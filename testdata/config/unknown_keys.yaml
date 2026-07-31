@@ -1,0 +1,7 @@
+version: 1
+server:
+  host: 127.0.0.1
+  typo: true
+logging:
+  level: info
+  format: text
