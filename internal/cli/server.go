@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/logging"
+	"github.com/anggasct/aura/internal/model"
 	"github.com/anggasct/aura/internal/server"
 )
 
@@ -28,6 +29,12 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			if result.DefaultGenerated {
 				slog.Info("generating default config", "component", "config", "path", result.Path)
+			}
+			if _, err := model.BuildRouter(cfg.Models); err != nil {
+				return err
+			}
+			if err := model.RegisterAdapters(cfg.Models); err != nil {
+				return err
 			}
 			slog.Info("starting server",
 				"component", "server",

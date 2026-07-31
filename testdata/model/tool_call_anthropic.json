@@ -1,0 +1,19 @@
+{
+  "id": "msg_002",
+  "model": "claude-sonnet-4-20250514",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_001",
+      "name": "search",
+      "input": {
+        "query": "go iter.Seq2"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "usage": {
+    "input_tokens": 15,
+    "output_tokens": 12
+  }
+}

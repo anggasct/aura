@@ -38,8 +38,9 @@ type LoadResult struct {
 }
 
 func buildEnvLookup() map[string]string {
+	paths, _ := validKeyPaths()
 	m := map[string]string{}
-	for path := range validKeyPaths() {
+	for path := range paths {
 		m[strings.ReplaceAll(path, ".", "_")] = path
 	}
 	return m
@@ -153,7 +154,8 @@ func validate(data []byte) error {
 	if doc.Kind != yamlv3.MappingNode {
 		return fmt.Errorf("invalid YAML: top level must be a mapping")
 	}
-	return checkUnknownKeys(doc, "", validKeyPaths())
+	valid, mapPaths := validKeyPaths()
+	return checkUnknownKeys(doc, "", valid, mapPaths)
 }
 
 func malformedYAMLError(err error) error {
@@ -164,7 +166,7 @@ func malformedYAMLError(err error) error {
 	return fmt.Errorf("invalid YAML: %w", err)
 }
 
-func checkUnknownKeys(node *yamlv3.Node, prefix string, valid map[string]bool) error {
+func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths map[string]bool) error {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		keyNode := node.Content[i]
 		valNode := node.Content[i+1]
@@ -175,8 +177,8 @@ func checkUnknownKeys(node *yamlv3.Node, prefix string, valid map[string]bool) e
 		if !valid[path] {
 			return fmt.Errorf("unknown key %q at line %d", path, keyNode.Line)
 		}
-		if valNode.Kind == yamlv3.MappingNode {
-			if err := checkUnknownKeys(valNode, path, valid); err != nil {
+		if valNode.Kind == yamlv3.MappingNode && !mapPaths[path] {
+			if err := checkUnknownKeys(valNode, path, valid, mapPaths); err != nil {
 				return err
 			}
 		}

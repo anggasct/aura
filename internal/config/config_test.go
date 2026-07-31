@@ -228,6 +228,58 @@ func TestLoad_AuraConfigEnvMissingErrors(t *testing.T) {
 	}
 }
 
+func TestLoad_WithModelsSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := `version: 1
+server:
+  host: 127.0.0.1
+models:
+  primary:
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    api_key: sk-ant-test
+  routing:
+    summarize: primary
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	res, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg := res.Config
+	if cfg.Models.Primary.Provider != "anthropic" || cfg.Models.Primary.Model != "claude-sonnet-4-20250514" || cfg.Models.Primary.APIKey != "sk-ant-test" {
+		t.Errorf("primary = %+v", cfg.Models.Primary)
+	}
+	if cfg.Models.Routing["summarize"] != "primary" {
+		t.Errorf("routing.summarize = %q, want primary", cfg.Models.Routing["summarize"])
+	}
+	if cfg.Models.RequestTimeout != 0 {
+		t.Errorf("RequestTimeout should default to 0 when unset, got %v", cfg.Models.RequestTimeout)
+	}
+}
+
+func TestLoad_UnknownKeyInsideModelsRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := `version: 1
+models:
+  primary:
+    provider: anthropic
+    typo_key: nope
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected unknown key error inside models")
+	}
+	if !strings.Contains(err.Error(), `unknown key "models.primary.typo_key"`) {
+		t.Errorf("error %q does not name the offending key", err)
+	}
+}
+
 func TestResolvePath_XDGEmptyFallsBack(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("AURA_CONFIG", "")

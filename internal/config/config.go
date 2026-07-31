@@ -13,6 +13,7 @@ type Config struct {
 	Version int     `koanf:"version" yaml:"version"`
 	Server  Server  `koanf:"server" yaml:"server"`
 	Logging Logging `koanf:"logging" yaml:"logging"`
+	Models  Models  `koanf:"models" yaml:"models"`
 }
 
 type Server struct {
@@ -24,6 +25,25 @@ type Server struct {
 type Logging struct {
 	Level  string `koanf:"level" yaml:"level"`
 	Format string `koanf:"format" yaml:"format"`
+}
+
+type Models struct {
+	Primary              ModelSpec         `koanf:"primary" yaml:"primary"`
+	Auxiliary            ModelSpec         `koanf:"auxiliary" yaml:"auxiliary"`
+	RequestTimeout       Duration          `koanf:"request_timeout" yaml:"request_timeout"`
+	StreamingIdleTimeout Duration          `koanf:"streaming_idle_timeout" yaml:"streaming_idle_timeout"`
+	FallbackNotify       bool              `koanf:"fallback_notify" yaml:"fallback_notify"`
+	CircuitCooldown      Duration          `koanf:"circuit_cooldown" yaml:"circuit_cooldown"`
+	CircuitThreshold     int               `koanf:"circuit_threshold" yaml:"circuit_threshold"`
+	Routing              map[string]string `koanf:"routing" yaml:"routing"`
+}
+
+type ModelSpec struct {
+	Provider  string   `koanf:"provider" yaml:"provider"`
+	Model     string   `koanf:"model" yaml:"model"`
+	APIKey    string   `koanf:"api_key" yaml:"api_key"`
+	BaseURL   string   `koanf:"base_url" yaml:"base_url"`
+	Fallbacks []string `koanf:"fallbacks" yaml:"fallbacks"`
 }
 
 type Duration time.Duration
@@ -44,6 +64,24 @@ func Default() Config {
 			Level:  "info",
 			Format: "text",
 		},
+		Models: Models{
+			RequestTimeout:       Duration(120 * time.Second),
+			StreamingIdleTimeout: Duration(60 * time.Second),
+			CircuitCooldown:      Duration(5 * time.Minute),
+			CircuitThreshold:     3,
+			Routing:              defaultModelsRouting(),
+		},
+	}
+}
+
+func defaultModelsRouting() map[string]string {
+	return map[string]string{
+		"summarize":        "auxiliary",
+		"vision":           "primary",
+		"title_gen":        "auxiliary",
+		"curator":          "auxiliary",
+		"context_compress": "auxiliary",
+		"profiling":        "auxiliary",
 	}
 }
 
@@ -60,8 +98,9 @@ func Marshal(c Config) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func validKeyPaths() map[string]bool {
+func validKeyPaths() (map[string]bool, map[string]bool) {
 	paths := map[string]bool{}
+	mapPaths := map[string]bool{}
 	var walk func(t reflect.Type, prefix string)
 	walk = func(t reflect.Type, prefix string) {
 		if t.Kind() == reflect.Pointer {
@@ -81,11 +120,16 @@ func validKeyPaths() map[string]bool {
 				path = prefix + "." + tag
 			}
 			paths[path] = true
-			if ft := f.Type; ft.Kind() == reflect.Struct && ft != reflect.TypeOf(Duration(0)) {
+			ft := f.Type
+			if ft.Kind() == reflect.Map {
+				mapPaths[path] = true
+				continue
+			}
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(Duration(0)) {
 				walk(ft, path)
 			}
 		}
 	}
 	walk(reflect.TypeOf(Config{}), "")
-	return paths
+	return paths, mapPaths
 }
