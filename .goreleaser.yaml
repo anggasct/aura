@@ -21,6 +21,8 @@ builds:
       - -X github.com/anggasct/aura/internal/cli.version={{.Version}}
       - -X github.com/anggasct/aura/internal/cli.commit={{.ShortCommit}}
       - -X github.com/anggasct/aura/internal/cli.date={{.Date}}
+      - -X github.com/anggasct/aura/internal/capability.buildProfile=core
+      - -X github.com/anggasct/aura/internal/capability.buildCapabilities=
 
 archives:
   - id: aura

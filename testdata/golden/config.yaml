@@ -1,8 +1,14 @@
 version: 1
+runtime:
+  max_active_turns: 4
+  max_pending_turns: 64
+  turn_timeout: 5m0s
+  shutdown_timeout: 30s
+capabilities:
+  enabled: []
 server:
   host: 127.0.0.1
   port: 8280
-  shutdown_timeout: 30s
 logging:
   level: info
   format: text

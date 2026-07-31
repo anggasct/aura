@@ -22,7 +22,7 @@ func TestVersionCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version: %v", err)
 	}
-	for _, want := range []string{"aura dev", "commit:", "built:", "go:", "platform:"} {
+	for _, want := range []string{"aura dev", "commit:", "built:", "go:", "platform:", "profile:  core", "capabilities: none"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("version output missing %q:\n%s", want, out)
 		}
