@@ -42,7 +42,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				"port", cfg.Server.Port,
 			)
 			srv := server.New(server.Options{
-				ShutdownTimeout: time.Duration(cfg.Server.ShutdownTimeout),
+				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 			})
 			return srv.Run(cmd.Context())
 		},

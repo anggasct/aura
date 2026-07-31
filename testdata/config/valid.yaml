@@ -1,8 +1,14 @@
 version: 1
+runtime:
+  max_active_turns: 8
+  max_pending_turns: 128
+  turn_timeout: 3m
+  shutdown_timeout: 10s
+capabilities:
+  enabled: []
 server:
   host: 0.0.0.0
   port: 9090
-  shutdown_timeout: 10s
 logging:
   level: debug
   format: json

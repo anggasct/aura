@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/capability"
 )
 
 const testdataDir = "../../testdata"
@@ -41,8 +43,11 @@ func TestLoad_ValidFile(t *testing.T) {
 	if cfg.Server.Host != "0.0.0.0" || cfg.Server.Port != 9090 {
 		t.Errorf("Server = %+v, want host 0.0.0.0 port 9090", cfg.Server)
 	}
-	if got := time.Duration(cfg.Server.ShutdownTimeout); got != 10*time.Second {
+	if got := time.Duration(cfg.Runtime.ShutdownTimeout); got != 10*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want 10s", got)
+	}
+	if cfg.Runtime.MaxActiveTurns != 8 || cfg.Runtime.MaxPendingTurns != 128 {
+		t.Errorf("Runtime limits = %+v, want 8 active and 128 pending", cfg.Runtime)
 	}
 	if cfg.Logging.Level != "debug" || cfg.Logging.Format != "json" {
 		t.Errorf("Logging = %+v, want debug/json", cfg.Logging)
@@ -54,7 +59,7 @@ func TestLoad_ValidFile(t *testing.T) {
 
 func TestLoad_EnvOverride(t *testing.T) {
 	t.Setenv("AURA_SERVER_PORT", "7777")
-	t.Setenv("AURA_SERVER_SHUTDOWN_TIMEOUT", "45s")
+	t.Setenv("AURA_RUNTIME_SHUTDOWN_TIMEOUT", "45s")
 	t.Setenv("AURA_LOGGING_LEVEL", "warn")
 
 	res, err := Load(fixture(t, "valid.yaml"))
@@ -65,7 +70,7 @@ func TestLoad_EnvOverride(t *testing.T) {
 	if cfg.Server.Port != 7777 {
 		t.Errorf("Port = %d, want 7777 (env override)", cfg.Server.Port)
 	}
-	if got := time.Duration(cfg.Server.ShutdownTimeout); got != 45*time.Second {
+	if got := time.Duration(cfg.Runtime.ShutdownTimeout); got != 45*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want 45s (env override)", got)
 	}
 	if cfg.Logging.Level != "warn" {
@@ -191,8 +196,55 @@ func TestLoad_WrongVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported version, got nil")
 	}
-	if !strings.Contains(err.Error(), `unsupported version "2"`) {
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeVersionUnsupported {
+		t.Errorf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeVersionUnsupported)
+	}
+	if !strings.Contains(err.Error(), `unsupported version "2" (supported: 1)`) {
 		t.Errorf("error %q does not report unsupported version", err)
+	}
+}
+
+func TestLoad_EnvironmentCannotUpgradeSchemaVersion(t *testing.T) {
+	path := writeTempConfig(t, "version: 1\nserver:\n  host: 127.0.0.1\n")
+	t.Setenv("AURA_VERSION", "2")
+	_, err := Load(path)
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeVersionUnsupported {
+		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeVersionUnsupported)
+	}
+}
+
+func TestLoad_StrictRuntimeAndCapabilityShapes(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "capability scalar",
+			content: "version: 1\ncapabilities:\n  enabled: sample\n",
+			want:    "capabilities.enabled must be a sequence",
+		},
+		{
+			name:    "runtime quoted integer",
+			content: "version: 1\nruntime:\n  max_active_turns: \"4\"\n",
+			want:    "runtime.max_active_turns must be an integer",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, tt.content))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_ExplicitZeroRuntimeValuesRejected(t *testing.T) {
+	path := writeTempConfig(t, "version: 1\nruntime:\n  max_active_turns: 0\n")
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "runtime.max_active_turns must be positive") {
+		t.Fatalf("Load error = %v, want explicit zero to be rejected", err)
 	}
 }
 
@@ -258,6 +310,15 @@ models:
 	if cfg.Models.RequestTimeout != 0 {
 		t.Errorf("RequestTimeout should default to 0 when unset, got %v", cfg.Models.RequestTimeout)
 	}
+	if cfg.Server.Host != "127.0.0.1" || cfg.Server.Port != 8280 {
+		t.Errorf("Server defaults = %+v", cfg.Server)
+	}
+	if cfg.Runtime.MaxActiveTurns != 4 || cfg.Runtime.MaxPendingTurns != 64 {
+		t.Errorf("Runtime defaults = %+v", cfg.Runtime)
+	}
+	if cfg.Logging.Level != "info" || cfg.Logging.Format != "text" {
+		t.Errorf("Logging defaults = %+v", cfg.Logging)
+	}
 }
 
 func TestLoad_UnknownKeyInsideModelsRejected(t *testing.T) {
@@ -277,6 +338,107 @@ models:
 	}
 	if !strings.Contains(err.Error(), `unknown key "models.primary.typo_key"`) {
 		t.Errorf("error %q does not name the offending key", err)
+	}
+}
+
+func writeTempConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+func mustRegistry(t *testing.T, definitions ...capability.Definition) capability.Registry {
+	t.Helper()
+	registry, err := capability.NewRegistry(definitions...)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	return registry
+}
+
+func TestLoad_DuplicateCapabilitiesRejected(t *testing.T) {
+	path := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: [sample, sample]\n")
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), `duplicate capability "sample"`) {
+		t.Fatalf("Load duplicate capabilities error = %v", err)
+	}
+}
+
+func TestLoad_UnknownCapability(t *testing.T) {
+	path := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: [unknown-test]\n")
+	_, err := Load(path)
+	if code, ok := capability.CodeOf(err); !ok || code != capability.ErrorCodeCapabilityUnknown {
+		t.Fatalf("capability.CodeOf(%v) = %q, %v; want %q, true", err, code, ok, capability.ErrorCodeCapabilityUnknown)
+	}
+}
+
+func TestLoad_EnabledCapabilityAbsentFromBuild(t *testing.T) {
+	registry := mustRegistry(t, capability.Definition{
+		Name:     "sample",
+		Profiles: []capability.Profile{capability.ProfileCore},
+	})
+	build, err := capability.NewBuild(string(capability.ProfileCore), nil, "linux")
+	if err != nil {
+		t.Fatalf("NewBuild: %v", err)
+	}
+	path := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: [sample]\n")
+	_, err = LoadWithOptions(path, LoadOptions{Build: build, Registry: registry})
+	if code, ok := capability.CodeOf(err); !ok || code != capability.ErrorCodeCapabilityUnavailable {
+		t.Fatalf("capability.CodeOf(%v) = %q, %v; want %q, true", err, code, ok, capability.ErrorCodeCapabilityUnavailable)
+	}
+}
+
+func TestLoad_MissingDependencyState(t *testing.T) {
+	registry := mustRegistry(t, capability.Definition{
+		Name:       "sample-runtime",
+		Effectful:  true,
+		Profiles:   []capability.Profile{capability.ProfileExecLinux},
+		Dependency: "sample-host-runtime",
+	})
+	build, err := capability.NewBuild(string(capability.ProfileExecLinux), []string{"sample-runtime"}, "linux")
+	if err != nil {
+		t.Fatalf("NewBuild: %v", err)
+	}
+	options := LoadOptions{Build: build, Registry: registry}
+
+	disabledPath := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: []\n")
+	result, err := LoadWithOptions(disabledPath, options)
+	if err != nil {
+		t.Fatalf("LoadWithOptions disabled missing dependency: %v", err)
+	}
+	status, ok := result.CapabilityReport.Status("sample-runtime")
+	if !ok || status.State != capability.StateMissing || status.MissingDependency != "sample-host-runtime" {
+		t.Fatalf("missing dependency status = %+v, %v", status, ok)
+	}
+
+	enabledPath := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: [sample-runtime]\n")
+	_, err = LoadWithOptions(enabledPath, options)
+	if code, ok := capability.CodeOf(err); !ok || code != capability.ErrorCodeDependencyMissing {
+		t.Fatalf("capability.CodeOf(%v) = %q, %v; want %q, true", err, code, ok, capability.ErrorCodeDependencyMissing)
+	}
+}
+
+func TestLoad_CapabilitiesEnvironmentOverride(t *testing.T) {
+	registry := mustRegistry(t, capability.Definition{
+		Name:     "sample",
+		Profiles: []capability.Profile{capability.ProfileCore},
+	})
+	build, err := capability.NewBuild(string(capability.ProfileCore), []string{"sample"}, "linux")
+	if err != nil {
+		t.Fatalf("NewBuild: %v", err)
+	}
+	t.Setenv("AURA_CAPABILITIES_ENABLED", "sample")
+	path := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: []\n")
+	result, err := LoadWithOptions(path, LoadOptions{Build: build, Registry: registry})
+	if err != nil {
+		t.Fatalf("LoadWithOptions: %v", err)
+	}
+	status, ok := result.CapabilityReport.Status("sample")
+	if !ok || status.State != capability.StateEnabled {
+		t.Fatalf("enabled status = %+v, %v", status, ok)
 	}
 }
 

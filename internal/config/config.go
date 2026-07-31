@@ -10,16 +10,28 @@ import (
 )
 
 type Config struct {
-	Version int     `koanf:"version" yaml:"version"`
-	Server  Server  `koanf:"server" yaml:"server"`
-	Logging Logging `koanf:"logging" yaml:"logging"`
-	Models  Models  `koanf:"models" yaml:"models"`
+	Version      int          `koanf:"version" yaml:"version"`
+	Runtime      Runtime      `koanf:"runtime" yaml:"runtime"`
+	Capabilities Capabilities `koanf:"capabilities" yaml:"capabilities"`
+	Server       Server       `koanf:"server" yaml:"server"`
+	Logging      Logging      `koanf:"logging" yaml:"logging"`
+	Models       Models       `koanf:"models" yaml:"models"`
+}
+
+type Runtime struct {
+	MaxActiveTurns  int      `koanf:"max_active_turns" yaml:"max_active_turns"`
+	MaxPendingTurns int      `koanf:"max_pending_turns" yaml:"max_pending_turns"`
+	TurnTimeout     Duration `koanf:"turn_timeout" yaml:"turn_timeout"`
+	ShutdownTimeout Duration `koanf:"shutdown_timeout" yaml:"shutdown_timeout"`
+}
+
+type Capabilities struct {
+	Enabled []string `koanf:"enabled" yaml:"enabled"`
 }
 
 type Server struct {
-	Host            string   `koanf:"host" yaml:"host"`
-	Port            int      `koanf:"port" yaml:"port"`
-	ShutdownTimeout Duration `koanf:"shutdown_timeout" yaml:"shutdown_timeout"`
+	Host string `koanf:"host" yaml:"host"`
+	Port int    `koanf:"port" yaml:"port"`
 }
 
 type Logging struct {
@@ -55,10 +67,16 @@ func (d Duration) MarshalYAML() (interface{}, error) {
 func Default() Config {
 	return Config{
 		Version: 1,
-		Server: Server{
-			Host:            "127.0.0.1",
-			Port:            8280,
+		Runtime: Runtime{
+			MaxActiveTurns:  4,
+			MaxPendingTurns: 64,
+			TurnTimeout:     Duration(5 * time.Minute),
 			ShutdownTimeout: Duration(30 * time.Second),
+		},
+		Capabilities: Capabilities{Enabled: []string{}},
+		Server: Server{
+			Host: "127.0.0.1",
+			Port: 8280,
 		},
 		Logging: Logging{
 			Level:  "info",
