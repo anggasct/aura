@@ -17,6 +17,7 @@ type RetryConfig struct {
 	MaxDelay   time.Duration
 	Jitter     float64
 	Sleep      func(context.Context, time.Duration) error
+	RetryCount *int
 }
 
 func defaultRetryConfig() RetryConfig {
@@ -70,6 +71,9 @@ func retryHTTP(ctx context.Context, cfg RetryConfig, do func() (*http.Response, 
 		}
 		if err := cfg.Sleep(ctx, delay); err != nil {
 			return nil, err
+		}
+		if cfg.RetryCount != nil {
+			*cfg.RetryCount = retry + 1
 		}
 	}
 }

@@ -1,7 +1,9 @@
 package model
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,5 +98,38 @@ func TestBuildRouterRejectsTaskWithoutCapability(t *testing.T) {
 	})
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeCapabilityUnsupported {
 		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeCapabilityUnsupported)
+	}
+}
+
+func TestModelTelemetryContainsSafeRequestMetadata(t *testing.T) {
+	previous := slog.Default()
+	var logs bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeFixture(t, w, fixtureBytes(t, "openai_responses.json"))
+	}))
+	defer srv.Close()
+
+	adapter, err := NewOpenAIResponsesAdapter("gpt-5", srv.URL, "never-log-key", 0)
+	if err != nil {
+		t.Fatalf("NewOpenAIResponsesAdapter: %v", err)
+	}
+	request := sampleRequest("never-log-content")
+	if _, err := collect(adapter.GenerateContent(WithTask(context.Background(), "summarize"), request, false)); err != nil {
+		t.Fatalf("GenerateContent: %v", err)
+	}
+	if !strings.Contains(logs.String(), "protocol=openai_responses") {
+		t.Errorf("logs missing protocol: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "model=gpt-5") || !strings.Contains(logs.String(), "task=summarize") {
+		t.Errorf("logs missing model/task: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "input_tokens=") || !strings.Contains(logs.String(), "retry_count=") {
+		t.Errorf("logs missing usage/retry fields: %s", logs.String())
+	}
+	if strings.Contains(logs.String(), "never-log-key") || strings.Contains(logs.String(), "never-log-content") {
+		t.Errorf("logs leaked secret or content: %s", logs.String())
 	}
 }

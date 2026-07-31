@@ -60,40 +60,56 @@ func (a *OpenAIResponsesAdapter) Name() string { return a.name }
 
 func (a *OpenAIResponsesAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		resp, err := a.do(ctx, req, stream)
+		telemetry := newModelTelemetry(ctx, "openai_responses", a.name)
+		resp, retries, err := a.do(ctx, req, stream)
+		telemetry.retries = retries
 		if err != nil {
+			telemetry.finish(nil, err)
 			yield(nil, err)
 			return
 		}
 		defer resp.Body.Close()
 		if cErr := classifyHTTPResponse(resp, "openai"); cErr != nil {
+			telemetry.finish(nil, cErr)
 			yield(nil, cErr)
 			return
 		}
 		if stream {
-			a.stream(ctx, resp.Body, yield)
+			a.stream(ctx, resp.Body, func(response *adkmodel.LLMResponse, streamErr error) bool {
+				if streamErr != nil || (response != nil && response.TurnComplete) {
+					telemetry.finish(response, streamErr)
+				}
+				return yield(response, streamErr)
+			})
+			telemetry.finishIfNeeded()
 			return
 		}
 		payload, err := io.ReadAll(resp.Body)
 		if err != nil {
+			telemetry.finish(nil, err)
 			yield(nil, fmt.Errorf("model: failed to read openai responses response: %w", err))
 			return
 		}
 		out, err := parseOpenAIResponsesResponse(payload)
 		if err != nil {
+			telemetry.finish(nil, err)
 			yield(nil, err)
 			return
 		}
+		telemetry.finish(out, nil)
 		yield(out, nil)
 	}
 }
 
-func (a *OpenAIResponsesAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream bool) (*http.Response, error) {
+func (a *OpenAIResponsesAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream bool) (*http.Response, int, error) {
+	retryCount := 0
 	body, err := buildOpenAIResponsesRequest(req, stream)
 	if err != nil {
-		return nil, fmt.Errorf("model: failed to build openai responses request: %w", err)
+		return nil, retryCount, fmt.Errorf("model: failed to build openai responses request: %w", err)
 	}
-	return retryHTTP(ctx, retryConfigForRequest(a.retry, req), func() (*http.Response, error) {
+	retry := retryConfigForRequest(a.retry, req)
+	retry.RetryCount = &retryCount
+	resp, err := retryHTTP(ctx, retry, func() (*http.Response, error) {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/responses", bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("model: failed to create openai responses request: %w", err)
@@ -108,6 +124,7 @@ func (a *OpenAIResponsesAdapter) do(ctx context.Context, req *adkmodel.LLMReques
 		}
 		return resp, nil
 	})
+	return resp, retryCount, err
 }
 
 func (a *OpenAIResponsesAdapter) stream(ctx context.Context, body io.ReadCloser, yield func(*adkmodel.LLMResponse, error) bool) {
