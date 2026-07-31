@@ -2,7 +2,10 @@ package config
 
 import (
 	"bytes"
+	"fmt"
+	"net/url"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -40,22 +43,52 @@ type Logging struct {
 }
 
 type Models struct {
-	Primary              ModelSpec         `koanf:"primary" yaml:"primary"`
-	Auxiliary            ModelSpec         `koanf:"auxiliary" yaml:"auxiliary"`
-	RequestTimeout       Duration          `koanf:"request_timeout" yaml:"request_timeout"`
-	StreamingIdleTimeout Duration          `koanf:"streaming_idle_timeout" yaml:"streaming_idle_timeout"`
-	FallbackNotify       bool              `koanf:"fallback_notify" yaml:"fallback_notify"`
-	CircuitCooldown      Duration          `koanf:"circuit_cooldown" yaml:"circuit_cooldown"`
-	CircuitThreshold     int               `koanf:"circuit_threshold" yaml:"circuit_threshold"`
-	Routing              map[string]string `koanf:"routing" yaml:"routing"`
+	Definitions          map[string]ModelDefinition `koanf:"definitions" yaml:"definitions"`
+	RequestTimeout       Duration                   `koanf:"request_timeout" yaml:"request_timeout"`
+	StreamingIdleTimeout Duration                   `koanf:"streaming_idle_timeout" yaml:"streaming_idle_timeout"`
+	Routing              map[string]string          `koanf:"routing" yaml:"routing"`
 }
 
-type ModelSpec struct {
-	Provider  string   `koanf:"provider" yaml:"provider"`
-	Model     string   `koanf:"model" yaml:"model"`
-	APIKey    string   `koanf:"api_key" yaml:"api_key"`
-	BaseURL   string   `koanf:"base_url" yaml:"base_url"`
-	Fallbacks []string `koanf:"fallbacks" yaml:"fallbacks"`
+type ModelDefinition struct {
+	Protocol     string            `koanf:"protocol" yaml:"protocol"`
+	Model        string            `koanf:"model" yaml:"model"`
+	BaseURL      string            `koanf:"base_url" yaml:"base_url"`
+	APIKeyEnv    string            `koanf:"api_key_env" yaml:"api_key_env"`
+	APIKeyFile   string            `koanf:"api_key_file" yaml:"api_key_file"`
+	Capabilities ModelCapabilities `koanf:"capabilities" yaml:"capabilities"`
+}
+
+type ModelCapabilities struct {
+	Streaming        bool   `koanf:"streaming" yaml:"streaming"`
+	Tools            bool   `koanf:"tools" yaml:"tools"`
+	StructuredOutput bool   `koanf:"structured_output" yaml:"structured_output"`
+	Vision           bool   `koanf:"vision" yaml:"vision"`
+	Audio            bool   `koanf:"audio" yaml:"audio"`
+	Reasoning        bool   `koanf:"reasoning" yaml:"reasoning"`
+	ContextTokens    int    `koanf:"context_tokens" yaml:"context_tokens"`
+	Tokenizer        string `koanf:"tokenizer" yaml:"tokenizer"`
+	UsageReporting   bool   `koanf:"usage_reporting" yaml:"usage_reporting"`
+}
+
+const (
+	ProtocolOpenAIResponses   = "openai_responses"
+	ProtocolOpenAIChatCompat  = "openai_chat_compat"
+	ProtocolAnthropicMessages = "anthropic_messages"
+	ProtocolGeminiNative      = "gemini_native"
+)
+
+var (
+	modelDefinitionNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+	envNamePattern             = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
+
+func validProtocol(p string) bool {
+	switch p {
+	case ProtocolOpenAIResponses, ProtocolOpenAIChatCompat, ProtocolAnthropicMessages, ProtocolGeminiNative:
+		return true
+	default:
+		return false
+	}
 }
 
 type Duration time.Duration
@@ -83,10 +116,9 @@ func Default() Config {
 			Format: "text",
 		},
 		Models: Models{
+			Definitions:          map[string]ModelDefinition{},
 			RequestTimeout:       Duration(120 * time.Second),
 			StreamingIdleTimeout: Duration(60 * time.Second),
-			CircuitCooldown:      Duration(5 * time.Minute),
-			CircuitThreshold:     3,
 			Routing:              defaultModelsRouting(),
 		},
 	}
@@ -94,12 +126,12 @@ func Default() Config {
 
 func defaultModelsRouting() map[string]string {
 	return map[string]string{
-		"summarize":        "auxiliary",
-		"vision":           "primary",
-		"title_gen":        "auxiliary",
-		"curator":          "auxiliary",
-		"context_compress": "auxiliary",
-		"profiling":        "auxiliary",
+		"agent":       "primary",
+		"summarize":   "auxiliary",
+		"title":       "auxiliary",
+		"curation":    "auxiliary",
+		"compression": "auxiliary",
+		"profiling":   "auxiliary",
 	}
 }
 
@@ -116,9 +148,10 @@ func Marshal(c Config) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func validKeyPaths() (map[string]bool, map[string]bool) {
+func validKeyPaths() (map[string]bool, map[string]bool, map[string]bool) {
 	paths := map[string]bool{}
 	mapPaths := map[string]bool{}
+	structMapPaths := map[string]bool{}
 	var walk func(t reflect.Type, prefix string)
 	walk = func(t reflect.Type, prefix string) {
 		if t.Kind() == reflect.Pointer {
@@ -140,7 +173,12 @@ func validKeyPaths() (map[string]bool, map[string]bool) {
 			paths[path] = true
 			ft := f.Type
 			if ft.Kind() == reflect.Map {
-				mapPaths[path] = true
+				if ft.Elem().Kind() == reflect.Struct {
+					structMapPaths[path] = true
+					walk(ft.Elem(), path+".*")
+				} else {
+					mapPaths[path] = true
+				}
 				continue
 			}
 			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(Duration(0)) {
@@ -149,5 +187,36 @@ func validKeyPaths() (map[string]bool, map[string]bool) {
 		}
 	}
 	walk(reflect.TypeOf(Config{}), "")
-	return paths, mapPaths
+	return paths, mapPaths, structMapPaths
+}
+
+func validateModelBaseURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("scheme must be http or https")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("missing host")
+	}
+	if u.User != nil {
+		return fmt.Errorf("user info is not allowed")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("query and fragment are not allowed")
+	}
+	if u.Scheme == "http" && !isLoopbackURL(u) {
+		return fmt.Errorf("https is required for non-loopback endpoints")
+	}
+	return nil
+}
+
+func isLoopbackURL(u *url.URL) bool {
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }

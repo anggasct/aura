@@ -51,7 +51,7 @@ func newAnthropicAdapter(name, baseURL, apiKey string, timeout, idleTimeout time
 		name:                 name,
 		baseURL:              strings.TrimRight(baseURL, "/"),
 		apiKey:               apiKey,
-		httpClient:           &http.Client{Timeout: timeout},
+		httpClient:           &http.Client{Timeout: timeout, CheckRedirect: rejectCrossOriginRedirect},
 		retry:                defaultRetryConfig(),
 		streamingIdleTimeout: idleTimeout,
 	}
@@ -97,7 +97,7 @@ func (a *AnthropicAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, str
 		return nil, fmt.Errorf("model: failed to build anthropic request: %w", err)
 	}
 	url := a.baseURL + "/v1/messages"
-	return retryHTTP(ctx, a.retry, func() (*http.Response, error) {
+	return retryHTTP(ctx, retryConfigForRequest(a.retry, req), func() (*http.Response, error) {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("model: failed to create anthropic request: %w", err)

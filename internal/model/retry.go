@@ -85,9 +85,9 @@ func classifyHTTPResponse(resp *http.Response, provider string) error {
 		message := strings.ToLower(string(body))
 		switch {
 		case strings.Contains(message, "content_filter"), strings.Contains(message, "content filter"):
-			return fmt.Errorf("%s: http 400: %w", provider, ErrContentFiltered)
+			return codedError(ErrorCodeContentFiltered, ErrContentFiltered, fmt.Sprintf("%s: http 400", provider))
 		case strings.Contains(message, "context_length"), strings.Contains(message, "context length"), strings.Contains(message, "too long"):
-			return fmt.Errorf("%s: http 400: %w", provider, ErrContextTooLong)
+			return codedError(ErrorCodeContextTooLong, ErrContextTooLong, fmt.Sprintf("%s: http 400", provider))
 		}
 		return fmt.Errorf("%s: http 400", provider)
 	}

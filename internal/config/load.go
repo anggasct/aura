@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -47,7 +48,7 @@ type LoadOptions struct {
 }
 
 func buildEnvLookup() map[string]string {
-	paths, _ := validKeyPaths()
+	paths, _, _ := validKeyPaths()
 	m := map[string]string{}
 	for path := range paths {
 		m[strings.ReplaceAll(path, ".", "_")] = path
@@ -56,7 +57,44 @@ func buildEnvLookup() map[string]string {
 }
 
 func envKeyMapper(s string) string {
-	return envLookup[strings.ToLower(strings.TrimPrefix(s, envPrefix))]
+	normalized := strings.ToLower(strings.TrimPrefix(s, envPrefix))
+	if path := envLookup[normalized]; path != "" {
+		return path
+	}
+	const definitionsPrefix = "models_definitions_"
+	if !strings.HasPrefix(normalized, definitionsPrefix) {
+		return ""
+	}
+	remainder := strings.TrimPrefix(normalized, definitionsPrefix)
+	fields := []struct {
+		suffix string
+		path   string
+	}{
+		{suffix: "_capabilities_streaming", path: "capabilities.streaming"},
+		{suffix: "_capabilities_tools", path: "capabilities.tools"},
+		{suffix: "_capabilities_structured_output", path: "capabilities.structured_output"},
+		{suffix: "_capabilities_vision", path: "capabilities.vision"},
+		{suffix: "_capabilities_audio", path: "capabilities.audio"},
+		{suffix: "_capabilities_reasoning", path: "capabilities.reasoning"},
+		{suffix: "_capabilities_context_tokens", path: "capabilities.context_tokens"},
+		{suffix: "_capabilities_tokenizer", path: "capabilities.tokenizer"},
+		{suffix: "_capabilities_usage_reporting", path: "capabilities.usage_reporting"},
+		{suffix: "_api_key_env", path: "api_key_env"},
+		{suffix: "_api_key_file", path: "api_key_file"},
+		{suffix: "_base_url", path: "base_url"},
+		{suffix: "_protocol", path: "protocol"},
+		{suffix: "_model", path: "model"},
+	}
+	for _, field := range fields {
+		if !strings.HasSuffix(remainder, field.suffix) {
+			continue
+		}
+		name := strings.TrimSuffix(remainder, field.suffix)
+		if modelDefinitionNamePattern.MatchString(name) {
+			return "models.definitions." + name + "." + field.path
+		}
+	}
+	return ""
 }
 
 // Load reads configuration. Path precedence: an explicit path argument, then
@@ -101,6 +139,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	if err := applyDefaults(cfg, data); err != nil {
+		return LoadResult{}, err
+	}
+	if err := validateLoadedModels(cfg.Models); err != nil {
 		return LoadResult{}, err
 	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
@@ -189,8 +230,11 @@ func validate(data []byte) error {
 	if err := validateRuntimeAndCapabilityShapes(doc); err != nil {
 		return err
 	}
-	valid, mapPaths := validKeyPaths()
-	return checkUnknownKeys(doc, "", valid, mapPaths)
+	if err := validateModelShapes(doc); err != nil {
+		return err
+	}
+	valid, mapPaths, structMapPaths := validKeyPaths()
+	return checkUnknownKeys(doc, "", valid, mapPaths, structMapPaths)
 }
 
 func parseDocument(data []byte) (*yamlv3.Node, error) {
@@ -284,6 +328,134 @@ func mappingValue(node *yamlv3.Node, key string) *yamlv3.Node {
 	return nil
 }
 
+func validateModelShapes(doc *yamlv3.Node) error {
+	modelsNode := mappingValue(doc, "models")
+	if modelsNode == nil {
+		return nil
+	}
+	if modelsNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("models must be a mapping at line %d", modelsNode.Line)
+	}
+	definitionsNode := mappingValue(modelsNode, "definitions")
+	if definitionsNode == nil {
+		return nil
+	}
+	if definitionsNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("models.definitions must be a mapping at line %d", definitionsNode.Line)
+	}
+	for i := 0; i+1 < len(definitionsNode.Content); i += 2 {
+		nameNode := definitionsNode.Content[i]
+		definitionNode := definitionsNode.Content[i+1]
+		if !modelDefinitionNamePattern.MatchString(nameNode.Value) {
+			return fmt.Errorf("invalid model definition name %q at line %d", nameNode.Value, nameNode.Line)
+		}
+		if definitionNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("models.definitions.%s must be a mapping at line %d", nameNode.Value, definitionNode.Line)
+		}
+		if err := validateModelDefinition(nameNode.Value, definitionNode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateModelDefinition(name string, node *yamlv3.Node) error {
+	protocolNode := mappingValue(node, "protocol")
+	modelNode := mappingValue(node, "model")
+	if protocolNode == nil || modelNode == nil || protocolNode.Kind != yamlv3.ScalarNode || modelNode.Kind != yamlv3.ScalarNode || protocolNode.Tag != "!!str" || modelNode.Tag != "!!str" || strings.TrimSpace(protocolNode.Value) == "" || strings.TrimSpace(modelNode.Value) == "" {
+		return fmt.Errorf("models.definitions.%s requires non-empty protocol and model strings", name)
+	}
+	if !validProtocol(protocolNode.Value) {
+		return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s uses unsupported protocol %q", name, protocolNode.Value)}
+	}
+
+	baseURL := ""
+	if node := mappingValue(node, "base_url"); node != nil {
+		if node.Kind != yamlv3.ScalarNode || node.Tag != "!!str" {
+			return fmt.Errorf("models.definitions.%s.base_url must be a string at line %d", name, node.Line)
+		}
+		baseURL = node.Value
+	}
+	if err := validateModelBaseURL(baseURL); err != nil {
+		return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s.base_url: %v", name, err)}
+	}
+
+	apiKeyEnv := scalarString(mappingValue(node, "api_key_env"))
+	apiKeyFile := scalarString(mappingValue(node, "api_key_file"))
+	if apiKeyEnv != "" && apiKeyFile != "" {
+		return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s must set only one of api_key_env or api_key_file", name)}
+	}
+	if apiKeyEnv != "" && !envNamePattern.MatchString(apiKeyEnv) {
+		return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s.api_key_env is not a valid environment variable name", name)}
+	}
+	if apiKeyEnv == "" && apiKeyFile == "" && !isLoopbackBaseURL(baseURL) {
+		return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s requires api_key_env or api_key_file for a non-loopback endpoint", name)}
+	}
+
+	capabilitiesNode := mappingValue(node, "capabilities")
+	if capabilitiesNode == nil || capabilitiesNode.Kind != yamlv3.MappingNode {
+		return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires a capabilities mapping", name)}
+	}
+	for _, key := range []string{"streaming", "tools", "structured_output", "vision", "audio", "reasoning", "usage_reporting"} {
+		valueNode := mappingValue(capabilitiesNode, key)
+		if valueNode == nil || valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+			return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s.capabilities.%s must be a boolean", name, key)}
+		}
+	}
+	contextNode := mappingValue(capabilitiesNode, "context_tokens")
+	contextTokens, contextErr := strconv.ParseInt("0", 10, 64)
+	if contextNode != nil && contextNode.Kind == yamlv3.ScalarNode && contextNode.Tag == "!!int" {
+		contextTokens, contextErr = strconv.ParseInt(contextNode.Value, 0, 64)
+	}
+	if contextNode == nil || contextNode.Kind != yamlv3.ScalarNode || contextNode.Tag != "!!int" || contextErr != nil || contextTokens <= 0 {
+		return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s.capabilities.context_tokens must be positive", name)}
+	}
+	tokenizerNode := mappingValue(capabilitiesNode, "tokenizer")
+	if tokenizerNode == nil || tokenizerNode.Kind != yamlv3.ScalarNode || tokenizerNode.Tag != "!!str" || strings.TrimSpace(tokenizerNode.Value) == "" {
+		return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s.capabilities.tokenizer must be a non-empty string", name)}
+	}
+	return nil
+}
+
+func validateLoadedModels(models Models) error {
+	for name, definition := range models.Definitions {
+		if !validProtocol(definition.Protocol) {
+			return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s uses unsupported protocol %q", name, definition.Protocol)}
+		}
+		if err := validateModelBaseURL(definition.BaseURL); err != nil {
+			return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s.base_url: %v", name, err)}
+		}
+		if definition.APIKeyEnv != "" && definition.APIKeyFile != "" {
+			return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s must set only one of api_key_env or api_key_file", name)}
+		}
+		if definition.APIKeyEnv != "" && !envNamePattern.MatchString(definition.APIKeyEnv) {
+			return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s.api_key_env is not a valid environment variable name", name)}
+		}
+		if definition.APIKeyEnv == "" && definition.APIKeyFile == "" && !isLoopbackBaseURL(definition.BaseURL) {
+			return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s requires api_key_env or api_key_file for a non-loopback endpoint", name)}
+		}
+		if definition.Capabilities.ContextTokens <= 0 || strings.TrimSpace(definition.Capabilities.Tokenizer) == "" {
+			return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires positive context_tokens and a tokenizer", name)}
+		}
+	}
+	return nil
+}
+
+func scalarString(node *yamlv3.Node) string {
+	if node == nil || node.Kind != yamlv3.ScalarNode || node.Tag != "!!str" {
+		return ""
+	}
+	return node.Value
+}
+
+func isLoopbackBaseURL(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	return err == nil && isLoopbackURL(u)
+}
+
 func malformedYAMLError(err error) error {
 	if m := yamlLineRe.FindStringSubmatch(err.Error()); len(m) == 2 {
 		line, _ := strconv.Atoi(m[1])
@@ -292,7 +464,7 @@ func malformedYAMLError(err error) error {
 	return fmt.Errorf("invalid YAML: %w", err)
 }
 
-func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths map[string]bool) error {
+func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structMapPaths map[string]bool) error {
 	seen := make(map[string]struct{}, len(node.Content)/2)
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		keyNode := node.Content[i]
@@ -305,16 +477,42 @@ func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths map[stri
 			return fmt.Errorf("duplicate key %q at line %d", path, keyNode.Line)
 		}
 		seen[path] = struct{}{}
-		if !valid[path] {
+		if !validConfigPath(path, valid, structMapPaths) {
 			return fmt.Errorf("unknown key %q at line %d", path, keyNode.Line)
 		}
-		if valNode.Kind == yamlv3.MappingNode && !mapPaths[path] {
-			if err := checkUnknownKeys(valNode, path, valid, mapPaths); err != nil {
-				return err
+		if valNode.Kind == yamlv3.MappingNode {
+			if structMapPaths[path] {
+				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths); err != nil {
+					return err
+				}
+			} else if !mapPaths[path] {
+				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func validConfigPath(path string, valid map[string]bool, structMapPaths map[string]bool) bool {
+	if valid[path] {
+		return true
+	}
+	for mapPath := range structMapPaths {
+		prefix := mapPath + "."
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		remainder := strings.TrimPrefix(path, prefix)
+		if !strings.Contains(remainder, ".") {
+			return true
+		}
+		if dot := strings.IndexByte(remainder, '.'); dot >= 0 {
+			return valid[mapPath+".*"+remainder[dot:]]
+		}
+	}
+	return false
 }
 
 func decode(data []byte) (*Config, error) {

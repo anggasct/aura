@@ -50,7 +50,7 @@ func newOpenAIAdapter(name, baseURL, apiKey string, timeout, idleTimeout time.Du
 		name:                 name,
 		baseURL:              strings.TrimRight(baseURL, "/"),
 		apiKey:               apiKey,
-		httpClient:           &http.Client{Timeout: timeout},
+		httpClient:           &http.Client{Timeout: timeout, CheckRedirect: rejectCrossOriginRedirect},
 		retry:                defaultRetryConfig(),
 		streamingIdleTimeout: idleTimeout,
 	}
@@ -96,7 +96,7 @@ func (a *OpenAIAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream
 		return nil, fmt.Errorf("model: failed to build openai request: %w", err)
 	}
 	url := a.baseURL + "/v1/chat/completions"
-	return retryHTTP(ctx, a.retry, func() (*http.Response, error) {
+	return retryHTTP(ctx, retryConfigForRequest(a.retry, req), func() (*http.Response, error) {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("model: failed to create openai request: %w", err)
@@ -483,13 +483,13 @@ func (s *streamToolAccumulator) parts() ([]*genai.Part, error) {
 func classifyHTTPStatus(status int, provider string) error {
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		return fmt.Errorf("%s: http %d: %w", provider, status, ErrAuthFailed)
+		return codedError(ErrorCodeAuthFailed, ErrAuthFailed, fmt.Sprintf("%s: http %d", provider, status))
 	case status == http.StatusNotFound:
-		return fmt.Errorf("%s: http %d: %w", provider, status, ErrModelNotFound)
+		return codedError(ErrorCodeNotFound, ErrModelNotFound, fmt.Sprintf("%s: http %d", provider, status))
 	case status == http.StatusTooManyRequests:
-		return fmt.Errorf("%s: http %d: %w", provider, status, ErrRateLimited)
+		return codedError(ErrorCodeRateLimited, ErrRateLimited, fmt.Sprintf("%s: http %d", provider, status))
 	case status >= 500:
-		return fmt.Errorf("%s: http %d: %w", provider, status, ErrOverloaded)
+		return codedError(ErrorCodeOverloaded, ErrOverloaded, fmt.Sprintf("%s: http %d", provider, status))
 	}
 	return nil
 }
@@ -498,5 +498,5 @@ func classifyRequestError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	return fmt.Errorf("model: %w: %v", ErrConnectionFailed, err)
+	return codedError(ErrorCodeConnectionFailed, ErrConnectionFailed, fmt.Sprintf("request failed: %v", err))
 }

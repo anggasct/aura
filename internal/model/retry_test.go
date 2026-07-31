@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/genai"
 )
 
 func testHTTPResponse(status int, retryAfter string) *http.Response {
@@ -149,6 +151,18 @@ func TestOpenAI_RetryTransientThenSuccess(t *testing.T) {
 	resps, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
 	if err != nil || len(resps) != 1 || calls != 2 {
 		t.Fatalf("responses=%d err=%v calls=%d, want success after retry", len(resps), err, calls)
+	}
+}
+
+func TestRetryConfigForRequestDisablesReplayAfterToolResult(t *testing.T) {
+	req := sampleRequest("continue")
+	req.Contents = append(req.Contents, &genai.Content{
+		Role:  "user",
+		Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{ID: "call-1", Name: "write_file", Response: map[string]any{"ok": true}}}},
+	})
+	cfg := retryConfigForRequest(defaultRetryConfig(), req)
+	if cfg.MaxRetries != 0 {
+		t.Fatalf("MaxRetries = %d, want 0 after tool result", cfg.MaxRetries)
 	}
 }
 

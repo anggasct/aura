@@ -2,7 +2,10 @@ package model
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -11,21 +14,22 @@ import (
 )
 
 var knownTasks = map[string]bool{
-	"summarize":        true,
-	"vision":           true,
-	"title_gen":        true,
-	"curator":          true,
-	"context_compress": true,
-	"profiling":        true,
+	"agent":       true,
+	"summarize":   true,
+	"vision":      true,
+	"title":       true,
+	"curation":    true,
+	"compression": true,
+	"profiling":   true,
 }
 
 var defaultTaskRouting = map[string]string{
-	"summarize":        "auxiliary",
-	"vision":           "primary",
-	"title_gen":        "auxiliary",
-	"curator":          "auxiliary",
-	"context_compress": "auxiliary",
-	"profiling":        "auxiliary",
+	"agent":       "primary",
+	"summarize":   "auxiliary",
+	"title":       "auxiliary",
+	"curation":    "auxiliary",
+	"compression": "auxiliary",
+	"profiling":   "auxiliary",
 }
 
 const (
@@ -46,7 +50,7 @@ func NewRouter(primary, auxiliary adkmodel.LLM, routing map[string]string) (*Rou
 	}
 	for task, role := range routing {
 		if !knownTasks[task] {
-			return nil, fmt.Errorf("model: unknown task %q in models.routing (known: summarize, vision, title_gen, curator, context_compress, profiling)", task)
+			return nil, fmt.Errorf("model: unknown task %q in models.routing (known: agent, summarize, vision, title, curation, compression, profiling)", task)
 		}
 		if role != "primary" && role != "auxiliary" {
 			return nil, fmt.Errorf("model: invalid role %q for task %q in models.routing (must be primary or auxiliary)", role, task)
@@ -57,6 +61,9 @@ func NewRouter(primary, auxiliary adkmodel.LLM, routing map[string]string) (*Rou
 }
 
 func BuildRouter(models config.Models) (*Router, error) {
+	if err := validateRoutingCapabilities(models); err != nil {
+		return nil, err
+	}
 	timeout := time.Duration(models.RequestTimeout)
 	if timeout <= 0 {
 		timeout = defaultRequestTimeout
@@ -65,15 +72,86 @@ func BuildRouter(models config.Models) (*Router, error) {
 	if idleTimeout <= 0 {
 		idleTimeout = defaultStreamingIdleTimeout
 	}
-	primary, err := newAdapter(models.Primary, timeout, idleTimeout)
+	primary, err := newAdapter("primary", models.Definitions["primary"], timeout, idleTimeout)
 	if err != nil {
 		return nil, err
 	}
-	auxiliary, err := newAdapter(models.Auxiliary, timeout, idleTimeout)
+	auxiliary, err := newAdapter("auxiliary", models.Definitions["auxiliary"], timeout, idleTimeout)
 	if err != nil {
 		return nil, err
 	}
 	return NewRouter(primary, auxiliary, models.Routing)
+}
+
+func validateRoutingCapabilities(models config.Models) error {
+	routing := make(map[string]string, len(defaultTaskRouting)+len(models.Routing))
+	for task, role := range defaultTaskRouting {
+		routing[task] = role
+	}
+	for task, role := range models.Routing {
+		if knownTasks[task] {
+			routing[task] = role
+		}
+	}
+	for task, capability := range map[string]string{"vision": "vision"} {
+		role := routing[task]
+		if role == "" {
+			continue
+		}
+		definition := models.Definitions[role]
+		if definition.Protocol == "" {
+			continue
+		}
+		if !modelHasCapability(definition.Capabilities, capability) {
+			return newError(ErrorCodeCapabilityUnsupported, role, capability, fmt.Sprintf("task %q requires capability %q", task, capability))
+		}
+	}
+	return nil
+}
+
+func modelHasCapability(capabilities config.ModelCapabilities, name string) bool {
+	switch name {
+	case "streaming":
+		return capabilities.Streaming
+	case "tools":
+		return capabilities.Tools
+	case "structured_output":
+		return capabilities.StructuredOutput
+	case "vision":
+		return capabilities.Vision
+	case "audio":
+		return capabilities.Audio
+	case "reasoning":
+		return capabilities.Reasoning
+	case "usage_reporting":
+		return capabilities.UsageReporting
+	default:
+		return false
+	}
+}
+
+func retryConfigForRequest(config RetryConfig, req *adkmodel.LLMRequest) RetryConfig {
+	if requestHasToolResult(req) {
+		config.MaxRetries = 0
+	}
+	return config
+}
+
+func requestHasToolResult(req *adkmodel.LLMRequest) bool {
+	if req == nil {
+		return false
+	}
+	for _, content := range req.Contents {
+		if content == nil {
+			continue
+		}
+		for _, part := range content.Parts {
+			if part != nil && part.FunctionResponse != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *Router) For(task string) adkmodel.LLM {
@@ -86,26 +164,63 @@ func (r *Router) For(task string) adkmodel.LLM {
 	return r.auxiliary
 }
 
-func newAdapter(spec config.ModelSpec, timeout, idleTimeout time.Duration) (adkmodel.LLM, error) {
-	if spec.Provider == "" {
+func newAdapter(name string, spec config.ModelDefinition, timeout, idleTimeout time.Duration) (adkmodel.LLM, error) {
+	if spec.Protocol == "" || spec.Model == "" {
 		return nil, nil
 	}
 	if spec.BaseURL != "" {
 		if err := validateBaseURL(spec.BaseURL); err != nil {
-			return nil, fmt.Errorf("model: invalid base_url %q for provider %q: %w", spec.BaseURL, spec.Provider, err)
+			return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("invalid base_url %q: %v", spec.BaseURL, err))
 		}
 	}
-	if spec.APIKey == "" && !isLocalhost(spec.BaseURL) {
-		return nil, fmt.Errorf("model: missing api_key for provider %q (set api_key, or use a localhost base_url)", spec.Provider)
-	}
-	switch spec.Provider {
-	case "anthropic":
-		return newAnthropicAdapter(spec.Model, spec.BaseURL, spec.APIKey, timeout, idleTimeout), nil
-	case "openai", "openrouter", "ollama", "vllm", "gemini", "lmstudio":
-		return newOpenAIAdapter(spec.Model, spec.BaseURL, spec.APIKey, timeout, idleTimeout), nil
+	switch spec.Protocol {
+	case config.ProtocolAnthropicMessages, config.ProtocolOpenAIChatCompat, config.ProtocolOpenAIResponses, config.ProtocolGeminiNative:
 	default:
-		return nil, fmt.Errorf("model: unsupported provider %q", spec.Provider)
+		return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
 	}
+	apiKey, err := resolveSecret(name, spec)
+	if err != nil {
+		return nil, err
+	}
+	switch spec.Protocol {
+	case config.ProtocolAnthropicMessages:
+		return newAnthropicAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), nil
+	case config.ProtocolOpenAIChatCompat:
+		return newOpenAIAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), nil
+	case config.ProtocolOpenAIResponses:
+		return newOpenAIResponsesAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), nil
+	case config.ProtocolGeminiNative:
+		return newGeminiAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), nil
+	}
+	return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
+}
+
+func resolveSecret(name string, spec config.ModelDefinition) (string, error) {
+	if spec.APIKeyEnv != "" && spec.APIKeyFile != "" {
+		return "", newError(ErrorCodeSecretInvalid, name, "", "set only one of api_key_env or api_key_file")
+	}
+	if spec.APIKeyEnv != "" {
+		value, ok := os.LookupEnv(spec.APIKeyEnv)
+		if !ok || (value == "" && !isLocalhost(spec.BaseURL)) {
+			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("secret environment variable %q is unavailable", spec.APIKeyEnv))
+		}
+		return value, nil
+	}
+	if spec.APIKeyFile != "" {
+		data, err := os.ReadFile(spec.APIKeyFile)
+		if err != nil {
+			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("cannot read secret file: %v", err))
+		}
+		value := strings.TrimSpace(string(data))
+		if value == "" {
+			return "", newError(ErrorCodeSecretInvalid, name, "", "secret file is empty")
+		}
+		return value, nil
+	}
+	if !isLocalhost(spec.BaseURL) {
+		return "", newError(ErrorCodeSecretInvalid, name, "", "api_key_env or api_key_file is required for a non-loopback endpoint")
+	}
+	return "", nil
 }
 
 func validateBaseURL(raw string) error {
@@ -141,4 +256,28 @@ func isLocalhost(raw string) bool {
 	}
 	host := u.Hostname()
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+func rejectCrossOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 {
+		return nil
+	}
+	previous := via[len(via)-1].URL
+	if redirectOrigin(previous) != redirectOrigin(req.URL) {
+		return fmt.Errorf("cross-origin redirect rejected")
+	}
+	return nil
+}
+
+func redirectOrigin(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	return u.Scheme + "://" + u.Hostname() + ":" + port
 }

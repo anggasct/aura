@@ -286,10 +286,22 @@ func TestLoad_WithModelsSection(t *testing.T) {
 server:
   host: 127.0.0.1
 models:
-  primary:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
-    api_key: sk-ant-test
+  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet-4-20250514
+      base_url: https://api.anthropic.com
+      api_key_env: ANTHROPIC_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: true
+        audio: false
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: anthropic
+        usage_reporting: true
   routing:
     summarize: primary
 `
@@ -301,8 +313,9 @@ models:
 		t.Fatalf("Load: %v", err)
 	}
 	cfg := res.Config
-	if cfg.Models.Primary.Provider != "anthropic" || cfg.Models.Primary.Model != "claude-sonnet-4-20250514" || cfg.Models.Primary.APIKey != "sk-ant-test" {
-		t.Errorf("primary = %+v", cfg.Models.Primary)
+	primary := cfg.Models.Definitions["primary"]
+	if primary.Protocol != "anthropic_messages" || primary.Model != "claude-sonnet-4-20250514" || primary.APIKeyEnv != "ANTHROPIC_API_KEY" {
+		t.Errorf("primary = %+v", primary)
 	}
 	if cfg.Models.Routing["summarize"] != "primary" {
 		t.Errorf("routing.summarize = %q, want primary", cfg.Models.Routing["summarize"])
@@ -325,9 +338,22 @@ func TestLoad_UnknownKeyInsideModelsRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	content := `version: 1
 models:
-  primary:
-    provider: anthropic
-    typo_key: nope
+  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet-4-20250514
+      api_key_env: ANTHROPIC_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: true
+        audio: false
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: anthropic
+        usage_reporting: true
+      typo_key: nope
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
@@ -336,8 +362,170 @@ models:
 	if err == nil {
 		t.Fatal("expected unknown key error inside models")
 	}
-	if !strings.Contains(err.Error(), `unknown key "models.primary.typo_key"`) {
+	if !strings.Contains(err.Error(), `unknown key "models.definitions.primary.typo_key"`) {
 		t.Errorf("error %q does not name the offending key", err)
+	}
+}
+
+func TestLoad_ModelProtocolAndCapabilityValidation(t *testing.T) {
+	valid := `version: 1
+models:
+  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet
+      base_url: https://api.anthropic.com
+      api_key_env: ANTHROPIC_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: true
+        audio: false
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: anthropic
+        usage_reporting: true
+`
+	tests := []struct {
+		name    string
+		content string
+		code    ErrorCode
+		want    string
+	}{
+		{
+			name:    "unknown protocol",
+			content: strings.Replace(valid, "anthropic_messages", "unknown_protocol", 1),
+			code:    ErrorCodeModelProtocolInvalid,
+			want:    "unsupported protocol",
+		},
+		{
+			name:    "missing capabilities",
+			content: strings.Replace(valid, "      capabilities:\n        streaming: true\n        tools: true\n        structured_output: false\n        vision: true\n        audio: false\n        reasoning: true\n        context_tokens: 200000\n        tokenizer: anthropic\n        usage_reporting: true\n", "", 1),
+			code:    ErrorCodeModelCapabilityUnsupported,
+			want:    "requires a capabilities mapping",
+		},
+		{
+			name:    "both secret references",
+			content: strings.Replace(valid, "      api_key_env: ANTHROPIC_API_KEY\n", "      api_key_env: ANTHROPIC_API_KEY\n      api_key_file: /run/secrets/anthropic\n", 1),
+			code:    ErrorCodeModelSecretInvalid,
+			want:    "only one of api_key_env or api_key_file",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, tt.content))
+			if code, ok := CodeOf(err); !ok || code != tt.code {
+				t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, tt.code)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q does not contain %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_InlineModelAPIKeyRejected(t *testing.T) {
+	content := `version: 1
+models:
+  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet
+      base_url: https://api.anthropic.com
+      api_key_env: ANTHROPIC_API_KEY
+      api_key: inline-secret
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: true
+        audio: false
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: anthropic
+        usage_reporting: true
+`
+	_, err := Load(writeTempConfig(t, content))
+	if err == nil || !strings.Contains(err.Error(), `unknown key "models.definitions.primary.api_key"`) {
+		t.Fatalf("Load error = %v, want inline API key rejection", err)
+	}
+}
+
+func TestLoad_ModelSecretReferencesAndLoopback(t *testing.T) {
+	content := `version: 1
+models:
+  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet
+      base_url: https://api.anthropic.com
+      api_key_env: ANTHROPIC_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: true
+        audio: false
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: anthropic
+        usage_reporting: true
+    auxiliary:
+      protocol: openai_chat_compat
+      model: local-model
+      base_url: http://127.0.0.1:11434/v1
+      capabilities:
+        streaming: true
+        tools: false
+        structured_output: false
+        vision: false
+        audio: false
+        reasoning: false
+        context_tokens: 32768
+        tokenizer: unknown
+        usage_reporting: false
+`
+	result, err := Load(writeTempConfig(t, content))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	primary := result.Config.Models.Definitions["primary"]
+	if primary.APIKeyEnv != "ANTHROPIC_API_KEY" || primary.APIKeyFile != "" {
+		t.Errorf("primary secret reference = %+v", primary)
+	}
+	if auxiliary := result.Config.Models.Definitions["auxiliary"]; auxiliary.APIKeyEnv != "" || auxiliary.APIKeyFile != "" {
+		t.Errorf("loopback secret reference = %+v", auxiliary)
+	}
+}
+
+func TestLoad_ModelDefinitionEnvironmentOverride(t *testing.T) {
+	content := `version: 1
+models:
+  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet
+      base_url: https://api.anthropic.com
+      api_key_env: ANTHROPIC_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: true
+        audio: false
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: anthropic
+        usage_reporting: true
+`
+	t.Setenv("AURA_MODELS_DEFINITIONS_PRIMARY_MODEL", "claude-opus")
+	result, err := Load(writeTempConfig(t, content))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := result.Config.Models.Definitions["primary"].Model; got != "claude-opus" {
+		t.Errorf("model = %q, want claude-opus", got)
 	}
 }
 
