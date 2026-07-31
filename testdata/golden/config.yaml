@@ -6,3 +6,28 @@ server:
 logging:
   level: info
   format: text
+models:
+  primary:
+    provider: ""
+    model: ""
+    api_key: ""
+    base_url: ""
+    fallbacks: []
+  auxiliary:
+    provider: ""
+    model: ""
+    api_key: ""
+    base_url: ""
+    fallbacks: []
+  request_timeout: 2m0s
+  streaming_idle_timeout: 1m0s
+  fallback_notify: false
+  circuit_cooldown: 5m0s
+  circuit_threshold: 3
+  routing:
+    context_compress: auxiliary
+    curator: auxiliary
+    profiling: auxiliary
+    summarize: auxiliary
+    title_gen: auxiliary
+    vision: primary
