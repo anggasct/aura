@@ -17,13 +17,17 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 		Use:   "server",
 		Short: "Start the daemon with all listeners",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(gf.configPath)
+			result, err := config.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
+			cfg := result.Config
 			level, format := resolveLogging(cmd, cfg)
 			if err := logging.Setup(level, format, os.Stderr); err != nil {
 				return err
+			}
+			if result.DefaultGenerated {
+				slog.Info("generating default config", "component", "config", "path", result.Path)
 			}
 			slog.Info("starting server",
 				"component", "server",

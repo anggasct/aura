@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -23,6 +22,7 @@ import (
 
 const (
 	envPrefix        = "AURA_"
+	envConfigVar     = "AURA_CONFIG"
 	supportedVersion = 1
 )
 
@@ -30,6 +30,12 @@ var (
 	envLookup  = buildEnvLookup()
 	yamlLineRe = regexp.MustCompile(`line (\d+)`)
 )
+
+type LoadResult struct {
+	Config           *Config
+	Path             string
+	DefaultGenerated bool
+}
 
 func buildEnvLookup() map[string]string {
 	m := map[string]string{}
@@ -43,34 +49,48 @@ func envKeyMapper(s string) string {
 	return envLookup[strings.ToLower(strings.TrimPrefix(s, envPrefix))]
 }
 
-// Load reads configuration from path, or the default XDG location when path is
-// empty. A missing default config is auto-generated; a missing explicit path is
-// an error. AURA_-prefixed environment variables override file values.
-func Load(path string) (*Config, error) {
+// Load reads configuration. Path precedence: an explicit path argument, then
+// AURA_CONFIG, then the default XDG location. A missing default config is
+// auto-generated; a missing explicit or AURA_CONFIG path is an error.
+// AURA_-prefixed environment variables override file values. DefaultGenerated
+// is true when a default config was written, so callers can log it through the
+// configured logger after setup.
+func Load(path string) (LoadResult, error) {
+	res, err := load(path)
+	if err != nil {
+		return LoadResult{}, fmt.Errorf("config: %w", err)
+	}
+	return res, nil
+}
+
+func load(path string) (LoadResult, error) {
 	resolved, explicit, err := resolvePath(path)
 	if err != nil {
-		return nil, err
+		return LoadResult{}, err
 	}
-	data, err := loadBytes(resolved, explicit)
+	data, generated, err := loadBytes(resolved, explicit)
 	if err != nil {
-		return nil, err
+		return LoadResult{}, err
 	}
 	if err := validate(data); err != nil {
-		return nil, err
+		return LoadResult{}, err
 	}
 	cfg, err := decode(data)
 	if err != nil {
-		return nil, err
+		return LoadResult{}, err
 	}
 	if err := checkVersion(cfg.Version); err != nil {
-		return nil, err
+		return LoadResult{}, err
 	}
-	return cfg, nil
+	return LoadResult{Config: cfg, Path: resolved, DefaultGenerated: generated}, nil
 }
 
-func resolvePath(explicit string) (string, bool, error) {
-	if explicit != "" {
-		return explicit, true, nil
+func resolvePath(flagPath string) (string, bool, error) {
+	if flagPath != "" {
+		return flagPath, true, nil
+	}
+	if env := os.Getenv(envConfigVar); env != "" {
+		return env, true, nil
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -79,31 +99,32 @@ func resolvePath(explicit string) (string, bool, error) {
 	return filepath.Join(base, "aura", "config.yaml"), false, nil
 }
 
-func loadBytes(path string, explicit bool) ([]byte, error) {
+func loadBytes(path string, explicit bool) ([]byte, bool, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if explicit {
-				return nil, fmt.Errorf("file not found: %s", path)
+				return nil, false, fmt.Errorf("file not found: %s", path)
 			}
-			return writeDefault(path)
+			data, err := writeDefault(path)
+			return data, true, err
 		}
 		if errors.Is(err, fs.ErrPermission) {
-			return nil, fmt.Errorf("cannot read %s: permission denied", path)
+			return nil, false, fmt.Errorf("cannot read %s: permission denied", path)
 		}
-		return nil, fmt.Errorf("cannot read %s: %w", path, err)
+		return nil, false, fmt.Errorf("cannot read %s: %w", path, err)
 	}
 	if info.IsDir() {
-		return nil, fmt.Errorf("%s is a directory, not a file", path)
+		return nil, false, fmt.Errorf("%s is a directory, not a file", path)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrPermission) {
-			return nil, fmt.Errorf("cannot read %s: permission denied", path)
+			return nil, false, fmt.Errorf("cannot read %s: permission denied", path)
 		}
-		return nil, fmt.Errorf("cannot read %s: %w", path, err)
+		return nil, false, fmt.Errorf("cannot read %s: %w", path, err)
 	}
-	return data, nil
+	return data, false, nil
 }
 
 func writeDefault(path string) ([]byte, error) {
@@ -117,7 +138,6 @@ func writeDefault(path string) ([]byte, error) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return nil, fmt.Errorf("cannot write default config: %w", err)
 	}
-	slog.Info("generating default config", "component", "config", "path", path)
 	return data, nil
 }
 

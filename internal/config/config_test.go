@@ -30,10 +30,11 @@ func TestMarshalDefault_GoldenFile(t *testing.T) {
 }
 
 func TestLoad_ValidFile(t *testing.T) {
-	cfg, err := Load(fixture(t, "valid.yaml"))
+	res, err := Load(fixture(t, "valid.yaml"))
 	if err != nil {
 		t.Fatalf("Load(valid): %v", err)
 	}
+	cfg := res.Config
 	if cfg.Version != 1 {
 		t.Errorf("Version = %d, want 1", cfg.Version)
 	}
@@ -46,6 +47,9 @@ func TestLoad_ValidFile(t *testing.T) {
 	if cfg.Logging.Level != "debug" || cfg.Logging.Format != "json" {
 		t.Errorf("Logging = %+v, want debug/json", cfg.Logging)
 	}
+	if res.DefaultGenerated {
+		t.Error("DefaultGenerated = true for an existing file")
+	}
 }
 
 func TestLoad_EnvOverride(t *testing.T) {
@@ -53,10 +57,11 @@ func TestLoad_EnvOverride(t *testing.T) {
 	t.Setenv("AURA_SERVER_SHUTDOWN_TIMEOUT", "45s")
 	t.Setenv("AURA_LOGGING_LEVEL", "warn")
 
-	cfg, err := Load(fixture(t, "valid.yaml"))
+	res, err := Load(fixture(t, "valid.yaml"))
 	if err != nil {
 		t.Fatalf("Load with env: %v", err)
 	}
+	cfg := res.Config
 	if cfg.Server.Port != 7777 {
 		t.Errorf("Port = %d, want 7777 (env override)", cfg.Server.Port)
 	}
@@ -99,15 +104,22 @@ func TestLoad_MissingDefaultAutoGenerates(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 
-	cfg, err := Load("")
+	res, err := Load("")
 	if err != nil {
 		t.Fatalf("Load default: %v", err)
 	}
+	cfg := res.Config
 	if cfg.Server.Port != 8280 {
 		t.Errorf("Port = %d, want default 8280", cfg.Server.Port)
 	}
+	if !res.DefaultGenerated {
+		t.Error("DefaultGenerated = false, want true for a missing default config")
+	}
 
 	path := filepath.Join(xdg, "aura", "config.yaml")
+	if res.Path != path {
+		t.Errorf("Path = %q, want %q", res.Path, path)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("expected generated config at %s: %v", path, err)
@@ -133,6 +145,9 @@ func TestLoad_MalformedYAML(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for malformed YAML, got nil")
 	}
+	if !strings.HasPrefix(err.Error(), "config: ") {
+		t.Errorf("error %q missing config component prefix", err)
+	}
 	if !strings.Contains(err.Error(), "invalid YAML") {
 		t.Errorf("error %q does not mention invalid YAML", err)
 	}
@@ -146,11 +161,24 @@ func TestLoad_UnknownKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown key, got nil")
 	}
+	if !strings.HasPrefix(err.Error(), "config: ") {
+		t.Errorf("error %q missing config component prefix", err)
+	}
 	if !strings.Contains(err.Error(), `unknown key "server.typo"`) {
 		t.Errorf("error %q does not name the offending key", err)
 	}
 	if !strings.Contains(err.Error(), "line") {
 		t.Errorf("error %q does not specify a line", err)
+	}
+}
+
+func TestLoad_ExplicitPathMissing(t *testing.T) {
+	_, err := Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	if err == nil {
+		t.Fatal("expected error for missing explicit path, got nil")
+	}
+	if !strings.Contains(err.Error(), "config: file not found") {
+		t.Errorf("error %q does not report file not found under config prefix", err)
 	}
 }
 
@@ -168,16 +196,6 @@ func TestLoad_WrongVersion(t *testing.T) {
 	}
 }
 
-func TestLoad_ExplicitPathMissing(t *testing.T) {
-	_, err := Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
-	if err == nil {
-		t.Fatal("expected error for missing explicit path, got nil")
-	}
-	if !strings.Contains(err.Error(), "file not found") {
-		t.Errorf("error %q does not report file not found", err)
-	}
-}
-
 func TestLoad_PathIsDirectory(t *testing.T) {
 	_, err := Load(t.TempDir())
 	if err == nil {
@@ -188,8 +206,31 @@ func TestLoad_PathIsDirectory(t *testing.T) {
 	}
 }
 
+func TestLoad_AuraConfigEnvPath(t *testing.T) {
+	t.Setenv("AURA_CONFIG", fixture(t, "valid.yaml"))
+	res, err := Load("")
+	if err != nil {
+		t.Fatalf("Load with AURA_CONFIG: %v", err)
+	}
+	if res.Config.Server.Port != 9090 {
+		t.Errorf("Port = %d, want 9090 from AURA_CONFIG file", res.Config.Server.Port)
+	}
+}
+
+func TestLoad_AuraConfigEnvMissingErrors(t *testing.T) {
+	t.Setenv("AURA_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+	_, err := Load("")
+	if err == nil {
+		t.Fatal("expected error for missing AURA_CONFIG path, got nil")
+	}
+	if !strings.Contains(err.Error(), "config: file not found") {
+		t.Errorf("error %q does not report file not found under config prefix", err)
+	}
+}
+
 func TestResolvePath_XDGEmptyFallsBack(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("AURA_CONFIG", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
