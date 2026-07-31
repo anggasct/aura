@@ -7,7 +7,12 @@ import (
 
 type ErrorCode string
 
-const ErrorCodeVersionUnsupported ErrorCode = "config_version_unsupported"
+const (
+	ErrorCodeVersionUnsupported         ErrorCode = "config_version_unsupported"
+	ErrorCodeModelProtocolInvalid       ErrorCode = "model_protocol_invalid"
+	ErrorCodeModelCapabilityUnsupported ErrorCode = "model_capability_unsupported"
+	ErrorCodeModelSecretInvalid         ErrorCode = "model_secret_invalid"
+)
 
 type Error struct {
 	Code   ErrorCode

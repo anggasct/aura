@@ -1,0 +1,20 @@
+{
+  "model": "gpt-5",
+  "output": [
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Hello from Responses."
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 9,
+    "output_tokens": 4,
+    "total_tokens": 13
+  }
+}

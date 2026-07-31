@@ -50,7 +50,7 @@ func newOpenAIAdapter(name, baseURL, apiKey string, timeout, idleTimeout time.Du
 		name:                 name,
 		baseURL:              strings.TrimRight(baseURL, "/"),
 		apiKey:               apiKey,
-		httpClient:           &http.Client{Timeout: timeout},
+		httpClient:           &http.Client{Timeout: timeout, CheckRedirect: rejectCrossOriginRedirect},
 		retry:                defaultRetryConfig(),
 		streamingIdleTimeout: idleTimeout,
 	}
@@ -60,43 +60,59 @@ func (a *OpenAIAdapter) Name() string { return a.name }
 
 func (a *OpenAIAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		resp, err := a.do(ctx, req, stream)
+		telemetry := newModelTelemetry(ctx, "openai_chat_compat", a.name)
+		resp, retries, err := a.do(ctx, req, stream)
+		telemetry.retries = retries
 		if err != nil {
+			telemetry.finish(nil, err)
 			yield(nil, err)
 			return
 		}
 		defer resp.Body.Close()
 
 		if cErr := classifyHTTPResponse(resp, "openai"); cErr != nil {
+			telemetry.finish(nil, cErr)
 			yield(nil, cErr)
 			return
 		}
 
 		if stream {
-			a.stream(ctx, resp.Body, yield)
+			a.stream(ctx, resp.Body, func(response *adkmodel.LLMResponse, streamErr error) bool {
+				if streamErr != nil || (response != nil && response.TurnComplete) {
+					telemetry.finish(response, streamErr)
+				}
+				return yield(response, streamErr)
+			})
+			telemetry.finishIfNeeded()
 			return
 		}
 		payload, err := io.ReadAll(resp.Body)
 		if err != nil {
+			telemetry.finish(nil, err)
 			yield(nil, fmt.Errorf("model: failed to read openai response: %w", err))
 			return
 		}
 		out, err := parseOpenAIResponse(payload)
 		if err != nil {
+			telemetry.finish(nil, err)
 			yield(nil, err)
 			return
 		}
+		telemetry.finish(out, nil)
 		yield(out, nil)
 	}
 }
 
-func (a *OpenAIAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream bool) (*http.Response, error) {
+func (a *OpenAIAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream bool) (*http.Response, int, error) {
+	retryCount := 0
 	body, err := buildOpenAIRequest(req, stream)
 	if err != nil {
-		return nil, fmt.Errorf("model: failed to build openai request: %w", err)
+		return nil, retryCount, fmt.Errorf("model: failed to build openai request: %w", err)
 	}
 	url := a.baseURL + "/v1/chat/completions"
-	return retryHTTP(ctx, a.retry, func() (*http.Response, error) {
+	retry := retryConfigForRequest(a.retry, req)
+	retry.RetryCount = &retryCount
+	resp, err := retryHTTP(ctx, retry, func() (*http.Response, error) {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("model: failed to create openai request: %w", err)
@@ -111,6 +127,7 @@ func (a *OpenAIAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream
 		}
 		return resp, nil
 	})
+	return resp, retryCount, err
 }
 
 func (a *OpenAIAdapter) stream(ctx context.Context, body io.ReadCloser, yield func(*adkmodel.LLMResponse, error) bool) {
@@ -483,13 +500,13 @@ func (s *streamToolAccumulator) parts() ([]*genai.Part, error) {
 func classifyHTTPStatus(status int, provider string) error {
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		return fmt.Errorf("%s: http %d: %w", provider, status, ErrAuthFailed)
+		return codedError(ErrorCodeAuthFailed, ErrAuthFailed, fmt.Sprintf("%s: http %d", provider, status))
 	case status == http.StatusNotFound:
-		return fmt.Errorf("%s: http %d: %w", provider, status, ErrModelNotFound)
+		return codedError(ErrorCodeNotFound, ErrModelNotFound, fmt.Sprintf("%s: http %d", provider, status))
 	case status == http.StatusTooManyRequests:
-		return fmt.Errorf("%s: http %d: %w", provider, status, ErrRateLimited)
+		return codedError(ErrorCodeRateLimited, ErrRateLimited, fmt.Sprintf("%s: http %d", provider, status))
 	case status >= 500:
-		return fmt.Errorf("%s: http %d: %w", provider, status, ErrOverloaded)
+		return codedError(ErrorCodeOverloaded, ErrOverloaded, fmt.Sprintf("%s: http %d", provider, status))
 	}
 	return nil
 }
@@ -498,5 +515,5 @@ func classifyRequestError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	return fmt.Errorf("model: %w: %v", ErrConnectionFailed, err)
+	return codedError(ErrorCodeConnectionFailed, ErrConnectionFailed, fmt.Sprintf("request failed: %v", err))
 }

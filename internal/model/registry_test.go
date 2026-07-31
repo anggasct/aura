@@ -11,9 +11,12 @@ import (
 )
 
 func TestRegisterAdapters_ResolvesViaNewLLM(t *testing.T) {
+	t.Setenv("TEST_MODEL_API_KEY", "k")
 	models := config.Models{
-		Primary:   config.ModelSpec{Provider: "anthropic", Model: "claude-reg-test-1", APIKey: "k"},
-		Auxiliary: config.ModelSpec{Provider: "openai", Model: "gpt-reg-test-1", APIKey: "k"},
+		Definitions: map[string]config.ModelDefinition{
+			"primary":   configuredDefinition(config.ProtocolAnthropicMessages, "claude-reg-test-1", "https://api.anthropic.com"),
+			"auxiliary": configuredDefinition(config.ProtocolOpenAIChatCompat, "gpt-reg-test-1", "https://api.openai.com"),
+		},
 	}
 	if err := RegisterAdapters(models); err != nil {
 		t.Fatalf("RegisterAdapters: %v", err)
@@ -37,9 +40,12 @@ func TestRegisterAdapters_ResolvesViaNewLLM(t *testing.T) {
 }
 
 func TestRegisterAdapters_DuplicateModelRejected(t *testing.T) {
+	t.Setenv("TEST_MODEL_API_KEY", "k")
 	models := config.Models{
-		Primary:   config.ModelSpec{Provider: "openai", Model: "dup-reg-test-1", APIKey: "k"},
-		Auxiliary: config.ModelSpec{Provider: "anthropic", Model: "dup-reg-test-1", APIKey: "k"},
+		Definitions: map[string]config.ModelDefinition{
+			"primary":   configuredDefinition(config.ProtocolOpenAIChatCompat, "dup-reg-test-1", "https://api.openai.com"),
+			"auxiliary": configuredDefinition(config.ProtocolAnthropicMessages, "dup-reg-test-1", "https://api.anthropic.com"),
+		},
 	}
 	err := RegisterAdapters(models)
 	if err == nil || !strings.Contains(err.Error(), "already registered") {

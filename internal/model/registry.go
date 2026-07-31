@@ -26,12 +26,12 @@ func RegisterAdapters(models config.Models) error {
 	if idleTimeout <= 0 {
 		idleTimeout = defaultStreamingIdleTimeout
 	}
-	specs := []config.ModelSpec{models.Primary, models.Auxiliary}
-	for _, spec := range specs {
-		if spec.Provider == "" || spec.Model == "" {
+	for _, role := range []string{"primary", "auxiliary"} {
+		spec := models.Definitions[role]
+		if spec.Protocol == "" || spec.Model == "" {
 			continue
 		}
-		if _, err := newAdapter(spec, timeout, idleTimeout); err != nil {
+		if _, err := newAdapter(role, spec, timeout, idleTimeout); err != nil {
 			return err
 		}
 		pattern := "^" + regexp.QuoteMeta(spec.Model) + "$"
@@ -39,9 +39,10 @@ func RegisterAdapters(models config.Models) error {
 			return fmt.Errorf("model: %q already registered", spec.Model)
 		}
 		registeredModelPatterns[pattern] = true
-		spec := spec
+		registeredRole := role
+		registeredSpec := spec
 		adkmodel.Register(pattern, func(ctx context.Context, name string) (adkmodel.LLM, error) {
-			return newAdapter(spec, timeout, idleTimeout)
+			return newAdapter(registeredRole, registeredSpec, timeout, idleTimeout)
 		})
 	}
 	return nil
