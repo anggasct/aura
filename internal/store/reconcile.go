@@ -12,12 +12,14 @@ import (
 // ReconcileReport lists storage inconsistencies. Reconcile never deletes or
 // modifies data; it only reports findings for an operator or health check.
 type ReconcileReport struct {
-	MissingBlobs []string // digests with a blob row but no file on disk
-	OrphanFiles  []string // paths on disk with no matching blob row
+	MissingBlobs   []string // digests with a blob row but no file on disk
+	CorruptedBlobs []string // digests whose file content does not match the digest
+	OrphanFiles    []string // paths on disk with no matching blob row
 }
 
 // Reconcile compares the blob table against the blob storage tree rooted at
-// root, detecting rows whose file is missing and files with no owning row.
+// root, detecting rows whose file is missing, files whose content does not
+// match their digest, and files with no owning row.
 func Reconcile(ctx context.Context, db *sql.DB, root string) (ReconcileReport, error) {
 	rows, err := db.QueryContext(ctx, `SELECT digest, relative_path FROM blob`)
 	if err != nil {
@@ -33,13 +35,23 @@ func Reconcile(ctx context.Context, db *sql.DB, root string) (ReconcileReport, e
 			return ReconcileReport{}, fmt.Errorf("scan blob row: %w", err)
 		}
 		knownPaths[filepath.ToSlash(relPath)] = struct{}{}
-		absPath := filepath.Join(root, filepath.FromSlash(relPath))
+		absPath, err := resolveRootedPath(root, relPath)
+		if err != nil {
+			return ReconcileReport{}, err
+		}
 		if _, err := os.Stat(absPath); err != nil {
 			if os.IsNotExist(err) {
 				report.MissingBlobs = append(report.MissingBlobs, digest)
 				continue
 			}
 			return ReconcileReport{}, fmt.Errorf("stat blob %s: %w", digest, err)
+		}
+		got, err := checksumFile(absPath)
+		if err != nil {
+			return ReconcileReport{}, fmt.Errorf("checksum blob %s: %w", digest, err)
+		}
+		if got != digest {
+			report.CorruptedBlobs = append(report.CorruptedBlobs, digest)
 		}
 	}
 	if err := rows.Err(); err != nil {

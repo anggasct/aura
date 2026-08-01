@@ -12,8 +12,11 @@ import (
 	"modernc.org/sqlite"
 )
 
-// SQLITE_CONSTRAINT_UNIQUE, see https://www.sqlite.org/rescode.html#constraint_unique.
-const sqliteConstraintUnique = 2067
+// SQLite extended result codes, see https://www.sqlite.org/rescode.html.
+const (
+	sqliteConstraintUnique     = 2067 // SQLITE_CONSTRAINT_UNIQUE
+	sqliteConstraintPrimaryKey = 1555 // SQLITE_CONSTRAINT_PRIMARYKEY
+)
 
 const insertRuntimeEventSQL = `
 INSERT INTO runtime_event (
@@ -47,8 +50,14 @@ func (s *sqliteEventStore) AppendBatch(ctx context.Context, events []RuntimeEven
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	stmt, err := tx.PrepareContext(ctx, insertRuntimeEventSQL)
+	if err != nil {
+		return fmt.Errorf("prepare append batch: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
 	for i := range events {
-		if err := appendEvent(ctx, tx, &events[i]); err != nil {
+		if err := appendEventCore(ctx, stmt.ExecContext, &events[i]); err != nil {
 			return err
 		}
 	}
@@ -107,16 +116,28 @@ type execer interface {
 }
 
 func appendEvent(ctx context.Context, x execer, e *RuntimeEvent) error {
+	return appendEventCore(ctx, func(ctx context.Context, args ...any) (sql.Result, error) {
+		return x.ExecContext(ctx, insertRuntimeEventSQL, args...)
+	}, e)
+}
+
+func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sql.Result, error), e *RuntimeEvent) error {
+	if !json.Valid(e.Payload) {
+		return &Error{
+			Code:   ErrorCodeEventPayloadInvalid,
+			Detail: fmt.Sprintf("event %s payload is not valid JSON", e.ID),
+		}
+	}
 	sequence, err := sequenceToDB(e.Sequence)
 	if err != nil {
 		return err
 	}
-	_, err = x.ExecContext(ctx, insertRuntimeEventSQL,
+	_, err = exec(ctx,
 		e.ID, e.SessionID, sequence, e.TurnID, e.InvocationID, e.Branch, e.Author, e.Kind,
 		int64(e.SchemaVersion), string(e.Payload), nullableJSON(e.ProviderUsage), formatTime(e.CreatedAt),
 	)
 	if err != nil {
-		if isSequenceConflict(err) {
+		if isConstraintUnique(err) {
 			return &Error{
 				Code:   ErrorCodeEventSequenceConflict,
 				Detail: fmt.Sprintf("session %s sequence %d already used by a different event", e.SessionID, e.Sequence),
@@ -127,9 +148,16 @@ func appendEvent(ctx context.Context, x execer, e *RuntimeEvent) error {
 	return nil
 }
 
-func isSequenceConflict(err error) bool {
+func isConstraintUnique(err error) bool {
 	var sqliteErr *sqlite.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteConstraintUnique
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	switch sqliteErr.Code() {
+	case sqliteConstraintUnique, sqliteConstraintPrimaryKey:
+		return true
+	}
+	return false
 }
 
 func nullableJSON(raw json.RawMessage) any {

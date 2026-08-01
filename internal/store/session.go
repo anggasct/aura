@@ -29,6 +29,12 @@ func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error 
 		sess.ID, sess.OwnerID, string(metadata), formatTime(sess.CreatedAt), formatTime(sess.UpdatedAt),
 	)
 	if err != nil {
+		if isConstraintUnique(err) {
+			return &Error{
+				Code:   ErrorCodeSessionIDConflict,
+				Detail: fmt.Sprintf("session %s already exists", sess.ID),
+			}
+		}
 		return fmt.Errorf("create session %s: %w", sess.ID, err)
 	}
 	return nil
@@ -54,6 +60,12 @@ func (s *sqliteSessionService) Get(ctx context.Context, id string) (Session, err
 }
 
 func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]RuntimeEvent, error) {
+	if limit < 0 {
+		return nil, &Error{
+			Code:   ErrorCodeInvalidArgument,
+			Detail: "limit must not be negative",
+		}
+	}
 	after, err := sequenceToDB(afterSequence)
 	if err != nil {
 		return nil, err

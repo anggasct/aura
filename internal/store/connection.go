@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -35,13 +36,15 @@ var connectionPragmaSet = []struct {
 // OpenDB opens a SQLite database and installs a connection policy hook so
 // that every physical connection the pool creates - not just the first -
 // gets foreign keys, WAL, busy timeout, and synchronous mode applied and
-// verified before it is handed to a caller.
+// verified before it is handed to a caller. Write transactions begin
+// immediately, so a transaction that reads before writing waits for the
+// write lock instead of failing on a stale snapshot.
 func OpenDB(ctx context.Context, dsn string) (*sql.DB, error) {
 	registerConnectionPolicyOnce.Do(func() {
 		sqlite.RegisterConnectionHook(verifyConnectionPolicy)
 	})
 
-	db, err := sql.Open(sqlDriverName, dsn)
+	db, err := sql.Open(sqlDriverName, withImmediateTxlock(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
@@ -52,14 +55,42 @@ func OpenDB(ctx context.Context, dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-func verifyConnectionPolicy(conn sqlite.ExecQuerierContext, _ string) error {
+func withImmediateTxlock(path string) string {
+	return (&url.URL{Scheme: "file", Path: path, RawQuery: "_txlock=immediate"}).String()
+}
+
+// openReadOnly opens a SQLite database without ever writing to it, so a
+// backup snapshot and its verification stay untouched.
+func openReadOnly(ctx context.Context, path string) (*sql.DB, error) {
+	dsn := (&url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}).String()
+	db, err := sql.Open(sqlDriverName, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite database read-only: %w", err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open sqlite database read-only: %w", err)
+	}
+	return db, nil
+}
+
+func verifyConnectionPolicy(conn sqlite.ExecQuerierContext, dsn string) error {
 	ctx := context.Background()
+	readOnly := strings.Contains(dsn, "mode=ro")
 	for _, p := range connectionPragmaSet {
+		// journal_mode would mutate a read-only database; it is the only
+		// pragma here that writes to the file.
+		if readOnly && p.name == "journal_mode" {
+			continue
+		}
 		if err := execPragma(ctx, conn, p.set); err != nil {
 			return fmt.Errorf("apply pragma %s: %w", p.name, err)
 		}
 	}
 	for _, p := range connectionPragmaSet {
+		if readOnly && p.name == "journal_mode" {
+			continue
+		}
 		got, err := queryPragma(ctx, conn, p.name)
 		if err != nil {
 			return fmt.Errorf("verify pragma %s: %w", p.name, err)

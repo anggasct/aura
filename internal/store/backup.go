@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -30,23 +31,51 @@ type BackupManifest struct {
 }
 
 // Backup writes a consistent point-in-time SQLite snapshot plus a manifest
-// of every blob digest, size, and path into destDir, so Restore can later
-// verify recovered sessions, events, dedupe keys, and artifact links against
-// checksummed content.
+// derived from that snapshot, so a restored database and its manifest can
+// never disagree about which blobs exist.
 func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, error) {
 	if err := os.MkdirAll(destDir, 0o700); err != nil {
-		return BackupManifest{}, fmt.Errorf("create backup dir %s: %w", destDir, err)
+		return BackupManifest{}, fmt.Errorf("create backup directory: %w", err)
 	}
 
 	dbDest := filepath.Join(destDir, backupDatabaseFilename)
 	if _, err := os.Stat(dbDest); err == nil {
-		return BackupManifest{}, fmt.Errorf("backup database already exists at %s", dbDest)
-	}
-	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, dbDest); err != nil {
-		return BackupManifest{}, fmt.Errorf("online backup to %s: %w", dbDest, err)
+		return BackupManifest{}, errBackupDestinationConflict()
 	}
 
-	rows, err := db.QueryContext(ctx, `SELECT digest, size_bytes, relative_path FROM blob ORDER BY digest`)
+	// SQLite does not allow parameters in VACUUM INTO; the pinned driver
+	// substitutes the value. The snapshot is written to a temp name, fsynced,
+	// and renamed, so a failure can never wedge the destination.
+	tmpDest := dbDest + ".tmp"
+	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, tmpDest); err != nil {
+		_ = os.Remove(tmpDest)
+		return BackupManifest{}, backupFail("create backup snapshot", err, tmpDest)
+	}
+	if err := syncPath(tmpDest); err != nil {
+		_ = os.Remove(tmpDest)
+		return BackupManifest{}, backupFail("fsync backup snapshot", err, tmpDest)
+	}
+	if _, err := os.Stat(dbDest); err == nil {
+		_ = os.Remove(tmpDest)
+		return BackupManifest{}, errBackupDestinationConflict()
+	}
+	if err := os.Rename(tmpDest, dbDest); err != nil {
+		_ = os.Remove(tmpDest)
+		return BackupManifest{}, backupFail("move backup snapshot into place", err, tmpDest, dbDest)
+	}
+	if err := syncPath(destDir); err != nil {
+		return BackupManifest{}, backupFail("fsync backup directory", err, destDir)
+	}
+
+	// The manifest is read from the snapshot itself, so blobs committed
+	// after the snapshot can never appear in it without their bytes.
+	snap, err := openReadOnly(ctx, dbDest)
+	if err != nil {
+		return BackupManifest{}, backupFail("open backup snapshot", err, dbDest)
+	}
+	defer func() { _ = snap.Close() }()
+
+	rows, err := snap.QueryContext(ctx, `SELECT digest, size_bytes, relative_path FROM blob ORDER BY digest`)
 	if err != nil {
 		return BackupManifest{}, fmt.Errorf("list blobs for manifest: %w", err)
 	}
@@ -68,8 +97,11 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 	if err != nil {
 		return BackupManifest{}, fmt.Errorf("marshal backup manifest: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(destDir, backupManifestFilename), data, 0o600); err != nil {
-		return BackupManifest{}, fmt.Errorf("write backup manifest: %w", err)
+	if err := writeSynced(filepath.Join(destDir, backupManifestFilename+".tmp"), filepath.Join(destDir, backupManifestFilename), data); err != nil {
+		return BackupManifest{}, backupFail("write backup manifest", err, filepath.Join(destDir, backupManifestFilename), filepath.Join(destDir, backupManifestFilename+".tmp"))
+	}
+	if err := syncPath(destDir); err != nil {
+		return BackupManifest{}, backupFail("fsync backup directory", err, destDir)
 	}
 	return manifest, nil
 }
@@ -84,23 +116,23 @@ type RestoreReport struct {
 	MissingBlobFiles   []string
 }
 
-// VerifyRestore opens the database backed up under backupDir, confirms
-// sessions, events, dedupe keys, and artifact links are present, and
-// recomputes each manifest blob's checksum against artifactRoot. It never
-// deletes or modifies data; it only reports findings.
+// VerifyRestore opens the database backed up under backupDir read-only,
+// confirms sessions, events, dedupe keys, and artifact links are present,
+// and recomputes each manifest blob's checksum against artifactRoot. It
+// never deletes or modifies data, including the backup files themselves.
 func VerifyRestore(ctx context.Context, backupDir, artifactRoot string) (RestoreReport, error) {
 	manifestData, err := os.ReadFile(filepath.Join(backupDir, backupManifestFilename))
 	if err != nil {
-		return RestoreReport{}, fmt.Errorf("read backup manifest: %w", err)
+		return RestoreReport{}, backupFail("read backup manifest", err, filepath.Join(backupDir, backupManifestFilename))
 	}
 	var manifest BackupManifest
 	if err := json.Unmarshal(manifestData, &manifest); err != nil {
 		return RestoreReport{}, fmt.Errorf("parse backup manifest: %w", err)
 	}
 
-	db, err := OpenDB(ctx, filepath.Join(backupDir, backupDatabaseFilename))
+	db, err := openReadOnly(ctx, filepath.Join(backupDir, backupDatabaseFilename))
 	if err != nil {
-		return RestoreReport{}, fmt.Errorf("open restored database: %w", err)
+		return RestoreReport{}, backupFail("open restored database", err, filepath.Join(backupDir, backupDatabaseFilename))
 	}
 	defer func() { _ = db.Close() }()
 
@@ -119,14 +151,17 @@ func VerifyRestore(ctx context.Context, backupDir, artifactRoot string) (Restore
 	}
 
 	for _, blob := range manifest.Blobs {
-		absPath := filepath.Join(artifactRoot, filepath.FromSlash(blob.RelativePath))
+		absPath, err := resolveRootedPath(artifactRoot, blob.RelativePath)
+		if err != nil {
+			return RestoreReport{}, err
+		}
 		digest, err := checksumFile(absPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				report.MissingBlobFiles = append(report.MissingBlobFiles, blob.Digest)
 				continue
 			}
-			return RestoreReport{}, fmt.Errorf("checksum blob %s: %w", blob.Digest, err)
+			return RestoreReport{}, backupFail("checksum blob", err, absPath)
 		}
 		if digest != blob.Digest {
 			report.ChecksumMismatches = append(report.ChecksumMismatches, blob.Digest)
@@ -149,4 +184,61 @@ func checksumFile(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func errBackupDestinationConflict() error {
+	return &Error{Code: ErrorCodeBackupDestinationConflict, Detail: "backup database already exists"}
+}
+
+// backupFail wraps a backup failure, redacting full paths from the rendered
+// message while keeping the cause chain intact.
+func backupFail(prefix string, cause error, paths ...string) error {
+	return &redactedError{prefix: prefix, cause: cause, paths: paths}
+}
+
+type redactedError struct {
+	prefix string
+	cause  error
+	paths  []string
+}
+
+func (e *redactedError) Error() string {
+	msg := e.prefix + ": " + e.cause.Error()
+	for _, p := range e.paths {
+		msg = strings.ReplaceAll(msg, p, filepath.Base(p))
+	}
+	return msg
+}
+
+func (e *redactedError) Unwrap() error { return e.cause }
+
+func syncPath(p string) error {
+	f, err := os.Open(p)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	return f.Sync()
+}
+
+func writeSynced(tmpPath, finalPath string, data []byte) error {
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, finalPath)
 }

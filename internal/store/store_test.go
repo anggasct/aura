@@ -69,7 +69,12 @@ func TestOpenDBAppliesPolicyToEveryConnection(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if got := pragmaValue(t, db, "foreign_keys"); got != "1" {
+			var got string
+			if err := db.QueryRowContext(context.Background(), "PRAGMA foreign_keys").Scan(&got); err != nil {
+				t.Errorf("pragma foreign_keys: %v", err)
+				return
+			}
+			if got != "1" {
 				t.Errorf("foreign_keys = %s, want 1", got)
 			}
 		}()

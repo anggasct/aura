@@ -87,14 +87,41 @@ CREATE TABLE ingress_dedupe (
 
 // Migrate applies the foundational schema and any registered feature
 // migrations, verifying the checksum of migrations already recorded as
-// applied. A checksum mismatch stops startup without touching the schema.
+// applied. A checksum mismatch or an applied version above the binary's
+// maximum stops startup without touching the schema.
 func Migrate(ctx context.Context, db *sql.DB) error {
+	if err := validateMigrationOrder(migrations); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
 		return fmt.Errorf("bootstrap schema_migration table: %w", err)
+	}
+	var appliedMax sql.NullInt64
+	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migration`).Scan(&appliedMax); err != nil {
+		return fmt.Errorf("read applied migration state: %w", err)
+	}
+	maxVersion := migrations[len(migrations)-1].version
+	if appliedMax.Valid && int(appliedMax.Int64) > maxVersion {
+		return &Error{
+			Code:   ErrorCodeMigrationSequenceInvalid,
+			Detail: fmt.Sprintf("database schema version %d is newer than this binary supports (%d)", appliedMax.Int64, maxVersion),
+		}
 	}
 	for _, m := range migrations {
 		if err := applyMigration(ctx, db, m); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateMigrationOrder(ms []migration) error {
+	for i := 1; i < len(ms); i++ {
+		if ms[i].version <= ms[i-1].version {
+			return &Error{
+				Code:   ErrorCodeMigrationSequenceInvalid,
+				Detail: fmt.Sprintf("migration %d follows %d, versions must be strictly increasing", ms[i].version, ms[i-1].version),
+			}
 		}
 	}
 	return nil

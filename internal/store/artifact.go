@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -91,10 +92,17 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 	}()
 
 	hasher := sha256.New()
-	size, err := io.Copy(io.MultiWriter(tmp, hasher), r)
+	size, err := io.Copy(io.MultiWriter(tmp, hasher), io.LimitReader(r, s.quotaBytes+1))
 	if err != nil {
 		_ = tmp.Close()
 		return ArtifactRef{}, fmt.Errorf("write artifact content: %w", err)
+	}
+	if size > s.quotaBytes {
+		_ = tmp.Close()
+		return ArtifactRef{}, &Error{
+			Code:   ErrorCodeArtifactQuotaExceeded,
+			Detail: fmt.Sprintf("artifact exceeds quota of %d bytes", s.quotaBytes),
+		}
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
@@ -148,19 +156,28 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		if err := tx.QueryRowContext(ctx, `SELECT SUM(size_bytes) FROM blob`).Scan(&total); err != nil {
 			return ArtifactRef{}, fmt.Errorf("read blob storage total: %w", err)
 		}
-		if total.Int64+size > s.quotaBytes {
+		if total.Valid && size > s.quotaBytes-total.Int64 {
 			_ = os.Remove(absPath)
 			return ArtifactRef{}, &Error{
 				Code:   ErrorCodeArtifactQuotaExceeded,
-				Detail: fmt.Sprintf("blob %s would use %d bytes, exceeding quota of %d", digest, total.Int64+size, s.quotaBytes),
+				Detail: fmt.Sprintf("blob %s would exceed the storage quota of %d bytes", digest, s.quotaBytes),
 			}
 		}
+		// A concurrent Put may commit the same digest between the SELECT
+		// above and this INSERT; ON CONFLICT turns that into dedupe, not an
+		// error, and the media type is re-read below.
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)`,
+			`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(digest) DO NOTHING`,
 			digest, size, meta.MediaType, relPath, formatTime(createdAt),
 		); err != nil {
 			return ArtifactRef{}, fmt.Errorf("insert blob %s: %w", digest, err)
 		}
+		var mediaType string
+		if err := tx.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&mediaType); err != nil {
+			return ArtifactRef{}, fmt.Errorf("read blob %s: %w", digest, err)
+		}
+		ref.MediaType = mediaType
 	default:
 		return ArtifactRef{}, fmt.Errorf("read blob %s: %w", digest, err)
 	}
@@ -201,7 +218,10 @@ func (s *sqliteArtifactStore) Open(ctx context.Context, refID string) (io.ReadCl
 		meta.EventID = eventID.String
 	}
 
-	absPath := filepath.Join(s.root, filepath.FromSlash(relPath))
+	absPath, err := resolveRootedPath(s.root, relPath)
+	if err != nil {
+		return nil, ArtifactMetadata{}, err
+	}
 	f, err := os.Open(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -240,6 +260,27 @@ func (s *sqliteArtifactStore) Unlink(ctx context.Context, refID string) error {
 
 func blobRelativePath(digest string) string {
 	return path.Join("blobs", digest[:2], digest)
+}
+
+// resolveRootedPath joins a DB-controlled relative path onto root; a corrupt
+// row must never be able to turn into access outside the root.
+func resolveRootedPath(root, rel string) (string, error) {
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", &Error{
+			Code:   ErrorCodeInvalidArgument,
+			Detail: fmt.Sprintf("relative path %q escapes the storage root", rel),
+		}
+	}
+	rootClean := filepath.Clean(root)
+	abs := filepath.Join(rootClean, clean)
+	if abs != rootClean && !strings.HasPrefix(abs, rootClean+string(filepath.Separator)) {
+		return "", &Error{
+			Code:   ErrorCodeInvalidArgument,
+			Detail: fmt.Sprintf("relative path %q escapes the storage root", rel),
+		}
+	}
+	return abs, nil
 }
 
 func nullableString(v string) any {
