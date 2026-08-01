@@ -656,6 +656,144 @@ models:
 	}
 }
 
+func TestLoad_StorageSectionDefaultsAndOverrides(t *testing.T) {
+	content := `version: 1
+storage:
+  path: /data/aura
+  busy_timeout: 10s
+  max_open_connections: 8
+  artifact_quota: 2GiB
+  backup_directory: /data/backups
+  backup_interval: 12h
+  backup_retention: 3
+`
+	res, err := Load(writeTempConfig(t, content))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := res.Config.Storage
+	if s.Path != "/data/aura" || s.BackupDirectory != "/data/backups" {
+		t.Errorf("paths = %q / %q", s.Path, s.BackupDirectory)
+	}
+	if s.BusyTimeout != Duration(10*time.Second) {
+		t.Errorf("BusyTimeout = %v, want 10s", s.BusyTimeout)
+	}
+	if s.MaxOpenConnections != 8 {
+		t.Errorf("MaxOpenConnections = %d, want 8", s.MaxOpenConnections)
+	}
+	if s.ArtifactQuota != ByteSize(2<<30) {
+		t.Errorf("ArtifactQuota = %v, want 2GiB", s.ArtifactQuota)
+	}
+	if s.BackupInterval != Duration(12*time.Hour) {
+		t.Errorf("BackupInterval = %v, want 12h", s.BackupInterval)
+	}
+	if s.BackupRetention != 3 {
+		t.Errorf("BackupRetention = %d, want 3", s.BackupRetention)
+	}
+}
+
+func TestLoad_StorageDefaultsApplied(t *testing.T) {
+	res, err := Load(writeTempConfig(t, "version: 1\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := res.Config.Storage
+	if s.BusyTimeout != Duration(5*time.Second) {
+		t.Errorf("BusyTimeout = %v, want default 5s", s.BusyTimeout)
+	}
+	if s.MaxOpenConnections != 4 {
+		t.Errorf("MaxOpenConnections = %d, want default 4", s.MaxOpenConnections)
+	}
+	if s.ArtifactQuota != ByteSize(5<<30) {
+		t.Errorf("ArtifactQuota = %v, want default 5GiB", s.ArtifactQuota)
+	}
+	if s.BackupInterval != Duration(24*time.Hour) {
+		t.Errorf("BackupInterval = %v, want default 24h", s.BackupInterval)
+	}
+	if s.BackupRetention != 7 {
+		t.Errorf("BackupRetention = %d, want default 7", s.BackupRetention)
+	}
+}
+
+func TestLoad_StorageValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "connections too low", content: "storage:\n  max_open_connections: 0\n", want: "storage.max_open_connections 0 is out of range (1-16)"},
+		{name: "connections too high", content: "storage:\n  max_open_connections: 17\n", want: "storage.max_open_connections 17 is out of range (1-16)"},
+		{name: "zero quota", content: "storage:\n  artifact_quota: 0\n", want: "storage.artifact_quota must be positive"},
+		{name: "zero busy timeout", content: "storage:\n  busy_timeout: 0s\n", want: "storage.busy_timeout must be positive"},
+		{name: "zero backup interval", content: "storage:\n  backup_interval: 0s\n", want: "storage.backup_interval must be positive"},
+		{name: "zero retention", content: "storage:\n  backup_retention: 0\n", want: "storage.backup_retention must be at least 1"},
+		{name: "quota not a size", content: "storage:\n  artifact_quota: [1, 2]\n", want: "storage.artifact_quota must be a size string"},
+		{name: "quota invalid size", content: "storage:\n  artifact_quota: 5XB\n", want: "invalid size"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, "version: 1\n"+tc.content))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load error = %v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestByteSizeParsing(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want ByteSize
+	}{
+		{raw: "1000", want: 1000},
+		{raw: "5GiB", want: 5 << 30},
+		{raw: "512MiB", want: 512 << 20},
+		{raw: "2KiB", want: 2 << 10},
+		{raw: "1TiB", want: 1 << 40},
+		{raw: "2GB", want: 2000 * 1000 * 1000},
+		{raw: "1500KB", want: 1500 * 1000},
+	}
+	for _, tc := range cases {
+		var got ByteSize
+		if err := got.UnmarshalText([]byte(tc.raw)); err != nil {
+			t.Errorf("UnmarshalText(%q): %v", tc.raw, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("UnmarshalText(%q) = %d, want %d", tc.raw, got, tc.want)
+		}
+	}
+	for _, bad := range []string{"", "-5", "5XB", "abc", "5GiBx", "99999999999999999999TiB"} {
+		var got ByteSize
+		if err := got.UnmarshalText([]byte(bad)); err == nil {
+			t.Errorf("UnmarshalText(%q) accepted an invalid size", bad)
+		}
+	}
+	if got := (ByteSize(5 << 30)).String(); got != "5GiB" {
+		t.Errorf("String() = %q, want 5GiB", got)
+	}
+}
+
+func TestLoad_StorageEnvOverride(t *testing.T) {
+	t.Setenv("AURA_STORAGE_MAX_OPEN_CONNECTIONS", "2")
+	t.Setenv("AURA_STORAGE_ARTIFACT_QUOTA", "1GiB")
+	t.Setenv("AURA_STORAGE_BUSY_TIMEOUT", "3s")
+	res, err := Load(writeTempConfig(t, "version: 1\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := res.Config.Storage
+	if s.MaxOpenConnections != 2 {
+		t.Errorf("MaxOpenConnections = %d, want 2 from env", s.MaxOpenConnections)
+	}
+	if s.ArtifactQuota != ByteSize(1<<30) {
+		t.Errorf("ArtifactQuota = %v, want 1GiB from env", s.ArtifactQuota)
+	}
+	if s.BusyTimeout != Duration(3*time.Second) {
+		t.Errorf("BusyTimeout = %v, want 3s from env", s.BusyTimeout)
+	}
+}
+
 func TestLoad_EnvOnlyModelDefinitionValidated(t *testing.T) {
 	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_PROTOCOL", "anthropic_messages")
 	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_MODEL", "claude-sonnet")

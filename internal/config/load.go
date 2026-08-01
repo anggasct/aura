@@ -150,6 +150,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateLogging(cfg.Logging); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateStorage(cfg.Storage); err != nil {
+		return LoadResult{}, err
+	}
 	report, err := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if err != nil {
 		return LoadResult{}, err
@@ -386,6 +389,34 @@ func validateSectionShapes(doc *yamlv3.Node) error {
 					if roleNode.Kind != yamlv3.ScalarNode || roleNode.Tag != "!!str" {
 						return fmt.Errorf("models.routing values must be strings at line %d", roleNode.Line)
 					}
+				}
+			}
+		}
+	}
+
+	if storageNode := mappingValue(doc, "storage"); storageNode != nil {
+		if storageNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("storage must be a mapping at line %d", storageNode.Line)
+		}
+		for i := 0; i+1 < len(storageNode.Content); i += 2 {
+			keyNode := storageNode.Content[i]
+			valueNode := storageNode.Content[i+1]
+			switch keyNode.Value {
+			case "path", "backup_directory":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+					return fmt.Errorf("storage.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+				}
+			case "busy_timeout", "backup_interval":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+					return fmt.Errorf("storage.%s must be a duration string at line %d", keyNode.Value, valueNode.Line)
+				}
+			case "max_open_connections", "backup_retention":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+					return fmt.Errorf("storage.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+				}
+			case "artifact_quota":
+				if valueNode.Kind != yamlv3.ScalarNode || (valueNode.Tag != "!!str" && valueNode.Tag != "!!int") {
+					return fmt.Errorf("storage.artifact_quota must be a size string at line %d", valueNode.Line)
 				}
 			}
 		}
@@ -628,6 +659,7 @@ func decode(data []byte) (*Config, error) {
 			WeaklyTypedInput: false,
 			DecodeHook: mapstructure.ComposeDecodeHookFunc(
 				stringToDurationHook(),
+				stringToByteSizeHook(),
 				stringToBoolHook(),
 				stringToIntHook(),
 				stringToStringSliceHook(),
@@ -654,6 +686,25 @@ func stringToDurationHook() mapstructure.DecodeHookFunc {
 			return nil, fmt.Errorf("invalid duration %q: %w", s, err)
 		}
 		return Duration(d), nil
+	}
+}
+
+// stringToByteSizeHook converts environment-provided size strings ("5GiB")
+// without loosening file decoding.
+func stringToByteSizeHook() mapstructure.DecodeHookFunc {
+	return func(from, to reflect.Type, data any) (any, error) {
+		if to != reflect.TypeOf(ByteSize(0)) {
+			return data, nil
+		}
+		s, ok := data.(string)
+		if !ok {
+			return data, nil
+		}
+		b, err := parseByteSize(s)
+		if err != nil {
+			return nil, fmt.Errorf("invalid size %q", s)
+		}
+		return b, nil
 	}
 }
 
@@ -753,6 +804,21 @@ func applyDefaults(cfg *Config, data []byte) error {
 	if cfg.Models.Routing == nil {
 		cfg.Models.Routing = defaults.Models.Routing
 	}
+	if cfg.Storage.BusyTimeout == 0 && !configValuePresent(doc, "storage", "busy_timeout") && !envValuePresent("storage.busy_timeout") {
+		cfg.Storage.BusyTimeout = defaults.Storage.BusyTimeout
+	}
+	if cfg.Storage.MaxOpenConnections == 0 && !configValuePresent(doc, "storage", "max_open_connections") && !envValuePresent("storage.max_open_connections") {
+		cfg.Storage.MaxOpenConnections = defaults.Storage.MaxOpenConnections
+	}
+	if cfg.Storage.ArtifactQuota == 0 && !configValuePresent(doc, "storage", "artifact_quota") && !envValuePresent("storage.artifact_quota") {
+		cfg.Storage.ArtifactQuota = defaults.Storage.ArtifactQuota
+	}
+	if cfg.Storage.BackupInterval == 0 && !configValuePresent(doc, "storage", "backup_interval") && !envValuePresent("storage.backup_interval") {
+		cfg.Storage.BackupInterval = defaults.Storage.BackupInterval
+	}
+	if cfg.Storage.BackupRetention == 0 && !configValuePresent(doc, "storage", "backup_retention") && !envValuePresent("storage.backup_retention") {
+		cfg.Storage.BackupRetention = defaults.Storage.BackupRetention
+	}
 	return nil
 }
 
@@ -801,6 +867,25 @@ func validateLogging(loggingConfig Logging) error {
 	}
 	if _, err := logging.ParseFormat(loggingConfig.Format); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateStorage(storage Storage) error {
+	if storage.MaxOpenConnections < 1 || storage.MaxOpenConnections > 16 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("storage.max_open_connections %d is out of range (1-16)", storage.MaxOpenConnections)}
+	}
+	if storage.BusyTimeout <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "storage.busy_timeout must be positive"}
+	}
+	if storage.ArtifactQuota <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "storage.artifact_quota must be positive"}
+	}
+	if storage.BackupInterval <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "storage.backup_interval must be positive"}
+	}
+	if storage.BackupRetention < 1 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "storage.backup_retention must be at least 1"}
 	}
 	return nil
 }

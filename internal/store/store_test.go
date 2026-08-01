@@ -56,6 +56,25 @@ func TestOpenDBAppliesConnectionPolicy(t *testing.T) {
 	}
 }
 
+func TestOpenDBWithOptionsHonorsBusyTimeout(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "aura.db")
+	db, err := OpenDBWithOptions(ctx, dsn, OpenOptions{BusyTimeout: 1500 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("OpenDBWithOptions: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if got := pragmaValue(t, db, "busy_timeout"); got != "1500" {
+		t.Errorf("busy_timeout = %s, want 1500 from options", got)
+	}
+	for _, p := range []struct{ name, want string }{{"foreign_keys", "1"}, {"journal_mode", "wal"}, {"synchronous", "1"}} {
+		if got := pragmaValue(t, db, p.name); got != p.want {
+			t.Errorf("%s = %s, want %s", p.name, got, p.want)
+		}
+	}
+}
+
 func TestOpenDBAppliesPolicyToEveryConnection(t *testing.T) {
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
