@@ -385,6 +385,8 @@ func TestArtifactAndBackupUseOwnerOnlyPermissions(t *testing.T) {
 
 	blobDir := filepath.Join(root, "blobs", ref.BlobDigest[:2])
 	assertMode(t, blobDir, 0o700)
+	assertMode(t, filepath.Join(blobDir, ref.BlobDigest), 0o600)
+	assertMode(t, filepath.Join(root, "tmp"), 0o700)
 
 	destDir := filepath.Join(t.TempDir(), "backup")
 	if _, err := Backup(ctx, db, destDir); err != nil {
