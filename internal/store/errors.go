@@ -8,14 +8,14 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeEventSequenceConflict      ErrorCode = "event_sequence_conflict"
-	ErrorCodeEventSequenceInvalid       ErrorCode = "event_sequence_invalid"
-	ErrorCodeEventSchemaVersionInvalid  ErrorCode = "event_schema_version_invalid"
-	ErrorCodeInvalidArgument            ErrorCode = "invalid_argument"
-	ErrorCodeMigrationChecksumMismatch  ErrorCode = "migration_checksum_mismatch"
-	ErrorCodeStorageBusy                ErrorCode = "storage_busy"
-	ErrorCodeArtifactQuotaExceeded      ErrorCode = "artifact_quota_exceeded"
-	ErrorCodeArtifactBlobMissing        ErrorCode = "artifact_blob_missing"
+	ErrorCodeEventSequenceConflict     ErrorCode = "event_sequence_conflict"
+	ErrorCodeEventSequenceInvalid      ErrorCode = "event_sequence_invalid"
+	ErrorCodeEventSchemaVersionInvalid ErrorCode = "event_schema_version_invalid"
+	ErrorCodeInvalidArgument           ErrorCode = "invalid_argument"
+	ErrorCodeMigrationChecksumMismatch ErrorCode = "migration_checksum_mismatch"
+	ErrorCodeStorageBusy               ErrorCode = "storage_busy"
+	ErrorCodeArtifactQuotaExceeded     ErrorCode = "artifact_quota_exceeded"
+	ErrorCodeArtifactBlobMissing       ErrorCode = "artifact_blob_missing"
 )
 
 type Error struct {
