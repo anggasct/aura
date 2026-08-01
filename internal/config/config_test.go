@@ -110,8 +110,9 @@ func TestLoad_EnvOverrideDoesNotPersist(t *testing.T) {
 }
 
 func TestLoad_MissingDefaultAutoGenerates(t *testing.T) {
-	xdg := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", xdg)
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	res, err := Load("")
 	if err != nil {
@@ -125,7 +126,11 @@ func TestLoad_MissingDefaultAutoGenerates(t *testing.T) {
 		t.Error("DefaultGenerated = false, want true for a missing default config")
 	}
 
-	path := filepath.Join(xdg, "aura", "config.yaml")
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	path := filepath.Join(base, "aura", "config.yaml")
 	if res.Path != path {
 		t.Errorf("Path = %q, want %q", res.Path, path)
 	}
@@ -810,7 +815,11 @@ func TestResolvePath_XDGEmptyFallsBack(t *testing.T) {
 	if explicit {
 		t.Error("explicit = true, want false for default resolution")
 	}
-	want := filepath.Join(home, ".config", "aura", "config.yaml")
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	want := filepath.Join(base, "aura", "config.yaml")
 	if path != want {
 		t.Errorf("path = %q, want %q", path, want)
 	}
