@@ -52,7 +52,7 @@ func TestReferenceRejectsInvalid(t *testing.T) {
 	}
 }
 
-// AC-06: canaries must never survive into prompts, logs, traces, errors,
+// Canaries must never survive into prompts, logs, traces, errors,
 // artifacts, or child environments.
 func TestCanariesNeverAppearInChannels(t *testing.T) {
 	const (

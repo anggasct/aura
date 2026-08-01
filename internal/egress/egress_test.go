@@ -143,6 +143,53 @@ func TestPinnedDialerDeniesPrivateResolution(t *testing.T) {
 	}
 }
 
+func TestClientRejectsInvalidInitialRequest(t *testing.T) {
+	resolver := staticResolver{"public.example": {net.ParseIP("93.184.216.34")}}
+	client := NewClient(resolver)
+	cases := []string{
+		"http://user:pass@public.example/x",
+		"http://public.example/x?q=1",
+		"http://public.example/x#frag",
+		"ftp://public.example/x",
+		"http://10.0.0.1/x",
+	}
+	for _, raw := range cases {
+		t.Run(raw, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, raw, http.NoBody)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			resp, err := client.Do(req)
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+				if resp != nil {
+					_ = resp.Body.Close()
+				}
+				t.Fatalf("Do(%q) = %v, want egress_denied", raw, err)
+			}
+		})
+	}
+}
+
+func TestNewClientRejectsCrossOriginRedirect(t *testing.T) {
+	resolver := staticResolver{
+		"public.example": {net.ParseIP("93.184.216.34")},
+		"other.example":  {net.ParseIP("93.184.216.35")},
+	}
+	client := NewClient(resolver)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://other.example/next", http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	first, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://public.example/start", http.NoBody)
+	err = client.CheckRedirect(req, []*http.Request{first})
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+		t.Fatalf("CheckRedirect(cross-origin) = %v, want egress_denied", err)
+	}
+	if !strings.Contains(err.Error(), "cross-origin") {
+		t.Fatalf("error should name cross-origin rejection: %v", err)
+	}
+}
+
 func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
 	// First hop is a public-ish server (here, the test server itself via a
 	// host the resolver maps to a dialable address); the redirect target

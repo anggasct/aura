@@ -157,17 +157,43 @@ func (d PinnedDialer) DialContext(ctx context.Context, network, address string) 
 	return dialer.DialContext(ctx, network, net.JoinHostPort(dest.IP.String(), port))
 }
 
+// validatingTransport enforces the full destination policy on every
+// request, including the initial one: scheme, credentials, query, and
+// fragment are rejected before the pinned dialer ever sees the host.
+type validatingTransport struct {
+	resolver Resolver
+	next     http.RoundTripper
+}
+
+func (t *validatingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if _, err := Validate(req.Context(), req.URL.String(), t.resolver); err != nil {
+		return nil, err
+	}
+	return t.next.RoundTrip(req)
+}
+
 // NewClient returns an HTTP client whose transport pins validated IPs and
-// whose redirect policy revalidates every hop, so a redirect to a private
-// destination is rejected after the first allowed request.
+// enforces the full destination policy on every request and redirect hop,
+// so a redirect to a private destination or a cross-origin redirect is
+// rejected after the first allowed request.
 func NewClient(resolver Resolver) *http.Client {
+	if resolver == nil {
+		resolver = systemResolver{}
+	}
+	pinned := &http.Transport{
+		DialContext: PinnedDialer{Resolver: resolver}.DialContext,
+	}
 	return &http.Client{
-		Transport: &http.Transport{
-			DialContext: PinnedDialer{Resolver: resolver}.DialContext,
-		},
+		Transport: &validatingTransport{resolver: resolver, next: pinned},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if _, err := Validate(req.Context(), req.URL.String(), resolver); err != nil {
 				return err
+			}
+			if len(via) > 0 {
+				prev := via[len(via)-1].URL
+				if prev.Scheme != req.URL.Scheme || prev.Host != req.URL.Host {
+					return Errorf(ErrorCodeEgressDenied, "cross-origin redirect to %q is not allowed", req.URL.Host)
+				}
 			}
 			if len(via) >= 10 {
 				return errors.New("too many redirects")
