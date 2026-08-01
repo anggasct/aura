@@ -170,7 +170,7 @@ func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
 	if client.CheckRedirect == nil {
 		t.Fatal("CheckRedirect must be set")
 	}
-	req, err := http.NewRequest(http.MethodGet, "http://metadata.internal/steal", http.NoBody)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://metadata.internal/steal", http.NoBody)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
 	}
 
 	// An allowed redirect (public resolution) passes CheckRedirect.
-	okReq, _ := http.NewRequest(http.MethodGet, "http://public.example/next", http.NoBody)
+	okReq, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://public.example/next", http.NoBody)
 	err = client.CheckRedirect(okReq, []*http.Request{{URL: okReq.URL}})
 	if err != nil {
 		t.Fatalf("CheckRedirect(public) = %v, want nil", err)
