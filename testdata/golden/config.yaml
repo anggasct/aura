@@ -23,3 +23,11 @@ models:
     profiling: auxiliary
     summarize: auxiliary
     title: auxiliary
+storage:
+  path: ""
+  busy_timeout: 5s
+  max_open_connections: 4
+  artifact_quota: 5GiB
+  backup_directory: ""
+  backup_interval: 24h0m0s
+  backup_retention: 7

@@ -19,6 +19,10 @@ const (
 	ErrorCodeArtifactQuotaExceeded     ErrorCode = "artifact_quota_exceeded"
 	ErrorCodeArtifactBlobMissing       ErrorCode = "artifact_blob_missing"
 	ErrorCodeBackupDestinationConflict ErrorCode = "backup_destination_conflict"
+	ErrorCodeBackupInvalid             ErrorCode = "backup_invalid"
+	ErrorCodeRestoreLocked             ErrorCode = "restore_locked"
+	ErrorCodeStorageBusy               ErrorCode = "storage_busy"
+	ErrorCodeStorageUnavailable        ErrorCode = "storage_unavailable"
 )
 
 type Error struct {
