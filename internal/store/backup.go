@@ -43,10 +43,23 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 		return BackupManifest{}, errBackupDestinationConflict()
 	}
 
-	// SQLite does not allow parameters in VACUUM INTO; the pinned driver
-	// substitutes the value. The snapshot is written to a temp name, fsynced,
-	// and renamed, so a failure can never wedge the destination.
-	tmpDest := dbDest + ".tmp"
+	// The snapshot is written to a unique temp name, fsynced, and renamed,
+	// so a failure can never wedge the destination and concurrent backups
+	// into the same directory cannot clobber each other. SQLite does not
+	// allow parameters in VACUUM INTO; the pinned driver substitutes the
+	// value.
+	tmp, err := os.CreateTemp(destDir, backupDatabaseFilename+".tmp-*")
+	if err != nil {
+		return BackupManifest{}, backupFail("create backup temp file", err, destDir)
+	}
+	tmpDest := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpDest)
+		return BackupManifest{}, backupFail("close backup temp file", err, tmpDest)
+	}
+	if err := os.Remove(tmpDest); err != nil {
+		return BackupManifest{}, backupFail("prepare backup temp file", err, tmpDest)
+	}
 	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, tmpDest); err != nil {
 		_ = os.Remove(tmpDest)
 		return BackupManifest{}, backupFail("create backup snapshot", err, tmpDest)

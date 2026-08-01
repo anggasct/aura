@@ -1,11 +1,14 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -80,6 +83,50 @@ func TestOpenDBAppliesPolicyToEveryConnection(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestOpenDBPathWithSpace(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "dir with space")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	dsn := filepath.Join(dir, "aura.db")
+	db, err := OpenDB(ctx, dsn)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	ro, err := openReadOnly(ctx, dsn)
+	if err != nil {
+		t.Fatalf("openReadOnly: %v", err)
+	}
+	t.Cleanup(func() { _ = ro.Close() })
+	var count int
+	if err := ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM session`).Scan(&count); err != nil {
+		t.Fatalf("query read-only db: %v", err)
+	}
+}
+
+func TestArtifactPutMaxInt64Quota(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	artifacts := NewArtifactStore(db, t.TempDir(), math.MaxInt64)
+
+	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("content")), &ArtifactMetadata{
+		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("Put with MaxInt64 quota: %v", err)
+	}
+	if ref.SizeBytes != int64(len("content")) {
+		t.Errorf("SizeBytes = %d, want %d", ref.SizeBytes, len("content"))
+	}
 }
 
 func TestMigrateAppliesFoundationalSchema(t *testing.T) {

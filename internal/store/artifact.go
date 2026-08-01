@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -91,8 +92,13 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		}
 	}()
 
+	// quota+1 would wrap at math.MaxInt64 and copy nothing.
+	limit := s.quotaBytes
+	if limit < math.MaxInt64 {
+		limit++
+	}
 	hasher := sha256.New()
-	size, err := io.Copy(io.MultiWriter(tmp, hasher), io.LimitReader(r, s.quotaBytes+1))
+	size, err := io.Copy(io.MultiWriter(tmp, hasher), io.LimitReader(r, limit))
 	if err != nil {
 		_ = tmp.Close()
 		return ArtifactRef{}, fmt.Errorf("write artifact content: %w", err)
