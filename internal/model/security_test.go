@@ -23,11 +23,11 @@ func TestAPIKeyRedaction(t *testing.T) {
 	defer srv.Close()
 
 	oa := mustOpenAIAdapter(t, "gpt-4o", srv.URL, secret, 0)
-	oa.retry.MaxRetries = 0
+	oa.core.retry.MaxRetries = 0
 	_, errOpenAI := collect(oa.GenerateContent(context.Background(), sampleRequest("hi"), false))
 
 	aa := mustAnthropicAdapter(t, "claude", srv.URL, secret, 0)
-	aa.retry.MaxRetries = 0
+	aa.core.retry.MaxRetries = 0
 	_, errAnthropic := collect(aa.GenerateContent(context.Background(), sampleRequest("hi"), false))
 
 	combined := buf.String()

@@ -130,7 +130,7 @@ func TestOpenAI_Streaming(t *testing.T) {
 	var final *adkmodel.LLMResponse
 	for _, r := range resps {
 		for _, p := range r.Content.Parts {
-			if p.Text != "" {
+			if p.Text != "" && r.Partial {
 				text += p.Text
 			}
 		}
@@ -140,6 +140,17 @@ func TestOpenAI_Streaming(t *testing.T) {
 	}
 	if text != "Hello world" {
 		t.Errorf("streamed text = %q, want %q", text, "Hello world")
+	}
+	if final != nil {
+		var finalText string
+		for _, p := range final.Content.Parts {
+			if p.Text != "" {
+				finalText += p.Text
+			}
+		}
+		if finalText != "Hello world" {
+			t.Errorf("final content = %q, want accumulated %q", finalText, "Hello world")
+		}
 	}
 	if final == nil || final.UsageMetadata.TotalTokenCount != 5 {
 		t.Errorf("final usage missing/wrong: %+v", final)
@@ -166,7 +177,7 @@ func TestOpenAI_RateLimited(t *testing.T) {
 	defer srv.Close()
 
 	a := mustOpenAIAdapter(t, "gpt-4o", srv.URL, "sk-test", 0)
-	a.retry.MaxRetries = 0
+	a.core.retry.MaxRetries = 0
 	_, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
 	if !errors.Is(err, ErrRateLimited) {
 		t.Errorf("err = %v, want ErrRateLimited", err)
@@ -259,7 +270,7 @@ func TestOpenAI_StreamingIdleTimeout(t *testing.T) {
 	defer srv.Close()
 
 	a := mustOpenAIAdapter(t, "gpt-4o", srv.URL, "sk-test", 0)
-	a.streamingIdleTimeout = 25 * time.Millisecond
+	a.core.idleTimeout = 25 * time.Millisecond
 	seq := a.GenerateContent(context.Background(), sampleRequest("hi"), true)
 	errCh := make(chan error, 1)
 	done := make(chan struct{})

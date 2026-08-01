@@ -2,12 +2,15 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -54,7 +57,18 @@ func retryHTTP(ctx context.Context, cfg RetryConfig, do func() (*http.Response, 
 	for retry := 0; ; retry++ {
 		resp, err := do()
 		if err != nil {
-			return nil, err
+			// Transient transport failures are retried like retryable
+			// statuses; everything else (auth, protocol, context) is not.
+			if !isTransientError(err) || ctx.Err() != nil || retry >= cfg.MaxRetries {
+				return nil, err
+			}
+			if err := cfg.Sleep(ctx, exponentialDelay(cfg, retry)); err != nil {
+				return nil, err
+			}
+			if cfg.RetryCount != nil {
+				*cfg.RetryCount = retry + 1
+			}
+			continue
 		}
 		if !isRetryableStatus(resp.StatusCode) || retry >= cfg.MaxRetries {
 			return resp, nil
@@ -79,8 +93,18 @@ func retryHTTP(ctx context.Context, cfg RetryConfig, do func() (*http.Response, 
 }
 
 func isRetryableStatus(status int) bool {
-	return status == http.StatusTooManyRequests || status == http.StatusInternalServerError ||
-		status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == 529
+	switch status {
+	case http.StatusRequestTimeout, 425, http.StatusTooManyRequests,
+		http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, 529:
+		return true
+	}
+	return false
+}
+
+func isTransientError(err error) bool {
+	return errors.Is(err, net.ErrClosed) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
 }
 
 func classifyHTTPResponse(resp *http.Response, provider string) error {

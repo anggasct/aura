@@ -158,7 +158,7 @@ func TestOpenAI_RetryTransientThenSuccess(t *testing.T) {
 	defer srv.Close()
 
 	a := mustOpenAIAdapter(t, "gpt-4o", srv.URL, "sk-test", 0)
-	a.retry = RetryConfig{MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond, Sleep: func(context.Context, time.Duration) error { return nil }}
+	a.core.retry = RetryConfig{MaxRetries: 1, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond, Sleep: func(context.Context, time.Duration) error { return nil }}
 	resps, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
 	if err != nil || len(resps) != 1 || calls != 2 {
 		t.Fatalf("responses=%d err=%v calls=%d, want success after retry", len(resps), err, calls)
@@ -195,7 +195,7 @@ func TestOpenAI_400TypedErrors(t *testing.T) {
 			defer srv.Close()
 
 			a := mustOpenAIAdapter(t, "gpt-4o", srv.URL, "sk-test", 0)
-			a.retry.MaxRetries = 0
+			a.core.retry.MaxRetries = 0
 			_, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
 			if !errors.Is(err, tc.want) {
 				t.Errorf("err=%v, want %v", err, tc.want)
@@ -212,7 +212,7 @@ func TestAnthropic_400TypedErrors(t *testing.T) {
 	defer srv.Close()
 
 	a := mustAnthropicAdapter(t, "claude", srv.URL, "sk-ant", 0)
-	a.retry.MaxRetries = 0
+	a.core.retry.MaxRetries = 0
 	_, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
 	if !errors.Is(err, ErrContextTooLong) {
 		t.Errorf("err=%v, want ErrContextTooLong", err)

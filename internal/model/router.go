@@ -51,10 +51,10 @@ func NewRouter(primary, auxiliary adkmodel.LLM, routing map[string]string) (*Rou
 	}
 	for task, role := range routing {
 		if !knownTasks[task] {
-			return nil, fmt.Errorf("model: unknown task %q in models.routing (known: agent, summarize, vision, title, curation, compression, profiling)", task)
+			return nil, newError(ErrorCodeNotFound, "", "", fmt.Sprintf("model: unknown task %q in models.routing", task))
 		}
 		if role != "primary" && role != "auxiliary" {
-			return nil, fmt.Errorf("model: invalid role %q for task %q in models.routing (must be primary or auxiliary)", role, task)
+			return nil, newError(ErrorCodeProtocolInvalid, "", "", fmt.Sprintf("model: invalid role %q for task %q in models.routing (must be primary or auxiliary)", role, task))
 		}
 		r.routing[task] = role
 	}
@@ -157,14 +157,30 @@ func requestHasToolResult(req *adkmodel.LLMRequest) bool {
 	return false
 }
 
-func (r *Router) For(task string) adkmodel.LLM {
-	if task == "" || task == "turn" {
-		return r.primary
+// For resolves the model for a task. An unknown task or a role with no
+// configured model is a typed error; nil is never returned as a usable
+// adapter.
+func (r *Router) For(task string) (adkmodel.LLM, error) {
+	role, ok := r.routing[task]
+	if !ok {
+		if task == "" || task == "turn" {
+			role = "primary"
+		} else {
+			return nil, newError(ErrorCodeNotFound, "", "", fmt.Sprintf("model: unknown task %q", task))
+		}
 	}
-	if r.routing[task] == "primary" {
-		return r.primary
+	switch role {
+	case "primary":
+		if r.primary == nil {
+			return nil, newError(ErrorCodeNotFound, "", "", "model: no primary model is configured")
+		}
+		return r.primary, nil
+	default:
+		if r.auxiliary == nil {
+			return nil, newError(ErrorCodeNotFound, "", "", "model: no auxiliary model is configured")
+		}
+		return r.auxiliary, nil
 	}
-	return r.auxiliary
 }
 
 func newAdapter(name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration) (adkmodel.LLM, error) {

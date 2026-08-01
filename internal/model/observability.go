@@ -2,8 +2,8 @@ package model
 
 import (
 	"context"
+	"errors"
 	"log/slog"
-	"strings"
 	"time"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -37,9 +37,9 @@ func (t *modelTelemetry) finish(ctx context.Context, response *adkmodel.LLMRespo
 		status = "error"
 		if code, ok := CodeOf(err); ok {
 			status = string(code)
-		} else if strings.Contains(err.Error(), "context canceled") {
+		} else if errors.Is(err, context.Canceled) {
 			status = "canceled"
-		} else if strings.Contains(err.Error(), "context deadline exceeded") {
+		} else if errors.Is(err, context.DeadlineExceeded) {
 			status = "deadline_exceeded"
 		}
 	}

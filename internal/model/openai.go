@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"net/http"
 	"strings"
@@ -20,13 +19,65 @@ import (
 
 const openaiDefaultBaseURL = "https://api.openai.com"
 
+type openaiCodec struct{}
+
+func (openaiCodec) protocol() string { return "openai_chat_compat" }
+
+func (openaiCodec) endpoint(baseURL string, req *adkmodel.LLMRequest, stream bool) string {
+	return baseURL + "/v1/chat/completions"
+}
+
+func (openaiCodec) buildRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
+	return buildOpenAIRequest(req, stream)
+}
+
+func (openaiCodec) decodeResponse(body []byte) (*adkmodel.LLMResponse, error) {
+	return parseOpenAIResponse(body)
+}
+
+func (openaiCodec) setAuthHeaders(req *http.Request, apiKey string) {
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+}
+
+func (openaiCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, error) {
+	if strings.TrimSpace(string(data)) == "[DONE]" {
+		return nil, true, nil
+	}
+	var chunk openaiStreamChunk
+	if err := json.Unmarshal(data, &chunk); err != nil {
+		return nil, false, fmt.Errorf("model: failed to parse openai stream chunk: %w", err)
+	}
+	var ops []streamOp
+	if chunk.Usage != nil {
+		ops = append(ops, streamOp{kind: opUsage, usageIn: chunk.Usage.PromptTokens, usageOut: chunk.Usage.CompletionTokens})
+	}
+	if len(chunk.Choices) == 0 {
+		return ops, false, nil
+	}
+	choice := chunk.Choices[0]
+	for _, tc := range choice.Delta.ToolCalls {
+		if tc.Index < 0 {
+			continue
+		}
+		if tc.ID != "" || tc.Function.Name != "" {
+			ops = append(ops, streamOp{kind: opToolStart, idx: tc.Index, toolID: tc.ID, toolName: tc.Function.Name})
+		}
+		if tc.Function.Arguments != "" {
+			ops = append(ops, streamOp{kind: opToolArgs, idx: tc.Index, toolArgs: tc.Function.Arguments})
+		}
+	}
+	if choice.Delta.Content != "" {
+		ops = append(ops, streamOp{kind: opText, text: choice.Delta.Content})
+	}
+	done := choice.FinishReason != "" && choice.FinishReason != "null"
+	if done {
+		ops = append(ops, streamOp{kind: opStop, stop: choice.FinishReason}, streamOp{kind: opDone})
+	}
+	return ops, done, nil
+}
+
 type OpenAIAdapter struct {
-	name                 string
-	baseURL              string
-	apiKey               string
-	httpClient           *http.Client
-	retry                RetryConfig
-	streamingIdleTimeout time.Duration
+	core *coreClient
 }
 
 func NewOpenAIAdapter(name, baseURL, apiKey string, timeout time.Duration) (*OpenAIAdapter, error) {
@@ -42,145 +93,13 @@ func newOpenAIAdapter(name, baseURL, apiKey string, timeout, idleTimeout time.Du
 	if baseURL == "" {
 		baseURL = openaiDefaultBaseURL
 	}
-	if timeout <= 0 {
-		timeout = defaultRequestTimeout
-	}
-	if idleTimeout <= 0 {
-		idleTimeout = defaultStreamingIdleTimeout
-	}
-	return &OpenAIAdapter{
-		name:                 name,
-		baseURL:              strings.TrimRight(baseURL, "/"),
-		apiKey:               apiKey,
-		httpClient:           &http.Client{Timeout: timeout, CheckRedirect: rejectCrossOriginRedirect},
-		retry:                defaultRetryConfig(),
-		streamingIdleTimeout: idleTimeout,
-	}
+	return &OpenAIAdapter{core: newCoreClient(name, baseURL, apiKey, timeout, idleTimeout, openaiCodec{})}
 }
 
-func (a *OpenAIAdapter) Name() string { return a.name }
+func (a *OpenAIAdapter) Name() string { return a.core.name }
 
 func (a *OpenAIAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
-	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		telemetry := newModelTelemetry("openai_chat_compat", a.name)
-		resp, retries, err := a.do(ctx, req, stream)
-		telemetry.retries = retries
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, err)
-			return
-		}
-		defer resp.Body.Close()
-
-		if cErr := classifyHTTPResponse(resp, "openai"); cErr != nil {
-			telemetry.finish(ctx, nil, cErr)
-			yield(nil, cErr)
-			return
-		}
-
-		if stream {
-			a.stream(ctx, resp.Body, func(response *adkmodel.LLMResponse, streamErr error) bool {
-				if streamErr != nil || (response != nil && response.TurnComplete) {
-					telemetry.finish(ctx, response, streamErr)
-				}
-				return yield(response, streamErr)
-			})
-			telemetry.finishIfNeeded(ctx)
-			return
-		}
-		payload, err := io.ReadAll(resp.Body)
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, fmt.Errorf("model: failed to read openai response: %w", err))
-			return
-		}
-		out, err := parseOpenAIResponse(payload)
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, err)
-			return
-		}
-		telemetry.finish(ctx, out, nil)
-		yield(out, nil)
-	}
-}
-
-func (a *OpenAIAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream bool) (*http.Response, int, error) {
-	retryCount := 0
-	body, err := buildOpenAIRequest(req, stream)
-	if err != nil {
-		return nil, retryCount, fmt.Errorf("model: failed to build openai request: %w", err)
-	}
-	url := a.baseURL + "/v1/chat/completions"
-	retry := retryConfigForRequest(a.retry, req)
-	retry.RetryCount = &retryCount
-	resp, err := retryHTTP(ctx, retry, func() (*http.Response, error) {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("model: failed to create openai request: %w", err)
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		if a.apiKey != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
-		}
-		resp, err := a.httpClient.Do(httpReq)
-		if err != nil {
-			return nil, classifyRequestError(err)
-		}
-		return resp, nil
-	})
-	return resp, retryCount, err
-}
-
-func (a *OpenAIAdapter) stream(ctx context.Context, body io.ReadCloser, yield func(*adkmodel.LLMResponse, error) bool) {
-	var lastUsage *genai.GenerateContentResponseUsageMetadata
-	tools := &streamToolAccumulator{}
-
-	err := scanSSE(ctx, body, a.streamingIdleTimeout, func(data []byte) error {
-		if strings.TrimSpace(string(data)) == "[DONE]" {
-			return io.EOF
-		}
-		var chunk openaiStreamChunk
-		if err := json.Unmarshal(data, &chunk); err != nil {
-			return fmt.Errorf("model: failed to parse openai stream chunk: %w", err)
-		}
-		if chunk.Usage != nil {
-			lastUsage = openaiUsageToMetadata(chunk.Usage)
-		}
-		if len(chunk.Choices) == 0 {
-			return nil
-		}
-		ch := chunk.Choices[0]
-		for _, tc := range ch.Delta.ToolCalls {
-			tools.add(tc)
-		}
-		c := &genai.Content{Role: "model"}
-		if ch.Delta.Content != "" {
-			c.Parts = append(c.Parts, &genai.Part{Text: ch.Delta.Content})
-		}
-		done := ch.FinishReason != "" && ch.FinishReason != "null"
-		if done {
-			parts, err := tools.parts()
-			if err != nil {
-				return err
-			}
-			c.Parts = append(c.Parts, parts...)
-		}
-		if len(c.Parts) == 0 && !done {
-			return nil
-		}
-		resp := &adkmodel.LLMResponse{Content: c, Partial: !done, TurnComplete: done}
-		if done {
-			resp.UsageMetadata = lastUsage
-		}
-		if !yield(resp, nil) {
-			return errStopYield
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, io.EOF) {
-		yield(nil, err)
-	}
+	return a.core.GenerateContent(ctx, req, stream)
 }
 
 type openaiRequestBody struct {
@@ -449,54 +368,6 @@ func contentText(c *genai.Content) string {
 		}
 	}
 	return strings.Join(parts, "")
-}
-
-type streamToolAccumulator struct {
-	calls map[int]*openaiStreamToolCall
-	args  map[int]*strings.Builder
-	order []int
-}
-
-func (s *streamToolAccumulator) add(tc openaiStreamToolCall) {
-	if s.calls == nil {
-		s.calls = map[int]*openaiStreamToolCall{}
-		s.args = map[int]*strings.Builder{}
-	}
-	if _, ok := s.calls[tc.Index]; !ok {
-		s.calls[tc.Index] = &openaiStreamToolCall{Index: tc.Index, Type: "function"}
-		s.args[tc.Index] = &strings.Builder{}
-		s.order = append(s.order, tc.Index)
-	}
-	existing := s.calls[tc.Index]
-	if tc.ID != "" {
-		existing.ID = tc.ID
-	}
-	if tc.Function.Name != "" {
-		existing.Function.Name = tc.Function.Name
-	}
-	if tc.Function.Arguments != "" {
-		s.args[tc.Index].WriteString(tc.Function.Arguments)
-	}
-}
-
-func (s *streamToolAccumulator) parts() ([]*genai.Part, error) {
-	parts := make([]*genai.Part, 0, len(s.order))
-	for _, idx := range s.order {
-		args := json.RawMessage(s.args[idx].String())
-		if len(bytes.TrimSpace(args)) == 0 {
-			args = json.RawMessage("{}")
-		}
-		if !json.Valid(args) {
-			return nil, fmt.Errorf("model: invalid tool call %q: %w", s.calls[idx].Function.Name, ErrInvalidToolCall)
-		}
-		tc := ToolCall{ID: s.calls[idx].ID, Name: s.calls[idx].Function.Name, Arguments: args}
-		fc, err := canonicalToFunctionCall(tc)
-		if err != nil {
-			return nil, err
-		}
-		parts = append(parts, &genai.Part{FunctionCall: fc})
-	}
-	return parts, nil
 }
 
 func classifyHTTPStatus(status int, provider string) error {

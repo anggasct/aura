@@ -80,11 +80,19 @@ func TestModernProtocolBuildRouter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}
-	if _, ok := router.For("turn").(*OpenAIResponsesAdapter); !ok {
-		t.Fatalf("primary = %T, want *OpenAIResponsesAdapter", router.For("turn"))
+	primary, err := router.For("turn")
+	if err != nil {
+		t.Fatalf("For(turn): %v", err)
 	}
-	if _, ok := router.For("summarize").(*GeminiAdapter); !ok {
-		t.Fatalf("auxiliary = %T, want *GeminiAdapter", router.For("summarize"))
+	if _, ok := primary.(*OpenAIResponsesAdapter); !ok {
+		t.Fatalf("primary = %T, want *OpenAIResponsesAdapter", primary)
+	}
+	auxiliary, err := router.For("summarize")
+	if err != nil {
+		t.Fatalf("For(summarize): %v", err)
+	}
+	if _, ok := auxiliary.(*GeminiAdapter); !ok {
+		t.Fatalf("auxiliary = %T, want *GeminiAdapter", auxiliary)
 	}
 }
 

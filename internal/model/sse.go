@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-var errStopYield = io.EOF
-
 type idleReader struct {
 	io.ReadCloser
 	activity chan struct{}
@@ -46,7 +44,7 @@ func scanSSE(ctx context.Context, body io.ReadCloser, idleTimeout time.Duration,
 		return onData([]byte(joined))
 	}
 	for sc.Scan() {
-		line := sc.Text()
+		line := strings.TrimSuffix(sc.Text(), "\r")
 		switch {
 		case line == "":
 			if err := flush(); err != nil {
