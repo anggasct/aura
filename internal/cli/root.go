@@ -52,16 +52,18 @@ func Execute() int {
 // runtime errors, and 0 on success. When args is empty the process arguments
 // are used.
 func ExecuteContext(ctx context.Context, args ...string) int {
+	effective := args
+	if len(effective) == 0 {
+		effective = os.Args[1:]
+	}
 	root := newRootCmd()
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return &usageError{err}
 	})
-	if len(args) > 0 {
-		root.SetArgs(args)
-	}
+	root.SetArgs(effective)
 	// An unknown subcommand is a usage error, but cobra surfaces it from
 	// Execute with no marker, so classify it here before running.
-	if _, _, err := root.Find(args); err != nil {
+	if _, _, err := root.Find(effective); err != nil {
 		fmt.Fprintln(os.Stderr, "aura:", err)
 		return 2
 	}

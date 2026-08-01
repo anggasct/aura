@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -72,6 +73,22 @@ func TestExecuteContextExitCodes(t *testing.T) {
 	}
 	if code := ExecuteContext(context.Background(), "server", "--config", "definitely-missing.yaml"); code != 1 {
 		t.Errorf("runtime error exit code = %d, want 1", code)
+	}
+}
+
+func TestExecuteContextUnknownCommandViaProcessArgs(t *testing.T) {
+	// main calls ExecuteContext without explicit args; the effective args
+	// come from os.Args, and the unknown-command classification must still
+	// fire on that path.
+	oldArgs := os.Args
+	t.Cleanup(func() { os.Args = oldArgs })
+	os.Args = []string{"aura", "bogus"}
+	if code := ExecuteContext(context.Background()); code != 2 {
+		t.Errorf("unknown command (process args) exit code = %d, want 2", code)
+	}
+	os.Args = []string{"aura", "--config", "x", "bogus"}
+	if code := ExecuteContext(context.Background()); code != 2 {
+		t.Errorf("unknown command after flags (process args) exit code = %d, want 2", code)
 	}
 }
 
