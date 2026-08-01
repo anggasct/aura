@@ -3,10 +3,13 @@ package store
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func wantCode(t *testing.T, err error, want ErrorCode) {
@@ -125,6 +128,109 @@ func TestPortsRejectNilArguments(t *testing.T) {
 
 	_, err = RuntimeEventToADK(nil)
 	wantCode(t, err, ErrorCodeInvalidArgument)
+
+	_, err = RuntimeEventFromADK("session-1", "turn-1", nil)
+	wantCode(t, err, ErrorCodeInvalidArgument)
+}
+
+func TestArtifactOpenRejectsEscapingRelativePath(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	root := t.TempDir()
+	mustCreateSession(t, db, "session-1")
+	artifacts := NewArtifactStore(db, root, DefaultArtifactQuotaBytes)
+
+	for i, rel := range []string{"../../etc/passwd", "a/../../b", "/etc/passwd", ".."} {
+		ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("content")), &ArtifactMetadata{
+			ID: fmt.Sprintf("artifact-%d", i), SessionID: "session-1", Filename: "f.txt", MediaType: "text/plain",
+		})
+		if err != nil {
+			t.Fatalf("Put %q: %v", rel, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE blob SET relative_path = ? WHERE digest = ?`, rel, ref.BlobDigest); err != nil {
+			t.Fatalf("corrupt relative_path: %v", err)
+		}
+		_, _, err = artifacts.Open(ctx, ref.ID)
+		wantCode(t, err, ErrorCodeInvalidArgument)
+	}
+}
+
+func TestVerifyRestoreRejectsEscapingManifestPath(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	destDir := filepath.Join(t.TempDir(), "backup")
+	if _, err := Backup(ctx, db, destDir); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+
+	hostile := BackupManifest{
+		CreatedAt: time.Now().UTC(),
+		Blobs:     []BackupBlobEntry{{Digest: "blob", SizeBytes: 1, RelativePath: "../../etc/passwd"}},
+	}
+	data, err := json.MarshalIndent(hostile, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal hostile manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(destDir, backupManifestFilename), data, 0o600); err != nil {
+		t.Fatalf("rewrite manifest: %v", err)
+	}
+
+	_, err = VerifyRestore(ctx, destDir, t.TempDir())
+	wantCode(t, err, ErrorCodeInvalidArgument)
+}
+
+func TestArtifactPutRejectsOverQuotaDuringCopy(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	root := t.TempDir()
+	mustCreateSession(t, db, "session-1")
+	artifacts := NewArtifactStore(db, root, 4)
+
+	_, err := artifacts.Put(ctx, bytes.NewReader([]byte("this is way more than four bytes")), &ArtifactMetadata{
+		ID: "artifact-over-quota", SessionID: "session-1", Filename: "big.bin", MediaType: "application/octet-stream",
+	})
+	wantCode(t, err, ErrorCodeArtifactQuotaExceeded)
+
+	var blobCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM blob`).Scan(&blobCount); err != nil {
+		t.Fatalf("count blob rows: %v", err)
+	}
+	if blobCount != 0 {
+		t.Errorf("blob rows = %d, want 0", blobCount)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "tmp"))
+	if err != nil {
+		t.Fatalf("read tmp dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("tmp dir holds %d leftover files, want 0", len(entries))
+	}
+}
+
+func TestArtifactPutQuotaOverflowCannotBypassQuota(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	root := t.TempDir()
+	mustCreateSession(t, db, "session-1")
+	artifacts := NewArtifactStore(db, root, DefaultArtifactQuotaBytes)
+
+	seed, err := artifacts.Put(ctx, bytes.NewReader([]byte("seed")), &ArtifactMetadata{
+		ID: "artifact-seed", SessionID: "session-1", Filename: "s.txt", MediaType: "text/plain",
+	})
+	if err != nil {
+		t.Fatalf("seed Put: %v", err)
+	}
+	// A wrapping quota check computes a negative total and lets the write
+	// through; the guarded form must reject it.
+	if _, err := db.ExecContext(ctx, `UPDATE blob SET size_bytes = ? WHERE digest = ?`, int64(math.MaxInt64), seed.BlobDigest); err != nil {
+		t.Fatalf("corrupt size_bytes: %v", err)
+	}
+
+	_, err = artifacts.Put(ctx, bytes.NewReader([]byte("more")), &ArtifactMetadata{
+		ID: "artifact-2", SessionID: "session-1", Filename: "m.txt", MediaType: "text/plain",
+	})
+	wantCode(t, err, ErrorCodeArtifactQuotaExceeded)
 }
 
 func TestArtifactAndBackupUseOwnerOnlyPermissions(t *testing.T) {

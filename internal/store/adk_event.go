@@ -31,6 +31,9 @@ type adkEventPayload struct {
 // actions, content, usage, and long-running tool identifiers. The caller
 // still owns Sequence assignment before Append.
 func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (RuntimeEvent, error) {
+	if ev == nil {
+		return RuntimeEvent{}, errNilArgument("event")
+	}
 	payloadJSON, err := json.Marshal(adkEventPayload{
 		Content:            ev.Content,
 		Actions:            ev.Actions,

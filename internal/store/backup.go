@@ -119,7 +119,10 @@ func VerifyRestore(ctx context.Context, backupDir, artifactRoot string) (Restore
 	}
 
 	for _, blob := range manifest.Blobs {
-		absPath := filepath.Join(artifactRoot, filepath.FromSlash(blob.RelativePath))
+		absPath, err := resolveRootedPath(artifactRoot, blob.RelativePath)
+		if err != nil {
+			return RestoreReport{}, err
+		}
 		digest, err := checksumFile(absPath)
 		if err != nil {
 			if os.IsNotExist(err) {
