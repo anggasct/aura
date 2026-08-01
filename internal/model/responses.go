@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"iter"
 	"net/http"
@@ -140,24 +139,32 @@ func buildOpenAIResponsesRequest(req *adkmodel.LLMRequest, stream bool) ([]byte,
 				if declaration == nil {
 					continue
 				}
+				params, err := toolParams(declaration)
+				if err != nil {
+					return nil, err
+				}
 				body.Tools = append(body.Tools, openAIResponsesTool{
 					Type:        "function",
 					Name:        declaration.Name,
 					Description: declaration.Description,
-					Parameters:  toolParams(declaration),
+					Parameters:  params,
 				})
 			}
 		}
 	}
 	for _, content := range req.Contents {
-		body.Input = append(body.Input, contentToOpenAIResponsesInput(content)...)
+		inputs, err := contentToOpenAIResponsesInput(content)
+		if err != nil {
+			return nil, err
+		}
+		body.Input = append(body.Input, inputs...)
 	}
 	return json.Marshal(body)
 }
 
-func contentToOpenAIResponsesInput(content *genai.Content) []openAIResponsesInput {
+func contentToOpenAIResponsesInput(content *genai.Content) ([]openAIResponsesInput, error) {
 	if content == nil {
-		return nil
+		return nil, nil
 	}
 	role := "user"
 	if content.Role == "model" {
@@ -174,14 +181,19 @@ func contentToOpenAIResponsesInput(content *genai.Content) []openAIResponsesInpu
 			}
 			text = append(text, openAIResponsesContent{Type: contentType, Text: part.Text})
 		case part.FunctionCall != nil:
-			tc := toCanonicalToolCall(part.FunctionCall)
+			tc, err := toCanonicalToolCall(part.FunctionCall)
+			if err != nil {
+				return nil, err
+			}
 			items = append(items, openAIResponsesInput{Type: "function_call", CallID: tc.ID, Name: tc.Name, Arguments: string(tc.Arguments)})
 		case part.FunctionResponse != nil:
 			result := "{}"
 			if len(part.FunctionResponse.Response) > 0 {
-				if encoded, err := json.Marshal(part.FunctionResponse.Response); err == nil {
-					result = string(encoded)
+				encoded, err := json.Marshal(part.FunctionResponse.Response)
+				if err != nil {
+					return nil, fmt.Errorf("model: failed to marshal tool result: %w", err)
 				}
+				result = string(encoded)
 			}
 			items = append(items, openAIResponsesInput{Type: "function_call_output", CallID: part.FunctionResponse.ID, Output: result})
 		}
@@ -189,7 +201,7 @@ func contentToOpenAIResponsesInput(content *genai.Content) []openAIResponsesInpu
 	if len(text) > 0 {
 		items = append([]openAIResponsesInput{{Role: role, Content: text}}, items...)
 	}
-	return items
+	return items, nil
 }
 
 type openAIResponsesResponse struct {
@@ -250,7 +262,7 @@ func parseOpenAIResponsesValue(response openAIResponsesResponse) (*adkmodel.LLMR
 		}
 	}
 	if len(content.Parts) == 0 {
-		return nil, errors.New("model: openai responses output was empty")
+		return nil, codedError(ErrorCodeProtocolInvalid, nil, "model: openai responses output was empty")
 	}
 	var usage *genai.GenerateContentResponseUsageMetadata
 	if response.Usage != nil {

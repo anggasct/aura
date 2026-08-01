@@ -197,7 +197,10 @@ func buildAnthropicRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error
 				if fd == nil {
 					continue
 				}
-				params := toolParams(fd)
+				params, err := toolParams(fd)
+				if err != nil {
+					return nil, err
+				}
 				if params == nil {
 					params = json.RawMessage(`{"type":"object"}`)
 				}
@@ -210,15 +213,18 @@ func buildAnthropicRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error
 		}
 	}
 	for _, c := range req.Contents {
-		msgs := contentToAnthropicMessages(c)
+		msgs, err := contentToAnthropicMessages(c)
+		if err != nil {
+			return nil, err
+		}
 		body.Messages = append(body.Messages, msgs...)
 	}
 	return json.Marshal(body)
 }
 
-func contentToAnthropicMessages(c *genai.Content) []anthropicMessage {
+func contentToAnthropicMessages(c *genai.Content) ([]anthropicMessage, error) {
 	if c == nil {
-		return nil
+		return nil, nil
 	}
 	role := "user"
 	if c.Role == "model" {
@@ -230,7 +236,10 @@ func contentToAnthropicMessages(c *genai.Content) []anthropicMessage {
 		case p.Text != "":
 			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: p.Text})
 		case p.FunctionCall != nil:
-			tc := toCanonicalToolCall(p.FunctionCall)
+			tc, err := toCanonicalToolCall(p.FunctionCall)
+			if err != nil {
+				return nil, err
+			}
 			input := tc.Arguments
 			if len(input) == 0 {
 				input = json.RawMessage("{}")
@@ -245,9 +254,11 @@ func contentToAnthropicMessages(c *genai.Content) []anthropicMessage {
 			fr := p.FunctionResponse
 			resp := ""
 			if len(fr.Response) > 0 {
-				if b, err := json.Marshal(fr.Response); err == nil {
-					resp = string(b)
+				b, err := json.Marshal(fr.Response)
+				if err != nil {
+					return nil, fmt.Errorf("model: failed to marshal tool result: %w", err)
 				}
+				resp = string(b)
 			}
 			blocks = append(blocks, anthropicContentBlock{
 				Type:      "tool_result",
@@ -257,9 +268,9 @@ func contentToAnthropicMessages(c *genai.Content) []anthropicMessage {
 		}
 	}
 	if len(blocks) == 0 {
-		return nil
+		return nil, nil
 	}
-	return []anthropicMessage{{Role: role, Content: blocks}}
+	return []anthropicMessage{{Role: role, Content: blocks}}, nil
 }
 
 func parseAnthropicResponse(body []byte) (*adkmodel.LLMResponse, error) {

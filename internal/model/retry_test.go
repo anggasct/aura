@@ -204,6 +204,69 @@ func TestOpenAI_400TypedErrors(t *testing.T) {
 	}
 }
 
+func TestRetryHTTP_GatewayTimeoutRetried(t *testing.T) {
+	calls := 0
+	cfg := RetryConfig{
+		MaxRetries: 1,
+		BaseDelay:  time.Millisecond,
+		MaxDelay:   time.Millisecond,
+		Jitter:     0,
+		Sleep: func(context.Context, time.Duration) error {
+			return nil
+		},
+	}
+	resp, err := retryHTTP(context.Background(), cfg, func() (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return testHTTPResponse(http.StatusGatewayTimeout, ""), nil
+		}
+		return testHTTPResponse(http.StatusOK, ""), nil
+	})
+	if err != nil {
+		t.Fatalf("retryHTTP: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK || calls != 2 {
+		t.Errorf("status=%d calls=%d, want 504 retried then 200", resp.StatusCode, calls)
+	}
+}
+
+func TestClassifyHTTPResponse_StructuralJSON(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want error
+	}{
+		{name: "openai code", body: `{"error":{"code":"content_filter"}}`, want: ErrContentFiltered},
+		{name: "anthropic type", body: `{"error":{"type":"context_length_exceeded"}}`, want: ErrContextTooLong},
+		{name: "gemini blocked status", body: `{"error":{"code":400,"message":"request blocked","status":"BLOCKED"}}`, want: ErrContentFiltered},
+		{name: "message fallback", body: `{"error":{"message":"prompt is too long"}}`, want: ErrContextTooLong},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Body:       io.NopCloser(strings.NewReader(tc.body)),
+			}
+			err := classifyHTTPResponse(resp, "test")
+			if !errors.Is(err, tc.want) {
+				t.Errorf("err=%v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestClassifyHTTPResponse_NonJSONBodyIsPlain400(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader("not json at all")),
+	}
+	err := classifyHTTPResponse(resp, "test")
+	if _, ok := CodeOf(err); ok {
+		t.Fatalf("CodeOf(%v) = %q, want no typed code for a non-JSON body", err, err)
+	}
+}
+
 func TestAnthropic_400TypedErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

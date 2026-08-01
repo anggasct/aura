@@ -200,26 +200,34 @@ func buildOpenAIRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
 				if fd == nil {
 					continue
 				}
+				params, err := toolParams(fd)
+				if err != nil {
+					return nil, err
+				}
 				body.Tools = append(body.Tools, openaiTool{
 					Type: "function",
 					Function: openaiToolDecl{
 						Name:        fd.Name,
 						Description: fd.Description,
-						Parameters:  toolParams(fd),
+						Parameters:  params,
 					},
 				})
 			}
 		}
 	}
 	for _, c := range req.Contents {
-		body.Messages = append(body.Messages, contentToOpenAIMessages(c)...)
+		msgs, err := contentToOpenAIMessages(c)
+		if err != nil {
+			return nil, err
+		}
+		body.Messages = append(body.Messages, msgs...)
 	}
 	return json.Marshal(body)
 }
 
-func contentToOpenAIMessages(c *genai.Content) []openaiMessage {
+func contentToOpenAIMessages(c *genai.Content) ([]openaiMessage, error) {
 	if c == nil {
-		return nil
+		return nil, nil
 	}
 	role := "user"
 	if c.Role == "model" {
@@ -233,9 +241,17 @@ func contentToOpenAIMessages(c *genai.Content) []openaiMessage {
 		case p.Text != "":
 			texts = append(texts, p.Text)
 		case p.FunctionCall != nil:
-			toolCalls = append(toolCalls, canonicalToOpenAIToolCall(toCanonicalToolCall(p.FunctionCall)))
+			tc, err := toCanonicalToolCall(p.FunctionCall)
+			if err != nil {
+				return nil, err
+			}
+			toolCalls = append(toolCalls, canonicalToOpenAIToolCall(tc))
 		case p.FunctionResponse != nil:
-			toolResults = append(toolResults, functionResponseToToolMessage(p.FunctionResponse))
+			m, err := functionResponseToToolMessage(p.FunctionResponse)
+			if err != nil {
+				return nil, err
+			}
+			toolResults = append(toolResults, m)
 		}
 	}
 	msgs := append([]openaiMessage{}, toolResults...)
@@ -252,17 +268,19 @@ func contentToOpenAIMessages(c *genai.Content) []openaiMessage {
 	} else if content != "" {
 		msgs = append(msgs, openaiMessage{Role: role, Content: content})
 	}
-	return msgs
+	return msgs, nil
 }
 
-func functionResponseToToolMessage(fr *genai.FunctionResponse) openaiMessage {
+func functionResponseToToolMessage(fr *genai.FunctionResponse) (openaiMessage, error) {
 	resp := []byte("{}")
 	if len(fr.Response) > 0 {
-		if b, err := json.Marshal(fr.Response); err == nil {
-			resp = b
+		b, err := json.Marshal(fr.Response)
+		if err != nil {
+			return openaiMessage{}, fmt.Errorf("model: failed to marshal tool result: %w", err)
 		}
+		resp = b
 	}
-	return openaiMessage{Role: "tool", ToolCallID: fr.ID, Content: string(resp)}
+	return openaiMessage{Role: "tool", ToolCallID: fr.ID, Content: string(resp)}, nil
 }
 
 func parseOpenAIResponse(body []byte) (*adkmodel.LLMResponse, error) {
@@ -271,7 +289,7 @@ func parseOpenAIResponse(body []byte) (*adkmodel.LLMResponse, error) {
 		return nil, fmt.Errorf("model: failed to parse openai response: %w", err)
 	}
 	if len(resp.Choices) == 0 {
-		return nil, errors.New("model: openai response had no choices")
+		return nil, codedError(ErrorCodeProtocolInvalid, nil, "model: openai response had no choices")
 	}
 	msg := resp.Choices[0].Message
 	c := &genai.Content{Role: "model"}
@@ -308,14 +326,16 @@ func openaiUsageToMetadata(u *openaiUsage) *genai.GenerateContentResponseUsageMe
 	}
 }
 
-func toCanonicalToolCall(fc *genai.FunctionCall) ToolCall {
+func toCanonicalToolCall(fc *genai.FunctionCall) (ToolCall, error) {
 	args := json.RawMessage("{}")
 	if len(fc.Args) > 0 {
-		if b, err := json.Marshal(fc.Args); err == nil {
-			args = b
+		b, err := json.Marshal(fc.Args)
+		if err != nil {
+			return ToolCall{}, fmt.Errorf("model: failed to marshal tool call args: %w", err)
 		}
+		args = b
 	}
-	return ToolCall{ID: fc.ID, Name: fc.Name, Arguments: args}
+	return ToolCall{ID: fc.ID, Name: fc.Name, Arguments: args}, nil
 }
 
 func canonicalToFunctionCall(tc ToolCall) (*genai.FunctionCall, error) {
@@ -343,18 +363,14 @@ func fromOpenAIToolCall(tc openaiToolCall) (ToolCall, error) {
 	return ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: raw}, nil
 }
 
-func toolParams(fd *genai.FunctionDeclaration) json.RawMessage {
+func toolParams(fd *genai.FunctionDeclaration) (json.RawMessage, error) {
 	if fd.ParametersJsonSchema != nil {
-		if b, err := json.Marshal(fd.ParametersJsonSchema); err == nil {
-			return b
-		}
+		return json.Marshal(fd.ParametersJsonSchema)
 	}
 	if fd.Parameters != nil {
-		if b, err := json.Marshal(fd.Parameters); err == nil {
-			return b
-		}
+		return json.Marshal(fd.Parameters)
 	}
-	return nil
+	return nil, nil
 }
 
 func contentText(c *genai.Content) string {

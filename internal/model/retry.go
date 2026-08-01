@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -93,13 +94,25 @@ func retryHTTP(ctx context.Context, cfg RetryConfig, do func() (*http.Response, 
 }
 
 func isRetryableStatus(status int) bool {
-	switch status {
-	case http.StatusRequestTimeout, 425, http.StatusTooManyRequests,
-		http.StatusInternalServerError, http.StatusBadGateway,
-		http.StatusServiceUnavailable, 529:
+	switch {
+	case status == http.StatusRequestTimeout, status == 425, status == http.StatusTooManyRequests:
+		return true
+	case status >= 500 && status <= 599:
 		return true
 	}
 	return false
+}
+
+// providerErrorBody captures the error object shape shared by the providers:
+// OpenAI/Responses (code/type/message), Anthropic (type/message), Gemini
+// (status/message).
+type providerErrorBody struct {
+	Error struct {
+		Code    string `json:"code"`
+		Type    string `json:"type"`
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
 func isTransientError(err error) bool {
@@ -108,18 +121,26 @@ func isTransientError(err error) bool {
 }
 
 func classifyHTTPResponse(resp *http.Response, provider string) error {
-	if resp.StatusCode == http.StatusBadRequest {
-		body, _ := io.ReadAll(resp.Body)
-		message := strings.ToLower(string(body))
-		switch {
-		case strings.Contains(message, "content_filter"), strings.Contains(message, "content filter"):
-			return codedError(ErrorCodeContentFiltered, ErrContentFiltered, provider+": http 400")
-		case strings.Contains(message, "context_length"), strings.Contains(message, "context length"), strings.Contains(message, "too long"):
-			return codedError(ErrorCodeContextTooLong, ErrContextTooLong, provider+": http 400")
-		}
+	if resp.StatusCode != http.StatusBadRequest {
+		return classifyHTTPStatus(resp.StatusCode, provider)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil || len(body) > maxResponseBytes {
 		return fmt.Errorf("%s: http 400", provider)
 	}
-	return classifyHTTPStatus(resp.StatusCode, provider)
+	var payload providerErrorBody
+	_ = json.Unmarshal(body, &payload)
+	code := strings.ToLower(payload.Error.Code)
+	typ := strings.ToLower(payload.Error.Type)
+	status := strings.ToLower(payload.Error.Status)
+	message := strings.ToLower(payload.Error.Message)
+	switch {
+	case strings.Contains(code, "content_filter"), strings.Contains(typ, "content_filter"), strings.Contains(status, "blocked"), strings.Contains(message, "content filter"), strings.Contains(message, "safety settings"):
+		return codedError(ErrorCodeContentFiltered, ErrContentFiltered, provider+": http 400")
+	case strings.Contains(code, "context_length"), strings.Contains(typ, "context_length"), strings.Contains(message, "context_length"), strings.Contains(message, "too long"):
+		return codedError(ErrorCodeContextTooLong, ErrContextTooLong, provider+": http 400")
+	}
+	return fmt.Errorf("%s: http 400", provider)
 }
 
 func exponentialDelay(cfg RetryConfig, retry int) time.Duration {

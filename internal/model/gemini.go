@@ -3,7 +3,6 @@ package model
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"iter"
 	"net/http"
@@ -56,7 +55,10 @@ func (geminiCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, error) {
 			ops = append(ops, streamOp{kind: opText, text: part.Text, usageIn: usageIn(response), usageOut: usageOut(response)})
 		}
 		if part.FunctionCall != nil {
-			args, _ := json.Marshal(part.FunctionCall.Args)
+			args, err := json.Marshal(part.FunctionCall.Args)
+			if err != nil {
+				return nil, false, fmt.Errorf("model: failed to marshal gemini tool call args: %w", err)
+			}
 			ops = append(ops,
 				streamOp{kind: opToolStart, idx: -1, toolID: part.FunctionCall.ID, toolName: part.FunctionCall.Name},
 				streamOp{kind: opToolArgs, idx: -1, toolArgs: string(args)},
@@ -175,10 +177,14 @@ func buildGeminiRequest(req *adkmodel.LLMRequest) ([]byte, error) {
 				if declaration == nil {
 					continue
 				}
+				params, err := toolParams(declaration)
+				if err != nil {
+					return nil, err
+				}
 				geminiToolSpec.FunctionDeclarations = append(geminiToolSpec.FunctionDeclarations, geminiFunctionDeclaration{
 					Name:        declaration.Name,
 					Description: declaration.Description,
-					Parameters:  toolParams(declaration),
+					Parameters:  params,
 				})
 			}
 			if len(geminiToolSpec.FunctionDeclarations) > 0 {
@@ -240,7 +246,7 @@ func parseGeminiResponse(body []byte) (*adkmodel.LLMResponse, error) {
 		return nil, fmt.Errorf("model: failed to parse gemini response: %w", err)
 	}
 	if len(response.Candidates) == 0 {
-		return nil, errors.New("model: gemini response had no candidates")
+		return nil, codedError(ErrorCodeProtocolInvalid, nil, "model: gemini response had no candidates")
 	}
 	content := &genai.Content{Role: "model"}
 	for _, part := range response.Candidates[0].Content.Parts {
@@ -252,7 +258,7 @@ func parseGeminiResponse(body []byte) (*adkmodel.LLMResponse, error) {
 		}
 	}
 	if len(content.Parts) == 0 {
-		return nil, errors.New("model: gemini response had no content")
+		return nil, codedError(ErrorCodeProtocolInvalid, nil, "model: gemini response had no content")
 	}
 	var usage *genai.GenerateContentResponseUsageMetadata
 	if response.UsageMetadata != nil {

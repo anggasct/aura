@@ -371,3 +371,76 @@ func TestOpenAI_RequestSerializesToolCall(t *testing.T) {
 		t.Errorf("tool result message not serialized: %+v", toolMsg)
 	}
 }
+
+func TestOpenAI_EmptyResponseTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeFixture(t, w, []byte(`{"choices":[]}`))
+	}))
+	defer srv.Close()
+
+	a := mustOpenAIAdapter(t, "gpt-4o", srv.URL, "sk-test", 0)
+	_, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeProtocolInvalid)
+	}
+}
+
+func TestGemini_EmptyResponseTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeFixture(t, w, []byte(`{"candidates":[]}`))
+	}))
+	defer srv.Close()
+
+	adapter, err := NewGeminiAdapter("gemini-2.5-pro", srv.URL, "key", 0)
+	if err != nil {
+		t.Fatalf("NewGeminiAdapter: %v", err)
+	}
+	_, err = collect(adapter.GenerateContent(context.Background(), sampleRequest("hi"), false))
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeProtocolInvalid)
+	}
+}
+
+func TestResponses_EmptyOutputTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeFixture(t, w, []byte(`{"output":[]}`))
+	}))
+	defer srv.Close()
+
+	adapter, err := NewOpenAIResponsesAdapter("gpt-5", srv.URL, "key", 0)
+	if err != nil {
+		t.Fatalf("NewOpenAIResponsesAdapter: %v", err)
+	}
+	_, err = collect(adapter.GenerateContent(context.Background(), sampleRequest("hi"), false))
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeProtocolInvalid)
+	}
+}
+
+func TestRequestBuild_MarshalErrorsPropagated(t *testing.T) {
+	bad := map[string]any{"unserializable": make(chan int)}
+	req := &adkmodel.LLMRequest{
+		Model: "gpt-4o",
+		Contents: []*genai.Content{{
+			Role:  "user",
+			Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{ID: "t1", Name: "tool", Response: bad}}},
+		}},
+	}
+	for _, build := range []struct {
+		name string
+		fn   func() ([]byte, error)
+	}{
+		{name: "openai", fn: func() ([]byte, error) { return buildOpenAIRequest(req, false) }},
+		{name: "anthropic", fn: func() ([]byte, error) { return buildAnthropicRequest(req, false) }},
+		{name: "responses", fn: func() ([]byte, error) { return buildOpenAIResponsesRequest(req, false) }},
+	} {
+		t.Run(build.name, func(t *testing.T) {
+			if _, err := build.fn(); err == nil {
+				t.Fatal("expected marshal error, got nil")
+			}
+		})
+	}
+	if _, err := toCanonicalToolCall(&genai.FunctionCall{ID: "c1", Name: "f", Args: bad}); err == nil {
+		t.Fatal("expected marshal error from toCanonicalToolCall, got nil")
+	}
+}
