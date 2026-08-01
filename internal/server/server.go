@@ -13,10 +13,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const (
-	defaultShutdownTimeout = 30 * time.Second
-	forcedExitCode         = 130
-)
+const defaultShutdownTimeout = 30 * time.Second
 
 type Listener interface {
 	Name() string
@@ -51,14 +48,21 @@ func New(opts Options) *Server {
 	}
 }
 
-func (s *Server) Add(l Listener) {
+// Add registers a listener. Add must be called before Run; the listener
+// slice is not synchronized against concurrent calls.
+func (s *Server) Add(l Listener) error {
+	if l == nil {
+		return &Error{Code: ErrorCodeInvalidArgument, Detail: "listener must not be nil"}
+	}
 	s.listeners = append(s.listeners, l)
+	return nil
 }
 
-// Run starts all registered listeners and blocks until a shutdown signal or a
-// listener failure. The first signal drains listeners within the shutdown
-// timeout; a second signal forces an immediate exit. It returns the first
-// listener error, or nil on a clean shutdown.
+// Run starts all registered listeners and blocks until a shutdown signal, a
+// listener failure, or ctx cancellation. The first signal drains listeners
+// within the shutdown timeout; a second signal forces an immediate exit with
+// the signal's 128+signum code. It returns the first listener error, or nil
+// on a clean shutdown.
 func (s *Server) Run(ctx context.Context) error {
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -78,24 +82,31 @@ func (s *Server) Run(ctx context.Context) error {
 	var firstErr error
 	signalled := false
 	if len(s.listeners) == 0 {
-		sig := <-sigCh
-		s.logger.Info("received shutdown signal", "component", "server", "signal", sig.String())
-		signalled = true
+		select {
+		case sig := <-sigCh:
+			s.logger.Info("received shutdown signal", "component", "server", "signal", sig.String())
+			signalled = true
+		case <-gctx.Done():
+			return nil
+		}
 	} else {
 		select {
 		case sig := <-sigCh:
 			s.logger.Info("received shutdown signal", "component", "server", "signal", sig.String())
 			signalled = true
-		case firstErr = <-waitResult:
+		case <-gctx.Done():
+			firstErr = <-waitResult
 		}
 	}
 
 	cancel()
+	done := make(chan struct{})
+	defer close(done)
 	if signalled {
-		go s.forceExitOnSecondSignal(sigCh)
+		go s.forceExitOnSecondSignal(sigCh, done)
 	}
 
-	if firstErr == nil {
+	if firstErr == nil && signalled {
 		select {
 		case firstErr = <-waitResult:
 		case <-time.After(s.shutdownTimeout):
@@ -120,7 +131,7 @@ func (s *Server) runListener(ctx context.Context, l Listener) (err error) {
 				"panic", fmt.Sprint(r),
 				"stack", string(debug.Stack()),
 			)
-			err = fmt.Errorf("listener %s panicked: %v", l.Name(), r)
+			err = &Error{Code: ErrorCodeListenerPanicked, Detail: "listener " + l.Name() + " panicked"}
 		}
 	}()
 	s.logger.Info("starting listener", "component", "server", "listener", l.Name())
@@ -131,8 +142,20 @@ func (s *Server) runListener(ctx context.Context, l Listener) (err error) {
 	return nil
 }
 
-func (s *Server) forceExitOnSecondSignal(sigCh <-chan os.Signal) {
-	sig := <-sigCh
-	s.logger.Warn("forced shutdown", "component", "server", "signal", sig.String())
-	s.exitFunc(forcedExitCode)
+// forceExitOnSecondSignal exits with the signal's 128+signum code on a
+// second signal, or returns when done closes so no goroutine outlives Run.
+func (s *Server) forceExitOnSecondSignal(sigCh <-chan os.Signal, done <-chan struct{}) {
+	select {
+	case <-done:
+	case sig := <-sigCh:
+		s.logger.Warn("forced shutdown", "component", "server", "signal", sig.String())
+		s.exitFunc(exitCodeForSignal(sig))
+	}
+}
+
+func exitCodeForSignal(sig os.Signal) int {
+	if s, ok := sig.(syscall.Signal); ok {
+		return 128 + int(s)
+	}
+	return 128
 }
