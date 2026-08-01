@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"modernc.org/sqlite"
@@ -29,7 +30,10 @@ func NewEventStore(db *sql.DB) EventStore {
 	return &sqliteEventStore{db: db}
 }
 
-func (s *sqliteEventStore) Append(ctx context.Context, e RuntimeEvent) error {
+func (s *sqliteEventStore) Append(ctx context.Context, e *RuntimeEvent) error {
+	if e == nil {
+		return errNilArgument("event")
+	}
 	return appendEvent(ctx, s.db, e)
 }
 
@@ -43,8 +47,8 @@ func (s *sqliteEventStore) AppendBatch(ctx context.Context, events []RuntimeEven
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	for _, e := range events {
-		if err := appendEvent(ctx, tx, e); err != nil {
+	for i := range events {
+		if err := appendEvent(ctx, tx, &events[i]); err != nil {
 			return err
 		}
 	}
@@ -62,17 +66,54 @@ func (s *sqliteEventStore) LastSequence(ctx context.Context, sessionID string) (
 	if !seq.Valid {
 		return 0, nil
 	}
-	return uint64(seq.Int64), nil
+	return sequenceFromDB(seq.Int64)
+}
+
+// sequenceToDB and sequenceFromDB bridge the uint64 domain counter and the
+// signed INTEGER column. Out-of-range values are rejected rather than wrapped,
+// so a corrupt row can never present itself as a valid ordering position.
+func sequenceToDB(sequence uint64) (int64, error) {
+	if sequence > math.MaxInt64 {
+		return 0, &Error{
+			Code:   ErrorCodeEventSequenceInvalid,
+			Detail: fmt.Sprintf("sequence %d exceeds the maximum storable value", sequence),
+		}
+	}
+	return int64(sequence), nil
+}
+
+func sequenceFromDB(stored int64) (uint64, error) {
+	if stored < 0 {
+		return 0, &Error{
+			Code:   ErrorCodeEventSequenceInvalid,
+			Detail: fmt.Sprintf("stored sequence %d is negative", stored),
+		}
+	}
+	return uint64(stored), nil
+}
+
+func schemaVersionFromDB(stored int64) (uint16, error) {
+	if stored < 0 || stored > math.MaxUint16 {
+		return 0, &Error{
+			Code:   ErrorCodeEventSchemaVersionInvalid,
+			Detail: fmt.Sprintf("stored schema version %d is out of range", stored),
+		}
+	}
+	return uint16(stored), nil
 }
 
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-func appendEvent(ctx context.Context, x execer, e RuntimeEvent) error {
-	_, err := x.ExecContext(ctx, insertRuntimeEventSQL,
-		e.ID, e.SessionID, int64(e.Sequence), e.TurnID, e.InvocationID, e.Branch, e.Author, e.Kind,
-		int(e.SchemaVersion), string(e.Payload), nullableJSON(e.ProviderUsage), formatTime(e.CreatedAt),
+func appendEvent(ctx context.Context, x execer, e *RuntimeEvent) error {
+	sequence, err := sequenceToDB(e.Sequence)
+	if err != nil {
+		return err
+	}
+	_, err = x.ExecContext(ctx, insertRuntimeEventSQL,
+		e.ID, e.SessionID, sequence, e.TurnID, e.InvocationID, e.Branch, e.Author, e.Kind,
+		int64(e.SchemaVersion), string(e.Payload), nullableJSON(e.ProviderUsage), formatTime(e.CreatedAt),
 	)
 	if err != nil {
 		if isSequenceConflict(err) {
@@ -114,13 +155,17 @@ func scanRuntimeEvent(rows *sql.Rows) (RuntimeEvent, error) {
 		&schemaVersion, &payload, &providerUsage, &createdAt); err != nil {
 		return RuntimeEvent{}, fmt.Errorf("scan runtime event: %w", err)
 	}
-	e.Sequence = uint64(sequence)
-	e.SchemaVersion = uint16(schemaVersion)
+	var err error
+	if e.Sequence, err = sequenceFromDB(sequence); err != nil {
+		return RuntimeEvent{}, err
+	}
+	if e.SchemaVersion, err = schemaVersionFromDB(schemaVersion); err != nil {
+		return RuntimeEvent{}, err
+	}
 	e.Payload = json.RawMessage(payload)
 	if providerUsage.Valid {
 		e.ProviderUsage = json.RawMessage(providerUsage.String)
 	}
-	var err error
 	if e.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
 		return RuntimeEvent{}, fmt.Errorf("parse created_at for event %s: %w", e.ID, err)
 	}

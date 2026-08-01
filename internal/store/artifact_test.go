@@ -22,7 +22,7 @@ func TestArtifactPutAndOpen(t *testing.T) {
 	artifacts := newArtifactStore(t, db, DefaultArtifactQuotaBytes)
 
 	content := []byte("hello artifact")
-	ref, err := artifacts.Put(ctx, bytes.NewReader(content), ArtifactMetadata{
+	ref, err := artifacts.Put(ctx, bytes.NewReader(content), &ArtifactMetadata{
 		ID:        "artifact-1",
 		SessionID: "session-1",
 		Filename:  "hello.txt",
@@ -49,7 +49,7 @@ func TestArtifactPutAndOpen(t *testing.T) {
 		t.Errorf("content = %q, want %q", got, content)
 	}
 	if meta.MediaType != "text/plain" || meta.SessionID != "session-1" || meta.Filename != "hello.txt" {
-		t.Errorf("Open() metadata = %+v", meta)
+		t.Errorf("Open() metadata = %+v", &meta)
 	}
 }
 
@@ -61,13 +61,13 @@ func TestArtifactPutDedupesAcrossSessions(t *testing.T) {
 	artifacts := newArtifactStore(t, db, DefaultArtifactQuotaBytes)
 
 	content := []byte("shared bytes")
-	refA, err := artifacts.Put(ctx, bytes.NewReader(content), ArtifactMetadata{
+	refA, err := artifacts.Put(ctx, bytes.NewReader(content), &ArtifactMetadata{
 		ID: "artifact-a", SessionID: "session-a", Filename: "shared.bin", MediaType: "application/octet-stream",
 	})
 	if err != nil {
 		t.Fatalf("Put a: %v", err)
 	}
-	refB, err := artifacts.Put(ctx, bytes.NewReader(content), ArtifactMetadata{
+	refB, err := artifacts.Put(ctx, bytes.NewReader(content), &ArtifactMetadata{
 		ID: "artifact-b", SessionID: "session-b", Filename: "shared-copy.bin", MediaType: "application/octet-stream",
 	})
 	if err != nil {
@@ -107,10 +107,10 @@ func TestArtifactPutIsIdempotentByID(t *testing.T) {
 	artifacts := newArtifactStore(t, db, DefaultArtifactQuotaBytes)
 
 	meta := ArtifactMetadata{ID: "artifact-1", SessionID: "session-1", Filename: "f.txt", MediaType: "text/plain"}
-	if _, err := artifacts.Put(ctx, bytes.NewReader([]byte("v1")), meta); err != nil {
+	if _, err := artifacts.Put(ctx, bytes.NewReader([]byte("v1")), &meta); err != nil {
 		t.Fatalf("first Put: %v", err)
 	}
-	if _, err := artifacts.Put(ctx, bytes.NewReader([]byte("v1")), meta); err != nil {
+	if _, err := artifacts.Put(ctx, bytes.NewReader([]byte("v1")), &meta); err != nil {
 		t.Fatalf("repeat Put (idempotent): %v", err)
 	}
 
@@ -129,7 +129,7 @@ func TestArtifactPutQuotaExceeded(t *testing.T) {
 	mustCreateSession(t, db, "session-1")
 	artifacts := newArtifactStore(t, db, 4) // tiny quota
 
-	_, err := artifacts.Put(ctx, bytes.NewReader([]byte("too big")), ArtifactMetadata{
+	_, err := artifacts.Put(ctx, bytes.NewReader([]byte("too big")), &ArtifactMetadata{
 		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
 	})
 	if err == nil {
@@ -148,7 +148,7 @@ func TestArtifactOpenMissingBlobFile(t *testing.T) {
 	root := t.TempDir()
 	artifacts := NewArtifactStore(db, root, DefaultArtifactQuotaBytes)
 
-	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("bytes")), ArtifactMetadata{
+	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("bytes")), &ArtifactMetadata{
 		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
 	})
 	if err != nil {
@@ -178,14 +178,14 @@ func TestArtifactLink(t *testing.T) {
 	artifacts := newArtifactStore(t, db, DefaultArtifactQuotaBytes)
 
 	content := []byte("linked bytes")
-	ref, err := artifacts.Put(ctx, bytes.NewReader(content), ArtifactMetadata{
+	ref, err := artifacts.Put(ctx, bytes.NewReader(content), &ArtifactMetadata{
 		ID: "artifact-a", SessionID: "session-a", Filename: "orig.bin", MediaType: "application/octet-stream",
 	})
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
-	if err := artifacts.Link(ctx, ArtifactLink{
+	if err := artifacts.Link(ctx, &ArtifactLink{
 		ID: "artifact-b", BlobDigest: ref.BlobDigest, SessionID: "session-b", Filename: "linked.bin",
 	}); err != nil {
 		t.Fatalf("Link: %v", err)
@@ -205,7 +205,7 @@ func TestArtifactLink(t *testing.T) {
 		t.Errorf("linked content = %q, want %q", got, content)
 	}
 	if meta.SessionID != "session-b" || meta.Filename != "linked.bin" {
-		t.Errorf("linked metadata = %+v", meta)
+		t.Errorf("linked metadata = %+v", &meta)
 	}
 }
 
@@ -216,7 +216,7 @@ func TestReconcileDetectsMissingAndOrphan(t *testing.T) {
 	root := t.TempDir()
 	artifacts := NewArtifactStore(db, root, DefaultArtifactQuotaBytes)
 
-	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("tracked")), ArtifactMetadata{
+	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("tracked")), &ArtifactMetadata{
 		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
 	})
 	if err != nil {

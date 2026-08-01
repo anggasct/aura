@@ -48,11 +48,12 @@ type ArtifactLink struct {
 	Metadata   json.RawMessage
 }
 
+// Pointer parameters are required; a nil argument returns ErrorCodeInvalidArgument.
 type ArtifactStore interface {
-	Put(context.Context, io.Reader, ArtifactMetadata) (ArtifactRef, error)
-	Open(context.Context, string) (io.ReadCloser, ArtifactMetadata, error)
-	Link(context.Context, ArtifactLink) error
-	Unlink(context.Context, string) error
+	Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error)
+	Open(ctx context.Context, refID string) (io.ReadCloser, ArtifactMetadata, error)
+	Link(ctx context.Context, link *ArtifactLink) error
+	Unlink(ctx context.Context, refID string) error
 }
 
 type sqliteArtifactStore struct {
@@ -69,9 +70,12 @@ func NewArtifactStore(db *sql.DB, root string, quotaBytes int64) ArtifactStore {
 	return &sqliteArtifactStore{db: db, root: root, quotaBytes: quotaBytes}
 }
 
-func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta ArtifactMetadata) (ArtifactRef, error) {
+func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
+	if meta == nil {
+		return ArtifactRef{}, errNilArgument("artifact metadata")
+	}
 	tmpDir := filepath.Join(s.root, "tmp")
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return ArtifactRef{}, fmt.Errorf("create artifact temp dir: %w", err)
 	}
 	tmp, err := os.CreateTemp(tmpDir, "blob-*")
@@ -103,7 +107,7 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta Artifac
 	digest := hex.EncodeToString(hasher.Sum(nil))
 	relPath := blobRelativePath(digest)
 	absPath := filepath.Join(s.root, filepath.FromSlash(relPath))
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o700); err != nil {
 		return ArtifactRef{}, fmt.Errorf("create blob directory: %w", err)
 	}
 	// Atomic rename: the file only becomes visible at its final,
@@ -211,7 +215,10 @@ func (s *sqliteArtifactStore) Open(ctx context.Context, refID string) (io.ReadCl
 	return f, meta, nil
 }
 
-func (s *sqliteArtifactStore) Link(ctx context.Context, link ArtifactLink) error {
+func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) error {
+	if link == nil {
+		return errNilArgument("artifact link")
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO artifact_ref (id, blob_digest, session_id, event_id, filename, metadata_json, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)

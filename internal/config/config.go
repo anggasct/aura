@@ -2,7 +2,7 @@ package config
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -135,7 +135,7 @@ func defaultModelsRouting() map[string]string {
 	}
 }
 
-func Marshal(c Config) ([]byte, error) {
+func Marshal(c *Config) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -148,10 +148,10 @@ func Marshal(c Config) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func validKeyPaths() (map[string]bool, map[string]bool, map[string]bool) {
-	paths := map[string]bool{}
-	mapPaths := map[string]bool{}
-	structMapPaths := map[string]bool{}
+func validKeyPaths() (paths, mapPaths, structMapPaths map[string]bool) {
+	paths = map[string]bool{}
+	mapPaths = map[string]bool{}
+	structMapPaths = map[string]bool{}
 	var walk func(t reflect.Type, prefix string)
 	walk = func(t reflect.Type, prefix string) {
 		if t.Kind() == reflect.Pointer {
@@ -160,7 +160,7 @@ func validKeyPaths() (map[string]bool, map[string]bool, map[string]bool) {
 		if t.Kind() != reflect.Struct {
 			return
 		}
-		for i := 0; i < t.NumField(); i++ {
+		for i := range t.NumField() {
 			f := t.Field(i)
 			tag := strings.Split(f.Tag.Get("koanf"), ",")[0]
 			if tag == "" || tag == "-" {
@@ -199,19 +199,19 @@ func validateModelBaseURL(raw string) error {
 		return err
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("scheme must be http or https")
+		return errors.New("scheme must be http or https")
 	}
 	if u.Host == "" {
-		return fmt.Errorf("missing host")
+		return errors.New("missing host")
 	}
 	if u.User != nil {
-		return fmt.Errorf("user info is not allowed")
+		return errors.New("user info is not allowed")
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("query and fragment are not allowed")
+		return errors.New("query and fragment are not allowed")
 	}
 	if u.Scheme == "http" && !isLoopbackURL(u) {
-		return fmt.Errorf("https is required for non-loopback endpoints")
+		return errors.New("https is required for non-loopback endpoints")
 	}
 	return nil
 }

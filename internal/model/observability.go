@@ -16,7 +16,6 @@ func WithTask(ctx context.Context, task string) context.Context {
 }
 
 type modelTelemetry struct {
-	ctx      context.Context
 	protocol string
 	model    string
 	started  time.Time
@@ -24,11 +23,11 @@ type modelTelemetry struct {
 	logged   bool
 }
 
-func newModelTelemetry(ctx context.Context, protocol, model string) *modelTelemetry {
-	return &modelTelemetry{ctx: ctx, protocol: protocol, model: model, started: time.Now()}
+func newModelTelemetry(protocol, model string) *modelTelemetry {
+	return &modelTelemetry{protocol: protocol, model: model, started: time.Now()}
 }
 
-func (t *modelTelemetry) finish(response *adkmodel.LLMResponse, err error) {
+func (t *modelTelemetry) finish(ctx context.Context, response *adkmodel.LLMResponse, err error) {
 	if t.logged {
 		return
 	}
@@ -50,7 +49,7 @@ func (t *modelTelemetry) finish(response *adkmodel.LLMResponse, err error) {
 		outputTokens = response.UsageMetadata.CandidatesTokenCount
 	}
 	task := "unknown"
-	if value, ok := t.ctx.Value(taskContextKey{}).(string); ok && value != "" {
+	if value, ok := ctx.Value(taskContextKey{}).(string); ok && value != "" {
 		task = value
 	}
 	slog.Info("model request",
@@ -65,6 +64,6 @@ func (t *modelTelemetry) finish(response *adkmodel.LLMResponse, err error) {
 	)
 }
 
-func (t *modelTelemetry) finishIfNeeded() {
-	t.finish(nil, nil)
+func (t *modelTelemetry) finishIfNeeded(ctx context.Context) {
+	t.finish(ctx, nil, nil)
 }

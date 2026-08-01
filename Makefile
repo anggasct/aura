@@ -10,7 +10,7 @@ LDFLAGS   := -s -w -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT) -X $(
 
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: build build-all test vet lint verify clean
+.PHONY: build build-all test vet fmt-check lint verify clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -29,10 +29,18 @@ test:
 vet:
 	go vet ./...
 
+fmt-check:
+	@unformatted="$$(gofmt -l .)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "Unformatted files found:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
 lint:
 	golangci-lint run
 
-verify: build-all vet test lint
+verify: build-all fmt-check vet test lint
 
 clean:
 	rm -f $(BINARY)

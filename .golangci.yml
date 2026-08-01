@@ -1,0 +1,43 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - bodyclose
+    - containedctx
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - gosec
+    - intrange
+    - makezero
+    - nilerr
+    - noctx
+    - perfsprint
+    - prealloc
+    - unconvert
+    - usestdlibvars
+
+linters-settings:
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+  gosec:
+    excludes:
+      # Retry jitter is not a security context.
+      - G404
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - prealloc

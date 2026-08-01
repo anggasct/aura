@@ -14,13 +14,14 @@ func TestBackupAndVerifyRestore(t *testing.T) {
 	mustCreateSession(t, db, "session-1")
 
 	events := NewEventStore(db)
-	if err := events.Append(ctx, newEvent("session-1", 1)); err != nil {
+	e := newEvent("session-1", 1)
+	if err := events.Append(ctx, &e); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 
 	artifactRoot := t.TempDir()
 	artifacts := NewArtifactStore(db, artifactRoot, DefaultArtifactQuotaBytes)
-	if _, err := artifacts.Put(ctx, bytes.NewReader([]byte("backup me")), ArtifactMetadata{
+	if _, err := artifacts.Put(ctx, bytes.NewReader([]byte("backup me")), &ArtifactMetadata{
 		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
 	}); err != nil {
 		t.Fatalf("Put: %v", err)
@@ -63,7 +64,7 @@ func TestVerifyRestoreDetectsMissingAndCorruptedBlobs(t *testing.T) {
 
 	artifactRoot := t.TempDir()
 	artifacts := NewArtifactStore(db, artifactRoot, DefaultArtifactQuotaBytes)
-	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("original bytes")), ArtifactMetadata{
+	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("original bytes")), &ArtifactMetadata{
 		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
 	})
 	if err != nil {

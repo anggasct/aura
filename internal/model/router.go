@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -72,11 +73,13 @@ func BuildRouter(models config.Models) (*Router, error) {
 	if idleTimeout <= 0 {
 		idleTimeout = defaultStreamingIdleTimeout
 	}
-	primary, err := newAdapter("primary", models.Definitions["primary"], timeout, idleTimeout)
+	primarySpec := models.Definitions["primary"]
+	primary, err := newAdapter("primary", &primarySpec, timeout, idleTimeout)
 	if err != nil {
 		return nil, err
 	}
-	auxiliary, err := newAdapter("auxiliary", models.Definitions["auxiliary"], timeout, idleTimeout)
+	auxiliarySpec := models.Definitions["auxiliary"]
+	auxiliary, err := newAdapter("auxiliary", &auxiliarySpec, timeout, idleTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +167,7 @@ func (r *Router) For(task string) adkmodel.LLM {
 	return r.auxiliary
 }
 
-func newAdapter(name string, spec config.ModelDefinition, timeout, idleTimeout time.Duration) (adkmodel.LLM, error) {
+func newAdapter(name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration) (adkmodel.LLM, error) {
 	if spec.Protocol == "" || spec.Model == "" {
 		return nil, nil
 	}
@@ -195,7 +198,7 @@ func newAdapter(name string, spec config.ModelDefinition, timeout, idleTimeout t
 	return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
 }
 
-func resolveSecret(name string, spec config.ModelDefinition) (string, error) {
+func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {
 	if spec.APIKeyEnv != "" && spec.APIKeyFile != "" {
 		return "", newError(ErrorCodeSecretInvalid, name, "", "set only one of api_key_env or api_key_file")
 	}
@@ -229,19 +232,19 @@ func validateBaseURL(raw string) error {
 		return err
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("scheme must be http or https")
+		return errors.New("scheme must be http or https")
 	}
 	if u.Host == "" {
-		return fmt.Errorf("missing host")
+		return errors.New("missing host")
 	}
 	if u.User != nil {
-		return fmt.Errorf("user info is not allowed")
+		return errors.New("user info is not allowed")
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("query and fragment are not allowed")
+		return errors.New("query and fragment are not allowed")
 	}
 	if u.Scheme == "http" && !isLocalhost(raw) {
-		return fmt.Errorf("https is required for non-localhost endpoints")
+		return errors.New("https is required for non-localhost endpoints")
 	}
 	return nil
 }
@@ -264,7 +267,7 @@ func rejectCrossOriginRedirect(req *http.Request, via []*http.Request) error {
 	}
 	previous := via[len(via)-1].URL
 	if redirectOrigin(previous) != redirectOrigin(req.URL) {
-		return fmt.Errorf("cross-origin redirect rejected")
+		return errors.New("cross-origin redirect rejected")
 	}
 	return nil
 }

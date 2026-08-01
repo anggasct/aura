@@ -38,7 +38,7 @@ func TestADKEventRoundTripPreservesRequiredFields(t *testing.T) {
 	}
 	re.Sequence = 1
 
-	roundTripped, err := RuntimeEventToADK(re)
+	roundTripped, err := RuntimeEventToADK(&re)
 	if err != nil {
 		t.Fatalf("RuntimeEventToADK: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestReplayTurnReturnsTerminalEvent(t *testing.T) {
 			t.Fatalf("RuntimeEventFromADK: %v", err)
 		}
 		re.Sequence = uint64(i + 1)
-		if err := events.Append(ctx, re); err != nil {
+		if err := events.Append(ctx, &re); err != nil {
 			t.Fatalf("Append: %v", err)
 		}
 	}
@@ -127,7 +127,7 @@ func TestReplayTurnNotYetFinal(t *testing.T) {
 		t.Fatalf("RuntimeEventFromADK: %v", err)
 	}
 	re.Sequence = 1
-	if err := events.Append(ctx, re); err != nil {
+	if err := events.Append(ctx, &re); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 

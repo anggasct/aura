@@ -159,7 +159,7 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	}, nil
 }
 
-func resolvePath(flagPath string) (string, bool, error) {
+func resolvePath(flagPath string) (path string, explicit bool, err error) {
 	if flagPath != "" {
 		return flagPath, true, nil
 	}
@@ -173,7 +173,7 @@ func resolvePath(flagPath string) (string, bool, error) {
 	return filepath.Join(base, "aura", "config.yaml"), false, nil
 }
 
-func loadBytes(path string, explicit bool) ([]byte, bool, error) {
+func loadBytes(path string, explicit bool) (data []byte, generated bool, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -191,7 +191,7 @@ func loadBytes(path string, explicit bool) ([]byte, bool, error) {
 	if info.IsDir() {
 		return nil, false, fmt.Errorf("%s is a directory, not a file", path)
 	}
-	data, err := os.ReadFile(path)
+	data, err = os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrPermission) {
 			return nil, false, fmt.Errorf("cannot read %s: permission denied", path)
@@ -202,7 +202,8 @@ func loadBytes(path string, explicit bool) ([]byte, bool, error) {
 }
 
 func writeDefault(path string) ([]byte, error) {
-	data, err := Marshal(Default())
+	defaults := Default()
+	data, err := Marshal(&defaults)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal default config: %w", err)
 	}
@@ -243,11 +244,11 @@ func parseDocument(data []byte) (*yamlv3.Node, error) {
 		return nil, malformedYAMLError(err)
 	}
 	if root.Kind != yamlv3.DocumentNode || len(root.Content) == 0 {
-		return nil, fmt.Errorf("invalid YAML: empty document")
+		return nil, errors.New("invalid YAML: empty document")
 	}
 	doc := root.Content[0]
 	if doc.Kind != yamlv3.MappingNode {
-		return nil, fmt.Errorf("invalid YAML: top level must be a mapping")
+		return nil, errors.New("invalid YAML: top level must be a mapping")
 	}
 	return doc, nil
 }
@@ -495,7 +496,7 @@ func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structM
 	return nil
 }
 
-func validConfigPath(path string, valid map[string]bool, structMapPaths map[string]bool) bool {
+func validConfigPath(path string, valid, structMapPaths map[string]bool) bool {
 	if valid[path] {
 		return true
 	}
@@ -635,16 +636,16 @@ func envValuePresent(path string) bool {
 
 func validateRuntime(runtime Runtime) error {
 	if runtime.MaxActiveTurns <= 0 {
-		return fmt.Errorf("runtime.max_active_turns must be positive")
+		return errors.New("runtime.max_active_turns must be positive")
 	}
 	if runtime.MaxPendingTurns < runtime.MaxActiveTurns {
-		return fmt.Errorf("runtime.max_pending_turns must be at least runtime.max_active_turns")
+		return errors.New("runtime.max_pending_turns must be at least runtime.max_active_turns")
 	}
 	if runtime.TurnTimeout <= 0 {
-		return fmt.Errorf("runtime.turn_timeout must be positive")
+		return errors.New("runtime.turn_timeout must be positive")
 	}
 	if runtime.ShutdownTimeout <= 0 {
-		return fmt.Errorf("runtime.shutdown_timeout must be positive")
+		return errors.New("runtime.shutdown_timeout must be positive")
 	}
 	return nil
 }

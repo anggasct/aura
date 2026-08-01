@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,8 @@ func fixture(t *testing.T, name string) string {
 }
 
 func TestMarshalDefault_GoldenFile(t *testing.T) {
-	got, err := Marshal(Default())
+	defaults := Default()
+	got, err := Marshal(&defaults)
 	if err != nil {
 		t.Fatalf("Marshal(Default()): %v", err)
 	}
@@ -26,7 +28,7 @@ func TestMarshalDefault_GoldenFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden: %v", err)
 	}
-	if string(got) != string(want) {
+	if !bytes.Equal(got, want) {
 		t.Fatalf("golden mismatch\n--- got ---\n%s--- want ---\n%s", got, want)
 	}
 }
@@ -100,7 +102,7 @@ func TestLoad_EnvOverrideDoesNotPersist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-read: %v", err)
 	}
-	if string(after) != string(data) {
+	if !bytes.Equal(after, data) {
 		t.Fatalf("config file was modified by env override\nbefore:\n%s\nafter:\n%s", data, after)
 	}
 }
@@ -136,11 +138,12 @@ func TestLoad_MissingDefaultAutoGenerates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated: %v", err)
 	}
-	want, err := Marshal(Default())
+	defaults := Default()
+	want, err := Marshal(&defaults)
 	if err != nil {
 		t.Fatalf("marshal default: %v", err)
 	}
-	if string(got) != string(want) {
+	if !bytes.Equal(got, want) {
 		t.Fatalf("generated config != Default()\n--- got ---\n%s--- want ---\n%s", got, want)
 	}
 }
