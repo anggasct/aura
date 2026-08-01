@@ -4,11 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +19,7 @@ import (
 	yamlv3 "gopkg.in/yaml.v3"
 
 	"github.com/anggasct/aura/internal/capability"
+	"github.com/anggasct/aura/internal/logging"
 )
 
 const (
@@ -29,16 +28,14 @@ const (
 	supportedVersion = 1
 )
 
-var (
-	envLookup  = buildEnvLookup()
-	yamlLineRe = regexp.MustCompile(`line (\d+)`)
-)
+var envLookup = buildEnvLookup()
 
 type LoadResult struct {
 	Config           *Config
 	Path             string
 	DefaultGenerated bool
 	CapabilityReport capability.Report
+	Warnings         []string
 }
 
 type LoadOptions struct {
@@ -141,10 +138,16 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := applyDefaults(cfg, data); err != nil {
 		return LoadResult{}, err
 	}
-	if err := validateLoadedModels(cfg.Models); err != nil {
+	if err := validateLoadedModels(cfg.Models, data); err != nil {
 		return LoadResult{}, err
 	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
+		return LoadResult{}, err
+	}
+	if err := validateServer(cfg.Server); err != nil {
+		return LoadResult{}, err
+	}
+	if err := validateLogging(cfg.Logging); err != nil {
 		return LoadResult{}, err
 	}
 	report, err := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
@@ -156,6 +159,7 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		Path:             resolved,
 		DefaultGenerated: generated,
 		CapabilityReport: report,
+		Warnings:         unknownEnvKeys(),
 	}, nil
 }
 
@@ -207,13 +211,45 @@ func writeDefault(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal default config: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("cannot create config directory: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Atomic write: the config only becomes visible at its final path once
+	// fully written and fsynced, so a crash cannot leave a truncated file.
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return nil, fmt.Errorf("cannot create temporary config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
 		return nil, fmt.Errorf("cannot write default config: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return nil, fmt.Errorf("cannot fsync default config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, fmt.Errorf("cannot close default config: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return nil, fmt.Errorf("cannot move default config into place: %w", err)
+	}
+	if err := syncDir(dir); err != nil {
+		return nil, fmt.Errorf("cannot fsync config directory: %w", err)
+	}
 	return data, nil
+}
+
+func syncDir(p string) error {
+	f, err := os.Open(p)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	return f.Sync()
 }
 
 func validate(data []byte) error {
@@ -228,7 +264,7 @@ func validate(data []byte) error {
 	if err := checkVersion(version); err != nil {
 		return err
 	}
-	if err := validateRuntimeAndCapabilityShapes(doc); err != nil {
+	if err := validateSectionShapes(doc); err != nil {
 		return err
 	}
 	if err := validateModelShapes(doc); err != nil {
@@ -272,7 +308,7 @@ func documentVersion(doc *yamlv3.Node) (int, error) {
 	return version, nil
 }
 
-func validateRuntimeAndCapabilityShapes(doc *yamlv3.Node) error {
+func validateSectionShapes(doc *yamlv3.Node) error {
 	if runtimeNode := mappingValue(doc, "runtime"); runtimeNode != nil {
 		if runtimeNode.Kind != yamlv3.MappingNode {
 			return fmt.Errorf("runtime must be a mapping at line %d", runtimeNode.Line)
@@ -288,6 +324,68 @@ func validateRuntimeAndCapabilityShapes(doc *yamlv3.Node) error {
 			case "turn_timeout", "shutdown_timeout":
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 					return fmt.Errorf("runtime.%s must be a duration string at line %d", keyNode.Value, valueNode.Line)
+				}
+			}
+		}
+	}
+
+	if serverNode := mappingValue(doc, "server"); serverNode != nil {
+		if serverNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("server must be a mapping at line %d", serverNode.Line)
+		}
+		for i := 0; i+1 < len(serverNode.Content); i += 2 {
+			keyNode := serverNode.Content[i]
+			valueNode := serverNode.Content[i+1]
+			switch keyNode.Value {
+			case "host":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+					return fmt.Errorf("server.host must be a string at line %d", valueNode.Line)
+				}
+			case "port":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+					return fmt.Errorf("server.port must be an integer at line %d", valueNode.Line)
+				}
+			}
+		}
+	}
+
+	if loggingNode := mappingValue(doc, "logging"); loggingNode != nil {
+		if loggingNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("logging must be a mapping at line %d", loggingNode.Line)
+		}
+		for i := 0; i+1 < len(loggingNode.Content); i += 2 {
+			keyNode := loggingNode.Content[i]
+			valueNode := loggingNode.Content[i+1]
+			switch keyNode.Value {
+			case "level", "format":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+					return fmt.Errorf("logging.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+				}
+			}
+		}
+	}
+
+	if modelsNode := mappingValue(doc, "models"); modelsNode != nil {
+		if modelsNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("models must be a mapping at line %d", modelsNode.Line)
+		}
+		for i := 0; i+1 < len(modelsNode.Content); i += 2 {
+			keyNode := modelsNode.Content[i]
+			valueNode := modelsNode.Content[i+1]
+			switch keyNode.Value {
+			case "request_timeout", "streaming_idle_timeout":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+					return fmt.Errorf("models.%s must be a duration string at line %d", keyNode.Value, valueNode.Line)
+				}
+			case "routing":
+				if valueNode.Kind != yamlv3.MappingNode {
+					return fmt.Errorf("models.routing must be a mapping at line %d", valueNode.Line)
+				}
+				for j := 0; j+1 < len(valueNode.Content); j += 2 {
+					roleNode := valueNode.Content[j+1]
+					if roleNode.Kind != yamlv3.ScalarNode || roleNode.Tag != "!!str" {
+						return fmt.Errorf("models.routing values must be strings at line %d", roleNode.Line)
+					}
 				}
 			}
 		}
@@ -360,70 +458,55 @@ func validateModelShapes(doc *yamlv3.Node) error {
 	return nil
 }
 
+// validateModelDefinition checks only the shape of one model definition;
+// all semantic rules live in validateLoadedModels.
 func validateModelDefinition(name string, node *yamlv3.Node) error {
-	protocolNode := mappingValue(node, "protocol")
-	modelNode := mappingValue(node, "model")
-	if protocolNode == nil || modelNode == nil || protocolNode.Kind != yamlv3.ScalarNode || modelNode.Kind != yamlv3.ScalarNode || protocolNode.Tag != "!!str" || modelNode.Tag != "!!str" || strings.TrimSpace(protocolNode.Value) == "" || strings.TrimSpace(modelNode.Value) == "" {
-		return fmt.Errorf("models.definitions.%s requires non-empty protocol and model strings", name)
-	}
-	if !validProtocol(protocolNode.Value) {
-		return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s uses unsupported protocol %q", name, protocolNode.Value)}
-	}
-
-	baseURL := ""
-	if node := mappingValue(node, "base_url"); node != nil {
-		if node.Kind != yamlv3.ScalarNode || node.Tag != "!!str" {
-			return fmt.Errorf("models.definitions.%s.base_url must be a string at line %d", name, node.Line)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		switch keyNode.Value {
+		case "protocol", "model", "base_url", "api_key_env", "api_key_file":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("models.definitions.%s.%s must be a string at line %d", name, keyNode.Value, valueNode.Line)
+			}
+		case "capabilities":
+			if valueNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("models.definitions.%s.capabilities must be a mapping at line %d", name, valueNode.Line)
+			}
+			for j := 0; j+1 < len(valueNode.Content); j += 2 {
+				capKey := valueNode.Content[j]
+				capVal := valueNode.Content[j+1]
+				switch capKey.Value {
+				case "streaming", "tools", "structured_output", "vision", "audio", "reasoning", "usage_reporting":
+					if capVal.Kind != yamlv3.ScalarNode || capVal.Tag != "!!bool" {
+						return fmt.Errorf("models.definitions.%s.capabilities.%s must be a boolean at line %d", name, capKey.Value, capVal.Line)
+					}
+				case "context_tokens":
+					if capVal.Kind != yamlv3.ScalarNode || capVal.Tag != "!!int" {
+						return fmt.Errorf("models.definitions.%s.capabilities.context_tokens must be an integer at line %d", name, capVal.Line)
+					}
+				case "tokenizer":
+					if capVal.Kind != yamlv3.ScalarNode || capVal.Tag != "!!str" {
+						return fmt.Errorf("models.definitions.%s.capabilities.tokenizer must be a string at line %d", name, capVal.Line)
+					}
+				}
+			}
 		}
-		baseURL = node.Value
-	}
-	if err := validateModelBaseURL(baseURL); err != nil {
-		return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s.base_url: %v", name, err)}
-	}
-
-	apiKeyEnv := scalarString(mappingValue(node, "api_key_env"))
-	apiKeyFile := scalarString(mappingValue(node, "api_key_file"))
-	if apiKeyEnv != "" && apiKeyFile != "" {
-		return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s must set only one of api_key_env or api_key_file", name)}
-	}
-	if apiKeyEnv != "" && !envNamePattern.MatchString(apiKeyEnv) {
-		return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s.api_key_env is not a valid environment variable name", name)}
-	}
-	if apiKeyEnv == "" && apiKeyFile == "" && !isLoopbackBaseURL(baseURL) {
-		return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s requires api_key_env or api_key_file for a non-loopback endpoint", name)}
-	}
-
-	capabilitiesNode := mappingValue(node, "capabilities")
-	if capabilitiesNode == nil || capabilitiesNode.Kind != yamlv3.MappingNode {
-		return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires a capabilities mapping", name)}
-	}
-	for _, key := range []string{"streaming", "tools", "structured_output", "vision", "audio", "reasoning", "usage_reporting"} {
-		valueNode := mappingValue(capabilitiesNode, key)
-		if valueNode == nil || valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
-			return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s.capabilities.%s must be a boolean", name, key)}
-		}
-	}
-	contextNode := mappingValue(capabilitiesNode, "context_tokens")
-	contextTokens, contextErr := strconv.ParseInt("0", 10, 64)
-	if contextNode != nil && contextNode.Kind == yamlv3.ScalarNode && contextNode.Tag == "!!int" {
-		contextTokens, contextErr = strconv.ParseInt(contextNode.Value, 0, 64)
-	}
-	if contextNode == nil || contextNode.Kind != yamlv3.ScalarNode || contextNode.Tag != "!!int" || contextErr != nil || contextTokens <= 0 {
-		return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s.capabilities.context_tokens must be positive", name)}
-	}
-	tokenizerNode := mappingValue(capabilitiesNode, "tokenizer")
-	if tokenizerNode == nil || tokenizerNode.Kind != yamlv3.ScalarNode || tokenizerNode.Tag != "!!str" || strings.TrimSpace(tokenizerNode.Value) == "" {
-		return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s.capabilities.tokenizer must be a non-empty string", name)}
 	}
 	return nil
 }
 
-func validateLoadedModels(models Models) error {
+// validateLoadedModels owns every semantic model rule, regardless of whether
+// a definition came from the file or from environment overrides.
+func validateLoadedModels(models Models, data []byte) error {
 	for name, definition := range models.Definitions {
+		if strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "" {
+			return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s requires non-empty protocol and model", name)}
+		}
 		if !validProtocol(definition.Protocol) {
 			return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s uses unsupported protocol %q", name, definition.Protocol)}
 		}
-		if err := validateModelBaseURL(definition.BaseURL); err != nil {
+		if err := ValidateBaseURL(definition.BaseURL); err != nil {
 			return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s.base_url: %v", name, err)}
 		}
 		if definition.APIKeyEnv != "" && definition.APIKeyFile != "" {
@@ -432,36 +515,41 @@ func validateLoadedModels(models Models) error {
 		if definition.APIKeyEnv != "" && !envNamePattern.MatchString(definition.APIKeyEnv) {
 			return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s.api_key_env is not a valid environment variable name", name)}
 		}
-		if definition.APIKeyEnv == "" && definition.APIKeyFile == "" && !isLoopbackBaseURL(definition.BaseURL) {
+		if definition.APIKeyEnv == "" && definition.APIKeyFile == "" && !IsLoopbackBaseURL(definition.BaseURL) {
 			return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s requires api_key_env or api_key_file for a non-loopback endpoint", name)}
 		}
 		if definition.Capabilities.ContextTokens <= 0 || strings.TrimSpace(definition.Capabilities.Tokenizer) == "" {
 			return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires positive context_tokens and a tokenizer", name)}
 		}
 	}
+	return validateRouting(models, data)
+}
+
+// validateRouting checks routing roles and, when the file declares an
+// explicit routing section, that each referenced role exists as a defined
+// model. Default-merged routing is exempt from the reference check, since a
+// single-model config legitimately routes tasks it never runs.
+func validateRouting(models Models, data []byte) error {
+	explicit := false
+	if doc, err := parseDocument(data); err == nil {
+		if modelsNode := mappingValue(doc, "models"); modelsNode != nil {
+			explicit = mappingValue(modelsNode, "routing") != nil
+		}
+	}
+	for task, role := range models.Routing {
+		if role != "primary" && role != "auxiliary" {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("models.routing.%s: role %q is not supported (must be primary or auxiliary)", task, role)}
+		}
+		if explicit && len(models.Definitions) > 0 {
+			if _, ok := models.Definitions[role]; !ok {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("models.routing.%s references undefined model %q", task, role)}
+			}
+		}
+	}
 	return nil
 }
 
-func scalarString(node *yamlv3.Node) string {
-	if node == nil || node.Kind != yamlv3.ScalarNode || node.Tag != "!!str" {
-		return ""
-	}
-	return node.Value
-}
-
-func isLoopbackBaseURL(raw string) bool {
-	if raw == "" {
-		return false
-	}
-	u, err := url.Parse(raw)
-	return err == nil && isLoopbackURL(u)
-}
-
 func malformedYAMLError(err error) error {
-	if m := yamlLineRe.FindStringSubmatch(err.Error()); len(m) == 2 {
-		line, _ := strconv.Atoi(m[1])
-		return fmt.Errorf("invalid YAML at line %d: %w", line, err)
-	}
 	return fmt.Errorf("invalid YAML: %w", err)
 }
 
@@ -529,9 +617,11 @@ func decode(data []byte) (*Config, error) {
 		Tag: "koanf",
 		DecoderConfig: &mapstructure.DecoderConfig{
 			Result:           &cfg,
-			WeaklyTypedInput: true,
+			WeaklyTypedInput: false,
 			DecodeHook: mapstructure.ComposeDecodeHookFunc(
 				stringToDurationHook(),
+				stringToBoolHook(),
+				stringToIntHook(),
 				stringToStringSliceHook(),
 			),
 		},
@@ -543,7 +633,7 @@ func decode(data []byte) (*Config, error) {
 }
 
 func stringToDurationHook() mapstructure.DecodeHookFunc {
-	return func(from, to reflect.Type, data interface{}) (interface{}, error) {
+	return func(from, to reflect.Type, data any) (any, error) {
 		if to != reflect.TypeOf(Duration(0)) {
 			return data, nil
 		}
@@ -559,8 +649,36 @@ func stringToDurationHook() mapstructure.DecodeHookFunc {
 	}
 }
 
+// stringToBoolHook and stringToIntHook convert environment-provided values,
+// which are always strings, without loosening file decoding.
+func stringToBoolHook() mapstructure.DecodeHookFunc {
+	return func(from, to reflect.Type, data any) (any, error) {
+		if from.Kind() != reflect.String || to.Kind() != reflect.Bool {
+			return data, nil
+		}
+		b, err := strconv.ParseBool(data.(string))
+		if err != nil {
+			return nil, fmt.Errorf("invalid boolean %q", data)
+		}
+		return b, nil
+	}
+}
+
+func stringToIntHook() mapstructure.DecodeHookFunc {
+	return func(from, to reflect.Type, data any) (any, error) {
+		if from.Kind() != reflect.String || to.Kind() != reflect.Int {
+			return data, nil
+		}
+		n, err := strconv.ParseInt(data.(string), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid integer %q", data)
+		}
+		return int(n), nil
+	}
+}
+
 func stringToStringSliceHook() mapstructure.DecodeHookFunc {
-	return func(from, to reflect.Type, data interface{}) (interface{}, error) {
+	return func(from, to reflect.Type, data any) (any, error) {
 		if from.Kind() != reflect.String || to.Kind() != reflect.Slice || to.Elem().Kind() != reflect.String {
 			return data, nil
 		}
@@ -615,6 +733,18 @@ func applyDefaults(cfg *Config, data []byte) error {
 	if cfg.Logging.Format == "" {
 		cfg.Logging.Format = defaults.Logging.Format
 	}
+	if cfg.Models.Definitions == nil {
+		cfg.Models.Definitions = defaults.Models.Definitions
+	}
+	if cfg.Models.RequestTimeout == 0 && !configValuePresent(doc, "models", "request_timeout") && !envValuePresent("models.request_timeout") {
+		cfg.Models.RequestTimeout = defaults.Models.RequestTimeout
+	}
+	if cfg.Models.StreamingIdleTimeout == 0 && !configValuePresent(doc, "models", "streaming_idle_timeout") && !envValuePresent("models.streaming_idle_timeout") {
+		cfg.Models.StreamingIdleTimeout = defaults.Models.StreamingIdleTimeout
+	}
+	if cfg.Models.Routing == nil {
+		cfg.Models.Routing = defaults.Models.Routing
+	}
 	return nil
 }
 
@@ -636,25 +766,71 @@ func envValuePresent(path string) bool {
 
 func validateRuntime(runtime Runtime) error {
 	if runtime.MaxActiveTurns <= 0 {
-		return errors.New("runtime.max_active_turns must be positive")
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.max_active_turns must be positive"}
 	}
 	if runtime.MaxPendingTurns < runtime.MaxActiveTurns {
-		return errors.New("runtime.max_pending_turns must be at least runtime.max_active_turns")
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.max_pending_turns must be at least runtime.max_active_turns"}
 	}
 	if runtime.TurnTimeout <= 0 {
-		return errors.New("runtime.turn_timeout must be positive")
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.turn_timeout must be positive"}
 	}
 	if runtime.ShutdownTimeout <= 0 {
-		return errors.New("runtime.shutdown_timeout must be positive")
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.shutdown_timeout must be positive"}
 	}
 	return nil
+}
+
+func validateServer(server Server) error {
+	if server.Port < 1 || server.Port > 65535 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("server.port %d is out of range (1-65535)", server.Port)}
+	}
+	return nil
+}
+
+func validateLogging(loggingConfig Logging) error {
+	if _, err := logging.ParseLevel(loggingConfig.Level); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	if _, err := logging.ParseFormat(loggingConfig.Format); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+// unknownEnvKeys lists AURA_-prefixed environment variables that no config
+// path or model definition maps to, so misconfigured overrides are surfaced
+// instead of silently ignored. AURA_CONFIG is a loader input, not a value.
+func unknownEnvKeys() []string {
+	warnings := make([]string, 0, len(os.Environ()))
+	known := make(map[string]bool, len(envLookup))
+	for key := range envLookup {
+		known[key] = true
+	}
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, envPrefix) {
+			continue
+		}
+		key, _, _ := strings.Cut(kv, "=")
+		if key == envConfigVar {
+			continue
+		}
+		normalized := strings.ToLower(strings.TrimPrefix(key, envPrefix))
+		if known[normalized] {
+			continue
+		}
+		if strings.HasPrefix(normalized, "models_definitions_") && envKeyMapper(key) != "" {
+			continue
+		}
+		warnings = append(warnings, key)
+	}
+	return warnings
 }
 
 func checkVersion(v int) error {
 	if v != supportedVersion {
 		return &Error{
 			Code:   ErrorCodeVersionUnsupported,
-			Detail: fmt.Sprintf("unsupported version %q (supported: %d)", strconv.Itoa(v), supportedVersion),
+			Detail: fmt.Sprintf("unsupported version %d (supported: %d)", v, supportedVersion),
 		}
 	}
 	return nil

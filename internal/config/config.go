@@ -3,6 +3,8 @@ package config
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"net"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -93,8 +95,19 @@ func validProtocol(p string) bool {
 
 type Duration time.Duration
 
-func (d Duration) MarshalYAML() (interface{}, error) {
+func (d Duration) MarshalYAML() (any, error) {
 	return time.Duration(d).String(), nil
+}
+
+// UnmarshalText lets direct yaml.Unmarshal and text decoding round-trip
+// durations, not only the koanf decode hook.
+func (d *Duration) UnmarshalText(text []byte) error {
+	duration, err := time.ParseDuration(string(text))
+	if err != nil {
+		return fmt.Errorf("invalid duration %q: %w", text, err)
+	}
+	*d = Duration(duration)
+	return nil
 }
 
 func Default() Config {
@@ -190,7 +203,10 @@ func validKeyPaths() (paths, mapPaths, structMapPaths map[string]bool) {
 	return paths, mapPaths, structMapPaths
 }
 
-func validateModelBaseURL(raw string) error {
+// ValidateBaseURL validates a model base URL: http/https scheme, a host, no
+// user info, no query or fragment, and https for anything outside the
+// loopback range. Exported so the model layer shares exactly one rule.
+func ValidateBaseURL(raw string) error {
 	if raw == "" {
 		return nil
 	}
@@ -216,7 +232,21 @@ func validateModelBaseURL(raw string) error {
 	return nil
 }
 
+// IsLoopbackBaseURL reports whether raw is an http(s) URL whose host is a
+// loopback address or the localhost name.
+func IsLoopbackBaseURL(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	return err == nil && isLoopbackURL(u)
+}
+
 func isLoopbackURL(u *url.URL) bool {
-	host := u.Hostname()
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+	host := strings.TrimSuffix(u.Hostname(), ".")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
