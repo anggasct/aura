@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -30,22 +32,85 @@ func TestVersionCommand(t *testing.T) {
 }
 
 func TestChatStub(t *testing.T) {
-	out, err := execute(t, "chat")
-	if err != nil {
-		t.Fatalf("chat: %v", err)
+	_, err := execute(t, "chat")
+	if err == nil {
+		t.Fatal("expected chat to fail loudly, got nil")
 	}
-	if !strings.Contains(out, "aura chat: interactive console not yet implemented") {
-		t.Errorf("unexpected chat output:\n%s", out)
+	if !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("unexpected chat error: %v", err)
 	}
 }
 
 func TestExecStub(t *testing.T) {
-	out, err := execute(t, "exec", "--", "ls", "-la")
-	if err != nil {
-		t.Fatalf("exec: %v", err)
+	_, err := execute(t, "exec", "--", "ls", "-la")
+	if err == nil {
+		t.Fatal("expected exec to fail loudly, got nil")
 	}
-	if !strings.Contains(out, "aura exec: sandboxed execution not yet implemented") {
-		t.Errorf("unexpected exec output:\n%s", out)
+	if !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("unexpected exec error: %v", err)
+	}
+}
+
+func TestExecRequiresArgument(t *testing.T) {
+	_, err := execute(t, "exec")
+	if err == nil {
+		t.Fatal("expected usage error for exec without arguments, got nil")
+	}
+	if !strings.Contains(err.Error(), "requires at least one argument") {
+		t.Errorf("unexpected exec usage error: %v", err)
+	}
+}
+
+func TestExecuteContextExitCodes(t *testing.T) {
+	if code := ExecuteContext(context.Background(), "version"); code != 0 {
+		t.Errorf("version exit code = %d, want 0", code)
+	}
+	if code := ExecuteContext(context.Background(), "exec"); code != 2 {
+		t.Errorf("usage error exit code = %d, want 2", code)
+	}
+	if code := ExecuteContext(context.Background(), "bogus"); code != 2 {
+		t.Errorf("unknown command exit code = %d, want 2", code)
+	}
+	if code := ExecuteContext(context.Background(), "help"); code != 0 {
+		t.Errorf("built-in help exit code = %d, want 0", code)
+	}
+	if code := ExecuteContext(context.Background(), "help", "version"); code != 0 {
+		t.Errorf("built-in help <cmd> exit code = %d, want 0", code)
+	}
+	if code := ExecuteContext(context.Background(), "completion", "bash"); code != 0 {
+		t.Errorf("built-in completion exit code = %d, want 0", code)
+	}
+	if code := ExecuteContext(context.Background(), "server", "--config", "definitely-missing.yaml"); code != 1 {
+		t.Errorf("runtime error exit code = %d, want 1", code)
+	}
+}
+
+func TestExecuteContextBuiltinsViaProcessArgs(t *testing.T) {
+	oldArgs := os.Args
+	t.Cleanup(func() { os.Args = oldArgs })
+	os.Args = []string{"aura", "help"}
+	if code := ExecuteContext(context.Background()); code != 0 {
+		t.Errorf("help (process args) exit code = %d, want 0", code)
+	}
+	os.Args = []string{"aura", "completion", "bash"}
+	if code := ExecuteContext(context.Background()); code != 0 {
+		t.Errorf("completion bash (process args) exit code = %d, want 0", code)
+	}
+}
+
+func TestExecuteContextUnknownCommandViaProcessArgs(t *testing.T) {
+	// main calls ExecuteContext without explicit args; the effective args
+	// come from os.Args, and the unknown-command classification must still
+	// fire on that path.
+	oldArgs := os.Args
+	t.Cleanup(func() { os.Args = oldArgs })
+	os.Args = []string{"aura", "bogus"}
+	if code := ExecuteContext(context.Background()); code != 2 {
+		t.Errorf("unknown command (process args) exit code = %d, want 2", code)
+	}
+	os.Args = []string{"aura", "--config", "x", "bogus"}
+	if code := ExecuteContext(context.Background()); code != 2 {
+		t.Errorf("unknown command after flags (process args) exit code = %d, want 2", code)
 	}
 }
 

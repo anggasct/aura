@@ -1,10 +1,10 @@
 package capability
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
 )
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
@@ -100,12 +100,12 @@ func (r Registry) Resolve(build Build, enabled []string, dependencies Dependenci
 	enabledSet := make(map[string]struct{}, len(enabled))
 	for _, name := range enabled {
 		if _, exists := enabledSet[name]; exists {
-			return Report{}, fmt.Errorf("duplicate capability %q", name)
+			return Report{}, newError(ErrorCodeProfileInvalid, name, "duplicate capability")
 		}
 		enabledSet[name] = struct{}{}
 	}
 	enabledNames := slices.Clone(enabled)
-	sort.Strings(enabledNames)
+	slices.Sort(enabledNames)
 	for _, name := range enabledNames {
 		if _, exists := r.definitions[name]; !exists {
 			return Report{}, newError(ErrorCodeCapabilityUnknown, name, "capability is not registered")
@@ -121,7 +121,7 @@ func (r Registry) Resolve(build Build, enabled []string, dependencies Dependenci
 	for name := range r.definitions {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	statuses := make([]Status, 0, len(names))
 	var validationErr error
@@ -135,16 +135,12 @@ func (r Registry) Resolve(build Build, enabled []string, dependencies Dependenci
 			continue
 		}
 		if !slices.Contains(definition.Profiles, build.Profile()) {
-			if validationErr == nil {
-				validationErr = newError(ErrorCodeCapabilityUnavailable, name, "capability is not included in profile "+string(build.Profile()))
-			}
+			validationErr = errors.Join(validationErr, newError(ErrorCodeCapabilityUnavailable, name, "capability is not included in profile "+string(build.Profile())))
 			statuses = append(statuses, status)
 			continue
 		}
 		if definition.Effectful && build.GOOS() != "linux" {
-			if validationErr == nil {
-				validationErr = newError(ErrorCodeCapabilityUnavailable, name, "effectful capabilities require Linux")
-			}
+			validationErr = errors.Join(validationErr, newError(ErrorCodeCapabilityUnavailable, name, "effectful capabilities require Linux"))
 			statuses = append(statuses, status)
 			continue
 		}
@@ -152,8 +148,8 @@ func (r Registry) Resolve(build Build, enabled []string, dependencies Dependenci
 			status.State = StateMissing
 			status.MissingDependency = definition.Dependency
 			statuses = append(statuses, status)
-			if status.Enabled && validationErr == nil {
-				validationErr = newError(ErrorCodeDependencyMissing, name, "required dependency "+definition.Dependency+" is missing")
+			if status.Enabled {
+				validationErr = errors.Join(validationErr, newError(ErrorCodeDependencyMissing, name, "required dependency "+definition.Dependency+" is missing"))
 			}
 			continue
 		}
@@ -167,8 +163,8 @@ func (r Registry) Resolve(build Build, enabled []string, dependencies Dependenci
 	}
 
 	for _, name := range enabledNames {
-		if _, compiled := compiledSet[name]; !compiled && validationErr == nil {
-			validationErr = newError(ErrorCodeCapabilityUnavailable, name, "capability is absent from this artifact")
+		if _, compiled := compiledSet[name]; !compiled {
+			validationErr = errors.Join(validationErr, newError(ErrorCodeCapabilityUnavailable, name, "capability is absent from this artifact"))
 		}
 	}
 

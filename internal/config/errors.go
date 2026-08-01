@@ -9,6 +9,7 @@ type ErrorCode string
 
 const (
 	ErrorCodeVersionUnsupported         ErrorCode = "config_version_unsupported"
+	ErrorCodeConfigInvalid              ErrorCode = "config_invalid"
 	ErrorCodeModelProtocolInvalid       ErrorCode = "model_protocol_invalid"
 	ErrorCodeModelCapabilityUnsupported ErrorCode = "model_capability_unsupported"
 	ErrorCodeModelSecretInvalid         ErrorCode = "model_secret_invalid"

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/anggasct/aura/internal/capability"
 )
 
@@ -202,7 +204,7 @@ func TestLoad_WrongVersion(t *testing.T) {
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeVersionUnsupported {
 		t.Errorf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeVersionUnsupported)
 	}
-	if !strings.Contains(err.Error(), `unsupported version "2" (supported: 1)`) {
+	if !strings.Contains(err.Error(), `unsupported version 2 (supported: 1)`) {
 		t.Errorf("error %q does not report unsupported version", err)
 	}
 }
@@ -323,8 +325,11 @@ models:
 	if cfg.Models.Routing["summarize"] != "primary" {
 		t.Errorf("routing.summarize = %q, want primary", cfg.Models.Routing["summarize"])
 	}
-	if cfg.Models.RequestTimeout != 0 {
-		t.Errorf("RequestTimeout should default to 0 when unset, got %v", cfg.Models.RequestTimeout)
+	if cfg.Models.RequestTimeout != Duration(120*time.Second) {
+		t.Errorf("RequestTimeout = %v, want the 120s default", cfg.Models.RequestTimeout)
+	}
+	if cfg.Models.StreamingIdleTimeout != Duration(60*time.Second) {
+		t.Errorf("StreamingIdleTimeout = %v, want the 60s default", cfg.Models.StreamingIdleTimeout)
 	}
 	if cfg.Server.Host != "127.0.0.1" || cfg.Server.Port != 8280 {
 		t.Errorf("Server defaults = %+v", cfg.Server)
@@ -406,7 +411,7 @@ models:
 			name:    "missing capabilities",
 			content: strings.Replace(valid, "      capabilities:\n        streaming: true\n        tools: true\n        structured_output: false\n        vision: true\n        audio: false\n        reasoning: true\n        context_tokens: 200000\n        tokenizer: anthropic\n        usage_reporting: true\n", "", 1),
 			code:    ErrorCodeModelCapabilityUnsupported,
-			want:    "requires a capabilities mapping",
+			want:    "requires positive context_tokens and a tokenizer",
 		},
 		{
 			name:    "both secret references",
@@ -539,6 +544,165 @@ func writeTempConfig(t *testing.T, content string) string {
 		t.Fatalf("write config: %v", err)
 	}
 	return path
+}
+
+func TestLoad_DuplicateKeyInArbitrarySection(t *testing.T) {
+	content := `version: 1
+server:
+  host: 127.0.0.1
+  port: 8280
+  port: 9000
+`
+	_, err := Load(writeTempConfig(t, content))
+	if err == nil || !strings.Contains(err.Error(), `duplicate key "server.port"`) {
+		t.Fatalf("Load error = %v, want duplicate key rejection", err)
+	}
+}
+
+func TestLoad_UnknownEnvKeyWarns(t *testing.T) {
+	t.Setenv("AURA_BOGUS_OVERRIDE", "1")
+	t.Setenv(envConfigVar, fixture(t, "valid.yaml"))
+	res, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	found := false
+	for _, key := range res.Warnings {
+		if key == "AURA_BOGUS_OVERRIDE" {
+			found = true
+		}
+		if key == envConfigVar {
+			t.Errorf("AURA_CONFIG itself must not warn")
+		}
+	}
+	if !found {
+		t.Errorf("Warnings = %v, want AURA_BOGUS_OVERRIDE listed", res.Warnings)
+	}
+}
+
+func TestLoad_QuotedPortRejected(t *testing.T) {
+	content := `version: 1
+server:
+  host: 127.0.0.1
+  port: "9090"
+`
+	_, err := Load(writeTempConfig(t, content))
+	if err == nil || !strings.Contains(err.Error(), "server.port must be an integer") {
+		t.Fatalf("Load error = %v, want quoted port rejection", err)
+	}
+}
+
+func TestLoad_PortOutOfRange(t *testing.T) {
+	for _, port := range []string{"99999", "-1"} {
+		content := "version: 1\nserver:\n  host: 127.0.0.1\n  port: " + port + "\n"
+		_, err := Load(writeTempConfig(t, content))
+		wantCode(t, err, ErrorCodeConfigInvalid)
+	}
+}
+
+func TestLoad_EmptyRoutingMapLoads(t *testing.T) {
+	content := `version: 1
+models:
+  routing: {}
+`
+	res, err := Load(writeTempConfig(t, content))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(res.Config.Models.Routing) != 0 {
+		t.Errorf("Routing = %v, want empty (explicitly cleared)", res.Config.Models.Routing)
+	}
+}
+
+func TestLoad_RoutingUndefinedModelRejected(t *testing.T) {
+	content := `version: 1
+models:
+  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet
+      base_url: https://api.anthropic.com
+      api_key_env: ANTHROPIC_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: true
+        audio: false
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: anthropic
+        usage_reporting: true
+  routing:
+    summarize: auxiliary
+`
+	_, err := Load(writeTempConfig(t, content))
+	wantCode(t, err, ErrorCodeConfigInvalid)
+}
+
+func TestLoad_NonDurationTimeoutRejected(t *testing.T) {
+	content := `version: 1
+models:
+  request_timeout: 120
+`
+	_, err := Load(writeTempConfig(t, content))
+	if err == nil || !strings.Contains(err.Error(), "models.request_timeout must be a duration string") {
+		t.Fatalf("Load error = %v, want duration shape rejection", err)
+	}
+}
+
+func TestLoad_EnvOnlyModelDefinitionValidated(t *testing.T) {
+	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_PROTOCOL", "anthropic_messages")
+	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_MODEL", "claude-sonnet")
+	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_BASE_URL", "https://api.anthropic.com")
+	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_API_KEY_ENV", "ANTHROPIC_API_KEY")
+	content := `version: 1
+`
+	_, err := Load(writeTempConfig(t, content))
+	wantCode(t, err, ErrorCodeModelCapabilityUnsupported)
+}
+
+func TestValidateBaseURLLoopbackRange(t *testing.T) {
+	for _, raw := range []string{"http://127.0.0.2:8080", "http://127.255.255.254", "http://[::1]:8080", "http://localhost."} {
+		if err := ValidateBaseURL(raw); err != nil {
+			t.Errorf("ValidateBaseURL(%q) = %v, want nil", raw, err)
+		}
+	}
+	if err := ValidateBaseURL("http://example.com"); err == nil {
+		t.Error("ValidateBaseURL(http://example.com) accepted a non-loopback http URL")
+	}
+}
+
+func TestDurationYAMLRoundTrip(t *testing.T) {
+	cfg := Default()
+	data, err := Marshal(&cfg)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded Config
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("direct yaml.Unmarshal: %v", err)
+	}
+	if decoded.Runtime.TurnTimeout != cfg.Runtime.TurnTimeout {
+		t.Errorf("TurnTimeout round trip = %v, want %v", decoded.Runtime.TurnTimeout, cfg.Runtime.TurnTimeout)
+	}
+	if decoded.Models.RequestTimeout != cfg.Models.RequestTimeout {
+		t.Errorf("RequestTimeout round trip = %v, want %v", decoded.Models.RequestTimeout, cfg.Models.RequestTimeout)
+	}
+}
+
+func wantCode(t *testing.T, err error, want ErrorCode) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error with code %s, got nil", want)
+	}
+	got, ok := CodeOf(err)
+	if !ok {
+		t.Fatalf("error %v carries no config code, want %s", err, want)
+	}
+	if got != want {
+		t.Errorf("error code = %s, want %s", got, want)
+	}
 }
 
 func mustRegistry(t *testing.T, definitions ...capability.Definition) capability.Registry {

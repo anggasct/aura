@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -8,6 +10,16 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 )
+
+// usageError marks argument and flag errors so ExecuteContext can exit with
+// code 2 instead of the runtime error code.
+type usageError struct {
+	err error
+}
+
+func (e *usageError) Error() string { return e.err.Error() }
+
+func (e *usageError) Unwrap() error { return e.err }
 
 type globalFlags struct {
 	configPath string
@@ -33,8 +45,35 @@ func newRootCmd() *cobra.Command {
 }
 
 func Execute() int {
-	if err := newRootCmd().Execute(); err != nil {
+	return ExecuteContext(context.Background())
+}
+
+// ExecuteContext runs the CLI with ctx, exiting 2 for usage errors, 1 for
+// runtime errors, and 0 on success. When args is empty the process arguments
+// are used.
+func ExecuteContext(ctx context.Context, args ...string) int {
+	effective := args
+	if len(effective) == 0 {
+		effective = os.Args[1:]
+	}
+	root := newRootCmd()
+	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return &usageError{err}
+	})
+	root.SetArgs(effective)
+	if err := root.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "aura:", err)
+		var ue *usageError
+		if errors.As(err, &ue) {
+			return 2
+		}
+		// An unknown subcommand is a usage error, but cobra surfaces it
+		// from Execute with no marker. Classify it here: by this point
+		// cobra's built-in commands (help, completion, __complete) are
+		// registered, so a Find failure is a genuine unknown command.
+		if _, _, findErr := root.Find(effective); findErr != nil {
+			return 2
+		}
 		return 1
 	}
 	return 0
