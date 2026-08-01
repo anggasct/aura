@@ -101,3 +101,28 @@ func nullableJSON(raw json.RawMessage) any {
 func formatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
+
+const selectRuntimeEventColumns = `id, session_id, sequence, turn_id, invocation_id, branch, author, kind,
+	                                schema_version, payload_json, provider_usage_json, created_at`
+
+func scanRuntimeEvent(rows *sql.Rows) (RuntimeEvent, error) {
+	var e RuntimeEvent
+	var sequence, schemaVersion int64
+	var payload, createdAt string
+	var providerUsage sql.NullString
+	if err := rows.Scan(&e.ID, &e.SessionID, &sequence, &e.TurnID, &e.InvocationID, &e.Branch, &e.Author, &e.Kind,
+		&schemaVersion, &payload, &providerUsage, &createdAt); err != nil {
+		return RuntimeEvent{}, fmt.Errorf("scan runtime event: %w", err)
+	}
+	e.Sequence = uint64(sequence)
+	e.SchemaVersion = uint16(schemaVersion)
+	e.Payload = json.RawMessage(payload)
+	if providerUsage.Valid {
+		e.ProviderUsage = json.RawMessage(providerUsage.String)
+	}
+	var err error
+	if e.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
+		return RuntimeEvent{}, fmt.Errorf("parse created_at for event %s: %w", e.ID, err)
+	}
+	return e, nil
+}

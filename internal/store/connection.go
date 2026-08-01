@@ -21,9 +21,13 @@ var connectionPragmaSet = []struct {
 	set  string
 	want string
 }{
+	// busy_timeout must be set before journal_mode: switching to WAL briefly
+	// needs an exclusive lock, and without a timeout yet in place a
+	// concurrently-opened connection can fail with "database is locked"
+	// instead of waiting.
+	{name: "busy_timeout", set: "PRAGMA busy_timeout = 5000", want: "5000"},
 	{name: "foreign_keys", set: "PRAGMA foreign_keys = ON", want: "1"},
 	{name: "journal_mode", set: "PRAGMA journal_mode = WAL", want: "wal"},
-	{name: "busy_timeout", set: "PRAGMA busy_timeout = 5000", want: "5000"},
 	{name: "synchronous", set: "PRAGMA synchronous = NORMAL", want: "1"},
 }
 

@@ -52,8 +52,7 @@ func (s *sqliteSessionService) Get(ctx context.Context, id string) (Session, err
 
 func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string, after uint64, limit int) ([]RuntimeEvent, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, sequence, turn_id, invocation_id, branch, author, kind,
-		        schema_version, payload_json, provider_usage_json, created_at
+		`SELECT `+selectRuntimeEventColumns+`
 		 FROM runtime_event
 		 WHERE session_id = ? AND sequence > ?
 		 ORDER BY sequence ASC
@@ -67,22 +66,9 @@ func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string,
 
 	var events []RuntimeEvent
 	for rows.Next() {
-		var e RuntimeEvent
-		var sequence, schemaVersion int64
-		var payload, createdAt string
-		var providerUsage sql.NullString
-		if err := rows.Scan(&e.ID, &e.SessionID, &sequence, &e.TurnID, &e.InvocationID, &e.Branch, &e.Author, &e.Kind,
-			&schemaVersion, &payload, &providerUsage, &createdAt); err != nil {
-			return nil, fmt.Errorf("scan event for session %s: %w", sessionID, err)
-		}
-		e.Sequence = uint64(sequence)
-		e.SchemaVersion = uint16(schemaVersion)
-		e.Payload = json.RawMessage(payload)
-		if providerUsage.Valid {
-			e.ProviderUsage = json.RawMessage(providerUsage.String)
-		}
-		if e.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
-			return nil, fmt.Errorf("parse created_at for event %s: %w", e.ID, err)
+		e, err := scanRuntimeEvent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list events for session %s: %w", sessionID, err)
 		}
 		events = append(events, e)
 	}
