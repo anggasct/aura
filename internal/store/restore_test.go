@@ -230,6 +230,70 @@ func TestCollectDeletesOnlyOldUnreferencedBlobs(t *testing.T) {
 	}
 }
 
+func TestCollectSkipsBlobReferencedAfterScan(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	root := t.TempDir()
+
+	// The blob is old and unreferenced at scan time, so it is a candidate;
+	// but a reference is linked before the conditional delete runs, which
+	// must protect the row and the file (AC-10).
+	digest := strings.Repeat("a", 64)
+	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
+		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, formatTime(time.Now().Add(-48*time.Hour))); err != nil {
+		t.Fatalf("insert blob: %v", err)
+	}
+	abs := filepath.Join(root, "blobs", digest[:2], digest)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(abs, []byte("xyz"), 0o600); err != nil {
+		t.Fatalf("write blob file: %v", err)
+	}
+
+	report, err := Collect(ctx, db, root, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if report.DeletedBlobs != 1 {
+		t.Fatalf("DeletedBlobs = %d, want 1 (blob unreferenced at scan time)", report.DeletedBlobs)
+	}
+
+	// Simulate the reference racing in after the candidate scan: re-insert
+	// the blob plus a reference, then run Collect again; the blob must
+	// survive because the conditional delete re-checks the reference.
+	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
+		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, formatTime(time.Now().Add(-48*time.Hour))); err != nil {
+		t.Fatalf("re-insert blob: %v", err)
+	}
+	if err := os.WriteFile(abs, []byte("xyz"), 0o600); err != nil {
+		t.Fatalf("rewrite blob file: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO artifact_ref (id, blob_digest, session_id, filename, created_at)
+		VALUES (?, ?, ?, ?, ?)`, "ref-1", digest, "session-1", "f.bin", formatTime(time.Now())); err != nil {
+		t.Fatalf("insert artifact_ref: %v", err)
+	}
+
+	report, err = Collect(ctx, db, root, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("Collect with reference: %v", err)
+	}
+	if report.DeletedBlobs != 0 {
+		t.Errorf("DeletedBlobs = %d, want 0 (blob became referenced before the delete)", report.DeletedBlobs)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		t.Errorf("referenced blob file removed despite the re-check: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM blob WHERE digest = ?`, digest).Scan(&count); err != nil {
+		t.Fatalf("count blob rows: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("blob rows = %d, want 1 (row must survive the conditional delete)", count)
+	}
+}
+
 func TestBackupStoreInterfaceRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
@@ -239,15 +303,16 @@ func TestBackupStoreInterfaceRoundTrip(t *testing.T) {
 
 	backups := NewBackupStore(db, artifactRoot, liveDB)
 	destDir := filepath.Join(t.TempDir(), "backup")
-	if _, err := backups.CreateBackup(ctx, destDir); err != nil {
+	created, err := backups.CreateBackup(ctx, destDir)
+	if err != nil {
 		t.Fatalf("CreateBackup: %v", err)
 	}
-	report, err := backups.VerifyBackup(ctx, destDir)
+	manifest, err := backups.VerifyBackup(ctx, destDir)
 	if err != nil {
 		t.Fatalf("VerifyBackup: %v", err)
 	}
-	if report.Sessions != 1 {
-		t.Errorf("verify sessions = %d, want 1", report.Sessions)
+	if len(manifest.Blobs) != len(created.Blobs) {
+		t.Errorf("verified manifest blobs = %d, want %d", len(manifest.Blobs), len(created.Blobs))
 	}
 	if err := backups.RestoreBackup(ctx, destDir, RestoreOptions{}); err != nil {
 		t.Fatalf("RestoreBackup: %v", err)

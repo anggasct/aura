@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,7 +16,7 @@ type RestoreOptions struct {
 	Force bool
 }
 
-// RestoreBackup installs a verified backup snapshot as the live database at
+// Restore installs a verified backup snapshot as the live database at
 // liveDBPath. The backup is verified first (integrity, manifest, and blob
 // checksums); any verification failure aborts before the live database is
 // touched. Without Force, an existing live database is refused with
@@ -26,11 +27,11 @@ func Restore(ctx context.Context, backupDir, artifactRoot, liveDBPath string, op
 		return RestoreReport{}, err
 	}
 	if len(report.ChecksumMismatches) > 0 || len(report.MissingBlobFiles) > 0 {
-		return RestoreReport{}, errBackupInvalid(fmt.Sprintf("backup verification found %d checksum mismatches and %d missing blobs", len(report.ChecksumMismatches), len(report.MissingBlobFiles)))
+		return RestoreReport{}, Errorf(ErrorCodeBackupInvalid, "backup verification found %d checksum mismatches and %d missing blobs", len(report.ChecksumMismatches), len(report.MissingBlobFiles))
 	}
 	if !opts.Force {
 		if _, err := os.Stat(liveDBPath); err == nil {
-			return RestoreReport{}, &Error{Code: ErrorCodeRestoreLocked, Detail: "live database exists; restore requires --force"}
+			return RestoreReport{}, Errorf(ErrorCodeRestoreLocked, "live database exists; restore requires --force")
 		} else if !os.IsNotExist(err) {
 			return RestoreReport{}, fmt.Errorf("inspect live database path: %w", err)
 		}
@@ -40,10 +41,6 @@ func Restore(ctx context.Context, backupDir, artifactRoot, liveDBPath string, op
 		return RestoreReport{}, fmt.Errorf("restore live database: %w", err)
 	}
 	return report, nil
-}
-
-func errBackupInvalid(detail string) error {
-	return &Error{Code: ErrorCodeBackupInvalid, Detail: detail}
 }
 
 func copyFileSynced(ctx context.Context, src, dst string) error {
@@ -68,7 +65,7 @@ func copyFileSynced(ctx context.Context, src, dst string) error {
 			_ = os.Remove(tmpPath)
 		}
 	}()
-	if _, err := io.Copy(tmp, in); err != nil {
+	if _, err := copyWithContext(ctx, tmp, in); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -89,12 +86,37 @@ func copyFileSynced(ctx context.Context, src, dst string) error {
 	return syncPath(dir)
 }
 
+// copyWithContext copies until EOF or cancellation, so a large restore
+// honors ctx instead of copying to completion.
+func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
+	buf := make([]byte, 32*1024)
+	var written int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
+		n, readErr := src.Read(buf)
+		if n > 0 {
+			if _, err := dst.Write(buf[:n]); err != nil {
+				return written, err
+			}
+			written += int64(n)
+		}
+		if readErr == io.EOF {
+			return written, nil
+		}
+		if readErr != nil {
+			return written, readErr
+		}
+	}
+}
+
 // BackupStore is the spec contract for backup/restore operations. The
 // concrete implementation composes the store's free functions so feature
 // packages can depend on the interface without importing the driver.
 type BackupStore interface {
 	CreateBackup(ctx context.Context, destDir string) (BackupManifest, error)
-	VerifyBackup(ctx context.Context, backupDir string) (RestoreReport, error)
+	VerifyBackup(ctx context.Context, backupDir string) (BackupManifest, error)
 	RestoreBackup(ctx context.Context, backupDir string, opts RestoreOptions) error
 }
 
@@ -112,8 +134,25 @@ func (s *sqliteBackupStore) CreateBackup(ctx context.Context, destDir string) (B
 	return Backup(ctx, s.db, destDir)
 }
 
-func (s *sqliteBackupStore) VerifyBackup(ctx context.Context, backupDir string) (RestoreReport, error) {
-	return VerifyRestore(ctx, backupDir, s.artifactRoot)
+// VerifyBackup verifies the backup against the artifact root and returns its
+// manifest, per the spec interface.
+func (s *sqliteBackupStore) VerifyBackup(ctx context.Context, backupDir string) (BackupManifest, error) {
+	report, err := VerifyRestore(ctx, backupDir, s.artifactRoot)
+	if err != nil {
+		return BackupManifest{}, err
+	}
+	if len(report.ChecksumMismatches) > 0 || len(report.MissingBlobFiles) > 0 {
+		return BackupManifest{}, Errorf(ErrorCodeBackupInvalid, "backup verification found %d checksum mismatches and %d missing blobs", len(report.ChecksumMismatches), len(report.MissingBlobFiles))
+	}
+	data, err := os.ReadFile(filepath.Join(backupDir, backupManifestFilename))
+	if err != nil {
+		return BackupManifest{}, backupFail("read backup manifest", err, filepath.Join(backupDir, backupManifestFilename))
+	}
+	var manifest BackupManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return BackupManifest{}, fmt.Errorf("parse backup manifest: %w", err)
+	}
+	return manifest, nil
 }
 
 func (s *sqliteBackupStore) RestoreBackup(ctx context.Context, backupDir string, opts RestoreOptions) error {

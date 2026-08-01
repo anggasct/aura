@@ -143,7 +143,7 @@ func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sq
 				Detail: fmt.Sprintf("session %s sequence %d already used by a different event", e.SessionID, e.Sequence),
 			}
 		}
-		return fmt.Errorf("append event %s: %w", e.ID, err)
+		return classifyBusy(fmt.Errorf("append event %s: %w", e.ID, err))
 	}
 	return nil
 }

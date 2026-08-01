@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/store"
 )
 
 func writeStorageConfig(t *testing.T, dataRoot string) string {
@@ -76,6 +78,47 @@ func TestStorageGcInvalidBefore(t *testing.T) {
 	}
 }
 
+func TestStorageVerifyDoesNotCreateLiveDB(t *testing.T) {
+	// The backup is made against one data root; verify then runs against a
+	// different, never-opened root so any side effect on the live database
+	// is visible.
+	backupRoot := t.TempDir()
+	backupCfg := writeStorageConfig(t, backupRoot)
+	backupDir := filepath.Join(backupRoot, "backup-1")
+	if err := executeNoErr(t, "storage", "backup", "--config", backupCfg, "--output", backupDir); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+
+	verifyRoot := t.TempDir()
+	verifyCfg := writeStorageConfig(t, verifyRoot)
+	if err := executeNoErr(t, "storage", "verify", "--config", verifyCfg, "--input", backupDir); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(verifyRoot, "aura.db")); !os.IsNotExist(err) {
+		t.Errorf("verify must not create or open the live database (stat err = %v)", err)
+	}
+}
+
+func TestStorageVerifyReportsBackupInvalid(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeStorageConfig(t, dataRoot)
+
+	backupDir := filepath.Join(dataRoot, "backup-1")
+	if err := executeNoErr(t, "storage", "backup", "--config", cfg, "--output", backupDir); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	if err := os.Remove(filepath.Join(backupDir, "manifest.json")); err != nil {
+		t.Fatalf("remove manifest: %v", err)
+	}
+	err := executeNoErr(t, "storage", "verify", "--config", cfg, "--input", backupDir)
+	if err == nil {
+		t.Fatal("verify of a broken backup must fail")
+	}
+	if code, ok := storeCodeOf(err); !ok || code != store.ErrorCodeBackupInvalid {
+		t.Errorf("verify error = %v, want code backup_invalid (got %q, %v)", err, code, ok)
+	}
+}
+
 func TestStorageBackupRejectsInvalidConfig(t *testing.T) {
 	dataRoot := t.TempDir()
 	cfg := writeStorageConfig(t, dataRoot)
@@ -95,4 +138,8 @@ func executeNoErr(t *testing.T, args ...string) error {
 	root.SetErr(&out)
 	root.SetArgs(args)
 	return root.Execute()
+}
+
+func storeCodeOf(err error) (store.ErrorCode, bool) {
+	return store.CodeOf(err)
 }

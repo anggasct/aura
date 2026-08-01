@@ -140,7 +140,10 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, cfg *config.Config, opened *sql.DB) error {
+			// Verify opens the backup snapshot itself and only needs the
+			// artifact root; the live database must not be opened or
+			// created as a side effect.
+			return withStorage(cmd, gf, false, func(ctx context.Context, cfg *config.Config, opened *sql.DB) error {
 				_, _, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
 					return err
@@ -148,7 +151,12 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 				start := time.Now()
 				report, err := store.VerifyRestore(ctx, input, artifactRoot)
 				if err != nil {
-					return err
+					// Integrity or manifest failures surface as
+					// backup_invalid; the cause chain is preserved.
+					if _, ok := store.CodeOf(err); ok {
+						return err
+					}
+					return store.Errorf(store.ErrorCodeBackupInvalid, "storage verification failed: %v", err)
 				}
 				slog.Info("storage verification complete",
 					"component", "storage",
@@ -163,7 +171,7 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 					"missing_blobs", len(report.MissingBlobFiles),
 				)
 				if len(report.ChecksumMismatches) > 0 || len(report.MissingBlobFiles) > 0 {
-					return fmt.Errorf("storage verification failed: %d checksum mismatches, %d missing blobs", len(report.ChecksumMismatches), len(report.MissingBlobFiles))
+					return store.Errorf(store.ErrorCodeBackupInvalid, "storage verification failed: %d checksum mismatches, %d missing blobs", len(report.ChecksumMismatches), len(report.MissingBlobFiles))
 				}
 				return nil
 			})

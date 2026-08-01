@@ -63,11 +63,11 @@ func OpenDBWithOptions(ctx context.Context, dsn string, opts OpenOptions) (*sql.
 
 	db, err := sql.Open(sqlDriverName, withConnectionOptions(dsn, opts))
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite database: %w", err)
+		return nil, codedError(ErrorCodeStorageUnavailable, "open sqlite database", err)
 	}
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("open sqlite database: %w", err)
+		return nil, codedError(ErrorCodeStorageUnavailable, "open sqlite database", err)
 	}
 	return db, nil
 }
