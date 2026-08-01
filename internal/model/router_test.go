@@ -42,22 +42,24 @@ func TestRouter_ForDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
-	if got := r.For("turn"); got != primary {
-		t.Errorf("For(turn) = %v, want primary", got)
+	if got, err := r.For("turn"); err != nil || got != primary {
+		t.Errorf("For(turn) = %v, %v; want primary", got, err)
 	}
-	if got := r.For(""); got != primary {
-		t.Errorf("For(empty) = %v, want primary", got)
+	if got, err := r.For(""); err != nil || got != primary {
+		t.Errorf("For(empty) = %v, %v; want primary", got, err)
 	}
 	for _, task := range []string{"summarize", "title", "curation", "compression", "profiling"} {
-		if got := r.For(task); got != auxiliary {
-			t.Errorf("For(%s) = %v, want auxiliary", task, got)
+		if got, err := r.For(task); err != nil || got != auxiliary {
+			t.Errorf("For(%s) = %v, %v; want auxiliary", task, got, err)
 		}
 	}
-	if got := r.For("agent"); got != primary {
-		t.Errorf("For(agent) = %v, want primary", got)
+	if got, err := r.For("agent"); err != nil || got != primary {
+		t.Errorf("For(agent) = %v, %v; want primary", got, err)
 	}
-	if got := r.For("unknown_task"); got != auxiliary {
-		t.Errorf("For(unknown_task) = %v, want auxiliary", got)
+	if _, err := r.For("unknown_task"); err == nil {
+		t.Error("For(unknown_task) accepted an unknown task")
+	} else {
+		wantCode(t, err, ErrorCodeNotFound)
 	}
 }
 
@@ -68,14 +70,14 @@ func TestRouter_RoutingOverridesMergeWithDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
-	if got := r.For("summarize"); got != primary {
-		t.Errorf("For(summarize) = %v, want primary (override)", got)
+	if got, err := r.For("summarize"); err != nil || got != primary {
+		t.Errorf("For(summarize) = %v, %v; want primary (override)", got, err)
 	}
-	if got := r.For("title"); got != auxiliary {
-		t.Errorf("For(title) = %v, want auxiliary (default preserved)", got)
+	if got, err := r.For("title"); err != nil || got != auxiliary {
+		t.Errorf("For(title) = %v, %v; want auxiliary (default preserved)", got, err)
 	}
-	if got := r.For("compression"); got != auxiliary {
-		t.Errorf("For(compression) = %v, want auxiliary (default preserved)", got)
+	if got, err := r.For("compression"); err != nil || got != auxiliary {
+		t.Errorf("For(compression) = %v, %v; want auxiliary (default preserved)", got, err)
 	}
 }
 
@@ -96,15 +98,37 @@ func TestBuildRouter_OpenRouterAndOllamaEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}
-	resps, err := collect(r.For("turn").GenerateContent(context.Background(), sampleRequest("hi"), false))
+	primary, err := r.For("turn")
+	if err != nil {
+		t.Fatalf("For(turn): %v", err)
+	}
+	resps, err := collect(primary.GenerateContent(context.Background(), sampleRequest("hi"), false))
 	if err != nil {
 		t.Fatalf("openrouter request: %v", err)
 	}
 	if len(resps) != 1 || resps[0].Content.Parts[0].Text != "Hello from the model." {
 		t.Errorf("unexpected response: %+v", resps)
 	}
-	if _, ok := r.For("summarize").(*OpenAIAdapter); !ok {
-		t.Errorf("ollama auxiliary = %T, want *OpenAIAdapter", r.For("summarize"))
+	auxiliary, err := r.For("summarize")
+	if err != nil {
+		t.Fatalf("For(summarize): %v", err)
+	}
+	if _, ok := auxiliary.(*OpenAIAdapter); !ok {
+		t.Errorf("ollama auxiliary = %T, want *OpenAIAdapter", auxiliary)
+	}
+}
+
+func wantCode(t *testing.T, err error, want ErrorCode) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error with code %s, got nil", want)
+	}
+	got, ok := CodeOf(err)
+	if !ok {
+		t.Fatalf("error %v carries no model code, want %s", err, want)
+	}
+	if got != want {
+		t.Errorf("error code = %s, want %s", got, want)
 	}
 }
 
@@ -134,24 +158,32 @@ func TestBuildRouter_ProviderMapping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}
-	if _, ok := r.For("turn").(*AnthropicAdapter); !ok {
-		t.Errorf("primary = %T, want *AnthropicAdapter", r.For("turn"))
+	primary, err := r.For("turn")
+	if err != nil {
+		t.Fatalf("For(turn): %v", err)
 	}
-	if _, ok := r.For("summarize").(*OpenAIAdapter); !ok {
-		t.Errorf("auxiliary = %T, want *OpenAIAdapter", r.For("summarize"))
+	if _, ok := primary.(*AnthropicAdapter); !ok {
+		t.Errorf("primary = %T, want *AnthropicAdapter", primary)
+	}
+	auxiliary, err := r.For("summarize")
+	if err != nil {
+		t.Fatalf("For(summarize): %v", err)
+	}
+	if _, ok := auxiliary.(*OpenAIAdapter); !ok {
+		t.Errorf("auxiliary = %T, want *OpenAIAdapter", auxiliary)
 	}
 }
 
-func TestBuildRouter_UnconfiguredProviderIsNil(t *testing.T) {
+func TestBuildRouter_UnconfiguredProviderFailsClosed(t *testing.T) {
 	r, err := BuildRouter(config.Models{})
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}
-	if r.For("turn") != nil {
-		t.Errorf("unconfigured primary should be nil, got %v", r.For("turn"))
+	if m, err := r.For("turn"); err == nil || m != nil {
+		t.Errorf("For(turn) = %v, %v; want typed not_found error", m, err)
 	}
-	if r.For("summarize") != nil {
-		t.Errorf("unconfigured auxiliary should be nil, got %v", r.For("summarize"))
+	if m, err := r.For("summarize"); err == nil || m != nil {
+		t.Errorf("For(summarize) = %v, %v; want typed not_found error", m, err)
 	}
 }
 
@@ -220,12 +252,16 @@ func TestBuildRouter_PassesStreamingIdleTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}
-	primary, ok := r.For("turn").(*OpenAIAdapter)
-	if !ok {
-		t.Fatalf("primary = %T, want *OpenAIAdapter", r.For("turn"))
+	primary, err := r.For("turn")
+	if err != nil {
+		t.Fatalf("For(turn): %v", err)
 	}
-	if primary.streamingIdleTimeout != 17*time.Second {
-		t.Errorf("idle timeout = %v, want 17s", primary.streamingIdleTimeout)
+	openaiPrimary, ok := primary.(*OpenAIAdapter)
+	if !ok {
+		t.Fatalf("primary = %T, want *OpenAIAdapter", primary)
+	}
+	if openaiPrimary.core.idleTimeout != 17*time.Second {
+		t.Errorf("idle timeout = %v, want 17s", openaiPrimary.core.idleTimeout)
 	}
 }
 

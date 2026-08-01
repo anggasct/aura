@@ -4,12 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
@@ -21,13 +18,73 @@ import (
 const anthropicDefaultBaseURL = "https://api.anthropic.com"
 const anthropicVersion = "2023-06-01"
 
+type anthropicCodec struct{}
+
+func (anthropicCodec) protocol() string { return "anthropic_messages" }
+
+func (anthropicCodec) endpoint(baseURL string, req *adkmodel.LLMRequest, stream bool) string {
+	return baseURL + "/v1/messages"
+}
+
+func (anthropicCodec) buildRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
+	return buildAnthropicRequest(req, stream)
+}
+
+func (anthropicCodec) decodeResponse(body []byte) (*adkmodel.LLMResponse, error) {
+	return parseAnthropicResponse(body)
+}
+
+func (anthropicCodec) setAuthHeaders(req *http.Request, apiKey string) {
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", anthropicVersion)
+}
+
+func (anthropicCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, error) {
+	var event anthropicStreamEvent
+	if err := json.Unmarshal(data, &event); err != nil {
+		return nil, false, fmt.Errorf("model: failed to parse anthropic stream event: %w", err)
+	}
+	var ops []streamOp
+	switch event.Type {
+	case "message_start":
+		if event.Message != nil {
+			ops = append(ops,
+				streamOp{kind: opModel, model: event.Message.Model},
+				streamOp{kind: opUsage, usageIn: event.Message.Usage.InputTokens},
+			)
+		}
+	case "content_block_start":
+		if event.ContentBlock == nil {
+			return nil, false, nil
+		}
+		if event.ContentBlock.Type == "tool_use" {
+			ops = append(ops, streamOp{kind: opToolStart, idx: -1, toolID: event.ContentBlock.ID, toolName: event.ContentBlock.Name})
+		}
+	case "content_block_delta":
+		if event.Delta == nil {
+			return nil, false, nil
+		}
+		if event.Delta.Text != "" {
+			ops = append(ops, streamOp{kind: opText, text: event.Delta.Text})
+		}
+		if event.Delta.PartialJSON != "" {
+			ops = append(ops, streamOp{kind: opToolArgs, idx: -1, toolArgs: event.Delta.PartialJSON})
+		}
+	case "message_delta":
+		if event.Delta != nil && event.Delta.StopReason != "" {
+			ops = append(ops, streamOp{kind: opStop, stop: event.Delta.StopReason})
+		}
+		if event.Usage != nil {
+			ops = append(ops, streamOp{kind: opUsage, usageOut: event.Usage.OutputTokens})
+		}
+	case "message_stop":
+		ops = append(ops, streamOp{kind: opDone})
+	}
+	return ops, event.Type == "message_stop", nil
+}
+
 type AnthropicAdapter struct {
-	name                 string
-	baseURL              string
-	apiKey               string
-	httpClient           *http.Client
-	retry                RetryConfig
-	streamingIdleTimeout time.Duration
+	core *coreClient
 }
 
 func NewAnthropicAdapter(name, baseURL, apiKey string, timeout time.Duration) (*AnthropicAdapter, error) {
@@ -43,230 +100,13 @@ func newAnthropicAdapter(name, baseURL, apiKey string, timeout, idleTimeout time
 	if baseURL == "" {
 		baseURL = anthropicDefaultBaseURL
 	}
-	if timeout <= 0 {
-		timeout = defaultRequestTimeout
-	}
-	if idleTimeout <= 0 {
-		idleTimeout = defaultStreamingIdleTimeout
-	}
-	return &AnthropicAdapter{
-		name:                 name,
-		baseURL:              strings.TrimRight(baseURL, "/"),
-		apiKey:               apiKey,
-		httpClient:           &http.Client{Timeout: timeout, CheckRedirect: rejectCrossOriginRedirect},
-		retry:                defaultRetryConfig(),
-		streamingIdleTimeout: idleTimeout,
-	}
+	return &AnthropicAdapter{core: newCoreClient(name, baseURL, apiKey, timeout, idleTimeout, anthropicCodec{})}
 }
 
-func (a *AnthropicAdapter) Name() string { return a.name }
+func (a *AnthropicAdapter) Name() string { return a.core.name }
 
 func (a *AnthropicAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
-	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		telemetry := newModelTelemetry("anthropic_messages", a.name)
-		resp, retries, err := a.do(ctx, req, stream)
-		telemetry.retries = retries
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, err)
-			return
-		}
-		defer resp.Body.Close()
-
-		if cErr := classifyHTTPResponse(resp, "anthropic"); cErr != nil {
-			telemetry.finish(ctx, nil, cErr)
-			yield(nil, cErr)
-			return
-		}
-
-		if stream {
-			a.stream(ctx, resp.Body, func(response *adkmodel.LLMResponse, streamErr error) bool {
-				if streamErr != nil || (response != nil && response.TurnComplete) {
-					telemetry.finish(ctx, response, streamErr)
-				}
-				return yield(response, streamErr)
-			})
-			telemetry.finishIfNeeded(ctx)
-			return
-		}
-		payload, err := io.ReadAll(resp.Body)
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, fmt.Errorf("model: failed to read anthropic response: %w", err))
-			return
-		}
-		out, err := parseAnthropicResponse(payload)
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, err)
-			return
-		}
-		telemetry.finish(ctx, out, nil)
-		yield(out, nil)
-	}
-}
-
-func (a *AnthropicAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream bool) (*http.Response, int, error) {
-	retryCount := 0
-	body, err := buildAnthropicRequest(req, stream)
-	if err != nil {
-		return nil, retryCount, fmt.Errorf("model: failed to build anthropic request: %w", err)
-	}
-	url := a.baseURL + "/v1/messages"
-	retry := retryConfigForRequest(a.retry, req)
-	retry.RetryCount = &retryCount
-	resp, err := retryHTTP(ctx, retry, func() (*http.Response, error) {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("model: failed to create anthropic request: %w", err)
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("x-api-key", a.apiKey)
-		httpReq.Header.Set("anthropic-version", anthropicVersion)
-		resp, err := a.httpClient.Do(httpReq)
-		if err != nil {
-			return nil, classifyRequestError(err)
-		}
-		return resp, nil
-	})
-	return resp, retryCount, err
-}
-
-func (a *AnthropicAdapter) stream(ctx context.Context, body io.ReadCloser, yield func(*adkmodel.LLMResponse, error) bool) {
-	acc := &streamContentAccumulator{}
-
-	err := scanSSE(ctx, body, a.streamingIdleTimeout, func(data []byte) error {
-		var ev anthropicStreamEvent
-		if err := json.Unmarshal(data, &ev); err != nil {
-			return fmt.Errorf("model: failed to parse anthropic stream event: %w", err)
-		}
-		switch ev.Type {
-		case "message_start":
-			if ev.Message != nil {
-				acc.model = ev.Message.Model
-				acc.inputTokens = ev.Message.Usage.InputTokens
-			}
-		case "content_block_start":
-			if ev.ContentBlock != nil {
-				if ev.ContentBlock.Type == "text" {
-					acc.newBlock(ev.Index, blockText)
-				} else {
-					acc.newBlock(ev.Index, blockToolUse)
-					if ev.ContentBlock.ID != "" {
-						acc.blocks[ev.Index].id = ev.ContentBlock.ID
-					}
-					if ev.ContentBlock.Name != "" {
-						acc.blocks[ev.Index].name = ev.ContentBlock.Name
-					}
-				}
-			}
-		case "content_block_delta":
-			if ev.Delta != nil {
-				text := ev.Delta.Text
-				if ev.Delta.PartialJSON != "" {
-					text = ev.Delta.PartialJSON
-				}
-				b := acc.blocks[ev.Index]
-				if b != nil && text != "" {
-					b.text.WriteString(text)
-					if b.kind == blockText {
-						partial := &adkmodel.LLMResponse{
-							Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: ev.Delta.Text}}},
-							Partial: true,
-						}
-						if !yield(partial, nil) {
-							return errStopYield
-						}
-					}
-				}
-			}
-		case "message_delta":
-			if ev.Delta != nil {
-				acc.stopReason = ev.Delta.StopReason
-			}
-			if ev.Usage != nil {
-				acc.outputTokens = ev.Usage.OutputTokens
-			}
-		case "message_stop":
-			resp, err := acc.finalResponse()
-			if err != nil {
-				return err
-			}
-			if !yield(resp, nil) {
-				return errStopYield
-			}
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, errStopYield) {
-		yield(nil, err)
-	}
-}
-
-type blockKind int
-
-const (
-	blockText blockKind = iota
-	blockToolUse
-)
-
-type streamBlock struct {
-	kind blockKind
-	id   string
-	name string
-	text strings.Builder
-}
-
-type streamContentAccumulator struct {
-	model        string
-	inputTokens  int32
-	outputTokens int32
-	stopReason   string
-	blocks       map[int]*streamBlock
-	order        []int
-}
-
-func (a *streamContentAccumulator) newBlock(idx int, kind blockKind) {
-	if a.blocks == nil {
-		a.blocks = map[int]*streamBlock{}
-	}
-	a.blocks[idx] = &streamBlock{kind: kind}
-	a.order = append(a.order, idx)
-}
-
-func (a *streamContentAccumulator) finalResponse() (*adkmodel.LLMResponse, error) {
-	c := &genai.Content{Role: "model"}
-	for _, idx := range a.order {
-		b := a.blocks[idx]
-		switch b.kind {
-		case blockText:
-			c.Parts = append(c.Parts, &genai.Part{Text: b.text.String()})
-		case blockToolUse:
-			input := json.RawMessage(b.text.String())
-			if len(bytes.TrimSpace(input)) == 0 {
-				input = json.RawMessage("{}")
-			}
-			if !json.Valid(input) {
-				return nil, fmt.Errorf("model: invalid tool call %q: %w", b.name, ErrInvalidToolCall)
-			}
-			tc := ToolCall{ID: b.id, Name: b.name, Arguments: input}
-			fc, err := canonicalToFunctionCall(tc)
-			if err != nil {
-				return nil, err
-			}
-			c.Parts = append(c.Parts, &genai.Part{FunctionCall: fc})
-		}
-	}
-	return &adkmodel.LLMResponse{
-		Content:      c,
-		ModelVersion: a.model,
-		TurnComplete: true,
-		UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
-			PromptTokenCount:     a.inputTokens,
-			CandidatesTokenCount: a.outputTokens,
-			TotalTokenCount:      a.inputTokens + a.outputTokens,
-		},
-	}, nil
+	return a.core.GenerateContent(ctx, req, stream)
 }
 
 type anthropicRequest struct {
@@ -357,7 +197,10 @@ func buildAnthropicRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error
 				if fd == nil {
 					continue
 				}
-				params := toolParams(fd)
+				params, err := toolParams(fd)
+				if err != nil {
+					return nil, err
+				}
 				if params == nil {
 					params = json.RawMessage(`{"type":"object"}`)
 				}
@@ -370,15 +213,18 @@ func buildAnthropicRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error
 		}
 	}
 	for _, c := range req.Contents {
-		msgs := contentToAnthropicMessages(c)
+		msgs, err := contentToAnthropicMessages(c)
+		if err != nil {
+			return nil, err
+		}
 		body.Messages = append(body.Messages, msgs...)
 	}
 	return json.Marshal(body)
 }
 
-func contentToAnthropicMessages(c *genai.Content) []anthropicMessage {
+func contentToAnthropicMessages(c *genai.Content) ([]anthropicMessage, error) {
 	if c == nil {
-		return nil
+		return nil, nil
 	}
 	role := "user"
 	if c.Role == "model" {
@@ -390,7 +236,10 @@ func contentToAnthropicMessages(c *genai.Content) []anthropicMessage {
 		case p.Text != "":
 			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: p.Text})
 		case p.FunctionCall != nil:
-			tc := toCanonicalToolCall(p.FunctionCall)
+			tc, err := toCanonicalToolCall(p.FunctionCall)
+			if err != nil {
+				return nil, err
+			}
 			input := tc.Arguments
 			if len(input) == 0 {
 				input = json.RawMessage("{}")
@@ -405,9 +254,11 @@ func contentToAnthropicMessages(c *genai.Content) []anthropicMessage {
 			fr := p.FunctionResponse
 			resp := ""
 			if len(fr.Response) > 0 {
-				if b, err := json.Marshal(fr.Response); err == nil {
-					resp = string(b)
+				b, err := json.Marshal(fr.Response)
+				if err != nil {
+					return nil, fmt.Errorf("model: failed to marshal tool result: %w", err)
 				}
+				resp = string(b)
 			}
 			blocks = append(blocks, anthropicContentBlock{
 				Type:      "tool_result",
@@ -417,9 +268,9 @@ func contentToAnthropicMessages(c *genai.Content) []anthropicMessage {
 		}
 	}
 	if len(blocks) == 0 {
-		return nil
+		return nil, nil
 	}
-	return []anthropicMessage{{Role: role, Content: blocks}}
+	return []anthropicMessage{{Role: role, Content: blocks}}, nil
 }
 
 func parseAnthropicResponse(body []byte) (*adkmodel.LLMResponse, error) {

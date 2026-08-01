@@ -1,16 +1,12 @@
 package model
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
@@ -21,13 +17,76 @@ import (
 
 const geminiDefaultBaseURL = "https://generativelanguage.googleapis.com"
 
+type geminiCodec struct{}
+
+func (geminiCodec) protocol() string { return "gemini_native" }
+
+func (geminiCodec) endpoint(baseURL string, req *adkmodel.LLMRequest, stream bool) string {
+	action := "generateContent"
+	query := ""
+	if stream {
+		action = "streamGenerateContent"
+		query = "?alt=sse"
+	}
+	return baseURL + "/v1beta/models/" + url.PathEscape(req.Model) + ":" + action + query
+}
+
+func (geminiCodec) buildRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
+	return buildGeminiRequest(req)
+}
+
+func (geminiCodec) decodeResponse(body []byte) (*adkmodel.LLMResponse, error) {
+	return parseGeminiResponse(body)
+}
+
+func (geminiCodec) setAuthHeaders(req *http.Request, apiKey string) {
+	req.Header.Set("x-goog-api-key", apiKey)
+}
+
+func (geminiCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, error) {
+	response, err := parseGeminiResponse(data)
+	if err != nil {
+		return nil, false, err
+	}
+	complete := response.TurnComplete
+	var ops []streamOp
+	for _, part := range response.Content.Parts {
+		if part.Text != "" {
+			ops = append(ops, streamOp{kind: opText, text: part.Text, usageIn: usageIn(response), usageOut: usageOut(response)})
+		}
+		if part.FunctionCall != nil {
+			args, err := json.Marshal(part.FunctionCall.Args)
+			if err != nil {
+				return nil, false, fmt.Errorf("model: failed to marshal gemini tool call args: %w", err)
+			}
+			ops = append(ops,
+				streamOp{kind: opToolStart, idx: -1, toolID: part.FunctionCall.ID, toolName: part.FunctionCall.Name},
+				streamOp{kind: opToolArgs, idx: -1, toolArgs: string(args)},
+			)
+		}
+	}
+	if complete {
+		ops = append(ops, streamOp{kind: opDone, final: response})
+	}
+	return ops, complete, nil
+}
+
+func usageIn(response *adkmodel.LLMResponse) int32 {
+	if response.UsageMetadata == nil {
+		return 0
+	}
+	return response.UsageMetadata.PromptTokenCount
+}
+
+func usageOut(response *adkmodel.LLMResponse) int32 {
+	if response.UsageMetadata == nil {
+		return 0
+	}
+	return response.UsageMetadata.CandidatesTokenCount
+}
+
 type GeminiAdapter struct {
-	name                 string
-	baseURL              string
-	apiKey               string
-	httpClient           *http.Client
-	retry                RetryConfig
-	streamingIdleTimeout time.Duration
+	core *coreClient
 }
 
 func NewGeminiAdapter(name, baseURL, apiKey string, timeout time.Duration) (*GeminiAdapter, error) {
@@ -43,115 +102,13 @@ func newGeminiAdapter(name, baseURL, apiKey string, timeout, idleTimeout time.Du
 	if baseURL == "" {
 		baseURL = geminiDefaultBaseURL
 	}
-	if timeout <= 0 {
-		timeout = defaultRequestTimeout
-	}
-	if idleTimeout <= 0 {
-		idleTimeout = defaultStreamingIdleTimeout
-	}
-	return &GeminiAdapter{
-		name:                 name,
-		baseURL:              strings.TrimRight(baseURL, "/"),
-		apiKey:               apiKey,
-		httpClient:           &http.Client{Timeout: timeout, CheckRedirect: rejectCrossOriginRedirect},
-		retry:                defaultRetryConfig(),
-		streamingIdleTimeout: idleTimeout,
-	}
+	return &GeminiAdapter{core: newCoreClient(name, baseURL, apiKey, timeout, idleTimeout, geminiCodec{})}
 }
 
-func (a *GeminiAdapter) Name() string { return a.name }
+func (a *GeminiAdapter) Name() string { return a.core.name }
 
 func (a *GeminiAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
-	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		telemetry := newModelTelemetry("gemini_native", a.name)
-		resp, retries, err := a.do(ctx, req, stream)
-		telemetry.retries = retries
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, err)
-			return
-		}
-		defer resp.Body.Close()
-		if cErr := classifyHTTPResponse(resp, "gemini"); cErr != nil {
-			telemetry.finish(ctx, nil, cErr)
-			yield(nil, cErr)
-			return
-		}
-		if stream {
-			a.stream(ctx, resp.Body, func(response *adkmodel.LLMResponse, streamErr error) bool {
-				if streamErr != nil || (response != nil && response.TurnComplete) {
-					telemetry.finish(ctx, response, streamErr)
-				}
-				return yield(response, streamErr)
-			})
-			telemetry.finishIfNeeded(ctx)
-			return
-		}
-		payload, err := io.ReadAll(resp.Body)
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, fmt.Errorf("model: failed to read gemini response: %w", err))
-			return
-		}
-		out, err := parseGeminiResponse(payload)
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, err)
-			return
-		}
-		telemetry.finish(ctx, out, nil)
-		yield(out, nil)
-	}
-}
-
-func (a *GeminiAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream bool) (*http.Response, int, error) {
-	retryCount := 0
-	body, err := buildGeminiRequest(req)
-	if err != nil {
-		return nil, retryCount, fmt.Errorf("model: failed to build gemini request: %w", err)
-	}
-	action := "generateContent"
-	query := ""
-	if stream {
-		action = "streamGenerateContent"
-		query = "?alt=sse"
-	}
-	endpoint := a.baseURL + "/v1beta/models/" + url.PathEscape(req.Model) + ":" + action + query
-	retry := retryConfigForRequest(a.retry, req)
-	retry.RetryCount = &retryCount
-	resp, err := retryHTTP(ctx, retry, func() (*http.Response, error) {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("model: failed to create gemini request: %w", err)
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		if a.apiKey != "" {
-			httpReq.Header.Set("x-goog-api-key", a.apiKey)
-		}
-		resp, err := a.httpClient.Do(httpReq)
-		if err != nil {
-			return nil, classifyRequestError(err)
-		}
-		return resp, nil
-	})
-	return resp, retryCount, err
-}
-
-func (a *GeminiAdapter) stream(ctx context.Context, body io.ReadCloser, yield func(*adkmodel.LLMResponse, error) bool) {
-	err := scanSSE(ctx, body, a.streamingIdleTimeout, func(data []byte) error {
-		response, err := parseGeminiResponse(data)
-		if err != nil {
-			return err
-		}
-		response.Partial = !response.TurnComplete
-		if !yield(response, nil) {
-			return errStopYield
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, errStopYield) && !errors.Is(err, io.EOF) {
-		yield(nil, err)
-	}
+	return a.core.GenerateContent(ctx, req, stream)
 }
 
 type geminiRequest struct {
@@ -220,10 +177,14 @@ func buildGeminiRequest(req *adkmodel.LLMRequest) ([]byte, error) {
 				if declaration == nil {
 					continue
 				}
+				params, err := toolParams(declaration)
+				if err != nil {
+					return nil, err
+				}
 				geminiToolSpec.FunctionDeclarations = append(geminiToolSpec.FunctionDeclarations, geminiFunctionDeclaration{
 					Name:        declaration.Name,
 					Description: declaration.Description,
-					Parameters:  toolParams(declaration),
+					Parameters:  params,
 				})
 			}
 			if len(geminiToolSpec.FunctionDeclarations) > 0 {
@@ -285,7 +246,7 @@ func parseGeminiResponse(body []byte) (*adkmodel.LLMResponse, error) {
 		return nil, fmt.Errorf("model: failed to parse gemini response: %w", err)
 	}
 	if len(response.Candidates) == 0 {
-		return nil, errors.New("model: gemini response had no candidates")
+		return nil, codedError(ErrorCodeProtocolInvalid, nil, "model: gemini response had no candidates")
 	}
 	content := &genai.Content{Role: "model"}
 	for _, part := range response.Candidates[0].Content.Parts {
@@ -297,7 +258,7 @@ func parseGeminiResponse(body []byte) (*adkmodel.LLMResponse, error) {
 		}
 	}
 	if len(content.Parts) == 0 {
-		return nil, errors.New("model: gemini response had no content")
+		return nil, codedError(ErrorCodeProtocolInvalid, nil, "model: gemini response had no content")
 	}
 	var usage *genai.GenerateContentResponseUsageMetadata
 	if response.UsageMetadata != nil {

@@ -4,12 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
@@ -20,13 +17,52 @@ import (
 
 const openAIResponsesDefaultBaseURL = "https://api.openai.com"
 
+type openAIResponsesCodec struct{}
+
+func (openAIResponsesCodec) protocol() string { return "openai_responses" }
+
+func (openAIResponsesCodec) endpoint(baseURL string, req *adkmodel.LLMRequest, stream bool) string {
+	return baseURL + "/v1/responses"
+}
+
+func (openAIResponsesCodec) buildRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
+	return buildOpenAIResponsesRequest(req, stream)
+}
+
+func (openAIResponsesCodec) decodeResponse(body []byte) (*adkmodel.LLMResponse, error) {
+	return parseOpenAIResponsesResponse(body)
+}
+
+func (openAIResponsesCodec) setAuthHeaders(req *http.Request, apiKey string) {
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+}
+
+func (openAIResponsesCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, error) {
+	var event responsesStreamEvent
+	if err := json.Unmarshal(data, &event); err != nil {
+		return nil, false, fmt.Errorf("model: failed to parse openai responses stream event: %w", err)
+	}
+	switch event.Type {
+	case "response.output_text.delta":
+		if event.Delta == "" {
+			return nil, false, nil
+		}
+		return []streamOp{{kind: opText, text: event.Delta}}, false, nil
+	case "response.completed":
+		if event.Response == nil {
+			return nil, false, nil
+		}
+		response, err := parseOpenAIResponsesValue(*event.Response)
+		if err != nil {
+			return nil, false, err
+		}
+		return []streamOp{{kind: opDone, final: response}}, true, nil
+	}
+	return nil, false, nil
+}
+
 type OpenAIResponsesAdapter struct {
-	name                 string
-	baseURL              string
-	apiKey               string
-	httpClient           *http.Client
-	retry                RetryConfig
-	streamingIdleTimeout time.Duration
+	core *coreClient
 }
 
 func NewOpenAIResponsesAdapter(name, baseURL, apiKey string, timeout time.Duration) (*OpenAIResponsesAdapter, error) {
@@ -42,128 +78,13 @@ func newOpenAIResponsesAdapter(name, baseURL, apiKey string, timeout, idleTimeou
 	if baseURL == "" {
 		baseURL = openAIResponsesDefaultBaseURL
 	}
-	if timeout <= 0 {
-		timeout = defaultRequestTimeout
-	}
-	if idleTimeout <= 0 {
-		idleTimeout = defaultStreamingIdleTimeout
-	}
-	return &OpenAIResponsesAdapter{
-		name:                 name,
-		baseURL:              strings.TrimRight(baseURL, "/"),
-		apiKey:               apiKey,
-		httpClient:           &http.Client{Timeout: timeout, CheckRedirect: rejectCrossOriginRedirect},
-		retry:                defaultRetryConfig(),
-		streamingIdleTimeout: idleTimeout,
-	}
+	return &OpenAIResponsesAdapter{core: newCoreClient(name, baseURL, apiKey, timeout, idleTimeout, openAIResponsesCodec{})}
 }
 
-func (a *OpenAIResponsesAdapter) Name() string { return a.name }
+func (a *OpenAIResponsesAdapter) Name() string { return a.core.name }
 
 func (a *OpenAIResponsesAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
-	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		telemetry := newModelTelemetry("openai_responses", a.name)
-		resp, retries, err := a.do(ctx, req, stream)
-		telemetry.retries = retries
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, err)
-			return
-		}
-		defer resp.Body.Close()
-		if cErr := classifyHTTPResponse(resp, "openai"); cErr != nil {
-			telemetry.finish(ctx, nil, cErr)
-			yield(nil, cErr)
-			return
-		}
-		if stream {
-			a.stream(ctx, resp.Body, func(response *adkmodel.LLMResponse, streamErr error) bool {
-				if streamErr != nil || (response != nil && response.TurnComplete) {
-					telemetry.finish(ctx, response, streamErr)
-				}
-				return yield(response, streamErr)
-			})
-			telemetry.finishIfNeeded(ctx)
-			return
-		}
-		payload, err := io.ReadAll(resp.Body)
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, fmt.Errorf("model: failed to read openai responses response: %w", err))
-			return
-		}
-		out, err := parseOpenAIResponsesResponse(payload)
-		if err != nil {
-			telemetry.finish(ctx, nil, err)
-			yield(nil, err)
-			return
-		}
-		telemetry.finish(ctx, out, nil)
-		yield(out, nil)
-	}
-}
-
-func (a *OpenAIResponsesAdapter) do(ctx context.Context, req *adkmodel.LLMRequest, stream bool) (*http.Response, int, error) {
-	retryCount := 0
-	body, err := buildOpenAIResponsesRequest(req, stream)
-	if err != nil {
-		return nil, retryCount, fmt.Errorf("model: failed to build openai responses request: %w", err)
-	}
-	retry := retryConfigForRequest(a.retry, req)
-	retry.RetryCount = &retryCount
-	resp, err := retryHTTP(ctx, retry, func() (*http.Response, error) {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/responses", bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("model: failed to create openai responses request: %w", err)
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		if a.apiKey != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
-		}
-		resp, err := a.httpClient.Do(httpReq)
-		if err != nil {
-			return nil, classifyRequestError(err)
-		}
-		return resp, nil
-	})
-	return resp, retryCount, err
-}
-
-func (a *OpenAIResponsesAdapter) stream(ctx context.Context, body io.ReadCloser, yield func(*adkmodel.LLMResponse, error) bool) {
-	err := scanSSE(ctx, body, a.streamingIdleTimeout, func(data []byte) error {
-		var event responsesStreamEvent
-		if err := json.Unmarshal(data, &event); err != nil {
-			return fmt.Errorf("model: failed to parse openai responses stream event: %w", err)
-		}
-		switch event.Type {
-		case "response.output_text.delta":
-			if event.Delta == "" {
-				return nil
-			}
-			response := &adkmodel.LLMResponse{
-				Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: event.Delta}}},
-				Partial: true,
-			}
-			if !yield(response, nil) {
-				return errStopYield
-			}
-		case "response.completed":
-			if event.Response == nil {
-				return nil
-			}
-			response, err := parseOpenAIResponsesValue(*event.Response)
-			if err != nil {
-				return err
-			}
-			if !yield(response, nil) {
-				return errStopYield
-			}
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, errStopYield) && !errors.Is(err, io.EOF) {
-		yield(nil, err)
-	}
+	return a.core.GenerateContent(ctx, req, stream)
 }
 
 type openAIResponsesRequest struct {
@@ -218,24 +139,32 @@ func buildOpenAIResponsesRequest(req *adkmodel.LLMRequest, stream bool) ([]byte,
 				if declaration == nil {
 					continue
 				}
+				params, err := toolParams(declaration)
+				if err != nil {
+					return nil, err
+				}
 				body.Tools = append(body.Tools, openAIResponsesTool{
 					Type:        "function",
 					Name:        declaration.Name,
 					Description: declaration.Description,
-					Parameters:  toolParams(declaration),
+					Parameters:  params,
 				})
 			}
 		}
 	}
 	for _, content := range req.Contents {
-		body.Input = append(body.Input, contentToOpenAIResponsesInput(content)...)
+		inputs, err := contentToOpenAIResponsesInput(content)
+		if err != nil {
+			return nil, err
+		}
+		body.Input = append(body.Input, inputs...)
 	}
 	return json.Marshal(body)
 }
 
-func contentToOpenAIResponsesInput(content *genai.Content) []openAIResponsesInput {
+func contentToOpenAIResponsesInput(content *genai.Content) ([]openAIResponsesInput, error) {
 	if content == nil {
-		return nil
+		return nil, nil
 	}
 	role := "user"
 	if content.Role == "model" {
@@ -252,14 +181,19 @@ func contentToOpenAIResponsesInput(content *genai.Content) []openAIResponsesInpu
 			}
 			text = append(text, openAIResponsesContent{Type: contentType, Text: part.Text})
 		case part.FunctionCall != nil:
-			tc := toCanonicalToolCall(part.FunctionCall)
+			tc, err := toCanonicalToolCall(part.FunctionCall)
+			if err != nil {
+				return nil, err
+			}
 			items = append(items, openAIResponsesInput{Type: "function_call", CallID: tc.ID, Name: tc.Name, Arguments: string(tc.Arguments)})
 		case part.FunctionResponse != nil:
 			result := "{}"
 			if len(part.FunctionResponse.Response) > 0 {
-				if encoded, err := json.Marshal(part.FunctionResponse.Response); err == nil {
-					result = string(encoded)
+				encoded, err := json.Marshal(part.FunctionResponse.Response)
+				if err != nil {
+					return nil, fmt.Errorf("model: failed to marshal tool result: %w", err)
 				}
+				result = string(encoded)
 			}
 			items = append(items, openAIResponsesInput{Type: "function_call_output", CallID: part.FunctionResponse.ID, Output: result})
 		}
@@ -267,7 +201,7 @@ func contentToOpenAIResponsesInput(content *genai.Content) []openAIResponsesInpu
 	if len(text) > 0 {
 		items = append([]openAIResponsesInput{{Role: role, Content: text}}, items...)
 	}
-	return items
+	return items, nil
 }
 
 type openAIResponsesResponse struct {
@@ -328,7 +262,7 @@ func parseOpenAIResponsesValue(response openAIResponsesResponse) (*adkmodel.LLMR
 		}
 	}
 	if len(content.Parts) == 0 {
-		return nil, errors.New("model: openai responses output was empty")
+		return nil, codedError(ErrorCodeProtocolInvalid, nil, "model: openai responses output was empty")
 	}
 	var usage *genai.GenerateContentResponseUsageMetadata
 	if response.Usage != nil {

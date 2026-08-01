@@ -58,6 +58,7 @@ var (
 	ErrInvalidToolCall  = errors.New("model: invalid tool call")
 	ErrConnectionFailed = errors.New("model: connection failed")
 	ErrStreamIdle       = errors.New("model: stream idle timeout")
+	ErrStreamTruncated  = errors.New("model: stream ended before the terminal event")
 )
 
 func newError(code ErrorCode, model, capability, detail string) error {

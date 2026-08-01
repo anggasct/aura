@@ -130,7 +130,7 @@ func TestOpenAI_Streaming(t *testing.T) {
 	var final *adkmodel.LLMResponse
 	for _, r := range resps {
 		for _, p := range r.Content.Parts {
-			if p.Text != "" {
+			if p.Text != "" && r.Partial {
 				text += p.Text
 			}
 		}
@@ -140,6 +140,17 @@ func TestOpenAI_Streaming(t *testing.T) {
 	}
 	if text != "Hello world" {
 		t.Errorf("streamed text = %q, want %q", text, "Hello world")
+	}
+	if final != nil {
+		var finalText string
+		for _, p := range final.Content.Parts {
+			if p.Text != "" {
+				finalText += p.Text
+			}
+		}
+		if finalText != "Hello world" {
+			t.Errorf("final content = %q, want accumulated %q", finalText, "Hello world")
+		}
 	}
 	if final == nil || final.UsageMetadata.TotalTokenCount != 5 {
 		t.Errorf("final usage missing/wrong: %+v", final)
@@ -166,7 +177,7 @@ func TestOpenAI_RateLimited(t *testing.T) {
 	defer srv.Close()
 
 	a := mustOpenAIAdapter(t, "gpt-4o", srv.URL, "sk-test", 0)
-	a.retry.MaxRetries = 0
+	a.core.retry.MaxRetries = 0
 	_, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
 	if !errors.Is(err, ErrRateLimited) {
 		t.Errorf("err = %v, want ErrRateLimited", err)
@@ -259,7 +270,7 @@ func TestOpenAI_StreamingIdleTimeout(t *testing.T) {
 	defer srv.Close()
 
 	a := mustOpenAIAdapter(t, "gpt-4o", srv.URL, "sk-test", 0)
-	a.streamingIdleTimeout = 25 * time.Millisecond
+	a.core.idleTimeout = 25 * time.Millisecond
 	seq := a.GenerateContent(context.Background(), sampleRequest("hi"), true)
 	errCh := make(chan error, 1)
 	done := make(chan struct{})
@@ -358,5 +369,78 @@ func TestOpenAI_RequestSerializesToolCall(t *testing.T) {
 	}
 	if toolMsg == nil || toolMsg.ToolCallID != "call_1" {
 		t.Errorf("tool result message not serialized: %+v", toolMsg)
+	}
+}
+
+func TestOpenAI_EmptyResponseTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeFixture(t, w, []byte(`{"choices":[]}`))
+	}))
+	defer srv.Close()
+
+	a := mustOpenAIAdapter(t, "gpt-4o", srv.URL, "sk-test", 0)
+	_, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeProtocolInvalid)
+	}
+}
+
+func TestGemini_EmptyResponseTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeFixture(t, w, []byte(`{"candidates":[]}`))
+	}))
+	defer srv.Close()
+
+	adapter, err := NewGeminiAdapter("gemini-2.5-pro", srv.URL, "key", 0)
+	if err != nil {
+		t.Fatalf("NewGeminiAdapter: %v", err)
+	}
+	_, err = collect(adapter.GenerateContent(context.Background(), sampleRequest("hi"), false))
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeProtocolInvalid)
+	}
+}
+
+func TestResponses_EmptyOutputTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeFixture(t, w, []byte(`{"output":[]}`))
+	}))
+	defer srv.Close()
+
+	adapter, err := NewOpenAIResponsesAdapter("gpt-5", srv.URL, "key", 0)
+	if err != nil {
+		t.Fatalf("NewOpenAIResponsesAdapter: %v", err)
+	}
+	_, err = collect(adapter.GenerateContent(context.Background(), sampleRequest("hi"), false))
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeProtocolInvalid)
+	}
+}
+
+func TestRequestBuild_MarshalErrorsPropagated(t *testing.T) {
+	bad := map[string]any{"unserializable": make(chan int)}
+	req := &adkmodel.LLMRequest{
+		Model: "gpt-4o",
+		Contents: []*genai.Content{{
+			Role:  "user",
+			Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{ID: "t1", Name: "tool", Response: bad}}},
+		}},
+	}
+	for _, build := range []struct {
+		name string
+		fn   func() ([]byte, error)
+	}{
+		{name: "openai", fn: func() ([]byte, error) { return buildOpenAIRequest(req, false) }},
+		{name: "anthropic", fn: func() ([]byte, error) { return buildAnthropicRequest(req, false) }},
+		{name: "responses", fn: func() ([]byte, error) { return buildOpenAIResponsesRequest(req, false) }},
+	} {
+		t.Run(build.name, func(t *testing.T) {
+			if _, err := build.fn(); err == nil {
+				t.Fatal("expected marshal error, got nil")
+			}
+		})
+	}
+	if _, err := toCanonicalToolCall(&genai.FunctionCall{ID: "c1", Name: "f", Args: bad}); err == nil {
+		t.Fatal("expected marshal error from toCanonicalToolCall, got nil")
 	}
 }
