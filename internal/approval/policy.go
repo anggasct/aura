@@ -80,7 +80,8 @@ type ToolResult struct {
 
 // ToolBroker is the single decision point every tool invocation passes
 // through before execution. A grant obtained from Evaluate is the only way
-// to reach Execute.
+// to reach Execute. Pointer parameters are required; a nil argument returns
+// invalid_argument rather than panicking.
 type ToolBroker interface {
 	Evaluate(ctx context.Context, request *ToolRequest) (PolicyDecision, error)
 	Execute(ctx context.Context, request *ToolRequest, grant *ApprovalGrant) (ToolResult, error)
@@ -144,8 +145,15 @@ type ApprovalGrant struct {
 }
 
 // ValidFor checks every bound field against the request and the current
-// policy version at time now. Any mismatch is approval_invalid.
+// policy version at time now. Any mismatch is approval_invalid. Nil
+// arguments are programming errors and return invalid_argument.
 func (g *ApprovalGrant) ValidFor(request *ToolRequest, policyVersion string, now time.Time) error {
+	if g == nil {
+		return Errorf(ErrorCodeInvalidArgument, "grant must not be nil")
+	}
+	if request == nil {
+		return Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
 	if g.GrantID == "" || g.Nonce == "" {
 		return Errorf(ErrorCodeApprovalInvalid, "grant is missing its identity or nonce")
 	}

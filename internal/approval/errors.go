@@ -8,6 +8,7 @@ import (
 type ErrorCode string
 
 const (
+	ErrorCodeInvalidArgument       ErrorCode = "invalid_argument"
 	ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"
 	ErrorCodePolicyDenied          ErrorCode = "policy_denied"
 	ErrorCodeApprovalRequired      ErrorCode = "approval_required"

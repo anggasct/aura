@@ -130,7 +130,7 @@ func TestEvaluateInvalidTrustLabel(t *testing.T) {
 	}
 }
 
-// AC-01: every invocation passes through policy exactly once; execution is
+// Every invocation passes through policy exactly once; execution is
 // only reachable with a grant minted after policy passed, and reusing a
 // grant fails.
 func TestExecuteRequiresGrantFromPolicy(t *testing.T) {
@@ -187,7 +187,7 @@ func TestExecuteForgedGrantRejected(t *testing.T) {
 	}
 }
 
-// AC-02: argument, scope, expiry, or nonce changes invalidate a grant.
+// Argument, scope, expiry, or nonce changes invalidate a grant.
 func TestGrantInvalidatedByFieldChanges(t *testing.T) {
 	engine := newTestEngine(t)
 	request := testRequest("read_file")
@@ -230,7 +230,7 @@ func TestGrantInvalidatedByFieldChanges(t *testing.T) {
 	}
 }
 
-// AC-02: an argument change in the request itself (tampered between grant
+// An argument change in the request itself (tampered between grant
 // and execute) invalidates the grant, because the hash no longer matches.
 func TestExecuteRejectsTamperedArguments(t *testing.T) {
 	engine := newTestEngine(t)
@@ -248,7 +248,7 @@ func TestExecuteRejectsTamperedArguments(t *testing.T) {
 	}
 }
 
-// AC-07: untrusted and derived content is always data — it cannot change
+// Untrusted and derived content is always data — it cannot change
 // policy or the approval outcome. The policy is immutable after
 // construction and no request field can mutate it; an untrusted request
 // with a policy-approved tool still evaluates under policy constraints.
@@ -371,6 +371,48 @@ func TestTrustLabelHelpers(t *testing.T) {
 	if TrustOwnerInput.IsUntrusted() || TrustTrustedConfiguration.IsUntrusted() {
 		t.Error("trusted labels must not report untrusted")
 	}
+}
+
+func TestNilArgumentsReturnInvalidArgument(t *testing.T) {
+	engine := newTestEngine(t)
+	request := testRequest("read_file")
+
+	// Nil request on every entry point.
+	if _, err := engine.Evaluate(context.Background(), nil); !isInvalidArgument(err) {
+		t.Errorf("Evaluate(nil) = %v, want invalid_argument", err)
+	}
+	if _, err := engine.Grant(context.Background(), nil, time.Minute); !isInvalidArgument(err) {
+		t.Errorf("Grant(nil) = %v, want invalid_argument", err)
+	}
+	if _, err := engine.Execute(context.Background(), nil, &ApprovalGrant{}); !isInvalidArgument(err) {
+		t.Errorf("Execute(nil request) = %v, want invalid_argument", err)
+	}
+
+	// Nil grant on Execute.
+	grant, err := engine.Grant(context.Background(), &request, time.Minute)
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if _, err := engine.Execute(context.Background(), &request, nil); !isInvalidArgument(err) {
+		t.Errorf("Execute(nil grant) = %v, want invalid_argument", err)
+	}
+	_ = grant
+
+	// Nil grant on ValidFor.
+	if err := (*ApprovalGrant)(nil).ValidFor(&request, "v1", time.Now()); !isInvalidArgument(err) {
+		t.Errorf("ValidFor(nil grant) = %v, want invalid_argument", err)
+	}
+	if err := grant.ValidFor(nil, "v1", time.Now()); !isInvalidArgument(err) {
+		t.Errorf("ValidFor(nil request) = %v, want invalid_argument", err)
+	}
+}
+
+func isInvalidArgument(err error) bool {
+	if err == nil {
+		return false
+	}
+	code, ok := CodeOf(err)
+	return ok && code == ErrorCodeInvalidArgument
 }
 
 func TestErrorsAreTyped(t *testing.T) {

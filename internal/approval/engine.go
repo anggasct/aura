@@ -62,6 +62,9 @@ func (e *Engine) Evaluate(ctx context.Context, request *ToolRequest) (PolicyDeci
 }
 
 func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecision, error) {
+	if request == nil {
+		return PolicyDecision{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
 	if strings.TrimSpace(request.ToolName) == "" {
 		return PolicyDecision{}, Errorf(ErrorCodePolicyDenied, "tool name must not be empty")
 	}
@@ -87,7 +90,7 @@ func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecisi
 		return PolicyDecision{
 			Outcome:       OutcomeRequireApproval,
 			PolicyVersion: e.policy.Version,
-			ReasonCode:    "approval_required",
+			ReasonCode:    string(ErrorCodeApprovalRequired),
 			Constraints:   rule.Constraints,
 		}, nil
 	}
@@ -103,9 +106,12 @@ func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecisi
 // principal, session, tool, arguments hash, constraints, policy version,
 // expiry, and a one-shot nonce. The decision is re-derived from policy, so
 // a fabricated decision can never mint a grant; Execute is only reachable
-// through this path (AC-01). Changing any bound field later invalidates
-// the grant (AC-02).
+// through this path. Changing any bound field later invalidates
+// the grant.
 func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Duration) (ApprovalGrant, error) {
+	if request == nil {
+		return ApprovalGrant{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
 	decision, err := e.decide(ctx, request)
 	if err != nil {
 		return ApprovalGrant{}, err
@@ -147,6 +153,12 @@ func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 // current policy, and the one-shot nonce has not been consumed. The handler
 // receives the decision constraints and never re-decides policy.
 func (e *Engine) Execute(ctx context.Context, request *ToolRequest, grant *ApprovalGrant) (ToolResult, error) {
+	if request == nil {
+		return ToolResult{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
+	if grant == nil {
+		return ToolResult{}, Errorf(ErrorCodeInvalidArgument, "grant must not be nil")
+	}
 	if err := grant.ValidFor(request, e.policy.Version, e.now()); err != nil {
 		return ToolResult{}, err
 	}
