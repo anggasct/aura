@@ -163,12 +163,21 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 				Detail: fmt.Sprintf("blob %s would exceed the storage quota of %d bytes", digest, s.quotaBytes),
 			}
 		}
+		// A concurrent Put may commit the same digest between the SELECT
+		// above and this INSERT; ON CONFLICT turns that into dedupe, not an
+		// error, and the media type is re-read below.
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)`,
+			`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(digest) DO NOTHING`,
 			digest, size, meta.MediaType, relPath, formatTime(createdAt),
 		); err != nil {
 			return ArtifactRef{}, fmt.Errorf("insert blob %s: %w", digest, err)
 		}
+		var mediaType string
+		if err := tx.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&mediaType); err != nil {
+			return ArtifactRef{}, fmt.Errorf("read blob %s: %w", digest, err)
+		}
+		ref.MediaType = mediaType
 	default:
 		return ArtifactRef{}, fmt.Errorf("read blob %s: %w", digest, err)
 	}

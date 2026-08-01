@@ -36,13 +36,15 @@ var connectionPragmaSet = []struct {
 // OpenDB opens a SQLite database and installs a connection policy hook so
 // that every physical connection the pool creates - not just the first -
 // gets foreign keys, WAL, busy timeout, and synchronous mode applied and
-// verified before it is handed to a caller.
+// verified before it is handed to a caller. Write transactions begin
+// immediately, so a transaction that reads before writing waits for the
+// write lock instead of failing on a stale snapshot.
 func OpenDB(ctx context.Context, dsn string) (*sql.DB, error) {
 	registerConnectionPolicyOnce.Do(func() {
 		sqlite.RegisterConnectionHook(verifyConnectionPolicy)
 	})
 
-	db, err := sql.Open(sqlDriverName, dsn)
+	db, err := sql.Open(sqlDriverName, withImmediateTxlock(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
@@ -51,6 +53,10 @@ func OpenDB(ctx context.Context, dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
 	return db, nil
+}
+
+func withImmediateTxlock(path string) string {
+	return (&url.URL{Scheme: "file", Path: path, RawQuery: "_txlock=immediate"}).String()
 }
 
 // openReadOnly opens a SQLite database without ever writing to it, so a

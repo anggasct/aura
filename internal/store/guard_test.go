@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -205,6 +206,138 @@ func TestArtifactPutRejectsOverQuotaDuringCopy(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("tmp dir holds %d leftover files, want 0", len(entries))
+	}
+}
+
+func TestArtifactConcurrentSameDigestPutsDedupe(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	artifacts := NewArtifactStore(db, t.TempDir(), DefaultArtifactQuotaBytes)
+
+	const workers = 8
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := artifacts.Put(ctx, bytes.NewReader([]byte("same bytes")), &ArtifactMetadata{
+				ID: "artifact-dedupe", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
+			})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent Put: %v", err)
+		}
+	}
+
+	var blobCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM blob`).Scan(&blobCount); err != nil {
+		t.Fatalf("count blob rows: %v", err)
+	}
+	if blobCount != 1 {
+		t.Errorf("blob rows = %d, want 1 (single digest)", blobCount)
+	}
+}
+
+func TestSessionCreateDuplicateReturnsConflict(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+
+	wantCode(t, NewSessionService(db).Create(ctx, &Session{ID: "session-1"}), ErrorCodeSessionIDConflict)
+}
+
+func TestListEventsRejectsNegativeLimit(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+
+	_, err := NewSessionService(db).ListEvents(ctx, "session-1", 0, -1)
+	wantCode(t, err, ErrorCodeInvalidArgument)
+}
+
+func TestEventAppendRejectsInvalidPayload(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+
+	e := newEvent("session-1", 1)
+	e.Payload = json.RawMessage(`{"broken":`)
+	wantCode(t, NewEventStore(db).Append(ctx, &e), ErrorCodeEventPayloadInvalid)
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_event`).Scan(&count); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("rows written = %d, want 0", count)
+	}
+}
+
+func TestMigrateRejectsVersionAboveBinary(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO schema_migration (version, checksum, applied_at) VALUES (?, ?, ?)`,
+		migrations[len(migrations)-1].version+1, "future", "2026-08-01T00:00:00Z",
+	); err != nil {
+		t.Fatalf("insert future migration: %v", err)
+	}
+
+	wantCode(t, Migrate(ctx, db), ErrorCodeMigrationSequenceInvalid)
+}
+
+func TestValidateMigrationOrder(t *testing.T) {
+	if err := validateMigrationOrder([]migration{{version: 1}, {version: 2}}); err != nil {
+		t.Errorf("strictly increasing list rejected: %v", err)
+	}
+	for _, ms := range [][]migration{
+		{{version: 1}, {version: 1}},
+		{{version: 2}, {version: 1}},
+	} {
+		if err := validateMigrationOrder(ms); err == nil {
+			t.Errorf("validateMigrationOrder(%+v) accepted a non-increasing list", ms)
+		} else {
+			wantCode(t, err, ErrorCodeMigrationSequenceInvalid)
+		}
+	}
+}
+
+func TestReconcileDetectsCorruptedBlobs(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	root := t.TempDir()
+	artifacts := NewArtifactStore(db, root, DefaultArtifactQuotaBytes)
+
+	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("original")), &ArtifactMetadata{
+		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	absPath := filepath.Join(root, "blobs", ref.BlobDigest[:2], ref.BlobDigest)
+	if err := os.WriteFile(absPath, []byte("corrupted"), 0o600); err != nil {
+		t.Fatalf("corrupt blob file: %v", err)
+	}
+
+	report, err := Reconcile(ctx, db, root)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(report.CorruptedBlobs) != 1 || report.CorruptedBlobs[0] != ref.BlobDigest {
+		t.Errorf("CorruptedBlobs = %v, want [%s]", report.CorruptedBlobs, ref.BlobDigest)
+	}
+	if len(report.MissingBlobs) != 0 || len(report.OrphanFiles) != 0 {
+		t.Errorf("unexpected missing=%v orphan=%v", report.MissingBlobs, report.OrphanFiles)
 	}
 }
 
