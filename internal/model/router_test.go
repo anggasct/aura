@@ -243,7 +243,7 @@ func TestResolveSecretFromFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(" file-secret\n"), 0o600); err != nil {
 		t.Fatalf("write secret: %v", err)
 	}
-	got, err := resolveSecret("primary", config.ModelDefinition{APIKeyFile: path})
+	got, err := resolveSecret("primary", &config.ModelDefinition{APIKeyFile: path})
 	if err != nil {
 		t.Fatalf("resolveSecret: %v", err)
 	}
@@ -253,18 +253,18 @@ func TestResolveSecretFromFile(t *testing.T) {
 }
 
 func TestRejectCrossOriginRedirect(t *testing.T) {
-	previous, err := http.NewRequest(http.MethodGet, "https://provider.example/v1", nil)
+	previous, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://provider.example/v1", http.NoBody)
 	if err != nil {
 		t.Fatalf("previous request: %v", err)
 	}
-	sameOrigin, err := http.NewRequest(http.MethodGet, "https://provider.example/other", nil)
+	sameOrigin, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://provider.example/other", http.NoBody)
 	if err != nil {
 		t.Fatalf("same-origin request: %v", err)
 	}
 	if err := rejectCrossOriginRedirect(sameOrigin, []*http.Request{previous}); err != nil {
 		t.Fatalf("same-origin redirect rejected: %v", err)
 	}
-	crossOrigin, err := http.NewRequest(http.MethodGet, "https://attacker.example/collect", nil)
+	crossOrigin, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://attacker.example/collect", http.NoBody)
 	if err != nil {
 		t.Fatalf("cross-origin request: %v", err)
 	}

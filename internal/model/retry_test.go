@@ -48,6 +48,7 @@ func TestRetryHTTP_ExponentialBackoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retryHTTP: %v", err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK || calls != 4 {
 		t.Errorf("status=%d calls=%d, want status 200 after 4 calls", resp.StatusCode, calls)
 	}
@@ -75,7 +76,7 @@ func TestRetryHTTP_RetryAfterOverridesBackoff(t *testing.T) {
 		},
 	}
 	calls := 0
-	_, err := retryHTTP(context.Background(), cfg, func() (*http.Response, error) {
+	resp, err := retryHTTP(context.Background(), cfg, func() (*http.Response, error) {
 		calls++
 		if calls == 1 {
 			return testHTTPResponse(http.StatusTooManyRequests, "2"), nil
@@ -85,6 +86,7 @@ func TestRetryHTTP_RetryAfterOverridesBackoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retryHTTP: %v", err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 	if delay != 2*time.Second {
 		t.Errorf("delay=%v, want 2s from Retry-After", delay)
 	}
@@ -100,6 +102,9 @@ func TestRetryHTTP_MaxRetriesAndNonTransient(t *testing.T) {
 		if err != nil || resp.StatusCode != status || calls != 1 {
 			t.Errorf("status %d: resp=%v err=%v calls=%d, want one attempt", status, resp, err, calls)
 		}
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
 	}
 
 	calls := 0
@@ -111,15 +116,21 @@ func TestRetryHTTP_MaxRetriesAndNonTransient(t *testing.T) {
 	if err != nil || resp.StatusCode != http.StatusBadGateway || calls != 4 {
 		t.Errorf("exhausted retries: resp=%v err=%v calls=%d, want final 502 after 4 attempts", resp, err, calls)
 	}
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 }
 
 func TestRetryHTTP_ContextCancellationDuringSleep(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	cfg := RetryConfig{MaxRetries: 1, Sleep: sleepWithContext}
-	_, err := retryHTTP(ctx, cfg, func() (*http.Response, error) {
+	resp, err := retryHTTP(ctx, cfg, func() (*http.Response, error) {
 		return testHTTPResponse(http.StatusServiceUnavailable, ""), nil
 	})
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err=%v, want context.Canceled", err)
 	}
@@ -127,7 +138,7 @@ func TestRetryHTTP_ContextCancellationDuringSleep(t *testing.T) {
 
 func TestExponentialDelay_CapsJitteredDelay(t *testing.T) {
 	cfg := RetryConfig{BaseDelay: time.Second, MaxDelay: time.Second, Jitter: 1}
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		if got := exponentialDelay(cfg, 1); got > cfg.MaxDelay {
 			t.Fatalf("delay=%v, want <= %v", got, cfg.MaxDelay)
 		}

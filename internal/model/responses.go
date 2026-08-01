@@ -60,43 +60,43 @@ func (a *OpenAIResponsesAdapter) Name() string { return a.name }
 
 func (a *OpenAIResponsesAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		telemetry := newModelTelemetry(ctx, "openai_responses", a.name)
+		telemetry := newModelTelemetry("openai_responses", a.name)
 		resp, retries, err := a.do(ctx, req, stream)
 		telemetry.retries = retries
 		if err != nil {
-			telemetry.finish(nil, err)
+			telemetry.finish(ctx, nil, err)
 			yield(nil, err)
 			return
 		}
 		defer resp.Body.Close()
 		if cErr := classifyHTTPResponse(resp, "openai"); cErr != nil {
-			telemetry.finish(nil, cErr)
+			telemetry.finish(ctx, nil, cErr)
 			yield(nil, cErr)
 			return
 		}
 		if stream {
 			a.stream(ctx, resp.Body, func(response *adkmodel.LLMResponse, streamErr error) bool {
 				if streamErr != nil || (response != nil && response.TurnComplete) {
-					telemetry.finish(response, streamErr)
+					telemetry.finish(ctx, response, streamErr)
 				}
 				return yield(response, streamErr)
 			})
-			telemetry.finishIfNeeded()
+			telemetry.finishIfNeeded(ctx)
 			return
 		}
 		payload, err := io.ReadAll(resp.Body)
 		if err != nil {
-			telemetry.finish(nil, err)
+			telemetry.finish(ctx, nil, err)
 			yield(nil, fmt.Errorf("model: failed to read openai responses response: %w", err))
 			return
 		}
 		out, err := parseOpenAIResponsesResponse(payload)
 		if err != nil {
-			telemetry.finish(nil, err)
+			telemetry.finish(ctx, nil, err)
 			yield(nil, err)
 			return
 		}
-		telemetry.finish(out, nil)
+		telemetry.finish(ctx, out, nil)
 		yield(out, nil)
 	}
 }
@@ -326,7 +326,7 @@ func parseOpenAIResponsesValue(response openAIResponsesResponse) (*adkmodel.LLMR
 		}
 	}
 	if len(content.Parts) == 0 {
-		return nil, fmt.Errorf("model: openai responses output was empty")
+		return nil, errors.New("model: openai responses output was empty")
 	}
 	var usage *genai.GenerateContentResponseUsageMetadata
 	if response.Usage != nil {

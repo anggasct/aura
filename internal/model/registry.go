@@ -31,7 +31,7 @@ func RegisterAdapters(models config.Models) error {
 		if spec.Protocol == "" || spec.Model == "" {
 			continue
 		}
-		if _, err := newAdapter(role, spec, timeout, idleTimeout); err != nil {
+		if _, err := newAdapter(role, &spec, timeout, idleTimeout); err != nil {
 			return err
 		}
 		pattern := "^" + regexp.QuoteMeta(spec.Model) + "$"
@@ -39,10 +39,9 @@ func RegisterAdapters(models config.Models) error {
 			return fmt.Errorf("model: %q already registered", spec.Model)
 		}
 		registeredModelPatterns[pattern] = true
-		registeredRole := role
 		registeredSpec := spec
-		adkmodel.Register(pattern, func(ctx context.Context, name string) (adkmodel.LLM, error) {
-			return newAdapter(registeredRole, registeredSpec, timeout, idleTimeout)
+		adkmodel.Register(pattern, func(_ context.Context, _ string) (adkmodel.LLM, error) {
+			return newAdapter(role, &registeredSpec, timeout, idleTimeout)
 		})
 	}
 	return nil

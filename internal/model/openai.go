@@ -60,18 +60,18 @@ func (a *OpenAIAdapter) Name() string { return a.name }
 
 func (a *OpenAIAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		telemetry := newModelTelemetry(ctx, "openai_chat_compat", a.name)
+		telemetry := newModelTelemetry("openai_chat_compat", a.name)
 		resp, retries, err := a.do(ctx, req, stream)
 		telemetry.retries = retries
 		if err != nil {
-			telemetry.finish(nil, err)
+			telemetry.finish(ctx, nil, err)
 			yield(nil, err)
 			return
 		}
 		defer resp.Body.Close()
 
 		if cErr := classifyHTTPResponse(resp, "openai"); cErr != nil {
-			telemetry.finish(nil, cErr)
+			telemetry.finish(ctx, nil, cErr)
 			yield(nil, cErr)
 			return
 		}
@@ -79,26 +79,26 @@ func (a *OpenAIAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRe
 		if stream {
 			a.stream(ctx, resp.Body, func(response *adkmodel.LLMResponse, streamErr error) bool {
 				if streamErr != nil || (response != nil && response.TurnComplete) {
-					telemetry.finish(response, streamErr)
+					telemetry.finish(ctx, response, streamErr)
 				}
 				return yield(response, streamErr)
 			})
-			telemetry.finishIfNeeded()
+			telemetry.finishIfNeeded(ctx)
 			return
 		}
 		payload, err := io.ReadAll(resp.Body)
 		if err != nil {
-			telemetry.finish(nil, err)
+			telemetry.finish(ctx, nil, err)
 			yield(nil, fmt.Errorf("model: failed to read openai response: %w", err))
 			return
 		}
 		out, err := parseOpenAIResponse(payload)
 		if err != nil {
-			telemetry.finish(nil, err)
+			telemetry.finish(ctx, nil, err)
 			yield(nil, err)
 			return
 		}
-		telemetry.finish(out, nil)
+		telemetry.finish(ctx, out, nil)
 		yield(out, nil)
 	}
 }
@@ -350,7 +350,7 @@ func parseOpenAIResponse(body []byte) (*adkmodel.LLMResponse, error) {
 		return nil, fmt.Errorf("model: failed to parse openai response: %w", err)
 	}
 	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("model: openai response had no choices")
+		return nil, errors.New("model: openai response had no choices")
 	}
 	msg := resp.Choices[0].Message
 	c := &genai.Content{Role: "model"}
@@ -478,7 +478,7 @@ func (s *streamToolAccumulator) add(tc openaiStreamToolCall) {
 }
 
 func (s *streamToolAccumulator) parts() ([]*genai.Part, error) {
-	var parts []*genai.Part
+	parts := make([]*genai.Part, 0, len(s.order))
 	for _, idx := range s.order {
 		args := json.RawMessage(s.args[idx].String())
 		if len(bytes.TrimSpace(args)) == 0 {
