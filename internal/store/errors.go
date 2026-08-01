@@ -16,6 +16,7 @@ const (
 	ErrorCodeStorageBusy               ErrorCode = "storage_busy"
 	ErrorCodeArtifactQuotaExceeded     ErrorCode = "artifact_quota_exceeded"
 	ErrorCodeArtifactBlobMissing       ErrorCode = "artifact_blob_missing"
+	ErrorCodeBackupDestinationConflict ErrorCode = "backup_destination_conflict"
 )
 
 type Error struct {
