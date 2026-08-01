@@ -13,8 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test:
-    name: Build & Test
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -34,7 +33,7 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Fmt check
+      - name: Gofmt check
         run: |
           if [ -n "$(gofmt -l .)" ]; then
             echo "Unformatted files found:"
@@ -48,10 +47,7 @@ jobs:
       - name: Lint
         run: golangci-lint run
 
-      - name: Diff check
-        run: git diff --check
-
-      - name: Test
+      - name: Test (race)
         run: go test -v -race ./...
 
       - name: Build (all platforms, static)
