@@ -59,6 +59,12 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 	if len(args) > 0 {
 		root.SetArgs(args)
 	}
+	// An unknown subcommand is a usage error, but cobra surfaces it from
+	// Execute with no marker, so classify it here before running.
+	if _, _, err := root.Find(args); err != nil {
+		fmt.Fprintln(os.Stderr, "aura:", err)
+		return 2
+	}
 	if err := root.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "aura:", err)
 		var ue *usageError

@@ -138,7 +138,7 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := applyDefaults(cfg, data); err != nil {
 		return LoadResult{}, err
 	}
-	if err := validateLoadedModels(cfg.Models, data); err != nil {
+	if err := validateLoadedModels(cfg.Models, routingExplicitIn(data)); err != nil {
 		return LoadResult{}, err
 	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
@@ -498,7 +498,7 @@ func validateModelDefinition(name string, node *yamlv3.Node) error {
 
 // validateLoadedModels owns every semantic model rule, regardless of whether
 // a definition came from the file or from environment overrides.
-func validateLoadedModels(models Models, data []byte) error {
+func validateLoadedModels(models Models, routingExplicit bool) error {
 	for name, definition := range models.Definitions {
 		if strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "" {
 			return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s requires non-empty protocol and model", name)}
@@ -522,20 +522,28 @@ func validateLoadedModels(models Models, data []byte) error {
 			return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires positive context_tokens and a tokenizer", name)}
 		}
 	}
-	return validateRouting(models, data)
+	return validateRouting(models, routingExplicit)
+}
+
+// routingExplicitIn reports whether the document declares a models.routing
+// section, so the semantic pass can restrict reference checks to routing the
+// user actually configured.
+func routingExplicitIn(data []byte) bool {
+	doc, err := parseDocument(data)
+	if err != nil {
+		return false
+	}
+	if modelsNode := mappingValue(doc, "models"); modelsNode != nil {
+		return mappingValue(modelsNode, "routing") != nil
+	}
+	return false
 }
 
 // validateRouting checks routing roles and, when the file declares an
 // explicit routing section, that each referenced role exists as a defined
 // model. Default-merged routing is exempt from the reference check, since a
 // single-model config legitimately routes tasks it never runs.
-func validateRouting(models Models, data []byte) error {
-	explicit := false
-	if doc, err := parseDocument(data); err == nil {
-		if modelsNode := mappingValue(doc, "models"); modelsNode != nil {
-			explicit = mappingValue(modelsNode, "routing") != nil
-		}
-	}
+func validateRouting(models Models, explicit bool) error {
 	for task, role := range models.Routing {
 		if role != "primary" && role != "auxiliary" {
 			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("models.routing.%s: role %q is not supported (must be primary or auxiliary)", task, role)}

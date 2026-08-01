@@ -67,6 +67,9 @@ func TestExecuteContextExitCodes(t *testing.T) {
 	if code := ExecuteContext(context.Background(), "exec"); code != 2 {
 		t.Errorf("usage error exit code = %d, want 2", code)
 	}
+	if code := ExecuteContext(context.Background(), "bogus"); code != 2 {
+		t.Errorf("unknown command exit code = %d, want 2", code)
+	}
 	if code := ExecuteContext(context.Background(), "server", "--config", "definitely-missing.yaml"); code != 1 {
 		t.Errorf("runtime error exit code = %d, want 1", code)
 	}
