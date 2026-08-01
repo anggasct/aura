@@ -30,6 +30,9 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if result.DefaultGenerated {
 				slog.Info("generating default config", "component", "config", "path", result.Path)
 			}
+			for _, key := range result.Warnings {
+				slog.Warn("unrecognized AURA_ environment variable is ignored", "component", "config", "env", key)
+			}
 			if _, err := model.BuildRouter(cfg.Models); err != nil {
 				return err
 			}

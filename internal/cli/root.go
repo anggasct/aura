@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -8,6 +10,16 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 )
+
+// usageError marks argument and flag errors so ExecuteContext can exit with
+// code 2 instead of the runtime error code.
+type usageError struct {
+	err error
+}
+
+func (e *usageError) Error() string { return e.err.Error() }
+
+func (e *usageError) Unwrap() error { return e.err }
 
 type globalFlags struct {
 	configPath string
@@ -33,8 +45,26 @@ func newRootCmd() *cobra.Command {
 }
 
 func Execute() int {
-	if err := newRootCmd().Execute(); err != nil {
+	return ExecuteContext(context.Background())
+}
+
+// ExecuteContext runs the CLI with ctx, exiting 2 for usage errors, 1 for
+// runtime errors, and 0 on success. When args is empty the process arguments
+// are used.
+func ExecuteContext(ctx context.Context, args ...string) int {
+	root := newRootCmd()
+	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return &usageError{err}
+	})
+	if len(args) > 0 {
+		root.SetArgs(args)
+	}
+	if err := root.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "aura:", err)
+		var ue *usageError
+		if errors.As(err, &ue) {
+			return 2
+		}
 		return 1
 	}
 	return 0

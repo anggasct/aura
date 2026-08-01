@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -30,22 +31,44 @@ func TestVersionCommand(t *testing.T) {
 }
 
 func TestChatStub(t *testing.T) {
-	out, err := execute(t, "chat")
-	if err != nil {
-		t.Fatalf("chat: %v", err)
+	_, err := execute(t, "chat")
+	if err == nil {
+		t.Fatal("expected chat to fail loudly, got nil")
 	}
-	if !strings.Contains(out, "aura chat: interactive console not yet implemented") {
-		t.Errorf("unexpected chat output:\n%s", out)
+	if !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("unexpected chat error: %v", err)
 	}
 }
 
 func TestExecStub(t *testing.T) {
-	out, err := execute(t, "exec", "--", "ls", "-la")
-	if err != nil {
-		t.Fatalf("exec: %v", err)
+	_, err := execute(t, "exec", "--", "ls", "-la")
+	if err == nil {
+		t.Fatal("expected exec to fail loudly, got nil")
 	}
-	if !strings.Contains(out, "aura exec: sandboxed execution not yet implemented") {
-		t.Errorf("unexpected exec output:\n%s", out)
+	if !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("unexpected exec error: %v", err)
+	}
+}
+
+func TestExecRequiresArgument(t *testing.T) {
+	_, err := execute(t, "exec")
+	if err == nil {
+		t.Fatal("expected usage error for exec without arguments, got nil")
+	}
+	if !strings.Contains(err.Error(), "requires at least one argument") {
+		t.Errorf("unexpected exec usage error: %v", err)
+	}
+}
+
+func TestExecuteContextExitCodes(t *testing.T) {
+	if code := ExecuteContext(context.Background(), "version"); code != 0 {
+		t.Errorf("version exit code = %d, want 0", code)
+	}
+	if code := ExecuteContext(context.Background(), "exec"); code != 2 {
+		t.Errorf("usage error exit code = %d, want 2", code)
+	}
+	if code := ExecuteContext(context.Background(), "server", "--config", "definitely-missing.yaml"); code != 1 {
+		t.Errorf("runtime error exit code = %d, want 1", code)
 	}
 }
 
