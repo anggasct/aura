@@ -172,7 +172,7 @@ func newAdapter(name string, spec *config.ModelDefinition, timeout, idleTimeout 
 		return nil, nil
 	}
 	if spec.BaseURL != "" {
-		if err := validateBaseURL(spec.BaseURL); err != nil {
+		if err := config.ValidateBaseURL(spec.BaseURL); err != nil {
 			return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("invalid base_url %q: %v", spec.BaseURL, err))
 		}
 	}
@@ -204,7 +204,7 @@ func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {
 	}
 	if spec.APIKeyEnv != "" {
 		value, ok := os.LookupEnv(spec.APIKeyEnv)
-		if !ok || (value == "" && !isLocalhost(spec.BaseURL)) {
+		if !ok || (value == "" && !config.IsLoopbackBaseURL(spec.BaseURL)) {
 			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("secret environment variable %q is unavailable", spec.APIKeyEnv))
 		}
 		return value, nil
@@ -220,45 +220,10 @@ func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {
 		}
 		return value, nil
 	}
-	if !isLocalhost(spec.BaseURL) {
+	if !config.IsLoopbackBaseURL(spec.BaseURL) {
 		return "", newError(ErrorCodeSecretInvalid, name, "", "api_key_env or api_key_file is required for a non-loopback endpoint")
 	}
 	return "", nil
-}
-
-func validateBaseURL(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return err
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return errors.New("scheme must be http or https")
-	}
-	if u.Host == "" {
-		return errors.New("missing host")
-	}
-	if u.User != nil {
-		return errors.New("user info is not allowed")
-	}
-	if u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("query and fragment are not allowed")
-	}
-	if u.Scheme == "http" && !isLocalhost(raw) {
-		return errors.New("https is required for non-localhost endpoints")
-	}
-	return nil
-}
-
-func isLocalhost(raw string) bool {
-	if raw == "" {
-		return false
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	host := u.Hostname()
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func rejectCrossOriginRedirect(req *http.Request, via []*http.Request) error {

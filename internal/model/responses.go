@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/config"
+
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
@@ -29,7 +31,7 @@ type OpenAIResponsesAdapter struct {
 
 func NewOpenAIResponsesAdapter(name, baseURL, apiKey string, timeout time.Duration) (*OpenAIResponsesAdapter, error) {
 	if baseURL != "" {
-		if err := validateBaseURL(baseURL); err != nil {
+		if err := config.ValidateBaseURL(baseURL); err != nil {
 			return nil, fmt.Errorf("model: invalid base_url %q: %w", baseURL, err)
 		}
 	}
