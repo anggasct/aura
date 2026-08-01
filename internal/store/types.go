@@ -29,14 +29,15 @@ type RuntimeEvent struct {
 	CreatedAt     time.Time
 }
 
+// Pointer parameters are required; a nil argument returns ErrorCodeInvalidArgument.
 type SessionService interface {
-	Create(context.Context, Session) error
-	Get(context.Context, string) (Session, error)
-	ListEvents(context.Context, string, uint64, int) ([]RuntimeEvent, error)
+	Create(ctx context.Context, sess *Session) error
+	Get(ctx context.Context, sessionID string) (Session, error)
+	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]RuntimeEvent, error)
 }
 
 type EventStore interface {
-	Append(context.Context, RuntimeEvent) error
-	AppendBatch(context.Context, []RuntimeEvent) error
-	LastSequence(context.Context, string) (uint64, error)
+	Append(ctx context.Context, e *RuntimeEvent) error
+	AppendBatch(ctx context.Context, events []RuntimeEvent) error
+	LastSequence(ctx context.Context, sessionID string) (uint64, error)
 }

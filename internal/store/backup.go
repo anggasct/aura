@@ -34,7 +34,7 @@ type BackupManifest struct {
 // verify recovered sessions, events, dedupe keys, and artifact links against
 // checksummed content.
 func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, error) {
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		return BackupManifest{}, fmt.Errorf("create backup dir %s: %w", destDir, err)
 	}
 
@@ -68,7 +68,7 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 	if err != nil {
 		return BackupManifest{}, fmt.Errorf("marshal backup manifest: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(destDir, backupManifestFilename), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(destDir, backupManifestFilename), data, 0o600); err != nil {
 		return BackupManifest{}, fmt.Errorf("write backup manifest: %w", err)
 	}
 	return manifest, nil

@@ -66,7 +66,10 @@ func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (RuntimeEv
 
 // RuntimeEventToADK reverses RuntimeEventFromADK, reconstructing an ADK
 // session event from a stored RuntimeEvent.
-func RuntimeEventToADK(e RuntimeEvent) (*session.Event, error) {
+func RuntimeEventToADK(e *RuntimeEvent) (*session.Event, error) {
+	if e == nil {
+		return nil, errNilArgument("event")
+	}
 	if e.Kind != EventKindADK {
 		return nil, fmt.Errorf("event %s has kind %q, want %q", e.ID, e.Kind, EventKindADK)
 	}
@@ -122,7 +125,7 @@ func ReplayTurn(ctx context.Context, db *sql.DB, sessionID, turnID string) (even
 		if err != nil {
 			return nil, false, fmt.Errorf("replay turn %s: %w", turnID, err)
 		}
-		ev, err := RuntimeEventToADK(e)
+		ev, err := RuntimeEventToADK(&e)
 		if err != nil {
 			return nil, false, fmt.Errorf("replay turn %s: %w", turnID, err)
 		}

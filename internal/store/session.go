@@ -16,7 +16,10 @@ func NewSessionService(db *sql.DB) SessionService {
 	return &sqliteSessionService{db: db}
 }
 
-func (s *sqliteSessionService) Create(ctx context.Context, sess Session) error {
+func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error {
+	if sess == nil {
+		return errNilArgument("session")
+	}
 	metadata := sess.Metadata
 	if metadata == nil {
 		metadata = json.RawMessage(`{}`)
@@ -50,14 +53,18 @@ func (s *sqliteSessionService) Get(ctx context.Context, id string) (Session, err
 	return sess, nil
 }
 
-func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string, after uint64, limit int) ([]RuntimeEvent, error) {
+func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]RuntimeEvent, error) {
+	after, err := sequenceToDB(afterSequence)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`
 		 FROM runtime_event
 		 WHERE session_id = ? AND sequence > ?
 		 ORDER BY sequence ASC
 		 LIMIT ?`,
-		sessionID, int64(after), limit,
+		sessionID, after, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list events for session %s: %w", sessionID, err)

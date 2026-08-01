@@ -65,7 +65,7 @@ func TestOpenDBAppliesPolicyToEveryConnection(t *testing.T) {
 	db.SetMaxIdleConns(0)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -135,7 +135,7 @@ func TestSessionCreateGetRoundTrip(t *testing.T) {
 	sessions := NewSessionService(db)
 
 	want := newSession("session-1")
-	if err := sessions.Create(ctx, want); err != nil {
+	if err := sessions.Create(ctx, &want); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -181,7 +181,8 @@ func newEvent(sessionID string, sequence uint64) RuntimeEvent {
 
 func mustCreateSession(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
-	if err := NewSessionService(db).Create(context.Background(), newSession(id)); err != nil {
+	sess := newSession(id)
+	if err := NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 }
@@ -193,10 +194,10 @@ func TestEventAppendIsIdempotent(t *testing.T) {
 	events := NewEventStore(db)
 
 	e := newEvent("session-1", 1)
-	if err := events.Append(ctx, e); err != nil {
+	if err := events.Append(ctx, &e); err != nil {
 		t.Fatalf("first Append: %v", err)
 	}
-	if err := events.Append(ctx, e); err != nil {
+	if err := events.Append(ctx, &e); err != nil {
 		t.Fatalf("repeat Append (idempotent): %v", err)
 	}
 
@@ -216,13 +217,13 @@ func TestEventAppendSequenceConflict(t *testing.T) {
 	events := NewEventStore(db)
 
 	first := newEvent("session-1", 1)
-	if err := events.Append(ctx, first); err != nil {
+	if err := events.Append(ctx, &first); err != nil {
 		t.Fatalf("first Append: %v", err)
 	}
 
 	second := newEvent("session-1", 1)
 	second.ID = "a-different-event-id"
-	err := events.Append(ctx, second)
+	err := events.Append(ctx, &second)
 	if err == nil {
 		t.Fatal("expected event_sequence_conflict, got nil")
 	}
@@ -240,7 +241,7 @@ func TestEventAppendBatchAtomicity(t *testing.T) {
 
 	conflicting := newEvent("session-1", 1)
 	conflicting.ID = "conflicting-event"
-	if err := events.Append(ctx, conflicting); err != nil {
+	if err := events.Append(ctx, &conflicting); err != nil {
 		t.Fatalf("seed conflicting event: %v", err)
 	}
 
@@ -267,11 +268,12 @@ func TestEventAppendConcurrentDistinctSequences(t *testing.T) {
 	const n = 50
 	var wg sync.WaitGroup
 	errs := make([]error, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(seq uint64) {
 			defer wg.Done()
-			errs[seq-1] = events.Append(ctx, newEvent("session-1", seq))
+			e := newEvent("session-1", seq)
+			errs[seq-1] = events.Append(ctx, &e)
 		}(uint64(i + 1))
 	}
 	wg.Wait()
@@ -314,7 +316,7 @@ func TestEventAppendConcurrentSequenceCollision(t *testing.T) {
 		wg.Add(1)
 		go func(idx int, ev RuntimeEvent) {
 			defer wg.Done()
-			results[idx] = events.Append(ctx, ev)
+			results[idx] = events.Append(ctx, &ev)
 		}(i, e)
 	}
 	wg.Wait()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -97,12 +98,11 @@ func drainRows(rows driver.Rows) error {
 
 	dest := make([]driver.Value, len(rows.Columns()))
 	for {
-		switch err := rows.Next(dest); err {
-		case nil:
-			continue
-		case io.EOF:
+		err := rows.Next(dest)
+		if errors.Is(err, io.EOF) {
 			return nil
-		default:
+		}
+		if err != nil {
 			return err
 		}
 	}
