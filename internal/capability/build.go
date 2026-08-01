@@ -1,9 +1,9 @@
 package capability
 
 import (
+	"fmt"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -42,13 +42,13 @@ func ParseBuild(profile, capabilities, goos string) (Build, error) {
 func NewBuild(profile string, capabilities []string, goos string) (Build, error) {
 	p := Profile(profile)
 	if !p.Valid() {
-		return Build{}, newError(ErrorCodeProfileInvalid, "", "unsupported build profile "+profile)
+		return Build{}, newError(ErrorCodeProfileInvalid, "", fmt.Sprintf("unsupported build profile %q", profile))
 	}
 	if goos == "" {
 		return Build{}, newError(ErrorCodeProfileInvalid, "", "build operating system is empty")
 	}
 	if p.requiresLinux() && goos != "linux" {
-		return Build{}, newError(ErrorCodeCapabilityUnavailable, "", string(p)+" requires Linux")
+		return Build{}, newError(ErrorCodeCapabilityUnavailable, "", fmt.Sprintf("%q requires Linux", p))
 	}
 
 	compiled := slices.Clone(capabilities)
@@ -62,7 +62,7 @@ func NewBuild(profile string, capabilities []string, goos string) (Build, error)
 		}
 		seen[name] = struct{}{}
 	}
-	sort.Strings(compiled)
+	slices.Sort(compiled)
 
 	return Build{profile: p, capabilities: compiled, goos: goos}, nil
 }
