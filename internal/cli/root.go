@@ -61,16 +61,17 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 		return &usageError{err}
 	})
 	root.SetArgs(effective)
-	// An unknown subcommand is a usage error, but cobra surfaces it from
-	// Execute with no marker, so classify it here before running.
-	if _, _, err := root.Find(effective); err != nil {
-		fmt.Fprintln(os.Stderr, "aura:", err)
-		return 2
-	}
 	if err := root.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "aura:", err)
 		var ue *usageError
 		if errors.As(err, &ue) {
+			return 2
+		}
+		// An unknown subcommand is a usage error, but cobra surfaces it
+		// from Execute with no marker. Classify it here: by this point
+		// cobra's built-in commands (help, completion, __complete) are
+		// registered, so a Find failure is a genuine unknown command.
+		if _, _, findErr := root.Find(effective); findErr != nil {
 			return 2
 		}
 		return 1

@@ -71,8 +71,30 @@ func TestExecuteContextExitCodes(t *testing.T) {
 	if code := ExecuteContext(context.Background(), "bogus"); code != 2 {
 		t.Errorf("unknown command exit code = %d, want 2", code)
 	}
+	if code := ExecuteContext(context.Background(), "help"); code != 0 {
+		t.Errorf("built-in help exit code = %d, want 0", code)
+	}
+	if code := ExecuteContext(context.Background(), "help", "version"); code != 0 {
+		t.Errorf("built-in help <cmd> exit code = %d, want 0", code)
+	}
+	if code := ExecuteContext(context.Background(), "completion", "bash"); code != 0 {
+		t.Errorf("built-in completion exit code = %d, want 0", code)
+	}
 	if code := ExecuteContext(context.Background(), "server", "--config", "definitely-missing.yaml"); code != 1 {
 		t.Errorf("runtime error exit code = %d, want 1", code)
+	}
+}
+
+func TestExecuteContextBuiltinsViaProcessArgs(t *testing.T) {
+	oldArgs := os.Args
+	t.Cleanup(func() { os.Args = oldArgs })
+	os.Args = []string{"aura", "help"}
+	if code := ExecuteContext(context.Background()); code != 0 {
+		t.Errorf("help (process args) exit code = %d, want 0", code)
+	}
+	os.Args = []string{"aura", "completion", "bash"}
+	if code := ExecuteContext(context.Background()); code != 0 {
+		t.Errorf("completion bash (process args) exit code = %d, want 0", code)
 	}
 }
 
