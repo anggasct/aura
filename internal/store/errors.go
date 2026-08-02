@@ -16,6 +16,7 @@ const (
 	ErrorCodeEventPayloadInvalid       ErrorCode = "event_payload_invalid"
 	ErrorCodeInvalidArgument           ErrorCode = "invalid_argument"
 	ErrorCodeSessionIDConflict         ErrorCode = "session_id_conflict"
+	ErrorCodeSessionNotFound           ErrorCode = "session_not_found"
 	ErrorCodeMigrationChecksumMismatch ErrorCode = "migration_checksum_mismatch"
 	ErrorCodeMigrationSequenceInvalid  ErrorCode = "migration_sequence_invalid"
 	ErrorCodeArtifactQuotaExceeded     ErrorCode = "artifact_quota_exceeded"

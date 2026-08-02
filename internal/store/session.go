@@ -35,7 +35,7 @@ func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error 
 				Detail: fmt.Sprintf("session %s already exists", sess.ID),
 			}
 		}
-		return fmt.Errorf("create session %s: %w", sess.ID, err)
+		return classifyBusy(fmt.Errorf("create session %s: %w", sess.ID, err))
 	}
 	return nil
 }

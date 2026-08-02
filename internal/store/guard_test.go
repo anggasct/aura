@@ -44,6 +44,33 @@ func TestAppendRejectsSequenceAboveInt64(t *testing.T) {
 	}
 }
 
+func TestAppendRejectsZeroSequence(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+
+	e := newEvent("session-1", 0)
+	wantCode(t, NewEventStore(db).Append(ctx, &e), ErrorCodeEventSequenceInvalid)
+}
+
+func TestAppendRejectsZeroSchemaVersion(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+
+	e := newEvent("session-1", 1)
+	e.SchemaVersion = 0
+	wantCode(t, NewEventStore(db).Append(ctx, &e), ErrorCodeEventSchemaVersionInvalid)
+}
+
+func TestAppendMissingSessionIsTyped(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	e := newEvent("missing-session", 1)
+	wantCode(t, NewEventStore(db).Append(ctx, &e), ErrorCodeSessionNotFound)
+}
+
 func TestAppendPreservesMaxValidSequence(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

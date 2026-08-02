@@ -177,7 +177,7 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 			 ON CONFLICT(digest) DO NOTHING`,
 			digest, size, meta.MediaType, relPath, formatTime(createdAt),
 		); err != nil {
-			return ArtifactRef{}, fmt.Errorf("insert blob %s: %w", digest, err)
+			return ArtifactRef{}, classifyBusy(fmt.Errorf("insert blob %s: %w", digest, err))
 		}
 		var mediaType string
 		if err := tx.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&mediaType); err != nil {
@@ -194,7 +194,7 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		 ON CONFLICT(id) DO NOTHING`,
 		meta.ID, digest, meta.SessionID, nullableString(meta.EventID), meta.Filename, jsonOrEmptyObject(meta.Metadata), formatTime(createdAt),
 	); err != nil {
-		return ArtifactRef{}, fmt.Errorf("insert artifact ref %s: %w", meta.ID, err)
+		return ArtifactRef{}, classifyBusy(fmt.Errorf("insert artifact ref %s: %w", meta.ID, err))
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -252,14 +252,20 @@ func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) erro
 		link.ID, link.BlobDigest, link.SessionID, nullableString(link.EventID), link.Filename, jsonOrEmptyObject(link.Metadata), formatTime(time.Now()),
 	)
 	if err != nil {
-		return fmt.Errorf("link artifact %s to blob %s: %w", link.ID, link.BlobDigest, err)
+		if isConstraintForeignKey(err) {
+			return &Error{
+				Code:   ErrorCodeSessionNotFound,
+				Detail: fmt.Sprintf("session %s does not exist", link.SessionID),
+			}
+		}
+		return classifyBusy(fmt.Errorf("link artifact %s to blob %s: %w", link.ID, link.BlobDigest, err))
 	}
 	return nil
 }
 
 func (s *sqliteArtifactStore) Unlink(ctx context.Context, refID string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM artifact_ref WHERE id = ?`, refID); err != nil {
-		return fmt.Errorf("unlink artifact %s: %w", refID, err)
+		return classifyBusy(fmt.Errorf("unlink artifact %s: %w", refID, err))
 	}
 	return nil
 }

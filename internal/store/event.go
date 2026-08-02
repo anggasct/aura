@@ -16,6 +16,8 @@ import (
 const (
 	sqliteConstraintUnique     = 2067 // SQLITE_CONSTRAINT_UNIQUE
 	sqliteConstraintPrimaryKey = 1555 // SQLITE_CONSTRAINT_PRIMARYKEY
+	sqliteConstraintCheck      = 275  // SQLITE_CONSTRAINT_CHECK
+	sqliteConstraintForeignKey = 787  // SQLITE_CONSTRAINT_FOREIGNKEY
 )
 
 const insertRuntimeEventSQL = `
@@ -81,6 +83,8 @@ func (s *sqliteEventStore) LastSequence(ctx context.Context, sessionID string) (
 // sequenceToDB and sequenceFromDB bridge the uint64 domain counter and the
 // signed INTEGER column. Out-of-range values are rejected rather than wrapped,
 // so a corrupt row can never present itself as a valid ordering position.
+// Zero is valid here: it is the "from the beginning" cursor in ListEvents and
+// only the append boundary rejects it.
 func sequenceToDB(sequence uint64) (int64, error) {
 	if sequence > math.MaxInt64 {
 		return 0, &Error{
@@ -111,6 +115,18 @@ func schemaVersionFromDB(stored int64) (uint16, error) {
 	return uint16(stored), nil
 }
 
+// schemaVersionToDB rejects a zero schema version at the boundary, mirroring
+// the schema's CHECK (schema_version > 0).
+func schemaVersionToDB(version uint16) (int64, error) {
+	if version == 0 {
+		return 0, &Error{
+			Code:   ErrorCodeEventSchemaVersionInvalid,
+			Detail: "schema version must be positive",
+		}
+	}
+	return int64(version), nil
+}
+
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
@@ -128,13 +144,29 @@ func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sq
 			Detail: fmt.Sprintf("event %s payload is not valid JSON", e.ID),
 		}
 	}
+	if e.Sequence == 0 {
+		return &Error{
+			Code:   ErrorCodeEventSequenceInvalid,
+			Detail: fmt.Sprintf("event %s sequence must be positive", e.ID),
+		}
+	}
+	if e.SchemaVersion == 0 {
+		return &Error{
+			Code:   ErrorCodeEventSchemaVersionInvalid,
+			Detail: fmt.Sprintf("event %s schema version must be positive", e.ID),
+		}
+	}
 	sequence, err := sequenceToDB(e.Sequence)
+	if err != nil {
+		return err
+	}
+	schemaVersion, err := schemaVersionToDB(e.SchemaVersion)
 	if err != nil {
 		return err
 	}
 	_, err = exec(ctx,
 		e.ID, e.SessionID, sequence, e.TurnID, e.InvocationID, e.Branch, e.Author, e.Kind,
-		int64(e.SchemaVersion), string(e.Payload), nullableJSON(e.ProviderUsage), formatTime(e.CreatedAt),
+		schemaVersion, string(e.Payload), nullableJSON(e.ProviderUsage), formatTime(e.CreatedAt),
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
@@ -143,19 +175,44 @@ func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sq
 				Detail: fmt.Sprintf("session %s sequence %d already used by a different event", e.SessionID, e.Sequence),
 			}
 		}
+		if isConstraintForeignKey(err) {
+			return &Error{
+				Code:   ErrorCodeSessionNotFound,
+				Detail: fmt.Sprintf("session %s does not exist", e.SessionID),
+			}
+		}
+		if isConstraintCheck(err) {
+			return &Error{
+				Code:   ErrorCodeEventPayloadInvalid,
+				Detail: fmt.Sprintf("event %s violates a storage constraint", e.ID),
+			}
+		}
 		return classifyBusy(fmt.Errorf("append event %s: %w", e.ID, err))
 	}
 	return nil
 }
 
 func isConstraintUnique(err error) bool {
+	return isConstraintCode(err, sqliteConstraintUnique, sqliteConstraintPrimaryKey)
+}
+
+func isConstraintForeignKey(err error) bool {
+	return isConstraintCode(err, sqliteConstraintForeignKey)
+}
+
+func isConstraintCheck(err error) bool {
+	return isConstraintCode(err, sqliteConstraintCheck)
+}
+
+func isConstraintCode(err error, codes ...int) bool {
 	var sqliteErr *sqlite.Error
 	if !errors.As(err, &sqliteErr) {
 		return false
 	}
-	switch sqliteErr.Code() {
-	case sqliteConstraintUnique, sqliteConstraintPrimaryKey:
-		return true
+	for _, code := range codes {
+		if sqliteErr.Code() == code {
+			return true
+		}
 	}
 	return false
 }
