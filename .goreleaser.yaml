@@ -32,5 +32,23 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+sboms:
+  - artifacts: archive
+
+# Cosign keyless signing: in CI the OIDC token (id-token: write) makes cosign
+# sign without a long-lived key. Locally `make release-snapshot` skips signing.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
 changelog:
   disable: true
