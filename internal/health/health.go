@@ -1,17 +1,16 @@
 // Package health defines Aura's diagnostics contract: typed findings, a
 // bounded evaluator, and checkers for the conditions an operator must detect
 // (migration state, capability availability, sandbox support, backup age,
-// provider configuration). Checkers take narrow probes so the package stays
-// decoupled from the subsystems it observes; the composition root wires real
-// probes and presents the findings (aura status, readiness probes).
+// provider configuration, stuck effects/jobs). Checkers take narrow probes so
+// the package stays decoupled from the subsystems it observes; the composition
+// root wires real probes and presents the findings (aura status, readiness
+// probes).
 package health
 
 import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/anggasct/aura/internal/capability"
 )
 
 // Status is a component's coarse health state, ordered from healthy to failed.
@@ -32,6 +31,7 @@ const (
 	ComponentSandbox    = "sandbox"
 	ComponentBackup     = "backup"
 	ComponentProvider   = "provider"
+	ComponentEffectJob  = "effect_job"
 )
 
 // Finding is one typed diagnostic. Detail is operator-facing and redacted: no
@@ -116,17 +116,26 @@ func (c MigrationChecker) Check(ctx context.Context) []Finding {
 	}
 }
 
-// CapabilityChecker reports capabilities that are unavailable or missing.
-// Disabled capabilities are a configuration choice, not a health fault.
-type CapabilityChecker struct {
-	Statuses []capability.Status
+// CapabilityStatus is the health-owned view of one capability's availability.
+// The composition root maps the capability registry onto this narrow shape so
+// the health package need not import the capability domain.
+type CapabilityStatus struct {
+	Name      string
+	Available bool
 }
 
-func (c CapabilityChecker) Check(_ context.Context) []Finding {
+// CapabilityChecker reports capabilities that are unavailable. Statuses probes
+// the current capability availability.
+type CapabilityChecker struct {
+	Statuses func(ctx context.Context) []CapabilityStatus
+}
+
+func (c CapabilityChecker) Check(ctx context.Context) []Finding {
 	now := time.Now().UTC()
-	findings := make([]Finding, 0, len(c.Statuses))
-	for _, s := range c.Statuses {
-		if s.State == capability.StateUnavailable || s.State == capability.StateMissing {
+	statuses := c.Statuses(ctx)
+	findings := make([]Finding, 0, len(statuses))
+	for _, s := range statuses {
+		if !s.Available {
 			findings = append(findings, Finding{
 				Component: ComponentCapability + "/" + s.Name,
 				Code:      "capability_unavailable",
@@ -189,4 +198,23 @@ func (c ProviderChecker) Check(ctx context.Context) []Finding {
 		return []Finding{{Component: ComponentProvider, Code: "provider_unavailable", Status: StatusDown, Detail: "no provider configured", CheckedAt: now}}
 	}
 	return []Finding{{Component: ComponentProvider, Code: "ok", Status: StatusUp, Detail: "provider configured", CheckedAt: now}}
+}
+
+// EffectJobChecker reports stuck effects and jobs. Stuck probes the count of
+// effect/job records that have not reached a terminal state; the composition
+// root wires it to the effect journal once that lands.
+type EffectJobChecker struct {
+	Stuck func(ctx context.Context) (count int, err error)
+}
+
+func (c EffectJobChecker) Check(ctx context.Context) []Finding {
+	now := time.Now().UTC()
+	count, err := c.Stuck(ctx)
+	if err != nil {
+		return []Finding{{Component: ComponentEffectJob, Code: "effect_job_unknown", Status: StatusUnknown, Detail: "effect/job state unavailable", CheckedAt: now}}
+	}
+	if count > 0 {
+		return []Finding{{Component: ComponentEffectJob, Code: "effect_job_stuck", Status: StatusDegraded, Detail: fmt.Sprintf("%d effect/job records stuck", count), CheckedAt: now}}
+	}
+	return []Finding{{Component: ComponentEffectJob, Code: "ok", Status: StatusUp, Detail: "no stuck effects or jobs", CheckedAt: now}}
 }

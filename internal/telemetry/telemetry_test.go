@@ -142,6 +142,24 @@ func TestInstrumentErrorPathMarksFailed(t *testing.T) {
 	}
 }
 
+func TestInstrumentNilProvidersFallBackToNoOp(t *testing.T) {
+	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: runtime.EventKindTurnCompleted}}}
+	inst, err := InstrumentRuntime(fr, nil, nil)
+	if err != nil {
+		t.Fatalf("InstrumentRuntime with nil providers: %v", err)
+	}
+	var n int
+	for _, err := range inst.Run(context.Background(), sampleTurnRequest()) {
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		n++
+	}
+	if n != 1 {
+		t.Errorf("streamed events = %d, want 1 (passthrough)", n)
+	}
+}
+
 func TestRedactDropsContentKeepsMetadata(t *testing.T) {
 	in := map[string]any{
 		AttrSessionID:    "session-1",

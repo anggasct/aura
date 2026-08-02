@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -24,10 +25,12 @@ import (
 // ScopeName identifies Aura's instrumentation scope.
 const ScopeName = "aura"
 
-// Span names. One trace per turn; child spans (model, tool, policy, storage)
-// nest under the turn span as their features land.
+// Span names. One trace per turn; child spans (model, tool) nest under the
+// turn span as their features land.
 const (
-	SpanTurn = "turn"
+	SpanTurn  = "turn"
+	SpanModel = "model"
+	SpanTool  = "tool"
 )
 
 // Metric instrument names. Labels are bounded to low-cardinality metadata;
@@ -95,6 +98,12 @@ type Instrument struct {
 func InstrumentRuntime(inner runtime.AgentRuntime, tp trace.TracerProvider, mp metric.MeterProvider) (*Instrument, error) {
 	if inner == nil {
 		return nil, errors.New("telemetry: runtime must not be nil")
+	}
+	if tp == nil {
+		tp = otel.GetTracerProvider()
+	}
+	if mp == nil {
+		mp = otel.GetMeterProvider()
 	}
 	tracer := tp.Tracer(ScopeName)
 	meter := mp.Meter(ScopeName)

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -64,18 +63,36 @@ func TestMigrationCheckerBranches(t *testing.T) {
 }
 
 func TestCapabilityChecker(t *testing.T) {
-	unavailable := CapabilityChecker{Statuses: []capability.Status{
-		{Name: "sandbox", State: capability.StateUnavailable},
-		{Name: "model", State: capability.StateEnabled, Available: true},
+	unavailable := CapabilityChecker{Statuses: func(context.Context) []CapabilityStatus {
+		return []CapabilityStatus{{Name: "sandbox", Available: false}, {Name: "model", Available: true}}
 	}}
 	findings := unavailable.Check(context.Background())
 	if len(findings) != 1 || findings[0].Status != StatusDown || findings[0].Component != "capability/sandbox" {
 		t.Fatalf("findings = %+v, want one down finding for capability/sandbox", findings)
 	}
 
-	healthy := CapabilityChecker{Statuses: []capability.Status{{Name: "model", State: capability.StateEnabled, Available: true}}}
+	healthy := CapabilityChecker{Statuses: func(context.Context) []CapabilityStatus {
+		return []CapabilityStatus{{Name: "model", Available: true}}
+	}}
 	if findings := healthy.Check(context.Background()); len(findings) != 1 || findings[0].Status != StatusUp {
 		t.Fatalf("healthy findings = %+v, want a single up finding", findings)
+	}
+}
+
+func TestEffectJobChecker(t *testing.T) {
+	stuck := EffectJobChecker{Stuck: func(context.Context) (int, error) { return 3, nil }}
+	if f := stuck.Check(context.Background()); f[0].Status != StatusDegraded || f[0].Code != "effect_job_stuck" {
+		t.Errorf("stuck finding = %+v, want degraded effect_job_stuck", f[0])
+	}
+
+	none := EffectJobChecker{Stuck: func(context.Context) (int, error) { return 0, nil }}
+	if f := none.Check(context.Background()); f[0].Status != StatusUp {
+		t.Errorf("clear finding = %+v, want up", f[0])
+	}
+
+	unknown := EffectJobChecker{Stuck: func(context.Context) (int, error) { return 0, errors.New("boom") }}
+	if f := unknown.Check(context.Background()); f[0].Status != StatusUnknown || f[0].Code != "effect_job_unknown" {
+		t.Errorf("unknown finding = %+v, want unknown effect_job_unknown", f[0])
 	}
 }
 
