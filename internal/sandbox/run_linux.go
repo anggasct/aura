@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 )
 
 // negotiate probes the running kernel for the primitives the containment
@@ -26,23 +27,21 @@ func negotiate() (Primitives, error) {
 	}, nil
 }
 
+// seccompAvailable probes kernel seccomp support directly instead of
+// reading the current process's confinement mode from /proc/self/status,
+// which is 0 on ordinary unconfined hosts even when CONFIG_SECCOMP=y.
+// SECCOMP_GET_ACTION_AVAIL returns 0 when the action can be used, and
+// ENOSYS when the seccomp syscall is not compiled in; EINVAL/EACCES/EPERM
+// mean the syscall exists (kernel support present).
 func seccompAvailable() bool {
-	fd, err := os.Open("/proc/self/status")
-	if err != nil {
-		return false
-	}
-	defer func() { _ = fd.Close() }()
-	var status [16 << 10]byte
-	n, err := fd.Read(status[:])
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(string(status[:n]), "\n") {
-		if strings.HasPrefix(line, "Seccomp:") && strings.TrimSpace(strings.TrimPrefix(line, "Seccomp:")) != "0" {
-			return true
-		}
-	}
-	return false
+	const (
+		seccompGetActionAvail = 2
+		seccompRetAllow       = 0x7fff0000
+		sysSeccomp            = 317
+	)
+	action := seccompRetAllow
+	_, _, errno := syscall.Syscall(sysSeccomp, seccompGetActionAvail, 0, uintptr(unsafe.Pointer(&action)))
+	return errno != syscall.ENOSYS
 }
 
 func cgroupV2Available() bool {
@@ -57,12 +56,10 @@ func cgroupV2Available() bool {
 }
 
 func landlockAvailable() bool {
-	var lsm [16 << 10]byte
 	data, err := os.ReadFile("/sys/kernel/security/lsm")
 	if err != nil {
 		return false
 	}
-	_ = lsm
 	return strings.Contains(string(data), "landlock")
 }
 

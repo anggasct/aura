@@ -204,5 +204,11 @@ func TestNegotiateReportsPrimitives(t *testing.T) {
 	if !primitives.ProcessGroups {
 		t.Fatal("process groups must always be available on Linux")
 	}
+	// The seccomp probe must agree with the kernel's own answer to
+	// SECCOMP_GET_ACTION_AVAIL, not with the current process's confinement
+	// mode (Seccomp: 0 in /proc/self/status on ordinary unconfined hosts).
+	if primitives.Seccomp != seccompAvailable() {
+		t.Fatal("Negotiate seccomp result disagrees with the probe")
+	}
 	t.Logf("primitives: seccomp=%v cgroupv2=%v landlock=%v", primitives.Seccomp, primitives.CgroupV2, primitives.Landlock)
 }
