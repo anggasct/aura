@@ -70,12 +70,10 @@ fuzz-smoke:
 	$(GO) test -fuzz=FuzzEventPayload -fuzztime=$(FUZZTIME) ./internal/store/
 	$(GO) test -fuzz=FuzzConfigDecode -fuzztime=$(FUZZTIME) ./internal/config/
 
-# goreleaser is pinned but kept out of the module: its dependency tree (k8s,
-# docker, ...) would dwarf the product's own, so it runs on demand rather than
-# as a tool directive. The snapshot builds archives, checksums, and SBOMs (syft
-# required) but skips signing; the tag-triggered release workflow signs keyless.
 GORELEASER_VERSION ?= v2.17.1
+SYFT_VERSION       ?= v1.42.3
 release-snapshot:
+	$(GO) install github.com/anchore/syft/cmd/syft@$(SYFT_VERSION)
 	$(GO) run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --snapshot --clean --skip=sign
 
 clean:
