@@ -220,15 +220,21 @@ func isTerminalKind(kind string) bool {
 	return false
 }
 
-func (e *Engine) submit(ctx context.Context, req *TurnRequest) (*subscriber, error) {
+// claim validates the request, accounts a pending slot, and durably claims
+// the turn. With an idempotency key it atomically claims the dedupe row with
+// the accepted event (a duplicate reports replay and the original turn ID);
+// without one it appends the accepted event directly. On any storage failure
+// the pending slot is released. The caller owns the next step: enqueue the
+// turn, or replay/return the original for a duplicate.
+func (e *Engine) claim(ctx context.Context, req *TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay bool, err error) {
 	if req == nil {
-		return nil, invalidArgument("turn request must not be nil")
+		return store.RuntimeEvent{}, "", false, invalidArgument("turn request must not be nil")
 	}
 	if req.SessionID == "" {
-		return nil, invalidArgument("session id must not be empty")
+		return store.RuntimeEvent{}, "", false, invalidArgument("session id must not be empty")
 	}
 	if req.Origin == "" {
-		return nil, invalidArgument("origin must not be empty")
+		return store.RuntimeEvent{}, "", false, invalidArgument("origin must not be empty")
 	}
 	if req.TurnID == "" {
 		req.TurnID = newTurnID()
@@ -237,11 +243,11 @@ func (e *Engine) submit(ctx context.Context, req *TurnRequest) (*subscriber, err
 	e.mu.Lock()
 	if e.shutdown {
 		e.mu.Unlock()
-		return nil, codedError(ErrorCodeRuntimeOverloaded, "runtime is shutting down", nil)
+		return store.RuntimeEvent{}, "", false, codedError(ErrorCodeRuntimeOverloaded, "runtime is shutting down", nil)
 	}
 	if e.pending >= e.cfg.MaxPendingTurns {
 		e.mu.Unlock()
-		return nil, codedError(ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
+		return store.RuntimeEvent{}, "", false, codedError(ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
 	}
 	e.pending++
 	sq := e.sessions[req.SessionID]
@@ -251,52 +257,56 @@ func (e *Engine) submit(ctx context.Context, req *TurnRequest) (*subscriber, err
 	}
 	e.mu.Unlock()
 
-	sub := newSubscriber()
-	accepted := acceptedEvent(req, 0)
-
-	var originalTurnID string
-	var created bool
-	var err error
+	accepted = acceptedEvent(req, 0)
 	if req.IdempotencyKey != "" {
 		err = sq.lock(func() error {
-			seq, err := e.nextSequence(ctx, req.SessionID)
-			if err != nil {
-				return err
+			seq, seqErr := e.nextSequence(ctx, req.SessionID)
+			if seqErr != nil {
+				return seqErr
 			}
 			accepted.Sequence = seq
-			originalTurnID, created, err = e.dedupe.Accept(ctx, string(req.Origin), req.IdempotencyKey, time.Now().Add(dedupeWindow), &accepted)
-			return err
+			var created bool
+			originalTurnID, created, seqErr = e.dedupe.Accept(ctx, string(req.Origin), req.IdempotencyKey, time.Now().Add(dedupeWindow), &accepted)
+			replay = !created
+			return seqErr
 		})
 		if err != nil {
 			e.releasePending()
-			return nil, codedError(ErrorCodeStorageUnavailable, "dedupe claim failed", err)
+			return store.RuntimeEvent{}, "", false, codedError(ErrorCodeStorageUnavailable, "dedupe claim failed", err)
 		}
-		if !created {
-			e.releasePending()
-			go e.replay(ctx, originalTurnID, sub)
-			return sub, nil
-		}
-	} else {
-		err = sq.lock(func() error {
-			seq, err := e.nextSequence(ctx, req.SessionID)
-			if err != nil {
-				return err
-			}
-			accepted.Sequence = seq
-			return e.events.Append(ctx, &accepted)
-		})
-		if err != nil {
-			e.releasePending()
-			return nil, codedError(ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
-		}
+		return accepted, originalTurnID, replay, nil
 	}
 
+	err = sq.lock(func() error {
+		seq, seqErr := e.nextSequence(ctx, req.SessionID)
+		if seqErr != nil {
+			return seqErr
+		}
+		accepted.Sequence = seq
+		return e.events.Append(ctx, &accepted)
+	})
+	if err != nil {
+		e.releasePending()
+		return store.RuntimeEvent{}, "", false, codedError(ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
+	}
+	return accepted, "", false, nil
+}
+
+// enqueue registers a claimed turn on its session queue and starts it when
+// capacity allows. The subscriber, when non-nil, receives the turn's events;
+// ingress accepts pass nil because channel delivery is decoupled from the
+// caller that submitted the envelope.
+func (e *Engine) enqueue(ctx context.Context, req *TurnRequest, accepted *store.RuntimeEvent, sub *subscriber) {
+	subs := map[*subscriber]struct{}{}
+	if sub != nil {
+		subs[sub] = struct{}{}
+	}
 	turnCtx, cancel := context.WithCancel(ctx)
 	t := &turn{
 		req:      *req,
 		turnID:   req.TurnID,
-		accepted: accepted,
-		subs:     map[*subscriber]struct{}{sub: {}},
+		accepted: *accepted,
+		subs:     subs,
 		cancel:   cancel,
 		done:     make(chan struct{}),
 	}
@@ -309,13 +319,27 @@ func (e *Engine) submit(ctx context.Context, req *TurnRequest) (*subscriber, err
 		e.mu.Unlock()
 		e.releasePending()
 		go e.terminateQueued(context.WithoutCancel(ctx), t)
-		return sub, nil
+		return
 	}
-	sq.queue = append(sq.queue, t)
+	e.sessions[req.SessionID].queue = append(e.sessions[req.SessionID].queue, t)
 	e.turns[req.TurnID] = t
 	e.mu.Unlock()
 
 	e.schedule()
+}
+
+func (e *Engine) submit(ctx context.Context, req *TurnRequest) (*subscriber, error) {
+	accepted, originalTurnID, replay, err := e.claim(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	sub := newSubscriber()
+	if replay {
+		e.releasePending()
+		go e.replay(ctx, originalTurnID, sub)
+		return sub, nil
+	}
+	e.enqueue(ctx, req, &accepted, sub)
 	return sub, nil
 }
 
