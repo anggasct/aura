@@ -10,6 +10,7 @@ require (
 	github.com/knadh/koanf/v2 v2.3.5
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.46.0
 	google.golang.org/adk/v2 v2.1.0
 	google.golang.org/genai v1.63.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -216,7 +217,6 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20250210185358-939b2ce775ac // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/tools v0.44.0 // indirect
 	google.golang.org/api v0.279.0 // indirect

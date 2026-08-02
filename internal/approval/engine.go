@@ -131,15 +131,16 @@ func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 
 	now := e.now()
 	grant := ApprovalGrant{
-		GrantID:       hex.EncodeToString(grantIDBytes),
-		PrincipalID:   request.PrincipalID,
-		SessionID:     request.SessionID,
-		ToolName:      request.ToolName,
-		ArgumentsHash: HashArguments(request.Arguments),
-		Constraints:   decision.Constraints,
-		PolicyVersion: decision.PolicyVersion,
-		ExpiresAt:     now.Add(ttl),
-		Nonce:         nonce,
+		GrantID:          hex.EncodeToString(grantIDBytes),
+		PrincipalID:      request.PrincipalID,
+		SessionID:        request.SessionID,
+		ToolName:         request.ToolName,
+		ArgumentsHash:    HashArguments(request.Arguments),
+		CapabilitiesHash: HashCapabilities(request.Capabilities),
+		Constraints:      decision.Constraints,
+		PolicyVersion:    decision.PolicyVersion,
+		ExpiresAt:        now.Add(ttl),
+		Nonce:            nonce,
 	}
 
 	e.mu.Lock()

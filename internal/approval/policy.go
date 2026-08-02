@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -133,15 +134,16 @@ func (p Policy) Validate() error {
 // ApprovalGrant binds everything the execution depends on. Changing any
 // bound field invalidates the grant.
 type ApprovalGrant struct {
-	GrantID       string
-	PrincipalID   string
-	SessionID     string
-	ToolName      string
-	ArgumentsHash string
-	Constraints   Constraints
-	PolicyVersion string
-	ExpiresAt     time.Time
-	Nonce         string
+	GrantID          string
+	PrincipalID      string
+	SessionID        string
+	ToolName         string
+	ArgumentsHash    string
+	CapabilitiesHash string
+	Constraints      Constraints
+	PolicyVersion    string
+	ExpiresAt        time.Time
+	Nonce            string
 }
 
 // ValidFor checks every bound field against the request and the current
@@ -169,6 +171,9 @@ func (g *ApprovalGrant) ValidFor(request *ToolRequest, policyVersion string, now
 	if g.ArgumentsHash != HashArguments(request.Arguments) {
 		return Errorf(ErrorCodeApprovalInvalid, "grant arguments hash %q does not match request arguments", g.ArgumentsHash)
 	}
+	if g.CapabilitiesHash != HashCapabilities(request.Capabilities) {
+		return Errorf(ErrorCodeApprovalInvalid, "grant capabilities hash %q does not match request capabilities", g.CapabilitiesHash)
+	}
 	if g.PolicyVersion != policyVersion {
 		return Errorf(ErrorCodeApprovalInvalid, "grant policy version %q does not match current %q", g.PolicyVersion, policyVersion)
 	}
@@ -183,5 +188,16 @@ func (g *ApprovalGrant) ValidFor(request *ToolRequest, policyVersion string, now
 // about its own hash.
 func HashArguments(arguments json.RawMessage) string {
 	sum := sha256.Sum256(arguments)
+	return hex.EncodeToString(sum[:])
+}
+
+// HashCapabilities returns the canonical hex SHA-256 of a capability set.
+// Ordering is irrelevant; the set is sorted before hashing, so a grant
+// stays valid across request orderings but is invalidated the moment the
+// granted capabilities change.
+func HashCapabilities(capabilities []string) string {
+	sorted := slices.Clone(capabilities)
+	slices.Sort(sorted)
+	sum := sha256.Sum256([]byte(strings.Join(sorted, "\x00")))
 	return hex.EncodeToString(sum[:])
 }
