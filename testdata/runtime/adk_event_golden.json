@@ -1,0 +1,34 @@
+{
+  "id": "golden-event-1",
+  "timestamp": "2026-08-02T00:00:00Z",
+  "invocationId": "invocation-9",
+  "branch": "agent_1.agent_2",
+  "author": "model",
+  "content": {
+    "role": "model",
+    "parts": [
+      {
+        "text": "golden answer"
+      }
+    ]
+  },
+  "actions": {
+    "stateDelta": {
+      "counter": 1
+    },
+    "artifactDelta": {
+      "report.txt": 2
+    },
+    "transferToAgent": "researcher",
+    "escalate": true
+  },
+  "longRunningToolIds": [
+    "tool-1",
+    "tool-2"
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 10,
+    "candidatesTokenCount": 20,
+    "totalTokenCount": 30
+  }
+}
