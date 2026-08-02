@@ -92,7 +92,7 @@ type GeminiAdapter struct {
 func NewGeminiAdapter(name, baseURL, apiKey string, timeout time.Duration) (*GeminiAdapter, error) {
 	if baseURL != "" {
 		if err := config.ValidateBaseURL(baseURL); err != nil {
-			return nil, fmt.Errorf("model: invalid base_url %q: %w", baseURL, err)
+			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
 	return newGeminiAdapter(name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil

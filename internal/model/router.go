@@ -3,9 +3,11 @@ package model
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +15,16 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 )
+
+// withoutPath strips the filesystem path from an *fs.PathError so an error
+// string keeps the reason without disclosing where the file lives.
+func withoutPath(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
+}
 
 var knownTasks = map[string]bool{
 	"agent":       true,
@@ -74,12 +86,12 @@ func BuildRouter(models config.Models) (*Router, error) {
 		idleTimeout = defaultStreamingIdleTimeout
 	}
 	primarySpec := models.Definitions["primary"]
-	primary, err := newAdapter("primary", &primarySpec, timeout, idleTimeout)
+	primary, _, err := newAdapter("primary", &primarySpec, timeout, idleTimeout)
 	if err != nil {
 		return nil, err
 	}
 	auxiliarySpec := models.Definitions["auxiliary"]
-	auxiliary, err := newAdapter("auxiliary", &auxiliarySpec, timeout, idleTimeout)
+	auxiliary, _, err := newAdapter("auxiliary", &auxiliarySpec, timeout, idleTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -133,11 +145,11 @@ func modelHasCapability(capabilities config.ModelCapabilities, name string) bool
 	}
 }
 
-func retryConfigForRequest(config RetryConfig, req *adkmodel.LLMRequest) RetryConfig {
+func retryConfigForRequest(base RetryConfig, req *adkmodel.LLMRequest) RetryConfig {
 	if requestHasToolResult(req) {
-		config.MaxRetries = 0
+		base.MaxRetries = 0
 	}
-	return config
+	return base
 }
 
 func requestHasToolResult(req *adkmodel.LLMRequest) bool {
@@ -183,35 +195,38 @@ func (r *Router) For(task string) (adkmodel.LLM, error) {
 	}
 }
 
-func newAdapter(name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration) (adkmodel.LLM, error) {
+// newAdapter reports configured=false when the definition is absent, so a
+// caller never has to read meaning into a nil adapter with a nil error.
+func newAdapter(name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration) (adapter adkmodel.LLM, configured bool, err error) {
 	if spec.Protocol == "" || spec.Model == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	if spec.BaseURL != "" {
+		// The URL is never echoed back: it may carry user-info credentials.
 		if err := config.ValidateBaseURL(spec.BaseURL); err != nil {
-			return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("invalid base_url %q: %v", spec.BaseURL, err))
+			return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("invalid base_url: %v", err))
 		}
 	}
 	switch spec.Protocol {
 	case config.ProtocolAnthropicMessages, config.ProtocolOpenAIChatCompat, config.ProtocolOpenAIResponses, config.ProtocolGeminiNative:
 	default:
-		return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
+		return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
 	}
 	apiKey, err := resolveSecret(name, spec)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	switch spec.Protocol {
 	case config.ProtocolAnthropicMessages:
-		return newAnthropicAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), nil
+		return newAnthropicAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
 	case config.ProtocolOpenAIChatCompat:
-		return newOpenAIAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), nil
+		return newOpenAIAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
 	case config.ProtocolOpenAIResponses:
-		return newOpenAIResponsesAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), nil
+		return newOpenAIResponsesAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
 	case config.ProtocolGeminiNative:
-		return newGeminiAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), nil
+		return newGeminiAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
 	}
-	return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
+	return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
 }
 
 func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {
@@ -228,7 +243,7 @@ func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {
 	if spec.APIKeyFile != "" {
 		data, err := os.ReadFile(spec.APIKeyFile)
 		if err != nil {
-			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("cannot read secret file: %v", err))
+			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("cannot read secret file %q: %v", filepath.Base(spec.APIKeyFile), withoutPath(err)))
 		}
 		value := strings.TrimSpace(string(data))
 		if value == "" {

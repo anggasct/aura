@@ -90,7 +90,7 @@ type AnthropicAdapter struct {
 func NewAnthropicAdapter(name, baseURL, apiKey string, timeout time.Duration) (*AnthropicAdapter, error) {
 	if baseURL != "" {
 		if err := config.ValidateBaseURL(baseURL); err != nil {
-			return nil, fmt.Errorf("model: invalid base_url %q: %w", baseURL, err)
+			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
 	return newAnthropicAdapter(name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil

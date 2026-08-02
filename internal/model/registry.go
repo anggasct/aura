@@ -43,7 +43,7 @@ func RegisterAdapters(models config.Models) error {
 		if spec.Protocol == "" || spec.Model == "" {
 			continue
 		}
-		if _, err := newAdapter(role, &spec, timeout, idleTimeout); err != nil {
+		if _, _, err := newAdapter(role, &spec, timeout, idleTimeout); err != nil {
 			return err
 		}
 		registrations = append(registrations, registration{
@@ -68,7 +68,8 @@ func RegisterAdapters(models config.Models) error {
 		registeredModelPatterns.patterns[reg.pattern] = true
 		spec := reg.spec
 		adkmodel.Register(reg.pattern, func(_ context.Context, _ string) (adkmodel.LLM, error) {
-			return newAdapter(reg.role, &spec, timeout, idleTimeout)
+			adapter, _, err := newAdapter(reg.role, &spec, timeout, idleTimeout)
+			return adapter, err
 		})
 	}
 	return nil
