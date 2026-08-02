@@ -289,7 +289,7 @@ func TestForceExitWatcherExitsOnDone(t *testing.T) {
 	done := make(chan struct{})
 	close(done)
 
-	go srv.forceExitOnSecondSignal(sigCh, done)
+	go srv.forceExitOnSecondSignal(t.Context(), sigCh, done)
 	select {
 	case <-exited:
 		t.Error("exitFunc called after done closed — watcher leaked")
