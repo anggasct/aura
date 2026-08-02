@@ -306,10 +306,13 @@ func TestClassifyRequestErrorPreservesTransientCause(t *testing.T) {
 func TestRetryHTTPRetriesTransportFailures(t *testing.T) {
 	attempts := 0
 	cfg := RetryConfig{MaxRetries: 3, Sleep: func(context.Context, time.Duration) error { return nil }}
-	_, err := retryHTTP(context.Background(), cfg, func() (*http.Response, error) {
+	resp, err := retryHTTP(context.Background(), cfg, func() (*http.Response, error) {
 		attempts++
 		return nil, classifyRequestError(&url.Error{Op: "Post", Err: syscall.ECONNRESET})
 	})
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected the transport failure to surface after retries")
 	}
