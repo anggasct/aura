@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // negotiate probes the running kernel for the primitives the containment
@@ -34,13 +36,8 @@ func negotiate() (Primitives, error) {
 // ENOSYS when the seccomp syscall is not compiled in; EINVAL/EACCES/EPERM
 // mean the syscall exists (kernel support present).
 func seccompAvailable() bool {
-	const (
-		seccompGetActionAvail = 2
-		seccompRetAllow       = 0x7fff0000
-		sysSeccomp            = 317
-	)
-	action := seccompRetAllow
-	_, _, errno := syscall.Syscall(sysSeccomp, seccompGetActionAvail, 0, uintptr(unsafe.Pointer(&action)))
+	action := unix.SECCOMP_RET_ALLOW
+	_, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_GET_ACTION_AVAIL, 0, uintptr(unsafe.Pointer(&action)))
 	return errno != syscall.ENOSYS
 }
 

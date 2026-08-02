@@ -7,8 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestRunBasicOutput(t *testing.T) {
@@ -204,11 +208,14 @@ func TestNegotiateReportsPrimitives(t *testing.T) {
 	if !primitives.ProcessGroups {
 		t.Fatal("process groups must always be available on Linux")
 	}
-	// The seccomp probe must agree with the kernel's own answer to
-	// SECCOMP_GET_ACTION_AVAIL, not with the current process's confinement
-	// mode (Seccomp: 0 in /proc/self/status on ordinary unconfined hosts).
-	if primitives.Seccomp != seccompAvailable() {
-		t.Fatal("Negotiate seccomp result disagrees with the probe")
+	// Probe the kernel independently (raw syscall with arch-aware constant)
+	// and require Negotiate to agree — this catches arch-specific syscall
+	// number bugs that a tautological comparison would miss.
+	action := unix.SECCOMP_RET_ALLOW
+	_, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_GET_ACTION_AVAIL, 0, uintptr(unsafe.Pointer(&action)))
+	want := errno != syscall.ENOSYS
+	if primitives.Seccomp != want {
+		t.Fatalf("Negotiate seccomp=%v, kernel reports %v", primitives.Seccomp, want)
 	}
 	t.Logf("primitives: seccomp=%v cgroupv2=%v landlock=%v", primitives.Seccomp, primitives.CgroupV2, primitives.Landlock)
 }
