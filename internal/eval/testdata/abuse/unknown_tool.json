@@ -1,0 +1,5 @@
+{
+  "name": "unknown tool injection",
+  "tool": "rm.rf",
+  "trust": "owner_input"
+}

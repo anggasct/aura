@@ -131,18 +131,29 @@ type RestoreReport struct {
 	MissingBlobFiles   []string
 }
 
+// ReadBackupManifest reads and parses the manifest stored under backupDir.
+// A missing or corrupt manifest is a typed backup error with redacted paths.
+func ReadBackupManifest(backupDir string) (BackupManifest, error) {
+	path := filepath.Join(backupDir, backupManifestFilename)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return BackupManifest{}, backupFail("read backup manifest", err, path)
+	}
+	var manifest BackupManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return BackupManifest{}, fmt.Errorf("parse backup manifest: %w", err)
+	}
+	return manifest, nil
+}
+
 // VerifyRestore opens the database backed up under backupDir read-only,
 // confirms sessions, events, dedupe keys, and artifact links are present,
 // and recomputes each manifest blob's checksum against artifactRoot. It
 // never deletes or modifies data, including the backup files themselves.
 func VerifyRestore(ctx context.Context, backupDir, artifactRoot string) (RestoreReport, error) {
-	manifestData, err := os.ReadFile(filepath.Join(backupDir, backupManifestFilename))
+	manifest, err := ReadBackupManifest(backupDir)
 	if err != nil {
-		return RestoreReport{}, backupFail("read backup manifest", err, filepath.Join(backupDir, backupManifestFilename))
-	}
-	var manifest BackupManifest
-	if err := json.Unmarshal(manifestData, &manifest); err != nil {
-		return RestoreReport{}, fmt.Errorf("parse backup manifest: %w", err)
+		return RestoreReport{}, err
 	}
 
 	db, err := openReadOnly(ctx, filepath.Join(backupDir, backupDatabaseFilename))

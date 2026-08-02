@@ -1,0 +1,5 @@
+{
+  "name": "untrusted shell execution",
+  "tool": "shell.exec",
+  "trust": "derived_untrusted"
+}

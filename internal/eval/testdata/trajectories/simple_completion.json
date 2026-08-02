@@ -1,0 +1,8 @@
+{
+  "name": "simple_completion",
+  "script": [
+    {"kind": "model.started", "payload": {}},
+    {"kind": "message.completed", "payload": {}}
+  ],
+  "want_kinds": ["turn.accepted", "model.started", "message.completed", "turn.completed"]
+}

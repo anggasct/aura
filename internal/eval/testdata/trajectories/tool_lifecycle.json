@@ -1,0 +1,10 @@
+{
+  "name": "tool_lifecycle",
+  "script": [
+    {"kind": "tool.requested", "payload": {}},
+    {"kind": "tool.started", "payload": {}},
+    {"kind": "tool.completed", "payload": {}},
+    {"kind": "message.completed", "payload": {}}
+  ],
+  "want_kinds": ["turn.accepted", "tool.requested", "tool.started", "tool.completed", "message.completed", "turn.completed"]
+}
