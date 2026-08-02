@@ -45,7 +45,7 @@ func (r *sqliteReconciler) Collect(ctx context.Context, before time.Time) (Colle
 // reference and were created before the grace cutoff. The delete is
 // conditional and transactional: the NOT EXISTS reference check runs in the
 // same statement as the row delete, so a reference linked after the candidate
-// scan still protects the blob (AC-10). Files are removed only when the row
+// scan still protects the blob. Files are removed only when the row
 // delete actually matched; a file that cannot be removed aborts the sweep
 // with its row intact, so a failed sweep never deletes ownership data.
 func Collect(ctx context.Context, db *sql.DB, root string, before time.Time) (CollectionReport, error) {

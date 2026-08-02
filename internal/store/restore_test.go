@@ -238,7 +238,7 @@ func TestCollectSkipsBlobReferencedAfterScan(t *testing.T) {
 
 	// The blob is old and unreferenced at scan time, so it is a candidate;
 	// but a reference is linked before the conditional delete runs, which
-	// must protect the row and the file (AC-10).
+	// must protect the row and the file.
 	digest := strings.Repeat("a", 64)
 	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
 		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, formatTime(time.Now().Add(-48*time.Hour))); err != nil {

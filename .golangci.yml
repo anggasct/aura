@@ -1,43 +1,137 @@
-run:
-  timeout: 5m
+version: "2"
 
 linters:
   enable:
+    - bidichk
     - bodyclose
     - containedctx
+    - contextcheck
     - copyloopvar
+    - durationcheck
+    - errchkjson
     - errorlint
+    - exhaustive
+    - fatcontext
     - gocritic
     - gosec
+    - iface
     - intrange
     - makezero
+    - misspell
+    - musttag
     - nilerr
+    - nilnil
     - noctx
+    - nolintlint
     - perfsprint
     - prealloc
+    - predeclared
+    - recvcheck
+    - revive
+    - rowserrcheck
+    - sloglint
+    - sqlclosecheck
     - unconvert
+    - unparam
     - usestdlibvars
+    - usetesting
+    - wastedassign
 
-linters-settings:
-  errorlint:
-    errorf: true
-    asserts: true
-    comparison: true
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-  gosec:
-    excludes:
-      # Retry jitter is not a security context.
-      - G404
+  settings:
+    errcheck:
+      # A deliberate ignore is written `_ =` at the call site so the decision
+      # stays visible in review; check-blank would make that idiom impossible.
+      check-blank: false
+      check-type-assertions: true
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    exhaustive:
+      # Error-code switches branch on the codes a caller handles and fall
+      # through otherwise; a default arm is the intended exhaustive form.
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    revive:
+      rules:
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: identical-branches
+        - name: range-val-address
+        - name: redefines-builtin-id
+        - name: string-of-int
+        - name: time-equal
+        - name: unnecessary-stmt
+        - name: unreachable-code
+        - name: waitgroup-by-value
+    sloglint:
+      no-global: all
+      context: all
+      static-msg: true
+      key-naming-case: snake
+
+  exclusions:
+    # No inherited preset sets: an exclusion nobody wrote down is an exclusion
+    # nobody accepted. Every rule below states why it exists.
+    generated: lax
+    presets: []
+    rules:
+      # Test fixtures construct deliberately hostile inputs and small slices;
+      # neither is a production concern.
+      - path: _test\.go
+        linters:
+          - gosec
+          - prealloc
+
+      # Test helpers keep a uniform signature across call sites even when one
+      # argument currently always receives the same value.
+      - path: _test\.go
+        linters:
+          - unparam
+
+      # Test-local structs are decoded for assertions only, never persisted.
+      - path: _test\.go
+        linters:
+          - musttag
+
+      # Every path reaching these opens is either operator-supplied config or
+      # confined to the data root by resolveRootedPath before use.
+      - linters:
+          - gosec
+        text: G304
+        path: internal/(store|config)/
+
+      # unsafe.Pointer is required to hand the seccomp action word to the
+      # kernel probe; the value is a stack-local uint32.
+      - linters:
+          - gosec
+        text: G103
+        path: internal/sandbox/run_linux.go
+
+      # Launching a caller-supplied command is this package's entire purpose;
+      # the command is constrained by the containment spec, not by gosec.
+      - linters:
+          - gosec
+        text: G204
+        path: internal/sandbox/run_linux.go
+
+      # Retry jitter is not a security context. Scoped to the one file that
+      # needs it rather than excluded repository-wide.
+      - linters:
+          - gosec
+        text: G404
+        path: internal/model/retry.go
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - prealloc

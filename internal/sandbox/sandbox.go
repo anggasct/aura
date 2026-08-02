@@ -39,8 +39,7 @@ func Errorf(code ErrorCode, format string, args ...any) error {
 
 // Limits are the resource bounds a contained process must stay inside.
 // Timeout and MaxOutputBytes are enforced by this harness. The remaining
-// fields are contract declarations for the full sandbox (feat-sandbox-runner)
-// and are not yet enforced here.
+// fields are contract declarations that this harness does not yet enforce.
 type Limits struct {
 	MaxOutputBytes int64
 	MaxOpenFiles   int64
@@ -85,10 +84,10 @@ type Result struct {
 // confined to WorkingDir. On timeout or cancellation the whole process
 // group is killed and reaped, so descendants cannot outlive the parent.
 // Output beyond MaxOutputBytes is truncated and reported in Result.
-// Run consults Negotiate and fails closed with sandbox_unavailable when the
-// host cannot provide the containment primitives; callers that need
-// kernel-level filesystem or syscall denial must check Negotiate before
-// running, since the full sandbox enforcement lands with feat-sandbox-runner.
+//
+// Run does not apply kernel-level filesystem or syscall denial. Callers that
+// require it must consult Negotiate and refuse to run when the primitives it
+// reports are unavailable.
 func Run(ctx context.Context, spec *Spec, command string, args ...string) (Result, error) {
 	if spec == nil {
 		return Result{}, Errorf(ErrorCodeInvalidArgument, "spec must not be nil")
