@@ -211,6 +211,7 @@ func TestBackupManifestMatchesSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list snapshot blobs: %v", err)
 	}
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var digest string
 		if err := rows.Scan(&digest); err != nil {
@@ -220,9 +221,6 @@ func TestBackupManifestMatchesSnapshot(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("list snapshot blobs: %v", err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatalf("close snapshot rows: %v", err)
 	}
 
 	if len(manifest.Blobs) != len(inDB) {

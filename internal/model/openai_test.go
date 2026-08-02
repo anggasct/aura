@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,28 +127,30 @@ func TestOpenAI_Streaming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateContent: %v", err)
 	}
-	var text string
+	var textBuf strings.Builder
 	var final *adkmodel.LLMResponse
 	for _, r := range resps {
 		for _, p := range r.Content.Parts {
 			if p.Text != "" && r.Partial {
-				text += p.Text
+				textBuf.WriteString(p.Text)
 			}
 		}
 		if r.TurnComplete {
 			final = r
 		}
 	}
+	text := textBuf.String()
 	if text != "Hello world" {
 		t.Errorf("streamed text = %q, want %q", text, "Hello world")
 	}
 	if final != nil {
-		var finalText string
+		var finalBuf strings.Builder
 		for _, p := range final.Content.Parts {
 			if p.Text != "" {
-				finalText += p.Text
+				finalBuf.WriteString(p.Text)
 			}
 		}
+		finalText := finalBuf.String()
 		if finalText != "Hello world" {
 			t.Errorf("final content = %q, want accumulated %q", finalText, "Hello world")
 		}
@@ -227,7 +230,10 @@ func TestOpenAI_StreamingCancellation(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		flusher := w.(http.Flusher)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			return
+		}
 		close(started)
 		flusher.Flush()
 		<-release
@@ -263,7 +269,9 @@ func TestOpenAI_StreamingIdleTimeout(t *testing.T) {
 	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.(http.Flusher).Flush()
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
 		close(started)
 		<-r.Context().Done()
 	}))

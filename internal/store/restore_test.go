@@ -225,6 +225,9 @@ func TestCollectDeletesOnlyOldUnreferencedBlobs(t *testing.T) {
 	if err := rows.Scan(&count); err != nil {
 		t.Fatalf("scan count: %v", err)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("count blobs: %v", err)
+	}
 	if count != 2 {
 		t.Errorf("blob rows after collect = %d, want 2 (referenced + recent unreferenced)", count)
 	}

@@ -87,7 +87,7 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 // logConfigResult reports what config load did, in one place, so the two
 // entry points that bootstrap config cannot drift apart. The resolved path is
 // reduced to its basename: it embeds the operator's home directory.
-func logConfigResult(ctx context.Context, logger *slog.Logger, result config.LoadResult) {
+func logConfigResult(ctx context.Context, logger *slog.Logger, result *config.LoadResult) {
 	if result.DefaultGenerated {
 		logger.InfoContext(ctx, "generating default config", "component", "config", "file", filepath.Base(result.Path))
 	}

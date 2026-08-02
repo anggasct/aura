@@ -312,7 +312,7 @@ func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(conte
 	if err != nil {
 		return err
 	}
-	logConfigResult(cmd.Context(), logger, result)
+	logConfigResult(cmd.Context(), logger, &result)
 	var opened *sql.DB
 	if needDB {
 		opened, err = openStorage(cmd.Context(), cfg)

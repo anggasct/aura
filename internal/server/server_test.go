@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -25,7 +24,7 @@ func (m *mockListener) Name() string                    { return m.name }
 func (m *mockListener) Start(ctx context.Context) error { return m.start(ctx) }
 
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func signalSelf(t *testing.T, sig syscall.Signal) {

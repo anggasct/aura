@@ -28,7 +28,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			logConfigResult(ctx, logger, result)
+			logConfigResult(ctx, logger, &result)
 			if _, err := model.BuildRouter(logger, cfg.Models); err != nil {
 				return err
 			}

@@ -138,6 +138,13 @@ linters:
         text: G404
         path: internal/model/retry.go
 
+      # The signal-derived context does reach every command, but it travels
+      # through cobra's command tree (ExecuteContext then cmd.Context()) and
+      # the analyser cannot trace it across that indirection.
+      - linters:
+          - contextcheck
+        path: internal/cli/root.go
+
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
