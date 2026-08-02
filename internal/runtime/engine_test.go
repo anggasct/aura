@@ -519,12 +519,13 @@ func TestCompletedTurnsArePruned(t *testing.T) {
 			}
 		}
 
-		engine.mu.Lock()
-		live := len(engine.turns)
-		engine.mu.Unlock()
-		if live != 0 {
-			t.Errorf("live turns after completion = %d, want 0 (pruned)", live)
-		}
+		// The terminal event is broadcast before the worker's deferred prune
+		// runs, so wait for the prune rather than asserting synchronously.
+		waitFor(t, func() bool {
+			engine.mu.Lock()
+			defer engine.mu.Unlock()
+			return len(engine.turns) == 0
+		})
 
 		// Replays of completed turns still work through the store.
 		events, err := engine.dedupe.ListTurnEvents(context.Background(), turnID(0))
