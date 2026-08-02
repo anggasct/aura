@@ -24,7 +24,6 @@ const maxEventLoad = 1 << 20
 // adapter; the rest of the runtime sees only store ports.
 type ADKSessionService struct {
 	sessions SessionPort
-	events   EventStore
 }
 
 // SessionPort is the Aura session lifecycle the adapter maps onto.
@@ -34,15 +33,12 @@ type SessionPort interface {
 	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]store.RuntimeEvent, error)
 }
 
-// NewADKSessionService wraps the Aura session and event stores for ADK.
-func NewADKSessionService(sessions SessionPort, events EventStore) (*ADKSessionService, error) {
+// NewADKSessionService wraps the Aura session port for ADK.
+func NewADKSessionService(sessions SessionPort) (*ADKSessionService, error) {
 	if sessions == nil {
 		return nil, invalidArgument("session port must not be nil")
 	}
-	if events == nil {
-		return nil, invalidArgument("event store must not be nil")
-	}
-	return &ADKSessionService{sessions: sessions, events: events}, nil
+	return &ADKSessionService{sessions: sessions}, nil
 }
 
 // adkSession is the ADK session view over a stored Aura session. Events are
@@ -155,12 +151,13 @@ func (s *ADKSessionService) Create(ctx context.Context, req *session.CreateReque
 	if id == "" {
 		id = newTurnID()
 	}
-	metadata, err := json.Marshal(req.State)
+	state := req.State
+	if state == nil {
+		state = map[string]any{}
+	}
+	metadata, err := json.Marshal(state)
 	if err != nil {
 		return nil, fmt.Errorf("marshal adk session state: %w", err)
-	}
-	if metadata == nil {
-		metadata = []byte("{}")
 	}
 	now := time.Now().UTC()
 	stored := &store.Session{
@@ -220,9 +217,12 @@ func (s *ADKSessionService) Delete(ctx context.Context, req *session.DeleteReque
 	return invalidArgument("adk session deletion is not supported by the aura store")
 }
 
-// AppendEvent persists an ADK event into the Aura runtime event log at the
-// session's next sequence, preserving invocation, branch, author, actions,
-// content, usage, and long-running tool identifiers.
+// AppendEvent validates an ADK event but does not persist it: the runtime
+// engine is the single writer for ADK events (it stamps the sequence and
+// persists every yielded event, including the user message via
+// WithYieldUserMessage). This keeps one serialized sequence allocation per
+// session and one stored row per event — a second write here would duplicate
+// the log and break replay fidelity.
 func (s *ADKSessionService) AppendEvent(ctx context.Context, adkSession session.Session, ev *session.Event) error {
 	if adkSession == nil {
 		return invalidArgument("session must not be nil")
@@ -230,16 +230,10 @@ func (s *ADKSessionService) AppendEvent(ctx context.Context, adkSession session.
 	if ev == nil {
 		return invalidArgument("event must not be nil")
 	}
-	re, err := store.RuntimeEventFromADK(adkSession.ID(), "", ev)
-	if err != nil {
+	if _, err := store.RuntimeEventFromADK(adkSession.ID(), "", ev); err != nil {
 		return err
 	}
-	seq, err := s.events.LastSequence(ctx, adkSession.ID())
-	if err != nil {
-		return fmt.Errorf("last sequence for session %s: %w", adkSession.ID(), err)
-	}
-	re.Sequence = seq + 1
-	return s.events.Append(ctx, &re)
+	return nil
 }
 
 func (s *ADKSessionService) loadEvents(ctx context.Context, sessionID string) ([]*session.Event, error) {

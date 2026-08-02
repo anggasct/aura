@@ -30,8 +30,8 @@ func newSessionTestDB(t *testing.T) (*sql.DB, store.SessionService, store.EventS
 }
 
 func TestADKSessionServiceCreateGet(t *testing.T) {
-	_, sessions, events := newSessionTestDB(t)
-	svc, err := NewADKSessionService(sessions, events)
+	_, sessions, _ := newSessionTestDB(t)
+	svc, err := NewADKSessionService(sessions)
 	if err != nil {
 		t.Fatalf("NewADKSessionService: %v", err)
 	}
@@ -67,9 +67,12 @@ func TestADKSessionServiceCreateGet(t *testing.T) {
 	}
 }
 
-func TestADKSessionServiceAppendAndReload(t *testing.T) {
+// The ADK session service is read-only for events: the engine is the single
+// writer. AppendEvent validates the mapping but persists nothing; Get
+// reloads events that the engine (or the store directly) wrote.
+func TestADKSessionServiceAppendValidatesButDoesNotPersist(t *testing.T) {
 	_, sessions, events := newSessionTestDB(t)
-	svc, err := NewADKSessionService(sessions, events)
+	svc, err := NewADKSessionService(sessions)
 	if err != nil {
 		t.Fatalf("NewADKSessionService: %v", err)
 	}
@@ -92,9 +95,29 @@ func TestADKSessionServiceAppendAndReload(t *testing.T) {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
+	// AppendEvent must not write: no rows in the store yet.
 	got, err := svc.Get(ctx, &session.GetRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
+	}
+	if got.Session.Events().Len() != 0 {
+		t.Fatalf("events = %d, want 0 (AppendEvent must not persist)", got.Session.Events().Len())
+	}
+
+	// The engine writes through the store with the original ADK event ID;
+	// Get must reload it with full fidelity.
+	re, err := store.RuntimeEventFromADK("session-1", "turn-1", ev)
+	if err != nil {
+		t.Fatalf("RuntimeEventFromADK: %v", err)
+	}
+	re.Sequence = 1
+	if err := events.Append(ctx, &re); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	got, err = svc.Get(ctx, &session.GetRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("Get after store write: %v", err)
 	}
 	if got.Session.Events().Len() != 1 {
 		t.Fatalf("events = %d, want 1", got.Session.Events().Len())
@@ -109,8 +132,8 @@ func TestADKSessionServiceAppendAndReload(t *testing.T) {
 }
 
 func TestADKSessionServiceUnsupportedOps(t *testing.T) {
-	_, sessions, events := newSessionTestDB(t)
-	svc, err := NewADKSessionService(sessions, events)
+	_, sessions, _ := newSessionTestDB(t)
+	svc, err := NewADKSessionService(sessions)
 	if err != nil {
 		t.Fatalf("NewADKSessionService: %v", err)
 	}

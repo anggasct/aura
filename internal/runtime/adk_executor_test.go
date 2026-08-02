@@ -6,7 +6,6 @@ import (
 	"iter"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/store"
@@ -94,12 +93,14 @@ func registerFakeModel(t *testing.T, model *fakeADKModel) string {
 }
 
 type fakeBroker struct {
-	deny    bool
-	checked []string
+	deny     bool
+	checked  []string
+	requests []approval.ToolRequest
 }
 
 func (b *fakeBroker) Evaluate(ctx context.Context, req *approval.ToolRequest) (approval.PolicyDecision, error) {
 	b.checked = append(b.checked, req.ToolName)
+	b.requests = append(b.requests, *req)
 	if b.deny {
 		return approval.PolicyDecision{Outcome: "deny"}, nil
 	}
@@ -171,6 +172,24 @@ func TestADKExecutorGatesToolCalls(t *testing.T) {
 	if len(broker.checked) == 0 {
 		t.Fatal("tool call was not evaluated by the broker")
 	}
+	// The broker must receive the full identity the security contract
+	// requires, bound from the invocation context.
+	got := broker.requests[len(broker.requests)-1]
+	if got.PrincipalID != "user-1" {
+		t.Errorf("PrincipalID = %q, want user-1", got.PrincipalID)
+	}
+	if got.SessionID != "session-1" {
+		t.Errorf("SessionID = %q, want session-1", got.SessionID)
+	}
+	if got.TurnID == "" || got.RequestID == "" {
+		t.Errorf("TurnID/RequestID empty: %+v", got)
+	}
+	if got.ToolName != "sample_tool" {
+		t.Errorf("ToolName = %q, want sample_tool", got.ToolName)
+	}
+	if got.Trust != approval.TrustDerivedUntrusted {
+		t.Errorf("Trust = %q, want derived_untrusted", got.Trust)
+	}
 }
 
 func TestADKExecutorDeniedToolFailsClosed(t *testing.T) {
@@ -219,5 +238,3 @@ func TestADKExecutorBudgetEnforced(t *testing.T) {
 		t.Fatalf("CodeOf(%v) = %q, %v; want budget_exhausted", lastErr, code, ok)
 	}
 }
-
-var _ = time.Now

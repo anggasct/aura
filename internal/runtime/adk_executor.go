@@ -81,7 +81,7 @@ func NewADKExecutor(appName, modelName string, sessions SessionPort, events Even
 // stamps sequence and persists them.
 func (x *ADKExecutor) Execute(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
-		sessionService, err := NewADKSessionService(x.sessions, x.events)
+		sessionService, err := NewADKSessionService(x.sessions)
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
@@ -99,7 +99,12 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *TurnRequest) iter.Seq2[s
 		}
 
 		usage := &usageTracker{maxTokens: req.Budget.MaxTokens}
-		for ev, err := range adkRunner.Run(ctx, req.PrincipalID, req.SessionID, content, agent.RunConfig{}) {
+		// WithYieldUserMessage surfaces the user's input as an event so the
+		// engine persists it through the same single-writer path; otherwise
+		// the user message would live only in the ADK session service, which
+		// no longer writes.
+		runOpts := []runner.RunOption{runner.WithYieldUserMessage()}
+		for ev, err := range adkRunner.Run(ctx, req.PrincipalID, req.SessionID, content, agent.RunConfig{}, runOpts...) {
 			if err != nil {
 				if usage.exceeded {
 					yield(store.RuntimeEvent{}, codedError(ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
@@ -148,17 +153,24 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	return r, nil
 }
 
-// toolGate evaluates one tool invocation through the broker. A deny or an
-// evaluation error blocks the call with a stable code.
-func (x *ADKExecutor) toolGate(ctx context.Context, toolName string, args map[string]any) error {
+// toolGate evaluates one tool invocation through the broker with the full
+// identity the security contract requires — principal, session, and
+// invocation — so policy can scope per principal and session, and the audit
+// trail carries identity. A deny or an evaluation error blocks the call with
+// a stable code.
+func (x *ADKExecutor) toolGate(actx agent.Context, toolName string, args map[string]any) error {
 	raw, err := json.Marshal(args)
 	if err != nil {
 		return codedError(ErrorCodeRuntimeInternal, "failed to marshal tool arguments", err)
 	}
-	decision, err := x.broker.Evaluate(ctx, &approval.ToolRequest{
-		ToolName:  toolName,
-		Arguments: raw,
-		Trust:     approval.TrustDerivedUntrusted,
+	decision, err := x.broker.Evaluate(actx, &approval.ToolRequest{
+		RequestID:   actx.InvocationID(),
+		TurnID:      actx.InvocationID(),
+		SessionID:   actx.SessionID(),
+		PrincipalID: actx.UserID(),
+		ToolName:    toolName,
+		Arguments:   raw,
+		Trust:       approval.TrustDerivedUntrusted,
 	})
 	if err != nil {
 		return codedError(ErrorCodePolicyDenied, "tool evaluation failed closed", err)

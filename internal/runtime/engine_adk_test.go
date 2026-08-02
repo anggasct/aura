@@ -91,3 +91,70 @@ func collectStream(engine *Engine, req *TurnRequest) (eventsCh <-chan store.Runt
 	}()
 	return events, errs
 }
+
+// The engine must be the single writer: one streamed ADK event produces
+// exactly one stored row, with the original ADK event ID preserved and no
+// runner-side duplicate.
+func TestEngineSingleWriterForADKEvents(t *testing.T) {
+	model := &fakeADKModel{answer: "single writer", tokens: 2}
+	modelName := registerFakeModel(t, model)
+	db, sessions, events := newSessionTestDB(t)
+	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil)
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	dedupe := store.NewDedupeStore(db)
+	engine, err := NewEngine(Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	mustCreateSession(t, db, "session-1")
+
+	req := &TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
+		Parts: []InputPart{{Text: "hi"}},
+	}
+	var streamed []store.RuntimeEvent
+	for ev, err := range engine.Run(context.Background(), req) {
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		streamed = append(streamed, ev)
+	}
+
+	// Every streamed ADK event must have exactly one stored row with the
+	// same ID — no runner-side duplicate, no engine-generated replacement.
+	stored, err := sessions.ListEvents(context.Background(), "session-1", 0, 1000)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	var streamedADK, storedADK int
+	seen := map[string]int{}
+	for _, ev := range stored {
+		if ev.Kind != store.EventKindADK {
+			continue
+		}
+		storedADK++
+		seen[ev.ID]++
+	}
+	for _, ev := range streamed {
+		if ev.Kind != store.EventKindADK {
+			continue
+		}
+		streamedADK++
+		if seen[ev.ID] != 1 {
+			t.Errorf("streamed ADK event %q has %d stored rows, want 1", ev.ID, seen[ev.ID])
+		}
+	}
+	if streamedADK == 0 || storedADK == 0 {
+		t.Fatalf("streamed=%d stored=%d, want both non-zero", streamedADK, storedADK)
+	}
+	if storedADK != streamedADK {
+		t.Errorf("stored ADK rows = %d, streamed ADK events = %d — single writer required", storedADK, streamedADK)
+	}
+	for id, n := range seen {
+		if n > 1 {
+			t.Errorf("ADK event %q stored %d times, want 1", id, n)
+		}
+	}
+}

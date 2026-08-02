@@ -425,9 +425,13 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	// persistEvent stamps the sequence and stores the executor's event with
 	// its full fidelity — invocation, branch, author, usage — then broadcasts
 	// it. Executor events may be zero-valued except Kind and Payload (the
-	// fake executor); those get identity filled here.
+	// fake executor); those get identity filled here. An event that already
+	// carries an ID (the ADK executor maps the runner's original event ID)
+	// keeps it, so the stored log is the authoritative event identity.
 	persistEvent := func(ctx context.Context, ev *store.RuntimeEvent) error {
-		ev.ID = newTurnID()
+		if ev.ID == "" {
+			ev.ID = newTurnID()
+		}
 		ev.SessionID = t.req.SessionID
 		ev.TurnID = t.turnID
 		if ev.Author == "" {

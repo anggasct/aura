@@ -32,21 +32,26 @@ func loadGoldenADKEvent(t *testing.T) *session.Event {
 func TestADKGoldenEventSurvivesFullRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	_, sessions, events := newSessionTestDB(t)
-	svc, err := NewADKSessionService(sessions, events)
+	svc, err := NewADKSessionService(sessions)
 	if err != nil {
 		t.Fatalf("NewADKSessionService: %v", err)
 	}
-	created, err := svc.Create(ctx, &session.CreateRequest{AppName: "aura", UserID: "user-1", SessionID: "session-golden"})
-	if err != nil {
+	if _, err := svc.Create(ctx, &session.CreateRequest{AppName: "aura", UserID: "user-1", SessionID: "session-golden"}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	original := loadGoldenADKEvent(t)
 
-	// Mapping + persistence: through the adapter's AppendEvent path, which is
-	// what the ADK runner uses at runtime.
-	if err := svc.AppendEvent(ctx, created.Session, original); err != nil {
-		t.Fatalf("AppendEvent: %v", err)
+	// Mapping + persistence: the engine is the single writer, persisting the
+	// mapped event exactly as the executor yields it — original ADK event ID,
+	// turn and session identity, full fidelity payload.
+	re, err := store.RuntimeEventFromADK("session-golden", "turn-golden", original)
+	if err != nil {
+		t.Fatalf("RuntimeEventFromADK: %v", err)
+	}
+	re.Sequence = 1
+	if err := events.Append(ctx, &re); err != nil {
+		t.Fatalf("Append: %v", err)
 	}
 
 	// Replay + mapping back: reload the session from the store.
