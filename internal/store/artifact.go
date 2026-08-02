@@ -194,6 +194,22 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		 ON CONFLICT(id) DO NOTHING`,
 		meta.ID, digest, meta.SessionID, nullableString(meta.EventID), meta.Filename, jsonOrEmptyObject(meta.Metadata), formatTime(createdAt),
 	); err != nil {
+		if isConstraintForeignKey(err) {
+			refs := []fkReference{
+				{what: "blob", key: digest, existsSQL: "SELECT 1 FROM blob WHERE digest = ?", code: ErrorCodeArtifactBlobMissing},
+				{what: "session", key: meta.SessionID, existsSQL: "SELECT 1 FROM session WHERE id = ?", code: ErrorCodeSessionNotFound},
+			}
+			if meta.EventID != "" {
+				refs = append(refs, fkReference{what: "event", key: meta.EventID, existsSQL: "SELECT 1 FROM runtime_event WHERE id = ?", code: ErrorCodeEventNotFound})
+			}
+			if classified := classifyFKReference(ctx, tx, refs...); classified != nil {
+				return ArtifactRef{}, classified
+			}
+			return ArtifactRef{}, &Error{
+				Code:   ErrorCodeInvalidArgument,
+				Detail: fmt.Sprintf("artifact %s violates a foreign key constraint", meta.ID),
+			}
+		}
 		return ArtifactRef{}, classifyBusy(fmt.Errorf("insert artifact ref %s: %w", meta.ID, err))
 	}
 
@@ -253,9 +269,19 @@ func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) erro
 	)
 	if err != nil {
 		if isConstraintForeignKey(err) {
+			refs := []fkReference{
+				{what: "blob", key: link.BlobDigest, existsSQL: "SELECT 1 FROM blob WHERE digest = ?", code: ErrorCodeArtifactBlobMissing},
+				{what: "session", key: link.SessionID, existsSQL: "SELECT 1 FROM session WHERE id = ?", code: ErrorCodeSessionNotFound},
+			}
+			if link.EventID != "" {
+				refs = append(refs, fkReference{what: "event", key: link.EventID, existsSQL: "SELECT 1 FROM runtime_event WHERE id = ?", code: ErrorCodeEventNotFound})
+			}
+			if classified := classifyFKReference(ctx, s.db, refs...); classified != nil {
+				return classified
+			}
 			return &Error{
-				Code:   ErrorCodeSessionNotFound,
-				Detail: fmt.Sprintf("session %s does not exist", link.SessionID),
+				Code:   ErrorCodeInvalidArgument,
+				Detail: fmt.Sprintf("link %s violates a foreign key constraint", link.ID),
 			}
 		}
 		return classifyBusy(fmt.Errorf("link artifact %s to blob %s: %w", link.ID, link.BlobDigest, err))

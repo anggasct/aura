@@ -1,6 +1,8 @@
 package store
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -17,6 +19,7 @@ const (
 	ErrorCodeInvalidArgument           ErrorCode = "invalid_argument"
 	ErrorCodeSessionIDConflict         ErrorCode = "session_id_conflict"
 	ErrorCodeSessionNotFound           ErrorCode = "session_not_found"
+	ErrorCodeEventNotFound             ErrorCode = "event_not_found"
 	ErrorCodeMigrationChecksumMismatch ErrorCode = "migration_checksum_mismatch"
 	ErrorCodeMigrationSequenceInvalid  ErrorCode = "migration_sequence_invalid"
 	ErrorCodeArtifactQuotaExceeded     ErrorCode = "artifact_quota_exceeded"
@@ -75,4 +78,34 @@ func classifyBusy(err error) error {
 		return err
 	}
 	return codedError(ErrorCodeStorageBusy, "database is busy", err)
+}
+
+// rowChecker is satisfied by both *sql.DB and *sql.Tx.
+type rowChecker interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func rowExists(ctx context.Context, q rowChecker, query string, args ...any) bool {
+	var one int
+	return q.QueryRowContext(ctx, query, args...).Scan(&one) == nil
+}
+
+// classifyFKReference reports which referenced row an FK failure is missing.
+// The driver's error message names no column or table, so the referenced
+// tables are probed; every check must be on a unique key for the scan to be
+// unambiguous.
+func classifyFKReference(ctx context.Context, q rowChecker, refs ...fkReference) error {
+	for _, ref := range refs {
+		if !rowExists(ctx, q, ref.existsSQL, ref.key) {
+			return &Error{Code: ref.code, Detail: fmt.Sprintf("%s %s does not exist", ref.what, ref.key)}
+		}
+	}
+	return nil
+}
+
+type fkReference struct {
+	what      string
+	key       any
+	existsSQL string
+	code      ErrorCode
 }
