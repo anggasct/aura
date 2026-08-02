@@ -422,16 +422,26 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	ctx, stop := context.WithDeadline(ctx, deadline)
 	defer stop()
 
-	emit := func(ctx context.Context, kind string, payload []byte) error {
-		ev := store.RuntimeEvent{
-			ID:            newTurnID(),
-			SessionID:     t.req.SessionID,
-			TurnID:        t.turnID,
-			Author:        t.req.PrincipalID,
-			Kind:          kind,
-			SchemaVersion: 1,
-			Payload:       payload,
-			CreatedAt:     time.Now().UTC(),
+	// persistEvent stamps the sequence and stores the executor's event with
+	// its full fidelity — invocation, branch, author, usage — then broadcasts
+	// it. Executor events may be zero-valued except Kind and Payload (the
+	// fake executor); those get identity filled here. An event that already
+	// carries an ID (the ADK executor maps the runner's original event ID)
+	// keeps it, so the stored log is the authoritative event identity.
+	persistEvent := func(ctx context.Context, ev *store.RuntimeEvent) error {
+		if ev.ID == "" {
+			ev.ID = newTurnID()
+		}
+		ev.SessionID = t.req.SessionID
+		ev.TurnID = t.turnID
+		if ev.Author == "" {
+			ev.Author = t.req.PrincipalID
+		}
+		if ev.SchemaVersion == 0 {
+			ev.SchemaVersion = 1
+		}
+		if ev.CreatedAt.IsZero() {
+			ev.CreatedAt = time.Now().UTC()
 		}
 		err := e.sessionQueue(t.req.SessionID).lock(func() error {
 			seq, err := e.nextSequence(ctx, t.req.SessionID)
@@ -439,13 +449,18 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 				return err
 			}
 			ev.Sequence = seq
-			return e.events.Append(ctx, &ev)
+			return e.events.Append(ctx, ev)
 		})
 		if err != nil {
-			return codedError(ErrorCodeStorageUnavailable, "failed to persist "+kind, err)
+			return codedError(ErrorCodeStorageUnavailable, "failed to persist "+ev.Kind, err)
 		}
-		e.broadcast(t, &ev)
+		e.broadcast(t, ev)
 		return nil
+	}
+
+	emit := func(ctx context.Context, kind string, payload []byte) error {
+		ev := &store.RuntimeEvent{Kind: kind, Payload: payload}
+		return persistEvent(ctx, ev)
 	}
 
 	e.broadcast(t, &t.accepted)
@@ -458,7 +473,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 			execErr = err
 			break
 		}
-		if emitErr := emit(ctx, ev.Kind, ev.Payload); emitErr != nil {
+		if emitErr := persistEvent(ctx, &ev); emitErr != nil {
 			execErr = emitErr
 			break
 		}
