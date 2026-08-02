@@ -46,13 +46,6 @@ type TurnRequest struct {
 	TraceParent    string
 }
 
-// TurnRef identifies an accepted turn. Duplicate submissions return the
-// original turn's reference rather than starting a second execution.
-type TurnRef struct {
-	TurnID    string
-	SessionID string
-}
-
 // Stable runtime event kinds. Consumers ignore unknown additive kinds.
 const (
 	EventKindTurnAccepted     = "turn.accepted"
@@ -72,6 +65,10 @@ const (
 // Gateways, schedulers, webhooks, and subagents must not build their own
 // turn loop. The stream carries the persisted event type, so what is
 // streamed is exactly what is durable.
+//
+// The request is passed by pointer per code conventions (heavy structs are
+// pointer parameters); implementations must treat the request as read-only
+// and copy before mutating.
 type AgentRuntime interface {
-	Run(ctx context.Context, req TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+	Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error]
 }

@@ -58,11 +58,13 @@ func (c *Config) validate() error {
 
 // TurnExecutor runs one turn's inner loop. The fake executor is the
 // deterministic step-1 implementation; the ADK runner adapter replaces it
-// behind the same interface. Executor events carry kind and payload; the
-// engine stamps identity, sequence, and timestamp, and persists every event
-// before forwarding it.
+// behind the same interface. Execute is named differently from the
+// AgentRuntime boundary so the queued runtime and its inner loop cannot be
+// conflated. Executor events carry kind and payload; the engine stamps
+// identity, sequence, and timestamp, and persists every event before
+// forwarding it.
 type TurnExecutor interface {
-	Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+	Execute(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error]
 }
 
 // Engine implements AgentRuntime with a bounded per-session FIFO queue,
@@ -162,12 +164,16 @@ func (s *subscriber) stop() {
 	s.once.Do(func() { close(s.done) })
 }
 
+var _ AgentRuntime = (*Engine)(nil)
+
 // Run submits a turn and streams its events. A duplicate idempotency key
 // replays the original turn's stored events and creates no second event
-// sequence.
+// sequence. The request is copied, so a caller-owned TurnID is never
+// mutated.
 func (e *Engine) Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
-		sub, err := e.submit(ctx, req)
+		copyReq := *req
+		sub, err := e.submit(ctx, &copyReq)
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
@@ -177,7 +183,7 @@ func (e *Engine) Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.Runt
 		for {
 			select {
 			case <-ctx.Done():
-				e.cancelTurn(req.TurnID)
+				e.cancelTurn(copyReq.TurnID)
 				e.drainUntilTerminal(sub, yield)
 				return
 			case ev, ok := <-sub.events:
@@ -296,6 +302,15 @@ func (e *Engine) submit(ctx context.Context, req *TurnRequest) (*subscriber, err
 	}
 	t.start = func() { e.runTurn(turnCtx, t) }
 	e.mu.Lock()
+	// Shutdown may have begun while the accepted event was being persisted;
+	// the queue is draining and a late enqueue would orphan this turn with a
+	// durable accepted event and no terminal. Terminate it durably instead.
+	if e.shutdown {
+		e.mu.Unlock()
+		e.releasePending()
+		go e.terminateQueued(context.WithoutCancel(ctx), t)
+		return sub, nil
+	}
 	sq.queue = append(sq.queue, t)
 	e.turns[req.TurnID] = t
 	e.mu.Unlock()
@@ -392,6 +407,10 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 		}
 		e.active--
 		close(t.done)
+		// The turn is terminal and its subscribers are closed; drop it so a
+		// long-lived runtime does not accumulate completed turns. Replays
+		// fall back to the store when the turn is not live.
+		delete(e.turns, t.turnID)
 		e.mu.Unlock()
 		e.schedule()
 	}()
@@ -434,7 +453,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	var terminalKind string
 	var terminalPayload []byte
 	var execErr error
-	for ev, err := range e.executor.Run(ctx, &t.req) {
+	for ev, err := range e.executor.Execute(ctx, &t.req) {
 		if err != nil {
 			execErr = err
 			break
@@ -570,6 +589,10 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 			}
 		}
 		e.mu.Unlock()
+		// The first timer.C was consumed; reset for the post-cancel drain
+		// window so shutdown stays bounded when an executor ignores
+		// cancellation.
+		timer.Reset(grace)
 		select {
 		case <-done:
 			return nil
