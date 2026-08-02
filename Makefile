@@ -15,7 +15,7 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all test vet fmt-check lint refs-check verify clean
+.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load fuzz-smoke release-snapshot clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -55,6 +55,28 @@ refs-check:
 	fi
 
 verify: build-all fmt-check vet test lint refs-check
+
+security:
+	$(GO) tool govulncheck ./...
+
+eval:
+	$(GO) test -race ./internal/eval/
+
+load:
+	$(GO) test -tags load -race -run TestLoad ./internal/runtime/
+
+FUZZTIME ?= 10s
+fuzz-smoke:
+	$(GO) test -fuzz=FuzzEventPayload -fuzztime=$(FUZZTIME) ./internal/store/
+	$(GO) test -fuzz=FuzzConfigDecode -fuzztime=$(FUZZTIME) ./internal/config/
+
+# goreleaser is pinned but kept out of the module: its dependency tree (k8s,
+# docker, ...) would dwarf the product's own, so it runs on demand rather than
+# as a tool directive. The snapshot builds archives, checksums, and SBOMs (syft
+# required) but skips signing; the tag-triggered release workflow signs keyless.
+GORELEASER_VERSION ?= v2.17.1
+release-snapshot:
+	$(GO) run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --snapshot --clean --skip=sign
 
 clean:
 	rm -f $(BINARY)
