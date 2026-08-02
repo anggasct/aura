@@ -73,9 +73,6 @@ func landlockAvailable() bool {
 // reaps it, so nothing survives the deadline. On non-Linux the build-tag
 // sibling fails closed before any process is started.
 func run(ctx context.Context, spec *Spec, command string, args ...string) (Result, error) {
-	if err := spec.validate(); err != nil {
-		return Result{}, err
-	}
 	if spec.AllowNetwork {
 		return Result{}, Errorf(ErrorCodeSandboxUnavailable, "network access is not available in this sandbox")
 	}

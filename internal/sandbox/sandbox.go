@@ -84,6 +84,12 @@ type Result struct {
 // Run fails closed: if the host cannot enforce a required primitive it
 // returns sandbox_unavailable and never launches the child.
 func Run(ctx context.Context, spec *Spec, command string, args ...string) (Result, error) {
+	if spec == nil {
+		return Result{}, Errorf(ErrorCodeInvalidArgument, "spec must not be nil")
+	}
+	if err := spec.validate(); err != nil {
+		return Result{}, err
+	}
 	return run(ctx, spec, command, args...)
 }
 
