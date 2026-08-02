@@ -277,6 +277,9 @@ func TestHashCapabilitiesIsOrderIndependent(t *testing.T) {
 	if HashCapabilities([]string{"web", "file-read"}) == first {
 		t.Fatal("different sets must hash differently")
 	}
+	if HashCapabilities([]string{"exec", "exec", "file-read", "web"}) == first {
+		t.Fatal("duplicate entries must hash differently from the deduplicated set")
+	}
 }
 
 // Untrusted and derived content is always data — it cannot change

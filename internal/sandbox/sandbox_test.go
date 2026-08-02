@@ -156,6 +156,46 @@ func TestRunInvalidSpecFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRunOutputCapped(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	spec := Spec{
+		WorkingDir: t.TempDir(),
+		AllowEnv:   []string{"PATH=" + os.Getenv("PATH")},
+		Limits:     Limits{Timeout: 5 * time.Second, MaxOutputBytes: 16},
+	}
+	result, err := Run(ctx, &spec, "sh", "-c", "printf '0123456789abcdefGHIJKLMNOP'")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Truncated {
+		t.Fatalf("Truncated = false, want true (output=%q)", result.Output)
+	}
+	if len(result.Output) != 16 {
+		t.Fatalf("output length = %d, want 16 (output=%q)", len(result.Output), result.Output)
+	}
+}
+
+func TestRunOutputNotCappedWhenUnderLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	spec := Spec{
+		WorkingDir: t.TempDir(),
+		AllowEnv:   []string{"PATH=" + os.Getenv("PATH")},
+		Limits:     Limits{Timeout: 5 * time.Second, MaxOutputBytes: 1 << 20},
+	}
+	result, err := Run(ctx, &spec, "printf", "short")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Truncated {
+		t.Fatal("Truncated = true for small output")
+	}
+	if result.Output != "short" {
+		t.Fatalf("output = %q", result.Output)
+	}
+}
+
 func TestNegotiateReportsPrimitives(t *testing.T) {
 	primitives, err := Negotiate()
 	if err != nil {
