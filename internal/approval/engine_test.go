@@ -210,6 +210,7 @@ func TestGrantInvalidatedByFieldChanges(t *testing.T) {
 		run  func() error
 	}{
 		{name: "arguments changed", run: mutate(func(g *ApprovalGrant) { g.ArgumentsHash = "different" })},
+		{name: "capabilities changed", run: mutate(func(g *ApprovalGrant) { g.CapabilitiesHash = "different" })},
 		{name: "session changed", run: mutate(func(g *ApprovalGrant) { g.SessionID = "session-2" })},
 		{name: "principal changed", run: mutate(func(g *ApprovalGrant) { g.PrincipalID = "attacker" })},
 		{name: "tool changed", run: mutate(func(g *ApprovalGrant) { g.ToolName = "exec" })},
@@ -245,6 +246,36 @@ func TestExecuteRejectsTamperedArguments(t *testing.T) {
 	_, err = engine.Execute(context.Background(), &tampered, &grant)
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
 		t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid for tampered arguments", err, code, ok)
+	}
+}
+
+// A capability change in the request invalidates the grant, so a skill or
+// MCP server whose granted capabilities changed requires a new trust
+// decision before it can execute again.
+func TestExecuteRejectsCapabilityChange(t *testing.T) {
+	engine := newTestEngine(t)
+	request := testRequest("read_file")
+	grant, err := engine.Grant(context.Background(), &request, time.Minute)
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+
+	escalated := request
+	escalated.Capabilities = append(escalated.Capabilities, "sys-admin")
+	_, err = engine.Execute(context.Background(), &escalated, &grant)
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid for capability change", err, code, ok)
+	}
+}
+
+func TestHashCapabilitiesIsOrderIndependent(t *testing.T) {
+	first := HashCapabilities([]string{"web", "file-read", "exec"})
+	second := HashCapabilities([]string{"exec", "file-read", "web"})
+	if first != second {
+		t.Fatalf("hash depends on ordering: %q != %q", first, second)
+	}
+	if HashCapabilities([]string{"web", "file-read"}) == first {
+		t.Fatal("different sets must hash differently")
 	}
 }
 
