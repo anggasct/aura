@@ -149,10 +149,3 @@ func TestPipelineBoundedQueueDoesNotBlock(t *testing.T) {
 
 	_ = tp.Shutdown(t.Context())
 }
-
-func TestPipelineOTLPGRPCEndpointRequired(t *testing.T) {
-	_, err := NewPipeline(config.Telemetry{Exporter: "otlp_grpc"}, nil)
-	if err == nil {
-		t.Log("otlp_grpc without endpoint created; endpoint validation is at config layer")
-	}
-}

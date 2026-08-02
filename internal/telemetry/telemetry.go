@@ -164,7 +164,7 @@ func (i *Instrument) StartModelSpan(ctx context.Context, params ModelSpanParams)
 	return ctx, span, time.Now()
 }
 
-func (i *Instrument) EndModelSpan(ctx context.Context, span trace.Span, start time.Time, system, responseModel string, inputTokens, outputTokens int64, err error) {
+func (i *Instrument) EndModelSpan(ctx context.Context, span trace.Span, start time.Time, system, operation, responseModel string, inputTokens, outputTokens int64, err error) {
 	if responseModel != "" {
 		span.SetAttributes(attribute.String(AttrGenAIResponseModel, responseModel))
 	}
@@ -181,7 +181,7 @@ func (i *Instrument) EndModelSpan(ctx context.Context, span trace.Span, start ti
 	span.End()
 	labels := metric.WithAttributes(
 		attribute.String(AttrGenAISystem, system),
-		attribute.String(AttrGenAIOperationName, "chat"),
+		attribute.String(AttrGenAIOperationName, operation),
 	)
 	i.modelDuration.Record(ctx, time.Since(start).Seconds(), labels)
 }

@@ -4,16 +4,14 @@ const SemconvVersion = "1.30.0"
 
 const (
 	SpanTurn  = "turn"
-	SpanModel = "gen_ai.client.operation"
-	SpanTool  = "tool.execute"
+	SpanModel = "model"
+	SpanTool  = "tool"
 )
 
 const (
 	MetricTurnsTotal    = "runtime.turns.total"
 	MetricTurnDuration  = "runtime.turn.duration"
 	MetricModelDuration = "gen_ai.client.operation.duration"
-	MetricExportErrors  = "telemetry.export.errors"
-	MetricDroppedSpans  = "telemetry.dropped_spans.total"
 )
 
 const (
@@ -61,8 +59,6 @@ var metricLabelAttrs = map[string][]string{
 	MetricTurnsTotal:    {AttrOrigin, AttrTerminalKind},
 	MetricTurnDuration:  {AttrOrigin, AttrTerminalKind},
 	MetricModelDuration: {AttrGenAISystem, AttrGenAIOperationName},
-	MetricExportErrors:  {},
-	MetricDroppedSpans:  {},
 }
 
 func AllowedSpanAttrs(spanName string) []string {

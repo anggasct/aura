@@ -225,7 +225,7 @@ func TestModelSpanExplicit(t *testing.T) {
 		Operation:    "chat",
 	})
 	_ = mctx
-	inst.EndModelSpan(ctx, mspan, mstart, "openai", "gpt-4o-2024-08-06", 100, 50, nil)
+	inst.EndModelSpan(ctx, mspan, mstart, "openai", "chat", "gpt-4o-2024-08-06", 100, 50, nil)
 
 	spans := exporter.GetSpans()
 	if len(spans) != 1 {

@@ -103,7 +103,7 @@ func TestPrivacyCanaryModelSpan(t *testing.T) {
 		RequestModel: "gpt-4o",
 		Operation:    "chat",
 	})
-	inst.EndModelSpan(ctx, span, start, "openai", "gpt-4o-2024-08-06", 150, 75, nil)
+	inst.EndModelSpan(ctx, span, start, "openai", "chat", "gpt-4o-2024-08-06", 150, 75, nil)
 
 	spans := exporter.GetSpans()
 	for _, s := range spans {
