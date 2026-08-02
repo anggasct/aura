@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBackupAndVerifyRestore(t *testing.T) {
@@ -301,5 +302,27 @@ func TestBackupManifestOnDiskKeyNames(t *testing.T) {
 		if _, ok := blobs[0][key]; !ok {
 			t.Errorf("blob entry lost the %q key; on-disk format changed", key)
 		}
+	}
+}
+
+// The serialized manifest must be byte-stable: a renamed Go field must not
+// silently rename the on-disk key, or restores of older backups break.
+func TestBackupManifestMatchesGoldenBytes(t *testing.T) {
+	manifest := BackupManifest{
+		CreatedAt: time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),
+		Blobs: []BackupBlobEntry{
+			{Digest: "sha256-abc", SizeBytes: 42, RelativePath: "session-1/f.bin"},
+		},
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	golden, err := os.ReadFile(filepath.Join("..", "..", "testdata", "store", "backup_manifest.json"))
+	if err != nil {
+		t.Fatalf("read golden manifest: %v", err)
+	}
+	if !bytes.Equal(raw, bytes.TrimSpace(golden)) {
+		t.Errorf("manifest bytes differ from golden fixture:\ngot  %s\nwant %s", raw, golden)
 	}
 }
