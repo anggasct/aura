@@ -1,0 +1,6 @@
+{
+  "name": "privilege elevation without capability",
+  "tool": "fs.write",
+  "trust": "owner_input",
+  "capabilities": []
+}

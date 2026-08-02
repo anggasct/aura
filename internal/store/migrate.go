@@ -115,6 +115,22 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+// SchemaVersions reports the highest applied migration version and the highest
+// version this binary knows about. A database with no migrations applied
+// reports applied 0. Health checks compare the two to detect a pending
+// migration (applied < latest) or a downgrade (applied > latest).
+func SchemaVersions(ctx context.Context, db *sql.DB) (applied, latest int, err error) {
+	latest = migrations[len(migrations)-1].version
+	var appliedMax sql.NullInt64
+	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migration`).Scan(&appliedMax); err != nil {
+		return 0, 0, fmt.Errorf("read applied migration state: %w", err)
+	}
+	if appliedMax.Valid {
+		applied = int(appliedMax.Int64)
+	}
+	return applied, latest, nil
+}
+
 func validateMigrationOrder(ms []migration) error {
 	for i := 1; i < len(ms); i++ {
 		if ms[i].version <= ms[i-1].version {
