@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+
+	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/config"
 )
@@ -66,6 +69,72 @@ func TestGeminiAdapter(t *testing.T) {
 	}
 	if len(responses) != 1 || responses[0].Content.Parts[0].Text != "Hello from Gemini." {
 		t.Fatalf("responses = %+v", responses)
+	}
+}
+
+func TestGeminiStreamFixture(t *testing.T) {
+	fixture := fixtureBytes(t, "gemini_stream.txt")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeFixture(t, w, fixture)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewGeminiAdapter("gemini-2.5-pro", srv.URL, "gemini-key", 0)
+	if err != nil {
+		t.Fatalf("NewGeminiAdapter: %v", err)
+	}
+	responses, err := collect(adapter.GenerateContent(context.Background(), sampleRequest("hello"), true))
+	if err != nil {
+		t.Fatalf("GenerateContent: %v", err)
+	}
+	var partials []string
+	var final *adkmodel.LLMResponse
+	for _, r := range responses {
+		if r.Partial {
+			partials = append(partials, r.Content.Parts[0].Text)
+			continue
+		}
+		final = r
+	}
+	if !slices.Equal(partials, []string{"Hello", " world"}) {
+		t.Fatalf("partials = %v", partials)
+	}
+	if final == nil || !final.TurnComplete {
+		t.Fatalf("final = %+v, want a complete terminal response", final)
+	}
+	if got := final.Content.Parts[0].Text; got != " world" {
+		t.Errorf("final text = %q, want %q", got, " world")
+	}
+	if final.UsageMetadata == nil || final.UsageMetadata.TotalTokenCount != 8 {
+		t.Errorf("final usage = %+v", final.UsageMetadata)
+	}
+}
+
+func TestGeminiStreamTruncatedBeforeTerminal(t *testing.T) {
+	fixture := fixtureBytes(t, "gemini_stream.txt")
+	// Cut at the event boundary before the STOP event so the stream is
+	// complete events that never reach the terminal marker.
+	stopAt := bytes.Index(fixture, []byte(`"finishReason":"STOP"`))
+	eventStart := bytes.LastIndex(fixture[:stopAt], []byte("\n\n"))
+	truncated := fixture[:eventStart+2]
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write(truncated)
+	}))
+	defer srv.Close()
+
+	adapter, err := NewGeminiAdapter("gemini-2.5-pro", srv.URL, "gemini-key", 0)
+	if err != nil {
+		t.Fatalf("NewGeminiAdapter: %v", err)
+	}
+	responses, err := collect(adapter.GenerateContent(context.Background(), sampleRequest("hello"), true))
+	if err == nil {
+		t.Fatal("expected truncation error, got nil")
+	}
+	wantCode(t, err, ErrorCodeStreamInvalid)
+	if len(responses) == 0 {
+		t.Error("partials should still be delivered before the truncation error")
 	}
 }
 

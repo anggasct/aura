@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -40,27 +41,32 @@ func ParseBuild(profile, capabilities, goos string) (Build, error) {
 }
 
 func NewBuild(profile string, capabilities []string, goos string) (Build, error) {
+	var problems []error
 	p := Profile(profile)
 	if !p.Valid() {
-		return Build{}, newError(ErrorCodeProfileInvalid, "", fmt.Sprintf("unsupported build profile %q", profile))
+		problems = append(problems, newError(ErrorCodeProfileInvalid, "", fmt.Sprintf("unsupported build profile %q", profile)))
 	}
 	if goos == "" {
-		return Build{}, newError(ErrorCodeProfileInvalid, "", "build operating system is empty")
+		problems = append(problems, newError(ErrorCodeProfileInvalid, "", "build operating system is empty"))
 	}
 	if p.requiresLinux() && goos != "linux" {
-		return Build{}, newError(ErrorCodeCapabilityUnavailable, "", fmt.Sprintf("%q requires Linux", p))
+		problems = append(problems, newError(ErrorCodeCapabilityUnavailable, "", fmt.Sprintf("%q requires Linux", p)))
 	}
 
 	compiled := slices.Clone(capabilities)
 	seen := make(map[string]struct{}, len(compiled))
 	for _, name := range compiled {
 		if name == "" || strings.TrimSpace(name) != name || !namePattern.MatchString(name) {
-			return Build{}, newError(ErrorCodeProfileInvalid, name, "compiled capability name is invalid")
+			problems = append(problems, newError(ErrorCodeProfileInvalid, name, "compiled capability name is invalid"))
+			continue
 		}
 		if _, ok := seen[name]; ok {
-			return Build{}, newError(ErrorCodeProfileInvalid, name, "compiled capability is duplicated")
+			problems = append(problems, newError(ErrorCodeProfileInvalid, name, "compiled capability is duplicated"))
 		}
 		seen[name] = struct{}{}
+	}
+	if err := errors.Join(problems...); err != nil {
+		return Build{}, err
 	}
 	slices.Sort(compiled)
 

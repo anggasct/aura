@@ -31,6 +31,9 @@ func fixtureBytes(t *testing.T, name string) []byte {
 
 func writeFixture(t *testing.T, w http.ResponseWriter, b []byte) {
 	t.Helper()
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
 	if _, err := w.Write(b); err != nil {
 		t.Fatalf("write response: %v", err)
 	}
@@ -325,6 +328,7 @@ func TestOpenAI_StreamingInvalidToolCall(t *testing.T) {
 
 func TestOpenAI_ToolCallArgumentsMustBeObject(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"model":"gpt-4o","choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"search","arguments":"[]"}}]},"finish_reason":"tool_calls"}]}`)
 	}))
 	defer srv.Close()

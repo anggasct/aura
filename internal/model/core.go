@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"iter"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,6 +123,11 @@ func (c *coreClient) GenerateContent(ctx context.Context, req *adkmodel.LLMReque
 		defer func() { _ = resp.Body.Close() }()
 
 		if cErr := classifyHTTPResponse(resp, c.codec.protocol()); cErr != nil {
+			telemetry.finish(ctx, nil, cErr)
+			yield(nil, cErr)
+			return
+		}
+		if cErr := validateContentType(resp.Header.Get("Content-Type"), stream, c.codec.protocol()); cErr != nil {
 			telemetry.finish(ctx, nil, cErr)
 			yield(nil, cErr)
 			return
@@ -241,6 +248,9 @@ func (c *coreClient) stream(ctx context.Context, body io.ReadCloser, telemetry *
 		return nil
 	})
 	if err != nil && !errors.Is(err, errStopYield) {
+		if errors.Is(err, bufio.ErrTooLong) {
+			err = codedError(ErrorCodeStreamInvalid, bufio.ErrTooLong, c.codec.protocol()+": stream line exceeds the buffer cap")
+		}
 		telemetry.finish(ctx, nil, err)
 		yield(nil, err)
 		return
@@ -260,6 +270,22 @@ func readCapped(body io.Reader) ([]byte, error) {
 		return nil, newError(ErrorCodeProtocolInvalid, "", "", "model: response exceeds the size limit")
 	}
 	return data, nil
+}
+
+// validateContentType rejects a body whose media type cannot be parsed by the
+// request path, so a proxy page or error page never reaches a decoder.
+func validateContentType(contentType string, stream bool, provider string) error {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if stream {
+		if mediaType != "text/event-stream" {
+			return codedError(ErrorCodeStreamInvalid, nil, provider+": unexpected stream content type "+strconv.Quote(contentType))
+		}
+		return nil
+	}
+	if mediaType != "application/json" {
+		return codedError(ErrorCodeProtocolInvalid, nil, provider+": unexpected content type "+strconv.Quote(contentType))
+	}
+	return nil
 }
 
 type streamPartKind int

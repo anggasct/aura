@@ -71,6 +71,40 @@ func TestAnthropicStreamTruncatedBeforeTerminal(t *testing.T) {
 	}
 }
 
+func TestRejectsUnexpectedContentType(t *testing.T) {
+	body := fixtureBytes(t, "gemini_response.json")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	a, err := NewGeminiAdapter("gemini-2.5-pro", srv.URL, "gemini-key", 0)
+	if err != nil {
+		t.Fatalf("NewGeminiAdapter: %v", err)
+	}
+	_, err = collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
+	wantCode(t, err, ErrorCodeProtocolInvalid)
+
+	_, err = collect(a.GenerateContent(context.Background(), sampleRequest("hi"), true))
+	wantCode(t, err, ErrorCodeStreamInvalid)
+}
+
+func TestStreamLineOverBufferCapIsTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: " + strings.Repeat("x", 2*1024*1024) + "\n\n"))
+	}))
+	defer srv.Close()
+
+	a, err := NewGeminiAdapter("gemini-2.5-pro", srv.URL, "gemini-key", 0)
+	if err != nil {
+		t.Fatalf("NewGeminiAdapter: %v", err)
+	}
+	_, err = collect(a.GenerateContent(context.Background(), sampleRequest("hi"), true))
+	wantCode(t, err, ErrorCodeStreamInvalid)
+}
+
 func TestReadCappedRejectsOversizedBody(t *testing.T) {
 	big := bytes.NewReader(bytes.Repeat([]byte("x"), maxResponseBytes+1))
 	if _, err := readCapped(big); err == nil {

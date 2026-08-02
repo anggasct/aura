@@ -962,3 +962,25 @@ func TestResolvePath_XDGEmptyFallsBack(t *testing.T) {
 		t.Errorf("path = %q, want %q", path, want)
 	}
 }
+
+// Definitions are independent, so an operator with several broken ones must
+// be told about all of them, not one per run in map-iteration order.
+func TestValidateLoadedModelsReportsEveryDefinition(t *testing.T) {
+	models := Models{Definitions: map[string]ModelDefinition{
+		"primary": {Protocol: "nope", Model: "m", APIKeyEnv: "K",
+			Capabilities: ModelCapabilities{ContextTokens: 1, Tokenizer: "t"}},
+		"auxiliary": {Protocol: ProtocolOpenAIChatCompat, Model: "",
+			Capabilities: ModelCapabilities{ContextTokens: 1, Tokenizer: "t"}},
+		"third": {Protocol: ProtocolOpenAIChatCompat, Model: "m", APIKeyEnv: "K",
+			Capabilities: ModelCapabilities{ContextTokens: 0, Tokenizer: ""}},
+	}}
+	err := validateLoadedModels(models, false)
+	if err == nil {
+		t.Fatal("expected the invalid definitions to be rejected")
+	}
+	for _, name := range []string{"primary", "auxiliary", "third"} {
+		if !strings.Contains(err.Error(), "models.definitions."+name) {
+			t.Errorf("aggregate error omits %q: %v", name, err)
+		}
+	}
+}

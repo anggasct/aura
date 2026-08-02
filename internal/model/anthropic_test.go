@@ -217,6 +217,7 @@ func TestAnthropic_RequestBuild(t *testing.T) {
 
 func TestAnthropic_ToolUseArgumentsMustBeObject(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"model":"claude","content":[{"type":"tool_use","id":"toolu_1","name":"search","input":[]}] ,"usage":{"input_tokens":1,"output_tokens":1}}`)
 	}))
 	defer srv.Close()
