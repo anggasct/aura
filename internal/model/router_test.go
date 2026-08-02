@@ -308,3 +308,47 @@ func TestRejectCrossOriginRedirect(t *testing.T) {
 		t.Fatal("cross-origin redirect was accepted")
 	}
 }
+
+// A base_url may carry credentials. The rejection must name the reason
+// without echoing the URL that contains them.
+func TestBuildRouterErrorOmitsBaseURLCredentials(t *testing.T) {
+	models := config.Models{Definitions: map[string]config.ModelDefinition{
+		"primary": {
+			Protocol:  config.ProtocolOpenAIChatCompat,
+			Model:     "gpt-4o",
+			BaseURL:   "https://alice:hunter2@provider.example",
+			APIKeyEnv: "AURA_TEST_KEY",
+		},
+	}}
+	t.Setenv("AURA_TEST_KEY", "k")
+	_, err := BuildRouter(nil, models)
+	if err == nil {
+		t.Fatal("expected credentials in base_url to be rejected")
+	}
+	for _, secret := range []string{"alice", "hunter2", "provider.example"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error leaked %q: %v", secret, err)
+		}
+	}
+}
+
+// A failed secret-file read must name the file, not where it lives.
+func TestResolveSecretErrorOmitsAbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "api-key.txt")
+	_, err := resolveSecret("primary", &config.ModelDefinition{
+		Protocol:   config.ProtocolOpenAIChatCompat,
+		Model:      "gpt-4o",
+		BaseURL:    "https://provider.example",
+		APIKeyFile: missing,
+	})
+	if err == nil {
+		t.Fatal("expected a missing secret file to be rejected")
+	}
+	if strings.Contains(err.Error(), dir) {
+		t.Errorf("error leaked the absolute path: %v", err)
+	}
+	if !strings.Contains(err.Error(), "api-key.txt") {
+		t.Errorf("error should name the file: %v", err)
+	}
+}

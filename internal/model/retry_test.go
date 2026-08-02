@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -279,5 +282,38 @@ func TestAnthropic_400TypedErrors(t *testing.T) {
 	_, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
 	if !errors.Is(err, ErrContextTooLong) {
 		t.Errorf("err=%v, want ErrContextTooLong", err)
+	}
+}
+
+// A transport failure must survive classification with its cause chain
+// intact, or retryHTTP cannot recognise it as transient and every connection
+// reset is treated as permanent.
+func TestClassifyRequestErrorPreservesTransientCause(t *testing.T) {
+	for _, cause := range []error{syscall.ECONNRESET, syscall.EPIPE, io.ErrUnexpectedEOF, net.ErrClosed} {
+		classified := classifyRequestError(&url.Error{Op: "Post", URL: "https://provider.example", Err: cause})
+		if !errors.Is(classified, cause) {
+			t.Errorf("classifyRequestError(%v) lost the cause chain: %v", cause, classified)
+		}
+		if !isTransientError(classified) {
+			t.Errorf("classified %v is not recognised as transient", cause)
+		}
+		if code, ok := CodeOf(classified); !ok || code != ErrorCodeConnectionFailed {
+			t.Errorf("CodeOf = %q, %v; want %q", code, ok, ErrorCodeConnectionFailed)
+		}
+	}
+}
+
+func TestRetryHTTPRetriesTransportFailures(t *testing.T) {
+	attempts := 0
+	cfg := RetryConfig{MaxRetries: 3, Sleep: func(context.Context, time.Duration) error { return nil }}
+	_, err := retryHTTP(context.Background(), cfg, func() (*http.Response, error) {
+		attempts++
+		return nil, classifyRequestError(&url.Error{Op: "Post", Err: syscall.ECONNRESET})
+	})
+	if err == nil {
+		t.Fatal("expected the transport failure to surface after retries")
+	}
+	if attempts != 4 {
+		t.Errorf("attempts = %d, want 4 (initial + 3 retries)", attempts)
 	}
 }
