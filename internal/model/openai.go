@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -83,17 +84,17 @@ type OpenAIAdapter struct {
 func NewOpenAIAdapter(name, baseURL, apiKey string, timeout time.Duration) (*OpenAIAdapter, error) {
 	if baseURL != "" {
 		if err := config.ValidateBaseURL(baseURL); err != nil {
-			return nil, fmt.Errorf("model: invalid base_url %q: %w", baseURL, err)
+			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
-	return newOpenAIAdapter(name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
+	return newOpenAIAdapter(nil, name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
 }
 
-func newOpenAIAdapter(name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *OpenAIAdapter {
+func newOpenAIAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *OpenAIAdapter {
 	if baseURL == "" {
 		baseURL = openaiDefaultBaseURL
 	}
-	return &OpenAIAdapter{core: newCoreClient(name, baseURL, apiKey, timeout, idleTimeout, openaiCodec{})}
+	return &OpenAIAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, openaiCodec{})}
 }
 
 func (a *OpenAIAdapter) Name() string { return a.core.name }
@@ -400,9 +401,13 @@ func classifyHTTPStatus(status int, provider string) error {
 	return nil
 }
 
+// classifyRequestError wraps the transport error rather than formatting it,
+// so isTransientError can still reach net.ErrClosed, io.ErrUnexpectedEOF, and
+// the syscall sentinels through errors.Is. Formatting the cause into the
+// detail string silently made every transport failure look permanent.
 func classifyRequestError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	return codedError(ErrorCodeConnectionFailed, ErrConnectionFailed, fmt.Sprintf("request failed: %v", err))
+	return fmt.Errorf("%w: %w", codedError(ErrorCodeConnectionFailed, ErrConnectionFailed, "request failed"), err)
 }

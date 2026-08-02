@@ -225,6 +225,9 @@ func TestCollectDeletesOnlyOldUnreferencedBlobs(t *testing.T) {
 	if err := rows.Scan(&count); err != nil {
 		t.Fatalf("scan count: %v", err)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("count blobs: %v", err)
+	}
 	if count != 2 {
 		t.Errorf("blob rows after collect = %d, want 2 (referenced + recent unreferenced)", count)
 	}
@@ -238,7 +241,7 @@ func TestCollectSkipsBlobReferencedAfterScan(t *testing.T) {
 
 	// The blob is old and unreferenced at scan time, so it is a candidate;
 	// but a reference is linked before the conditional delete runs, which
-	// must protect the row and the file (AC-10).
+	// must protect the row and the file.
 	digest := strings.Repeat("a", 64)
 	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
 		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, formatTime(time.Now().Add(-48*time.Hour))); err != nil {

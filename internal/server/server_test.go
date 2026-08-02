@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -25,7 +24,7 @@ func (m *mockListener) Name() string                    { return m.name }
 func (m *mockListener) Start(ctx context.Context) error { return m.start(ctx) }
 
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func signalSelf(t *testing.T, sig syscall.Signal) {
@@ -289,7 +288,7 @@ func TestForceExitWatcherExitsOnDone(t *testing.T) {
 	done := make(chan struct{})
 	close(done)
 
-	go srv.forceExitOnSecondSignal(sigCh, done)
+	go srv.forceExitOnSecondSignal(t.Context(), sigCh, done)
 	select {
 	case <-exited:
 		t.Error("exitFunc called after done closed — watcher leaked")
@@ -324,5 +323,39 @@ func TestRunShutdownTimeout(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("Run did not return after shutdown timeout")
+	}
+}
+
+// A listener that ignores cancellation must not be able to hang the process.
+// Before the shutdown paths were unified, the context path skipped the drain
+// timeout entirely and Run blocked here forever.
+func TestRunCancellationHonorsShutdownTimeout(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+
+	stuck := &mockListener{name: "stuck", start: func(ctx context.Context) error {
+		close(started)
+		<-release
+		return nil
+	}}
+	srv := New(Options{Logger: discardLogger(), ShutdownTimeout: 100 * time.Millisecond})
+	if err := srv.Add(stuck); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- srv.Run(ctx) }()
+	<-started
+	cancel()
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("Run returned error on cancellation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run ignored the shutdown timeout on parent context cancellation")
 	}
 }

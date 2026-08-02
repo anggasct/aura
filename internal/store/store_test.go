@@ -394,8 +394,8 @@ func TestEventAppendConcurrentSequenceCollision(t *testing.T) {
 
 	successes, conflicts := 0, 0
 	for _, err := range results {
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			successes++
 		default:
 			if code, ok := CodeOf(err); ok && code == ErrorCodeEventSequenceConflict {

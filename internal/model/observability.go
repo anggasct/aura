@@ -16,6 +16,7 @@ func WithTask(ctx context.Context, task string) context.Context {
 }
 
 type modelTelemetry struct {
+	logger   *slog.Logger
 	protocol string
 	model    string
 	started  time.Time
@@ -23,8 +24,11 @@ type modelTelemetry struct {
 	logged   bool
 }
 
-func newModelTelemetry(protocol, model string) *modelTelemetry {
-	return &modelTelemetry{protocol: protocol, model: model, started: time.Now()}
+func newModelTelemetry(logger *slog.Logger, protocol, model string) *modelTelemetry {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &modelTelemetry{logger: logger, protocol: protocol, model: model, started: time.Now()}
 }
 
 func (t *modelTelemetry) finish(ctx context.Context, response *adkmodel.LLMResponse, err error) {
@@ -52,7 +56,7 @@ func (t *modelTelemetry) finish(ctx context.Context, response *adkmodel.LLMRespo
 	if value, ok := ctx.Value(taskContextKey{}).(string); ok && value != "" {
 		task = value
 	}
-	slog.Info("model request",
+	t.logger.InfoContext(ctx, "model request",
 		"protocol", t.protocol,
 		"model", t.model,
 		"task", task,

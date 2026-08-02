@@ -25,19 +25,19 @@ func newVersionCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("capability: %w", err)
 			}
-			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "aura %s\n", version)
-			fmt.Fprintf(out, "  commit:   %s\n", commit)
-			fmt.Fprintf(out, "  built:    %s\n", date)
-			fmt.Fprintf(out, "  go:       %s\n", runtime.Version())
-			fmt.Fprintf(out, "  platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
-			fmt.Fprintf(out, "  profile:  %s\n", build.Profile())
 			compiled := strings.Join(build.CompiledCapabilities(), ", ")
 			if compiled == "" {
 				compiled = "none"
 			}
-			fmt.Fprintf(out, "  capabilities: %s\n", compiled)
-			return nil
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), `aura %s
+  commit:   %s
+  built:    %s
+  go:       %s
+  platform: %s/%s
+  profile:  %s
+  capabilities: %s
+`, version, commit, date, runtime.Version(), runtime.GOOS, runtime.GOARCH, build.Profile(), compiled)
+			return err
 		},
 	}
 }

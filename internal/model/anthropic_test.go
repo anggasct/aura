@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,12 +91,13 @@ func TestAnthropic_Streaming(t *testing.T) {
 	var partialCount int
 	var partialText string
 	var final *adkmodel.LLMResponse
+	var partialBuf strings.Builder
 	for _, r := range resps {
 		if r.Partial {
 			partialCount++
 			for _, p := range r.Content.Parts {
 				if p.Text != "" {
-					partialText += p.Text
+					partialBuf.WriteString(p.Text)
 				}
 			}
 		} else if r.TurnComplete {
@@ -108,12 +110,14 @@ func TestAnthropic_Streaming(t *testing.T) {
 	if final == nil {
 		t.Fatal("expected final TurnComplete response")
 	}
-	var finalText string
+	partialText = partialBuf.String()
+	var finalBuf strings.Builder
 	for _, p := range final.Content.Parts {
 		if p.Text != "" {
-			finalText += p.Text
+			finalBuf.WriteString(p.Text)
 		}
 	}
+	finalText := finalBuf.String()
 	if finalText != "Hello Claude" {
 		t.Errorf("final text = %q, want %q", finalText, "Hello Claude")
 	}
@@ -213,6 +217,7 @@ func TestAnthropic_RequestBuild(t *testing.T) {
 
 func TestAnthropic_ToolUseArgumentsMustBeObject(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"model":"claude","content":[{"type":"tool_use","id":"toolu_1","name":"search","input":[]}] ,"usage":{"input_tokens":1,"output_tokens":1}}`)
 	}))
 	defer srv.Close()
@@ -245,7 +250,10 @@ func TestAnthropic_StreamingStopsWhenCallerStops(t *testing.T) {
 	serverDone := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		flusher := w.(http.Flusher)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			return
+		}
 		for _, data := range []string{
 			`{"type":"message_start","message":{"model":"claude","usage":{}}}`,
 			`{"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,

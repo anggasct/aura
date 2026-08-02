@@ -80,52 +80,56 @@ func (s *Server) Run(ctx context.Context) error {
 	go func() { waitResult <- g.Wait() }()
 
 	var firstErr error
-	signalled := false
+	drained := false
+
+	// A shutdown request means the same thing whether it arrives on this
+	// server's own signal channel or as parent-context cancellation. Reacting
+	// to only one of them let the other path skip both the bounded drain and
+	// the force-exit watcher, and which one won was a race on a real signal.
 	if len(s.listeners) == 0 {
 		select {
 		case sig := <-sigCh:
-			s.logger.Info("received shutdown signal", "component", "server", "signal", sig.String())
-			signalled = true
-		case <-gctx.Done():
-			return nil
+			s.logger.InfoContext(ctx, "received shutdown signal", "component", "server", "signal", sig.String())
+		case <-ctx.Done():
+			s.logger.InfoContext(ctx, "shutdown requested", "component", "server")
 		}
 	} else {
 		select {
 		case sig := <-sigCh:
-			s.logger.Info("received shutdown signal", "component", "server", "signal", sig.String())
-			signalled = true
-		case <-gctx.Done():
-			firstErr = <-waitResult
+			s.logger.InfoContext(ctx, "received shutdown signal", "component", "server", "signal", sig.String())
+		case <-ctx.Done():
+			s.logger.InfoContext(ctx, "shutdown requested", "component", "server")
+		case firstErr = <-waitResult:
+			drained = true
 		}
 	}
 
 	cancel()
-	done := make(chan struct{})
-	defer close(done)
-	if signalled {
-		go s.forceExitOnSecondSignal(sigCh, done)
-	}
 
-	if firstErr == nil && signalled {
+	if !drained {
+		done := make(chan struct{})
+		defer close(done)
+		go s.forceExitOnSecondSignal(ctx, sigCh, done)
+
 		select {
 		case firstErr = <-waitResult:
 		case <-time.After(s.shutdownTimeout):
-			s.logger.Warn("shutdown timed out; forcing exit", "component", "server", "timeout", s.shutdownTimeout)
+			s.logger.WarnContext(ctx, "shutdown timed out; forcing exit", "component", "server", "timeout", s.shutdownTimeout)
 		}
 	}
 
 	if firstErr != nil {
-		s.logger.Error("server stopped with error", "component", "server", "error", firstErr)
+		s.logger.ErrorContext(ctx, "server stopped with error", "component", "server", "error", firstErr)
 		return firstErr
 	}
-	s.logger.Info("server stopped", "component", "server")
+	s.logger.InfoContext(ctx, "server stopped", "component", "server")
 	return nil
 }
 
 func (s *Server) runListener(ctx context.Context, l Listener) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.logger.Error("listener panic",
+			s.logger.ErrorContext(ctx, "listener panic",
 				"component", "server",
 				"listener", l.Name(),
 				"panic", fmt.Sprint(r),
@@ -134,9 +138,9 @@ func (s *Server) runListener(ctx context.Context, l Listener) (err error) {
 			err = &Error{Code: ErrorCodeListenerPanicked, Detail: "listener " + l.Name() + " panicked"}
 		}
 	}()
-	s.logger.Info("starting listener", "component", "server", "listener", l.Name())
+	s.logger.InfoContext(ctx, "starting listener", "component", "server", "listener", l.Name())
 	if err := l.Start(ctx); err != nil {
-		s.logger.Error("listener failed", "component", "server", "listener", l.Name(), "error", err)
+		s.logger.ErrorContext(ctx, "listener failed", "component", "server", "listener", l.Name(), "error", err)
 		return err
 	}
 	return nil
@@ -144,11 +148,11 @@ func (s *Server) runListener(ctx context.Context, l Listener) (err error) {
 
 // forceExitOnSecondSignal exits with the signal's 128+signum code on a
 // second signal, or returns when done closes so no goroutine outlives Run.
-func (s *Server) forceExitOnSecondSignal(sigCh <-chan os.Signal, done <-chan struct{}) {
+func (s *Server) forceExitOnSecondSignal(ctx context.Context, sigCh <-chan os.Signal, done <-chan struct{}) {
 	select {
 	case <-done:
 	case sig := <-sigCh:
-		s.logger.Warn("forced shutdown", "component", "server", "signal", sig.String())
+		s.logger.WarnContext(ctx, "forced shutdown", "component", "server", "signal", sig.String())
 		s.exitFunc(exitCodeForSignal(sig))
 	}
 }

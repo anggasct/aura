@@ -3,11 +3,13 @@ package store
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBackupAndVerifyRestore(t *testing.T) {
@@ -211,6 +213,7 @@ func TestBackupManifestMatchesSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list snapshot blobs: %v", err)
 	}
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var digest string
 		if err := rows.Scan(&digest); err != nil {
@@ -220,9 +223,6 @@ func TestBackupManifestMatchesSnapshot(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("list snapshot blobs: %v", err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatalf("close snapshot rows: %v", err)
 	}
 
 	if len(manifest.Blobs) != len(inDB) {
@@ -257,5 +257,72 @@ func TestVerifyRestoreLeavesBackupReadOnly(t *testing.T) {
 		if strings.HasSuffix(e.Name(), "-wal") || strings.HasSuffix(e.Name(), "-shm") {
 			t.Errorf("verification mutated the backup: %s present", e.Name())
 		}
+	}
+}
+
+// The manifest is an on-disk contract. Renaming a Go field must not be able
+// to change the serialized key names, so pin them here.
+func TestBackupManifestOnDiskKeyNames(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	artifacts := NewArtifactStore(db, t.TempDir(), DefaultArtifactQuotaBytes)
+	if _, err := artifacts.Put(ctx, strings.NewReader("payload"), &ArtifactMetadata{
+		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
+	}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	destDir := filepath.Join(t.TempDir(), "backup")
+	if _, err := Backup(ctx, db, destDir); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(destDir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("manifest is not an object: %v", err)
+	}
+	for _, key := range []string{"CreatedAt", "Blobs"} {
+		if _, ok := decoded[key]; !ok {
+			t.Errorf("manifest lost the %q key; on-disk format changed", key)
+		}
+	}
+	var blobs []map[string]json.RawMessage
+	if err := json.Unmarshal(decoded["Blobs"], &blobs); err != nil {
+		t.Fatalf("Blobs is not an array of objects: %v", err)
+	}
+	if len(blobs) == 0 {
+		t.Fatal("expected the manifest to list the stored blob")
+	}
+	for _, key := range []string{"Digest", "SizeBytes", "RelativePath"} {
+		if _, ok := blobs[0][key]; !ok {
+			t.Errorf("blob entry lost the %q key; on-disk format changed", key)
+		}
+	}
+}
+
+// The serialized manifest must be byte-stable: a renamed Go field must not
+// silently rename the on-disk key, or restores of older backups break.
+func TestBackupManifestMatchesGoldenBytes(t *testing.T) {
+	manifest := BackupManifest{
+		CreatedAt: time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),
+		Blobs: []BackupBlobEntry{
+			{Digest: "sha256-abc", SizeBytes: 42, RelativePath: "session-1/f.bin"},
+		},
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	golden, err := os.ReadFile(filepath.Join("..", "..", "testdata", "store", "backup_manifest.json"))
+	if err != nil {
+		t.Fatalf("read golden manifest: %v", err)
+	}
+	if !bytes.Equal(raw, bytes.TrimSpace(golden)) {
+		t.Errorf("manifest bytes differ from golden fixture:\ngot  %s\nwant %s", raw, golden)
 	}
 }

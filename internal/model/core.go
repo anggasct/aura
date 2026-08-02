@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -77,9 +80,15 @@ type coreClient struct {
 	retry        RetryConfig
 	idleTimeout  time.Duration
 	codec        providerCodec
+	logger       *slog.Logger
 }
 
-func newCoreClient(name, baseURL, apiKey string, timeout, idleTimeout time.Duration, codec providerCodec) *coreClient {
+// newCoreClient resolves a nil logger to the process default once, here, so
+// no request path reaches for a global while serving.
+func newCoreClient(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration, codec providerCodec) *coreClient {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	if timeout <= 0 {
 		timeout = defaultRequestTimeout
 	}
@@ -97,12 +106,13 @@ func newCoreClient(name, baseURL, apiKey string, timeout, idleTimeout time.Durat
 		retry:        defaultRetryConfig(),
 		idleTimeout:  idleTimeout,
 		codec:        codec,
+		logger:       logger,
 	}
 }
 
 func (c *coreClient) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		telemetry := newModelTelemetry(c.codec.protocol(), c.name)
+		telemetry := newModelTelemetry(c.logger, c.codec.protocol(), c.name)
 		resp, retries, err := c.do(ctx, req, stream)
 		telemetry.retries = retries
 		if err != nil {
@@ -110,9 +120,14 @@ func (c *coreClient) GenerateContent(ctx context.Context, req *adkmodel.LLMReque
 			yield(nil, err)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if cErr := classifyHTTPResponse(resp, c.codec.protocol()); cErr != nil {
+			telemetry.finish(ctx, nil, cErr)
+			yield(nil, cErr)
+			return
+		}
+		if cErr := validateContentType(resp.Header.Get("Content-Type"), stream, c.codec.protocol()); cErr != nil {
 			telemetry.finish(ctx, nil, cErr)
 			yield(nil, cErr)
 			return
@@ -233,6 +248,9 @@ func (c *coreClient) stream(ctx context.Context, body io.ReadCloser, telemetry *
 		return nil
 	})
 	if err != nil && !errors.Is(err, errStopYield) {
+		if errors.Is(err, bufio.ErrTooLong) {
+			err = codedError(ErrorCodeStreamInvalid, bufio.ErrTooLong, c.codec.protocol()+": stream line exceeds the buffer cap")
+		}
 		telemetry.finish(ctx, nil, err)
 		yield(nil, err)
 		return
@@ -252,6 +270,22 @@ func readCapped(body io.Reader) ([]byte, error) {
 		return nil, newError(ErrorCodeProtocolInvalid, "", "", "model: response exceeds the size limit")
 	}
 	return data, nil
+}
+
+// validateContentType rejects a body whose media type cannot be parsed by the
+// request path, so a proxy page or error page never reaches a decoder.
+func validateContentType(contentType string, stream bool, provider string) error {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if stream {
+		if mediaType != "text/event-stream" {
+			return codedError(ErrorCodeStreamInvalid, nil, provider+": unexpected stream content type "+strconv.Quote(contentType))
+		}
+		return nil
+	}
+	if mediaType != "application/json" {
+		return codedError(ErrorCodeProtocolInvalid, nil, provider+": unexpected content type "+strconv.Quote(contentType))
+	}
+	return nil
 }
 
 type streamPartKind int

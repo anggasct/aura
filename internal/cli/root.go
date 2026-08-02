@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -82,6 +84,18 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 // resolveLogging picks the effective log level and format. An explicitly set
 // flag wins; otherwise the config value (which already reflects AURA_ env
 // overrides) is used, so flag > env > file.
+// logConfigResult reports what config load did, in one place, so the two
+// entry points that bootstrap config cannot drift apart. The resolved path is
+// reduced to its basename: it embeds the operator's home directory.
+func logConfigResult(ctx context.Context, logger *slog.Logger, result *config.LoadResult) {
+	if result.DefaultGenerated {
+		logger.InfoContext(ctx, "generating default config", "component", "config", "file", filepath.Base(result.Path))
+	}
+	for _, key := range result.Warnings {
+		logger.WarnContext(ctx, "unrecognized environment variable is ignored", "component", "config", "env", key)
+	}
+}
+
 func resolveLogging(cmd *cobra.Command, cfg *config.Config) (level, format string) {
 	level, format = cfg.Logging.Level, cfg.Logging.Format
 	if f := cmd.Flags().Lookup("log-level"); f != nil && f.Changed {

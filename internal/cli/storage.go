@@ -38,14 +38,14 @@ func newStorageCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-// storagePaths resolves the data root, live database path, artifact root, and
-// backup directory from config. Empty paths resolve below $XDG_DATA_HOME/aura.
-func storagePaths(cfg *config.Config) (dataRoot, dbPath, artifactRoot, backupDir string, err error) {
-	dataRoot = cfg.Storage.Path
+// storagePaths resolves the live database path, artifact root, and backup
+// directory from config. Empty paths resolve below $XDG_DATA_HOME/aura.
+func storagePaths(cfg *config.Config) (dbPath, artifactRoot, backupDir string, err error) {
+	dataRoot := cfg.Storage.Path
 	if dataRoot == "" {
 		dataRoot, err = defaultDataRoot()
 		if err != nil {
-			return "", "", "", "", err
+			return "", "", "", err
 		}
 	}
 	dbPath = filepath.Join(dataRoot, liveDatabaseFilename)
@@ -54,7 +54,7 @@ func storagePaths(cfg *config.Config) (dataRoot, dbPath, artifactRoot, backupDir
 	if backupDir == "" {
 		backupDir = filepath.Join(dataRoot, defaultBackupDirName)
 	}
-	return dataRoot, dbPath, artifactRoot, backupDir, nil
+	return dbPath, artifactRoot, backupDir, nil
 }
 
 func defaultDataRoot() (string, error) {
@@ -71,7 +71,7 @@ func defaultDataRoot() (string, error) {
 // openStorage opens the live database with config-driven connection policy
 // and applies migrations.
 func openStorage(ctx context.Context, cfg *config.Config) (*sql.DB, error) {
-	_, dbPath, _, _, err := storagePaths(cfg)
+	dbPath, _, _, err := storagePaths(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +93,8 @@ func newStorageBackupCmd(gf *globalFlags) *cobra.Command {
 		Use:   "backup",
 		Short: "Create and verify an online database and artifact-manifest backup",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, cfg *config.Config, opened *sql.DB) error {
-				_, _, artifactRoot, backupDir, err := storagePaths(cfg)
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+				_, artifactRoot, backupDir, err := storagePaths(cfg)
 				if err != nil {
 					return err
 				}
@@ -111,7 +111,7 @@ func newStorageBackupCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				slog.Info("storage backup complete",
+				logger.InfoContext(ctx, "storage backup complete",
 					"component", "storage",
 					"operation", "backup",
 					"duration_ms", time.Since(start).Milliseconds(),
@@ -143,8 +143,8 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 			// Verify opens the backup snapshot itself and only needs the
 			// artifact root; the live database must not be opened or
 			// created as a side effect.
-			return withStorage(cmd, gf, false, func(ctx context.Context, cfg *config.Config, opened *sql.DB) error {
-				_, _, artifactRoot, _, err := storagePaths(cfg)
+			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+				_, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
 					return err
 				}
@@ -158,7 +158,7 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 					}
 					return store.Errorf(store.ErrorCodeBackupInvalid, "storage verification failed: %v", err)
 				}
-				slog.Info("storage verification complete",
+				logger.InfoContext(ctx, "storage verification complete",
 					"component", "storage",
 					"operation", "verify",
 					"duration_ms", time.Since(start).Milliseconds(),
@@ -196,8 +196,8 @@ func newStorageRestoreCmd(gf *globalFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Restore is offline: the live database must not be opened
 			// before it is replaced, so the db is not needed here.
-			return withStorage(cmd, gf, false, func(ctx context.Context, cfg *config.Config, opened *sql.DB) error {
-				_, dbPath, artifactRoot, _, err := storagePaths(cfg)
+			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+				dbPath, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
 					return err
 				}
@@ -206,7 +206,7 @@ func newStorageRestoreCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				slog.Info("storage restore complete",
+				logger.InfoContext(ctx, "storage restore complete",
 					"component", "storage",
 					"operation", "restore",
 					"duration_ms", time.Since(start).Milliseconds(),
@@ -228,8 +228,8 @@ func newStorageReconcileCmd(gf *globalFlags) *cobra.Command {
 		Use:   "reconcile",
 		Short: "Report missing or orphaned blobs; never deletes data",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, cfg *config.Config, opened *sql.DB) error {
-				_, _, artifactRoot, _, err := storagePaths(cfg)
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+				_, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
 					return err
 				}
@@ -238,7 +238,7 @@ func newStorageReconcileCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				slog.Info("storage reconcile complete",
+				logger.InfoContext(ctx, "storage reconcile complete",
 					"component", "storage",
 					"operation", "reconcile",
 					"duration_ms", time.Since(start).Milliseconds(),
@@ -258,8 +258,8 @@ func newStorageGcCmd(gf *globalFlags) *cobra.Command {
 		Use:   "gc",
 		Short: "Delete only unreferenced blobs older than the grace period",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, cfg *config.Config, opened *sql.DB) error {
-				_, _, artifactRoot, _, err := storagePaths(cfg)
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+				_, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
 					return err
 				}
@@ -272,7 +272,7 @@ func newStorageGcCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				slog.Info("storage gc complete",
+				logger.InfoContext(ctx, "storage gc complete",
 					"component", "storage",
 					"operation", "gc",
 					"duration_ms", time.Since(start).Milliseconds(),
@@ -301,22 +301,18 @@ func collectCutoff(before string) (time.Time, error) {
 // withStorage loads config, resolves storage paths, and runs fn. When needDB
 // is true the live database is opened and migrated first; offline operations
 // (restore) pass false so the database being replaced is never opened.
-func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *config.Config, *sql.DB) error) error {
+func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *slog.Logger, *config.Config, *sql.DB) error) error {
 	result, err := config.Load(gf.configPath)
 	if err != nil {
 		return err
 	}
 	cfg := result.Config
 	level, format := resolveLogging(cmd, cfg)
-	if err := logging.Setup(level, format, os.Stderr); err != nil {
+	logger, err := logging.Setup(level, format, os.Stderr)
+	if err != nil {
 		return err
 	}
-	if result.DefaultGenerated {
-		slog.Info("generating default config", "component", "config", "path", result.Path)
-	}
-	for _, key := range result.Warnings {
-		slog.Warn("unrecognized AURA_ environment variable is ignored", "component", "config", "env", key)
-	}
+	logConfigResult(cmd.Context(), logger, &result)
 	var opened *sql.DB
 	if needDB {
 		opened, err = openStorage(cmd.Context(), cfg)
@@ -325,5 +321,5 @@ func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(conte
 		}
 		defer func() { _ = opened.Close() }()
 	}
-	return fn(cmd.Context(), cfg, opened)
+	return fn(cmd.Context(), logger, cfg, opened)
 }

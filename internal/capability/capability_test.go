@@ -2,6 +2,7 @@ package capability
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +58,16 @@ func TestBuildRejectsDuplicateCompiledCapability(t *testing.T) {
 func TestBuildRejectsInvalidCompiledCapabilityName(t *testing.T) {
 	_, err := NewBuild(string(ProfileCore), []string{"invalid_name"}, "linux")
 	requireErrorCode(t, err, ErrorCodeProfileInvalid)
+}
+
+func TestBuildReportsEveryInvalidCapability(t *testing.T) {
+	_, err := NewBuild(string(ProfileCore), []string{"invalid_name", "sample", "sample"}, "linux")
+	requireErrorCode(t, err, ErrorCodeProfileInvalid)
+	for _, name := range []string{"invalid_name", "sample"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("aggregate error omits %q: %v", name, err)
+		}
+	}
 }
 
 func TestRegistryReportsAvailabilityAndEnablement(t *testing.T) {

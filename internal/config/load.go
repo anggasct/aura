@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -170,8 +172,8 @@ func resolvePath(flagPath string) (path string, explicit bool, err error) {
 	if flagPath != "" {
 		return flagPath, true, nil
 	}
-	if env := os.Getenv(envConfigVar); env != "" {
-		return env, true, nil
+	if fromEnv := os.Getenv(envConfigVar); fromEnv != "" {
+		return fromEnv, true, nil
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -529,31 +531,45 @@ func validateModelDefinition(name string, node *yamlv3.Node) error {
 
 // validateLoadedModels owns every semantic model rule, regardless of whether
 // a definition came from the file or from environment overrides.
+// Definitions are independent of each other, so every one is reported.
+// First-error-wins told an operator about one broken definition at a time,
+// and which one depended on map iteration order.
 func validateLoadedModels(models Models, routingExplicit bool) error {
-	for name, definition := range models.Definitions {
-		if strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "" {
-			return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s requires non-empty protocol and model", name)}
-		}
-		if !validProtocol(definition.Protocol) {
-			return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s uses unsupported protocol %q", name, definition.Protocol)}
-		}
-		if err := ValidateBaseURL(definition.BaseURL); err != nil {
-			return &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s.base_url: %v", name, err)}
-		}
-		if definition.APIKeyEnv != "" && definition.APIKeyFile != "" {
-			return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s must set only one of api_key_env or api_key_file", name)}
-		}
-		if definition.APIKeyEnv != "" && !envNamePattern.MatchString(definition.APIKeyEnv) {
-			return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s.api_key_env is not a valid environment variable name", name)}
-		}
-		if definition.APIKeyEnv == "" && definition.APIKeyFile == "" && !IsLoopbackBaseURL(definition.BaseURL) {
-			return &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s requires api_key_env or api_key_file for a non-loopback endpoint", name)}
-		}
-		if definition.Capabilities.ContextTokens <= 0 || strings.TrimSpace(definition.Capabilities.Tokenizer) == "" {
-			return &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires positive context_tokens and a tokenizer", name)}
-		}
+	problems := make([]error, 0, len(models.Definitions)+1)
+	for _, name := range slices.Sorted(maps.Keys(models.Definitions)) {
+		definition := models.Definitions[name]
+		problems = append(problems, modelDefinitionProblems(name, &definition)...)
 	}
-	return validateRouting(models, routingExplicit)
+	problems = append(problems, validateRouting(models, routingExplicit))
+	return errors.Join(problems...)
+}
+
+func modelDefinitionProblems(name string, definition *ModelDefinition) []error {
+	var problems []error
+	// The protocol checks are dependent: an empty protocol is not also an
+	// unsupported one.
+	switch {
+	case strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "":
+		problems = append(problems, &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s requires non-empty protocol and model", name)})
+	case !validProtocol(definition.Protocol):
+		problems = append(problems, &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s uses unsupported protocol %q", name, definition.Protocol)})
+	}
+	if err := ValidateBaseURL(definition.BaseURL); err != nil {
+		problems = append(problems, &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s.base_url: %v", name, err)})
+	}
+	if definition.APIKeyEnv != "" && definition.APIKeyFile != "" {
+		problems = append(problems, &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s must set only one of api_key_env or api_key_file", name)})
+	}
+	if definition.APIKeyEnv != "" && !envNamePattern.MatchString(definition.APIKeyEnv) {
+		problems = append(problems, &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s.api_key_env is not a valid environment variable name", name)})
+	}
+	if definition.APIKeyEnv == "" && definition.APIKeyFile == "" && !IsLoopbackBaseURL(definition.BaseURL) {
+		problems = append(problems, &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s requires api_key_env or api_key_file for a non-loopback endpoint", name)})
+	}
+	if definition.Capabilities.ContextTokens <= 0 || strings.TrimSpace(definition.Capabilities.Tokenizer) == "" {
+		problems = append(problems, &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires positive context_tokens and a tokenizer", name)})
+	}
+	return problems
 }
 
 // routingExplicitIn reports whether the document declares a models.routing
@@ -715,7 +731,11 @@ func stringToBoolHook() mapstructure.DecodeHookFunc {
 		if from.Kind() != reflect.String || to.Kind() != reflect.Bool {
 			return data, nil
 		}
-		b, err := strconv.ParseBool(data.(string))
+		s, ok := data.(string)
+		if !ok {
+			return data, nil
+		}
+		b, err := strconv.ParseBool(s)
 		if err != nil {
 			return nil, fmt.Errorf("invalid boolean %q", data)
 		}
@@ -728,7 +748,11 @@ func stringToIntHook() mapstructure.DecodeHookFunc {
 		if from.Kind() != reflect.String || to.Kind() != reflect.Int {
 			return data, nil
 		}
-		n, err := strconv.ParseInt(data.(string), 10, 64)
+		s, ok := data.(string)
+		if !ok {
+			return data, nil
+		}
+		n, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid integer %q", data)
 		}

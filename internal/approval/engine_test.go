@@ -329,6 +329,25 @@ func TestPolicyValidate(t *testing.T) {
 	}
 }
 
+func TestPolicyValidateReportsEveryRule(t *testing.T) {
+	policy := Policy{
+		Version: "",
+		Rules: map[string]Rule{
+			"one": {ToolName: "one", Constraints: Constraints{MaxOutputBytes: -1}},
+			"two": {ToolName: "two", AllowedTrust: []TrustLabel{"spoofed"}},
+		},
+	}
+	err := policy.Validate()
+	if err == nil {
+		t.Fatal("expected the invalid policy to be rejected")
+	}
+	for _, want := range []string{"one", "two"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("aggregate error omits rule %q: %v", want, err)
+		}
+	}
+}
+
 func TestNewEngineRejectsNilHandler(t *testing.T) {
 	if _, err := NewEngine(testPolicy(), nil); err == nil {
 		t.Fatal("expected nil handler to be rejected")

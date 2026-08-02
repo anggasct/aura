@@ -177,7 +177,7 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 			 ON CONFLICT(digest) DO NOTHING`,
 			digest, size, meta.MediaType, relPath, formatTime(createdAt),
 		); err != nil {
-			return ArtifactRef{}, fmt.Errorf("insert blob %s: %w", digest, err)
+			return ArtifactRef{}, classifyBusy(fmt.Errorf("insert blob %s: %w", digest, err))
 		}
 		var mediaType string
 		if err := tx.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&mediaType); err != nil {
@@ -194,7 +194,23 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		 ON CONFLICT(id) DO NOTHING`,
 		meta.ID, digest, meta.SessionID, nullableString(meta.EventID), meta.Filename, jsonOrEmptyObject(meta.Metadata), formatTime(createdAt),
 	); err != nil {
-		return ArtifactRef{}, fmt.Errorf("insert artifact ref %s: %w", meta.ID, err)
+		if isConstraintForeignKey(err) {
+			refs := []fkReference{
+				{what: "blob", key: digest, existsSQL: "SELECT 1 FROM blob WHERE digest = ?", code: ErrorCodeArtifactBlobMissing},
+				{what: "session", key: meta.SessionID, existsSQL: "SELECT 1 FROM session WHERE id = ?", code: ErrorCodeSessionNotFound},
+			}
+			if meta.EventID != "" {
+				refs = append(refs, fkReference{what: "event", key: meta.EventID, existsSQL: "SELECT 1 FROM runtime_event WHERE id = ?", code: ErrorCodeEventNotFound})
+			}
+			if classified := classifyFKReference(ctx, tx, refs...); classified != nil {
+				return ArtifactRef{}, classified
+			}
+			return ArtifactRef{}, &Error{
+				Code:   ErrorCodeInvalidArgument,
+				Detail: fmt.Sprintf("artifact %s violates a foreign key constraint", meta.ID),
+			}
+		}
+		return ArtifactRef{}, classifyBusy(fmt.Errorf("insert artifact ref %s: %w", meta.ID, err))
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -252,14 +268,30 @@ func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) erro
 		link.ID, link.BlobDigest, link.SessionID, nullableString(link.EventID), link.Filename, jsonOrEmptyObject(link.Metadata), formatTime(time.Now()),
 	)
 	if err != nil {
-		return fmt.Errorf("link artifact %s to blob %s: %w", link.ID, link.BlobDigest, err)
+		if isConstraintForeignKey(err) {
+			refs := []fkReference{
+				{what: "blob", key: link.BlobDigest, existsSQL: "SELECT 1 FROM blob WHERE digest = ?", code: ErrorCodeArtifactBlobMissing},
+				{what: "session", key: link.SessionID, existsSQL: "SELECT 1 FROM session WHERE id = ?", code: ErrorCodeSessionNotFound},
+			}
+			if link.EventID != "" {
+				refs = append(refs, fkReference{what: "event", key: link.EventID, existsSQL: "SELECT 1 FROM runtime_event WHERE id = ?", code: ErrorCodeEventNotFound})
+			}
+			if classified := classifyFKReference(ctx, s.db, refs...); classified != nil {
+				return classified
+			}
+			return &Error{
+				Code:   ErrorCodeInvalidArgument,
+				Detail: fmt.Sprintf("link %s violates a foreign key constraint", link.ID),
+			}
+		}
+		return classifyBusy(fmt.Errorf("link artifact %s to blob %s: %w", link.ID, link.BlobDigest, err))
 	}
 	return nil
 }
 
 func (s *sqliteArtifactStore) Unlink(ctx context.Context, refID string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM artifact_ref WHERE id = ?`, refID); err != nil {
-		return fmt.Errorf("unlink artifact %s: %w", refID, err)
+		return classifyBusy(fmt.Errorf("unlink artifact %s: %w", refID, err))
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -42,6 +43,73 @@ func TestAppendRejectsSequenceAboveInt64(t *testing.T) {
 	if count != 0 {
 		t.Errorf("rows written = %d, want 0 — rejection must happen before the exec", count)
 	}
+}
+
+func TestAppendRejectsZeroSequence(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+
+	e := newEvent("session-1", 0)
+	wantCode(t, NewEventStore(db).Append(ctx, &e), ErrorCodeEventSequenceInvalid)
+}
+
+func TestAppendRejectsZeroSchemaVersion(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+
+	e := newEvent("session-1", 1)
+	e.SchemaVersion = 0
+	wantCode(t, NewEventStore(db).Append(ctx, &e), ErrorCodeEventSchemaVersionInvalid)
+}
+
+func TestAppendMissingSessionIsTyped(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	e := newEvent("missing-session", 1)
+	wantCode(t, NewEventStore(db).Append(ctx, &e), ErrorCodeSessionNotFound)
+}
+
+func TestLinkMissingBlobIsTyped(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+
+	artifacts := NewArtifactStore(db, t.TempDir(), DefaultArtifactQuotaBytes)
+	wantCode(t, artifacts.Link(ctx, &ArtifactLink{
+		ID: "link-1", BlobDigest: "missing-blob", SessionID: "session-1", Filename: "f.bin",
+	}), ErrorCodeArtifactBlobMissing)
+}
+
+func TestLinkMissingSessionIsTyped(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	artifacts := NewArtifactStore(db, t.TempDir(), DefaultArtifactQuotaBytes)
+
+	ref, err := artifacts.Put(ctx, strings.NewReader("payload"), &ArtifactMetadata{
+		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	wantCode(t, artifacts.Link(ctx, &ArtifactLink{
+		ID: "link-1", BlobDigest: ref.BlobDigest, SessionID: "missing-session", Filename: "f.bin",
+	}), ErrorCodeSessionNotFound)
+}
+
+func TestPutMissingSessionIsTyped(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	artifacts := NewArtifactStore(db, t.TempDir(), DefaultArtifactQuotaBytes)
+
+	_, err := artifacts.Put(ctx, strings.NewReader("payload"), &ArtifactMetadata{
+		ID: "artifact-1", SessionID: "missing-session", Filename: "f.bin", MediaType: "application/octet-stream",
+	})
+	wantCode(t, err, ErrorCodeSessionNotFound)
 }
 
 func TestAppendPreservesMaxValidSequence(t *testing.T) {

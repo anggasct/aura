@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -107,28 +108,30 @@ type Policy struct {
 }
 
 func (p Policy) Validate() error {
+	var problems []error
 	if strings.TrimSpace(p.Version) == "" {
-		return errors.New("policy version must not be empty")
+		problems = append(problems, errors.New("policy version must not be empty"))
 	}
-	for name, rule := range p.Rules {
+	for _, name := range slices.Sorted(maps.Keys(p.Rules)) {
+		rule := p.Rules[name]
 		if strings.TrimSpace(rule.ToolName) != name || strings.TrimSpace(name) == "" {
-			return fmt.Errorf("policy rule tool name %q does not match its key %q", rule.ToolName, name)
+			problems = append(problems, fmt.Errorf("policy rule tool name %q does not match its key %q", rule.ToolName, name))
 		}
 		for _, label := range rule.AllowedTrust {
 			if !label.Valid() {
-				return fmt.Errorf("policy rule %q has invalid trust label %q", name, label)
+				problems = append(problems, fmt.Errorf("policy rule %q has invalid trust label %q", name, label))
 			}
 		}
 		for _, capability := range rule.RequiredCapabilities {
 			if strings.TrimSpace(capability) == "" {
-				return fmt.Errorf("policy rule %q has an empty required capability", name)
+				problems = append(problems, fmt.Errorf("policy rule %q has an empty required capability", name))
 			}
 		}
 		if rule.Constraints.MaxOutputBytes < 0 || rule.Constraints.Timeout < 0 {
-			return fmt.Errorf("policy rule %q has negative constraints", name)
+			problems = append(problems, fmt.Errorf("policy rule %q has negative constraints", name))
 		}
 	}
-	return nil
+	return errors.Join(problems...)
 }
 
 // ApprovalGrant binds everything the execution depends on. Changing any

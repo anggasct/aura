@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ var registeredModelPatterns = struct {
 // overlapping patterns break NewLLM's exactly-one-match rule, so a duplicate
 // registration of the same model name is rejected. Every adapter is validated
 // before any is registered, so a failure never leaves half-registered state.
-func RegisterAdapters(models config.Models) error {
+func RegisterAdapters(logger *slog.Logger, models config.Models) error {
 	timeout := time.Duration(models.RequestTimeout)
 	if timeout <= 0 {
 		timeout = defaultRequestTimeout
@@ -40,11 +41,12 @@ func RegisterAdapters(models config.Models) error {
 	registrations := make([]registration, 0, 2)
 	for _, role := range []string{"primary", "auxiliary"} {
 		spec := models.Definitions[role]
-		if spec.Protocol == "" || spec.Model == "" {
-			continue
-		}
-		if _, err := newAdapter(role, &spec, timeout, idleTimeout); err != nil {
+		_, configured, err := newAdapter(logger, role, &spec, timeout, idleTimeout)
+		if err != nil {
 			return err
+		}
+		if !configured {
+			continue
 		}
 		registrations = append(registrations, registration{
 			role:    role,
@@ -68,7 +70,8 @@ func RegisterAdapters(models config.Models) error {
 		registeredModelPatterns.patterns[reg.pattern] = true
 		spec := reg.spec
 		adkmodel.Register(reg.pattern, func(_ context.Context, _ string) (adkmodel.LLM, error) {
-			return newAdapter(reg.role, &spec, timeout, idleTimeout)
+			adapter, _, err := newAdapter(logger, reg.role, &spec, timeout, idleTimeout)
+			return adapter, err
 		})
 	}
 	return nil

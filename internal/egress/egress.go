@@ -63,10 +63,10 @@ type Destination struct {
 	IP   net.IP
 }
 
-// Validate resolves and validates a destination. Loopback, private,
-// link-local, unspecified, multicast, and cloud-metadata addresses are
-// rejected by default. The returned IP is the one the dialer must pin, so a
-// second DNS lookup cannot redirect to a different address.
+// Validate resolves and validates a destination. HTTPS is required, and
+// loopback, private, link-local, unspecified, multicast, and cloud-metadata
+// addresses are rejected by default. The returned IP is the one the dialer
+// must pin, so a second DNS lookup cannot redirect to a different address.
 func Validate(ctx context.Context, raw string, resolver Resolver) (Destination, error) {
 	if resolver == nil {
 		resolver = systemResolver{}
@@ -75,8 +75,10 @@ func Validate(ctx context.Context, raw string, resolver Resolver) (Destination, 
 	if err != nil {
 		return Destination{}, Errorf(ErrorCodeEgressDenied, "invalid destination %q", raw)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return Destination{}, Errorf(ErrorCodeEgressDenied, "scheme %q is not allowed", u.Scheme)
+	// Loopback and private addresses are rejected below, so every destination
+	// that survives validation is public and plaintext is never acceptable.
+	if u.Scheme != "https" {
+		return Destination{}, Errorf(ErrorCodeEgressDenied, "scheme %q is not allowed: https is required", u.Scheme)
 	}
 	if u.Host == "" {
 		return Destination{}, Errorf(ErrorCodeEgressDenied, "destination has no host")

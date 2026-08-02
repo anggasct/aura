@@ -45,21 +45,21 @@ func TestValidateRejectsPrivateDestinations(t *testing.T) {
 	cases := []struct {
 		raw string
 	}{
-		{raw: "http://internal.example/x"},
-		{raw: "http://nat.example/x"},
-		{raw: "http://loopback.example/x"},
-		{raw: "http://linklocal.example/x"},
-		{raw: "http://ipv6loopback.example/x"},
-		{raw: "http://mixed.example/x"},
-		{raw: "http://10.0.0.1/x"},
-		{raw: "http://127.0.0.1/x"},
-		{raw: "http://[::1]/x"},
-		{raw: "http://169.254.169.254/latest/meta-data/"},
-		{raw: "http://169.254.169.253/x"},
+		{raw: "https://internal.example/x"},
+		{raw: "https://nat.example/x"},
+		{raw: "https://loopback.example/x"},
+		{raw: "https://linklocal.example/x"},
+		{raw: "https://ipv6loopback.example/x"},
+		{raw: "https://mixed.example/x"},
+		{raw: "https://10.0.0.1/x"},
+		{raw: "https://127.0.0.1/x"},
+		{raw: "https://[::1]/x"},
+		{raw: "https://169.254.169.254/latest/meta-data/"},
+		{raw: "https://169.254.169.253/x"},
 		{raw: "ftp://example.com/x"},
-		{raw: "http://user:pass@example.com/x"},
-		{raw: "http://example.com/x?q=1"},
-		{raw: "http://example.com/x#frag"},
+		{raw: "https://user:pass@example.com/x"},
+		{raw: "https://example.com/x?q=1"},
+		{raw: "https://example.com/x#frag"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.raw, func(t *testing.T) {
@@ -82,7 +82,7 @@ func TestValidateRejectsPrivateDestinations(t *testing.T) {
 func TestValidateRejectsUnixSocketAndEmptyHost(t *testing.T) {
 	ctx := context.Background()
 	resolver := staticResolver{}
-	for _, raw := range []string{"http:///var/run/x.sock", "unix:///var/run/x.sock", "http://"} {
+	for _, raw := range []string{"https:///var/run/x.sock", "unix:///var/run/x.sock", "https://"} {
 		_, err := Validate(ctx, raw, resolver)
 		if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
 			t.Fatalf("Validate(%q) = %v, want egress_denied", raw, err)
@@ -147,11 +147,11 @@ func TestClientRejectsInvalidInitialRequest(t *testing.T) {
 	resolver := staticResolver{"public.example": {net.ParseIP("93.184.216.34")}}
 	client := NewClient(resolver)
 	cases := []string{
-		"http://user:pass@public.example/x",
-		"http://public.example/x?q=1",
-		"http://public.example/x#frag",
+		"https://user:pass@public.example/x",
+		"https://public.example/x?q=1",
+		"https://public.example/x#frag",
 		"ftp://public.example/x",
-		"http://10.0.0.1/x",
+		"https://10.0.0.1/x",
 	}
 	for _, raw := range cases {
 		t.Run(raw, func(t *testing.T) {
@@ -176,11 +176,11 @@ func TestNewClientRejectsCrossOriginRedirect(t *testing.T) {
 		"other.example":  {net.ParseIP("93.184.216.35")},
 	}
 	client := NewClient(resolver)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://other.example/next", http.NoBody)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://other.example/next", http.NoBody)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	first, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://public.example/start", http.NoBody)
+	first, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://public.example/start", http.NoBody)
 	err = client.CheckRedirect(req, []*http.Request{first})
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
 		t.Fatalf("CheckRedirect(cross-origin) = %v, want egress_denied", err)
@@ -217,7 +217,7 @@ func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
 	if client.CheckRedirect == nil {
 		t.Fatal("CheckRedirect must be set")
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://metadata.internal/steal", http.NoBody)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://metadata.internal/steal", http.NoBody)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
 	}
 
 	// An allowed redirect (public resolution) passes CheckRedirect.
-	okReq, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://public.example/next", http.NoBody)
+	okReq, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://public.example/next", http.NoBody)
 	err = client.CheckRedirect(okReq, []*http.Request{{URL: okReq.URL}})
 	if err != nil {
 		t.Fatalf("CheckRedirect(public) = %v, want nil", err)
@@ -239,8 +239,25 @@ func TestValidateNoResolverDefaultsToSystem(t *testing.T) {
 	// typed error for an unroutable host rather than crashing.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := Validate(ctx, "http://definitely-not-a-real-host.invalid/x", nil)
+	_, err := Validate(ctx, "https://definitely-not-a-real-host.invalid/x", nil)
 	if err == nil {
 		t.Fatal("expected an error for an unresolvable host")
+	}
+}
+
+func TestValidateRequiresHTTPS(t *testing.T) {
+	resolver := staticResolver{"public.example": {net.ParseIP("93.184.216.34")}}
+
+	if _, err := Validate(context.Background(), "https://public.example/v1", resolver); err != nil {
+		t.Fatalf("Validate(https) = %v, want allowed", err)
+	}
+
+	_, err := Validate(context.Background(), "http://public.example/v1", resolver)
+	code, ok := CodeOf(err)
+	if !ok || code != ErrorCodeEgressDenied {
+		t.Fatalf("Validate(http) = %v, want egress_denied", err)
+	}
+	if !strings.Contains(err.Error(), "https is required") {
+		t.Fatalf("error should name the https requirement: %v", err)
 	}
 }

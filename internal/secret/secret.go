@@ -3,10 +3,22 @@ package secret
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
+
+// withoutPath strips the filesystem path from an *fs.PathError so an error
+// string keeps the reason without disclosing where the file lives.
+func withoutPath(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
+}
 
 type ErrorCode string
 
@@ -58,7 +70,7 @@ func (r Reference) Resolve() (string, error) {
 	case r.File != "":
 		value, err := os.ReadFile(r.File)
 		if err != nil {
-			return "", Errorf(ErrorCodeScopeViolation, "cannot read secret file: %v", err)
+			return "", Errorf(ErrorCodeScopeViolation, "cannot read secret file %q: %v", filepath.Base(r.File), withoutPath(err))
 		}
 		secret := strings.TrimRight(string(value), "\r\n")
 		if secret == "" {

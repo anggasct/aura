@@ -11,7 +11,11 @@ LDFLAGS   := -s -w -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT) -X $(
 
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: build build-all test vet fmt-check lint verify clean
+# Source must read as a standalone product: no internal tracking IDs, doc
+# paths, or process vocabulary in shipped code.
+INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
+
+.PHONY: build build-all test vet fmt-check lint refs-check verify clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -41,7 +45,16 @@ fmt-check:
 lint:
 	$(GO) tool golangci-lint run ./...
 
-verify: build-all fmt-check vet test lint
+refs-check:
+	@found="$$(grep -rInEi '$(INTERNAL_REFS)' --include='*.go' \
+		--exclude-dir=.worktree --exclude-dir=dist . || true)"; \
+	if [ -n "$$found" ]; then \
+		echo "Internal references found in source:"; \
+		echo "$$found"; \
+		exit 1; \
+	fi
+
+verify: build-all fmt-check vet test lint refs-check
 
 clean:
 	rm -f $(BINARY)

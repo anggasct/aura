@@ -50,11 +50,15 @@ func New(level, format string, w io.Writer) (*slog.Logger, error) {
 	return slog.New(h), nil
 }
 
-func Setup(level, format string, w io.Writer) error {
+// Setup builds the process logger and installs it as the default, so any
+// package that falls back to slog.Default() shares this configuration. The
+// logger is returned so callers pass it explicitly rather than reaching for
+// the global at every call site.
+func Setup(level, format string, w io.Writer) (*slog.Logger, error) {
 	l, err := New(level, format, w)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	slog.SetDefault(l)
-	return nil
+	return l, nil
 }
