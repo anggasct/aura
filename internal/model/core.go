@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -77,9 +78,15 @@ type coreClient struct {
 	retry        RetryConfig
 	idleTimeout  time.Duration
 	codec        providerCodec
+	logger       *slog.Logger
 }
 
-func newCoreClient(name, baseURL, apiKey string, timeout, idleTimeout time.Duration, codec providerCodec) *coreClient {
+// newCoreClient resolves a nil logger to the process default once, here, so
+// no request path reaches for a global while serving.
+func newCoreClient(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration, codec providerCodec) *coreClient {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	if timeout <= 0 {
 		timeout = defaultRequestTimeout
 	}
@@ -97,12 +104,13 @@ func newCoreClient(name, baseURL, apiKey string, timeout, idleTimeout time.Durat
 		retry:        defaultRetryConfig(),
 		idleTimeout:  idleTimeout,
 		codec:        codec,
+		logger:       logger,
 	}
 }
 
 func (c *coreClient) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		telemetry := newModelTelemetry(c.codec.protocol(), c.name)
+		telemetry := newModelTelemetry(c.logger, c.codec.protocol(), c.name)
 		resp, retries, err := c.do(ctx, req, stream)
 		telemetry.retries = retries
 		if err != nil {
@@ -110,7 +118,7 @@ func (c *coreClient) GenerateContent(ctx context.Context, req *adkmodel.LLMReque
 			yield(nil, err)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if cErr := classifyHTTPResponse(resp, c.codec.protocol()); cErr != nil {
 			telemetry.finish(ctx, nil, cErr)

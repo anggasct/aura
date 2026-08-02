@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -71,14 +72,14 @@ func NewOpenAIResponsesAdapter(name, baseURL, apiKey string, timeout time.Durati
 			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
-	return newOpenAIResponsesAdapter(name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
+	return newOpenAIResponsesAdapter(nil, name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
 }
 
-func newOpenAIResponsesAdapter(name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *OpenAIResponsesAdapter {
+func newOpenAIResponsesAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *OpenAIResponsesAdapter {
 	if baseURL == "" {
 		baseURL = openAIResponsesDefaultBaseURL
 	}
-	return &OpenAIResponsesAdapter{core: newCoreClient(name, baseURL, apiKey, timeout, idleTimeout, openAIResponsesCodec{})}
+	return &OpenAIResponsesAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, openAIResponsesCodec{})}
 }
 
 func (a *OpenAIResponsesAdapter) Name() string { return a.core.name }

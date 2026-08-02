@@ -170,8 +170,8 @@ func resolvePath(flagPath string) (path string, explicit bool, err error) {
 	if flagPath != "" {
 		return flagPath, true, nil
 	}
-	if env := os.Getenv(envConfigVar); env != "" {
-		return env, true, nil
+	if fromEnv := os.Getenv(envConfigVar); fromEnv != "" {
+		return fromEnv, true, nil
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -715,7 +715,11 @@ func stringToBoolHook() mapstructure.DecodeHookFunc {
 		if from.Kind() != reflect.String || to.Kind() != reflect.Bool {
 			return data, nil
 		}
-		b, err := strconv.ParseBool(data.(string))
+		s, ok := data.(string)
+		if !ok {
+			return data, nil
+		}
+		b, err := strconv.ParseBool(s)
 		if err != nil {
 			return nil, fmt.Errorf("invalid boolean %q", data)
 		}
@@ -728,7 +732,11 @@ func stringToIntHook() mapstructure.DecodeHookFunc {
 		if from.Kind() != reflect.String || to.Kind() != reflect.Int {
 			return data, nil
 		}
-		n, err := strconv.ParseInt(data.(string), 10, 64)
+		s, ok := data.(string)
+		if !ok {
+			return data, nil
+		}
+		n, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid integer %q", data)
 		}

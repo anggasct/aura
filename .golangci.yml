@@ -56,6 +56,12 @@ linters:
         - diagnostic
         - style
         - performance
+    recvcheck:
+      # UnmarshalText must take a pointer to assign; String and MarshalYAML
+      # must take a value so the type still formats and marshals when held by
+      # value. No arrangement satisfies both plus a uniform receiver.
+      exclusions:
+        - ByteSize.UnmarshalText
     nolintlint:
       require-explanation: true
       require-specific: true

@@ -19,15 +19,17 @@ const (
 	backupManifestFilename = "manifest.json"
 )
 
+// The tags pin the manifest's on-disk key names to what shipped builds
+// already write, so renaming a field here cannot change the file format.
 type BackupBlobEntry struct {
-	Digest       string
-	SizeBytes    int64
-	RelativePath string
+	Digest       string `json:"Digest"`
+	SizeBytes    int64  `json:"SizeBytes"`
+	RelativePath string `json:"RelativePath"`
 }
 
 type BackupManifest struct {
-	CreatedAt time.Time
-	Blobs     []BackupBlobEntry
+	CreatedAt time.Time         `json:"CreatedAt"`
+	Blobs     []BackupBlobEntry `json:"Blobs"`
 }
 
 // Backup writes a consistent point-in-time SQLite snapshot plus a manifest

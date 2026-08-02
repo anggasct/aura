@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -93,14 +94,14 @@ func NewAnthropicAdapter(name, baseURL, apiKey string, timeout time.Duration) (*
 			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
-	return newAnthropicAdapter(name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
+	return newAnthropicAdapter(nil, name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
 }
 
-func newAnthropicAdapter(name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *AnthropicAdapter {
+func newAnthropicAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *AnthropicAdapter {
 	if baseURL == "" {
 		baseURL = anthropicDefaultBaseURL
 	}
-	return &AnthropicAdapter{core: newCoreClient(name, baseURL, apiKey, timeout, idleTimeout, anthropicCodec{})}
+	return &AnthropicAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, anthropicCodec{})}
 }
 
 func (a *AnthropicAdapter) Name() string { return a.core.name }

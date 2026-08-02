@@ -18,7 +18,7 @@ func TestRegisterAdapters_ResolvesViaNewLLM(t *testing.T) {
 			"auxiliary": configuredDefinition(config.ProtocolOpenAIChatCompat, "gpt-reg-test-1", "https://api.openai.com"),
 		},
 	}
-	if err := RegisterAdapters(models); err != nil {
+	if err := RegisterAdapters(nil, models); err != nil {
 		t.Fatalf("RegisterAdapters: %v", err)
 	}
 
@@ -47,14 +47,14 @@ func TestRegisterAdapters_DuplicateModelRejected(t *testing.T) {
 			"auxiliary": configuredDefinition(config.ProtocolAnthropicMessages, "dup-reg-test-1", "https://api.anthropic.com"),
 		},
 	}
-	err := RegisterAdapters(models)
+	err := RegisterAdapters(nil, models)
 	if err == nil || !strings.Contains(err.Error(), "already registered") {
 		t.Errorf("err = %v, want already registered error", err)
 	}
 }
 
 func TestRegisterAdapters_UnconfiguredNoop(t *testing.T) {
-	if err := RegisterAdapters(config.Models{}); err != nil {
-		t.Fatalf("RegisterAdapters(unconfigured): %v", err)
+	if err := RegisterAdapters(nil, config.Models{}); err != nil {
+		t.Fatalf("RegisterAdapters(nil, unconfigured): %v", err)
 	}
 }

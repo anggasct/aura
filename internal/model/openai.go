@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -86,14 +87,14 @@ func NewOpenAIAdapter(name, baseURL, apiKey string, timeout time.Duration) (*Ope
 			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
-	return newOpenAIAdapter(name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
+	return newOpenAIAdapter(nil, name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
 }
 
-func newOpenAIAdapter(name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *OpenAIAdapter {
+func newOpenAIAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *OpenAIAdapter {
 	if baseURL == "" {
 		baseURL = openaiDefaultBaseURL
 	}
-	return &OpenAIAdapter{core: newCoreClient(name, baseURL, apiKey, timeout, idleTimeout, openaiCodec{})}
+	return &OpenAIAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, openaiCodec{})}
 }
 
 func (a *OpenAIAdapter) Name() string { return a.core.name }

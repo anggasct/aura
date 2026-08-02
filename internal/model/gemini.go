@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -95,14 +96,14 @@ func NewGeminiAdapter(name, baseURL, apiKey string, timeout time.Duration) (*Gem
 			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
-	return newGeminiAdapter(name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
+	return newGeminiAdapter(nil, name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
 }
 
-func newGeminiAdapter(name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *GeminiAdapter {
+func newGeminiAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *GeminiAdapter {
 	if baseURL == "" {
 		baseURL = geminiDefaultBaseURL
 	}
-	return &GeminiAdapter{core: newCoreClient(name, baseURL, apiKey, timeout, idleTimeout, geminiCodec{})}
+	return &GeminiAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, geminiCodec{})}
 }
 
 func (a *GeminiAdapter) Name() string { return a.core.name }

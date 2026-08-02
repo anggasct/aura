@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -73,7 +74,7 @@ func NewRouter(primary, auxiliary adkmodel.LLM, routing map[string]string) (*Rou
 	return r, nil
 }
 
-func BuildRouter(models config.Models) (*Router, error) {
+func BuildRouter(logger *slog.Logger, models config.Models) (*Router, error) {
 	if err := validateRoutingCapabilities(models); err != nil {
 		return nil, err
 	}
@@ -86,12 +87,12 @@ func BuildRouter(models config.Models) (*Router, error) {
 		idleTimeout = defaultStreamingIdleTimeout
 	}
 	primarySpec := models.Definitions["primary"]
-	primary, _, err := newAdapter("primary", &primarySpec, timeout, idleTimeout)
+	primary, _, err := newAdapter(logger, "primary", &primarySpec, timeout, idleTimeout)
 	if err != nil {
 		return nil, err
 	}
 	auxiliarySpec := models.Definitions["auxiliary"]
-	auxiliary, _, err := newAdapter("auxiliary", &auxiliarySpec, timeout, idleTimeout)
+	auxiliary, _, err := newAdapter(logger, "auxiliary", &auxiliarySpec, timeout, idleTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +198,7 @@ func (r *Router) For(task string) (adkmodel.LLM, error) {
 
 // newAdapter reports configured=false when the definition is absent, so a
 // caller never has to read meaning into a nil adapter with a nil error.
-func newAdapter(name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration) (adapter adkmodel.LLM, configured bool, err error) {
+func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration) (adapter adkmodel.LLM, configured bool, err error) {
 	if spec.Protocol == "" || spec.Model == "" {
 		return nil, false, nil
 	}
@@ -218,13 +219,13 @@ func newAdapter(name string, spec *config.ModelDefinition, timeout, idleTimeout 
 	}
 	switch spec.Protocol {
 	case config.ProtocolAnthropicMessages:
-		return newAnthropicAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
+		return newAnthropicAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
 	case config.ProtocolOpenAIChatCompat:
-		return newOpenAIAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
+		return newOpenAIAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
 	case config.ProtocolOpenAIResponses:
-		return newOpenAIResponsesAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
+		return newOpenAIResponsesAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
 	case config.ProtocolGeminiNative:
-		return newGeminiAdapter(spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
+		return newGeminiAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
 	}
 	return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
 }

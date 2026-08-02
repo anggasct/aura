@@ -71,7 +71,7 @@ func TestGeminiAdapter(t *testing.T) {
 
 func TestModernProtocolBuildRouter(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "key")
-	router, err := BuildRouter(config.Models{
+	router, err := BuildRouter(nil, config.Models{
 		Definitions: map[string]config.ModelDefinition{
 			"primary":   configuredDefinition(config.ProtocolOpenAIResponses, "gpt-5", "https://api.openai.com"),
 			"auxiliary": configuredDefinition(config.ProtocolGeminiNative, "gemini-2.5-pro", "https://generativelanguage.googleapis.com"),
@@ -98,7 +98,7 @@ func TestModernProtocolBuildRouter(t *testing.T) {
 
 func TestBuildRouterRejectsTaskWithoutCapability(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "key")
-	_, err := BuildRouter(config.Models{
+	_, err := BuildRouter(nil, config.Models{
 		Definitions: map[string]config.ModelDefinition{
 			"primary": configuredDefinition(config.ProtocolOpenAIResponses, "gpt-5", "https://api.openai.com"),
 		},

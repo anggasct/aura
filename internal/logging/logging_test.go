@@ -51,7 +51,7 @@ func TestNew_TextOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	l.Info("hello world", "component", "test")
+	l.InfoContext(t.Context(), "hello world", "component", "test")
 	out := buf.String()
 	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "hello world") {
 		t.Errorf("text output missing level/msg: %q", out)
@@ -67,7 +67,7 @@ func TestNew_JSONOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	l.Info("hello json", "component", "test")
+	l.InfoContext(t.Context(), "hello json", "component", "test")
 	var m map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
@@ -83,11 +83,11 @@ func TestNew_LevelFiltering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	l.Info("suppressed")
+	l.InfoContext(t.Context(), "suppressed")
 	if buf.Len() != 0 {
 		t.Errorf("info record emitted at warn level: %q", buf.String())
 	}
-	l.Warn("shown")
+	l.WarnContext(t.Context(), "shown")
 	if !strings.Contains(buf.String(), "shown") {
 		t.Errorf("warn record not emitted: %q", buf.String())
 	}
@@ -107,10 +107,14 @@ func TestNew_InvalidFormat(t *testing.T) {
 
 func TestSetup_SetsDefault(t *testing.T) {
 	var buf bytes.Buffer
-	if err := Setup("info", "text", &buf); err != nil {
+	logger, err := Setup("info", "text", &buf)
+	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	slog.Info("via default")
+	if logger == nil {
+		t.Fatal("Setup returned a nil logger")
+	}
+	slog.Default().InfoContext(t.Context(), "via default")
 	if !strings.Contains(buf.String(), "via default") {
 		t.Errorf("default logger did not route to configured writer: %q", buf.String())
 	}

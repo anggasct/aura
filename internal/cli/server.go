@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"log/slog"
 	"os"
 	"time"
 
@@ -18,36 +17,34 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 		Use:   "server",
 		Short: "Start the daemon with all listeners",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			result, err := config.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
 			cfg := result.Config
 			level, format := resolveLogging(cmd, cfg)
-			if err := logging.Setup(level, format, os.Stderr); err != nil {
+			logger, err := logging.Setup(level, format, os.Stderr)
+			if err != nil {
 				return err
 			}
-			if result.DefaultGenerated {
-				slog.Info("generating default config", "component", "config", "path", result.Path)
-			}
-			for _, key := range result.Warnings {
-				slog.Warn("unrecognized AURA_ environment variable is ignored", "component", "config", "env", key)
-			}
-			if _, err := model.BuildRouter(cfg.Models); err != nil {
+			logConfigResult(ctx, logger, result)
+			if _, err := model.BuildRouter(logger, cfg.Models); err != nil {
 				return err
 			}
-			if err := model.RegisterAdapters(cfg.Models); err != nil {
+			if err := model.RegisterAdapters(logger, cfg.Models); err != nil {
 				return err
 			}
-			slog.Info("starting server",
+			logger.InfoContext(ctx, "starting server",
 				"component", "server",
 				"host", cfg.Server.Host,
 				"port", cfg.Server.Port,
 			)
 			srv := server.New(server.Options{
+				Logger:          logger,
 				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 			})
-			return srv.Run(cmd.Context())
+			return srv.Run(ctx)
 		},
 	}
 }

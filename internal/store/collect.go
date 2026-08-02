@@ -49,28 +49,9 @@ func (r *sqliteReconciler) Collect(ctx context.Context, before time.Time) (Colle
 // delete actually matched; a file that cannot be removed aborts the sweep
 // with its row intact, so a failed sweep never deletes ownership data.
 func Collect(ctx context.Context, db *sql.DB, root string, before time.Time) (CollectionReport, error) {
-	rows, err := db.QueryContext(ctx, `SELECT digest, size_bytes, relative_path FROM blob b
-		WHERE NOT EXISTS (SELECT 1 FROM artifact_ref r WHERE r.blob_digest = b.digest)
-		AND b.created_at < ?`, formatTime(before))
+	candidates, err := collectionCandidates(ctx, db, before)
 	if err != nil {
-		return CollectionReport{}, classifyBusy(err)
-	}
-	type candidate struct {
-		digest       string
-		size         int64
-		relativePath string
-	}
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err := rows.Scan(&c.digest, &c.size, &c.relativePath); err != nil {
-			_ = rows.Close()
-			return CollectionReport{}, fmt.Errorf("scan collectible blob: %w", err)
-		}
-		candidates = append(candidates, c)
-	}
-	if err := rows.Close(); err != nil {
-		return CollectionReport{}, fmt.Errorf("close collectible blob scan: %w", err)
+		return CollectionReport{}, err
 	}
 
 	var report CollectionReport
@@ -83,9 +64,15 @@ func Collect(ctx context.Context, db *sql.DB, root string, before time.Time) (Co
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	stmt, err := tx.PrepareContext(ctx, `DELETE FROM blob WHERE digest = ? AND NOT EXISTS
+		(SELECT 1 FROM artifact_ref r WHERE r.blob_digest = ?)`)
+	if err != nil {
+		return CollectionReport{}, classifyBusy(err)
+	}
+	defer func() { _ = stmt.Close() }()
+
 	for _, c := range candidates {
-		res, err := tx.ExecContext(ctx, `DELETE FROM blob WHERE digest = ? AND NOT EXISTS
-			(SELECT 1 FROM artifact_ref r WHERE r.blob_digest = ?)`, c.digest, c.digest)
+		res, err := stmt.ExecContext(ctx, c.digest, c.digest)
 		if err != nil {
 			return CollectionReport{}, classifyBusy(err)
 		}
@@ -110,4 +97,35 @@ func Collect(ctx context.Context, db *sql.DB, root string, before time.Time) (Co
 		return CollectionReport{}, classifyBusy(err)
 	}
 	return report, nil
+}
+
+type collectionCandidate struct {
+	digest       string
+	size         int64
+	relativePath string
+}
+
+func collectionCandidates(ctx context.Context, db *sql.DB, before time.Time) ([]collectionCandidate, error) {
+	rows, err := db.QueryContext(ctx, `SELECT digest, size_bytes, relative_path FROM blob b
+		WHERE NOT EXISTS (SELECT 1 FROM artifact_ref r WHERE r.blob_digest = b.digest)
+		AND b.created_at < ?`, formatTime(before))
+	if err != nil {
+		return nil, classifyBusy(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var candidates []collectionCandidate
+	for rows.Next() {
+		var c collectionCandidate
+		if err := rows.Scan(&c.digest, &c.size, &c.relativePath); err != nil {
+			return nil, fmt.Errorf("scan collectible blob: %w", err)
+		}
+		candidates = append(candidates, c)
+	}
+	// Without this a query that fails mid-iteration is indistinguishable from
+	// an empty result, and the sweep would report success having seen nothing.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan collectible blobs: %w", err)
+	}
+	return candidates, nil
 }

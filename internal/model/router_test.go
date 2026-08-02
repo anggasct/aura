@@ -94,7 +94,7 @@ func TestBuildRouter_OpenRouterAndOllamaEndpoints(t *testing.T) {
 			"auxiliary": configuredDefinition(config.ProtocolOpenAIChatCompat, "llama3", "http://localhost:11434"),
 		},
 	}
-	r, err := BuildRouter(models)
+	r, err := BuildRouter(nil, models)
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestBuildRouter_ProviderMapping(t *testing.T) {
 			"auxiliary": configuredDefinition(config.ProtocolOpenAIChatCompat, "llama", "https://openrouter.ai/api"),
 		},
 	}
-	r, err := BuildRouter(models)
+	r, err := BuildRouter(nil, models)
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestBuildRouter_ProviderMapping(t *testing.T) {
 }
 
 func TestBuildRouter_UnconfiguredProviderFailsClosed(t *testing.T) {
-	r, err := BuildRouter(config.Models{})
+	r, err := BuildRouter(nil, config.Models{})
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestBuildRouter_UnsupportedProviderFails(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
 		"primary": configuredDefinition("bogus", "x", "https://provider.example"),
 	}}
-	if _, err := BuildRouter(models); err == nil || !strings.Contains(err.Error(), "unsupported protocol") {
+	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "unsupported protocol") {
 		t.Errorf("err = %v, want unsupported protocol error", err)
 	}
 }
@@ -201,14 +201,14 @@ func TestBuildRouter_MissingKeyValidation(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
 		"primary": {Protocol: config.ProtocolAnthropicMessages, Model: "claude", BaseURL: "https://api.anthropic.com"},
 	}}
-	if _, err := BuildRouter(models); err == nil || !strings.Contains(err.Error(), "api_key_env or api_key_file") {
+	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "api_key_env or api_key_file") {
 		t.Errorf("err = %v, want secret reference error", err)
 	}
 
 	localhost := config.Models{Definitions: map[string]config.ModelDefinition{
 		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "llama3", BaseURL: "http://localhost:11434"},
 	}}
-	if _, err := BuildRouter(localhost); err != nil {
+	if _, err := BuildRouter(nil, localhost); err != nil {
 		t.Errorf("localhost without key should be allowed: %v", err)
 	}
 }
@@ -217,7 +217,7 @@ func TestBuildRouter_InvalidBaseURLFails(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
 		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyEnv: "TEST_MODEL_API_KEY", BaseURL: "://bad"},
 	}}
-	if _, err := BuildRouter(models); err == nil || !strings.Contains(err.Error(), "invalid base_url") {
+	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "invalid base_url") {
 		t.Errorf("err = %v, want invalid base_url error", err)
 	}
 }
@@ -226,7 +226,7 @@ func TestBuildRouter_RemoteHTTPRequiresTLS(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
 		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyEnv: "TEST_MODEL_API_KEY", BaseURL: "http://provider.example"},
 	}}
-	if _, err := BuildRouter(models); err == nil || !strings.Contains(err.Error(), "https is required") {
+	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "https is required") {
 		t.Errorf("err = %v, want remote HTTP TLS error", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestBuildRouter_BaseURLCredentialsRejected(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
 		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyEnv: "TEST_MODEL_API_KEY", BaseURL: "https://user:pass@provider.example"},
 	}}
-	if _, err := BuildRouter(models); err == nil || !strings.Contains(err.Error(), "user info is not allowed") {
+	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "user info is not allowed") {
 		t.Errorf("err = %v, want URL credentials error", err)
 	}
 }
@@ -248,7 +248,7 @@ func TestBuildRouter_PassesStreamingIdleTimeout(t *testing.T) {
 			"primary": configuredDefinition(config.ProtocolOpenAIChatCompat, "gpt-4o", "https://api.example"),
 		},
 	}
-	r, err := BuildRouter(models)
+	r, err := BuildRouter(nil, models)
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}

@@ -118,12 +118,12 @@ func TestRegisterAdaptersValidatesAllBeforeRegistering(t *testing.T) {
 
 	// auxiliary is invalid (no secret and a non-loopback endpoint), so the
 	// whole registration must fail without registering primary.
-	if err := RegisterAdapters(models); err == nil {
+	if err := RegisterAdapters(nil, models); err == nil {
 		t.Fatal("expected registration failure for invalid auxiliary")
 	}
 	// If primary had been registered despite the failure, registering it
 	// again would hit the duplicate check.
-	if err := RegisterAdapters(config.Models{Definitions: map[string]config.ModelDefinition{"primary": valid}}); err != nil {
+	if err := RegisterAdapters(nil, config.Models{Definitions: map[string]config.ModelDefinition{"primary": valid}}); err != nil {
 		t.Fatalf("re-register after failed batch: %v", err)
 	}
 }
