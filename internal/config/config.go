@@ -24,6 +24,16 @@ type Config struct {
 	Logging      Logging      `koanf:"logging" yaml:"logging"`
 	Models       Models       `koanf:"models" yaml:"models"`
 	Storage      Storage      `koanf:"storage" yaml:"storage"`
+	Telemetry    Telemetry    `koanf:"telemetry" yaml:"telemetry"`
+}
+
+type Telemetry struct {
+	Exporter      string   `koanf:"exporter" yaml:"exporter"`
+	Endpoint      string   `koanf:"endpoint" yaml:"endpoint"`
+	CredentialRef string   `koanf:"credential_ref" yaml:"credential_ref"`
+	SampleRatio   float64  `koanf:"sample_ratio" yaml:"sample_ratio"`
+	QueueSize     int      `koanf:"queue_size" yaml:"queue_size"`
+	ExportTimeout Duration `koanf:"export_timeout" yaml:"export_timeout"`
 }
 
 type Runtime struct {
@@ -222,6 +232,12 @@ func Default() Config {
 			ArtifactQuota:      ByteSize(5 << 30),
 			BackupInterval:     Duration(24 * time.Hour),
 			BackupRetention:    7,
+		},
+		Telemetry: Telemetry{
+			Exporter:      "none",
+			SampleRatio:   0.10,
+			QueueSize:     2048,
+			ExportTimeout: Duration(5 * time.Second),
 		},
 	}
 }

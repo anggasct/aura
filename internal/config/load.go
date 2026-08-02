@@ -155,6 +155,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateStorage(cfg.Storage); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateTelemetry(cfg.Telemetry); err != nil {
+		return LoadResult{}, err
+	}
 	report, err := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if err != nil {
 		return LoadResult{}, err
@@ -270,6 +273,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateSectionShapes(doc); err != nil {
+		return err
+	}
+	if err := validateTelemetryShapes(doc); err != nil {
 		return err
 	}
 	if err := validateModelShapes(doc); err != nil {
@@ -447,6 +453,39 @@ func validateSectionShapes(doc *yamlv3.Node) error {
 			return fmt.Errorf("duplicate capability %q at line %d", item.Value, item.Line)
 		}
 		seen[item.Value] = struct{}{}
+	}
+	return nil
+}
+
+func validateTelemetryShapes(doc *yamlv3.Node) error {
+	telemetryNode := mappingValue(doc, "telemetry")
+	if telemetryNode == nil {
+		return nil
+	}
+	if telemetryNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("telemetry must be a mapping at line %d", telemetryNode.Line)
+	}
+	for i := 0; i+1 < len(telemetryNode.Content); i += 2 {
+		keyNode := telemetryNode.Content[i]
+		valueNode := telemetryNode.Content[i+1]
+		switch keyNode.Value {
+		case "exporter", "endpoint", "credential_ref":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("telemetry.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "sample_ratio":
+			if valueNode.Kind != yamlv3.ScalarNode || (valueNode.Tag != "!!float" && valueNode.Tag != "!!int") {
+				return fmt.Errorf("telemetry.sample_ratio must be a number at line %d", valueNode.Line)
+			}
+		case "queue_size":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("telemetry.queue_size must be an integer at line %d", valueNode.Line)
+			}
+		case "export_timeout":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("telemetry.export_timeout must be a duration string at line %d", valueNode.Line)
+			}
+		}
 	}
 	return nil
 }
@@ -843,6 +882,18 @@ func applyDefaults(cfg *Config, data []byte) error {
 	if cfg.Storage.BackupRetention == 0 && !configValuePresent(doc, "storage", "backup_retention") && !envValuePresent("storage.backup_retention") {
 		cfg.Storage.BackupRetention = defaults.Storage.BackupRetention
 	}
+	if cfg.Telemetry.Exporter == "" {
+		cfg.Telemetry.Exporter = defaults.Telemetry.Exporter
+	}
+	if cfg.Telemetry.SampleRatio == 0 && !configValuePresent(doc, "telemetry", "sample_ratio") && !envValuePresent("telemetry.sample_ratio") {
+		cfg.Telemetry.SampleRatio = defaults.Telemetry.SampleRatio
+	}
+	if cfg.Telemetry.QueueSize == 0 && !configValuePresent(doc, "telemetry", "queue_size") && !envValuePresent("telemetry.queue_size") {
+		cfg.Telemetry.QueueSize = defaults.Telemetry.QueueSize
+	}
+	if cfg.Telemetry.ExportTimeout == 0 && !configValuePresent(doc, "telemetry", "export_timeout") && !envValuePresent("telemetry.export_timeout") {
+		cfg.Telemetry.ExportTimeout = defaults.Telemetry.ExportTimeout
+	}
 	return nil
 }
 
@@ -910,6 +961,27 @@ func validateStorage(storage Storage) error {
 	}
 	if storage.BackupRetention < 1 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "storage.backup_retention must be at least 1"}
+	}
+	return nil
+}
+
+func validateTelemetry(t Telemetry) error {
+	switch t.Exporter {
+	case "", "none", "stdout", "otlp_grpc", "otlp_http":
+	default:
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("telemetry.exporter %q is not supported (none, stdout, otlp_grpc, otlp_http)", t.Exporter)}
+	}
+	if t.SampleRatio < 0 || t.SampleRatio > 1 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("telemetry.sample_ratio %f is out of range (0-1)", t.SampleRatio)}
+	}
+	if t.QueueSize < 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "telemetry.queue_size must not be negative"}
+	}
+	if t.ExportTimeout < 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "telemetry.export_timeout must not be negative"}
+	}
+	if (t.Exporter == "otlp_grpc" || t.Exporter == "otlp_http") && t.Endpoint == "" {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("telemetry.endpoint is required for exporter %q", t.Exporter)}
 	}
 	return nil
 }

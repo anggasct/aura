@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"iter"
+	"sync/atomic"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -45,7 +46,7 @@ func newTestProviders(t *testing.T) (*tracetest.InMemoryExporter, *sdkmetric.Man
 		{Kind: runtime.EventKindTurnAccepted},
 		{Kind: runtime.EventKindTurnCompleted},
 	}}
-	inst, err := InstrumentRuntime(fr, tp, mp)
+	inst, err := InstrumentRuntime(fr, tp, mp, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestInstrumentEmitsOneTraceWithoutContent(t *testing.T) {
 
 	var sawTerminal bool
 	for _, attr := range span.Attributes {
-		if isContentKey(string(attr.Key)) {
+		if isContentLeak(string(attr.Key)) {
 			t.Errorf("content-bearing attribute leaked into telemetry: %s", attr.Key)
 		}
 		if attr.Key == AttrTerminalKind && attr.Value.AsString() == runtime.EventKindTurnCompleted {
@@ -119,7 +120,7 @@ func TestInstrumentErrorPathMarksFailed(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
 	fr := &fakeRuntime{err: context.Canceled}
-	inst, err := InstrumentRuntime(fr, tp, mp)
+	inst, err := InstrumentRuntime(fr, tp, mp, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestInstrumentErrorPathMarksFailed(t *testing.T) {
 
 func TestInstrumentNilProvidersFallBackToNoOp(t *testing.T) {
 	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: runtime.EventKindTurnCompleted}}}
-	inst, err := InstrumentRuntime(fr, nil, nil)
+	inst, err := InstrumentRuntime(fr, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime with nil providers: %v", err)
 	}
@@ -180,6 +181,134 @@ func TestRedactDropsContentKeepsMetadata(t *testing.T) {
 			t.Errorf("content key %q was not redacted", dropped)
 		}
 	}
+}
+
+func TestModelSpanHierarchy(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: runtime.EventKindTurnCompleted}}}
+	inst, err := InstrumentRuntime(fr, tp, mp, nil)
+	if err != nil {
+		t.Fatalf("InstrumentRuntime: %v", err)
+	}
+
+	ctx := context.Background()
+	for _, err := range inst.Run(ctx, sampleTurnRequest()) {
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	}
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want 1 (turn only, no model span without explicit call)", len(spans))
+	}
+}
+
+func TestModelSpanExplicit(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: runtime.EventKindTurnCompleted}}}
+	inst, err := InstrumentRuntime(fr, tp, mp, nil)
+	if err != nil {
+		t.Fatalf("InstrumentRuntime: %v", err)
+	}
+
+	ctx := context.Background()
+	mctx, mspan, mstart := inst.StartModelSpan(ctx, ModelSpanParams{
+		System:       "openai",
+		RequestModel: "gpt-4o",
+		Operation:    "chat",
+	})
+	_ = mctx
+	inst.EndModelSpan(ctx, mspan, mstart, "openai", "gpt-4o-2024-08-06", 100, 50, nil)
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want 1", len(spans))
+	}
+	span := spans[0]
+	if span.Name != SpanModel {
+		t.Errorf("span name = %q, want %q", span.Name, SpanModel)
+	}
+	if span.Status.Code != codes.Ok {
+		t.Errorf("span status = %v, want Ok", span.Status.Code)
+	}
+	attrMap := spanAttrMap(&span)
+	if attrMap[AttrGenAISystem] != "openai" {
+		t.Errorf("gen_ai.system = %q, want openai", attrMap[AttrGenAISystem])
+	}
+	if attrMap[AttrGenAIResponseModel] != "gpt-4o-2024-08-06" {
+		t.Errorf("gen_ai.response.model = %q, want gpt-4o-2024-08-06", attrMap[AttrGenAIResponseModel])
+	}
+	for _, attr := range span.Attributes {
+		if isContentLeak(string(attr.Key)) {
+			t.Errorf("content-bearing attribute leaked: %s", attr.Key)
+		}
+	}
+}
+
+func TestToolSpanExplicit(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
+	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: runtime.EventKindTurnCompleted}}}
+	inst, err := InstrumentRuntime(fr, tp, mp, nil)
+	if err != nil {
+		t.Fatalf("InstrumentRuntime: %v", err)
+	}
+
+	ctx := context.Background()
+	_, tspan := inst.StartToolSpan(ctx, ToolSpanParams{Name: "web_search"})
+	inst.EndToolSpan(tspan, "completed", nil)
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want 1", len(spans))
+	}
+	span := spans[0]
+	if span.Name != SpanTool {
+		t.Errorf("span name = %q, want %q", span.Name, SpanTool)
+	}
+	attrMap := spanAttrMap(&span)
+	if attrMap[AttrToolName] != "web_search" {
+		t.Errorf("tool.name = %q, want web_search", attrMap[AttrToolName])
+	}
+	if attrMap[AttrToolStatus] != "completed" {
+		t.Errorf("tool.status = %q, want completed", attrMap[AttrToolStatus])
+	}
+}
+
+func TestDroppedCounterShared(t *testing.T) {
+	dropped := &atomic.Int64{}
+	dropped.Store(42)
+	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: runtime.EventKindTurnCompleted}}}
+	inst, err := InstrumentRuntime(fr, nil, nil, dropped)
+	if err != nil {
+		t.Fatalf("InstrumentRuntime: %v", err)
+	}
+	if inst.dropped.Load() != 42 {
+		t.Errorf("dropped = %d, want 42 (shared counter)", inst.dropped.Load())
+	}
+}
+
+func spanAttrMap(span *tracetest.SpanStub) map[string]string {
+	m := make(map[string]string, len(span.Attributes))
+	for _, attr := range span.Attributes {
+		m[string(attr.Key)] = attr.Value.AsString()
+	}
+	return m
+}
+
+func isContentLeak(key string) bool {
+	if safeKeys[key] {
+		return false
+	}
+	return isContentKey(key)
 }
 
 func hasMetricWithAttrs(rm metricdata.ResourceMetrics, name string, want attribute.Set) bool {

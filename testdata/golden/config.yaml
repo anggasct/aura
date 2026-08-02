@@ -31,3 +31,10 @@ storage:
   backup_directory: ""
   backup_interval: 24h0m0s
   backup_retention: 7
+telemetry:
+  exporter: none
+  endpoint: ""
+  credential_ref: ""
+  sample_ratio: 0.1
+  queue_size: 2048
+  export_timeout: 5s
