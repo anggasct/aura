@@ -1,15 +1,11 @@
-// Package telemetry defines Aura's observability contract: a fixed signal
-// vocabulary, a default-deny redaction baseline, and a turn instrument that
-// wraps the runtime so every turn exposes one correlated trace and bounded
-// metrics. Content is never emitted; only low-cardinality metadata is.
 package telemetry
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"iter"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -22,49 +18,27 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// ScopeName identifies Aura's instrumentation scope.
 const ScopeName = "aura"
 
-// Span names. One trace per turn; child spans (model, tool) nest under the
-// turn span as their features land.
-const (
-	SpanTurn  = "turn"
-	SpanModel = "model"
-	SpanTool  = "tool"
-)
-
-// Metric instrument names. Labels are bounded to low-cardinality metadata;
-// session, turn, and event IDs are never metric labels.
-const (
-	MetricTurnsTotal   = "runtime.turns.total"
-	MetricTurnDuration = "runtime.turn.duration"
-)
-
-// Attribute keys. Span attributes may carry IDs; metric attributes use only
-// the low-cardinality subset (origin, terminal kind).
-const (
-	AttrSessionID    = "session.id"
-	AttrTurnID       = "turn.id"
-	AttrOrigin       = "turn.origin"
-	AttrTerminalKind = "turn.terminal_kind"
-)
-
-// contentPatterns are key fragments that mark an attribute as content-bearing.
-// Redact drops any attribute whose lowercased key contains one of these, so
-// prompts, tool arguments/results, memory, secrets, and attachments never
-// reach telemetry. Safe metadata keys (session.id, turn.origin, ...) contain
-// none of these fragments.
 var contentPatterns = []string{
 	"prompt", "content", "message", "text", "argument", "result",
 	"memory", "attachment", "secret", "token", "password", "credential",
 	"body", "payload", "input", "output", "key",
+	"filename", "header", "profile", "url",
 }
 
-// Redact returns only the attributes whose keys are not content-bearing. It is
-// default-deny: any key matching a content pattern is dropped.
+var safeKeys = map[string]bool{
+	AttrGenAIUsageInputCount:  true,
+	AttrGenAIUsageOutputCount: true,
+}
+
 func Redact(attrs map[string]any) map[string]any {
 	out := make(map[string]any, len(attrs))
 	for k, v := range attrs {
+		if safeKeys[k] {
+			out[k] = v
+			continue
+		}
 		if isContentKey(k) {
 			continue
 		}
@@ -73,8 +47,8 @@ func Redact(attrs map[string]any) map[string]any {
 	return out
 }
 
-func isContentKey(key string) bool {
-	lower := strings.ToLower(key)
+func isContentKey(k string) bool {
+	lower := strings.ToLower(k)
 	for _, p := range contentPatterns {
 		if strings.Contains(lower, p) {
 			return true
@@ -83,21 +57,18 @@ func isContentKey(key string) bool {
 	return false
 }
 
-// Instrument decorates an AgentRuntime, emitting one turn span and bounded
-// turn metrics per Run. Nil providers fall back to the global no-op providers,
-// so an unconfigured instrument adds no export and no content exposure.
 type Instrument struct {
-	inner        runtime.AgentRuntime
-	tracer       trace.Tracer
-	turnsTotal   metric.Int64Counter
-	turnDuration metric.Float64Histogram
+	inner         runtime.AgentRuntime
+	tracer        trace.Tracer
+	turnsTotal    metric.Int64Counter
+	turnDuration  metric.Float64Histogram
+	modelDuration metric.Float64Histogram
+	dropped       *atomic.Int64
 }
 
-// InstrumentRuntime wraps inner with turn tracing and metrics. Nil providers
-// select the global (no-op by default) providers.
-func InstrumentRuntime(inner runtime.AgentRuntime, tp trace.TracerProvider, mp metric.MeterProvider) (*Instrument, error) {
+func InstrumentRuntime(inner runtime.AgentRuntime, tp trace.TracerProvider, mp metric.MeterProvider, dropped *atomic.Int64) (*Instrument, error) {
 	if inner == nil {
-		return nil, errors.New("telemetry: runtime must not be nil")
+		return nil, &Error{Code: ErrorCodeInstrumentFailed, Detail: "runtime must not be nil"}
 	}
 	if tp == nil {
 		tp = otel.GetTracerProvider()
@@ -115,18 +86,30 @@ func InstrumentRuntime(inner runtime.AgentRuntime, tp trace.TracerProvider, mp m
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: create duration histogram: %w", err)
 	}
-	return &Instrument{inner: inner, tracer: tracer, turnsTotal: turnsTotal, turnDuration: turnDuration}, nil
+	modelDuration, err := meter.Float64Histogram(MetricModelDuration, metric.WithUnit("s"), metric.WithDescription("model operation duration in seconds"))
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: create model duration histogram: %w", err)
+	}
+	if dropped == nil {
+		dropped = &atomic.Int64{}
+	}
+	return &Instrument{
+		inner:         inner,
+		tracer:        tracer,
+		turnsTotal:    turnsTotal,
+		turnDuration:  turnDuration,
+		modelDuration: modelDuration,
+		dropped:       dropped,
+	}, nil
 }
 
-// Run starts a turn span, delegates to the wrapped runtime, and records the
-// terminal outcome. The span carries redacted metadata only; the stream is
-// passed through unchanged.
 func (i *Instrument) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		spanAttrs := Redact(map[string]any{
-			AttrSessionID: req.SessionID,
-			AttrTurnID:    req.TurnID,
-			AttrOrigin:    string(req.Origin),
+			AttrSessionID:      req.SessionID,
+			AttrTurnID:         req.TurnID,
+			AttrOrigin:         string(req.Origin),
+			AttrSemconvVersion: SemconvVersion,
 		})
 		ctx, span := i.tracer.Start(ctx, SpanTurn, trace.WithAttributes(toKeyValues(spanAttrs)...))
 		defer span.End()
@@ -137,7 +120,7 @@ func (i *Instrument) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq
 			if err != nil {
 				span.RecordError(err)
 				span.SetStatus(codes.Error, "")
-				i.record(ctx, start, req, runtime.EventKindTurnFailed)
+				i.recordTurn(ctx, start, req, runtime.EventKindTurnFailed)
 				yield(ev, err)
 				return
 			}
@@ -155,14 +138,75 @@ func (i *Instrument) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq
 			span.SetStatus(codes.Error, "")
 		}
 		span.SetAttributes(attribute.String(AttrTerminalKind, terminal))
-		i.record(ctx, start, req, terminal)
+		i.recordTurn(ctx, start, req, terminal)
 	}
 }
 
-func (i *Instrument) record(ctx context.Context, start time.Time, req *runtime.TurnRequest, terminal string) {
+func (i *Instrument) recordTurn(ctx context.Context, start time.Time, req *runtime.TurnRequest, terminal string) {
 	labels := metric.WithAttributes(attribute.String(AttrOrigin, string(req.Origin)), attribute.String(AttrTerminalKind, terminal))
 	i.turnsTotal.Add(ctx, 1, labels)
 	i.turnDuration.Record(ctx, time.Since(start).Seconds(), labels)
+}
+
+type ModelSpanParams struct {
+	System       string
+	RequestModel string
+	Operation    string
+}
+
+func (i *Instrument) StartModelSpan(ctx context.Context, params ModelSpanParams) (context.Context, trace.Span, time.Time) {
+	attrs := Redact(map[string]any{
+		AttrGenAISystem:        params.System,
+		AttrGenAIRequestModel:  params.RequestModel,
+		AttrGenAIOperationName: params.Operation,
+	})
+	ctx, span := i.tracer.Start(ctx, SpanModel, trace.WithAttributes(toKeyValues(attrs)...))
+	return ctx, span, time.Now()
+}
+
+func (i *Instrument) EndModelSpan(ctx context.Context, span trace.Span, start time.Time, system, operation, responseModel string, inputTokens, outputTokens int64, err error) {
+	if responseModel != "" {
+		span.SetAttributes(attribute.String(AttrGenAIResponseModel, responseModel))
+	}
+	span.SetAttributes(
+		attribute.Int64(AttrGenAIUsageInputCount, inputTokens),
+		attribute.Int64(AttrGenAIUsageOutputCount, outputTokens),
+	)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "")
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+	span.End()
+	labels := metric.WithAttributes(
+		attribute.String(AttrGenAISystem, system),
+		attribute.String(AttrGenAIOperationName, operation),
+	)
+	i.modelDuration.Record(ctx, time.Since(start).Seconds(), labels)
+}
+
+type ToolSpanParams struct {
+	Name string
+}
+
+func (i *Instrument) StartToolSpan(ctx context.Context, params ToolSpanParams) (context.Context, trace.Span) {
+	attrs := Redact(map[string]any{
+		AttrToolName: params.Name,
+	})
+	ctx, span := i.tracer.Start(ctx, SpanTool, trace.WithAttributes(toKeyValues(attrs)...))
+	return ctx, span
+}
+
+func (i *Instrument) EndToolSpan(span trace.Span, status string, err error) {
+	span.SetAttributes(attribute.String(AttrToolStatus, status))
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "")
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+	span.End()
 }
 
 func isTerminalKind(kind string) bool {
