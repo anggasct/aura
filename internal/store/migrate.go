@@ -17,6 +17,7 @@ type migration struct {
 
 var migrations = []migration{
 	{version: 1, sql: foundationalSchemaSQL},
+	{version: 2, sql: usageLedgerSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -83,6 +84,38 @@ CREATE TABLE ingress_dedupe (
     turn_id TEXT NOT NULL,
     PRIMARY KEY (source, external_id)
 );
+`
+
+const usageLedgerSchemaSQL = `
+CREATE TABLE usage_reservation (
+    id TEXT PRIMARY KEY,
+    invocation_id TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    model_definition_id TEXT NOT NULL,
+    window_day TEXT NOT NULL,
+    window_month TEXT NOT NULL,
+    reserved_cost_micros INTEGER NOT NULL CHECK (reserved_cost_micros >= 0),
+    state TEXT NOT NULL CHECK (state IN ('active','settled','expired','reconciled')),
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(invocation_id, attempt)
+);
+
+CREATE TABLE usage_entry (
+    id TEXT PRIMARY KEY,
+    reservation_id TEXT NOT NULL UNIQUE REFERENCES usage_reservation(id) ON DELETE RESTRICT,
+    provider_usage_id TEXT,
+    input_tokens INTEGER NOT NULL CHECK (input_tokens >= 0),
+    output_tokens INTEGER NOT NULL CHECK (output_tokens >= 0),
+    usage_json TEXT NOT NULL,
+    cost_micros INTEGER NOT NULL CHECK (cost_micros >= 0),
+    accounting TEXT NOT NULL CHECK (accounting IN ('reported','estimated','reconciled')),
+    price_version TEXT NOT NULL,
+    recorded_at TEXT NOT NULL
+);
+
+CREATE INDEX usage_window_idx ON usage_reservation(window_day, window_month, state);
 `
 
 // Migrate applies the foundational schema and any registered feature

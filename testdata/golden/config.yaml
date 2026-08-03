@@ -38,3 +38,8 @@ telemetry:
   sample_ratio: 0.1
   queue_size: 2048
   export_timeout: 5s
+usage:
+  currency: USD
+  daily_budget_micros: 10000000
+  monthly_budget_micros: 200000000
+  reservation_ttl: 1h0m0s

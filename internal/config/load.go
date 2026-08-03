@@ -158,6 +158,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateTelemetry(cfg.Telemetry); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateUsage(cfg.Usage); err != nil {
+		return LoadResult{}, err
+	}
 	report, err := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if err != nil {
 		return LoadResult{}, err
@@ -276,6 +279,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateTelemetryShapes(doc); err != nil {
+		return err
+	}
+	if err := validateUsageShapes(doc); err != nil {
 		return err
 	}
 	if err := validateModelShapes(doc); err != nil {
@@ -494,6 +500,35 @@ func mappingValue(node *yamlv3.Node, key string) *yamlv3.Node {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		if node.Content[i].Value == key {
 			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func validateUsageShapes(doc *yamlv3.Node) error {
+	usageNode := mappingValue(doc, "usage")
+	if usageNode == nil {
+		return nil
+	}
+	if usageNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("usage must be a mapping at line %d", usageNode.Line)
+	}
+	for i := 0; i+1 < len(usageNode.Content); i += 2 {
+		keyNode := usageNode.Content[i]
+		valueNode := usageNode.Content[i+1]
+		switch keyNode.Value {
+		case "currency":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("usage.currency must be a string at line %d", valueNode.Line)
+			}
+		case "daily_budget_micros", "monthly_budget_micros":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("usage.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "reservation_ttl":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("usage.reservation_ttl must be a duration string at line %d", valueNode.Line)
+			}
 		}
 	}
 	return nil
@@ -894,6 +929,18 @@ func applyDefaults(cfg *Config, data []byte) error {
 	if cfg.Telemetry.ExportTimeout == 0 && !configValuePresent(doc, "telemetry", "export_timeout") && !envValuePresent("telemetry.export_timeout") {
 		cfg.Telemetry.ExportTimeout = defaults.Telemetry.ExportTimeout
 	}
+	if cfg.Usage.Currency == "" {
+		cfg.Usage.Currency = defaults.Usage.Currency
+	}
+	if cfg.Usage.DailyBudgetMicros == 0 && !configValuePresent(doc, "usage", "daily_budget_micros") && !envValuePresent("usage.daily_budget_micros") {
+		cfg.Usage.DailyBudgetMicros = defaults.Usage.DailyBudgetMicros
+	}
+	if cfg.Usage.MonthlyBudgetMicros == 0 && !configValuePresent(doc, "usage", "monthly_budget_micros") && !envValuePresent("usage.monthly_budget_micros") {
+		cfg.Usage.MonthlyBudgetMicros = defaults.Usage.MonthlyBudgetMicros
+	}
+	if cfg.Usage.ReservationTTL == 0 && !configValuePresent(doc, "usage", "reservation_ttl") && !envValuePresent("usage.reservation_ttl") {
+		cfg.Usage.ReservationTTL = defaults.Usage.ReservationTTL
+	}
 	return nil
 }
 
@@ -982,6 +1029,22 @@ func validateTelemetry(t Telemetry) error {
 	}
 	if (t.Exporter == "otlp_grpc" || t.Exporter == "otlp_http") && t.Endpoint == "" {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("telemetry.endpoint is required for exporter %q", t.Exporter)}
+	}
+	return nil
+}
+
+func validateUsage(u Usage) error {
+	if u.Currency == "" {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.currency must not be empty"}
+	}
+	if u.DailyBudgetMicros < 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.daily_budget_micros must not be negative"}
+	}
+	if u.MonthlyBudgetMicros < 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.monthly_budget_micros must not be negative"}
+	}
+	if u.ReservationTTL <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.reservation_ttl must be positive"}
 	}
 	return nil
 }
