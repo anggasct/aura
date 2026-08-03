@@ -4,8 +4,6 @@ import (
 	"os"
 	"testing"
 	"time"
-
-	"modernc.org/sqlite"
 )
 
 func testPrice(modelDef string) *Price {
@@ -187,5 +185,3 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
-
-var _ = sqlite.Error{}
