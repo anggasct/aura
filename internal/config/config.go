@@ -25,6 +25,14 @@ type Config struct {
 	Models       Models       `koanf:"models" yaml:"models"`
 	Storage      Storage      `koanf:"storage" yaml:"storage"`
 	Telemetry    Telemetry    `koanf:"telemetry" yaml:"telemetry"`
+	Usage        Usage        `koanf:"usage" yaml:"usage"`
+}
+
+type Usage struct {
+	Currency            string   `koanf:"currency" yaml:"currency"`
+	DailyBudgetMicros   int64    `koanf:"daily_budget_micros" yaml:"daily_budget_micros"`
+	MonthlyBudgetMicros int64    `koanf:"monthly_budget_micros" yaml:"monthly_budget_micros"`
+	ReservationTTL      Duration `koanf:"reservation_ttl" yaml:"reservation_ttl"`
 }
 
 type Telemetry struct {
@@ -238,6 +246,12 @@ func Default() Config {
 			SampleRatio:   0.10,
 			QueueSize:     2048,
 			ExportTimeout: Duration(5 * time.Second),
+		},
+		Usage: Usage{
+			Currency:            "USD",
+			DailyBudgetMicros:   10000000,
+			MonthlyBudgetMicros: 200000000,
+			ReservationTTL:      Duration(time.Hour),
 		},
 	}
 }
