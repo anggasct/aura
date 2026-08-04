@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -137,6 +138,7 @@ func newUsageStatusCmd(gf *globalFlags) *cobra.Command {
 				tbl.printf("reserved (micros)\t%d\t%d\n", st.DayReservedMicros, st.MonthReservedMicros)
 				tbl.printf("settled (micros)\t%d\t%d\n", st.DaySettledMicros, st.MonthSettledMicros)
 				tbl.printf("cap (micros)\t%d\t%d\n", st.DailyCapMicros, st.MonthlyCapMicros)
+				tbl.printf("remaining (micros)\t%d\t%d\n", st.DayRemainingMicros(), st.MonthRemainingMicros())
 				tbl.printf("period\t%s\t%s\n", st.Day, st.Month)
 				if err := tbl.flush(); err != nil {
 					return err
@@ -153,6 +155,12 @@ func newUsageEntriesCmd(gf *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "entries",
 		Short: "List settled usage entries, newest first",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if limit < 0 {
+				return &usageError{errors.New("usage entries --limit must not be negative")}
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *config.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
 				entries, err := ledger.Entries(ctx, limit)
@@ -164,12 +172,12 @@ func newUsageEntriesCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				tbl := newTable(cmd.OutOrStdout())
-				tbl.printf("recorded_at\tmodel\tinput\toutput\tcost_micros\taccounting\tprice_version\n")
+				tbl.printf("recorded_at\treservation_id\tmodel\tinput\toutput\tcost_micros\taccounting\tprice_version\n")
 				for i := range entries {
 					en := &entries[i]
-					tbl.printf("%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
+					tbl.printf("%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
 						en.RecordedAt.UTC().Format("2006-01-02T15:04:05Z"),
-						en.ModelDefinitionID, en.InputTokens, en.OutputTokens,
+						en.ReservationID, en.ModelDefinitionID, en.InputTokens, en.OutputTokens,
 						en.CostMicros, en.Accounting, en.PriceVersion)
 				}
 				return tbl.flush()

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,7 +79,7 @@ func TestUsageStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("usage status: %v", err)
 	}
-	for _, want := range []string{"window", "day", "month", "used (micros)", "cap (micros)", "active reservations: 0"} {
+	for _, want := range []string{"window", "day", "month", "used (micros)", "cap (micros)", "remaining (micros)", "active reservations: 0"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status output missing %q:\n%s", want, out)
 		}
@@ -93,10 +95,29 @@ func TestUsageEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("usage entries: %v", err)
 	}
-	for _, want := range []string{"recorded_at", "model", "primary", "reported"} {
+	for _, want := range []string{"recorded_at", "reservation_id", "model", "primary", "reported"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("entries output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestUsageEntriesNegativeLimitRejected(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeUsageConfig(t, dataRoot)
+
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"usage", "entries", "--config", cfg, "--limit", "-5"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected a usage error for negative --limit")
+	}
+	var ue *usageError
+	if !errors.As(err, &ue) {
+		t.Errorf("negative --limit must be a usage error (exit 2), got %T: %v", err, err)
 	}
 }
 

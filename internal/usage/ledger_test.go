@@ -415,6 +415,14 @@ func TestRestartPreservesCapState(t *testing.T) {
 	_ = r3
 }
 
+func TestEntriesNegativeLimitRejected(t *testing.T) {
+	l := newTestLedger(t, 1000000, 10000000)
+	_, err := l.Entries(context.Background(), -1)
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		t.Errorf("code = %v, want invalid_argument (err=%v)", code, err)
+	}
+}
+
 func TestMonthlyCapEnforced(t *testing.T) {
 	l := newTestLedger(t, 10000000, 30000)
 	reserve(t, l, "inv-1", 0, 100, 200) // 14000

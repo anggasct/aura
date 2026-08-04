@@ -26,6 +26,14 @@ func (s *Status) DayUsedMicros() int64 { return s.DayReservedMicros + s.DaySettl
 // MonthUsedMicros is the counted month spend (reserved + settled).
 func (s *Status) MonthUsedMicros() int64 { return s.MonthReservedMicros + s.MonthSettledMicros }
 
+// DayRemainingMicros is the remaining daily budget (cap - used). A zero cap
+// means the daily budget is not enforced.
+func (s *Status) DayRemainingMicros() int64 { return s.DailyCapMicros - s.DayUsedMicros() }
+
+// MonthRemainingMicros is the remaining monthly budget (cap - used). A zero
+// cap means the monthly budget is not enforced.
+func (s *Status) MonthRemainingMicros() int64 { return s.MonthlyCapMicros - s.MonthUsedMicros() }
+
 // Status reports current window consumption against the configured caps.
 func (l *Ledger) Status(ctx context.Context) (*Status, error) {
 	now := l.now()
@@ -84,10 +92,13 @@ type Entry struct {
 	RecordedAt        time.Time
 }
 
-// Entries lists settlement entries newest first, capped at limit. A limit <= 0
-// defaults to 50.
+// Entries lists settlement entries newest first, capped at limit. A limit of
+// 0 selects the default of 50; a negative limit is an invalid argument.
 func (l *Ledger) Entries(ctx context.Context, limit int) ([]Entry, error) {
-	if limit <= 0 {
+	if limit < 0 {
+		return nil, codedError(ErrorCodeInvalidArgument, "usage: entries limit must not be negative", nil)
+	}
+	if limit == 0 {
 		limit = 50
 	}
 	rows, err := l.db.QueryContext(ctx, `

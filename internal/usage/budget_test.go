@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"iter"
 	"sync"
@@ -55,7 +56,7 @@ func budgetedLedger(t *testing.T, dailyCap int64) (*Ledger, *fakeLLM) {
 
 func TestBudgetedReservesAndSettles(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
-	b, err := NewBudgeted(inner, l, "primary")
+	b, err := NewBudgeted(inner, l, "primary", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +96,7 @@ func TestBudgetedReservesAndSettles(t *testing.T) {
 
 func TestBudgetedBlocksOnBudgetExhaustion(t *testing.T) {
 	l, inner := budgetedLedger(t, 100) // too small for any reservation
-	b, err := NewBudgeted(inner, l, "primary")
+	b, err := NewBudgeted(inner, l, "primary", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestBudgetedBlocksOnBudgetExhaustion(t *testing.T) {
 func TestBudgetedSettlesEstimatedOnError(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
 	inner.err = errors.New("provider down")
-	b, err := NewBudgeted(inner, l, "primary")
+	b, err := NewBudgeted(inner, l, "primary", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +149,7 @@ func TestBudgetedSettlesEstimatedOnError(t *testing.T) {
 
 func TestBudgetedNilLedgerPassthrough(t *testing.T) {
 	inner := &fakeLLM{name: "fake"}
-	got, err := NewBudgeted(inner, nil, "primary")
+	got, err := NewBudgeted(inner, nil, "primary", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,14 +160,14 @@ func TestBudgetedNilLedgerPassthrough(t *testing.T) {
 
 func TestBudgetedNilInnerRejected(t *testing.T) {
 	l := newTestLedger(t, 1000000, 10000000)
-	if _, err := NewBudgeted(nil, l, "primary"); err == nil {
+	if _, err := NewBudgeted(nil, l, "primary", nil); err == nil {
 		t.Error("expected error for nil inner")
 	}
 }
 
 func TestBudgetedConcurrentDispatch(t *testing.T) {
 	l, inner := budgetedLedger(t, 10000000)
-	b, err := NewBudgeted(inner, l, "primary")
+	b, err := NewBudgeted(inner, l, "primary", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,5 +200,100 @@ func TestBudgetedConcurrentDispatch(t *testing.T) {
 	}
 	if len(entries) != 20 {
 		t.Errorf("entries = %d, want 20 (each dispatch settled exactly once)", len(entries))
+	}
+}
+
+// dbClosingLLM closes the ledger database while generating, so the wrapper's
+// post-response settlement fails deterministically.
+type dbClosingLLM struct {
+	db    *sql.DB
+	usage *genai.GenerateContentResponseUsageMetadata
+	fail  error
+}
+
+func (f *dbClosingLLM) Name() string { return "saboteur" }
+
+func (f *dbClosingLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		_ = f.db.Close()
+		if f.fail != nil {
+			yield(nil, f.fail)
+			return
+		}
+		yield(&adkmodel.LLMResponse{UsageMetadata: f.usage, TurnComplete: true}, nil)
+	}
+}
+
+func TestBudgetedPropagatesSettlementFailure(t *testing.T) {
+	l, db := newTestLedgerWithDB(t, 1000000, 10000000)
+	inner := &dbClosingLLM{
+		db: db,
+		usage: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:     10,
+			CandidatesTokenCount: 20,
+		},
+	}
+	b, err := NewBudgeted(inner, l, "primary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
+
+	var sawErr error
+	for _, err := range b.GenerateContent(context.Background(), req, false) {
+		if err != nil {
+			sawErr = err
+		}
+	}
+	if sawErr == nil {
+		t.Fatal("expected the settlement failure to be surfaced, got nil")
+	}
+}
+
+func TestBudgetedJoinsProviderAndSettlementErrors(t *testing.T) {
+	l, db := newTestLedgerWithDB(t, 1000000, 10000000)
+	providerErr := errors.New("provider exploded")
+	inner := &dbClosingLLM{db: db, fail: providerErr}
+	b, err := NewBudgeted(inner, l, "primary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
+
+	var sawErr error
+	for _, err := range b.GenerateContent(context.Background(), req, false) {
+		if err != nil {
+			sawErr = err
+		}
+	}
+	if sawErr == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !errors.Is(sawErr, providerErr) {
+		t.Errorf("provider error must be preserved, got %v", sawErr)
+	}
+}
+
+func TestBudgetedCancelledContextBlocksDispatch(t *testing.T) {
+	l, inner := budgetedLedger(t, 1000000)
+	b, err := NewBudgeted(inner, l, "primary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
+
+	var sawErr error
+	for _, err := range b.GenerateContent(ctx, req, false) {
+		if err != nil {
+			sawErr = err
+		}
+	}
+	if sawErr == nil {
+		t.Fatal("expected a cancellation error before dispatch")
+	}
+	if inner.callCount() != 0 {
+		t.Errorf("inner called %d times, want 0 (cancelled before dispatch)", inner.callCount())
 	}
 }

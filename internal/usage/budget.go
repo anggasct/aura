@@ -3,7 +3,9 @@ package usage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
+	"log/slog"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -18,17 +20,21 @@ const defaultMaxOutputBound = 4096
 // it reserves a conservative cost before any network dispatch and settles the
 // provider-reported usage once the response completes. Budget exhaustion
 // rejects the request before dispatch. A stream that ends in error settles
-// conservatively at the reserved amount, never at zero.
+// conservatively at the reserved amount, never at zero. Settlement failures
+// are surfaced so a reservation never completes without an observable,
+// exactly-once settlement outcome.
 type Budgeted struct {
 	inner             adkmodel.LLM
 	ledger            *Ledger
 	modelDefinitionID string
+	logger            *slog.Logger
 }
 
 // NewBudgeted wraps inner with budget enforcement for the given model
 // definition. A nil ledger disables enforcement and returns inner unchanged,
-// so an unconfigured deployment adds no accounting.
-func NewBudgeted(inner adkmodel.LLM, ledger *Ledger, modelDefinitionID string) (adkmodel.LLM, error) {
+// so an unconfigured deployment adds no accounting. A nil logger falls back
+// to the process default.
+func NewBudgeted(inner adkmodel.LLM, ledger *Ledger, modelDefinitionID string, logger *slog.Logger) (adkmodel.LLM, error) {
 	if inner == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "usage: inner model must not be nil", nil)
 	}
@@ -38,7 +44,10 @@ func NewBudgeted(inner adkmodel.LLM, ledger *Ledger, modelDefinitionID string) (
 	if modelDefinitionID == "" {
 		return nil, codedError(ErrorCodeInvalidArgument, "usage: model definition id must not be empty", nil)
 	}
-	return &Budgeted{inner: inner, ledger: ledger, modelDefinitionID: modelDefinitionID}, nil
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Budgeted{inner: inner, ledger: ledger, modelDefinitionID: modelDefinitionID, logger: logger}, nil
 }
 
 func (b *Budgeted) Name() string {
@@ -70,20 +79,33 @@ func (b *Budgeted) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest
 		for resp, err := range b.inner.GenerateContent(ctx, req, stream) {
 			if err != nil {
 				// Settle conservatively at the reserved amount; a failed
-				// attempt must never release its reservation at zero.
-				_, _ = b.ledger.Settle(ctx, &SettleRequest{ReservationID: reservation.ID})
-				yield(resp, err)
+				// attempt must never release its reservation at zero. The
+				// provider error is preserved and joined with any settlement
+				// failure so both remain observable.
+				if _, settleErr := b.ledger.Settle(ctx, &SettleRequest{ReservationID: reservation.ID}); settleErr != nil {
+					yield(resp, errors.Join(err, settleErr))
+				} else {
+					yield(resp, err)
+				}
 				return
 			}
 			if resp != nil {
 				final = resp
 			}
 			if !yield(resp, nil) {
-				_, _ = b.ledger.Settle(ctx, settleForResponse(reservation.ID, final))
+				// The consumer stopped iterating; the outcome can no longer
+				// be reported through the stream, so a settlement failure is
+				// logged for reconciliation rather than dropped silently.
+				if _, settleErr := b.ledger.Settle(ctx, settleForResponse(reservation.ID, final)); settleErr != nil {
+					b.logger.WarnContext(ctx, "usage settlement failed after consumer stop",
+						"component", "usage", "reservation_id", reservation.ID, "error", settleErr)
+				}
 				return
 			}
 		}
-		_, _ = b.ledger.Settle(ctx, settleForResponse(reservation.ID, final))
+		if _, settleErr := b.ledger.Settle(ctx, settleForResponse(reservation.ID, final)); settleErr != nil {
+			yield(nil, settleErr)
+		}
 	}
 }
 
