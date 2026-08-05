@@ -108,12 +108,29 @@ type Reservation struct {
 }
 
 // Reserve atomically checks the UTC daily and monthly windows against the
-// caps and records a conservative reservation. An attempt with no applicable
-// price is rejected when a cap is enabled; it never reserves at zero cost.
+// caps and records a conservative reservation. The (invocation_id, attempt)
+// pair is the idempotency key: a replay or retry that re-enters with the same
+// key returns the existing reservation rather than creating a second one, so
+// one logical model attempt can never be double-counted. An attempt with no
+// applicable price is rejected when a cap is enabled; it never reserves at
+// zero cost.
 func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation, error) {
 	if err := validateReserveRequest(req); err != nil {
 		return nil, err
 	}
+
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("usage: begin reserve transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if existing, ok, err := l.reservationByKey(ctx, tx, req.InvocationID, req.Attempt); err != nil {
+		return nil, err
+	} else if ok {
+		return existing, nil
+	}
+
 	now := l.now()
 	price, err := l.prices.At(req.ModelDefinitionID, l.currency, now)
 	if err != nil {
@@ -132,12 +149,6 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 	reserved := price.ReserveCostMicros(req.KnownInputTokens, req.RequestedMaxOutputTokens)
 	day, month := windowKeys(now)
 	expiresAt := now.Add(l.reservationTTL)
-
-	tx, err := l.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("usage: begin reserve transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	if l.capsEnabled() {
 		dayUsed, monthUsed, err := l.windowUsed(ctx, tx, day, month, reserved)
@@ -170,6 +181,11 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
+			// A concurrent reservation for the same key won the insert; the
+			// idempotent answer is that row, not a conflict.
+			if existing, ok, rerr := l.reservationByKey(ctx, tx, invocationID, attempt); rerr == nil && ok {
+				return existing, nil
+			}
 			return nil, codedError(ErrorCodeReservationConflict,
 				fmt.Sprintf("usage: reservation for invocation %q attempt %d already exists", invocationID, attempt), err)
 		}
@@ -190,6 +206,35 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 		ExpiresAt:          expiresAt,
 		CreatedAt:          now,
 	}, nil
+}
+
+// reservationByKey reports whether a reservation exists for the
+// (invocation_id, attempt) idempotency key and returns it.
+func (l *Ledger) reservationByKey(ctx context.Context, q queryer, invocationID string, attempt int) (r *Reservation, ok bool, err error) {
+	var (
+		row       Reservation
+		expiresAt string
+		createdAt string
+	)
+	err = q.QueryRowContext(ctx, `
+		SELECT id, invocation_id, attempt, model_definition_id, window_day, window_month,
+			reserved_cost_micros, state, expires_at, created_at
+		FROM usage_reservation WHERE invocation_id = ? AND attempt = ?`, invocationID, attempt).
+		Scan(&row.ID, &row.InvocationID, &row.Attempt, &row.ModelDefinitionID, &row.WindowDay, &row.WindowMonth,
+			&row.ReservedCostMicros, &row.State, &expiresAt, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("usage: read reservation by key: %w", err)
+	}
+	if row.ExpiresAt, err = time.Parse(time.RFC3339Nano, expiresAt); err != nil {
+		return nil, false, fmt.Errorf("usage: parse reservation expires_at: %w", err)
+	}
+	if row.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
+		return nil, false, fmt.Errorf("usage: parse reservation created_at: %w", err)
+	}
+	return &row, true, nil
 }
 
 func validateReserveRequest(req ReserveRequest) error {

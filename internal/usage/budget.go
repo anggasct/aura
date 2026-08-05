@@ -6,6 +6,7 @@ import (
 	"errors"
 	"iter"
 	"log/slog"
+	"sync/atomic"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -28,6 +29,11 @@ type Budgeted struct {
 	ledger            *Ledger
 	modelDefinitionID string
 	logger            *slog.Logger
+	// attempts assigns a distinct attempt number to each model call that
+	// arrives without an explicit idempotency key, so multiple calls within
+	// one runtime invocation (a tool loop, a sub-agent) each get their own
+	// reservation instead of colliding on the same (invocation_id, attempt).
+	attempts atomic.Int64
 }
 
 // NewBudgeted wraps inner with budget enforcement for the given model
@@ -56,16 +62,21 @@ func (b *Budgeted) Name() string {
 
 func (b *Budgeted) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		invocationID, err := randomID()
+		invocationID, attempt, err := b.resolveInvocation(ctx)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		inputTokens, err := estimateInputTokens(req, b.ledger.capsEnabled())
 		if err != nil {
 			yield(nil, err)
 			return
 		}
 		reservation, err := b.ledger.Reserve(ctx, ReserveRequest{
 			InvocationID:             invocationID,
-			Attempt:                  0,
+			Attempt:                  attempt,
 			ModelDefinitionID:        b.modelDefinitionID,
-			KnownInputTokens:         estimateInputTokens(req),
+			KnownInputTokens:         inputTokens,
 			RequestedMaxOutputTokens: requestedMaxOutput(req),
 		})
 		if err != nil {
@@ -129,12 +140,36 @@ func settleForResponse(reservationID string, resp *adkmodel.LLMResponse) *Settle
 	}
 }
 
+// resolveInvocation derives the reservation idempotency key. An explicit key
+// set via WithInvocation wins (the retry/fallback contract); otherwise the
+// runtime invocation identity is read from the context when present so a
+// replay of the same logical turn reuses its reservation. A call with neither
+// falls back to a fresh random identity, which never reuses.
+func (b *Budgeted) resolveInvocation(ctx context.Context) (invocationID string, attempt int, err error) {
+	if id, attempt, ok := invocationFrom(ctx); ok {
+		return id, attempt, nil
+	}
+	if carrier, ok := ctx.(invocationCarrier); ok {
+		if id := carrier.InvocationID(); id != "" {
+			return id, int(b.attempts.Add(1)), nil
+		}
+	}
+	id, err := randomID()
+	if err != nil {
+		return "", 0, err
+	}
+	return id, 0, nil
+}
+
 // estimateInputTokens derives a conservative input token estimate from the
 // request contents. It approximates four characters per token; the estimate
-// only bounds the reservation, which the settlement releases.
-func estimateInputTokens(req *adkmodel.LLMRequest) int64 {
+// only bounds the reservation, which the settlement releases. Every
+// content-bearing part is accounted for. A part whose size cannot be bounded
+// (file data referenced by URI) is rejected while a cap is enabled, since an
+// understated estimate would let the request pass a hard budget check.
+func estimateInputTokens(req *adkmodel.LLMRequest, strict bool) (int64, error) {
 	if req == nil {
-		return 0
+		return 0, nil
 	}
 	chars := 0
 	for _, content := range req.Contents {
@@ -142,28 +177,62 @@ func estimateInputTokens(req *adkmodel.LLMRequest) int64 {
 			continue
 		}
 		for _, part := range content.Parts {
-			chars += partSize(part)
+			n, err := partSize(part, strict)
+			if err != nil {
+				return 0, err
+			}
+			chars += n
 		}
 	}
-	return int64((chars + 3) / 4)
+	return int64((chars + 3) / 4), nil
 }
 
-func partSize(part *genai.Part) int {
+func partSize(part *genai.Part, strict bool) (int, error) {
 	if part == nil {
-		return 0
+		return 0, nil
 	}
 	size := len(part.Text)
 	if part.FunctionCall != nil {
-		if data, err := json.Marshal(part.FunctionCall); err == nil {
-			size += len(data)
-		}
+		size += jsonSize(part.FunctionCall)
 	}
 	if part.FunctionResponse != nil {
-		if data, err := json.Marshal(part.FunctionResponse); err == nil {
-			size += len(data)
-		}
+		size += jsonSize(part.FunctionResponse)
 	}
-	return size
+	if part.InlineData != nil {
+		size += len(part.InlineData.Data)
+	}
+	if part.ExecutableCode != nil {
+		size += len(part.ExecutableCode.Code)
+	}
+	if part.CodeExecutionResult != nil {
+		size += len(part.CodeExecutionResult.Output)
+	}
+	if part.ToolCall != nil {
+		size += jsonSize(part.ToolCall)
+	}
+	if part.ToolResponse != nil {
+		size += jsonSize(part.ToolResponse)
+	}
+	size += len(part.ThoughtSignature)
+	if part.PartMetadata != nil {
+		size += jsonSize(part.PartMetadata)
+	}
+	if part.FileData != nil {
+		if strict {
+			return 0, codedError(ErrorCodeInvalidArgument,
+				"usage: file_data input cannot be conservatively reserved; its size is unknown at reserve time", nil)
+		}
+		// No cap is enforced, so an unpriced part cannot bypass a budget; the
+		// output bound still reserves a non-zero amount.
+	}
+	return size, nil
+}
+
+func jsonSize(v any) int {
+	if data, err := json.Marshal(v); err == nil {
+		return len(data)
+	}
+	return 0
 }
 
 func requestedMaxOutput(req *adkmodel.LLMRequest) int64 {

@@ -26,18 +26,21 @@ func TestReserveCreatesConservativeReservation(t *testing.T) {
 	}
 }
 
-func TestReserveDuplicateAttemptConflicts(t *testing.T) {
+func TestReserveDuplicateAttemptIdempotent(t *testing.T) {
 	l := newTestLedger(t, 1000000, 10000000)
-	reserve(t, l, "inv-1", 0, 100, 200)
-	_, err := l.Reserve(context.Background(), ReserveRequest{
+	first := reserve(t, l, "inv-1", 0, 100, 200)
+	second, err := l.Reserve(context.Background(), ReserveRequest{
 		InvocationID:             "inv-1",
 		Attempt:                  0,
 		ModelDefinitionID:        "primary",
 		KnownInputTokens:         100,
 		RequestedMaxOutputTokens: 200,
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeReservationConflict {
-		t.Errorf("code = %v, want reservation_conflict (err=%v)", code, err)
+	if err != nil {
+		t.Fatalf("duplicate reserve must be idempotent, got %v", err)
+	}
+	if second.ID != first.ID {
+		t.Errorf("second reserve = %q, want first %q (idempotent reuse)", second.ID, first.ID)
 	}
 }
 

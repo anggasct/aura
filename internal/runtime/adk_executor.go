@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/usage"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -33,6 +34,11 @@ type ADKExecutor struct {
 	broker    ToolBroker
 	tools     []tool.Tool
 	logger    *slog.Logger
+	// ledger, when set with modelDefinitionID, wraps the resolved model with
+	// budget enforcement so every turn reserves before dispatch and settles
+	// provider-reported usage after.
+	ledger            *usage.Ledger
+	modelDefinitionID string
 }
 
 // ToolBroker is the policy gate every tool call must pass before execution.
@@ -45,8 +51,9 @@ type ToolBroker interface {
 // through the ADK model registry (registered by the model package at
 // startup); broker is the tool policy gate; tools are the declared tool set
 // (empty until the built-in tools engine lands — every declared tool is
-// still gated by the broker before ADK executes it).
-func NewADKExecutor(appName, modelName string, sessions SessionPort, events EventStore, broker ToolBroker, tools []tool.Tool, logger *slog.Logger) (*ADKExecutor, error) {
+// still gated by the broker before ADK executes it). Options attach optional
+// capabilities such as budget enforcement.
+func NewADKExecutor(appName, modelName string, sessions SessionPort, events EventStore, broker ToolBroker, tools []tool.Tool, logger *slog.Logger, opts ...ExecutorOption) (*ADKExecutor, error) {
 	if appName == "" {
 		return nil, invalidArgument("app name must not be empty")
 	}
@@ -65,7 +72,7 @@ func NewADKExecutor(appName, modelName string, sessions SessionPort, events Even
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ADKExecutor{
+	e := &ADKExecutor{
 		appName:   appName,
 		modelName: modelName,
 		sessions:  sessions,
@@ -73,7 +80,35 @@ func NewADKExecutor(appName, modelName string, sessions SessionPort, events Even
 		broker:    broker,
 		tools:     tools,
 		logger:    logger,
-	}, nil
+	}
+	for _, opt := range opts {
+		if err := opt(e); err != nil {
+			return nil, err
+		}
+	}
+	return e, nil
+}
+
+// ExecutorOption configures an ADKExecutor at construction.
+type ExecutorOption func(*ADKExecutor) error
+
+// WithBudgetLedger wraps the resolved model with the usage budget ledger, so a
+// turn reserves a conservative cost before dispatch, settles provider-reported
+// usage after, and is rejected before dispatch once the configured cap is
+// reached. modelDefinitionID is the pricing key (the config model definition
+// name, e.g. "primary").
+func WithBudgetLedger(ledger *usage.Ledger, modelDefinitionID string) ExecutorOption {
+	return func(e *ADKExecutor) error {
+		if ledger == nil {
+			return invalidArgument("budget ledger must not be nil")
+		}
+		if modelDefinitionID == "" {
+			return invalidArgument("model definition id must not be empty")
+		}
+		e.ledger = ledger
+		e.modelDefinitionID = modelDefinitionID
+		return nil
+	}
 }
 
 // Execute runs one turn through the ADK runner. The returned events carry
@@ -98,7 +133,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *TurnRequest) iter.Seq2[s
 			return
 		}
 
-		usage := &usageTracker{maxTokens: req.Budget.MaxTokens}
+		turnUsage := &usageTracker{maxTokens: req.Budget.MaxTokens}
 		// WithYieldUserMessage surfaces the user's input as an event so the
 		// engine persists it through the same single-writer path; otherwise
 		// the user message would live only in the ADK session service, which
@@ -106,14 +141,14 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *TurnRequest) iter.Seq2[s
 		runOpts := []runner.RunOption{runner.WithYieldUserMessage()}
 		for ev, err := range adkRunner.Run(ctx, req.PrincipalID, req.SessionID, content, agent.RunConfig{}, runOpts...) {
 			if err != nil {
-				if usage.exceeded {
+				if turnUsage.exceeded {
 					yield(store.RuntimeEvent{}, codedError(ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
 					return
 				}
 				yield(store.RuntimeEvent{}, err)
 				return
 			}
-			if exceeded := usage.add(ev); exceeded {
+			if exceeded := turnUsage.add(ev); exceeded {
 				yield(store.RuntimeEvent{}, codedError(ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
 				return
 			}
@@ -136,6 +171,13 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	model, err := adkmodel.NewLLM(ctx, x.modelName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model %q: %w", x.modelName, err)
+	}
+	if x.ledger != nil {
+		wrapped, werr := usage.NewBudgeted(model, x.ledger, x.modelDefinitionID, x.logger)
+		if werr != nil {
+			return nil, fmt.Errorf("wrap model with budget: %w", werr)
+		}
+		model = wrapped
 	}
 	rootAgent, err := buildAgent(x.appName, model, x.tools, x.beforeTool)
 	if err != nil {

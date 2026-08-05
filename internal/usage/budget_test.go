@@ -297,3 +297,106 @@ func TestBudgetedCancelledContextBlocksDispatch(t *testing.T) {
 		t.Errorf("inner called %d times, want 0 (cancelled before dispatch)", inner.callCount())
 	}
 }
+
+// TestBudgetedIdempotentReplay proves a retry that re-enters the wrapper with
+// the same idempotency key collapses onto the existing reservation: one
+// reservation row, one settlement entry, never two.
+func TestBudgetedIdempotentReplay(t *testing.T) {
+	l, inner := budgetedLedger(t, 1000000)
+	b, err := NewBudgeted(inner, l, "primary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
+	ctx := WithInvocation(context.Background(), "inv-replay", 0)
+
+	for range 2 {
+		for _, err := range b.GenerateContent(ctx, req, false) {
+			if err != nil {
+				t.Fatalf("replay dispatch: %v", err)
+			}
+		}
+	}
+
+	entries, err := l.Entries(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("entries = %d, want 1 (replay must not duplicate settlement)", len(entries))
+	}
+	var reservations int
+	if err := l.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM usage_reservation").Scan(&reservations); err != nil {
+		t.Fatal(err)
+	}
+	if reservations != 1 {
+		t.Errorf("reservations = %d, want 1 (replay must not duplicate the reservation)", reservations)
+	}
+}
+
+func TestEstimateInputTokensAccountsAllParts(t *testing.T) {
+	textOnly, err := estimateInputTokens(&adkmodel.LLMRequest{
+		Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withInline, err := estimateInputTokens(&adkmodel.LLMRequest{
+		Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{
+			{Text: "hello"},
+			{InlineData: &genai.Blob{Data: make([]byte, 4000), MIMEType: "image/png"}},
+		}}},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withInline <= textOnly {
+		t.Errorf("inline data must raise the estimate: inline=%d text=%d", withInline, textOnly)
+	}
+	// 4000 bytes ~= 1000 tokens; the image must not be counted as zero.
+	if withInline-textOnly < 900 {
+		t.Errorf("inline data delta = %d, want ~1000 tokens for 4000 bytes", withInline-textOnly)
+	}
+}
+
+func TestEstimateInputTokensRejectsFileDataUnderCap(t *testing.T) {
+	req := &adkmodel.LLMRequest{
+		Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{
+			{FileData: &genai.FileData{FileURI: "gs://bucket/big.mp4", MIMEType: "video/mp4"}},
+		}}},
+	}
+	if _, err := estimateInputTokens(req, true); err == nil {
+		t.Error("strict estimate must reject file_data whose size is unknown")
+	}
+	// With no cap enforced the same request is accepted (the output bound still
+	// reserves a non-zero amount); it simply cannot be precisely sized.
+	if _, err := estimateInputTokens(req, false); err != nil {
+		t.Errorf("non-strict estimate rejected file_data: %v", err)
+	}
+}
+
+func TestBudgetedRejectsFileDataUnderCap(t *testing.T) {
+	l, inner := budgetedLedger(t, 1000000)
+	b, err := NewBudgeted(inner, l, "primary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{
+		{FileData: &genai.FileData{FileURI: "gs://bucket/media.png", MIMEType: "image/png"}},
+	}}}}
+	var sawErr error
+	for _, err := range b.GenerateContent(context.Background(), req, false) {
+		if err != nil {
+			sawErr = err
+		}
+	}
+	if sawErr == nil {
+		t.Fatal("expected file_data under a cap to be rejected before dispatch")
+	}
+	if code, ok := CodeOf(sawErr); !ok || code != ErrorCodeInvalidArgument {
+		t.Errorf("code = %v, want invalid_argument (err=%v)", code, sawErr)
+	}
+	if inner.callCount() != 0 {
+		t.Errorf("inner called %d times, want 0 (rejected before dispatch)", inner.callCount())
+	}
+}
