@@ -121,6 +121,26 @@ func TestUsageEntriesNegativeLimitRejected(t *testing.T) {
 	}
 }
 
+// TestUsageSubcommandsRejectPositionalArgs: the read-only usage subcommands
+// take no positional arguments; a stray argument must be rejected rather than
+// silently ignored.
+func TestUsageSubcommandsRejectPositionalArgs(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeUsageConfig(t, dataRoot)
+
+	for _, sub := range []string{"status", "entries", "prices", "reconcile"} {
+		t.Run(sub, func(t *testing.T) {
+			out, err := execute(t, "usage", sub, "--config", cfg, "stray")
+			if err == nil {
+				t.Fatalf("usage %s stray: expected an error, got nil (out: %q)", sub, out)
+			}
+			if !strings.Contains(err.Error(), "unknown command") && !strings.Contains(err.Error(), "unexpected argument") {
+				t.Errorf("usage %s stray: unexpected error %v", sub, err)
+			}
+		})
+	}
+}
+
 func TestUsageEntriesEmpty(t *testing.T) {
 	dataRoot := t.TempDir()
 	cfg := writeUsageConfig(t, dataRoot)

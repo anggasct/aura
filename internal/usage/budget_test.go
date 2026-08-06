@@ -326,6 +326,136 @@ func TestBudgetedErrorPathYieldsFinalResponse(t *testing.T) {
 	}
 }
 
+// streamStopsLLM yields one partial (non-TurnComplete) response, then stops
+// cleanly; the consumer is expected to stop before exhaustion.
+type streamStopsLLM struct{}
+
+func (f *streamStopsLLM) Name() string { return "stream-stops" }
+
+func (f *streamStopsLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		yield(&adkmodel.LLMResponse{UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:     10,
+			CandidatesTokenCount: 20,
+		}, TurnComplete: false}, nil)
+	}
+}
+
+// noCompleteLLM exhausts cleanly but never emits a TurnComplete response.
+type noCompleteLLM struct{}
+
+func (f *noCompleteLLM) Name() string { return "no-complete" }
+
+func (f *noCompleteLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		yield(&adkmodel.LLMResponse{UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:     10,
+			CandidatesTokenCount: 20,
+		}, TurnComplete: false}, nil)
+	}
+}
+
+// TestBudgetedConsumerStopSettlesConservative: when the consumer stops
+// iterating early, the final outcome is unknown, so the reservation must be
+// settled conservatively at the reserved amount (accountingEstimated, >= the
+// reserved cost), never at the partial usage.
+func TestBudgetedConsumerStopSettlesConservative(t *testing.T) {
+	l := newTestLedger(t, 10000000, 10000000)
+	b, err := NewBudgeted(&streamStopsLLM{}, l, "primary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
+	// Stop after the first (partial) response.
+	for resp := range b.GenerateContent(context.Background(), req, false) {
+		_ = resp
+		break
+	}
+
+	entries, err := l.Entries(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if entries[0].Accounting != accountingEstimated {
+		t.Errorf("consumer-stop accounting = %q, want estimated (conservative)", entries[0].Accounting)
+	}
+	// The reserved cost for 100 in / 200 out at the test price is > 0; the
+	// conservative settle must charge at least that, never the tiny partial
+	// usage (10 in / 20 out).
+	if entries[0].CostMicros < 100 {
+		t.Errorf("consumer-stop cost = %d, want >= reserved cost (conservative, not partial)", entries[0].CostMicros)
+	}
+}
+
+// TestBudgetedCleanExhaustionWithoutCompleteSettlesConservative: a stream
+// that ends without a TurnComplete response has no completion evidence, so it
+// must settle conservatively at the reserved amount rather than release the
+// remainder at partial usage.
+func TestBudgetedCleanExhaustionWithoutCompleteSettlesConservative(t *testing.T) {
+	l := newTestLedger(t, 10000000, 10000000)
+	b, err := NewBudgeted(&noCompleteLLM{}, l, "primary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
+	for range b.GenerateContent(context.Background(), req, false) {
+	}
+
+	entries, err := l.Entries(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if entries[0].Accounting != accountingEstimated {
+		t.Errorf("no-complete accounting = %q, want estimated (conservative)", entries[0].Accounting)
+	}
+	if entries[0].CostMicros < 100 {
+		t.Errorf("no-complete cost = %d, want >= reserved cost (conservative, not partial)", entries[0].CostMicros)
+	}
+}
+
+// TestBudgetedSettlesCacheAndReasoningTokens: provider-reported cached-content
+// and reasoning/thought tokens must be priced into the settlement (not dropped
+// to zero), so the settled cost reflects cache/reasoning rates.
+func TestBudgetedSettlesCacheAndReasoningTokens(t *testing.T) {
+	l, inner := budgetedLedger(t, 1000000)
+	inner.usage = &genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:        50,
+		CandidatesTokenCount:    100,
+		CachedContentTokenCount: 30,
+		ThoughtsTokenCount:      7,
+	}
+	b, err := NewBudgeted(inner, l, "primary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
+	for range b.GenerateContent(context.Background(), req, false) {
+	}
+
+	entries, err := l.Entries(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	// The test price (MicrosPerInputToken=10, Output=30, Cache=2, Reasoning=5)
+	// must price all four components: 50*10 + 100*30 + 30*2 + 7*5 = 3695.
+	want := testPrice("primary").CostMicros(Usage{InputTokens: 50, OutputTokens: 100, CacheTokens: 30, ReasoningTokens: 7})
+	if entries[0].CostMicros != want {
+		t.Errorf("cost = %d, want %d (cache/reasoning must be priced, not dropped)", entries[0].CostMicros, want)
+	}
+	if entries[0].CostMicros <= testPrice("primary").CostMicros(Usage{InputTokens: 50, OutputTokens: 100}) {
+		t.Errorf("cost = %d, want strictly more than input+output-only cost (cache/reasoning ignored)", entries[0].CostMicros)
+	}
+}
+
 func TestBudgetedCancelledContextBlocksDispatch(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
 	b, err := NewBudgeted(inner, l, "primary", nil)

@@ -115,17 +115,29 @@ func (b *Budgeted) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest
 				final = resp
 			}
 			if !yield(resp, nil) {
-				// The consumer stopped iterating; the outcome can no longer
-				// be reported through the stream, so a settlement failure is
-				// logged for reconciliation rather than dropped silently.
-				if _, settleErr := b.ledger.Settle(ctx, settleForResponse(reservation.ID, final)); settleErr != nil {
+				// The consumer stopped iterating; the final outcome is
+				// unknown, so settle conservatively at the reserved amount
+				// (never release the reserved remainder at partial usage).
+				// The outcome can no longer be reported through the stream,
+				// so a settlement failure is logged for reconciliation
+				// rather than dropped silently.
+				if _, settleErr := b.ledger.Settle(ctx, &SettleRequest{ReservationID: reservation.ID}); settleErr != nil {
 					b.logger.WarnContext(ctx, "usage settlement failed after consumer stop",
 						"component", "usage", "reservation_id", reservation.ID, "error", settleErr)
 				}
 				return
 			}
 		}
-		if _, settleErr := b.ledger.Settle(ctx, settleForResponse(reservation.ID, final)); settleErr != nil {
+		// Clean stream exhaustion. A response with a completion marker is
+		// the only evidence the turn actually finished; without it the
+		// outcome is unknown and the reservation is settled conservatively
+		// at the reserved amount instead of releasing the remainder on a
+		// possibly-partial response.
+		settleReq := &SettleRequest{ReservationID: reservation.ID}
+		if final != nil && final.TurnComplete {
+			settleReq = settleForResponse(reservation.ID, final)
+		}
+		if _, settleErr := b.ledger.Settle(ctx, settleReq); settleErr != nil {
 			// The stream already delivered its responses; the settlement
 			// failure is the only error left, so it is yielded alongside the
 			// last streamed response (or nil when nothing was streamed),
@@ -144,6 +156,8 @@ func settleForResponse(reservationID string, resp *adkmodel.LLMResponse) *Settle
 	if resp.UsageMetadata != nil {
 		usage.InputTokens = int64(resp.UsageMetadata.PromptTokenCount)
 		usage.OutputTokens = int64(resp.UsageMetadata.CandidatesTokenCount)
+		usage.CacheTokens = int64(resp.UsageMetadata.CachedContentTokenCount)
+		usage.ReasoningTokens = int64(resp.UsageMetadata.ThoughtsTokenCount)
 	}
 	payload, err := json.Marshal(resp.UsageMetadata)
 	if err != nil {
