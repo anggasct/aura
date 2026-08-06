@@ -108,8 +108,8 @@ func TestReserveConflictPathBothMisses(t *testing.T) {
 		func() (*Reservation, bool, error) { return nil, false, nil },
 		func() (*Reservation, bool, error) { return nil, false, nil },
 	)
-	if rerr != nil {
-		t.Fatalf("both misses must not error, got %v", rerr)
+	if !errors.Is(rerr, errReservationNotFound) {
+		t.Fatalf("both misses must report not-found, got %v", rerr)
 	}
 	if got != nil {
 		t.Errorf("got %v, want nil (caller reports the conflict)", got)
@@ -221,7 +221,7 @@ func TestSettleConflictPathInTxHitSkipsOutsideLookup(t *testing.T) {
 		func() (*Settlement, error) { return winner, nil },
 		func() (*Settlement, error) {
 			outTxCalls++
-			return nil, nil
+			return nil, errSettlementNotFound
 		},
 	)
 	if rerr != nil {
@@ -239,7 +239,7 @@ func TestSettleConflictPathLookupErrorPropagates(t *testing.T) {
 	wantErr := errors.New("read failed")
 	got, rerr := settlementAfterConflict(
 		func() (*Settlement, error) { return nil, wantErr },
-		func() (*Settlement, error) { return nil, nil },
+		func() (*Settlement, error) { return nil, errSettlementNotFound },
 	)
 	if !errors.Is(rerr, wantErr) {
 		t.Fatalf("in-tx lookup error must propagate, got %v", rerr)

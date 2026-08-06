@@ -199,7 +199,7 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 				func() (*Reservation, bool, error) { return l.reservationByKey(ctx, tx, invocationID, attempt) },
 				func() (*Reservation, bool, error) { return l.reservationByKey(ctx, l.db, invocationID, attempt) },
 			)
-			if rerr != nil {
+			if rerr != nil && !errors.Is(rerr, errReservationNotFound) {
 				return nil, rerr
 			}
 			if existing != nil {
@@ -247,7 +247,7 @@ func reservationAfterConflict(lookupInTx, lookupOutside func() (*Reservation, bo
 	} else if ok {
 		return existing, nil
 	}
-	return nil, nil
+	return nil, errReservationNotFound
 }
 
 // settlementAfterConflict resolves an idempotency conflict after a failed
@@ -267,7 +267,7 @@ func settlementAfterConflict(lookupInTx, lookupOutside func() (*Settlement, erro
 	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	return nil, nil
+	return nil, errSettlementNotFound
 }
 
 // reservationByKey reports whether a reservation exists for the
@@ -462,7 +462,7 @@ func (l *Ledger) Settle(ctx context.Context, req *SettleRequest) (*Settlement, e
 					return &w, nil
 				},
 			)
-			if rerr != nil {
+			if rerr != nil && !errors.Is(rerr, errSettlementNotFound) {
 				return nil, rerr
 			}
 			if winner != nil {
