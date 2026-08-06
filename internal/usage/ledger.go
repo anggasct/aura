@@ -49,6 +49,11 @@ type LedgerOptions struct {
 // NewLedger builds a ledger over an existing SQLite handle whose schema
 // includes the usage tables (migration v2). A zero daily and monthly cap
 // disables budget enforcement; reservations are still recorded.
+// NewLedger builds a ledger over db. The connection pool must allow more
+// than one open connection: the unique-violation recovery paths (Reserve,
+// Settle) re-read the pool outside the transaction while it still holds a
+// connection, so a pool pinned to MaxOpenConns(1) would deadlock on that
+// re-read.
 func NewLedger(db *sql.DB, opts LedgerOptions) (*Ledger, error) {
 	if db == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "usage: database handle must not be nil", nil)
@@ -182,10 +187,28 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 	if err != nil {
 		if isUniqueViolation(err) {
 			// A concurrent reservation for the same key won the insert; the
-			// idempotent answer is that row, not a conflict.
-			if existing, ok, rerr := l.reservationByKey(ctx, tx, invocationID, attempt); rerr == nil && ok {
+			// idempotent answer is that row, not a conflict. The in-tx
+			// re-read can miss it under a deferred (read-committed)
+			// snapshot, so fall back to the database outside the
+			// transaction: the violation proves the winner committed, and a
+			// fresh snapshot sees it. Note the read reuses the pool while
+			// the transaction still holds a connection; a pool pinned to one
+			// connection would deadlock, so a caller using MaxOpenConns(1)
+			// must account for that.
+			existing, rerr := reservationAfterConflict(
+				func() (*Reservation, bool, error) { return l.reservationByKey(ctx, tx, invocationID, attempt) },
+				func() (*Reservation, bool, error) { return l.reservationByKey(ctx, l.db, invocationID, attempt) },
+			)
+			if rerr != nil {
+				return nil, rerr
+			}
+			if existing != nil {
 				return existing, nil
 			}
+			// The winner row was not visible to either read; under this
+			// store's immediate-lock transactions the insert could not have
+			// proceeded past a committed winner, so this is the genuine
+			// conflict case - the caller should treat it as such and retry.
 			return nil, codedError(ErrorCodeReservationConflict,
 				fmt.Sprintf("usage: reservation for invocation %q attempt %d already exists", invocationID, attempt), err)
 		}
@@ -206,6 +229,45 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 		ExpiresAt:          expiresAt,
 		CreatedAt:          now,
 	}, nil
+}
+
+// reservationAfterConflict resolves an idempotency conflict after a failed
+// insert: the winning row is looked up first inside the transaction, then -
+// when that read sees nothing because the winner was uncommitted under a
+// deferred snapshot - outside it. lookupInTx and lookupOutside are provided
+// by the caller so the decision is testable without a real concurrent winner.
+func reservationAfterConflict(lookupInTx, lookupOutside func() (*Reservation, bool, error)) (*Reservation, error) {
+	if existing, ok, err := lookupInTx(); err != nil {
+		return nil, err
+	} else if ok {
+		return existing, nil
+	}
+	if existing, ok, err := lookupOutside(); err != nil {
+		return nil, err
+	} else if ok {
+		return existing, nil
+	}
+	return nil, nil
+}
+
+// settlementAfterConflict resolves an idempotency conflict after a failed
+// settlement insert: the winning entry is looked up first inside the
+// transaction, then - when that read sees nothing because the winner was
+// uncommitted under a deferred snapshot - outside it. lookupInTx and
+// lookupOutside are provided by the caller so the decision is testable
+// without a real concurrent winner.
+func settlementAfterConflict(lookupInTx, lookupOutside func() (*Settlement, error)) (*Settlement, error) {
+	if winner, err := lookupInTx(); err == nil && winner != nil {
+		return winner, nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if winner, err := lookupOutside(); err == nil && winner != nil {
+		return winner, nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // reservationByKey reports whether a reservation exists for the
@@ -373,13 +435,38 @@ func (l *Ledger) Settle(ctx context.Context, req *SettleRequest) (*Settlement, e
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			// Concurrent duplicate settlement: read the winner.
-			var winner Settlement
-			if rerr := tx.QueryRowContext(ctx, `
-				SELECT id, reservation_id, cost_micros, accounting, price_version
-				FROM usage_entry WHERE reservation_id = ?`, req.ReservationID).
-				Scan(&winner.ID, &winner.ReservationID, &winner.CostMicros, &winner.Accounting, &winner.PriceVersion); rerr == nil {
-				return &winner, nil
+			// Concurrent duplicate settlement: read the winner. The in-tx
+			// re-read can miss it under a deferred (read-committed) snapshot,
+			// so - as in Reserve - fall back to the database outside the
+			// transaction, where the fresh snapshot sees the committed entry.
+			// Both reads missing is the genuine conflict; the caller retries.
+			winner, rerr := settlementAfterConflict(
+				func() (*Settlement, error) {
+					var w Settlement
+					if err := tx.QueryRowContext(ctx, `
+						SELECT id, reservation_id, cost_micros, accounting, price_version
+						FROM usage_entry WHERE reservation_id = ?`, req.ReservationID).
+						Scan(&w.ID, &w.ReservationID, &w.CostMicros, &w.Accounting, &w.PriceVersion); err != nil {
+						return nil, err
+					}
+					return &w, nil
+				},
+				func() (*Settlement, error) {
+					var w Settlement
+					if err := l.db.QueryRowContext(ctx, `
+						SELECT id, reservation_id, cost_micros, accounting, price_version
+						FROM usage_entry WHERE reservation_id = ?`, req.ReservationID).
+						Scan(&w.ID, &w.ReservationID, &w.CostMicros, &w.Accounting, &w.PriceVersion); err != nil {
+						return nil, err
+					}
+					return &w, nil
+				},
+			)
+			if rerr != nil {
+				return nil, rerr
+			}
+			if winner != nil {
+				return winner, nil
 			}
 			return nil, codedError(ErrorCodeReservationConflict,
 				fmt.Sprintf("usage: reservation %q already settled", req.ReservationID), err)

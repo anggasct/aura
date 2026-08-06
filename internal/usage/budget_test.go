@@ -274,6 +274,58 @@ func TestBudgetedJoinsProviderAndSettlementErrors(t *testing.T) {
 	}
 }
 
+// errAfterResponseLLM yields a response first, then fails with providerErr, so
+// the error path carries a non-nil final response.
+type errAfterResponseLLM struct {
+	providerErr error
+}
+
+func (f *errAfterResponseLLM) Name() string { return "err-after-response" }
+
+func (f *errAfterResponseLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		yield(&adkmodel.LLMResponse{UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:     10,
+			CandidatesTokenCount: 20,
+		}, TurnComplete: true}, nil)
+		yield(nil, f.providerErr)
+	}
+}
+
+// TestBudgetedErrorPathYieldsFinalResponse proves the error path settles and
+// yields the last successfully received response alongside the error instead
+// of a nil response, so a partial response is never dropped on provider error.
+func TestBudgetedErrorPathYieldsFinalResponse(t *testing.T) {
+	l, _ := budgetedLedger(t, 1000000)
+	providerErr := errors.New("provider exploded mid-stream")
+
+	b, err := NewBudgeted(&errAfterResponseLLM{providerErr: providerErr}, l, "primary", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
+
+	var sawErr error
+	var errResp *adkmodel.LLMResponse
+	for resp, err := range b.GenerateContent(context.Background(), req, false) {
+		if err != nil {
+			sawErr = err
+			errResp = resp
+		}
+	}
+	if sawErr == nil || !errors.Is(sawErr, providerErr) {
+		t.Fatalf("provider error must be surfaced, got %v", sawErr)
+	}
+	// The response delivered alongside the error must be the one the inner
+	// stream attached to the error (a fresh partial chunk), not nil.
+	if errResp == nil {
+		t.Fatal("the response attached to the provider error must be yielded, got nil")
+	}
+	if errResp.UsageMetadata == nil || errResp.UsageMetadata.PromptTokenCount != 10 {
+		t.Errorf("error-attached response usage = %+v, want prompt_token_count 10", errResp.UsageMetadata)
+	}
+}
+
 func TestBudgetedCancelledContextBlocksDispatch(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
 	b, err := NewBudgeted(inner, l, "primary", nil)

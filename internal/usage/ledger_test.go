@@ -2,7 +2,9 @@ package usage
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -41,6 +43,76 @@ func TestReserveDuplicateAttemptIdempotent(t *testing.T) {
 	}
 	if second.ID != first.ID {
 		t.Errorf("second reserve = %q, want first %q (idempotent reuse)", second.ID, first.ID)
+	}
+}
+
+// TestReserveConflictPathFallbackReusesWinner proves the idempotency
+// recovery used on a unique-violation: when the in-transaction re-read sees
+// nothing (the concurrent winner was uncommitted under a deferred snapshot),
+// the out-of-transaction fallback read returns the winner's reservation
+// instead of a spurious reservation_conflict.
+func TestReserveConflictPathFallbackReusesWinner(t *testing.T) {
+	l := newTestLedger(t, 1000000, 10000000)
+	winner := reserve(t, l, "inv-1", 0, 100, 200)
+
+	// The insert's unique violation is simulated by routing Reserve through
+	// the recovery helper with a stubbed in-tx lookup that misses (stale
+	// snapshot) and a stubbed out-of-tx lookup that finds the committed row.
+	var inTxCalls, outTxCalls int
+	got, rerr := reservationAfterConflict(
+		func() (*Reservation, bool, error) {
+			inTxCalls++
+			return nil, false, nil
+		},
+		func() (*Reservation, bool, error) {
+			outTxCalls++
+			return winner, true, nil
+		},
+	)
+	if rerr != nil {
+		t.Fatalf("fallback must not error, got %v", rerr)
+	}
+	if got == nil || got.ID != winner.ID {
+		t.Fatalf("fallback = %v, want winner %q", got, winner.ID)
+	}
+	if inTxCalls != 1 || outTxCalls != 1 {
+		t.Errorf("lookup calls = in-tx %d, out-tx %d, want 1/1", inTxCalls, outTxCalls)
+	}
+}
+
+func TestReserveConflictPathInTxHitSkipsOutsideLookup(t *testing.T) {
+	l := newTestLedger(t, 1000000, 10000000)
+	winner := reserve(t, l, "inv-1", 0, 100, 200)
+
+	var outTxCalls int
+	got, rerr := reservationAfterConflict(
+		func() (*Reservation, bool, error) { return winner, true, nil },
+		func() (*Reservation, bool, error) {
+			outTxCalls++
+			return nil, false, nil
+		},
+	)
+	if rerr != nil {
+		t.Fatalf("in-tx hit must not error, got %v", rerr)
+	}
+	if got == nil || got.ID != winner.ID {
+		t.Fatalf("got %v, want winner %q", got, winner.ID)
+	}
+	if outTxCalls != 0 {
+		t.Errorf("out-of-tx lookup called %d times, want 0 when in-tx hit", outTxCalls)
+	}
+}
+
+func TestReserveConflictPathBothMisses(t *testing.T) {
+	got, rerr := reservationAfterConflict(
+		func() (*Reservation, bool, error) { return nil, false, nil },
+		func() (*Reservation, bool, error) { return nil, false, nil },
+	)
+	if rerr != nil {
+		t.Fatalf("both misses must not error, got %v", rerr)
+	}
+	if got != nil {
+		t.Errorf("got %v, want nil (caller reports the conflict)", got)
 	}
 }
 
@@ -108,6 +180,83 @@ func TestSettleIdempotent(t *testing.T) {
 	}
 	if second.ID != first.ID || second.CostMicros != first.CostMicros {
 		t.Errorf("duplicate settlement not idempotent: %+v vs %+v", second, first)
+	}
+}
+
+// TestSettleConflictPathFallbackReusesWinner proves the unique-violation
+// recovery used on a concurrent duplicate settlement: when the in-transaction
+// re-read sees nothing (the winner was uncommitted under a deferred snapshot),
+// the out-of-transaction fallback read returns the winner's entry instead of a
+// spurious reservation_conflict.
+func TestSettleConflictPathFallbackReusesWinner(t *testing.T) {
+	winner := &Settlement{ID: "entry-1", ReservationID: "res-1", CostMicros: 400, Accounting: accountingReported, PriceVersion: "2026-07-01"}
+
+	var inTxCalls, outTxCalls int
+	got, rerr := settlementAfterConflict(
+		func() (*Settlement, error) {
+			inTxCalls++
+			return nil, sql.ErrNoRows
+		},
+		func() (*Settlement, error) {
+			outTxCalls++
+			return winner, nil
+		},
+	)
+	if rerr != nil {
+		t.Fatalf("fallback must not error, got %v", rerr)
+	}
+	if got == nil || got.ID != winner.ID {
+		t.Fatalf("fallback = %v, want winner %q", got, winner.ID)
+	}
+	if inTxCalls != 1 || outTxCalls != 1 {
+		t.Errorf("lookup calls = in-tx %d, out-tx %d, want 1/1", inTxCalls, outTxCalls)
+	}
+}
+
+func TestSettleConflictPathInTxHitSkipsOutsideLookup(t *testing.T) {
+	winner := &Settlement{ID: "entry-1", ReservationID: "res-1", CostMicros: 400}
+
+	var outTxCalls int
+	got, rerr := settlementAfterConflict(
+		func() (*Settlement, error) { return winner, nil },
+		func() (*Settlement, error) {
+			outTxCalls++
+			return nil, nil
+		},
+	)
+	if rerr != nil {
+		t.Fatalf("in-tx hit must not error, got %v", rerr)
+	}
+	if got == nil || got.ID != winner.ID {
+		t.Fatalf("got %v, want winner %q", got, winner.ID)
+	}
+	if outTxCalls != 0 {
+		t.Errorf("out-of-tx lookup called %d times, want 0 when in-tx hit", outTxCalls)
+	}
+}
+
+func TestSettleConflictPathLookupErrorPropagates(t *testing.T) {
+	wantErr := errors.New("read failed")
+	got, rerr := settlementAfterConflict(
+		func() (*Settlement, error) { return nil, wantErr },
+		func() (*Settlement, error) { return nil, nil },
+	)
+	if !errors.Is(rerr, wantErr) {
+		t.Fatalf("in-tx lookup error must propagate, got %v", rerr)
+	}
+	if got != nil {
+		t.Errorf("got %v, want nil on error", got)
+	}
+
+	got, rerr = settlementAfterConflict(
+		func() (*Settlement, error) { return nil, sql.ErrNoRows },
+		func() (*Settlement, error) { return nil, wantErr },
+	)
+	if !errors.Is(rerr, wantErr) {
+		t.Fatalf("outside lookup error must propagate, got %v", rerr)
+	}
+	if got != nil {
+		t.Errorf("got %v, want nil on error", got)
 	}
 }
 

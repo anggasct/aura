@@ -33,6 +33,9 @@ type Budgeted struct {
 	// arrives without an explicit idempotency key, so multiple calls within
 	// one runtime invocation (a tool loop, a sub-agent) each get their own
 	// reservation instead of colliding on the same (invocation_id, attempt).
+	// The counter is per Budgeted instance; stable identity across replays
+	// comes from WithInvocation or the invocationCarrier context, never from
+	// this counter (it only ever increments, so it never reuses).
 	attempts atomic.Int64
 }
 
@@ -92,11 +95,19 @@ func (b *Budgeted) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest
 				// Settle conservatively at the reserved amount; a failed
 				// attempt must never release its reservation at zero. The
 				// provider error is preserved and joined with any settlement
-				// failure so both remain observable.
+				// failure so both remain observable. The response delivered
+				// with the error is whatever the inner stream attached to it
+				// (a fresh partial chunk); when the error carries none, the
+				// last successfully streamed response is yielded instead of
+				// a nil payload. Err-first consumers ignore this response.
+				last := resp
+				if last == nil {
+					last = final
+				}
 				if _, settleErr := b.ledger.Settle(ctx, &SettleRequest{ReservationID: reservation.ID}); settleErr != nil {
-					yield(resp, errors.Join(err, settleErr))
+					yield(last, errors.Join(err, settleErr))
 				} else {
-					yield(resp, err)
+					yield(last, err)
 				}
 				return
 			}
@@ -115,7 +126,12 @@ func (b *Budgeted) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest
 			}
 		}
 		if _, settleErr := b.ledger.Settle(ctx, settleForResponse(reservation.ID, final)); settleErr != nil {
-			yield(nil, settleErr)
+			// The stream already delivered its responses; the settlement
+			// failure is the only error left, so it is yielded alongside the
+			// last streamed response (or nil when nothing was streamed),
+			// mirroring the error-path handler above. Err-first consumers
+			// read the error and ignore the response payload.
+			yield(final, settleErr)
 		}
 	}
 }
