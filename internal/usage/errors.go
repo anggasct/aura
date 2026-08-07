@@ -41,6 +41,15 @@ func CodeOf(err error) (ErrorCode, bool) {
 var (
 	ErrBudgetExceeded = errors.New("usage: budget exceeded")
 	ErrPriceNotFound  = errors.New("usage: no applicable price record")
+
+	// errReservationNotFound reports that a conflict-recovery lookup found no
+	// winning row; sentinel so the recovery helpers never return a nil error
+	// alongside a nil value.
+	errReservationNotFound = errors.New("usage: reservation not found in conflict recovery")
+
+	// errSettlementNotFound mirrors errReservationNotFound for settlement
+	// conflict recovery.
+	errSettlementNotFound = errors.New("usage: settlement not found in conflict recovery")
 )
 
 func codedError(code ErrorCode, detail string, cause error) error {

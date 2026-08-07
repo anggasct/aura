@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -9,6 +10,12 @@ import (
 )
 
 func newTestLedger(t *testing.T, dailyCap, monthlyCap int64) *Ledger {
+	t.Helper()
+	l, _ := newTestLedgerWithDB(t, dailyCap, monthlyCap)
+	return l
+}
+
+func newTestLedgerWithDB(t *testing.T, dailyCap, monthlyCap int64) (*Ledger, *sql.DB) {
 	t.Helper()
 	db, err := store.OpenDB(context.Background(), t.TempDir()+"/usage.db")
 	if err != nil {
@@ -38,7 +45,7 @@ func newTestLedger(t *testing.T, dailyCap, monthlyCap int64) *Ledger {
 	if err != nil {
 		t.Fatalf("new ledger: %v", err)
 	}
-	return l
+	return l, db
 }
 
 func reserve(t *testing.T, l *Ledger, invocation string, attempt int, input, maxOutput int64) *Reservation {
