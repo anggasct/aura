@@ -122,11 +122,20 @@ func (t *table) flush() error {
 	return t.w.Flush()
 }
 
+// noPositionalArgs rejects stray positional arguments with a typed usageError
+// so ExecuteContext exits 2 (argument-error contract), not the runtime code.
+func noPositionalArgs(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return &usageError{fmt.Errorf("%s: unexpected argument %q", cmd.CommandPath(), args[0])}
+	}
+	return nil
+}
+
 func newUsageStatusCmd(gf *globalFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Report current day/month spend against budget caps",
-		Args:  cobra.NoArgs,
+		Args:  noPositionalArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *config.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
 				st, err := ledger.Status(ctx)
@@ -157,8 +166,8 @@ func newUsageEntriesCmd(gf *globalFlags) *cobra.Command {
 		Use:   "entries",
 		Short: "List settled usage entries, newest first",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				return &usageError{fmt.Errorf("usage entries: unexpected argument %q", args[0])}
+			if err := noPositionalArgs(cmd, args); err != nil {
+				return err
 			}
 			if limit < 0 {
 				return &usageError{errors.New("usage entries --limit must not be negative")}
@@ -197,7 +206,7 @@ func newUsagePricesCmd(gf *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "prices",
 		Short: "List versioned price records from the operator price file",
-		Args:  cobra.NoArgs,
+		Args:  noPositionalArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withUsage(cmd, gf, pricesPath, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, _ *usage.Ledger, reg *usage.PriceRegistry) error {
 				prices := reg.All()
@@ -232,7 +241,7 @@ func newUsageReconcileCmd(gf *globalFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "reconcile",
 		Short: "Expire stale reservations and release expired ones; never deletes rows",
-		Args:  cobra.NoArgs,
+		Args:  noPositionalArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *config.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
 				expired, err := ledger.ExpireStale(ctx)
