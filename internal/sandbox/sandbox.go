@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -85,9 +86,12 @@ type Result struct {
 // group is killed and reaped, so descendants cannot outlive the parent.
 // Output beyond MaxOutputBytes is truncated and reported in Result.
 //
-// Run does not apply kernel-level filesystem or syscall denial. Callers that
-// require it must consult Negotiate and refuse to run when the primitives it
-// reports are unavailable.
+// Run is the low-level harness: it enforces process-group, environment,
+// working-directory, output, and timeout bounds. It does not apply
+// kernel-level filesystem or syscall denial, and it does not itself gate on
+// the mandatory primitives. Callers that advertise an effectful capability
+// must gate with Require on the Negotiate result before reaching Run, so a
+// host missing a mandatory primitive never executes an effectful child.
 func Run(ctx context.Context, spec *Spec, command string, args ...string) (Result, error) {
 	if spec == nil {
 		return Result{}, Errorf(ErrorCodeInvalidArgument, "spec must not be nil")
@@ -106,6 +110,7 @@ func Run(ctx context.Context, spec *Spec, command string, args ...string) (Resul
 // contract, so callers can distinguish "sandbox not available" from a
 // runtime violation.
 type Primitives struct {
+	UserNamespace bool
 	Seccomp       bool
 	CgroupV2      bool
 	Landlock      bool
@@ -114,4 +119,34 @@ type Primitives struct {
 
 func Negotiate() (Primitives, error) {
 	return negotiate()
+}
+
+// Require is the fail-closed gate for an effectful containment capability.
+// have is the negotiated host state. A missing mandatory primitive makes
+// full kernel-level containment unavailable, so Require returns a
+// sandbox_unavailable error naming every absent primitive. The composition
+// root must refuse to advertise or execute the capability while it returns
+// non-nil; callers reach Run only after Require passes.
+func Require(have Primitives) error {
+	var missing []string
+	if !have.UserNamespace {
+		missing = append(missing, "user_namespace")
+	}
+	if !have.Landlock {
+		missing = append(missing, "landlock")
+	}
+	if !have.Seccomp {
+		missing = append(missing, "seccomp")
+	}
+	if !have.CgroupV2 {
+		missing = append(missing, "cgroup_v2")
+	}
+	if !have.ProcessGroups {
+		missing = append(missing, "process_groups")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	slices.Sort(missing)
+	return Errorf(ErrorCodeSandboxUnavailable, "missing mandatory containment primitive(s): %s", strings.Join(missing, ", "))
 }

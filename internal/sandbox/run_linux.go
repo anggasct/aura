@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,11 +23,36 @@ import (
 // available before running untrusted children.
 func negotiate() (Primitives, error) {
 	return Primitives{
+		UserNamespace: usernsAvailable(),
 		Seccomp:       seccompAvailable(),
 		CgroupV2:      cgroupV2Available(),
 		Landlock:      landlockAvailable(),
 		ProcessGroups: true,
 	}, nil
+}
+
+// usernsAvailable reports whether an unprivileged process may create a user
+// namespace. /proc/sys/user/max_user_namespaces is the kernel's authoritative
+// knob: 0 (or absent) means user namespaces are disabled or compiled out; a
+// positive value is the per-user creation limit. Some distros additionally
+// gate unprivileged creation via kernel.unprivileged_userns_clone. Reading
+// these knobs queries the kernel directly rather than inferring support from
+// a marketing kernel version.
+func usernsAvailable() bool {
+	data, err := os.ReadFile("/proc/sys/user/max_user_namespaces")
+	if err != nil {
+		return false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || n <= 0 {
+		return false
+	}
+	if gate, err := os.ReadFile("/proc/sys/kernel/unprivileged_userns_clone"); err == nil {
+		if strings.TrimSpace(string(gate)) == "0" {
+			return false
+		}
+	}
+	return true
 }
 
 // seccompAvailable probes kernel seccomp support directly instead of

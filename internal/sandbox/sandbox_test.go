@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -217,5 +218,26 @@ func TestNegotiateReportsPrimitives(t *testing.T) {
 	if primitives.Seccomp != want {
 		t.Fatalf("Negotiate seccomp=%v, kernel reports %v", primitives.Seccomp, want)
 	}
-	t.Logf("primitives: seccomp=%v cgroupv2=%v landlock=%v", primitives.Seccomp, primitives.CgroupV2, primitives.Landlock)
+	if primitives.UserNamespace != usernsExpected() {
+		t.Fatalf("Negotiate userns=%v, sysctl reports %v", primitives.UserNamespace, usernsExpected())
+	}
+	t.Logf("primitives: userns=%v seccomp=%v cgroupv2=%v landlock=%v", primitives.UserNamespace, primitives.Seccomp, primitives.CgroupV2, primitives.Landlock)
+}
+
+// usernsExpected is an independent read of the kernel knobs so the test does
+// not just re-run the implementation. It mirrors what an operator checking
+// unprivileged-userns support by hand would read.
+func usernsExpected() bool {
+	data, err := os.ReadFile("/proc/sys/user/max_user_namespaces")
+	if err != nil {
+		return false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || n <= 0 {
+		return false
+	}
+	if gate, err := os.ReadFile("/proc/sys/kernel/unprivileged_userns_clone"); err == nil && strings.TrimSpace(string(gate)) == "0" {
+		return false
+	}
+	return true
 }
