@@ -158,7 +158,14 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 	_ = configW.Close()
 	_ = errW.Close() // the child is the sole writer of the init-error pipe
 	if cg != nil {
-		_ = cg.attach(cmd.Process.Pid)
+		if err := cg.attach(cmd.Process.Pid); err != nil {
+			// A child that escapes its cgroup runs without memory/PID
+			// enforcement; kill it and refuse rather than fail open.
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Wait()
+			_ = cg.destroy()
+			return Result{}, Errorf(ErrorCodeSandboxInitFailed, "attach child to cgroup: %v", err)
+		}
 	}
 
 	timeout := time.NewTimer(spec.Limits.Timeout)

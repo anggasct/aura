@@ -247,3 +247,35 @@ func TestIntegrationNetworkDenied(t *testing.T) {
 		t.Fatalf("network not denied: child opened an external connection (%+v)", result)
 	}
 }
+
+// An rlimit open-files bound is enforced: opening past MaxOpenFiles fails.
+func TestIntegrationRlimitOpenFiles(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available for the open-files fixture")
+	}
+	spec := baseSpec(t)
+	spec.Limits.MaxOpenFiles = 9
+	result, _ := Run(context.Background(), &spec, "bash", "-c", "for i in {1..100}; do exec {fd}>f; done")
+	if result.ExitCode == 0 {
+		t.Fatalf("rlimit NOFILE not enforced: child opened past the bound (%+v)", result)
+	}
+}
+
+// A cgroup PID bound is enforced: a fork-heavy child cannot spawn past
+// MaxProcesses. Env-gated like the memory test (needs delegated controllers).
+func TestIntegrationCgroupPids(t *testing.T) {
+	if !cgroupControllersWritable() {
+		t.Skip("cgroup controllers not delegated on this host")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available for the PID-exhaustion fixture")
+	}
+	spec := baseSpec(t)
+	spec.Limits.MaxProcesses = 8
+	spec.Limits.MaxOutputBytes = 1 << 20
+	result, _ := Run(context.Background(), &spec, "bash", "-c", "for i in $(seq 1 200); do : & done; wait")
+	// pids.max makes fork fail with EAGAIN; bash surfaces it on stderr.
+	if !strings.Contains(result.Output, "Resource temporarily unavailable") && result.ExitCode == 0 {
+		t.Fatalf("cgroup pids not enforced: child forked past the bound (%+v)", result)
+	}
+}
