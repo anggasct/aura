@@ -163,50 +163,65 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 
 	timeout := time.NewTimer(spec.Limits.Timeout)
 	defer timeout.Stop()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-
-	initErrReady := make(chan struct{})
+	// waitDone and initErrCh are buffered so both senders always terminate;
+	// the err reader is authoritative for setup failure, the wait reaps.
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+	initErrCh := make(chan error, 1)
 	go func() {
 		initErr, _ := io.ReadAll(errR)
 		_ = errR.Close()
 		if len(initErr) > 0 {
-			done <- Errorf(ErrorCodeSandboxInitFailed, "child setup: %s", strings.TrimSpace(string(initErr)))
+			initErrCh <- Errorf(ErrorCodeSandboxInitFailed, "child setup: %s", strings.TrimSpace(string(initErr)))
+		} else {
+			initErrCh <- nil
 		}
-		close(initErrReady)
 	}()
 
-	// exec.Cmd.Wait handles SIGKILL-on-cancel; the process-group kill is a
-	// second net so grandchildren die even though we only hold the parent.
-	select {
-	case err := <-done:
-		<-initErrReady
-		if cg != nil {
-			_ = cg.destroy()
-		}
-		if err != nil && !isExitErr(err) {
-			return Result{}, err
-		}
+	buildResult := func(waitErr error) Result {
 		result := Result{Output: strings.TrimRight(output.String(), "\n"), Truncated: output.truncated}
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if errors.As(waitErr, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
 		}
-		return result, nil
-	case <-timeout.C:
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-		<-initErrReady
+		return result
+	}
+
+	// The process-group kill is a second net so grandchildren die even though
+	// only the parent is held directly.
+	select {
+	case waitErr := <-waitDone:
+		initErr := <-initErrCh // child exit closed the err pipe, so the reader has finished
 		if cg != nil {
 			_ = cg.destroy()
+		}
+		if initErr != nil {
+			return Result{}, initErr
+		}
+		if waitErr != nil && !isExitErr(waitErr) {
+			return Result{}, waitErr
+		}
+		return buildResult(waitErr), nil
+	case <-timeout.C:
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-waitDone
+		initErr := <-initErrCh
+		if cg != nil {
+			_ = cg.destroy()
+		}
+		if initErr != nil {
+			return Result{Terminated: true, Truncated: output.truncated}, initErr
 		}
 		return Result{Terminated: true, Truncated: output.truncated}, nil
 	case <-ctx.Done():
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-		<-initErrReady
+		<-waitDone
+		initErr := <-initErrCh
 		if cg != nil {
 			_ = cg.destroy()
+		}
+		if initErr != nil {
+			return Result{Terminated: true, Truncated: output.truncated}, initErr
 		}
 		return Result{Terminated: true, Truncated: output.truncated}, nil
 	}

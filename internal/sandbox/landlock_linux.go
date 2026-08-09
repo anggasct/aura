@@ -107,6 +107,9 @@ func applyLandlock(spec *Spec) error {
 			return err
 		}
 	}
+	// WorkingDir is the workspace: the one root a contained tool is expected to
+	// write. It is granted the write mask implicitly; ReadWritePaths and
+	// ReadOnlyPaths add or narrow beyond it.
 	for _, path := range append([]string{spec.WorkingDir}, spec.ReadWritePaths...) {
 		if err := addLandlockRule(int(ruleset), path, writeMask); err != nil {
 			return err

@@ -5,7 +5,9 @@ package sandbox
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -157,5 +159,91 @@ func TestIntegrationRlimitFileBytes(t *testing.T) {
 	}
 	if result.ExitCode == 0 {
 		t.Fatalf("rlimit FSIZE not enforced: child wrote past the bound (%+v)", result)
+	}
+}
+
+// TestIntegrationInitFailureDeterministic triggers a child setup failure
+// repeatedly and asserts the typed sandbox_init_failed error is returned every
+// time, with no goroutine left blocked on the coordination path.
+func TestIntegrationInitFailureDeterministic(t *testing.T) {
+	spec := baseSpec(t)
+	spec.ReadOnlyPaths = []string{"/nonexistent-sandbox-probe-path"}
+	before := runtime.NumGoroutine()
+	for range 5 {
+		_, err := Run(context.Background(), &spec, "true")
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
+			t.Fatalf("Run = %v, want sandbox_init_failed", err)
+		}
+	}
+	// Give the reaped goroutines a moment to exit, then assert no growth.
+	time.Sleep(100 * time.Millisecond)
+	if got := runtime.NumGoroutine(); got > before+1 {
+		t.Fatalf("goroutine leak: before=%d after=%d", before, got)
+	}
+}
+
+// A symlink inside the workspace pointing at an outside file cannot
+// smuggle access to it; Landlock follows the link to its undeclared target.
+func TestIntegrationLandlockDeniesSymlinkEscape(t *testing.T) {
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret")
+	if err := os.WriteFile(secret, []byte("treasure"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(secret, filepath.Join(dir, "link")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	spec := baseSpec(t)
+	spec.WorkingDir = dir
+	result, _ := Run(context.Background(), &spec, "cat", filepath.Join(dir, "link"))
+	if strings.Contains(result.Output, "treasure") {
+		t.Fatalf("symlink escape: child read outside file via link (%+v)", result)
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("symlink escape: cat succeeded outside declared roots")
+	}
+}
+
+// An rlimit CPU bound kills a tool that burns past it.
+func TestIntegrationRlimitCPUTime(t *testing.T) {
+	spec := baseSpec(t)
+	spec.Limits.CPUTime = 1 * time.Second
+	result, err := Run(context.Background(), &spec, "sh", "-c", "while :; do :; done")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.ExitCode == 0 && !result.Terminated {
+		t.Fatalf("rlimit CPU not enforced: child ran past the bound (%+v)", result)
+	}
+}
+
+// A cgroup memory bound kills a tool that allocates past it.
+func TestIntegrationCgroupMemory(t *testing.T) {
+	if !cgroupControllersWritable() {
+		t.Skip("cgroup controllers not delegated on this host")
+	}
+	spec := baseSpec(t)
+	spec.Limits.MemoryBytes = 4 << 20
+	result, err := Run(context.Background(), &spec, "sh", "-c", "x=$(seq 3000000); echo ${#x}")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.ExitCode == 0 && !result.Terminated {
+		t.Fatalf("cgroup memory not enforced: child allocated past the bound (%+v)", result)
+	}
+}
+
+// A child that attempts a network connection is denied. The seccomp
+// filter excludes socket syscalls and the network namespace has no external
+// interface, so bash's /dev/tcp open must fail and kill the child.
+func TestIntegrationNetworkDenied(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available for the network-attempt fixture")
+	}
+	spec := baseSpec(t)
+	result, _ := Run(context.Background(), &spec, "bash", "-c", "echo > /dev/tcp/203.0.113.1/1")
+	if result.ExitCode == 0 {
+		t.Fatalf("network not denied: child opened an external connection (%+v)", result)
 	}
 }

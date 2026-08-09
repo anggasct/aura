@@ -19,10 +19,11 @@ type cgroup struct {
 	path string
 }
 
-// cgroupControllersWritable reports whether the service can write controller
-// limits into a child of its own cgroup — the actual precondition for cgroup
-// enforcement. A process can often mkdir a child cgroup but still be denied
-// the controller files unless its scope delegated them.
+// cgroupControllersWritable reports whether the service can write the
+// controller limits the sandbox applies — pids and memory — into a child of
+// its own cgroup. A process can often mkdir a child cgroup but still be denied
+// particular controller files unless its scope delegated them, so every
+// controller the feature uses is probed rather than just one.
 func cgroupControllersWritable() bool {
 	parent, err := ownCgroupPath()
 	if err != nil {
@@ -33,7 +34,12 @@ func cgroupControllersWritable() bool {
 		return false
 	}
 	defer func() { _ = os.Remove(dir) }()
-	return os.WriteFile(filepath.Join(dir, "pids.max"), []byte("8"), 0o600) == nil
+	for _, probe := range []string{"pids.max", "memory.max"} {
+		if os.WriteFile(filepath.Join(dir, probe), []byte("max"), 0o600) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // ownCgroupPath returns the absolute path of the calling process's current
