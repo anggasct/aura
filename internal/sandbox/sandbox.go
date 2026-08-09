@@ -12,9 +12,13 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeInvalidArgument    ErrorCode = "invalid_argument"
-	ErrorCodeSandboxUnavailable ErrorCode = "sandbox_unavailable"
-	ErrorCodeSandboxViolation   ErrorCode = "sandbox_violation"
+	ErrorCodeInvalidArgument         ErrorCode = "invalid_argument"
+	ErrorCodeSandboxUnavailable      ErrorCode = "sandbox_unavailable"
+	ErrorCodeSandboxViolation        ErrorCode = "sandbox_violation"
+	ErrorCodeSandboxInitFailed       ErrorCode = "sandbox_init_failed"
+	ErrorCodeSandboxPathDenied       ErrorCode = "sandbox_path_denied"
+	ErrorCodeSandboxSyscallDenied    ErrorCode = "sandbox_syscall_denied"
+	ErrorCodeSandboxResourceExceeded ErrorCode = "sandbox_resource_exceeded"
 )
 
 type Error struct {
@@ -39,26 +43,33 @@ func Errorf(code ErrorCode, format string, args ...any) error {
 }
 
 // Limits are the resource bounds a contained process must stay inside.
-// Timeout and MaxOutputBytes are enforced by this harness. The remaining
-// fields are contract declarations that this harness does not yet enforce.
+// MemoryBytes, CPUTime, FileBytes, MaxOpenFiles, MaxProcesses, and
+// MaxCoreSize are enforced by the cgroup v2 and rlimit adapters; Timeout is
+// the wall deadline and MaxOutputBytes caps captured output.
 type Limits struct {
+	MemoryBytes    int64
+	CPUTime        time.Duration
 	MaxOutputBytes int64
 	MaxOpenFiles   int64
 	MaxProcesses   int64
 	MaxCoreSize    int64
+	FileBytes      int64
 	Timeout        time.Duration
 }
 
 // Spec is the containment contract for one subprocess. Environment and
-// working directory are allowlisted. Network is denied by default: a spec
-// that requests it is refused with sandbox_unavailable; kernel-level denial
-// of undeclared filesystem and syscall access is delegated to the full
-// sandbox and reported through Negotiate.
+// working directory are allowlisted. ReadOnlyPaths and ReadWritePaths are
+// the only filesystem roots the child may access; Landlock enforces them.
+// Network is denied by default: a spec that requests it is refused with
+// sandbox_unavailable, and the default case runs the child in an isolated
+// network namespace with no external interface.
 type Spec struct {
-	WorkingDir   string
-	AllowEnv     []string
-	AllowNetwork bool
-	Limits       Limits
+	WorkingDir     string
+	ReadOnlyPaths  []string
+	ReadWritePaths []string
+	AllowEnv       []string
+	AllowNetwork   bool
+	Limits         Limits
 }
 
 func (s *Spec) validate() error {
