@@ -11,9 +11,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unsafe"
-
-	"golang.org/x/sys/unix"
 )
 
 // negotiate probes the running kernel for the primitives the containment
@@ -53,18 +50,6 @@ func usernsAvailable() bool {
 		}
 	}
 	return true
-}
-
-// seccompAvailable probes kernel seccomp support directly instead of
-// reading the current process's confinement mode from /proc/self/status,
-// which is 0 on ordinary unconfined hosts even when CONFIG_SECCOMP=y.
-// SECCOMP_GET_ACTION_AVAIL returns 0 when the action can be used, and
-// ENOSYS when the seccomp syscall is not compiled in; EINVAL/EACCES/EPERM
-// mean the syscall exists (kernel support present).
-func seccompAvailable() bool {
-	action := unix.SECCOMP_RET_ALLOW
-	_, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_GET_ACTION_AVAIL, 0, uintptr(unsafe.Pointer(&action)))
-	return errno != syscall.ENOSYS
 }
 
 func cgroupV2Available() bool {
