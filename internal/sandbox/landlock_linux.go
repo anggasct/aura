@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"os"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -38,6 +39,21 @@ func landlockWriteMask(abiVersion int) uint64 {
 		m |= unix.LANDLOCK_ACCESS_FS_TRUNCATE
 	}
 	return uint64(m)
+}
+
+// landlockRuntimeRoots returns the system directories a contained,
+// dynamically linked tool needs to start: its executable, the dynamic
+// loader, and shared libraries. Only roots that exist on this host are
+// returned so a rule is never added for a missing path.
+func landlockRuntimeRoots() []string {
+	candidates := []string{"/usr", "/lib", "/lib64", "/bin", "/sbin"}
+	var roots []string
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			roots = append(roots, c)
+		}
+	}
+	return roots
 }
 
 // landlockABI returns the running kernel's Landlock ABI version, or 0 when
@@ -77,6 +93,15 @@ func applyLandlock(spec *Spec) error {
 	}
 	defer func() { _ = unix.Close(int(ruleset)) }()
 
+	// Runtime roots hold the executable, the dynamic loader, and shared
+	// libraries a contained tool needs to exec. The exec-linux profile grants
+	// them read access so a dynamically linked target can start, while every
+	// other path remains denied unless the caller declared it.
+	for _, root := range landlockRuntimeRoots() {
+		if err := addLandlockRule(int(ruleset), root, landlockReadMask); err != nil {
+			return err
+		}
+	}
 	for _, path := range spec.ReadOnlyPaths {
 		if err := addLandlockRule(int(ruleset), path, landlockReadMask); err != nil {
 			return err

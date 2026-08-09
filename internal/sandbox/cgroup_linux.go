@@ -19,6 +19,23 @@ type cgroup struct {
 	path string
 }
 
+// cgroupControllersWritable reports whether the service can write controller
+// limits into a child of its own cgroup — the actual precondition for cgroup
+// enforcement. A process can often mkdir a child cgroup but still be denied
+// the controller files unless its scope delegated them.
+func cgroupControllersWritable() bool {
+	parent, err := ownCgroupPath()
+	if err != nil {
+		return false
+	}
+	dir, err := os.MkdirTemp(parent, "aura-probe-*")
+	if err != nil {
+		return false
+	}
+	defer func() { _ = os.Remove(dir) }()
+	return os.WriteFile(filepath.Join(dir, "pids.max"), []byte("8"), 0o600) == nil
+}
+
 // ownCgroupPath returns the absolute path of the calling process's current
 // cgroup v2. The service must run under a delegated subtree to create child
 // cgroups here without privileges.
@@ -89,5 +106,5 @@ func (c cgroup) destroy() error {
 }
 
 func (c cgroup) writeFile(name, value string) error {
-	return os.WriteFile(filepath.Join(c.path, name), []byte(value), 0o644)
+	return os.WriteFile(filepath.Join(c.path, name), []byte(value), 0o600)
 }

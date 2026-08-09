@@ -9,6 +9,28 @@ import (
 	"time"
 )
 
+// ChildSentinel is the argv marker that distinguishes a sandbox child
+// re-execution from a normal aura invocation.
+const ChildSentinel = "__aura-sandbox-child"
+
+// childConfig is the contract the parent streams to a re-executed child over
+// an inherited pipe. The child applies the limits and confinement, then execs
+// Command with Args under the allowlisted environment.
+type childConfig struct {
+	WorkingDir     string   `json:"working_dir"`
+	ReadOnlyPaths  []string `json:"read_only_paths"`
+	ReadWritePaths []string `json:"read_write_paths"`
+	AllowEnv       []string `json:"allow_env"`
+	Limits         Limits   `json:"limits"`
+	Command        string   `json:"command"`
+	Args           []string `json:"args"`
+}
+
+// IsChild reports whether args begins a sandbox child re-execution.
+func IsChild(args []string) bool {
+	return len(args) > 1 && args[1] == ChildSentinel
+}
+
 type ErrorCode string
 
 const (
@@ -47,14 +69,14 @@ func Errorf(code ErrorCode, format string, args ...any) error {
 // MaxCoreSize are enforced by the cgroup v2 and rlimit adapters; Timeout is
 // the wall deadline and MaxOutputBytes caps captured output.
 type Limits struct {
-	MemoryBytes    int64
-	CPUTime        time.Duration
-	MaxOutputBytes int64
-	MaxOpenFiles   int64
-	MaxProcesses   int64
-	MaxCoreSize    int64
-	FileBytes      int64
-	Timeout        time.Duration
+	MemoryBytes    int64         `json:"memory_bytes"`
+	CPUTime        time.Duration `json:"cpu_time"`
+	MaxOutputBytes int64         `json:"max_output_bytes"`
+	MaxOpenFiles   int64         `json:"max_open_files"`
+	MaxProcesses   int64         `json:"max_processes"`
+	MaxCoreSize    int64         `json:"max_core_size"`
+	FileBytes      int64         `json:"file_bytes"`
+	Timeout        time.Duration `json:"timeout"`
 }
 
 // Spec is the containment contract for one subprocess. Environment and

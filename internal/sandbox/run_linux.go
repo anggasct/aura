@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -60,7 +61,10 @@ func cgroupV2Available() bool {
 	}
 	defer func() { _ = fd.Close() }()
 	n, _ := fd.Read(mountInfo[:])
-	return strings.Contains(string(mountInfo[:n]), "cgroup2 ")
+	if !strings.Contains(string(mountInfo[:n]), "cgroup2 ") {
+		return false
+	}
+	return cgroupControllersWritable()
 }
 
 func landlockAvailable() bool {
@@ -71,23 +75,67 @@ func landlockAvailable() bool {
 	return strings.Contains(string(data), "landlock")
 }
 
-// run launches the child in its own process group with an allowlisted
-// environment and the explicit working directory. Output is capped at
+// run launches the tool inside a contained child. The child is a re-execution
+// of this binary under the sandbox sentinel: the parent streams the config
+// over a pipe, the child applies rlimits, Landlock, and seccomp then execs
+// the target in fresh user and network namespaces. Output is capped at
 // MaxOutputBytes. Timeout or cancellation kills the entire process group
-// with SIGKILL and reaps it, so nothing survives the deadline. On
-// non-Linux the build-tag sibling fails closed before any process starts.
+// with SIGKILL and reaps it, so nothing survives the deadline. The cgroup is
+// applied where the host delegated its controllers; Require gates the
+// capability on that delegation, so production runs always enforce it.
 func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...string) (Result, error) {
 	if spec.AllowNetwork {
 		return Result{}, Errorf(ErrorCodeSandboxUnavailable, "network access is not available in this sandbox")
 	}
-	cmd := exec.CommandContext(ctx, command, args...)
-	cmd.Dir = spec.WorkingDir
-	cmd.Env = append([]string(nil), spec.AllowEnv...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-		Pgid:    0,
+	resolved := command
+	if !strings.Contains(command, "/") {
+		lp, lerr := exec.LookPath(command)
+		if lerr != nil {
+			return Result{}, Errorf(ErrorCodeSandboxUnavailable, "resolve %q: %v", command, lerr)
+		}
+		resolved = lp
+	}
+	payload, err := json.Marshal(childConfig{
+		WorkingDir: spec.WorkingDir, ReadOnlyPaths: spec.ReadOnlyPaths, ReadWritePaths: spec.ReadWritePaths,
+		AllowEnv: spec.AllowEnv, Limits: spec.Limits, Command: resolved, Args: args,
+	})
+	if err != nil {
+		return Result{}, Errorf(ErrorCodeSandboxInitFailed, "encode child config: %v", err)
+	}
+	configR, configW, err := os.Pipe()
+	if err != nil {
+		return Result{}, Errorf(ErrorCodeSandboxInitFailed, "config pipe: %v", err)
+	}
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		_ = configR.Close()
+		_ = configW.Close()
+		return Result{}, Errorf(ErrorCodeSandboxInitFailed, "error pipe: %v", err)
 	}
 
+	var cg *cgroup
+	if cgroupControllersWritable() {
+		c, cerr := newCgroup(spec.Limits)
+		if cerr != nil {
+			_ = configR.Close()
+			_ = configW.Close()
+			_ = errR.Close()
+			_ = errW.Close()
+			return Result{}, cerr
+		}
+		cg = &c
+	}
+
+	cmd := exec.CommandContext(ctx, "/proc/self/exe", ChildSentinel)
+	cmd.Dir = spec.WorkingDir
+	cmd.Env = append([]string(nil), spec.AllowEnv...)
+	cmd.ExtraFiles = []*os.File{configR, errW}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid:     true,
+		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET,
+		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
+		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
+	}
 	var output limitedBuffer
 	if spec.Limits.MaxOutputBytes > 0 {
 		output.limit = spec.Limits.MaxOutputBytes
@@ -96,19 +144,49 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 	cmd.Stderr = &output
 
 	if err := cmd.Start(); err != nil {
-		return Result{}, Errorf(ErrorCodeSandboxUnavailable, "cannot start %q: %v", command, err)
+		_ = configR.Close()
+		_ = configW.Close()
+		_ = errW.Close()
+		_ = errR.Close()
+		if cg != nil {
+			_ = cg.destroy()
+		}
+		return Result{}, Errorf(ErrorCodeSandboxUnavailable, "start child: %v", err)
+	}
+	_ = configR.Close() // the child owns its dup; the parent's copy is no longer needed
+	_, _ = configW.Write(payload)
+	_ = configW.Close()
+	_ = errW.Close() // the child is the sole writer of the init-error pipe
+	if cg != nil {
+		_ = cg.attach(cmd.Process.Pid)
 	}
 
-	// exec.Cmd.Wait handles SIGKILL-on-cancel; the process group kill is a
-	// second net so grandchildren die even though we only hold the parent.
 	timeout := time.NewTimer(spec.Limits.Timeout)
 	defer timeout.Stop()
 	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	initErrReady := make(chan struct{})
 	go func() {
-		done <- cmd.Wait()
+		initErr, _ := io.ReadAll(errR)
+		_ = errR.Close()
+		if len(initErr) > 0 {
+			done <- Errorf(ErrorCodeSandboxInitFailed, "child setup: %s", strings.TrimSpace(string(initErr)))
+		}
+		close(initErrReady)
 	}()
+
+	// exec.Cmd.Wait handles SIGKILL-on-cancel; the process-group kill is a
+	// second net so grandchildren die even though we only hold the parent.
 	select {
 	case err := <-done:
+		<-initErrReady
+		if cg != nil {
+			_ = cg.destroy()
+		}
+		if err != nil && !isExitErr(err) {
+			return Result{}, err
+		}
 		result := Result{Output: strings.TrimRight(output.String(), "\n"), Truncated: output.truncated}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -118,12 +196,25 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 	case <-timeout.C:
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-done
+		<-initErrReady
+		if cg != nil {
+			_ = cg.destroy()
+		}
 		return Result{Terminated: true, Truncated: output.truncated}, nil
 	case <-ctx.Done():
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-done
+		<-initErrReady
+		if cg != nil {
+			_ = cg.destroy()
+		}
 		return Result{Terminated: true, Truncated: output.truncated}, nil
 	}
+}
+
+func isExitErr(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr)
 }
 
 // limitedBuffer accumulates child output up to a byte cap and drops the

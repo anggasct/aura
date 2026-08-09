@@ -2,10 +2,6 @@
 
 package sandbox
 
-// seccompProfileVersion mirrors the amd64 profile version so telemetry code
-// compiles uniformly; on non-amd64 Linux the filter itself is not compiled.
-const seccompProfileVersion = "2026.08"
-
 // seccompAvailable reports no enforcement on non-amd64 Linux: the curated
 // allowlist is amd64-specific, so Require fails closed here rather than
 // installing an arch-mismatched filter.

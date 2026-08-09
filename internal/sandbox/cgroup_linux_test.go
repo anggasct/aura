@@ -50,18 +50,5 @@ func TestCgroupLimitsAppliedOrFailsClosed(t *testing.T) {
 	}
 }
 
-// cgroupControllersWritable reports whether the service can write controller
-// limits into a child of its own cgroup — the actual precondition for cgroup
-// enforcement, stronger than being able to create the directory.
-func cgroupControllersWritable() bool {
-	parent, err := ownCgroupPath()
-	if err != nil {
-		return false
-	}
-	dir, err := os.MkdirTemp(parent, "aura-probe-*")
-	if err != nil {
-		return false
-	}
-	defer os.Remove(dir)
-	return os.WriteFile(filepath.Join(dir, "pids.max"), []byte("8"), 0o644) == nil
-}
+// cgroupControllersWritable is defined in cgroup_linux.go; the test exercises
+// the production probe directly.

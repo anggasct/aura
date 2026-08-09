@@ -9,10 +9,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// seccompProfileVersion identifies the allowlist revision recorded in
-// sandbox telemetry so an escape finding can be tied to the exact filter.
-const seccompProfileVersion = "2026.08"
-
 func seccompAvailable() bool {
 	action := unix.SECCOMP_RET_ALLOW
 	_, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_GET_ACTION_AVAIL, 0, uintptr(unsafe.Pointer(&action)))
@@ -30,7 +26,7 @@ func allowedSyscalls() []int {
 		unix.SYS_READ, unix.SYS_WRITE, unix.SYS_OPENAT, unix.SYS_CLOSE, unix.SYS_CLOSE_RANGE,
 		unix.SYS_LSEEK, unix.SYS_PREAD64, unix.SYS_PWRITE64, unix.SYS_READV, unix.SYS_WRITEV,
 		unix.SYS_PREADV, unix.SYS_PWRITEV, unix.SYS_FSTAT, unix.SYS_NEWFSTATAT, unix.SYS_STATX,
-		unix.SYS_STAT, unix.SYS_LSTAT, unix.SYS_FACCESSAT, unix.SYS_FACCESSAT2,
+		unix.SYS_STAT, unix.SYS_LSTAT, unix.SYS_ACCESS, unix.SYS_FACCESSAT, unix.SYS_FACCESSAT2,
 		unix.SYS_READLINK, unix.SYS_READLINKAT, unix.SYS_GETCWD, unix.SYS_GETDENTS64,
 		unix.SYS_FCNTL, unix.SYS_DUP, unix.SYS_DUP2, unix.SYS_DUP3, unix.SYS_FADVISE64,
 		unix.SYS_TRUNCATE, unix.SYS_FTRUNCATE, unix.SYS_FCHMOD, unix.SYS_FCHMODAT,
@@ -44,7 +40,7 @@ func allowedSyscalls() []int {
 		unix.SYS_BRK, unix.SYS_MMAP, unix.SYS_MPROTECT, unix.SYS_MUNMAP, unix.SYS_MREMAP,
 		unix.SYS_MADVISE, unix.SYS_MSYNC, unix.SYS_MINCORE,
 		unix.SYS_RT_SIGACTION, unix.SYS_RT_SIGPROCMASK, unix.SYS_RT_SIGRETURN, unix.SYS_SIGALTSTACK,
-		unix.SYS_CLONE, unix.SYS_CLONE3, unix.SYS_EXIT, unix.SYS_EXIT_GROUP, unix.SYS_WAIT4,
+		unix.SYS_CLONE, unix.SYS_CLONE3, unix.SYS_FORK, unix.SYS_VFORK, unix.SYS_EXIT, unix.SYS_EXIT_GROUP, unix.SYS_WAIT4,
 		unix.SYS_SET_TID_ADDRESS, unix.SYS_SET_ROBUST_LIST, unix.SYS_RSEQ, unix.SYS_ARCH_PRCTL,
 		unix.SYS_PRLIMIT64, unix.SYS_GETRLIMIT, unix.SYS_GETRUSAGE, unix.SYS_TIMES,
 		unix.SYS_CLOCK_GETTIME, unix.SYS_CLOCK_GETRES, unix.SYS_CLOCK_NANOSLEEP, unix.SYS_NANOSLEEP,
@@ -98,7 +94,7 @@ func applySeccomp() error {
 	}
 	filter := buildSeccompFilter(allowedSyscalls())
 	prog := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
-	if _, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, uintptr(unsafe.Pointer(&prog)), 0); errno != 0 {
+	if _, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, 0, uintptr(unsafe.Pointer(&prog))); errno != 0 {
 		return Errorf(ErrorCodeSandboxInitFailed, "install seccomp filter: %v", errno)
 	}
 	return nil
