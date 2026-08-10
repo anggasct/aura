@@ -124,6 +124,21 @@ linters:
         text: G103
         path: internal/sandbox/run_linux.go
 
+      # Landlock and seccomp syscall arguments are stack-local structs handed
+      # to the kernel through unsafe.Pointer; the values are built in-package.
+      - linters:
+          - gosec
+        text: G103
+        path: internal/sandbox/(seccomp_linux_amd64|landlock_linux)\.go
+
+      # BPF jump offsets, Landlock file descriptors, and rlimit tuples use the
+      # kernel's fixed integer widths; the source values are bounded syscall
+      # numbers, file descriptors, and resource limits.
+      - linters:
+          - gosec
+        text: G115
+        path: internal/sandbox/(seccomp_linux_amd64|landlock_linux|rlimit_linux)\.go
+
       # Launching a caller-supplied command is this package's entire purpose;
       # the command is constrained by the containment spec, not by gosec.
       - linters:

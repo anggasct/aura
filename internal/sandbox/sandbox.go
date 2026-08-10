@@ -9,12 +9,38 @@ import (
 	"time"
 )
 
+// ChildSentinel is the argv marker that distinguishes a sandbox child
+// re-execution from a normal aura invocation.
+const ChildSentinel = "__aura-sandbox-child"
+
+// childConfig is the contract the parent streams to a re-executed child over
+// an inherited pipe. The child applies the limits and confinement, then execs
+// Command with Args under the allowlisted environment.
+type childConfig struct {
+	WorkingDir     string   `json:"working_dir"`
+	ReadOnlyPaths  []string `json:"read_only_paths"`
+	ReadWritePaths []string `json:"read_write_paths"`
+	AllowEnv       []string `json:"allow_env"`
+	Limits         Limits   `json:"limits"`
+	Command        string   `json:"command"`
+	Args           []string `json:"args"`
+}
+
+// IsChild reports whether args begins a sandbox child re-execution.
+func IsChild(args []string) bool {
+	return len(args) > 1 && args[1] == ChildSentinel
+}
+
 type ErrorCode string
 
 const (
-	ErrorCodeInvalidArgument    ErrorCode = "invalid_argument"
-	ErrorCodeSandboxUnavailable ErrorCode = "sandbox_unavailable"
-	ErrorCodeSandboxViolation   ErrorCode = "sandbox_violation"
+	ErrorCodeInvalidArgument         ErrorCode = "invalid_argument"
+	ErrorCodeSandboxUnavailable      ErrorCode = "sandbox_unavailable"
+	ErrorCodeSandboxViolation        ErrorCode = "sandbox_violation"
+	ErrorCodeSandboxInitFailed       ErrorCode = "sandbox_init_failed"
+	ErrorCodeSandboxPathDenied       ErrorCode = "sandbox_path_denied"
+	ErrorCodeSandboxSyscallDenied    ErrorCode = "sandbox_syscall_denied"
+	ErrorCodeSandboxResourceExceeded ErrorCode = "sandbox_resource_exceeded"
 )
 
 type Error struct {
@@ -39,26 +65,33 @@ func Errorf(code ErrorCode, format string, args ...any) error {
 }
 
 // Limits are the resource bounds a contained process must stay inside.
-// Timeout and MaxOutputBytes are enforced by this harness. The remaining
-// fields are contract declarations that this harness does not yet enforce.
+// MemoryBytes, CPUTime, FileBytes, MaxOpenFiles, MaxProcesses, and
+// MaxCoreSize are enforced by the cgroup v2 and rlimit adapters; Timeout is
+// the wall deadline and MaxOutputBytes caps captured output.
 type Limits struct {
-	MaxOutputBytes int64
-	MaxOpenFiles   int64
-	MaxProcesses   int64
-	MaxCoreSize    int64
-	Timeout        time.Duration
+	MemoryBytes    int64         `json:"memory_bytes"`
+	CPUTime        time.Duration `json:"cpu_time"`
+	MaxOutputBytes int64         `json:"max_output_bytes"`
+	MaxOpenFiles   int64         `json:"max_open_files"`
+	MaxProcesses   int64         `json:"max_processes"`
+	MaxCoreSize    int64         `json:"max_core_size"`
+	FileBytes      int64         `json:"file_bytes"`
+	Timeout        time.Duration `json:"timeout"`
 }
 
 // Spec is the containment contract for one subprocess. Environment and
-// working directory are allowlisted. Network is denied by default: a spec
-// that requests it is refused with sandbox_unavailable; kernel-level denial
-// of undeclared filesystem and syscall access is delegated to the full
-// sandbox and reported through Negotiate.
+// working directory are allowlisted. ReadOnlyPaths and ReadWritePaths are
+// the only filesystem roots the child may access; Landlock enforces them.
+// Network is denied by default: a spec that requests it is refused with
+// sandbox_unavailable, and the default case runs the child in an isolated
+// network namespace with no external interface.
 type Spec struct {
-	WorkingDir   string
-	AllowEnv     []string
-	AllowNetwork bool
-	Limits       Limits
+	WorkingDir     string
+	ReadOnlyPaths  []string
+	ReadWritePaths []string
+	AllowEnv       []string
+	AllowNetwork   bool
+	Limits         Limits
 }
 
 func (s *Spec) validate() error {
