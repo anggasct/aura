@@ -43,12 +43,10 @@ func TestFormatSandboxStatusReasonOnProbeError(t *testing.T) {
 }
 
 func TestStatusCmdReportsMissingPrimitive(t *testing.T) {
-	orig := sandboxNegotiate
-	t.Cleanup(func() { sandboxNegotiate = orig })
-	sandboxNegotiate = func() (sandbox.Primitives, error) {
+	negotiate := func() (sandbox.Primitives, error) {
 		return sandbox.Primitives{ProcessGroups: true}, nil
 	}
-	cmd := newStatusCmd()
+	cmd := newStatusCmd(negotiate)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	if err := cmd.RunE(cmd, nil); err == nil {
@@ -60,12 +58,10 @@ func TestStatusCmdReportsMissingPrimitive(t *testing.T) {
 }
 
 func TestStatusCmdAvailableExitsClean(t *testing.T) {
-	orig := sandboxNegotiate
-	t.Cleanup(func() { sandboxNegotiate = orig })
-	sandboxNegotiate = func() (sandbox.Primitives, error) {
+	negotiate := func() (sandbox.Primitives, error) {
 		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
 	}
-	cmd := newStatusCmd()
+	cmd := newStatusCmd(negotiate)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	if err := cmd.RunE(cmd, nil); err != nil {

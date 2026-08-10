@@ -10,19 +10,17 @@ import (
 	"github.com/anggasct/aura/internal/sandbox"
 )
 
-// sandboxNegotiate is the seam the status command reaches the kernel through.
-// Tests swap it so the reported surface is deterministic without depending on
-// the host the suite runs on.
-var sandboxNegotiate = sandbox.Negotiate
-
-func newStatusCmd() *cobra.Command {
+// newStatusCmd builds the status command bound to negotiate. The negotiator is
+// injected so tests can fix the reported surface without depending on the host
+// the suite runs on; the composition root passes sandbox.Negotiate.
+func newStatusCmd(negotiate func() (sandbox.Primitives, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:           "status",
 		Short:         "Report sandbox containment availability",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			primitives, err := sandboxNegotiate()
+			primitives, err := negotiate()
 			text, available := formatSandboxStatus(primitives, err)
 			if _, werr := fmt.Fprintln(cmd.OutOrStdout(), text); werr != nil {
 				return werr

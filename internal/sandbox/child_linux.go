@@ -81,10 +81,10 @@ func reportChildInit(err error) {
 // init-error (4) pipes. A parent fd without close-on-exec would otherwise
 // survive execve into the confined process; close_range atomically clears the
 // range so a leaked descriptor carrying secret data cannot reach the child.
-// Kernels without close_range (ENOSYS) cannot make this guarantee and the run
-// fails closed rather than execute with an unclean descriptor set.
+// Any failure — including a kernel without close_range — fails closed here so
+// the child never execs with an unclean descriptor set.
 func closeExtraFds() error {
-	if err := unix.CloseRange(5, ^uint(0), 0); err != nil && err != unix.ENOSYS {
+	if err := unix.CloseRange(5, ^uint(0), 0); err != nil {
 		return fmt.Errorf("close extra fds: %w", err)
 	}
 	return nil
