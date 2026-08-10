@@ -42,7 +42,7 @@ func newRootCmd() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newStatusCmd())
 	return root
 }
 

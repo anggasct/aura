@@ -4,11 +4,14 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -278,4 +281,151 @@ func TestIntegrationCgroupPids(t *testing.T) {
 	if !strings.Contains(result.Output, "Resource temporarily unavailable") && result.ExitCode == 0 {
 		t.Fatalf("cgroup pids not enforced: child forked past the bound (%+v)", result)
 	}
+}
+
+// A parent file descriptor opened without close-on-exec would otherwise survive
+// execve into the confined child. The child closes every descriptor above the
+// config and init-error pipes, so the secret held by the leaked fd is
+// unreadable from inside the sandbox.
+func TestIntegrationFDNoLeak(t *testing.T) {
+	tmp := t.TempDir()
+	secretPath := filepath.Join(tmp, "secret")
+	if err := os.WriteFile(secretPath, []byte("fd-canary-SECRET"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	fd, err := syscall.Open(secretPath, syscall.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer syscall.Close(fd)
+	const target = 9
+	if err := syscall.Dup3(fd, target, 0); err != nil {
+		t.Fatalf("dup3: %v", err)
+	}
+	syscall.Close(fd)
+	defer syscall.Close(target)
+	spec := baseSpec(t)
+	result, err := Run(context.Background(), &spec, "sh", "-c", fmt.Sprintf("cat <&%d", target))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(result.Output, "fd-canary-SECRET") {
+		t.Fatalf("fd leaked secret into child:\n%s", result.Output)
+	}
+}
+
+// An elevated request bound to a registered grant executes inside the
+// containment contract.
+func TestIntegrationElevatedRunApproved(t *testing.T) {
+	req := testRequest(t)
+	req.Executable = "printf"
+	req.Arguments = []string{"approved-run"}
+	grant := mintTestGrant(t, "v1", time.Minute, req)
+	registry := NewRegistry("v1", nil)
+	if err := registry.Register(context.Background(), &grant, req); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	req.ApprovalGrantID = grant.GrantID
+	result, err := registry.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.ExitCode != 0 || !strings.Contains(result.Output, "approved-run") {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+// A request altered after approval is refused before any child starts, so the
+// contained executor never runs a tampered request.
+func TestIntegrationElevatedRunRejectsMutation(t *testing.T) {
+	req := testRequest(t)
+	req.Executable = "printf"
+	req.Arguments = []string{"approved-run"}
+	grant := mintTestGrant(t, "v1", time.Minute, req)
+	registry := NewRegistry("v1", nil)
+	if err := registry.Register(context.Background(), &grant, req); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	mutated := cloneRequest(req)
+	mutated.ApprovalGrantID = grant.GrantID
+	mutated.Arguments = []string{"tampered"}
+	_, err := registry.Execute(context.Background(), mutated)
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
+		t.Fatalf("Execute mutated = %v, want approval_invalid", err)
+	}
+}
+
+// Repeated cancellation must not leak goroutines, file descriptors, cgroup
+// subtrees, or orphaned processes. Each iteration launches a long-lived child
+// and cancels it mid-run; after the sweep the parent's resource usage is back
+// at the baseline.
+func TestIntegrationCancelNoLeak(t *testing.T) {
+	goroutinesBefore := runtime.NumGoroutine()
+	fdsBefore := countOpenFDs(t)
+	cgroupBefore := countAuraCgroups(t)
+
+	for range 5 {
+		ctx, cancel := context.WithCancel(context.Background())
+		spec := baseSpec(t)
+		spec.Limits.Timeout = 30 * time.Second
+		go func() {
+			_, _ = Run(ctx, &spec, "sleep", "300")
+		}()
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	if got := runtime.NumGoroutine(); got > goroutinesBefore+2 {
+		t.Errorf("goroutine leak: before=%d after=%d", goroutinesBefore, got)
+	}
+	if got := countOpenFDs(t); got > fdsBefore+2 {
+		t.Errorf("fd leak: before=%d after=%d", fdsBefore, got)
+	}
+	if got := countAuraCgroups(t); got > cgroupBefore {
+		t.Errorf("cgroup leak: before=%d after=%d", cgroupBefore, got)
+	}
+	if orphans := countSleepOrphans(); orphans != 0 {
+		t.Errorf("orphan sleep processes: %d", orphans)
+	}
+}
+
+func countOpenFDs(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Skipf("cannot read /proc/self/fd: %v", err)
+	}
+	return len(entries)
+}
+
+func countAuraCgroups(t *testing.T) int {
+	t.Helper()
+	parent, err := ownCgroupPath()
+	if err != nil {
+		t.Skipf("cannot resolve own cgroup: %v", err)
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Skipf("cannot read cgroup parent: %v", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "aura-sandbox-") {
+			count++
+		}
+	}
+	return count
+}
+
+func countSleepOrphans() int {
+	out, err := exec.Command("pgrep", "-c", "-f", "sleep 300").Output()
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0
+	}
+	return n
 }

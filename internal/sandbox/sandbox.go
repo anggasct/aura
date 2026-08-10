@@ -41,6 +41,7 @@ const (
 	ErrorCodeSandboxPathDenied       ErrorCode = "sandbox_path_denied"
 	ErrorCodeSandboxSyscallDenied    ErrorCode = "sandbox_syscall_denied"
 	ErrorCodeSandboxResourceExceeded ErrorCode = "sandbox_resource_exceeded"
+	ErrorCodeApprovalInvalid         ErrorCode = "approval_invalid"
 )
 
 type Error struct {
@@ -154,13 +155,10 @@ func Negotiate() (Primitives, error) {
 	return negotiate()
 }
 
-// Require is the fail-closed gate for an effectful containment capability.
-// have is the negotiated host state. A missing mandatory primitive makes
-// full kernel-level containment unavailable, so Require returns a
-// sandbox_unavailable error naming every absent primitive. The composition
-// root must refuse to advertise or execute the capability while it returns
-// non-nil; callers reach Run only after Require passes.
-func Require(have Primitives) error {
+// MissingMandatory returns the sorted names of every mandatory containment
+// primitive absent from have. It is the single source of truth for the
+// fail-closed gate and the status surface, so both report the same names.
+func MissingMandatory(have Primitives) []string {
 	var missing []string
 	if !have.UserNamespace {
 		missing = append(missing, "user_namespace")
@@ -177,9 +175,20 @@ func Require(have Primitives) error {
 	if !have.ProcessGroups {
 		missing = append(missing, "process_groups")
 	}
+	slices.Sort(missing)
+	return missing
+}
+
+// Require is the fail-closed gate for an effectful containment capability.
+// have is the negotiated host state. A missing mandatory primitive makes
+// full kernel-level containment unavailable, so Require returns a
+// sandbox_unavailable error naming every absent primitive. The composition
+// root must refuse to advertise or execute the capability while it returns
+// non-nil; callers reach Run only after Require passes.
+func Require(have Primitives) error {
+	missing := MissingMandatory(have)
 	if len(missing) == 0 {
 		return nil
 	}
-	slices.Sort(missing)
 	return Errorf(ErrorCodeSandboxUnavailable, "missing mandatory containment primitive(s): %s", strings.Join(missing, ", "))
 }
