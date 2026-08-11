@@ -49,10 +49,14 @@ func readChildConfig() (childConfig, error) {
 	return cfg, nil
 }
 
-// setupChild applies confinement in the order the kernel requires: rlimits
-// first, then no_new_privs (needed by both Landlock restrict_self and
-// seccomp), then Landlock, then the seccomp filter immediately before exec.
+// setupChild applies confinement in the order the kernel requires: close
+// stray inherited descriptors first, then rlimits, then no_new_privs (needed
+// by both Landlock restrict_self and seccomp), then Landlock, then the seccomp
+// filter immediately before exec.
 func setupChild(cfg *childConfig) error {
+	if err := closeExtraFds(); err != nil {
+		return err
+	}
 	if err := applyRlimits(cfg.Limits); err != nil {
 		return err
 	}
@@ -71,4 +75,17 @@ func reportChildInit(err error) {
 		_, _ = f.WriteString(err.Error())
 		_ = f.Close()
 	}
+}
+
+// closeExtraFds closes every inherited descriptor above the config (3) and
+// init-error (4) pipes. A parent fd without close-on-exec would otherwise
+// survive execve into the confined process; close_range atomically clears the
+// range so a leaked descriptor carrying secret data cannot reach the child.
+// Any failure — including a kernel without close_range — fails closed here so
+// the child never execs with an unclean descriptor set.
+func closeExtraFds() error {
+	if err := unix.CloseRange(5, ^uint(0), 0); err != nil {
+		return fmt.Errorf("close extra fds: %w", err)
+	}
+	return nil
 }

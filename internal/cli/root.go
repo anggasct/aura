@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/sandbox"
 )
 
 // usageError marks argument and flag errors so ExecuteContext can exit with
@@ -42,7 +43,7 @@ func newRootCmd() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newStatusCmd(sandbox.Negotiate))
 	return root
 }
 
