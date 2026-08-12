@@ -47,9 +47,8 @@ func codedError(code ErrorCode, detail string, cause error) error {
 	return fmt.Errorf("%w: %w", &Error{Code: code, Detail: detail}, cause)
 }
 
-// errIntentNotFound reports that a key or id lookup found no intent. Internal
-// sentinel so the idempotency and transition paths distinguish "absent, keep
-// going" from a real storage error without returning (nil, nil).
+// errIntentNotFound lets the idempotency and transition paths distinguish
+// "absent, keep going" from a storage error without returning (nil, nil).
 var errIntentNotFound = errors.New("effect: intent not found")
 
 func isUniqueViolation(err error) bool {

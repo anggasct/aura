@@ -10,14 +10,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/anggasct/aura/internal/store"
 )
 
-// Classification declares how an effectful operation may be safely recovered.
-// It is set by tool/provider registration; the model cannot override it.
+// Classification is declared by tool/provider registration; the model cannot
+// override it.
 type Classification string
 
 const (
@@ -35,7 +34,6 @@ func (c Classification) valid() bool {
 	return false
 }
 
-// State is the lifecycle position of an effect intent.
 type State string
 
 const (
@@ -46,8 +44,6 @@ const (
 	StateFailed    State = "failed"
 )
 
-// EventKindToolRequested marks a runtime event emitted atomically with the
-// creation of a prepared effect intent.
 const EventKindToolRequested = "tool.requested"
 
 const toolRequestedSchemaVersion uint16 = 1
@@ -62,7 +58,6 @@ type toolRequestedPayload struct {
 	RequestDigest  string         `json:"request_digest"`
 }
 
-// Intent is one durable effectful-operation record.
 type Intent struct {
 	ID              string
 	SessionID       string
@@ -85,10 +80,6 @@ type Intent struct {
 	UpdatedAt       time.Time
 }
 
-// PrepareRequest creates a prepared intent. Request must be canonical bytes:
-// its digest is the idempotency replay key, so the caller owns normalization.
-// The event identity fields name the tool.requested runtime event appended in
-// the same transaction; the caller owns session sequence allocation.
 type PrepareRequest struct {
 	SessionID      string
 	TurnID         string
@@ -97,7 +88,9 @@ type PrepareRequest struct {
 	Provider       string
 	Operation      string
 	Classification Classification
-	Request        json.RawMessage
+	// Request must be canonical bytes: its digest is the idempotency replay
+	// key, so the caller owns normalization.
+	Request json.RawMessage
 
 	EventID         string
 	EventSequence   uint64
@@ -106,22 +99,15 @@ type PrepareRequest struct {
 	EventAuthor     string
 }
 
-// Journal durably records effectful operation intent and drives the
-// prepared->started->terminal state machine with crash-safe transitions and
-// lease-based recovery that never executes the same intent twice.
 type Journal struct {
-	db     *sql.DB
-	now    func() time.Time
-	logger *slog.Logger
+	db  *sql.DB
+	now func() time.Time
 }
 
 type Options struct {
-	Now    func() time.Time
-	Logger *slog.Logger
+	Now func() time.Time
 }
 
-// NewJournal builds a journal over db. The schema must include the
-// effect_intent table (migration v3).
 func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
 	if db == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: database handle must not be nil", nil)
@@ -129,10 +115,7 @@ func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
-	if opts.Logger == nil {
-		opts.Logger = slog.Default()
-	}
-	return &Journal{db: db, now: opts.Now, logger: opts.Logger}, nil
+	return &Journal{db: db, now: opts.Now}, nil
 }
 
 const insertIntentSQL = `
@@ -156,11 +139,6 @@ SELECT id, session_id, turn_id, tool_call_id, idempotency_key, provider, operati
 FROM effect_intent
 WHERE id = ?`
 
-// Prepare atomically records a prepared intent and its tool.requested runtime
-// event before any provider invocation. The (provider, operation,
-// idempotency_key) triple is unique: a replay with the same request digest
-// returns the existing intent without appending a second event; a different
-// digest is a conflict.
 func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, error) {
 	if req == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: prepare request must not be nil", nil)
@@ -263,11 +241,8 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	}, nil
 }
 
-// resolvePrepareConflict handles a concurrent prepare that won the unique
-// insert. The winner is read outside this transaction: a deferred snapshot can
-// miss an uncommitted winner, but a fresh read sees it. A matching digest is
-// the idempotent answer and returns the existing intent; anything else is a
-// conflict. It never returns a nil intent with a nil error.
+// resolvePrepareConflict reads the winner outside this transaction: a deferred
+// snapshot can miss a winner that just committed, but a fresh read sees it.
 func (j *Journal) resolvePrepareConflict(ctx context.Context, req *PrepareRequest, digest string, cause error) (*Intent, error) {
 	existing, err := intentByKey(ctx, j.db, req.Provider, req.Operation, req.IdempotencyKey)
 	if err != nil && !errors.Is(err, errIntentNotFound) {
@@ -325,9 +300,6 @@ func digestRequest(req json.RawMessage) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Start durably transitions a prepared intent to started. A caller must not
-// invoke the provider until Start has returned: only a committed started row
-// proves the intent will be observed by recovery.
 func (j *Journal) Start(ctx context.Context, id string) (*Intent, error) {
 	return j.transition(ctx, id, &transitionSpec{
 		from:         []State{StatePrepared},
@@ -337,7 +309,6 @@ func (j *Journal) Start(ctx context.Context, id string) (*Intent, error) {
 	})
 }
 
-// Succeed records a provider receipt and transitions started to succeeded.
 func (j *Journal) Succeed(ctx context.Context, id string, receipt json.RawMessage) (*Intent, error) {
 	if len(receipt) > 0 && !json.Valid(receipt) {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: receipt must be valid JSON", nil)
@@ -351,9 +322,6 @@ func (j *Journal) Succeed(ctx context.Context, id string, receipt json.RawMessag
 	})
 }
 
-// Fail records a definite safe error code and transitions prepared or started
-// to failed (a prepared intent may fail on validation or policy before
-// invocation).
 func (j *Journal) Fail(ctx context.Context, id, safeErrorCode string) (*Intent, error) {
 	return j.transition(ctx, id, &transitionSpec{
 		from:          []State{StatePrepared, StateStarted},
@@ -364,10 +332,6 @@ func (j *Journal) Fail(ctx context.Context, id, safeErrorCode string) (*Intent, 
 	})
 }
 
-// MarkUnknown transitions started to unknown after an ambiguous outcome - a
-// lost response, connection loss, process crash, or response-commit failure
-// after invocation began. Recovery (Recover) makes the same transition for
-// intents still started at startup.
 func (j *Journal) MarkUnknown(ctx context.Context, id string) (*Intent, error) {
 	return j.transition(ctx, id, &transitionSpec{
 		from:        []State{StateStarted},
@@ -376,17 +340,12 @@ func (j *Journal) MarkUnknown(ctx context.Context, id string) (*Intent, error) {
 	})
 }
 
-// Resolution is a reconciliation result that resolves an unknown intent to a
-// terminal state.
 type Resolution struct {
 	Succeeded     bool
 	Receipt       json.RawMessage
 	SafeErrorCode string
 }
 
-// Resolve transitions an unknown intent to succeeded or failed using provider
-// reconciliation evidence. It sets reconciled_at. A caller must only call this
-// with definitive evidence; the Executor gates that.
 func (j *Journal) Resolve(ctx context.Context, id string, res Resolution) (*Intent, error) {
 	if res.Succeeded {
 		if len(res.Receipt) > 0 && !json.Valid(res.Receipt) {
@@ -426,11 +385,8 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	if id == "" {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
 	}
-	// The store connection policy opens every connection with _txlock=immediate,
-	// so this BEGIN takes the write lock up front: the SELECT-state-then-
-	// conditional-UPDATE below serializes against any other writer on this row,
-	// and a concurrent transition reads the committed state instead of a stale
-	// snapshot.
+	// Connection policy is _txlock=immediate, so this read-state-then-
+	// conditional-update serializes against other writers on this row.
 	tx, err := j.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("effect: begin transition transaction: %w", err)
@@ -455,9 +411,7 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	if spec.receipt != nil {
 		receiptArg = string(spec.receipt)
 	}
-	// started_at, finished_at, and reconciled_at are advanced only on the
-	// transitions that reach them; CASE WHEN keeps the statement static so a
-	// hostile value can never splice into the SQL text.
+	// CASE WHEN keeps the statement static so no value splices into the SQL.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE effect_intent
 		SET state = ?,
@@ -508,7 +462,6 @@ func stateIn(s State, set []State) bool {
 	return false
 }
 
-// Get returns the current intent, or a typed not-found error.
 func (j *Journal) Get(ctx context.Context, id string) (*Intent, error) {
 	if id == "" {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
@@ -523,8 +476,6 @@ func (j *Journal) Get(ctx context.Context, id string) (*Intent, error) {
 	return intent, nil
 }
 
-// ListByState returns intents in a given state ordered for recovery (oldest
-// first). A negative limit is rejected; a zero limit means no bound.
 func (j *Journal) ListByState(ctx context.Context, state State, limit int) ([]Intent, error) {
 	if limit < 0 {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: limit must not be negative", nil)

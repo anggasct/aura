@@ -8,10 +8,6 @@ import (
 	"testing"
 )
 
-// fakeProvider is a deterministic provider with controllable outcomes,
-// idempotency, and reconciliation. It stands in for any channel, webhook,
-// broadcaster, or scheduler adapter: the contract it implements carries no
-// domain terms.
 type fakeProvider struct {
 	mu                  sync.Mutex
 	supportsIdempotency bool
@@ -21,9 +17,7 @@ type fakeProvider struct {
 	reconcileEvidence   Evidence
 	reconcileErr        error
 	reconcileCount      int
-	// lastKey captures the idempotency key the provider was invoked with, so a
-	// test can assert it is stable across retries.
-	lastKey string
+	lastKey             string
 }
 
 func (f *fakeProvider) SupportsIdempotency() bool { return f.supportsIdempotency }
@@ -52,7 +46,7 @@ func (f *fakeProvider) Reconcile(_ context.Context, _ *Intent) (Evidence, error)
 func newExecutor(t *testing.T) (*Executor, *Journal) {
 	t.Helper()
 	j, _ := newTestJournal(t)
-	exec, err := NewExecutor(j, ExecutorOptions{})
+	exec, err := NewExecutor(j)
 	if err != nil {
 		t.Fatalf("new executor: %v", err)
 	}
@@ -99,8 +93,6 @@ func TestExecute_DefiniteFailureSettlesFailed(t *testing.T) {
 	}
 }
 
-// A lost response, connection loss, or commit failure after the provider may
-// have observed the request becomes unknown, never prepared or auto-success.
 func TestExecute_AmbiguousOutcomeBecomesUnknown(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
@@ -129,7 +121,6 @@ func TestExecute_InvokeErrorBecomesUnknown(t *testing.T) {
 	}
 }
 
-// A replayed execute returns the existing intent and does not invoke again.
 func TestExecute_ReplayIsIdempotent(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
@@ -151,12 +142,9 @@ func TestExecute_ReplayIsIdempotent(t *testing.T) {
 	}
 }
 
-// The idempotency key is stable across safe retries: re-invocation during
-// recovery reuses the same key.
 func TestReconcile_StableIdempotencyKeyOnRetry(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
-	// First attempt is ambiguous -> unknown.
 	ambiguous := &fakeProvider{supportsIdempotency: true, outcome: Outcome{Ambiguous: true}}
 	intent, err := exec.Execute(context.Background(), validPrepare(1), ambiguous)
 	if err != nil {
@@ -166,7 +154,6 @@ func TestReconcile_StableIdempotencyKeyOnRetry(t *testing.T) {
 		t.Fatalf("setup state = %s, want unknown", intent.State)
 	}
 
-	// Recovery re-invokes (idempotent classification) with a definite outcome.
 	retry := &fakeProvider{supportsIdempotency: true, outcome: Outcome{Succeeded: true, Receipt: json.RawMessage(`{"id":7}`)}}
 	resolved, err := exec.Reconcile(context.Background(), intent.ID, retry, nil)
 	if err != nil {
@@ -180,9 +167,6 @@ func TestReconcile_StableIdempotencyKeyOnRetry(t *testing.T) {
 	}
 }
 
-// Non-idempotent unknown effects are never automatically retried. An
-// irreversible unknown intent with no reconciler stays unknown and reports
-// that reconciliation is unsupported.
 func TestReconcile_IrreversibleNeverAutoRetried(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
@@ -209,8 +193,6 @@ func TestReconcile_IrreversibleNeverAutoRetried(t *testing.T) {
 	}
 }
 
-// A non-idempotent unknown effect with a reconciler is reconciled but never
-// re-invoked, even when reconciliation is non-definitive.
 func TestReconcile_EffectfulWithoutIdempotencyNotReinvoked(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
@@ -236,8 +218,6 @@ func TestReconcile_EffectfulWithoutIdempotencyNotReinvoked(t *testing.T) {
 	}
 }
 
-// Reconciliation transitions unknown only when provider evidence is
-// definitive. Non-definitive evidence leaves the intent unknown.
 func TestReconcile_DefinitiveEvidenceResolves(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
@@ -305,7 +285,6 @@ func TestReconcile_OnlyUnknownIntentsReconcile(t *testing.T) {
 	assertCode(t, err, ErrorCodeTransitionInvalid)
 }
 
-// CanAutoRetry policy across classifications and provider capability.
 func TestCanAutoRetry(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -331,14 +310,10 @@ func TestCanAutoRetry(t *testing.T) {
 	}
 }
 
-// Recover sweeps unknown intents: idempotent ones are resolved by
-// re-invocation, non-idempotent ones without a reconciler are left unknown.
 func TestRecover_MixedClassifications(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
 
-	// Two idempotent unknown intents (recoverable by re-invoke) and one
-	// irreversible unknown intent (no auto-retry, no reconciler).
 	idem1 := mustPrepare(t, exec.Journal(), validPrepare(1))
 	mustStart(t, exec.Journal(), idem1.ID)
 	if _, err := exec.Journal().MarkUnknown(context.Background(), idem1.ID); err != nil {
@@ -358,8 +333,6 @@ func TestRecover_MixedClassifications(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Recovery provider re-invokes idempotent ops successfully; the
-	// irreversible op has no reconciler and no idempotency, so it is left.
 	p := &fakeProvider{supportsIdempotency: true, outcome: Outcome{Succeeded: true, Receipt: json.RawMessage(`{}`)}}
 	summary, err := exec.Recover(context.Background(), p, nil)
 	if err != nil {
@@ -378,7 +351,7 @@ func TestRecover_MixedClassifications(t *testing.T) {
 
 func TestNewExecutor_NilJournal(t *testing.T) {
 	t.Parallel()
-	_, err := NewExecutor(nil, ExecutorOptions{})
+	_, err := NewExecutor(nil)
 	assertCode(t, err, ErrorCodeInvalidArgument)
 }
 
@@ -389,9 +362,6 @@ func TestExecute_NilProvider(t *testing.T) {
 	assertCode(t, err, ErrorCodeInvalidArgument)
 }
 
-// Smoke test that the deterministic fake provider exercises the same protocol
-// a real channel/webhook/broadcaster/scheduler adapter would: the Provider
-// contract is domain-neutral.
 func TestExecute_ProtocolIsDomainNeutral(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
@@ -433,8 +403,6 @@ func TestExecute_ConcurrentSameIntentSerializes(t *testing.T) {
 
 	const workers = 12
 	req := validPrepare(1)
-	// A single shared provider records every invocation; idempotent Execute
-	// must invoke it exactly once no matter how many callers race.
 	p := &fakeProvider{
 		supportsIdempotency: true,
 		outcome:             Outcome{Succeeded: true, Receipt: json.RawMessage(`{}`)},
@@ -458,7 +426,6 @@ func TestExecute_ConcurrentSameIntentSerializes(t *testing.T) {
 	if invokes != 1 {
 		t.Fatalf("provider invokes = %d, want exactly 1", invokes)
 	}
-	// Prepare is idempotent, so it resolves the single shared intent id.
 	intent, err := exec.Journal().Prepare(context.Background(), req)
 	if err != nil {
 		t.Fatalf("resolve intent id: %v", err)
