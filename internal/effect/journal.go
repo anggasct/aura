@@ -1,6 +1,7 @@
 package effect
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -375,14 +376,50 @@ func (j *Journal) MarkUnknown(ctx context.Context, id string) (*Intent, error) {
 	})
 }
 
+// Resolution is a reconciliation result that resolves an unknown intent to a
+// terminal state.
+type Resolution struct {
+	Succeeded     bool
+	Receipt       json.RawMessage
+	SafeErrorCode string
+}
+
+// Resolve transitions an unknown intent to succeeded or failed using provider
+// reconciliation evidence. It sets reconciled_at. A caller must only call this
+// with definitive evidence; the Executor gates that.
+func (j *Journal) Resolve(ctx context.Context, id string, res Resolution) (*Intent, error) {
+	if res.Succeeded {
+		if len(res.Receipt) > 0 && !json.Valid(res.Receipt) {
+			return nil, codedError(ErrorCodeInvalidArgument, "effect: receipt must be valid JSON", nil)
+		}
+		return j.transition(ctx, id, &transitionSpec{
+			from:            []State{StateUnknown},
+			to:              StateSucceeded,
+			receipt:         res.Receipt,
+			setFinishedAt:   true,
+			setReconciledAt: true,
+			invalidCode:     ErrorCodeTransitionInvalid,
+		})
+	}
+	return j.transition(ctx, id, &transitionSpec{
+		from:            []State{StateUnknown},
+		to:              StateFailed,
+		safeErrorCode:   cmp.Or(res.SafeErrorCode, "effect_reconciliation_failed"),
+		setFinishedAt:   true,
+		setReconciledAt: true,
+		invalidCode:     ErrorCodeTransitionInvalid,
+	})
+}
+
 type transitionSpec struct {
-	from          []State
-	to            State
-	receipt       json.RawMessage
-	safeErrorCode string
-	setStartedAt  bool
-	setFinishedAt bool
-	invalidCode   ErrorCode
+	from            []State
+	to              State
+	receipt         json.RawMessage
+	safeErrorCode   string
+	setStartedAt    bool
+	setFinishedAt   bool
+	setReconciledAt bool
+	invalidCode     ErrorCode
 }
 
 func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpec) (*Intent, error) {
@@ -418,21 +455,23 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	if spec.receipt != nil {
 		receiptArg = string(spec.receipt)
 	}
-	// started_at and finished_at are advanced only on the transitions that
-	// reach them; CASE WHEN keeps the statement static so a hostlie value can
-	// never splice into the SQL text.
+	// started_at, finished_at, and reconciled_at are advanced only on the
+	// transitions that reach them; CASE WHEN keeps the statement static so a
+	// hostile value can never splice into the SQL text.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE effect_intent
 		SET state = ?,
 		    updated_at = ?,
 		    started_at = CASE WHEN ? THEN ? ELSE started_at END,
 		    finished_at = CASE WHEN ? THEN ? ELSE finished_at END,
+		    reconciled_at = CASE WHEN ? THEN ? ELSE reconciled_at END,
 		    provider_receipt_json = ?,
 		    safe_error_code = ?
 		WHERE id = ? AND state = ?`,
 		string(spec.to), fmtTime(now),
 		boolToInt(spec.setStartedAt), fmtTime(now),
 		boolToInt(spec.setFinishedAt), fmtTime(now),
+		boolToInt(spec.setReconciledAt), fmtTime(now),
 		receiptArg, nullableString(spec.safeErrorCode),
 		id, string(currentState),
 	)
