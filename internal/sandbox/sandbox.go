@@ -13,9 +13,6 @@ import (
 // re-execution from a normal aura invocation.
 const ChildSentinel = "__aura-sandbox-child"
 
-// childConfig is the contract the parent streams to a re-executed child over
-// an inherited pipe. The child applies the limits and confinement, then execs
-// Command with Args under the allowlisted environment.
 type childConfig struct {
 	WorkingDir     string   `json:"working_dir"`
 	ReadOnlyPaths  []string `json:"read_only_paths"`
@@ -26,7 +23,6 @@ type childConfig struct {
 	Args           []string `json:"args"`
 }
 
-// IsChild reports whether args begins a sandbox child re-execution.
 func IsChild(args []string) bool {
 	return len(args) > 1 && args[1] == ChildSentinel
 }
@@ -65,10 +61,6 @@ func Errorf(code ErrorCode, format string, args ...any) error {
 	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
 }
 
-// Limits are the resource bounds a contained process must stay inside.
-// MemoryBytes, CPUTime, FileBytes, MaxOpenFiles, MaxProcesses, and
-// MaxCoreSize are enforced by the cgroup v2 and rlimit adapters; Timeout is
-// the wall deadline and MaxOutputBytes caps captured output.
 type Limits struct {
 	MemoryBytes    int64         `json:"memory_bytes"`
 	CPUTime        time.Duration `json:"cpu_time"`
@@ -105,8 +97,6 @@ func (s *Spec) validate() error {
 	return nil
 }
 
-// Result reports what a contained run did, so callers never have to guess
-// whether termination was enforced.
 type Result struct {
 	ExitCode   int
 	Output     string

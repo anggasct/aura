@@ -8,17 +8,13 @@ import (
 	"time"
 )
 
-// ReconciliationReport is the spec name for the findings produced by
-// Reconciler.Inspect (the underlying scan is Reconcile).
 type ReconciliationReport = ReconcileReport
 
-// CollectionReport reports what an unreferenced-blob sweep deleted.
 type CollectionReport struct {
 	DeletedBlobs int
 	FreedBytes   int64
 }
 
-// Reconciler is the spec contract for reconciliation and garbage collection.
 type Reconciler interface {
 	Inspect(ctx context.Context) (ReconciliationReport, error)
 	Collect(ctx context.Context, before time.Time) (CollectionReport, error)
