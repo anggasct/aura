@@ -13,7 +13,7 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 # Source must read as a standalone product: no internal tracking IDs, doc
 # paths, or process vocabulary in shipped code.
-INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
+INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
 .PHONY: build build-all test vet fmt-check lint refs-check verify security eval load fuzz-smoke release-snapshot clean
 
