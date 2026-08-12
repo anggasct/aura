@@ -18,6 +18,7 @@ type migration struct {
 var migrations = []migration{
 	{version: 1, sql: foundationalSchemaSQL},
 	{version: 2, sql: usageLedgerSchemaSQL},
+	{version: 3, sql: effectIntentSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -116,6 +117,39 @@ CREATE TABLE usage_entry (
 );
 
 CREATE INDEX usage_window_idx ON usage_reservation(window_day, window_month, state);
+`
+
+const effectIntentSchemaSQL = `
+CREATE TABLE effect_intent (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+    turn_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    classification TEXT NOT NULL
+        CHECK (classification IN ('read_only','idempotent','effectful','irreversible')),
+    state TEXT NOT NULL
+        CHECK (state IN ('prepared','started','succeeded','unknown','failed')),
+    request_digest TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    provider_receipt_json TEXT,
+    safe_error_code TEXT,
+    retry_of TEXT REFERENCES effect_intent(id) ON DELETE SET NULL,
+    prepared_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    reconciled_at TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE (provider, operation, idempotency_key)
+);
+
+CREATE INDEX effect_intent_recovery_idx
+    ON effect_intent(state, updated_at);
+
+CREATE INDEX effect_intent_turn_idx
+    ON effect_intent(session_id, turn_id, prepared_at);
 `
 
 // Migrate applies the foundational schema and any registered feature

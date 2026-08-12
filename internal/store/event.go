@@ -127,11 +127,26 @@ func schemaVersionToDB(version uint16) (int64, error) {
 	return int64(version), nil
 }
 
-type execer interface {
+// EventWriter is the write surface shared by *sql.DB and *sql.Tx, so a caller
+// can append a runtime event inside its own transaction and keep the insert
+// atomic with whatever else that transaction commits.
+type EventWriter interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-func appendEvent(ctx context.Context, x execer, e *RuntimeEvent) error {
+// AppendEventTx appends a runtime event within a caller-owned transaction.
+// The event and the caller's other writes commit or roll back together.
+func AppendEventTx(ctx context.Context, tx EventWriter, e *RuntimeEvent) error {
+	if tx == nil {
+		return errNilArgument("tx")
+	}
+	if e == nil {
+		return errNilArgument("event")
+	}
+	return appendEvent(ctx, tx, e)
+}
+
+func appendEvent(ctx context.Context, x EventWriter, e *RuntimeEvent) error {
 	return appendEventCore(ctx, func(ctx context.Context, args ...any) (sql.Result, error) {
 		return x.ExecContext(ctx, insertRuntimeEventSQL, args...)
 	}, e)
