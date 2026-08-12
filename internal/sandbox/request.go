@@ -48,9 +48,6 @@ type boundContract struct {
 	Limits         Limits   `json:"limits"`
 }
 
-// DigestPayload returns the canonical JSON a broker hashes when minting an
-// approval grant for req, so the broker and the registry cannot drift on what
-// the grant binds.
 func DigestPayload(req *SandboxRequest) (json.RawMessage, error) {
 	if req == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
@@ -86,8 +83,6 @@ func sortedClone(values []string) []string {
 	return clone
 }
 
-// registeredGrant holds a grant the registry accepted after confirming it
-// binds the request the broker presented.
 type registeredGrant struct {
 	grant approval.ApprovalGrant
 }
@@ -122,9 +117,6 @@ func NewRegistry(policyVersion string, logger *slog.Logger) *Registry {
 	}
 }
 
-// Register records a grant for req after confirming the grant binds this exact
-// request. A grant already registered, or one whose bound fields do not match
-// req, is refused so a mismatched or replayed grant can never reach execution.
 func (r *Registry) Register(_ context.Context, grant *approval.ApprovalGrant, req *SandboxRequest) error {
 	if grant == nil {
 		return Errorf(ErrorCodeInvalidArgument, "grant must not be nil")
@@ -150,8 +142,6 @@ func (r *Registry) Register(_ context.Context, grant *approval.ApprovalGrant, re
 	return nil
 }
 
-// assertBinds verifies the grant's bound fields match req, so registration
-// fails fast on a grant minted for a different request.
 func (r *Registry) assertBinds(grant *approval.ApprovalGrant, req *SandboxRequest) error {
 	payload, err := DigestPayload(req)
 	if err != nil {

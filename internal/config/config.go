@@ -65,9 +65,6 @@ type Logging struct {
 	Format string `koanf:"format" yaml:"format"`
 }
 
-// Storage configures the SQLite data directory, connection policy, artifact
-// quota, and backup cadence. Empty path values resolve below
-// $XDG_DATA_HOME/aura at open time.
 type Storage struct {
 	Path               string   `koanf:"path" yaml:"path"`
 	BusyTimeout        Duration `koanf:"busy_timeout" yaml:"busy_timeout"`
@@ -78,16 +75,12 @@ type Storage struct {
 	BackupRetention    int      `koanf:"backup_retention" yaml:"backup_retention"`
 }
 
-// ByteSize is a byte count that parses human-readable forms ("5GiB", "512MB",
-// "1000") so storage quotas can be written naturally in config.
 type ByteSize int64
 
 func (b ByteSize) MarshalYAML() (any, error) {
 	return b.String(), nil
 }
 
-// UnmarshalText accepts a plain integer (bytes) or a size with a decimal
-// (KB/MB/GB/TB) or binary (KiB/MiB/GiB/TiB) suffix.
 func (b *ByteSize) UnmarshalText(text []byte) error {
 	value, err := parseByteSize(string(text))
 	if err != nil {
@@ -351,8 +344,6 @@ func ValidateBaseURL(raw string) error {
 	return nil
 }
 
-// IsLoopbackBaseURL reports whether raw is an http(s) URL whose host is a
-// loopback address or the localhost name.
 func IsLoopbackBaseURL(raw string) bool {
 	if raw == "" {
 		return false

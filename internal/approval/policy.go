@@ -32,8 +32,6 @@ func (t TrustLabel) Valid() bool {
 	return false
 }
 
-// IsUntrusted reports whether content with this label may never become a
-// system instruction or policy rule.
 func (t TrustLabel) IsUntrusted() bool {
 	return t == TrustUntrustedExternal || t == TrustDerivedUntrusted
 }

@@ -12,9 +12,6 @@ import (
 	"time"
 )
 
-// Handler executes one tool after the broker has validated its grant. The
-// handler itself never re-decides policy; it receives the decision's
-// constraints and runs the tool under them.
 type Handler func(ctx context.Context, request ToolRequest, constraints Constraints) (ToolResult, error)
 
 // Engine is the canonical ToolBroker: every invocation is evaluated exactly
@@ -28,8 +25,6 @@ type Engine struct {
 	nonces  map[string]time.Time // nonce -> expiry; consumed on Execute
 }
 
-// NewEngine builds an immutable-policy broker. The policy is loaded from
-// trusted configuration only; nothing in a ToolRequest can alter it.
 func NewEngine(policy Policy, handler Handler) (*Engine, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("approval: invalid policy: %w", err)

@@ -34,7 +34,6 @@ func (c Classification) valid() bool {
 	return false
 }
 
-// State is the lifecycle position of an effect intent.
 type State string
 
 const (
@@ -119,8 +118,6 @@ type Options struct {
 	Logger *slog.Logger
 }
 
-// NewJournal builds a journal over db. The schema must include the
-// effect_intent table (migration v3).
 func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
 	if db == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: database handle must not be nil", nil)
@@ -469,7 +466,6 @@ func stateIn(s State, set []State) bool {
 	return false
 }
 
-// Get returns the current intent, or a typed not-found error.
 func (j *Journal) Get(ctx context.Context, id string) (*Intent, error) {
 	if id == "" {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)

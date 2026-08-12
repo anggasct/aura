@@ -103,9 +103,6 @@ func isRetryableStatus(status int) bool {
 	return false
 }
 
-// providerErrorBody captures the error object shape shared by the providers:
-// OpenAI/Responses (code/type/message), Anthropic (type/message), Gemini
-// (status/message).
 type providerErrorBody struct {
 	Error struct {
 		Code    string `json:"code"`

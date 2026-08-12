@@ -565,8 +565,6 @@ func validateModelShapes(doc *yamlv3.Node) error {
 	return nil
 }
 
-// validateModelDefinition checks only the shape of one model definition;
-// all semantic rules live in validateLoadedModels.
 func validateModelDefinition(name string, node *yamlv3.Node) error {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		keyNode := node.Content[i]

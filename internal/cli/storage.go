@@ -38,8 +38,6 @@ func newStorageCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-// storagePaths resolves the live database path, artifact root, and backup
-// directory from config. Empty paths resolve below $XDG_DATA_HOME/aura.
 func storagePaths(cfg *config.Config) (dbPath, artifactRoot, backupDir string, err error) {
 	dataRoot := cfg.Storage.Path
 	if dataRoot == "" {
@@ -68,8 +66,6 @@ func defaultDataRoot() (string, error) {
 	return filepath.Join(home, ".local", "share", "aura"), nil
 }
 
-// openStorage opens the live database with config-driven connection policy
-// and applies migrations.
 func openStorage(ctx context.Context, cfg *config.Config) (*sql.DB, error) {
 	dbPath, _, _, err := storagePaths(cfg)
 	if err != nil {
@@ -298,9 +294,6 @@ func collectCutoff(before string) (time.Time, error) {
 	return cutoff, nil
 }
 
-// withStorage loads config, resolves storage paths, and runs fn. When needDB
-// is true the live database is opened and migrated first; offline operations
-// (restore) pass false so the database being replaced is never opened.
 func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *slog.Logger, *config.Config, *sql.DB) error) error {
 	result, err := config.Load(gf.configPath)
 	if err != nil {

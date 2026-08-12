@@ -47,12 +47,6 @@ type ToolBroker interface {
 	Evaluate(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error)
 }
 
-// NewADKExecutor builds an ADK-backed turn executor. modelName is resolved
-// through the ADK model registry (registered by the model package at
-// startup); broker is the tool policy gate; tools are the declared tool set
-// (empty until the built-in tools engine lands — every declared tool is
-// still gated by the broker before ADK executes it). Options attach optional
-// capabilities such as budget enforcement.
 func NewADKExecutor(appName, modelName string, sessions SessionPort, events EventStore, broker ToolBroker, tools []tool.Tool, logger *slog.Logger, opts ...ExecutorOption) (*ADKExecutor, error) {
 	if appName == "" {
 		return nil, invalidArgument("app name must not be empty")
@@ -89,7 +83,6 @@ func NewADKExecutor(appName, modelName string, sessions SessionPort, events Even
 	return e, nil
 }
 
-// ExecutorOption configures an ADKExecutor at construction.
 type ExecutorOption func(*ADKExecutor) error
 
 // WithBudgetLedger wraps the resolved model with the usage budget ledger, so a
