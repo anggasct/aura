@@ -32,19 +32,12 @@ func TestPrepare_RecordsIntentAndRequestedEvent(t *testing.T) {
 	}
 }
 
-// Intent and the requested runtime event are atomic before provider
-// invocation. A failure in the event append must roll back the intent insert.
 func TestPrepare_AtomicIntentAndEvent(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
 
 	mustPrepare(t, j, validPrepare(1))
 
-	// A second prepare with a fresh idempotency key but reusing the first's
-	// event sequence: the intent insert succeeds inside the transaction, then
-	// the tool.requested event append hits UNIQUE(session_id, sequence) and
-	// the whole transaction must roll back - neither the second intent nor a
-	// second event may persist.
 	dup := validPrepare(2)
 	dup.EventSequence = 1
 	_, err := j.Prepare(context.Background(), dup)
@@ -133,8 +126,6 @@ func TestPrepare_NilRequest(t *testing.T) {
 	assertCode(t, err, ErrorCodeInvalidArgument)
 }
 
-// Provider invocation cannot occur unless started is durable. Start commits
-// the started row before returning.
 func TestStart_PersistsStartedBeforeReturn(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
@@ -218,8 +209,6 @@ func TestMarkUnknown_FromStarted(t *testing.T) {
 	}
 }
 
-// Crash injection before/after every protocol step yields only a valid state.
-// Terminal states are immutable; every transition guards its source.
 func TestTransition_TerminalImmutable(t *testing.T) {
 	t.Parallel()
 	j, _ := newTestJournal(t)
@@ -293,8 +282,6 @@ func TestListByState_NegativeLimitRejected(t *testing.T) {
 	assertCode(t, err, ErrorCodeInvalidArgument)
 }
 
-// Concurrent recovery workers cannot execute the same intent twice. N
-// goroutines claim the same started intent; exactly one wins.
 func TestClaim_ConcurrentExactlyOnce(t *testing.T) {
 	t.Parallel()
 	j, _ := newTestJournal(t)
@@ -336,7 +323,6 @@ func TestClaim_ConcurrentExactlyOnce(t *testing.T) {
 	}
 }
 
-// Concurrent Recover calls partition started intents without double-claiming.
 func TestRecover_ConcurrentNoDoubleClaim(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
@@ -401,8 +387,6 @@ func TestRecover_LeavesOtherStatesAlone(t *testing.T) {
 	}
 }
 
-// A replayed prepare does not append a second event, so the event stream
-// reflects exactly one requested event per logical intent.
 func TestPrepare_ReplayDoesNotDoubleAppendEvent(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
@@ -427,8 +411,6 @@ func TestSucceed_InvalidReceiptRejected(t *testing.T) {
 	assertCode(t, err, ErrorCodeInvalidArgument)
 }
 
-// Sanity: the tool.requested event payload links back to the intent and omits
-// request content (request body lives only on effect_intent.request_json).
 func TestPrepare_EventPayloadIsSafe(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
@@ -456,8 +438,6 @@ func TestPrepare_EventPayloadIsSafe(t *testing.T) {
 
 func TestStorePackageContract(t *testing.T) {
 	t.Parallel()
-	// AppendEventTx rejects a nil transaction, mirroring the pointer-required
-	// contract every other write helper enforces.
 	err := store.AppendEventTx(context.Background(), nil, &store.RuntimeEvent{})
 	if err == nil {
 		t.Fatal("expected nil-tx error")
@@ -471,9 +451,6 @@ func TestCodeOf_Unwrapped(t *testing.T) {
 	}
 }
 
-// Concurrent prepares with the same key and digest must all resolve to the
-// same non-nil intent. Exactly one insert wins; the rest read the winner via
-// the unique-violation path. No caller gets a nil intent with a nil error.
 func TestPrepare_ConcurrentSameKeyReturnsSameIntent(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
@@ -529,10 +506,6 @@ func TestPrepare_ConcurrentSameKeyReturnsSameIntent(t *testing.T) {
 	}
 }
 
-// Concurrent transitions on the same intent serialize under the write lock:
-// every goroutine attempts Start then Succeed, and the row ends succeeded with
-// exactly one receipt and finished_at set. No state is corrupted and no
-// goroutine returns (nil, nil).
 func TestTransition_ConcurrentStartSucceedSerializes(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
