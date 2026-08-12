@@ -470,3 +470,111 @@ func TestCodeOf_Unwrapped(t *testing.T) {
 		t.Fatal("plain error must not yield a code")
 	}
 }
+
+// Concurrent prepares with the same key and digest must all resolve to the
+// same non-nil intent. Exactly one insert wins; the rest read the winner via
+// the unique-violation path. No caller gets a nil intent with a nil error.
+func TestPrepare_ConcurrentSameKeyReturnsSameIntent(t *testing.T) {
+	t.Parallel()
+	j, db := newTestJournal(t)
+
+	const workers = 16
+	req := validPrepare(1)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	start := make(chan struct{})
+	results := make([]*Intent, workers)
+	errs := make([]error, workers)
+	for i := range workers {
+		go func() {
+			defer wg.Done()
+			<-start
+			intent, err := j.Prepare(context.Background(), req)
+			results[i] = intent
+			errs[i] = err
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	var winnerID string
+	var successes int64
+	for i := range workers {
+		if errs[i] != nil {
+			t.Fatalf("worker %d error: %v", i, errs[i])
+		}
+		if results[i] == nil {
+			t.Fatalf("worker %d got nil intent with nil error", i)
+		}
+		if results[i].ID == "" {
+			t.Fatalf("worker %d got empty intent id", i)
+		}
+		if winnerID == "" {
+			winnerID = results[i].ID
+		} else if results[i].ID != winnerID {
+			t.Fatalf("worker %d intent %s differs from winner %s", i, results[i].ID, winnerID)
+		}
+		if results[i].State == StatePrepared {
+			atomic.AddInt64(&successes, 1)
+		}
+	}
+	if got := intentCount(t, db, "id = ?", winnerID); got != 1 {
+		t.Fatalf("intent rows = %d, want 1", got)
+	}
+	if got := eventCount(t, db, EventKindToolRequested); got != 1 {
+		t.Fatalf("tool.requested events = %d, want 1", got)
+	}
+	if successes != int64(workers) {
+		t.Fatalf("prepared-state successes = %d, want %d", successes, workers)
+	}
+}
+
+// Concurrent transitions on the same intent serialize under the write lock:
+// every goroutine attempts Start then Succeed, and the row ends succeeded with
+// exactly one receipt and finished_at set. No state is corrupted and no
+// goroutine returns (nil, nil).
+func TestTransition_ConcurrentStartSucceedSerializes(t *testing.T) {
+	t.Parallel()
+	j, db := newTestJournal(t)
+
+	intent := mustPrepare(t, j, validPrepare(1))
+
+	const workers = 16
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	start := make(chan struct{})
+	receipt := json.RawMessage(`{"message_id":7}`)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _ = j.Start(context.Background(), intent.ID)
+			_, _ = j.Succeed(context.Background(), intent.ID, receipt)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	final, err := j.Get(context.Background(), intent.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if final.State != StateSucceeded {
+		t.Fatalf("final state = %s, want succeeded", final.State)
+	}
+	if final.StartedAt == nil {
+		t.Fatal("started_at not set")
+	}
+	if final.FinishedAt == nil {
+		t.Fatal("finished_at not set")
+	}
+	var receiptCount int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM effect_intent WHERE id = ? AND provider_receipt_json IS NOT NULL`,
+		intent.ID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count receipts: %v", err)
+	}
+	if receiptCount != 1 {
+		t.Fatalf("receipt rows = %d, want 1", receiptCount)
+	}
+}

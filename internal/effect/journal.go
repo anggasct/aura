@@ -202,7 +202,7 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return nil, j.resolvePrepareConflict(ctx, req, digest, err)
+			return j.resolvePrepareConflict(ctx, req, digest, err)
 		}
 		return nil, fmt.Errorf("effect: insert intent: %w", err)
 	}
@@ -263,22 +263,23 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 }
 
 // resolvePrepareConflict handles a concurrent prepare that won the unique
-// insert. The winner is read inside this transaction, then outside it: a
-// deferred snapshot can miss an uncommitted winner, but a fresh read sees it.
-// A matching digest is the idempotent answer; anything else is a conflict.
-func (j *Journal) resolvePrepareConflict(ctx context.Context, req *PrepareRequest, digest string, cause error) error {
+// insert. The winner is read outside this transaction: a deferred snapshot can
+// miss an uncommitted winner, but a fresh read sees it. A matching digest is
+// the idempotent answer and returns the existing intent; anything else is a
+// conflict. It never returns a nil intent with a nil error.
+func (j *Journal) resolvePrepareConflict(ctx context.Context, req *PrepareRequest, digest string, cause error) (*Intent, error) {
 	existing, err := intentByKey(ctx, j.db, req.Provider, req.Operation, req.IdempotencyKey)
 	if err != nil && !errors.Is(err, errIntentNotFound) {
-		return err
+		return nil, err
 	}
 	if existing != nil {
 		if existing.RequestDigest != digest {
-			return codedError(ErrorCodeIdempotencyConflict,
+			return nil, codedError(ErrorCodeIdempotencyConflict,
 				fmt.Sprintf("effect: idempotency key %q already bound to a different request", req.IdempotencyKey), nil)
 		}
-		return nil
+		return existing, nil
 	}
-	return codedError(ErrorCodeIdempotencyConflict,
+	return nil, codedError(ErrorCodeIdempotencyConflict,
 		fmt.Sprintf("effect: idempotency key %q already in use", req.IdempotencyKey), cause)
 }
 
@@ -388,6 +389,11 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	if id == "" {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
 	}
+	// The store connection policy opens every connection with _txlock=immediate,
+	// so this BEGIN takes the write lock up front: the SELECT-state-then-
+	// conditional-UPDATE below serializes against any other writer on this row,
+	// and a concurrent transition reads the committed state instead of a stale
+	// snapshot.
 	tx, err := j.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("effect: begin transition transaction: %w", err)
