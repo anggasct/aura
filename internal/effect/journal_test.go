@@ -113,6 +113,52 @@ func TestPrepare_InvalidRequestJSON(t *testing.T) {
 	assertCode(t, err, ErrorCodeInvalidArgument)
 }
 
+func TestPrepare_RejectsUnreferencedSecret(t *testing.T) {
+	t.Parallel()
+	j, db := newTestJournal(t)
+
+	req := validPrepare(1)
+	req.Request = json.RawMessage(`{"api_key":"secret-canary"}`)
+	_, err := j.Prepare(context.Background(), req)
+	assertCode(t, err, ErrorCodeRequestUnsafe)
+	if got := intentCount(t, db, "idempotency_key = ?", req.IdempotencyKey); got != 0 {
+		t.Fatalf("unsafe request persisted %d intent rows", got)
+	}
+}
+
+func TestPrepare_CanonicalizesRequestAndReferencesSecrets(t *testing.T) {
+	t.Parallel()
+	j, _ := newTestJournal(t)
+
+	firstRequest := json.RawMessage(`{ "text": "hi", "api_key": { "env": "TELEGRAM_TOKEN" }, "chat": "@a" }`)
+	first := validPrepare(1)
+	first.Request = firstRequest
+	intent := mustPrepare(t, j, first)
+	if got, want := string(intent.RequestJSON), `{"api_key":{"env":"TELEGRAM_TOKEN"},"chat":"@a","text":"hi"}`; got != want {
+		t.Fatalf("normalized request = %s, want %s", got, want)
+	}
+
+	replay := validPrepare(1)
+	replay.Request = json.RawMessage(`{"chat":"@a","text":"hi","api_key":{"env":"TELEGRAM_TOKEN"}}`)
+	replayed, err := j.Prepare(context.Background(), replay)
+	if err != nil {
+		t.Fatalf("normalized replay: %v", err)
+	}
+	if replayed.ID != intent.ID {
+		t.Fatalf("replay returned %s, want %s", replayed.ID, intent.ID)
+	}
+}
+
+func TestPrepare_RejectsInvalidSecretReference(t *testing.T) {
+	t.Parallel()
+	j, _ := newTestJournal(t)
+
+	req := validPrepare(1)
+	req.Request = json.RawMessage(`{"token":{"value":"secret-canary"}}`)
+	_, err := j.Prepare(context.Background(), req)
+	assertCode(t, err, ErrorCodeRequestUnsafe)
+}
+
 func TestPrepare_NilPointerDB(t *testing.T) {
 	t.Parallel()
 	_, err := NewJournal(nil, Options{})

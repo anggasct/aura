@@ -177,6 +177,9 @@ func TestRetryApprovalCreatesLinkedIntentAndEvent(t *testing.T) {
 	if retry.IdempotencyKey == intent.IdempotencyKey {
 		t.Fatal("retry reused the original idempotency key")
 	}
+	if string(retry.RequestJSON) != string(intent.RequestJSON) {
+		t.Fatalf("retry request = %s, want canonical original %s", retry.RequestJSON, intent.RequestJSON)
+	}
 	original, err := j.Get(context.Background(), intent.ID)
 	if err != nil {
 		t.Fatalf("get original: %v", err)
@@ -193,6 +196,31 @@ func TestRetryApprovalCreatesLinkedIntentAndEvent(t *testing.T) {
 	}
 	if consumed == "" {
 		t.Fatal("retry approval was not consumed")
+	}
+}
+
+func TestRetryRejectsUnsafeStoredRequest(t *testing.T) {
+	t.Parallel()
+	j, db := newTestJournal(t)
+	intent := mustPrepare(t, j, validPrepare(1))
+	mustStart(t, j, intent.ID)
+	mustMarkUnknown(t, j, intent.ID)
+	approval, err := j.Approve(context.Background(), &ApprovalRequest{
+		IntentID:  intent.ID,
+		Action:    ApprovalActionRetry,
+		Reason:    "legacy request safety test",
+		ExpiresIn: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `UPDATE effect_intent SET request_json = ? WHERE id = ?`, `{"token":"secret-canary"}`, intent.ID); err != nil {
+		t.Fatalf("seed unsafe request: %v", err)
+	}
+	_, err = j.RetryWithApproval(context.Background(), intent.ID, approval.Token)
+	assertCode(t, err, ErrorCodeRequestUnsafe)
+	if got := intentCount(t, db, "retry_of = ?", intent.ID); got != 0 {
+		t.Fatalf("unsafe retry persisted %d linked intents", got)
 	}
 }
 

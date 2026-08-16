@@ -26,6 +26,7 @@ func newEffectsCmd(gf *globalFlags) *cobra.Command {
 		newEffectsReconcileCmd(gf),
 		newEffectsMarkCmd(gf),
 		newEffectsRetryCmd(gf),
+		newEffectsPruneCmd(gf),
 	)
 	return cmd
 }
@@ -203,6 +204,45 @@ func newEffectsRetryCmd(gf *globalFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&token, "approval-token", "", "one-shot approval token")
+	return cmd
+}
+
+func newEffectsPruneCmd(gf *globalFlags) *cobra.Command {
+	var before string
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Prune old terminal effect intents",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if err := noPositionalArgs(cmd, args); err != nil {
+				return err
+			}
+			if before != "" {
+				if _, err := time.Parse(time.RFC3339Nano, before); err != nil {
+					return &usageError{fmt.Errorf("effects prune --before must be RFC3339Nano: %w", err)}
+				}
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, journal *effect.Journal) error {
+				cutoff := time.Now().UTC().Add(-effect.DefaultTerminalRetention)
+				if before != "" {
+					parsed, err := time.Parse(time.RFC3339Nano, before)
+					if err != nil {
+						return err
+					}
+					cutoff = parsed
+				}
+				report, err := journal.Prune(ctx, cutoff)
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "deleted: %d\npreserved_audits: %d\n", report.Deleted, report.PreservedAudits)
+				return err
+			})
+		},
+	}
+	cmd.Flags().StringVar(&before, "before", "", "delete terminal intents older than this RFC3339Nano time (default: 30d ago)")
 	return cmd
 }
 

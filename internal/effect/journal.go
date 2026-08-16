@@ -170,7 +170,11 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	if err := validatePrepare(req); err != nil {
 		return nil, err
 	}
-	digest := digestRequest(req.Request)
+	normalizedRequest, err := normalizeRequest(req.Request)
+	if err != nil {
+		return nil, err
+	}
+	digest := digestRequest(normalizedRequest)
 
 	tx, err := j.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -200,7 +204,7 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	}
 	_, err = tx.ExecContext(ctx, insertIntentSQL,
 		intentID, req.SessionID, req.TurnID, req.ToolCallID, req.IdempotencyKey, req.Provider, req.Operation,
-		string(req.Classification), string(StatePrepared), digest, string(req.Request),
+		string(req.Classification), string(StatePrepared), digest, string(normalizedRequest),
 		fmtTime(now), fmtTime(now),
 	)
 	if err != nil {
@@ -259,7 +263,7 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 		Classification: req.Classification,
 		State:          StatePrepared,
 		RequestDigest:  digest,
-		RequestJSON:    req.Request,
+		RequestJSON:    normalizedRequest,
 		PreparedAt:     now,
 		UpdatedAt:      now,
 	}

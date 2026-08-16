@@ -105,3 +105,39 @@ func TestEffectsCommandRequiresExactApprovalInputs(t *testing.T) {
 		t.Fatalf("mark without token error = %v", err)
 	}
 }
+
+func TestEffectsPruneUsesThirtyDayDefault(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg, id := seedUnknownEffect(t, dataRoot)
+	if err := os.WriteFile(cfg, []byte(fmt.Sprintf("version: 1\nstorage:\n  path: %s\n", dataRoot)), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	if err != nil {
+		t.Fatalf("open db for aging: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		UPDATE effect_intent
+		SET state = 'succeeded', finished_at = '2000-01-01T00:00:00Z', updated_at = '2000-01-01T00:00:00Z'
+		WHERE id = ?`, id); err != nil {
+		_ = db.Close()
+		t.Fatalf("age intent: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close aging db: %v", err)
+	}
+
+	out, err := execute(t, "effects", "prune", "--config", cfg)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if !strings.Contains(out, "deleted: 1") || !strings.Contains(out, "preserved_audits: 0") {
+		t.Fatalf("prune output = %s", out)
+	}
+}
+
+func TestEffectsPruneRejectsInvalidCutoff(t *testing.T) {
+	if _, err := execute(t, "effects", "prune", "--before", "not-a-time"); err == nil || !strings.Contains(err.Error(), "RFC3339Nano") {
+		t.Fatalf("invalid cutoff error = %v", err)
+	}
+}
