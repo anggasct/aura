@@ -13,6 +13,19 @@ import (
 
 const childInitFailedExit = 126
 
+// childConfig is the contract the parent streams to a re-executed child over
+// an inherited pipe. The child applies the limits and confinement, then execs
+// Command with Args under the allowlisted environment.
+type childConfig struct {
+	WorkingDir     string   `json:"working_dir"`
+	ReadOnlyPaths  []string `json:"read_only_paths"`
+	ReadWritePaths []string `json:"read_write_paths"`
+	AllowEnv       []string `json:"allow_env"`
+	Limits         Limits   `json:"limits"`
+	Command        string   `json:"command"`
+	Args           []string `json:"args"`
+}
+
 // RunChild is the entry point for a sandbox child re-execution. It reads the
 // streamed config, applies the resource and confinement layers in order, and
 // execs the target. It returns only when setup fails (exit 126, with the

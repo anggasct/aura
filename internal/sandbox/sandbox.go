@@ -13,16 +13,6 @@ import (
 // re-execution from a normal aura invocation.
 const ChildSentinel = "__aura-sandbox-child"
 
-type childConfig struct {
-	WorkingDir     string   `json:"working_dir"`
-	ReadOnlyPaths  []string `json:"read_only_paths"`
-	ReadWritePaths []string `json:"read_write_paths"`
-	AllowEnv       []string `json:"allow_env"`
-	Limits         Limits   `json:"limits"`
-	Command        string   `json:"command"`
-	Args           []string `json:"args"`
-}
-
 func IsChild(args []string) bool {
 	return len(args) > 1 && args[1] == ChildSentinel
 }
