@@ -10,13 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/anggasct/aura/internal/store"
 )
 
-// Classification is declared by tool/provider registration; the model cannot
-// override it.
 type Classification string
 
 const (
@@ -44,6 +43,15 @@ const (
 	StateFailed    State = "failed"
 )
 
+func (s State) valid() bool {
+	switch s {
+	case StatePrepared, StateStarted, StateSucceeded, StateUnknown, StateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 const EventKindToolRequested = "tool.requested"
 
 const toolRequestedSchemaVersion uint16 = 1
@@ -56,6 +64,7 @@ type toolRequestedPayload struct {
 	Classification Classification `json:"classification"`
 	IdempotencyKey string         `json:"idempotency_key"`
 	RequestDigest  string         `json:"request_digest"`
+	RetryOf        string         `json:"retry_of,omitempty"`
 }
 
 type Intent struct {
@@ -88,9 +97,7 @@ type PrepareRequest struct {
 	Provider       string
 	Operation      string
 	Classification Classification
-	// Request must be canonical bytes: its digest is the idempotency replay
-	// key, so the caller owns normalization.
-	Request json.RawMessage
+	Request        json.RawMessage
 
 	EventID         string
 	EventSequence   uint64
@@ -100,12 +107,16 @@ type PrepareRequest struct {
 }
 
 type Journal struct {
-	db  *sql.DB
-	now func() time.Time
+	db       *sql.DB
+	now      func() time.Time
+	logger   *slog.Logger
+	observer Observer
 }
 
 type Options struct {
-	Now func() time.Time
+	Now      func() time.Time
+	Logger   *slog.Logger
+	Observer Observer
 }
 
 func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
@@ -115,7 +126,13 @@ func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
-	return &Journal{db: db, now: opts.Now}, nil
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+	if opts.Observer == nil {
+		opts.Observer = observerFunc(noopObserver)
+	}
+	return &Journal{db: db, now: opts.Now, logger: opts.Logger, observer: opts.Observer}, nil
 }
 
 const insertIntentSQL = `
@@ -124,6 +141,13 @@ INSERT INTO effect_intent (
     classification, state, request_digest, request_json, provider_receipt_json,
     safe_error_code, retry_of, prepared_at, started_at, finished_at, reconciled_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, NULL, ?)`
+
+const insertIntentSQLWithRetry = `
+INSERT INTO effect_intent (
+    id, session_id, turn_id, tool_call_id, idempotency_key, provider, operation,
+    classification, state, request_digest, request_json, provider_receipt_json,
+    safe_error_code, retry_of, prepared_at, started_at, finished_at, reconciled_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL, NULL, NULL, ?)`
 
 const selectIntentByKeySQL = `
 SELECT id, session_id, turn_id, tool_call_id, idempotency_key, provider, operation,
@@ -224,7 +248,7 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("effect: commit prepare: %w", err)
 	}
-	return &Intent{
+	intent := &Intent{
 		ID:             intentID,
 		SessionID:      req.SessionID,
 		TurnID:         req.TurnID,
@@ -238,11 +262,11 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 		RequestJSON:    req.Request,
 		PreparedAt:     now,
 		UpdatedAt:      now,
-	}, nil
+	}
+	j.observe(ctx, intent, "prepared")
+	return intent, nil
 }
 
-// resolvePrepareConflict reads the winner outside this transaction: a deferred
-// snapshot can miss a winner that just committed, but a fresh read sees it.
 func (j *Journal) resolvePrepareConflict(ctx context.Context, req *PrepareRequest, digest string, cause error) (*Intent, error) {
 	existing, err := intentByKey(ctx, j.db, req.Provider, req.Operation, req.IdempotencyKey)
 	if err != nil && !errors.Is(err, errIntentNotFound) {
@@ -385,8 +409,6 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	if id == "" {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
 	}
-	// Connection policy is _txlock=immediate, so this read-state-then-
-	// conditional-update serializes against other writers on this row.
 	tx, err := j.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("effect: begin transition transaction: %w", err)
@@ -411,7 +433,6 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	if spec.receipt != nil {
 		receiptArg = string(spec.receipt)
 	}
-	// CASE WHEN keeps the statement static so no value splices into the SQL.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE effect_intent
 		SET state = ?,
@@ -443,7 +464,12 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("effect: commit transition to %s: %w", spec.to, err)
 	}
-	return j.Get(ctx, id)
+	intent, err := j.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	j.observe(ctx, intent, string(spec.to))
+	return intent, nil
 }
 
 func boolToInt(b bool) int {
@@ -479,6 +505,9 @@ func (j *Journal) Get(ctx context.Context, id string) (*Intent, error) {
 func (j *Journal) ListByState(ctx context.Context, state State, limit int) ([]Intent, error) {
 	if limit < 0 {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: limit must not be negative", nil)
+	}
+	if !state.valid() {
+		return nil, codedError(ErrorCodeInvalidArgument, "effect: state is invalid", nil)
 	}
 	query := `
 	SELECT id, session_id, turn_id, tool_call_id, idempotency_key, provider, operation,
