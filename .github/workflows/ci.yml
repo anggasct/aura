@@ -14,7 +14,10 @@ concurrency:
 
 jobs:
   check:
-    runs-on: [self-hosted, kuma-vps]
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
 
     steps:
@@ -33,13 +36,13 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: aura-binaries
+          name: aura-binaries-${{ matrix.os }}
           path: dist/
           retention-days: 7
           if-no-files-found: error
 
   security:
-    runs-on: [self-hosted, kuma-vps]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -51,7 +54,7 @@ jobs:
         run: make security
 
   fuzz:
-    runs-on: [self-hosted, kuma-vps]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -63,7 +66,7 @@ jobs:
         run: make fuzz-smoke
 
   codeql:
-    runs-on: [self-hosted, kuma-vps]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       actions: read
