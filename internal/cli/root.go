@@ -14,8 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/sandbox"
 )
 
-// usageError marks argument and flag errors so ExecuteContext can exit with
-// code 2 instead of the runtime error code.
 type usageError struct {
 	err error
 }
@@ -43,7 +41,7 @@ func newRootCmd() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newStatusCmd(sandbox.Negotiate))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newStatusCmd(sandbox.Negotiate))
 	return root
 }
 
@@ -51,9 +49,6 @@ func Execute() int {
 	return ExecuteContext(context.Background())
 }
 
-// ExecuteContext runs the CLI with ctx, exiting 2 for usage errors, 1 for
-// runtime errors, and 0 on success. When args is empty the process arguments
-// are used.
 func ExecuteContext(ctx context.Context, args ...string) int {
 	effective := args
 	if len(effective) == 0 {
@@ -70,10 +65,6 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 		if errors.As(err, &ue) {
 			return 2
 		}
-		// An unknown subcommand is a usage error, but cobra surfaces it
-		// from Execute with no marker. Classify it here: by this point
-		// cobra's built-in commands (help, completion, __complete) are
-		// registered, so a Find failure is a genuine unknown command.
 		if _, _, findErr := root.Find(effective); findErr != nil {
 			return 2
 		}
@@ -82,12 +73,6 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 	return 0
 }
 
-// resolveLogging picks the effective log level and format. An explicitly set
-// flag wins; otherwise the config value (which already reflects AURA_ env
-// overrides) is used, so flag > env > file.
-// logConfigResult reports what config load did, in one place, so the two
-// entry points that bootstrap config cannot drift apart. The resolved path is
-// reduced to its basename: it embeds the operator's home directory.
 func logConfigResult(ctx context.Context, logger *slog.Logger, result *config.LoadResult) {
 	if result.DefaultGenerated {
 		logger.InfoContext(ctx, "generating default config", "component", "config", "file", filepath.Base(result.Path))

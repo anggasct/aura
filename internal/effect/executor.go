@@ -27,8 +27,6 @@ func (e *Executor) Execute(ctx context.Context, req *PrepareRequest, p Provider)
 	if err != nil {
 		return nil, err
 	}
-	// A replay or an intent left started/unknown by a prior attempt is returned
-	// as-is so recovery reconciles explicitly instead of double-invoking.
 	if intent.State != StatePrepared {
 		return intent, nil
 	}
@@ -47,8 +45,6 @@ func (e *Executor) Execute(ctx context.Context, req *PrepareRequest, p Provider)
 		Request:        started.RequestJSON,
 	})
 	if err != nil {
-		// An unclassifiable invoke may have already sent bytes; the only safe
-		// settlement is unknown.
 		resolved, markErr := e.journal.MarkUnknown(ctx, started.ID)
 		if markErr != nil {
 			return nil, fmt.Errorf("effect: mark unknown after invoke error: %w", errors.Join(err, markErr))
@@ -93,8 +89,6 @@ func (e *Executor) Reconcile(ctx context.Context, id string, p Provider, r Recon
 		}
 	}
 
-	// Safe classifications retry by re-invoking with the stable idempotency key;
-	// the provider deduplicates. Non-idempotent unknowns never reach here.
 	if CanAutoRetry(intent.Classification, p.SupportsIdempotency()) {
 		return e.retryByReinvoke(ctx, intent, p)
 	}

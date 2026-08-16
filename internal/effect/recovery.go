@@ -5,8 +5,6 @@ import (
 	"fmt"
 )
 
-// Claim's conditional UPDATE (state = 'started') makes the started->unknown
-// transition exactly-once across concurrent callers.
 func (j *Journal) Claim(ctx context.Context, id string) (bool, error) {
 	if id == "" {
 		return false, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
@@ -24,7 +22,15 @@ func (j *Journal) Claim(ctx context.Context, id string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("effect: read claim rows affected: %w", err)
 	}
-	return affected == 1, nil
+	if affected != 1 {
+		return false, nil
+	}
+	intent, err := j.Get(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	j.observe(ctx, intent, "recovered_unknown")
+	return true, nil
 }
 
 type RecoveryReport struct {
@@ -32,9 +38,6 @@ type RecoveryReport struct {
 	Claimed int
 }
 
-// Recover marks every still-started intent unknown: started is ambiguous after
-// a crash (the provider may already have observed the request), and without
-// reconciliation the only safe resolution is unknown.
 func (j *Journal) Recover(ctx context.Context) (RecoveryReport, error) {
 	started, err := j.ListByState(ctx, StateStarted, 0)
 	if err != nil {

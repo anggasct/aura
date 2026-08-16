@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -22,7 +23,8 @@ func newTestJournal(t *testing.T) (*Journal, *sql.DB) {
 		t.Fatalf("migrate: %v", err)
 	}
 	j, err := NewJournal(db, Options{
-		Now: func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
+		Now:    func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
+		Logger: slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)

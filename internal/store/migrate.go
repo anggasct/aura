@@ -19,6 +19,7 @@ var migrations = []migration{
 	{version: 1, sql: foundationalSchemaSQL},
 	{version: 2, sql: usageLedgerSchemaSQL},
 	{version: 3, sql: effectIntentSchemaSQL},
+	{version: 4, sql: effectApprovalSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -152,10 +153,25 @@ CREATE INDEX effect_intent_turn_idx
     ON effect_intent(session_id, turn_id, prepared_at);
 `
 
-// Migrate applies the foundational schema and any registered feature
-// migrations, verifying the checksum of migrations already recorded as
-// applied. A checksum mismatch or an applied version above the binary's
-// maximum stops startup without touching the schema.
+const effectApprovalSchemaSQL = `
+CREATE TABLE effect_approval (
+    id TEXT PRIMARY KEY,
+    intent_id TEXT NOT NULL REFERENCES effect_intent(id) ON DELETE RESTRICT,
+    action TEXT NOT NULL
+        CHECK (action IN ('mark_succeeded','mark_failed','retry')),
+    request_digest TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    issued_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT
+);
+
+CREATE INDEX effect_approval_intent_idx
+    ON effect_approval(intent_id, issued_at);
+`
+
 func Migrate(ctx context.Context, db *sql.DB) error {
 	if err := validateMigrationOrder(migrations); err != nil {
 		return err
@@ -182,10 +198,6 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// SchemaVersions reports the highest applied migration version and the highest
-// version this binary knows about. A database with no migrations applied
-// reports applied 0. Health checks compare the two to detect a pending
-// migration (applied < latest) or a downgrade (applied > latest).
 func SchemaVersions(ctx context.Context, db *sql.DB) (applied, latest int, err error) {
 	latest = migrations[len(migrations)-1].version
 	var appliedMax sql.NullInt64
@@ -225,7 +237,6 @@ func applyMigration(ctx context.Context, db *sql.DB, m migration) error {
 		}
 		return nil
 	case errors.Is(err, sql.ErrNoRows):
-		// Not yet applied.
 	default:
 		return fmt.Errorf("read migration %d state: %w", m.version, err)
 	}
