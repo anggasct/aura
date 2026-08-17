@@ -295,6 +295,14 @@ func readApproval(ctx context.Context, q queryer, tokenHash string) (*approvalRe
 }
 
 func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerID string, now time.Time) (*Intent, error) {
+	normalizedRequest, err := normalizeRequest(intent.RequestJSON)
+	if err != nil {
+		return nil, err
+	}
+	requestDigest := digestRequest(normalizedRequest)
+	if requestDigest != intent.RequestDigest {
+		return nil, codedError(ErrorCodeApprovalInvalid, "effect: stored request does not match approval digest", nil)
+	}
 	newID, err := randomID()
 	if err != nil {
 		return nil, err
@@ -323,7 +331,7 @@ func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerI
 		Operation:      intent.Operation,
 		Classification: intent.Classification,
 		IdempotencyKey: newKey,
-		RequestDigest:  intent.RequestDigest,
+		RequestDigest:  requestDigest,
 		RetryOf:        intent.ID,
 	})
 	if err != nil {
@@ -350,7 +358,7 @@ func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerI
 	}
 	_, err = tx.ExecContext(ctx, insertIntentSQLWithRetry,
 		newID, intent.SessionID, intent.TurnID, intent.ToolCallID, newKey, intent.Provider, intent.Operation,
-		string(intent.Classification), string(StatePrepared), intent.RequestDigest, string(intent.RequestJSON), intent.ID,
+		string(intent.Classification), string(StatePrepared), requestDigest, string(normalizedRequest), intent.ID,
 		fmtTime(now), fmtTime(now),
 	)
 	if err != nil {
@@ -366,8 +374,8 @@ func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerI
 		Operation:      intent.Operation,
 		Classification: intent.Classification,
 		State:          StatePrepared,
-		RequestDigest:  intent.RequestDigest,
-		RequestJSON:    intent.RequestJSON,
+		RequestDigest:  requestDigest,
+		RequestJSON:    normalizedRequest,
 		RetryOf:        intent.ID,
 		PreparedAt:     now,
 		UpdatedAt:      now,

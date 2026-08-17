@@ -20,6 +20,7 @@ const (
 	ErrorCodeNotFound                  ErrorCode = "effect_not_found"
 	ErrorCodeReconciliationUnsupported ErrorCode = "effect_reconciliation_unsupported"
 	ErrorCodeReconciliationFailed      ErrorCode = "effect_reconciliation_failed"
+	ErrorCodeRequestUnsafe             ErrorCode = "effect_request_unsafe"
 	ErrorCodeRetryApprovalRequired     ErrorCode = "effect_retry_approval_required"
 	ErrorCodeApprovalInvalid           ErrorCode = "effect_approval_invalid"
 	ErrorCodeApprovalExpired           ErrorCode = "effect_approval_expired"
