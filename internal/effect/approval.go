@@ -300,6 +300,9 @@ func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerI
 		return nil, err
 	}
 	requestDigest := digestRequest(normalizedRequest)
+	if requestDigest != intent.RequestDigest {
+		return nil, codedError(ErrorCodeApprovalInvalid, "effect: stored request does not match approval digest", nil)
+	}
 	newID, err := randomID()
 	if err != nil {
 		return nil, err
