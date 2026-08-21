@@ -72,11 +72,15 @@ type fakeProvider struct {
 	profile ProviderProfile
 	result  ProviderResult
 	err     error
+	invoked *bool
 }
 
 func (p *fakeProvider) Profile() ProviderProfile { return p.profile }
 
 func (p *fakeProvider) Invoke(context.Context, *ProviderRequest) (ProviderResult, error) {
+	if p.invoked != nil {
+		*p.invoked = true
+	}
 	return p.result, p.err
 }
 
