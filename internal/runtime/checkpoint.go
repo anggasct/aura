@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -22,6 +23,8 @@ type Checkpoint struct {
 	RunID              string   `json:"run_id"`
 	SessionID          string   `json:"session_id"`
 	TurnID             string   `json:"turn_id"`
+	OwnerID            string   `json:"owner_id"`
+	PrincipalID        string   `json:"principal_id"`
 	Phase              string   `json:"phase"`
 	EventSequence      uint64   `json:"event_sequence"`
 	InputCursor        string   `json:"input_cursor"`
@@ -57,6 +60,7 @@ func (c *Checkpoint) Validate() error {
 	}
 	for name, value := range map[string]string{
 		"run_id": c.RunID, "session_id": c.SessionID, "turn_id": c.TurnID,
+		"owner_id": c.OwnerID, "principal_id": c.PrincipalID,
 		"phase": c.Phase, "input_cursor": c.InputCursor, "policy_version": c.PolicyVersion,
 	} {
 		if strings.TrimSpace(value) == "" {
@@ -94,8 +98,8 @@ func (c *Checkpoint) ValidateResume(validation *ResumeValidation) error {
 	if validation.SessionID != c.SessionID || validation.TurnID != c.TurnID {
 		return codedError(ErrorCodeCheckpointStale, "resume identity does not match checkpoint", nil)
 	}
-	if validation.OwnerID == "" || validation.PrincipalID == "" || validation.OwnerID != validation.PrincipalID {
-		return codedError(ErrorCodePolicyDenied, "resume principal is not the session owner", nil)
+	if validation.OwnerID == "" || validation.PrincipalID == "" || validation.OwnerID != c.OwnerID || validation.PrincipalID != c.PrincipalID {
+		return codedError(ErrorCodePolicyDenied, "resume principal does not match checkpoint identity", nil)
 	}
 	if validation.CapabilityDigest != c.CapabilityDigest || validation.PolicyVersion != c.PolicyVersion {
 		return codedError(ErrorCodeCheckpointStale, "capability or policy binding changed", nil)
@@ -197,12 +201,27 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) err
 		if last < checkpoint.EventSequence {
 			return codedError(ErrorCodeCheckpointStale, "checkpoint boundary is ahead of the event log", nil)
 		}
+		eventID := checkpoint.RunID + ".checkpoint." + strconv.FormatUint(checkpoint.ResumeGeneration, 10)
+		lookup, ok := e.events.(EventLookup)
+		if !ok {
+			return codedError(ErrorCodeStorageUnavailable, "event store cannot verify checkpoint idempotency", nil)
+		}
+		existing, found, err := lookup.LookupEvent(ctx, eventID)
+		if err != nil {
+			return codedError(ErrorCodeStorageUnavailable, "read existing checkpoint event", err)
+		}
+		if found {
+			if existing.Kind == EventKindRunCheckpoint && existing.SessionID == checkpoint.SessionID && existing.TurnID == checkpoint.TurnID && bytes.Equal(existing.Payload, payload) {
+				return nil
+			}
+			return codedError(ErrorCodeCheckpointStale, "checkpoint id is already bound to different state", nil)
+		}
 		sequence, err := e.nextSequence(ctx, checkpoint.SessionID)
 		if err != nil {
 			return codedError(ErrorCodeStorageUnavailable, "allocate checkpoint event sequence", err)
 		}
 		return e.events.Append(ctx, &store.RuntimeEvent{
-			ID:            checkpoint.RunID + ".checkpoint." + strconv.FormatUint(checkpoint.ResumeGeneration, 10),
+			ID:            eventID,
 			SessionID:     checkpoint.SessionID,
 			Sequence:      sequence,
 			TurnID:        checkpoint.TurnID,
@@ -215,6 +234,10 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) err
 			CreatedAt:     time.Now().UTC(),
 		})
 	})
+}
+
+type EventLookup interface {
+	LookupEvent(context.Context, string) (store.RuntimeEvent, bool, error)
 }
 
 func (e *Engine) LoadCheckpoint(ctx context.Context, turnID string) (Checkpoint, error) {

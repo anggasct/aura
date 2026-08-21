@@ -19,6 +19,7 @@ const (
 	ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"
 	ErrorCodeProviderUnavailable   ErrorCode = "provider_unavailable"
 	ErrorCodeResultTooLarge        ErrorCode = "result_too_large"
+	ErrorCodeApprovalInvalid       ErrorCode = "approval_invalid"
 	ErrorCodeShutdownTimeout       ErrorCode = "shutdown_timeout"
 )
 

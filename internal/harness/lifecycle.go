@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/anggasct/aura/internal/approval"
 )
 
 type Phase string
@@ -80,12 +82,10 @@ type PolicyDecision struct {
 	PolicyVersion    string
 	CapabilityDigest string
 	RequiresApproval bool
+	Constraints      approval.Constraints
 }
 
-type Approval struct {
-	GrantID   string
-	ExpiresAt time.Time
-}
+type Approval = approval.ApprovalGrant
 
 type PreparedInvocation struct {
 	Request    CanonicalRequest
@@ -135,6 +135,10 @@ type LiveSink interface {
 	Publish(context.Context, *Event) error
 }
 
+type ApprovalAuthority interface {
+	ValidateAndConsume(context.Context, *approval.ToolRequest, *approval.ApprovalGrant) error
+}
+
 type Phases struct {
 	Admit        func(context.Context, *Request) (Admission, error)
 	Canonicalize func(context.Context, Admission) (CanonicalRequest, error)
@@ -148,9 +152,10 @@ type Phases struct {
 }
 
 type Config struct {
-	MaxArgumentBytes int
-	MaxResultBytes   int
-	Now              func() time.Time
+	MaxArgumentBytes  int
+	MaxResultBytes    int
+	Now               func() time.Time
+	ApprovalAuthority ApprovalAuthority
 }
 
 type Runner struct {
@@ -275,7 +280,7 @@ func (r *Runner) Run(ctx context.Context, req *Request) (Result, error) {
 	if err != nil {
 		return Result{}, r.fail(ctx, req, PhasePolicy, err)
 	}
-	if err := validateDecision(decision); err != nil {
+	if err := validateDecision(&decision); err != nil {
 		return Result{}, r.fail(ctx, req, PhasePolicy, err)
 	}
 	failures, emitErr = r.emit(ctx, req, PhasePolicy, string(decision.Outcome), "")
@@ -283,23 +288,28 @@ func (r *Runner) Run(ctx context.Context, req *Request) (Result, error) {
 		return result, applyErr
 	}
 
-	approval, err := r.phases.Approve(ctx, canonical, decision)
+	grant, err := r.phases.Approve(ctx, canonical, decision)
 	if err != nil {
 		return Result{}, r.fail(ctx, req, PhaseApproval, err)
 	}
-	if err := validateApproval(approval, decision, r.cfg.Now()); err != nil {
+	if err := validateApproval(&grant, &canonical, &decision, r.cfg.Now()); err != nil {
 		return Result{}, r.fail(ctx, req, PhaseApproval, err)
+	}
+	if decision.RequiresApproval {
+		if err := r.consumeApproval(ctx, &canonical, &grant); err != nil {
+			return Result{}, r.fail(ctx, req, PhaseApproval, err)
+		}
 	}
 	failures, emitErr = r.emit(ctx, req, PhaseApproval, string(decision.Outcome), "")
 	if applyErr := r.applyEmission(&result, failures, emitErr); applyErr != nil {
 		return result, applyErr
 	}
 
-	prepared, err := r.phases.Prepare(ctx, canonical, decision, approval)
+	prepared, err := r.phases.Prepare(ctx, canonical, decision, grant)
 	if err != nil {
 		return Result{}, r.fail(ctx, req, PhasePrepare, err)
 	}
-	if err := validatePrepared(&prepared, &canonical, decision, approval); err != nil {
+	if err := validatePrepared(&prepared, &canonical, &decision, &grant); err != nil {
 		return Result{}, r.fail(ctx, req, PhasePrepare, err)
 	}
 	failures, emitErr = r.emit(ctx, req, PhasePrepare, string(decision.Outcome), "")
@@ -482,7 +492,10 @@ func validateCanonical(canonical *CanonicalRequest, admission *Admission, maxByt
 	return nil
 }
 
-func validateDecision(decision PolicyDecision) error {
+func validateDecision(decision *PolicyDecision) error {
+	if decision == nil {
+		return invalidArgument("policy decision must not be nil")
+	}
 	switch decision.Outcome {
 	case OutcomeAllow, OutcomeDeny, OutcomeRequireApproval:
 	default:
@@ -500,27 +513,59 @@ func validateDecision(decision PolicyDecision) error {
 	return nil
 }
 
-func validateApproval(approval Approval, decision PolicyDecision, now time.Time) error {
-	if decision.RequiresApproval && approval.GrantID == "" {
-		return codedError(ErrorCodeLifecycleInvalid, "approved invocation is missing a grant", nil)
+func validateApproval(grant *Approval, canonical *CanonicalRequest, decision *PolicyDecision, now time.Time) error {
+	if grant == nil || canonical == nil || decision == nil {
+		return invalidArgument("approval grant and policy decision must not be nil")
 	}
-	if !decision.RequiresApproval && approval.GrantID != "" {
-		return codedError(ErrorCodeLifecycleInvalid, "denied invocation cannot carry a grant", nil)
+	if !decision.RequiresApproval {
+		if grant.GrantID != "" {
+			return codedError(ErrorCodeLifecycleInvalid, "non-approved invocation cannot carry a grant", nil)
+		}
+		return nil
 	}
-	if decision.RequiresApproval && !approval.ExpiresAt.After(now) {
-		return codedError(ErrorCodeLifecycleInvalid, "approval grant is expired", nil)
+	if grant.GrantID == "" || grant.Nonce == "" {
+		return codedError(ErrorCodeApprovalInvalid, "approved invocation is missing a bound grant", nil)
+	}
+	request := approvalRequest(canonical)
+	if err := grant.ValidFor(request, decision.PolicyVersion, now); err != nil {
+		return codedError(ErrorCodeApprovalInvalid, "approval grant binding is invalid", err)
+	}
+	if !grant.ExpiresAt.After(now) || grant.Constraints != decision.Constraints {
+		return codedError(ErrorCodeApprovalInvalid, "approval grant constraints or expiry are invalid", nil)
 	}
 	return nil
 }
 
-func validatePrepared(prepared *PreparedInvocation, canonical *CanonicalRequest, decision PolicyDecision, approval Approval) error {
-	if prepared == nil || canonical == nil {
+func approvalRequest(canonical *CanonicalRequest) *approval.ToolRequest {
+	return &approval.ToolRequest{
+		RequestID:    canonical.Admission.Request.InvocationID,
+		TurnID:       canonical.Admission.Request.TurnID,
+		SessionID:    canonical.Admission.Request.SessionID,
+		PrincipalID:  canonical.Admission.Request.PrincipalID,
+		ToolName:     canonical.Admission.Request.ToolName,
+		Arguments:    canonical.Arguments,
+		Capabilities: []string{canonical.Admission.Request.Capability},
+	}
+}
+
+func (r *Runner) consumeApproval(ctx context.Context, canonical *CanonicalRequest, grant *Approval) error {
+	if r.cfg.ApprovalAuthority == nil {
+		return codedError(ErrorCodeApprovalInvalid, "approval authority is not configured", nil)
+	}
+	if err := r.cfg.ApprovalAuthority.ValidateAndConsume(ctx, approvalRequest(canonical), grant); err != nil {
+		return codedError(ErrorCodeApprovalInvalid, "approval authority rejected grant", err)
+	}
+	return nil
+}
+
+func validatePrepared(prepared *PreparedInvocation, canonical *CanonicalRequest, decision *PolicyDecision, grant *Approval) error {
+	if prepared == nil || canonical == nil || decision == nil || grant == nil {
 		return invalidArgument("prepared invocation and canonical request must not be nil")
 	}
-	if !sameCanonical(&prepared.Request, canonical) || prepared.Decision != decision || prepared.Approval != approval {
+	if !sameCanonical(&prepared.Request, canonical) || prepared.Decision != *decision || prepared.Approval != *grant {
 		return codedError(ErrorCodeLifecycleInvalid, "prepared invocation changed a bound value", nil)
 	}
-	wantExecutable := (decision.Outcome == OutcomeAllow || decision.Outcome == OutcomeRequireApproval) && (!decision.RequiresApproval || approval.GrantID != "")
+	wantExecutable := (decision.Outcome == OutcomeAllow || decision.Outcome == OutcomeRequireApproval) && (!decision.RequiresApproval || grant.GrantID != "")
 	if prepared.Executable != wantExecutable {
 		return codedError(ErrorCodeLifecycleInvalid, "prepared invocation has an invalid execution gate", nil)
 	}

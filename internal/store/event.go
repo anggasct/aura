@@ -80,6 +80,27 @@ func (s *sqliteEventStore) LastSequence(ctx context.Context, sessionID string) (
 	return sequenceFromDB(seq.Int64)
 }
 
+func (s *sqliteEventStore) LookupEvent(ctx context.Context, id string) (RuntimeEvent, bool, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+selectRuntimeEventColumns+` FROM runtime_event WHERE id = ?`, id,
+	)
+	if err != nil {
+		return RuntimeEvent{}, false, fmt.Errorf("lookup event %s: %w", id, err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return RuntimeEvent{}, false, fmt.Errorf("lookup event %s: %w", id, err)
+		}
+		return RuntimeEvent{}, false, nil
+	}
+	event, err := scanRuntimeEvent(rows)
+	if err != nil {
+		return RuntimeEvent{}, false, err
+	}
+	return event, true, nil
+}
+
 // sequenceToDB and sequenceFromDB bridge the uint64 domain counter and the
 // signed INTEGER column. Out-of-range values are rejected rather than wrapped,
 // so a corrupt row can never present itself as a valid ordering position.

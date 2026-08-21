@@ -17,6 +17,8 @@ func checkpointFixture(eventSequence uint64) *Checkpoint {
 		RunID:              "run-1",
 		SessionID:          "session-1",
 		TurnID:             "turn-1",
+		OwnerID:            "user-1",
+		PrincipalID:        "user-1",
 		Phase:              "awaiting_approval",
 		EventSequence:      eventSequence,
 		InputCursor:        "cursor-1",
@@ -114,6 +116,24 @@ func TestSaveCheckpointRejectsFutureBoundary(t *testing.T) {
 	}
 }
 
+func TestSaveCheckpointRejectsMutatedRetry(t *testing.T) {
+	engine, _, _, last := checkpointRuntime(t)
+	checkpoint := checkpointFixture(last)
+	if err := engine.SaveCheckpoint(context.Background(), checkpoint); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	if err := engine.SaveCheckpoint(context.Background(), checkpoint); err != nil {
+		t.Fatalf("SaveCheckpoint idempotent retry: %v", err)
+	}
+	mutated := *checkpoint
+	mutated.StateDigest = strings.Repeat("c", 64)
+	if err := engine.SaveCheckpoint(context.Background(), &mutated); err == nil {
+		t.Fatal("SaveCheckpoint accepted a mutated retry")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCheckpointStale {
+		t.Fatalf("CodeOf(%v) = %q, %v; want checkpoint_stale", err, code, ok)
+	}
+}
+
 func TestValidateResumeRejectsChangedState(t *testing.T) {
 	checkpoint := checkpointFixture(42)
 	cases := []struct {
@@ -140,6 +160,18 @@ func TestValidateResumeRejectsChangedState(t *testing.T) {
 				t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, code, ok, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateResumeRejectsMatchingAttackerIdentity(t *testing.T) {
+	checkpoint := checkpointFixture(42)
+	validation := validResumeValidation(checkpoint, checkpoint.EventSequence)
+	validation.OwnerID = "attacker"
+	validation.PrincipalID = "attacker"
+	if err := checkpoint.ValidateResume(validation); err == nil {
+		t.Fatal("ValidateResume accepted an attacker-controlled identity pair")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodePolicyDenied {
+		t.Fatalf("CodeOf(%v) = %q, %v; want policy_denied", err, code, ok)
 	}
 }
 

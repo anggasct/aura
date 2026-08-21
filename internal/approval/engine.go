@@ -150,23 +150,30 @@ func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 	return grant, nil
 }
 
+func (e *Engine) ValidateAndConsume(ctx context.Context, request *ToolRequest, grant *ApprovalGrant) error {
+	if request == nil {
+		return Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
+	if grant == nil {
+		return Errorf(ErrorCodeInvalidArgument, "grant must not be nil")
+	}
+	if err := grant.ValidFor(request, e.policy.Version, e.now()); err != nil {
+		return err
+	}
+	if !e.consumeNonce(grant.Nonce) {
+		return Errorf(ErrorCodeApprovalInvalid, "grant nonce was already consumed or is unknown")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Execute runs the tool only when the grant is valid for the request and
 // current policy, and the one-shot nonce has not been consumed. The handler
 // receives the decision constraints and never re-decides policy.
 func (e *Engine) Execute(ctx context.Context, request *ToolRequest, grant *ApprovalGrant) (ToolResult, error) {
-	if request == nil {
-		return ToolResult{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
-	}
-	if grant == nil {
-		return ToolResult{}, Errorf(ErrorCodeInvalidArgument, "grant must not be nil")
-	}
-	if err := grant.ValidFor(request, e.policy.Version, e.now()); err != nil {
-		return ToolResult{}, err
-	}
-	if !e.consumeNonce(grant.Nonce) {
-		return ToolResult{}, Errorf(ErrorCodeApprovalInvalid, "grant nonce was already consumed or is unknown")
-	}
-	if err := ctx.Err(); err != nil {
+	if err := e.ValidateAndConsume(ctx, request, grant); err != nil {
 		return ToolResult{}, err
 	}
 	return e.handler(ctx, *request, grant.Constraints)

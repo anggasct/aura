@@ -18,6 +18,7 @@ func TestGradeTraceEnforcesTrajectoryAndPolicySignals(t *testing.T) {
 	grade := GradeTrace(trace, &TraceExpectation{
 		Profile:        "exec-linux",
 		Outcome:        "completed",
+		ExpectedKinds:  []string{"turn.accepted", "tool.requested", "tool.completed", "turn.completed"},
 		RequiredKinds:  []string{"tool.requested", "tool.completed"},
 		ForbiddenKinds: []string{"policy.bypass"},
 		MinScore:       100,
@@ -30,6 +31,27 @@ func TestGradeTraceEnforcesTrajectoryAndPolicySignals(t *testing.T) {
 	failed := GradeTrace(trace, &TraceExpectation{Profile: "exec-linux", Outcome: "completed", MinScore: 100})
 	if failed.Passed || len(failed.Failures) == 0 {
 		t.Fatalf("failed grade = %+v, want failure evidence", failed)
+	}
+}
+
+func TestGradeTraceRejectsExtraAndReorderedSteps(t *testing.T) {
+	trace := NewTrace("core", "completed", []store.RuntimeEvent{
+		{Sequence: 1, Kind: "turn.accepted"},
+		{Sequence: 2, Kind: "tool.completed"},
+		{Sequence: 3, Kind: "tool.requested"},
+		{Sequence: 4, Kind: "turn.completed"},
+	})
+	want := []string{"turn.accepted", "tool.requested", "tool.completed", "turn.completed"}
+	grade := GradeTrace(trace, &TraceExpectation{Profile: "core", Outcome: "completed", ExpectedKinds: want, MinScore: 100})
+	if grade.Passed {
+		t.Fatalf("grade = %+v, want reordered trajectory rejected", grade)
+	}
+	trace.Events = append(trace.Events, store.RuntimeEvent{Sequence: 5, Kind: "unexpected"})
+	grade = GradeTrace(trace, &TraceExpectation{Profile: "core", Outcome: "completed", ExpectedKinds: []string{
+		"turn.accepted", "tool.completed", "tool.requested", "turn.completed",
+	}, MinScore: 100})
+	if grade.Passed {
+		t.Fatalf("grade = %+v, want extra trajectory step rejected", grade)
 	}
 }
 

@@ -13,6 +13,8 @@ type SessionRegistry struct {
 	mu       sync.Mutex
 	sessions map[string]ProviderSession
 	closing  bool
+	failed   bool
+	closed   bool
 }
 
 func NewSessionRegistry() *SessionRegistry {
@@ -25,7 +27,7 @@ func (r *SessionRegistry) Register(id string, session ProviderSession) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closing {
+	if r.closing || r.failed || r.closed {
 		return codedError(ErrorCodeShutdownTimeout, "provider session registry is closing", nil)
 	}
 	if _, exists := r.sessions[id]; exists {
@@ -49,21 +51,28 @@ func (r *SessionRegistry) Close(ctx context.Context) error {
 		return invalidArgument("session registry and context must not be nil")
 	}
 	r.mu.Lock()
-	if r.closing {
+	if r.closed {
 		r.mu.Unlock()
 		return nil
 	}
+	if r.closing {
+		r.mu.Unlock()
+		return codedError(ErrorCodeShutdownTimeout, "provider session registry is already closing", nil)
+	}
 	r.closing = true
-	sessions := make([]ProviderSession, 0, len(r.sessions))
-	for _, session := range r.sessions {
-		sessions = append(sessions, session)
+	sessions := make(map[string]ProviderSession, len(r.sessions))
+	for id, session := range r.sessions {
+		sessions[id] = session
 	}
 	r.mu.Unlock()
 
 	var failures []error
-	for _, session := range sessions {
+	closed := make([]string, 0, len(sessions))
+	for id, session := range sessions {
 		if err := session.Close(ctx); err != nil {
 			failures = append(failures, err)
+		} else {
+			closed = append(closed, id)
 		}
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, codedError(ErrorCodeShutdownTimeout, "provider session close timed out", err))
@@ -71,7 +80,12 @@ func (r *SessionRegistry) Close(ctx context.Context) error {
 		}
 	}
 	r.mu.Lock()
-	clear(r.sessions)
+	for _, id := range closed {
+		delete(r.sessions, id)
+	}
+	r.failed = len(failures) > 0
+	r.closed = len(failures) == 0 && len(r.sessions) == 0
+	r.closing = false
 	r.mu.Unlock()
 	if len(failures) > 0 {
 		return errors.Join(failures...)

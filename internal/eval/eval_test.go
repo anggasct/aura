@@ -126,6 +126,7 @@ func TestGradeTraceScoresToolApprovalHandoffAndContinuationSignals(t *testing.T)
 	})
 	grade := GradeTrace(trace, &TraceExpectation{
 		Profile: "core", Outcome: "completed", MinScore: 100,
+		ExpectedKinds:  []string{"tool.requested", "approval.required", "tool.completed", "handoff.completed", "continuation.started", "turn.completed"},
 		RequiredKinds:  []string{"tool.requested", "approval.required", "tool.completed", "handoff.completed", "continuation.started", "turn.completed"},
 		ForbiddenKinds: []string{"policy.bypass"},
 	})

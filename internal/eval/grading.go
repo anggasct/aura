@@ -16,6 +16,7 @@ type Trace struct {
 type TraceExpectation struct {
 	Profile        string
 	Outcome        string
+	ExpectedKinds  []string
 	RequiredKinds  []string
 	ForbiddenKinds []string
 	MinScore       int
@@ -60,6 +61,10 @@ func GradeTrace(trace Trace, expectation *TraceExpectation) TraceGrade {
 	if !monotonic(trace.Events) {
 		grade.Score -= 25
 		grade.Failures = append(grade.Failures, "event sequence is not monotonic")
+	}
+	if want.ExpectedKinds != nil && !slices.Equal(eventKinds(trace.Events), want.ExpectedKinds) {
+		grade.Score -= 25
+		grade.Failures = append(grade.Failures, "event trajectory does not match expected order")
 	}
 	for _, kind := range want.RequiredKinds {
 		if !containsKind(trace.Events, kind) {
@@ -117,4 +122,12 @@ func containsKind(events []store.RuntimeEvent, kind string) bool {
 		}
 	}
 	return false
+}
+
+func eventKinds(events []store.RuntimeEvent) []string {
+	kinds := make([]string, len(events))
+	for i := range events {
+		kinds[i] = events[i].Kind
+	}
+	return kinds
 }

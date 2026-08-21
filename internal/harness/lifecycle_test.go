@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/approval"
 )
 
 type recordingDurable struct {
@@ -34,6 +37,27 @@ type recordingLive struct {
 	events []Event
 	order  *[]string
 	fail   bool
+}
+
+type testApprovalAuthority struct {
+	mu   sync.Mutex
+	used map[string]struct{}
+}
+
+func (a *testApprovalAuthority) ValidateAndConsume(ctx context.Context, request *approval.ToolRequest, grant *approval.ApprovalGrant) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := grant.ValidFor(request, "policy-1", time.Unix(100, 0).UTC()); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, exists := a.used[grant.Nonce]; exists {
+		return errors.New("approval nonce already consumed")
+	}
+	a.used[grant.Nonce] = struct{}{}
+	return nil
 }
 
 func (s *recordingLive) Publish(_ context.Context, event *Event) error {
@@ -116,7 +140,10 @@ func phasesFor(calls *[]Phase, execute func(context.Context, PreparedInvocation)
 
 func newTestRunner(t *testing.T, phases Phases, durable DurableSink, live LiveSink) *Runner {
 	t.Helper()
-	runner, err := NewRunner(Config{Now: func() time.Time { return time.Unix(100, 0).UTC() }}, phases, durable, live)
+	runner, err := NewRunner(Config{
+		Now:               func() time.Time { return time.Unix(100, 0).UTC() },
+		ApprovalAuthority: &testApprovalAuthority{used: make(map[string]struct{})},
+	}, phases, durable, live)
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
 	}
@@ -206,7 +233,18 @@ func TestRunnerApprovalGrantOpensExecutionGate(t *testing.T) {
 	}
 	phases.Approve = func(_ context.Context, _ CanonicalRequest, _ PolicyDecision) (Approval, error) {
 		calls = append(calls, PhaseApproval)
-		return Approval{GrantID: "grant-1", ExpiresAt: time.Unix(101, 0).UTC()}, nil
+		request := testRequest()
+		return Approval{
+			GrantID:          "grant-1",
+			PrincipalID:      request.PrincipalID,
+			SessionID:        request.SessionID,
+			ToolName:         request.ToolName,
+			ArgumentsHash:    approval.HashArguments(request.Arguments),
+			CapabilitiesHash: approval.HashCapabilities([]string{request.Capability}),
+			PolicyVersion:    "policy-1",
+			ExpiresAt:        time.Unix(101, 0).UTC(),
+			Nonce:            "nonce-1",
+		}, nil
 	}
 	durable := &recordingDurable{failAt: -1}
 	runner := newTestRunner(t, phases, durable, nil)
@@ -217,6 +255,105 @@ func TestRunnerApprovalGrantOpensExecutionGate(t *testing.T) {
 	}
 	if !executed || result.Settlement.State != StateSucceeded {
 		t.Fatalf("executed = %v, settlement = %q; want successful execution", executed, result.Settlement.State)
+	}
+}
+
+func TestRunnerRejectsApprovalMutationAndSecondUse(t *testing.T) {
+	validGrant := func(request CanonicalRequest, decision PolicyDecision) Approval {
+		return Approval{
+			GrantID:          "grant-bound",
+			PrincipalID:      request.Admission.Request.PrincipalID,
+			SessionID:        request.Admission.Request.SessionID,
+			ToolName:         request.Admission.Request.ToolName,
+			ArgumentsHash:    approval.HashArguments(request.Arguments),
+			CapabilitiesHash: approval.HashCapabilities([]string{request.Admission.Request.Capability}),
+			Constraints:      decision.Constraints,
+			PolicyVersion:    decision.PolicyVersion,
+			ExpiresAt:        time.Unix(101, 0).UTC(),
+			Nonce:            "nonce-bound",
+		}
+	}
+
+	newPhases := func(grant func(CanonicalRequest, PolicyDecision) Approval) Phases {
+		var calls []Phase
+		phases := phasesFor(&calls, func(context.Context, PreparedInvocation) (Execution, error) {
+			return Execution{State: StateSucceeded}, nil
+		})
+		phases.Policy = func(_ context.Context, _ CanonicalRequest) (PolicyDecision, error) {
+			return PolicyDecision{Outcome: OutcomeRequireApproval, PolicyVersion: "policy-1", CapabilityDigest: "capability-1", RequiresApproval: true}, nil
+		}
+		phases.Approve = func(_ context.Context, request CanonicalRequest, decision PolicyDecision) (Approval, error) {
+			return grant(request, decision), nil
+		}
+		return phases
+	}
+
+	runner := newTestRunner(t, newPhases(validGrant), &recordingDurable{failAt: -1}, nil)
+	if _, err := runner.Run(context.Background(), testRequest()); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	if _, err := runner.Run(context.Background(), testRequest()); err == nil {
+		t.Fatal("second Run accepted a consumed approval grant")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid", err, code, ok)
+	}
+
+	attackerRunner := newTestRunner(t, newPhases(func(request CanonicalRequest, decision PolicyDecision) Approval {
+		grant := validGrant(request, decision)
+		grant.PrincipalID = "attacker"
+		return grant
+	}), &recordingDurable{failAt: -1}, nil)
+	if _, err := attackerRunner.Run(context.Background(), testRequest()); err == nil {
+		t.Fatal("Run accepted a grant bound to another principal")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid", err, code, ok)
+	}
+}
+
+func TestRunnerUsesApprovalAuthorityForCrossRunnerNonceConsumption(t *testing.T) {
+	authority, err := approval.NewEngine(approval.Policy{
+		Version: "policy-1",
+		Rules: map[string]approval.Rule{
+			"read": {ToolName: "read", RequiresApproval: true},
+		},
+	}, func(context.Context, approval.ToolRequest, approval.Constraints) (approval.ToolResult, error) {
+		return approval.ToolResult{}, nil
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	request := testRequest()
+	toolRequest := approval.ToolRequest{
+		RequestID: "invocation-1", TurnID: request.TurnID, SessionID: request.SessionID, PrincipalID: request.PrincipalID,
+		ToolName: request.ToolName, Arguments: request.Arguments, Capabilities: []string{request.Capability}, Trust: approval.TrustOwnerInput,
+	}
+	grant, err := authority.Grant(context.Background(), &toolRequest, time.Minute)
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	phases := phasesFor(&[]Phase{}, func(context.Context, PreparedInvocation) (Execution, error) {
+		return Execution{State: StateSucceeded}, nil
+	})
+	phases.Policy = func(context.Context, CanonicalRequest) (PolicyDecision, error) {
+		return PolicyDecision{Outcome: OutcomeRequireApproval, PolicyVersion: "policy-1", CapabilityDigest: "capability-1", RequiresApproval: true}, nil
+	}
+	phases.Approve = func(context.Context, CanonicalRequest, PolicyDecision) (Approval, error) {
+		return grant, nil
+	}
+	newRunner := func() *Runner {
+		runner, runnerErr := NewRunner(Config{ApprovalAuthority: authority}, phases, &recordingDurable{failAt: -1}, nil)
+		if runnerErr != nil {
+			t.Fatalf("NewRunner: %v", runnerErr)
+		}
+		return runner
+	}
+	if _, err := newRunner().Run(context.Background(), request); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	if _, err := newRunner().Run(context.Background(), request); err == nil {
+		t.Fatal("second runner accepted a consumed approval nonce")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
+		t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid", err, code, ok)
 	}
 }
 

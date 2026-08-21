@@ -131,11 +131,15 @@ func TestSessionRegistryReturnsCloseFailures(t *testing.T) {
 	if err := registry.Close(context.Background()); err == nil {
 		t.Fatal("Close returned nil after provider failure")
 	}
+	if registry.Count() != 1 {
+		t.Fatalf("provider session count = %d, want failed session retained", registry.Count())
+	}
 }
 
 func TestSessionRegistryReportsShutdownTimeout(t *testing.T) {
 	registry := NewSessionRegistry()
-	if err := registry.Register("provider-1", &fakeProviderSession{wait: true}); err != nil {
+	session := &fakeProviderSession{wait: true}
+	if err := registry.Register("provider-1", session); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -144,5 +148,15 @@ func TestSessionRegistryReportsShutdownTimeout(t *testing.T) {
 		t.Fatal("Close returned nil after context cancellation")
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeShutdownTimeout {
 		t.Fatalf("CodeOf(%v) = %q, %v; want shutdown_timeout", err, code, ok)
+	}
+	if registry.Count() != 1 {
+		t.Fatalf("provider session count = %d, want timed-out session retained", registry.Count())
+	}
+	session.wait = false
+	if err := registry.Close(context.Background()); err != nil {
+		t.Fatalf("Close retry: %v", err)
+	}
+	if registry.Count() != 0 {
+		t.Fatalf("provider session count after retry = %d, want 0", registry.Count())
 	}
 }
