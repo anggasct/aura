@@ -19,6 +19,10 @@ const (
 	ErrorCodeBudgetExhausted            ErrorCode = "budget_exhausted"
 	ErrorCodeRuntimeInternal            ErrorCode = "runtime_internal"
 	ErrorCodeInvalidArgument            ErrorCode = "invalid_argument"
+	ErrorCodeCheckpointInvalid          ErrorCode = "checkpoint_invalid"
+	ErrorCodeCheckpointNotFound         ErrorCode = "checkpoint_not_found"
+	ErrorCodeCheckpointStale            ErrorCode = "checkpoint_stale"
+	ErrorCodeCheckpointUnsupported      ErrorCode = "checkpoint_unsupported"
 )
 
 // Retryable reports whether a caller may resubmit the same work after this
