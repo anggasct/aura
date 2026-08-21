@@ -43,7 +43,8 @@ func TestShutdownCoordinatorClosesResourcesInStableOrder(t *testing.T) {
 
 func TestShutdownCoordinatorReportsNonCleanTimeout(t *testing.T) {
 	coordinator := NewShutdownCoordinator()
-	if err := coordinator.Register("child-process", &closeProbe{block: true}); err != nil {
+	probe := &closeProbe{block: true, done: make(chan struct{})}
+	if err := coordinator.Register("child-process", probe); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -54,5 +55,10 @@ func TestShutdownCoordinatorReportsNonCleanTimeout(t *testing.T) {
 	}
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeShutdownTimeout {
 		t.Fatalf("CodeOf(%v) = %q, %v; want shutdown_timeout", err, code, ok)
+	}
+	probe.block = false
+	report, err = coordinator.Shutdown(context.Background())
+	if err != nil || !report.Clean {
+		t.Fatalf("retry report=%+v err=%v, want clean retry", report, err)
 	}
 }

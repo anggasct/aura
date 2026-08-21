@@ -22,6 +22,7 @@ type ShutdownCoordinator struct {
 	mu        sync.Mutex
 	resources map[string]ShutdownResource
 	closing   bool
+	closed    bool
 }
 
 func NewShutdownCoordinator() *ShutdownCoordinator {
@@ -34,7 +35,7 @@ func (c *ShutdownCoordinator) Register(name string, resource ShutdownResource) e
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closing {
+	if c.closing || c.closed {
 		return codedError(ErrorCodeShutdownTimeout, "shutdown has already started", nil)
 	}
 	if _, exists := c.resources[name]; exists {
@@ -49,9 +50,13 @@ func (c *ShutdownCoordinator) Shutdown(ctx context.Context) (ShutdownReport, err
 		return ShutdownReport{}, invalidArgument("shutdown coordinator and context must not be nil")
 	}
 	c.mu.Lock()
-	if c.closing {
+	if c.closed {
 		c.mu.Unlock()
 		return ShutdownReport{Clean: true}, nil
+	}
+	if c.closing {
+		c.mu.Unlock()
+		return ShutdownReport{}, codedError(ErrorCodeShutdownTimeout, "shutdown is already in progress", nil)
 	}
 	c.closing = true
 	names := make([]string, 0, len(c.resources))
@@ -85,6 +90,15 @@ func (c *ShutdownCoordinator) Shutdown(ctx context.Context) (ShutdownReport, err
 		report.Closed = append(report.Closed, name)
 	}
 	report.Clean = len(failures) == 0 && len(report.Closed) == len(names)
+	c.mu.Lock()
+	for _, name := range report.Closed {
+		delete(c.resources, name)
+	}
+	c.closing = false
+	remaining := len(c.resources)
+	report.Clean = report.Clean && remaining == 0
+	c.closed = report.Clean
+	c.mu.Unlock()
 	if len(failures) == 0 {
 		return report, nil
 	}
