@@ -308,3 +308,57 @@ func TestRunnerRejectsChangedCanonicalDigest(t *testing.T) {
 		t.Fatalf("CodeOf(%v) = %q, %v; want lifecycle_invalid", err, code, ok)
 	}
 }
+
+func TestRunnerFailureOutcomesCannotBypassThePhaseContract(t *testing.T) {
+	t.Run("approval failure", func(t *testing.T) {
+		var calls []Phase
+		phases := phasesFor(&calls, func(context.Context, PreparedInvocation) (Execution, error) {
+			t.Fatal("provider executed after approval failure")
+			return Execution{}, nil
+		})
+		phases.Approve = func(context.Context, CanonicalRequest, PolicyDecision) (Approval, error) {
+			calls = append(calls, PhaseApproval)
+			return Approval{}, errors.New("approval service unavailable")
+		}
+		runner := newTestRunner(t, phases, &recordingDurable{failAt: -1}, nil)
+		if _, err := runner.Run(context.Background(), testRequest()); err == nil {
+			t.Fatal("Run returned nil after approval failure")
+		}
+		if reflect.DeepEqual(calls, append(phaseOrder[:4], PhasePrepare)) {
+			t.Fatal("approval failure reached prepare")
+		}
+	})
+
+	t.Run("provider failure normalizes to terminal failure", func(t *testing.T) {
+		var calls []Phase
+		phases := phasesFor(&calls, func(context.Context, PreparedInvocation) (Execution, error) {
+			return Execution{}, errors.New("provider unavailable")
+		})
+		runner := newTestRunner(t, phases, &recordingDurable{failAt: -1}, nil)
+		result, err := runner.Run(context.Background(), testRequest())
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if result.Settlement.State != StateFailed {
+			t.Fatalf("settlement state = %q, want failed", result.Settlement.State)
+		}
+	})
+
+	t.Run("expired deadline skips provider", func(t *testing.T) {
+		var calls []Phase
+		phases := phasesFor(&calls, func(context.Context, PreparedInvocation) (Execution, error) {
+			t.Fatal("provider executed after deadline")
+			return Execution{}, nil
+		})
+		runner := newTestRunner(t, phases, &recordingDurable{failAt: -1}, nil)
+		req := testRequest()
+		req.Deadline = time.Unix(1, 0).UTC()
+		result, err := runner.Run(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if result.Settlement.State != StateCancelled {
+			t.Fatalf("settlement state = %q, want cancelled", result.Settlement.State)
+		}
+	})
+}

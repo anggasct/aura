@@ -101,11 +101,8 @@ type Result struct {
 // Output beyond MaxOutputBytes is truncated and reported in Result.
 //
 // Run is the low-level harness: it enforces process-group, environment,
-// working-directory, output, and timeout bounds. It does not apply
-// kernel-level filesystem or syscall denial, and it does not itself gate on
-// the mandatory primitives. Callers that advertise an effectful capability
-// must gate with Require on the Negotiate result before reaching Run, so a
-// host missing a mandatory primitive never executes an effectful child.
+// working-directory, output, and timeout bounds. It refuses to execute when a
+// mandatory kernel primitive is unavailable.
 func Run(ctx context.Context, spec *Spec, command string, args ...string) (Result, error) {
 	if spec == nil {
 		return Result{}, Errorf(ErrorCodeInvalidArgument, "spec must not be nil")
@@ -115,6 +112,9 @@ func Run(ctx context.Context, spec *Spec, command string, args ...string) (Resul
 	}
 	primitives, err := negotiate()
 	if err != nil {
+		return Result{}, err
+	}
+	if err := Require(primitives); err != nil {
 		return Result{}, err
 	}
 	return run(ctx, spec, primitives, command, args...)

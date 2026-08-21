@@ -130,6 +130,39 @@ func (f resolverFunc) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 	return f(ctx, host)
 }
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestValidatingTransportPinsTheValidatedDestination(t *testing.T) {
+	calls := 0
+	resolver := resolverFunc(func(context.Context, string) ([]net.IP, error) {
+		calls++
+		return []net.IP{mustParseIP(t, "93.184.216.34")}, nil
+	})
+	transport := &validatingTransport{
+		resolver: resolver,
+		next: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			destination, ok := destinationFromContext(req.Context())
+			if !ok || !destination.IP.Equal(mustParseIP(t, "93.184.216.34")) {
+				t.Fatalf("request destination = %+v, ok=%v; want pinned public IP", destination, ok)
+			}
+			return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody, Request: req}, nil
+		}),
+	}
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "https://public.example/path", http.NoBody)
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	_ = resp.Body.Close()
+	if calls != 1 {
+		t.Fatalf("resolver calls = %d, want one validation lookup", calls)
+	}
+}
+
 func TestPinnedDialerDeniesPrivateResolution(t *testing.T) {
 	resolver := staticResolver{"rebind.example": {mustParseIP(t, "10.0.0.5")}}
 	dialer := PinnedDialer{Resolver: resolver}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"github.com/anggasct/aura/internal/capability"
 )
 
 const maxProviderArgumentBytes = 1 << 20
@@ -38,7 +40,7 @@ func InvokeProvider(ctx context.Context, provider Provider, request *ProviderReq
 		return ProviderResult{}, invalidArgument("provider invocation requires context, provider, and request")
 	}
 	profile := provider.Profile()
-	if strings.TrimSpace(profile.Name) == "" || strings.TrimSpace(profile.Capability) == "" || profile.MaxResultBytes <= 0 {
+	if strings.TrimSpace(profile.Name) == "" || strings.TrimSpace(profile.Capability) == "" || profile.MaxResultBytes <= 0 || !capability.Profile(profile.BuildProfile).Valid() {
 		return ProviderResult{}, codedError(ErrorCodeProviderUnavailable, "provider profile is invalid", nil)
 	}
 	if request.Descriptor.Capability != profile.Capability {

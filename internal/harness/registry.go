@@ -7,9 +7,7 @@ import (
 	"sync"
 )
 
-type ProviderSession interface {
-	Close(context.Context) error
-}
+type ProviderSession = ShutdownResource
 
 type SessionRegistry struct {
 	mu       sync.Mutex
