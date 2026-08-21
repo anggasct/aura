@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -52,6 +53,41 @@ func TestGradeTraceRejectsExtraAndReorderedSteps(t *testing.T) {
 	}, MinScore: 100})
 	if grade.Passed {
 		t.Fatalf("grade = %+v, want extra trajectory step rejected", grade)
+	}
+}
+
+func TestGradeTraceEnforcesIdentityAndPayloadSignals(t *testing.T) {
+	event := func(sequence uint64, kind string, payload string) store.RuntimeEvent {
+		return store.RuntimeEvent{
+			Sequence: sequence, Kind: kind, SessionID: "session-1", TurnID: "turn-1", InvocationID: "invocation-1", Author: "owner",
+			Payload: json.RawMessage(payload),
+		}
+	}
+	trace := NewTrace("core", "completed", []store.RuntimeEvent{
+		event(1, "tool.requested", `{"tool_name":"files.read","policy":"policy-1"}`),
+		event(2, "approval.required", `{"grant_id":"grant-1"}`),
+		event(3, "handoff.completed", `{"target":"researcher"}`),
+		event(4, "continuation.started", `{"turn":"turn-2"}`),
+		event(5, "turn.completed", `{"outcome":"completed"}`),
+	})
+	want := &TraceExpectation{
+		Profile: "core", Outcome: "completed", MinScore: 100,
+		Identity: &TraceIdentity{SessionID: "session-1", TurnID: "turn-1", InvocationID: "invocation-1", Author: "owner"},
+		RequiredSignals: []TraceSignal{
+			{Kind: "tool.requested", PayloadFields: map[string]string{"tool_name": "files.read", "policy": "policy-1"}},
+			{Kind: "approval.required", PayloadFields: map[string]string{"grant_id": "grant-1"}},
+			{Kind: "handoff.completed", PayloadFields: map[string]string{"target": "researcher"}},
+			{Kind: "continuation.started", PayloadFields: map[string]string{"turn": "turn-2"}},
+			{Kind: "turn.completed", PayloadFields: map[string]string{"outcome": "completed"}},
+		},
+		ForbiddenSignals: []TraceSignal{{Kind: "policy.bypass"}},
+	}
+	if grade := GradeTrace(trace, want); !grade.Passed {
+		t.Fatalf("grade = %+v, want passing identity and signal checks", grade)
+	}
+	trace.Events[0].Payload = json.RawMessage(`{"tool_name":"shell.exec","policy":"policy-1"}`)
+	if grade := GradeTrace(trace, want); grade.Passed {
+		t.Fatalf("grade = %+v, want wrong tool choice rejected", grade)
 	}
 }
 

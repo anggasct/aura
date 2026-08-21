@@ -101,6 +101,49 @@ func (s *sqliteEventStore) LookupEvent(ctx context.Context, id string) (RuntimeE
 	return event, true, nil
 }
 
+func (s *sqliteEventStore) AppendCheckpoint(ctx context.Context, event *RuntimeEvent) error {
+	if event == nil {
+		return errNilArgument("event")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return classifyBusy(fmt.Errorf("begin checkpoint append: %w", err))
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var sessionID, turnID, invocationID, branch, author, kind, payload string
+	var schemaVersion int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT session_id, turn_id, invocation_id, branch, author, kind, schema_version, payload_json
+		FROM runtime_event WHERE id = ?`, event.ID,
+	).Scan(&sessionID, &turnID, &invocationID, &branch, &author, &kind, &schemaVersion, &payload)
+	if err == nil {
+		existingSchemaVersion, schemaErr := schemaVersionFromDB(schemaVersion)
+		if schemaErr != nil {
+			return schemaErr
+		}
+		if sessionID == event.SessionID && turnID == event.TurnID && invocationID == event.InvocationID &&
+			branch == event.Branch && author == event.Author && kind == event.Kind &&
+			existingSchemaVersion == event.SchemaVersion && payload == string(event.Payload) {
+			return nil
+		}
+		return &Error{
+			Code:   ErrorCodeEventSequenceConflict,
+			Detail: fmt.Sprintf("event %s is already bound to different checkpoint state", event.ID),
+		}
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return classifyBusy(fmt.Errorf("lookup checkpoint event %s: %w", event.ID, err))
+	}
+	if err := AppendEventTx(ctx, tx, event); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return classifyBusy(fmt.Errorf("commit checkpoint append: %w", err))
+	}
+	return nil
+}
+
 // sequenceToDB and sequenceFromDB bridge the uint64 domain counter and the
 // signed INTEGER column. Out-of-range values are rejected rather than wrapped,
 // so a corrupt row can never present itself as a valid ordering position.

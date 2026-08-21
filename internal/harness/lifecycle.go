@@ -391,14 +391,57 @@ func (r *Runner) fail(ctx context.Context, req *Request, phase Phase, cause erro
 	if coded, ok := CodeOf(cause); ok {
 		code = coded
 	}
-	_, emitErr := r.emit(context.WithoutCancel(ctx), req, phase, "", "", string(code))
-	if emitErr != nil {
-		if liveCode, ok := CodeOf(emitErr); ok && liveCode == ErrorCodeLivePublishFailed {
-			return cause
+	_, phaseEmitErr := r.emit(ctx, req, phase, "", "", string(code))
+	terminalEmitErr := r.emitTerminal(ctx, req, phase, code)
+	var durableErrs []error
+	for _, emitErr := range []error{phaseEmitErr, terminalEmitErr} {
+		if emitErr == nil {
+			continue
 		}
-		return errors.Join(cause, emitErr)
+		if liveCode, ok := CodeOf(emitErr); ok && liveCode == ErrorCodeLivePublishFailed {
+			continue
+		}
+		durableErrs = append(durableErrs, emitErr)
 	}
-	return cause
+	return errors.Join(append([]error{cause}, durableErrs...)...)
+}
+
+func (r *Runner) emitTerminal(ctx context.Context, req *Request, phase Phase, code ErrorCode) error {
+	kind := "invocation.terminal"
+	state := string(StateFailed)
+	if ctx.Err() != nil {
+		kind = "invocation.interrupted"
+		state = string(StateCancelled)
+	}
+	payload, err := json.Marshal(struct {
+		Phase     Phase     `json:"phase"`
+		Outcome   string    `json:"outcome"`
+		State     string    `json:"state"`
+		ErrorCode ErrorCode `json:"error_code"`
+	}{Phase: phase, Outcome: state, State: state, ErrorCode: code})
+	if err != nil {
+		return codedError(ErrorCodeLifecycleInvalid, "marshal terminal lifecycle event", err)
+	}
+	event := &Event{
+		ID:            req.InvocationID + "." + kind,
+		SessionID:     req.SessionID,
+		TurnID:        req.TurnID,
+		InvocationID:  req.InvocationID,
+		Kind:          kind,
+		SchemaVersion: 1,
+		Payload:       payload,
+		CreatedAt:     r.cfg.Now().UTC(),
+	}
+	if err := r.durable.Append(context.WithoutCancel(ctx), event); err != nil {
+		return codedError(ErrorCodeDurabilityFailed, "append terminal lifecycle event", err)
+	}
+	if r.live == nil {
+		return nil
+	}
+	if err := r.live.Publish(ctx, event); err != nil {
+		return codedError(ErrorCodeLivePublishFailed, "publish terminal lifecycle event", err)
+	}
+	return nil
 }
 
 func (r *Runner) emit(ctx context.Context, req *Request, phase Phase, outcome, state string, errorCodes ...string) (int, error) {

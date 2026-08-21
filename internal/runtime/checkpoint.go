@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -202,25 +201,15 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) err
 			return codedError(ErrorCodeCheckpointStale, "checkpoint boundary is ahead of the event log", nil)
 		}
 		eventID := checkpoint.RunID + ".checkpoint." + strconv.FormatUint(checkpoint.ResumeGeneration, 10)
-		lookup, ok := e.events.(EventLookup)
+		appender, ok := e.events.(CheckpointAppender)
 		if !ok {
-			return codedError(ErrorCodeStorageUnavailable, "event store cannot verify checkpoint idempotency", nil)
-		}
-		existing, found, err := lookup.LookupEvent(ctx, eventID)
-		if err != nil {
-			return codedError(ErrorCodeStorageUnavailable, "read existing checkpoint event", err)
-		}
-		if found {
-			if existing.Kind == EventKindRunCheckpoint && existing.SessionID == checkpoint.SessionID && existing.TurnID == checkpoint.TurnID && bytes.Equal(existing.Payload, payload) {
-				return nil
-			}
-			return codedError(ErrorCodeCheckpointStale, "checkpoint id is already bound to different state", nil)
+			return codedError(ErrorCodeStorageUnavailable, "event store cannot atomically append checkpoints", nil)
 		}
 		sequence, err := e.nextSequence(ctx, checkpoint.SessionID)
 		if err != nil {
 			return codedError(ErrorCodeStorageUnavailable, "allocate checkpoint event sequence", err)
 		}
-		return e.events.Append(ctx, &store.RuntimeEvent{
+		event := &store.RuntimeEvent{
 			ID:            eventID,
 			SessionID:     checkpoint.SessionID,
 			Sequence:      sequence,
@@ -232,12 +221,19 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) err
 			SchemaVersion: checkpointSchemaVersion,
 			Payload:       payload,
 			CreatedAt:     time.Now().UTC(),
-		})
+		}
+		if err := appender.AppendCheckpoint(ctx, event); err != nil {
+			if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeEventSequenceConflict {
+				return codedError(ErrorCodeCheckpointStale, "checkpoint id is already bound to different state", err)
+			}
+			return codedError(ErrorCodeStorageUnavailable, "append checkpoint event", err)
+		}
+		return nil
 	})
 }
 
-type EventLookup interface {
-	LookupEvent(context.Context, string) (store.RuntimeEvent, bool, error)
+type CheckpointAppender interface {
+	AppendCheckpoint(context.Context, *store.RuntimeEvent) error
 }
 
 func (e *Engine) LoadCheckpoint(ctx context.Context, turnID string) (Checkpoint, error) {

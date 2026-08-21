@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 
 	"github.com/anggasct/aura/internal/store"
@@ -14,12 +15,27 @@ type Trace struct {
 }
 
 type TraceExpectation struct {
-	Profile        string
-	Outcome        string
-	ExpectedKinds  []string
-	RequiredKinds  []string
-	ForbiddenKinds []string
-	MinScore       int
+	Profile          string
+	Outcome          string
+	ExpectedKinds    []string
+	RequiredKinds    []string
+	ForbiddenKinds   []string
+	Identity         *TraceIdentity
+	RequiredSignals  []TraceSignal
+	ForbiddenSignals []TraceSignal
+	MinScore         int
+}
+
+type TraceIdentity struct {
+	SessionID    string
+	TurnID       string
+	InvocationID string
+	Author       string
+}
+
+type TraceSignal struct {
+	Kind          string
+	PayloadFields map[string]string
 }
 
 type TraceGrade struct {
@@ -65,6 +81,22 @@ func GradeTrace(trace Trace, expectation *TraceExpectation) TraceGrade {
 	if want.ExpectedKinds != nil && !slices.Equal(eventKinds(trace.Events), want.ExpectedKinds) {
 		grade.Score -= 25
 		grade.Failures = append(grade.Failures, "event trajectory does not match expected order")
+	}
+	if want.Identity != nil && !matchesIdentity(trace.Events, *want.Identity) {
+		grade.Score -= 25
+		grade.Failures = append(grade.Failures, "event identity does not match expectation")
+	}
+	for _, signal := range want.RequiredSignals {
+		if !containsSignal(trace.Events, signal) {
+			grade.Score -= 10
+			grade.Failures = append(grade.Failures, "missing required trace signal: "+signal.Kind)
+		}
+	}
+	for _, signal := range want.ForbiddenSignals {
+		if containsSignal(trace.Events, signal) {
+			grade.Score -= 25
+			grade.Failures = append(grade.Failures, "forbidden trace signal: "+signal.Kind)
+		}
 	}
 	for _, kind := range want.RequiredKinds {
 		if !containsKind(trace.Events, kind) {
@@ -130,4 +162,59 @@ func eventKinds(events []store.RuntimeEvent) []string {
 		kinds[i] = events[i].Kind
 	}
 	return kinds
+}
+
+func matchesIdentity(events []store.RuntimeEvent, identity TraceIdentity) bool {
+	for i := range events {
+		event := &events[i]
+		if identity.SessionID != "" && event.SessionID != identity.SessionID {
+			return false
+		}
+		if identity.TurnID != "" && event.TurnID != identity.TurnID {
+			return false
+		}
+		if identity.InvocationID != "" && event.InvocationID != identity.InvocationID {
+			return false
+		}
+		if identity.Author != "" && event.Author != identity.Author {
+			return false
+		}
+	}
+	return len(events) > 0
+}
+
+func containsSignal(events []store.RuntimeEvent, signal TraceSignal) bool {
+	for i := range events {
+		if signalMatches(&events[i], signal) {
+			return true
+		}
+	}
+	return false
+}
+
+func signalMatches(event *store.RuntimeEvent, signal TraceSignal) bool {
+	if event.Kind != signal.Kind {
+		return false
+	}
+	if len(signal.PayloadFields) == 0 {
+		return true
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(event.Payload, &fields); err != nil {
+		return false
+	}
+	for name, want := range signal.PayloadFields {
+		raw, ok := fields[name]
+		if !ok {
+			return false
+		}
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			value = string(raw)
+		}
+		if value != want {
+			return false
+		}
+	}
+	return true
 }

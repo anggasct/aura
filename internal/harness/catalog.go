@@ -45,10 +45,19 @@ type Catalog struct {
 var descriptorNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
 
 const maxDescriptorResultBytes = 64 << 20
+const maxCatalogDescriptors = 256
+const maxCatalogVisible = 64
+const maxDescriptorFieldBytes = 1024
 
 func NewCatalog(descriptors []Descriptor, maxVisible int) (Catalog, error) {
 	if maxVisible <= 0 {
 		return Catalog{}, invalidArgument("catalog visible limit must be positive")
+	}
+	if maxVisible > maxCatalogVisible {
+		return Catalog{}, invalidArgument("catalog visible limit exceeds hard bound")
+	}
+	if len(descriptors) > maxCatalogDescriptors {
+		return Catalog{}, invalidArgument("catalog descriptor count exceeds hard bound")
 	}
 	catalog := Catalog{descriptors: make(map[string]Descriptor, len(descriptors)), maxVisible: maxVisible}
 	var problems []error
@@ -70,7 +79,10 @@ func NewCatalog(descriptors []Descriptor, maxVisible int) (Catalog, error) {
 }
 
 func (c Catalog) Visible(capabilities []string, limit int) []Descriptor {
-	if limit <= 0 || limit > c.maxVisible {
+	if limit <= 0 {
+		return nil
+	}
+	if limit > c.maxVisible {
 		limit = c.maxVisible
 	}
 	allowed := make(map[string]struct{}, len(capabilities))
@@ -111,6 +123,9 @@ func validateDescriptor(descriptor *Descriptor) error {
 	}
 	if !descriptorNamePattern.MatchString(descriptor.Name) || descriptor.Version == "" || descriptor.Capability == "" || descriptor.ScopeSummary == "" {
 		return codedError(ErrorCodeCatalogInvalid, "descriptor identity or scope is invalid", nil)
+	}
+	if len(descriptor.Name) > maxDescriptorFieldBytes || len(descriptor.Version) > maxDescriptorFieldBytes || len(descriptor.Capability) > maxDescriptorFieldBytes || len(descriptor.ScopeSummary) > maxDescriptorFieldBytes {
+		return codedError(ErrorCodeCatalogInvalid, "descriptor field exceeds hard bound", nil)
 	}
 	if !validTrust(descriptor.Trust) || !validRisk(descriptor.Risk) {
 		return codedError(ErrorCodeCatalogInvalid, "descriptor trust or risk is invalid", nil)

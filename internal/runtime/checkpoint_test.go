@@ -7,6 +7,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/anggasct/aura/internal/store"
@@ -131,6 +132,58 @@ func TestSaveCheckpointRejectsMutatedRetry(t *testing.T) {
 		t.Fatal("SaveCheckpoint accepted a mutated retry")
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCheckpointStale {
 		t.Fatalf("CodeOf(%v) = %q, %v; want checkpoint_stale", err, code, ok)
+	}
+}
+
+func TestConcurrentCheckpointMutationHasOneAuthoritativePayload(t *testing.T) {
+	engine, db, _, last := checkpointRuntime(t)
+	other, err := NewEngine(Config{}, store.NewEventStore(db), store.NewDedupeStore(db), NewFakeExecutor(nil), nil)
+	if err != nil {
+		t.Fatalf("NewEngine second writer: %v", err)
+	}
+	first := checkpointFixture(last)
+	second := *first
+	second.StateDigest = strings.Repeat("c", 64)
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, runner := range []*Engine{engine, other} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			checkpoint := first
+			if runner == other {
+				checkpoint = &second
+			}
+			errs <- runner.SaveCheckpoint(context.Background(), checkpoint)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	var successes, stale int
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		if code, ok := CodeOf(err); ok && code == ErrorCodeCheckpointStale {
+			stale++
+			continue
+		}
+		t.Fatalf("concurrent SaveCheckpoint error = %v", err)
+	}
+	if successes != 1 || stale != 1 {
+		t.Fatalf("concurrent saves successes=%d stale=%d, want one each", successes, stale)
+	}
+	loaded, err := engine.LoadCheckpoint(context.Background(), first.TurnID)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if loaded.StateDigest != first.StateDigest && loaded.StateDigest != second.StateDigest {
+		t.Fatalf("loaded state digest = %q, want one authoritative payload", loaded.StateDigest)
 	}
 }
 

@@ -110,11 +110,29 @@ func (j *Journal) ValidateResumeEffects(ctx context.Context, sessionID, turnID s
 		}
 	}
 	for i := range intents {
-		if intents[i].State != StateStarted {
+		switch intents[i].State {
+		case StatePrepared, StateUnknown:
 			continue
-		}
-		if _, err := j.Claim(ctx, intents[i].ID); err != nil {
-			return err
+		case StateStarted:
+			claimed, err := j.Claim(ctx, intents[i].ID)
+			if err != nil {
+				return err
+			}
+			if claimed {
+				continue
+			}
+			current, err := j.Get(ctx, intents[i].ID)
+			if err != nil {
+				return err
+			}
+			if current.State == StateUnknown {
+				continue
+			}
+			return codedError(ErrorCodeTransitionInvalid, fmt.Sprintf("effect: pending tool call %s changed to %s during recovery", intents[i].ToolCallID, current.State), nil)
+		case StateSucceeded, StateFailed:
+			return codedError(ErrorCodeTransitionInvalid, fmt.Sprintf("effect: pending tool call %s is already terminal (%s)", intents[i].ToolCallID, intents[i].State), nil)
+		default:
+			return codedError(ErrorCodeTransitionInvalid, fmt.Sprintf("effect: pending tool call %s has unsupported state %s", intents[i].ToolCallID, intents[i].State), nil)
 		}
 	}
 	return nil

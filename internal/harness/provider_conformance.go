@@ -5,15 +5,17 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+
+	"github.com/anggasct/aura/internal/approval"
 )
 
 type ProviderCase struct {
 	Name           string
 	Provider       Provider
+	Broker         approval.ToolBroker
 	Descriptor     Descriptor
 	Arguments      json.RawMessage
 	Scope          string
-	Authorize      func(context.Context, ProviderRequest) error
 	SecretCanaries []string
 }
 
@@ -33,12 +35,29 @@ func ConformProviders(ctx context.Context, cases []ProviderCase) []ProviderConfo
 		testCase := &ordered[i]
 		result := ProviderConformanceResult{Name: testCase.Name}
 		request := ProviderRequest{Descriptor: testCase.Descriptor, Arguments: testCase.Arguments, Scope: testCase.Scope}
-		if testCase.Authorize != nil {
-			if err := testCase.Authorize(ctx, request); err != nil {
+		if testCase.Broker == nil {
+			result.Failure = "provider authorization boundary is missing"
+			results = append(results, result)
+			continue
+		}
+		decision, err := testCase.Broker.Evaluate(ctx, &approval.ToolRequest{
+			RequestID:    "provider-" + testCase.Name,
+			TurnID:       "provider-conformance",
+			SessionID:    testCase.Scope,
+			PrincipalID:  "provider-conformance",
+			ToolName:     testCase.Descriptor.Name,
+			Arguments:    testCase.Arguments,
+			Capabilities: []string{testCase.Descriptor.Capability},
+			Trust:        approval.TrustOwnerInput,
+		})
+		if err != nil || decision.Outcome != approval.OutcomeAllow {
+			if err != nil {
 				result.Failure = err.Error()
-				results = append(results, result)
-				continue
+			} else {
+				result.Failure = "provider authorization denied"
 			}
+			results = append(results, result)
+			continue
 		}
 		output, err := InvokeProvider(ctx, testCase.Provider, &request)
 		if err != nil {

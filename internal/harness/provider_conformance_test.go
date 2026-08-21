@@ -7,8 +7,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/capability"
 )
+
+type providerBroker struct{ allow bool }
+
+func (b providerBroker) Evaluate(context.Context, *approval.ToolRequest) (approval.PolicyDecision, error) {
+	if !b.allow {
+		return approval.PolicyDecision{Outcome: approval.OutcomeDeny}, nil
+	}
+	return approval.PolicyDecision{Outcome: approval.OutcomeAllow}, nil
+}
+
+func (providerBroker) Execute(context.Context, *approval.ToolRequest, *approval.ApprovalGrant) (approval.ToolResult, error) {
+	return approval.ToolResult{}, errors.New("provider test broker does not execute")
+}
 
 func TestConformProvidersChecksAuthorizationBoundsAndSecretCanaries(t *testing.T) {
 	descriptor := descriptorFixture()
@@ -22,14 +36,15 @@ func TestConformProvidersChecksAuthorizationBoundsAndSecretCanaries(t *testing.T
 		{
 			Name:       "unauthorized",
 			Provider:   provider(`{"ok":true}`),
+			Broker:     providerBroker{},
 			Descriptor: descriptor,
 			Arguments:  json.RawMessage(`{}`),
 			Scope:      "workspace-1",
-			Authorize:  func(context.Context, ProviderRequest) error { return errors.New("policy denied") },
 		},
 		{
 			Name:           "secret-leak",
 			Provider:       provider(`{"value":"secret-canary"}`),
+			Broker:         providerBroker{allow: true},
 			Descriptor:     descriptor,
 			Arguments:      json.RawMessage(`{}`),
 			Scope:          "workspace-1",
@@ -38,6 +53,7 @@ func TestConformProvidersChecksAuthorizationBoundsAndSecretCanaries(t *testing.T
 		{
 			Name:       "safe",
 			Provider:   provider(`{"ok":true}`),
+			Broker:     providerBroker{allow: true},
 			Descriptor: descriptor,
 			Arguments:  json.RawMessage(`{}`),
 			Scope:      "workspace-1",
@@ -45,6 +61,7 @@ func TestConformProvidersChecksAuthorizationBoundsAndSecretCanaries(t *testing.T
 		{
 			Name:       "unbounded",
 			Provider:   provider(strings.Repeat("x", descriptor.MaxResultBytes+1)),
+			Broker:     providerBroker{allow: true},
 			Descriptor: descriptor,
 			Arguments:  json.RawMessage(`{}`),
 			Scope:      "workspace-1",
@@ -58,12 +75,26 @@ func TestConformProvidersChecksAuthorizationBoundsAndSecretCanaries(t *testing.T
 	}
 }
 
+func TestConformProvidersRejectsMissingAuthorizationBoundary(t *testing.T) {
+	descriptor := descriptorFixture()
+	results := ConformProviders(context.Background(), []ProviderCase{{
+		Name: "missing-broker", Provider: &fakeProvider{
+			profile: ProviderProfile{Name: "provider", Capability: descriptor.Capability, BuildProfile: "core", MaxResultBytes: descriptor.MaxResultBytes},
+			result:  ProviderResult{State: StateSucceeded, Output: json.RawMessage(`{"ok":true}`)},
+		}, Descriptor: descriptor, Arguments: json.RawMessage(`{}`), Scope: "workspace-1",
+	}})
+	if len(results) != 1 || results[0].Passed || results[0].Failure != "provider authorization boundary is missing" {
+		t.Fatalf("results = %+v, want missing authorization boundary failure", results)
+	}
+}
+
 func TestConformProvidersCoversEverySupportedProfile(t *testing.T) {
 	descriptor := descriptorFixture()
 	cases := make([]ProviderCase, 0, len(capability.SupportedProfiles()))
 	for _, profile := range capability.SupportedProfiles() {
 		cases = append(cases, ProviderCase{
 			Name:       string(profile),
+			Broker:     providerBroker{allow: true},
 			Descriptor: descriptor,
 			Provider: &fakeProvider{
 				profile: ProviderProfile{

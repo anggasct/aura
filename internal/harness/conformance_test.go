@@ -50,6 +50,24 @@ func TestCatalogRejectsInvalidDescriptor(t *testing.T) {
 	}
 }
 
+func TestCatalogRejectsUnboundedLimitsAndFields(t *testing.T) {
+	descriptor := descriptorFixture()
+	if _, err := NewCatalog([]Descriptor{descriptor}, maxCatalogVisible+1); err == nil {
+		t.Fatal("NewCatalog accepted an oversized visible limit")
+	}
+	descriptor.ScopeSummary = strings.Repeat("x", maxDescriptorFieldBytes+1)
+	if _, err := NewCatalog([]Descriptor{descriptor}, 1); err == nil {
+		t.Fatal("NewCatalog accepted an oversized descriptor field")
+	}
+	catalog, err := NewCatalog([]Descriptor{descriptorFixture()}, 1)
+	if err != nil {
+		t.Fatalf("NewCatalog: %v", err)
+	}
+	if visible := catalog.Visible([]string{"workspace.read"}, 0); visible != nil {
+		t.Fatalf("Visible(0) = %+v, want no descriptors", visible)
+	}
+}
+
 type fakeProvider struct {
 	profile ProviderProfile
 	result  ProviderResult

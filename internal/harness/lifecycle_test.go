@@ -215,6 +215,24 @@ func TestRunnerDenialCannotReachProvider(t *testing.T) {
 	}
 }
 
+func TestRunnerPersistsTerminalOutcomeAfterPhaseFailure(t *testing.T) {
+	var calls []Phase
+	phases := phasesFor(&calls, func(context.Context, PreparedInvocation) (Execution, error) {
+		return Execution{State: StateSucceeded}, nil
+	})
+	phases.Policy = func(context.Context, CanonicalRequest) (PolicyDecision, error) {
+		return PolicyDecision{}, codedError(ErrorCodeLifecycleInvalid, "policy rejected request", nil)
+	}
+	durable := &recordingDurable{failAt: -1}
+	runner := newTestRunner(t, phases, durable, nil)
+	if _, err := runner.Run(context.Background(), testRequest()); err == nil {
+		t.Fatal("Run accepted policy failure")
+	}
+	if len(durable.events) == 0 || durable.events[len(durable.events)-1].Kind != "invocation.terminal" {
+		t.Fatalf("durable events = %+v, want terminal outcome last", durable.events)
+	}
+}
+
 func TestRunnerApprovalGrantOpensExecutionGate(t *testing.T) {
 	var calls []Phase
 	executed := false
