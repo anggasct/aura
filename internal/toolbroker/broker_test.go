@@ -94,6 +94,7 @@ func TestBrokerObserverReceivesMetadataOnly(t *testing.T) {
 
 func TestBrokerBindsExactApprovalAndReturnsUntrustedResult(t *testing.T) {
 	broker, err := New(&Options{
+		Effects: newBrokerEffectExecutor(t),
 		Adapters: map[string]Adapter{
 			"exec@v1": func(_ context.Context, request *ToolRequest, _ approval.Constraints) (ToolResult, error) {
 				return ToolResult{Output: json.RawMessage(`{"command":"secret-value"}`)}, nil
@@ -106,6 +107,7 @@ func TestBrokerBindsExactApprovalAndReturnsUntrustedResult(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	request := brokerRequest("exec", `{"command":["printf","ok"]}`, "exec-linux")
+	request.EventSequence = 1
 	if _, err := broker.Execute(context.Background(), request); classOf(err) != ResultApprovalRequired {
 		t.Fatalf("Execute without approval = %v", err)
 	}

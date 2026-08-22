@@ -17,6 +17,7 @@ type Definition struct {
 	Schema               json.RawMessage
 	RequiredCapabilities []string
 	RequiresApproval     bool
+	Effectful            bool
 }
 
 func (d *Definition) Key() string {
@@ -97,9 +98,9 @@ func (d *Definition) Validate(raw json.RawMessage) (json.RawMessage, error) {
 
 func Builtins() []Definition {
 	return []Definition{
-		{Name: "exec", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/exec/v1","type":"object","properties":{"command":{"type":"array","items":{"type":"string"},"minItems":1},"shell":{"type":"boolean"}},"required":["command"],"additionalProperties":false}`), RequiredCapabilities: []string{"exec-linux"}, RequiresApproval: true},
+		{Name: "exec", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/exec/v1","type":"object","properties":{"command":{"type":"array","items":{"type":"string"},"minItems":1},"shell":{"type":"boolean"}},"required":["command"],"additionalProperties":false}`), RequiredCapabilities: []string{"exec-linux"}, RequiresApproval: true, Effectful: true},
 		{Name: "read_file", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/read_file/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"max_bytes":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-read"}},
-		{Name: "write_file", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/write_file/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"content":{"type":"string"},"overwrite":{"type":"boolean"}},"required":["path","content"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-write"}, RequiresApproval: true},
+		{Name: "write_file", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/write_file/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"content":{"type":"string"},"overwrite":{"type":"boolean"}},"required":["path","content"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-write"}, RequiresApproval: true, Effectful: true},
 		{Name: "list_dir", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/list_dir/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"recursive":{"type":"boolean"}},"required":["path"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-read"}},
 		{Name: "web_fetch", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_fetch/v1","type":"object","properties":{"url":{"type":"string","format":"uri","minLength":1}},"required":["url"],"additionalProperties":false}`), RequiredCapabilities: []string{"public-web"}},
 		{Name: "web_search", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1},"max_results":{"type":"integer","minimum":1}},"required":["query"],"additionalProperties":false}`), RequiredCapabilities: []string{"provider-search"}},

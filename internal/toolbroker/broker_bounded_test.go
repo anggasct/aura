@@ -70,8 +70,8 @@ func TestBrokerOversizedOutputReturnsDecodableTruncationEnvelope(t *testing.T) {
 	if envelope.SizeBytes != int64(len(output)) || !envelope.Truncated || envelope.ArtifactID != "" {
 		t.Fatalf("envelope = %+v", envelope)
 	}
-	if want := 4096 - envelopeReserve; len(envelope.Body) != want {
-		t.Fatalf("inline body length = %d, want %d", len(envelope.Body), want)
+	if envelope.Body == "" {
+		t.Fatal("inline body is empty")
 	}
 	if !strings.HasPrefix(string(output), envelope.Body) {
 		t.Fatal("inline body is not a prefix of the original output")

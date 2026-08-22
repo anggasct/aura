@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/store"
@@ -21,19 +22,23 @@ import (
 )
 
 type ToolRequest struct {
-	RequestID      string
-	TurnID         string
-	SessionID      string
-	PrincipalID    string
-	ToolName       string
-	ToolVersion    string
-	Arguments      json.RawMessage
-	RequestDigest  string
-	Capabilities   []string
-	Trust          approval.TrustLabel
-	Deadline       time.Time
-	IdempotencyKey string
-	Approval       *approval.ApprovalGrant
+	RequestID       string
+	TurnID          string
+	SessionID       string
+	PrincipalID     string
+	ToolName        string
+	ToolVersion     string
+	Arguments       json.RawMessage
+	RequestDigest   string
+	Capabilities    []string
+	Trust           approval.TrustLabel
+	Deadline        time.Time
+	IdempotencyKey  string
+	Approval        *approval.ApprovalGrant
+	EventSequence   uint64
+	EventInvocation string
+	EventBranch     string
+	EventAuthor     string
 }
 
 type ToolResult struct {
@@ -63,6 +68,7 @@ type Options struct {
 	Secrets              []string
 	MaxInlineResultBytes int64
 	Artifacts            store.ArtifactStore
+	Effects              *effect.Executor
 	Observer             Observer
 }
 
@@ -73,6 +79,7 @@ type Broker struct {
 	secrets              []string
 	maxInlineResultBytes int64
 	artifacts            store.ArtifactStore
+	effects              *effect.Executor
 	observer             Observer
 }
 
@@ -104,6 +111,7 @@ func New(options *Options) (*Broker, error) {
 		secrets:              slices.Clone(options.Secrets),
 		maxInlineResultBytes: options.MaxInlineResultBytes,
 		artifacts:            options.Artifacts,
+		effects:              options.Effects,
 		observer:             options.Observer,
 	}, nil
 }
@@ -200,9 +208,18 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		return ToolResult{}, mapApprovalError(err)
 	}
 	key := canonical.ToolName + "@" + canonical.ToolVersion
+	definition := b.definitions[key]
 	adapter, ok := b.adapters[key]
 	if !ok {
 		return ToolResult{}, errorf(ResultCapabilityUnavailable, "tool %q is not available in this artifact", key)
+	}
+	if definition.Effectful {
+		if b.effects == nil {
+			return ToolResult{}, errorf(ResultCapabilityUnavailable, "effect journal is required for tool %q", key)
+		}
+		if err := validateEffectRequest(&canonical); err != nil {
+			return ToolResult{}, err
+		}
 	}
 
 	grant := canonical.Approval
@@ -224,7 +241,11 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), grant); err != nil {
 		return ToolResult{}, mapApprovalError(err)
 	}
-	result, err = adapter(ctx, &canonical, decision.Constraints)
+	if definition.Effectful {
+		result, err = b.executeEffect(ctx, &canonical, decision.Constraints, adapter)
+	} else {
+		result, err = adapter(ctx, &canonical, decision.Constraints)
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return ToolResult{}, errorf(ResultDeadlineExceeded, "tool request ended: %v", err)
@@ -277,10 +298,6 @@ type boundedOutput struct {
 	Body       string `json:"body,omitempty"`
 }
 
-// envelopeReserve is subtracted from the inline budget so the truncation
-// envelope's own metadata cannot push the result past the limit.
-const envelopeReserve = 1024
-
 func (b *Broker) boundOutput(ctx context.Context, canonical *ToolRequest, output json.RawMessage, maxOutputBytes int64) (json.RawMessage, error) {
 	digest := sha256.Sum256(output)
 	envelope := boundedOutput{
@@ -306,20 +323,120 @@ func (b *Broker) boundOutput(ctx context.Context, canonical *ToolRequest, output
 		}
 	}
 	if envelope.ArtifactID == "" {
-		budget := maxOutputBytes - envelopeReserve
-		if budget < 0 {
-			budget = 0
+		bodyBytes, err := boundedBodyBytes(envelope, output, maxOutputBytes)
+		if err != nil {
+			return nil, err
 		}
-		if int64(len(output)) < budget {
-			budget = int64(len(output))
-		}
-		envelope.Body = string(output[:budget])
+		envelope.Body = string(output[:bodyBytes])
 	}
 	encoded, err := json.Marshal(envelope)
 	if err != nil {
 		return nil, errorf(ResultExecutionFailed, "encode bounded result: %v", err)
 	}
+	if int64(len(encoded)) > maxOutputBytes {
+		return nil, errorf(ResultExecutionFailed, "bounded result envelope exceeds output limit")
+	}
 	return encoded, nil
+}
+
+func boundedBodyBytes(envelope boundedOutput, output json.RawMessage, maxOutputBytes int64) (int, error) {
+	base := envelope
+	base.Body = ""
+	encoded, err := json.Marshal(base)
+	if err != nil {
+		return 0, errorf(ResultExecutionFailed, "encode bounded result: %v", err)
+	}
+	if int64(len(encoded)) > maxOutputBytes {
+		return 0, errorf(ResultExecutionFailed, "bounded result envelope exceeds output limit")
+	}
+	low, high := 0, len(output)
+	for low < high {
+		mid := low + (high-low+1)/2
+		candidate := envelope
+		candidate.Body = string(output[:mid])
+		encoded, err := json.Marshal(candidate)
+		if err != nil {
+			return 0, errorf(ResultExecutionFailed, "encode bounded result: %v", err)
+		}
+		if int64(len(encoded)) <= maxOutputBytes {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	return low, nil
+}
+
+type effectInvocation struct {
+	adapter     Adapter
+	request     *ToolRequest
+	constraints approval.Constraints
+	result      ToolResult
+	invoked     bool
+}
+
+func (i *effectInvocation) SupportsIdempotency() bool { return false }
+
+func (i *effectInvocation) Invoke(ctx context.Context, _ *effect.Invocation) (effect.Outcome, error) {
+	result, err := i.adapter(ctx, i.request, i.constraints)
+	if err != nil {
+		return effect.Outcome{}, err
+	}
+	i.result = result
+	i.invoked = true
+	digest := sha256.Sum256(result.Output)
+	receipt, err := json.Marshal(struct {
+		ToolName     string      `json:"tool_name"`
+		ToolVersion  string      `json:"tool_version"`
+		Class        ResultClass `json:"class"`
+		OutputBytes  int64       `json:"output_bytes"`
+		OutputDigest string      `json:"output_digest"`
+		Truncated    bool        `json:"truncated"`
+	}{
+		ToolName: i.request.ToolName, ToolVersion: i.request.ToolVersion,
+		Class: result.Class, OutputBytes: int64(len(result.Output)),
+		OutputDigest: hex.EncodeToString(digest[:]), Truncated: result.Truncated,
+	})
+	if err != nil {
+		return effect.Outcome{}, err
+	}
+	return effect.Outcome{Succeeded: true, Receipt: receipt}, nil
+}
+
+func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constraints approval.Constraints, adapter Adapter) (ToolResult, error) {
+	payload, err := json.Marshal(struct {
+		ToolName    string          `json:"tool_name"`
+		ToolVersion string          `json:"tool_version"`
+		Arguments   json.RawMessage `json:"arguments"`
+	}{request.ToolName, request.ToolVersion, request.Arguments})
+	if err != nil {
+		return ToolResult{}, errorf(ResultInvalidArgument, "encode effect request: %v", err)
+	}
+	invocation := &effectInvocation{adapter: adapter, request: request, constraints: constraints}
+	intent, err := b.effects.Execute(ctx, &effect.PrepareRequest{
+		SessionID: request.SessionID, TurnID: request.TurnID, ToolCallID: request.RequestID,
+		IdempotencyKey: request.IdempotencyKey, Provider: "builtin-tools", Operation: request.ToolName,
+		Classification: effect.ClassificationEffectful, Request: payload,
+		EventSequence: request.EventSequence, EventInvocation: request.EventInvocation,
+		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
+	}, invocation)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	if intent.State != effect.StateSucceeded {
+		return ToolResult{}, errorf(ResultExecutionFailed, "effectful tool settled as %s", intent.State)
+	}
+	if !invocation.invoked {
+		return ToolResult{}, errorf(ResultExecutionFailed, "effectful tool result is unavailable for a replayed request")
+	}
+	return invocation.result, nil
+}
+
+func validateEffectRequest(request *ToolRequest) error {
+	if request.SessionID == "" || request.TurnID == "" || request.RequestID == "" || request.IdempotencyKey == "" || request.EventSequence == 0 {
+		return errorf(ResultInvalidArgument, "effectful tool requests require session, turn, request, idempotency, and event sequence identifiers")
+	}
+	return nil
 }
 
 func randomArtifactID() (string, error) {
