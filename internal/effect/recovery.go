@@ -111,22 +111,24 @@ func (j *Journal) ValidateResumeEffects(ctx context.Context, sessionID, turnID s
 	}
 	for i := range intents {
 		switch intents[i].State {
-		case StatePrepared, StateUnknown:
+		case StatePrepared:
 			continue
+		case StateUnknown:
+			return codedError(ErrorCodeUnknown, fmt.Sprintf("effect: pending tool call %s requires reconciliation before resume", intents[i].ToolCallID), nil)
 		case StateStarted:
 			claimed, err := j.Claim(ctx, intents[i].ID)
 			if err != nil {
 				return err
 			}
 			if claimed {
-				continue
+				return codedError(ErrorCodeUnknown, fmt.Sprintf("effect: pending tool call %s requires reconciliation before resume", intents[i].ToolCallID), nil)
 			}
 			current, err := j.Get(ctx, intents[i].ID)
 			if err != nil {
 				return err
 			}
 			if current.State == StateUnknown {
-				continue
+				return codedError(ErrorCodeUnknown, fmt.Sprintf("effect: pending tool call %s requires reconciliation before resume", intents[i].ToolCallID), nil)
 			}
 			return codedError(ErrorCodeTransitionInvalid, fmt.Sprintf("effect: pending tool call %s changed to %s during recovery", intents[i].ToolCallID, current.State), nil)
 		case StateSucceeded, StateFailed:

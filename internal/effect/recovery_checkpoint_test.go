@@ -2,16 +2,19 @@ package effect
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 )
 
-func TestValidateResumeEffectsClaimsStartedAndRejectsMissing(t *testing.T) {
+func TestValidateResumeEffectsClaimsStartedAndRejectsAmbiguous(t *testing.T) {
 	j, _ := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
 	mustStart(t, j, intent.ID)
 
-	if err := j.ValidateResumeEffects(context.Background(), "sess-1", "turn-1", []string{intent.ToolCallID}); err != nil {
-		t.Fatalf("ValidateResumeEffects: %v", err)
+	if err := j.ValidateResumeEffects(context.Background(), "sess-1", "turn-1", []string{intent.ToolCallID}); err == nil {
+		t.Fatal("ValidateResumeEffects accepted an ambiguous effect")
+	} else {
+		assertCode(t, err, ErrorCodeUnknown)
 	}
 	unknown, err := j.Get(context.Background(), intent.ID)
 	if err != nil {
@@ -61,7 +64,17 @@ func TestValidateResumeEffectsRejectsTerminalPendingEffects(t *testing.T) {
 			}
 		})
 	}
-	if err := j.ValidateResumeEffects(context.Background(), "sess-1", "turn-1", []string{unknown.ToolCallID}); err != nil {
-		t.Fatalf("ValidateResumeEffects(unknown): %v", err)
+	if err := j.ValidateResumeEffects(context.Background(), "sess-1", "turn-1", []string{unknown.ToolCallID}); err == nil {
+		t.Fatal("ValidateResumeEffects accepted an unreconciled effect")
+	} else {
+		assertCode(t, err, ErrorCodeUnknown)
+	}
+	if _, err := j.Resolve(context.Background(), unknown.ID, Resolution{Succeeded: true, Receipt: json.RawMessage(`{"provider_id":"p-1"}`)}); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := j.ValidateResumeEffects(context.Background(), "sess-1", "turn-1", []string{unknown.ToolCallID}); err == nil {
+		t.Fatal("ValidateResumeEffects accepted a resolved effect as pending")
+	} else {
+		assertCode(t, err, ErrorCodeTransitionInvalid)
 	}
 }
