@@ -202,32 +202,20 @@ func (t *validatingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return t.next.RoundTrip(req.WithContext(withDestination(req.Context(), destination)))
 }
 
-// NewClient returns an HTTP client whose transport pins validated IPs and
-// enforces the full destination policy on every request and redirect hop,
-// so a redirect to a private destination or a cross-origin redirect is
-// rejected after the first allowed request.
+// NewClient returns the only construction path for mediated HTTP: the
+// transport validates every request and redirect hop, and all connections
+// are dialed by the pinned dialer using the validated address. There is
+// deliberately no transport-injection variant; a caller-provided
+// RoundTripper could ignore the pinned destination and bypass mediation.
 func NewClient(resolver Resolver) *http.Client {
-	return NewClientWithTransport(resolver, nil)
-}
-
-// NewClientWithTransport returns an HTTP client that enforces the full
-// destination policy on every request and redirect hop before delegating
-// to base. The base transport only ever sees requests that passed
-// validation, so an injected transport is a constrained seam, not a
-// bypass; a nil base uses the default pinned transport, whose connections
-// dial the validated address.
-func NewClientWithTransport(resolver Resolver, base http.RoundTripper) *http.Client {
 	if resolver == nil {
 		resolver = systemResolver{}
 	}
-	next := base
-	if next == nil {
-		next = &http.Transport{
-			DialContext: PinnedDialer{Resolver: resolver}.DialContext,
-		}
+	pinned := &http.Transport{
+		DialContext: PinnedDialer{Resolver: resolver}.DialContext,
 	}
 	return &http.Client{
-		Transport: &validatingTransport{resolver: resolver, next: next},
+		Transport: &validatingTransport{resolver: resolver, next: pinned},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if _, err := Validate(req.Context(), req.URL.String(), resolver); err != nil {
 				return err

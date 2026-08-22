@@ -26,7 +26,10 @@ type Options struct {
 	MaxResults    int
 	MaxBodyBytes  int64
 	Resolver      egress.Resolver
-	Transport     http.RoundTripper
+
+	// client is unexported so external constructors can only obtain the
+	// mediated egress client; in-package tests use it as a canned seam.
+	client *http.Client
 }
 
 type arguments struct {
@@ -78,7 +81,10 @@ func New(options *Options) (toolbroker.Adapter, error) {
 	if err := egress.ValidateDestinationShape(options.Endpoint); err != nil {
 		return nil, fmt.Errorf("search: endpoint is not a permitted destination: %w", err)
 	}
-	client := egress.NewClientWithTransport(options.Resolver, options.Transport)
+	client := options.client
+	if client == nil {
+		client = egress.NewClient(options.Resolver)
+	}
 	clientCopy := *client
 	return func(ctx context.Context, request *toolbroker.ToolRequest, constraints approval.Constraints) (toolbroker.ToolResult, error) {
 		return run(ctx, request, constraints, options, &clientCopy)

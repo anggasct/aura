@@ -31,6 +31,13 @@ type dirArguments struct {
 	Recursive bool   `json:"recursive"`
 }
 
+// sysClose and sysFsync are seams so tests can inject close and fsync
+// failures into the write durability path.
+var (
+	sysClose = unix.Close
+	sysFsync = unix.Fsync
+)
+
 func New(options Options) (map[string]toolbroker.Adapter, error) {
 	if err := validateOptions(&options); err != nil {
 		return nil, err
@@ -116,7 +123,13 @@ func writeFile(ctx context.Context, request *toolbroker.ToolRequest, options Opt
 			_ = unix.Unlinkat(parent, base, 0)
 			return toolbroker.ToolResult{}, fmt.Errorf("filesystem: write file: %w", err)
 		}
-		_ = unix.Close(fd)
+		if err := sysClose(fd); err != nil {
+			_ = unix.Unlinkat(parent, base, 0)
+			return toolbroker.ToolResult{}, fmt.Errorf("filesystem: write file: %w", err)
+		}
+		if err := sysFsync(parent); err != nil {
+			return toolbroker.ToolResult{}, fmt.Errorf("filesystem: sync directory: %w", err)
+		}
 	} else if err := atomicReplace(parent, base, []byte(args.Content)); err != nil {
 		return toolbroker.ToolResult{}, pathError("replace", args.Path, err)
 	}
@@ -290,7 +303,7 @@ func writeAndSync(fd int, content []byte) error {
 		}
 		content = content[n:]
 	}
-	return unix.Fsync(fd)
+	return sysFsync(fd)
 }
 
 func atomicReplace(parent int, name string, content []byte) error {
@@ -312,7 +325,7 @@ func atomicReplace(parent int, name string, content []byte) error {
 	if err := writeAndSync(fd, content); err != nil {
 		return err
 	}
-	if err := unix.Close(fd); err != nil {
+	if err := sysClose(fd); err != nil {
 		return err
 	}
 	fd = -1
@@ -320,7 +333,7 @@ func atomicReplace(parent int, name string, content []byte) error {
 		return err
 	}
 	removeTemp = false
-	return nil
+	return sysFsync(parent)
 }
 
 func temporaryName() (string, error) {

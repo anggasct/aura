@@ -22,7 +22,10 @@ type Options struct {
 	MaxEncodedBytes int64
 	MaxDecodedBytes int64
 	Resolver        egress.Resolver
-	Transport       http.RoundTripper
+
+	// client is unexported so external constructors can only obtain the
+	// mediated egress client; in-package tests use it as a canned seam.
+	client *http.Client
 }
 
 type arguments struct {
@@ -47,7 +50,10 @@ func New(options Options) (toolbroker.Adapter, error) {
 	if options.MaxEncodedBytes <= 0 || options.MaxDecodedBytes <= 0 {
 		return nil, errors.New("fetch: body limits must be positive")
 	}
-	client := egress.NewClientWithTransport(options.Resolver, options.Transport)
+	client := options.client
+	if client == nil {
+		client = egress.NewClient(options.Resolver)
+	}
 	clientCopy := *client
 	originalRedirect := client.CheckRedirect
 	clientCopy.CheckRedirect = func(request *http.Request, via []*http.Request) error {

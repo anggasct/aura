@@ -5,6 +5,7 @@ package filesystem
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,6 +97,98 @@ func TestListDirDoesNotFollowSymlink(t *testing.T) {
 	if len(decoded.Entries) != 1 || decoded.Entries[0].Kind != "symlink" {
 		t.Fatalf("entries = %+v", decoded.Entries)
 	}
+}
+
+func TestWriteFileFsyncsFileAndParentDirectoryOnBothPaths(t *testing.T) {
+	workspace := t.TempDir()
+	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	write := adapters["write_file@v1"]
+	original := sysFsync
+	t.Cleanup(func() { sysFsync = original })
+
+	steps := []struct {
+		name    string
+		request map[string]any
+	}{
+		{"create-new", map[string]any{"path": "note.txt", "content": "one"}},
+		{"replace", map[string]any{"path": "note.txt", "content": "two", "overwrite": true}},
+	}
+	for _, step := range steps {
+		var fsyncs []int
+		sysFsync = func(fd int) error {
+			fsyncs = append(fsyncs, fd)
+			return original(fd)
+		}
+		if _, err := write(context.Background(), fsRequest(t, step.request), approvalConstraints()); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		sysFsync = original
+		if len(fsyncs) != 2 {
+			t.Fatalf("%s fsyncs = %v, want file then parent directory", step.name, fsyncs)
+		}
+		if fsyncs[0] == fsyncs[1] {
+			t.Fatalf("%s fsynced the same descriptor twice: %v", step.name, fsyncs)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(workspace, "note.txt")); err != nil || string(got) != "two" {
+		t.Fatalf("final content = %q, err = %v", got, err)
+	}
+}
+
+func TestWriteFileCreateNewPropagatesCloseError(t *testing.T) {
+	workspace := t.TempDir()
+	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	original := sysClose
+	sysClose = func(fd int) error {
+		_ = original(fd)
+		return errors.New("close failed")
+	}
+	t.Cleanup(func() { sysClose = original })
+	_, err = adapters["write_file@v1"](context.Background(), fsRequest(t, map[string]any{"path": "note.txt", "content": "one"}), approvalConstraints())
+	if err == nil {
+		t.Fatal("write succeeded despite close failure")
+	}
+	if _, statErr := os.Lstat(filepath.Join(workspace, "note.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("failed create was not rolled back: %v", statErr)
+	}
+}
+
+func TestWriteFilePropagatesParentSyncError(t *testing.T) {
+	workspace := t.TempDir()
+	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	write := adapters["write_file@v1"]
+	original := sysFsync
+	t.Cleanup(func() { sysFsync = original })
+
+	for _, step := range []struct {
+		name    string
+		request map[string]any
+	}{
+		{"create-new", map[string]any{"path": "note.txt", "content": "one"}},
+		{"replace", map[string]any{"path": "note.txt", "content": "two", "overwrite": true}},
+	} {
+		calls := 0
+		sysFsync = func(fd int) error {
+			calls++
+			if calls == 2 {
+				return errors.New("directory sync failed")
+			}
+			return original(fd)
+		}
+		if _, err := write(context.Background(), fsRequest(t, step.request), approvalConstraints()); err == nil {
+			t.Fatalf("%s succeeded despite parent directory sync failure", step.name)
+		}
+	}
+	sysFsync = original
 }
 
 func fsRequest(t *testing.T, value map[string]any) *toolbroker.ToolRequest {
