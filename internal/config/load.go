@@ -143,6 +143,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateLoadedModels(cfg.Models, routingExplicitIn(data)); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateTools(cfg.Tools, options.Build.Profile()); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
 		return LoadResult{}, err
 	}
@@ -285,6 +288,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateModelShapes(doc); err != nil {
+		return err
+	}
+	if err := validateToolsShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths := validKeyPaths()
@@ -565,6 +571,110 @@ func validateModelShapes(doc *yamlv3.Node) error {
 	return nil
 }
 
+func validateToolsShapes(doc *yamlv3.Node) error {
+	toolsNode := mappingValue(doc, "tools")
+	if toolsNode == nil {
+		return nil
+	}
+	if toolsNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("tools must be a mapping at line %d", toolsNode.Line)
+	}
+	for i := 0; i+1 < len(toolsNode.Content); i += 2 {
+		keyNode := toolsNode.Content[i]
+		valueNode := toolsNode.Content[i+1]
+		switch keyNode.Value {
+		case "workspace":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("tools.workspace must be a string at line %d", valueNode.Line)
+			}
+		case "max_inline_result_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("tools.max_inline_result_bytes must be an integer at line %d", valueNode.Line)
+			}
+		case "exec":
+			if err := validateToolExecShape(valueNode); err != nil {
+				return err
+			}
+		case "fetch":
+			if err := validateToolFetchShape(valueNode); err != nil {
+				return err
+			}
+		case "web_search":
+			if err := validateToolWebSearchShape(valueNode); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateToolExecShape(node *yamlv3.Node) error {
+	if node.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("tools.exec must be a mapping at line %d", node.Line)
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		switch keyNode.Value {
+		case "timeout":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("tools.exec.timeout must be a duration string at line %d", valueNode.Line)
+			}
+		case "max_stdout_bytes", "max_stderr_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("tools.exec.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func validateToolFetchShape(node *yamlv3.Node) error {
+	if node.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("tools.fetch must be a mapping at line %d", node.Line)
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		switch keyNode.Value {
+		case "timeout":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("tools.fetch.timeout must be a duration string at line %d", valueNode.Line)
+			}
+		case "max_redirects":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("tools.fetch.max_redirects must be an integer at line %d", valueNode.Line)
+			}
+		case "max_encoded_bytes", "max_decoded_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("tools.fetch.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func validateToolWebSearchShape(node *yamlv3.Node) error {
+	if node.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("tools.web_search must be a mapping at line %d", node.Line)
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		switch keyNode.Value {
+		case "provider", "credential_ref":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("tools.web_search.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "max_results":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("tools.web_search.max_results must be an integer at line %d", valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
 // validateModelDefinition checks only the shape of one model definition;
 // all semantic rules live in validateLoadedModels.
 func validateModelDefinition(name string, node *yamlv3.Node) error {
@@ -819,7 +929,7 @@ func stringToBoolHook() mapstructure.DecodeHookFunc {
 
 func stringToIntHook() mapstructure.DecodeHookFunc {
 	return func(from, to reflect.Type, data any) (any, error) {
-		if from.Kind() != reflect.String || to.Kind() != reflect.Int {
+		if from.Kind() != reflect.String || (to.Kind() < reflect.Int || to.Kind() > reflect.Int64) {
 			return data, nil
 		}
 		s, ok := data.(string)
@@ -830,7 +940,7 @@ func stringToIntHook() mapstructure.DecodeHookFunc {
 		if err != nil {
 			return nil, fmt.Errorf("invalid integer %q", data)
 		}
-		return int(n), nil
+		return reflect.ValueOf(n).Convert(to).Interface(), nil
 	}
 }
 
@@ -878,6 +988,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	if cfg.Capabilities.Enabled == nil {
 		cfg.Capabilities.Enabled = []string{}
 	}
+	applyToolDefaults(cfg, doc)
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = defaults.Server.Host
 	}
@@ -942,6 +1053,49 @@ func applyDefaults(cfg *Config, data []byte) error {
 		cfg.Usage.ReservationTTL = defaults.Usage.ReservationTTL
 	}
 	return nil
+}
+
+func applyToolDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Tools == nil {
+		return
+	}
+	defaults := Default().Tools
+	if cfg.Tools.Workspace == "" && !configValuePresent(doc, "tools", "workspace") && !envValuePresent("tools.workspace") {
+		cfg.Tools.Workspace = defaults.Workspace
+	}
+	if cfg.Tools.MaxInlineResultBytes == 0 && !configValuePresent(doc, "tools", "max_inline_result_bytes") && !envValuePresent("tools.max_inline_result_bytes") {
+		cfg.Tools.MaxInlineResultBytes = defaults.MaxInlineResultBytes
+	}
+	if cfg.Tools.Exec.Timeout == 0 && !configValuePresent(doc, "tools", "exec", "timeout") && !envValuePresent("tools.exec.timeout") {
+		cfg.Tools.Exec.Timeout = defaults.Exec.Timeout
+	}
+	if cfg.Tools.Exec.MaxStdoutBytes == 0 && !configValuePresent(doc, "tools", "exec", "max_stdout_bytes") && !envValuePresent("tools.exec.max_stdout_bytes") {
+		cfg.Tools.Exec.MaxStdoutBytes = defaults.Exec.MaxStdoutBytes
+	}
+	if cfg.Tools.Exec.MaxStderrBytes == 0 && !configValuePresent(doc, "tools", "exec", "max_stderr_bytes") && !envValuePresent("tools.exec.max_stderr_bytes") {
+		cfg.Tools.Exec.MaxStderrBytes = defaults.Exec.MaxStderrBytes
+	}
+	if cfg.Tools.Fetch.Timeout == 0 && !configValuePresent(doc, "tools", "fetch", "timeout") && !envValuePresent("tools.fetch.timeout") {
+		cfg.Tools.Fetch.Timeout = defaults.Fetch.Timeout
+	}
+	if cfg.Tools.Fetch.MaxRedirects == 0 && !configValuePresent(doc, "tools", "fetch", "max_redirects") && !envValuePresent("tools.fetch.max_redirects") {
+		cfg.Tools.Fetch.MaxRedirects = defaults.Fetch.MaxRedirects
+	}
+	if cfg.Tools.Fetch.MaxEncodedBytes == 0 && !configValuePresent(doc, "tools", "fetch", "max_encoded_bytes") && !envValuePresent("tools.fetch.max_encoded_bytes") {
+		cfg.Tools.Fetch.MaxEncodedBytes = defaults.Fetch.MaxEncodedBytes
+	}
+	if cfg.Tools.Fetch.MaxDecodedBytes == 0 && !configValuePresent(doc, "tools", "fetch", "max_decoded_bytes") && !envValuePresent("tools.fetch.max_decoded_bytes") {
+		cfg.Tools.Fetch.MaxDecodedBytes = defaults.Fetch.MaxDecodedBytes
+	}
+	if cfg.Tools.WebSearch.Provider == "" && !configValuePresent(doc, "tools", "web_search", "provider") && !envValuePresent("tools.web_search.provider") {
+		cfg.Tools.WebSearch.Provider = defaults.WebSearch.Provider
+	}
+	if cfg.Tools.WebSearch.CredentialRef == "" && !configValuePresent(doc, "tools", "web_search", "credential_ref") && !envValuePresent("tools.web_search.credential_ref") {
+		cfg.Tools.WebSearch.CredentialRef = defaults.WebSearch.CredentialRef
+	}
+	if cfg.Tools.WebSearch.MaxResults == 0 && !configValuePresent(doc, "tools", "web_search", "max_results") && !envValuePresent("tools.web_search.max_results") {
+		cfg.Tools.WebSearch.MaxResults = defaults.WebSearch.MaxResults
+	}
 }
 
 func configValuePresent(node *yamlv3.Node, path ...string) bool {
@@ -1045,6 +1199,49 @@ func validateUsage(u Usage) error {
 	}
 	if u.ReservationTTL <= 0 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.reservation_ttl must be positive"}
+	}
+	return nil
+}
+
+func validateTools(toolsConfig *Tools, profile capability.Profile) error {
+	if toolsConfig == nil {
+		if profile != capability.ProfileCore {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("tools section is required for build profile %q", profile)}
+		}
+		return nil
+	}
+	if strings.TrimSpace(toolsConfig.Workspace) == "" {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.workspace must not be empty"}
+	}
+	if !filepath.IsAbs(toolsConfig.Workspace) {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.workspace must be an absolute path"}
+	}
+	if toolsConfig.MaxInlineResultBytes <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.max_inline_result_bytes must be positive"}
+	}
+	if toolsConfig.Exec.Timeout <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.exec.timeout must be positive"}
+	}
+	if toolsConfig.Exec.MaxStdoutBytes <= 0 || toolsConfig.Exec.MaxStderrBytes <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.exec output limits must be positive"}
+	}
+	if toolsConfig.Fetch.Timeout <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.fetch.timeout must be positive"}
+	}
+	if toolsConfig.Fetch.MaxRedirects < 0 || toolsConfig.Fetch.MaxRedirects > 10 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.fetch.max_redirects must be between 0 and 10"}
+	}
+	if toolsConfig.Fetch.MaxEncodedBytes <= 0 || toolsConfig.Fetch.MaxDecodedBytes <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.fetch body limits must be positive"}
+	}
+	if strings.TrimSpace(toolsConfig.WebSearch.Provider) == "" {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.web_search.provider must not be empty"}
+	}
+	if !strings.HasPrefix(toolsConfig.WebSearch.CredentialRef, "env://") && !strings.HasPrefix(toolsConfig.WebSearch.CredentialRef, "file://") {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.web_search.credential_ref must use env:// or file://"}
+	}
+	if toolsConfig.WebSearch.MaxResults < 1 || toolsConfig.WebSearch.MaxResults > 20 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.web_search.max_results must be between 1 and 20"}
 	}
 	return nil
 }

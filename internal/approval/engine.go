@@ -88,6 +88,9 @@ func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecisi
 	if !ok {
 		return PolicyDecision{}, Errorf(ErrorCodePolicyDenied, "unknown tool %q", request.ToolName)
 	}
+	if rule.ToolVersion != "" && request.ToolVersion != rule.ToolVersion {
+		return PolicyDecision{}, Errorf(ErrorCodePolicyDenied, "tool %q version %q is not supported", request.ToolName, request.ToolVersion)
+	}
 	if len(rule.AllowedTrust) > 0 && !slices.Contains(rule.AllowedTrust, request.Trust) {
 		return PolicyDecision{}, Errorf(ErrorCodePolicyDenied, "tool %q is not allowed for trust label %q", request.ToolName, request.Trust)
 	}
@@ -151,7 +154,9 @@ func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 		PrincipalID:      request.PrincipalID,
 		SessionID:        request.SessionID,
 		ToolName:         request.ToolName,
+		ToolVersion:      request.ToolVersion,
 		ArgumentsHash:    HashArguments(request.Arguments),
+		RequestDigest:    request.RequestDigest,
 		CapabilitiesHash: HashCapabilities(request.Capabilities),
 		Constraints:      decision.Constraints,
 		PolicyVersion:    decision.PolicyVersion,
@@ -209,7 +214,7 @@ func (e *Engine) consumeNonce(nonce string) bool {
 	if !ok {
 		return false
 	}
-	if e.now().After(expiry) {
+	if !e.now().Before(expiry) {
 		delete(e.nonces, nonce)
 		return false
 	}
@@ -219,7 +224,7 @@ func (e *Engine) consumeNonce(nonce string) bool {
 
 func (e *Engine) pruneNoncesLocked(now time.Time) {
 	for nonce, expiry := range e.nonces {
-		if now.After(expiry) {
+		if !now.Before(expiry) {
 			delete(e.nonces, nonce)
 		}
 	}

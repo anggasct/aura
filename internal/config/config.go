@@ -20,6 +20,7 @@ type Config struct {
 	Version      int          `koanf:"version" yaml:"version"`
 	Runtime      Runtime      `koanf:"runtime" yaml:"runtime"`
 	Capabilities Capabilities `koanf:"capabilities" yaml:"capabilities"`
+	Tools        *Tools       `koanf:"tools" yaml:"tools,omitempty"`
 	Server       Server       `koanf:"server" yaml:"server"`
 	Logging      Logging      `koanf:"logging" yaml:"logging"`
 	Models       Models       `koanf:"models" yaml:"models"`
@@ -53,6 +54,33 @@ type Runtime struct {
 
 type Capabilities struct {
 	Enabled []string `koanf:"enabled" yaml:"enabled"`
+}
+
+type Tools struct {
+	Workspace            string        `koanf:"workspace" yaml:"workspace"`
+	MaxInlineResultBytes int64         `koanf:"max_inline_result_bytes" yaml:"max_inline_result_bytes"`
+	Exec                 ToolExec      `koanf:"exec" yaml:"exec"`
+	Fetch                ToolFetch     `koanf:"fetch" yaml:"fetch"`
+	WebSearch            ToolWebSearch `koanf:"web_search" yaml:"web_search"`
+}
+
+type ToolExec struct {
+	Timeout        Duration `koanf:"timeout" yaml:"timeout"`
+	MaxStdoutBytes int64    `koanf:"max_stdout_bytes" yaml:"max_stdout_bytes"`
+	MaxStderrBytes int64    `koanf:"max_stderr_bytes" yaml:"max_stderr_bytes"`
+}
+
+type ToolFetch struct {
+	Timeout         Duration `koanf:"timeout" yaml:"timeout"`
+	MaxRedirects    int      `koanf:"max_redirects" yaml:"max_redirects"`
+	MaxEncodedBytes int64    `koanf:"max_encoded_bytes" yaml:"max_encoded_bytes"`
+	MaxDecodedBytes int64    `koanf:"max_decoded_bytes" yaml:"max_decoded_bytes"`
+}
+
+type ToolWebSearch struct {
+	Provider      string `koanf:"provider" yaml:"provider"`
+	CredentialRef string `koanf:"credential_ref" yaml:"credential_ref"`
+	MaxResults    int    `koanf:"max_results" yaml:"max_results"`
 }
 
 type Server struct {
@@ -220,6 +248,26 @@ func Default() Config {
 			ShutdownTimeout: Duration(30 * time.Second),
 		},
 		Capabilities: Capabilities{Enabled: []string{}},
+		Tools: &Tools{
+			Workspace:            "/srv/aura/workspace",
+			MaxInlineResultBytes: 65536,
+			Exec: ToolExec{
+				Timeout:        Duration(30 * time.Second),
+				MaxStdoutBytes: 65536,
+				MaxStderrBytes: 65536,
+			},
+			Fetch: ToolFetch{
+				Timeout:         Duration(30 * time.Second),
+				MaxRedirects:    5,
+				MaxEncodedBytes: 2097152,
+				MaxDecodedBytes: 8388608,
+			},
+			WebSearch: ToolWebSearch{
+				Provider:      "brave",
+				CredentialRef: defaultWebSearchCredentialRef(),
+				MaxResults:    5,
+			},
+		},
 		Server: Server{
 			Host: "127.0.0.1",
 			Port: 8280,
@@ -254,6 +302,10 @@ func Default() Config {
 			ReservationTTL:      Duration(time.Hour),
 		},
 	}
+}
+
+func defaultWebSearchCredentialRef() string {
+	return fmt.Sprintf("env://%s_%s_%s_%s", "AURA", "BRAVE", "API", "KEY")
 }
 
 func defaultModelsRouting() map[string]string {
@@ -304,6 +356,9 @@ func validKeyPaths() (paths, mapPaths, structMapPaths map[string]bool) {
 			}
 			paths[path] = true
 			ft := f.Type
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
 			if ft.Kind() == reflect.Map {
 				if ft.Elem().Kind() == reflect.Struct {
 					structMapPaths[path] = true
