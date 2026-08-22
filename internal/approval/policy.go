@@ -186,6 +186,16 @@ func (g *ApprovalGrant) ValidFor(request *ToolRequest, policyVersion string, now
 	return nil
 }
 
+func (g *ApprovalGrant) ValidForConstraints(request *ToolRequest, policyVersion string, now time.Time, expected Constraints) error {
+	if err := g.ValidFor(request, policyVersion, now); err != nil {
+		return err
+	}
+	if g.Constraints != expected {
+		return Errorf(ErrorCodeApprovalInvalid, "grant constraints do not match current policy")
+	}
+	return nil
+}
+
 // HashArguments returns the canonical hex SHA-256 of the raw arguments, so
 // the grant binds the exact bytes evaluated, and the request cannot lie
 // about its own hash.

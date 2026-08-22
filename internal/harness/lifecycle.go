@@ -588,6 +588,7 @@ func approvalRequest(canonical *CanonicalRequest) *approval.ToolRequest {
 		ToolName:     canonical.Admission.Request.ToolName,
 		Arguments:    canonical.Arguments,
 		Capabilities: []string{canonical.Admission.Request.Capability},
+		Trust:        approval.TrustOwnerInput,
 	}
 }
 

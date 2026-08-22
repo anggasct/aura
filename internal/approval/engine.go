@@ -157,7 +157,11 @@ func (e *Engine) ValidateAndConsume(ctx context.Context, request *ToolRequest, g
 	if grant == nil {
 		return Errorf(ErrorCodeInvalidArgument, "grant must not be nil")
 	}
-	if err := grant.ValidFor(request, e.policy.Version, e.now()); err != nil {
+	decision, err := e.decide(ctx, request)
+	if err != nil {
+		return err
+	}
+	if err := grant.ValidForConstraints(request, e.policy.Version, e.now(), decision.Constraints); err != nil {
 		return err
 	}
 	if !e.consumeNonce(grant.Nonce) {

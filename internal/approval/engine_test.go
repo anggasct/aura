@@ -231,6 +231,43 @@ func TestGrantInvalidatedByFieldChanges(t *testing.T) {
 	}
 }
 
+func TestExecuteRejectsConstraintMutations(t *testing.T) {
+	var handlerCalls int
+	engine, err := NewEngine(testPolicy(), func(_ context.Context, request ToolRequest, _ Constraints) (ToolResult, error) {
+		handlerCalls++
+		return ToolResult{ToolName: request.ToolName}, nil
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	request := testRequest("exec")
+	cases := []struct {
+		name   string
+		mutate func(*ApprovalGrant)
+	}{
+		{name: "network", mutate: func(grant *ApprovalGrant) { grant.Constraints.AllowNetwork = false }},
+		{name: "output limit", mutate: func(grant *ApprovalGrant) { grant.Constraints.MaxOutputBytes = 1 }},
+		{name: "timeout", mutate: func(grant *ApprovalGrant) { grant.Constraints.Timeout = time.Second }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			grant, err := engine.Grant(context.Background(), &request, time.Minute)
+			if err != nil {
+				t.Fatalf("Grant: %v", err)
+			}
+			tc.mutate(&grant)
+			if _, err := engine.Execute(context.Background(), &request, &grant); err == nil {
+				t.Fatal("Execute accepted mutated constraints")
+			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
+				t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid", err, code, ok)
+			}
+		})
+	}
+	if handlerCalls != 0 {
+		t.Fatalf("handler calls = %d, want zero for mutated grants", handlerCalls)
+	}
+}
+
 // An argument change in the request itself (tampered between grant
 // and execute) invalidates the grant, because the hash no longer matches.
 func TestExecuteRejectsTamperedArguments(t *testing.T) {
