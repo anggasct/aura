@@ -6,6 +6,22 @@ runtime:
   shutdown_timeout: 30s
 capabilities:
   enabled: []
+tools:
+  workspace: /srv/aura/workspace
+  max_inline_result_bytes: 65536
+  exec:
+    timeout: 30s
+    max_stdout_bytes: 65536
+    max_stderr_bytes: 65536
+  fetch:
+    timeout: 30s
+    max_redirects: 5
+    max_encoded_bytes: 2097152
+    max_decoded_bytes: 8388608
+  web_search:
+    provider: brave
+    credential_ref: env://AURA_BRAVE_API_KEY
+    max_results: 5
 server:
   host: 127.0.0.1
   port: 8280

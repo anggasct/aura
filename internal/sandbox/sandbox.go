@@ -90,6 +90,8 @@ func (s *Spec) validate() error {
 type Result struct {
 	ExitCode   int
 	Output     string
+	Stdout     string
+	Stderr     string
 	Terminated bool
 	Truncated  bool
 }

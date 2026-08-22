@@ -47,8 +47,10 @@ type ToolRequest struct {
 	SessionID      string
 	PrincipalID    string
 	ToolName       string
+	ToolVersion    string
 	Arguments      json.RawMessage
 	ArgumentsHash  string
+	RequestDigest  string
 	Capabilities   []string
 	Trust          TrustLabel
 	Deadline       time.Time
@@ -94,6 +96,7 @@ type ToolBroker interface {
 // are always honored as constraints, never as policy.
 type Rule struct {
 	ToolName             string
+	ToolVersion          string
 	RequiresApproval     bool
 	RequiredCapabilities []string
 	AllowedTrust         []TrustLabel
@@ -141,7 +144,9 @@ type ApprovalGrant struct {
 	PrincipalID      string
 	SessionID        string
 	ToolName         string
+	ToolVersion      string
 	ArgumentsHash    string
+	RequestDigest    string
 	CapabilitiesHash string
 	Constraints      Constraints
 	PolicyVersion    string
@@ -171,8 +176,14 @@ func (g *ApprovalGrant) ValidFor(request *ToolRequest, policyVersion string, now
 	if g.ToolName != request.ToolName {
 		return Errorf(ErrorCodeApprovalInvalid, "grant tool %q does not match request tool %q", g.ToolName, request.ToolName)
 	}
+	if g.ToolVersion != request.ToolVersion {
+		return Errorf(ErrorCodeApprovalInvalid, "grant tool version %q does not match request version %q", g.ToolVersion, request.ToolVersion)
+	}
 	if g.ArgumentsHash != HashArguments(request.Arguments) {
 		return Errorf(ErrorCodeApprovalInvalid, "grant arguments hash %q does not match request arguments", g.ArgumentsHash)
+	}
+	if g.RequestDigest != request.RequestDigest {
+		return Errorf(ErrorCodeApprovalInvalid, "grant request digest does not match request")
 	}
 	if g.CapabilitiesHash != HashCapabilities(request.Capabilities) {
 		return Errorf(ErrorCodeApprovalInvalid, "grant capabilities hash %q does not match request capabilities", g.CapabilitiesHash)
@@ -180,7 +191,7 @@ func (g *ApprovalGrant) ValidFor(request *ToolRequest, policyVersion string, now
 	if g.PolicyVersion != policyVersion {
 		return Errorf(ErrorCodeApprovalInvalid, "grant policy version %q does not match current %q", g.PolicyVersion, policyVersion)
 	}
-	if now.After(g.ExpiresAt) {
+	if !now.Before(g.ExpiresAt) {
 		return Errorf(ErrorCodeApprovalInvalid, "grant expired at %s", g.ExpiresAt.UTC().Format(time.RFC3339))
 	}
 	return nil
