@@ -130,6 +130,55 @@ func TestEvaluateInvalidTrustLabel(t *testing.T) {
 	}
 }
 
+func TestApprovalOperationsRejectNilContext(t *testing.T) {
+	var handlerCalls int
+	engine, err := NewEngine(testPolicy(), func(_ context.Context, request ToolRequest, _ Constraints) (ToolResult, error) {
+		handlerCalls++
+		return ToolResult{ToolName: request.ToolName}, nil
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	request := testRequest("read_file")
+	grant, err := engine.Grant(context.Background(), &request, time.Minute)
+	if err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	var nilContext context.Context
+	cases := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "evaluate", run: func() error {
+			_, err := engine.Evaluate(nilContext, &request)
+			return err
+		}},
+		{name: "grant", run: func() error {
+			_, err := engine.Grant(nilContext, &request, time.Minute)
+			return err
+		}},
+		{name: "validate and consume", run: func() error {
+			return engine.ValidateAndConsume(nilContext, &request, &grant)
+		}},
+		{name: "execute", run: func() error {
+			_, err := engine.Execute(nilContext, &request, &grant)
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.run(); err == nil {
+				t.Fatal("operation accepted a nil context")
+			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+				t.Fatalf("CodeOf(%v) = %q, %v; want invalid_argument", err, code, ok)
+			}
+		})
+	}
+	if handlerCalls != 0 {
+		t.Fatalf("handler calls = %d, want zero for nil contexts", handlerCalls)
+	}
+}
+
 // Every invocation passes through policy exactly once; execution is
 // only reachable with a grant minted after policy passed, and reusing a
 // grant fails.

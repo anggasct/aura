@@ -49,11 +49,21 @@ func (e *Engine) PolicyVersion() string {
 	return e.policy.Version
 }
 
+func validateContext(ctx context.Context) error {
+	if ctx == nil {
+		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	return nil
+}
+
 // Evaluate applies policy to a normalized structured request. Deny is the
 // fail-closed default for unknown tools, disallowed trust labels, or
 // missing capabilities. Untrusted and derived content is always data and
 // can never alter policy; it can only be more restricted.
 func (e *Engine) Evaluate(ctx context.Context, request *ToolRequest) (PolicyDecision, error) {
+	if err := validateContext(ctx); err != nil {
+		return PolicyDecision{}, err
+	}
 	decision, err := e.decide(ctx, request)
 	if err != nil {
 		return PolicyDecision{}, err
@@ -62,6 +72,9 @@ func (e *Engine) Evaluate(ctx context.Context, request *ToolRequest) (PolicyDeci
 }
 
 func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecision, error) {
+	if err := validateContext(ctx); err != nil {
+		return PolicyDecision{}, err
+	}
 	if request == nil {
 		return PolicyDecision{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
 	}
@@ -109,6 +122,9 @@ func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecisi
 // through this path. Changing any bound field later invalidates
 // the grant.
 func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Duration) (ApprovalGrant, error) {
+	if err := validateContext(ctx); err != nil {
+		return ApprovalGrant{}, err
+	}
 	if request == nil {
 		return ApprovalGrant{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
 	}
@@ -151,6 +167,9 @@ func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 }
 
 func (e *Engine) ValidateAndConsume(ctx context.Context, request *ToolRequest, grant *ApprovalGrant) error {
+	if err := validateContext(ctx); err != nil {
+		return err
+	}
 	if request == nil {
 		return Errorf(ErrorCodeInvalidArgument, "request must not be nil")
 	}
