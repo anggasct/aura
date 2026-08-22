@@ -74,6 +74,33 @@ func destinationFromContext(ctx context.Context) (Destination, bool) {
 	return destination, ok
 }
 
+// ValidateDestinationShape enforces the URL-level destination rules — https
+// scheme, host present, no credentials, query, or fragment — without
+// resolving the host, so constructors can reject unsafe endpoints before
+// any request is built.
+func ValidateDestinationShape(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return Errorf(ErrorCodeEgressDenied, "invalid destination %q", raw)
+	}
+	if u.Scheme != "https" {
+		return Errorf(ErrorCodeEgressDenied, "scheme %q is not allowed: https is required", u.Scheme)
+	}
+	if u.Host == "" {
+		return Errorf(ErrorCodeEgressDenied, "destination has no host")
+	}
+	if strings.TrimSpace(u.Hostname()) == "" {
+		return Errorf(ErrorCodeEgressDenied, "destination has no hostname")
+	}
+	if u.User != nil {
+		return Errorf(ErrorCodeEgressDenied, "credentials in the destination URL are not allowed")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return Errorf(ErrorCodeEgressDenied, "query and fragment are not allowed in the destination URL")
+	}
+	return nil
+}
+
 // Validate resolves and validates a destination. HTTPS is required, and
 // loopback, private, link-local, unspecified, multicast, and cloud-metadata
 // addresses are rejected by default. The returned IP is the one the dialer
@@ -82,28 +109,14 @@ func Validate(ctx context.Context, raw string, resolver Resolver) (Destination, 
 	if resolver == nil {
 		resolver = systemResolver{}
 	}
+	if err := ValidateDestinationShape(raw); err != nil {
+		return Destination{}, err
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return Destination{}, Errorf(ErrorCodeEgressDenied, "invalid destination %q", raw)
 	}
-	// Loopback and private addresses are rejected below, so every destination
-	// that survives validation is public and plaintext is never acceptable.
-	if u.Scheme != "https" {
-		return Destination{}, Errorf(ErrorCodeEgressDenied, "scheme %q is not allowed: https is required", u.Scheme)
-	}
-	if u.Host == "" {
-		return Destination{}, Errorf(ErrorCodeEgressDenied, "destination has no host")
-	}
 	host := u.Hostname()
-	if strings.TrimSpace(host) == "" {
-		return Destination{}, Errorf(ErrorCodeEgressDenied, "destination has no hostname")
-	}
-	if u.User != nil {
-		return Destination{}, Errorf(ErrorCodeEgressDenied, "credentials in the destination URL are not allowed")
-	}
-	if u.RawQuery != "" || u.Fragment != "" {
-		return Destination{}, Errorf(ErrorCodeEgressDenied, "query and fragment are not allowed in the destination URL")
-	}
 
 	// A literal IP is validated directly; hostnames are resolved here, once,
 	// so the caller dials the checked address (DNS-rebinding defense).
@@ -194,14 +207,27 @@ func (t *validatingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 // so a redirect to a private destination or a cross-origin redirect is
 // rejected after the first allowed request.
 func NewClient(resolver Resolver) *http.Client {
+	return NewClientWithTransport(resolver, nil)
+}
+
+// NewClientWithTransport returns an HTTP client that enforces the full
+// destination policy on every request and redirect hop before delegating
+// to base. The base transport only ever sees requests that passed
+// validation, so an injected transport is a constrained seam, not a
+// bypass; a nil base uses the default pinned transport, whose connections
+// dial the validated address.
+func NewClientWithTransport(resolver Resolver, base http.RoundTripper) *http.Client {
 	if resolver == nil {
 		resolver = systemResolver{}
 	}
-	pinned := &http.Transport{
-		DialContext: PinnedDialer{Resolver: resolver}.DialContext,
+	next := base
+	if next == nil {
+		next = &http.Transport{
+			DialContext: PinnedDialer{Resolver: resolver}.DialContext,
+		}
 	}
 	return &http.Client{
-		Transport: &validatingTransport{resolver: resolver, next: pinned},
+		Transport: &validatingTransport{resolver: resolver, next: next},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if _, err := Validate(req.Context(), req.URL.String(), resolver); err != nil {
 				return err

@@ -22,7 +22,7 @@ type Options struct {
 	MaxEncodedBytes int64
 	MaxDecodedBytes int64
 	Resolver        egress.Resolver
-	Client          *http.Client
+	Transport       http.RoundTripper
 }
 
 type arguments struct {
@@ -47,10 +47,7 @@ func New(options Options) (toolbroker.Adapter, error) {
 	if options.MaxEncodedBytes <= 0 || options.MaxDecodedBytes <= 0 {
 		return nil, errors.New("fetch: body limits must be positive")
 	}
-	client := options.Client
-	if client == nil {
-		client = egress.NewClient(options.Resolver)
-	}
+	client := egress.NewClientWithTransport(options.Resolver, options.Transport)
 	clientCopy := *client
 	originalRedirect := client.CheckRedirect
 	clientCopy.CheckRedirect = func(request *http.Request, via []*http.Request) error {

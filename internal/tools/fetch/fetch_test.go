@@ -3,24 +3,66 @@ package fetch
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/toolbroker"
 )
 
+type staticResolver map[string][]net.IP
+
+func (r staticResolver) LookupIP(_ context.Context, host string) ([]net.IP, error) {
+	ips, ok := r[host]
+	if !ok {
+		return nil, &net.DNSError{Err: "no such host", Name: host}
+	}
+	return ips, nil
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func cannedResponse(req *http.Request, contentType, body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{contentType}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}
+}
+
+func publicResolver() staticResolver {
+	return staticResolver{"public.example": {net.ParseIP("93.184.216.34")}}
+}
+
 func TestFetchBoundsBodyAndRejectsBinaryContent(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(contentHandler))
-	defer server.Close()
-	adapter, err := New(Options{Timeout: time.Second, MaxRedirects: 2, MaxEncodedBytes: 1024, MaxDecodedBytes: 3, Client: server.Client()})
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxRedirects:    2,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 3,
+		Resolver:        publicResolver(),
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			contentType := "text/plain"
+			if req.URL.Path == "/binary" {
+				contentType = "application/octet-stream"
+			}
+			return cannedResponse(req, contentType, "abcdef"), nil
+		}),
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	responseResult, err := adapter(context.Background(), fetchRequest(server.URL), constraints())
+	responseResult, err := adapter(context.Background(), fetchRequest("https://public.example/doc"), constraints())
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
@@ -31,24 +73,74 @@ func TestFetchBoundsBodyAndRejectsBinaryContent(t *testing.T) {
 	if body.Body != "abc" || !body.Truncated || body.StatusCode != http.StatusOK {
 		t.Fatalf("result = %+v", body)
 	}
-	_, err = adapter(context.Background(), fetchRequest(server.URL+"/binary"), constraints())
+	_, err = adapter(context.Background(), fetchRequest("https://public.example/binary"), constraints())
 	if class := classOf(err); class != toolbroker.ResultPolicyDenied {
 		t.Fatalf("binary class = %q, err = %v", class, err)
 	}
 }
 
 func TestFetchRejectsQueryAndLimitsRedirects(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(redirectHandler))
-	defer server.Close()
-	adapter, err := New(Options{Timeout: time.Second, MaxRedirects: 0, MaxEncodedBytes: 1024, MaxDecodedBytes: 1024, Client: server.Client()})
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxRedirects:    0,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 1024,
+		Resolver:        publicResolver(),
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == "/redirect" {
+				return &http.Response{
+					StatusCode: http.StatusFound,
+					Header:     http.Header{"Location": []string{"https://public.example/final"}},
+					Body:       http.NoBody,
+					Request:    req,
+				}, nil
+			}
+			return cannedResponse(req, "text/plain", "ok"), nil
+		}),
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	for _, raw := range []string{server.URL + "?secret=1", server.URL + "/redirect"} {
+	for _, raw := range []string{"https://public.example/doc?secret=1", "https://public.example/redirect"} {
 		_, err := adapter(context.Background(), fetchRequest(raw), constraints())
 		if err == nil {
 			t.Errorf("accepted unsafe URL %q", raw)
 		}
+	}
+}
+
+func TestFetchInjectedTransportCannotBypassEgress(t *testing.T) {
+	transportCalls := 0
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxRedirects:    2,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 1024,
+		Resolver: staticResolver{
+			"internal.example": {net.ParseIP("10.0.0.5")},
+			"public.example":   {net.ParseIP("93.184.216.34")},
+		},
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			transportCalls++
+			return cannedResponse(req, "text/plain", "should not be reached"), nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for _, raw := range []string{
+		"https://127.0.0.1/doc",
+		"https://10.0.0.5/doc",
+		"https://internal.example/doc",
+		"http://public.example/doc",
+	} {
+		_, err := adapter(context.Background(), fetchRequest(raw), constraints())
+		if code, ok := egress.CodeOf(err); !ok || code != egress.ErrorCodeEgressDenied {
+			t.Errorf("fetch(%q) = %v, want egress_denied", raw, err)
+		}
+	}
+	if transportCalls != 0 {
+		t.Fatalf("injected transport was called %d times, want 0 (no connection)", transportCalls)
 	}
 }
 
@@ -62,23 +154,6 @@ func TestNewRejectsInvalidLimits(t *testing.T) {
 			t.Errorf("New(%+v) accepted invalid options", options)
 		}
 	}
-}
-
-func contentHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/binary" {
-		w.Header().Set("Content-Type", "application/octet-stream")
-	} else {
-		w.Header().Set("Content-Type", "text/plain")
-	}
-	_, _ = w.Write([]byte("abcdef"))
-}
-
-func redirectHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/redirect" {
-		http.Redirect(w, r, "/final", http.StatusFound)
-		return
-	}
-	_, _ = w.Write([]byte("ok"))
 }
 
 func fetchRequest(raw string) *toolbroker.ToolRequest {

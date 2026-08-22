@@ -3,6 +3,7 @@ package toolbroker
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/tools"
 )
 
@@ -60,6 +62,7 @@ type Options struct {
 	Adapters             map[string]Adapter
 	Secrets              []string
 	MaxInlineResultBytes int64
+	Artifacts            store.ArtifactStore
 	Observer             Observer
 }
 
@@ -69,10 +72,14 @@ type Broker struct {
 	adapters             map[string]Adapter
 	secrets              []string
 	maxInlineResultBytes int64
+	artifacts            store.ArtifactStore
 	observer             Observer
 }
 
-func New(options Options) (*Broker, error) {
+func New(options *Options) (*Broker, error) {
+	if options == nil {
+		options = &Options{}
+	}
 	definitions := tools.DefinitionsByKey()
 	policy := options.Policy
 	if policy.Version == "" {
@@ -96,6 +103,7 @@ func New(options Options) (*Broker, error) {
 		adapters:             cloneAdapters(options.Adapters),
 		secrets:              slices.Clone(options.Secrets),
 		maxInlineResultBytes: options.MaxInlineResultBytes,
+		artifacts:            options.Artifacts,
 		observer:             options.Observer,
 	}, nil
 }
@@ -251,10 +259,75 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		maxOutputBytes = decision.Constraints.MaxOutputBytes
 	}
 	if int64(len(result.Output)) > maxOutputBytes {
-		result.Output = slices.Clone(result.Output[:int(maxOutputBytes)])
+		bounded, err := b.boundOutput(ctx, &canonical, result.Output, maxOutputBytes)
+		if err != nil {
+			return ToolResult{}, err
+		}
+		result.Output = bounded
 		result.Truncated = true
 	}
 	return result, nil
+}
+
+type boundedOutput struct {
+	ArtifactID string `json:"artifact_id,omitempty"`
+	Digest     string `json:"digest"`
+	SizeBytes  int64  `json:"size_bytes"`
+	Truncated  bool   `json:"truncated"`
+	Body       string `json:"body,omitempty"`
+}
+
+// envelopeReserve is subtracted from the inline budget so the truncation
+// envelope's own metadata cannot push the result past the limit.
+const envelopeReserve = 1024
+
+func (b *Broker) boundOutput(ctx context.Context, canonical *ToolRequest, output json.RawMessage, maxOutputBytes int64) (json.RawMessage, error) {
+	digest := sha256.Sum256(output)
+	envelope := boundedOutput{
+		Digest:    hex.EncodeToString(digest[:]),
+		SizeBytes: int64(len(output)),
+		Truncated: true,
+	}
+	if b.artifacts != nil && canonical.SessionID != "" {
+		artifactID, err := randomArtifactID()
+		if err != nil {
+			return nil, errorf(ResultExecutionFailed, "generate artifact id: %v", err)
+		}
+		ref, err := b.artifacts.Put(ctx, strings.NewReader(string(output)), &store.ArtifactMetadata{
+			ID:        artifactID,
+			SessionID: canonical.SessionID,
+			Filename:  canonical.ToolName + "-" + canonical.RequestID + ".json",
+			MediaType: "application/json",
+		})
+		if err == nil {
+			envelope.ArtifactID = ref.ID
+			envelope.Digest = ref.BlobDigest
+			envelope.Truncated = false
+		}
+	}
+	if envelope.ArtifactID == "" {
+		budget := maxOutputBytes - envelopeReserve
+		if budget < 0 {
+			budget = 0
+		}
+		if int64(len(output)) < budget {
+			budget = int64(len(output))
+		}
+		envelope.Body = string(output[:budget])
+	}
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, errorf(ResultExecutionFailed, "encode bounded result: %v", err)
+	}
+	return encoded, nil
+}
+
+func randomArtifactID() (string, error) {
+	var data [16]byte
+	if _, err := rand.Read(data[:]); err != nil {
+		return "", err
+	}
+	return "art-" + hex.EncodeToString(data[:]), nil
 }
 
 func (b *Broker) canonicalRequest(request *ToolRequest) (ToolRequest, error) {

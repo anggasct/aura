@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -27,7 +26,7 @@ type Options struct {
 	MaxResults    int
 	MaxBodyBytes  int64
 	Resolver      egress.Resolver
-	Client        *http.Client
+	Transport     http.RoundTripper
 }
 
 type arguments struct {
@@ -76,13 +75,10 @@ func New(options *Options) (toolbroker.Adapter, error) {
 	if options.Endpoint == "" {
 		options.Endpoint = defaultEndpoint
 	}
-	if _, err := url.ParseRequestURI(options.Endpoint); err != nil {
-		return nil, errors.New("search: endpoint is invalid")
+	if err := egress.ValidateDestinationShape(options.Endpoint); err != nil {
+		return nil, fmt.Errorf("search: endpoint is not a permitted destination: %w", err)
 	}
-	client := options.Client
-	if client == nil {
-		client = egress.NewClient(options.Resolver)
-	}
+	client := egress.NewClientWithTransport(options.Resolver, options.Transport)
 	clientCopy := *client
 	return func(ctx context.Context, request *toolbroker.ToolRequest, constraints approval.Constraints) (toolbroker.ToolResult, error) {
 		return run(ctx, request, constraints, options, &clientCopy)
