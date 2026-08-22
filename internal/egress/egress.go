@@ -63,6 +63,17 @@ type Destination struct {
 	IP   net.IP
 }
 
+type destinationContextKey struct{}
+
+func withDestination(ctx context.Context, destination Destination) context.Context {
+	return context.WithValue(ctx, destinationContextKey{}, destination)
+}
+
+func destinationFromContext(ctx context.Context) (Destination, bool) {
+	destination, ok := ctx.Value(destinationContextKey{}).(Destination)
+	return destination, ok
+}
+
 // Validate resolves and validates a destination. HTTPS is required, and
 // loopback, private, link-local, unspecified, multicast, and cloud-metadata
 // addresses are rejected by default. The returned IP is the one the dialer
@@ -151,9 +162,12 @@ func (d PinnedDialer) DialContext(ctx context.Context, network, address string) 
 	if err != nil {
 		return nil, err
 	}
-	dest, err := Validate(ctx, "https://"+host, d.Resolver)
-	if err != nil {
-		return nil, err
+	dest, ok := destinationFromContext(ctx)
+	if !ok {
+		dest, err = Validate(ctx, "https://"+host, d.Resolver)
+		if err != nil {
+			return nil, err
+		}
 	}
 	dialer := &net.Dialer{}
 	return dialer.DialContext(ctx, network, net.JoinHostPort(dest.IP.String(), port))
@@ -168,10 +182,11 @@ type validatingTransport struct {
 }
 
 func (t *validatingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if _, err := Validate(req.Context(), req.URL.String(), t.resolver); err != nil {
+	destination, err := Validate(req.Context(), req.URL.String(), t.resolver)
+	if err != nil {
 		return nil, err
 	}
-	return t.next.RoundTrip(req)
+	return t.next.RoundTrip(req.WithContext(withDestination(req.Context(), destination)))
 }
 
 // NewClient returns an HTTP client whose transport pins validated IPs and

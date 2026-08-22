@@ -2,6 +2,7 @@ package effect
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
@@ -54,4 +55,90 @@ func (j *Journal) Recover(ctx context.Context) (RecoveryReport, error) {
 		}
 	}
 	return report, nil
+}
+
+func (j *Journal) ValidateResumeEffects(ctx context.Context, sessionID, turnID string, toolCallIDs []string) error {
+	if sessionID == "" || turnID == "" {
+		return codedError(ErrorCodeInvalidArgument, "effect: session and turn must not be empty", nil)
+	}
+	if len(toolCallIDs) > 128 {
+		return codedError(ErrorCodeInvalidArgument, "effect: too many pending tool calls", nil)
+	}
+	if len(toolCallIDs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(toolCallIDs))
+	for _, id := range toolCallIDs {
+		if id == "" {
+			return codedError(ErrorCodeInvalidArgument, "effect: pending tool call id must not be empty", nil)
+		}
+		if _, exists := seen[id]; exists {
+			return codedError(ErrorCodeInvalidArgument, "effect: duplicate pending tool call id", nil)
+		}
+		seen[id] = struct{}{}
+	}
+
+	query := `
+	SELECT id, session_id, turn_id, tool_call_id, idempotency_key, provider, operation,
+	       classification, state, request_digest, request_json, provider_receipt_json,
+	       safe_error_code, retry_of, prepared_at, started_at, finished_at, reconciled_at, updated_at
+	FROM effect_intent
+	WHERE session_id = ? AND turn_id = ?
+	  AND tool_call_id IN (SELECT value FROM json_each(?))`
+	idsJSON, err := json.Marshal(toolCallIDs)
+	if err != nil {
+		return fmt.Errorf("effect: encode pending tool calls: %w", err)
+	}
+	rows, err := j.db.QueryContext(ctx, query, sessionID, turnID, string(idsJSON))
+	if err != nil {
+		return fmt.Errorf("effect: list pending resume effects: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	found := make(map[string]struct{}, len(toolCallIDs))
+	var intents []Intent
+	for rows.Next() {
+		intent, err := scanIntent(rows)
+		if err != nil {
+			return fmt.Errorf("effect: scan pending resume effect: %w", err)
+		}
+		found[intent.ToolCallID] = struct{}{}
+		intents = append(intents, *intent)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("effect: list pending resume effects: %w", err)
+	}
+	for _, id := range toolCallIDs {
+		if _, exists := found[id]; !exists {
+			return codedError(ErrorCodeNotFound, fmt.Sprintf("effect: pending tool call %s not found", id), nil)
+		}
+	}
+	for i := range intents {
+		switch intents[i].State {
+		case StatePrepared:
+			continue
+		case StateUnknown:
+			return codedError(ErrorCodeUnknown, fmt.Sprintf("effect: pending tool call %s requires reconciliation before resume", intents[i].ToolCallID), nil)
+		case StateStarted:
+			claimed, err := j.Claim(ctx, intents[i].ID)
+			if err != nil {
+				return err
+			}
+			if claimed {
+				return codedError(ErrorCodeUnknown, fmt.Sprintf("effect: pending tool call %s requires reconciliation before resume", intents[i].ToolCallID), nil)
+			}
+			current, err := j.Get(ctx, intents[i].ID)
+			if err != nil {
+				return err
+			}
+			if current.State == StateUnknown {
+				return codedError(ErrorCodeUnknown, fmt.Sprintf("effect: pending tool call %s requires reconciliation before resume", intents[i].ToolCallID), nil)
+			}
+			return codedError(ErrorCodeTransitionInvalid, fmt.Sprintf("effect: pending tool call %s changed to %s during recovery", intents[i].ToolCallID, current.State), nil)
+		case StateSucceeded, StateFailed:
+			return codedError(ErrorCodeTransitionInvalid, fmt.Sprintf("effect: pending tool call %s is already terminal (%s)", intents[i].ToolCallID, intents[i].State), nil)
+		default:
+			return codedError(ErrorCodeTransitionInvalid, fmt.Sprintf("effect: pending tool call %s has unsupported state %s", intents[i].ToolCallID, intents[i].State), nil)
+		}
+	}
+	return nil
 }

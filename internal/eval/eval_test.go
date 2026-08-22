@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/store"
 )
 
 func TestGoldenTrajectories(t *testing.T) {
@@ -92,5 +93,44 @@ func TestAuthorizedRequestIsAllowed(t *testing.T) {
 	}
 	if decision.Outcome != approval.OutcomeAllow {
 		t.Errorf("authorized request outcome = %q, want allow", decision.Outcome)
+	}
+}
+
+func TestCheckTrajectoryRejectsMissingAndExtraSteps(t *testing.T) {
+	events := []store.RuntimeEvent{
+		{Sequence: 1, Kind: "turn.accepted"},
+		{Sequence: 2, Kind: "tool.requested"},
+		{Sequence: 3, Kind: "tool.completed"},
+		{Sequence: 4, Kind: "turn.completed"},
+	}
+	if err := CheckTrajectory(events, []string{"turn.accepted", "tool.requested", "tool.completed", "turn.completed"}); err != nil {
+		t.Fatalf("CheckTrajectory(valid): %v", err)
+	}
+	if err := CheckTrajectory(events[:3], []string{"turn.accepted", "tool.requested", "tool.completed", "turn.completed"}); err == nil {
+		t.Fatal("CheckTrajectory accepted a missing terminal step")
+	}
+	withExtra := append(append([]store.RuntimeEvent{}, events...), store.RuntimeEvent{Sequence: 5, Kind: "policy.bypass"})
+	if err := CheckTrajectory(withExtra, []string{"turn.accepted", "tool.requested", "tool.completed", "turn.completed"}); err == nil {
+		t.Fatal("CheckTrajectory accepted an extra step")
+	}
+}
+
+func TestGradeTraceScoresToolApprovalHandoffAndContinuationSignals(t *testing.T) {
+	trace := NewTrace("core", "completed", []store.RuntimeEvent{
+		{Sequence: 1, Kind: "tool.requested"},
+		{Sequence: 2, Kind: "approval.required"},
+		{Sequence: 3, Kind: "tool.completed"},
+		{Sequence: 4, Kind: "handoff.completed"},
+		{Sequence: 5, Kind: "continuation.started"},
+		{Sequence: 6, Kind: "turn.completed"},
+	})
+	grade := GradeTrace(trace, &TraceExpectation{
+		Profile: "core", Outcome: "completed", MinScore: 100,
+		ExpectedKinds:  []string{"tool.requested", "approval.required", "tool.completed", "handoff.completed", "continuation.started", "turn.completed"},
+		RequiredKinds:  []string{"tool.requested", "approval.required", "tool.completed", "handoff.completed", "continuation.started", "turn.completed"},
+		ForbiddenKinds: []string{"policy.bypass"},
+	})
+	if !grade.Passed || grade.Version != "trace-grader.v1" {
+		t.Fatalf("grade = %+v, want passing semantic signal grade", grade)
 	}
 }
