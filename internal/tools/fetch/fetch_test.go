@@ -155,6 +155,150 @@ func (f resolverFunc) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 	return f(ctx, host)
 }
 
+func chunkedClient(contentType, body string) *http.Client {
+	return cannedClient(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Header:        http.Header{"Content-Type": []string{contentType}},
+			Body:          io.NopCloser(strings.NewReader(body)),
+			ContentLength: -1,
+			Request:       req,
+		}, nil
+	})
+}
+
+func TestFetchEnforcesEncodedLimitForChunkedResponses(t *testing.T) {
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxRedirects:    2,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 8192,
+		client:          chunkedClient("text/plain", strings.Repeat("a", 4096)),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = adapter(context.Background(), fetchRequest("https://public.example/doc"), constraints())
+	if class := classOf(err); class != toolbroker.ResultPolicyDenied {
+		t.Fatalf("class = %q, err = %v, want policy_denied", class, err)
+	}
+	if !strings.Contains(err.Error(), "encoded") {
+		t.Fatalf("error should name the encoded limit: %v", err)
+	}
+}
+
+func TestFetchRejectsCompressedResponses(t *testing.T) {
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxRedirects:    2,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 8192,
+		client: cannedClient(func(req *http.Request) (*http.Response, error) {
+			response := cannedResponse(req, "text/plain", "compressed payload")
+			response.Header.Set("Content-Encoding", "gzip")
+			return response, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = adapter(context.Background(), fetchRequest("https://public.example/doc"), constraints())
+	if class := classOf(err); class != toolbroker.ResultPolicyDenied {
+		t.Fatalf("class = %q, err = %v, want policy_denied", class, err)
+	}
+}
+
+func TestFetchAcceptsTransparentlyDecompressedBody(t *testing.T) {
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxRedirects:    2,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 8192,
+		client: cannedClient(func(req *http.Request) (*http.Response, error) {
+			response := cannedResponse(req, "text/plain", strings.Repeat("a", 2048))
+			response.Uncompressed = true
+			return response, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	outcome, err := adapter(context.Background(), fetchRequest("https://public.example/doc"), constraints())
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	var body result
+	if err := json.Unmarshal(outcome.Output, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Body) != 2048 || body.Truncated {
+		t.Fatalf("body length = %d, truncated = %v", len(body.Body), body.Truncated)
+	}
+}
+
+func TestFetchConvertsHTMLToMarkdown(t *testing.T) {
+	document := `<html><head><style>body{color:red}</style><title>ignore</title></head><body>` +
+		`<h1>Title</h1><p>Hello <b>world</b> and <i>farewell</i>.</p>` +
+		`<a href="https://example.com/page">a link</a>` +
+		`<script>alert("x")</script><style>h1{}</style>` +
+		`<pre>line one
+line two</pre></body></html>`
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxRedirects:    2,
+		MaxEncodedBytes: 8192,
+		MaxDecodedBytes: 8192,
+		client:          chunkedClient("text/html", document),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	outcome, err := adapter(context.Background(), fetchRequest("https://public.example/doc"), constraints())
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	var body result
+	if err := json.Unmarshal(outcome.Output, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, want := range []string{"# Title", "**world**", "*farewell*", "[a link](https://example.com/page)", "```", "line two"} {
+		if !strings.Contains(body.Body, want) {
+			t.Errorf("converted body missing %q:\n%s", want, body.Body)
+		}
+	}
+	for _, forbidden := range []string{"<h1>", "<b>", "<script>", "alert", "color:red", "<style>", "ignore"} {
+		if strings.Contains(body.Body, forbidden) {
+			t.Errorf("converted body still contains %q:\n%s", forbidden, body.Body)
+		}
+	}
+}
+
+func TestFetchLeavesNonHTMLBodiesUnchanged(t *testing.T) {
+	for _, contentType := range []string{"text/plain", "application/json"} {
+		adapter, err := New(Options{
+			Timeout:         time.Second,
+			MaxRedirects:    2,
+			MaxEncodedBytes: 8192,
+			MaxDecodedBytes: 8192,
+			client:          chunkedClient(contentType, `{"a": 1}`),
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		outcome, err := adapter(context.Background(), fetchRequest("https://public.example/doc"), constraints())
+		if err != nil {
+			t.Fatalf("fetch(%s): %v", contentType, err)
+		}
+		var body result
+		if err := json.Unmarshal(outcome.Output, &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if body.Body != `{"a": 1}` {
+			t.Fatalf("body = %q, want unchanged non-HTML content", body.Body)
+		}
+	}
+}
+
 func TestNewRejectsInvalidLimits(t *testing.T) {
 	for _, options := range []Options{
 		{Timeout: 0, MaxRedirects: 1, MaxEncodedBytes: 1, MaxDecodedBytes: 1},

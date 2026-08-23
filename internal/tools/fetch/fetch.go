@@ -109,6 +109,9 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 	if response.ContentLength > options.MaxEncodedBytes {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "response exceeds encoded body limit")
 	}
+	if encoding := response.Header.Get("Content-Encoding"); encoding != "" && !strings.EqualFold(encoding, "identity") {
+		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "compressed response encoding is not accepted")
+	}
 	contentType := strings.ToLower(strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]))
 	if !allowedContentType(contentType) {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "content type is not readable")
@@ -120,6 +123,19 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 	truncated := int64(len(body)) > options.MaxDecodedBytes
 	if truncated {
 		body = body[:options.MaxDecodedBytes]
+	}
+	// With identity transfer the stream bytes are the encoded bytes, so this
+	// cap enforces MaxEncodedBytes for chunked and unknown-length responses.
+	// Transparently decompressed responses are covered by the decoded cap
+	// above because the compressed wire stream is never larger than the
+	// decompressed body.
+	if !response.Uncompressed && int64(len(body)) > options.MaxEncodedBytes {
+		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "response exceeds encoded body limit")
+	}
+	if isHTML(contentType) {
+		converted, convertedTruncated := htmlToMarkdown(body, options.MaxDecodedBytes)
+		body = []byte(converted)
+		truncated = truncated || convertedTruncated
 	}
 	encoded, err := json.Marshal(result{URL: parsed.String(), StatusCode: response.StatusCode, ContentType: contentType, Body: string(body), Truncated: truncated})
 	if err != nil {
