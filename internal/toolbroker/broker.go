@@ -250,6 +250,11 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return ToolResult{}, errorf(ResultDeadlineExceeded, "tool request ended: %v", err)
 		}
+		// An adapter that already classified its error keeps its stable
+		// broker class; only the detail is rewrapped and redacted.
+		if code, ok := CodeOf(err); ok && code.stable() {
+			return ToolResult{}, errorf(code, "%s", redact([]byte(err.Error()), b.secrets))
+		}
 		if code, ok := sandbox.CodeOf(err); ok {
 			switch code {
 			case sandbox.ErrorCodeSandboxUnavailable:

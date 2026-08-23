@@ -187,6 +187,26 @@ func TestFetchEnforcesEncodedLimitForChunkedResponses(t *testing.T) {
 	}
 }
 
+func TestFetchEnforcesEncodedLimitWhenDecodedCapIsLower(t *testing.T) {
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxRedirects:    2,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 512,
+		client:          chunkedClient("text/plain", strings.Repeat("a", 4096)),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = adapter(context.Background(), fetchRequest("https://public.example/doc"), constraints())
+	if class := classOf(err); class != toolbroker.ResultPolicyDenied {
+		t.Fatalf("class = %q, err = %v, want policy_denied (encoded over-limit must not be truncated into acceptance)", class, err)
+	}
+	if !strings.Contains(err.Error(), "encoded") {
+		t.Fatalf("error should name the encoded limit: %v", err)
+	}
+}
+
 func TestFetchRejectsCompressedResponses(t *testing.T) {
 	adapter, err := New(Options{
 		Timeout:         time.Second,

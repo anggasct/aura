@@ -42,6 +42,17 @@ func CodeOf(err error) (ResultClass, bool) {
 	return target.Class, true
 }
 
+// stable reports whether the class is one of the documented stable result
+// classes; anything else is remapped by the broker's generic error path.
+func (c ResultClass) stable() bool {
+	switch c {
+	case ResultOK, ResultInvalidArgument, ResultPolicyDenied, ResultApprovalRequired,
+		ResultCapabilityUnavailable, ResultDeadlineExceeded, ResultExecutionFailed:
+		return true
+	}
+	return false
+}
+
 func errorf(class ResultClass, format string, args ...any) error {
 	return &Error{Class: class, Detail: fmt.Sprintf(format, args...)}
 }

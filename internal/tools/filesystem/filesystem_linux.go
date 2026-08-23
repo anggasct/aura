@@ -172,38 +172,64 @@ func listDirectory(ctx context.Context, root int, relative string, recursive boo
 		return errors.New("filesystem: directory handle unavailable")
 	}
 	defer func() { _ = file.Close() }()
-	entries, err := file.Readdir(-1)
-	if err != nil {
-		return fmt.Errorf("filesystem: read directory: %w", err)
-	}
-	for _, entry := range entries {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	for {
+		remaining := limit - len(result.Entries)
+		// Read at most the remaining budget plus one entry so truncation
+		// is detectable without ever materializing the full listing. An
+		// exhausted budget probes a single entry to distinguish an exact
+		// fit from a truncated listing.
+		readSize := 1
+		if remaining > 0 {
+			readSize = remaining + 1
 		}
-		if len(result.Entries) >= limit {
+		batch, err := file.Readdir(readSize)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return fmt.Errorf("filesystem: read directory: %w", err)
+		}
+		if len(batch) == 0 {
+			return nil
+		}
+		if remaining <= 0 {
 			result.Truncated = true
 			return nil
 		}
-		entryPath := entry.Name()
-		if relative != "." {
-			entryPath = filepath.Join(relative, entry.Name())
+		if len(batch) > remaining {
+			result.Truncated = true
+			batch = batch[:remaining]
 		}
-		kind := "file"
-		if entry.IsDir() {
-			kind = "directory"
-		} else if entry.Mode()&os.ModeSymlink != 0 {
-			kind = "symlink"
-		}
-		result.Entries = append(result.Entries, directoryEntry{Path: entryPath, Kind: kind, Size: entry.Size()})
-		if recursive && entry.IsDir() {
-			if err := listDirectory(ctx, root, entryPath, true, limit, result); err != nil {
-				return err
+		for _, entry := range batch {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			// The budget is shared with recursive descents, so it must be
+			// rechecked per entry, not per batch.
+			if len(result.Entries) >= limit {
+				result.Truncated = true
+				return nil
+			}
+			entryPath := entry.Name()
+			if relative != "." {
+				entryPath = filepath.Join(relative, entry.Name())
+			}
+			kind := "file"
+			if entry.IsDir() {
+				kind = "directory"
+			} else if entry.Mode()&os.ModeSymlink != 0 {
+				kind = "symlink"
+			}
+			result.Entries = append(result.Entries, directoryEntry{Path: entryPath, Kind: kind, Size: entry.Size()})
+			if recursive && entry.IsDir() {
+				if err := listDirectory(ctx, root, entryPath, true, limit, result); err != nil {
+					return err
+				}
 			}
 		}
+		if result.Truncated || errors.Is(err, io.EOF) {
+			return nil
+		}
 	}
-	return nil
 }
 
 func decodeArguments(request *toolbroker.ToolRequest, target any) error {

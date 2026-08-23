@@ -116,21 +116,27 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 	if !allowedContentType(contentType) {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "content type is not readable")
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, options.MaxDecodedBytes+1))
+	// The stream is read up to the larger cap plus one byte so the encoded
+	// bound is enforceable even when the decoded cap is the smaller one:
+	// truncation to MaxDecodedBytes must never hide an over-limit wire
+	// body. With identity transfer the stream bytes are the encoded bytes;
+	// transparently decompressed responses are covered by the decoded cap
+	// because the compressed wire stream is never larger than the
+	// decompressed body.
+	readLimit := options.MaxEncodedBytes
+	if options.MaxDecodedBytes > readLimit {
+		readLimit = options.MaxDecodedBytes
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, readLimit+1))
 	if err != nil {
 		return toolbroker.ToolResult{}, fmt.Errorf("fetch: read response: %w", err)
+	}
+	if !response.Uncompressed && int64(len(body)) > options.MaxEncodedBytes {
+		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "response exceeds encoded body limit")
 	}
 	truncated := int64(len(body)) > options.MaxDecodedBytes
 	if truncated {
 		body = body[:options.MaxDecodedBytes]
-	}
-	// With identity transfer the stream bytes are the encoded bytes, so this
-	// cap enforces MaxEncodedBytes for chunked and unknown-length responses.
-	// Transparently decompressed responses are covered by the decoded cap
-	// above because the compressed wire stream is never larger than the
-	// decompressed body.
-	if !response.Uncompressed && int64(len(body)) > options.MaxEncodedBytes {
-		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "response exceeds encoded body limit")
 	}
 	if isHTML(contentType) {
 		converted, convertedTruncated := htmlToMarkdown(body, options.MaxDecodedBytes)

@@ -43,6 +43,95 @@ func TestBrokerMapsEgressDenialToPolicyDenied(t *testing.T) {
 	}
 }
 
+func TestBrokerPreservesAdapterResultClasses(t *testing.T) {
+	cases := []struct {
+		name        string
+		tool        string
+		arguments   string
+		capability  string
+		adapterErr  error
+		want        ResultClass
+		wantSegment string
+	}{
+		{
+			name:        "filesystem policy denial",
+			tool:        "read_file",
+			arguments:   `{"path":"../secret"}`,
+			capability:  "workspace-read",
+			adapterErr:  errorf(ResultPolicyDenied, "read path is outside the workspace"),
+			want:        ResultPolicyDenied,
+			wantSegment: "outside the workspace",
+		},
+		{
+			name:        "fetch policy denial",
+			tool:        "web_fetch",
+			arguments:   `{"url":"https://public.example/doc"}`,
+			capability:  "public-web",
+			adapterErr:  errorf(ResultPolicyDenied, "response exceeds encoded body limit"),
+			want:        ResultPolicyDenied,
+			wantSegment: "encoded body limit",
+		},
+		{
+			name:        "missing search credentials",
+			tool:        "web_search",
+			arguments:   `{"query":"aura"}`,
+			capability:  "provider-search",
+			adapterErr:  errorf(ResultCapabilityUnavailable, "search credential is unavailable"),
+			want:        ResultCapabilityUnavailable,
+			wantSegment: "credential is unavailable",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			broker, err := New(&Options{
+				Adapters: map[string]Adapter{
+					tc.tool + "@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+						return ToolResult{}, tc.adapterErr
+					},
+				},
+				Secrets: []string{"search-secret"},
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			request := brokerRequest(tc.tool, tc.arguments, tc.capability)
+			request.RequestID = "request-" + tc.tool
+			request.IdempotencyKey = "idempotency-" + tc.tool
+			_, err = broker.Execute(context.Background(), request)
+			if class := classOf(err); class != tc.want {
+				t.Fatalf("class = %q, want %q (err = %v)", class, tc.want, err)
+			}
+			if !strings.Contains(err.Error(), tc.wantSegment) {
+				t.Fatalf("error detail %q lost the adapter message: %v", tc.wantSegment, err)
+			}
+		})
+	}
+}
+
+func TestBrokerRedactsAdapterErrorDetail(t *testing.T) {
+	broker, err := New(&Options{
+		Adapters: map[string]Adapter{
+			"web_search@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+				return ToolResult{}, errorf(ResultExecutionFailed, "provider rejected token search-secret")
+			},
+		},
+		Secrets: []string{"search-secret"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = broker.Execute(context.Background(), brokerRequest("web_search", `{"query":"aura"}`, "provider-search"))
+	if class := classOf(err); class != ResultExecutionFailed {
+		t.Fatalf("class = %q, err = %v", class, err)
+	}
+	if strings.Contains(err.Error(), "search-secret") {
+		t.Fatalf("adapter error leaked a secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Fatalf("error detail was not redacted: %v", err)
+	}
+}
+
 func TestBrokerOversizedOutputReturnsDecodableTruncationEnvelope(t *testing.T) {
 	output := oversizedOutput(8192)
 	broker, err := New(&Options{Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096})

@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
@@ -189,6 +191,94 @@ func TestWriteFilePropagatesParentSyncError(t *testing.T) {
 		}
 	}
 	sysFsync = original
+}
+
+func TestListDirBoundsLargeDirectoryWithoutFullListing(t *testing.T) {
+	workspace := t.TempDir()
+	const total = 3000
+	const limit = 100
+	for i := range total {
+		if err := os.WriteFile(filepath.Join(workspace, fmt.Sprintf("file-%04d", i)), []byte("x"), 0o600); err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
+	}
+	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: limit})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	result, err := adapters["list_dir@v1"](context.Background(), fsRequest(t, map[string]any{"path": "."}), approvalConstraints())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var decoded directoryResult
+	if err := json.Unmarshal(result.Output, &decoded); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if len(decoded.Entries) != limit || !decoded.Truncated {
+		t.Fatalf("entries = %d, truncated = %v, want %d entries with truncation", len(decoded.Entries), decoded.Truncated, limit)
+	}
+}
+
+func TestListDirExactFitIsNotTruncated(t *testing.T) {
+	workspace := t.TempDir()
+	for _, name := range []string{"a", "b", "c"} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte("x"), 0o600); err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
+	}
+	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 3})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	result, err := adapters["list_dir@v1"](context.Background(), fsRequest(t, map[string]any{"path": "."}), approvalConstraints())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var decoded directoryResult
+	if err := json.Unmarshal(result.Output, &decoded); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if len(decoded.Entries) != 3 || decoded.Truncated {
+		t.Fatalf("entries = %d, truncated = %v, want exactly 3 without truncation", len(decoded.Entries), decoded.Truncated)
+	}
+}
+
+func TestListDirRecursiveSharesBudgetAcrossDirectories(t *testing.T) {
+	workspace := t.TempDir()
+	nested := filepath.Join(workspace, "nested")
+	if err := os.Mkdir(nested, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(workspace, "top-a"),
+		filepath.Join(workspace, "top-b"),
+		filepath.Join(nested, "child-a"),
+		filepath.Join(nested, "child-b"),
+	} {
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
+	}
+	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 3})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	result, err := adapters["list_dir@v1"](context.Background(), fsRequest(t, map[string]any{"path": ".", "recursive": true}), approvalConstraints())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var decoded directoryResult
+	if err := json.Unmarshal(result.Output, &decoded); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if len(decoded.Entries) != 3 || !decoded.Truncated {
+		t.Fatalf("entries = %d, truncated = %v, want the shared 3-entry budget with truncation", len(decoded.Entries), decoded.Truncated)
+	}
+	for _, entry := range decoded.Entries {
+		if strings.Contains(entry.Path, "..") {
+			t.Fatalf("entry escaped the workspace: %+v", entry)
+		}
+	}
 }
 
 func fsRequest(t *testing.T, value map[string]any) *toolbroker.ToolRequest {
