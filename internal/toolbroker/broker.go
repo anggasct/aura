@@ -122,6 +122,7 @@ func DefaultPolicy() approval.Policy {
 		allowedTrust := []approval.TrustLabel{
 			approval.TrustOwnerInput,
 			approval.TrustTrustedConfiguration,
+			approval.TrustDerivedUntrusted,
 		}
 		rules[definition.Name] = approval.Rule{
 			ToolName:             definition.Name,
