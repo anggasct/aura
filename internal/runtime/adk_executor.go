@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/anggasct/aura/internal/approval"
@@ -34,6 +35,8 @@ type ADKExecutor struct {
 	broker    ToolBroker
 	tools     []tool.Tool
 	logger    *slog.Logger
+	builtins  BuiltinToolExecutor
+	toolSeq   toolSequence
 	// ledger, when set with modelDefinitionID, wraps the resolved model with
 	// budget enforcement so every turn reserves before dispatch and settles
 	// provider-reported usage after.
@@ -49,10 +52,9 @@ type ToolBroker interface {
 
 // NewADKExecutor builds an ADK-backed turn executor. modelName is resolved
 // through the ADK model registry (registered by the model package at
-// startup); broker is the tool policy gate; tools are the declared tool set
-// (empty until the built-in tools engine lands — every declared tool is
-// still gated by the broker before ADK executes it). Options attach optional
-// capabilities such as budget enforcement.
+// startup); broker is the tool policy gate; tools are the declared tool set.
+// Built-in tools are attached with WithBuiltinToolExecutor. Options attach
+// optional capabilities such as budget enforcement.
 func NewADKExecutor(appName, modelName string, sessions SessionPort, events EventStore, broker ToolBroker, tools []tool.Tool, logger *slog.Logger, opts ...ExecutorOption) (*ADKExecutor, error) {
 	if appName == "" {
 		return nil, invalidArgument("app name must not be empty")
@@ -111,17 +113,34 @@ func WithBudgetLedger(ledger *usage.Ledger, modelDefinitionID string) ExecutorOp
 	}
 }
 
+func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
+	return func(e *ADKExecutor) error {
+		if executor == nil {
+			return invalidArgument("builtin tool executor must not be nil")
+		}
+		definitions := cloneBuiltinDefinitions(executor.Definitions())
+		tools, err := buildBuiltinTools(definitions)
+		if err != nil {
+			return err
+		}
+		e.builtins = executor
+		e.tools = tools
+		return nil
+	}
+}
+
 // Execute runs one turn through the ADK runner. The returned events carry
 // full ADK fidelity (invocation, branch, author, actions, usage); the engine
 // stamps sequence and persists them.
 func (x *ADKExecutor) Execute(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
+		runCtx := withTurnID(ctx, req.TurnID)
 		sessionService, err := NewADKSessionService(x.sessions)
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
 		}
-		adkRunner, err := x.buildRunner(ctx, sessionService)
+		adkRunner, err := x.buildRunner(runCtx, sessionService)
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
@@ -139,7 +158,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *TurnRequest) iter.Seq2[s
 		// the user message would live only in the ADK session service, which
 		// no longer writes.
 		runOpts := []runner.RunOption{runner.WithYieldUserMessage()}
-		for ev, err := range adkRunner.Run(ctx, req.PrincipalID, req.SessionID, content, agent.RunConfig{}, runOpts...) {
+		for ev, err := range adkRunner.Run(runCtx, req.PrincipalID, req.SessionID, content, agent.RunConfig{}, runOpts...) {
 			if err != nil {
 				if turnUsage.exceeded {
 					yield(store.RuntimeEvent{}, codedError(ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
@@ -223,6 +242,65 @@ func (x *ADKExecutor) toolGate(actx agent.Context, toolName string, args map[str
 	return nil
 }
 
+func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, args map[string]any) (map[string]any, error) {
+	definitions := x.builtins.Definitions()
+	var definition *BuiltinToolDefinition
+	for i := range definitions {
+		if definitions[i].Name == toolName {
+			definition = &definitions[i]
+			break
+		}
+	}
+	if definition == nil {
+		return nil, invalidArgument(fmt.Sprintf("unknown builtin tool %q", toolName))
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return nil, codedError(ErrorCodeRuntimeInternal, "failed to marshal tool arguments", err)
+	}
+	requestID := actx.FunctionCallID()
+	if requestID == "" {
+		requestID = actx.InvocationID()
+	}
+	turnID := turnIDFromContext(actx)
+	if turnID == "" {
+		turnID = actx.InvocationID()
+	}
+	deadline, _ := actx.Deadline()
+	request := &BuiltinToolRequest{
+		RequestID:       requestID,
+		TurnID:          turnID,
+		SessionID:       actx.SessionID(),
+		PrincipalID:     actx.UserID(),
+		ToolName:        definition.Name,
+		ToolVersion:     definition.Version,
+		Arguments:       raw,
+		Capabilities:    slices.Clone(definition.RequiredCapabilities),
+		Trust:           "derived_untrusted",
+		Deadline:        deadline,
+		IdempotencyKey:  "adk/" + actx.SessionID() + "/" + turnID + "/" + requestID,
+		EventInvocation: actx.InvocationID(),
+		EventBranch:     actx.Branch(),
+		EventAuthor:     actx.AgentName(),
+	}
+	x.toolSeq.mu.Lock()
+	defer x.toolSeq.mu.Unlock()
+	sequence, err := x.events.LastSequence(actx, request.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("read tool event sequence: %w", err)
+	}
+	request.EventSequence = sequence + 1
+	output, err := x.builtins.Execute(actx, request)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		return nil, fmt.Errorf("decode builtin tool result: %w", err)
+	}
+	return result, nil
+}
+
 func contentFromParts(req *TurnRequest) (*genai.Content, error) {
 	var parts []*genai.Part
 	for _, p := range req.Parts {
@@ -273,6 +351,9 @@ func buildAgent(name string, model adkmodel.LLM, tools []tool.Tool, gate llmagen
 // passes through the broker's Evaluate before the tool runs. A deny or an
 // evaluation error blocks the call with a stable code.
 func (x *ADKExecutor) beforeTool(actx agent.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
+	if x.builtins != nil {
+		return x.executeBuiltinTool(actx, t.Name(), args)
+	}
 	if err := x.toolGate(actx, t.Name(), args); err != nil {
 		return nil, err
 	}

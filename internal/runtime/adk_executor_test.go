@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"iter"
 	"strings"
 	"testing"
@@ -96,6 +97,25 @@ type fakeBroker struct {
 	deny     bool
 	checked  []string
 	requests []approval.ToolRequest
+}
+
+type fakeBuiltinExecutor struct {
+	definitions []BuiltinToolDefinition
+	requests    []*BuiltinToolRequest
+	output      json.RawMessage
+	err         error
+}
+
+func (f *fakeBuiltinExecutor) Definitions() []BuiltinToolDefinition {
+	return cloneBuiltinDefinitions(f.definitions)
+}
+
+func (f *fakeBuiltinExecutor) Execute(_ context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
+	f.requests = append(f.requests, request)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.output, nil
 }
 
 func (b *fakeBroker) Evaluate(ctx context.Context, req *approval.ToolRequest) (approval.PolicyDecision, error) {
@@ -211,6 +231,47 @@ func TestADKExecutorDeniedToolFailsClosed(t *testing.T) {
 	}
 	if *executed {
 		t.Fatal("denied tool call was executed despite the denial")
+	}
+}
+
+func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
+	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
+	modelName := registerFakeModel(t, model)
+	builtin := &fakeBuiltinExecutor{
+		definitions: []BuiltinToolDefinition{{
+			Name:                 "sample_tool",
+			Version:              "v1",
+			Description:          "sample",
+			Schema:               json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}`),
+			RequiredCapabilities: []string{"sample-capability"},
+		}},
+		output: json.RawMessage(`{"ok":true}`),
+	}
+	db, sessions, events := newSessionTestDB(t)
+	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	mustCreateSession(t, db, "session-1")
+
+	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []InputPart{{Text: "hi"}}}
+	for _, err := range executor.Execute(context.Background(), req) {
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	}
+	if len(builtin.requests) != 1 {
+		t.Fatalf("builtin calls = %d, want 1", len(builtin.requests))
+	}
+	got := builtin.requests[0]
+	if got.ToolName != "sample_tool" || got.ToolVersion != "v1" || got.TurnID != "turn-1" || got.SessionID != "session-1" || got.PrincipalID != "user-1" {
+		t.Fatalf("builtin request identity = %+v", got)
+	}
+	if got.EventSequence == 0 || got.RequestID == "" || got.IdempotencyKey == "" {
+		t.Fatalf("builtin request lacks execution identity = %+v", got)
+	}
+	if got.Trust != "derived_untrusted" || len(got.Capabilities) != 1 || got.Capabilities[0] != "sample-capability" {
+		t.Fatalf("builtin request policy fields = %+v", got)
 	}
 }
 

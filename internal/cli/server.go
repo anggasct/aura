@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"time"
 
@@ -9,7 +10,9 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/logging"
 	"github.com/anggasct/aura/internal/model"
+	auraruntime "github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/server"
+	"github.com/anggasct/aura/internal/store"
 )
 
 func newServerCmd(gf *globalFlags) *cobra.Command {
@@ -35,6 +38,44 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err := model.RegisterAdapters(logger, cfg.Models); err != nil {
 				return err
 			}
+			db, err := openStorage(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+			builtin, err := newBuiltinToolExecutor(cfg, db, logger)
+			if err != nil {
+				return err
+			}
+			modelDefinition := cfg.Models.Definitions["primary"]
+			if modelDefinition.Model == "" {
+				return &config.Error{Code: config.ErrorCodeConfigInvalid, Detail: "models.definitions.primary.model is required for the server runtime"}
+			}
+			sessions := store.NewSessionService(db)
+			events := store.NewEventStore(db)
+			adkExecutor, err := auraruntime.NewADKExecutor(
+				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
+				auraruntime.WithBuiltinToolExecutor(builtin),
+			)
+			if err != nil {
+				return err
+			}
+			runtimeEngine, err := auraruntime.NewEngine(auraruntime.Config{
+				MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
+				MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
+				TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
+				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
+			}, events, store.NewDedupeStore(db), adkExecutor, logger)
+			if err != nil {
+				return err
+			}
+			host, err := auraruntime.NewHost(runtimeEngine, nil, logger)
+			if err != nil {
+				return err
+			}
+			if err := host.Start(ctx); err != nil {
+				return err
+			}
 			logger.InfoContext(ctx, "starting server",
 				"component", "server",
 				"host", cfg.Server.Host,
@@ -44,7 +85,13 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				Logger:          logger,
 				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 			})
-			return srv.Run(ctx)
+			runErr := srv.Run(ctx)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Runtime.ShutdownTimeout))
+			defer cancel()
+			if err := host.Shutdown(shutdownCtx); runErr == nil {
+				runErr = err
+			}
+			return runErr
 		},
 	}
 }
