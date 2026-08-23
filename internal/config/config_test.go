@@ -902,7 +902,7 @@ func TestLoad_MissingDependencyState(t *testing.T) {
 	}
 	options := LoadOptions{Build: build, Registry: registry}
 
-	disabledPath := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: []\n")
+	disabledPath := writeTempConfig(t, "version: 1\ntools:\n  workspace: /tmp/aura\ncapabilities:\n  enabled: []\n")
 	result, err := LoadWithOptions(disabledPath, options)
 	if err != nil {
 		t.Fatalf("LoadWithOptions disabled missing dependency: %v", err)
@@ -912,7 +912,7 @@ func TestLoad_MissingDependencyState(t *testing.T) {
 		t.Fatalf("missing dependency status = %+v, %v", status, ok)
 	}
 
-	enabledPath := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: [sample-runtime]\n")
+	enabledPath := writeTempConfig(t, "version: 1\ntools:\n  workspace: /tmp/aura\ncapabilities:\n  enabled: [sample-runtime]\n")
 	_, err = LoadWithOptions(enabledPath, options)
 	if code, ok := capability.CodeOf(err); !ok || code != capability.ErrorCodeDependencyMissing {
 		t.Fatalf("capability.CodeOf(%v) = %q, %v; want %q, true", err, code, ok, capability.ErrorCodeDependencyMissing)

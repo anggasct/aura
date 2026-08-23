@@ -136,12 +136,13 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
 		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
 	}
-	var output limitedBuffer
+	var stdout, stderr limitedBuffer
 	if spec.Limits.MaxOutputBytes > 0 {
-		output.limit = spec.Limits.MaxOutputBytes
+		stdout.limit = spec.Limits.MaxOutputBytes
+		stderr.limit = spec.Limits.MaxOutputBytes
 	}
-	cmd.Stdout = &output
-	cmd.Stderr = &output
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
 		_ = configR.Close()
@@ -186,7 +187,9 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 	}()
 
 	buildResult := func(waitErr error) Result {
-		result := Result{Output: strings.TrimRight(output.String(), "\n"), Truncated: output.truncated}
+		out := strings.TrimRight(stdout.String(), "\n")
+		errOut := strings.TrimRight(stderr.String(), "\n")
+		result := Result{Output: strings.TrimRight(out+errOut, "\n"), Stdout: out, Stderr: errOut, Truncated: stdout.truncated || stderr.truncated}
 		var exitErr *exec.ExitError
 		if errors.As(waitErr, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
@@ -217,9 +220,9 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 			_ = cg.destroy()
 		}
 		if initErr != nil {
-			return Result{Terminated: true, Truncated: output.truncated}, initErr
+			return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, initErr
 		}
-		return Result{Terminated: true, Truncated: output.truncated}, nil
+		return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, nil
 	case <-ctx.Done():
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-waitDone
@@ -228,9 +231,9 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 			_ = cg.destroy()
 		}
 		if initErr != nil {
-			return Result{Terminated: true, Truncated: output.truncated}, initErr
+			return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, initErr
 		}
-		return Result{Terminated: true, Truncated: output.truncated}, nil
+		return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, nil
 	}
 }
 
