@@ -88,7 +88,3 @@ func readCgroupFile(name string) (int64, bool) {
 	}
 	return value, true
 }
-
-// processProbeFn is the seam tests use to pin process-resource evidence;
-// production reads the real limits.
-var processProbeFn = processProbe

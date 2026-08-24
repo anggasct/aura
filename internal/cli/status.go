@@ -47,7 +47,7 @@ func newStatusCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 			if err != nil {
 				return &exitCodeError{code: exitCommand, err: err}
 			}
-			return runStatus(cmd, loaded.Config, loaded.CapabilityReport, negotiate, offline, asJSON)
+			return runStatus(cmd, loaded.Config, loaded.CapabilityReport, negotiate, offline, asJSON, processProbe)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable output")
@@ -55,9 +55,9 @@ func newStatusCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 	return cmd
 }
 
-func runStatus(cmd *cobra.Command, cfg *config.Config, report capability.Report, negotiate func() (sandbox.Primitives, error), offline, asJSON bool) error {
+func runStatus(cmd *cobra.Command, cfg *config.Config, report capability.Report, negotiate func() (sandbox.Primitives, error), offline, asJSON bool, processProbe func() (health.ProcessStatus, bool)) error {
 	ctx := cmd.Context()
-	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), negotiate)
+	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), negotiate, processProbe)
 	if err != nil {
 		return &exitCodeError{code: exitCommand, err: err}
 	}
@@ -101,7 +101,7 @@ func liveReadiness(ctx context.Context, offline bool, listen string) (live healt
 // primitives from the host, provider configuration, capability consistency
 // with this release profile, and process resource pressure. Checks never
 // mutate state and never dial a provider.
-func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilityStatus, negotiate func() (sandbox.Primitives, error)) (*health.Registry, error) {
+func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilityStatus, negotiate func() (sandbox.Primitives, error), processProbe func() (health.ProcessStatus, bool)) (*health.Registry, error) {
 	dbPath, artifactRoot, backupDir, err := storagePaths(cfg)
 	if err != nil {
 		return nil, err
@@ -151,7 +151,7 @@ func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilitySta
 		},
 		health.RegisteredCheck{
 			ID:          "process",
-			Checker:     health.ProcessChecker{Probe: func(context.Context) (health.ProcessStatus, bool) { return processProbeFn() }},
+			Checker:     health.ProcessChecker{Probe: func(context.Context) (health.ProcessStatus, bool) { return processProbe() }},
 			Timeout:     checkTimeout,
 			Remediation: health.RemediationRelieveLimits,
 		},
@@ -215,6 +215,7 @@ func mapCapabilityStatuses(report capability.Report) []health.CapabilityStatus {
 			Available:         s.Available,
 			Enabled:           s.Enabled,
 			MissingDependency: s.MissingDependency,
+			UnavailableReason: s.UnavailableReason,
 		})
 	}
 	return mapped

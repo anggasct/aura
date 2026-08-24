@@ -139,6 +139,7 @@ type CapabilityStatus struct {
 	Available         bool
 	Enabled           bool
 	MissingDependency string
+	UnavailableReason string
 }
 
 // CapabilityChecker reports every capability whose declared state does not
@@ -167,8 +168,11 @@ func (c CapabilityChecker) Check(ctx context.Context) []Finding {
 			})
 		case s.Enabled && !s.Available:
 			detail := "capability unavailable"
-			if s.MissingDependency != "" {
+			switch {
+			case s.MissingDependency != "":
 				detail = "missing dependency: " + s.MissingDependency
+			case s.UnavailableReason != "":
+				detail = s.UnavailableReason
 			}
 			findings = append(findings, Finding{
 				Component: ComponentCapability + "/" + s.Name,

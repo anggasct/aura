@@ -34,6 +34,7 @@ type Status struct {
 	Available         bool
 	Enabled           bool
 	MissingDependency string
+	UnavailableReason string
 }
 
 type Report struct {
@@ -135,12 +136,14 @@ func (r Registry) Resolve(build Build, enabled []string, dependencies Dependenci
 			continue
 		}
 		if !slices.Contains(definition.Profiles, build.Profile()) {
-			validationErr = errors.Join(validationErr, newError(ErrorCodeCapabilityUnavailable, name, "capability is not included in profile "+string(build.Profile())))
+			status.UnavailableReason = "capability is not included in profile " + string(build.Profile())
+			validationErr = errors.Join(validationErr, newError(ErrorCodeCapabilityUnavailable, name, status.UnavailableReason))
 			statuses = append(statuses, status)
 			continue
 		}
 		if definition.Effectful && build.GOOS() != "linux" {
-			validationErr = errors.Join(validationErr, newError(ErrorCodeCapabilityUnavailable, name, "effectful capabilities require Linux"))
+			status.UnavailableReason = "effectful capabilities require Linux"
+			validationErr = errors.Join(validationErr, newError(ErrorCodeCapabilityUnavailable, name, status.UnavailableReason))
 			statuses = append(statuses, status)
 			continue
 		}

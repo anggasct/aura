@@ -12,7 +12,3 @@ import (
 func processProbe() (health.ProcessStatus, bool) {
 	return health.ProcessStatus{}, false
 }
-
-// processProbeFn is the seam tests use to pin process-resource evidence;
-// production reads the real limits.
-var processProbeFn = processProbe
