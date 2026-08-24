@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -197,32 +198,66 @@ func TestRegistryStalenessCarriesLastObservation(t *testing.T) {
 }
 
 // Timed-out checks and their per-attempt contexts must not leak goroutines:
-// repeated evaluations settle back to the baseline goroutine count.
+// repeated evaluations settle back to the baseline goroutine count. The
+// blocking checker signals entry and completion explicitly, so the
+// assertion runs only after every checker goroutine has provably exited —
+// no sleeps or scheduler-dependent polling.
 func TestRegistryEvaluationsDoNotLeakGoroutines(t *testing.T) {
-	slow := stubChecker{delay: time.Second}
+	block := make(chan struct{})
+	entered := make(chan struct{}, 12)
+	var running sync.WaitGroup
+	blocking := checkerFunc(func(context.Context) []Finding {
+		running.Add(1)
+		entered <- struct{}{}
+		<-block
+		running.Done()
+		return nil
+	})
 	registry, err := NewRegistry(
-		RegisteredCheck{ID: "a", Checker: slow, Timeout: 15 * time.Millisecond},
-		RegisteredCheck{ID: "b", Checker: slow, Timeout: 15 * time.Millisecond},
+		RegisteredCheck{ID: "a", Checker: blocking, Timeout: 15 * time.Millisecond},
+		RegisteredCheck{ID: "b", Checker: blocking, Timeout: 15 * time.Millisecond},
 	)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	time.Sleep(20 * time.Millisecond)
-	before := runtime.NumGoroutine()
 
-	for range 6 {
+	first := registry.Evaluate(context.Background())
+	if len(first) != 2 {
+		t.Fatalf("first evaluation findings = %d, want 2 timeouts", len(first))
+	}
+	// Both checkers are still parked inside their attempt; confirm they
+	// entered before relying on the count.
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("checker never entered its attempt")
+		}
+	}
+
+	before := runtime.NumGoroutine()
+	for range 5 {
 		registry.Evaluate(context.Background())
 	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		runtime.GC()
-		time.Sleep(25 * time.Millisecond)
-		if runtime.NumGoroutine() <= before+2 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("goroutines after evaluations = %d, baseline %d", runtime.NumGoroutine(), before)
+	// Drain the entry signals of the later evaluations so their checkers
+	// are accounted for before the release.
+	for range 10 {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("later checker never entered its attempt")
 		}
 	}
+
+	close(block)
+	running.Wait()
+	runtime.GC()
+	if got := runtime.NumGoroutine(); got > before {
+		t.Fatalf("goroutines after evaluations = %d, baseline %d", got, before)
+	}
 }
+
+// checkerFunc adapts a function to the Checker interface.
+type checkerFunc func(context.Context) []Finding
+
+func (f checkerFunc) Check(ctx context.Context) []Finding { return f(ctx) }

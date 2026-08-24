@@ -151,7 +151,7 @@ func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilitySta
 		},
 		health.RegisteredCheck{
 			ID:          "process",
-			Checker:     health.ProcessChecker{Probe: func(context.Context) (health.ProcessStatus, bool) { return processProbe() }},
+			Checker:     health.ProcessChecker{Probe: func(context.Context) (health.ProcessStatus, bool) { return processProbeFn() }},
 			Timeout:     checkTimeout,
 			Remediation: health.RemediationRelieveLimits,
 		},

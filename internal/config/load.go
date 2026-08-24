@@ -23,6 +23,7 @@ import (
 
 	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/logging"
+	"github.com/anggasct/aura/internal/sandbox"
 )
 
 const (
@@ -108,7 +109,11 @@ func Load(path string) (LoadResult, error) {
 	if err != nil {
 		return LoadResult{}, fmt.Errorf("config: %w", err)
 	}
-	return LoadWithOptions(path, LoadOptions{Build: build, Registry: capability.EmptyRegistry()})
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		return LoadResult{}, fmt.Errorf("config: %w", err)
+	}
+	return LoadWithOptions(path, LoadOptions{Build: build, Registry: registry, Dependencies: sandbox.CapabilityDependencies()})
 }
 
 func LoadWithOptions(path string, options LoadOptions) (LoadResult, error) {

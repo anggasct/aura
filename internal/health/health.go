@@ -142,8 +142,11 @@ type CapabilityStatus struct {
 }
 
 // CapabilityChecker reports every capability whose declared state does not
-// hold, each with the reason an operator can act on. An aggregate up finding
-// is emitted when everything is consistent.
+// hold, each with the reason an operator can act on. Capabilities that are
+// neither compiled into this artifact nor enabled are simply not part of
+// this build; configuration validation already rejects enabling them, so
+// the checker only flags capabilities the configuration asked for. An
+// aggregate up finding is emitted when everything requested is consistent.
 type CapabilityChecker struct {
 	Statuses func(ctx context.Context) []CapabilityStatus
 }
@@ -162,7 +165,7 @@ func (c CapabilityChecker) Check(ctx context.Context) []Finding {
 				Detail:    "enabled in configuration but not compiled into this binary",
 				CheckedAt: now,
 			})
-		case !s.Available:
+		case s.Enabled && !s.Available:
 			detail := "capability unavailable"
 			if s.MissingDependency != "" {
 				detail = "missing dependency: " + s.MissingDependency
