@@ -97,6 +97,18 @@ func openReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// OpenReadOnly opens the live database without ever writing to it: no WAL
+// switch, no migration, no pragma that persists. Diagnostics surfaces use
+// this so a status sweep is provably read-only. A missing file is a typed
+// storage-unavailable error.
+func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
+	db, err := openReadOnly(ctx, path)
+	if err != nil {
+		return nil, codedError(ErrorCodeStorageUnavailable, "open sqlite database read-only", err)
+	}
+	return db, nil
+}
+
 func verifyConnectionPolicy(conn sqlite.ExecQuerierContext, dsn string) error {
 	ctx := context.Background()
 	readOnly := strings.Contains(dsn, "mode=ro")

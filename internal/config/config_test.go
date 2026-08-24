@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,8 @@ import (
 
 const testdataDir = "../../testdata"
 
+var updateGolden = flag.Bool("update", false, "rewrite golden files")
+
 func fixture(t *testing.T, name string) string {
 	t.Helper()
 	return filepath.Join(testdataDir, "config", name)
@@ -26,7 +29,14 @@ func TestMarshalDefault_GoldenFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal(Default()): %v", err)
 	}
-	want, err := os.ReadFile(filepath.Join(testdataDir, "golden", "config.yaml"))
+	goldenPath := filepath.Join(testdataDir, "golden", "config.yaml")
+	if *updateGolden {
+		if err := os.WriteFile(goldenPath, got, 0o600); err != nil {
+			t.Fatalf("rewrite golden: %v", err)
+		}
+		return
+	}
+	want, err := os.ReadFile(goldenPath)
 	if err != nil {
 		t.Fatalf("read golden: %v", err)
 	}

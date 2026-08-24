@@ -35,13 +35,23 @@ const (
 )
 
 // Finding is one typed diagnostic. Detail is operator-facing and redacted: no
-// secrets, tokens, absolute paths, or content.
+// secrets, tokens, absolute paths, or content. ID, Severity, Scope, and
+// Remediation are stable contract fields for diagnostics consumers; the
+// registry fills ID/Severity/Scope/Remediation/FirstSeen/LastSeen when a
+// checker leaves them zero.
 type Finding struct {
-	Component string
-	Code      string
-	Status    Status
-	Detail    string
-	CheckedAt time.Time
+	ID          string    `json:"id"`
+	Component   string    `json:"component"`
+	Scope       string    `json:"scope"`
+	Code        string    `json:"code"`
+	Status      Status    `json:"status"`
+	Severity    Severity  `json:"severity"`
+	Detail      string    `json:"detail"`
+	Remediation string    `json:"remediation,omitempty"`
+	Stale       bool      `json:"stale,omitempty"`
+	FirstSeen   time.Time `json:"first_seen"`
+	LastSeen    time.Time `json:"last_seen"`
+	CheckedAt   time.Time `json:"checked_at"`
 }
 
 // Checker reports the health of one concern. A checker always returns at least
@@ -72,10 +82,11 @@ func (e *Evaluator) Evaluate(ctx context.Context) []Finding {
 // Status returns the worst status across all findings, or StatusUp when there
 // are none.
 func (e *Evaluator) Status(ctx context.Context) Status {
+	findings := e.Evaluate(ctx)
 	worst := StatusUp
-	for _, f := range e.Evaluate(ctx) {
-		if severity(f.Status) > severity(worst) {
-			worst = f.Status
+	for i := range findings {
+		if severity(findings[i].Status) > severity(worst) {
+			worst = findings[i].Status
 		}
 	}
 	return worst
@@ -175,7 +186,11 @@ type BackupChecker struct {
 }
 
 func (c BackupChecker) Check(ctx context.Context) []Finding {
-	now := c.Now()
+	nowFunc := c.Now
+	if nowFunc == nil {
+		nowFunc = func() time.Time { return time.Now().UTC() }
+	}
+	now := nowFunc()
 	at, err := c.LastBackup(ctx)
 	if err != nil {
 		return []Finding{{Component: ComponentBackup, Code: "backup_missing", Status: StatusDown, Detail: "no backup found", CheckedAt: now}}

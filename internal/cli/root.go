@@ -22,6 +22,18 @@ func (e *usageError) Error() string { return e.err.Error() }
 
 func (e *usageError) Unwrap() error { return e.err }
 
+// exitCodeError carries an explicit process exit code for commands whose
+// contract defines more states than ok/usage-failure (diagnostics exit
+// codes, for example).
+type exitCodeError struct {
+	code int
+	err  error
+}
+
+func (e *exitCodeError) Error() string { return e.err.Error() }
+
+func (e *exitCodeError) Unwrap() error { return e.err }
+
 type globalFlags struct {
 	configPath string
 	logLevel   string
@@ -41,7 +53,7 @@ func newRootCmd() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newStatusCmd(sandbox.Negotiate))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate))
 	return root
 }
 
@@ -64,6 +76,10 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 		var ue *usageError
 		if errors.As(err, &ue) {
 			return 2
+		}
+		var coded *exitCodeError
+		if errors.As(err, &coded) {
+			return coded.code
 		}
 		if _, _, findErr := root.Find(effective); findErr != nil {
 			return 2
