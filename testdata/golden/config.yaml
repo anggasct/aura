@@ -59,3 +59,12 @@ usage:
   daily_budget_micros: 10000000
   monthly_budget_micros: 200000000
   reservation_ttl: 1h0m0s
+health:
+  listen: 127.0.0.1:8281
+  check_interval: 1m0s
+  check_timeout: 5s
+  disk_warning_percent: 15
+  disk_critical_percent: 8
+  disk_critical_floor_bytes: 512MiB
+  backup_max_age: 24h0m0s
+  restore_verification_max_age: 720h0m0s

@@ -27,6 +27,21 @@ type Config struct {
 	Storage      Storage      `koanf:"storage" yaml:"storage"`
 	Telemetry    Telemetry    `koanf:"telemetry" yaml:"telemetry"`
 	Usage        Usage        `koanf:"usage" yaml:"usage"`
+	Health       Health       `koanf:"health" yaml:"health"`
+}
+
+// Health configures the loopback probe listener and diagnostics budgets.
+// The listen address must be loopback; exposing probes beyond loopback
+// requires a separate authenticated admin surface.
+type Health struct {
+	Listen                    string   `koanf:"listen" yaml:"listen"`
+	CheckInterval             Duration `koanf:"check_interval" yaml:"check_interval"`
+	CheckTimeout              Duration `koanf:"check_timeout" yaml:"check_timeout"`
+	DiskWarningPercent        int      `koanf:"disk_warning_percent" yaml:"disk_warning_percent"`
+	DiskCriticalPercent       int      `koanf:"disk_critical_percent" yaml:"disk_critical_percent"`
+	DiskCriticalFloorBytes    ByteSize `koanf:"disk_critical_floor_bytes" yaml:"disk_critical_floor_bytes"`
+	BackupMaxAge              Duration `koanf:"backup_max_age" yaml:"backup_max_age"`
+	RestoreVerificationMaxAge Duration `koanf:"restore_verification_max_age" yaml:"restore_verification_max_age"`
 }
 
 type Usage struct {
@@ -300,6 +315,16 @@ func Default() Config {
 			DailyBudgetMicros:   10000000,
 			MonthlyBudgetMicros: 200000000,
 			ReservationTTL:      Duration(time.Hour),
+		},
+		Health: Health{
+			Listen:                    "127.0.0.1:8281",
+			CheckInterval:             Duration(60 * time.Second),
+			CheckTimeout:              Duration(5 * time.Second),
+			DiskWarningPercent:        15,
+			DiskCriticalPercent:       8,
+			DiskCriticalFloorBytes:    ByteSize(512 << 20),
+			BackupMaxAge:              Duration(24 * time.Hour),
+			RestoreVerificationMaxAge: Duration(30 * 24 * time.Hour),
 		},
 	}
 }

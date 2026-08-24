@@ -104,15 +104,22 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err := host.Start(ctx); err != nil {
 				return err
 			}
+			probeListener, err := buildProbeListener(cfg)
+			if err != nil {
+				return err
+			}
+			srv := server.New(server.Options{
+				Logger:          logger,
+				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
+			})
+			if err := srv.Add(probeListener); err != nil {
+				return err
+			}
 			logger.InfoContext(ctx, "starting server",
 				"component", "server",
 				"host", cfg.Server.Host,
 				"port", cfg.Server.Port,
 			)
-			srv := server.New(server.Options{
-				Logger:          logger,
-				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
-			})
 			runErr := srv.Run(ctx)
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Runtime.ShutdownTimeout))
 			defer cancel()

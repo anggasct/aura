@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -164,6 +165,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateUsage(cfg.Usage); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateHealth(cfg.Health); err != nil {
+		return LoadResult{}, err
+	}
 	report, err := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if err != nil {
 		return LoadResult{}, err
@@ -282,6 +286,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateTelemetryShapes(doc); err != nil {
+		return err
+	}
+	if err := validateHealthShapes(doc); err != nil {
 		return err
 	}
 	if err := validateUsageShapes(doc); err != nil {
@@ -506,6 +513,39 @@ func mappingValue(node *yamlv3.Node, key string) *yamlv3.Node {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		if node.Content[i].Value == key {
 			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func validateHealthShapes(doc *yamlv3.Node) error {
+	healthNode := mappingValue(doc, "health")
+	if healthNode == nil {
+		return nil
+	}
+	if healthNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("health must be a mapping at line %d", healthNode.Line)
+	}
+	for i := 0; i+1 < len(healthNode.Content); i += 2 {
+		keyNode := healthNode.Content[i]
+		valueNode := healthNode.Content[i+1]
+		switch keyNode.Value {
+		case "listen":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("health.listen must be a string at line %d", valueNode.Line)
+			}
+		case "check_interval", "check_timeout", "backup_max_age", "restore_verification_max_age":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("health.%s must be a duration string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "disk_warning_percent", "disk_critical_percent":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("health.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "disk_critical_floor_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || (valueNode.Tag != "!!int" && valueNode.Tag != "!!str") {
+				return fmt.Errorf("health.disk_critical_floor_bytes must be a byte size at line %d", valueNode.Line)
+			}
 		}
 	}
 	return nil
@@ -1052,7 +1092,35 @@ func applyDefaults(cfg *Config, data []byte) error {
 	if cfg.Usage.ReservationTTL == 0 && !configValuePresent(doc, "usage", "reservation_ttl") && !envValuePresent("usage.reservation_ttl") {
 		cfg.Usage.ReservationTTL = defaults.Usage.ReservationTTL
 	}
+	applyHealthDefaults(cfg, doc, defaults.Health)
 	return nil
+}
+
+func applyHealthDefaults(cfg *Config, doc *yamlv3.Node, defaults Health) {
+	if cfg.Health.Listen == "" && !configValuePresent(doc, "health", "listen") && !envValuePresent("health.listen") {
+		cfg.Health.Listen = defaults.Listen
+	}
+	if cfg.Health.CheckInterval == 0 && !configValuePresent(doc, "health", "check_interval") && !envValuePresent("health.check_interval") {
+		cfg.Health.CheckInterval = defaults.CheckInterval
+	}
+	if cfg.Health.CheckTimeout == 0 && !configValuePresent(doc, "health", "check_timeout") && !envValuePresent("health.check_timeout") {
+		cfg.Health.CheckTimeout = defaults.CheckTimeout
+	}
+	if cfg.Health.DiskWarningPercent == 0 && !configValuePresent(doc, "health", "disk_warning_percent") && !envValuePresent("health.disk_warning_percent") {
+		cfg.Health.DiskWarningPercent = defaults.DiskWarningPercent
+	}
+	if cfg.Health.DiskCriticalPercent == 0 && !configValuePresent(doc, "health", "disk_critical_percent") && !envValuePresent("health.disk_critical_percent") {
+		cfg.Health.DiskCriticalPercent = defaults.DiskCriticalPercent
+	}
+	if cfg.Health.DiskCriticalFloorBytes == 0 && !configValuePresent(doc, "health", "disk_critical_floor_bytes") && !envValuePresent("health.disk_critical_floor_bytes") {
+		cfg.Health.DiskCriticalFloorBytes = defaults.DiskCriticalFloorBytes
+	}
+	if cfg.Health.BackupMaxAge == 0 && !configValuePresent(doc, "health", "backup_max_age") && !envValuePresent("health.backup_max_age") {
+		cfg.Health.BackupMaxAge = defaults.BackupMaxAge
+	}
+	if cfg.Health.RestoreVerificationMaxAge == 0 && !configValuePresent(doc, "health", "restore_verification_max_age") && !envValuePresent("health.restore_verification_max_age") {
+		cfg.Health.RestoreVerificationMaxAge = defaults.RestoreVerificationMaxAge
+	}
 }
 
 func applyToolDefaults(cfg *Config, doc *yamlv3.Node) {
@@ -1201,6 +1269,61 @@ func validateUsage(u Usage) error {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.reservation_ttl must be positive"}
 	}
 	return nil
+}
+
+func validateHealth(h Health) error {
+	if err := validateLoopbackListen(h.Listen, "health.listen"); err != nil {
+		return err
+	}
+	if h.CheckInterval <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.check_interval must be positive"}
+	}
+	if h.CheckTimeout <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.check_timeout must be positive"}
+	}
+	if h.CheckTimeout > h.CheckInterval {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.check_timeout must not exceed health.check_interval"}
+	}
+	if h.DiskWarningPercent < 1 || h.DiskWarningPercent > 99 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.disk_warning_percent must be between 1 and 99"}
+	}
+	if h.DiskCriticalPercent < 1 || h.DiskCriticalPercent > 99 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.disk_critical_percent must be between 1 and 99"}
+	}
+	if h.DiskCriticalPercent >= h.DiskWarningPercent {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.disk_critical_percent must be below health.disk_warning_percent"}
+	}
+	if h.DiskCriticalFloorBytes <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.disk_critical_floor_bytes must be positive"}
+	}
+	if h.BackupMaxAge <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.backup_max_age must be positive"}
+	}
+	if h.RestoreVerificationMaxAge <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.restore_verification_max_age must be positive"}
+	}
+	return nil
+}
+
+// validateLoopbackListen enforces the probe exposure boundary: host:port with
+// a loopback host. Non-loopback probe exposure needs the authenticated admin
+// surface, not this listener.
+func validateLoopbackListen(listen, field string) error {
+	host, portText, err := net.SplitHostPort(listen)
+	if err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s must be host:port: %v", field, err)}
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " port must be between 1 and 65535"}
+	}
+	if host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " must bind loopback; non-loopback probe exposure requires the authenticated admin surface"}
 }
 
 func validateTools(toolsConfig *Tools, profile capability.Profile) error {
