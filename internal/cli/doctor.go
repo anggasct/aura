@@ -28,7 +28,7 @@ func newDoctorCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 			if err != nil {
 				return &exitCodeError{code: exitCommand, err: err}
 			}
-			registry, err := buildHealthRegistry(loaded.Config, negotiate)
+			registry, err := buildHealthRegistry(loaded.Config, mapCapabilityStatuses(loaded.CapabilityReport), negotiate, processProbe)
 			if err != nil {
 				return &exitCodeError{code: exitCommand, err: err}
 			}

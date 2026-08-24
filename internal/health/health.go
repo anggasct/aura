@@ -127,16 +127,27 @@ func (c MigrationChecker) Check(ctx context.Context) []Finding {
 	}
 }
 
-// CapabilityStatus is the health-owned view of one capability's availability.
-// The composition root maps the capability registry onto this narrow shape so
-// the health package need not import the capability domain.
+// CapabilityStatus is the health-owned view of one capability across the
+// release profile dimensions: whether it is compiled into this binary,
+// whether its dependencies are present on this host, and whether the
+// operator enabled it. The composition root maps the capability registry
+// onto this shape so the health package need not import the capability
+// domain.
 type CapabilityStatus struct {
-	Name      string
-	Available bool
+	Name              string
+	Compiled          bool
+	Available         bool
+	Enabled           bool
+	MissingDependency string
+	UnavailableReason string
 }
 
-// CapabilityChecker reports capabilities that are unavailable. Statuses probes
-// the current capability availability.
+// CapabilityChecker reports every capability whose declared state does not
+// hold, each with the reason an operator can act on. Capabilities that are
+// neither compiled into this artifact nor enabled are simply not part of
+// this build; configuration validation already rejects enabling them, so
+// the checker only flags capabilities the configuration asked for. An
+// aggregate up finding is emitted when everything requested is consistent.
 type CapabilityChecker struct {
 	Statuses func(ctx context.Context) []CapabilityStatus
 }
@@ -146,18 +157,34 @@ func (c CapabilityChecker) Check(ctx context.Context) []Finding {
 	statuses := c.Statuses(ctx)
 	findings := make([]Finding, 0, len(statuses))
 	for _, s := range statuses {
-		if !s.Available {
+		switch {
+		case !s.Compiled && s.Enabled:
+			findings = append(findings, Finding{
+				Component: ComponentCapability + "/" + s.Name,
+				Code:      "capability_not_compiled",
+				Status:    StatusDown,
+				Detail:    "enabled in configuration but not compiled into this binary",
+				CheckedAt: now,
+			})
+		case s.Enabled && !s.Available:
+			detail := "capability unavailable"
+			switch {
+			case s.MissingDependency != "":
+				detail = "missing dependency: " + s.MissingDependency
+			case s.UnavailableReason != "":
+				detail = s.UnavailableReason
+			}
 			findings = append(findings, Finding{
 				Component: ComponentCapability + "/" + s.Name,
 				Code:      "capability_unavailable",
 				Status:    StatusDown,
-				Detail:    "capability unavailable",
+				Detail:    detail,
 				CheckedAt: now,
 			})
 		}
 	}
 	if len(findings) == 0 {
-		return []Finding{{Component: ComponentCapability, Code: "ok", Status: StatusUp, Detail: "all capabilities available", CheckedAt: now}}
+		return []Finding{{Component: ComponentCapability, Code: "ok", Status: StatusUp, Detail: "all capabilities consistent with this profile", CheckedAt: now}}
 	}
 	return findings
 }

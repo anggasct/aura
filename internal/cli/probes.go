@@ -23,11 +23,11 @@ type probeListener struct {
 	readiness   *health.Readiness
 }
 
-func buildProbeListener(cfg *config.Config) (*probeListener, error) {
+func buildProbeListener(cfg *config.Config, capabilities []health.CapabilityStatus) (*probeListener, error) {
 	if cfg == nil {
 		return nil, errors.New("probe listener requires configuration")
 	}
-	registry, err := buildHealthRegistry(cfg, sandbox.Negotiate)
+	registry, err := buildHealthRegistry(cfg, capabilities, sandbox.Negotiate, processProbe)
 	if err != nil {
 		return nil, err
 	}

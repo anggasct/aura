@@ -6,12 +6,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/sandbox"
@@ -85,7 +88,8 @@ func TestStatusCmdAvailableExitsClean(t *testing.T) {
 // temporary environment: a migrated database, a fresh backup directory, and
 // a configured primary model, so the healthy-path assertion is meaningful.
 // healthyStorage=false removes the database and backup so degraded findings
-// appear.
+// appear. Process-resource evidence is pinned so concurrent test load on
+// the host cannot turn the available-path assertion flaky.
 func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, error), healthyStorage bool) *cobra.Command {
 	t.Helper()
 	dataRoot := t.TempDir()
@@ -100,9 +104,15 @@ func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, err
 	cmd := &cobra.Command{Use: "status"}
 	cmd.SetContext(t.Context())
 	cmd.RunE = func(c *cobra.Command, _ []string) error {
-		return runStatus(c, &cfg, negotiate, true, false)
+		return runStatus(c, &cfg, capability.Report{}, negotiate, true, false, pinnedProcessProbe)
 	}
 	return cmd
+}
+
+// pinnedProcessProbe is benign fixed process-resource evidence so
+// concurrent suite load cannot make finding-set assertions flaky.
+func pinnedProcessProbe() (health.ProcessStatus, bool) {
+	return health.ProcessStatus{FDsOpen: 10, FDsLimit: 4096, MemoryUsedBytes: 1 << 20, MemoryLimitBytes: 1 << 30, MemoryLimitKnown: true}, true
 }
 
 func seedHealthyStorage(t *testing.T, dataRoot string) {
@@ -161,7 +171,7 @@ func TestStatusJSONEncodesContract(t *testing.T) {
 	cmd.SetContext(t.Context())
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	if err := runStatus(cmd, &cfg, negotiate, true, true); err != nil {
+	if err := runStatus(cmd, &cfg, capability.Report{}, negotiate, true, true, pinnedProcessProbe); err != nil {
 		t.Fatalf("runStatus json: %v", err)
 	}
 	var decoded struct {
@@ -184,8 +194,8 @@ func TestStatusJSONEncodesContract(t *testing.T) {
 	if decoded.Live.Reachable {
 		t.Error("offline json must report live unreachable")
 	}
-	if len(decoded.Findings) != 5 {
-		t.Fatalf("findings = %d, want 5 (migration, backup, storage, sandbox, provider): %v", len(decoded.Findings), decoded.Findings)
+	if len(decoded.Findings) != 8 {
+		t.Fatalf("findings = %d, want 8 (migration, backup, storage intake, disk, sandbox, capability, process, provider): %v", len(decoded.Findings), decoded.Findings)
 	}
 	for _, f := range decoded.Findings {
 		if f.ID == "" || f.Severity == "" {
@@ -205,7 +215,7 @@ func TestDoctorFiltersByCheck(t *testing.T) {
 	negotiate := func() (sandbox.Primitives, error) {
 		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
 	}
-	registry, err := buildHealthRegistry(&cfg, negotiate)
+	registry, err := buildHealthRegistry(&cfg, nil, negotiate, pinnedProcessProbe)
 	if err != nil {
 		t.Fatalf("buildHealthRegistry: %v", err)
 	}
@@ -242,5 +252,210 @@ func TestDoctorFormatCarriesContractFields(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("doctor output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+// The load path must feed the real builtin capability registry into the
+// status surface: a fresh configuration yields the shipped capability
+// statuses, never an empty report that claims consistency without data.
+func TestStatusUsesBuiltinCapabilityRegistry(t *testing.T) {
+	// Point the default-config resolution at an isolated home so the load
+	// generates a fresh configuration instead of reading this user's.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("AURA_CONFIG", "")
+	t.Setenv("AURA_TOOLS_WORKSPACE", t.TempDir())
+	loaded, err := config.Load("")
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	statuses := mapCapabilityStatuses(loaded.CapabilityReport)
+	names := make([]string, 0, len(statuses))
+	for _, s := range statuses {
+		names = append(names, s.Name)
+	}
+	slices.Sort(names)
+	want := []string{"exec-linux", "provider-search", "public-web", "workspace-read", "workspace-write"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("capability statuses = %v, want %v", names, want)
+	}
+	for _, s := range statuses {
+		if s.Compiled || s.Enabled {
+			t.Fatalf("default build reports %q as compiled=%v enabled=%v, want absent and disabled", s.Name, s.Compiled, s.Enabled)
+		}
+	}
+}
+
+// statusFromLoadedConfig loads a real configuration file through the
+// production load path and runs offline status against the result, so
+// assertions cover the config.Load → status contract end to end.
+func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadOptions) (*cobra.Command, string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	dataRoot := t.TempDir()
+	seedHealthyStorage(t, dataRoot)
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := "version: 1\n" +
+		"capabilities:\n  enabled: [" + strings.Join(enabled, ", ") + "]\n" +
+		"storage:\n  path: " + dataRoot + "\n" +
+		"tools:\n  workspace: " + t.TempDir() + "\n" +
+		"models:\n  definitions:\n    primary:\n" +
+		"      protocol: anthropic_messages\n" +
+		"      api_key_env: AURA_TEST_ANTHROPIC_KEY\n" +
+		"      model: claude-sonnet-4\n" +
+		"      capabilities:\n        context_tokens: 200000\n        tokenizer: anthropic\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if options.Build.Profile() == "" {
+		build, err := capability.CurrentBuild()
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.Build = build
+	}
+	loaded, err := config.LoadWithOptions(cfgPath, options)
+	if err != nil {
+		t.Fatalf("config.LoadWithOptions: %v", err)
+	}
+	cmd := &cobra.Command{Use: "status"}
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetContext(t.Context())
+	runErr := runStatus(cmd, loaded.Config, loaded.CapabilityReport, func() (sandbox.Primitives, error) {
+		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+	}, true, false, pinnedProcessProbe)
+	return cmd, out.String(), runErr
+}
+
+// A capability the configuration enabled but whose host dependency is
+// missing survives the real load path and reaches the status output with
+// the stable finding code and the critical health exit.
+func TestStatusReportsEnabledCapabilityMissingDependency(t *testing.T) {
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	build, err := capability.ParseBuild("exec-linux", "exec-linux", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"exec-linux"}, config.LoadOptions{
+		Build:        build,
+		Registry:     registry,
+		Dependencies: capability.Dependencies{},
+	})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("runStatus error = %v, want exit code error", runErr)
+	}
+	if exitErr.code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	}
+	if !strings.Contains(output, "capability/exec-linux") || !strings.Contains(output, "missing dependency: process-containment") {
+		t.Fatalf("status output missing the capability finding:\n%s", output)
+	}
+}
+
+// A capability enabled in configuration but absent from the artifact
+// survives the real config.Load path (default build) and is reported
+// through the status surface with the not-compiled code, not a
+// configuration error.
+func TestStatusReportsEnabledCapabilityNotCompiled(t *testing.T) {
+	build, err := capability.ParseBuild("core", "", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"public-web"}, config.LoadOptions{Build: build, Registry: registry})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("runStatus error = %v, want exit code error", runErr)
+	}
+	if exitErr.code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	}
+	if !strings.Contains(output, "capability/public-web") || !strings.Contains(output, "capability_not_compiled") {
+		t.Fatalf("status output missing the not-compiled finding:\n%s", output)
+	}
+}
+
+// A capability name the registry does not know is a malformed
+// configuration, not a health state: the load fails outright.
+func TestStatusUnknownCapabilityIsAConfigError(t *testing.T) {
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	build, err := capability.ParseBuild("core", "", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := "version: 1\ncapabilities:\n  enabled: [typo-cap]\ntools:\n  workspace: " + t.TempDir() + "\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = config.LoadWithOptions(cfgPath, config.LoadOptions{Build: build, Registry: registry})
+	if err == nil || !strings.Contains(err.Error(), "capability_unknown") {
+		t.Fatalf("load error = %v, want capability_unknown config error", err)
+	}
+}
+
+// A capability compiled into the artifact but excluded by the selected
+// profile reports the profile reason through the real load path: the
+// finding names the profile, not a generic unavailability.
+func TestStatusReportsProfileExclusionReason(t *testing.T) {
+	// exec-linux profile compiles workspace-write, but a core build does
+	// not include it: enabling it on core is an artifact state, and the
+	// status output must name the profile cause.
+	build, err := capability.ParseBuild("core", "workspace-write", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"workspace-write"}, config.LoadOptions{Build: build, Registry: registry})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("runStatus error = %v, want exit code error", runErr)
+	}
+	if exitErr.code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	}
+	if !strings.Contains(output, "capability/workspace-write") || !strings.Contains(output, "not included in profile core") {
+		t.Fatalf("status output missing the profile-exclusion reason:\n%s", output)
+	}
+}
+
+// An effectful capability enabled on a non-Linux build reports the OS
+// reason through the same path.
+func TestStatusReportsNonLinuxReasonForEffectfulCapability(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("OS reason requires a non-Linux build parse; exercised on darwin/windows CI legs")
+	}
+	build, err := capability.ParseBuild("exec-linux", "exec-linux", runtime.GOOS)
+	if err != nil {
+		t.Skipf("profile invalid on %s: %v", runtime.GOOS, err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"exec-linux"}, config.LoadOptions{Build: build, Registry: registry, Dependencies: capability.Dependencies{capability.DependencyProcessContainment: true}})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("runStatus error = %v, want exit code error", runErr)
+	}
+	if exitErr.code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	}
+	if !strings.Contains(output, "effectful capabilities require Linux") {
+		t.Fatalf("status output missing the OS reason:\n%s", output)
 	}
 }

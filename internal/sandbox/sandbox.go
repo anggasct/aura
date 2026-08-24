@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/capability"
 )
 
 // ChildSentinel is the argv marker that distinguishes a sandbox child
@@ -173,4 +175,16 @@ func Require(have Primitives) error {
 		return nil
 	}
 	return Errorf(ErrorCodeSandboxUnavailable, "missing mandatory containment primitive(s): %s", strings.Join(missing, ", "))
+}
+
+// CapabilityDependencies reports the host-detected capability dependencies
+// for the configuration load path: process containment is available only
+// when every mandatory primitive negotiates.
+func CapabilityDependencies() capability.Dependencies {
+	deps := capability.Dependencies{}
+	primitives, err := Negotiate()
+	if err == nil && len(MissingMandatory(primitives)) == 0 {
+		deps[capability.DependencyProcessContainment] = true
+	}
+	return deps
 }

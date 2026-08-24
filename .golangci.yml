@@ -117,6 +117,13 @@ linters:
         text: G304
         path: internal/(store|config|usage)/
 
+      # The cgroup v2 directory comes from the kernel's /proc/self/cgroup for
+      # this very process, never from external input.
+      - linters:
+          - gosec
+        text: G304
+        path: internal/cli/process_unix.go
+
       # unsafe.Pointer is required to hand the seccomp action word to the
       # kernel probe; the value is a stack-local uint32.
       - linters:
