@@ -15,10 +15,13 @@ import (
 // ToolObservation is the metadata-only record of one completed tool call.
 // Raw arguments, output, paths, URLs, and secrets never belong here.
 type ToolObservation struct {
-	Name        string
-	Status      string
-	Duration    time.Duration
-	OutputBytes int64
+	Name          string
+	Status        string
+	PolicyOutcome string
+	Approval      string
+	Executor      string
+	Duration      time.Duration
+	OutputBytes   int64
 }
 
 // ToolRecorder turns tool observations into spans and bounded-label
@@ -49,12 +52,15 @@ func NewToolRecorder(tp trace.TracerProvider, mp metric.MeterProvider) (*ToolRec
 	return &ToolRecorder{tracer: tp.Tracer(ScopeName), calls: calls, duration: duration}, nil
 }
 
-func (r *ToolRecorder) Record(ctx context.Context, observation ToolObservation) {
+func (r *ToolRecorder) Record(ctx context.Context, observation *ToolObservation) {
 	end := time.Now()
 	start := end.Add(-observation.Duration)
 	labels := metric.WithAttributes(
 		attribute.String(AttrToolName, observation.Name),
 		attribute.String(AttrToolStatus, observation.Status),
+		attribute.String(AttrToolPolicyOutcome, observation.PolicyOutcome),
+		attribute.String(AttrToolApproval, observation.Approval),
+		attribute.String(AttrToolExecutor, observation.Executor),
 		attribute.String(AttrToolOutputBucket, OutputByteBucket(observation.OutputBytes)),
 	)
 	_, span := r.tracer.Start(ctx, SpanTool,
@@ -62,6 +68,9 @@ func (r *ToolRecorder) Record(ctx context.Context, observation ToolObservation) 
 		trace.WithAttributes(
 			attribute.String(AttrToolName, observation.Name),
 			attribute.String(AttrToolStatus, observation.Status),
+			attribute.String(AttrToolPolicyOutcome, observation.PolicyOutcome),
+			attribute.String(AttrToolApproval, observation.Approval),
+			attribute.String(AttrToolExecutor, observation.Executor),
 			attribute.Int64(AttrToolOutputBytes, observation.OutputBytes),
 			attribute.String(AttrSemconvVersion, SemconvVersion),
 		),

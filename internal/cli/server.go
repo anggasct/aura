@@ -60,12 +60,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			observer := toolbroker.Observer(func(observation toolbroker.Observation) {
-				recorder.Record(ctx, telemetry.ToolObservation{
-					Name:        observation.ToolName + "@" + observation.ToolVersion,
-					Status:      string(observation.Class),
-					Duration:    observation.Duration,
-					OutputBytes: observation.OutputBytes,
+			observer := toolbroker.Observer(func(ctx context.Context, observation toolbroker.Observation) {
+				recorder.Record(ctx, &telemetry.ToolObservation{
+					Name:          observation.ToolName + "@" + observation.ToolVersion,
+					Status:        string(observation.Class),
+					PolicyOutcome: observation.PolicyOutcome,
+					Approval:      observation.Approval,
+					Executor:      observation.Executor,
+					Duration:      observation.Duration,
+					OutputBytes:   observation.OutputBytes,
 				})
 			})
 			builtin, err := newBuiltinToolExecutor(cfg, db, logger, observer)

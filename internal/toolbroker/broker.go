@@ -52,15 +52,34 @@ type ToolResult struct {
 
 type Adapter func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error)
 
+// Bounded observation metadata values. Raw arguments, paths, URLs, and
+// content never appear in observations.
+const (
+	PolicyOutcomeAllow           = "allow"
+	PolicyOutcomeRequireApproval = "require_approval"
+	PolicyOutcomeDeny            = "deny"
+	PolicyOutcomeNotEvaluated    = "not_evaluated"
+
+	ApprovalMissing  = "missing"
+	ApprovalAttached = "attached"
+	ApprovalAuto     = "auto"
+
+	ExecutorDirect = "direct"
+	ExecutorEffect = "effect"
+)
+
 type Observation struct {
-	ToolName    string
-	ToolVersion string
-	Class       ResultClass
-	Duration    time.Duration
-	OutputBytes int64
+	ToolName      string
+	ToolVersion   string
+	Class         ResultClass
+	PolicyOutcome string
+	Approval      string
+	Executor      string
+	Duration      time.Duration
+	OutputBytes   int64
 }
 
-type Observer func(Observation)
+type Observer func(context.Context, Observation)
 
 type Options struct {
 	Policy               approval.Policy
@@ -179,6 +198,7 @@ func (b *Broker) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 
 func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result ToolResult, err error) {
 	started := time.Now()
+	var policyOutcome, approvalState, executorClass string
 	defer func() {
 		if b.observer == nil {
 			return
@@ -190,12 +210,15 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		if class == "" {
 			class = ResultExecutionFailed
 		}
-		observation := Observation{Class: class, Duration: time.Since(started), OutputBytes: int64(len(result.Output))}
+		if policyOutcome == "" {
+			policyOutcome = PolicyOutcomeNotEvaluated
+		}
+		observation := Observation{Class: class, PolicyOutcome: policyOutcome, Approval: approvalState, Executor: executorClass, Duration: time.Since(started), OutputBytes: int64(len(result.Output))}
 		if request != nil {
 			observation.ToolName = request.ToolName
 			observation.ToolVersion = request.ToolVersion
 		}
-		b.observer(observation)
+		b.observer(ctx, observation)
 	}()
 	canonical, err := b.canonicalRequest(request)
 	if err != nil {
@@ -206,8 +229,10 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	}
 	decision, err := b.engine.Evaluate(ctx, toApprovalRequest(&canonical, b.PolicyVersion()))
 	if err != nil {
+		policyOutcome = PolicyOutcomeDeny
 		return ToolResult{}, mapApprovalError(err)
 	}
+	policyOutcome = decision.Outcome
 	key := canonical.ToolName + "@" + canonical.ToolVersion
 	definition := b.definitions[key]
 	adapter, ok := b.adapters[key]
@@ -225,9 +250,11 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 
 	grant := canonical.Approval
 	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil {
+		approvalState = ApprovalMissing
 		return ToolResult{}, errorf(ResultApprovalRequired, "tool %q requires approval", key)
 	}
 	if grant == nil {
+		approvalState = ApprovalAuto
 		ttl := 5 * time.Minute
 		if !canonical.Deadline.IsZero() {
 			ttl = time.Until(canonical.Deadline)
@@ -238,13 +265,17 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			return ToolResult{}, mapApprovalError(err)
 		}
 		grant = &newGrant
+	} else {
+		approvalState = ApprovalAttached
 	}
 	if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), grant); err != nil {
 		return ToolResult{}, mapApprovalError(err)
 	}
 	if definition.Effectful {
+		executorClass = ExecutorEffect
 		result, err = b.executeEffect(ctx, &canonical, decision.Constraints, adapter)
 	} else {
+		executorClass = ExecutorDirect
 		result, err = adapter(ctx, &canonical, decision.Constraints)
 	}
 	if err != nil {

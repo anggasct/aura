@@ -133,6 +133,9 @@ func TestToolSpanAllowedAttrs(t *testing.T) {
 	want := []string{
 		AttrToolName,
 		AttrToolStatus,
+		AttrToolPolicyOutcome,
+		AttrToolApproval,
+		AttrToolExecutor,
 		AttrToolOutputBytes,
 		AttrSemconvVersion,
 	}
@@ -147,8 +150,8 @@ func TestMetricLabelsBounded(t *testing.T) {
 		{MetricTurnsTotal, []string{AttrOrigin, AttrTerminalKind}},
 		{MetricTurnDuration, []string{AttrOrigin, AttrTerminalKind}},
 		{MetricModelDuration, []string{AttrGenAISystem, AttrGenAIOperationName}},
-		{MetricToolCallsTotal, []string{AttrToolName, AttrToolStatus, AttrToolOutputBucket}},
-		{MetricToolCallDuration, []string{AttrToolName, AttrToolStatus, AttrToolOutputBucket}},
+		{MetricToolCallsTotal, []string{AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket}},
+		{MetricToolCallDuration, []string{AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket}},
 	}
 	for _, tc := range cases {
 		got := AllowedMetricLabels(tc.metric)

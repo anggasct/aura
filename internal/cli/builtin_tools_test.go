@@ -31,7 +31,7 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
 	var observations []toolbroker.Observation
-	executor, err := newBuiltinToolExecutor(&cfg, db, nil, func(observation toolbroker.Observation) {
+	executor, err := newBuiltinToolExecutor(&cfg, db, nil, func(_ context.Context, observation toolbroker.Observation) {
 		observations = append(observations, observation)
 	})
 	if err != nil {

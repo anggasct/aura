@@ -32,6 +32,10 @@ const (
 	AttrToolName   = "tool.name"
 	AttrToolStatus = "tool.status"
 
+	AttrToolPolicyOutcome = "tool.policy.outcome"
+	AttrToolApproval      = "tool.approval"
+	AttrToolExecutor      = "tool.executor"
+
 	AttrToolOutputBucket = "tool.output.bucket"
 	AttrToolOutputBytes  = "tool.output.bytes"
 
@@ -58,6 +62,9 @@ var modelSpanAttrs = []string{
 var toolSpanAttrs = []string{
 	AttrToolName,
 	AttrToolStatus,
+	AttrToolPolicyOutcome,
+	AttrToolApproval,
+	AttrToolExecutor,
 	AttrToolOutputBytes,
 	AttrSemconvVersion,
 }
@@ -66,8 +73,8 @@ var metricLabelAttrs = map[string][]string{
 	MetricTurnsTotal:       {AttrOrigin, AttrTerminalKind},
 	MetricTurnDuration:     {AttrOrigin, AttrTerminalKind},
 	MetricModelDuration:    {AttrGenAISystem, AttrGenAIOperationName},
-	MetricToolCallsTotal:   {AttrToolName, AttrToolStatus, AttrToolOutputBucket},
-	MetricToolCallDuration: {AttrToolName, AttrToolStatus, AttrToolOutputBucket},
+	MetricToolCallsTotal:   {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
+	MetricToolCallDuration: {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
 }
 
 func AllowedSpanAttrs(spanName string) []string {
