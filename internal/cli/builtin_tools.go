@@ -24,7 +24,7 @@ type builtinToolExecutor struct {
 	broker *toolbroker.Broker
 }
 
-func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger) (*builtinToolExecutor, error) {
+func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger, observer toolbroker.Observer) (*builtinToolExecutor, error) {
 	if cfg == nil || cfg.Tools == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -88,6 +88,7 @@ func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger)
 		MaxInlineResultBytes: toolsCfg.MaxInlineResultBytes,
 		Artifacts:            store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
 		Effects:              effects,
+		Observer:             observer,
 	})
 	if err != nil {
 		return nil, err

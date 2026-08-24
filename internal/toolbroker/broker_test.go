@@ -78,7 +78,7 @@ func TestBrokerObserverReceivesMetadataOnly(t *testing.T) {
 				return ToolResult{Output: json.RawMessage(`{"content":"untrusted"}`)}, nil
 			},
 		},
-		Observer: func(observation Observation) { observations = append(observations, observation) },
+		Observer: func(_ context.Context, observation Observation) { observations = append(observations, observation) },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
