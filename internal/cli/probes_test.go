@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
+	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -62,12 +63,21 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	if liveBody.Status != health.ProbeStatusAlive {
 		t.Errorf("livez status = %q", liveBody.Status)
 	}
-	readyBody := probeBody(t, addr, "/readyz")
-	// Sandbox availability depends on the host the suite runs on; degraded
-	// sandbox still admits intake, so both ready codes are correct here.
-	if readyBody.Status != health.ProbeStatusReady ||
-		(readyBody.Code != health.ProbeCodeReady && readyBody.Code != health.ProbeCodeReadyDegraded) {
-		t.Errorf("readyz body = %+v", readyBody)
+	// Readiness reflects the real host: a host missing mandatory sandbox
+	// primitives must be 503 with the sandbox code, a fully contained host
+	// must be 200 ready. Everything in between is an intake-blocking bug.
+	primitives, _ := sandbox.Negotiate()
+	supported := len(sandbox.MissingMandatory(primitives)) == 0
+	readyCode, readyStatus := rawProbeStatus(t, addr, "/readyz")
+	if supported {
+		if readyStatus != http.StatusOK || readyCode != health.ProbeStatusReady {
+			t.Errorf("readyz on capable host = %d %q", readyStatus, readyCode)
+		}
+	} else {
+		if readyStatus != http.StatusServiceUnavailable ||
+			readyCode != "sandbox.sandbox_unavailable" {
+			t.Errorf("readyz on host without sandbox = %d %q, want 503 sandbox.sandbox_unavailable", readyStatus, readyCode)
+		}
 	}
 
 	cancel()
@@ -124,6 +134,22 @@ func probeBody(t *testing.T, addr, path string) health.ProbeBody {
 		t.Fatalf("decode %s body: %v", path, err)
 	}
 	return body
+}
+
+// rawProbeStatus returns the probe code and HTTP status so tests can assert
+// the readiness 503 matrix against the real host state.
+func rawProbeStatus(t *testing.T, addr, path string) (code string, status int) {
+	t.Helper()
+	response, err := probeGet(t.Context(), addr, path)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	var body health.ProbeBody
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode %s body: %v", path, err)
+	}
+	return body.Code, response.StatusCode
 }
 
 func mkdirBackup(t *testing.T, dataRoot string) error {

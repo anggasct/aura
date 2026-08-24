@@ -44,6 +44,7 @@ const (
 	RemediationConfigureModels = "configure-models"
 	RemediationReviewSandbox   = "review-sandbox-host"
 	RemediationReconcileState  = "reconcile-durable-state"
+	RemediationRepairStorage   = "repair-storage"
 )
 
 // Scope labels where a finding applies. Local findings are safe to print in

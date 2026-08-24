@@ -164,6 +164,8 @@ func (c CapabilityChecker) Check(ctx context.Context) []Finding {
 
 // SandboxChecker reports whether host containment primitives are available.
 // Support returns whether any primitive is usable plus an operator detail.
+// An unsupported host is down, not degraded: containment is mandatory for
+// effectful execution, so its absence must block intake.
 type SandboxChecker struct {
 	Support func() (supported bool, detail string)
 }
@@ -174,7 +176,42 @@ func (c SandboxChecker) Check(_ context.Context) []Finding {
 	if supported {
 		return []Finding{{Component: ComponentSandbox, Code: "ok", Status: StatusUp, Detail: detail, CheckedAt: now}}
 	}
-	return []Finding{{Component: ComponentSandbox, Code: "sandbox_unavailable", Status: StatusDegraded, Detail: detail, CheckedAt: now}}
+	return []Finding{{Component: ComponentSandbox, Code: "sandbox_unavailable", Status: StatusDown, Detail: detail, CheckedAt: now}}
+}
+
+// StorageIntakeState classifies whether the storage surface can durably
+// accept new writes.
+type StorageIntakeState string
+
+const (
+	StorageIntakeOK          StorageIntakeState = "ok"
+	StorageIntakeUnknown     StorageIntakeState = "unknown"
+	StorageIntakeUnreachable StorageIntakeState = "unreachable"
+	StorageIntakeReadOnly    StorageIntakeState = "read_only"
+	StorageIntakeFull        StorageIntakeState = "full"
+)
+
+// StorageChecker reports whether the storage surface accepts durable intake.
+// Intake probes writability and free space without mutating state.
+type StorageChecker struct {
+	Intake func(ctx context.Context) (StorageIntakeState, string)
+}
+
+func (c StorageChecker) Check(ctx context.Context) []Finding {
+	now := time.Now().UTC()
+	state, detail := c.Intake(ctx)
+	switch state {
+	case StorageIntakeOK:
+		return []Finding{{Component: ComponentStorage, Code: "ok", Status: StatusUp, Detail: detail, CheckedAt: now}}
+	case StorageIntakeReadOnly:
+		return []Finding{{Component: ComponentStorage, Code: "storage_read_only", Status: StatusDown, Detail: detail, CheckedAt: now}}
+	case StorageIntakeFull:
+		return []Finding{{Component: ComponentStorage, Code: "storage_full", Status: StatusDown, Detail: detail, CheckedAt: now}}
+	case StorageIntakeUnreachable:
+		return []Finding{{Component: ComponentStorage, Code: "storage_unreachable", Status: StatusDown, Detail: detail, CheckedAt: now}}
+	default:
+		return []Finding{{Component: ComponentStorage, Code: "storage_unknown", Status: StatusUnknown, Detail: detail, CheckedAt: now}}
+	}
 }
 
 // BackupChecker reports whether a recent backup exists. LastBackup returns the

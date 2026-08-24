@@ -102,8 +102,10 @@ func TestSandboxChecker(t *testing.T) {
 		t.Errorf("supported sandbox status = %s, want up", f[0].Status)
 	}
 	down := SandboxChecker{Support: func() (bool, string) { return false, "no primitives" }}
-	if f := down.Check(context.Background()); f[0].Status != StatusDegraded || f[0].Code != "sandbox_unavailable" {
-		t.Errorf("unsupported sandbox finding = %+v, want degraded sandbox_unavailable", f[0])
+	// Mandatory containment is absent: the finding is down so readiness and
+	// exit codes both block, never a benign degraded line.
+	if f := down.Check(context.Background()); f[0].Status != StatusDown || f[0].Code != "sandbox_unavailable" {
+		t.Errorf("unsupported sandbox finding = %+v, want down sandbox_unavailable", f[0])
 	}
 }
 

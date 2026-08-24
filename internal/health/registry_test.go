@@ -274,6 +274,79 @@ func TestProbeHandlers(t *testing.T) {
 	}
 }
 
+// The real SandboxChecker result must drive readiness: a host missing
+// mandatory containment yields a down finding that blocks intake (503).
+func TestSandboxCheckerThroughReadinessBlocksIntake(t *testing.T) {
+	support := func() (bool, string) {
+		// cgroup_v2 is missing on the fixture host, like the real Checker
+		// reports when containment is absent.
+		return false, "missing: cgroup_v2"
+	}
+	checker := NewRegistryCheckForTest(RegisteredCheck{
+		ID:      "sandbox",
+		Checker: SandboxChecker{Support: support},
+	})
+	findings := checker.Evaluate(context.Background())
+	if len(findings) != 1 || findings[0].Code != "sandbox_unavailable" || findings[0].Status != StatusDown {
+		t.Fatalf("sandbox findings = %+v", findings)
+	}
+	ready := NewReadiness()
+	ready.SetStarted()
+	blocking := FindBlocking(findings)
+	if len(blocking) != 1 {
+		t.Fatalf("blocking = %+v, want the sandbox finding", blocking)
+	}
+	ok, code := ready.Probe(findings)
+	if ok || code != "sandbox.sandbox_unavailable" {
+		t.Fatalf("Probe() = %v, %q; want false, sandbox.sandbox_unavailable", ok, code)
+	}
+}
+
+// StorageChecker must classify every intake state to a stable code and
+// readiness must turn a blocking storage state into 503.
+func TestStorageCheckerThroughReadinessBlocksIntake(t *testing.T) {
+	states := []struct {
+		name   string
+		state  StorageIntakeState
+		wantOK bool
+	}{
+		{name: "ok", state: StorageIntakeOK, wantOK: true},
+		{name: "read-only", state: StorageIntakeReadOnly, wantOK: false},
+		{name: "full", state: StorageIntakeFull, wantOK: false},
+		{name: "unreachable", state: StorageIntakeUnreachable, wantOK: false},
+		{name: "unknown", state: StorageIntakeUnknown, wantOK: false},
+	}
+	for _, tc := range states {
+		t.Run(tc.name, func(t *testing.T) {
+			checker := NewRegistryCheckForTest(RegisteredCheck{
+				ID:      "storage",
+				Checker: StorageChecker{Intake: func(context.Context) (StorageIntakeState, string) { return tc.state, tc.name }},
+			})
+			findings := checker.Evaluate(context.Background())
+			if len(findings) != 1 {
+				t.Fatalf("findings = %+v", findings)
+			}
+			ready := NewReadiness()
+			ready.SetStarted()
+			ok, code := ready.Probe(findings)
+			if ok != tc.wantOK {
+				t.Errorf("Probe() = %v, want %v (code %q)", ok, tc.wantOK, code)
+			}
+			if tc.state != StorageIntakeOK && code != "storage."+findings[0].Code {
+				t.Errorf("code = %q, want storage.%s", code, findings[0].Code)
+			}
+		})
+	}
+}
+
+func NewRegistryCheckForTest(checks ...RegisteredCheck) *Registry {
+	registry, err := NewRegistry(checks...)
+	if err != nil {
+		panic(err)
+	}
+	return registry
+}
+
 // The readiness handler must respect request cancellation so a hung
 // evaluation cannot pin probe workers.
 func TestReadinessHandlerPassesRequestContext(t *testing.T) {

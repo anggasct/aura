@@ -66,15 +66,17 @@ func (r *Readiness) Draining() bool            { return r.draining.Load() }
 
 // intakeBlocking reports whether a finding must keep new work out. Provider
 // and backup degradation do not: they degrade without blocking intake. Any
-// non-healthy migration state blocks: writing events against a schema this
-// binary did not fully migrate is never safe intake.
+// non-healthy migration state blocks (writing events against a schema this
+// binary did not fully migrate is never safe intake), as does a missing
+// mandatory sandbox: the sandbox check reports that as degraded, and intake
+// must still stay closed until containment is restored.
 func intakeBlocking(f *Finding) bool {
 	switch f.Component {
-	case ComponentMigration:
+	case ComponentMigration, ComponentSandbox:
 		return f.Status != StatusUp
 	case ComponentStorage:
 		return f.Status == StatusDown || f.Status == StatusUnknown
-	case ComponentCapability, ComponentSandbox:
+	case ComponentCapability:
 		return f.Status == StatusDown
 	default:
 		return false

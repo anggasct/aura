@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -118,6 +119,12 @@ func buildHealthRegistry(cfg *config.Config, negotiate func() (sandbox.Primitive
 			Remediation: health.RemediationRestoreBackup,
 		},
 		health.RegisteredCheck{
+			ID:          "storage",
+			Checker:     health.StorageChecker{Intake: storageIntakeProbe(dbPath)},
+			Timeout:     checkTimeout,
+			Remediation: health.RemediationRepairStorage,
+		},
+		health.RegisteredCheck{
 			ID:          "sandbox",
 			Checker:     health.SandboxChecker{Support: sandboxSupport(negotiate)},
 			Timeout:     checkTimeout,
@@ -130,6 +137,39 @@ func buildHealthRegistry(cfg *config.Config, negotiate func() (sandbox.Primitive
 			Remediation: health.RemediationConfigureModels,
 		},
 	)
+}
+
+// storageMinFreeBytes is the headroom intake needs for WAL growth and
+// artifact writes; below it the storage surface counts as full.
+const storageMinFreeBytes = 64 << 20
+
+// openWritableCheck opens the configured database path in append mode without
+// writing. The path comes from storagePaths (validated config), never from a
+// request, so the variable-path open is confined by construction.
+
+// storageIntakeProbe classifies the storage surface without mutating it:
+// reachability via stat, writability via an append-mode open that writes
+// nothing, and headroom via the filesystem's free-space report.
+func storageIntakeProbe(dbPath string) func(context.Context) (health.StorageIntakeState, string) {
+	return func(context.Context) (health.StorageIntakeState, string) {
+		if _, err := os.Stat(dbPath); err != nil {
+			return health.StorageIntakeUnreachable, "storage database is unreachable"
+		}
+		if err := writableProbe(dbPath); err != nil {
+			if classifyOpenError(err) {
+				return health.StorageIntakeReadOnly, "storage filesystem is read-only"
+			}
+			return health.StorageIntakeUnknown, "storage writability could not be confirmed"
+		}
+		free, err := diskFreeBytes(filepath.Dir(dbPath))
+		if err != nil {
+			return health.StorageIntakeUnknown, "storage free space could not be determined"
+		}
+		if free < storageMinFreeBytes {
+			return health.StorageIntakeFull, fmt.Sprintf("storage has %d MiB free, below the %d MiB intake floor", free>>20, storageMinFreeBytes>>20)
+		}
+		return health.StorageIntakeOK, "storage accepts durable writes"
+	}
 }
 
 func schemaVersionsReadOnly(ctx context.Context, dbPath string) (applied, latest int, err error) {
