@@ -76,8 +76,12 @@ func readFile(_ context.Context, request *toolbroker.ToolRequest, options Option
 	if err != nil {
 		return toolbroker.ToolResult{}, pathError("read", args.Path, err)
 	}
-	defer func() { _ = unix.Close(fd) }()
-	data, err := io.ReadAll(io.LimitReader(os.NewFile(uintptr(fd), "read-file"), limit+1))
+	// The os.File owns the descriptor: its Close (or finalizer) is the
+	// only close. Pairing os.NewFile with a raw unix.Close on the same fd
+	// lets a late finalizer close a recycled descriptor.
+	file := os.NewFile(uintptr(fd), "read-file")
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return toolbroker.ToolResult{}, fmt.Errorf("filesystem: read file: %w", err)
 	}
