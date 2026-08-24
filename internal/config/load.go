@@ -39,7 +39,12 @@ type LoadResult struct {
 	Path             string
 	DefaultGenerated bool
 	CapabilityReport capability.Report
-	Warnings         []string
+	// CapabilityStateError carries artifact/host capability states
+	// (enabled but not compiled, missing dependency). They are not load
+	// failures: diagnostics surfaces report them as findings, and the
+	// server refuses startup while one is set.
+	CapabilityStateError error
+	Warnings             []string
 }
 
 type LoadOptions struct {
@@ -173,16 +178,17 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateHealth(cfg.Health); err != nil {
 		return LoadResult{}, err
 	}
-	report, err := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
-	if err != nil {
-		return LoadResult{}, err
+	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
+	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
+		return LoadResult{}, resolveErr
 	}
 	return LoadResult{
-		Config:           cfg,
-		Path:             resolved,
-		DefaultGenerated: generated,
-		CapabilityReport: report,
-		Warnings:         unknownEnvKeys(),
+		Config:               cfg,
+		Path:                 resolved,
+		DefaultGenerated:     generated,
+		CapabilityReport:     report,
+		CapabilityStateError: resolveErr,
+		Warnings:             unknownEnvKeys(),
 	}, nil
 }
 
