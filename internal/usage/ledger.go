@@ -124,9 +124,9 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 		return nil, err
 	}
 
-	tx, err := l.db.BeginTx(ctx, nil)
+	tx, err := beginTx(ctx, l.db, "reserve")
 	if err != nil {
-		return nil, fmt.Errorf("usage: begin reserve transaction: %w", err)
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -347,9 +347,9 @@ func (l *Ledger) Settle(ctx context.Context, req *SettleRequest) (*Settlement, e
 	}
 	now := l.now()
 
-	tx, err := l.db.BeginTx(ctx, nil)
+	tx, err := beginTx(ctx, l.db, "settle")
 	if err != nil {
-		return nil, fmt.Errorf("usage: begin settle transaction: %w", err)
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
