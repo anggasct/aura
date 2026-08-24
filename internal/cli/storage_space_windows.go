@@ -24,3 +24,9 @@ func writableProbe(path string) error {
 }
 
 func classifyOpenError(error) bool { return false }
+
+// diskUsage has no portable statfs on this platform; callers report the
+// filesystem as unknown capacity.
+func diskUsage(string) (int64, int64, int64, error) {
+	return 0, 0, 0, errDiskSpaceUnsupported
+}

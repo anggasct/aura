@@ -104,7 +104,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err := host.Start(ctx); err != nil {
 				return err
 			}
-			probeListener, err := buildProbeListener(cfg)
+			probeListener, err := buildProbeListener(cfg, mapCapabilityStatuses(result.CapabilityReport))
 			if err != nil {
 				return err
 			}

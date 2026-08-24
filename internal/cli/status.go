@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/sandbox"
@@ -46,7 +47,7 @@ func newStatusCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 			if err != nil {
 				return &exitCodeError{code: exitCommand, err: err}
 			}
-			return runStatus(cmd, loaded.Config, negotiate, offline, asJSON)
+			return runStatus(cmd, loaded.Config, loaded.CapabilityReport, negotiate, offline, asJSON)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable output")
@@ -54,9 +55,9 @@ func newStatusCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 	return cmd
 }
 
-func runStatus(cmd *cobra.Command, cfg *config.Config, negotiate func() (sandbox.Primitives, error), offline, asJSON bool) error {
+func runStatus(cmd *cobra.Command, cfg *config.Config, report capability.Report, negotiate func() (sandbox.Primitives, error), offline, asJSON bool) error {
 	ctx := cmd.Context()
-	registry, err := buildHealthRegistry(cfg, negotiate)
+	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), negotiate)
 	if err != nil {
 		return &exitCodeError{code: exitCommand, err: err}
 	}
@@ -96,11 +97,12 @@ func liveReadiness(ctx context.Context, offline bool, listen string) (live healt
 
 // buildHealthRegistry assembles the offline-capable check set from the
 // loaded configuration: migration state and backup age from the store opened
-// read-only, sandbox primitives from the host, provider configuration and
-// capability availability from the load result's inputs. Checks never mutate
-// state and never dial a provider.
-func buildHealthRegistry(cfg *config.Config, negotiate func() (sandbox.Primitives, error)) (*health.Registry, error) {
-	dbPath, _, backupDir, err := storagePaths(cfg)
+// read-only, storage intake plus per-path filesystem headroom, sandbox
+// primitives from the host, provider configuration, capability consistency
+// with this release profile, and process resource pressure. Checks never
+// mutate state and never dial a provider.
+func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilityStatus, negotiate func() (sandbox.Primitives, error)) (*health.Registry, error) {
+	dbPath, artifactRoot, backupDir, err := storagePaths(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -123,6 +125,35 @@ func buildHealthRegistry(cfg *config.Config, negotiate func() (sandbox.Primitive
 			Checker:     health.StorageChecker{Intake: storageIntakeProbe(dbPath)},
 			Timeout:     checkTimeout,
 			Remediation: health.RemediationRepairStorage,
+		},
+		health.RegisteredCheck{
+			ID: "disk",
+			Checker: health.DiskChecker{
+				Targets: func(context.Context) []health.FilesystemTarget {
+					return diskTargets(dbPath, artifactRoot, backupDir)
+				},
+				Usage: func(_ context.Context, path string) (health.DiskUsage, error) {
+					free, total, inodes, err := diskUsage(path)
+					return health.DiskUsage{FreeBytes: free, TotalBytes: total, FreeInodes: inodes}, err
+				},
+				WarningPercent:  cfg.Health.DiskWarningPercent,
+				CriticalPercent: cfg.Health.DiskCriticalPercent,
+				FloorBytes:      int64(cfg.Health.DiskCriticalFloorBytes),
+			},
+			Timeout:     checkTimeout,
+			Remediation: health.RemediationRepairStorage,
+		},
+		health.RegisteredCheck{
+			ID:          "capability",
+			Checker:     health.CapabilityChecker{Statuses: func(context.Context) []health.CapabilityStatus { return capabilities }},
+			Timeout:     checkTimeout,
+			Remediation: health.RemediationReviewProfile,
+		},
+		health.RegisteredCheck{
+			ID:          "process",
+			Checker:     health.ProcessChecker{Probe: func(context.Context) (health.ProcessStatus, bool) { return processProbe() }},
+			Timeout:     checkTimeout,
+			Remediation: health.RemediationRelieveLimits,
 		},
 		health.RegisteredCheck{
 			ID:          "sandbox",
@@ -170,6 +201,50 @@ func storageIntakeProbe(dbPath string) func(context.Context) (health.StorageInta
 		}
 		return health.StorageIntakeOK, "storage accepts durable writes"
 	}
+}
+
+// mapCapabilityStatuses projects the load-time capability report onto the
+// health-owned view.
+func mapCapabilityStatuses(report capability.Report) []health.CapabilityStatus {
+	reported := report.Statuses()
+	mapped := make([]health.CapabilityStatus, 0, len(reported))
+	for _, s := range reported {
+		mapped = append(mapped, health.CapabilityStatus{
+			Name:              s.Name,
+			Compiled:          s.Compiled,
+			Available:         s.Available,
+			Enabled:           s.Enabled,
+			MissingDependency: s.MissingDependency,
+		})
+	}
+	return mapped
+}
+
+// diskTargets names every storage surface whose filesystem must keep
+// headroom. A not-yet-created path is probed at its nearest existing
+// ancestor so a fresh install reports real capacity instead of unknown.
+func diskTargets(dbPath, artifactRoot, backupDir string) []health.FilesystemTarget {
+	return []health.FilesystemTarget{
+		{Name: health.DiskTargetDatabase, Path: existingAncestor(dbPath)},
+		{Name: health.DiskTargetArtifacts, Path: existingAncestor(artifactRoot)},
+		{Name: health.DiskTargetBackups, Path: existingAncestor(backupDir)},
+		{Name: health.DiskTargetTemp, Path: os.TempDir()},
+	}
+}
+
+func existingAncestor(path string) string {
+	current := path
+	for range 16 {
+		if _, err := os.Stat(current); err == nil {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	return path
 }
 
 func schemaVersionsReadOnly(ctx context.Context, dbPath string) (applied, latest int, err error) {

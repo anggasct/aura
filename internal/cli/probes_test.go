@@ -40,7 +40,7 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
-	listener, err := buildProbeListener(&cfg)
+	listener, err := buildProbeListener(&cfg, nil)
 	if err != nil {
 		t.Fatalf("buildProbeListener: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 }
 
 func TestProbeListenerRejectsNilConfig(t *testing.T) {
-	if _, err := buildProbeListener(nil); err == nil {
+	if _, err := buildProbeListener(nil, nil); err == nil {
 		t.Fatal("nil config must be rejected")
 	}
 }

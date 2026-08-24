@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -71,12 +72,12 @@ func (r *Readiness) Draining() bool            { return r.draining.Load() }
 // mandatory sandbox: the sandbox check reports that as degraded, and intake
 // must still stay closed until containment is restored.
 func intakeBlocking(f *Finding) bool {
-	switch f.Component {
-	case ComponentMigration, ComponentSandbox:
+	switch {
+	case f.Component == ComponentMigration || f.Component == ComponentSandbox:
 		return f.Status != StatusUp
-	case ComponentStorage:
+	case f.Component == ComponentStorage || strings.HasPrefix(f.Component, ComponentStorage+"/"):
 		return f.Status == StatusDown || f.Status == StatusUnknown
-	case ComponentCapability:
+	case f.Component == ComponentCapability:
 		return f.Status == StatusDown
 	default:
 		return false

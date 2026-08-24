@@ -15,18 +15,30 @@ import (
 // kernel block-count types differ per platform; anything above the int64
 // range clamps to MaxInt64, far beyond any real filesystem.
 func diskFreeBytes(path string) (int64, error) {
+	free, _, _, err := diskUsage(path)
+	return free, err
+}
+
+// diskUsage reports free bytes, total capacity, and free inodes for the
+// filesystem holding path.
+func diskUsage(path string) (freeBytes, totalBytes, freeInodes int64, err error) {
 	var stats unix.Statfs_t
 	if err := unix.Statfs(path, &stats); err != nil {
-		return 0, err
+		return 0, 0, 0, err
 	}
 	if stats.Bavail <= 0 || stats.Bsize <= 0 {
-		return 0, nil
+		return 0, 0, int64(math.Min(float64(stats.Ffree), math.MaxInt64)), nil
 	}
 	free := float64(stats.Bavail) * float64(stats.Bsize)
+	total := float64(stats.Blocks) * float64(stats.Bsize)
 	if free >= math.MaxInt64 {
-		return math.MaxInt64, nil
+		free = math.MaxInt64
 	}
-	return int64(free), nil
+	if total >= math.MaxInt64 {
+		total = math.MaxInt64
+	}
+	freeInodes = int64(math.Min(float64(stats.Ffree), math.MaxInt64))
+	return int64(free), int64(total), freeInodes, nil
 }
 
 // writableProbe reports whether the process could write to path without

@@ -45,6 +45,8 @@ const (
 	RemediationReviewSandbox   = "review-sandbox-host"
 	RemediationReconcileState  = "reconcile-durable-state"
 	RemediationRepairStorage   = "repair-storage"
+	RemediationReviewProfile   = "review-capability-profile"
+	RemediationRelieveLimits   = "relieve-resource-limits"
 )
 
 // Scope labels where a finding applies. Local findings are safe to print in
@@ -75,6 +77,9 @@ type Registry struct {
 
 	mu   sync.Mutex
 	seen map[string]Finding
+	// lastByCheck keeps each check's newest observation so a timed-out
+	// evaluation can name what the operator would have seen.
+	lastByCheck map[string]Finding
 }
 
 // NewRegistry builds a registry over the given checks. Duplicate check IDs
@@ -105,10 +110,11 @@ func NewRegistry(checks ...RegisteredCheck) (*Registry, error) {
 		normalized = append(normalized, check)
 	}
 	return &Registry{
-		checks:     normalized,
-		maxRunning: maxCheckConcurrency,
-		now:        func() time.Time { return time.Now().UTC() },
-		seen:       make(map[string]Finding, len(normalized)),
+		checks:      normalized,
+		maxRunning:  maxCheckConcurrency,
+		now:         func() time.Time { return time.Now().UTC() },
+		seen:        make(map[string]Finding, len(normalized)),
+		lastByCheck: make(map[string]Finding, len(normalized)),
 	}, nil
 }
 
@@ -221,7 +227,7 @@ func safeCheck(ctx context.Context, check *RegisteredCheck) (findings []Finding,
 func (r *Registry) lastFinding(check *RegisteredCheck) (Finding, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	finding, ok := r.seen[check.ID]
+	finding, ok := r.lastByCheck[check.ID]
 	return finding, ok
 }
 
@@ -262,6 +268,7 @@ func (r *Registry) stamp(check *RegisteredCheck, observed *Finding) Finding {
 		finding.FirstSeen = finding.CheckedAt
 	}
 	r.seen[key] = finding
+	r.lastByCheck[check.ID] = finding
 	return finding
 }
 

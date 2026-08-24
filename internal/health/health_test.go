@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,18 +65,32 @@ func TestMigrationCheckerBranches(t *testing.T) {
 
 func TestCapabilityChecker(t *testing.T) {
 	unavailable := CapabilityChecker{Statuses: func(context.Context) []CapabilityStatus {
-		return []CapabilityStatus{{Name: "sandbox", Available: false}, {Name: "model", Available: true}}
+		return []CapabilityStatus{
+			{Name: "sandbox", Compiled: true, Enabled: true, MissingDependency: "cgroup_v2 delegation"},
+			{Name: "model", Compiled: true, Available: true, Enabled: true},
+		}
 	}}
 	findings := unavailable.Check(context.Background())
 	if len(findings) != 1 || findings[0].Status != StatusDown || findings[0].Component != "capability/sandbox" {
 		t.Fatalf("findings = %+v, want one down finding for capability/sandbox", findings)
 	}
+	if !strings.Contains(findings[0].Detail, "cgroup_v2") {
+		t.Errorf("detail = %q, want the missing dependency reason", findings[0].Detail)
+	}
 
 	healthy := CapabilityChecker{Statuses: func(context.Context) []CapabilityStatus {
-		return []CapabilityStatus{{Name: "model", Available: true}}
+		return []CapabilityStatus{{Name: "model", Compiled: true, Available: true, Enabled: true}}
 	}}
 	if findings := healthy.Check(context.Background()); len(findings) != 1 || findings[0].Status != StatusUp {
 		t.Fatalf("healthy findings = %+v, want a single up finding", findings)
+	}
+
+	notCompiled := CapabilityChecker{Statuses: func(context.Context) []CapabilityStatus {
+		return []CapabilityStatus{{Name: "exec-linux", Compiled: false, Available: false, Enabled: true}}
+	}}
+	findings = notCompiled.Check(context.Background())
+	if len(findings) != 1 || findings[0].Code != "capability_not_compiled" || findings[0].Status != StatusDown {
+		t.Fatalf("not-compiled findings = %+v, want down capability_not_compiled", findings)
 	}
 }
 

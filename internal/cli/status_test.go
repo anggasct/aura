@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/sandbox"
@@ -100,7 +101,7 @@ func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, err
 	cmd := &cobra.Command{Use: "status"}
 	cmd.SetContext(t.Context())
 	cmd.RunE = func(c *cobra.Command, _ []string) error {
-		return runStatus(c, &cfg, negotiate, true, false)
+		return runStatus(c, &cfg, capability.Report{}, negotiate, true, false)
 	}
 	return cmd
 }
@@ -161,7 +162,7 @@ func TestStatusJSONEncodesContract(t *testing.T) {
 	cmd.SetContext(t.Context())
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	if err := runStatus(cmd, &cfg, negotiate, true, true); err != nil {
+	if err := runStatus(cmd, &cfg, capability.Report{}, negotiate, true, true); err != nil {
 		t.Fatalf("runStatus json: %v", err)
 	}
 	var decoded struct {
@@ -184,8 +185,8 @@ func TestStatusJSONEncodesContract(t *testing.T) {
 	if decoded.Live.Reachable {
 		t.Error("offline json must report live unreachable")
 	}
-	if len(decoded.Findings) != 5 {
-		t.Fatalf("findings = %d, want 5 (migration, backup, storage, sandbox, provider): %v", len(decoded.Findings), decoded.Findings)
+	if len(decoded.Findings) != 8 {
+		t.Fatalf("findings = %d, want 8 (migration, backup, storage intake, disk, sandbox, capability, process, provider): %v", len(decoded.Findings), decoded.Findings)
 	}
 	for _, f := range decoded.Findings {
 		if f.ID == "" || f.Severity == "" {
@@ -205,7 +206,7 @@ func TestDoctorFiltersByCheck(t *testing.T) {
 	negotiate := func() (sandbox.Primitives, error) {
 		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
 	}
-	registry, err := buildHealthRegistry(&cfg, negotiate)
+	registry, err := buildHealthRegistry(&cfg, nil, negotiate)
 	if err != nil {
 		t.Fatalf("buildHealthRegistry: %v", err)
 	}
