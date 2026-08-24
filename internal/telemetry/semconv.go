@@ -9,9 +9,11 @@ const (
 )
 
 const (
-	MetricTurnsTotal    = "runtime.turns.total"
-	MetricTurnDuration  = "runtime.turn.duration"
-	MetricModelDuration = "gen_ai.client.operation.duration"
+	MetricTurnsTotal       = "runtime.turns.total"
+	MetricTurnDuration     = "runtime.turn.duration"
+	MetricModelDuration    = "gen_ai.client.operation.duration"
+	MetricToolCallsTotal   = "tools.calls.total"
+	MetricToolCallDuration = "tools.call.duration"
 )
 
 const (
@@ -29,6 +31,9 @@ const (
 
 	AttrToolName   = "tool.name"
 	AttrToolStatus = "tool.status"
+
+	AttrToolOutputBucket = "tool.output.bucket"
+	AttrToolOutputBytes  = "tool.output.bytes"
 
 	AttrSemconvVersion = "aura.semconv.version"
 )
@@ -53,12 +58,16 @@ var modelSpanAttrs = []string{
 var toolSpanAttrs = []string{
 	AttrToolName,
 	AttrToolStatus,
+	AttrToolOutputBytes,
+	AttrSemconvVersion,
 }
 
 var metricLabelAttrs = map[string][]string{
-	MetricTurnsTotal:    {AttrOrigin, AttrTerminalKind},
-	MetricTurnDuration:  {AttrOrigin, AttrTerminalKind},
-	MetricModelDuration: {AttrGenAISystem, AttrGenAIOperationName},
+	MetricTurnsTotal:       {AttrOrigin, AttrTerminalKind},
+	MetricTurnDuration:     {AttrOrigin, AttrTerminalKind},
+	MetricModelDuration:    {AttrGenAISystem, AttrGenAIOperationName},
+	MetricToolCallsTotal:   {AttrToolName, AttrToolStatus, AttrToolOutputBucket},
+	MetricToolCallDuration: {AttrToolName, AttrToolStatus, AttrToolOutputBucket},
 }
 
 func AllowedSpanAttrs(spanName string) []string {

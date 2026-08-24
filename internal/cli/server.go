@@ -13,6 +13,8 @@ import (
 	auraruntime "github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/server"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/telemetry"
+	"github.com/anggasct/aura/internal/toolbroker"
 )
 
 func newServerCmd(gf *globalFlags) *cobra.Command {
@@ -43,7 +45,30 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer func() { _ = db.Close() }()
-			builtin, err := newBuiltinToolExecutor(cfg, db, logger)
+			pipeline, err := telemetry.NewPipeline(cfg.Telemetry, logger)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
+				defer cancel()
+				if err := pipeline.Shutdown(shutdownCtx); err != nil {
+					logger.WarnContext(shutdownCtx, "telemetry shutdown", "component", "telemetry", "error", err)
+				}
+			}()
+			recorder, err := telemetry.NewToolRecorder(pipeline.TracerProvider(), pipeline.MeterProvider())
+			if err != nil {
+				return err
+			}
+			observer := toolbroker.Observer(func(observation toolbroker.Observation) {
+				recorder.Record(ctx, telemetry.ToolObservation{
+					Name:        observation.ToolName + "@" + observation.ToolVersion,
+					Status:      string(observation.Class),
+					Duration:    observation.Duration,
+					OutputBytes: observation.OutputBytes,
+				})
+			})
+			builtin, err := newBuiltinToolExecutor(cfg, db, logger, observer)
 			if err != nil {
 				return err
 			}

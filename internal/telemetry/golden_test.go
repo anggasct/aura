@@ -40,14 +40,18 @@ func TestSpanNamesPinned(t *testing.T) {
 
 func TestMetricNamesPinned(t *testing.T) {
 	metrics := map[string]string{
-		"MetricTurnsTotal":    MetricTurnsTotal,
-		"MetricTurnDuration":  MetricTurnDuration,
-		"MetricModelDuration": MetricModelDuration,
+		"MetricTurnsTotal":       MetricTurnsTotal,
+		"MetricTurnDuration":     MetricTurnDuration,
+		"MetricModelDuration":    MetricModelDuration,
+		"MetricToolCallsTotal":   MetricToolCallsTotal,
+		"MetricToolCallDuration": MetricToolCallDuration,
 	}
 	want := map[string]string{
-		"MetricTurnsTotal":    "runtime.turns.total",
-		"MetricTurnDuration":  "runtime.turn.duration",
-		"MetricModelDuration": "gen_ai.client.operation.duration",
+		"MetricTurnsTotal":       "runtime.turns.total",
+		"MetricTurnDuration":     "runtime.turn.duration",
+		"MetricModelDuration":    "gen_ai.client.operation.duration",
+		"MetricToolCallsTotal":   "tools.calls.total",
+		"MetricToolCallDuration": "tools.call.duration",
 	}
 	for name, got := range metrics {
 		if got != want[name] {
@@ -129,6 +133,8 @@ func TestToolSpanAllowedAttrs(t *testing.T) {
 	want := []string{
 		AttrToolName,
 		AttrToolStatus,
+		AttrToolOutputBytes,
+		AttrSemconvVersion,
 	}
 	assertAttrSet(t, "tool span", allowed, want)
 }
@@ -141,6 +147,8 @@ func TestMetricLabelsBounded(t *testing.T) {
 		{MetricTurnsTotal, []string{AttrOrigin, AttrTerminalKind}},
 		{MetricTurnDuration, []string{AttrOrigin, AttrTerminalKind}},
 		{MetricModelDuration, []string{AttrGenAISystem, AttrGenAIOperationName}},
+		{MetricToolCallsTotal, []string{AttrToolName, AttrToolStatus, AttrToolOutputBucket}},
+		{MetricToolCallDuration, []string{AttrToolName, AttrToolStatus, AttrToolOutputBucket}},
 	}
 	for _, tc := range cases {
 		got := AllowedMetricLabels(tc.metric)
@@ -159,9 +167,11 @@ func TestMetricLabelsBounded(t *testing.T) {
 func TestMetricLabelsExcludeHighCardinality(t *testing.T) {
 	highCardinality := []string{AttrSessionID, AttrTurnID}
 	for metric, labels := range map[string][]string{
-		MetricTurnsTotal:    AllowedMetricLabels(MetricTurnsTotal),
-		MetricTurnDuration:  AllowedMetricLabels(MetricTurnDuration),
-		MetricModelDuration: AllowedMetricLabels(MetricModelDuration),
+		MetricTurnsTotal:       AllowedMetricLabels(MetricTurnsTotal),
+		MetricTurnDuration:     AllowedMetricLabels(MetricTurnDuration),
+		MetricModelDuration:    AllowedMetricLabels(MetricModelDuration),
+		MetricToolCallsTotal:   AllowedMetricLabels(MetricToolCallsTotal),
+		MetricToolCallDuration: AllowedMetricLabels(MetricToolCallDuration),
 	} {
 		for _, label := range labels {
 			for _, hc := range highCardinality {
