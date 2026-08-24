@@ -11,11 +11,12 @@ import (
 )
 
 // A write lock held by another connection must not fail the reserve: the
-// begin retries transient SQLITE_BUSY until the holder releases. The ledger's
-// connection uses a short busy_timeout so each failed begin is fast and the
-// retry loop — not the driver wait — does the work.
+// begin retries transient SQLITE_BUSY until the holder releases. The lock
+// is released only after a busy begin failure has actually been observed,
+// so the retry path — not lock timing — carries the reserve.
 func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
 	dsn := t.TempDir() + "/usage.db"
 
 	seed, err := store.OpenDB(ctx, dsn)
@@ -60,9 +61,17 @@ func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 		t.Fatalf("begin holder tx: %v", err)
 	}
 
+	busyFailures := 0
+	busyObserved := make(chan struct{}, busyMaxAttempts)
+	setBusyBeginObserver(func() {
+		busyFailures++
+		busyObserved <- struct{}{}
+	})
+	t.Cleanup(func() { setBusyBeginObserver(nil) })
+
 	reserveDone := make(chan error, 1)
 	go func() {
-		_, rerr := l.Reserve(context.Background(), ReserveRequest{
+		_, rerr := l.Reserve(ctx, ReserveRequest{
 			InvocationID:             "inv-retry",
 			ModelDefinitionID:        "primary",
 			KnownInputTokens:         100,
@@ -71,17 +80,28 @@ func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 		reserveDone <- rerr
 	}()
 
-	time.Sleep(150 * time.Millisecond)
+	select {
+	case <-busyObserved:
+	case <-ctx.Done():
+		t.Fatalf("no busy begin observed before timeout: %v", ctx.Err())
+	}
 	if err := lockTx.Rollback(); err != nil {
 		t.Fatalf("release lock: %v", err)
 	}
+
 	select {
 	case err := <-reserveDone:
 		if err != nil {
 			t.Fatalf("Reserve under contention = %v, want success after retry", err)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Reserve did not return")
+	case <-ctx.Done():
+		<-reserveDone
+		t.Fatalf("Reserve did not finish: %v", ctx.Err())
+	}
+	// Reading busyFailures is safe here: the reserve goroutine finished,
+	// and every observer call precedes Reserve returning.
+	if busyFailures != 1 {
+		t.Fatalf("busy begin failures = %d, want exactly 1 before the release", busyFailures)
 	}
 }
 
@@ -101,7 +121,8 @@ func TestBeginTxDoesNotRetryPermanentErrors(t *testing.T) {
 // A busy BEGIN that never clears exhausts its attempt budget instead of
 // spinning forever: a real holder connection keeps the write lock while the
 // probe connection runs with a tiny busy_timeout, so every attempt fails with
-// genuine driver SQLITE_BUSY.
+// genuine driver SQLITE_BUSY. The observed busy count pins the budget
+// without timing assumptions.
 func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 	ctx := context.Background()
 	dsn := t.TempDir() + "/usage.db"
@@ -134,7 +155,10 @@ func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = prober.Close() })
 
-	started := time.Now()
+	var busyAttempts int
+	setBusyBeginObserver(func() { busyAttempts++ })
+	t.Cleanup(func() { setBusyBeginObserver(nil) })
+
 	_, err = beginTx(ctx, prober, "probe")
 	if err == nil {
 		t.Fatal("begin succeeded although the write lock was held")
@@ -142,8 +166,10 @@ func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 	if !isTransientBusy(err) {
 		t.Fatalf("err = %v (%T), want wrapped driver SQLITE_BUSY", err, err)
 	}
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
-		t.Errorf("retry budget took %v, want bounded well under the driver timeout", elapsed)
+	// The final attempt fails without notifying, so the observer sees
+	// exactly the retry count.
+	if busyAttempts != busyMaxAttempts-1 {
+		t.Fatalf("busy begin retries = %d, want %d before giving up", busyAttempts, busyMaxAttempts-1)
 	}
 }
 

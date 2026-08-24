@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	"modernc.org/sqlite"
@@ -37,6 +38,29 @@ type beginner interface {
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
 }
 
+// busyBeginObserver, when set, runs after each begin attempt fails with
+// transient SQLITE_BUSY and before the retry sleep; tests coordinate lock
+// release on this signal so the retry path is exercised deterministically.
+var (
+	busyBeginMu       sync.Mutex
+	busyBeginObserver func()
+)
+
+func setBusyBeginObserver(observer func()) {
+	busyBeginMu.Lock()
+	busyBeginObserver = observer
+	busyBeginMu.Unlock()
+}
+
+func notifyBusyBegin() {
+	busyBeginMu.Lock()
+	observer := busyBeginObserver
+	busyBeginMu.Unlock()
+	if observer != nil {
+		observer()
+	}
+}
+
 // beginTx begins a write transaction, retrying transient SQLITE_BUSY with
 // bounded jittered backoff.
 func beginTx(ctx context.Context, db beginner, operation string) (*sql.Tx, error) {
@@ -49,6 +73,7 @@ func beginTx(ctx context.Context, db beginner, operation string) (*sql.Tx, error
 		if !isTransientBusy(err) || attempt >= busyMaxAttempts {
 			return nil, fmt.Errorf("usage: begin %s transaction: %w", operation, err)
 		}
+		notifyBusyBegin()
 		timer := time.NewTimer(delay + rand.N(delay/2))
 		select {
 		case <-ctx.Done():
