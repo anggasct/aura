@@ -162,21 +162,28 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	// Freeze the log before the restart comparison: the observer may have
+	// committed further transitions between the read above and the stop.
 	stopObserver()
 	<-observerDone
+	log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
+	history, err = log.history(ctx)
+	if err != nil {
+		t.Fatalf("frozen history: %v", err)
+	}
 	if history[0].From != health.StatusNone || history[0].FindingID == "" {
 		t.Fatalf("first transition = %+v", history[0])
 	}
 
-	// Restart: a fresh log over the same store replays the transition and a
-	// rebuilt tracker resumes from the persisted state without re-emitting.
+	// Restart: a fresh log over the same store replays every persisted
+	// transition and a rebuilt tracker resumes without re-emitting.
 	restarted := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
 	replayed, err := restarted.history(ctx)
 	if err != nil {
 		t.Fatalf("history after restart: %v", err)
 	}
-	if len(replayed) != len(history) {
-		t.Fatalf("replayed history = %+v, want same length as before restart", replayed)
+	if !slices.Equal(replayed, history) {
+		t.Fatalf("replayed history drifted: %+v vs %+v", replayed, history)
 	}
 	fresh, err := health.NewStateTracker(health.TransitionPolicy{StableFor: time.Minute, Cooldown: time.Minute}, restarted.sink, restarted.history)
 	if err != nil {
