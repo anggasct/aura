@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -377,5 +378,30 @@ func TestReadinessHandlerPassesRequestContext(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("handler did not propagate cancellation")
+	}
+}
+
+// Probe bodies never carry finding evidence: a canary planted in a finding's
+// detail must not reach the HTTP surface.
+func TestProbeBodyExcludesFindingDetail(t *testing.T) {
+	const canary = "canary-secret-zz9-6k2"
+	ready := NewReadiness()
+	ready.SetStarted()
+	handler := ReadinessHandler(ready, func(context.Context) []Finding {
+		return []Finding{{ID: "backup/backup_stale", Component: ComponentBackup, Code: "backup_stale", Status: StatusDegraded, Detail: "stale since " + canary}}
+	}, "", nil)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/readyz", http.NoBody)
+	handler.ServeHTTP(recorder, request)
+	if strings.Contains(recorder.Body.String(), canary) {
+		t.Errorf("probe body leaked finding content:\n%s", recorder.Body.String())
+	}
+	var body ProbeBody
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body %q: %v", recorder.Body.String(), err)
+	}
+	if len(strings.Fields(recorder.Body.String())) > 12 {
+		t.Errorf("probe body grew beyond the minimal contract: %s", recorder.Body.String())
 	}
 }

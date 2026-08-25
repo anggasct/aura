@@ -29,9 +29,7 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	if err := store.Migrate(t.Context(), db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close db: %v", err)
-	}
+	t.Cleanup(func() { _ = db.Close() })
 	if err := mkdirBackup(t, dataRoot); err != nil {
 		t.Fatalf("seed backup: %v", err)
 	}
@@ -40,7 +38,7 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
-	listener, err := buildProbeListener(&cfg, nil)
+	listener, err := buildProbeListener(&cfg, nil, store.NewEventStore(db), store.NewSessionService(db))
 	if err != nil {
 		t.Fatalf("buildProbeListener: %v", err)
 	}
@@ -92,7 +90,7 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 }
 
 func TestProbeListenerRejectsNilConfig(t *testing.T) {
-	if _, err := buildProbeListener(nil, nil); err == nil {
+	if _, err := buildProbeListener(nil, nil, nil, nil); err == nil {
 		t.Fatal("nil config must be rejected")
 	}
 }
