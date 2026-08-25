@@ -5,6 +5,7 @@ import (
 	"net"
 	"path/filepath"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -121,10 +122,9 @@ func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 }
 
 // The periodic observer must persist transitions durably: an evaluation
-// whose bounded evaluation context has ended still writes the transition,
-// and a fresh process replays it after restart. This drives the real
-// observer loop through a probe listener with a fast interval, so the
-// evaluation/persistence context split is exercised as shipped.
+// whose bounded context expires still writes the transition, and a fresh
+// process replays it after restart. Every context fact is asserted through
+// channels, not wall-clock polling.
 func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
@@ -136,47 +136,68 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	if err := store.Migrate(ctx, db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	cfg := config.Default()
-	cfg.Storage.Path = dataRoot
-	cfg.Health.CheckInterval = config.Duration(50 * time.Millisecond)
-	listener, err := buildProbeListener(&cfg, nil, store.NewEventStore(db), store.NewSessionService(db))
-	if err != nil {
-		t.Fatalf("buildProbeListener: %v", err)
+
+	// The evaluation hook spins until its bounded context expires, proving
+	// the persistence step ran after the evaluation context was done.
+	expired := make(chan struct{})
+	var expiredOnce sync.Once
+	evaluate := func(evalCtx context.Context) []health.Finding {
+		<-evalCtx.Done()
+		expiredOnce.Do(func() { close(expired) })
+		return []health.Finding{{ID: "backup/backup_missing", Status: health.StatusDown, Code: "backup_missing"}}
 	}
+	log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
+	var persistOnce sync.Once
+	persistDone := make(chan struct{})
+	sink := func(persistCtx context.Context, transition *health.Transition) error {
+		err := log.sink(persistCtx, transition)
+		persistOnce.Do(func() { close(persistDone) })
+		return err
+	}
+	tracker, err := health.NewStateTracker(
+		health.TransitionPolicy{StableFor: time.Nanosecond, Cooldown: time.Nanosecond},
+		sink,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("tracker: %v", err)
+	}
+	listener := &probeListener{evaluate: evaluate, tracker: tracker, interval: 10 * time.Millisecond}
 
 	observerCtx, stopObserver := context.WithCancel(ctx)
 	observerDone := listener.startObserver(observerCtx)
 
-	deadline := time.Now().Add(5 * time.Second)
-	var history []health.Transition
-	for {
-		log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
-		history, err = log.history(ctx)
-		if err == nil && len(history) >= 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			stopObserver()
-			<-observerDone
-			t.Fatalf("observer never persisted a transition: history=%+v err=%v", history, err)
-		}
-		time.Sleep(20 * time.Millisecond)
+	// Evaluation expired, then persistence completed on its own context —
+	// both observed through channels, in that order, before the observer is
+	// stopped. Nothing here sleeps or polls wall-clock.
+	select {
+	case <-expired:
+	case <-time.After(5 * time.Second):
+		stopObserver()
+		<-observerDone
+		t.Fatal("evaluation context never expired")
 	}
-	// Freeze the log before the restart comparison: the observer may have
-	// committed further transitions between the read above and the stop.
+	select {
+	case <-persistDone:
+	case <-time.After(5 * time.Second):
+		stopObserver()
+		<-observerDone
+		t.Fatal("durable append never completed after evaluation expired")
+	}
 	stopObserver()
 	<-observerDone
-	log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
-	history, err = log.history(ctx)
+
+	check := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
+	history, err := check.history(ctx)
 	if err != nil {
-		t.Fatalf("frozen history: %v", err)
+		t.Fatalf("history: %v", err)
 	}
-	if history[0].From != health.StatusNone || history[0].FindingID == "" {
-		t.Fatalf("first transition = %+v", history[0])
+	if len(history) != 1 || history[0].FindingID != "backup/backup_missing" || history[0].From != health.StatusNone {
+		t.Fatalf("persisted history = %+v", history)
 	}
 
-	// Restart: a fresh log over the same store replays every persisted
-	// transition and a rebuilt tracker resumes without re-emitting.
+	// Restart: a fresh log replays every persisted transition and a rebuilt
+	// tracker resumes without re-emitting.
 	restarted := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
 	replayed, err := restarted.history(ctx)
 	if err != nil {
