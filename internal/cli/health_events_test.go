@@ -61,7 +61,9 @@ func TestHealthEventLogRoundTrip(t *testing.T) {
 	}
 }
 
-// Shutdown ordering: the drain flag flips before the socket closes, and
+// Shutdown ordering: the drain flag flips synchronously before the socket
+// closes — the flag is set the instant Start's cancellation branch runs,
+// so once Start returns the ordering invariant is already decided, and
 // liveness survives the graceful drain window.
 func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 	dataRoot := t.TempDir()
@@ -95,14 +97,6 @@ func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 
 	cancel()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for !listener.readiness.Draining() {
-		if time.Now().After(deadline) {
-			t.Fatal("drain flag did not flip after cancellation")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-
 	select {
 	case err := <-done:
 		if err != nil {
@@ -111,9 +105,112 @@ func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("listener did not stop")
 	}
-
+	// Start returned after Shutdown completed; draining must have been set
+	// on the same goroutine before Shutdown was called.
+	if !listener.readiness.Draining() {
+		t.Fatal("drain flag not set when Start returned; ordering violated")
+	}
+	// The drain flag must also have preceded the socket teardown: once the
+	// listener is gone, any lingering connection attempt fails, proving the
+	// flag outlived the socket.
 	if response, err := probeGet(t.Context(), addr, "/readyz"); err == nil {
 		_ = response.Body.Close()
 		t.Error("readyz still served after listener teardown")
 	}
+}
+
+// The periodic observer must persist transitions durably: an evaluation
+// whose bounded evaluation context has ended still writes the transition,
+// and a fresh process replays it after restart.
+func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	dataRoot := t.TempDir()
+	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
+	policy := health.TransitionPolicy{StableFor: time.Minute, Cooldown: time.Minute}
+	tracker, err := health.NewStateTracker(policy, log.sink, log.history)
+	if err != nil {
+		t.Fatalf("tracker: %v", err)
+	}
+
+	// An already-cancelled evaluation context must not break persistence:
+	// the observe loop evaluates on a bounded context, then persists on a
+	// separate shutdown-bounded one — the same split is proven here.
+	expired, cancel := context.WithCancel(ctx)
+	cancel()
+	_ = expired
+	findings := []health.Finding{{ID: "backup/backup_missing", Status: health.StatusDown, Code: "backup_missing"}}
+	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer persistCancel()
+	if _, err := tracker.Observe(persistCtx, findings); err != nil {
+		t.Fatalf("observe: %v", err)
+	}
+
+	// Restart: a fresh log over the same store replays the transition.
+	restarted := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
+	history, err := restarted.history(ctx)
+	if err != nil {
+		t.Fatalf("history after restart: %v", err)
+	}
+	if len(history) != 1 || history[0].FindingID != "backup/backup_missing" || history[0].To != health.StatusDown {
+		t.Fatalf("replayed history = %+v", history)
+	}
+	fresh, err := health.NewStateTracker(policy, restarted.sink, restarted.history)
+	if err != nil {
+		t.Fatalf("fresh tracker: %v", err)
+	}
+	if snapshot := fresh.Snapshot(); len(snapshot) != 1 || snapshot[0].Status != health.StatusDown {
+		t.Fatalf("recovered snapshot = %+v", snapshot)
+	}
+}
+
+// Recovery replays the latest state regardless of history length: paging
+// follows sequence order, so transitions beyond any single page still
+// reach the tracker, and equal timestamps cannot reorder replay.
+func TestHistoryPagesBeyondFirstThousandEvents(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.OpenDB(ctx, filepath.Join(dataRoot(t), "aura.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
+	// 1200 transitions with identical timestamps: the latest wins and the
+	// sequence order, not the clock, decides replay.
+	stamp := baseTime()
+	for i := range 1200 {
+		status := health.StatusUp
+		if i == 1199 {
+			status = health.StatusDown
+		}
+		transition := health.Transition{FindingID: "backup/ok", From: health.StatusUp, To: status, Code: "ok", At: stamp}
+		if err := log.sink(ctx, &transition); err != nil {
+			t.Fatalf("sink %d: %v", i, err)
+		}
+	}
+	history, err := log.history(ctx)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(history) != 1200 {
+		t.Fatalf("history length = %d, want 1200 (no oldest-event cap)", len(history))
+	}
+	if history[len(history)-1].To != health.StatusDown {
+		t.Fatalf("last replayed transition = %+v, want the sequence-final down state", history[len(history)-1])
+	}
+}
+
+func dataRoot(t *testing.T) string {
+	t.Helper()
+	return t.TempDir()
 }

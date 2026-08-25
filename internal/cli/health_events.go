@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 
 	"github.com/anggasct/aura/internal/health"
@@ -52,8 +51,12 @@ func (l *healthEventLog) sink(ctx context.Context, t *health.Transition) error {
 	if err != nil {
 		return fmt.Errorf("health event: %w", err)
 	}
+	eventID, err := newHealthEventID()
+	if err != nil {
+		return err
+	}
 	event := store.RuntimeEvent{
-		ID:            newHealthEventID(),
+		ID:            eventID,
 		SessionID:     healthSessionID,
 		Sequence:      sequence + 1,
 		Author:        healthEventAuthor,
@@ -87,36 +90,45 @@ func (l *healthEventLog) ensureSession(ctx context.Context) error {
 	return nil
 }
 
-// history replays persisted transitions oldest-first so a restarted tracker
-// resumes from the true prior state.
+// history replays every persisted transition in database sequence order so
+// a restarted tracker resumes from the true prior state. Pages follow the
+// cursor forward, so no oldest-event window can silently drop state.
 func (l *healthEventLog) history(ctx context.Context) ([]health.Transition, error) {
-	listed, err := l.sessions.ListEvents(ctx, healthSessionID, 0, healthHistoryReplay)
-	if err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionNotFound {
-			return nil, nil
+	var transitions []health.Transition
+	const pageSize = 1000
+	var after uint64
+	for {
+		listed, err := l.sessions.ListEvents(ctx, healthSessionID, after, pageSize)
+		if err != nil {
+			if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionNotFound {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("health event history: %w", err)
 		}
-		return nil, fmt.Errorf("health event history: %w", err)
+		for i := range listed {
+			event := &listed[i]
+			if event.Sequence > after {
+				after = event.Sequence
+			}
+			if event.Kind != healthEventKind {
+				continue
+			}
+			var t health.Transition
+			if err := json.Unmarshal(event.Payload, &t); err != nil {
+				return nil, fmt.Errorf("health event history: decode %s: %w", event.ID, err)
+			}
+			transitions = append(transitions, t)
+		}
+		if len(listed) < pageSize {
+			return transitions, nil
+		}
 	}
-	transitions := make([]health.Transition, 0, len(listed))
-	for i := range listed {
-		event := &listed[i]
-		if event.Kind != healthEventKind {
-			continue
-		}
-		var t health.Transition
-		if err := json.Unmarshal(event.Payload, &t); err != nil {
-			return nil, fmt.Errorf("health event history: decode %s: %w", event.ID, err)
-		}
-		transitions = append(transitions, t)
-	}
-	slices.SortFunc(transitions, func(a, b health.Transition) int { return a.At.Compare(b.At) })
-	return transitions, nil
 }
 
-func newHealthEventID() string {
+func newHealthEventID() (string, error) {
 	var data [12]byte
 	if _, err := rand.Read(data[:]); err != nil {
-		panic(fmt.Sprintf("health event id: %v", err))
+		return "", fmt.Errorf("health event id: %w", err)
 	}
-	return "he-" + hex.EncodeToString(data[:])
+	return "he-" + hex.EncodeToString(data[:]), nil
 }

@@ -80,11 +80,6 @@ func (p *probeListener) Start(ctx context.Context) error {
 	// Readiness turns true only once the endpoint is actually serving.
 	p.readiness.SetStarted()
 	stopObserving := p.observeLoop(ctx)
-	// Shutdown ordering: the drain flag flips the moment cancellation is
-	// observed, before this or any other listener tears its socket down, so
-	// no ingress is rejected while readiness still claims open. Liveness is
-	// never cleared — it stays alive through graceful drain.
-	context.AfterFunc(ctx, func() { p.readiness.SetDraining(true) })
 
 	server := &http.Server{
 		Handler:           p.handler,
@@ -101,6 +96,11 @@ func (p *probeListener) Start(ctx context.Context) error {
 		stopObserving()
 		return fmt.Errorf("probe listener: %w", err)
 	case <-ctx.Done():
+		// Shutdown ordering: the drain flag flips synchronously before
+		// this or any other listener tears its socket down, so no ingress
+		// is rejected while readiness still claims open. Liveness is
+		// never cleared — it stays alive through graceful drain.
+		p.readiness.SetDraining(true)
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
@@ -130,7 +130,12 @@ func (p *probeListener) observeLoop(ctx context.Context) func() {
 				evalCtx, evalCancel := context.WithTimeout(loopCtx, p.interval)
 				findings := p.evaluate(evalCtx)
 				evalCancel()
-				if _, err := p.tracker.Observe(evalCtx, findings); err != nil {
+				// Persistence runs on its own shutdown-bounded context: the
+				// evaluation timeout must not cancel the durable append.
+				persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(loopCtx), p.interval)
+				_, err := p.tracker.Observe(persistCtx, findings)
+				persistCancel()
+				if err != nil {
 					// Persistence retried on the next tick; state does not
 					// advance past an unwritten transition.
 					continue
