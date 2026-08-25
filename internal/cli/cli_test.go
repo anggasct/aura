@@ -31,13 +31,19 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
-func TestChatStub(t *testing.T) {
-	_, err := execute(t, "chat")
+func TestChatWithoutModelFailsLoudly(t *testing.T) {
+	// --config points at an unreachable path so the command fails on config
+	// resolution rather than generating a default config under the user's
+	// config directory.
+	_, err := execute(t, "chat", "--config", "../../testdata/config/does-not-exist.yaml")
 	if err == nil {
 		t.Fatal("expected chat to fail loudly, got nil")
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("unexpected chat error: %v", err)
+	if strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("chat is implemented; got stale stub message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "file not found") {
+		t.Errorf("expected chat to fail at config load, got: %v", err)
 	}
 }
 

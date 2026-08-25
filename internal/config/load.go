@@ -178,6 +178,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateHealth(cfg.Health); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateTerminal(cfg.Terminal); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -303,6 +306,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateUsageShapes(doc); err != nil {
+		return err
+	}
+	if err := validateTerminalShapes(doc); err != nil {
 		return err
 	}
 	if err := validateModelShapes(doc); err != nil {
@@ -524,6 +530,35 @@ func mappingValue(node *yamlv3.Node, key string) *yamlv3.Node {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		if node.Content[i].Value == key {
 			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func validateTerminalShapes(doc *yamlv3.Node) error {
+	terminalNode := mappingValue(doc, "terminal")
+	if terminalNode == nil {
+		return nil
+	}
+	if terminalNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("terminal must be a mapping at line %d", terminalNode.Line)
+	}
+	for i := 0; i+1 < len(terminalNode.Content); i += 2 {
+		keyNode := terminalNode.Content[i]
+		valueNode := terminalNode.Content[i+1]
+		switch keyNode.Value {
+		case "render_hz", "max_input_bytes", "in_memory_history":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("terminal.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "second_interrupt_window":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("terminal.second_interrupt_window must be a duration string at line %d", valueNode.Line)
+			}
+		case "plain_approval":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("terminal.plain_approval must be a string at line %d", valueNode.Line)
+			}
 		}
 	}
 	return nil
@@ -1104,7 +1139,26 @@ func applyDefaults(cfg *Config, data []byte) error {
 		cfg.Usage.ReservationTTL = defaults.Usage.ReservationTTL
 	}
 	applyHealthDefaults(cfg, doc, defaults.Health)
+	applyTerminalDefaults(cfg, doc, defaults.Terminal)
 	return nil
+}
+
+func applyTerminalDefaults(cfg *Config, doc *yamlv3.Node, defaults Terminal) {
+	if cfg.Terminal.RenderHz == 0 && !configValuePresent(doc, "terminal", "render_hz") && !envValuePresent("terminal.render_hz") {
+		cfg.Terminal.RenderHz = defaults.RenderHz
+	}
+	if cfg.Terminal.MaxInputBytes == 0 && !configValuePresent(doc, "terminal", "max_input_bytes") && !envValuePresent("terminal.max_input_bytes") {
+		cfg.Terminal.MaxInputBytes = defaults.MaxInputBytes
+	}
+	if cfg.Terminal.InMemoryHistory == 0 && !configValuePresent(doc, "terminal", "in_memory_history") && !envValuePresent("terminal.in_memory_history") {
+		cfg.Terminal.InMemoryHistory = defaults.InMemoryHistory
+	}
+	if cfg.Terminal.SecondInterruptTime == 0 && !configValuePresent(doc, "terminal", "second_interrupt_window") && !envValuePresent("terminal.second_interrupt_window") {
+		cfg.Terminal.SecondInterruptTime = defaults.SecondInterruptTime
+	}
+	if cfg.Terminal.PlainApproval == "" && !configValuePresent(doc, "terminal", "plain_approval") && !envValuePresent("terminal.plain_approval") {
+		cfg.Terminal.PlainApproval = defaults.PlainApproval
+	}
 }
 
 func applyHealthDefaults(cfg *Config, doc *yamlv3.Node, defaults Health) {
@@ -1312,6 +1366,27 @@ func validateHealth(h Health) error {
 	}
 	if h.RestoreVerificationMaxAge <= 0 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.restore_verification_max_age must be positive"}
+	}
+	return nil
+}
+
+func validateTerminal(t Terminal) error {
+	if t.RenderHz <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.render_hz must be positive"}
+	}
+	if t.MaxInputBytes <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.max_input_bytes must be positive"}
+	}
+	if t.InMemoryHistory < 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.in_memory_history must not be negative"}
+	}
+	if t.SecondInterruptTime <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.second_interrupt_window must be positive"}
+	}
+	switch t.PlainApproval {
+	case "deny":
+	default:
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.plain_approval must be \"deny\""}
 	}
 	return nil
 }

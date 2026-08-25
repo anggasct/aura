@@ -68,3 +68,9 @@ health:
   disk_critical_floor_bytes: 512MiB
   backup_max_age: 24h0m0s
   restore_verification_max_age: 720h0m0s
+terminal:
+  render_hz: 20
+  max_input_bytes: 262144
+  in_memory_history: 100
+  second_interrupt_window: 2s
+  plain_approval: deny
