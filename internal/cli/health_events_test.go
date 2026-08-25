@@ -5,6 +5,7 @@ import (
 	"net"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -121,7 +122,9 @@ func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 
 // The periodic observer must persist transitions durably: an evaluation
 // whose bounded evaluation context has ended still writes the transition,
-// and a fresh process replays it after restart.
+// and a fresh process replays it after restart. This drives the real
+// observer loop through a probe listener with a fast interval, so the
+// evaluation/persistence context split is exercised as shipped.
 func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
@@ -133,41 +136,95 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	if err := store.Migrate(ctx, db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
-	policy := health.TransitionPolicy{StableFor: time.Minute, Cooldown: time.Minute}
-	tracker, err := health.NewStateTracker(policy, log.sink, log.history)
+	cfg := config.Default()
+	cfg.Storage.Path = dataRoot
+	cfg.Health.CheckInterval = config.Duration(50 * time.Millisecond)
+	listener, err := buildProbeListener(&cfg, nil, store.NewEventStore(db), store.NewSessionService(db))
 	if err != nil {
-		t.Fatalf("tracker: %v", err)
+		t.Fatalf("buildProbeListener: %v", err)
 	}
 
-	// An already-cancelled evaluation context must not break persistence:
-	// the observe loop evaluates on a bounded context, then persists on a
-	// separate shutdown-bounded one — the same split is proven here.
-	expired, cancel := context.WithCancel(ctx)
-	cancel()
-	_ = expired
-	findings := []health.Finding{{ID: "backup/backup_missing", Status: health.StatusDown, Code: "backup_missing"}}
-	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-	defer persistCancel()
-	if _, err := tracker.Observe(persistCtx, findings); err != nil {
-		t.Fatalf("observe: %v", err)
+	observerCtx, stopObserver := context.WithCancel(ctx)
+	observerDone := listener.startObserver(observerCtx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	var history []health.Transition
+	for {
+		log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
+		history, err = log.history(ctx)
+		if err == nil && len(history) >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			stopObserver()
+			<-observerDone
+			t.Fatalf("observer never persisted a transition: history=%+v err=%v", history, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	stopObserver()
+	<-observerDone
+	if history[0].From != health.StatusNone || history[0].FindingID == "" {
+		t.Fatalf("first transition = %+v", history[0])
 	}
 
-	// Restart: a fresh log over the same store replays the transition.
+	// Restart: a fresh log over the same store replays the transition and a
+	// rebuilt tracker resumes from the persisted state without re-emitting.
 	restarted := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
-	history, err := restarted.history(ctx)
+	replayed, err := restarted.history(ctx)
 	if err != nil {
 		t.Fatalf("history after restart: %v", err)
 	}
-	if len(history) != 1 || history[0].FindingID != "backup/backup_missing" || history[0].To != health.StatusDown {
-		t.Fatalf("replayed history = %+v", history)
+	if len(replayed) != len(history) {
+		t.Fatalf("replayed history = %+v, want same length as before restart", replayed)
 	}
-	fresh, err := health.NewStateTracker(policy, restarted.sink, restarted.history)
+	fresh, err := health.NewStateTracker(health.TransitionPolicy{StableFor: time.Minute, Cooldown: time.Minute}, restarted.sink, restarted.history)
 	if err != nil {
-		t.Fatalf("fresh tracker: %v", err)
+		t.Fatalf("rebuild tracker: %v", err)
 	}
-	if snapshot := fresh.Snapshot(); len(snapshot) != 1 || snapshot[0].Status != health.StatusDown {
-		t.Fatalf("recovered snapshot = %+v", snapshot)
+	if snapshot := fresh.Snapshot(); len(snapshot) == 0 {
+		t.Fatal("restored tracker has no state")
+	}
+}
+
+// Shutdown must cancel an in-flight sink operation, and the stop function
+// must block until the observer goroutine has fully exited.
+func TestObserverStopCancelsInFlightPersistence(t *testing.T) {
+	sinkStarted := make(chan struct{})
+	var sawCancellation atomic.Bool
+	slowSink := func(sinkCtx context.Context, _ *health.Transition) error {
+		select {
+		case sinkStarted <- struct{}{}:
+		default:
+		}
+		<-sinkCtx.Done()
+		sawCancellation.Store(true)
+		return sinkCtx.Err()
+	}
+	tracker, err := health.NewStateTracker(health.TransitionPolicy{StableFor: time.Nanosecond, Cooldown: time.Nanosecond}, slowSink, nil)
+	if err != nil {
+		t.Fatalf("tracker: %v", err)
+	}
+	listener := &probeListener{
+		evaluate: func(context.Context) []health.Finding {
+			return []health.Finding{{ID: "f/one", Status: health.StatusDown, Code: "down"}}
+		},
+		tracker:  tracker,
+		interval: 10 * time.Millisecond,
+	}
+
+	observerCtx, stop := context.WithCancel(context.Background())
+	observerDone := listener.startObserver(observerCtx)
+
+	<-sinkStarted
+	stoppedAt := time.Now()
+	stop()
+	<-observerDone
+	if elapsed := time.Since(stoppedAt); elapsed > 5*time.Second {
+		t.Errorf("stop blocked %v; in-flight persistence was not cancelled", elapsed)
+	}
+	if !sawCancellation.Load() {
+		t.Error("in-flight sink observed no cancellation")
 	}
 }
 

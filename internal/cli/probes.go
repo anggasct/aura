@@ -113,26 +113,44 @@ func (p *probeListener) Start(ctx context.Context) error {
 }
 
 // observeLoop folds periodic evaluations into the transition tracker until
-// the context is cancelled. It exists only when a durable log is wired.
+// the context is cancelled. It exists only when a durable log is wired. The
+// returned stop function cancels the loop and blocks until the observer
+// goroutine — including any in-flight persistence — has exited.
 func (p *probeListener) observeLoop(ctx context.Context) func() {
-	if p.tracker == nil || p.interval <= 0 {
-		return func() {}
+	observerCtx, cancel := context.WithCancel(ctx)
+	stopped := p.startObserver(observerCtx)
+	return func() {
+		cancel()
+		<-stopped
 	}
-	loopCtx, cancel := context.WithCancel(ctx)
+}
+
+// startObserver runs the periodic evaluation loop until ctx is cancelled and
+// returns a channel closed once the observer goroutine — including any
+// in-flight persistence — has exited.
+func (p *probeListener) startObserver(ctx context.Context) <-chan struct{} {
+	stopped := make(chan struct{})
+	if p.tracker == nil || p.interval <= 0 {
+		close(stopped)
+		return stopped
+	}
 	go func() {
+		defer close(stopped)
 		ticker := time.NewTicker(p.interval)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-loopCtx.Done():
+			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				evalCtx, evalCancel := context.WithTimeout(loopCtx, p.interval)
+				evalCtx, evalCancel := context.WithTimeout(context.WithoutCancel(ctx), p.interval)
 				findings := p.evaluate(evalCtx)
 				evalCancel()
-				// Persistence runs on its own shutdown-bounded context: the
-				// evaluation timeout must not cancel the durable append.
-				persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(loopCtx), p.interval)
+				// Persistence runs on its own context derived from the
+				// shutdown-aware loop context: the evaluation timeout cannot
+				// cancel the durable append, while shutdown still bounds and
+				// cancels an in-flight sink operation.
+				persistCtx, persistCancel := context.WithTimeout(ctx, p.interval)
 				_, err := p.tracker.Observe(persistCtx, findings)
 				persistCancel()
 				if err != nil {
@@ -143,5 +161,5 @@ func (p *probeListener) observeLoop(ctx context.Context) func() {
 			}
 		}
 	}()
-	return cancel
+	return stopped
 }
