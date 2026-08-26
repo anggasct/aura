@@ -206,9 +206,9 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 	}
 	// A cancelled turn has no terminal event in the console's own stream: the
 	// engine owns the durable terminal state when the turn context is
-	// cancelled by an interrupt. Only a stream that ends without terminality
-	// for an un-cancelled turn is an error.
-	if !terminal && turnCtx.Err() == nil {
+	// cancelled by an interrupt. A stream that ends without terminality is an
+	// error regardless of cancellation state.
+	if !terminal {
 		return errors.New("terminal: turn ended without a terminal event")
 	}
 	return nil

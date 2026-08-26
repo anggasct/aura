@@ -21,6 +21,17 @@ type fakeRunner struct {
 	eventsFor func(prompt string) []Event
 }
 
+type cancellationWithoutTerminalRunner struct {
+	started chan struct{}
+}
+
+func (r *cancellationWithoutTerminalRunner) Run(ctx context.Context, _ *Request) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		close(r.started)
+		<-ctx.Done()
+	}
+}
+
 func (f *fakeRunner) Run(ctx context.Context, req *Request) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		f.mu.Lock()
@@ -189,6 +200,23 @@ func TestPlainSuppressesCancelledPartialOutput(t *testing.T) {
 	}
 	if got := diag.String(); got != "turn cancelled\n" {
 		t.Errorf("stderr = %q, want cancelled-turn diagnostic", got)
+	}
+}
+
+func TestCancellationWithoutTerminalEventFails(t *testing.T) {
+	runner := &cancellationWithoutTerminalRunner{started: make(chan struct{})}
+	console, out, _, cleanup := newConsoleForTest(runner, newFakeSessions(), "unused\n")
+	defer cleanup()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- console.runTurn(ctx, "prompt") }()
+	<-runner.started
+	cancel()
+	if err := <-done; err == nil {
+		t.Fatal("runTurn returned nil without a terminal event")
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", out.String())
 	}
 }
 
