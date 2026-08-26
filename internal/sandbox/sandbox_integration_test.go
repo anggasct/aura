@@ -320,6 +320,12 @@ func TestIntegrationElevatedRunApproved(t *testing.T) {
 	req := testRequest(t)
 	req.Executable = "printf"
 	req.Arguments = []string{"approved-run"}
+	// This test proves the approved request executes, not memory enforcement
+	// (covered separately below). The re-executed runner binary's early
+	// resident set varies with platform and page-cache charging, and a tight
+	// cgroup ceiling can OOM-kill it on cold hosted runners before the
+	// target ever runs.
+	req.Limits.MemoryBytes = 0
 	grant := mintTestGrant(t, "v1", time.Minute, req)
 	registry := NewRegistry("v1", nil)
 	if err := registry.Register(context.Background(), &grant, req); err != nil {
