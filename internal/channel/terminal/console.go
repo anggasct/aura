@@ -190,7 +190,10 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 			return err
 		}
 	}
-	if streamErr == nil && !failed && !cancelled && assistant != "" {
+	// A cancelled turn context suppresses partial output too: the stream may
+	// end without a terminal event when cancellation races the executor.
+	suppressed := streamErr != nil || failed || cancelled || turnCtx.Err() != nil
+	if !suppressed && assistant != "" {
 		if err := writeLine(c.out, assistant); err != nil {
 			return err
 		}
