@@ -1,17 +1,41 @@
 package cli
 
 import (
-	"errors"
+	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/logging"
 )
 
-func newChatCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "chat",
+func newChatCmd(gf *globalFlags) *cobra.Command {
+	var plain bool
+	cmd := &cobra.Command{
+		Use:   "chat [--plain] [--session <id>]",
 		Short: "Interactive terminal console",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return errors.New("aura chat: interactive console not yet implemented")
+			sessionID, _ := cmd.Flags().GetString("session")
+			ctx := cmd.Context()
+			result, err := config.Load(gf.configPath)
+			if err != nil {
+				return err
+			}
+			cfg := result.Config
+			level, format := resolveLogging(cmd, cfg)
+			logger, err := logging.Setup(level, format, os.Stderr)
+			if err != nil {
+				return err
+			}
+			logConfigResult(ctx, logger, &result)
+			if result.CapabilityStateError != nil {
+				return result.CapabilityStateError
+			}
+			_ = plain
+			return runChat(ctx, cfg, logger, os.Stdin, os.Stdout, os.Stderr, sessionID)
 		},
 	}
+	cmd.Flags().BoolVar(&plain, "plain", false, "force non-TTY plain output")
+	cmd.Flags().String("session", "", "resume an existing session")
+	return cmd
 }

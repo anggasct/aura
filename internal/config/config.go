@@ -28,6 +28,19 @@ type Config struct {
 	Telemetry    Telemetry    `koanf:"telemetry" yaml:"telemetry"`
 	Usage        Usage        `koanf:"usage" yaml:"usage"`
 	Health       Health       `koanf:"health" yaml:"health"`
+	Terminal     Terminal     `koanf:"terminal" yaml:"terminal"`
+}
+
+// Terminal configures the aura chat console. render_hz bounds how often a
+// TTY renderer may repaint; max_input_bytes bounds one prompt; and
+// second_interrupt_window controls how long a first interrupt stays armed
+// before a second one exits outright.
+type Terminal struct {
+	RenderHz            int      `koanf:"render_hz" yaml:"render_hz"`
+	MaxInputBytes       int      `koanf:"max_input_bytes" yaml:"max_input_bytes"`
+	InMemoryHistory     int      `koanf:"in_memory_history" yaml:"in_memory_history"`
+	SecondInterruptTime Duration `koanf:"second_interrupt_window" yaml:"second_interrupt_window"`
+	PlainApproval       string   `koanf:"plain_approval" yaml:"plain_approval"`
 }
 
 // Health configures the loopback probe listener and diagnostics budgets.
@@ -325,6 +338,13 @@ func Default() Config {
 			DiskCriticalFloorBytes:    ByteSize(512 << 20),
 			BackupMaxAge:              Duration(24 * time.Hour),
 			RestoreVerificationMaxAge: Duration(30 * 24 * time.Hour),
+		},
+		Terminal: Terminal{
+			RenderHz:            20,
+			MaxInputBytes:       262144,
+			InMemoryHistory:     100,
+			SecondInterruptTime: Duration(2 * time.Second),
+			PlainApproval:       "deny",
 		},
 	}
 }

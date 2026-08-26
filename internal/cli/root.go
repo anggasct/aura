@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
+	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/sandbox"
 )
@@ -53,7 +55,7 @@ func newRootCmd() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate))
 	return root
 }
 
@@ -71,11 +73,16 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 		return &usageError{err}
 	})
 	root.SetArgs(effective)
-	if err := root.ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "aura:", err)
+	executionCtx, stopInterrupts := contextForCommand(ctx, root, effective)
+	defer stopInterrupts()
+	if err := root.ExecuteContext(executionCtx); err != nil {
+		fmt.Fprintln(os.Stderr, "aura:", terminal.SanitizeText(err.Error()))
 		var ue *usageError
 		if errors.As(err, &ue) {
 			return 2
+		}
+		if errors.Is(err, terminal.ErrInterrupted) {
+			return 128 + int(syscall.SIGINT)
 		}
 		var coded *exitCodeError
 		if errors.As(err, &coded) {
@@ -87,6 +94,33 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 		return 1
 	}
 	return 0
+}
+
+func contextForCommand(ctx context.Context, root *cobra.Command, args []string) (executionCtx context.Context, stop func()) {
+	command, _, err := root.Find(args)
+	if err != nil || command.Name() == "chat" {
+		return ctx, func() {}
+	}
+	signals := interruptsFromContext(ctx)
+	if signals == nil {
+		return ctx, func() {}
+	}
+	interruptCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case _, ok := <-signals:
+			if ok {
+				cancel()
+			}
+		case <-interruptCtx.Done():
+		}
+	}()
+	return interruptCtx, func() {
+		cancel()
+		<-done
+	}
 }
 
 func logConfigResult(ctx context.Context, logger *slog.Logger, result *config.LoadResult) {

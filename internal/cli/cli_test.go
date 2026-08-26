@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func execute(t *testing.T, args ...string) (stdout string, err error) {
@@ -31,13 +32,19 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
-func TestChatStub(t *testing.T) {
-	_, err := execute(t, "chat")
+func TestChatWithoutModelFailsLoudly(t *testing.T) {
+	// --config points at an unreachable path so the command fails on config
+	// resolution rather than generating a default config under the user's
+	// config directory.
+	_, err := execute(t, "chat", "--config", "../../testdata/config/does-not-exist.yaml")
 	if err == nil {
 		t.Fatal("expected chat to fail loudly, got nil")
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("unexpected chat error: %v", err)
+	if strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("chat is implemented; got stale stub message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "file not found") {
+		t.Errorf("expected chat to fail at config load, got: %v", err)
 	}
 }
 
@@ -111,6 +118,32 @@ func TestExecuteContextUnknownCommandViaProcessArgs(t *testing.T) {
 	os.Args = []string{"aura", "--config", "x", "bogus"}
 	if code := ExecuteContext(context.Background()); code != 2 {
 		t.Errorf("unknown command after flags (process args) exit code = %d, want 2", code)
+	}
+}
+
+func TestContextForCommandCancelsOnInterrupt(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	ctx := WithInterrupts(context.Background(), signals)
+	executionCtx, stop := contextForCommand(ctx, newRootCmd(), []string{"server"})
+	signals <- os.Interrupt
+	select {
+	case <-executionCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("non-chat command context was not cancelled")
+	}
+	stop()
+}
+
+func TestContextForChatLeavesInterruptsForConsole(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	ctx := WithInterrupts(context.Background(), signals)
+	executionCtx, stop := contextForCommand(ctx, newRootCmd(), []string{"chat"})
+	defer stop()
+	signals <- os.Interrupt
+	select {
+	case <-executionCtx.Done():
+		t.Fatal("chat context cancelled by process interrupt bridge")
+	default:
 	}
 }
 

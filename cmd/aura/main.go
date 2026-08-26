@@ -15,8 +15,12 @@ func main() {
 		os.Exit(sandbox.RunChild())
 		return
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	interrupts := make(chan os.Signal, 2)
+	signal.Notify(interrupts, os.Interrupt)
+	ctx = cli.WithInterrupts(ctx, interrupts)
 	code := cli.ExecuteContext(ctx)
 	stop()
+	signal.Stop(interrupts)
 	os.Exit(code)
 }
