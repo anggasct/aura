@@ -164,9 +164,9 @@ func TestPlainSeparatesDiagnosticsToStderr(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("stdout = %q, want empty on failed turn", out.String())
 	}
-	// A failed turn produces a terminal event; the renderer does not enrich
-	// stderr for it, so stderr stays empty in this deterministic script.
-	_ = diag
+	if got := diag.String(); got != "turn failed\n" {
+		t.Errorf("stderr = %q, want failed-turn diagnostic", got)
+	}
 }
 
 func TestPlainRunsMultiplePromptsToEOF(t *testing.T) {
@@ -305,6 +305,32 @@ func TestSecondInterruptWithinWindowEscalates(t *testing.T) {
 	}
 }
 
+func TestClosedInterruptSourceStopsWatcher(t *testing.T) {
+	interrupts := make(chan struct{})
+	close(interrupts)
+	c := &Console{
+		interrupts: interrupts,
+		escalated:  make(chan struct{}, 1),
+		now:        time.Now,
+		config:     Config{SecondInterruptTime: time.Hour},
+	}
+	done := make(chan struct{})
+	go func() {
+		c.watchInterrupts(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watcher did not stop after interrupt source closed")
+	}
+	select {
+	case <-c.escalated:
+		t.Fatal("closed interrupt source escalated")
+	default:
+	}
+}
+
 func TestFirstInterruptCancelsActiveTurnOnly(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event {
 		return []Event{{Kind: "model.delta", Payload: delta("thinking")}, {Kind: "turn.completed"}}
@@ -363,6 +389,7 @@ func TestCancellationStopsCloseableReader(t *testing.T) {
 	console, _, _, _ := newConsolePipeTest(&fakeRunner{eventsFor: func(string) []Event {
 		return []Event{{Kind: "turn.completed"}}
 	}}, newFakeSessions(), pr)
+	console.SetInputCloser(func() { _ = pr.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- console.Run(ctx) }()
@@ -376,6 +403,32 @@ func TestCancellationStopsCloseableReader(t *testing.T) {
 		t.Fatal("Run did not stop after cancellation")
 	}
 	_ = pw.Close()
+}
+
+type closeTrackingReader struct {
+	*bytes.Reader
+	closed bool
+}
+
+func (r *closeTrackingReader) Close() error {
+	r.closed = true
+	return nil
+}
+
+func TestRunDoesNotCloseCallerReader(t *testing.T) {
+	reader := &closeTrackingReader{Reader: bytes.NewReader(nil)}
+	console := NewConsole(&fakeRunner{eventsFor: func(string) []Event {
+		return []Event{{Kind: "turn.completed"}}
+	}}, newFakeSessions(), PlainRenderer{}, reader, &bytes.Buffer{}, &bytes.Buffer{}, Config{
+		MaxInputBytes:       100,
+		SecondInterruptTime: time.Second,
+	}, "owner")
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reader.closed {
+		t.Fatal("Run closed the caller-owned reader")
+	}
 }
 
 func TestRenderStateIsBounded(t *testing.T) {

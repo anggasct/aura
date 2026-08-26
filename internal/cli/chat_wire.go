@@ -176,6 +176,7 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 		},
 		principal,
 	)
+	console.SetInputCloser(func() { _ = os.Stdin.Close() })
 	console.SetSessionID(sessionID)
 	interrupts, stopInterrupts := forwardInterrupts(ctx, interruptsFromContext(ctx))
 	defer stopInterrupts()

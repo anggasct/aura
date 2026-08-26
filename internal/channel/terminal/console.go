@@ -31,8 +31,9 @@ type Console struct {
 	diag   io.Writer
 	config Config
 
-	principal string
-	sessionID string
+	principal  string
+	sessionID  string
+	closeInput func()
 
 	mu           sync.Mutex
 	interrupts   <-chan struct{}
@@ -43,8 +44,9 @@ type Console struct {
 }
 
 // NewConsole builds a plain console. in/out/diag are owned by the caller; the
-// console never closes them. principal is the local owner identity stamped on
-// every turn and validated on session switches.
+// console only closes input when the caller opts in with SetInputCloser.
+// principal is the local owner identity stamped on every turn and validated on
+// session switches.
 func NewConsole(runner Runner, sessions Sessions, render Renderer, in io.Reader, out, diag io.Writer, config Config, principal string) *Console {
 	return &Console{
 		runner:    runner,
@@ -68,6 +70,10 @@ func (c *Console) SetClock(now func() time.Time) { c.now = now }
 func (c *Console) SetInterrupts(ch <-chan struct{}) { c.interrupts = ch }
 
 func (c *Console) SetSessionID(id string) { c.sessionID = id }
+
+// SetInputCloser opts into closing the input reader when Run stops. This lets
+// callers release a blocking reader without transferring ownership by default.
+func (c *Console) SetInputCloser(closeInput func()) { c.closeInput = closeInput }
 
 // Run drives the console until EOF after drain, an escalated interrupt, or
 // ctx cancellation. A first interrupt cancels the active turn and waits for
@@ -104,7 +110,7 @@ func (c *Console) Run(ctx context.Context) error {
 		go c.watchInterrupts(watchCtx)
 	}
 
-	lines, stopReading := readLines(ctx, c.in, c.config.MaxInputBytes)
+	lines, stopReading := readLines(ctx, c.in, c.config.MaxInputBytes, c.closeInput)
 	defer stopReading()
 	for {
 		select {
@@ -207,7 +213,10 @@ func (c *Console) watchInterrupts(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-c.interrupts:
+		case _, ok := <-c.interrupts:
+			if !ok {
+				return
+			}
 			if c.observeInterrupt() {
 				select {
 				case c.escalated <- struct{}{}:
@@ -344,7 +353,7 @@ func appendRenderEvent(stream []Event, ev Event) []Event {
 	return append(stream, ev)
 }
 
-func readLines(ctx context.Context, r io.Reader, maxBytes int) (lines <-chan readLineResult, stop func()) {
+func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()) (lines <-chan readLineResult, stop func()) {
 	out := make(chan readLineResult, 1)
 	readCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -380,9 +389,12 @@ func readLines(ctx context.Context, r io.Reader, maxBytes int) (lines <-chan rea
 	}()
 	stop = func() {
 		cancel()
-		if closer, ok := r.(io.Closer); ok {
-			_ = closer.Close()
+		if closeInput == nil {
+			// Without a closer the caller owns the reader and its blocking
+			// read; joining would deadlock on a read nothing can release.
+			return
 		}
+		closeInput()
 		<-done
 	}
 	return out, stop
