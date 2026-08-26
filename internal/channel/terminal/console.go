@@ -171,6 +171,7 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 	}
 	var stream []Event
 	var streamErr error
+	var failed, cancelled bool
 	for ev, err := range c.runner.Run(turnCtx, req) {
 		if err != nil {
 			streamErr = err
@@ -179,6 +180,8 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 			}
 			break
 		}
+		failed = failed || ev.Kind == "turn.failed"
+		cancelled = cancelled || ev.Kind == "turn.cancelled"
 		stream = appendRenderEvent(stream, ev)
 	}
 	assistant, diagnostics, terminal := c.render.RenderTurn(stream)
@@ -187,13 +190,16 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 			return err
 		}
 	}
-	if assistant != "" {
+	if streamErr == nil && !failed && !cancelled && assistant != "" {
 		if err := writeLine(c.out, assistant); err != nil {
 			return err
 		}
 	}
 	if streamErr != nil {
 		return fmt.Errorf("terminal: turn: %w", streamErr)
+	}
+	if failed {
+		return errors.New("terminal: turn failed")
 	}
 	// A cancelled turn has no terminal event in the console's own stream: the
 	// engine owns the durable terminal state when the turn context is

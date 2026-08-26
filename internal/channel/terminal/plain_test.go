@@ -42,3 +42,10 @@ func TestPlainRendererBoundsAssistantText(t *testing.T) {
 		t.Fatalf("assistant length = %d, want <= %d", len(assistant), maxRenderBytes)
 	}
 }
+
+func TestSanitizeTextForErrors(t *testing.T) {
+	got := SanitizeText("bad\x1b]8;;https://example.test\a\x00text")
+	if strings.ContainsAny(got, "\x00\x1b\x7f") {
+		t.Fatalf("sanitized error = %q", got)
+	}
+}

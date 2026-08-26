@@ -48,6 +48,11 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 	return sanitizeText(string(buf)), diagnostics, terminal
 }
 
+// SanitizeText removes terminal control sequences and invalid UTF-8 from user-visible text.
+func SanitizeText(text string) string {
+	return sanitizeText(text)
+}
+
 // decodeDelta extracts model text from a delta or completed-message payload.
 // The runtime's canonical text parts live in an adk content payload; fall
 // back to a plain "text" field for scripted events.

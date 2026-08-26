@@ -154,18 +154,41 @@ func TestPlainWritesOnlyCompletedAssistantText(t *testing.T) {
 
 func TestPlainSeparatesDiagnosticsToStderr(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event {
-		return []Event{{Kind: "turn.failed", Payload: json.RawMessage(`{"code":"policy_denied"}`)}}
+		return []Event{
+			{Kind: "model.delta", Payload: delta("partial")},
+			{Kind: "turn.failed", Payload: json.RawMessage(`{"code":"policy_denied"}`)},
+		}
 	}}
 	console, out, diag, cancel := newConsoleForTest(runner, newFakeSessions(), "run tool\n")
 	defer cancel()
-	if err := console.Run(context.Background()); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := console.Run(context.Background()); err == nil {
+		t.Fatal("Run returned nil for failed turn")
 	}
 	if out.Len() != 0 {
 		t.Errorf("stdout = %q, want empty on failed turn", out.String())
 	}
 	if got := diag.String(); got != "turn failed\n" {
 		t.Errorf("stderr = %q, want failed-turn diagnostic", got)
+	}
+}
+
+func TestPlainSuppressesCancelledPartialOutput(t *testing.T) {
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return []Event{
+			{Kind: "model.delta", Payload: delta("partial")},
+			{Kind: "turn.cancelled"},
+		}
+	}}
+	console, out, diag, cancel := newConsoleForTest(runner, newFakeSessions(), "cancel\n")
+	defer cancel()
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want empty on cancelled turn", out.String())
+	}
+	if got := diag.String(); got != "turn cancelled\n" {
+		t.Errorf("stderr = %q, want cancelled-turn diagnostic", got)
 	}
 }
 

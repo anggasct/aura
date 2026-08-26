@@ -73,8 +73,10 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 		return &usageError{err}
 	})
 	root.SetArgs(effective)
-	if err := root.ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "aura:", err)
+	executionCtx, stopInterrupts := contextForCommand(ctx, root, effective)
+	defer stopInterrupts()
+	if err := root.ExecuteContext(executionCtx); err != nil {
+		fmt.Fprintln(os.Stderr, "aura:", terminal.SanitizeText(err.Error()))
 		var ue *usageError
 		if errors.As(err, &ue) {
 			return 2
@@ -92,6 +94,33 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 		return 1
 	}
 	return 0
+}
+
+func contextForCommand(ctx context.Context, root *cobra.Command, args []string) (executionCtx context.Context, stop func()) {
+	command, _, err := root.Find(args)
+	if err != nil || command.Name() == "chat" {
+		return ctx, func() {}
+	}
+	signals := interruptsFromContext(ctx)
+	if signals == nil {
+		return ctx, func() {}
+	}
+	interruptCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case _, ok := <-signals:
+			if ok {
+				cancel()
+			}
+		case <-interruptCtx.Done():
+		}
+	}()
+	return interruptCtx, func() {
+		cancel()
+		<-done
+	}
 }
 
 func logConfigResult(ctx context.Context, logger *slog.Logger, result *config.LoadResult) {
