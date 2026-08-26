@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"log/slog"
+	"os"
 	"os/user"
 	"time"
 
@@ -21,8 +23,8 @@ import (
 )
 
 // terminalBroker denies every tool call. The plain console never presents an
-// interactive approval and has no tool grants wired in step 1, so tool
-// invocation fails closed rather than executing unconfined.
+// interactive approval and has no tool grants, so tool invocation fails closed
+// rather than executing unconfined.
 type terminalBroker struct{}
 
 func (terminalBroker) Evaluate(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error) {
@@ -74,13 +76,22 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 // port.
 type terminalSessions struct {
 	sessions store.SessionService
+	newID    func() (string, error)
 }
 
 var _ terminal.Sessions = (*terminalSessions)(nil)
 
 func (s *terminalSessions) Create(ctx context.Context, owner string) (terminal.Session, error) {
+	newID := s.newID
+	if newID == nil {
+		newID = newTerminalSessionID
+	}
+	id, err := newID()
+	if err != nil {
+		return terminal.Session{}, fmt.Errorf("terminal: create session id: %w", err)
+	}
 	internal := &store.Session{
-		ID:        newTerminalSessionID(),
+		ID:        id,
 		OwnerID:   owner,
 		Metadata:  json.RawMessage(`{}`),
 		CreatedAt: time.Now().UTC(),
@@ -119,7 +130,7 @@ func (s *terminalSessions) ListEvents(ctx context.Context, sessionID string, aft
 
 // runChat is the wire for `aura chat`. It loads config, opens storage, builds
 // the runtime engine, and drives the terminal console over stdin/stdout.
-func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io.Reader, out, diag io.Writer) error {
+func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID string) error {
 	if _, err := model.BuildRouter(logger, cfg.Models); err != nil {
 		return err
 	}
@@ -165,15 +176,63 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 		},
 		principal,
 	)
+	console.SetSessionID(sessionID)
+	interrupts, stopInterrupts := forwardInterrupts(ctx, interruptsFromContext(ctx))
+	defer stopInterrupts()
+	console.SetInterrupts(interrupts)
 	return console.Run(ctx)
 }
 
-func newTerminalSessionID() string {
+func newTerminalSessionID() (string, error) {
 	var b [12]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "sess_" + hex.EncodeToString([]byte("0123456789abcdef01234567"))
+		return "", err
 	}
-	return "sess_" + hex.EncodeToString(b[:])
+	return "sess_" + hex.EncodeToString(b[:]), nil
+}
+
+type interruptContextKey struct{}
+
+func WithInterrupts(ctx context.Context, signals <-chan os.Signal) context.Context {
+	return context.WithValue(ctx, interruptContextKey{}, signals)
+}
+
+func interruptsFromContext(ctx context.Context) <-chan os.Signal {
+	signals, _ := ctx.Value(interruptContextKey{}).(<-chan os.Signal)
+	return signals
+}
+
+func forwardInterrupts(ctx context.Context, signals <-chan os.Signal) (events <-chan struct{}, stop func()) {
+	if signals == nil {
+		return nil, func() {}
+	}
+	forwardCtx, cancel := context.WithCancel(ctx)
+	out := make(chan struct{}, 2)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(out)
+		for {
+			select {
+			case <-forwardCtx.Done():
+				return
+			case _, ok := <-signals:
+				if !ok {
+					return
+				}
+				select {
+				case out <- struct{}{}:
+				case <-forwardCtx.Done():
+					return
+				}
+			}
+		}
+	}()
+	stop = func() {
+		cancel()
+		<-done
+	}
+	return out, stop
 }
 
 func localPrincipal() (string, error) {

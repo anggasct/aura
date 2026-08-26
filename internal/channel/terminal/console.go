@@ -2,7 +2,9 @@ package terminal
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -65,6 +67,8 @@ func (c *Console) SetClock(now func() time.Time) { c.now = now }
 // default) means interrupts never arrive.
 func (c *Console) SetInterrupts(ch <-chan struct{}) { c.interrupts = ch }
 
+func (c *Console) SetSessionID(id string) { c.sessionID = id }
+
 // Run drives the console until EOF after drain, an escalated interrupt, or
 // ctx cancellation. A first interrupt cancels the active turn and waits for
 // its durable terminal state; a second interrupt within the configured window
@@ -76,15 +80,20 @@ func (c *Console) Run(ctx context.Context) error {
 	if c.sessions == nil {
 		return errors.New("terminal: session service must not be nil")
 	}
-	sess, err := c.sessions.Create(ctx, c.principal)
-	if err != nil {
-		if !isSessionConflict(err) {
-			return fmt.Errorf("terminal: open session: %w", err)
-		}
+	var (
+		sess Session
+		err  error
+	)
+	if c.sessionID == "" {
+		sess, err = c.sessions.Create(ctx, c.principal)
+	} else {
 		sess, err = c.sessions.Get(ctx, c.sessionID)
-		if err != nil {
-			return fmt.Errorf("terminal: open session: %w", err)
+		if err == nil && (c.principal == "" || sess.OwnerID != c.principal) {
+			return fmt.Errorf("terminal: session %s is not owned by %s", c.sessionID, c.principal)
 		}
+	}
+	if err != nil {
+		return fmt.Errorf("terminal: open session: %w", err)
 	}
 	c.sessionID = sess.ID
 
@@ -95,7 +104,8 @@ func (c *Console) Run(ctx context.Context) error {
 		go c.watchInterrupts(watchCtx)
 	}
 
-	lines := readLines(ctx, c.in, c.config.MaxInputBytes)
+	lines, stopReading := readLines(ctx, c.in, c.config.MaxInputBytes)
+	defer stopReading()
 	for {
 		select {
 		case <-c.escalated:
@@ -154,19 +164,30 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 		Parts:       []Input{{Text: line}},
 	}
 	var stream []Event
+	var streamErr error
 	for ev, err := range c.runner.Run(turnCtx, req) {
 		if err != nil {
-			_ = writeLinef(c.diag, "aura: %v", err)
+			streamErr = err
+			if writeErr := writeLinef(c.diag, "aura: %v", err); writeErr != nil {
+				return writeErr
+			}
 			break
 		}
-		stream = append(stream, ev)
+		stream = appendRenderEvent(stream, ev)
 	}
 	assistant, diagnostics, terminal := c.render.RenderTurn(stream)
 	for _, d := range diagnostics {
-		_ = writeLine(c.diag, d)
+		if err := writeLine(c.diag, d); err != nil {
+			return err
+		}
 	}
 	if assistant != "" {
-		_ = writeLine(c.out, assistant)
+		if err := writeLine(c.out, assistant); err != nil {
+			return err
+		}
+	}
+	if streamErr != nil {
+		return fmt.Errorf("terminal: turn: %w", streamErr)
 	}
 	// A cancelled turn has no terminal event in the console's own stream: the
 	// engine owns the durable terminal state when the turn context is
@@ -256,60 +277,156 @@ type readLineResult struct {
 }
 
 func writeLine(w io.Writer, text string) error {
-	if _, err := fmt.Fprintln(w, text); err != nil {
+	if _, err := fmt.Fprintln(w, sanitizeText(text)); err != nil {
 		return fmt.Errorf("terminal: write: %w", err)
 	}
 	return nil
 }
 
 func writeLinef(w io.Writer, format string, args ...any) error {
-	if _, err := fmt.Fprintf(w, format, args...); err != nil {
-		return fmt.Errorf("terminal: write: %w", err)
-	}
-	return nil
+	return writeLine(w, fmt.Sprintf(format, args...))
 }
 
 // readLines reads newline-delimited prompts until EOF, capping each line at
 // maxBytes. Over-long lines fail the console rather than gas up memory.
-func readLines(ctx context.Context, r io.Reader, maxBytes int) <-chan readLineResult {
+const maxBufferedEvents = 1024
+
+func appendRenderEvent(stream []Event, ev Event) []Event {
+	switch ev.Kind {
+	case "model.delta", "message.completed":
+		payload, err := json.Marshal(struct {
+			Text string `json:"text"`
+		}{Text: string(decodeDelta(ev.Payload))})
+		if err == nil {
+			ev.Payload = payload
+		}
+	default:
+		ev.Payload = nil
+	}
+	if ev.Kind == "model.delta" {
+		for i := len(stream) - 1; i >= 0; i-- {
+			if stream[i].Kind == "message.completed" {
+				break
+			}
+			if stream[i].Kind == "model.delta" {
+				text := append([]byte{}, decodeDelta(stream[i].Payload)...)
+				text = append(text, decodeDelta(ev.Payload)...)
+				payload, err := json.Marshal(struct {
+					Text string `json:"text"`
+				}{Text: limitText(string(text), maxRenderBytes)})
+				if err == nil {
+					stream[i].Payload = payload
+				}
+				return stream
+			}
+		}
+	}
+	if ev.Kind == "message.completed" {
+		kept := stream[:0]
+		for _, existing := range stream {
+			if existing.Kind != "model.delta" {
+				kept = append(kept, existing)
+			}
+		}
+		stream = kept
+	}
+	if len(stream) == maxBufferedEvents {
+		drop := 0
+		for i, existing := range stream {
+			if existing.Kind != "model.delta" && existing.Kind != "message.completed" {
+				drop = i
+				break
+			}
+		}
+		copy(stream[drop:], stream[drop+1:])
+		stream = stream[:maxBufferedEvents-1]
+	}
+	return append(stream, ev)
+}
+
+func readLines(ctx context.Context, r io.Reader, maxBytes int) (lines <-chan readLineResult, stop func()) {
 	out := make(chan readLineResult, 1)
+	readCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		defer close(out)
-		br := bufio.NewReaderSize(r, maxBytes+2)
+		br := bufio.NewReaderSize(r, 4096)
 		for {
 			select {
-			case <-ctx.Done():
+			case <-readCtx.Done():
 				return
 			default:
 			}
-			line, err := br.ReadString('\n')
+			line, eof, err := readBoundedLine(br, maxBytes)
 			switch {
-			case err != nil && !errors.Is(err, io.EOF):
-				out <- readLineResult{err: err}
+			case err != nil:
+				if !sendLineResult(readCtx, out, readLineResult{err: err}) {
+					return
+				}
 				return
-			case len(line) > maxBytes:
-				out <- readLineResult{err: errors.New("terminal: input line exceeds the configured maximum")}
-				return
-			case line == "" && errors.Is(err, io.EOF):
-				out <- readLineResult{eof: true}
-				return
-			case errors.Is(err, io.EOF):
-				// Final line without a trailing newline is a prompt.
-				out <- readLineResult{line: strings.TrimSuffix(line, "\n")}
-				out <- readLineResult{eof: true}
+			case eof:
+				if line != "" && !sendLineResult(readCtx, out, readLineResult{line: line}) {
+					return
+				}
+				sendLineResult(readCtx, out, readLineResult{eof: true})
 				return
 			default:
-				out <- readLineResult{line: strings.TrimSuffix(line, "\n")}
+				if !sendLineResult(readCtx, out, readLineResult{line: line}) {
+					return
+				}
 			}
 		}
 	}()
-	return out
+	stop = func() {
+		cancel()
+		if closer, ok := r.(io.Closer); ok {
+			_ = closer.Close()
+		}
+		<-done
+	}
+	return out, stop
 }
 
-func isSessionConflict(err error) bool {
-	type coder interface{ Code() string }
-	if c, ok := err.(coder); ok {
-		return c.Code() == "session_id_conflict"
+func readBoundedLine(br *bufio.Reader, maxBytes int) (lineText string, eof bool, err error) {
+	if maxBytes <= 0 {
+		return "", false, errors.New("terminal: input line exceeds the configured maximum")
 	}
-	return strings.Contains(err.Error(), "already exists")
+	var line []byte
+	for {
+		part, err := br.ReadSlice('\n')
+		contentLen := len(line) + len(part)
+		if newline := bytes.IndexByte(part, '\n'); newline >= 0 {
+			contentLen = len(line) + newline
+		}
+		if contentLen > maxBytes {
+			return "", false, errors.New("terminal: input line exceeds the configured maximum")
+		}
+		line = append(line, part...)
+		switch {
+		case err == nil:
+			line = bytes.TrimSuffix(line, []byte{'\n'})
+			line = bytes.TrimSuffix(line, []byte{'\r'})
+			return string(line), false, nil
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF):
+			if len(line) == 0 {
+				return "", true, nil
+			}
+			line = bytes.TrimSuffix(line, []byte{'\r'})
+			return string(line), true, nil
+		default:
+			return "", false, err
+		}
+	}
+}
+
+func sendLineResult(ctx context.Context, out chan<- readLineResult, result readLineResult) bool {
+	select {
+	case out <- result:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

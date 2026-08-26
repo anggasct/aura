@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
+	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/sandbox"
 )
@@ -76,6 +78,9 @@ func ExecuteContext(ctx context.Context, args ...string) int {
 		var ue *usageError
 		if errors.As(err, &ue) {
 			return 2
+		}
+		if errors.Is(err, terminal.ErrInterrupted) {
+			return 128 + int(syscall.SIGINT)
 		}
 		var coded *exitCodeError
 		if errors.As(err, &coded) {

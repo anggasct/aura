@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -17,9 +16,6 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 		Short: "Interactive terminal console",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID, _ := cmd.Flags().GetString("session")
-			if sessionID != "" {
-				return errors.New("aura chat: --session resume is not yet implemented")
-			}
 			ctx := cmd.Context()
 			result, err := config.Load(gf.configPath)
 			if err != nil {
@@ -36,7 +32,7 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 				return result.CapabilityStateError
 			}
 			_ = plain
-			return runChat(ctx, cfg, logger, os.Stdin, os.Stdout, os.Stderr)
+			return runChat(ctx, cfg, logger, os.Stdin, os.Stdout, os.Stderr, sessionID)
 		},
 	}
 	cmd.Flags().BoolVar(&plain, "plain", false, "force non-TTY plain output")

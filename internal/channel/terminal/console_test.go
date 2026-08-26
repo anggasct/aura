@@ -244,6 +244,33 @@ func TestSessionSwitchToOwnedSession(t *testing.T) {
 	}
 }
 
+func TestConfiguredSessionIsUsed(t *testing.T) {
+	sessions := newFakeSessions()
+	sessions.sessions["sess_resume"] = Session{ID: "sess_resume", OwnerID: "owner"}
+	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
+	console, _, _, cancel := newConsoleForTest(runner, sessions, "prompt\n")
+	defer cancel()
+	console.SetSessionID("sess_resume")
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(runner.calls) != 1 || runner.calls[0].SessionID != "sess_resume" {
+		t.Errorf("turn session = %+v, want sess_resume", runner.calls)
+	}
+}
+
+func TestSessionSwitchRejectsOwnerlessSession(t *testing.T) {
+	sessions := newFakeSessions()
+	sessions.sessions["sess_ownerless"] = Session{ID: "sess_ownerless"}
+	console, _, _, cancel := newConsoleForTest(&fakeRunner{eventsFor: func(string) []Event {
+		return []Event{{Kind: "turn.completed"}}
+	}}, sessions, "/session sess_ownerless\n")
+	defer cancel()
+	if err := console.Run(context.Background()); err == nil {
+		t.Fatal("expected owner validation error")
+	}
+}
+
 func TestStatusListsCurrentSession(t *testing.T) {
 	sessions := newFakeSessions()
 	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
@@ -319,5 +346,70 @@ func TestOverlongLineRejected(t *testing.T) {
 	err := console.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected overlong-line error")
+	}
+}
+
+func TestOverlongUnterminatedLineRejected(t *testing.T) {
+	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
+	config := Config{MaxInputBytes: 5, InMemoryHistory: 100, SecondInterruptTime: time.Second}
+	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, bytes.NewBufferString("123456"), &bytes.Buffer{}, &bytes.Buffer{}, config, "owner")
+	if err := console.Run(context.Background()); err == nil {
+		t.Fatal("expected overlong-line error")
+	}
+}
+
+func TestCancellationStopsCloseableReader(t *testing.T) {
+	pr, pw := io.Pipe()
+	console, _, _, _ := newConsolePipeTest(&fakeRunner{eventsFor: func(string) []Event {
+		return []Event{{Kind: "turn.completed"}}
+	}}, newFakeSessions(), pr)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- console.Run(ctx) }()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after cancellation")
+	}
+	_ = pw.Close()
+}
+
+func TestRenderStateIsBounded(t *testing.T) {
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		events := make([]Event, 0, maxBufferedEvents*2)
+		for range maxBufferedEvents * 2 {
+			events = append(events, Event{Kind: "tool.started", Author: "x"})
+		}
+		events = append(events, Event{Kind: "turn.completed"})
+		return events
+	}}
+	console, out, _, cancel := newConsoleForTest(runner, newFakeSessions(), "prompt\n")
+	defer cancel()
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", out.String())
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("closed output") }
+
+func TestOutputWriteFailureIsReturned(t *testing.T) {
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return []Event{{Kind: "model.delta", Payload: delta("reply")}, {Kind: "turn.completed"}}
+	}}
+	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, bytes.NewBufferString("prompt\n"), failingWriter{}, &bytes.Buffer{}, Config{
+		MaxInputBytes:       100,
+		SecondInterruptTime: time.Second,
+	}, "owner")
+	if err := console.Run(context.Background()); err == nil {
+		t.Fatal("expected output write error")
 	}
 }

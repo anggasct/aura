@@ -55,7 +55,7 @@ func (c *Console) sessionCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("terminal: session %s: %w", id, err)
 	}
-	if sess.OwnerID != "" && sess.OwnerID != c.principal {
+	if c.principal == "" || sess.OwnerID != c.principal {
 		return fmt.Errorf("terminal: session %s is not owned by %s", id, c.principal)
 	}
 	c.sessionID = sess.ID
