@@ -15,7 +15,7 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load fuzz-smoke release-snapshot clean
+.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration fuzz-smoke release-snapshot clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -64,6 +64,20 @@ eval:
 
 load:
 	$(GO) test -tags load -race -run TestLoad ./internal/runtime/
+
+# Containment integration suite: the runner needs a cgroup v2 subtree with
+# the pids and memory controllers enabled for the test process. Service-
+# managed hosts delegate controllers to no session by default, and the
+# no-internal-process rule forbids enabling them under a live session, so
+# the suite runs from the kernel-exempt root cgroup, whose controllers are
+# already enabled. Requires Linux with cgroup v2 mounted writable and
+# passwordless sudo; fails closed anywhere else.
+integration:
+ifeq ($(shell uname -s),Linux)
+	@sudo -n env PATH="$(PATH)" bash -ec 'echo $$$$ > /sys/fs/cgroup/cgroup.procs && cd "$(CURDIR)" && $(GO) test -tags=integration -race -count=1 ./internal/sandbox/...'
+else
+	@echo "integration: containment suite is Linux-only; nothing to run on $(shell uname -s)"
+endif
 
 FUZZTIME ?= 10s
 fuzz-smoke:
