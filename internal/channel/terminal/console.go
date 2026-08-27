@@ -268,7 +268,7 @@ func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, canc
 			return err
 		}
 	}
-	if err := c.tty.Finalize(*failed, *cancelled); err != nil {
+	if err := c.tty.finalize(turnCtx, *failed, *cancelled); err != nil {
 		return err
 	}
 	return streamErr

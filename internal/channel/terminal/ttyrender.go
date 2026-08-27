@@ -27,7 +27,7 @@ const (
 
 // TTYOptions configures the interactive presentation renderer.
 type TTYOptions struct {
-	Out     io.WriteCloser
+	Out     TTYOutput
 	Width   func() int // probe per paint; zero or nil means unknown
 	Hz      int        // paint frequency; zero selects the default
 	Styling bool       // false (NO_COLOR) disables all escape sequences
@@ -36,6 +36,49 @@ type TTYOptions struct {
 	Stdin  *os.File
 	Stdout *os.File
 }
+
+// TTYOutput must return from WriteContext when its context is cancelled.
+type TTYOutput interface {
+	WriteContext(context.Context, []byte) (int, error)
+	io.Closer
+}
+
+type fileOutput struct{ file *os.File }
+
+func NewTTYOutput(file *os.File) TTYOutput {
+	if file == nil {
+		return nil
+	}
+	return fileOutput{file: file}
+}
+
+func (o fileOutput) WriteContext(ctx context.Context, p []byte) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	type result struct {
+		n   int
+		err error
+	}
+	written := make(chan result, 1)
+	go func() {
+		n, err := o.file.Write(p)
+		written <- result{n: n, err: err}
+	}()
+	select {
+	case result := <-written:
+		return result.n, result.err
+	case <-ctx.Done():
+		_ = o.file.Close()
+		result := <-written
+		if result.err != nil {
+			return result.n, result.err
+		}
+		return 0, ctx.Err()
+	}
+}
+
+func (o fileOutput) Close() error { return o.file.Close() }
 
 // TTYRenderer paints streamed runtime events as in-place terminal frames.
 // Untrusted text is sanitized before entering render state; only the
@@ -211,10 +254,12 @@ func (r *TTYRenderer) StartPump(ctx context.Context, onError func(error)) <-chan
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				paintCtx, cancelPaint := context.WithCancel(ctx)
 				written := make(chan error, 1)
-				go func() { written <- r.Paint() }()
+				go func() { written <- r.paint(paintCtx) }()
 				select {
 				case err := <-written:
+					cancelPaint()
 					if err != nil {
 						r.setErr(err)
 						if onError != nil {
@@ -222,9 +267,14 @@ func (r *TTYRenderer) StartPump(ctx context.Context, onError func(error)) <-chan
 						}
 						return
 					}
+				case <-ctx.Done():
+					cancelPaint()
+					<-written
+					return
 				case <-time.After(paintWatchdog(r.hz)):
 					err := errors.New("terminal: paint stalled: output is closed or too slow")
 					r.setErr(err)
+					cancelPaint()
 					if r.closeOutput() {
 						<-written
 					}
@@ -269,6 +319,10 @@ func (r *TTYRenderer) closeOutput() bool {
 // Paint writes one frame when state changed since the last paint. It is
 // called from the pump only.
 func (r *TTYRenderer) Paint() error {
+	return r.paint(context.Background())
+}
+
+func (r *TTYRenderer) paint(ctx context.Context) error {
 	r.mu.Lock()
 	if r.err != nil {
 		err := r.err
@@ -282,17 +336,21 @@ func (r *TTYRenderer) Paint() error {
 	frame, lines := r.buildFrame(false, false)
 	r.dirty = false
 	r.mu.Unlock()
-	return r.writeFrame(frame, lines)
+	return r.writeFrame(ctx, frame, lines)
 }
 
 // Finalize paints the terminal frame with the authoritative text: the
 // completed durable message when present, otherwise the streamed partial,
 // and a failure marker replaces partial text for failed turns.
 func (r *TTYRenderer) Finalize(failed, cancelled bool) error {
+	return r.finalize(context.Background(), failed, cancelled)
+}
+
+func (r *TTYRenderer) finalize(ctx context.Context, failed, cancelled bool) error {
 	r.mu.Lock()
 	frame, lines := r.buildFrame(failed, cancelled)
 	r.mu.Unlock()
-	return r.writeFrame(frame, lines)
+	return r.writeFrame(ctx, frame, lines)
 }
 
 // buildFrame composes the frame under lock. failed turns discard partial
@@ -415,35 +473,47 @@ const (
 // writeFrame serializes writes so a cancelled pump cannot interleave with
 // the final frame, and records the frame extent for the next in-place
 // repaint.
-func (r *TTYRenderer) writeFrame(frame string, lines int) error {
+func (r *TTYRenderer) writeFrame(ctx context.Context, frame string, lines int) error {
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 	r.mu.Lock()
 	r.frameLines = lines
 	r.painted = true
 	r.mu.Unlock()
-	if _, err := io.WriteString(r.opt.Out, frame); err != nil {
+	if err := r.writeOutput(ctx, []byte(frame)); err != nil {
 		return fmt.Errorf("terminal: paint: %w", err)
 	}
 	return nil
 }
 
+func (r *TTYRenderer) writeOutput(ctx context.Context, p []byte) error {
+	if r.opt.Out == nil {
+		return errors.New("terminal: output is not configured")
+	}
+	_, err := r.opt.Out.WriteContext(ctx, p)
+	return err
+}
+
 // ClearScreen erases the display when styling is available; otherwise it
 // degrades to a blank line.
 func (r *TTYRenderer) ClearScreen() error {
+	return r.clearScreen(context.Background())
+}
+
+func (r *TTYRenderer) clearScreen(ctx context.Context) error {
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 	r.mu.Lock()
 	r.frameLines = 0
 	r.mu.Unlock()
 	if !r.opt.Styling {
-		_, err := io.WriteString(r.opt.Out, "\n")
+		err := r.writeOutput(ctx, []byte("\n"))
 		if err != nil {
 			return fmt.Errorf("terminal: clear: %w", err)
 		}
 		return nil
 	}
-	if _, err := io.WriteString(r.opt.Out, "\x1b[2J\x1b[H"); err != nil {
+	if err := r.writeOutput(ctx, []byte("\x1b[2J\x1b[H")); err != nil {
 		return fmt.Errorf("terminal: clear: %w", err)
 	}
 	return nil

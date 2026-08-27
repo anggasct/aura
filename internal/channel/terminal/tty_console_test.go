@@ -259,18 +259,35 @@ func TestTTYClosedOutputCancelsProducer(t *testing.T) {
 }
 
 type blockingConsoleWriter struct {
-	started   chan struct{}
-	release   chan struct{}
-	finished  chan struct{}
-	once      sync.Once
-	closeOnce sync.Once
+	started    chan struct{}
+	release    chan struct{}
+	finished   chan struct{}
+	once       sync.Once
+	finishOnce sync.Once
+	closeOnce  sync.Once
+}
+
+func (w *blockingConsoleWriter) finish() {
+	w.finishOnce.Do(func() { close(w.finished) })
 }
 
 func (w *blockingConsoleWriter) Write(p []byte) (int, error) {
 	w.once.Do(func() { close(w.started) })
 	<-w.release
-	close(w.finished)
+	w.finish()
 	return len(p), nil
+}
+
+func (w *blockingConsoleWriter) WriteContext(ctx context.Context, p []byte) (int, error) {
+	w.once.Do(func() { close(w.started) })
+	select {
+	case <-w.release:
+		w.finish()
+		return len(p), nil
+	case <-ctx.Done():
+		w.finish()
+		return 0, ctx.Err()
+	}
 }
 
 func (w *blockingConsoleWriter) Close() error {

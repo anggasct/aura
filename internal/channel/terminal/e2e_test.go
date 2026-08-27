@@ -205,3 +205,7 @@ type e2eWriteCloser struct {
 }
 
 func (e2eWriteCloser) Close() error { return nil }
+
+func (e e2eWriteCloser) WriteContext(_ context.Context, p []byte) (int, error) {
+	return e.Write(p)
+}

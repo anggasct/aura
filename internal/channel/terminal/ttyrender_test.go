@@ -33,6 +33,10 @@ type testWriteCloser struct {
 
 func (testWriteCloser) Close() error { return nil }
 
+func (w testWriteCloser) WriteContext(_ context.Context, p []byte) (int, error) {
+	return w.Write(p)
+}
+
 func TestTTYCompletedEventWinsOverPartials(t *testing.T) {
 	out := &bytes.Buffer{}
 	r := newTestTTY(out, func() int { return 80 }, false)
@@ -299,6 +303,15 @@ func (w *blockingWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (w *blockingWriter) WriteContext(ctx context.Context, p []byte) (int, error) {
+	select {
+	case <-w.release:
+		return len(p), nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
 func (w *blockingWriter) Close() error {
 	w.once.Do(func() { close(w.release) })
 	return nil
@@ -429,6 +442,16 @@ func (w *closingWriter) Write(p []byte) (int, error) {
 	return 0, errors.New("closed output")
 }
 
+func (w *closingWriter) WriteContext(ctx context.Context, p []byte) (int, error) {
+	close(w.entered)
+	select {
+	case <-w.closed:
+		return 0, errors.New("closed output")
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
 func (w *closingWriter) Close() error {
 	w.once.Do(func() { close(w.closed) })
 	return nil
@@ -456,6 +479,39 @@ func TestStalledWriterClosesAndTerminatesPump(t *testing.T) {
 		t.Fatal("stalled writer was not closed")
 	}
 	stop()
+}
+
+type contextOnlyWriter struct {
+	entered chan struct{}
+	ended   chan struct{}
+}
+
+func (w *contextOnlyWriter) WriteContext(ctx context.Context, _ []byte) (int, error) {
+	close(w.entered)
+	<-ctx.Done()
+	close(w.ended)
+	return 0, ctx.Err()
+}
+
+func (w *contextOnlyWriter) Close() error { return nil }
+
+func TestStalledWriterHonorsPaintCancellation(t *testing.T) {
+	out := &contextOnlyWriter{entered: make(chan struct{}), ended: make(chan struct{})}
+	r := NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500})
+	r.Begin()
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "data")})
+	done := r.StartPump(context.Background(), nil)
+	<-out.entered
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pump leaked: cancelled paint did not terminate")
+	}
+	select {
+	case <-out.ended:
+	case <-time.After(time.Second):
+		t.Fatal("paint writer did not observe cancellation")
+	}
 }
 
 func TestTTYNoColorEmitsProgressAfterTailRollsOver(t *testing.T) {

@@ -20,7 +20,7 @@ func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
 		return false, nil
 	case "clear":
 		if c.tty != nil {
-			return true, c.tty.ClearScreen()
+			return true, c.tty.clearScreen(ctx)
 		}
 		return true, writeLine(c.out, "")
 	case "new":
