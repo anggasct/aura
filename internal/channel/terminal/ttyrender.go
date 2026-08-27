@@ -21,7 +21,8 @@ const (
 	// maxProgressLines bounds the tool/approval progress tail per frame.
 	maxProgressLines = 8
 	defaultRenderHz  = 20
-	maxRenderHz      = int(time.Second / time.Nanosecond)
+	maxRenderHz      = 1000
+	minPaintWatchdog = 100 * time.Millisecond
 )
 
 // TTYOptions configures the interactive presentation renderer.
@@ -221,7 +222,7 @@ func (r *TTYRenderer) StartPump(ctx context.Context, onError func(error)) <-chan
 						}
 						return
 					}
-				case <-time.After(2 * r.hz):
+				case <-time.After(paintWatchdog(r.hz)):
 					err := errors.New("terminal: paint stalled: output is closed or too slow")
 					r.setErr(err)
 					if r.closeOutput() {
@@ -236,6 +237,10 @@ func (r *TTYRenderer) StartPump(ctx context.Context, onError func(error)) <-chan
 		}
 	}()
 	return done
+}
+
+func paintWatchdog(interval time.Duration) time.Duration {
+	return max(2*interval, minPaintWatchdog)
 }
 
 // Err reports the first paint failure, e.g. a closed output.
@@ -324,21 +329,27 @@ func (r *TTYRenderer) buildFrame(failed, cancelled bool) (frame string, lines in
 			lines++
 		}
 		r.progressEmitted = len(r.progress)
-		// Continuation and divergence are compared on sanitized text: the
-		// emitted prefix is sanitized, so the prefix match uses the already
-		// sanitized body, otherwise identical control-bearing model text is
-		// misread as a revision and emitted twice.
-		diverged := r.emitted > 0 && (!strings.HasPrefix(text, r.emittedPrefix) || len(text) < r.emitted)
-		if diverged && r.finalSet {
-			// The completed message revises what was streamed and cannot
-			// extend it. Close the partial line and print the authoritative
-			// text whole; the completed message wins.
-			b.WriteString("\n")
-			lines++
+		if failed || cancelled {
+			if r.emitted > 0 {
+				b.WriteString("\n")
+				lines++
+			}
 			r.emitted = 0
 			r.emittedPrefix = ""
-		} else if r.emitted > 0 && len(text) >= r.emitted {
-			text = text[r.emitted:]
+		} else {
+			// Continuation and divergence are compared on sanitized text.
+			diverged := r.emitted > 0 && (!strings.HasPrefix(text, r.emittedPrefix) || len(text) < r.emitted)
+			if diverged && r.finalSet {
+				// The completed message revises what was streamed and cannot
+				// extend it. Close the partial line and print the authoritative
+				// text whole; the completed message wins.
+				b.WriteString("\n")
+				lines++
+				r.emitted = 0
+				r.emittedPrefix = ""
+			} else if r.emitted > 0 && len(text) >= r.emitted {
+				text = text[r.emitted:]
+			}
 		}
 		if text != "" {
 			physical := truncateLines(wrapText(text, width), maxDisplayLines)

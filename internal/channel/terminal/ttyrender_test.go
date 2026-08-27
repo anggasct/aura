@@ -86,8 +86,11 @@ func TestTTYADKEventsRenderToolAndActionProgress(t *testing.T) {
 
 func TestTTYLargeRenderRateUsesValidTicker(t *testing.T) {
 	r := NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: &bytes.Buffer{}}, Hz: maxRenderHz + 1})
-	if r.hz <= 0 {
-		t.Fatalf("ticker interval = %v, want positive", r.hz)
+	if r.hz < time.Millisecond {
+		t.Fatalf("ticker interval = %v, want at least 1ms", r.hz)
+	}
+	if got := paintWatchdog(r.hz); got < minPaintWatchdog {
+		t.Fatalf("paint watchdog = %v, want at least %v", got, minPaintWatchdog)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := r.StartPump(ctx, nil)
@@ -143,6 +146,35 @@ func TestTTYFailureFrameReplacesPartials(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "partial") {
 		t.Errorf("output = %q, failed turn partial must not survive", out.String())
+	}
+}
+
+func TestTTYNoColorFailureFrameReplacesPaintedPartials(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		failed     bool
+		cancelled  bool
+		wantMarker string
+	}{
+		{name: "failed", failed: true, wantMarker: "turn failed"},
+		{name: "cancelled", cancelled: true, wantMarker: "turn cancelled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			r := newTestTTY(out, func() int { return 80 }, false)
+			r.Begin()
+			r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "partial")})
+			if err := r.Paint(); err != nil {
+				t.Fatalf("Paint: %v", err)
+			}
+			if err := r.Finalize(tc.failed, tc.cancelled); err != nil {
+				t.Fatalf("Finalize: %v", err)
+			}
+			want := "partial\n\n" + tc.wantMarker + "\n"
+			if out.String() != want {
+				t.Errorf("output = %q, want %q", out.String(), want)
+			}
+		})
 	}
 }
 
