@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -31,9 +30,11 @@ type Console struct {
 	diag   io.Writer
 	config Config
 
-	principal  string
-	sessionID  string
-	closeInput func()
+	principal    string
+	sessionID    string
+	closeInput   func()
+	tty          *TTYRenderer
+	terminalSeen bool
 
 	mu           sync.Mutex
 	interrupts   <-chan struct{}
@@ -75,6 +76,11 @@ func (c *Console) SetSessionID(id string) { c.sessionID = id }
 // callers release a blocking reader without transferring ownership by default.
 func (c *Console) SetInputCloser(closeInput func()) { c.closeInput = closeInput }
 
+// SetTTY switches the console to the interactive presentation: streamed
+// frames replace the batch plain renderer, and the multiline editor gesture
+// becomes available. nil restores the plain contract.
+func (c *Console) SetTTY(r *TTYRenderer) { c.tty = r }
+
 // Run drives the console until EOF after drain, an escalated interrupt, or
 // ctx cancellation. A first interrupt cancels the active turn and waits for
 // its durable terminal state; a second interrupt within the configured window
@@ -110,7 +116,7 @@ func (c *Console) Run(ctx context.Context) error {
 		go c.watchInterrupts(watchCtx)
 	}
 
-	lines, stopReading := readLines(ctx, c.in, c.config.MaxInputBytes, c.closeInput)
+	lines, pauseReading, resumeReading, stopReading := readLines(ctx, c.in, c.config.MaxInputBytes, c.closeInput)
 	defer stopReading()
 	for {
 		select {
@@ -123,17 +129,48 @@ func (c *Console) Run(ctx context.Context) error {
 			if !ok {
 				return c.drain()
 			}
+			ack := func() {
+				if r.ack != nil {
+					close(r.ack)
+				}
+			}
 			if r.err != nil {
+				ack()
 				return r.err
 			}
 			if r.eof {
+				ack()
 				return c.drain()
 			}
 			line := strings.TrimSpace(r.line)
 			if line == "" {
+				ack()
+				continue
+			}
+			// The lone-period gesture composes a multi-line prompt in the
+			// user's editor; it is interactive-surface only, and a plain
+			// console submits the period as an ordinary prompt.
+			if line == "." && c.tty != nil {
+				pauseReading()
+				ack()
+				composed, ok, err := c.tty.Compose(ctx, c.config.MaxInputBytes)
+				resumeReading()
+				if err != nil {
+					if writeErr := writeLinef(c.diag, "aura: %v", err); writeErr != nil {
+						return writeErr
+					}
+					continue
+				}
+				if ok {
+					if err := c.runTurn(ctx, composed); err != nil {
+						return err
+					}
+					continue
+				}
 				continue
 			}
 			if strings.HasPrefix(line, "/") {
+				ack()
 				cont, err := c.dispatch(ctx, line)
 				if err != nil {
 					return err
@@ -143,6 +180,7 @@ func (c *Console) Run(ctx context.Context) error {
 				}
 				continue
 			}
+			ack()
 			if err := c.runTurn(ctx, line); err != nil {
 				return err
 			}
@@ -162,6 +200,7 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 	turnCtx, cancel := context.WithCancel(ctx)
 	c.setTurnCancel(cancel)
 	defer c.clearTurnCancel(cancel)
+	c.terminalSeen = false
 
 	req := &Request{
 		SessionID:   c.sessionID,
@@ -169,34 +208,12 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 		Origin:      "terminal",
 		Parts:       []Input{{Text: line}},
 	}
-	var stream []Event
 	var streamErr error
 	var failed, cancelled bool
-	for ev, err := range c.runner.Run(turnCtx, req) {
-		if err != nil {
-			streamErr = err
-			if writeErr := writeLinef(c.diag, "aura: %v", err); writeErr != nil {
-				return writeErr
-			}
-			break
-		}
-		failed = failed || ev.Kind == "turn.failed"
-		cancelled = cancelled || ev.Kind == "turn.cancelled"
-		stream = appendRenderEvent(stream, ev)
-	}
-	assistant, diagnostics, terminal := c.render.RenderTurn(stream)
-	for _, d := range diagnostics {
-		if err := writeLine(c.diag, d); err != nil {
-			return err
-		}
-	}
-	// A cancelled turn context suppresses partial output too: the stream may
-	// end without a terminal event when cancellation races the executor.
-	suppressed := streamErr != nil || failed || cancelled || turnCtx.Err() != nil
-	if !suppressed && assistant != "" {
-		if err := writeLine(c.out, assistant); err != nil {
-			return err
-		}
+	if c.tty != nil {
+		streamErr = c.streamTurn(turnCtx, req, &failed, &cancelled)
+	} else {
+		streamErr = c.batchTurn(turnCtx, req, &failed, &cancelled)
 	}
 	if streamErr != nil {
 		return fmt.Errorf("terminal: turn: %w", streamErr)
@@ -204,13 +221,95 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 	if failed {
 		return errors.New("terminal: turn failed")
 	}
-	// A cancelled turn has no terminal event in the console's own stream: the
-	// engine owns the durable terminal state when the turn context is
-	// cancelled by an interrupt. A stream that ends without terminality is an
-	// error regardless of cancellation state.
-	if !terminal {
+	// A stream that ends without terminality is an error regardless of
+	// cancellation state: the turn owns a durable terminal event.
+	if !c.terminalSeen {
 		return errors.New("terminal: turn ended without a terminal event")
 	}
+	return nil
+}
+
+// streamTurn drives the interactive renderer: events fold into bounded
+// render state, a pump coalesces frames at the configured rate, and the
+// final frame carries the authoritative completed message.
+func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, cancelled *bool) error {
+	c.tty.Begin()
+	producerCtx, cancelProducer := context.WithCancel(turnCtx)
+	defer cancelProducer()
+	pumpCtx, stopPump := context.WithCancel(producerCtx)
+	pumpDone := c.tty.StartPump(pumpCtx, func(error) { cancelProducer() })
+	var streamErr error
+	for ev, err := range c.runner.Run(producerCtx, req) {
+		if err != nil {
+			streamErr = err
+			break
+		}
+		*failed = *failed || ev.Kind == "turn.failed"
+		*cancelled = *cancelled || ev.Kind == "turn.cancelled"
+		if ev.Kind == "turn.completed" || ev.Kind == "turn.failed" || ev.Kind == "turn.cancelled" {
+			c.terminalSeen = true
+		}
+		c.tty.Observe(ev)
+	}
+	stopPump()
+	pumpTimer := time.NewTimer(time.Second)
+	defer pumpTimer.Stop()
+	select {
+	case <-pumpDone:
+	case <-pumpTimer.C:
+		cancelProducer()
+		return errors.New("terminal: paint did not stop after cancellation")
+	}
+	if err := c.tty.Err(); err != nil {
+		return err
+	}
+	if streamErr != nil {
+		if err := writeLinef(c.diag, "aura: %v", streamErr); err != nil {
+			return err
+		}
+	}
+	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(turnCtx), time.Second)
+	defer cancelFinalize()
+	if err := c.tty.finalize(finalizeCtx, *failed, *cancelled); err != nil {
+		return err
+	}
+	return streamErr
+}
+
+// batchTurn collects the event stream and renders once at the end: the plain
+// contract writes only completed assistant text.
+func (c *Console) batchTurn(turnCtx context.Context, req *Request, failed, cancelled *bool) error {
+	var stream []Event
+	retained := 0
+	for ev, err := range c.runner.Run(turnCtx, req) {
+		if err != nil {
+			if writeErr := writeLinef(c.diag, "aura: %v", err); writeErr != nil {
+				return writeErr
+			}
+			return err
+		}
+		*failed = *failed || ev.Kind == "turn.failed"
+		*cancelled = *cancelled || ev.Kind == "turn.cancelled"
+		if ev.Kind == "turn.completed" || ev.Kind == "turn.failed" || ev.Kind == "turn.cancelled" {
+			c.terminalSeen = true
+		}
+		stream, retained = appendRenderEvent(stream, ev, retained)
+	}
+	assistant, diagnostics, terminal := c.render.RenderTurn(stream)
+	for _, d := range diagnostics {
+		if err := writeLine(c.diag, d); err != nil {
+			return err
+		}
+	}
+	// Failed and cancelled turns suppress partial output: the durable log
+	// owns what happened, the display shows the outcome.
+	suppressed := *failed || *cancelled
+	if !suppressed && assistant != "" {
+		if err := writeLine(c.out, assistant); err != nil {
+			return err
+		}
+	}
+	_ = terminal
 	return nil
 }
 
@@ -292,6 +391,7 @@ type readLineResult struct {
 	line string
 	eof  bool
 	err  error
+	ack  chan struct{}
 }
 
 func writeLine(w io.Writer, text string) error {
@@ -309,7 +409,12 @@ func writeLinef(w io.Writer, format string, args ...any) error {
 // maxBytes. Over-long lines fail the console rather than gas up memory.
 const maxBufferedEvents = 1024
 
-func appendRenderEvent(stream []Event, ev Event) []Event {
+// maxBatchStreamBytes bounds the aggregate payload bytes a batch turn may
+// retain before rendering; extraction happens at append time so a stream of
+// large provider events cannot accumulate a process-sized buffer.
+const maxBatchStreamBytes = 2 << 20
+
+func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event, total int) {
 	switch ev.Kind {
 	case "model.delta", "message.completed":
 		payload, err := json.Marshal(struct {
@@ -317,6 +422,53 @@ func appendRenderEvent(stream []Event, ev Event) []Event {
 		}{Text: string(decodeDelta(ev.Payload))})
 		if err == nil {
 			ev.Payload = payload
+		}
+	case "adk_event":
+		adk, ok := decodeADKEvent(ev.Payload)
+		if !ok {
+			ev.Payload = nil
+			break
+		}
+		normalized := map[string]any{"partial": adk.Partial}
+		var toolCalls, toolResponses []string
+		if adk.Content != nil {
+			for _, part := range adk.Content.Parts {
+				if part.FunctionCall != nil && part.FunctionCall.Name != "" {
+					toolCalls = append(toolCalls, limitText(sanitizeText(part.FunctionCall.Name)))
+				}
+				if part.FunctionResponse != nil && part.FunctionResponse.Name != "" {
+					toolResponses = append(toolResponses, limitText(sanitizeText(part.FunctionResponse.Name)))
+				}
+			}
+		}
+		if text, present, emptyAssistant := adkText(adk); present {
+			normalized["text"] = limitText(sanitizeText(string(text)))
+		} else if adk.Content != nil && adk.Content.Role == "user" {
+			normalized["role"] = "user"
+		} else if emptyAssistant && !adk.Partial {
+			normalized["empty"] = true
+		}
+		if adk.Actions != nil {
+			if adk.Actions.TransferToAgent != "" {
+				normalized["transfer"] = limitText(sanitizeText(adk.Actions.TransferToAgent))
+			}
+			if adk.Actions.Escalate {
+				normalized["escalate"] = true
+			}
+		}
+		if len(adk.LongRunningToolIDs) > 0 {
+			normalized["longRunning"] = len(adk.LongRunningToolIDs)
+		}
+		if len(toolCalls) > 0 {
+			normalized["toolCalls"] = toolCalls
+		}
+		if len(toolResponses) > 0 {
+			normalized["toolResponses"] = toolResponses
+		}
+		if payload, err := json.Marshal(normalized); err == nil {
+			ev.Payload = payload
+		} else {
+			ev.Payload = nil
 		}
 	default:
 		ev.Payload = nil
@@ -327,28 +479,41 @@ func appendRenderEvent(stream []Event, ev Event) []Event {
 				break
 			}
 			if stream[i].Kind == "model.delta" {
+				before := len(stream[i].Payload)
 				text := append([]byte{}, decodeDelta(stream[i].Payload)...)
 				text = append(text, decodeDelta(ev.Payload)...)
 				payload, err := json.Marshal(struct {
 					Text string `json:"text"`
-				}{Text: limitText(string(text), maxRenderBytes)})
+				}{Text: limitText(string(text))})
 				if err == nil {
 					stream[i].Payload = payload
+					retained += len(payload) - before
 				}
-				return stream
+				stream, retained = trimBatchStream(stream, retained)
+				return stream, retained
 			}
 		}
 	}
 	if ev.Kind == "message.completed" {
 		kept := stream[:0]
 		for _, existing := range stream {
-			if existing.Kind != "model.delta" {
-				kept = append(kept, existing)
+			if existing.Kind == "model.delta" {
+				retained -= len(existing.Payload)
+				continue
 			}
+			kept = append(kept, existing)
 		}
 		stream = kept
 	}
-	if len(stream) == maxBufferedEvents {
+	stream, retained = trimBatchStream(stream, retained)
+	if retained+len(ev.Payload) > maxBatchStreamBytes {
+		ev.Payload = nil
+	}
+	return append(stream, ev), retained + len(ev.Payload)
+}
+
+func trimBatchStream(stream []Event, retained int) (updated []Event, total int) {
+	for len(stream) > 0 && (len(stream) >= maxBufferedEvents || retained > maxBatchStreamBytes) {
 		drop := 0
 		for i, existing := range stream {
 			if existing.Kind != "model.delta" && existing.Kind != "message.completed" {
@@ -356,27 +521,43 @@ func appendRenderEvent(stream []Event, ev Event) []Event {
 				break
 			}
 		}
+		retained -= len(stream[drop].Payload)
 		copy(stream[drop:], stream[drop+1:])
-		stream = stream[:maxBufferedEvents-1]
+		stream = stream[:len(stream)-1]
 	}
-	return append(stream, ev)
+	return stream, retained
 }
 
-func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()) (lines <-chan readLineResult, stop func()) {
-	out := make(chan readLineResult, 1)
+// readLines reads newline-delimited prompts until EOF. pause stops reading
+// between lines and releases stdin to another consumer (the multiline editor
+// gesture); resume restarts reading afterwards. Both are safe on a stopped
+// reader.
+func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()) (lines <-chan readLineResult, pause, resume, stop func()) {
+	out := make(chan readLineResult)
 	readCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+	var gateMu sync.Mutex
+	var gate chan struct{} // nil while running; closed to resume
 	go func() {
 		defer close(done)
 		defer close(out)
-		br := bufio.NewReaderSize(r, 4096)
 		for {
+			gateMu.Lock()
+			g := gate
+			gateMu.Unlock()
+			if g != nil {
+				select {
+				case <-readCtx.Done():
+					return
+				case <-g:
+				}
+			}
 			select {
 			case <-readCtx.Done():
 				return
 			default:
 			}
-			line, eof, err := readBoundedLine(br, maxBytes)
+			line, eof, err := readBoundedLine(r, maxBytes)
 			switch {
 			case err != nil:
 				if !sendLineResult(readCtx, out, readLineResult{err: err}) {
@@ -396,8 +577,24 @@ func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()
 			}
 		}
 	}()
+	pause = func() {
+		gateMu.Lock()
+		defer gateMu.Unlock()
+		if gate == nil {
+			gate = make(chan struct{})
+		}
+	}
+	resume = func() {
+		gateMu.Lock()
+		defer gateMu.Unlock()
+		if gate != nil {
+			close(gate)
+			gate = nil
+		}
+	}
 	stop = func() {
 		cancel()
+		resume()
 		if closeInput == nil {
 			// Without a closer the caller owns the reader and its blocking
 			// read; joining would deadlock on a read nothing can release.
@@ -406,46 +603,52 @@ func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()
 		closeInput()
 		<-done
 	}
-	return out, stop
+	return out, pause, resume, stop
 }
 
-func readBoundedLine(br *bufio.Reader, maxBytes int) (lineText string, eof bool, err error) {
+func readBoundedLine(r io.Reader, maxBytes int) (lineText string, eof bool, err error) {
 	if maxBytes <= 0 {
 		return "", false, errors.New("terminal: input line exceeds the configured maximum")
 	}
 	var line []byte
+	var one [1]byte
 	for {
-		part, err := br.ReadSlice('\n')
-		contentLen := len(line) + len(part)
-		if newline := bytes.IndexByte(part, '\n'); newline >= 0 {
-			contentLen = len(line) + newline
+		n, readErr := r.Read(one[:])
+		if n > 0 {
+			if one[0] == '\n' {
+				line = bytes.TrimSuffix(line, []byte{'\r'})
+				return string(line), false, nil
+			}
+			line = append(line, one[0])
+			if len(line) > maxBytes {
+				return "", false, errors.New("terminal: input line exceeds the configured maximum")
+			}
 		}
-		if contentLen > maxBytes {
-			return "", false, errors.New("terminal: input line exceeds the configured maximum")
-		}
-		line = append(line, part...)
 		switch {
-		case err == nil:
-			line = bytes.TrimSuffix(line, []byte{'\n'})
-			line = bytes.TrimSuffix(line, []byte{'\r'})
-			return string(line), false, nil
-		case errors.Is(err, bufio.ErrBufferFull):
+		case readErr == nil:
 			continue
-		case errors.Is(err, io.EOF):
+		case errors.Is(readErr, io.EOF):
 			if len(line) == 0 {
 				return "", true, nil
 			}
 			line = bytes.TrimSuffix(line, []byte{'\r'})
 			return string(line), true, nil
 		default:
-			return "", false, err
+			return "", false, readErr
 		}
 	}
 }
 
 func sendLineResult(ctx context.Context, out chan<- readLineResult, result readLineResult) bool {
+	ack := make(chan struct{})
+	result.ack = ack
 	select {
 	case out <- result:
+	case <-ctx.Done():
+		return false
+	}
+	select {
+	case <-ack:
 		return true
 	case <-ctx.Done():
 		return false

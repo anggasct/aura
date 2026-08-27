@@ -11,6 +11,56 @@ const (
 	maxDiagnosticLines = 1024
 )
 
+type adkRenderEvent struct {
+	Content *struct {
+		Role  string `json:"role"`
+		Parts []struct {
+			Text         *string `json:"text"`
+			FunctionCall *struct {
+				Name string `json:"name"`
+			} `json:"functionCall"`
+			FunctionResponse *struct {
+				Name string `json:"name"`
+			} `json:"functionResponse"`
+		} `json:"parts"`
+	} `json:"content"`
+	Actions *struct {
+		TransferToAgent string `json:"transferToAgent"`
+		Escalate        bool   `json:"escalate"`
+	} `json:"actions"`
+	LongRunningToolIDs []string `json:"longRunningToolIds"`
+	Partial            bool     `json:"partial"`
+}
+
+func decodeADKEvent(payload json.RawMessage) (*adkRenderEvent, bool) {
+	if len(payload) == 0 || len(payload) > 4*maxRenderBytes {
+		return nil, false
+	}
+	var event adkRenderEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return nil, false
+	}
+	return &event, true
+}
+
+func adkText(event *adkRenderEvent) (text []byte, present, emptyAssistant bool) {
+	if event == nil || event.Content == nil || event.Content.Role == "user" {
+		return nil, false, false
+	}
+	hasToolPart := false
+	for _, part := range event.Content.Parts {
+		if part.Text != nil {
+			text = appendLimited(text, []byte(*part.Text))
+			present = true
+		}
+		if part.FunctionCall != nil || part.FunctionResponse != nil {
+			hasToolPart = true
+		}
+	}
+	emptyAssistant = !present && !hasToolPart && len(event.Content.Parts) == 0
+	return text, present, emptyAssistant
+}
+
 // PlainRenderer is the non-TTY event renderer. It folds a turn's events into
 // the completed assistant text for stdout and diagnostics for stderr; tool
 // and approval activity is surfaced as progress lines, never as model text.
@@ -21,6 +71,7 @@ type PlainRenderer struct{}
 // to stderr, and whether the turn reached a durable terminal event.
 func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics []string, terminal bool) {
 	var buf []byte
+	var finalSet bool
 	for _, ev := range stream {
 		switch ev.Kind {
 		case "turn.completed":
@@ -32,10 +83,75 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 			terminal = true
 			diagnostics = appendDiagnostic(diagnostics, "turn failed")
 		case "model.delta":
-			buf = appendLimited(buf, decodeDelta(ev.Payload), maxRenderBytes)
+			if !finalSet {
+				buf = appendLimited(buf, decodeDelta(ev.Payload))
+			}
 		case "message.completed":
-			if text := decodeDelta(ev.Payload); len(text) > 0 {
-				buf = appendLimited(nil, text, maxRenderBytes)
+			finalSet = true
+			buf = appendLimited(nil, decodeDelta(ev.Payload))
+		case "adk_event":
+			// Batch streams carry the normalized projection; standalone
+			// renderer use may still see the raw provider shape.
+			var norm struct {
+				Text          string   `json:"text"`
+				Role          string   `json:"role"`
+				Partial       bool     `json:"partial"`
+				Empty         bool     `json:"empty"`
+				ToolCalls     []string `json:"toolCalls"`
+				ToolResponses []string `json:"toolResponses"`
+				LongRunning   int      `json:"longRunning"`
+				Transfer      string   `json:"transfer"`
+				Escalate      bool     `json:"escalate"`
+			}
+			if err := json.Unmarshal(ev.Payload, &norm); err == nil && (norm.Text != "" || norm.Role != "" || norm.Empty || len(norm.ToolCalls) > 0 || len(norm.ToolResponses) > 0 || norm.LongRunning > 0 || norm.Transfer != "" || norm.Escalate) {
+				if norm.Text != "" {
+					if norm.Partial {
+						if !finalSet {
+							buf = appendLimited(buf, []byte(norm.Text))
+						}
+					} else {
+						buf = appendLimited(nil, []byte(norm.Text))
+						finalSet = true
+					}
+				}
+				if norm.Transfer != "" {
+					diagnostics = appendDiagnostic(diagnostics, "agent transfer requested: "+norm.Transfer)
+				}
+				if norm.Escalate {
+					diagnostics = appendDiagnostic(diagnostics, "agent escalation requested")
+				}
+				if norm.Empty && !norm.Partial {
+					buf = nil
+					finalSet = true
+				}
+				for _, name := range norm.ToolCalls {
+					diagnostics = appendDiagnostic(diagnostics, "tool requested: "+name)
+				}
+				for _, name := range norm.ToolResponses {
+					diagnostics = appendDiagnostic(diagnostics, "tool completed: "+name)
+				}
+				if norm.LongRunning > 0 {
+					diagnostics = appendDiagnostic(diagnostics, "long-running tool active")
+				}
+				continue
+			}
+			adk, ok := decodeADKEvent(ev.Payload)
+			if !ok {
+				continue
+			}
+			text, present, emptyAssistant := adkText(adk)
+			if present {
+				if adk.Partial {
+					if !finalSet {
+						buf = appendLimited(buf, text)
+					}
+				} else {
+					buf = appendLimited(nil, text)
+					finalSet = true
+				}
+			} else if emptyAssistant && !adk.Partial {
+				buf = nil
+				finalSet = true
 			}
 		case "tool.started":
 			diagnostics = appendDiagnostic(diagnostics, "tool started: "+sanitizeText(ev.Author))
@@ -70,7 +186,7 @@ func decodeDelta(payload json.RawMessage) []byte {
 	if err := json.Unmarshal(payload, &content); err == nil && content.Content != nil {
 		var out []byte
 		for _, p := range content.Content.Parts {
-			out = appendLimited(out, []byte(p.Text), maxRenderBytes)
+			out = appendLimited(out, []byte(p.Text))
 		}
 		return out
 	}
@@ -87,25 +203,25 @@ func appendDiagnostic(diagnostics []string, text string) []string {
 	if len(diagnostics) >= maxDiagnosticLines {
 		return diagnostics
 	}
-	return append(diagnostics, limitText(sanitizeText(text), maxRenderBytes))
+	return append(diagnostics, limitText(sanitizeText(text)))
 }
 
-func appendLimited(dst, src []byte, limit int) []byte {
-	if len(dst) >= limit {
-		return dst[:limit]
+func appendLimited(dst, src []byte) []byte {
+	if len(dst) >= maxRenderBytes {
+		return dst[:maxRenderBytes]
 	}
-	remaining := limit - len(dst)
+	remaining := maxRenderBytes - len(dst)
 	if len(src) > remaining {
 		src = src[:remaining]
 	}
 	return append(dst, src...)
 }
 
-func limitText(text string, limit int) string {
-	if len(text) <= limit {
+func limitText(text string) string {
+	if len(text) <= maxRenderBytes {
 		return text
 	}
-	cut := limit
+	cut := maxRenderBytes
 	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}
@@ -134,7 +250,7 @@ func sanitizeText(text string) string {
 			i += size
 		}
 	}
-	return limitText(out.String(), maxRenderBytes)
+	return limitText(out.String())
 }
 
 func skipEscape(text string, i int) int {

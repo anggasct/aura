@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"iter"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,10 +26,24 @@ type cancellationWithoutTerminalRunner struct {
 	started chan struct{}
 }
 
+type cancellationTTYRunner struct {
+	started   chan struct{}
+	cancelled chan struct{}
+}
+
 func (r *cancellationWithoutTerminalRunner) Run(ctx context.Context, _ *Request) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		close(r.started)
 		<-ctx.Done()
+	}
+}
+
+func (r *cancellationTTYRunner) Run(ctx context.Context, _ *Request) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		close(r.started)
+		<-ctx.Done()
+		close(r.cancelled)
+		yield(Event{Kind: "turn.cancelled"}, nil)
 	}
 }
 
@@ -484,8 +499,8 @@ func TestRunDoesNotCloseCallerReader(t *testing.T) {
 
 func TestRenderStateIsBounded(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event {
-		events := make([]Event, 0, maxBufferedEvents*2)
-		for range maxBufferedEvents * 2 {
+		events := make([]Event, 0, maxBufferedEvents/4)
+		for range maxBufferedEvents / 4 {
 			events = append(events, Event{Kind: "tool.started", Author: "x"})
 		}
 		events = append(events, Event{Kind: "turn.completed"})
@@ -498,6 +513,71 @@ func TestRenderStateIsBounded(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", out.String())
+	}
+}
+
+func TestBatchEmptyADKCompletionReplacesPartial(t *testing.T) {
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return []Event{
+			{Kind: "model.delta", Payload: delta("stale partial")},
+			{Kind: "adk_event", Payload: json.RawMessage(`{"content":{"role":"model","parts":[]},"partial":false}`)},
+			{Kind: "turn.completed"},
+		}
+	}}
+	console, out, _, cleanup := newConsoleForTest(runner, newFakeSessions(), "prompt\n")
+	defer cleanup()
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty authoritative completion", out.String())
+	}
+}
+
+func TestBatchMergeMaintainsByteBudget(t *testing.T) {
+	chunk := strings.Repeat("x", 600*1024)
+	stream := []Event{
+		{Kind: "adk_event", Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"` + chunk + `"}]},"partial":true}`)},
+		{Kind: "model.delta", Payload: delta(chunk)},
+		{Kind: "adk_event", Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"` + chunk + `"}]},"partial":true}`)},
+	}
+	var retained int
+	var projected []Event
+	for _, event := range stream {
+		projected, retained = appendRenderEvent(projected, event, retained)
+	}
+	projected, retained = appendRenderEvent(projected, Event{Kind: "model.delta", Payload: delta(chunk)}, retained)
+	if retained > maxBatchStreamBytes {
+		t.Fatalf("retained = %d, want <= %d", retained, maxBatchStreamBytes)
+	}
+	var payloadBytes int
+	for _, event := range projected {
+		payloadBytes += len(event.Payload)
+	}
+	if payloadBytes > maxBatchStreamBytes {
+		t.Fatalf("payload bytes = %d, want <= %d", payloadBytes, maxBatchStreamBytes)
+	}
+}
+
+func TestBatchADKToolProgressStaysOnDiagnostics(t *testing.T) {
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return []Event{
+			{Kind: "adk_event", Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"functionCall":{"name":"search"}},{"functionResponse":{"name":"search"}}]},"longRunningToolIds":["tool-1"],"partial":true}`)},
+			{Kind: "turn.completed"},
+		}
+	}}
+	console, out, diag, cleanup := newConsoleForTest(runner, newFakeSessions(), "prompt\n")
+	defer cleanup()
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want no tool progress", out.String())
+	}
+	for _, want := range []string{"tool requested: search", "tool completed: search", "long-running tool active"} {
+		if !strings.Contains(diag.String(), want) {
+			t.Errorf("stderr = %q, missing %q", diag.String(), want)
+		}
 	}
 }
 
@@ -515,5 +595,42 @@ func TestOutputWriteFailureIsReturned(t *testing.T) {
 	}, "owner")
 	if err := console.Run(context.Background()); err == nil {
 		t.Fatal("expected output write error")
+	}
+}
+
+func TestBatchStreamByteBudgetBounded(t *testing.T) {
+	// Near-cap ADK payloads would previously retain up to 4 MiB each across
+	// 1024 events; the normalized projection plus the aggregate byte budget
+	// must keep the retained stream small regardless of payload size.
+	big := strings.Repeat("x", 64*1024)
+	events := make([]Event, 0, maxBufferedEvents/4)
+	for range maxBufferedEvents / 4 {
+		events = append(events, Event{Kind: "adk_event", Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"` + big + `"}]},"partial":true}`)})
+	}
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return append(events, Event{Kind: "turn.completed"})
+	}}
+	console, out, _, cleanup := newConsoleForTest(runner, newFakeSessions(), "prompt\n")
+	defer cleanup()
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Len() > 2*maxRenderBytes {
+		t.Errorf("output = %d bytes, want bounded below the stream input", out.Len())
+	}
+	var retained int
+	var stream []Event
+	for _, ev := range events {
+		stream, retained = appendRenderEvent(stream, ev, retained)
+	}
+	if retained > maxBatchStreamBytes {
+		t.Fatalf("retained = %d, want <= %d", retained, maxBatchStreamBytes)
+	}
+	var payloadBytes int
+	for _, ev := range stream {
+		payloadBytes += len(ev.Payload)
+	}
+	if payloadBytes > maxBatchStreamBytes {
+		t.Fatalf("retained payload bytes = %d, want <= %d", payloadBytes, maxBatchStreamBytes)
 	}
 }

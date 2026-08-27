@@ -19,6 +19,9 @@ func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
 	case "exit", "quit":
 		return false, nil
 	case "clear":
+		if c.tty != nil {
+			return true, c.tty.clearScreen(ctx)
+		}
 		return true, writeLine(c.out, "")
 	case "new":
 		return true, c.newSession(ctx)
@@ -93,5 +96,6 @@ func helpText() string {
 		"  /new               start a new session\n" +
 		"  /session [id]      show or switch to a session\n" +
 		"  /cancel            cancel the active turn\n" +
-		"  /status            show the current session\n"
+		"  /status            show the current session\n" +
+		"  .                  compose a multi-line prompt in $EDITOR (interactive)\n"
 }

@@ -424,6 +424,129 @@ func TestAbandonedConsumerDoesNotBlockTurn(t *testing.T) {
 	})
 }
 
+func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
+	sub := newSubscriber()
+	defer sub.stop()
+	for range cap(sub.events) {
+		sub.events <- store.RuntimeEvent{Kind: EventKindModelDelta}
+	}
+
+	cancelled := make(chan struct{})
+	engine := &Engine{
+		turns: map[string]*turn{
+			"turn-live": {
+				req:    TurnRequest{SessionID: "session-a"},
+				cancel: func() { close(cancelled) },
+				subs:   map[*subscriber]struct{}{sub: {}},
+			},
+		},
+	}
+
+	published := make(chan struct{})
+	go func() {
+		engine.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
+		close(published)
+	}()
+	cancelDone := make(chan struct{})
+	go func() {
+		engine.cancelTurn("turn-live")
+		close(cancelDone)
+	}()
+
+	select {
+	case <-cancelDone:
+	case <-time.After(time.Second):
+		t.Fatal("control path blocked behind live event publish")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("cancel path did not reach the live turn")
+	}
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("live event publisher blocked on coalescible deltas")
+	}
+
+	found := false
+	for range cap(sub.events) + 1 {
+		select {
+		case ev := <-sub.events:
+			if ev.Kind == "tool.requested" {
+				found = true
+			}
+		case <-time.After(time.Second):
+			t.Fatal("published lifecycle event was not delivered")
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Fatal("published lifecycle event was not delivered")
+	}
+}
+
+func TestPublishAfterSubscriberCloseDoesNotPanic(t *testing.T) {
+	sub := newSubscriber()
+	sub.closeEvents()
+	engine := &Engine{
+		turns: map[string]*turn{
+			"turn-live": {
+				req:  TurnRequest{SessionID: "session-a"},
+				subs: map[*subscriber]struct{}{sub: {}},
+			},
+		},
+	}
+	done := make(chan struct{})
+	go func() {
+		engine.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("publish blocked on closed subscriber")
+	}
+}
+
+func TestSaturatedLifecycleSubscriberReplaysAfterGap(t *testing.T) {
+	script := make([]FakeStep, subscriberBufferSize+1)
+	for i := range script {
+		script[i] = FakeStep{Kind: EventKindToolRequested, Payload: []byte(`{"tool":"test"}`)}
+	}
+	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 2}, NewFakeExecutor(script))
+	mustCreateSession(t, db, "session-a")
+
+	next, stop := iter.Pull2(engine.Run(context.Background(), sampleRequest("session-a", "turn-gap")))
+	defer stop()
+	first, err, ok := next()
+	if err != nil || !ok || first.Kind != EventKindTurnAccepted {
+		t.Fatalf("first event = %+v, err=%v, present=%v; want accepted", first, err, ok)
+	}
+
+	var requested int
+	for {
+		ev, err, ok := next()
+		if err != nil {
+			t.Fatalf("next event: %v", err)
+		}
+		if !ok {
+			t.Fatal("stream closed before terminal replay")
+		}
+		if ev.Kind == EventKindToolRequested {
+			requested++
+		}
+		if isTerminalKind(ev.Kind) {
+			if requested != len(script) {
+				t.Fatalf("replayed lifecycle events = %d, want %d", requested, len(script))
+			}
+			return
+		}
+	}
+}
+
 func waitForTerminalDurable(t *testing.T, db *sql.DB, turnID string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
