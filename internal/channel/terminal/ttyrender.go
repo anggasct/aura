@@ -219,12 +219,11 @@ func (r *TTYRenderer) StartPump(ctx context.Context, onError func(error)) <-chan
 						return
 					}
 				case <-time.After(2 * r.hz):
-					// The writer stalled mid-frame. Declare the output
-					// closed, abandon the frame, and stop the pump; the
-					// abandoned write finishes on its own whenever the
-					// writer unblocks and cannot re-enter render state.
 					err := errors.New("terminal: paint stalled: output is closed or too slow")
 					r.setErr(err)
+					if r.closeOutput() {
+						<-written
+					}
 					if onError != nil {
 						onError(err)
 					}
@@ -249,6 +248,14 @@ func (r *TTYRenderer) setErr(err error) {
 		r.err = err
 	}
 	r.mu.Unlock()
+}
+
+func (r *TTYRenderer) closeOutput() bool {
+	if closer, ok := r.opt.Out.(io.Closer); ok {
+		_ = closer.Close()
+		return true
+	}
+	return false
 }
 
 // Paint writes one frame when state changed since the last paint. It is

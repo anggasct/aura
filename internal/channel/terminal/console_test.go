@@ -502,6 +502,24 @@ func TestRenderStateIsBounded(t *testing.T) {
 	}
 }
 
+func TestBatchEmptyADKCompletionReplacesPartial(t *testing.T) {
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return []Event{
+			{Kind: "model.delta", Payload: delta("stale partial")},
+			{Kind: "adk_event", Payload: json.RawMessage(`{"content":{"role":"model","parts":[]},"partial":false}`)},
+			{Kind: "turn.completed"},
+		}
+	}}
+	console, out, _, cleanup := newConsoleForTest(runner, newFakeSessions(), "prompt\n")
+	defer cleanup()
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty authoritative completion", out.String())
+	}
+}
+
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("closed output") }

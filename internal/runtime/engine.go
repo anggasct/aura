@@ -538,6 +538,22 @@ func (e *Engine) broadcast(t *turn, ev *store.RuntimeEvent) {
 	}
 }
 
+// Publish forwards an event already committed by a downstream effect path to
+// the live turn subscriber without persisting it a second time.
+func (e *Engine) Publish(ev *store.RuntimeEvent) {
+	if ev == nil || ev.TurnID == "" {
+		return
+	}
+	e.mu.Lock()
+	t := e.turns[ev.TurnID]
+	if t == nil || t.req.SessionID != ev.SessionID {
+		e.mu.Unlock()
+		return
+	}
+	e.broadcast(t, ev)
+	e.mu.Unlock()
+}
+
 func (e *Engine) cancelTurn(turnID string) {
 	e.mu.Lock()
 	t, ok := e.turns[turnID]

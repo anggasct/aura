@@ -259,10 +259,11 @@ func TestTTYClosedOutputCancelsProducer(t *testing.T) {
 }
 
 type blockingConsoleWriter struct {
-	started  chan struct{}
-	release  chan struct{}
-	finished chan struct{}
-	once     sync.Once
+	started   chan struct{}
+	release   chan struct{}
+	finished  chan struct{}
+	once      sync.Once
+	closeOnce sync.Once
 }
 
 func (w *blockingConsoleWriter) Write(p []byte) (int, error) {
@@ -270,6 +271,11 @@ func (w *blockingConsoleWriter) Write(p []byte) (int, error) {
 	<-w.release
 	close(w.finished)
 	return len(p), nil
+}
+
+func (w *blockingConsoleWriter) Close() error {
+	w.closeOnce.Do(func() { close(w.release) })
+	return nil
 }
 
 func TestTTYSlowOutputDoesNotHangConsole(t *testing.T) {
@@ -301,7 +307,7 @@ func TestTTYSlowOutputDoesNotHangConsole(t *testing.T) {
 	case <-time.After(1500 * time.Millisecond):
 		t.Fatal("Run remained blocked on stalled output")
 	}
-	close(out.release)
+	_ = out.Close()
 	select {
 	case <-out.finished:
 	case <-time.After(time.Second):

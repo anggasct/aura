@@ -37,11 +37,20 @@ type ADKExecutor struct {
 	logger    *slog.Logger
 	builtins  BuiltinToolExecutor
 	toolSeq   toolSequence
+	publisher EventPublisher
 	// ledger, when set with modelDefinitionID, wraps the resolved model with
 	// budget enforcement so every turn reserves before dispatch and settles
 	// provider-reported usage after.
 	ledger            *usage.Ledger
 	modelDefinitionID string
+}
+
+type EventPublisher interface {
+	Publish(*store.RuntimeEvent)
+}
+
+func (x *ADKExecutor) SetEventPublisher(publisher EventPublisher) {
+	x.publisher = publisher
 }
 
 // ToolBroker is the policy gate every tool call must pass before execution.
@@ -290,7 +299,20 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		return nil, fmt.Errorf("read tool event sequence: %w", err)
 	}
 	request.EventSequence = sequence + 1
-	output, err := x.builtins.Execute(actx, request)
+	output, executeErr := x.builtins.Execute(actx, request)
+	if x.publisher != nil {
+		events, listErr := x.sessions.ListEvents(actx, request.SessionID, request.EventSequence-1, 32)
+		if listErr != nil {
+			return nil, fmt.Errorf("read builtin tool events: %w", listErr)
+		}
+		for i := range events {
+			if events[i].TurnID == request.TurnID && events[i].Sequence >= request.EventSequence {
+				event := events[i]
+				x.publisher.Publish(&event)
+			}
+		}
+	}
+	err = executeErr
 	if err != nil {
 		return nil, err
 	}

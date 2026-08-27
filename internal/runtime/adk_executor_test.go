@@ -7,6 +7,7 @@ import (
 	"iter"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/store"
@@ -102,6 +103,7 @@ type fakeBroker struct {
 type fakeBuiltinExecutor struct {
 	definitions []BuiltinToolDefinition
 	requests    []*BuiltinToolRequest
+	events      store.EventStore
 	output      json.RawMessage
 	err         error
 }
@@ -110,12 +112,33 @@ func (f *fakeBuiltinExecutor) Definitions() []BuiltinToolDefinition {
 	return cloneBuiltinDefinitions(f.definitions)
 }
 
-func (f *fakeBuiltinExecutor) Execute(_ context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
+func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
 	f.requests = append(f.requests, request)
+	if f.events != nil {
+		payload, err := json.Marshal(map[string]string{"operation": request.ToolName})
+		if err != nil {
+			return nil, err
+		}
+		if err := f.events.Append(ctx, &store.RuntimeEvent{
+			ID: request.RequestID + "-requested", SessionID: request.SessionID, Sequence: request.EventSequence,
+			TurnID: request.TurnID, InvocationID: request.EventInvocation, Author: request.EventAuthor,
+			Kind: EventKindToolRequested, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			return nil, err
+		}
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.output, nil
+}
+
+type recordingPublisher struct {
+	events []store.RuntimeEvent
+}
+
+func (p *recordingPublisher) Publish(event *store.RuntimeEvent) {
+	p.events = append(p.events, *event)
 }
 
 func (b *fakeBroker) Evaluate(ctx context.Context, req *approval.ToolRequest) (approval.PolicyDecision, error) {
@@ -272,6 +295,39 @@ func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
 	}
 	if got.Trust != "derived_untrusted" || len(got.Capabilities) != 1 || got.Capabilities[0] != "sample-capability" {
 		t.Fatalf("builtin request policy fields = %+v", got)
+	}
+}
+
+func TestADKExecutorPublishesDurableBuiltinEvents(t *testing.T) {
+	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
+	modelName := registerFakeModel(t, model)
+	db, sessions, events := newSessionTestDB(t)
+	builtin := &fakeBuiltinExecutor{
+		definitions: []BuiltinToolDefinition{{
+			Name: "sample_tool", Version: "v1", Description: "sample",
+			Schema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		}},
+		events: events,
+		output: json.RawMessage(`{"ok":true}`),
+	}
+	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	publisher := &recordingPublisher{}
+	executor.SetEventPublisher(publisher)
+	mustCreateSession(t, db, "session-1")
+
+	for _, err := range executor.Execute(context.Background(), &TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
+		Parts: []InputPart{{Text: "hi"}},
+	}) {
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	}
+	if len(publisher.events) != 1 || publisher.events[0].Kind != EventKindToolRequested {
+		t.Fatalf("published events = %+v, want one tool.requested event", publisher.events)
 	}
 }
 

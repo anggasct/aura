@@ -130,23 +130,30 @@ func (c *Console) Run(ctx context.Context) error {
 			if !ok {
 				return c.drain()
 			}
+			ack := func() {
+				if r.ack != nil {
+					close(r.ack)
+				}
+			}
 			if r.err != nil {
+				ack()
 				return r.err
 			}
 			if r.eof {
+				ack()
 				return c.drain()
 			}
 			line := strings.TrimSpace(r.line)
 			if line == "" {
+				ack()
 				continue
 			}
 			// The lone-period gesture composes a multi-line prompt in the
 			// user's editor; it is interactive-surface only, and a plain
 			// console submits the period as an ordinary prompt.
 			if line == "." && c.tty != nil {
-				// The line reader owns stdin between lines only; the editor
-				// gesture takes exclusive ownership while it runs.
 				pauseReading()
+				ack()
 				composed, ok, err := c.tty.Compose(ctx, c.config.MaxInputBytes)
 				resumeReading()
 				if err != nil {
@@ -164,6 +171,7 @@ func (c *Console) Run(ctx context.Context) error {
 				continue
 			}
 			if strings.HasPrefix(line, "/") {
+				ack()
 				cont, err := c.dispatch(ctx, line)
 				if err != nil {
 					return err
@@ -173,6 +181,7 @@ func (c *Console) Run(ctx context.Context) error {
 				}
 				continue
 			}
+			ack()
 			if err := c.runTurn(ctx, line); err != nil {
 				return err
 			}
@@ -381,6 +390,7 @@ type readLineResult struct {
 	line string
 	eof  bool
 	err  error
+	ack  chan struct{}
 }
 
 func writeLine(w io.Writer, text string) error {
@@ -419,10 +429,12 @@ func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event,
 			break
 		}
 		normalized := map[string]any{"partial": adk.Partial}
-		if text, present, _ := adkText(adk); present {
+		if text, present, emptyAssistant := adkText(adk); present {
 			normalized["text"] = limitText(sanitizeText(string(text)))
 		} else if adk.Content != nil && adk.Content.Role == "user" {
 			normalized["role"] = "user"
+		} else if emptyAssistant && !adk.Partial {
+			normalized["empty"] = true
 		}
 		if adk.Actions != nil {
 			if adk.Actions.TransferToAgent != "" {
@@ -500,7 +512,7 @@ func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event,
 // gesture); resume restarts reading afterwards. Both are safe on a stopped
 // reader.
 func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()) (lines <-chan readLineResult, pause, resume, stop func()) {
-	out := make(chan readLineResult, 1)
+	out := make(chan readLineResult)
 	readCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	var gateMu sync.Mutex
@@ -609,8 +621,15 @@ func readBoundedLine(br *bufio.Reader, maxBytes int) (lineText string, eof bool,
 }
 
 func sendLineResult(ctx context.Context, out chan<- readLineResult, result readLineResult) bool {
+	ack := make(chan struct{})
+	result.ack = ack
 	select {
 	case out <- result:
+	case <-ctx.Done():
+		return false
+	}
+	select {
+	case <-ack:
 		return true
 	case <-ctx.Done():
 		return false

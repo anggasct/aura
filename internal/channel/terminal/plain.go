@@ -96,10 +96,11 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 				Text     string `json:"text"`
 				Role     string `json:"role"`
 				Partial  bool   `json:"partial"`
+				Empty    bool   `json:"empty"`
 				Transfer string `json:"transfer"`
 				Escalate bool   `json:"escalate"`
 			}
-			if err := json.Unmarshal(ev.Payload, &norm); err == nil && (norm.Text != "" || norm.Role != "" || norm.Transfer != "" || norm.Escalate) {
+			if err := json.Unmarshal(ev.Payload, &norm); err == nil && (norm.Text != "" || norm.Role != "" || norm.Empty || norm.Transfer != "" || norm.Escalate) {
 				if norm.Text != "" {
 					if norm.Partial {
 						if !finalSet {
@@ -115,6 +116,10 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 				}
 				if norm.Escalate {
 					diagnostics = appendDiagnostic(diagnostics, "agent escalation requested")
+				}
+				if norm.Empty && !norm.Partial {
+					buf = nil
+					finalSet = true
 				}
 				continue
 			}

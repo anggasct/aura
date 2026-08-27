@@ -103,6 +103,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			adkExecutor.SetEventPublisher(runtimeEngine)
 			host, err := auraruntime.NewHost(runtimeEngine, nil, logger)
 			if err != nil {
 				return err

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -371,19 +372,26 @@ func TestNoColorCompletedWinsWithoutReplayingPartial(t *testing.T) {
 	}
 }
 
-// neverReleaseWriter blocks forever once written to; it models a closed or
-// wedged output pipe that never unblocks.
-type neverReleaseWriter struct {
+// closingWriter blocks until the renderer closes the output boundary.
+type closingWriter struct {
 	entered chan struct{}
+	closed  chan struct{}
+	once    sync.Once
 }
 
-func (w *neverReleaseWriter) Write(p []byte) (int, error) {
+func (w *closingWriter) Write(p []byte) (int, error) {
 	close(w.entered)
-	select {} // block forever; the pump must not wait on us
+	<-w.closed
+	return 0, errors.New("closed output")
 }
 
-func TestStalledWriterTerminatesPumpWithoutUnblocking(t *testing.T) {
-	out := &neverReleaseWriter{entered: make(chan struct{})}
+func (w *closingWriter) Close() error {
+	w.once.Do(func() { close(w.closed) })
+	return nil
+}
+
+func TestStalledWriterClosesAndTerminatesPump(t *testing.T) {
+	out := &closingWriter{entered: make(chan struct{}), closed: make(chan struct{})}
 	r := NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500})
 	r.Begin()
 	pumpCtx, stop := context.WithCancel(context.Background())
@@ -397,6 +405,11 @@ func TestStalledWriterTerminatesPumpWithoutUnblocking(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("pump leaked: stalled writer did not terminate it")
+	}
+	select {
+	case <-out.closed:
+	case <-time.After(time.Second):
+		t.Fatal("stalled writer was not closed")
 	}
 	stop()
 }
