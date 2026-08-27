@@ -240,7 +240,14 @@ func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, canc
 		c.tty.Observe(ev)
 	}
 	stopPump()
-	<-pumpDone
+	pumpTimer := time.NewTimer(time.Second)
+	defer pumpTimer.Stop()
+	select {
+	case <-pumpDone:
+	case <-pumpTimer.C:
+		cancelProducer()
+		return errors.New("terminal: paint did not stop after cancellation")
+	}
 	if err := c.tty.Err(); err != nil {
 		return err
 	}
@@ -394,6 +401,10 @@ func appendRenderEvent(stream []Event, ev Event) []Event {
 		}{Text: string(decodeDelta(ev.Payload))})
 		if err == nil {
 			ev.Payload = payload
+		}
+	case "adk_event":
+		if len(ev.Payload) > 4*maxRenderBytes {
+			ev.Payload = nil
 		}
 	default:
 		ev.Payload = nil

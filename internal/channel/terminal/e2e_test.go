@@ -99,7 +99,7 @@ func TestTerminalVerticalSlice(t *testing.T) {
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
 	executor := runtime.NewFakeExecutor([]runtime.FakeStep{
-		{Kind: runtime.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"hello from the slice"}]}}`)},
+		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"hello from the slice"}]},"partial":false}`)},
 	})
 	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {

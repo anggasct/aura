@@ -256,3 +256,59 @@ func TestTTYClosedOutputCancelsProducer(t *testing.T) {
 		t.Fatal("runner was not cancelled after closed output")
 	}
 }
+
+type blockingConsoleWriter struct {
+	started  chan struct{}
+	release  chan struct{}
+	finished chan struct{}
+	once     sync.Once
+}
+
+func (w *blockingConsoleWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.started) })
+	<-w.release
+	close(w.finished)
+	return len(p), nil
+}
+
+func TestTTYSlowOutputDoesNotHangConsole(t *testing.T) {
+	runner := &blockingTTYRunner{cancelled: make(chan struct{})}
+	out := &blockingConsoleWriter{
+		started:  make(chan struct{}),
+		release:  make(chan struct{}),
+		finished: make(chan struct{}),
+	}
+	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, bytes.NewBufferString("x\n"), out, &bytes.Buffer{}, Config{
+		MaxInputBytes:       100,
+		SecondInterruptTime: time.Second,
+	}, "owner")
+	console.SetTTY(NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500}))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- console.Run(ctx) }()
+	select {
+	case <-out.started:
+	case <-time.After(time.Second):
+		t.Fatal("paint did not reach the blocking writer")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Run returned nil for a stalled output")
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("Run remained blocked on stalled output")
+	}
+	close(out.release)
+	select {
+	case <-out.finished:
+	case <-time.After(time.Second):
+		t.Fatal("blocked writer did not release")
+	}
+	select {
+	case <-runner.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("runner was not cancelled")
+	}
+}

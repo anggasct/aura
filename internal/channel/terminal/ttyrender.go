@@ -104,33 +104,11 @@ func (r *TTYRenderer) Observe(ev Event) {
 		r.finalSet = true
 		r.final = limitText(string(decodeDelta(ev.Payload)))
 	case "adk_event":
-		if len(ev.Payload) == 0 || len(ev.Payload) > 4*maxRenderBytes {
+		adk, ok := decodeADKEvent(ev.Payload)
+		if !ok {
 			return
 		}
-		var adk struct {
-			Content *struct {
-				Role  string `json:"role"`
-				Parts []struct {
-					Text         *string `json:"text"`
-					FunctionCall *struct {
-						Name string `json:"name"`
-					} `json:"functionCall"`
-					FunctionResponse *struct {
-						Name string `json:"name"`
-					} `json:"functionResponse"`
-				} `json:"parts"`
-			} `json:"content"`
-			Actions *struct {
-				TransferToAgent string `json:"transferToAgent"`
-				Escalate        bool   `json:"escalate"`
-			} `json:"actions"`
-			LongRunningToolIDs []string `json:"longRunningToolIds"`
-			Partial            bool     `json:"partial"`
-		}
-		if err := json.Unmarshal(ev.Payload, &adk); err != nil {
-			return
-		}
-		var hasText bool
+		text, present, emptyAssistant := adkText(adk)
 		if adk.Content != nil {
 			for _, part := range adk.Content.Parts {
 				if part.FunctionCall != nil && part.FunctionCall.Name != "" {
@@ -138,9 +116,6 @@ func (r *TTYRenderer) Observe(ev Event) {
 				}
 				if part.FunctionResponse != nil && part.FunctionResponse.Name != "" {
 					r.appendProgress("tool completed: " + part.FunctionResponse.Name)
-				}
-				if part.Text != nil && adk.Content.Role != "user" {
-					hasText = true
 				}
 			}
 		}
@@ -155,25 +130,21 @@ func (r *TTYRenderer) Observe(ev Event) {
 		if len(adk.LongRunningToolIDs) > 0 {
 			r.appendProgress("long-running tool active")
 		}
-		if !hasText {
+		if !present {
+			if emptyAssistant && !adk.Partial {
+				r.final = ""
+				r.finalSet = true
+			}
 			r.dirty = true
 			return
 		}
-		var text strings.Builder
-		if adk.Content != nil {
-			for _, part := range adk.Content.Parts {
-				if part.Text != nil && adk.Content.Role != "user" {
-					text.WriteString(*part.Text)
-				}
-			}
-		}
 		if adk.Partial {
 			if !r.finalSet {
-				r.partial.WriteString(text.String())
+				r.partial.Write(text)
 				r.capLocked()
 			}
 		} else {
-			r.final = limitText(text.String())
+			r.final = limitText(string(text))
 			r.finalSet = true
 		}
 	case "tool.requested":

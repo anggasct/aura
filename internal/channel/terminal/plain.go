@@ -11,6 +11,56 @@ const (
 	maxDiagnosticLines = 1024
 )
 
+type adkRenderEvent struct {
+	Content *struct {
+		Role  string `json:"role"`
+		Parts []struct {
+			Text         *string `json:"text"`
+			FunctionCall *struct {
+				Name string `json:"name"`
+			} `json:"functionCall"`
+			FunctionResponse *struct {
+				Name string `json:"name"`
+			} `json:"functionResponse"`
+		} `json:"parts"`
+	} `json:"content"`
+	Actions *struct {
+		TransferToAgent string `json:"transferToAgent"`
+		Escalate        bool   `json:"escalate"`
+	} `json:"actions"`
+	LongRunningToolIDs []string `json:"longRunningToolIds"`
+	Partial            bool     `json:"partial"`
+}
+
+func decodeADKEvent(payload json.RawMessage) (*adkRenderEvent, bool) {
+	if len(payload) == 0 || len(payload) > 4*maxRenderBytes {
+		return nil, false
+	}
+	var event adkRenderEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return nil, false
+	}
+	return &event, true
+}
+
+func adkText(event *adkRenderEvent) (text []byte, present, emptyAssistant bool) {
+	if event == nil || event.Content == nil || event.Content.Role == "user" {
+		return nil, false, false
+	}
+	hasToolPart := false
+	for _, part := range event.Content.Parts {
+		if part.Text != nil {
+			text = appendLimited(text, []byte(*part.Text))
+			present = true
+		}
+		if part.FunctionCall != nil || part.FunctionResponse != nil {
+			hasToolPart = true
+		}
+	}
+	emptyAssistant = !present && !hasToolPart && len(event.Content.Parts) == 0
+	return text, present, emptyAssistant
+}
+
 // PlainRenderer is the non-TTY event renderer. It folds a turn's events into
 // the completed assistant text for stdout and diagnostics for stderr; tool
 // and approval activity is surfaced as progress lines, never as model text.
@@ -21,6 +71,7 @@ type PlainRenderer struct{}
 // to stderr, and whether the turn reached a durable terminal event.
 func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics []string, terminal bool) {
 	var buf []byte
+	var finalSet bool
 	for _, ev := range stream {
 		switch ev.Kind {
 		case "turn.completed":
@@ -32,10 +83,30 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 			terminal = true
 			diagnostics = appendDiagnostic(diagnostics, "turn failed")
 		case "model.delta":
-			buf = appendLimited(buf, decodeDelta(ev.Payload), maxRenderBytes)
+			if !finalSet {
+				buf = appendLimited(buf, decodeDelta(ev.Payload))
+			}
 		case "message.completed":
-			if text := decodeDelta(ev.Payload); len(text) > 0 {
-				buf = appendLimited(nil, text, maxRenderBytes)
+			finalSet = true
+			buf = appendLimited(nil, decodeDelta(ev.Payload))
+		case "adk_event":
+			adk, ok := decodeADKEvent(ev.Payload)
+			if !ok {
+				continue
+			}
+			text, present, emptyAssistant := adkText(adk)
+			if present {
+				if adk.Partial {
+					if !finalSet {
+						buf = appendLimited(buf, text)
+					}
+				} else {
+					buf = appendLimited(nil, text)
+					finalSet = true
+				}
+			} else if emptyAssistant && !adk.Partial {
+				buf = nil
+				finalSet = true
 			}
 		case "tool.started":
 			diagnostics = appendDiagnostic(diagnostics, "tool started: "+sanitizeText(ev.Author))
@@ -70,7 +141,7 @@ func decodeDelta(payload json.RawMessage) []byte {
 	if err := json.Unmarshal(payload, &content); err == nil && content.Content != nil {
 		var out []byte
 		for _, p := range content.Content.Parts {
-			out = appendLimited(out, []byte(p.Text), maxRenderBytes)
+			out = appendLimited(out, []byte(p.Text))
 		}
 		return out
 	}
@@ -90,11 +161,11 @@ func appendDiagnostic(diagnostics []string, text string) []string {
 	return append(diagnostics, limitText(sanitizeText(text)))
 }
 
-func appendLimited(dst, src []byte, limit int) []byte {
-	if len(dst) >= limit {
-		return dst[:limit]
+func appendLimited(dst, src []byte) []byte {
+	if len(dst) >= maxRenderBytes {
+		return dst[:maxRenderBytes]
 	}
-	remaining := limit - len(dst)
+	remaining := maxRenderBytes - len(dst)
 	if len(src) > remaining {
 		src = src[:remaining]
 	}
