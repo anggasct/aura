@@ -428,7 +428,7 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 	sub := newSubscriber()
 	defer sub.stop()
 	for range cap(sub.events) {
-		sub.events <- store.RuntimeEvent{}
+		sub.events <- store.RuntimeEvent{Kind: EventKindModelDelta}
 	}
 
 	cancelled := make(chan struct{})
@@ -463,6 +463,11 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("cancel path did not reach the live turn")
 	}
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("live event publisher blocked on coalescible deltas")
+	}
 
 	found := false
 	for range cap(sub.events) + 1 {
@@ -480,11 +485,6 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("published lifecycle event was not delivered")
-	}
-	select {
-	case <-published:
-	case <-time.After(time.Second):
-		t.Fatal("live event publisher did not finish after subscriber drained")
 	}
 }
 
@@ -508,6 +508,42 @@ func TestPublishAfterSubscriberCloseDoesNotPanic(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("publish blocked on closed subscriber")
+	}
+}
+
+func TestSaturatedLifecycleSubscriberReplaysAfterGap(t *testing.T) {
+	script := make([]FakeStep, subscriberBufferSize+1)
+	for i := range script {
+		script[i] = FakeStep{Kind: EventKindToolRequested, Payload: []byte(`{"tool":"test"}`)}
+	}
+	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 2}, NewFakeExecutor(script))
+	mustCreateSession(t, db, "session-a")
+
+	next, stop := iter.Pull2(engine.Run(context.Background(), sampleRequest("session-a", "turn-gap")))
+	defer stop()
+	first, err, ok := next()
+	if err != nil || !ok || first.Kind != EventKindTurnAccepted {
+		t.Fatalf("first event = %+v, err=%v, present=%v; want accepted", first, err, ok)
+	}
+
+	var requested int
+	for {
+		ev, err, ok := next()
+		if err != nil {
+			t.Fatalf("next event: %v", err)
+		}
+		if !ok {
+			t.Fatal("stream closed before terminal replay")
+		}
+		if ev.Kind == EventKindToolRequested {
+			requested++
+		}
+		if isTerminalKind(ev.Kind) {
+			if requested != len(script) {
+				t.Fatalf("replayed lifecycle events = %d, want %d", requested, len(script))
+			}
+			return
+		}
 	}
 }
 
