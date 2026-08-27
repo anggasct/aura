@@ -19,6 +19,8 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/model"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/adk"
+	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
@@ -173,7 +175,7 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
 	var broker runtime.ToolBroker = terminalBroker{}
-	var executorOpts []runtime.ExecutorOption
+	var executorOpts []runtimeadk.ExecutorOption
 	var approvals *terminal.ApprovalBridge
 	if cfg.Tools != nil {
 		if useTTY {
@@ -184,15 +186,15 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 			return err
 		}
 		broker = builtin
-		executorOpts = append(executorOpts, runtime.WithBuiltinToolExecutor(builtin))
+		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
 	}
-	executor, err := runtime.NewADKExecutor(
+	executor, err := runtimeadk.NewADKExecutor(
 		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,
 	)
 	if err != nil {
 		return err
 	}
-	engine, err := runtime.NewEngine(runtime.Config{
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{
 		MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
 		MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
 		TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),

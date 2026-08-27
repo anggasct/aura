@@ -1,9 +1,10 @@
-package runtime
+package runtimeengine
 
 import (
 	"context"
 	"errors"
 
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 )
 
@@ -35,7 +36,7 @@ func (e *Engine) Accept(ctx context.Context, env *runtimeingress.IngressEnvelope
 	return runtimeingress.TurnRef{TurnID: req.TurnID, SessionID: req.SessionID}, nil
 }
 
-func turnRequestFromEnvelope(env *runtimeingress.IngressEnvelope) (*TurnRequest, error) {
+func turnRequestFromEnvelope(env *runtimeingress.IngressEnvelope) (*runtime.TurnRequest, error) {
 	var problems []error
 	if env.Source == "" {
 		problems = append(problems, invalidArgument("ingress source must not be empty"))
@@ -52,10 +53,10 @@ func turnRequestFromEnvelope(env *runtimeingress.IngressEnvelope) (*TurnRequest,
 	if len(problems) > 0 {
 		return nil, errors.Join(problems...)
 	}
-	return &TurnRequest{
+	return &runtime.TurnRequest{
 		SessionID:      env.ConversationID,
 		PrincipalID:    env.PrincipalID,
-		Origin:         Origin(env.Source),
+		Origin:         runtime.Origin(env.Source),
 		Parts:          env.Parts,
 		IdempotencyKey: env.ExternalID,
 		TraceParent:    env.TraceParent,

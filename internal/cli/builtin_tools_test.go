@@ -14,7 +14,7 @@ import (
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
 )
@@ -49,7 +49,7 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 			t.Errorf("definition[%d] = %q, want %q", i, key, wantDefinitions[i])
 		}
 	}
-	output, err := executor.Execute(context.Background(), &runtime.BuiltinToolRequest{
+	output, err := executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID:    "call-1",
 		TurnID:       "turn-1",
 		SessionID:    "session-1",
@@ -110,7 +110,7 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBuiltinToolExecutor: %v", err)
 	}
-	output, err := executor.Execute(context.Background(), &runtime.BuiltinToolRequest{
+	output, err := executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID:       "call-1",
 		TurnID:          "turn-1",
 		SessionID:       "session-1",

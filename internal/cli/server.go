@@ -10,7 +10,8 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/logging"
 	"github.com/anggasct/aura/internal/model"
-	auraruntime "github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/adk"
+	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/server"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
@@ -87,14 +88,14 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			sessions := store.NewSessionService(db)
 			events := store.NewEventStore(db)
-			adkExecutor, err := auraruntime.NewADKExecutor(
+			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
-				auraruntime.WithBuiltinToolExecutor(builtin),
+				runtimeadk.WithBuiltinToolExecutor(builtin),
 			)
 			if err != nil {
 				return err
 			}
-			runtimeEngine, err := auraruntime.NewEngine(auraruntime.Config{
+			runtimeEngine, err := runtimeengine.NewEngine(runtimeengine.Config{
 				MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
 				MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
 				TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
@@ -104,7 +105,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			adkExecutor.SetEventPublisher(runtimeEngine)
-			host, err := auraruntime.NewHost(runtimeEngine, nil, logger)
+			host, err := runtimeengine.NewHost(runtimeEngine, nil, logger)
 			if err != nil {
 				return err
 			}

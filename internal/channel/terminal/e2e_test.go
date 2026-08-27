@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -103,7 +104,7 @@ func TestTerminalVerticalSlice(t *testing.T) {
 	executor := runtime.NewFakeExecutor([]runtime.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"hello from the slice"}]},"partial":false}`)},
 	})
-	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -161,7 +162,7 @@ func TestTerminalReplayCompletedEventWins(t *testing.T) {
 		{Kind: runtime.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"stream"}]}}`)},
 		{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{"content":{"parts":[{"text":"durable answer"}]}}`)},
 	})
-	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

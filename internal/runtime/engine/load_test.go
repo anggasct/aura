@@ -1,6 +1,6 @@
 //go:build load
 
-package runtime
+package runtimeengine
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+
+	auraruntime "github.com/anggasct/aura/internal/runtime"
 )
 
 // TestLoadBoundsUnderVolume submits far more concurrent turns than the runtime
@@ -21,7 +23,7 @@ import (
 func TestLoadBoundsUnderVolume(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := NewFakeExecutor([]FakeStep{{Kind: EventKindModelStarted, Block: gate, Payload: json.RawMessage(`{}`)}})
+		executor := auraruntime.NewFakeExecutor([]auraruntime.FakeStep{{Kind: auraruntime.EventKindModelStarted, Block: gate, Payload: json.RawMessage(`{}`)}})
 		cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 8}
 		engine, db, _ := newTestRuntime(t, cfg, executor)
 
@@ -50,7 +52,7 @@ func TestLoadBoundsUnderVolume(t *testing.T) {
 
 		var overflowCount int
 		for err := range overflow {
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeRuntimeOverloaded {
+			if code, ok := auraruntime.CodeOf(err); !ok || code != auraruntime.ErrorCodeRuntimeOverloaded {
 				t.Errorf("overflow error code = %q (ok=%v), want runtime_overloaded", code, ok)
 			}
 			overflowCount++
@@ -91,7 +93,7 @@ func TestLoadBoundsUnderVolume(t *testing.T) {
 // subscribers under load.
 func TestLoadNoLeakAfterAbandonedConsumers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := NewFakeExecutor([]FakeStep{jsonStep(EventKindModelStarted), jsonStep(EventKindMessageCompleted)})
+		executor := auraruntime.NewFakeExecutor([]auraruntime.FakeStep{jsonStep(auraruntime.EventKindModelStarted), jsonStep(auraruntime.EventKindMessageCompleted)})
 		cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 64}
 		engine, db, _ := newTestRuntime(t, cfg, executor)
 

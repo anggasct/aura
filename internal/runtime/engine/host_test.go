@@ -1,4 +1,4 @@
-package runtime
+package runtimeengine
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 )
@@ -65,7 +66,7 @@ func (a *fakeChannelAdapter) ref() (runtimeingress.TurnRef, error) {
 
 func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := NewFakeExecutor([]FakeStep{jsonStep(EventKindMessageCompleted)})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "conv-gw")
 
@@ -89,7 +90,7 @@ func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 			t.Errorf("unexpected turn ref from adapter ingress: %+v", ref)
 		}
 		waitFor(t, func() bool { return terminalCount(t, db, ref.TurnID) == 1 })
-		if got := eventCountByKind(t, db, ref.TurnID, EventKindTurnCompleted); got != 1 {
+		if got := eventCountByKind(t, db, ref.TurnID, runtime.EventKindTurnCompleted); got != 1 {
 			t.Errorf("completed events = %d, want 1", got)
 		}
 	})
@@ -97,7 +98,7 @@ func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 
 func TestHostShutdownStopsAdapters(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := NewFakeExecutor([]FakeStep{jsonStep(EventKindMessageCompleted)})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindMessageCompleted)})
 		engine, _, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
 
 		adapter := newFakeChannelAdapter("telegram")
@@ -123,7 +124,7 @@ func TestHostShutdownStopsAdapters(t *testing.T) {
 
 func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := NewFakeExecutor([]FakeStep{jsonStep(EventKindMessageCompleted)})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
 		mustCreateSession(t, db, "conv-drain")
 
@@ -153,8 +154,8 @@ func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 
 func TestNewHostRequiresRuntime(t *testing.T) {
 	_, err := NewHost(nil, nil, nil)
-	code, ok := CodeOf(err)
-	if !ok || code != ErrorCodeInvalidArgument {
+	code, ok := runtime.CodeOf(err)
+	if !ok || code != runtime.ErrorCodeInvalidArgument {
 		t.Fatalf("code = %q (ok=%v), want invalid_argument", code, ok)
 	}
 }

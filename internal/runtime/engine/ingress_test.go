@@ -1,4 +1,4 @@
-package runtime
+package runtimeengine
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 )
 
@@ -16,7 +17,7 @@ func terminalCount(t *testing.T, db *sql.DB, turnID string) int {
 	var count int
 	err := db.QueryRowContext(context.Background(),
 		`SELECT COUNT(*) FROM runtime_event WHERE turn_id = ? AND kind IN (?, ?, ?)`,
-		turnID, EventKindTurnCompleted, EventKindTurnFailed, EventKindTurnCancelled).Scan(&count)
+		turnID, runtime.EventKindTurnCompleted, runtime.EventKindTurnFailed, runtime.EventKindTurnCancelled).Scan(&count)
 	if err != nil {
 		t.Fatalf("count terminal: %v", err)
 	}
@@ -37,8 +38,8 @@ func eventCountByKind(t *testing.T, db *sql.DB, turnID, kind string) int {
 
 // jsonStep is a fake executor step with a valid JSON payload, so the event
 // survives the store's payload validation.
-func jsonStep(kind string) FakeStep {
-	return FakeStep{Kind: kind, Payload: json.RawMessage(`{}`)}
+func jsonStep(kind string) runtime.FakeStep {
+	return runtime.FakeStep{Kind: kind, Payload: json.RawMessage(`{}`)}
 }
 
 func sampleEnvelope(conversation, externalID string) *runtimeingress.IngressEnvelope {
@@ -54,7 +55,7 @@ func sampleEnvelope(conversation, externalID string) *runtimeingress.IngressEnve
 
 func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := NewFakeExecutor([]FakeStep{jsonStep(EventKindModelStarted), jsonStep(EventKindMessageCompleted)})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindModelStarted), jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "conv-1")
 
@@ -70,10 +71,10 @@ func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
 		}
 
 		waitFor(t, func() bool { return terminalCount(t, db, ref.TurnID) == 1 })
-		if got := eventCountByKind(t, db, ref.TurnID, EventKindTurnAccepted); got != 1 {
+		if got := eventCountByKind(t, db, ref.TurnID, runtime.EventKindTurnAccepted); got != 1 {
 			t.Errorf("accepted events = %d, want 1", got)
 		}
-		if got := eventCountByKind(t, db, ref.TurnID, EventKindTurnCompleted); got != 1 {
+		if got := eventCountByKind(t, db, ref.TurnID, runtime.EventKindTurnCompleted); got != 1 {
 			t.Errorf("completed events = %d, want 1", got)
 		}
 	})
@@ -81,7 +82,7 @@ func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
 
 func TestAcceptDuplicateReturnsOriginal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := NewFakeExecutor([]FakeStep{jsonStep(EventKindMessageCompleted)})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "conv-1")
 
@@ -103,7 +104,7 @@ func TestAcceptDuplicateReturnsOriginal(t *testing.T) {
 		waitFor(t, func() bool { return terminalCount(t, db, first.TurnID) == 1 })
 		var totalAccepted int
 		if err := db.QueryRowContext(context.Background(),
-			`SELECT COUNT(*) FROM runtime_event WHERE kind = ?`, EventKindTurnAccepted).Scan(&totalAccepted); err != nil {
+			`SELECT COUNT(*) FROM runtime_event WHERE kind = ?`, runtime.EventKindTurnAccepted).Scan(&totalAccepted); err != nil {
 			t.Fatalf("count accepted: %v", err)
 		}
 		if totalAccepted != 1 {
@@ -114,7 +115,7 @@ func TestAcceptDuplicateReturnsOriginal(t *testing.T) {
 
 func TestAcceptAfterShutdownIsRejected(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := NewFakeExecutor([]FakeStep{jsonStep(EventKindMessageCompleted)})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "conv-1")
 
@@ -122,15 +123,15 @@ func TestAcceptAfterShutdownIsRejected(t *testing.T) {
 			t.Fatalf("Shutdown: %v", err)
 		}
 		_, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-late"))
-		code, ok := CodeOf(err)
-		if !ok || code != ErrorCodeRuntimeOverloaded {
+		code, ok := runtime.CodeOf(err)
+		if !ok || code != runtime.ErrorCodeRuntimeOverloaded {
 			t.Fatalf("Accept after shutdown code = %q (ok=%v), want runtime_overloaded", code, ok)
 		}
 	})
 }
 
 func TestAcceptValidatesIdentity(t *testing.T) {
-	executor := NewFakeExecutor(nil)
+	executor := runtime.NewFakeExecutor(nil)
 	engine, db, _ := newTestRuntime(t, Config{}, executor)
 	mustCreateSession(t, db, "conv-1")
 
@@ -144,8 +145,8 @@ func TestAcceptValidatesIdentity(t *testing.T) {
 	for name, env := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := engine.Accept(context.Background(), env)
-			code, ok := CodeOf(err)
-			if !ok || code != ErrorCodeInvalidArgument {
+			code, ok := runtime.CodeOf(err)
+			if !ok || code != runtime.ErrorCodeInvalidArgument {
 				t.Fatalf("code = %q (ok=%v), want invalid_argument", code, ok)
 			}
 		})

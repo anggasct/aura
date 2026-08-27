@@ -1,4 +1,4 @@
-package runtime
+package runtimeadk
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 // loadGoldenADKEvent reads the golden fixture as an ADK event.
 func loadGoldenADKEvent(t *testing.T) *session.Event {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "runtime", "adk_event_golden.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "runtime", "adk_event_golden.json"))
 	if err != nil {
 		t.Fatalf("read golden fixture: %v", err)
 	}

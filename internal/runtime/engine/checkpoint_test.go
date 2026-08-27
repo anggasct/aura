@@ -1,4 +1,4 @@
-package runtime
+package runtimeengine
 
 import (
 	"context"
@@ -10,12 +10,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/checkpoint"
 	"github.com/anggasct/aura/internal/store"
 )
 
-func checkpointFixture(eventSequence uint64) *Checkpoint {
-	return &Checkpoint{
+func checkpointFixture(eventSequence uint64) *runtime.Checkpoint {
+	return &runtime.Checkpoint{
 		RunID:              "run-1",
 		SessionID:          "session-1",
 		TurnID:             "turn-1",
@@ -33,7 +34,7 @@ func checkpointFixture(eventSequence uint64) *Checkpoint {
 	}
 }
 
-func validResumeValidation(checkpoint *Checkpoint, currentSequence uint64) *runtimecheckpoint.ResumeValidation {
+func validResumeValidation(checkpoint *runtime.Checkpoint, currentSequence uint64) *runtimecheckpoint.ResumeValidation {
 	return &runtimecheckpoint.ResumeValidation{
 		SessionID:            checkpoint.SessionID,
 		TurnID:               checkpoint.TurnID,
@@ -51,7 +52,7 @@ func validResumeValidation(checkpoint *Checkpoint, currentSequence uint64) *runt
 
 func checkpointRuntime(t *testing.T) (*Engine, *sql.DB, store.EventStore, uint64) {
 	t.Helper()
-	engine, db, events := newTestRuntime(t, Config{}, NewFakeExecutor(nil))
+	engine, db, events := newTestRuntime(t, Config{}, runtime.NewFakeExecutor(nil))
 	mustCreateSession(t, db, "session-1")
 	if _, err := collect(t, engine, sampleRequest("session-1", "turn-1")); err != nil {
 		t.Fatalf("seed turn: %v", err)
@@ -99,7 +100,7 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 	if latest.ResumeGeneration != 2 || latest.EventSequence != currentSequence {
 		t.Fatalf("latest checkpoint = %+v, want generation 2 at boundary %d", latest, currentSequence)
 	}
-	restarted, err := NewEngine(Config{}, store.NewEventStore(db), store.NewDedupeStore(db), NewFakeExecutor(nil), nil)
+	restarted, err := NewEngine(Config{}, store.NewEventStore(db), store.NewDedupeStore(db), runtime.NewFakeExecutor(nil), nil)
 	if err != nil {
 		t.Fatalf("NewEngine after restart: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestSaveCheckpointRejectsFutureBoundary(t *testing.T) {
 	checkpoint := checkpointFixture(last + 1)
 	if err := engine.SaveCheckpoint(context.Background(), checkpoint); err == nil {
 		t.Fatal("SaveCheckpoint succeeded for a future event boundary")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCheckpointStale {
+	} else if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeCheckpointStale {
 		t.Fatalf("CodeOf(%v) = %q, %v; want checkpoint_stale", err, code, ok)
 	}
 }
@@ -131,14 +132,14 @@ func TestSaveCheckpointRejectsMutatedRetry(t *testing.T) {
 	mutated.StateDigest = strings.Repeat("c", 64)
 	if err := engine.SaveCheckpoint(context.Background(), &mutated); err == nil {
 		t.Fatal("SaveCheckpoint accepted a mutated retry")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCheckpointStale {
+	} else if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeCheckpointStale {
 		t.Fatalf("CodeOf(%v) = %q, %v; want checkpoint_stale", err, code, ok)
 	}
 }
 
 func TestConcurrentCheckpointMutationHasOneAuthoritativePayload(t *testing.T) {
 	engine, db, _, last := checkpointRuntime(t)
-	other, err := NewEngine(Config{}, store.NewEventStore(db), store.NewDedupeStore(db), NewFakeExecutor(nil), nil)
+	other, err := NewEngine(Config{}, store.NewEventStore(db), store.NewDedupeStore(db), runtime.NewFakeExecutor(nil), nil)
 	if err != nil {
 		t.Fatalf("NewEngine second writer: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestConcurrentCheckpointMutationHasOneAuthoritativePayload(t *testing.T) {
 			successes++
 			continue
 		}
-		if code, ok := CodeOf(err); ok && code == ErrorCodeCheckpointStale {
+		if code, ok := runtime.CodeOf(err); ok && code == runtime.ErrorCodeCheckpointStale {
 			stale++
 			continue
 		}
@@ -193,16 +194,16 @@ func TestValidateResumeRejectsChangedState(t *testing.T) {
 	cases := []struct {
 		name   string
 		mutate func(*runtimecheckpoint.ResumeValidation)
-		want   ErrorCode
+		want   runtime.ErrorCode
 	}{
-		{name: "owner", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.PrincipalID = "other" }, want: ErrorCodePolicyDenied},
-		{name: "capability", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.CapabilityDigest = strings.Repeat("c", 64) }, want: ErrorCodeCheckpointStale},
-		{name: "policy", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.PolicyVersion = "policy-2" }, want: ErrorCodeCheckpointStale},
-		{name: "sequence", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.CurrentEventSequence = 41 }, want: ErrorCodeCheckpointStale},
-		{name: "state", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.CurrentStateDigest = strings.Repeat("c", 64) }, want: ErrorCodeCheckpointStale},
-		{name: "generation", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.ResumeGeneration = 2 }, want: ErrorCodeCheckpointStale},
-		{name: "approval", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.ApprovalValid = false }, want: ErrorCodeCheckpointStale},
-		{name: "effect", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.EffectStateValid = false }, want: ErrorCodeCheckpointStale},
+		{name: "owner", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.PrincipalID = "other" }, want: runtime.ErrorCodePolicyDenied},
+		{name: "capability", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.CapabilityDigest = strings.Repeat("c", 64) }, want: runtime.ErrorCodeCheckpointStale},
+		{name: "policy", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.PolicyVersion = "policy-2" }, want: runtime.ErrorCodeCheckpointStale},
+		{name: "sequence", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.CurrentEventSequence = 41 }, want: runtime.ErrorCodeCheckpointStale},
+		{name: "state", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.CurrentStateDigest = strings.Repeat("c", 64) }, want: runtime.ErrorCodeCheckpointStale},
+		{name: "generation", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.ResumeGeneration = 2 }, want: runtime.ErrorCodeCheckpointStale},
+		{name: "approval", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.ApprovalValid = false }, want: runtime.ErrorCodeCheckpointStale},
+		{name: "effect", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.EffectStateValid = false }, want: runtime.ErrorCodeCheckpointStale},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -210,7 +211,7 @@ func TestValidateResumeRejectsChangedState(t *testing.T) {
 			test.mutate(validation)
 			if err := checkpoint.ValidateResume(validation); err == nil {
 				t.Fatal("ValidateResume accepted invalid state")
-			} else if code, ok := CodeOf(err); !ok || code != test.want {
+			} else if code, ok := runtime.CodeOf(err); !ok || code != test.want {
 				t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, code, ok, test.want)
 			}
 		})
@@ -224,7 +225,7 @@ func TestValidateResumeRejectsMatchingAttackerIdentity(t *testing.T) {
 	validation.PrincipalID = "attacker"
 	if err := checkpoint.ValidateResume(validation); err == nil {
 		t.Fatal("ValidateResume accepted an attacker-controlled identity pair")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodePolicyDenied {
+	} else if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodePolicyDenied {
 		t.Fatalf("CodeOf(%v) = %q, %v; want policy_denied", err, code, ok)
 	}
 }
@@ -251,21 +252,21 @@ func TestCheckpointPayloadRejectsCorruption(t *testing.T) {
 	cases := []struct {
 		name   string
 		mutate func(*store.RuntimeEvent)
-		want   ErrorCode
+		want   runtime.ErrorCode
 	}{
-		{name: "wrong kind", mutate: func(event *store.RuntimeEvent) { event.Kind = "unknown" }, want: ErrorCodeCheckpointUnsupported},
-		{name: "wrong schema", mutate: func(event *store.RuntimeEvent) { event.SchemaVersion = 2 }, want: ErrorCodeCheckpointUnsupported},
-		{name: "invalid json", mutate: func(event *store.RuntimeEvent) { event.Payload = json.RawMessage(`{"state":`) }, want: ErrorCodeCheckpointInvalid},
-		{name: "identity mismatch", mutate: func(event *store.RuntimeEvent) { event.TurnID = "other" }, want: ErrorCodeCheckpointInvalid},
-		{name: "boundary mismatch", mutate: func(event *store.RuntimeEvent) { event.Sequence = checkpoint.EventSequence }, want: ErrorCodeCheckpointInvalid},
+		{name: "wrong kind", mutate: func(event *store.RuntimeEvent) { event.Kind = "unknown" }, want: runtime.ErrorCodeCheckpointUnsupported},
+		{name: "wrong schema", mutate: func(event *store.RuntimeEvent) { event.SchemaVersion = 2 }, want: runtime.ErrorCodeCheckpointUnsupported},
+		{name: "invalid json", mutate: func(event *store.RuntimeEvent) { event.Payload = json.RawMessage(`{"state":`) }, want: runtime.ErrorCodeCheckpointInvalid},
+		{name: "identity mismatch", mutate: func(event *store.RuntimeEvent) { event.TurnID = "other" }, want: runtime.ErrorCodeCheckpointInvalid},
+		{name: "boundary mismatch", mutate: func(event *store.RuntimeEvent) { event.Sequence = checkpoint.EventSequence }, want: runtime.ErrorCodeCheckpointInvalid},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			event := validEvent()
 			test.mutate(&event)
-			if _, err := ParseCheckpoint(&event); err == nil {
+			if _, err := runtime.ParseCheckpoint(&event); err == nil {
 				t.Fatal("ParseCheckpoint accepted corrupted event")
-			} else if code, ok := CodeOf(err); !ok || code != test.want {
+			} else if code, ok := runtime.CodeOf(err); !ok || code != test.want {
 				t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, code, ok, test.want)
 			}
 		})
@@ -314,7 +315,7 @@ func TestValidateCheckpointWithEffectsRequiresRecovery(t *testing.T) {
 	validator.err = errors.New("effect recovery unavailable")
 	if _, err := engine.ValidateCheckpointWithEffects(context.Background(), checkpoint.TurnID, validation, validator); err == nil {
 		t.Fatal("ValidateCheckpointWithEffects accepted failed effect recovery")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCheckpointStale {
+	} else if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeCheckpointStale {
 		t.Fatalf("CodeOf(%v) = %q, %v; want checkpoint_stale", err, code, ok)
 	}
 }

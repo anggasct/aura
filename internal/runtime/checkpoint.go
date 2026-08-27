@@ -1,15 +1,12 @@
 package runtime
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/anggasct/aura/internal/runtime/checkpoint"
 	"github.com/anggasct/aura/internal/store"
@@ -148,136 +145,6 @@ func ParseCheckpoint(event *store.RuntimeEvent) (Checkpoint, error) {
 	}
 	return checkpoint, nil
 }
-
-func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) error {
-	if ctx == nil {
-		return invalidArgument("context must not be nil")
-	}
-	if err := checkpoint.Validate(); err != nil {
-		return err
-	}
-	payload, err := checkpoint.MarshalPayload()
-	if err != nil {
-		return err
-	}
-
-	e.mu.Lock()
-	if e.shutdown {
-		e.mu.Unlock()
-		return codedError(ErrorCodeRuntimeOverloaded, "runtime is shutting down", nil)
-	}
-	sq := e.sessions[checkpoint.SessionID]
-	if sq == nil {
-		sq = &sessionQueue{}
-		e.sessions[checkpoint.SessionID] = sq
-	}
-	e.mu.Unlock()
-
-	return sq.lock(func() error {
-		last, err := e.events.LastSequence(ctx, checkpoint.SessionID)
-		if err != nil {
-			return codedError(ErrorCodeStorageUnavailable, "read checkpoint event boundary", err)
-		}
-		if last < checkpoint.EventSequence {
-			return codedError(ErrorCodeCheckpointStale, "checkpoint boundary is ahead of the event log", nil)
-		}
-		eventID := checkpoint.RunID + ".checkpoint." + strconv.FormatUint(checkpoint.ResumeGeneration, 10)
-		appender, ok := e.events.(runtimecheckpoint.CheckpointAppender)
-		if !ok {
-			return codedError(ErrorCodeStorageUnavailable, "event store cannot atomically append checkpoints", nil)
-		}
-		sequence, err := e.nextSequence(ctx, checkpoint.SessionID)
-		if err != nil {
-			return codedError(ErrorCodeStorageUnavailable, "allocate checkpoint event sequence", err)
-		}
-		event := &store.RuntimeEvent{
-			ID:            eventID,
-			SessionID:     checkpoint.SessionID,
-			Sequence:      sequence,
-			TurnID:        checkpoint.TurnID,
-			InvocationID:  checkpoint.RunID,
-			Branch:        "checkpoint",
-			Author:        "runtime",
-			Kind:          runtimecheckpoint.EventKindRunCheckpoint,
-			SchemaVersion: checkpointSchemaVersion,
-			Payload:       payload,
-			CreatedAt:     time.Now().UTC(),
-		}
-		if err := appender.AppendCheckpoint(ctx, event); err != nil {
-			if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeEventSequenceConflict {
-				return codedError(ErrorCodeCheckpointStale, "checkpoint id is already bound to different state", err)
-			}
-			return codedError(ErrorCodeStorageUnavailable, "append checkpoint event", err)
-		}
-		return nil
-	})
-}
-
-func (e *Engine) LoadCheckpoint(ctx context.Context, turnID string) (Checkpoint, error) {
-	if ctx == nil {
-		return Checkpoint{}, invalidArgument("context must not be nil")
-	}
-	if strings.TrimSpace(turnID) == "" {
-		return Checkpoint{}, invalidArgument("turn id must not be empty")
-	}
-	events, err := e.dedupe.ListTurnEvents(ctx, turnID)
-	if err != nil {
-		return Checkpoint{}, codedError(ErrorCodeStorageUnavailable, "list checkpoint events", err)
-	}
-	var latest Checkpoint
-	found := false
-	for i := range events {
-		if events[i].Kind != runtimecheckpoint.EventKindRunCheckpoint {
-			continue
-		}
-		checkpoint, parseErr := ParseCheckpoint(&events[i])
-		if parseErr != nil {
-			return Checkpoint{}, parseErr
-		}
-		if !found || events[i].Sequence > latest.EventSequence {
-			latest = checkpoint
-			found = true
-		}
-	}
-	if !found {
-		return Checkpoint{}, codedError(ErrorCodeCheckpointNotFound, "no checkpoint exists for turn", nil)
-	}
-	return latest, nil
-}
-
-func (e *Engine) ValidateCheckpoint(ctx context.Context, turnID string, validation *runtimecheckpoint.ResumeValidation) (Checkpoint, error) {
-	checkpoint, err := e.LoadCheckpoint(ctx, turnID)
-	if err != nil {
-		return Checkpoint{}, err
-	}
-	if err := checkpoint.ValidateResume(validation); err != nil {
-		return Checkpoint{}, err
-	}
-	return checkpoint, nil
-}
-
-func (e *Engine) ValidateCheckpointWithEffects(ctx context.Context, turnID string, validation *runtimecheckpoint.ResumeValidation, effects runtimecheckpoint.EffectResumeValidator) (Checkpoint, error) {
-	if effects == nil {
-		return Checkpoint{}, invalidArgument("effect resume validator must not be nil")
-	}
-	checkpoint, err := e.LoadCheckpoint(ctx, turnID)
-	if err != nil {
-		return Checkpoint{}, err
-	}
-	if validation == nil {
-		return Checkpoint{}, invalidArgument("resume validation must not be nil")
-	}
-	validated := *validation
-	if err := effects.ValidateResumeEffects(ctx, checkpoint.SessionID, checkpoint.TurnID, checkpoint.PendingToolCallIDs); err != nil {
-		return Checkpoint{}, codedError(ErrorCodeCheckpointStale, "effect state validation failed", err)
-	}
-	validated.EffectStateValid = true
-	if err := checkpoint.ValidateResume(&validated); err != nil {
-		return Checkpoint{}, err
-	}
-	return checkpoint, nil
-}
-
 func validCheckpointPhase(phase string) bool {
 	return slices.Contains([]string{
 		"admitting", "awaiting_approval", "preparing", "executing",

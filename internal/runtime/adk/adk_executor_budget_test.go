@@ -1,4 +1,4 @@
-package runtime
+package runtimeadk
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/usage"
 )
@@ -53,8 +54,8 @@ func TestADKExecutorBudgetBlocksDispatch(t *testing.T) {
 	}
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{
-		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
+	req := &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal,
 		Parts: []runtimeingress.InputPart{{Text: "hi"}},
 	}
 	var sawErr error
@@ -85,8 +86,8 @@ func TestADKExecutorBudgetSettlesTurn(t *testing.T) {
 	}
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{
-		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
+	req := &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal,
 		Parts: []runtimeingress.InputPart{{Text: "hello"}},
 	}
 	for _, err := range executor.Execute(context.Background(), req) {

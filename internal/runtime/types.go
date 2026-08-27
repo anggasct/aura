@@ -5,6 +5,7 @@ import (
 	"iter"
 	"time"
 
+	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -66,4 +67,10 @@ const (
 // and copy before mutating.
 type AgentRuntime interface {
 	Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+}
+
+// ToolBroker is the policy gate every tool call must pass before execution.
+// approval.Engine is the canonical implementation.
+type ToolBroker interface {
+	Evaluate(ctx context.Context, req *approval.ToolRequest) (approval.PolicyDecision, error)
 }
