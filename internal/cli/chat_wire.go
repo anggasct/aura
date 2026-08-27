@@ -128,9 +128,27 @@ func (s *terminalSessions) ListEvents(ctx context.Context, sessionID string, aft
 	return out, nil
 }
 
+// chatPresentation captures the caller's presentation choices: --plain
+// forces the plain contract, NO_COLOR disables styling without giving up
+// streaming.
+type chatPresentation struct {
+	plain   bool
+	noColor bool
+}
+
+// shouldUseTTY reports whether the interactive presentation applies. It
+// requires both surfaces to be terminals; --plain forces the plain contract
+// and NO_COLOR degrades styling only, never runtime behavior.
+func shouldUseTTY(present chatPresentation, inTTY, outTTY bool) bool {
+	if present.plain {
+		return false
+	}
+	return inTTY && outTTY
+}
+
 // runChat is the wire for `aura chat`. It loads config, opens storage, builds
 // the runtime engine, and drives the terminal console over stdin/stdout.
-func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID string) error {
+func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID string, present chatPresentation) error {
 	if _, err := model.BuildRouter(logger, cfg.Models); err != nil {
 		return err
 	}
@@ -178,6 +196,21 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 	)
 	console.SetInputCloser(func() { _ = os.Stdin.Close() })
 	console.SetSessionID(sessionID)
+	if inFile, inOk := in.(*os.File); inOk {
+		if outFile, outOk := out.(*os.File); outOk {
+			if shouldUseTTY(present, terminal.IsTerminal(int(inFile.Fd())), terminal.IsTerminal(int(outFile.Fd()))) {
+				outFD := int(outFile.Fd())
+				console.SetTTY(terminal.NewTTYRenderer(terminal.TTYOptions{
+					Out:     out,
+					Width:   func() int { w, _ := terminal.TerminalSize(outFD); return w },
+					Hz:      cfg.Terminal.RenderHz,
+					Styling: !present.noColor,
+					Stdin:   inFile,
+					Stdout:  outFile,
+				}))
+			}
+		}
+	}
 	interrupts, stopInterrupts := forwardInterrupts(ctx, interruptsFromContext(ctx))
 	defer stopInterrupts()
 	console.SetInterrupts(interrupts)

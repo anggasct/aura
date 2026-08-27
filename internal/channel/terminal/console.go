@@ -31,9 +31,11 @@ type Console struct {
 	diag   io.Writer
 	config Config
 
-	principal  string
-	sessionID  string
-	closeInput func()
+	principal    string
+	sessionID    string
+	closeInput   func()
+	tty          *TTYRenderer
+	terminalSeen bool
 
 	mu           sync.Mutex
 	interrupts   <-chan struct{}
@@ -74,6 +76,11 @@ func (c *Console) SetSessionID(id string) { c.sessionID = id }
 // SetInputCloser opts into closing the input reader when Run stops. This lets
 // callers release a blocking reader without transferring ownership by default.
 func (c *Console) SetInputCloser(closeInput func()) { c.closeInput = closeInput }
+
+// SetTTY switches the console to the interactive presentation: streamed
+// frames replace the batch plain renderer, and the multiline editor gesture
+// becomes available. nil restores the plain contract.
+func (c *Console) SetTTY(r *TTYRenderer) { c.tty = r }
 
 // Run drives the console until EOF after drain, an escalated interrupt, or
 // ctx cancellation. A first interrupt cancels the active turn and waits for
@@ -133,6 +140,25 @@ func (c *Console) Run(ctx context.Context) error {
 			if line == "" {
 				continue
 			}
+			// The lone-period gesture composes a multi-line prompt in the
+			// user's editor; it is interactive-surface only, and a plain
+			// console submits the period as an ordinary prompt.
+			if line == "." && c.tty != nil {
+				composed, ok, err := c.tty.Compose(ctx, c.config.MaxInputBytes)
+				if err != nil {
+					if writeErr := writeLinef(c.diag, "aura: %v", err); writeErr != nil {
+						return writeErr
+					}
+					continue
+				}
+				if ok {
+					if err := c.runTurn(ctx, composed); err != nil {
+						return err
+					}
+					continue
+				}
+				continue
+			}
 			if strings.HasPrefix(line, "/") {
 				cont, err := c.dispatch(ctx, line)
 				if err != nil {
@@ -162,6 +188,7 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 	turnCtx, cancel := context.WithCancel(ctx)
 	c.setTurnCancel(cancel)
 	defer c.clearTurnCancel(cancel)
+	c.terminalSeen = false
 
 	req := &Request{
 		SessionID:   c.sessionID,
@@ -169,19 +196,79 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 		Origin:      "terminal",
 		Parts:       []Input{{Text: line}},
 	}
-	var stream []Event
 	var streamErr error
 	var failed, cancelled bool
+	if c.tty != nil {
+		streamErr = c.streamTurn(turnCtx, req, &failed, &cancelled)
+	} else {
+		streamErr = c.batchTurn(turnCtx, req, &failed, &cancelled)
+	}
+	if streamErr != nil {
+		return fmt.Errorf("terminal: turn: %w", streamErr)
+	}
+	if failed {
+		return errors.New("terminal: turn failed")
+	}
+	// A stream that ends without terminality is an error regardless of
+	// cancellation state: the turn owns a durable terminal event.
+	if !c.terminalSeen {
+		return errors.New("terminal: turn ended without a terminal event")
+	}
+	return nil
+}
+
+// streamTurn drives the interactive renderer: events fold into bounded
+// render state, a pump coalesces frames at the configured rate, and the
+// final frame carries the authoritative completed message.
+func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, cancelled *bool) error {
+	c.tty.Begin()
+	pumpCtx, stopPump := context.WithCancel(turnCtx)
+	pumpDone := c.tty.StartPump(pumpCtx)
+	var streamErr error
 	for ev, err := range c.runner.Run(turnCtx, req) {
 		if err != nil {
 			streamErr = err
+			break
+		}
+		*failed = *failed || ev.Kind == "turn.failed"
+		*cancelled = *cancelled || ev.Kind == "turn.cancelled"
+		if ev.Kind == "turn.completed" || ev.Kind == "turn.failed" || ev.Kind == "turn.cancelled" {
+			c.terminalSeen = true
+		}
+		c.tty.Observe(ev)
+	}
+	stopPump()
+	<-pumpDone
+	if err := c.tty.Err(); err != nil {
+		return err
+	}
+	if streamErr != nil {
+		if err := writeLinef(c.diag, "aura: %v", streamErr); err != nil {
+			return err
+		}
+	}
+	if err := c.tty.Finalize(*failed); err != nil {
+		return err
+	}
+	return streamErr
+}
+
+// batchTurn collects the event stream and renders once at the end: the plain
+// contract writes only completed assistant text.
+func (c *Console) batchTurn(turnCtx context.Context, req *Request, failed, cancelled *bool) error {
+	var stream []Event
+	for ev, err := range c.runner.Run(turnCtx, req) {
+		if err != nil {
 			if writeErr := writeLinef(c.diag, "aura: %v", err); writeErr != nil {
 				return writeErr
 			}
-			break
+			return err
 		}
-		failed = failed || ev.Kind == "turn.failed"
-		cancelled = cancelled || ev.Kind == "turn.cancelled"
+		*failed = *failed || ev.Kind == "turn.failed"
+		*cancelled = *cancelled || ev.Kind == "turn.cancelled"
+		if ev.Kind == "turn.completed" || ev.Kind == "turn.failed" || ev.Kind == "turn.cancelled" {
+			c.terminalSeen = true
+		}
 		stream = appendRenderEvent(stream, ev)
 	}
 	assistant, diagnostics, terminal := c.render.RenderTurn(stream)
@@ -190,27 +277,15 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 			return err
 		}
 	}
-	// A cancelled turn context suppresses partial output too: the stream may
-	// end without a terminal event when cancellation races the executor.
-	suppressed := streamErr != nil || failed || cancelled || turnCtx.Err() != nil
+	// Failed and cancelled turns suppress partial output: the durable log
+	// owns what happened, the display shows the outcome.
+	suppressed := *failed || *cancelled
 	if !suppressed && assistant != "" {
 		if err := writeLine(c.out, assistant); err != nil {
 			return err
 		}
 	}
-	if streamErr != nil {
-		return fmt.Errorf("terminal: turn: %w", streamErr)
-	}
-	if failed {
-		return errors.New("terminal: turn failed")
-	}
-	// A cancelled turn has no terminal event in the console's own stream: the
-	// engine owns the durable terminal state when the turn context is
-	// cancelled by an interrupt. A stream that ends without terminality is an
-	// error regardless of cancellation state.
-	if !terminal {
-		return errors.New("terminal: turn ended without a terminal event")
-	}
+	_ = terminal
 	return nil
 }
 
@@ -331,7 +406,7 @@ func appendRenderEvent(stream []Event, ev Event) []Event {
 				text = append(text, decodeDelta(ev.Payload)...)
 				payload, err := json.Marshal(struct {
 					Text string `json:"text"`
-				}{Text: limitText(string(text), maxRenderBytes)})
+				}{Text: limitText(string(text))})
 				if err == nil {
 					stream[i].Payload = payload
 				}

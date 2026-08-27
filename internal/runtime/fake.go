@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
+	"strconv"
 	"sync"
 	"time"
 
@@ -74,7 +75,10 @@ func (f *FakeExecutor) Execute(ctx context.Context, req *TurnRequest) iter.Seq2[
 			if step.Kind != "" {
 				seq++
 				if !yield(store.RuntimeEvent{
-					ID:            req.TurnID + "-step",
+					// The ID must differ per step: the durable event log keys
+					// events by ID, so a repeated ID collapses a scripted
+					// stream on a real store.
+					ID:            req.TurnID + "-step-" + strconv.FormatUint(seq, 10),
 					Sequence:      seq,
 					TurnID:        req.TurnID,
 					Kind:          step.Kind,

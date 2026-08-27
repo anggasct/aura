@@ -153,6 +153,18 @@ linters:
         text: G204
         path: internal/sandbox/run_linux.go
 
+      # Launching the operator's own \$EDITOR is the multiline gesture's
+      # purpose; the value is as trusted as the command the operator typed.
+      # G702 fires on the same launch for the same reason.
+      - linters:
+          - gosec
+        text: G204
+        path: internal/channel/terminal/ttyrender\.go
+      - linters:
+          - gosec
+        text: G702
+        path: internal/channel/terminal/ttyrender\.go
+
       # Retry jitter is not a security context. Scoped to the one file that
       # needs it rather than excluded repository-wide.
       - linters:

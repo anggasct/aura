@@ -87,7 +87,7 @@ func appendDiagnostic(diagnostics []string, text string) []string {
 	if len(diagnostics) >= maxDiagnosticLines {
 		return diagnostics
 	}
-	return append(diagnostics, limitText(sanitizeText(text), maxRenderBytes))
+	return append(diagnostics, limitText(sanitizeText(text)))
 }
 
 func appendLimited(dst, src []byte, limit int) []byte {
@@ -101,11 +101,11 @@ func appendLimited(dst, src []byte, limit int) []byte {
 	return append(dst, src...)
 }
 
-func limitText(text string, limit int) string {
-	if len(text) <= limit {
+func limitText(text string) string {
+	if len(text) <= maxRenderBytes {
 		return text
 	}
-	cut := limit
+	cut := maxRenderBytes
 	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}
@@ -134,7 +134,7 @@ func sanitizeText(text string) string {
 			i += size
 		}
 	}
-	return limitText(out.String(), maxRenderBytes)
+	return limitText(out.String())
 }
 
 func skipEscape(text string, i int) int {

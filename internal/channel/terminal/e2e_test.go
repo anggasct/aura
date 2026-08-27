@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"iter"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,5 +136,65 @@ func TestTerminalVerticalSlice(t *testing.T) {
 	}
 	if len(turns) == 0 {
 		t.Fatal("no durable events recorded for the turn")
+	}
+}
+
+// TestTerminalReplayCompletedEventWins proves the replay half of the render
+// contract: events read back from durable storage drive the interactive
+// renderer to the same authoritative completed message the live stream
+// produced, and streamed partials never survive replay.
+func TestTerminalReplayCompletedEventWins(t *testing.T) {
+	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	sessions := store.NewSessionService(db)
+	events := store.NewEventStore(db)
+	executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+		{Kind: runtime.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"partial "}]}}`)},
+		{Kind: runtime.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"stream"}]}}`)},
+		{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{"content":{"parts":[{"text":"durable answer"}]}}`)},
+	})
+	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := sessions.Create(context.Background(), &store.Session{ID: "e2e-replay", OwnerID: "e2e-owner", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	runner := e2eRunner{engine: engine}
+	req := &terminal.Request{SessionID: "e2e-replay", PrincipalID: "e2e-owner", Origin: "terminal", Parts: []terminal.Input{{Text: "hi"}}}
+	for _, err := range runner.Run(context.Background(), req) {
+		if err != nil {
+			t.Fatalf("live turn: %v", err)
+		}
+	}
+
+	stored, err := sessions.ListEvents(context.Background(), "e2e-replay", 0, 1000)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	var replayed []terminal.Event
+	for i := range stored {
+		replayed = append(replayed, terminal.Event{Kind: stored[i].Kind, Author: stored[i].Author, Payload: stored[i].Payload})
+	}
+	out := &bytes.Buffer{}
+	renderer := terminal.NewTTYRenderer(terminal.TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500})
+	renderer.Begin()
+	for _, ev := range replayed {
+		renderer.Observe(ev)
+	}
+	if err := renderer.Finalize(false); err != nil {
+		t.Fatalf("finalize replay: %v", err)
+	}
+	if !strings.Contains(out.String(), "durable answer") {
+		t.Errorf("replayed output = %q, want the durable completed message", out.String())
+	}
+	if strings.Contains(out.String(), "partial stream") {
+		t.Errorf("replayed output = %q, streamed partial must not win on replay", out.String())
 	}
 }
