@@ -150,6 +150,7 @@ type subscriber struct {
 	done   chan struct{}
 	once   sync.Once
 	mu     sync.Mutex
+	closed bool
 }
 
 func newSubscriber() *subscriber {
@@ -168,6 +169,9 @@ func (s *subscriber) stop() {
 func (s *subscriber) send(ev *store.RuntimeEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
 	select {
 	case s.events <- *ev:
 	case <-s.done:
@@ -177,6 +181,9 @@ func (s *subscriber) send(ev *store.RuntimeEvent) {
 func (s *subscriber) sendContext(ctx context.Context, ev *store.RuntimeEvent) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
 	select {
 	case s.events <- *ev:
 		return true
@@ -190,6 +197,10 @@ func (s *subscriber) sendContext(ctx context.Context, ev *store.RuntimeEvent) bo
 func (s *subscriber) closeEvents() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
 	close(s.events)
 }
 

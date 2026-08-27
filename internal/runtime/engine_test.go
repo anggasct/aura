@@ -488,6 +488,29 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 	}
 }
 
+func TestPublishAfterSubscriberCloseDoesNotPanic(t *testing.T) {
+	sub := newSubscriber()
+	sub.closeEvents()
+	engine := &Engine{
+		turns: map[string]*turn{
+			"turn-live": {
+				req:  TurnRequest{SessionID: "session-a"},
+				subs: map[*subscriber]struct{}{sub: {}},
+			},
+		},
+	}
+	done := make(chan struct{})
+	go func() {
+		engine.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("publish blocked on closed subscriber")
+	}
+}
+
 func waitForTerminalDurable(t *testing.T, db *sql.DB, turnID string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
