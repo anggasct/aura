@@ -545,13 +545,18 @@ func (e *Engine) Publish(ev *store.RuntimeEvent) {
 		return
 	}
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	t := e.turns[ev.TurnID]
 	if t == nil || t.req.SessionID != ev.SessionID {
-		e.mu.Unlock()
 		return
 	}
-	e.broadcast(t, ev)
-	e.mu.Unlock()
+	for sub := range t.subs {
+		select {
+		case sub.events <- *ev:
+		case <-sub.done:
+		default:
+		}
+	}
 }
 
 func (e *Engine) cancelTurn(turnID string) {

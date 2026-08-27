@@ -424,6 +424,52 @@ func TestAbandonedConsumerDoesNotBlockTurn(t *testing.T) {
 	})
 }
 
+func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
+	sub := newSubscriber()
+	defer sub.stop()
+	for range cap(sub.events) {
+		sub.events <- store.RuntimeEvent{}
+	}
+
+	cancelled := make(chan struct{})
+	engine := &Engine{
+		turns: map[string]*turn{
+			"turn-live": {
+				req:    TurnRequest{SessionID: "session-a"},
+				cancel: func() { close(cancelled) },
+				subs:   map[*subscriber]struct{}{sub: {}},
+			},
+		},
+	}
+
+	published := make(chan struct{})
+	go func() {
+		engine.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live"})
+		close(published)
+	}()
+	cancelDone := make(chan struct{})
+	go func() {
+		engine.cancelTurn("turn-live")
+		close(cancelDone)
+	}()
+
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("live event publish blocked on a full subscriber")
+	}
+	select {
+	case <-cancelDone:
+	case <-time.After(time.Second):
+		t.Fatal("control path blocked behind live event publish")
+	}
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("cancel path did not reach the live turn")
+	}
+}
+
 func waitForTerminalDurable(t *testing.T, db *sql.DB, turnID string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
