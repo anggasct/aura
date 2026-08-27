@@ -11,10 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/runtime/checkpoint"
 	"github.com/anggasct/aura/internal/store"
 )
-
-const EventKindRunCheckpoint = "run.checkpoint.v1"
 
 const checkpointSchemaVersion uint16 = 1
 
@@ -33,24 +32,6 @@ type Checkpoint struct {
 	PolicyVersion      string   `json:"policy_version"`
 	ResumeGeneration   uint64   `json:"resume_generation"`
 	StateDigest        string   `json:"state_digest"`
-}
-
-type ResumeValidation struct {
-	SessionID            string
-	TurnID               string
-	OwnerID              string
-	PrincipalID          string
-	CapabilityDigest     string
-	PolicyVersion        string
-	CurrentEventSequence uint64
-	CurrentStateDigest   string
-	ResumeGeneration     uint64
-	ApprovalValid        bool
-	EffectStateValid     bool
-}
-
-type EffectResumeValidator interface {
-	ValidateResumeEffects(context.Context, string, string, []string) error
 }
 
 func (c *Checkpoint) Validate() error {
@@ -87,7 +68,7 @@ func (c *Checkpoint) Validate() error {
 	return validateCheckpointIDs(c.PendingToolCallIDs, "pending tool call ids")
 }
 
-func (c *Checkpoint) ValidateResume(validation *ResumeValidation) error {
+func (c *Checkpoint) ValidateResume(validation *runtimecheckpoint.ResumeValidation) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -143,7 +124,7 @@ func ParseCheckpoint(event *store.RuntimeEvent) (Checkpoint, error) {
 	if event == nil {
 		return Checkpoint{}, invalidArgument("checkpoint event must not be nil")
 	}
-	if event.Kind != EventKindRunCheckpoint {
+	if event.Kind != runtimecheckpoint.EventKindRunCheckpoint {
 		return Checkpoint{}, codedError(ErrorCodeCheckpointUnsupported, "event is not a checkpoint", nil)
 	}
 	if event.SchemaVersion != checkpointSchemaVersion {
@@ -201,7 +182,7 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) err
 			return codedError(ErrorCodeCheckpointStale, "checkpoint boundary is ahead of the event log", nil)
 		}
 		eventID := checkpoint.RunID + ".checkpoint." + strconv.FormatUint(checkpoint.ResumeGeneration, 10)
-		appender, ok := e.events.(CheckpointAppender)
+		appender, ok := e.events.(runtimecheckpoint.CheckpointAppender)
 		if !ok {
 			return codedError(ErrorCodeStorageUnavailable, "event store cannot atomically append checkpoints", nil)
 		}
@@ -217,7 +198,7 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) err
 			InvocationID:  checkpoint.RunID,
 			Branch:        "checkpoint",
 			Author:        "runtime",
-			Kind:          EventKindRunCheckpoint,
+			Kind:          runtimecheckpoint.EventKindRunCheckpoint,
 			SchemaVersion: checkpointSchemaVersion,
 			Payload:       payload,
 			CreatedAt:     time.Now().UTC(),
@@ -230,10 +211,6 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *Checkpoint) err
 		}
 		return nil
 	})
-}
-
-type CheckpointAppender interface {
-	AppendCheckpoint(context.Context, *store.RuntimeEvent) error
 }
 
 func (e *Engine) LoadCheckpoint(ctx context.Context, turnID string) (Checkpoint, error) {
@@ -250,7 +227,7 @@ func (e *Engine) LoadCheckpoint(ctx context.Context, turnID string) (Checkpoint,
 	var latest Checkpoint
 	found := false
 	for i := range events {
-		if events[i].Kind != EventKindRunCheckpoint {
+		if events[i].Kind != runtimecheckpoint.EventKindRunCheckpoint {
 			continue
 		}
 		checkpoint, parseErr := ParseCheckpoint(&events[i])
@@ -268,7 +245,7 @@ func (e *Engine) LoadCheckpoint(ctx context.Context, turnID string) (Checkpoint,
 	return latest, nil
 }
 
-func (e *Engine) ValidateCheckpoint(ctx context.Context, turnID string, validation *ResumeValidation) (Checkpoint, error) {
+func (e *Engine) ValidateCheckpoint(ctx context.Context, turnID string, validation *runtimecheckpoint.ResumeValidation) (Checkpoint, error) {
 	checkpoint, err := e.LoadCheckpoint(ctx, turnID)
 	if err != nil {
 		return Checkpoint{}, err
@@ -279,7 +256,7 @@ func (e *Engine) ValidateCheckpoint(ctx context.Context, turnID string, validati
 	return checkpoint, nil
 }
 
-func (e *Engine) ValidateCheckpointWithEffects(ctx context.Context, turnID string, validation *ResumeValidation, effects EffectResumeValidator) (Checkpoint, error) {
+func (e *Engine) ValidateCheckpointWithEffects(ctx context.Context, turnID string, validation *runtimecheckpoint.ResumeValidation, effects runtimecheckpoint.EffectResumeValidator) (Checkpoint, error) {
 	if effects == nil {
 		return Checkpoint{}, invalidArgument("effect resume validator must not be nil")
 	}

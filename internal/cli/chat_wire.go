@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/model"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
 )
@@ -45,9 +46,9 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 			yield(terminal.Event{}, errors.New("terminal: request must not be nil"))
 			return
 		}
-		parts := make([]runtime.InputPart, len(req.Parts))
+		parts := make([]runtimeingress.InputPart, len(req.Parts))
 		for i := range req.Parts {
-			parts[i] = runtime.InputPart{Text: req.Parts[i].Text}
+			parts[i] = runtimeingress.InputPart{Text: req.Parts[i].Text}
 		}
 		runtimeReq := &runtime.TurnRequest{
 			SessionID:      req.SessionID,

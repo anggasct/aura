@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -44,7 +45,7 @@ func TestComposedEntryVerifiesExternalWorldEvidence(t *testing.T) {
 	}
 	for event, runErr := range engine.Run(ctx, &runtime.TurnRequest{
 		TurnID: "world-turn", SessionID: "world-session", PrincipalID: "owner", Origin: runtime.OriginInternal,
-		Parts: []runtime.InputPart{{Text: "world"}},
+		Parts: []runtimeingress.InputPart{{Text: "world"}},
 	}) {
 		if runErr != nil {
 			t.Fatalf("Run: %v", runErr)

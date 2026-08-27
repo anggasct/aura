@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -28,7 +29,7 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 
 	eventsCh, errs := collectStream(engine, &TurnRequest{
 		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-		Parts: []InputPart{{Text: "hi"}},
+		Parts: []runtimeingress.InputPart{{Text: "hi"}},
 	})
 
 	var adkCount int
@@ -112,7 +113,7 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 
 	req := &TurnRequest{
 		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-		Parts: []InputPart{{Text: "hi"}},
+		Parts: []runtimeingress.InputPart{{Text: "hi"}},
 	}
 	var streamed []store.RuntimeEvent
 	for ev, err := range engine.Run(context.Background(), req) {

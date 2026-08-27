@@ -6,6 +6,9 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/anggasct/aura/internal/runtime/channelhost"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 )
 
 // fakeChannelAdapter satisfies ChannelPort. Its only way to run work is the
@@ -13,14 +16,14 @@ import (
 // through the sink exactly as a gateway adapter would.
 type fakeChannelAdapter struct {
 	name      string
-	acceptEnv *IngressEnvelope
+	acceptEnv *runtimeingress.IngressEnvelope
 
 	startedCh chan struct{}
 	stoppedCh chan struct{}
 	accepted  chan struct{}
 
 	mu        sync.Mutex
-	acceptRef TurnRef
+	acceptRef runtimeingress.TurnRef
 	acceptErr error
 }
 
@@ -32,7 +35,7 @@ func newFakeChannelAdapter(name string) *fakeChannelAdapter {
 	}
 }
 
-func (a *fakeChannelAdapter) Start(ctx context.Context, sink IngressSink) error {
+func (a *fakeChannelAdapter) Start(ctx context.Context, sink runtimeingress.IngressSink) error {
 	close(a.startedCh)
 	if a.acceptEnv != nil {
 		ref, err := sink.Accept(ctx, a.acceptEnv)
@@ -46,15 +49,15 @@ func (a *fakeChannelAdapter) Start(ctx context.Context, sink IngressSink) error 
 	return ctx.Err()
 }
 
-func (a *fakeChannelAdapter) Deliver(_ context.Context, _ *DeliveryRequest) (ProviderReceipt, error) {
-	return ProviderReceipt{ProviderID: a.name, At: time.Now().UTC()}, nil
+func (a *fakeChannelAdapter) Deliver(_ context.Context, _ *runtimechannelhost.DeliveryRequest) (runtimechannelhost.ProviderReceipt, error) {
+	return runtimechannelhost.ProviderReceipt{ProviderID: a.name, At: time.Now().UTC()}, nil
 }
 
-func (a *fakeChannelAdapter) Health(_ context.Context) ChannelHealth {
-	return ChannelHealth{Status: ChannelHealthy}
+func (a *fakeChannelAdapter) Health(_ context.Context) runtimechannelhost.ChannelHealth {
+	return runtimechannelhost.ChannelHealth{Status: runtimechannelhost.ChannelHealthy}
 }
 
-func (a *fakeChannelAdapter) ref() (TurnRef, error) {
+func (a *fakeChannelAdapter) ref() (runtimeingress.TurnRef, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.acceptRef, a.acceptErr
@@ -68,7 +71,7 @@ func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 
 		adapter := newFakeChannelAdapter("telegram")
 		adapter.acceptEnv = sampleEnvelope("conv-gw", "gw-msg-1")
-		host, err := NewHost(engine, []ChannelPort{adapter}, nil)
+		host, err := NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, nil)
 		if err != nil {
 			t.Fatalf("NewHost: %v", err)
 		}
@@ -98,7 +101,7 @@ func TestHostShutdownStopsAdapters(t *testing.T) {
 		engine, _, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
 
 		adapter := newFakeChannelAdapter("telegram")
-		host, err := NewHost(engine, []ChannelPort{adapter}, nil)
+		host, err := NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, nil)
 		if err != nil {
 			t.Fatalf("NewHost: %v", err)
 		}
@@ -126,7 +129,7 @@ func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 
 		adapter := newFakeChannelAdapter("telegram")
 		adapter.acceptEnv = sampleEnvelope("conv-drain", "drain-1")
-		host, err := NewHost(engine, []ChannelPort{adapter}, nil)
+		host, err := NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, nil)
 		if err != nil {
 			t.Fatalf("NewHost: %v", err)
 		}

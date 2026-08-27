@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 
 	"google.golang.org/adk/v2/agent"
@@ -191,7 +192,7 @@ func TestADKExecutorRunsTurnAndPersists(t *testing.T) {
 		SessionID:   "session-1",
 		PrincipalID: "user-1",
 		Origin:      OriginTerminal,
-		Parts:       []InputPart{{Text: "hello"}},
+		Parts:       []runtimeingress.InputPart{{Text: "hello"}},
 	}
 	var events []store.RuntimeEvent
 	for ev, err := range executor.Execute(context.Background(), req) {
@@ -225,7 +226,7 @@ func TestADKExecutorGatesToolCalls(t *testing.T) {
 	executor, db, _ := newADKTestExecutor(t, modelName, broker, newFakeTool(t))
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []InputPart{{Text: "hi"}}}
+	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}}}
 	for _, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Logf("executor error: %v", err)
@@ -262,7 +263,7 @@ func TestADKExecutorDeniedToolFailsClosed(t *testing.T) {
 	executor, db, _ := newADKTestExecutor(t, modelName, broker, gateTool)
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []InputPart{{Text: "hi"}}}
+	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}}}
 	for _, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Logf("executor error: %v", err)
@@ -296,7 +297,7 @@ func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
 	}
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []InputPart{{Text: "hi"}}}
+	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}}}
 	for _, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
@@ -339,7 +340,7 @@ func TestADKExecutorPublishesDurableBuiltinEvents(t *testing.T) {
 
 	for _, err := range executor.Execute(context.Background(), &TurnRequest{
 		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-		Parts: []InputPart{{Text: "hi"}},
+		Parts: []runtimeingress.InputPart{{Text: "hi"}},
 	}) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
@@ -358,7 +359,7 @@ func TestADKExecutorBudgetEnforced(t *testing.T) {
 
 	req := &TurnRequest{
 		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-		Parts:  []InputPart{{Text: "hi"}},
+		Parts:  []runtimeingress.InputPart{{Text: "hi"}},
 		Budget: Budget{MaxTokens: 10},
 	}
 	var lastErr error
@@ -410,7 +411,7 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 		var runErr error
 		for ev, err := range engine.Run(context.Background(), &TurnRequest{
 			TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-			Parts: []InputPart{{Text: "hi"}},
+			Parts: []runtimeingress.InputPart{{Text: "hi"}},
 		}) {
 			if err != nil {
 				runErr = err

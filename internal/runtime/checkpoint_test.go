@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/runtime/checkpoint"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -32,8 +33,8 @@ func checkpointFixture(eventSequence uint64) *Checkpoint {
 	}
 }
 
-func validResumeValidation(checkpoint *Checkpoint, currentSequence uint64) *ResumeValidation {
-	return &ResumeValidation{
+func validResumeValidation(checkpoint *Checkpoint, currentSequence uint64) *runtimecheckpoint.ResumeValidation {
+	return &runtimecheckpoint.ResumeValidation{
 		SessionID:            checkpoint.SessionID,
 		TurnID:               checkpoint.TurnID,
 		OwnerID:              "user-1",
@@ -191,17 +192,17 @@ func TestValidateResumeRejectsChangedState(t *testing.T) {
 	checkpoint := checkpointFixture(42)
 	cases := []struct {
 		name   string
-		mutate func(*ResumeValidation)
+		mutate func(*runtimecheckpoint.ResumeValidation)
 		want   ErrorCode
 	}{
-		{name: "owner", mutate: func(v *ResumeValidation) { v.PrincipalID = "other" }, want: ErrorCodePolicyDenied},
-		{name: "capability", mutate: func(v *ResumeValidation) { v.CapabilityDigest = strings.Repeat("c", 64) }, want: ErrorCodeCheckpointStale},
-		{name: "policy", mutate: func(v *ResumeValidation) { v.PolicyVersion = "policy-2" }, want: ErrorCodeCheckpointStale},
-		{name: "sequence", mutate: func(v *ResumeValidation) { v.CurrentEventSequence = 41 }, want: ErrorCodeCheckpointStale},
-		{name: "state", mutate: func(v *ResumeValidation) { v.CurrentStateDigest = strings.Repeat("c", 64) }, want: ErrorCodeCheckpointStale},
-		{name: "generation", mutate: func(v *ResumeValidation) { v.ResumeGeneration = 2 }, want: ErrorCodeCheckpointStale},
-		{name: "approval", mutate: func(v *ResumeValidation) { v.ApprovalValid = false }, want: ErrorCodeCheckpointStale},
-		{name: "effect", mutate: func(v *ResumeValidation) { v.EffectStateValid = false }, want: ErrorCodeCheckpointStale},
+		{name: "owner", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.PrincipalID = "other" }, want: ErrorCodePolicyDenied},
+		{name: "capability", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.CapabilityDigest = strings.Repeat("c", 64) }, want: ErrorCodeCheckpointStale},
+		{name: "policy", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.PolicyVersion = "policy-2" }, want: ErrorCodeCheckpointStale},
+		{name: "sequence", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.CurrentEventSequence = 41 }, want: ErrorCodeCheckpointStale},
+		{name: "state", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.CurrentStateDigest = strings.Repeat("c", 64) }, want: ErrorCodeCheckpointStale},
+		{name: "generation", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.ResumeGeneration = 2 }, want: ErrorCodeCheckpointStale},
+		{name: "approval", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.ApprovalValid = false }, want: ErrorCodeCheckpointStale},
+		{name: "effect", mutate: func(v *runtimecheckpoint.ResumeValidation) { v.EffectStateValid = false }, want: ErrorCodeCheckpointStale},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -242,7 +243,7 @@ func TestCheckpointPayloadRejectsCorruption(t *testing.T) {
 			TurnID:        checkpoint.TurnID,
 			InvocationID:  checkpoint.RunID,
 			Author:        "runtime",
-			Kind:          EventKindRunCheckpoint,
+			Kind:          runtimecheckpoint.EventKindRunCheckpoint,
 			SchemaVersion: 1,
 			Payload:       payload,
 		}

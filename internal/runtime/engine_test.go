@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -61,7 +62,7 @@ func sampleRequest(sessionID, turnID string) *TurnRequest {
 		SessionID:   sessionID,
 		PrincipalID: "user-1",
 		Origin:      OriginTerminal,
-		Parts:       []InputPart{{Text: "hello"}},
+		Parts:       []runtimeingress.InputPart{{Text: "hello"}},
 	}
 }
 

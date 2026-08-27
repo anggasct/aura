@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -34,7 +35,7 @@ func TestComposedRuntimeEntryPersistsTerminalBeforeReturn(t *testing.T) {
 		SessionID:   "entry-session",
 		PrincipalID: "owner",
 		Origin:      runtime.OriginInternal,
-		Parts:       []runtime.InputPart{{Text: "entry"}},
+		Parts:       []runtimeingress.InputPart{{Text: "entry"}},
 	}) {
 		if streamErr != nil {
 			t.Fatalf("Run: %v", streamErr)

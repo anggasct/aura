@@ -7,6 +7,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/anggasct/aura/internal/runtime/ingress"
 )
 
 func terminalCount(t *testing.T, db *sql.DB, turnID string) int {
@@ -39,13 +41,13 @@ func jsonStep(kind string) FakeStep {
 	return FakeStep{Kind: kind, Payload: json.RawMessage(`{}`)}
 }
 
-func sampleEnvelope(conversation, externalID string) *IngressEnvelope {
-	return &IngressEnvelope{
+func sampleEnvelope(conversation, externalID string) *runtimeingress.IngressEnvelope {
+	return &runtimeingress.IngressEnvelope{
 		Source:         "telegram",
 		ExternalID:     externalID,
 		PrincipalID:    "user-1",
 		ConversationID: conversation,
-		Parts:          []InputPart{{Text: "hello"}},
+		Parts:          []runtimeingress.InputPart{{Text: "hello"}},
 		ReceivedAt:     time.Now().UTC(),
 	}
 }
@@ -132,7 +134,7 @@ func TestAcceptValidatesIdentity(t *testing.T) {
 	engine, db, _ := newTestRuntime(t, Config{}, executor)
 	mustCreateSession(t, db, "conv-1")
 
-	cases := map[string]*IngressEnvelope{
+	cases := map[string]*runtimeingress.IngressEnvelope{
 		"nil envelope":         nil,
 		"missing source":       {ExternalID: "x", PrincipalID: "u", ConversationID: "conv-1"},
 		"missing external":     {Source: "telegram", PrincipalID: "u", ConversationID: "conv-1"},

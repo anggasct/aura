@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -26,9 +27,9 @@ type e2eRunner struct {
 
 func (r e2eRunner) Run(ctx context.Context, req *terminal.Request) iter.Seq2[terminal.Event, error] {
 	return func(yield func(terminal.Event, error) bool) {
-		parts := make([]runtime.InputPart, len(req.Parts))
+		parts := make([]runtimeingress.InputPart, len(req.Parts))
 		for i := range req.Parts {
-			parts[i] = runtime.InputPart{Text: req.Parts[i].Text}
+			parts[i] = runtimeingress.InputPart{Text: req.Parts[i].Text}
 		}
 		runtimeReq := &runtime.TurnRequest{
 			SessionID:   req.SessionID,
