@@ -49,8 +49,22 @@ type EventPublisher interface {
 	Publish(*store.RuntimeEvent)
 }
 
+// builtinEventPublisher is implemented by builtin tool executors that publish
+// tool lifecycle events as they become durable. The executor forwards the
+// runtime publisher so tool requests reach the live stream before the
+// provider is invoked.
+type builtinEventPublisher interface {
+	SetEventPublisher(func(*store.RuntimeEvent))
+}
+
 func (x *ADKExecutor) SetEventPublisher(publisher EventPublisher) {
 	x.publisher = publisher
+	if publisher == nil {
+		return
+	}
+	if setter, ok := x.builtins.(builtinEventPublisher); ok {
+		setter.SetEventPublisher(publisher.Publish)
+	}
 }
 
 // ToolBroker is the policy gate every tool call must pass before execution.
@@ -299,19 +313,10 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		return nil, fmt.Errorf("read tool event sequence: %w", err)
 	}
 	request.EventSequence = sequence + 1
+	// Tool lifecycle events are published by the builtin executor as they
+	// become durable — before the provider is invoked — so a long-running
+	// tool reports progress while it runs. See SetEventPublisher.
 	output, executeErr := x.builtins.Execute(actx, request)
-	if x.publisher != nil {
-		events, listErr := x.sessions.ListEvents(actx, request.SessionID, request.EventSequence-1, 32)
-		if listErr != nil {
-			return nil, fmt.Errorf("read builtin tool events: %w", listErr)
-		}
-		for i := range events {
-			if events[i].TurnID == request.TurnID && events[i].Sequence >= request.EventSequence {
-				event := events[i]
-				x.publisher.Publish(&event)
-			}
-		}
-	}
 	err = executeErr
 	if err != nil {
 		return nil, err

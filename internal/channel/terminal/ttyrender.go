@@ -324,17 +324,20 @@ func (r *TTYRenderer) buildFrame(failed, cancelled bool) (frame string, lines in
 			lines++
 		}
 		r.progressEmitted = len(r.progress)
-		diverged := r.emitted > 0 && (!strings.HasPrefix(body, r.emittedPrefix) || len(body) < r.emitted)
+		// Continuation and divergence are compared on sanitized text: the
+		// emitted prefix is sanitized, so the prefix match uses the already
+		// sanitized body, otherwise identical control-bearing model text is
+		// misread as a revision and emitted twice.
+		diverged := r.emitted > 0 && (!strings.HasPrefix(text, r.emittedPrefix) || len(text) < r.emitted)
 		if diverged && r.finalSet {
 			// The completed message revises what was streamed and cannot
 			// extend it. Close the partial line and print the authoritative
 			// text whole; the completed message wins.
 			b.WriteString("\n")
 			lines++
-			text = sanitizeText(body)
 			r.emitted = 0
 			r.emittedPrefix = ""
-		} else if r.emitted > 0 && len(text) >= r.emitted && strings.HasPrefix(text, r.emittedPrefix) {
+		} else if r.emitted > 0 && len(text) >= r.emitted {
 			text = text[r.emitted:]
 		}
 		if text != "" {

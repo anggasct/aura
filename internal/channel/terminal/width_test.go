@@ -75,3 +75,55 @@ func TestTruncateLinesBounded(t *testing.T) {
 		t.Errorf("first kept = %q, want ellipsis marker", kept[0].text)
 	}
 }
+
+func TestWrapTextKeepsGraphemeClustersWhole(t *testing.T) {
+	cases := []struct {
+		name  string
+		text  string
+		width int
+		want  []string
+	}{
+		// ZWJ sequence: one cluster, display width two.
+		{"zwj emoji", "\U0001F469\u200D\U0001F4BB\U0001F469\u200D\U0001F4BB", 2, []string{"\U0001F469\u200D\U0001F4BB", "\U0001F469\u200D\U0001F4BB"}},
+		// Regional indicator pair: one flag cluster, width two.
+		{"flag", "\U0001F1FA\U0001F1F8\U0001F1FA\U0001F1F8", 2, []string{"\U0001F1FA\U0001F1F8", "\U0001F1FA\U0001F1F8"}},
+		// Skin-tone modifier: one cluster, width two.
+		{"modifier", "\U0001F44D\U0001F3FD\U0001F44D\U0001F3FD", 2, []string{"\U0001F44D\U0001F3FD", "\U0001F44D\U0001F3FD"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := wrapText(tc.text, tc.width)
+			got := make([]string, 0, len(lines))
+			for _, line := range lines {
+				got = append(got, line.text)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("wrapped %q into %d lines (%q), want %d (%q)", tc.text, len(got), got, len(tc.want), tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("line %d = %q, want %q (cluster split?)", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestStringWidthGraphemeAware(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want int
+	}{
+		{"zwj technologist", "\U0001F469\u200D\U0001F4BB", 2},
+		{"flag", "\U0001F1FA\U0001F1F8", 2},
+		{"skin tone modifier", "\U0001F44D\U0001F3FD", 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stringWidth(tc.text); got != tc.want {
+				t.Errorf("stringWidth(%q) = %d, want %d", tc.text, got, tc.want)
+			}
+		})
+	}
+}

@@ -21,7 +21,24 @@ import (
 )
 
 type builtinToolExecutor struct {
-	broker *toolbroker.Broker
+	broker  *toolbroker.Broker
+	journal *effect.Journal
+}
+
+// effectPublisherFunc adapts a plain publish function to the effect journal's
+// EventPublisher so the runtime publisher can be forwarded.
+type effectPublisherFunc func(*store.RuntimeEvent)
+
+func (f effectPublisherFunc) Publish(ev *store.RuntimeEvent) { f(ev) }
+
+// SetEventPublisher forwards the runtime event publisher to the effect
+// journal so tool requests are published as they become durable, before the
+// provider runs.
+func (e *builtinToolExecutor) SetEventPublisher(publish func(*store.RuntimeEvent)) {
+	if publish == nil || e.journal == nil {
+		return
+	}
+	e.journal.SetEventPublisher(effectPublisherFunc(publish))
 }
 
 func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger, observer toolbroker.Observer) (*builtinToolExecutor, error) {
@@ -93,7 +110,7 @@ func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger,
 	if err != nil {
 		return nil, err
 	}
-	return &builtinToolExecutor{broker: broker}, nil
+	return &builtinToolExecutor{broker: broker, journal: journal}, nil
 }
 
 func (e *builtinToolExecutor) Definitions() []runtime.BuiltinToolDefinition {

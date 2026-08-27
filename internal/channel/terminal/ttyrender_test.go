@@ -444,3 +444,29 @@ func TestTTYNoColorEmitsProgressAfterTailRollsOver(t *testing.T) {
 		t.Fatalf("output = %q, want latest progress", out.String())
 	}
 }
+
+func TestNoColorDoesNotDuplicateControlBearingOutput(t *testing.T) {
+	// The streamed partial and the authoritative completed message carry the
+	// same ANSI-bearing text; sanitized comparison must recognize them as
+	// one message and emit the sanitized answer exactly once.
+	ansi := "a\x1b[31mb"
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, func() int { return 80 }, false)
+	r.Begin()
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, ansi)})
+	if err := r.Paint(); err != nil {
+		t.Fatalf("first paint: %v", err)
+	}
+	r.Observe(Event{Kind: "message.completed", Payload: ttPayload(t, ansi)})
+	r.Observe(Event{Kind: "turn.completed"})
+	if err := r.Finalize(false, false); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	got := out.String()
+	if strings.Count(got, "ab") != 1 {
+		t.Errorf("output = %q, sanitized answer must appear exactly once", got)
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("output = %q, must not contain escape sequences", got)
+	}
+}

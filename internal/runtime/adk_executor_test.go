@@ -106,6 +106,14 @@ type fakeBuiltinExecutor struct {
 	events      store.EventStore
 	output      json.RawMessage
 	err         error
+	publish     func(*store.RuntimeEvent)
+	// block, when non-nil, holds Execute open after the tool request is
+	// published, modeling a provider that is still running.
+	block chan struct{}
+}
+
+func (f *fakeBuiltinExecutor) SetEventPublisher(publish func(*store.RuntimeEvent)) {
+	f.publish = publish
 }
 
 func (f *fakeBuiltinExecutor) Definitions() []BuiltinToolDefinition {
@@ -119,12 +127,23 @@ func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolR
 		if err != nil {
 			return nil, err
 		}
-		if err := f.events.Append(ctx, &store.RuntimeEvent{
+		event := &store.RuntimeEvent{
 			ID: request.RequestID + "-requested", SessionID: request.SessionID, Sequence: request.EventSequence,
 			TurnID: request.TurnID, InvocationID: request.EventInvocation, Author: request.EventAuthor,
 			Kind: EventKindToolRequested, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
-		}); err != nil {
+		}
+		if err := f.events.Append(ctx, event); err != nil {
 			return nil, err
+		}
+		if f.publish != nil {
+			f.publish(event)
+		}
+	}
+	if f.block != nil {
+		select {
+		case <-f.block:
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 	}
 	if f.err != nil {
@@ -353,5 +372,89 @@ func TestADKExecutorBudgetEnforced(t *testing.T) {
 	}
 	if code, ok := CodeOf(lastErr); !ok || code != ErrorCodeBudgetExhausted {
 		t.Fatalf("CodeOf(%v) = %q, %v; want budget_exhausted", lastErr, code, ok)
+	}
+}
+
+// TestBuiltinToolRequestStreamsWhileProviderRuns proves the live delivery
+// path the interactive console depends on: the committed tool request reaches
+// the runtime's live subscriber while the provider is still running, not
+// after the tool settles.
+func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
+	model := &fakeADKModel{answer: "done", toolCall: true, tokens: 3}
+	modelName := registerFakeModel(t, model)
+	db, sessions, events := newSessionTestDB(t)
+	block := make(chan struct{})
+	builtin := &fakeBuiltinExecutor{
+		definitions: []BuiltinToolDefinition{{
+			Name: "sample_tool", Version: "v1", Description: "sample",
+			Schema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		}},
+		events: events,
+		output: json.RawMessage(`{"ok":true}`),
+		block:  block,
+	}
+	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	engine, err := NewEngine(Config{}, events, store.NewDedupeStore(db), executor, nil)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	executor.SetEventPublisher(engine)
+	mustCreateSession(t, db, "session-1")
+
+	kinds := make(chan string, 16)
+	runDone := make(chan error, 1)
+	go func() {
+		var runErr error
+		for ev, err := range engine.Run(context.Background(), &TurnRequest{
+			TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
+			Parts: []InputPart{{Text: "hi"}},
+		}) {
+			if err != nil {
+				runErr = err
+				break
+			}
+			kinds <- ev.Kind
+			if ev.Kind == EventKindTurnCompleted || ev.Kind == EventKindTurnFailed {
+				break
+			}
+		}
+		runDone <- runErr
+	}()
+
+	// The tool provider never releases during this window: the request must
+	// still reach the live subscriber. Earlier turn events are expected; the
+	// assertion is that tool.requested arrives before the release.
+	deadline := time.After(2 * time.Second)
+	sawToolRequested := false
+	for !sawToolRequested {
+		select {
+		case kind := <-kinds:
+			if kind == EventKindToolRequested {
+				sawToolRequested = true
+			}
+		case <-deadline:
+			t.Fatal("tool request did not stream while the provider was running")
+		}
+	}
+
+	// Drain the remaining blocked work: release the provider and wait for a
+	// terminal event so the run goroutine exits.
+	close(block)
+	deadline = time.After(2 * time.Second)
+	for {
+		select {
+		case kind := <-kinds:
+			if kind == EventKindTurnCompleted || kind == EventKindTurnFailed {
+				if err := <-runDone; err != nil {
+					t.Fatalf("run: %v", err)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("turn did not finish after the provider was released")
+		}
 	}
 }
