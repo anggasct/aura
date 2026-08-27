@@ -21,6 +21,7 @@ const (
 	// maxProgressLines bounds the tool/approval progress tail per frame.
 	maxProgressLines = 8
 	defaultRenderHz  = 20
+	maxRenderHz      = int(time.Second / time.Nanosecond)
 )
 
 // TTYOptions configures the interactive presentation renderer.
@@ -65,6 +66,9 @@ func NewTTYRenderer(opt TTYOptions) *TTYRenderer {
 	if hz <= 0 {
 		hz = defaultRenderHz
 	}
+	if hz > maxRenderHz {
+		hz = maxRenderHz
+	}
 	return &TTYRenderer{
 		opt: opt,
 		hz:  time.Second / time.Duration(hz),
@@ -100,38 +104,89 @@ func (r *TTYRenderer) Observe(ev Event) {
 		r.finalSet = true
 		r.final = limitText(string(decodeDelta(ev.Payload)))
 	case "adk_event":
+		if len(ev.Payload) == 0 || len(ev.Payload) > 4*maxRenderBytes {
+			return
+		}
 		var adk struct {
 			Content *struct {
 				Role  string `json:"role"`
 				Parts []struct {
-					Text *string `json:"text"`
+					Text         *string `json:"text"`
+					FunctionCall *struct {
+						Name string `json:"name"`
+					} `json:"functionCall"`
+					FunctionResponse *struct {
+						Name string `json:"name"`
+					} `json:"functionResponse"`
 				} `json:"parts"`
 			} `json:"content"`
-			Partial bool `json:"partial"`
+			Actions *struct {
+				TransferToAgent string `json:"transferToAgent"`
+				Escalate        bool   `json:"escalate"`
+			} `json:"actions"`
+			LongRunningToolIDs []string `json:"longRunningToolIds"`
+			Partial            bool     `json:"partial"`
 		}
-		if err := json.Unmarshal(ev.Payload, &adk); err != nil || adk.Content == nil || adk.Content.Role == "user" {
+		if err := json.Unmarshal(ev.Payload, &adk); err != nil {
 			return
 		}
 		var hasText bool
-		for _, part := range adk.Content.Parts {
-			if part.Text != nil {
-				hasText = true
-				break
+		if adk.Content != nil {
+			for _, part := range adk.Content.Parts {
+				if part.FunctionCall != nil && part.FunctionCall.Name != "" {
+					r.appendProgress("tool requested: " + part.FunctionCall.Name)
+				}
+				if part.FunctionResponse != nil && part.FunctionResponse.Name != "" {
+					r.appendProgress("tool completed: " + part.FunctionResponse.Name)
+				}
+				if part.Text != nil && adk.Content.Role != "user" {
+					hasText = true
+				}
 			}
 		}
+		if adk.Actions != nil {
+			if adk.Actions.TransferToAgent != "" {
+				r.appendProgress("agent transfer requested: " + adk.Actions.TransferToAgent)
+			}
+			if adk.Actions.Escalate {
+				r.appendProgress("agent escalation requested")
+			}
+		}
+		if len(adk.LongRunningToolIDs) > 0 {
+			r.appendProgress("long-running tool active")
+		}
 		if !hasText {
+			r.dirty = true
 			return
 		}
-		text := string(decodeDelta(ev.Payload))
+		var text strings.Builder
+		if adk.Content != nil {
+			for _, part := range adk.Content.Parts {
+				if part.Text != nil && adk.Content.Role != "user" {
+					text.WriteString(*part.Text)
+				}
+			}
+		}
 		if adk.Partial {
 			if !r.finalSet {
-				r.partial.WriteString(text)
+				r.partial.WriteString(text.String())
 				r.capLocked()
 			}
 		} else {
-			r.final = limitText(text)
+			r.final = limitText(text.String())
 			r.finalSet = true
 		}
+	case "tool.requested":
+		var request struct {
+			Operation string `json:"operation"`
+		}
+		if err := json.Unmarshal(ev.Payload, &request); err != nil {
+			return
+		}
+		if request.Operation == "" {
+			request.Operation = "unknown"
+		}
+		r.appendProgress("tool requested: " + request.Operation)
 	case "tool.started":
 		r.appendProgress("tool started: " + ev.Author)
 	case "tool.completed":

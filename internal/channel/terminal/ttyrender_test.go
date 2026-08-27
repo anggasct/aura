@@ -59,6 +59,55 @@ func TestTTYADKEventsRenderAssistantText(t *testing.T) {
 	}
 }
 
+func TestTTYADKEventsRenderToolAndActionProgress(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, func() int { return 80 }, false)
+	r.Begin()
+	r.Observe(Event{Kind: "adk_event", Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"functionCall":{"name":"search"}}]},"longRunningToolIds":["tool-1"]}`)})
+	r.Observe(Event{Kind: "adk_event", Payload: json.RawMessage(`{"actions":{"transferToAgent":"researcher","escalate":true}}`)})
+	r.Observe(Event{Kind: "tool.requested", Payload: json.RawMessage(`{"operation":"exec"}`)})
+	r.Observe(Event{Kind: "turn.completed"})
+	if err := r.Finalize(false, false); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	for _, want := range []string{"tool requested: search", "agent transfer requested: researcher", "agent escalation requested", "long-running tool active", "tool requested: exec"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output = %q, want %q", out.String(), want)
+		}
+	}
+}
+
+func TestTTYLargeRenderRateUsesValidTicker(t *testing.T) {
+	r := NewTTYRenderer(TTYOptions{Out: &bytes.Buffer{}, Hz: maxRenderHz + 1})
+	if r.hz <= 0 {
+		t.Fatalf("ticker interval = %v, want positive", r.hz)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := r.StartPump(ctx, nil)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pump did not stop")
+	}
+}
+
+func TestTTYOversizedADKPayloadIsIgnored(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, func() int { return 80 }, false)
+	r.Begin()
+	payload := []byte(`{"content":{"role":"model","parts":[{"text":"`)
+	payload = append(payload, bytes.Repeat([]byte{'x'}, 4*maxRenderBytes)...)
+	payload = append(payload, []byte(`"}]}}`)...)
+	r.Observe(Event{Kind: "adk_event", Payload: payload})
+	if err := r.Finalize(false, false); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if strings.Contains(out.String(), "xxxx") {
+		t.Errorf("output = %q, oversized ADK payload must be ignored", out.String())
+	}
+}
+
 func TestTTYPartialSurvivesWithoutCompletedMessage(t *testing.T) {
 	out := &bytes.Buffer{}
 	r := newTestTTY(out, func() int { return 80 }, false)
