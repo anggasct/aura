@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"iter"
 	"path/filepath"
 	"strings"
@@ -183,7 +184,7 @@ func TestTerminalReplayCompletedEventWins(t *testing.T) {
 		replayed = append(replayed, terminal.Event{Kind: stored[i].Kind, Author: stored[i].Author, Payload: stored[i].Payload})
 	}
 	out := &bytes.Buffer{}
-	renderer := terminal.NewTTYRenderer(terminal.TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500})
+	renderer := terminal.NewTTYRenderer(terminal.TTYOptions{Out: e2eWriteCloser{Writer: out}, Width: func() int { return 80 }, Hz: 500})
 	renderer.Begin()
 	for _, ev := range replayed {
 		renderer.Observe(ev)
@@ -198,3 +199,9 @@ func TestTerminalReplayCompletedEventWins(t *testing.T) {
 		t.Errorf("replayed output = %q, streamed partial must not win on replay", out.String())
 	}
 }
+
+type e2eWriteCloser struct {
+	io.Writer
+}
+
+func (e2eWriteCloser) Close() error { return nil }

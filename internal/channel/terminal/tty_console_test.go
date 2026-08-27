@@ -24,7 +24,7 @@ func newTTYConsole(runner Runner, sess *fakeSessions, in string, width int) (con
 		SecondInterruptTime: 2 * time.Second,
 	}, "owner")
 	console.SetTTY(NewTTYRenderer(TTYOptions{
-		Out:     out,
+		Out:     testWriteCloser{Writer: out},
 		Width:   func() int { return width },
 		Hz:      500,
 		Styling: false,
@@ -199,7 +199,7 @@ func TestEditorCommandContextCancels(t *testing.T) {
 		t.Skip("sh unavailable")
 	}
 	r := NewTTYRenderer(TTYOptions{
-		Out:     &bytes.Buffer{},
+		Out:     testWriteCloser{Writer: &bytes.Buffer{}},
 		Width:   func() int { return 80 },
 		Stdin:   os.Stdin,
 		Stdout:  os.Stdout,
@@ -240,7 +240,7 @@ func TestTTYClosedOutputCancelsProducer(t *testing.T) {
 		MaxInputBytes:       100,
 		SecondInterruptTime: time.Second,
 	}, "owner")
-	console.SetTTY(NewTTYRenderer(TTYOptions{Out: failingWriter{}, Width: func() int { return 80 }, Hz: 500}))
+	console.SetTTY(NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: failingWriter{}}, Width: func() int { return 80 }, Hz: 500}))
 	done := make(chan error, 1)
 	go func() { done <- console.Run(context.Background()) }()
 	select {
@@ -339,7 +339,7 @@ func TestEditorGetsExclusiveStdin(t *testing.T) {
 		MaxInputBytes:       1000,
 		SecondInterruptTime: 2 * time.Second,
 	}, "owner")
-	console.SetTTY(NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500, Stdin: os.Stdin, Stdout: os.Stdout}))
+	console.SetTTY(NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: out}, Width: func() int { return 80 }, Hz: 500, Stdin: os.Stdin, Stdout: os.Stdout}))
 	done := make(chan error, 1)
 	go func() { done <- console.Run(context.Background()) }()
 	if _, err := pw.Write([]byte(".\n")); err != nil {
@@ -361,4 +361,25 @@ func TestEditorGetsExclusiveStdin(t *testing.T) {
 	if len(runner.calls) < 2 || runner.calls[1].Parts[0].Text != "during-editor" {
 		t.Errorf("calls = %d, want the during-editor line consumed after resume", len(runner.calls))
 	}
+}
+
+func TestReadLinesDoesNotPrefetchWhilePaused(t *testing.T) {
+	r := strings.NewReader("first\nsecond\n")
+	lines, pause, resume, stop := readLines(context.Background(), r, 1000, nil)
+	defer stop()
+	result := <-lines
+	if result.err != nil || result.line != "first" {
+		t.Fatalf("result = %+v, want first line", result)
+	}
+	pause()
+	close(result.ack)
+	if remaining := r.Len(); remaining != len("second\n") {
+		t.Fatalf("reader has %d bytes remaining while paused, want %d", remaining, len("second\n"))
+	}
+	resume()
+	result = <-lines
+	if result.err != nil || result.line != "second" {
+		t.Fatalf("result = %+v, want second line", result)
+	}
+	close(result.ack)
 }

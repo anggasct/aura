@@ -93,14 +93,17 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 			// Batch streams carry the normalized projection; standalone
 			// renderer use may still see the raw provider shape.
 			var norm struct {
-				Text     string `json:"text"`
-				Role     string `json:"role"`
-				Partial  bool   `json:"partial"`
-				Empty    bool   `json:"empty"`
-				Transfer string `json:"transfer"`
-				Escalate bool   `json:"escalate"`
+				Text          string   `json:"text"`
+				Role          string   `json:"role"`
+				Partial       bool     `json:"partial"`
+				Empty         bool     `json:"empty"`
+				ToolCalls     []string `json:"toolCalls"`
+				ToolResponses []string `json:"toolResponses"`
+				LongRunning   int      `json:"longRunning"`
+				Transfer      string   `json:"transfer"`
+				Escalate      bool     `json:"escalate"`
 			}
-			if err := json.Unmarshal(ev.Payload, &norm); err == nil && (norm.Text != "" || norm.Role != "" || norm.Empty || norm.Transfer != "" || norm.Escalate) {
+			if err := json.Unmarshal(ev.Payload, &norm); err == nil && (norm.Text != "" || norm.Role != "" || norm.Empty || len(norm.ToolCalls) > 0 || len(norm.ToolResponses) > 0 || norm.LongRunning > 0 || norm.Transfer != "" || norm.Escalate) {
 				if norm.Text != "" {
 					if norm.Partial {
 						if !finalSet {
@@ -120,6 +123,15 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 				if norm.Empty && !norm.Partial {
 					buf = nil
 					finalSet = true
+				}
+				for _, name := range norm.ToolCalls {
+					diagnostics = appendDiagnostic(diagnostics, "tool requested: "+name)
+				}
+				for _, name := range norm.ToolResponses {
+					diagnostics = appendDiagnostic(diagnostics, "tool completed: "+name)
+				}
+				if norm.LongRunning > 0 {
+					diagnostics = appendDiagnostic(diagnostics, "long-running tool active")
 				}
 				continue
 			}

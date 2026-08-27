@@ -24,8 +24,14 @@ func ttPayload(t *testing.T, text string) json.RawMessage {
 }
 
 func newTestTTY(out io.Writer, width func() int, styling bool) *TTYRenderer {
-	return NewTTYRenderer(TTYOptions{Out: out, Width: width, Hz: 500, Styling: styling})
+	return NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: out}, Width: width, Hz: 500, Styling: styling})
 }
+
+type testWriteCloser struct {
+	io.Writer
+}
+
+func (testWriteCloser) Close() error { return nil }
 
 func TestTTYCompletedEventWinsOverPartials(t *testing.T) {
 	out := &bytes.Buffer{}
@@ -79,7 +85,7 @@ func TestTTYADKEventsRenderToolAndActionProgress(t *testing.T) {
 }
 
 func TestTTYLargeRenderRateUsesValidTicker(t *testing.T) {
-	r := NewTTYRenderer(TTYOptions{Out: &bytes.Buffer{}, Hz: maxRenderHz + 1})
+	r := NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: &bytes.Buffer{}}, Hz: maxRenderHz + 1})
 	if r.hz <= 0 {
 		t.Fatalf("ticker interval = %v, want positive", r.hz)
 	}
@@ -200,7 +206,7 @@ func TestTTYSanitizesUntrustedStream(t *testing.T) {
 
 func TestTTYCoalescesFrames(t *testing.T) {
 	out := &countingWriter{}
-	r := NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 1000})
+	r := NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: out}, Width: func() int { return 80 }, Hz: 1000})
 	r.Begin()
 	pumpCtx, stop := context.WithCancel(context.Background())
 	done := r.StartPump(pumpCtx, nil)
@@ -243,7 +249,7 @@ func TestTTYSlowWriterStaysBoundedAndCancellable(t *testing.T) {
 	// The first paint blocks in the writer; cancellation must stop the pump
 	// without piling on more frames.
 	stop()
-	close(release)
+	_ = out.Close()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -253,11 +259,17 @@ func TestTTYSlowWriterStaysBoundedAndCancellable(t *testing.T) {
 
 type blockingWriter struct {
 	release chan struct{}
+	once    sync.Once
 }
 
 func (w *blockingWriter) Write(p []byte) (int, error) {
 	<-w.release
 	return len(p), nil
+}
+
+func (w *blockingWriter) Close() error {
+	w.once.Do(func() { close(w.release) })
+	return nil
 }
 
 func TestTTYClosedOutputSurfacesError(t *testing.T) {
@@ -412,4 +424,23 @@ func TestStalledWriterClosesAndTerminatesPump(t *testing.T) {
 		t.Fatal("stalled writer was not closed")
 	}
 	stop()
+}
+
+func TestTTYNoColorEmitsProgressAfterTailRollsOver(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, nil, false)
+	r.Begin()
+	for range maxProgressLines {
+		r.Observe(Event{Kind: "tool.started", Author: "old"})
+	}
+	if err := r.Paint(); err != nil {
+		t.Fatalf("first paint: %v", err)
+	}
+	r.Observe(Event{Kind: "tool.started", Author: "latest"})
+	if err := r.Paint(); err != nil {
+		t.Fatalf("second paint: %v", err)
+	}
+	if !strings.Contains(out.String(), "tool started: latest") {
+		t.Fatalf("output = %q, want latest progress", out.String())
+	}
 }

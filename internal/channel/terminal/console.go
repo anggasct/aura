@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -429,6 +428,17 @@ func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event,
 			break
 		}
 		normalized := map[string]any{"partial": adk.Partial}
+		var toolCalls, toolResponses []string
+		if adk.Content != nil {
+			for _, part := range adk.Content.Parts {
+				if part.FunctionCall != nil && part.FunctionCall.Name != "" {
+					toolCalls = append(toolCalls, limitText(sanitizeText(part.FunctionCall.Name)))
+				}
+				if part.FunctionResponse != nil && part.FunctionResponse.Name != "" {
+					toolResponses = append(toolResponses, limitText(sanitizeText(part.FunctionResponse.Name)))
+				}
+			}
+		}
 		if text, present, emptyAssistant := adkText(adk); present {
 			normalized["text"] = limitText(sanitizeText(string(text)))
 		} else if adk.Content != nil && adk.Content.Role == "user" {
@@ -447,6 +457,12 @@ func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event,
 		if len(adk.LongRunningToolIDs) > 0 {
 			normalized["longRunning"] = len(adk.LongRunningToolIDs)
 		}
+		if len(toolCalls) > 0 {
+			normalized["toolCalls"] = toolCalls
+		}
+		if len(toolResponses) > 0 {
+			normalized["toolResponses"] = toolResponses
+		}
 		if payload, err := json.Marshal(normalized); err == nil {
 			ev.Payload = payload
 		} else {
@@ -455,7 +471,6 @@ func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event,
 	default:
 		ev.Payload = nil
 	}
-	_ = retained
 	if ev.Kind == "model.delta" {
 		for i := len(stream) - 1; i >= 0; i-- {
 			if stream[i].Kind == "message.completed" {
@@ -472,6 +487,7 @@ func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event,
 					stream[i].Payload = payload
 					retained += len(payload) - before
 				}
+				stream, retained = trimBatchStream(stream, retained)
 				return stream, retained
 			}
 		}
@@ -487,7 +503,15 @@ func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event,
 		}
 		stream = kept
 	}
-	for len(stream) >= maxBufferedEvents || retained+len(ev.Payload) > maxBatchStreamBytes {
+	stream, retained = trimBatchStream(stream, retained)
+	if retained+len(ev.Payload) > maxBatchStreamBytes {
+		ev.Payload = nil
+	}
+	return append(stream, ev), retained + len(ev.Payload)
+}
+
+func trimBatchStream(stream []Event, retained int) (updated []Event, total int) {
+	for len(stream) > 0 && (len(stream) >= maxBufferedEvents || retained > maxBatchStreamBytes) {
 		drop := 0
 		for i, existing := range stream {
 			if existing.Kind != "model.delta" && existing.Kind != "message.completed" {
@@ -498,13 +522,8 @@ func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event,
 		retained -= len(stream[drop].Payload)
 		copy(stream[drop:], stream[drop+1:])
 		stream = stream[:len(stream)-1]
-		if len(stream) == 0 && retained+len(ev.Payload) > maxBatchStreamBytes {
-			ev.Payload = nil
-			break
-		}
 	}
-	retained += len(ev.Payload)
-	return append(stream, ev), retained
+	return stream, retained
 }
 
 // readLines reads newline-delimited prompts until EOF. pause stops reading
@@ -520,7 +539,6 @@ func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()
 	go func() {
 		defer close(done)
 		defer close(out)
-		br := bufio.NewReaderSize(r, 4096)
 		for {
 			gateMu.Lock()
 			g := gate
@@ -537,7 +555,7 @@ func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()
 				return
 			default:
 			}
-			line, eof, err := readBoundedLine(br, maxBytes)
+			line, eof, err := readBoundedLine(r, maxBytes)
 			switch {
 			case err != nil:
 				if !sendLineResult(readCtx, out, readLineResult{err: err}) {
@@ -586,36 +604,35 @@ func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()
 	return out, pause, resume, stop
 }
 
-func readBoundedLine(br *bufio.Reader, maxBytes int) (lineText string, eof bool, err error) {
+func readBoundedLine(r io.Reader, maxBytes int) (lineText string, eof bool, err error) {
 	if maxBytes <= 0 {
 		return "", false, errors.New("terminal: input line exceeds the configured maximum")
 	}
 	var line []byte
+	var one [1]byte
 	for {
-		part, err := br.ReadSlice('\n')
-		contentLen := len(line) + len(part)
-		if newline := bytes.IndexByte(part, '\n'); newline >= 0 {
-			contentLen = len(line) + newline
+		n, readErr := r.Read(one[:])
+		if n > 0 {
+			if one[0] == '\n' {
+				line = bytes.TrimSuffix(line, []byte{'\r'})
+				return string(line), false, nil
+			}
+			line = append(line, one[0])
+			if len(line) > maxBytes {
+				return "", false, errors.New("terminal: input line exceeds the configured maximum")
+			}
 		}
-		if contentLen > maxBytes {
-			return "", false, errors.New("terminal: input line exceeds the configured maximum")
-		}
-		line = append(line, part...)
 		switch {
-		case err == nil:
-			line = bytes.TrimSuffix(line, []byte{'\n'})
-			line = bytes.TrimSuffix(line, []byte{'\r'})
-			return string(line), false, nil
-		case errors.Is(err, bufio.ErrBufferFull):
+		case readErr == nil:
 			continue
-		case errors.Is(err, io.EOF):
+		case errors.Is(readErr, io.EOF):
 			if len(line) == 0 {
 				return "", true, nil
 			}
 			line = bytes.TrimSuffix(line, []byte{'\r'})
 			return string(line), true, nil
 		default:
-			return "", false, err
+			return "", false, readErr
 		}
 	}
 }

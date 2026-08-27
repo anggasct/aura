@@ -178,6 +178,7 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 	if err != nil {
 		return err
 	}
+	executor.SetEventPublisher(engine)
 	principal, err := localPrincipal()
 	if err != nil {
 		return err
@@ -201,7 +202,7 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 			if shouldUseTTY(present, terminal.IsTerminal(int(inFile.Fd())), terminal.IsTerminal(int(outFile.Fd()))) {
 				outFD := int(outFile.Fd())
 				console.SetTTY(terminal.NewTTYRenderer(terminal.TTYOptions{
-					Out:     out,
+					Out:     outFile,
 					Width:   func() int { w, _ := terminal.TerminalSize(outFD); return w },
 					Hz:      cfg.Terminal.RenderHz,
 					Styling: !present.noColor,

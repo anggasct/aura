@@ -26,7 +26,7 @@ const (
 
 // TTYOptions configures the interactive presentation renderer.
 type TTYOptions struct {
-	Out     io.Writer
+	Out     io.WriteCloser
 	Width   func() int // probe per paint; zero or nil means unknown
 	Hz      int        // paint frequency; zero selects the default
 	Styling bool       // false (NO_COLOR) disables all escape sequences
@@ -182,6 +182,9 @@ func (r *TTYRenderer) appendProgress(line string) {
 	r.progress = append(r.progress, limitText(sanitizeText(line)))
 	if len(r.progress) > maxProgressLines {
 		r.progress = r.progress[len(r.progress)-maxProgressLines:]
+		if r.progressEmitted > 0 {
+			r.progressEmitted--
+		}
 	}
 }
 
@@ -251,11 +254,11 @@ func (r *TTYRenderer) setErr(err error) {
 }
 
 func (r *TTYRenderer) closeOutput() bool {
-	if closer, ok := r.opt.Out.(io.Closer); ok {
-		_ = closer.Close()
-		return true
+	if r.opt.Out == nil {
+		return false
 	}
-	return false
+	_ = r.opt.Out.Close()
+	return true
 }
 
 // Paint writes one frame when state changed since the last paint. It is
