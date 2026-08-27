@@ -88,6 +88,44 @@ func TestTTYCancelledTurnReplacesPartials(t *testing.T) {
 	}
 }
 
+func TestTTYCancelledActiveTurnFinalizesAfterContextCancellation(t *testing.T) {
+	runner := &cancellationTTYRunner{started: make(chan struct{}), cancelled: make(chan struct{})}
+	pr, pw := io.Pipe()
+	console, out, _, cancel := newConsolePipeTest(runner, newFakeSessions(), pr)
+	defer cancel()
+	defer func() { _ = pw.Close() }()
+	console.SetTTY(NewTTYRenderer(TTYOptions{
+		Out:     testWriteCloser{Writer: out},
+		Width:   func() int { return 80 },
+		Hz:      500,
+		Styling: false,
+	}))
+	interrupts := make(chan struct{}, 1)
+	console.SetInterrupts(interrupts)
+
+	done := make(chan error, 1)
+	go func() { done <- console.Run(context.Background()) }()
+	if _, err := pw.Write([]byte("cancel\n")); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(time.Second):
+		t.Fatal("turn did not start")
+	}
+	interrupts <- struct{}{}
+	<-runner.cancelled
+	if err := pw.Close(); err != nil {
+		t.Fatalf("close input: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "turn cancelled") {
+		t.Errorf("output = %q, want cancellation frame", got)
+	}
+}
+
 func TestPlainPeriodIsAnOrdinaryPrompt(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event {
 		return []Event{{Kind: "turn.completed"}}

@@ -26,10 +26,24 @@ type cancellationWithoutTerminalRunner struct {
 	started chan struct{}
 }
 
+type cancellationTTYRunner struct {
+	started   chan struct{}
+	cancelled chan struct{}
+}
+
 func (r *cancellationWithoutTerminalRunner) Run(ctx context.Context, _ *Request) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		close(r.started)
 		<-ctx.Done()
+	}
+}
+
+func (r *cancellationTTYRunner) Run(ctx context.Context, _ *Request) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		close(r.started)
+		<-ctx.Done()
+		close(r.cancelled)
+		yield(Event{Kind: "turn.cancelled"}, nil)
 	}
 }
 
