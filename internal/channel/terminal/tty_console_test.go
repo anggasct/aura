@@ -3,10 +3,12 @@ package terminal
 import (
 	"bytes"
 	"context"
+	"iter"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -68,6 +70,20 @@ func TestTTYFailedTurnReportsFailure(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "partial") {
 		t.Errorf("output = %q, partial must not survive a failed turn", out.String())
+	}
+}
+
+func TestTTYCancelledTurnReplacesPartials(t *testing.T) {
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return []Event{{Kind: "model.delta", Payload: delta("partial")}, {Kind: "turn.cancelled"}}
+	}}
+	console, out, _, cleanup := newTTYConsole(runner, newFakeSessions(), "x\n", 80)
+	defer cleanup()
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(out.String(), "partial") || !strings.Contains(out.String(), "turn cancelled") {
+		t.Errorf("output = %q, want cancellation without partial", out.String())
 	}
 }
 
@@ -201,5 +217,42 @@ func TestEditorCommandContextCancels(t *testing.T) {
 	_, _, err := r.Compose(ctx, 1024)
 	if err == nil {
 		t.Fatal("cancelled editor compose must fail")
+	}
+}
+
+type blockingTTYRunner struct {
+	cancelled chan struct{}
+	once      sync.Once
+}
+
+func (r *blockingTTYRunner) Run(ctx context.Context, _ *Request) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		yield(Event{Kind: "model.delta", Payload: delta("partial")}, nil)
+		<-ctx.Done()
+		r.once.Do(func() { close(r.cancelled) })
+	}
+}
+
+func TestTTYClosedOutputCancelsProducer(t *testing.T) {
+	runner := &blockingTTYRunner{cancelled: make(chan struct{})}
+	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, bytes.NewBufferString("x\n"), failingWriter{}, &bytes.Buffer{}, Config{
+		MaxInputBytes:       100,
+		SecondInterruptTime: time.Second,
+	}, "owner")
+	console.SetTTY(NewTTYRenderer(TTYOptions{Out: failingWriter{}, Width: func() int { return 80 }, Hz: 500}))
+	done := make(chan error, 1)
+	go func() { done <- console.Run(context.Background()) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Run returned nil for closed output")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after closed output")
+	}
+	select {
+	case <-runner.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("runner was not cancelled after closed output")
 	}
 }

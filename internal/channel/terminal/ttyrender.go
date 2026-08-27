@@ -3,6 +3,7 @@ package terminal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -48,6 +49,7 @@ type TTYRenderer struct {
 	mu          sync.Mutex
 	partial     bytes.Buffer
 	final       string
+	finalSet    bool
 	progress    []string
 	terminalHit bool
 	dirty       bool
@@ -75,6 +77,7 @@ func (r *TTYRenderer) Begin() {
 	defer r.mu.Unlock()
 	r.partial.Reset()
 	r.final = ""
+	r.finalSet = false
 	r.progress = nil
 	r.terminalHit = false
 	r.dirty = false
@@ -89,16 +92,45 @@ func (r *TTYRenderer) Observe(ev Event) {
 	defer r.mu.Unlock()
 	switch ev.Kind {
 	case "model.delta":
-		if r.final == "" {
+		if !r.finalSet {
 			r.partial.Write(decodeDelta(ev.Payload))
 			r.capLocked()
 		}
 	case "message.completed":
-		if text := string(decodeDelta(ev.Payload)); text != "" {
-			r.final = text
-			if len(r.final) > maxRenderBytes {
-				r.final = limitText(r.final)
+		r.finalSet = true
+		r.final = limitText(string(decodeDelta(ev.Payload)))
+	case "adk_event":
+		var adk struct {
+			Content *struct {
+				Role  string `json:"role"`
+				Parts []struct {
+					Text *string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+			Partial bool `json:"partial"`
+		}
+		if err := json.Unmarshal(ev.Payload, &adk); err != nil || adk.Content == nil || adk.Content.Role == "user" {
+			return
+		}
+		var hasText bool
+		for _, part := range adk.Content.Parts {
+			if part.Text != nil {
+				hasText = true
+				break
 			}
+		}
+		if !hasText {
+			return
+		}
+		text := string(decodeDelta(ev.Payload))
+		if adk.Partial {
+			if !r.finalSet {
+				r.partial.WriteString(text)
+				r.capLocked()
+			}
+		} else {
+			r.final = limitText(text)
+			r.finalSet = true
 		}
 	case "tool.started":
 		r.appendProgress("tool started: " + ev.Author)
@@ -132,7 +164,7 @@ func (r *TTYRenderer) capLocked() {
 // StartPump runs the paint loop until ctx is cancelled. Paints coalesce: a
 // slow consumer naturally skips ticks because the loop is single-threaded,
 // and a clean frame state means no write at all.
-func (r *TTYRenderer) StartPump(ctx context.Context) <-chan struct{} {
+func (r *TTYRenderer) StartPump(ctx context.Context, onError func(error)) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -145,6 +177,9 @@ func (r *TTYRenderer) StartPump(ctx context.Context) <-chan struct{} {
 			case <-ticker.C:
 				if err := r.Paint(); err != nil {
 					r.setErr(err)
+					if onError != nil {
+						onError(err)
+					}
 					return
 				}
 			}
@@ -181,7 +216,7 @@ func (r *TTYRenderer) Paint() error {
 		r.mu.Unlock()
 		return nil
 	}
-	frame, lines := r.buildFrame(false)
+	frame, lines := r.buildFrame(false, false)
 	r.dirty = false
 	r.mu.Unlock()
 	return r.writeFrame(frame, lines)
@@ -190,16 +225,16 @@ func (r *TTYRenderer) Paint() error {
 // Finalize paints the terminal frame with the authoritative text: the
 // completed durable message when present, otherwise the streamed partial,
 // and a failure marker replaces partial text for failed turns.
-func (r *TTYRenderer) Finalize(failed bool) error {
+func (r *TTYRenderer) Finalize(failed, cancelled bool) error {
 	r.mu.Lock()
-	frame, lines := r.buildFrame(failed)
+	frame, lines := r.buildFrame(failed, cancelled)
 	r.mu.Unlock()
 	return r.writeFrame(frame, lines)
 }
 
 // buildFrame composes the frame under lock. failed turns discard partial
 // text: the durable log owns what happened, the display shows the outcome.
-func (r *TTYRenderer) buildFrame(failed bool) (frame string, lines int) {
+func (r *TTYRenderer) buildFrame(failed, cancelled bool) (frame string, lines int) {
 	width := 0
 	if r.opt.Width != nil {
 		width = r.opt.Width()
@@ -211,7 +246,9 @@ func (r *TTYRenderer) buildFrame(failed bool) (frame string, lines int) {
 	switch {
 	case failed:
 		body = "turn failed"
-	case r.final != "":
+	case cancelled:
+		body = "turn cancelled"
+	case r.finalSet:
 		body = r.final
 	default:
 		body = r.partial.String()
@@ -226,6 +263,7 @@ func (r *TTYRenderer) buildFrame(failed bool) (frame string, lines int) {
 	}
 	for _, p := range progress {
 		writeStyled(&b, r.opt.Styling, dim, p)
+		lines++
 	}
 	for _, line := range physical {
 		writeStyled(&b, r.opt.Styling, bold, line.text)
@@ -325,9 +363,17 @@ func (r *TTYRenderer) Compose(ctx context.Context, maxBytes int) (text string, o
 	if err := cmd.Run(); err != nil {
 		return "", false, fmt.Errorf("terminal: editor: %w", err)
 	}
-	draft, err := os.ReadFile(tmp.Name())
+	draftFile, err := os.Open(tmp.Name())
 	if err != nil {
 		return "", false, fmt.Errorf("terminal: read draft: %w", err)
+	}
+	draft, err := io.ReadAll(io.LimitReader(draftFile, int64(maxBytes)+1))
+	closeErr := draftFile.Close()
+	if err != nil {
+		return "", false, fmt.Errorf("terminal: read draft: %w", err)
+	}
+	if closeErr != nil {
+		return "", false, fmt.Errorf("terminal: close draft: %w", closeErr)
 	}
 	if len(draft) > maxBytes {
 		return "", false, errors.New("terminal: multiline input exceeds the configured maximum")

@@ -188,7 +188,7 @@ func TestTerminalReplayCompletedEventWins(t *testing.T) {
 	for _, ev := range replayed {
 		renderer.Observe(ev)
 	}
-	if err := renderer.Finalize(false); err != nil {
+	if err := renderer.Finalize(false, false); err != nil {
 		t.Fatalf("finalize replay: %v", err)
 	}
 	if !strings.Contains(out.String(), "durable answer") {

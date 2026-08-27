@@ -222,10 +222,12 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 // final frame carries the authoritative completed message.
 func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, cancelled *bool) error {
 	c.tty.Begin()
-	pumpCtx, stopPump := context.WithCancel(turnCtx)
-	pumpDone := c.tty.StartPump(pumpCtx)
+	producerCtx, cancelProducer := context.WithCancel(turnCtx)
+	defer cancelProducer()
+	pumpCtx, stopPump := context.WithCancel(producerCtx)
+	pumpDone := c.tty.StartPump(pumpCtx, func(error) { cancelProducer() })
 	var streamErr error
-	for ev, err := range c.runner.Run(turnCtx, req) {
+	for ev, err := range c.runner.Run(producerCtx, req) {
 		if err != nil {
 			streamErr = err
 			break
@@ -247,7 +249,7 @@ func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, canc
 			return err
 		}
 	}
-	if err := c.tty.Finalize(*failed); err != nil {
+	if err := c.tty.Finalize(*failed, *cancelled); err != nil {
 		return err
 	}
 	return streamErr

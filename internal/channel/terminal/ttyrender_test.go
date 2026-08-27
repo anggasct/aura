@@ -34,7 +34,7 @@ func TestTTYCompletedEventWinsOverPartials(t *testing.T) {
 	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "lo")})
 	r.Observe(Event{Kind: "message.completed", Payload: ttPayload(t, "goodbye")})
 	r.Observe(Event{Kind: "turn.completed"})
-	if err := r.Finalize(false); err != nil {
+	if err := r.Finalize(false, false); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	if !strings.Contains(out.String(), "goodbye") {
@@ -45,13 +45,27 @@ func TestTTYCompletedEventWinsOverPartials(t *testing.T) {
 	}
 }
 
+func TestTTYADKEventsRenderAssistantText(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, func() int { return 80 }, false)
+	r.Begin()
+	r.Observe(Event{Kind: "adk_event", Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"assistant answer"}]},"partial":false}`)})
+	r.Observe(Event{Kind: "turn.completed"})
+	if err := r.Finalize(false, false); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if !strings.Contains(out.String(), "assistant answer") {
+		t.Errorf("output = %q, want assistant text", out.String())
+	}
+}
+
 func TestTTYPartialSurvivesWithoutCompletedMessage(t *testing.T) {
 	out := &bytes.Buffer{}
 	r := newTestTTY(out, func() int { return 80 }, false)
 	r.Begin()
 	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "partial answer")})
 	r.Observe(Event{Kind: "turn.completed"})
-	if err := r.Finalize(false); err != nil {
+	if err := r.Finalize(false, false); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	if !strings.Contains(out.String(), "partial answer") {
@@ -65,7 +79,7 @@ func TestTTYFailureFrameReplacesPartials(t *testing.T) {
 	r.Begin()
 	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "partial")})
 	r.Observe(Event{Kind: "turn.failed"})
-	if err := r.Finalize(true); err != nil {
+	if err := r.Finalize(true, false); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	if !strings.Contains(out.String(), "turn failed") {
@@ -76,6 +90,39 @@ func TestTTYFailureFrameReplacesPartials(t *testing.T) {
 	}
 }
 
+func TestTTYEmptyCompletedEventReplacesPartials(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, func() int { return 80 }, false)
+	r.Begin()
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "partial")})
+	r.Observe(Event{Kind: "message.completed", Payload: ttPayload(t, "")})
+	r.Observe(Event{Kind: "turn.completed"})
+	if err := r.Finalize(false, false); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if strings.Contains(out.String(), "partial") {
+		t.Errorf("output = %q, empty completion must replace partial", out.String())
+	}
+}
+
+func TestTTYRepaintIncludesProgressLines(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, func() int { return 80 }, true)
+	r.Begin()
+	r.Observe(Event{Kind: "tool.started", Author: "tool"})
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "first")})
+	if err := r.Paint(); err != nil {
+		t.Fatalf("first Paint: %v", err)
+	}
+	r.Observe(Event{Kind: "tool.completed", Author: "tool"})
+	if err := r.Paint(); err != nil {
+		t.Fatalf("second Paint: %v", err)
+	}
+	if !strings.Contains(out.String(), "\x1b[2A\r\x1b[J") {
+		t.Errorf("output = %q, want repaint over progress and body lines", out.String())
+	}
+}
+
 func TestTTYSanitizesUntrustedStream(t *testing.T) {
 	out := &bytes.Buffer{}
 	r := newTestTTY(out, func() int { return 80 }, true)
@@ -83,7 +130,7 @@ func TestTTYSanitizesUntrustedStream(t *testing.T) {
 	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "x\x1b[31m red\x1b]8;;https://evil.test\a link\x1b]8;;\a\x00\xff end")})
 	r.Observe(Event{Kind: "tool.started", Author: "tool\x1b[2J"})
 	r.Observe(Event{Kind: "turn.completed"})
-	if err := r.Finalize(false); err != nil {
+	if err := r.Finalize(false, false); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	got := out.String()
@@ -106,7 +153,7 @@ func TestTTYCoalescesFrames(t *testing.T) {
 	r := NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 1000})
 	r.Begin()
 	pumpCtx, stop := context.WithCancel(context.Background())
-	done := r.StartPump(pumpCtx)
+	done := r.StartPump(pumpCtx, nil)
 	for range 500 {
 		r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "x")})
 		time.Sleep(50 * time.Microsecond)
@@ -140,7 +187,7 @@ func TestTTYSlowWriterStaysBoundedAndCancellable(t *testing.T) {
 	r := NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 1000})
 	r.Begin()
 	pumpCtx, stop := context.WithCancel(context.Background())
-	done := r.StartPump(pumpCtx)
+	done := r.StartPump(pumpCtx, nil)
 	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "data")})
 	time.Sleep(5 * time.Millisecond)
 	// The first paint blocks in the writer; cancellation must stop the pump
@@ -168,7 +215,7 @@ func TestTTYClosedOutputSurfacesError(t *testing.T) {
 	r := newTestTTY(out, nil, false)
 	r.Begin()
 	pumpCtx, stop := context.WithCancel(context.Background())
-	done := r.StartPump(pumpCtx)
+	done := r.StartPump(pumpCtx, nil)
 	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "data")})
 	<-done
 	if r.Err() == nil {
@@ -211,7 +258,7 @@ func TestTTYTinyWidthBoundsFrame(t *testing.T) {
 	r.Begin()
 	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, strings.Repeat("x", 100*maxDisplayLines))})
 	r.Observe(Event{Kind: "turn.completed"})
-	if err := r.Finalize(false); err != nil {
+	if err := r.Finalize(false, false); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	lines := strings.Count(out.String(), "\n")
@@ -225,7 +272,7 @@ func TestTTYNoColorOmitsStyling(t *testing.T) {
 	r := newTestTTY(out, func() int { return 80 }, false)
 	r.Begin()
 	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "answer")})
-	if err := r.Finalize(false); err != nil {
+	if err := r.Finalize(false, false); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	if strings.Contains(out.String(), "\x1b[") {
