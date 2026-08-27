@@ -149,6 +149,7 @@ type subscriber struct {
 	events chan store.RuntimeEvent
 	done   chan struct{}
 	once   sync.Once
+	mu     sync.Mutex
 }
 
 func newSubscriber() *subscriber {
@@ -162,6 +163,34 @@ func newSubscriber() *subscriber {
 // the turn continues to durable completion.
 func (s *subscriber) stop() {
 	s.once.Do(func() { close(s.done) })
+}
+
+func (s *subscriber) send(ev *store.RuntimeEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case s.events <- *ev:
+	case <-s.done:
+	}
+}
+
+func (s *subscriber) sendContext(ctx context.Context, ev *store.RuntimeEvent) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case s.events <- *ev:
+		return true
+	case <-s.done:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (s *subscriber) closeEvents() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	close(s.events)
 }
 
 var _ AgentRuntime = (*Engine)(nil)
@@ -525,16 +554,13 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	}
 
 	for sub := range t.subs {
-		close(sub.events)
+		sub.closeEvents()
 	}
 }
 
 func (e *Engine) broadcast(t *turn, ev *store.RuntimeEvent) {
 	for sub := range t.subs {
-		select {
-		case sub.events <- *ev:
-		case <-sub.done:
-		}
+		sub.send(ev)
 	}
 }
 
@@ -545,17 +571,18 @@ func (e *Engine) Publish(ev *store.RuntimeEvent) {
 		return
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	t := e.turns[ev.TurnID]
 	if t == nil || t.req.SessionID != ev.SessionID {
+		e.mu.Unlock()
 		return
 	}
+	subs := make([]*subscriber, 0, len(t.subs))
 	for sub := range t.subs {
-		select {
-		case sub.events <- *ev:
-		case <-sub.done:
-		default:
-		}
+		subs = append(subs, sub)
+	}
+	e.mu.Unlock()
+	for _, sub := range subs {
+		sub.send(ev)
 	}
 }
 
@@ -586,23 +613,18 @@ func (e *Engine) replay(ctx context.Context, turnID string, sub *subscriber) {
 	}
 	events, err := e.dedupe.ListTurnEvents(ctx, turnID)
 	if err != nil {
-		select {
-		case sub.events <- store.RuntimeEvent{Kind: EventKindTurnFailed, Payload: failedPayload(ErrorCodeRuntimeInternal, "failed to replay the original turn", err)}:
-		case <-sub.done:
-		}
+		sub.sendContext(ctx, &store.RuntimeEvent{Kind: EventKindTurnFailed, Payload: failedPayload(ErrorCodeRuntimeInternal, "failed to replay the original turn", err)})
 		return
 	}
 	for i := range events {
-		select {
-		case sub.events <- events[i]:
-		case <-sub.done:
+		if !sub.sendContext(ctx, &events[i]) {
 			return
 		}
 		if isTerminalKind(events[i].Kind) {
 			return
 		}
 	}
-	close(sub.events)
+	sub.closeEvents()
 }
 
 // Shutdown stops ingress, drains active turns within the grace period, then
@@ -690,7 +712,7 @@ func (e *Engine) terminateQueued(ctx context.Context, t *turn) {
 	e.broadcast(t, &t.accepted)
 	e.broadcast(t, terminal)
 	for sub := range t.subs {
-		close(sub.events)
+		sub.closeEvents()
 	}
 	e.mu.Lock()
 	delete(e.turns, t.turnID)

@@ -444,7 +444,7 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 
 	published := make(chan struct{})
 	go func() {
-		engine.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live"})
+		engine.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
 		close(published)
 	}()
 	cancelDone := make(chan struct{})
@@ -454,19 +454,37 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 	}()
 
 	select {
-	case <-published:
-	case <-time.After(time.Second):
-		t.Fatal("live event publish blocked on a full subscriber")
-	}
-	select {
 	case <-cancelDone:
 	case <-time.After(time.Second):
 		t.Fatal("control path blocked behind live event publish")
 	}
 	select {
 	case <-cancelled:
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("cancel path did not reach the live turn")
+	}
+
+	found := false
+	for range cap(sub.events) + 1 {
+		select {
+		case ev := <-sub.events:
+			if ev.Kind == "tool.requested" {
+				found = true
+			}
+		case <-time.After(time.Second):
+			t.Fatal("published lifecycle event was not delivered")
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Fatal("published lifecycle event was not delivered")
+	}
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("live event publisher did not finish after subscriber drained")
 	}
 }
 
