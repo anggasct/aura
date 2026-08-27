@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"iter"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -484,8 +485,8 @@ func TestRunDoesNotCloseCallerReader(t *testing.T) {
 
 func TestRenderStateIsBounded(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event {
-		events := make([]Event, 0, maxBufferedEvents*2)
-		for range maxBufferedEvents * 2 {
+		events := make([]Event, 0, maxBufferedEvents/4)
+		for range maxBufferedEvents / 4 {
 			events = append(events, Event{Kind: "tool.started", Author: "x"})
 		}
 		events = append(events, Event{Kind: "turn.completed"})
@@ -515,5 +516,42 @@ func TestOutputWriteFailureIsReturned(t *testing.T) {
 	}, "owner")
 	if err := console.Run(context.Background()); err == nil {
 		t.Fatal("expected output write error")
+	}
+}
+
+func TestBatchStreamByteBudgetBounded(t *testing.T) {
+	// Near-cap ADK payloads would previously retain up to 4 MiB each across
+	// 1024 events; the normalized projection plus the aggregate byte budget
+	// must keep the retained stream small regardless of payload size.
+	big := strings.Repeat("x", 64*1024)
+	events := make([]Event, 0, maxBufferedEvents/4)
+	for range maxBufferedEvents / 4 {
+		events = append(events, Event{Kind: "adk_event", Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"` + big + `"}]},"partial":true}`)})
+	}
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return append(events, Event{Kind: "turn.completed"})
+	}}
+	console, out, _, cleanup := newConsoleForTest(runner, newFakeSessions(), "prompt\n")
+	defer cleanup()
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Len() > 2*maxRenderBytes {
+		t.Errorf("output = %d bytes, want bounded below the stream input", out.Len())
+	}
+	var retained int
+	var stream []Event
+	for _, ev := range events {
+		stream, retained = appendRenderEvent(stream, ev, retained)
+	}
+	if retained > maxBatchStreamBytes {
+		t.Fatalf("retained = %d, want <= %d", retained, maxBatchStreamBytes)
+	}
+	var payloadBytes int
+	for _, ev := range stream {
+		payloadBytes += len(ev.Payload)
+	}
+	if payloadBytes > maxBatchStreamBytes {
+		t.Fatalf("retained payload bytes = %d, want <= %d", payloadBytes, maxBatchStreamBytes)
 	}
 }

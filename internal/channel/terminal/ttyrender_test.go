@@ -328,3 +328,75 @@ func TestTTYNoColorOmitsStyling(t *testing.T) {
 		t.Errorf("output = %q, styling disabled must emit no escapes", out.String())
 	}
 }
+
+func TestNoColorMultiPaintEmitsEachSegmentOnce(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, func() int { return 80 }, false)
+	r.Begin()
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "a")})
+	if err := r.Paint(); err != nil {
+		t.Fatalf("first paint: %v", err)
+	}
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "b")})
+	if err := r.Paint(); err != nil {
+		t.Fatalf("second paint: %v", err)
+	}
+	r.Observe(Event{Kind: "turn.completed"})
+	if err := r.Finalize(false, false); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if got := out.String(); got != "a\nb\n" {
+		t.Errorf("output = %q, want each assistant segment exactly once", got)
+	}
+}
+
+func TestNoColorCompletedWinsWithoutReplayingPartial(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, func() int { return 80 }, false)
+	r.Begin()
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "part")})
+	if err := r.Paint(); err != nil {
+		t.Fatalf("first paint: %v", err)
+	}
+	r.Observe(Event{Kind: "message.completed", Payload: ttPayload(t, "whole answer")})
+	if err := r.Finalize(false, false); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "whole answer") {
+		t.Errorf("output = %q, want completed text", got)
+	}
+	if strings.Count(got, "part") > 1 && strings.HasPrefix(got, "part") && !strings.HasPrefix(got, "whole") {
+		t.Errorf("output = %q, completed text must not replay emitted partial", got)
+	}
+}
+
+// neverReleaseWriter blocks forever once written to; it models a closed or
+// wedged output pipe that never unblocks.
+type neverReleaseWriter struct {
+	entered chan struct{}
+}
+
+func (w *neverReleaseWriter) Write(p []byte) (int, error) {
+	close(w.entered)
+	select {} // block forever; the pump must not wait on us
+}
+
+func TestStalledWriterTerminatesPumpWithoutUnblocking(t *testing.T) {
+	out := &neverReleaseWriter{entered: make(chan struct{})}
+	r := NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500})
+	r.Begin()
+	pumpCtx, stop := context.WithCancel(context.Background())
+	done := r.StartPump(pumpCtx, nil)
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "data")})
+	<-out.entered
+	select {
+	case <-done:
+		if r.Err() == nil {
+			t.Fatal("stalled paint must record an error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pump leaked: stalled writer did not terminate it")
+	}
+	stop()
+}

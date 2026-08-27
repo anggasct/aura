@@ -90,6 +90,34 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 			finalSet = true
 			buf = appendLimited(nil, decodeDelta(ev.Payload))
 		case "adk_event":
+			// Batch streams carry the normalized projection; standalone
+			// renderer use may still see the raw provider shape.
+			var norm struct {
+				Text     string `json:"text"`
+				Role     string `json:"role"`
+				Partial  bool   `json:"partial"`
+				Transfer string `json:"transfer"`
+				Escalate bool   `json:"escalate"`
+			}
+			if err := json.Unmarshal(ev.Payload, &norm); err == nil && (norm.Text != "" || norm.Role != "" || norm.Transfer != "" || norm.Escalate) {
+				if norm.Text != "" {
+					if norm.Partial {
+						if !finalSet {
+							buf = appendLimited(buf, []byte(norm.Text))
+						}
+					} else {
+						buf = appendLimited(nil, []byte(norm.Text))
+						finalSet = true
+					}
+				}
+				if norm.Transfer != "" {
+					diagnostics = appendDiagnostic(diagnostics, "agent transfer requested: "+norm.Transfer)
+				}
+				if norm.Escalate {
+					diagnostics = appendDiagnostic(diagnostics, "agent escalation requested")
+				}
+				continue
+			}
 			adk, ok := decodeADKEvent(ev.Payload)
 			if !ok {
 				continue

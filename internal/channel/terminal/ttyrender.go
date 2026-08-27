@@ -47,16 +47,19 @@ type TTYRenderer struct {
 
 	writeMu sync.Mutex // serializes frame writes
 
-	mu          sync.Mutex
-	partial     bytes.Buffer
-	final       string
-	finalSet    bool
-	progress    []string
-	terminalHit bool
-	dirty       bool
-	frameLines  int
-	painted     bool
-	err         error
+	mu              sync.Mutex
+	partial         bytes.Buffer
+	final           string
+	finalSet        bool
+	progress        []string
+	terminalHit     bool
+	dirty           bool
+	frameLines      int
+	painted         bool
+	emitted         int
+	emittedPrefix   string
+	progressEmitted int
+	err             error
 }
 
 // NewTTYRenderer builds the interactive renderer. A nil Width probe or a
@@ -87,6 +90,9 @@ func (r *TTYRenderer) Begin() {
 	r.dirty = false
 	r.frameLines = 0
 	r.painted = false
+	r.emitted = 0
+	r.emittedPrefix = ""
+	r.progressEmitted = 0
 }
 
 // Observe folds one runtime event into render state; it never blocks the
@@ -201,7 +207,23 @@ func (r *TTYRenderer) StartPump(ctx context.Context, onError func(error)) <-chan
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := r.Paint(); err != nil {
+				written := make(chan error, 1)
+				go func() { written <- r.Paint() }()
+				select {
+				case err := <-written:
+					if err != nil {
+						r.setErr(err)
+						if onError != nil {
+							onError(err)
+						}
+						return
+					}
+				case <-time.After(2 * r.hz):
+					// The writer stalled mid-frame. Declare the output
+					// closed, abandon the frame, and stop the pump; the
+					// abandoned write finishes on its own whenever the
+					// writer unblocks and cannot re-enter render state.
+					err := errors.New("terminal: paint stalled: output is closed or too slow")
 					r.setErr(err)
 					if onError != nil {
 						onError(err)
@@ -280,19 +302,66 @@ func (r *TTYRenderer) buildFrame(failed, cancelled bool) (frame string, lines in
 		body = r.partial.String()
 	}
 	text := sanitizeText(body)
+
+	// Without styling there is no cursor control, so frames append
+	// incrementally: only body bytes not yet emitted are printed, and each
+	// assistant segment reaches the output exactly once.
+	if !r.opt.Styling {
+		var b strings.Builder
+		for _, p := range r.progress[r.progressEmitted:] {
+			b.WriteString(p)
+			b.WriteByte('\n')
+			lines++
+		}
+		r.progressEmitted = len(r.progress)
+		diverged := r.emitted > 0 && (!strings.HasPrefix(body, r.emittedPrefix) || len(body) < r.emitted)
+		if diverged && r.finalSet {
+			// The completed message revises what was streamed and cannot
+			// extend it. Close the partial line and print the authoritative
+			// text whole; the completed message wins.
+			b.WriteString("\n")
+			lines++
+			text = sanitizeText(body)
+			r.emitted = 0
+			r.emittedPrefix = ""
+		} else if r.emitted > 0 && len(text) >= r.emitted && strings.HasPrefix(text, r.emittedPrefix) {
+			text = text[r.emitted:]
+		}
+		if text != "" {
+			physical := truncateLines(wrapText(text, width), maxDisplayLines)
+			for _, line := range physical {
+				b.WriteString(line.text)
+				b.WriteByte('\n')
+				lines++
+			}
+			r.emitted += len(text)
+			r.emittedPrefix += text
+		}
+		if b.Len() == 0 {
+			return "", 0
+		}
+		if len(r.emittedPrefix) > maxRenderBytes {
+			r.emittedPrefix = r.emittedPrefix[len(r.emittedPrefix)-maxRenderBytes:]
+			// The prefix window slid; continuation math must restart from
+			// here even though bytes were emitted before the window.
+			r.emitted = len(r.emittedPrefix)
+		}
+		return b.String(), lines
+	}
+
 	physical := truncateLines(wrapText(text, width), maxDisplayLines)
 	progress := r.progress
 
 	var b strings.Builder
-	if r.opt.Styling && r.painted && r.frameLines > 0 {
+	if r.painted && r.frameLines > 0 {
 		fmt.Fprintf(&b, "\x1b[%dA\r\x1b[J", r.frameLines)
 	}
 	for _, p := range progress {
-		writeStyled(&b, r.opt.Styling, dim, p)
+		writeStyled(&b, true, dim, p)
 		lines++
 	}
 	for _, line := range physical {
-		writeStyled(&b, r.opt.Styling, bold, line.text)
+		writeStyled(&b, true, bold, line.text)
 		lines++
 	}
 	return b.String(), lines

@@ -117,7 +117,7 @@ func (c *Console) Run(ctx context.Context) error {
 		go c.watchInterrupts(watchCtx)
 	}
 
-	lines, stopReading := readLines(ctx, c.in, c.config.MaxInputBytes, c.closeInput)
+	lines, pauseReading, resumeReading, stopReading := readLines(ctx, c.in, c.config.MaxInputBytes, c.closeInput)
 	defer stopReading()
 	for {
 		select {
@@ -144,7 +144,11 @@ func (c *Console) Run(ctx context.Context) error {
 			// user's editor; it is interactive-surface only, and a plain
 			// console submits the period as an ordinary prompt.
 			if line == "." && c.tty != nil {
+				// The line reader owns stdin between lines only; the editor
+				// gesture takes exclusive ownership while it runs.
+				pauseReading()
 				composed, ok, err := c.tty.Compose(ctx, c.config.MaxInputBytes)
+				resumeReading()
 				if err != nil {
 					if writeErr := writeLinef(c.diag, "aura: %v", err); writeErr != nil {
 						return writeErr
@@ -266,6 +270,7 @@ func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, canc
 // contract writes only completed assistant text.
 func (c *Console) batchTurn(turnCtx context.Context, req *Request, failed, cancelled *bool) error {
 	var stream []Event
+	retained := 0
 	for ev, err := range c.runner.Run(turnCtx, req) {
 		if err != nil {
 			if writeErr := writeLinef(c.diag, "aura: %v", err); writeErr != nil {
@@ -278,7 +283,7 @@ func (c *Console) batchTurn(turnCtx context.Context, req *Request, failed, cance
 		if ev.Kind == "turn.completed" || ev.Kind == "turn.failed" || ev.Kind == "turn.cancelled" {
 			c.terminalSeen = true
 		}
-		stream = appendRenderEvent(stream, ev)
+		stream, retained = appendRenderEvent(stream, ev, retained)
 	}
 	assistant, diagnostics, terminal := c.render.RenderTurn(stream)
 	for _, d := range diagnostics {
@@ -393,7 +398,12 @@ func writeLinef(w io.Writer, format string, args ...any) error {
 // maxBytes. Over-long lines fail the console rather than gas up memory.
 const maxBufferedEvents = 1024
 
-func appendRenderEvent(stream []Event, ev Event) []Event {
+// maxBatchStreamBytes bounds the aggregate payload bytes a batch turn may
+// retain before rendering; extraction happens at append time so a stream of
+// large provider events cannot accumulate a process-sized buffer.
+const maxBatchStreamBytes = 2 << 20
+
+func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event, total int) {
 	switch ev.Kind {
 	case "model.delta", "message.completed":
 		payload, err := json.Marshal(struct {
@@ -403,18 +413,44 @@ func appendRenderEvent(stream []Event, ev Event) []Event {
 			ev.Payload = payload
 		}
 	case "adk_event":
-		if len(ev.Payload) > 4*maxRenderBytes {
+		adk, ok := decodeADKEvent(ev.Payload)
+		if !ok {
+			ev.Payload = nil
+			break
+		}
+		normalized := map[string]any{"partial": adk.Partial}
+		if text, present, _ := adkText(adk); present {
+			normalized["text"] = limitText(sanitizeText(string(text)))
+		} else if adk.Content != nil && adk.Content.Role == "user" {
+			normalized["role"] = "user"
+		}
+		if adk.Actions != nil {
+			if adk.Actions.TransferToAgent != "" {
+				normalized["transfer"] = limitText(sanitizeText(adk.Actions.TransferToAgent))
+			}
+			if adk.Actions.Escalate {
+				normalized["escalate"] = true
+			}
+		}
+		if len(adk.LongRunningToolIDs) > 0 {
+			normalized["longRunning"] = len(adk.LongRunningToolIDs)
+		}
+		if payload, err := json.Marshal(normalized); err == nil {
+			ev.Payload = payload
+		} else {
 			ev.Payload = nil
 		}
 	default:
 		ev.Payload = nil
 	}
+	_ = retained
 	if ev.Kind == "model.delta" {
 		for i := len(stream) - 1; i >= 0; i-- {
 			if stream[i].Kind == "message.completed" {
 				break
 			}
 			if stream[i].Kind == "model.delta" {
+				before := len(stream[i].Payload)
 				text := append([]byte{}, decodeDelta(stream[i].Payload)...)
 				text = append(text, decodeDelta(ev.Payload)...)
 				payload, err := json.Marshal(struct {
@@ -422,21 +458,24 @@ func appendRenderEvent(stream []Event, ev Event) []Event {
 				}{Text: limitText(string(text))})
 				if err == nil {
 					stream[i].Payload = payload
+					retained += len(payload) - before
 				}
-				return stream
+				return stream, retained
 			}
 		}
 	}
 	if ev.Kind == "message.completed" {
 		kept := stream[:0]
 		for _, existing := range stream {
-			if existing.Kind != "model.delta" {
-				kept = append(kept, existing)
+			if existing.Kind == "model.delta" {
+				retained -= len(existing.Payload)
+				continue
 			}
+			kept = append(kept, existing)
 		}
 		stream = kept
 	}
-	if len(stream) == maxBufferedEvents {
+	for len(stream) >= maxBufferedEvents || retained+len(ev.Payload) > maxBatchStreamBytes {
 		drop := 0
 		for i, existing := range stream {
 			if existing.Kind != "model.delta" && existing.Kind != "message.completed" {
@@ -444,21 +483,43 @@ func appendRenderEvent(stream []Event, ev Event) []Event {
 				break
 			}
 		}
+		retained -= len(stream[drop].Payload)
 		copy(stream[drop:], stream[drop+1:])
-		stream = stream[:maxBufferedEvents-1]
+		stream = stream[:len(stream)-1]
+		if len(stream) == 0 && retained+len(ev.Payload) > maxBatchStreamBytes {
+			ev.Payload = nil
+			break
+		}
 	}
-	return append(stream, ev)
+	retained += len(ev.Payload)
+	return append(stream, ev), retained
 }
 
-func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()) (lines <-chan readLineResult, stop func()) {
+// readLines reads newline-delimited prompts until EOF. pause stops reading
+// between lines and releases stdin to another consumer (the multiline editor
+// gesture); resume restarts reading afterwards. Both are safe on a stopped
+// reader.
+func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()) (lines <-chan readLineResult, pause, resume, stop func()) {
 	out := make(chan readLineResult, 1)
 	readCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+	var gateMu sync.Mutex
+	var gate chan struct{} // nil while running; closed to resume
 	go func() {
 		defer close(done)
 		defer close(out)
 		br := bufio.NewReaderSize(r, 4096)
 		for {
+			gateMu.Lock()
+			g := gate
+			gateMu.Unlock()
+			if g != nil {
+				select {
+				case <-readCtx.Done():
+					return
+				case <-g:
+				}
+			}
 			select {
 			case <-readCtx.Done():
 				return
@@ -484,8 +545,24 @@ func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()
 			}
 		}
 	}()
+	pause = func() {
+		gateMu.Lock()
+		defer gateMu.Unlock()
+		if gate == nil {
+			gate = make(chan struct{})
+		}
+	}
+	resume = func() {
+		gateMu.Lock()
+		defer gateMu.Unlock()
+		if gate != nil {
+			close(gate)
+			gate = nil
+		}
+	}
 	stop = func() {
 		cancel()
+		resume()
 		if closeInput == nil {
 			// Without a closer the caller owns the reader and its blocking
 			// read; joining would deadlock on a read nothing can release.
@@ -494,7 +571,7 @@ func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()
 		closeInput()
 		<-done
 	}
-	return out, stop
+	return out, pause, resume, stop
 }
 
 func readBoundedLine(br *bufio.Reader, maxBytes int) (lineText string, eof bool, err error) {

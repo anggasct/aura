@@ -3,6 +3,7 @@ package terminal
 import (
 	"bytes"
 	"context"
+	"io"
 	"iter"
 	"os"
 	"os/exec"
@@ -310,5 +311,48 @@ func TestTTYSlowOutputDoesNotHangConsole(t *testing.T) {
 	case <-runner.cancelled:
 	case <-time.After(time.Second):
 		t.Fatal("runner was not cancelled")
+	}
+}
+
+// TestEditorGetsExclusiveStdin proves the line reader is paused while the
+// editor gesture runs: lines arriving during composition are consumed only
+// after the editor exits, so editor keystrokes cannot be stolen mid-draft.
+func TestEditorGetsExclusiveStdin(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "editor.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 0.3\nprintf 'composed line\\n' > \"$1\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EDITOR", script)
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return []Event{{Kind: "turn.completed"}}
+	}}
+	pr, pw := io.Pipe()
+	out := &bytes.Buffer{}
+	diag := &bytes.Buffer{}
+	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, pr, out, diag, Config{
+		MaxInputBytes:       1000,
+		SecondInterruptTime: 2 * time.Second,
+	}, "owner")
+	console.SetTTY(NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500, Stdin: os.Stdin, Stdout: os.Stdout}))
+	done := make(chan error, 1)
+	go func() { done <- console.Run(context.Background()) }()
+	if _, err := pw.Write([]byte(".\n")); err != nil {
+		t.Fatal(err)
+	}
+	// While the editor holds stdin (0.3s), a line written to the pipe must
+	// not be consumed as a prompt by the paused reader.
+	time.Sleep(100 * time.Millisecond)
+	if _, err := pw.Write([]byte("during-editor\n/exit\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	_ = pw.Close()
+	if len(runner.calls) == 0 || runner.calls[0].Parts[0].Text != "composed line" {
+		t.Fatalf("calls = %+v, want the composed draft as the turn input", runner.calls)
+	}
+	if len(runner.calls) < 2 || runner.calls[1].Parts[0].Text != "during-editor" {
+		t.Errorf("calls = %d, want the during-editor line consumed after resume", len(runner.calls))
 	}
 }
