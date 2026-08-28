@@ -47,6 +47,37 @@ func TestBrokerApprovalDeciderAcceptExecutes(t *testing.T) {
 	}
 }
 
+func TestBrokerApprovalDeciderReturnsPastDeadlineFailsClosed(t *testing.T) {
+	executor := newBrokerEffectExecutor(t)
+	calls := 0
+	broker, err := New(&Options{
+		Effects: executor,
+		Adapters: map[string]Adapter{
+			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+				calls++
+				return ToolResult{Output: json.RawMessage(`{}`)}, nil
+			},
+		},
+		ApprovalDecider: func(_ context.Context, _ *ApprovalPrompt) (bool, error) {
+			time.Sleep(200 * time.Millisecond)
+			return true, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	request := brokerRequest("exec", `{"command":["true"]}`, "exec-linux")
+	request.EventSequence = 1
+	request.Deadline = time.Now().Add(50 * time.Millisecond)
+	_, err = broker.Execute(context.Background(), request)
+	if classOf(err) != ResultDeadlineExceeded {
+		t.Fatalf("Execute error = %v, want deadline_exceeded", err)
+	}
+	if calls != 0 {
+		t.Fatalf("adapter calls = %d, want 0 after deadline expiry", calls)
+	}
+}
+
 func TestBrokerApprovalDeciderRejectBlocksExecution(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
