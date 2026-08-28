@@ -558,3 +558,32 @@ func TestNoColorDoesNotDuplicateControlBearingOutput(t *testing.T) {
 		t.Errorf("output = %q, must not contain escape sequences", got)
 	}
 }
+
+func TestDirectWriteResetsFrameOrigin(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newTestTTY(out, func() int { return 80 }, true)
+	r.Begin()
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "hello")})
+	if err := r.Paint(); err != nil {
+		t.Fatalf("first paint: %v", err)
+	}
+	if err := r.DirectWrite(context.Background(), "approval card\n"); err != nil {
+		t.Fatalf("direct write: %v", err)
+	}
+	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, " more")})
+	if err := r.Paint(); err != nil {
+		t.Fatalf("second paint: %v", err)
+	}
+	rendered := out.String()
+	cardAt := strings.Index(rendered, "approval card")
+	if cardAt < 0 {
+		t.Fatalf("output = %q, want the direct write", rendered)
+	}
+	after := rendered[cardAt:]
+	if strings.Contains(after, "\r\x1b[J") {
+		t.Errorf("output after the card = %q, paint must append without cursor control", after)
+	}
+	if !strings.Contains(rendered[cardAt:], "hello more") {
+		t.Errorf("output after the card = %q, want the appended frame text", rendered[cardAt:])
+	}
+}

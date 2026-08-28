@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"iter"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -226,7 +227,7 @@ func TestApprovalExpiryRejects(t *testing.T) {
 		if strings.Contains(out.String(), "approval rejected (expired): exec@v1") {
 			break
 		}
-		time.Sleep(5 * time.Millisecond)
+		goruntime.Gosched()
 	}
 	if !strings.Contains(out.String(), "approval rejected (expired): exec@v1") {
 		t.Fatalf("output = %q, want expired rejection", out.String())

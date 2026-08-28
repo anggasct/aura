@@ -388,7 +388,15 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 			}
 		}
 	}()
-	time.Sleep(50 * time.Millisecond)
+	e2eWaitFor(t, func() bool {
+		var count int
+		if err := db.QueryRowContext(context.Background(),
+			`SELECT COUNT(*) FROM runtime_event WHERE session_id = ? AND kind = ?`,
+			"seed-b", runtime.EventKindTurnAccepted).Scan(&count); err != nil {
+			return false
+		}
+		return count >= 1
+	})
 
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
@@ -405,7 +413,7 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 	if err == nil {
 		t.Fatal("overloaded submission must surface an error")
 	}
-	if code, ok := runtime.CodeOf(errorsUnwrapAll(err)); !ok || code != runtime.ErrorCodeRuntimeOverloaded {
+	if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeRuntimeOverloaded {
 		t.Fatalf("error = %v, want runtime_overloaded", err)
 	}
 	if !strings.Contains(diag.String(), "aura:") {
@@ -413,9 +421,20 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 	}
 	close(blocker.release)
 	<-seedDone
+	<-queuedDone
 }
 
-func errorsUnwrapAll(err error) error { return err }
+func e2eWaitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("e2eWaitFor: condition not met within 5s")
+}
 
 func TestTerminalRestartResume(t *testing.T) {
 	dir := t.TempDir()

@@ -143,7 +143,7 @@ func (e *builtinToolExecutor) Evaluate(ctx context.Context, request *approval.To
 
 func (e *builtinToolExecutor) Execute(ctx context.Context, request *runtime.BuiltinToolRequest) (json.RawMessage, error) {
 	if request == nil {
-		return nil, errors.New("builtin tool request must not be nil")
+		return nil, &runtime.Error{Code: runtime.ErrorCodeInvalidArgument, Detail: "builtin tool request must not be nil"}
 	}
 	result, err := e.broker.Execute(ctx, &toolbroker.ToolRequest{
 		RequestID: request.RequestID, TurnID: request.TurnID, SessionID: request.SessionID,

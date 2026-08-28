@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+func errNilArgument(name string) error {
+	return fmt.Errorf("invalid_argument: %s must not be nil", name)
+}
+
 // ApprovalCard is the display-safe canonical scope of one exact approval
 // request. Values are sanitized before they reach the output surface and
 // secret material is already redacted upstream.
@@ -60,10 +64,10 @@ func NewApprovalBridge() *ApprovalBridge {
 // returns the operator's answer or ctx ends.
 func (b *ApprovalBridge) Decide(ctx context.Context, card *ApprovalCard) (bool, error) {
 	if ctx == nil {
-		return false, errors.New("terminal: approval context must not be nil")
+		return false, fmt.Errorf("terminal: %w", errNilArgument("context"))
 	}
 	if card == nil {
-		return false, errors.New("terminal: approval card must not be nil")
+		return false, fmt.Errorf("terminal: %w", errNilArgument("card"))
 	}
 	ask := &approvalAsk{card: card, reply: make(chan bool, 1)}
 	b.mu.Lock()
