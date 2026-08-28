@@ -33,8 +33,9 @@ type ApprovalCard struct {
 
 // approvalAsk is one pending card plus its reply path.
 type approvalAsk struct {
-	card  *ApprovalCard
-	reply chan bool
+	card    *ApprovalCard
+	reply   chan bool
+	claimed bool
 }
 
 func (a *approvalAsk) answer(accepted bool) {
@@ -101,14 +102,18 @@ func (b *ApprovalBridge) readyCh() <-chan struct{} {
 	return b.ready
 }
 
-// take claims the pending ask for rendering; nil when none is pending.
+// take claims the pending ask for rendering; nil when none is pending or
+// the ask is already being served. The ask stays pending — and concurrent
+// asks keep failing closed in Decide — until it is answered or its
+// context ends.
 func (b *ApprovalBridge) take() *approvalAsk {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	ask := b.pending
-	if ask != nil {
-		b.pending = nil
+	if ask == nil || ask.claimed {
+		return nil
 	}
+	ask.claimed = true
 	return ask
 }
 

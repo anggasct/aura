@@ -303,3 +303,50 @@ func TestApprovalBridgeSecondAskFailsClosed(t *testing.T) {
 	cancel()
 	<-done
 }
+
+func TestApprovalBridgeSecondAskFailsClosedWhileServing(t *testing.T) {
+	bridge := NewApprovalBridge()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := make(chan error, 1)
+	go func() {
+		_, err := bridge.Decide(ctx, testCard())
+		first <- err
+	}()
+	<-bridge.readyCh()
+	ask := bridge.take()
+	if ask == nil {
+		t.Fatal("take = nil, want the pending ask")
+	}
+	if again := bridge.take(); again != nil {
+		t.Fatal("take must hand the ask to the renderer exactly once")
+	}
+	secondErr := make(chan error, 1)
+	go func() {
+		_, err := bridge.Decide(context.Background(), testCard())
+		secondErr <- err
+	}()
+	select {
+	case err := <-secondErr:
+		if err == nil {
+			t.Fatal("second concurrent ask must fail while the first is being served")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second concurrent ask blocked instead of failing closed")
+	}
+	ask.answer(true)
+	if err := <-first; err != nil {
+		t.Fatalf("first ask ended with error: %v", err)
+	}
+	second := make(chan error, 1)
+	secondCtx, secondCancel := context.WithCancel(context.Background())
+	go func() {
+		_, err := bridge.Decide(secondCtx, testCard())
+		second <- err
+	}()
+	<-bridge.readyCh()
+	secondCancel()
+	if err := <-second; err == nil {
+		t.Fatal("cancelled second ask must return an error")
+	}
+}
