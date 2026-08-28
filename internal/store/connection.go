@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,7 +63,11 @@ func OpenDBWithOptions(ctx context.Context, dsn string, opts OpenOptions) (*sql.
 	registerConnectionPolicyOnce.Do(func() {
 		sqlite.RegisterConnectionHook(verifyConnectionPolicy)
 	})
-
+	if dsn != "" && dsn != ":memory:" {
+		if err := ensureOwnerOnly(dsn); err != nil {
+			return nil, err
+		}
+	}
 	db, err := sql.Open(sqlDriverName, withConnectionOptions(dsn, opts))
 	if err != nil {
 		return nil, codedError(ErrorCodeStorageUnavailable, "open sqlite database", err)
@@ -70,6 +77,37 @@ func OpenDBWithOptions(ctx context.Context, dsn string, opts OpenOptions) (*sql.
 		return nil, codedError(ErrorCodeStorageUnavailable, "open sqlite database", err)
 	}
 	return db, nil
+}
+
+// ensureOwnerOnly makes the storage directory and database file owner-only
+// before SQLite opens them, so the WAL and SHM siblings are created with the
+// database's own mode instead of the process default.
+func ensureOwnerOnly(path string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "create storage directory", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "secure storage directory", err)
+	}
+	_, statErr := os.Stat(path)
+	switch {
+	case errors.Is(statErr, fs.ErrNotExist):
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o600)
+		if err != nil {
+			return codedError(ErrorCodeStorageUnavailable, "create database file", err)
+		}
+		if err := f.Close(); err != nil {
+			return codedError(ErrorCodeStorageUnavailable, "close database file", err)
+		}
+	case statErr != nil:
+		return codedError(ErrorCodeStorageUnavailable, "inspect database file", statErr)
+	default:
+		if err := os.Chmod(path, 0o600); err != nil {
+			return codedError(ErrorCodeStorageUnavailable, "secure database file", err)
+		}
+	}
+	return nil
 }
 
 func withConnectionOptions(path string, opts OpenOptions) string {

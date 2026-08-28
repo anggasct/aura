@@ -33,7 +33,7 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 	var observations []toolbroker.Observation
 	executor, err := newBuiltinToolExecutor(&cfg, db, nil, func(_ context.Context, observation toolbroker.Observation) {
 		observations = append(observations, observation)
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("newBuiltinToolExecutor: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	cfg.Tools.Workspace = workspace
 	cfg.Tools.MaxInlineResultBytes = 256
 	cfg.Storage.Path = filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
-	executor, err := newBuiltinToolExecutor(&cfg, db, nil, nil)
+	executor, err := newBuiltinToolExecutor(&cfg, db, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newBuiltinToolExecutor: %v", err)
 	}

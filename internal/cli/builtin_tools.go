@@ -41,7 +41,7 @@ func (e *builtinToolExecutor) SetEventPublisher(publish func(*store.RuntimeEvent
 	e.journal.SetEventPublisher(effectPublisherFunc(publish))
 }
 
-func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger, observer toolbroker.Observer) (*builtinToolExecutor, error) {
+func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider) (*builtinToolExecutor, error) {
 	if cfg == nil || cfg.Tools == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -106,6 +106,7 @@ func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger,
 		Artifacts:            store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
 		Effects:              effects,
 		Observer:             observer,
+		ApprovalDecider:      decider,
 	})
 	if err != nil {
 		return nil, err

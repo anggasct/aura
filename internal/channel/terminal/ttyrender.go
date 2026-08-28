@@ -494,6 +494,23 @@ func (r *TTYRenderer) writeOutput(ctx context.Context, p []byte) error {
 	return err
 }
 
+// DirectWrite appends text outside the frame system, for surfaces that own
+// whole lines below the live frame — the approval card and its outcome. The
+// frame origin resets so the next paint continues below the written text
+// instead of repainting over it.
+func (r *TTYRenderer) DirectWrite(ctx context.Context, text string) error {
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+	r.mu.Lock()
+	r.frameLines = 0
+	r.painted = false
+	r.mu.Unlock()
+	if err := r.writeOutput(ctx, []byte(text)); err != nil {
+		return fmt.Errorf("terminal: direct write: %w", err)
+	}
+	return nil
+}
+
 // ClearScreen erases the display when styling is available; otherwise it
 // degrades to a blank line.
 func (r *TTYRenderer) ClearScreen() error {

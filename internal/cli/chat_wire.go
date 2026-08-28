@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/model"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/toolbroker"
 )
 
 // terminalBroker denies every tool call. The plain console never presents an
@@ -161,10 +162,31 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 	}
 	defer func() { _ = db.Close() }()
 
+	useTTY := false
+	inFile, inOk := in.(*os.File)
+	outFile, outOk := out.(*os.File)
+	if inOk && outOk {
+		useTTY = shouldUseTTY(present, terminal.IsTerminal(int(inFile.Fd())), terminal.IsTerminal(int(outFile.Fd())))
+	}
+
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
+	var broker runtime.ToolBroker = terminalBroker{}
+	var executorOpts []runtime.ExecutorOption
+	var approvals *terminal.ApprovalBridge
+	if cfg.Tools != nil {
+		if useTTY {
+			approvals = terminal.NewApprovalBridge()
+		}
+		builtin, err := newBuiltinToolExecutor(cfg, db, logger, nil, approvalDeciderFor(approvals))
+		if err != nil {
+			return err
+		}
+		broker = builtin
+		executorOpts = append(executorOpts, runtime.WithBuiltinToolExecutor(builtin))
+	}
 	executor, err := runtime.NewADKExecutor(
-		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, terminalBroker{}, nil, logger,
+		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,
 	)
 	if err != nil {
 		return err
@@ -197,25 +219,51 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 	)
 	console.SetInputCloser(func() { _ = os.Stdin.Close() })
 	console.SetSessionID(sessionID)
-	if inFile, inOk := in.(*os.File); inOk {
-		if outFile, outOk := out.(*os.File); outOk {
-			if shouldUseTTY(present, terminal.IsTerminal(int(inFile.Fd())), terminal.IsTerminal(int(outFile.Fd()))) {
-				outFD := int(outFile.Fd())
-				console.SetTTY(terminal.NewTTYRenderer(terminal.TTYOptions{
-					Out:     terminal.NewTTYOutput(outFile),
-					Width:   func() int { w, _ := terminal.TerminalSize(outFD); return w },
-					Hz:      cfg.Terminal.RenderHz,
-					Styling: !present.noColor,
-					Stdin:   inFile,
-					Stdout:  outFile,
-				}))
-			}
-		}
+	if useTTY {
+		outFD := int(outFile.Fd())
+		console.SetTTY(terminal.NewTTYRenderer(terminal.TTYOptions{
+			Out:     terminal.NewTTYOutput(outFile),
+			Width:   func() int { w, _ := terminal.TerminalSize(outFD); return w },
+			Hz:      cfg.Terminal.RenderHz,
+			Styling: !present.noColor,
+			Stdin:   inFile,
+			Stdout:  outFile,
+		}))
+		console.SetApprovalBridge(approvals)
 	}
 	interrupts, stopInterrupts := forwardInterrupts(ctx, interruptsFromContext(ctx))
 	defer stopInterrupts()
 	console.SetInterrupts(interrupts)
 	return console.Run(ctx)
+}
+
+// approvalDeciderFor adapts the console approval bridge onto the tool
+// broker's decision seam. A nil bridge (plain presentation, or a build
+// without interactive approvals) leaves the decider unset, which rejects
+// fail-closed upstream.
+func approvalDeciderFor(approvals *terminal.ApprovalBridge) toolbroker.ApprovalDecider {
+	if approvals == nil {
+		return nil
+	}
+	return func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+		if prompt == nil {
+			return false, errors.New("approval prompt must not be nil")
+		}
+		return approvals.Decide(ctx, &terminal.ApprovalCard{
+			ToolName:       prompt.ToolName,
+			ToolVersion:    prompt.ToolVersion,
+			SessionID:      prompt.SessionID,
+			TurnID:         prompt.TurnID,
+			PrincipalID:    prompt.PrincipalID,
+			Arguments:      prompt.Arguments,
+			Network:        prompt.Network,
+			Timeout:        prompt.Timeout,
+			MaxOutputBytes: prompt.MaxOutputBytes,
+			PolicyVersion:  prompt.PolicyVersion,
+			ReasonCode:     prompt.ReasonCode,
+			ExpiresAt:      prompt.ExpiresAt,
+		})
+	}
 }
 
 func newTerminalSessionID() (string, error) {

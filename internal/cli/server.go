@@ -77,7 +77,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					OutputBytes:   observation.OutputBytes,
 				})
 			})
-			builtin, err := newBuiltinToolExecutor(cfg, db, logger, observer)
+			builtin, err := newBuiltinToolExecutor(cfg, db, logger, observer, nil)
 			if err != nil {
 				return err
 			}
