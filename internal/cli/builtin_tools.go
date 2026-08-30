@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
 	execTool "github.com/anggasct/aura/internal/tools/exec"
@@ -102,6 +104,7 @@ func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger,
 	}
 	broker, err := toolbroker.New(&toolbroker.Options{
 		Adapters:             adapters,
+		Secrets:              configuredToolSecrets(cfg),
 		MaxInlineResultBytes: toolsCfg.MaxInlineResultBytes,
 		Artifacts:            store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
 		Effects:              effects,
@@ -112,6 +115,27 @@ func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger,
 		return nil, err
 	}
 	return &builtinToolExecutor{broker: broker, journal: journal}, nil
+}
+
+func configuredToolSecrets(cfg *config.Config) []string {
+	if cfg == nil || cfg.Tools == nil {
+		return nil
+	}
+	ref := cfg.Tools.WebSearch.CredentialRef
+	var source secret.Reference
+	switch {
+	case strings.HasPrefix(ref, "env://"):
+		source.Env = strings.TrimPrefix(ref, "env://")
+	case strings.HasPrefix(ref, "file://"):
+		source.File = strings.TrimPrefix(ref, "file://")
+	default:
+		return nil
+	}
+	value, err := source.Resolve()
+	if err != nil || value == "" {
+		return nil
+	}
+	return []string{value}
 }
 
 func (e *builtinToolExecutor) Definitions() []runtime.BuiltinToolDefinition {

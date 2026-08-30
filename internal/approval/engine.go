@@ -131,12 +131,40 @@ func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 	if request == nil {
 		return ApprovalGrant{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
 	}
+	if ttl <= 0 {
+		return ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "grant ttl must be positive")
+	}
+	return e.grantUntil(ctx, request, e.now().Add(ttl))
+}
+
+// GrantUntil mints a grant with an absolute expiry. Callers that already have
+// a user-visible deadline use this to keep the grant from outliving that
+// deadline while policy evaluation and nonce generation run.
+func (e *Engine) GrantUntil(ctx context.Context, request *ToolRequest, expiresAt time.Time) (ApprovalGrant, error) {
+	if expiresAt.IsZero() {
+		return ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "grant expiry must be set")
+	}
+	return e.grantUntil(ctx, request, expiresAt)
+}
+
+func (e *Engine) grantUntil(ctx context.Context, request *ToolRequest, expiresAt time.Time) (ApprovalGrant, error) {
+	if err := validateContext(ctx); err != nil {
+		return ApprovalGrant{}, err
+	}
+	if request == nil {
+		return ApprovalGrant{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
+	now := e.now()
+	if !now.Before(expiresAt) {
+		return ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "grant expiry has passed")
+	}
 	decision, err := e.decide(ctx, request)
 	if err != nil {
 		return ApprovalGrant{}, err
 	}
-	if ttl <= 0 {
-		return ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "grant ttl must be positive")
+	now = e.now()
+	if !now.Before(expiresAt) {
+		return ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "grant expiry has passed")
 	}
 	nonceBytes := make([]byte, 16)
 	if _, err := rand.Read(nonceBytes); err != nil {
@@ -148,7 +176,6 @@ func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 		return ApprovalGrant{}, fmt.Errorf("approval: generate grant id: %w", err)
 	}
 
-	now := e.now()
 	grant := ApprovalGrant{
 		GrantID:          hex.EncodeToString(grantIDBytes),
 		PrincipalID:      request.PrincipalID,
@@ -160,7 +187,7 @@ func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 		CapabilitiesHash: HashCapabilities(request.Capabilities),
 		Constraints:      decision.Constraints,
 		PolicyVersion:    decision.PolicyVersion,
-		ExpiresAt:        now.Add(ttl),
+		ExpiresAt:        expiresAt,
 		Nonce:            nonce,
 	}
 

@@ -131,6 +131,125 @@ func TestOpenDBPathWithSpace(t *testing.T) {
 	}
 }
 
+func TestEnsureOwnerOnlySecuresExistingDatabaseSidecars(t *testing.T) {
+	dir := t.TempDir()
+	dsn := filepath.Join(dir, "aura.db")
+	if err := os.WriteFile(dsn, []byte("database"), 0o644); err != nil {
+		t.Fatalf("write database: %v", err)
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.WriteFile(dsn+suffix, []byte("sidecar"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", suffix, err)
+		}
+	}
+
+	if err := ensureOwnerOnly(dsn); err != nil {
+		t.Fatalf("ensureOwnerOnly: %v", err)
+	}
+	for _, path := range []string{dsn, dsn + "-wal", dsn + "-shm"} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", filepath.Base(path), err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s mode = %o, want 600", filepath.Base(path), got)
+		}
+	}
+}
+
+func TestEnsureOwnerOnlyRejectsUnsafeDatabaseFiles(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("target"), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(dir, "aura.db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink database: %v", err)
+	}
+	if err := ensureOwnerOnly(link); err == nil {
+		t.Fatal("ensureOwnerOnly accepted a database symlink")
+	}
+
+	nonRegular := filepath.Join(dir, "directory.db")
+	if err := os.Mkdir(nonRegular, 0o700); err != nil {
+		t.Fatalf("mkdir database path: %v", err)
+	}
+	if err := ensureOwnerOnly(nonRegular); err == nil {
+		t.Fatal("ensureOwnerOnly accepted a non-regular database path")
+	}
+
+	sidecarDB := filepath.Join(dir, "sidecar.db")
+	if err := os.WriteFile(sidecarDB, []byte("database"), 0o600); err != nil {
+		t.Fatalf("write sidecar database: %v", err)
+	}
+	if err := os.Symlink(target, sidecarDB+"-wal"); err != nil {
+		t.Fatalf("symlink sidecar: %v", err)
+	}
+	if err := ensureOwnerOnly(sidecarDB); err == nil {
+		t.Fatal("ensureOwnerOnly accepted a sidecar symlink")
+	}
+}
+
+func TestOpenReadOnlyRejectsUnsafePermissionsWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	dsn := filepath.Join(dir, "aura.db")
+	db, err := OpenDB(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatalf("chmod directory: %v", err)
+	}
+	if err := os.Chmod(dsn, 0o644); err != nil {
+		t.Fatalf("chmod database: %v", err)
+	}
+
+	if _, err := OpenReadOnly(context.Background(), dsn); err == nil {
+		t.Fatal("OpenReadOnly accepted unsafe permissions")
+	}
+	dirInfo, err := os.Lstat(dir)
+	if err != nil {
+		t.Fatalf("stat directory: %v", err)
+	}
+	dbInfo, err := os.Lstat(dsn)
+	if err != nil {
+		t.Fatalf("stat database: %v", err)
+	}
+	if dirInfo.Mode().Perm() != 0o755 || dbInfo.Mode().Perm() != 0o644 {
+		t.Fatalf("OpenReadOnly mutated unsafe modes: directory=%o database=%o", dirInfo.Mode().Perm(), dbInfo.Mode().Perm())
+	}
+}
+
+func TestOpenReadOnlyRejectsUnsafeSidecarWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	dsn := filepath.Join(dir, "aura.db")
+	db, err := OpenDB(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+	sidecar := dsn + "-wal"
+	if err := os.WriteFile(sidecar, []byte("sidecar"), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+	if _, err := OpenReadOnly(context.Background(), dsn); err == nil {
+		t.Fatal("OpenReadOnly accepted unsafe sidecar permissions")
+	}
+	info, err := os.Lstat(sidecar)
+	if err != nil {
+		t.Fatalf("stat sidecar: %v", err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("OpenReadOnly mutated sidecar mode: %o", info.Mode().Perm())
+	}
+}
+
 func TestArtifactPutMaxInt64Quota(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

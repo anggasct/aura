@@ -249,6 +249,96 @@ func TestApprovalExpiryRejects(t *testing.T) {
 	}
 }
 
+type lateApprovalRunner struct {
+	bridge *ApprovalBridge
+	card   *ApprovalCard
+
+	mu      sync.Mutex
+	prompts []string
+	turns   int
+}
+
+func (r *lateApprovalRunner) Run(ctx context.Context, req *Request) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		r.mu.Lock()
+		r.prompts = append(r.prompts, req.Parts[0].Text)
+		r.turns++
+		turn := r.turns
+		r.mu.Unlock()
+		if turn == 1 {
+			_, _ = r.bridge.Decide(ctx, r.card)
+		}
+		yield(Event{Kind: "turn.completed"}, nil)
+	}
+}
+
+func (r *lateApprovalRunner) promptList() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.prompts...)
+}
+
+func TestLateApprovalInputIsDiscardedInsteadOfBecomingPrompt(t *testing.T) {
+	pr, pw := io.Pipe()
+	bridge := NewApprovalBridge()
+	runner := &lateApprovalRunner{bridge: bridge, card: testCard()}
+	runner.card.ExpiresAt = time.Now().Add(50 * time.Millisecond)
+	out := &syncBuffer{}
+	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, pr, out, &bytes.Buffer{}, Config{
+		MaxInputBytes:       1000,
+		InMemoryHistory:     100,
+		SecondInterruptTime: 2 * time.Second,
+	}, "owner")
+	console.SetTTY(NewTTYRenderer(TTYOptions{
+		Out:     syncOutput{s: out},
+		Width:   func() int { return 80 },
+		Hz:      500,
+		Styling: false,
+	}))
+	console.SetApprovalBridge(bridge)
+
+	done := make(chan error, 1)
+	go func() { done <- console.Run(context.Background()) }()
+	if _, err := pw.Write([]byte("first\n")); err != nil {
+		t.Fatalf("write first prompt: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(out.String(), "approval rejected (expired): exec@v1") {
+		goruntime.Gosched()
+	}
+	if !strings.Contains(out.String(), "approval rejected (expired): exec@v1") {
+		t.Fatalf("output = %q, want expired rejection", out.String())
+	}
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := pw.Write([]byte("y\nsecond\n"))
+		writeDone <- err
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write late input: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("late input was not consumed")
+	}
+	if err := pw.Close(); err != nil {
+		t.Fatalf("close input: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("console did not stop")
+	}
+	got := runner.promptList()
+	if len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Fatalf("prompts = %v, want [first second]", got)
+	}
+}
+
 func TestApprovalCardSanitizesInjectedSequences(t *testing.T) {
 	card := testCard()
 	card.Arguments = `{"command":["\u001b[31mevil\u0007"]}`

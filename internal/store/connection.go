@@ -84,28 +84,60 @@ func OpenDBWithOptions(ctx context.Context, dsn string, opts OpenOptions) (*sql.
 // database's own mode instead of the process default.
 func ensureOwnerOnly(path string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := ensureOwnerOnlyDirectory(dir); err != nil {
+		return err
+	}
+	if err := ensureOwnerOnlyFile(path, true, "database"); err != nil {
+		return err
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := ensureOwnerOnlyFile(path+suffix, false, "database sidecar"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureOwnerOnlyDirectory(path string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
 		return codedError(ErrorCodeStorageUnavailable, "create storage directory", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "inspect storage directory", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return codedError(ErrorCodeStorageUnavailable, "storage path is not a directory", errors.New("unsafe storage directory"))
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
 		return codedError(ErrorCodeStorageUnavailable, "secure storage directory", err)
 	}
-	_, statErr := os.Stat(path)
-	switch {
-	case errors.Is(statErr, fs.ErrNotExist):
-		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o600)
-		if err != nil {
-			return codedError(ErrorCodeStorageUnavailable, "create database file", err)
+	return nil
+}
+
+func ensureOwnerOnlyFile(path string, create bool, label string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) && create {
+		f, createErr := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if createErr != nil {
+			return codedError(ErrorCodeStorageUnavailable, "create "+label, createErr)
 		}
-		if err := f.Close(); err != nil {
-			return codedError(ErrorCodeStorageUnavailable, "close database file", err)
+		if closeErr := f.Close(); closeErr != nil {
+			return codedError(ErrorCodeStorageUnavailable, "close "+label, closeErr)
 		}
-	case statErr != nil:
-		return codedError(ErrorCodeStorageUnavailable, "inspect database file", statErr)
-	default:
-		if err := os.Chmod(path, 0o600); err != nil {
-			return codedError(ErrorCodeStorageUnavailable, "secure database file", err)
-		}
+		return nil
+	}
+	if errors.Is(err, fs.ErrNotExist) && !create {
+		return nil
+	}
+	if err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "inspect "+label, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return codedError(ErrorCodeStorageUnavailable, label+" is not a regular file", errors.New("unsafe storage file"))
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "secure "+label, err)
 	}
 	return nil
 }
@@ -123,6 +155,9 @@ func withConnectionOptions(path string, opts OpenOptions) string {
 // openReadOnly opens a SQLite database without ever writing to it, so a
 // backup snapshot and its verification stay untouched.
 func openReadOnly(ctx context.Context, path string) (*sql.DB, error) {
+	if err := validateReadOnlyPath(path); err != nil {
+		return nil, err
+	}
 	dsn := (&url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}).String()
 	db, err := sql.Open(sqlDriverName, dsn)
 	if err != nil {
@@ -133,6 +168,43 @@ func openReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("open sqlite database read-only: %w", err)
 	}
 	return db, nil
+}
+
+func validateReadOnlyPath(path string) error {
+	dir := filepath.Dir(path)
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "inspect storage directory", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+		return codedError(ErrorCodeStorageUnavailable, "storage directory permissions are unsafe", errors.New("owner-only storage directory required"))
+	}
+	if err := validateReadOnlyFile(path, "database", true); err != nil {
+		return err
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := validateReadOnlyFile(path+suffix, "database sidecar", false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateReadOnlyFile(path, label string, required bool) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		if !required {
+			return nil
+		}
+		return codedError(ErrorCodeStorageUnavailable, "read-only database is missing", err)
+	}
+	if err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "inspect "+label, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return codedError(ErrorCodeStorageUnavailable, label+" permissions are unsafe", errors.New("owner-only storage file required"))
+	}
+	return nil
 }
 
 // OpenReadOnly opens the live database without ever writing to it: no WAL

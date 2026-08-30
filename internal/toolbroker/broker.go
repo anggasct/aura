@@ -279,15 +279,15 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 	}
 
+	approvalExpiry := absoluteApprovalExpiry(canonical.Deadline)
 	grant := canonical.Approval
 	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && b.decider == nil {
 		approvalState = ApprovalMissing
 		return ToolResult{}, errorf(ResultApprovalRequired, "tool %q requires approval", key)
 	}
 	if grant == nil {
-		ttl := approvalTTL(canonical.Deadline)
 		if decision.Outcome == approval.OutcomeRequireApproval {
-			accepted, err := b.decider(ctx, b.buildApprovalPrompt(&canonical, decision, ttl))
+			accepted, err := b.decider(ctx, b.buildApprovalPrompt(&canonical, decision, approvalExpiry))
 			if err != nil {
 				approvalState = ApprovalRejected
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -304,14 +304,13 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			approvalState = ApprovalAuto
 		}
 		// The interactive ask can block past the request deadline, so the
-		// grant must derive from the remaining duration, not the TTL
-		// captured before the ask.
-		if err := contextError(ctx, canonical.Deadline); err != nil {
+		// grant must retain the original absolute expiry, not a fresh TTL
+		// captured after the ask.
+		if err := contextError(ctx, approvalExpiry); err != nil {
 			approvalState = ApprovalRejected
 			return ToolResult{}, err
 		}
-		ttl = approvalTTL(canonical.Deadline)
-		newGrant, grantErr := b.engine.Grant(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), ttl)
+		newGrant, grantErr := b.engine.GrantUntil(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), approvalExpiry)
 		err = grantErr
 		if err != nil {
 			return ToolResult{}, mapApprovalError(err)
@@ -541,14 +540,14 @@ const (
 	maxApprovalDisplayBytes = 2048
 )
 
-func approvalTTL(deadline time.Time) time.Duration {
+func absoluteApprovalExpiry(deadline time.Time) time.Time {
 	if !deadline.IsZero() {
-		return time.Until(deadline)
+		return deadline
 	}
-	return defaultApprovalTTL
+	return time.Now().Add(defaultApprovalTTL)
 }
 
-func (b *Broker) buildApprovalPrompt(request *ToolRequest, decision approval.PolicyDecision, ttl time.Duration) *ApprovalPrompt {
+func (b *Broker) buildApprovalPrompt(request *ToolRequest, decision approval.PolicyDecision, expiresAt time.Time) *ApprovalPrompt {
 	display := redact(request.Arguments, b.secrets)
 	if len(display) > maxApprovalDisplayBytes {
 		display = truncateDisplay(display, maxApprovalDisplayBytes)
@@ -565,7 +564,7 @@ func (b *Broker) buildApprovalPrompt(request *ToolRequest, decision approval.Pol
 		MaxOutputBytes: decision.Constraints.MaxOutputBytes,
 		PolicyVersion:  decision.PolicyVersion,
 		ReasonCode:     decision.ReasonCode,
-		ExpiresAt:      time.Now().Add(ttl),
+		ExpiresAt:      expiresAt,
 	}
 }
 

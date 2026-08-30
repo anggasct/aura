@@ -40,6 +40,9 @@ type Console struct {
 	// ask can route the operator's answer. Written once in Run before any
 	// turn starts and read only from the run loop goroutine.
 	lines <-chan readLineResult
+	// The next line belongs to an approval that ended before its answer was
+	// consumed; it must not become a new model turn.
+	discardNextApproval bool
 
 	mu           sync.Mutex
 	interrupts   <-chan struct{}
@@ -152,6 +155,11 @@ func (c *Console) Run(ctx context.Context) error {
 			if r.eof {
 				ack()
 				return c.drain()
+			}
+			if c.discardNextApproval {
+				c.discardNextApproval = false
+				ack()
+				continue
 			}
 			line := strings.TrimSpace(r.line)
 			if line == "" {
@@ -303,6 +311,12 @@ func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, canc
 			c.tty.setErr(err)
 		}
 	}
+	rejectPending := func(outcome string) {
+		if serving != nil {
+			c.discardNextApproval = true
+		}
+		answer(false, outcome)
+	}
 loop:
 	for {
 		select {
@@ -335,6 +349,7 @@ loop:
 			cancelWrite()
 			if err != nil {
 				c.tty.setErr(err)
+				c.discardNextApproval = true
 				ask.answer(false)
 				streamErr = err
 				break loop
@@ -369,12 +384,12 @@ loop:
 				answer(false, "rejected")
 			}
 		case <-expiry:
-			answer(false, "rejected (expired)")
+			rejectPending("rejected (expired)")
 		case <-turnDone:
-			answer(false, "rejected (turn ended)")
+			rejectPending("rejected (turn ended)")
 		}
 	}
-	answer(false, "rejected (turn ended)")
+	rejectPending("rejected (turn ended)")
 	if expiryTimer != nil {
 		expiryTimer.Stop()
 	}
