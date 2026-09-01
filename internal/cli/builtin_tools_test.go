@@ -5,6 +5,8 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +35,7 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 	var observations []toolbroker.Observation
 	executor, err := newBuiltinToolExecutor(&cfg, db, nil, func(_ context.Context, observation toolbroker.Observation) {
 		observations = append(observations, observation)
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("newBuiltinToolExecutor: %v", err)
 	}
@@ -104,7 +106,7 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	cfg.Tools.Workspace = workspace
 	cfg.Tools.MaxInlineResultBytes = 256
 	cfg.Storage.Path = filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
-	executor, err := newBuiltinToolExecutor(&cfg, db, nil, nil)
+	executor, err := newBuiltinToolExecutor(&cfg, db, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newBuiltinToolExecutor: %v", err)
 	}
@@ -148,5 +150,126 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	}
 	if envelope.Body != "" {
 		t.Fatalf("artifact spill must not inline the body: %s", output)
+	}
+}
+
+func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T) {
+	const canary = "tool-secret-7f3a9d1c"
+	t.Setenv("AURA_TEST_TOOL_SECRET", canary)
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "secret.txt"), []byte(strings.Repeat(canary, 128)), 0o600); err != nil {
+		t.Fatalf("write secret fixture: %v", err)
+	}
+	dataRoot := t.TempDir()
+	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	session := store.Session{ID: "session-secret", OwnerID: "owner-1"}
+	if err := store.NewSessionService(db).Create(context.Background(), &session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	cfg := config.Default()
+	cfg.Tools.Workspace = workspace
+	cfg.Tools.WebSearch.CredentialRef = "env://AURA_TEST_TOOL_SECRET"
+	cfg.Tools.MaxInlineResultBytes = 512
+	cfg.Storage.Path = dataRoot
+	var prompted *toolbroker.ApprovalPrompt
+	executor, err := newBuiltinToolExecutor(&cfg, db, nil, nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+		prompted = prompt
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("newBuiltinToolExecutor: %v", err)
+	}
+	_, err = executor.Execute(context.Background(), &runtime.BuiltinToolRequest{
+		RequestID:       "approval-secret",
+		TurnID:          "turn-secret",
+		SessionID:       "session-secret",
+		PrincipalID:     "owner-1",
+		ToolName:        "write_file",
+		ToolVersion:     "v1",
+		Arguments:       json.RawMessage(`{"path":"out.txt","content":"tool-secret-7f3a9d1c"}`),
+		Capabilities:    []string{"workspace-write"},
+		Trust:           string(approval.TrustOwnerInput),
+		IdempotencyKey:  "approval-secret-1",
+		EventSequence:   1,
+		EventInvocation: "inv-secret",
+		EventBranch:     "main",
+		EventAuthor:     "agent",
+	})
+	class, ok := toolbroker.CodeOf(err)
+	if !ok || class != toolbroker.ResultApprovalRequired {
+		t.Fatalf("approval error = %v, want approval_required", err)
+	}
+	if prompted == nil || strings.Contains(prompted.Arguments, canary) || !strings.Contains(prompted.Arguments, "[REDACTED]") {
+		t.Fatalf("approval prompt leaked configured secret: %+v", prompted)
+	}
+
+	diagnosticExecutor, err := newBuiltinToolExecutor(&cfg, db, nil, nil, func(_ context.Context, _ *toolbroker.ApprovalPrompt) (bool, error) {
+		return false, errors.New("approval surface failed: " + canary)
+	})
+	if err != nil {
+		t.Fatalf("new diagnostic executor: %v", err)
+	}
+	_, err = diagnosticExecutor.Execute(context.Background(), &runtime.BuiltinToolRequest{
+		RequestID:      "diagnostic-secret",
+		TurnID:         "turn-secret",
+		SessionID:      "session-secret",
+		PrincipalID:    "owner-1",
+		ToolName:       "write_file",
+		ToolVersion:    "v1",
+		Arguments:      json.RawMessage(`{"path":"out.txt","content":"safe"}`),
+		Capabilities:   []string{"workspace-write"},
+		Trust:          string(approval.TrustOwnerInput),
+		IdempotencyKey: "diagnostic-secret-1",
+		EventSequence:  2,
+	})
+	if err == nil {
+		t.Fatal("diagnostic executor unexpectedly succeeded")
+	}
+	if strings.Contains(err.Error(), canary) {
+		t.Fatalf("diagnostic leaked configured secret: %v", err)
+	}
+
+	output, err := executor.Execute(context.Background(), &runtime.BuiltinToolRequest{
+		RequestID:      "output-secret",
+		TurnID:         "turn-secret",
+		SessionID:      "session-secret",
+		PrincipalID:    "owner-1",
+		ToolName:       "read_file",
+		ToolVersion:    "v1",
+		Arguments:      json.RawMessage(`{"path":"secret.txt"}`),
+		Capabilities:   []string{"workspace-read"},
+		Trust:          string(approval.TrustDerivedUntrusted),
+		IdempotencyKey: "output-secret-1",
+	})
+	if err != nil {
+		t.Fatalf("read secret fixture: %v", err)
+	}
+	var envelope struct {
+		ArtifactID string `json:"artifact_id"`
+	}
+	if err := json.Unmarshal(output, &envelope); err != nil {
+		t.Fatalf("decode output envelope: %v", err)
+	}
+	if envelope.ArtifactID == "" {
+		t.Fatalf("expected persisted output artifact, got %s", output)
+	}
+	artifact, _, err := store.NewArtifactStore(db, dataRoot, int64(cfg.Storage.ArtifactQuota)).Open(context.Background(), envelope.ArtifactID)
+	if err != nil {
+		t.Fatalf("open persisted output: %v", err)
+	}
+	defer func() { _ = artifact.Close() }()
+	persisted, err := io.ReadAll(artifact)
+	if err != nil {
+		t.Fatalf("read persisted output: %v", err)
+	}
+	if strings.Contains(string(persisted), canary) {
+		t.Fatalf("persisted tool output leaked configured secret: %s", persisted)
 	}
 }

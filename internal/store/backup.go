@@ -78,6 +78,9 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 		_ = os.Remove(tmpDest)
 		return BackupManifest{}, backupFail("move backup snapshot into place", err, tmpDest, dbDest)
 	}
+	if err := os.Chmod(dbDest, 0o600); err != nil {
+		return BackupManifest{}, backupFail("secure backup snapshot", err, dbDest)
+	}
 	if err := syncPath(destDir); err != nil {
 		return BackupManifest{}, backupFail("fsync backup directory", err, destDir)
 	}

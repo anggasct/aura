@@ -99,6 +99,7 @@ type TTYRenderer struct {
 	terminalHit     bool
 	dirty           bool
 	frameLines      int
+	frameEpoch      uint64
 	painted         bool
 	emitted         int
 	emittedPrefix   string
@@ -316,7 +317,7 @@ func (r *TTYRenderer) closeOutput() bool {
 	return true
 }
 
-// Paint writes one frame when state changed since the last paint. It is
+// paint writes one frame when state changed since the last paint. It is
 // called from the pump only.
 func (r *TTYRenderer) Paint() error {
 	return r.paint(context.Background())
@@ -334,9 +335,10 @@ func (r *TTYRenderer) paint(ctx context.Context) error {
 		return nil
 	}
 	frame, lines := r.buildFrame(false, false)
+	epoch := r.frameEpoch
 	r.dirty = false
 	r.mu.Unlock()
-	return r.writeFrame(ctx, frame, lines)
+	return r.writeFrame(ctx, frame, lines, epoch)
 }
 
 // Finalize paints the terminal frame with the authoritative text: the
@@ -349,8 +351,9 @@ func (r *TTYRenderer) Finalize(failed, cancelled bool) error {
 func (r *TTYRenderer) finalize(ctx context.Context, failed, cancelled bool) error {
 	r.mu.Lock()
 	frame, lines := r.buildFrame(failed, cancelled)
+	epoch := r.frameEpoch
 	r.mu.Unlock()
-	return r.writeFrame(ctx, frame, lines)
+	return r.writeFrame(ctx, frame, lines, epoch)
 }
 
 // buildFrame composes the frame under lock. failed turns discard partial
@@ -472,11 +475,18 @@ const (
 
 // writeFrame serializes writes so a cancelled pump cannot interleave with
 // the final frame, and records the frame extent for the next in-place
-// repaint.
-func (r *TTYRenderer) writeFrame(ctx context.Context, frame string, lines int) error {
+// repaint. A frame built before a direct write moved the frame origin is
+// dropped and re-dirtied: its cursor math would repaint over the lines the
+// direct write owns.
+func (r *TTYRenderer) writeFrame(ctx context.Context, frame string, lines int, epoch uint64) error {
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 	r.mu.Lock()
+	if r.frameEpoch != epoch {
+		r.dirty = true
+		r.mu.Unlock()
+		return nil
+	}
 	r.frameLines = lines
 	r.painted = true
 	r.mu.Unlock()
@@ -492,6 +502,25 @@ func (r *TTYRenderer) writeOutput(ctx context.Context, p []byte) error {
 	}
 	_, err := r.opt.Out.WriteContext(ctx, p)
 	return err
+}
+
+// DirectWrite appends text outside the frame system, for surfaces that own
+// whole lines below the live frame — the approval card and its outcome. The
+// frame origin resets so the next paint continues below the written text
+// instead of repainting over it; in-flight frames built against the old
+// origin are dropped by the epoch check in writeFrame.
+func (r *TTYRenderer) DirectWrite(ctx context.Context, text string) error {
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+	r.mu.Lock()
+	r.frameEpoch++
+	r.frameLines = 0
+	r.painted = false
+	r.mu.Unlock()
+	if err := r.writeOutput(ctx, []byte(text)); err != nil {
+		return fmt.Errorf("terminal: direct write: %w", err)
+	}
+	return nil
 }
 
 // ClearScreen erases the display when styling is available; otherwise it

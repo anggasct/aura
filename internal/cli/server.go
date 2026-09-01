@@ -77,7 +77,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					OutputBytes:   observation.OutputBytes,
 				})
 			})
-			builtin, err := newBuiltinToolExecutor(cfg, db, logger, observer)
+			builtin, err := newBuiltinToolExecutor(cfg, db, logger, observer, nil)
 			if err != nil {
 				return err
 			}
@@ -128,7 +128,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				"port", cfg.Server.Port,
 			)
 			runErr := srv.Run(ctx)
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Runtime.ShutdownTimeout))
+			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
 			defer cancel()
 			if err := host.Shutdown(shutdownCtx); runErr == nil {
 				runErr = err

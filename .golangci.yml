@@ -124,6 +124,14 @@ linters:
         text: G304
         path: internal/cli/process_unix.go
 
+      # Directories are hardened to 0700 exactly as the filesystem convention
+      # requires; G302's 0600 ceiling is a file rule and cannot express the
+      # execute bit a directory needs.
+      - linters:
+          - gosec
+        text: G302
+        path: internal/store/connection\.go
+
       # unsafe.Pointer is required to hand the seccomp action word to the
       # kernel probe; the value is a stack-local uint32.
       - linters:

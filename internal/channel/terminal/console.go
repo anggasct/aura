@@ -35,6 +35,14 @@ type Console struct {
 	closeInput   func()
 	tty          *TTYRenderer
 	terminalSeen bool
+	approvals    *ApprovalBridge
+	// lines is the run loop's line source, stored so an in-turn approval
+	// ask can route the operator's answer. Written once in Run before any
+	// turn starts and read only from the run loop goroutine.
+	lines <-chan readLineResult
+	// The next line belongs to an approval that ended before its answer was
+	// consumed; it must not become a new model turn.
+	discardNextApproval bool
 
 	mu           sync.Mutex
 	interrupts   <-chan struct{}
@@ -81,6 +89,11 @@ func (c *Console) SetInputCloser(closeInput func()) { c.closeInput = closeInput 
 // becomes available. nil restores the plain contract.
 func (c *Console) SetTTY(r *TTYRenderer) { c.tty = r }
 
+// SetApprovalBridge installs the interactive exact-approval path. It only
+// takes effect in the TTY presentation; the plain contract keeps denying
+// approvals by default.
+func (c *Console) SetApprovalBridge(b *ApprovalBridge) { c.approvals = b }
+
 // Run drives the console until EOF after drain, an escalated interrupt, or
 // ctx cancellation. A first interrupt cancels the active turn and waits for
 // its durable terminal state; a second interrupt within the configured window
@@ -118,6 +131,7 @@ func (c *Console) Run(ctx context.Context) error {
 
 	lines, pauseReading, resumeReading, stopReading := readLines(ctx, c.in, c.config.MaxInputBytes, c.closeInput)
 	defer stopReading()
+	c.lines = lines
 	for {
 		select {
 		case <-c.escalated:
@@ -141,6 +155,11 @@ func (c *Console) Run(ctx context.Context) error {
 			if r.eof {
 				ack()
 				return c.drain()
+			}
+			if c.discardNextApproval {
+				c.discardNextApproval = false
+				ack()
+				continue
 			}
 			line := strings.TrimSpace(r.line)
 			if line == "" {
@@ -229,36 +248,165 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 	return nil
 }
 
+// streamItem is one event or error pumped off the turn's stream.
+type streamItem struct {
+	ev  Event
+	err error
+}
+
 // streamTurn drives the interactive renderer: events fold into bounded
 // render state, a pump coalesces frames at the configured rate, and the
-// final frame carries the authoritative completed message.
+// final frame carries the authoritative completed message. An exact
+// approval ask suspends the loop's answer routing: the card is written
+// below the live frame and the next input line becomes the decision,
+// defaulting to reject on empty input, EOF, expiry, or turn end.
 func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, cancelled *bool) error {
 	c.tty.Begin()
 	producerCtx, cancelProducer := context.WithCancel(turnCtx)
 	defer cancelProducer()
 	pumpCtx, stopPump := context.WithCancel(producerCtx)
 	pumpDone := c.tty.StartPump(pumpCtx, func(error) { cancelProducer() })
+
+	consumeCtx, stopConsuming := context.WithCancel(context.Background())
+	defer stopConsuming()
+	items := make(chan streamItem)
+	produceDone := make(chan struct{})
+	go func() {
+		defer close(produceDone)
+		defer close(items)
+		for ev, err := range c.runner.Run(producerCtx, req) {
+			select {
+			case items <- streamItem{ev: ev, err: err}:
+			case <-consumeCtx.Done():
+				return
+			}
+		}
+	}()
+
+	var approvalReady <-chan struct{}
+	if c.approvals != nil {
+		approvalReady = c.approvals.readyCh()
+	}
 	var streamErr error
-	for ev, err := range c.runner.Run(producerCtx, req) {
-		if err != nil {
-			streamErr = err
-			break
+	var serving *approvalAsk
+	var answers <-chan readLineResult
+	var expiry <-chan time.Time
+	var turnDone <-chan struct{}
+	var expiryTimer *time.Timer
+	answer := func(accepted bool, outcome string) {
+		if serving == nil {
+			return
 		}
-		*failed = *failed || ev.Kind == "turn.failed"
-		*cancelled = *cancelled || ev.Kind == "turn.cancelled"
-		if ev.Kind == "turn.completed" || ev.Kind == "turn.failed" || ev.Kind == "turn.cancelled" {
-			c.terminalSeen = true
+		card := serving.card
+		serving.answer(accepted)
+		if expiryTimer != nil {
+			expiryTimer.Stop()
+			expiryTimer = nil
 		}
-		c.tty.Observe(ev)
+		expiry, turnDone, answers, serving = nil, nil, nil, nil
+		writeCtx, cancelWrite := context.WithTimeout(context.WithoutCancel(turnCtx), time.Second)
+		defer cancelWrite()
+		line := fmt.Sprintf("approval %s: %s@%s\n", outcome, sanitizeText(card.ToolName), sanitizeText(card.ToolVersion))
+		if err := c.tty.DirectWrite(writeCtx, line); err != nil {
+			c.tty.setErr(err)
+		}
+	}
+	rejectPending := func(outcome string) {
+		if serving != nil {
+			c.discardNextApproval = true
+		}
+		answer(false, outcome)
+	}
+loop:
+	for {
+		select {
+		case item, ok := <-items:
+			if !ok {
+				break loop
+			}
+			if item.err != nil {
+				streamErr = item.err
+				break loop
+			}
+			ev := item.ev
+			*failed = *failed || ev.Kind == "turn.failed"
+			*cancelled = *cancelled || ev.Kind == "turn.cancelled"
+			if ev.Kind == "turn.completed" || ev.Kind == "turn.failed" || ev.Kind == "turn.cancelled" {
+				c.terminalSeen = true
+			}
+			c.tty.Observe(ev)
+		case <-approvalReady:
+			ask := c.approvals.take()
+			if ask == nil {
+				continue
+			}
+			cardWidth := 0
+			if c.tty.opt.Width != nil {
+				cardWidth = c.tty.opt.Width()
+			}
+			writeCtx, cancelWrite := context.WithTimeout(context.WithoutCancel(turnCtx), time.Second)
+			err := c.tty.DirectWrite(writeCtx, renderApprovalCard(ask.card, cardWidth))
+			cancelWrite()
+			if err != nil {
+				c.tty.setErr(err)
+				c.discardNextApproval = true
+				ask.answer(false)
+				streamErr = err
+				break loop
+			}
+			serving = ask
+			answers = c.lines
+			turnDone = turnCtx.Done()
+			if !ask.card.ExpiresAt.IsZero() {
+				delay := time.Until(ask.card.ExpiresAt)
+				if delay < 0 {
+					delay = 0
+				}
+				expiryTimer = time.NewTimer(delay)
+				expiry = expiryTimer.C
+			}
+		case r, ok := <-answers:
+			if !ok {
+				answers = nil
+				answer(false, "rejected (input closed)")
+				continue
+			}
+			if r.ack != nil {
+				close(r.ack)
+			}
+			if r.err != nil || r.eof {
+				answer(false, "rejected (input closed)")
+				continue
+			}
+			if approvalAccepted(r.line) {
+				answer(true, "accepted")
+			} else {
+				answer(false, "rejected")
+			}
+		case <-expiry:
+			rejectPending("rejected (expired)")
+		case <-turnDone:
+			rejectPending("rejected (turn ended)")
+		}
+	}
+	rejectPending("rejected (turn ended)")
+	if expiryTimer != nil {
+		expiryTimer.Stop()
 	}
 	stopPump()
-	pumpTimer := time.NewTimer(time.Second)
+	stopConsuming()
+	cancelProducer()
+	pumpTimer := time.NewTimer(5 * time.Second)
 	defer pumpTimer.Stop()
 	select {
 	case <-pumpDone:
 	case <-pumpTimer.C:
-		cancelProducer()
 		return errors.New("terminal: paint did not stop after cancellation")
+	}
+	select {
+	case <-produceDone:
+	case <-pumpTimer.C:
+		return errors.New("terminal: event pump did not stop after cancellation")
 	}
 	if err := c.tty.Err(); err != nil {
 		return err

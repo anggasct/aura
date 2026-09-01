@@ -24,7 +24,7 @@ func TestBuiltinToolExecutorFailsClosedWithoutLinux(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tools.Workspace = t.TempDir()
 	cfg.Storage.Path = t.TempDir()
-	_, err = newBuiltinToolExecutor(&cfg, db, nil, nil)
+	_, err = newBuiltinToolExecutor(&cfg, db, nil, nil, nil)
 	if err == nil {
 		t.Fatal("newBuiltinToolExecutor succeeded on a platform without race-safe filesystem access")
 	}

@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
 	execTool "github.com/anggasct/aura/internal/tools/exec"
@@ -41,7 +43,7 @@ func (e *builtinToolExecutor) SetEventPublisher(publish func(*store.RuntimeEvent
 	e.journal.SetEventPublisher(effectPublisherFunc(publish))
 }
 
-func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger, observer toolbroker.Observer) (*builtinToolExecutor, error) {
+func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider) (*builtinToolExecutor, error) {
 	if cfg == nil || cfg.Tools == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -102,15 +104,38 @@ func newBuiltinToolExecutor(cfg *config.Config, db *sql.DB, logger *slog.Logger,
 	}
 	broker, err := toolbroker.New(&toolbroker.Options{
 		Adapters:             adapters,
+		Secrets:              configuredToolSecrets(cfg),
 		MaxInlineResultBytes: toolsCfg.MaxInlineResultBytes,
 		Artifacts:            store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
 		Effects:              effects,
 		Observer:             observer,
+		ApprovalDecider:      decider,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &builtinToolExecutor{broker: broker, journal: journal}, nil
+}
+
+func configuredToolSecrets(cfg *config.Config) []string {
+	if cfg == nil || cfg.Tools == nil {
+		return nil
+	}
+	ref := cfg.Tools.WebSearch.CredentialRef
+	var source secret.Reference
+	switch {
+	case strings.HasPrefix(ref, "env://"):
+		source.Env = strings.TrimPrefix(ref, "env://")
+	case strings.HasPrefix(ref, "file://"):
+		source.File = strings.TrimPrefix(ref, "file://")
+	default:
+		return nil
+	}
+	value, err := source.Resolve()
+	if err != nil || value == "" {
+		return nil
+	}
+	return []string{value}
 }
 
 func (e *builtinToolExecutor) Definitions() []runtime.BuiltinToolDefinition {
@@ -142,7 +167,7 @@ func (e *builtinToolExecutor) Evaluate(ctx context.Context, request *approval.To
 
 func (e *builtinToolExecutor) Execute(ctx context.Context, request *runtime.BuiltinToolRequest) (json.RawMessage, error) {
 	if request == nil {
-		return nil, errors.New("builtin tool request must not be nil")
+		return nil, &runtime.Error{Code: runtime.ErrorCodeInvalidArgument, Detail: "builtin tool request must not be nil"}
 	}
 	result, err := e.broker.Execute(ctx, &toolbroker.ToolRequest{
 		RequestID: request.RequestID, TurnID: request.TurnID, SessionID: request.SessionID,

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/effect"
@@ -63,6 +64,8 @@ const (
 	ApprovalMissing  = "missing"
 	ApprovalAttached = "attached"
 	ApprovalAuto     = "auto"
+	ApprovalApproved = "approved"
+	ApprovalRejected = "rejected"
 
 	ExecutorDirect = "direct"
 	ExecutorEffect = "effect"
@@ -81,6 +84,31 @@ type Observation struct {
 
 type Observer func(context.Context, Observation)
 
+// ApprovalPrompt is the display-safe canonical scope of one approval
+// request: the exact tool identity, the canonical arguments with configured
+// secrets redacted and the display bounded, the constraints the execution
+// will run under, and the policy reason. It carries everything an operator
+// needs to decide and nothing that can alter the decision.
+type ApprovalPrompt struct {
+	ToolName       string
+	ToolVersion    string
+	SessionID      string
+	TurnID         string
+	PrincipalID    string
+	Arguments      string
+	Network        bool
+	Timeout        time.Duration
+	MaxOutputBytes int64
+	PolicyVersion  string
+	ReasonCode     string
+	ExpiresAt      time.Time
+}
+
+// ApprovalDecider resolves one require-approval outcome. true is valid only
+// for an explicit acceptance of the displayed prompt; false, an error, or a
+// missing decider all reject fail-closed.
+type ApprovalDecider func(ctx context.Context, prompt *ApprovalPrompt) (bool, error)
+
 type Options struct {
 	Policy               approval.Policy
 	Adapters             map[string]Adapter
@@ -89,6 +117,7 @@ type Options struct {
 	Artifacts            store.ArtifactStore
 	Effects              *effect.Executor
 	Observer             Observer
+	ApprovalDecider      ApprovalDecider
 }
 
 type Broker struct {
@@ -100,6 +129,7 @@ type Broker struct {
 	artifacts            store.ArtifactStore
 	effects              *effect.Executor
 	observer             Observer
+	decider              ApprovalDecider
 }
 
 func New(options *Options) (*Broker, error) {
@@ -132,6 +162,7 @@ func New(options *Options) (*Broker, error) {
 		artifacts:            options.Artifacts,
 		effects:              options.Effects,
 		observer:             options.Observer,
+		decider:              options.ApprovalDecider,
 	}, nil
 }
 
@@ -248,18 +279,38 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 	}
 
+	approvalExpiry := absoluteApprovalExpiry(canonical.Deadline)
 	grant := canonical.Approval
-	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil {
+	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && b.decider == nil {
 		approvalState = ApprovalMissing
 		return ToolResult{}, errorf(ResultApprovalRequired, "tool %q requires approval", key)
 	}
 	if grant == nil {
-		approvalState = ApprovalAuto
-		ttl := 5 * time.Minute
-		if !canonical.Deadline.IsZero() {
-			ttl = time.Until(canonical.Deadline)
+		if decision.Outcome == approval.OutcomeRequireApproval {
+			accepted, err := b.decider(ctx, b.buildApprovalPrompt(&canonical, decision, approvalExpiry))
+			if err != nil {
+				approvalState = ApprovalRejected
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return ToolResult{}, errorf(ResultDeadlineExceeded, "tool request ended: %v", err)
+				}
+				return ToolResult{}, errorf(ResultPolicyDenied, "tool %q approval failed closed: %s", key, redact([]byte(err.Error()), b.secrets))
+			}
+			if !accepted {
+				approvalState = ApprovalRejected
+				return ToolResult{}, errorf(ResultApprovalRequired, "tool %q approval was rejected", key)
+			}
+			approvalState = ApprovalApproved
+		} else {
+			approvalState = ApprovalAuto
 		}
-		newGrant, grantErr := b.engine.Grant(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), ttl)
+		// The interactive ask can block past the request deadline, so the
+		// grant must retain the original absolute expiry, not a fresh TTL
+		// captured after the ask.
+		if err := contextError(ctx, approvalExpiry); err != nil {
+			approvalState = ApprovalRejected
+			return ToolResult{}, err
+		}
+		newGrant, grantErr := b.engine.GrantUntil(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), approvalExpiry)
 		err = grantErr
 		if err != nil {
 			return ToolResult{}, mapApprovalError(err)
@@ -482,6 +533,47 @@ func randomArtifactID() (string, error) {
 		return "", err
 	}
 	return "art-" + hex.EncodeToString(data[:]), nil
+}
+
+const (
+	defaultApprovalTTL      = 5 * time.Minute
+	maxApprovalDisplayBytes = 2048
+)
+
+func absoluteApprovalExpiry(deadline time.Time) time.Time {
+	if !deadline.IsZero() {
+		return deadline
+	}
+	return time.Now().Add(defaultApprovalTTL)
+}
+
+func (b *Broker) buildApprovalPrompt(request *ToolRequest, decision approval.PolicyDecision, expiresAt time.Time) *ApprovalPrompt {
+	display := redact(request.Arguments, b.secrets)
+	if len(display) > maxApprovalDisplayBytes {
+		display = truncateDisplay(display, maxApprovalDisplayBytes)
+	}
+	return &ApprovalPrompt{
+		ToolName:       request.ToolName,
+		ToolVersion:    request.ToolVersion,
+		SessionID:      request.SessionID,
+		TurnID:         request.TurnID,
+		PrincipalID:    request.PrincipalID,
+		Arguments:      string(display),
+		Network:        decision.Constraints.AllowNetwork,
+		Timeout:        decision.Constraints.Timeout,
+		MaxOutputBytes: decision.Constraints.MaxOutputBytes,
+		PolicyVersion:  decision.PolicyVersion,
+		ReasonCode:     decision.ReasonCode,
+		ExpiresAt:      expiresAt,
+	}
+}
+
+func truncateDisplay(data []byte, limit int) []byte {
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(data[cut]) {
+		cut--
+	}
+	return append(data[:cut:cut], []byte("...[truncated]")...)
 }
 
 func (b *Broker) canonicalRequest(request *ToolRequest) (ToolRequest, error) {
