@@ -59,8 +59,11 @@ linters:
             - pkg: github.com/anggasct/aura/internal/runtime/adk
               desc: only the cli composition root may import the ADK executor adapter; depend on the runtime boundary types instead
         # The root package is the shared contract layer (types, errors, fake,
-        # checkpoint payload); subpackages import it, never the reverse, so
-        # the root cannot grow a dependency on any implementation package.
+        # checkpoint payload). It deliberately references the ingress and
+        # checkpoint contract packages — TurnRequest carries ingress
+        # InputParts and the checkpoint payload is shared with the engine —
+        # but must never depend on an implementation package: engine, adk,
+        # or channelhost. The dependency direction for those is reversed.
         runtime-root-stays-contract-only:
           files:
             - "**/internal/runtime/*.go"
@@ -71,8 +74,13 @@ linters:
               desc: the root contract package must not depend on the ADK adapter; the dependency direction is adk importing root
             - pkg: github.com/anggasct/aura/internal/runtime/channelhost
               desc: channel contracts are consumed by the engine host and channel adapters, not by the shared root package
-        # The engine consumes executors through the TurnExecutor port and must
-        # never reach into a concrete adapter, or the port loses its meaning.
+        # The engine's deliberate import set is the root contracts plus
+        # ingress, channelhost, and checkpoint: the Host binds channel
+        # adapters to the engine (channelhost->engine stays forbidden), and
+        # checkpoint resume validation is typed by the checkpoint contracts.
+        # adk is the one denied sibling — the engine consumes executors
+        # through the TurnExecutor port and must never reach into a concrete
+        # adapter, or the port loses its meaning.
         engine-never-imports-adk:
           files:
             - "**/internal/runtime/engine/**"
