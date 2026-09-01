@@ -186,7 +186,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	if err != nil {
 		t.Fatalf("newBuiltinToolExecutor: %v", err)
 	}
-	_, err = executor.Execute(context.Background(), &runtime.BuiltinToolRequest{
+	_, err = executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID:       "approval-secret",
 		TurnID:          "turn-secret",
 		SessionID:       "session-secret",
@@ -216,7 +216,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	if err != nil {
 		t.Fatalf("new diagnostic executor: %v", err)
 	}
-	_, err = diagnosticExecutor.Execute(context.Background(), &runtime.BuiltinToolRequest{
+	_, err = diagnosticExecutor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID:      "diagnostic-secret",
 		TurnID:         "turn-secret",
 		SessionID:      "session-secret",
@@ -236,7 +236,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 		t.Fatalf("diagnostic leaked configured secret: %v", err)
 	}
 
-	output, err := executor.Execute(context.Background(), &runtime.BuiltinToolRequest{
+	output, err := executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID:      "output-secret",
 		TurnID:         "turn-secret",
 		SessionID:      "session-secret",
