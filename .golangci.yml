@@ -7,6 +7,7 @@ linters:
     - containedctx
     - contextcheck
     - copyloopvar
+    - depguard
     - durationcheck
     - errchkjson
     - errorlint
@@ -38,6 +39,98 @@ linters:
     - wastedassign
 
   settings:
+    depguard:
+      # The rules below freeze the internal/runtime package graph after its
+      # decomposition into root contracts + ingress, channelhost, checkpoint,
+      # engine, and adk subpackages. Every deny states the architectural
+      # reason it protects; adding an allowed edge requires a deliberate
+      # config change, not an incidental import.
+      rules:
+        # The ADK executor adapter is an implementation detail wired only by
+        # the cli composition root; everything else depends on the runtime
+        # boundary (AgentRuntime, TurnRequest, ToolBroker) instead. adk's
+        # own files are exempt because they are the package itself.
+        adk-wired-only-by-cli:
+          files:
+            - "**/internal/**"
+            - "!**/internal/cli/**"
+            - "!**/internal/runtime/adk/**"
+          deny:
+            - pkg: github.com/anggasct/aura/internal/runtime/adk
+              desc: only the cli composition root may import the ADK executor adapter; depend on the runtime boundary types instead
+        # The root package is the shared contract layer (types, errors, fake,
+        # checkpoint payload). It deliberately references the ingress and
+        # checkpoint contract packages — TurnRequest carries ingress
+        # InputParts and the checkpoint payload is shared with the engine —
+        # but must never depend on an implementation package: engine, adk,
+        # or channelhost. The dependency direction for those is reversed.
+        runtime-root-stays-contract-only:
+          files:
+            - "**/internal/runtime/*.go"
+          deny:
+            - pkg: github.com/anggasct/aura/internal/runtime/engine
+              desc: the root contract package must not depend on the turn engine; the dependency direction is engine importing root
+            - pkg: github.com/anggasct/aura/internal/runtime/adk
+              desc: the root contract package must not depend on the ADK adapter; the dependency direction is adk importing root
+            - pkg: github.com/anggasct/aura/internal/runtime/channelhost
+              desc: channel contracts are consumed by the engine host and channel adapters, not by the shared root package
+        # The engine's deliberate import set is the root contracts plus
+        # ingress, channelhost, and checkpoint: the Host binds channel
+        # adapters to the engine (channelhost->engine stays forbidden), and
+        # checkpoint resume validation is typed by the checkpoint contracts.
+        # adk is the one denied sibling — the engine consumes executors
+        # through the TurnExecutor port and must never reach into a concrete
+        # adapter, or the port loses its meaning.
+        engine-never-imports-adk:
+          files:
+            - "**/internal/runtime/engine/**"
+          deny:
+            - pkg: github.com/anggasct/aura/internal/runtime/adk
+              desc: the engine consumes executors through the TurnExecutor port and must not depend on the ADK adapter
+        # The ADK adapter touches the runtime only through the root contract
+        # package and the engine ports. Test files are exempt: they build
+        # TurnRequests whose Parts field is typed by the ingress package.
+        adk-via-root-and-engine-only:
+          files:
+            - "**/internal/runtime/adk/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/anggasct/aura/internal/runtime/ingress
+              desc: the ADK adapter maps normalized TurnRequests, not channel ingress envelopes
+            - pkg: github.com/anggasct/aura/internal/runtime/channelhost
+              desc: outbound channel delivery belongs to the engine host and channel adapters, not the executor
+            - pkg: github.com/anggasct/aura/internal/runtime/checkpoint
+              desc: checkpoint resume flows through the engine, not the executor adapter
+        # Ingress is the innermost contract: it must stay importable by every
+        # runtime package, so it may depend on no internal package at all.
+        # Deny paths are prefix matches, so the internal root covers the
+        # whole internal tree.
+        ingress-stays-innermost:
+          files:
+            - "**/internal/runtime/ingress/**"
+          deny:
+            - pkg: github.com/anggasct/aura/internal
+              desc: ingress types are the innermost runtime contract and must not depend on any internal package
+        # The channel contract layer may reference ingress types but no other
+        # runtime package; lax mode lets the longer ingress allow entry win
+        # over the runtime-tree deny prefix.
+        channelhost-contract-only:
+          list-mode: lax
+          files:
+            - "**/internal/runtime/channelhost/**"
+          allow:
+            - github.com/anggasct/aura/internal/runtime/ingress
+          deny:
+            - pkg: github.com/anggasct/aura/internal/runtime
+              desc: channel contracts are consumed by the engine host and channel adapters, and must not reach back into the runtime tree beyond ingress types
+        # The checkpoint contract layer binds to the store only; the runtime
+        # root prefix deny covers the root package and every subpackage.
+        checkpoint-contract-only:
+          files:
+            - "**/internal/runtime/checkpoint/**"
+          deny:
+            - pkg: github.com/anggasct/aura/internal/runtime
+              desc: checkpoint contracts are store-facing boundaries consumed by the engine, and must not reach back into the runtime tree
     errcheck:
       # A deliberate ignore is written `_ =` at the call site so the decision
       # stays visible in review; check-blank would make that idiom impossible.

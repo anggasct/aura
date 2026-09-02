@@ -1,4 +1,4 @@
-package runtime
+package runtimeengine
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -59,15 +60,15 @@ func (c *Config) validate() error {
 // TurnExecutor runs one turn's inner loop. The fake executor is the
 // deterministic step-1 implementation; the ADK runner adapter replaces it
 // behind the same interface. Execute is named differently from the
-// AgentRuntime boundary so the queued runtime and its inner loop cannot be
+// runtime.AgentRuntime boundary so the queued runtime and its inner loop cannot be
 // conflated. Executor events carry kind and payload; the engine stamps
 // identity, sequence, and timestamp, and persists every event before
 // forwarding it.
 type TurnExecutor interface {
-	Execute(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+	Execute(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error]
 }
 
-// Engine implements AgentRuntime with a bounded per-session FIFO queue,
+// Engine implements runtime.AgentRuntime with a bounded per-session FIFO queue,
 // global concurrency limits, durable terminal events, and stream
 // subscribers that apply bounded backpressure.
 type Engine struct {
@@ -136,7 +137,7 @@ type sessionQueue struct {
 }
 
 type turn struct {
-	req      TurnRequest
+	req      runtime.TurnRequest
 	turnID   string
 	accepted store.RuntimeEvent
 	subs     map[*subscriber]struct{}
@@ -182,7 +183,7 @@ func (s *subscriber) send(ev *store.RuntimeEvent) {
 		return
 	default:
 	}
-	if ev.Kind == EventKindModelDelta {
+	if ev.Kind == runtime.EventKindModelDelta {
 		return
 	}
 	if !s.makeRoomLocked() {
@@ -200,7 +201,7 @@ func (s *subscriber) makeRoomLocked() bool {
 	for {
 		select {
 		case queuedEvent := <-s.events:
-			if !removedDelta && queuedEvent.Kind == EventKindModelDelta {
+			if !removedDelta && queuedEvent.Kind == runtime.EventKindModelDelta {
 				removedDelta = true
 				continue
 			}
@@ -246,13 +247,13 @@ func (s *subscriber) wasGapped() bool {
 	return s.gapped
 }
 
-var _ AgentRuntime = (*Engine)(nil)
+var _ runtime.AgentRuntime = (*Engine)(nil)
 
 // Run submits a turn and streams its events. A duplicate idempotency key
 // replays the original turn's stored events and creates no second event
 // sequence. The request is copied, so a caller-owned TurnID is never
 // mutated.
-func (e *Engine) Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (e *Engine) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		copyReq := *req
 		sub, err := e.submit(ctx, &copyReq)
@@ -314,7 +315,7 @@ func (e *Engine) replayAfterGap(ctx context.Context, turnID string, afterSequenc
 
 	events, err := e.dedupe.ListTurnEvents(context.WithoutCancel(ctx), turnID)
 	if err != nil {
-		yield(store.RuntimeEvent{Kind: EventKindTurnFailed, Payload: failedPayload(ErrorCodeRuntimeInternal, "failed to replay the live turn", err)}, nil)
+		yield(store.RuntimeEvent{Kind: runtime.EventKindTurnFailed, Payload: failedPayload(runtime.ErrorCodeRuntimeInternal, "failed to replay the live turn", err)}, nil)
 		return
 	}
 	for i := range events {
@@ -332,7 +333,7 @@ func (e *Engine) replayAfterGap(ctx context.Context, turnID string, afterSequenc
 
 func isTerminalKind(kind string) bool {
 	switch kind {
-	case EventKindTurnCompleted, EventKindTurnFailed, EventKindTurnCancelled:
+	case runtime.EventKindTurnCompleted, runtime.EventKindTurnFailed, runtime.EventKindTurnCancelled:
 		return true
 	}
 	return false
@@ -344,7 +345,7 @@ func isTerminalKind(kind string) bool {
 // without one it appends the accepted event directly. On any storage failure
 // the pending slot is released. The caller owns the next step: enqueue the
 // turn, or replay/return the original for a duplicate.
-func (e *Engine) claim(ctx context.Context, req *TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay bool, err error) {
+func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay bool, err error) {
 	if req == nil {
 		return store.RuntimeEvent{}, "", false, invalidArgument("turn request must not be nil")
 	}
@@ -355,17 +356,17 @@ func (e *Engine) claim(ctx context.Context, req *TurnRequest) (accepted store.Ru
 		return store.RuntimeEvent{}, "", false, invalidArgument("origin must not be empty")
 	}
 	if req.TurnID == "" {
-		req.TurnID = newTurnID()
+		req.TurnID = NewTurnID()
 	}
 
 	e.mu.Lock()
 	if e.shutdown {
 		e.mu.Unlock()
-		return store.RuntimeEvent{}, "", false, codedError(ErrorCodeRuntimeOverloaded, "runtime is shutting down", nil)
+		return store.RuntimeEvent{}, "", false, codedError(runtime.ErrorCodeRuntimeOverloaded, "runtime is shutting down", nil)
 	}
 	if e.pending >= e.cfg.MaxPendingTurns {
 		e.mu.Unlock()
-		return store.RuntimeEvent{}, "", false, codedError(ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
+		return store.RuntimeEvent{}, "", false, codedError(runtime.ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
 	}
 	e.pending++
 	sq := e.sessions[req.SessionID]
@@ -390,7 +391,7 @@ func (e *Engine) claim(ctx context.Context, req *TurnRequest) (accepted store.Ru
 		})
 		if err != nil {
 			e.releasePending()
-			return store.RuntimeEvent{}, "", false, codedError(ErrorCodeStorageUnavailable, "dedupe claim failed", err)
+			return store.RuntimeEvent{}, "", false, codedError(runtime.ErrorCodeStorageUnavailable, "dedupe claim failed", err)
 		}
 		return accepted, originalTurnID, replay, nil
 	}
@@ -405,7 +406,7 @@ func (e *Engine) claim(ctx context.Context, req *TurnRequest) (accepted store.Ru
 	})
 	if err != nil {
 		e.releasePending()
-		return store.RuntimeEvent{}, "", false, codedError(ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
+		return store.RuntimeEvent{}, "", false, codedError(runtime.ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
 	}
 	return accepted, "", false, nil
 }
@@ -414,7 +415,7 @@ func (e *Engine) claim(ctx context.Context, req *TurnRequest) (accepted store.Ru
 // capacity allows. The subscriber, when non-nil, receives the turn's events;
 // ingress accepts pass nil because channel delivery is decoupled from the
 // caller that submitted the envelope.
-func (e *Engine) enqueue(ctx context.Context, req *TurnRequest, accepted *store.RuntimeEvent, sub *subscriber) {
+func (e *Engine) enqueue(ctx context.Context, req *runtime.TurnRequest, accepted *store.RuntimeEvent, sub *subscriber) {
 	subs := map[*subscriber]struct{}{}
 	if sub != nil {
 		subs[sub] = struct{}{}
@@ -446,7 +447,7 @@ func (e *Engine) enqueue(ctx context.Context, req *TurnRequest, accepted *store.
 	e.schedule()
 }
 
-func (e *Engine) submit(ctx context.Context, req *TurnRequest) (*subscriber, error) {
+func (e *Engine) submit(ctx context.Context, req *runtime.TurnRequest) (*subscriber, error) {
 	accepted, originalTurnID, replay, err := e.claim(ctx, req)
 	if err != nil {
 		return nil, err
@@ -469,15 +470,15 @@ func (e *Engine) releasePending() {
 	e.mu.Unlock()
 }
 
-func acceptedEvent(req *TurnRequest, seq uint64) store.RuntimeEvent {
+func acceptedEvent(req *runtime.TurnRequest, seq uint64) store.RuntimeEvent {
 	payload := fmt.Sprintf(`{"origin":%q,"principal":%q}`, req.Origin, req.PrincipalID)
 	return store.RuntimeEvent{
-		ID:            newTurnID(),
+		ID:            NewTurnID(),
 		SessionID:     req.SessionID,
 		Sequence:      seq,
 		TurnID:        req.TurnID,
 		Author:        req.PrincipalID,
-		Kind:          EventKindTurnAccepted,
+		Kind:          runtime.EventKindTurnAccepted,
 		SchemaVersion: 1,
 		Payload:       []byte(payload),
 		CreatedAt:     time.Now().UTC(),
@@ -572,7 +573,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	// keeps it, so the stored log is the authoritative event identity.
 	persistEvent := func(ctx context.Context, ev *store.RuntimeEvent) error {
 		if ev.ID == "" {
-			ev.ID = newTurnID()
+			ev.ID = NewTurnID()
 		}
 		ev.SessionID = t.req.SessionID
 		ev.TurnID = t.turnID
@@ -594,7 +595,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 			return e.events.Append(ctx, ev)
 		})
 		if err != nil {
-			return codedError(ErrorCodeStorageUnavailable, "failed to persist "+ev.Kind, err)
+			return codedError(runtime.ErrorCodeStorageUnavailable, "failed to persist "+ev.Kind, err)
 		}
 		e.broadcast(t, ev)
 		return nil
@@ -623,17 +624,17 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 
 	switch {
 	case ctx.Err() == context.Canceled:
-		terminalKind, terminalPayload = EventKindTurnCancelled, cancelledPayload("turn cancelled")
+		terminalKind, terminalPayload = runtime.EventKindTurnCancelled, cancelledPayload("turn cancelled")
 	case ctx.Err() == context.DeadlineExceeded:
-		terminalKind, terminalPayload = EventKindTurnFailed, failedPayload(ErrorCodeTurnDeadlineExceeded, "turn deadline elapsed", nil)
+		terminalKind, terminalPayload = runtime.EventKindTurnFailed, failedPayload(runtime.ErrorCodeTurnDeadlineExceeded, "turn deadline elapsed", nil)
 	case execErr != nil:
-		code, ok := CodeOf(execErr)
+		code, ok := runtime.CodeOf(execErr)
 		if !ok {
-			code = ErrorCodeRuntimeInternal
+			code = runtime.ErrorCodeRuntimeInternal
 		}
-		terminalKind, terminalPayload = EventKindTurnFailed, failedPayload(code, "turn execution failed", execErr)
+		terminalKind, terminalPayload = runtime.EventKindTurnFailed, failedPayload(code, "turn execution failed", execErr)
 	default:
-		terminalKind, terminalPayload = EventKindTurnCompleted, completedPayload()
+		terminalKind, terminalPayload = runtime.EventKindTurnCompleted, completedPayload()
 	}
 	// The terminal event must be durable even when the turn context is
 	// cancelled or expired: "a turn is terminal only after its terminal
@@ -702,7 +703,7 @@ func (e *Engine) replay(ctx context.Context, turnID string, sub *subscriber) {
 	}
 	events, err := e.dedupe.ListTurnEvents(ctx, turnID)
 	if err != nil {
-		sub.sendContext(ctx, &store.RuntimeEvent{Kind: EventKindTurnFailed, Payload: failedPayload(ErrorCodeRuntimeInternal, "failed to replay the original turn", err)})
+		sub.sendContext(ctx, &store.RuntimeEvent{Kind: runtime.EventKindTurnFailed, Payload: failedPayload(runtime.ErrorCodeRuntimeInternal, "failed to replay the original turn", err)})
 		return
 	}
 	for i := range events {
@@ -768,7 +769,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 		case <-done:
 			return nil
 		case <-timer.C:
-			return codedError(ErrorCodeRuntimeInternal, "shutdown grace elapsed with turns still draining", nil)
+			return codedError(runtime.ErrorCodeRuntimeInternal, "shutdown grace elapsed with turns still draining", nil)
 		}
 	}
 }
@@ -777,11 +778,11 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 // started, then closes its subscribers.
 func (e *Engine) terminateQueued(ctx context.Context, t *turn) {
 	terminal := &store.RuntimeEvent{
-		ID:            newTurnID(),
+		ID:            NewTurnID(),
 		SessionID:     t.req.SessionID,
 		TurnID:        t.turnID,
 		Author:        t.req.PrincipalID,
-		Kind:          EventKindTurnCancelled,
+		Kind:          runtime.EventKindTurnCancelled,
 		SchemaVersion: 1,
 		Payload:       cancelledPayload("runtime shutdown"),
 		CreatedAt:     time.Now().UTC(),
@@ -813,7 +814,7 @@ func completedPayload() []byte {
 	return []byte(`{"outcome":"completed"}`)
 }
 
-func failedPayload(code ErrorCode, detail string, cause error) []byte {
+func failedPayload(code runtime.ErrorCode, detail string, cause error) []byte {
 	if cause != nil {
 		detail = detail + ": " + cause.Error()
 	}
@@ -824,7 +825,7 @@ func cancelledPayload(detail string) []byte {
 	return []byte(fmt.Sprintf(`{"reason":"cancelled","detail":%q}`, detail))
 }
 
-func newTurnID() string {
+func NewTurnID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return "turn_" + hex.EncodeToString(b[:])

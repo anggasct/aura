@@ -5,6 +5,8 @@ import (
 	"iter"
 	"time"
 
+	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -17,12 +19,6 @@ const (
 	OriginTerminal Origin = "terminal"
 	OriginInternal Origin = "internal"
 )
-
-// InputPart is one normalized piece of a turn's input. Channel adapters map
-// their wire format onto these parts before submission.
-type InputPart struct {
-	Text string
-}
 
 // Budget bounds a turn's consumption. Zero fields mean "no explicit limit
 // beyond the runtime defaults"; enforcement lives in the usage ledger.
@@ -39,7 +35,7 @@ type TurnRequest struct {
 	SessionID      string
 	PrincipalID    string
 	Origin         Origin
-	Parts          []InputPart
+	Parts          []runtimeingress.InputPart
 	IdempotencyKey string
 	Deadline       time.Time
 	Budget         Budget
@@ -71,4 +67,10 @@ const (
 // and copy before mutating.
 type AgentRuntime interface {
 	Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+}
+
+// ToolBroker is the policy gate every tool call must pass before execution.
+// approval.Engine is the canonical implementation.
+type ToolBroker interface {
+	Evaluate(ctx context.Context, req *approval.ToolRequest) (approval.PolicyDecision, error)
 }

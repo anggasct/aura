@@ -14,6 +14,8 @@ import (
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/engine"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -38,13 +40,13 @@ func TestComposedEntryVerifiesExternalWorldEvidence(t *testing.T) {
 		t.Fatalf("Create session: %v", err)
 	}
 	events := store.NewEventStore(db)
-	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}}), nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, events, store.NewDedupeStore(db), runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}}), nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
 	for event, runErr := range engine.Run(ctx, &runtime.TurnRequest{
 		TurnID: "world-turn", SessionID: "world-session", PrincipalID: "owner", Origin: runtime.OriginInternal,
-		Parts: []runtime.InputPart{{Text: "world"}},
+		Parts: []runtimeingress.InputPart{{Text: "world"}},
 	}) {
 		if runErr != nil {
 			t.Fatalf("Run: %v", runErr)

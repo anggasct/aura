@@ -1,4 +1,4 @@
-package runtime
+package runtimeengine
 
 import (
 	"context"
@@ -11,6 +11,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -43,7 +45,7 @@ func mustCreateSession(t *testing.T, db *sql.DB, id string) {
 	}
 }
 
-func collect(t *testing.T, engine *Engine, req *TurnRequest) ([]store.RuntimeEvent, error) {
+func collect(t *testing.T, engine *Engine, req *runtime.TurnRequest) ([]store.RuntimeEvent, error) {
 	t.Helper()
 	var events []store.RuntimeEvent
 	for ev, err := range engine.Run(context.Background(), req) {
@@ -55,21 +57,21 @@ func collect(t *testing.T, engine *Engine, req *TurnRequest) ([]store.RuntimeEve
 	return events, nil
 }
 
-func sampleRequest(sessionID, turnID string) *TurnRequest {
-	return &TurnRequest{
+func sampleRequest(sessionID, turnID string) *runtime.TurnRequest {
+	return &runtime.TurnRequest{
 		TurnID:      turnID,
 		SessionID:   sessionID,
 		PrincipalID: "user-1",
-		Origin:      OriginTerminal,
-		Parts:       []InputPart{{Text: "hello"}},
+		Origin:      runtime.OriginTerminal,
+		Parts:       []runtimeingress.InputPart{{Text: "hello"}},
 	}
 }
 
 func TestPerSessionFIFONoOverlap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := NewFakeExecutor([]FakeStep{
-			{Kind: EventKindModelStarted, Block: gate},
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			{Kind: runtime.EventKindModelStarted, Block: gate},
 		})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
@@ -111,8 +113,8 @@ func TestPerSessionFIFONoOverlap(t *testing.T) {
 func TestGlobalConcurrencyLimit(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := NewFakeExecutor([]FakeStep{
-			{Kind: EventKindModelStarted, Block: gate},
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			{Kind: runtime.EventKindModelStarted, Block: gate},
 		})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 16}, executor)
 		for i := range 4 {
@@ -145,9 +147,9 @@ func TestGlobalConcurrencyLimit(t *testing.T) {
 
 func TestDuplicateIngressReturnsOriginalTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := NewFakeExecutor([]FakeStep{
-			{Kind: EventKindModelStarted},
-			{Kind: EventKindMessageCompleted},
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			{Kind: runtime.EventKindModelStarted},
+			{Kind: runtime.EventKindMessageCompleted},
 		})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
@@ -191,7 +193,7 @@ func acceptedCount(t *testing.T, db *sql.DB, sessionID string) int {
 	var count int
 	if err := db.QueryRowContext(context.Background(),
 		`SELECT COUNT(*) FROM runtime_event WHERE session_id = ? AND kind = ?`,
-		sessionID, EventKindTurnAccepted).Scan(&count); err != nil {
+		sessionID, runtime.EventKindTurnAccepted).Scan(&count); err != nil {
 		t.Fatalf("count accepted: %v", err)
 	}
 	return count
@@ -209,7 +211,7 @@ func firstEventTurn(events []store.RuntimeEvent) string {
 func TestQueueOverflowIsTyped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := NewFakeExecutor([]FakeStep{{Kind: EventKindModelStarted, Block: gate}})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, executor)
 		mustCreateSession(t, db, "session-a")
 		mustCreateSession(t, db, "session-b")
@@ -230,8 +232,8 @@ func TestQueueOverflowIsTyped(t *testing.T) {
 
 		// The third turn has no room: active slot busy, pending slot full.
 		_, err := collect(t, engine, sampleRequest("session-c", turnID(2)))
-		code, ok := CodeOf(err)
-		if !ok || code != ErrorCodeRuntimeOverloaded {
+		code, ok := runtime.CodeOf(err)
+		if !ok || code != runtime.ErrorCodeRuntimeOverloaded {
 			t.Fatalf("CodeOf(%v) = %q, %v; want runtime_overloaded", err, code, ok)
 		}
 		close(gate)
@@ -262,7 +264,7 @@ func waitFor(t *testing.T, cond func() bool) {
 func TestTurnDeadlineIsDurable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := NewFakeExecutor([]FakeStep{{Kind: EventKindModelStarted, Block: gate}})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{
 			MaxActiveTurns: 2, MaxPendingTurns: 4, TurnTimeout: 50 * time.Millisecond,
 		}, executor)
@@ -272,11 +274,11 @@ func TestTurnDeadlineIsDurable(t *testing.T) {
 		go func() {
 			events, err := collect(t, engine, sampleRequest("session-a", "turn-deadline"))
 			for _, ev := range events {
-				if ev.Kind == EventKindTurnFailed {
+				if ev.Kind == runtime.EventKindTurnFailed {
 					var payload struct {
-						Code ErrorCode `json:"code"`
+						Code runtime.ErrorCode `json:"code"`
 					}
-					if err := json.Unmarshal(ev.Payload, &payload); err == nil && payload.Code == ErrorCodeTurnDeadlineExceeded {
+					if err := json.Unmarshal(ev.Payload, &payload); err == nil && payload.Code == runtime.ErrorCodeTurnDeadlineExceeded {
 						errs <- nil
 						return
 					}
@@ -292,7 +294,7 @@ func TestTurnDeadlineIsDurable(t *testing.T) {
 		var count int
 		if err := db.QueryRowContext(context.Background(),
 			`SELECT COUNT(*) FROM runtime_event WHERE turn_id = 'turn-deadline' AND kind = ?`,
-			EventKindTurnFailed).Scan(&count); err != nil {
+			runtime.EventKindTurnFailed).Scan(&count); err != nil {
 			t.Fatalf("count terminal: %v", err)
 		}
 		if count != 1 {
@@ -305,7 +307,7 @@ func TestTurnDeadlineIsDurable(t *testing.T) {
 func TestRunCancellationIsDurable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := NewFakeExecutor([]FakeStep{{Kind: EventKindModelStarted, Block: gate}})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -333,7 +335,7 @@ func TestRunCancellationIsDurable(t *testing.T) {
 		var count int
 		if err := db.QueryRowContext(context.Background(),
 			`SELECT COUNT(*) FROM runtime_event WHERE turn_id = 'turn-cancel' AND kind = ?`,
-			EventKindTurnCancelled).Scan(&count); err != nil {
+			runtime.EventKindTurnCancelled).Scan(&count); err != nil {
 			t.Fatalf("count terminal: %v", err)
 		}
 		if count != 1 {
@@ -356,7 +358,7 @@ func waitForTerminal(t *testing.T, events chan store.RuntimeEvent) {
 func TestShutdownDrainsAndCancelsDurably(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := NewFakeExecutor([]FakeStep{{Kind: EventKindModelStarted, Block: gate}})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{
 			MaxActiveTurns: 1, MaxPendingTurns: 4, ShutdownTimeout: 2 * time.Second,
 		}, executor)
@@ -380,12 +382,12 @@ func TestShutdownDrainsAndCancelsDurably(t *testing.T) {
 		var accepted, terminals int
 		if err := db.QueryRowContext(context.Background(),
 			`SELECT COUNT(*) FROM runtime_event WHERE session_id = 'session-a' AND kind = ?`,
-			EventKindTurnAccepted).Scan(&accepted); err != nil {
+			runtime.EventKindTurnAccepted).Scan(&accepted); err != nil {
 			t.Fatalf("count accepted: %v", err)
 		}
 		if err := db.QueryRowContext(context.Background(),
 			`SELECT COUNT(*) FROM runtime_event WHERE session_id = 'session-a' AND kind IN (?, ?, ?)`,
-			EventKindTurnCompleted, EventKindTurnFailed, EventKindTurnCancelled).Scan(&terminals); err != nil {
+			runtime.EventKindTurnCompleted, runtime.EventKindTurnFailed, runtime.EventKindTurnCancelled).Scan(&terminals); err != nil {
 			t.Fatalf("count terminals: %v", err)
 		}
 		if accepted != 3 || terminals != 3 {
@@ -401,7 +403,7 @@ func TestShutdownDrainsAndCancelsDurably(t *testing.T) {
 func TestAbandonedConsumerDoesNotBlockTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := NewFakeExecutor([]FakeStep{{Kind: EventKindModelStarted, Block: gate}})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -411,7 +413,7 @@ func TestAbandonedConsumerDoesNotBlockTurn(t *testing.T) {
 		seq := engine.Run(ctx, sampleRequest("session-a", "turn-abandon"))
 		next, stop := iter.Pull2(seq)
 		first, _, ok := next()
-		if !ok || first.Kind != EventKindTurnAccepted {
+		if !ok || first.Kind != runtime.EventKindTurnAccepted {
 			t.Fatalf("first event = %v, present=%v", first, ok)
 		}
 		stop()
@@ -428,14 +430,14 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 	sub := newSubscriber()
 	defer sub.stop()
 	for range cap(sub.events) {
-		sub.events <- store.RuntimeEvent{Kind: EventKindModelDelta}
+		sub.events <- store.RuntimeEvent{Kind: runtime.EventKindModelDelta}
 	}
 
 	cancelled := make(chan struct{})
 	engine := &Engine{
 		turns: map[string]*turn{
 			"turn-live": {
-				req:    TurnRequest{SessionID: "session-a"},
+				req:    runtime.TurnRequest{SessionID: "session-a"},
 				cancel: func() { close(cancelled) },
 				subs:   map[*subscriber]struct{}{sub: {}},
 			},
@@ -494,7 +496,7 @@ func TestPublishAfterSubscriberCloseDoesNotPanic(t *testing.T) {
 	engine := &Engine{
 		turns: map[string]*turn{
 			"turn-live": {
-				req:  TurnRequest{SessionID: "session-a"},
+				req:  runtime.TurnRequest{SessionID: "session-a"},
 				subs: map[*subscriber]struct{}{sub: {}},
 			},
 		},
@@ -512,17 +514,17 @@ func TestPublishAfterSubscriberCloseDoesNotPanic(t *testing.T) {
 }
 
 func TestSaturatedLifecycleSubscriberReplaysAfterGap(t *testing.T) {
-	script := make([]FakeStep, subscriberBufferSize+1)
+	script := make([]runtime.FakeStep, subscriberBufferSize+1)
 	for i := range script {
-		script[i] = FakeStep{Kind: EventKindToolRequested, Payload: []byte(`{"tool":"test"}`)}
+		script[i] = runtime.FakeStep{Kind: runtime.EventKindToolRequested, Payload: []byte(`{"tool":"test"}`)}
 	}
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 2}, NewFakeExecutor(script))
+	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 2}, runtime.NewFakeExecutor(script))
 	mustCreateSession(t, db, "session-a")
 
 	next, stop := iter.Pull2(engine.Run(context.Background(), sampleRequest("session-a", "turn-gap")))
 	defer stop()
 	first, err, ok := next()
-	if err != nil || !ok || first.Kind != EventKindTurnAccepted {
+	if err != nil || !ok || first.Kind != runtime.EventKindTurnAccepted {
 		t.Fatalf("first event = %+v, err=%v, present=%v; want accepted", first, err, ok)
 	}
 
@@ -535,7 +537,7 @@ func TestSaturatedLifecycleSubscriberReplaysAfterGap(t *testing.T) {
 		if !ok {
 			t.Fatal("stream closed before terminal replay")
 		}
-		if ev.Kind == EventKindToolRequested {
+		if ev.Kind == runtime.EventKindToolRequested {
 			requested++
 		}
 		if isTerminalKind(ev.Kind) {
@@ -554,7 +556,7 @@ func waitForTerminalDurable(t *testing.T, db *sql.DB, turnID string) {
 		var count int
 		if err := db.QueryRowContext(context.Background(),
 			`SELECT COUNT(*) FROM runtime_event WHERE turn_id = ? AND kind IN (?, ?, ?)`,
-			turnID, EventKindTurnCompleted, EventKindTurnFailed, EventKindTurnCancelled).Scan(&count); err != nil {
+			turnID, runtime.EventKindTurnCompleted, runtime.EventKindTurnFailed, runtime.EventKindTurnCancelled).Scan(&count); err != nil {
 			t.Fatalf("count terminal: %v", err)
 		}
 		if count >= 1 {
@@ -568,7 +570,7 @@ func waitForTerminalDurable(t *testing.T, db *sql.DB, turnID string) {
 func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := NewFakeExecutor([]FakeStep{{Kind: EventKindModelStarted, Block: gate}})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 64}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -605,7 +607,7 @@ func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 		for i := range n {
 			// Rejection with a stable code is fine; hangs are the failure mode.
 			if err := <-errs; err != nil {
-				if code, ok := CodeOf(err); !ok || code != ErrorCodeRuntimeOverloaded {
+				if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeRuntimeOverloaded {
 					t.Fatalf("submit %d: %v", i, err)
 				}
 			}
@@ -621,7 +623,7 @@ func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 			WHERE a.kind = ? AND NOT EXISTS (
 				SELECT 1 FROM runtime_event b
 				WHERE b.turn_id = a.turn_id AND b.kind IN (?, ?, ?)
-			)`, EventKindTurnAccepted, EventKindTurnCompleted, EventKindTurnFailed, EventKindTurnCancelled).Scan(&orphans); err != nil {
+			)`, runtime.EventKindTurnAccepted, runtime.EventKindTurnCompleted, runtime.EventKindTurnFailed, runtime.EventKindTurnCancelled).Scan(&orphans); err != nil {
 			t.Fatalf("count orphaned accepts: %v", err)
 		}
 		if orphans != 0 {
@@ -632,7 +634,7 @@ func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 
 func TestCompletedTurnsArePruned(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := NewFakeExecutor([]FakeStep{{Kind: EventKindModelStarted}})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -674,7 +676,7 @@ type ignoreCancelExecutor struct {
 	release chan struct{}
 }
 
-func (e ignoreCancelExecutor) Execute(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (e ignoreCancelExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		<-e.release
 	}
@@ -698,7 +700,7 @@ func TestShutdownBoundedWhenExecutorIgnoresCancellation(t *testing.T) {
 		if err == nil {
 			t.Fatal("Shutdown returned nil, want runtime_internal after grace")
 		}
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeRuntimeInternal {
+		if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeRuntimeInternal {
 			t.Fatalf("CodeOf(%v) = %q, %v; want runtime_internal", err, code, ok)
 		}
 		if elapsed := time.Since(start); elapsed > 5*time.Second {

@@ -1,4 +1,4 @@
-package runtime
+package runtimeadk
 
 import (
 	"context"
@@ -27,6 +27,14 @@ func newSessionTestDB(t *testing.T) (*sql.DB, store.SessionService, store.EventS
 		t.Fatalf("Migrate: %v", err)
 	}
 	return db, store.NewSessionService(db), store.NewEventStore(db)
+}
+
+func mustCreateSession(t *testing.T, db *sql.DB, id string) {
+	t.Helper()
+	sess := store.Session{ID: id, OwnerID: "user-1"}
+	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
+		t.Fatalf("create session %s: %v", id, err)
+	}
 }
 
 func TestADKSessionServiceCreateGet(t *testing.T) {

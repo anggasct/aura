@@ -15,6 +15,8 @@ import (
 
 	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/engine"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -26,9 +28,9 @@ type e2eRunner struct {
 
 func (r e2eRunner) Run(ctx context.Context, req *terminal.Request) iter.Seq2[terminal.Event, error] {
 	return func(yield func(terminal.Event, error) bool) {
-		parts := make([]runtime.InputPart, len(req.Parts))
+		parts := make([]runtimeingress.InputPart, len(req.Parts))
 		for i := range req.Parts {
-			parts[i] = runtime.InputPart{Text: req.Parts[i].Text}
+			parts[i] = runtimeingress.InputPart{Text: req.Parts[i].Text}
 		}
 		runtimeReq := &runtime.TurnRequest{
 			SessionID:   req.SessionID,
@@ -102,7 +104,7 @@ func TestTerminalVerticalSlice(t *testing.T) {
 	executor := runtime.NewFakeExecutor([]runtime.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"hello from the slice"}]},"partial":false}`)},
 	})
-	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -160,7 +162,7 @@ func TestTerminalReplayCompletedEventWins(t *testing.T) {
 		{Kind: runtime.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"stream"}]}}`)},
 		{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{"content":{"parts":[{"text":"durable answer"}]}}`)},
 	})
-	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

@@ -1,10 +1,12 @@
-package runtime
+package runtimeengine
 
 import (
 	"context"
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/anggasct/aura/internal/runtime/channelhost"
 )
 
 // Host owns the runtime and its channel adapters. It hands each adapter the
@@ -13,7 +15,7 @@ import (
 // turn reaches a durable terminal before the adapters close.
 type Host struct {
 	runtime  *Engine
-	adapters []ChannelPort
+	adapters []runtimechannelhost.ChannelPort
 	logger   *slog.Logger
 
 	mu        sync.Mutex
@@ -24,7 +26,7 @@ type Host struct {
 
 // NewHost builds a host over the runtime and its adapters. Adapters may be
 // empty; the runtime must not be nil.
-func NewHost(runtime *Engine, adapters []ChannelPort, logger *slog.Logger) (*Host, error) {
+func NewHost(runtime *Engine, adapters []runtimechannelhost.ChannelPort, logger *slog.Logger) (*Host, error) {
 	if runtime == nil {
 		return nil, invalidArgument("runtime must not be nil")
 	}
@@ -50,7 +52,7 @@ func (h *Host) Start(ctx context.Context) error {
 
 	for _, adapter := range h.adapters {
 		h.wg.Add(1)
-		go func(a ChannelPort) {
+		go func(a runtimechannelhost.ChannelPort) {
 			defer h.wg.Done()
 			if err := a.Start(runCtx, h.runtime); err != nil && runCtx.Err() == nil {
 				h.logger.ErrorContext(runCtx, "channel adapter stopped with error", "error", err)

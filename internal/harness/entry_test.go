@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/engine"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -24,7 +26,7 @@ func TestComposedRuntimeEntryPersistsTerminalBeforeReturn(t *testing.T) {
 		t.Fatalf("Create session: %v", err)
 	}
 	events := store.NewEventStore(db)
-	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}}), nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, events, store.NewDedupeStore(db), runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}}), nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
@@ -34,7 +36,7 @@ func TestComposedRuntimeEntryPersistsTerminalBeforeReturn(t *testing.T) {
 		SessionID:   "entry-session",
 		PrincipalID: "owner",
 		Origin:      runtime.OriginInternal,
-		Parts:       []runtime.InputPart{{Text: "entry"}},
+		Parts:       []runtimeingress.InputPart{{Text: "entry"}},
 	}) {
 		if streamErr != nil {
 			t.Fatalf("Run: %v", streamErr)

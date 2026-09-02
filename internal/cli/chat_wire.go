@@ -19,6 +19,9 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/model"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/adk"
+	"github.com/anggasct/aura/internal/runtime/engine"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
 )
@@ -45,9 +48,9 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 			yield(terminal.Event{}, errors.New("terminal: request must not be nil"))
 			return
 		}
-		parts := make([]runtime.InputPart, len(req.Parts))
+		parts := make([]runtimeingress.InputPart, len(req.Parts))
 		for i := range req.Parts {
-			parts[i] = runtime.InputPart{Text: req.Parts[i].Text}
+			parts[i] = runtimeingress.InputPart{Text: req.Parts[i].Text}
 		}
 		runtimeReq := &runtime.TurnRequest{
 			SessionID:      req.SessionID,
@@ -172,7 +175,7 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
 	var broker runtime.ToolBroker = terminalBroker{}
-	var executorOpts []runtime.ExecutorOption
+	var executorOpts []runtimeadk.ExecutorOption
 	var approvals *terminal.ApprovalBridge
 	if cfg.Tools != nil {
 		if useTTY {
@@ -183,15 +186,15 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 			return err
 		}
 		broker = builtin
-		executorOpts = append(executorOpts, runtime.WithBuiltinToolExecutor(builtin))
+		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
 	}
-	executor, err := runtime.NewADKExecutor(
+	executor, err := runtimeadk.NewADKExecutor(
 		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,
 	)
 	if err != nil {
 		return err
 	}
-	engine, err := runtime.NewEngine(runtime.Config{
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{
 		MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
 		MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
 		TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),

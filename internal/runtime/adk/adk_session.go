@@ -1,4 +1,4 @@
-package runtime
+package runtimeadk
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"iter"
 	"time"
 
+	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/store"
 
 	"google.golang.org/adk/v2/session"
@@ -149,7 +150,7 @@ func (s *ADKSessionService) Create(ctx context.Context, req *session.CreateReque
 	}
 	id := req.SessionID
 	if id == "" {
-		id = newTurnID()
+		id = runtimeengine.NewTurnID()
 	}
 	state := req.State
 	if state == nil {

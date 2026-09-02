@@ -1,9 +1,11 @@
-package runtime
+package runtimechannelhost
 
 import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/anggasct/aura/internal/runtime/ingress"
 )
 
 // OutputPart is one normalized piece of outbound delivery. The runtime maps
@@ -54,7 +56,7 @@ type ChannelHealth struct {
 // outbound and readiness edges. An adapter never imports model or tool
 // implementations and never builds its own turn loop.
 type ChannelPort interface {
-	Start(ctx context.Context, sink IngressSink) error
+	Start(ctx context.Context, sink runtimeingress.IngressSink) error
 	Deliver(ctx context.Context, req *DeliveryRequest) (ProviderReceipt, error)
 	Health(ctx context.Context) ChannelHealth
 }

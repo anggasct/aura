@@ -63,7 +63,7 @@ eval:
 	$(GO) test -race ./internal/eval/
 
 load:
-	$(GO) test -tags load -race -run TestLoad ./internal/runtime/
+	$(GO) test -tags load -race -run TestLoad ./internal/runtime/engine/
 
 # Containment integration suite: the runner needs a cgroup v2 subtree with
 # the pids and memory controllers enabled for the test process. Service-

@@ -1,9 +1,12 @@
-package runtime
+package runtimeadk
 
 import (
 	"context"
 	"testing"
 
+	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/engine"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -20,15 +23,15 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	dedupe := store.NewDedupeStore(db)
-	engine, err := NewEngine(Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.NewEngine: %v", err)
 	}
 	mustCreateSession(t, db, "session-1")
 
-	eventsCh, errs := collectStream(engine, &TurnRequest{
-		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-		Parts: []InputPart{{Text: "hi"}},
+	eventsCh, errs := collectStream(engine, &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal,
+		Parts: []runtimeingress.InputPart{{Text: "hi"}},
 	})
 
 	var adkCount int
@@ -74,7 +77,7 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 }
 
 // collectStream drains an engine Run stream into a channel.
-func collectStream(engine *Engine, req *TurnRequest) (eventsCh <-chan store.RuntimeEvent, errCh <-chan error) {
+func collectStream(engine *runtimeengine.Engine, req *runtime.TurnRequest) (eventsCh <-chan store.RuntimeEvent, errCh <-chan error) {
 	events := make(chan store.RuntimeEvent, 64)
 	errs := make(chan error, 1)
 	go func() {
@@ -104,15 +107,15 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	dedupe := store.NewDedupeStore(db)
-	engine, err := NewEngine(Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.NewEngine: %v", err)
 	}
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{
-		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-		Parts: []InputPart{{Text: "hi"}},
+	req := &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal,
+		Parts: []runtimeingress.InputPart{{Text: "hi"}},
 	}
 	var streamed []store.RuntimeEvent
 	for ev, err := range engine.Run(context.Background(), req) {

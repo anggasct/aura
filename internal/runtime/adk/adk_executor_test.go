@@ -1,4 +1,4 @@
-package runtime
+package runtimeadk
 
 import (
 	"context"
@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/engine"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 
 	"google.golang.org/adk/v2/agent"
@@ -87,7 +90,7 @@ func newRecordingTool(t *testing.T) (ft tool.Tool, executed *bool) {
 
 func registerFakeModel(t *testing.T, model *fakeADKModel) string {
 	t.Helper()
-	name := "fake-model-" + newTurnID()
+	name := "fake-model-" + runtimeengine.NewTurnID()
 	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) {
 		return model, nil
 	})
@@ -130,7 +133,7 @@ func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolR
 		event := &store.RuntimeEvent{
 			ID: request.RequestID + "-requested", SessionID: request.SessionID, Sequence: request.EventSequence,
 			TurnID: request.TurnID, InvocationID: request.EventInvocation, Author: request.EventAuthor,
-			Kind: EventKindToolRequested, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
+			Kind: runtime.EventKindToolRequested, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
 		}
 		if err := f.events.Append(ctx, event); err != nil {
 			return nil, err
@@ -169,7 +172,7 @@ func (b *fakeBroker) Evaluate(ctx context.Context, req *approval.ToolRequest) (a
 	return approval.PolicyDecision{Outcome: "allow"}, nil
 }
 
-func newADKTestExecutor(t *testing.T, modelName string, broker ToolBroker, tools ...tool.Tool) (*ADKExecutor, *sql.DB, store.EventStore) {
+func newADKTestExecutor(t *testing.T, modelName string, broker runtime.ToolBroker, tools ...tool.Tool) (*ADKExecutor, *sql.DB, store.EventStore) {
 	t.Helper()
 	db, sessions, events := newSessionTestDB(t)
 	executor, err := NewADKExecutor("aura", modelName, sessions, events, broker, tools, nil)
@@ -186,12 +189,12 @@ func TestADKExecutorRunsTurnAndPersists(t *testing.T) {
 	executor, db, _ := newADKTestExecutor(t, modelName, broker)
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{
+	req := &runtime.TurnRequest{
 		TurnID:      "turn-1",
 		SessionID:   "session-1",
 		PrincipalID: "user-1",
-		Origin:      OriginTerminal,
-		Parts:       []InputPart{{Text: "hello"}},
+		Origin:      runtime.OriginTerminal,
+		Parts:       []runtimeingress.InputPart{{Text: "hello"}},
 	}
 	var events []store.RuntimeEvent
 	for ev, err := range executor.Execute(context.Background(), req) {
@@ -225,7 +228,7 @@ func TestADKExecutorGatesToolCalls(t *testing.T) {
 	executor, db, _ := newADKTestExecutor(t, modelName, broker, newFakeTool(t))
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []InputPart{{Text: "hi"}}}
+	req := &runtime.TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}}}
 	for _, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Logf("executor error: %v", err)
@@ -262,7 +265,7 @@ func TestADKExecutorDeniedToolFailsClosed(t *testing.T) {
 	executor, db, _ := newADKTestExecutor(t, modelName, broker, gateTool)
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []InputPart{{Text: "hi"}}}
+	req := &runtime.TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}}}
 	for _, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Logf("executor error: %v", err)
@@ -296,7 +299,7 @@ func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
 	}
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal, Parts: []InputPart{{Text: "hi"}}}
+	req := &runtime.TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}}}
 	for _, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
@@ -337,15 +340,15 @@ func TestADKExecutorPublishesDurableBuiltinEvents(t *testing.T) {
 	executor.SetEventPublisher(publisher)
 	mustCreateSession(t, db, "session-1")
 
-	for _, err := range executor.Execute(context.Background(), &TurnRequest{
-		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-		Parts: []InputPart{{Text: "hi"}},
+	for _, err := range executor.Execute(context.Background(), &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal,
+		Parts: []runtimeingress.InputPart{{Text: "hi"}},
 	}) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
 	}
-	if len(publisher.events) != 1 || publisher.events[0].Kind != EventKindToolRequested {
+	if len(publisher.events) != 1 || publisher.events[0].Kind != runtime.EventKindToolRequested {
 		t.Fatalf("published events = %+v, want one tool.requested event", publisher.events)
 	}
 }
@@ -356,10 +359,10 @@ func TestADKExecutorBudgetEnforced(t *testing.T) {
 	executor, db, _ := newADKTestExecutor(t, modelName, &fakeBroker{})
 	mustCreateSession(t, db, "session-1")
 
-	req := &TurnRequest{
-		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-		Parts:  []InputPart{{Text: "hi"}},
-		Budget: Budget{MaxTokens: 10},
+	req := &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal,
+		Parts:  []runtimeingress.InputPart{{Text: "hi"}},
+		Budget: runtime.Budget{MaxTokens: 10},
 	}
 	var lastErr error
 	for _, err := range executor.Execute(context.Background(), req) {
@@ -370,7 +373,7 @@ func TestADKExecutorBudgetEnforced(t *testing.T) {
 	if lastErr == nil {
 		t.Fatal("budget exceeded but no error")
 	}
-	if code, ok := CodeOf(lastErr); !ok || code != ErrorCodeBudgetExhausted {
+	if code, ok := runtime.CodeOf(lastErr); !ok || code != runtime.ErrorCodeBudgetExhausted {
 		t.Fatalf("CodeOf(%v) = %q, %v; want budget_exhausted", lastErr, code, ok)
 	}
 }
@@ -397,9 +400,9 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := NewEngine(Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.NewEngine: %v", err)
 	}
 	executor.SetEventPublisher(engine)
 	mustCreateSession(t, db, "session-1")
@@ -408,16 +411,16 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 	runDone := make(chan error, 1)
 	go func() {
 		var runErr error
-		for ev, err := range engine.Run(context.Background(), &TurnRequest{
-			TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: OriginTerminal,
-			Parts: []InputPart{{Text: "hi"}},
+		for ev, err := range engine.Run(context.Background(), &runtime.TurnRequest{
+			TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal,
+			Parts: []runtimeingress.InputPart{{Text: "hi"}},
 		}) {
 			if err != nil {
 				runErr = err
 				break
 			}
 			kinds <- ev.Kind
-			if ev.Kind == EventKindTurnCompleted || ev.Kind == EventKindTurnFailed {
+			if ev.Kind == runtime.EventKindTurnCompleted || ev.Kind == runtime.EventKindTurnFailed {
 				break
 			}
 		}
@@ -432,7 +435,7 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 	for !sawToolRequested {
 		select {
 		case kind := <-kinds:
-			if kind == EventKindToolRequested {
+			if kind == runtime.EventKindToolRequested {
 				sawToolRequested = true
 			}
 		case <-deadline:
@@ -447,7 +450,7 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 	for {
 		select {
 		case kind := <-kinds:
-			if kind == EventKindTurnCompleted || kind == EventKindTurnFailed {
+			if kind == runtime.EventKindTurnCompleted || kind == runtime.EventKindTurnFailed {
 				if err := <-runDone; err != nil {
 					t.Fatalf("run: %v", err)
 				}

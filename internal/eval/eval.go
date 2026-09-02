@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -53,7 +54,7 @@ func ScriptedRuntime(ctx context.Context, dir string, script []runtime.FakeStep)
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: create session: %w", err)
 	}
-	engine, err := runtime.NewEngine(runtime.Config{}, store.NewEventStore(db), store.NewDedupeStore(db), runtime.NewFakeExecutor(script), nil)
+	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, store.NewEventStore(db), store.NewDedupeStore(db), runtime.NewFakeExecutor(script), nil)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: build engine: %w", err)

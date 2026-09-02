@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
@@ -138,11 +139,11 @@ func configuredToolSecrets(cfg *config.Config) []string {
 	return []string{value}
 }
 
-func (e *builtinToolExecutor) Definitions() []runtime.BuiltinToolDefinition {
+func (e *builtinToolExecutor) Definitions() []runtimeadk.BuiltinToolDefinition {
 	definitions := e.broker.Definitions()
-	result := make([]runtime.BuiltinToolDefinition, 0, len(definitions))
+	result := make([]runtimeadk.BuiltinToolDefinition, 0, len(definitions))
 	for _, definition := range definitions {
-		result = append(result, runtime.BuiltinToolDefinition{
+		result = append(result, runtimeadk.BuiltinToolDefinition{
 			Name:                 definition.Name,
 			Version:              definition.Version,
 			Description:          "Aura built-in " + definition.Name + " tool",
@@ -165,7 +166,7 @@ func (e *builtinToolExecutor) Evaluate(ctx context.Context, request *approval.To
 	})
 }
 
-func (e *builtinToolExecutor) Execute(ctx context.Context, request *runtime.BuiltinToolRequest) (json.RawMessage, error) {
+func (e *builtinToolExecutor) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {
 	if request == nil {
 		return nil, &runtime.Error{Code: runtime.ErrorCodeInvalidArgument, Detail: "builtin tool request must not be nil"}
 	}
