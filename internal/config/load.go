@@ -320,6 +320,9 @@ func validate(data []byte) error {
 	if err := validateAgentsShapes(doc); err != nil {
 		return err
 	}
+	if err := validateWorkflowsShapes(doc); err != nil {
+		return err
+	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
 	return checkUnknownKeys(doc, "", valid, mapPaths, structMapPaths, listStructPaths)
 }
@@ -655,6 +658,35 @@ func validateModelShapes(doc *yamlv3.Node) error {
 		}
 		if err := validateModelDefinition(nameNode.Value, definitionNode); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateWorkflowsShapes(doc *yamlv3.Node) error {
+	workflowsNode := mappingValue(doc, "workflows")
+	if workflowsNode == nil {
+		return nil
+	}
+	if workflowsNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("workflows must be a mapping at line %d", workflowsNode.Line)
+	}
+	for i := 0; i+1 < len(workflowsNode.Content); i += 2 {
+		key := workflowsNode.Content[i].Value
+		value := workflowsNode.Content[i+1]
+		switch key {
+		case "definitions_dir":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
+				return fmt.Errorf("workflows.definitions_dir must be a string at line %d", value.Line)
+			}
+		case "max_concurrent_steps":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!int" {
+				return fmt.Errorf("workflows.max_concurrent_steps must be an integer at line %d", value.Line)
+			}
+		case "default_step_timeout":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
+				return fmt.Errorf("workflows.default_step_timeout must be a duration string at line %d", value.Line)
+			}
 		}
 	}
 	return nil
@@ -1142,6 +1174,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 		cfg.Capabilities.Enabled = []string{}
 	}
 	applyToolDefaults(cfg, doc)
+	applyWorkflowDefaults(cfg, doc)
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = defaults.Server.Host
 	}
@@ -1252,6 +1285,19 @@ func applyHealthDefaults(cfg *Config, doc *yamlv3.Node, defaults Health) {
 	}
 	if cfg.Health.RestoreVerificationMaxAge == 0 && !configValuePresent(doc, "health", "restore_verification_max_age") && !envValuePresent("health.restore_verification_max_age") {
 		cfg.Health.RestoreVerificationMaxAge = defaults.RestoreVerificationMaxAge
+	}
+}
+
+func applyWorkflowDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Workflows == nil {
+		cfg.Workflows = &Workflows{}
+	}
+	defaults := Default().Workflows
+	if cfg.Workflows.MaxConcurrentSteps == 0 && !configValuePresent(doc, "workflows", "max_concurrent_steps") && !envValuePresent("workflows.max_concurrent_steps") {
+		cfg.Workflows.MaxConcurrentSteps = defaults.MaxConcurrentSteps
+	}
+	if cfg.Workflows.DefaultStepTimeout == 0 && !configValuePresent(doc, "workflows", "default_step_timeout") && !envValuePresent("workflows.default_step_timeout") {
+		cfg.Workflows.DefaultStepTimeout = defaults.DefaultStepTimeout
 	}
 }
 

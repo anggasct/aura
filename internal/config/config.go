@@ -22,6 +22,7 @@ type Config struct {
 	Capabilities Capabilities `koanf:"capabilities" yaml:"capabilities"`
 	Tools        *Tools       `koanf:"tools" yaml:"tools,omitempty"`
 	Agents       *Agents      `koanf:"agents" yaml:"agents,omitempty"`
+	Workflows    *Workflows   `koanf:"workflows" yaml:"workflows,omitempty"`
 	Server       Server       `koanf:"server" yaml:"server"`
 	Logging      Logging      `koanf:"logging" yaml:"logging"`
 	Models       Models       `koanf:"models" yaml:"models"`
@@ -240,6 +241,15 @@ type Agents struct {
 	Definitions []AgentDefinition `koanf:"definitions" yaml:"definitions"`
 }
 
+// Workflows configures the declarative workflow engine: where definition
+// files load from, how many steps run concurrently, and the default
+// per-step timeout.
+type Workflows struct {
+	DefinitionsDir     string   `koanf:"definitions_dir" yaml:"definitions_dir"`
+	MaxConcurrentSteps int      `koanf:"max_concurrent_steps" yaml:"max_concurrent_steps"`
+	DefaultStepTimeout Duration `koanf:"default_step_timeout" yaml:"default_step_timeout"`
+}
+
 type ModelCapabilities struct {
 	Streaming        bool   `koanf:"streaming" yaml:"streaming"`
 	Tools            bool   `koanf:"tools" yaml:"tools"`
@@ -301,6 +311,10 @@ func Default() Config {
 		},
 		Capabilities: Capabilities{Enabled: []string{}},
 		Agents:       &Agents{},
+		Workflows: &Workflows{
+			MaxConcurrentSteps: 4,
+			DefaultStepTimeout: Duration(15 * time.Minute),
+		},
 		Tools: &Tools{
 			Workspace:            "/srv/aura/workspace",
 			MaxInlineResultBytes: 65536,
