@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -51,6 +52,37 @@ func TestParseConditionGrammar(t *testing.T) {
 						t.Errorf("references = %v, want %q", got, want)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestConditionComparesLargeIntegerOutputsNumerically(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "one million", value: "1000000"},
+		{name: "nine digits", value: "123456789"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			execution := &stepExecution{
+				outputs:  map[string]json.RawMessage{"a": json.RawMessage(`{"n":` + tc.value + `}`)},
+				statuses: map[string]string{},
+			}
+			equal, err := parseCondition("steps.a.output.n == " + tc.value)
+			if err != nil {
+				t.Fatalf("parseCondition: %v", err)
+			}
+			if !execution.evaluate(equal) {
+				t.Fatalf("steps.a.output.n == %s evaluated false for output %s", tc.value, tc.value)
+			}
+			notEqual, err := parseCondition("steps.a.output.n != " + tc.value)
+			if err != nil {
+				t.Fatalf("parseCondition: %v", err)
+			}
+			if execution.evaluate(notEqual) {
+				t.Fatalf("steps.a.output.n != %s evaluated true for output %s", tc.value, tc.value)
 			}
 		})
 	}

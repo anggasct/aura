@@ -228,7 +228,7 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec) *stepUp
 // step output.
 func (e *stepExecution) runWaitStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
 	e.suspendRun(ctx, step.ID)
-	payload, ok := e.invocation.Signal(ctx, "wait."+step.ID)
+	payload, ok := e.awaitSignal(ctx, "wait."+step.ID)
 	e.resumeRun(ctx, step.ID)
 	if !ok {
 		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: "", EndedAt: nowPtr(), Detail: errWaitCancelled.Error()}
@@ -245,7 +245,7 @@ func (e *stepExecution) runApprovalStep(ctx context.Context, step *StepSpec, att
 		}
 	}
 	e.suspendRun(ctx, step.ID)
-	payload, ok := e.invocation.Signal(ctx, "approval."+step.ID)
+	payload, ok := e.awaitSignal(ctx, "approval."+step.ID)
 	e.resumeRun(ctx, step.ID)
 	if !ok {
 		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, EndedAt: nowPtr(), Detail: errWaitCancelled.Error()}
@@ -307,6 +307,16 @@ func (e *stepExecution) suspendRun(ctx context.Context, stepID string) {
 	if onlyWaiter {
 		e.writeRunStatus(ctx, RunSuspended)
 	}
+}
+
+// awaitSignal parks on a runtime signal. The concurrency slot is released
+// while parked: the bound gates active execution only, so a suspended step
+// never starves a dependency-ready sibling of a slot.
+func (e *stepExecution) awaitSignal(ctx context.Context, name string) (json.RawMessage, bool) {
+	e.interpreter.release()
+	payload, ok := e.invocation.Signal(ctx, name)
+	e.interpreter.acquire()
+	return payload, ok
 }
 
 // resumeRun clears the step's waiter flag; the run row returns to running
@@ -451,7 +461,25 @@ func jsonScalarEqual(left any, leftText string, right any, rightText string) boo
 	if leftText == rightText {
 		return true
 	}
+	if leftNumber, ok := scalarNumber(left); ok {
+		if rightNumber, ok := scalarNumber(right); ok {
+			return leftNumber == rightNumber
+		}
+	}
 	return fmt.Sprint(left) == fmt.Sprint(right)
+}
+
+// scalarNumber reads integers and decoded JSON numbers as float64 so
+// comparisons happen between values, not their rendered forms.
+func scalarNumber(value any) (float64, bool) {
+	switch number := value.(type) {
+	case float64:
+		return number, true
+	case int64:
+		return float64(number), true
+	default:
+		return 0, false
+	}
 }
 
 // resolveOperand materializes one operand: references read step state and

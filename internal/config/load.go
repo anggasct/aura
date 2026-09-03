@@ -181,6 +181,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateTerminal(cfg.Terminal); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateWorkflows(cfg.Workflows); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -1379,6 +1382,16 @@ func validateRuntime(runtime Runtime) error {
 func validateServer(server Server) error {
 	if server.Port < 1 || server.Port > 65535 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("server.port %d is out of range (1-65535)", server.Port)}
+	}
+	return nil
+}
+
+func validateWorkflows(workflows *Workflows) error {
+	if workflows == nil {
+		return nil
+	}
+	if workflows.MaxConcurrentSteps < 1 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.max_concurrent_steps must be at least 1"}
 	}
 	return nil
 }

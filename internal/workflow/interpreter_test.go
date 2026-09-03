@@ -920,6 +920,60 @@ func TestInterpreterSuspendedRunStaysSuspendedWhenSiblingCompletes(t *testing.T)
 	waitForRunStatus(t, disk, summary.ID, RunSucceeded, 2*time.Second)
 }
 
+func TestInterpreterSuspendedStepReleasesConcurrencySlot(t *testing.T) {
+	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	fake := durable.NewFake()
+	disk := newTestStore(t)
+	started := make(chan struct{}, 1)
+	agents := &countingRunner{onStart: func() { started <- struct{}{} }}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		MaxConcurrentSteps: 1,
+		AgentResolver:      registry,
+		Agents:             agents,
+	})
+	spec := &Spec{
+		ID: "slotflow", Goal: "Suspension releases the slot", Version: 1, Source: SourceDefined,
+		Steps: []StepSpec{
+			{ID: "gate", Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
+			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+		},
+	}
+	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := interpreter.Start(ctx, spec.ID, nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunSuspended, 2*time.Second)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dependency-ready agent step never started while the approval step stayed suspended")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := fake.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, "approval.gate", []byte(`{"decision":"approve"}`)); err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunSucceeded, 2*time.Second)
+	steps, err := disk.Steps(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	for _, step := range steps {
+		if step.Status != StepSucceeded {
+			t.Fatalf("step %s = %s, want succeeded", step.StepID, step.Status)
+		}
+	}
+}
+
 func TestRunsOrdersRunsByIdentity(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
