@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
+	"github.com/anggasct/aura/internal/tools"
 	execTool "github.com/anggasct/aura/internal/tools/exec"
 	fetchTool "github.com/anggasct/aura/internal/tools/fetch"
 	filesystemTool "github.com/anggasct/aura/internal/tools/filesystem"
@@ -125,6 +127,18 @@ func builtinAdapters(toolsCfg *config.Tools) (map[string]toolbroker.Adapter, err
 	adapters["web_fetch@v1"] = fetchAdapter
 	adapters["web_search@v1"] = searchAdapter
 	return adapters, nil
+}
+
+// DefinitionNames lists the registered builtin tool names in stable order;
+// consumers validate agent or workflow tool references against this set.
+func DefinitionNames() []string {
+	registry := tools.DefinitionsByKey()
+	names := make([]string, 0, len(registry))
+	for _, definition := range registry {
+		names = append(names, definition.Name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func configuredToolSecrets(cfg *config.Config) []string {

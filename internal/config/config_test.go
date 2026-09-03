@@ -357,6 +357,91 @@ models:
 	}
 }
 
+func TestLoad_UnknownKeyInsideAgentDefinitionsRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		item    string
+		wantErr string
+	}{
+		{
+			name:    "unknown item key",
+			item:    "      typo_key: oops",
+			wantErr: `unknown key "agents.definitions.typo_key"`,
+		},
+		{
+			name:    "misspelled capabilities key",
+			item:    "      capabilitis: [review]",
+			wantErr: `unknown key "agents.definitions.capabilitis"`,
+		},
+		{
+			name:    "unknown key inside limits",
+			item:    "      limits:\n        turn_timeot: 30s",
+			wantErr: `unknown key "agents.definitions.limits.turn_timeot"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := `version: 1
+agents:
+  definitions:
+    - id: reviewer
+      description: Reviews changes
+      instructions: Review carefully.
+      tools: [read_files]
+      capabilities: [review]
+      model_route: fast
+` + tt.item + `
+`
+			_, err := Load(writeTempConfig(t, content))
+			if err == nil {
+				t.Fatal("expected unknown key error inside agents.definitions item")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not name the offending key", err)
+			}
+		})
+	}
+}
+
+func TestLoad_AgentDefinitionsKnownFieldsAccepted(t *testing.T) {
+	content := `version: 1
+agents:
+  definitions:
+    - id: reviewer
+      description: Reviews changes
+      instructions: Review carefully.
+      tools: [read_files]
+      capabilities: [review]
+      model_route: fast
+      limits:
+        turn_timeout: 30s
+`
+	res, err := Load(writeTempConfig(t, content))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defs := res.Config.Agents.Definitions
+	if len(defs) != 1 {
+		t.Fatalf("got %d definitions, want 1", len(defs))
+	}
+	d := defs[0]
+	if d.ID != "reviewer" || d.Description != "Reviews changes" || d.Instructions != "Review carefully." {
+		t.Errorf("scalar fields = %+v", d)
+	}
+	if len(d.Tools) != 1 || d.Tools[0] != "read_files" {
+		t.Errorf("Tools = %v", d.Tools)
+	}
+	if len(d.Capabilities) != 1 || d.Capabilities[0] != "review" {
+		t.Errorf("Capabilities = %v", d.Capabilities)
+	}
+	if d.ModelRoute != "fast" {
+		t.Errorf("ModelRoute = %q", d.ModelRoute)
+	}
+	if d.Limits.TurnTimeout != Duration(30*time.Second) {
+		t.Errorf("Limits.TurnTimeout = %v", d.Limits.TurnTimeout)
+	}
+}
+
 func TestLoad_UnknownKeyInsideModelsRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	content := `version: 1

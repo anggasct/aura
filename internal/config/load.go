@@ -54,7 +54,7 @@ type LoadOptions struct {
 }
 
 func buildEnvLookup() map[string]string {
-	paths, _, _ := validKeyPaths()
+	paths, _, _, _ := validKeyPaths()
 	m := map[string]string{}
 	for path := range paths {
 		m[strings.ReplaceAll(path, ".", "_")] = path
@@ -317,8 +317,11 @@ func validate(data []byte) error {
 	if err := validateToolsShapes(doc); err != nil {
 		return err
 	}
-	valid, mapPaths, structMapPaths := validKeyPaths()
-	return checkUnknownKeys(doc, "", valid, mapPaths, structMapPaths)
+	if err := validateAgentsShapes(doc); err != nil {
+		return err
+	}
+	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
+	return checkUnknownKeys(doc, "", valid, mapPaths, structMapPaths, listStructPaths)
 }
 
 func parseDocument(data []byte) (*yamlv3.Node, error) {
@@ -657,6 +660,60 @@ func validateModelShapes(doc *yamlv3.Node) error {
 	return nil
 }
 
+func validateAgentsShapes(doc *yamlv3.Node) error {
+	agentsNode := mappingValue(doc, "agents")
+	if agentsNode == nil {
+		return nil
+	}
+	if agentsNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("agents must be a mapping at line %d", agentsNode.Line)
+	}
+	definitionsNode := mappingValue(agentsNode, "definitions")
+	if definitionsNode == nil {
+		return nil
+	}
+	if definitionsNode.Kind != yamlv3.SequenceNode {
+		return fmt.Errorf("agents.definitions must be a list at line %d", definitionsNode.Line)
+	}
+	stringFields := []string{"id", "description", "instructions", "model_route"}
+	listFields := []string{"tools", "capabilities"}
+	for _, item := range definitionsNode.Content {
+		if item.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("agents.definitions entries must be mappings at line %d", item.Line)
+		}
+		for i := 0; i+1 < len(item.Content); i += 2 {
+			key := item.Content[i].Value
+			value := item.Content[i+1]
+			switch {
+			case slices.Contains(stringFields, key):
+				if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
+					return fmt.Errorf("agents.definitions.%s must be a string at line %d", key, value.Line)
+				}
+			case slices.Contains(listFields, key):
+				if value.Kind != yamlv3.SequenceNode {
+					return fmt.Errorf("agents.definitions.%s must be a list at line %d", key, value.Line)
+				}
+				for _, entry := range value.Content {
+					if entry.Kind != yamlv3.ScalarNode || entry.Tag != "!!str" {
+						return fmt.Errorf("agents.definitions.%s entries must be strings at line %d", key, entry.Line)
+					}
+				}
+			case key == "limits":
+				if value.Kind != yamlv3.MappingNode {
+					return fmt.Errorf("agents.definitions.limits must be a mapping at line %d", value.Line)
+				}
+				for j := 0; j+1 < len(value.Content); j += 2 {
+					limitValue := value.Content[j+1]
+					if limitValue.Kind != yamlv3.ScalarNode || limitValue.Tag != "!!str" {
+						return fmt.Errorf("agents.definitions.limits.%s must be a duration string at line %d", value.Content[j].Value, limitValue.Line)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func validateToolsShapes(doc *yamlv3.Node) error {
 	toolsNode := mappingValue(doc, "tools")
 	if toolsNode == nil {
@@ -878,7 +935,7 @@ func malformedYAMLError(err error) error {
 	return fmt.Errorf("invalid YAML: %w", err)
 }
 
-func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structMapPaths map[string]bool) error {
+func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structMapPaths, listStructPaths map[string]bool) error {
 	seen := make(map[string]struct{}, len(node.Content)/2)
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		keyNode := node.Content[i]
@@ -894,13 +951,23 @@ func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structM
 		if !validConfigPath(path, valid, structMapPaths) {
 			return fmt.Errorf("unknown key %q at line %d", path, keyNode.Line)
 		}
+		if valNode.Kind == yamlv3.SequenceNode {
+			if listStructPaths[path] {
+				for _, item := range valNode.Content {
+					if err := checkUnknownKeys(item, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
+						return err
+					}
+				}
+			}
+			continue
+		}
 		if valNode.Kind == yamlv3.MappingNode {
 			if structMapPaths[path] {
-				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths); err != nil {
+				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
 					return err
 				}
 			} else if !mapPaths[path] {
-				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths); err != nil {
+				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
 					return err
 				}
 			}

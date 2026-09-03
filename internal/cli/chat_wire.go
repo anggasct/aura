@@ -14,6 +14,7 @@ import (
 	"os/user"
 	"time"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/config"
@@ -175,8 +176,13 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
+	registry, err := buildAgentRegistry(cfg)
+	if err != nil {
+		return err
+	}
 	var broker runtime.ToolBroker = terminalBroker{}
 	var executorOpts []runtimeadk.ExecutorOption
+	executorOpts = append(executorOpts, runtimeadk.WithAgentResolver(registry, modelRouteResolver(cfg)))
 	var approvals *terminal.ApprovalBridge
 	if cfg.Tools != nil {
 		if useTTY {
@@ -204,6 +210,7 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 		MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
 		TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
 		ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
+		DefaultAgentID:  auraagent.DefaultID,
 	}, events, store.NewDedupeStore(db), executor, logger)
 	if err != nil {
 		return err
