@@ -236,6 +236,22 @@ func TestValidateRejectsInvalidClasses(t *testing.T) {
 	}
 }
 
+func TestValidateAppliesConfiguredDefaultStepTimeout(t *testing.T) {
+	spec := validTestSpec()
+	spec.Steps[0].Timeout = 0
+	deps := testValidationDeps()
+	if err := Validate(spec, deps); err == nil {
+		t.Fatal("omitted timeout without a configured default was accepted")
+	}
+	deps.DefaultStepTimeout = 15 * time.Minute
+	if err := Validate(spec, deps); err != nil {
+		t.Fatalf("omitted timeout with configured default rejected: %v", err)
+	}
+	if spec.Steps[0].Timeout != 15*time.Minute {
+		t.Fatalf("timeout = %s, want the configured default", spec.Steps[0].Timeout)
+	}
+}
+
 func TestValidateRequiresApprovalCoverageForEffectfulTools(t *testing.T) {
 	spec := validTestSpec()
 	tool := "exec"

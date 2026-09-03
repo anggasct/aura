@@ -106,6 +106,9 @@ func Validate(spec *Spec, deps ValidationDeps) error {
 
 	for index := range spec.Steps {
 		step := &spec.Steps[index]
+		if step.Timeout <= 0 && deps.DefaultStepTimeout > 0 {
+			step.Timeout = deps.DefaultStepTimeout
+		}
 		if step.Timeout <= 0 {
 			return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("steps[%d].timeout must be positive", index))
 		}

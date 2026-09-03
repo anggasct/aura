@@ -3,13 +3,13 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/durable"
 )
 
 const maxInlineOutputBytes = 64 << 10
@@ -68,7 +68,9 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 	}
 	for _, dependency := range step.DependsOn {
 		if e.statusFor(dependency) == StepSkipped {
-			e.terminal(ctx, step.ID, &stepUpdate{Status: StepSkipped})
+			if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepSkipped}); err != nil {
+				e.failRun(ctx, step.ID, err)
+			}
 			return
 		}
 	}
@@ -79,7 +81,9 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 			return
 		}
 		if !e.evaluate(parsed) {
-			e.terminal(ctx, step.ID, &stepUpdate{Status: StepSkipped})
+			if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepSkipped}); err != nil {
+				e.failRun(ctx, step.ID, err)
+			}
 			return
 		}
 	}
@@ -91,16 +95,32 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 			return
 		}
 		if update.ErrorCode == "" {
-			e.terminal(ctx, step.ID, update)
+			if err := e.sinkOutput(ctx, update); err != nil {
+				if terminalErr := e.terminal(ctx, step.ID, &stepUpdate{Status: StepFailed, Attempt: update.Attempt, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr()}); terminalErr != nil {
+					err = errors.Join(err, terminalErr)
+				}
+				e.failRun(ctx, step.ID, err)
+				return
+			}
+			if err := e.terminal(ctx, step.ID, update); err != nil {
+				e.failRun(ctx, step.ID, err)
+				return
+			}
 			e.recordSuccess(step.ID, update.Output)
 			return
 		}
 		if attempt >= step.Retry.Attempts {
-			e.terminal(ctx, step.ID, update)
+			if err := e.terminal(ctx, step.ID, update); err != nil {
+				e.failRun(ctx, step.ID, err)
+				return
+			}
 			e.failRun(ctx, step.ID, &Error{Code: ErrorCode(update.ErrorCode), Detail: fmt.Sprintf("step %s exhausted %d attempts", step.ID, attempt+1)})
 			return
 		}
-		e.terminal(ctx, step.ID, &stepUpdate{Status: StepFailed, Attempt: attempt, ErrorCode: update.ErrorCode})
+		if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepFailed, Attempt: attempt, ErrorCode: update.ErrorCode}); err != nil {
+			e.failRun(ctx, step.ID, err)
+			return
+		}
 		if err := e.invocation.Sleep(step.Retry.Backoff); err != nil {
 			return
 		}
@@ -111,13 +131,18 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 // executeAttempt runs one attempt under the timeout timer; ended reports a
 // cancelled invocation.
 func (e *stepExecution) executeAttempt(ctx context.Context, step *StepSpec, attempt int) (*stepUpdate, bool) {
-	e.terminal(ctx, step.ID, &stepUpdate{Status: StepRunning, Attempt: attempt})
+	if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepRunning, Attempt: attempt}); err != nil {
+		e.failRun(ctx, step.ID, err)
+		return nil, true
+	}
 	e.interpreter.acquire()
 	defer e.interpreter.release()
 
+	attemptCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	result := make(chan *stepUpdate, 1)
 	go func() {
-		result <- e.invokeExecutor(ctx, step, attempt)
+		result <- e.invokeExecutor(attemptCtx, step, attempt)
 	}()
 	timer := e.invocation.Timer(step.Timeout)
 	select {
@@ -125,6 +150,10 @@ func (e *stepExecution) executeAttempt(ctx context.Context, step *StepSpec, atte
 		update.Attempt = attempt + 1
 		return update, false
 	case <-timer:
+		cancel()
+		if step.Executor.Kind == KindAgent || step.Executor.Kind == KindTool {
+			<-result
+		}
 		return &stepUpdate{
 			Status:    StepFailed,
 			Attempt:   attempt + 1,
@@ -176,7 +205,7 @@ func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec) *stepU
 		Metadata:    e.input.Metadata,
 	})
 	if err != nil {
-		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeSpecInvalid), Detail: err.Error(), EndedAt: nowPtr()}
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr()}
 	}
 	return &stepUpdate{Status: StepSucceeded, Output: []byte(output), EndedAt: nowPtr()}
 }
@@ -188,7 +217,7 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec) *stepUp
 	}
 	output, err := runner.Invoke(ctx, *step.Executor.ToolID, json.RawMessage(`{}`))
 	if err != nil {
-		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeSpecInvalid), Detail: err.Error(), EndedAt: nowPtr()}
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr()}
 	}
 	return &stepUpdate{Status: StepSucceeded, Output: []byte(output), EndedAt: nowPtr()}
 }
@@ -196,14 +225,11 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec) *stepUp
 // runWaitStep suspends on wait.<step_id>; the signal payload becomes the
 // step output.
 func (e *stepExecution) runWaitStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
-	_ = e.interpreter.store.SetRunStatus(ctx, e.runID, RunSuspended)
+	e.suspendRun(ctx, step.ID)
 	payload, ok := e.invocation.Signal("wait." + step.ID)
-	_ = e.interpreter.store.SetRunStatus(ctx, e.runID, RunRunning)
+	e.resumeRun(ctx, step.ID)
 	if !ok {
 		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: "", EndedAt: nowPtr(), Detail: errWaitCancelled.Error()}
-	}
-	if len(payload) > maxInlineOutputBytes {
-		return &stepUpdate{Status: StepSucceeded, Attempt: attempt + 1, EndedAt: nowPtr(), Output: bounded(payload)}
 	}
 	return &stepUpdate{Status: StepSucceeded, Attempt: attempt + 1, EndedAt: nowPtr(), Output: payload}
 }
@@ -213,12 +239,12 @@ func (e *stepExecution) runWaitStep(ctx context.Context, step *StepSpec, attempt
 func (e *stepExecution) runApprovalStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
 	if requester := e.interpreter.options.Approvals; requester != nil {
 		if err := requester.Request(ctx, e.runID, step.ID); err != nil {
-			return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeSpecInvalid), Detail: err.Error(), EndedAt: nowPtr()}
+			return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr()}
 		}
 	}
-	_ = e.interpreter.store.SetRunStatus(ctx, e.runID, RunSuspended)
+	e.suspendRun(ctx, step.ID)
 	payload, ok := e.invocation.Signal("approval." + step.ID)
-	_ = e.interpreter.store.SetRunStatus(ctx, e.runID, RunRunning)
+	e.resumeRun(ctx, step.ID)
 	if !ok {
 		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, EndedAt: nowPtr(), Detail: errWaitCancelled.Error()}
 	}
@@ -226,10 +252,10 @@ func (e *stepExecution) runApprovalStep(ctx context.Context, step *StepSpec, att
 		Decision string `json:"decision"`
 	}
 	if err := json.Unmarshal(payload, &decision); err != nil || decision.Decision == "" {
-		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeSpecInvalid), Detail: "approval signal payload must carry a decision", EndedAt: nowPtr()}
+		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeStepFailed), Detail: "approval signal payload must carry a decision", EndedAt: nowPtr()}
 	}
 	if decision.Decision != "approve" {
-		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeSpecInvalid), Detail: "approval was rejected", EndedAt: nowPtr()}
+		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeApprovalRejected), Detail: "approval was rejected", EndedAt: nowPtr()}
 	}
 	return &stepUpdate{Status: StepSucceeded, Attempt: attempt + 1, EndedAt: nowPtr(), Output: payload}
 }
@@ -245,18 +271,60 @@ func nowPtr() *time.Time {
 	return &now
 }
 
-// bounded trims inline output to the bounded inline size.
-func bounded(payload []byte) []byte {
-	if len(payload) > maxInlineOutputBytes {
-		return payload[:maxInlineOutputBytes]
+// sinkOutput routes outputs over the inline limit through the artifact
+// sink, leaving a bounded digest reference inline; without a sink the
+// failure surfaces instead of truncating into an invalid row.
+func (e *stepExecution) sinkOutput(ctx context.Context, update *stepUpdate) error {
+	if len(update.Output) <= maxInlineOutputBytes {
+		return nil
 	}
-	return payload
+	sink := e.interpreter.options.Artifacts
+	if sink == nil {
+		return codedError(ErrorCodeStepFailed, fmt.Sprintf("output of %d bytes exceeds the %d byte inline limit and no artifact sink is wired", len(update.Output), maxInlineOutputBytes))
+	}
+	digest, err := sink.Put(context.WithoutCancel(ctx), update.Output)
+	if err != nil {
+		return codedError(ErrorCodeStepFailed, "store output artifact: "+err.Error())
+	}
+	update.ArtifactDigest = digest
+	update.Output = json.RawMessage(fmt.Sprintf(`{"artifact_digest":%q}`, digest))
+	return nil
+}
+
+// suspendRun marks the step as awaiting a signal and moves the run row to
+// suspended when it is the only waiter.
+func (e *stepExecution) suspendRun(ctx context.Context, stepID string) {
+	e.statusMu.Lock()
+	defer e.statusMu.Unlock()
+	e.awaiting[stepID] = true
+	if len(e.awaiting) == 1 {
+		e.writeRunStatus(context.WithoutCancel(ctx), RunSuspended)
+	}
+}
+
+// resumeRun clears the step's waiter flag; the run row returns to running
+// only when no sibling remains suspended.
+func (e *stepExecution) resumeRun(ctx context.Context, stepID string) {
+	e.statusMu.Lock()
+	defer e.statusMu.Unlock()
+	delete(e.awaiting, stepID)
+	if len(e.awaiting) == 0 && ctx.Err() == nil {
+		e.writeRunStatus(context.WithoutCancel(ctx), RunRunning)
+	}
+}
+
+func (e *stepExecution) writeRunStatus(ctx context.Context, status string) {
+	if err := e.interpreter.store.SetRunStatus(ctx, e.runID, status); err != nil && e.interpreter.options.Logger != nil {
+		e.interpreter.options.Logger.WarnContext(ctx, "workflow run status persist failed", "status", status, "error", err.Error())
+	}
 }
 
 // terminal persists one step transition and records handler state. The
 // write uses a context detached from the invocation so terminal rows stay
-// durable even when the run is cancelled mid-step.
-func (e *stepExecution) terminal(ctx context.Context, stepID string, update *stepUpdate) {
+// durable even when the run is cancelled mid-step. A run-terminal step
+// keeps a concurrently suspended run suspended instead of forcing it back
+// to running.
+func (e *stepExecution) terminal(ctx context.Context, stepID string, update *stepUpdate) error {
 	if update.Status != StepRunning {
 		e.mu.Lock()
 		e.statuses[stepID] = update.Status
@@ -264,19 +332,29 @@ func (e *stepExecution) terminal(ctx context.Context, stepID string, update *ste
 	}
 	tx, err := e.interpreter.store.BeginStepTransaction(context.WithoutCancel(ctx))
 	if err != nil {
-		return
+		return fmt.Errorf("begin step %s transition: %w", stepID, err)
 	}
 	if err := UpdateStep(context.WithoutCancel(ctx), tx, e.runID, stepID, update); err != nil {
 		_ = tx.Rollback()
-		return
+		return err
 	}
-	if update.Status != StepRunning && (update.Status == StepSucceeded || update.Status == StepFailed || update.Status == StepSkipped) {
-		if err := e.interpreter.store.SetRunStatusTx(context.WithoutCancel(ctx), tx, e.runID, RunRunning); err != nil {
+	if update.Status == StepSucceeded || update.Status == StepFailed || update.Status == StepSkipped {
+		e.statusMu.Lock()
+		runStatus := RunRunning
+		if len(e.awaiting) > 0 {
+			runStatus = RunSuspended
+		}
+		err := e.interpreter.store.SetRunStatusTx(context.WithoutCancel(ctx), tx, e.runID, runStatus)
+		e.statusMu.Unlock()
+		if err != nil {
 			_ = tx.Rollback()
-			return
+			return err
 		}
 	}
-	_ = tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit step %s transition: %w", stepID, err)
+	}
+	return nil
 }
 
 func (e *stepExecution) failRun(ctx context.Context, stepID string, err error) {
@@ -436,8 +514,3 @@ func (i *Interpreter) acquire() {
 func (i *Interpreter) release() {
 	<-i.inflight
 }
-
-var (
-	_ = durable.RunRunning
-	_ = context.Context(nil)
-)

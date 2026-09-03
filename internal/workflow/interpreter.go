@@ -227,6 +227,7 @@ func (i *Interpreter) handleInvocation(ctx context.Context, inv *durable.Invocat
 		graph:       compiled.graph,
 		runID:       tick.RunID,
 		input:       input,
+		awaiting:    map[string]bool{},
 	}
 	return execution.run(ctx)
 }
@@ -246,4 +247,8 @@ type stepExecution struct {
 	failedStep string
 	// mu guards the working state shared across concurrent step goroutines.
 	mu sync.Mutex
+	// statusMu serializes run-status decisions with their writes; awaiting
+	// holds the steps currently suspended on a signal.
+	statusMu sync.Mutex
+	awaiting map[string]bool
 }

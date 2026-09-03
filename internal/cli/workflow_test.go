@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/workflow"
 )
 
@@ -120,5 +121,140 @@ func TestWorkflowRunsAndInspectUnknownRunFails(t *testing.T) {
 	}
 	if _, err := runWorkflowCommand(t, gf, "runs", "--status", "queued"); err != nil {
 		t.Fatalf("runs listing failed: %v", err)
+	}
+}
+
+const noTimeoutWorkflowYAML = `id: notime
+version: 1
+goal: The configured default step timeout applies
+source: defined
+steps:
+  - id: gate
+    executor: { kind: approval }
+`
+
+const brokenAgentConfig = `version: 1
+models:
+  definitions:
+    primary:
+      protocol: openai_chat_compat
+      model: test-model
+      api_key_env: AURA_TEST_MODEL_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        context_tokens: 200000
+        tokenizer: anthropic
+agents:
+  definitions:
+    - id: broken
+      description: broken
+      instructions: do nothing
+      tools: [no_such_tool]
+storage:
+  path: DIR
+workflows:
+  definitions_dir: DEFS
+`
+
+func writeBrokenAgentFixtures(t *testing.T, definition string) *globalFlags {
+	t.Helper()
+	gf := writeWorkflowFixtures(t, "")
+	cfgPath := gf.configPath
+	dir := filepath.Dir(cfgPath)
+	defsDir := filepath.Join(dir, "workflows")
+	cfg := strings.ReplaceAll(brokenAgentConfig, "DIR", dir)
+	cfg = strings.ReplaceAll(cfg, "DEFS", defsDir)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if definition != "" {
+		if err := os.WriteFile(filepath.Join(defsDir, "broken.yaml"), []byte(definition), 0o600); err != nil {
+			t.Fatalf("write definition: %v", err)
+		}
+	}
+	return gf
+}
+
+func TestWorkflowValidateFailsClosedWhenRegistryBuildFails(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "demo.yaml")
+	if err := os.WriteFile(file, []byte(validWorkflowYAML), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	gf := writeBrokenAgentFixtures(t, validWorkflowYAML)
+	if _, err := runWorkflowCommand(t, gf, "validate", file); err == nil {
+		t.Fatal("validate tolerated an agent registry build failure")
+	}
+	if _, err := runWorkflowCommand(t, gf, "definitions"); err == nil {
+		t.Fatal("definitions tolerated an agent registry build failure")
+	}
+}
+
+func TestWorkflowValidateAcceptsOmittedTimeoutWithConfiguredDefault(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "notime.yaml")
+	if err := os.WriteFile(file, []byte(noTimeoutWorkflowYAML), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	gf := writeWorkflowFixtures(t, "")
+	out, err := runWorkflowCommand(t, gf, "validate", file)
+	if err != nil {
+		t.Fatalf("validate rejected an omitted timeout: %v", err)
+	}
+	if !strings.Contains(out, "valid: notime") {
+		t.Fatalf("output = %q, want the valid marker", out)
+	}
+}
+
+func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
+	gf := writeWorkflowFixtures(t, validWorkflowYAML)
+	ctx := t.Context()
+	result, err := config.Load(gf.configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	dir := filepath.Dir(gf.configPath)
+	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
+	if err != nil {
+		t.Fatalf("load fixture spec: %v", err)
+	}
+	db, err := openStorage(ctx, result.Config)
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	disk := workflow.NewStore(db)
+	if err := disk.SaveDefinition(ctx, spec); err != nil {
+		t.Fatalf("save definition: %v", err)
+	}
+	summary, err := disk.CreateRun(ctx, spec, nil)
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := disk.SetRunStatus(ctx, summary.ID, workflow.RunSucceeded); err != nil {
+		t.Fatalf("succeed run: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	out, err := runWorkflowCommand(t, gf, "cancel", summary.ID)
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if !strings.Contains(out, "status: "+workflow.RunSucceeded) {
+		t.Fatalf("cancel output = %q, want the preserved terminal status", out)
+	}
+	db, err = openStorage(ctx, result.Config)
+	if err != nil {
+		t.Fatalf("reopen storage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	run, err := workflow.NewStore(db).Run(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if run.Status != workflow.RunSucceeded {
+		t.Fatalf("run status = %s, want the terminal succeeded state preserved", run.Status)
 	}
 }

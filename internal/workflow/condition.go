@@ -18,6 +18,8 @@ const (
 	ErrorCodeDangerousUncovered ErrorCode = "workflow_dangerous_operation_uncovered"
 	ErrorCodeRunNotFound        ErrorCode = "workflow_run_not_found"
 	ErrorCodeDefinitionNotFound ErrorCode = "workflow_definition_not_found"
+	ErrorCodeStepFailed         ErrorCode = "workflow_step_failed"
+	ErrorCodeApprovalRejected   ErrorCode = "workflow_approval_rejected"
 	ErrorCodeStepTimeout        ErrorCode = "workflow_step_timeout"
 	ErrorCodeBudgetExhausted    ErrorCode = "workflow_budget_exhausted"
 	ErrorCodeConcurrencyBounded ErrorCode = "workflow_concurrency_bounded"

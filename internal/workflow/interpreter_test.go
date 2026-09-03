@@ -2,8 +2,10 @@ package workflow
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,7 +32,11 @@ func (f *fakeAgentRunner) Run(ctx context.Context, definition *auraagent.Definit
 	f.calls++
 	f.mu.Unlock()
 	if f.inFlight != nil {
-		<-f.inFlight
+		select {
+		case <-f.inFlight:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	if f.output != nil {
 		return f.output, nil
@@ -54,7 +60,7 @@ func (f *fakeToolRunner) Invoke(ctx context.Context, toolID string, args json.Ra
 	return json.RawMessage(`{"ok":true}`), nil
 }
 
-func newTestStore(t *testing.T) *Store {
+func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	ctx := context.Background()
 	db, err := store.OpenDB(ctx, filepath.Join(t.TempDir(), "aura.db"))
@@ -65,7 +71,12 @@ func newTestStore(t *testing.T) *Store {
 	if err := store.Migrate(ctx, db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return NewStore(db)
+	return db
+}
+
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
+	return NewStore(newTestDB(t))
 }
 
 func TestInterpreterRunsMixedWorkflowEndToEnd(t *testing.T) {
@@ -499,7 +510,383 @@ func TestApprovalRejectionRoutesRunToFailure(t *testing.T) {
 	}
 	waitForRunStatus(t, disk, summary.ID, RunFailed, 2*time.Second)
 	steps, err := disk.Steps(ctx, summary.ID)
-	if err != nil || steps[0].Status != StepFailed {
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	if len(steps) != 1 || steps[0].Status != StepFailed {
 		t.Fatalf("approval step = %+v (%v), want failed", steps, err)
+	}
+	if steps[0].ErrorCode != string(ErrorCodeApprovalRejected) {
+		t.Fatalf("error code = %q, want %s", steps[0].ErrorCode, ErrorCodeApprovalRejected)
+	}
+}
+
+func TestInterpreterTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
+	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	clock := durable.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
+	fake := durable.NewFake().WithClock(clock)
+	disk := newTestStore(t)
+	tracker := &attemptTracker{events: map[int]string{}}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		MaxConcurrentSteps: 1,
+		AgentResolver:      registry,
+		Agents:             tracker,
+	})
+	spec := &Spec{
+		ID: "attemptflow", Goal: "Attempts", Version: 1, Source: SourceDefined,
+		Steps: []StepSpec{
+			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 2, Backoff: time.Minute}},
+		},
+	}
+	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := interpreter.Start(ctx, "attemptflow", nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	for range 24 {
+		clock.Advance(time.Minute)
+		time.Sleep(2 * time.Millisecond)
+		if run, err := disk.Run(ctx, summary.ID); err == nil && run.Status == RunFailed {
+			break
+		}
+	}
+	waitForRunStatus(t, disk, summary.ID, RunFailed, 2*time.Second)
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if tracker.maxLive != 1 {
+		t.Fatalf("max live attempts = %d, want 1", tracker.maxLive)
+	}
+	if len(tracker.started) != 3 {
+		t.Fatalf("attempts = %d, want 3", len(tracker.started))
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
+		if !strings.Contains(tracker.events[attempt], "cancelled") {
+			t.Fatalf("attempt %d ended without observing cancellation: %q", attempt, tracker.events[attempt])
+		}
+	}
+}
+
+type attemptTracker struct {
+	mu      sync.Mutex
+	started []int
+	events  map[int]string
+	active  int
+	maxLive int
+}
+
+func (t *attemptTracker) Run(ctx context.Context, definition *auraagent.Definition, input *ExecutionContext) (json.RawMessage, error) {
+	t.mu.Lock()
+	t.active++
+	if t.active > t.maxLive {
+		t.maxLive = t.active
+	}
+	attempt := len(t.started) + 1
+	t.started = append(t.started, attempt)
+	t.mu.Unlock()
+	<-ctx.Done()
+	t.mu.Lock()
+	t.active--
+	t.events[attempt] = "cancelled before next attempt"
+	t.mu.Unlock()
+	return nil, ctx.Err()
+}
+
+type fakeArtifactSink struct {
+	mu     sync.Mutex
+	digest string
+	stored [][]byte
+	err    error
+}
+
+func (s *fakeArtifactSink) Put(ctx context.Context, content []byte) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	s.mu.Lock()
+	s.stored = append(s.stored, content)
+	s.mu.Unlock()
+	return s.digest, nil
+}
+
+func oversizedOutput(size int) json.RawMessage {
+	return json.RawMessage(`{"blob":"` + strings.Repeat("x", size) + `"}`)
+}
+
+func waitForStepStatus(t *testing.T, disk *Store, runID, stepID, status string, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		steps, err := disk.Steps(context.Background(), runID)
+		if err == nil {
+			for _, step := range steps {
+				if step.StepID == stepID && step.Status == status {
+					return
+				}
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("step %s on run %s never reached %s within %s", stepID, runID, status, within)
+}
+
+func TestInterpreterSinksOversizedOutputThroughArtifactSink(t *testing.T) {
+	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	fake := durable.NewFake()
+	disk := newTestStore(t)
+	sink := &fakeArtifactSink{digest: "sha256-abc123"}
+	agents := &fakeAgentRunner{output: oversizedOutput(70000)}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		MaxConcurrentSteps: 2,
+		AgentResolver:      registry,
+		Agents:             agents,
+		Artifacts:          sink,
+	})
+	spec := &Spec{
+		ID: "sinkflow", Goal: "Sink", Version: 1, Source: SourceDefined,
+		Steps: []StepSpec{
+			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+		},
+	}
+	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := interpreter.Start(ctx, "sinkflow", nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunSucceeded, 2*time.Second)
+	steps, err := disk.Steps(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	if len(steps) != 1 || steps[0].Status != StepSucceeded {
+		t.Fatalf("steps = %+v, want one succeeded step", steps)
+	}
+	if steps[0].OutputArtifactDigest != "sha256-abc123" {
+		t.Fatalf("output_artifact_digest = %q, want the sink digest", steps[0].OutputArtifactDigest)
+	}
+	if want := `{"artifact_digest":"sha256-abc123"}`; string(steps[0].Output) != want {
+		t.Fatalf("inline output = %s, want %s", steps[0].Output, want)
+	}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.stored) != 1 || len(sink.stored[0]) != len(oversizedOutput(70000)) {
+		t.Fatalf("sink stored %d payloads, want the full oversized output", len(sink.stored))
+	}
+}
+
+func TestInterpreterWaitPayloadOverInlineLimitIsSunk(t *testing.T) {
+	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	fake := durable.NewFake()
+	disk := newTestStore(t)
+	sink := &fakeArtifactSink{digest: "sha256-wait"}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		MaxConcurrentSteps: 2,
+		AgentResolver:      registry,
+		Artifacts:          sink,
+	})
+	spec := &Spec{
+		ID: "waitbig", Goal: "Wait big", Version: 1, Source: SourceDefined,
+		Steps: []StepSpec{
+			{ID: "ci", Executor: ExecutorSpec{Kind: KindWait, Event: ptr("ci.completed")}, Timeout: 5 * time.Second},
+		},
+	}
+	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := interpreter.Start(ctx, "waitbig", nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunSuspended, 2*time.Second)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := fake.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, "wait.ci", oversizedOutput(70000)); err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunSucceeded, 2*time.Second)
+	steps, err := disk.Steps(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	if len(steps) != 1 || steps[0].Status != StepSucceeded || steps[0].OutputArtifactDigest != "sha256-wait" {
+		t.Fatalf("steps = %+v, want one succeeded step with the sink digest", steps)
+	}
+}
+
+func TestInterpreterOversizedOutputWithoutSinkFailsTheRun(t *testing.T) {
+	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	fake := durable.NewFake()
+	disk := newTestStore(t)
+	agents := &fakeAgentRunner{output: oversizedOutput(70000)}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		MaxConcurrentSteps: 2,
+		AgentResolver:      registry,
+		Agents:             agents,
+	})
+	spec := &Spec{
+		ID: "nosink", Goal: "No sink", Version: 1, Source: SourceDefined,
+		Steps: []StepSpec{
+			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+		},
+	}
+	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := interpreter.Start(ctx, "nosink", nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunFailed, 2*time.Second)
+	steps, err := disk.Steps(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	if len(steps) != 1 || steps[0].Status != StepFailed || steps[0].ErrorCode != string(ErrorCodeStepFailed) {
+		t.Fatalf("steps = %+v, want one failed step with %s", steps, ErrorCodeStepFailed)
+	}
+}
+
+func TestInterpreterStepPersistFailureFailsTheRun(t *testing.T) {
+	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	fake := durable.NewFake()
+	db := newTestDB(t)
+	disk := NewStore(db)
+	block := make(chan struct{})
+	agents := &fakeAgentRunner{inFlight: block}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		MaxConcurrentSteps: 1,
+		AgentResolver:      registry,
+		Agents:             agents,
+	})
+	spec := &Spec{
+		ID: "persistfail", Goal: "Persist fail", Version: 1, Source: SourceDefined,
+		Steps: []StepSpec{
+			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+		},
+	}
+	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := interpreter.Start(ctx, "persistfail", nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForStepStatus(t, disk, summary.ID, "work", StepRunning, 2*time.Second)
+	if _, err := db.ExecContext(ctx, `DELETE FROM workflow_step_run WHERE run_id = ?`, summary.ID); err != nil {
+		t.Fatalf("delete step row: %v", err)
+	}
+	close(block)
+	waitForRunStatus(t, disk, summary.ID, RunFailed, 2*time.Second)
+}
+
+func TestInterpreterSuspendedRunStaysSuspendedWhenSiblingCompletes(t *testing.T) {
+	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	fake := durable.NewFake()
+	disk := newTestStore(t)
+	agents := &fakeAgentRunner{}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		MaxConcurrentSteps: 2,
+		AgentResolver:      registry,
+		Agents:             agents,
+	})
+	spec := &Spec{
+		ID: "siblingflow", Goal: "Sibling", Version: 1, Source: SourceDefined,
+		Steps: []StepSpec{
+			{ID: "gate", Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
+			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+		},
+	}
+	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := interpreter.Start(ctx, "siblingflow", nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForStepStatus(t, disk, summary.ID, "work", StepSucceeded, 2*time.Second)
+	waitForRunStatus(t, disk, summary.ID, RunSuspended, 2*time.Second)
+	run, err := disk.Run(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if run.Status != RunSuspended {
+		t.Fatalf("run status = %s, want suspended while the approval step awaits its signal", run.Status)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := fake.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, "approval.gate", []byte(`{"decision":"approve"}`)); err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunSucceeded, 2*time.Second)
+}
+
+func TestRunsOrdersRunsByIdentity(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	disk := NewStore(db)
+	spec := validTestSpec()
+	if err := disk.SaveDefinition(ctx, spec); err != nil {
+		t.Fatalf("SaveDefinition: %v", err)
+	}
+	first, err := disk.CreateRun(ctx, spec, nil)
+	if err != nil {
+		t.Fatalf("first CreateRun: %v", err)
+	}
+	second, err := disk.CreateRun(ctx, spec, nil)
+	if err != nil {
+		t.Fatalf("second CreateRun: %v", err)
+	}
+	older, newer := first.ID, second.ID
+	if older > newer {
+		older, newer = newer, older
+	}
+	epoch := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	recent := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	if _, err := db.ExecContext(ctx, `UPDATE workflow_run SET created_at = ? WHERE id = ?`, recent, newer); err != nil {
+		t.Fatalf("stamp newer run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE workflow_run SET created_at = ? WHERE id = ?`, epoch, older); err != nil {
+		t.Fatalf("stamp older run: %v", err)
+	}
+	runs, err := disk.Runs(ctx, "")
+	if err != nil {
+		t.Fatalf("Runs: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("runs = %d, want 2", len(runs))
+	}
+	if runs[0].ID != older || runs[1].ID != newer {
+		t.Fatalf("order = [%s %s], want identity order [%s %s]", runs[0].ID, runs[1].ID, older, newer)
 	}
 }

@@ -36,20 +36,22 @@ func newWorkflowCmd(gf *globalFlags) *cobra.Command {
 }
 
 // workflowValidationDeps gathers the registries validation checks against.
-func workflowValidationDeps(cfg *config.Config) workflow.ValidationDeps {
+// A registry build failure is returned so validation fails closed instead
+// of silently skipping the resolution checks.
+func workflowValidationDeps(cfg *config.Config) (workflow.ValidationDeps, error) {
 	deps := workflow.ValidationDeps{
 		KnownTools:     toolsbuiltin.DefinitionNames(),
 		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
 	}
-	registry, err := buildAgentRegistry(cfg)
-	if err != nil {
-		return deps
-	}
-	deps.Agents = registry
 	if cfg.Workflows != nil {
 		deps.DefaultStepTimeout = time.Duration(cfg.Workflows.DefaultStepTimeout)
 	}
-	return deps
+	registry, err := buildAgentRegistry(cfg)
+	if err != nil {
+		return deps, err
+	}
+	deps.Agents = registry
+	return deps, nil
 }
 
 func newWorkflowValidateCmd(gf *globalFlags) *cobra.Command {
@@ -66,7 +68,11 @@ func newWorkflowValidateCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := workflow.Compile(spec, workflowValidationDeps(result.Config)); err != nil {
+			deps, err := workflowValidationDeps(result.Config)
+			if err != nil {
+				return err
+			}
+			if _, err := workflow.Compile(spec, deps); err != nil {
 				return fmt.Errorf("invalid workflow definition: %w", err)
 			}
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), "valid: "+spec.ID)
@@ -80,7 +86,6 @@ func newWorkflowDefinitionsCmd(gf *globalFlags) *cobra.Command {
 		Use:   "definitions",
 		Short: "List workflow definitions from the configured directory",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
 			result, err := config.Load(gf.configPath)
 			if err != nil {
 				return err
@@ -89,7 +94,10 @@ func newWorkflowDefinitionsCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			deps := workflowValidationDeps(result.Config)
+			deps, err := workflowValidationDeps(result.Config)
+			if err != nil {
+				return err
+			}
 			out := cmd.OutOrStdout()
 			for _, spec := range specs {
 				if _, err := workflow.Compile(spec, deps); err != nil {
@@ -103,7 +111,6 @@ func newWorkflowDefinitionsCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 			}
-			_ = ctx
 			return nil
 		},
 	}
@@ -134,9 +141,6 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer closeStorage()
-			for _, spec := range interpreter.Definitions() {
-				_ = spec
-			}
 			runInput := &workflow.RunInput{}
 			if inputFlag != "" {
 				if err := json.Unmarshal([]byte(inputFlag), runInput); err != nil {
@@ -168,7 +172,10 @@ func buildWorkflowInterpreter(ctx context.Context, cfg *config.Config) (*workflo
 	if err != nil {
 		return nil, closeStorage, err
 	}
-	deps := workflowValidationDeps(cfg)
+	deps, err := workflowValidationDeps(cfg)
+	if err != nil {
+		return nil, closeStorage, err
+	}
 	interpreter := workflow.NewInterpreter(workflow.NewStore(db), durable.NewFake(), &workflow.Options{
 		MaxConcurrentSteps: workflowMaxConcurrentSteps(cfg),
 		Tools:              newWorkflowToolRunner(cfg, db),
@@ -319,7 +326,12 @@ func newWorkflowCancelCmd(gf *globalFlags) *cobra.Command {
 			}
 			defer func() { _ = db.Close() }()
 			runs := workflow.NewStore(db)
-			if _, err := runs.Run(ctx, args[0]); err != nil {
+			run, err := runs.Run(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			if run.Status == workflow.RunSucceeded || run.Status == workflow.RunFailed || run.Status == workflow.RunCancelled {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nstatus: %s\n", run.ID, run.Status)
 				return err
 			}
 			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, cfg)

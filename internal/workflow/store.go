@@ -182,7 +182,7 @@ func (s *Store) Run(ctx context.Context, runID string) (*RunSummary, error) {
 	return &summary, nil
 }
 
-// Runs lists runs newest-first, optionally filtered by status.
+// Runs lists runs ordered by run identity, optionally filtered by status.
 func (s *Store) Runs(ctx context.Context, status string) ([]*RunSummary, error) {
 	query := `SELECT id, definition_id, definition_version, COALESCE(durable_key, ''), goal, status, created_at, updated_at FROM workflow_run`
 	args := []any{}
@@ -190,7 +190,7 @@ func (s *Store) Runs(ctx context.Context, status string) ([]*RunSummary, error) 
 		query += ` WHERE status = ?`
 		args = append(args, status)
 	}
-	query += ` ORDER BY created_at DESC, id`
+	query += ` ORDER BY id`
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
