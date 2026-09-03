@@ -54,7 +54,7 @@ type LoadOptions struct {
 }
 
 func buildEnvLookup() map[string]string {
-	paths, _, _ := validKeyPaths()
+	paths, _, _, _ := validKeyPaths()
 	m := map[string]string{}
 	for path := range paths {
 		m[strings.ReplaceAll(path, ".", "_")] = path
@@ -320,8 +320,8 @@ func validate(data []byte) error {
 	if err := validateAgentsShapes(doc); err != nil {
 		return err
 	}
-	valid, mapPaths, structMapPaths := validKeyPaths()
-	return checkUnknownKeys(doc, "", valid, mapPaths, structMapPaths)
+	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
+	return checkUnknownKeys(doc, "", valid, mapPaths, structMapPaths, listStructPaths)
 }
 
 func parseDocument(data []byte) (*yamlv3.Node, error) {
@@ -935,7 +935,7 @@ func malformedYAMLError(err error) error {
 	return fmt.Errorf("invalid YAML: %w", err)
 }
 
-func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structMapPaths map[string]bool) error {
+func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structMapPaths, listStructPaths map[string]bool) error {
 	seen := make(map[string]struct{}, len(node.Content)/2)
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		keyNode := node.Content[i]
@@ -952,9 +952,9 @@ func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structM
 			return fmt.Errorf("unknown key %q at line %d", path, keyNode.Line)
 		}
 		if valNode.Kind == yamlv3.SequenceNode {
-			if structMapPaths[path] {
+			if listStructPaths[path] {
 				for _, item := range valNode.Content {
-					if err := checkUnknownKeys(item, path, valid, mapPaths, structMapPaths); err != nil {
+					if err := checkUnknownKeys(item, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
 						return err
 					}
 				}
@@ -963,11 +963,11 @@ func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structM
 		}
 		if valNode.Kind == yamlv3.MappingNode {
 			if structMapPaths[path] {
-				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths); err != nil {
+				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
 					return err
 				}
 			} else if !mapPaths[path] {
-				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths); err != nil {
+				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
 					return err
 				}
 			}

@@ -402,10 +402,11 @@ func Marshal(c *Config) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func validKeyPaths() (paths, mapPaths, structMapPaths map[string]bool) {
+func validKeyPaths() (paths, mapPaths, structMapPaths, listStructPaths map[string]bool) {
 	paths = map[string]bool{}
 	mapPaths = map[string]bool{}
 	structMapPaths = map[string]bool{}
+	listStructPaths = map[string]bool{}
 	var walk func(t reflect.Type, prefix string)
 	walk = func(t reflect.Type, prefix string) {
 		if t.Kind() == reflect.Pointer {
@@ -440,7 +441,7 @@ func validKeyPaths() (paths, mapPaths, structMapPaths map[string]bool) {
 			}
 			if ft.Kind() == reflect.Slice {
 				if ft.Elem().Kind() == reflect.Struct {
-					structMapPaths[path] = true
+					listStructPaths[path] = true
 					walk(ft.Elem(), path)
 				}
 				continue
@@ -451,7 +452,7 @@ func validKeyPaths() (paths, mapPaths, structMapPaths map[string]bool) {
 		}
 	}
 	walk(reflect.TypeOf(Config{}), "")
-	return paths, mapPaths, structMapPaths
+	return paths, mapPaths, structMapPaths, listStructPaths
 }
 
 // ValidateBaseURL validates a model base URL: http/https scheme, a host, no
