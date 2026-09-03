@@ -22,6 +22,8 @@ tools:
     provider: brave
     credential_ref: env://AURA_BRAVE_API_KEY
     max_results: 5
+agents:
+  definitions: []
 server:
   host: 127.0.0.1
   port: 8280

@@ -21,6 +21,7 @@ type Config struct {
 	Runtime      Runtime      `koanf:"runtime" yaml:"runtime"`
 	Capabilities Capabilities `koanf:"capabilities" yaml:"capabilities"`
 	Tools        *Tools       `koanf:"tools" yaml:"tools,omitempty"`
+	Agents       *Agents      `koanf:"agents" yaml:"agents,omitempty"`
 	Server       Server       `koanf:"server" yaml:"server"`
 	Logging      Logging      `koanf:"logging" yaml:"logging"`
 	Models       Models       `koanf:"models" yaml:"models"`
@@ -216,6 +217,29 @@ type ModelDefinition struct {
 	Capabilities ModelCapabilities `koanf:"capabilities" yaml:"capabilities"`
 }
 
+type AgentLimits struct {
+	TurnTimeout Duration `koanf:"turn_timeout" yaml:"turn_timeout"`
+}
+
+// AgentDefinition is one configured override or addition on top of the
+// compiled-in agent definitions; unknown keys are rejected and every
+// referenced tool, capability, and model route must exist.
+type AgentDefinition struct {
+	ID           string      `koanf:"id" yaml:"id"`
+	Description  string      `koanf:"description" yaml:"description"`
+	Instructions string      `koanf:"instructions" yaml:"instructions"`
+	Tools        []string    `koanf:"tools" yaml:"tools"`
+	Capabilities []string    `koanf:"capabilities" yaml:"capabilities"`
+	ModelRoute   string      `koanf:"model_route" yaml:"model_route"`
+	Limits       AgentLimits `koanf:"limits" yaml:"limits"`
+}
+
+// Agents configures overrides and additions to the compiled-in agent
+// definitions. A definition whose id matches a builtin replaces it.
+type Agents struct {
+	Definitions []AgentDefinition `koanf:"definitions" yaml:"definitions"`
+}
+
 type ModelCapabilities struct {
 	Streaming        bool   `koanf:"streaming" yaml:"streaming"`
 	Tools            bool   `koanf:"tools" yaml:"tools"`
@@ -276,6 +300,7 @@ func Default() Config {
 			ShutdownTimeout: Duration(30 * time.Second),
 		},
 		Capabilities: Capabilities{Enabled: []string{}},
+		Agents:       &Agents{},
 		Tools: &Tools{
 			Workspace:            "/srv/aura/workspace",
 			MaxInlineResultBytes: 65536,
@@ -410,6 +435,13 @@ func validKeyPaths() (paths, mapPaths, structMapPaths map[string]bool) {
 					walk(ft.Elem(), path+".*")
 				} else {
 					mapPaths[path] = true
+				}
+				continue
+			}
+			if ft.Kind() == reflect.Slice {
+				if ft.Elem().Kind() == reflect.Struct {
+					structMapPaths[path] = true
+					walk(ft.Elem(), path)
 				}
 				continue
 			}

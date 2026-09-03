@@ -23,6 +23,10 @@ type Config struct {
 	MaxPendingTurns int
 	TurnTimeout     time.Duration
 	ShutdownTimeout time.Duration
+	// DefaultAgentID names the agent definition that serves turns whose
+	// request does not target one explicitly; it is stamped onto turn event
+	// payloads as agent_id.
+	DefaultAgentID string
 }
 
 func (c *Config) applyDefaults() {
@@ -315,7 +319,7 @@ func (e *Engine) replayAfterGap(ctx context.Context, turnID string, afterSequenc
 
 	events, err := e.dedupe.ListTurnEvents(context.WithoutCancel(ctx), turnID)
 	if err != nil {
-		yield(store.RuntimeEvent{Kind: runtime.EventKindTurnFailed, Payload: failedPayload(runtime.ErrorCodeRuntimeInternal, "failed to replay the live turn", err)}, nil)
+		yield(store.RuntimeEvent{Kind: runtime.EventKindTurnFailed, Payload: failedPayload(runtime.ErrorCodeRuntimeInternal, "failed to replay the live turn", err, "")}, nil)
 		return
 	}
 	for i := range events {
@@ -376,7 +380,7 @@ func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted 
 	}
 	e.mu.Unlock()
 
-	accepted = acceptedEvent(req, 0)
+	accepted = acceptedEvent(req, 0, e.agentID(req))
 	if req.IdempotencyKey != "" {
 		err = sq.lock(func() error {
 			seq, seqErr := e.nextSequence(ctx, req.SessionID)
@@ -470,8 +474,11 @@ func (e *Engine) releasePending() {
 	e.mu.Unlock()
 }
 
-func acceptedEvent(req *runtime.TurnRequest, seq uint64) store.RuntimeEvent {
+func acceptedEvent(req *runtime.TurnRequest, seq uint64, agentID string) store.RuntimeEvent {
 	payload := fmt.Sprintf(`{"origin":%q,"principal":%q}`, req.Origin, req.PrincipalID)
+	if agentID != "" {
+		payload = fmt.Sprintf(`{"origin":%q,"principal":%q,"agent_id":%q}`, req.Origin, req.PrincipalID, agentID)
+	}
 	return store.RuntimeEvent{
 		ID:            NewTurnID(),
 		SessionID:     req.SessionID,
@@ -483,6 +490,15 @@ func acceptedEvent(req *runtime.TurnRequest, seq uint64) store.RuntimeEvent {
 		Payload:       []byte(payload),
 		CreatedAt:     time.Now().UTC(),
 	}
+}
+
+// agentID returns the agent definition targeted by the request, falling back
+// to the engine's configured default target.
+func (e *Engine) agentID(req *runtime.TurnRequest) string {
+	if req.AgentID != "" {
+		return req.AgentID
+	}
+	return e.cfg.DefaultAgentID
 }
 
 func (e *Engine) nextSequence(ctx context.Context, sessionID string) (uint64, error) {
@@ -624,17 +640,17 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 
 	switch {
 	case ctx.Err() == context.Canceled:
-		terminalKind, terminalPayload = runtime.EventKindTurnCancelled, cancelledPayload("turn cancelled")
+		terminalKind, terminalPayload = runtime.EventKindTurnCancelled, cancelledPayload("turn cancelled", e.agentID(&t.req))
 	case ctx.Err() == context.DeadlineExceeded:
-		terminalKind, terminalPayload = runtime.EventKindTurnFailed, failedPayload(runtime.ErrorCodeTurnDeadlineExceeded, "turn deadline elapsed", nil)
+		terminalKind, terminalPayload = runtime.EventKindTurnFailed, failedPayload(runtime.ErrorCodeTurnDeadlineExceeded, "turn deadline elapsed", nil, e.agentID(&t.req))
 	case execErr != nil:
 		code, ok := runtime.CodeOf(execErr)
 		if !ok {
 			code = runtime.ErrorCodeRuntimeInternal
 		}
-		terminalKind, terminalPayload = runtime.EventKindTurnFailed, failedPayload(code, "turn execution failed", execErr)
+		terminalKind, terminalPayload = runtime.EventKindTurnFailed, failedPayload(code, "turn execution failed", execErr, e.agentID(&t.req))
 	default:
-		terminalKind, terminalPayload = runtime.EventKindTurnCompleted, completedPayload()
+		terminalKind, terminalPayload = runtime.EventKindTurnCompleted, completedPayload(e.agentID(&t.req))
 	}
 	// The terminal event must be durable even when the turn context is
 	// cancelled or expired: "a turn is terminal only after its terminal
@@ -703,7 +719,7 @@ func (e *Engine) replay(ctx context.Context, turnID string, sub *subscriber) {
 	}
 	events, err := e.dedupe.ListTurnEvents(ctx, turnID)
 	if err != nil {
-		sub.sendContext(ctx, &store.RuntimeEvent{Kind: runtime.EventKindTurnFailed, Payload: failedPayload(runtime.ErrorCodeRuntimeInternal, "failed to replay the original turn", err)})
+		sub.sendContext(ctx, &store.RuntimeEvent{Kind: runtime.EventKindTurnFailed, Payload: failedPayload(runtime.ErrorCodeRuntimeInternal, "failed to replay the original turn", err, "")})
 		return
 	}
 	for i := range events {
@@ -784,7 +800,7 @@ func (e *Engine) terminateQueued(ctx context.Context, t *turn) {
 		Author:        t.req.PrincipalID,
 		Kind:          runtime.EventKindTurnCancelled,
 		SchemaVersion: 1,
-		Payload:       cancelledPayload("runtime shutdown"),
+		Payload:       cancelledPayload("runtime shutdown", e.agentID(&t.req)),
 		CreatedAt:     time.Now().UTC(),
 	}
 	err := e.sessionQueue(t.req.SessionID).lock(func() error {
@@ -810,18 +826,27 @@ func (e *Engine) terminateQueued(ctx context.Context, t *turn) {
 	e.mu.Unlock()
 }
 
-func completedPayload() []byte {
+func completedPayload(agentID string) []byte {
+	if agentID != "" {
+		return []byte(fmt.Sprintf(`{"outcome":"completed","agent_id":%q}`, agentID))
+	}
 	return []byte(`{"outcome":"completed"}`)
 }
 
-func failedPayload(code runtime.ErrorCode, detail string, cause error) []byte {
+func failedPayload(code runtime.ErrorCode, detail string, cause error, agentID string) []byte {
 	if cause != nil {
 		detail = detail + ": " + cause.Error()
+	}
+	if agentID != "" {
+		return []byte(fmt.Sprintf(`{"code":%q,"detail":%q,"agent_id":%q}`, code, detail, agentID))
 	}
 	return []byte(fmt.Sprintf(`{"code":%q,"detail":%q}`, code, detail))
 }
 
-func cancelledPayload(detail string) []byte {
+func cancelledPayload(detail, agentID string) []byte {
+	if agentID != "" {
+		return []byte(fmt.Sprintf(`{"reason":"cancelled","detail":%q,"agent_id":%q}`, detail, agentID))
+	}
 	return []byte(fmt.Sprintf(`{"reason":"cancelled","detail":%q}`, detail))
 }
 

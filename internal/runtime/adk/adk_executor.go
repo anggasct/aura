@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/engine"
@@ -40,11 +41,23 @@ type ADKExecutor struct {
 	builtins  BuiltinToolExecutor
 	toolSeq   toolSequence
 	publisher EventPublisher
+	// agents, when set, resolves the target definition for every turn and
+	// drives the ADK agent construction from that definition; modelForRoute
+	// maps a definition's model route onto a registered model name.
+	agents        AgentResolver
+	modelForRoute func(route string) (string, error)
 	// ledger, when set with modelDefinitionID, wraps the resolved model with
 	// budget enforcement so every turn reserves before dispatch and settles
 	// provider-reported usage after.
 	ledger            *usage.Ledger
 	modelDefinitionID string
+}
+
+// AgentResolver selects the definition a turn runs on. The registry in the
+// agent package is the canonical implementation; the interface is declared
+// here so the executor depends only on the resolution it performs.
+type AgentResolver interface {
+	Resolve(required []string, preferID *string) (auraagent.Definition, error)
 }
 
 type EventPublisher interface {
@@ -113,6 +126,22 @@ func NewADKExecutor(appName, modelName string, sessions SessionPort, events runt
 // ExecutorOption configures an ADKExecutor at construction.
 type ExecutorOption func(*ADKExecutor) error
 
+// WithAgentResolver attaches declarative agent definitions: every turn
+// resolves its target definition (req.AgentID when set, else the most
+// specific default), and the ADK agent is constructed from that definition's
+// instructions, tool subset, and model route. modelForRoute maps a
+// definition's model route onto a registered model name.
+func WithAgentResolver(resolver AgentResolver, modelForRoute func(route string) (string, error)) ExecutorOption {
+	return func(e *ADKExecutor) error {
+		if resolver == nil {
+			return invalidArgument("agent resolver must not be nil")
+		}
+		e.agents = resolver
+		e.modelForRoute = modelForRoute
+		return nil
+	}
+}
+
 // WithBudgetLedger wraps the resolved model with the usage budget ledger, so a
 // turn reserves a conservative cost before dispatch, settles provider-reported
 // usage after, and is rejected before dispatch once the configured cap is
@@ -153,13 +182,23 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 // stamps sequence and persists them.
 func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
+		definition, err := x.resolveDefinition(req)
+		if err != nil {
+			yield(store.RuntimeEvent{}, err)
+			return
+		}
 		runCtx := withTurnID(ctx, req.TurnID)
+		if definition.Limits.TurnTimeout > 0 {
+			var cancel context.CancelFunc
+			runCtx, cancel = context.WithTimeout(runCtx, definition.Limits.TurnTimeout)
+			defer cancel()
+		}
 		sessionService, err := NewADKSessionService(x.sessions)
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
 		}
-		adkRunner, err := x.buildRunner(runCtx, sessionService)
+		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition)
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
@@ -202,13 +241,31 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 	}
 }
 
+// resolveDefinition picks the definition the turn runs on: the requested id
+// when the request targets one, else the deterministic default. Resolution
+// failure returns before any work starts.
+func (x *ADKExecutor) resolveDefinition(req *runtime.TurnRequest) (auraagent.Definition, error) {
+	if x.agents == nil {
+		return auraagent.Definition{}, nil
+	}
+	var prefer *string
+	if req.AgentID != "" {
+		prefer = &req.AgentID
+	}
+	definition, err := x.agents.Resolve(nil, prefer)
+	if err != nil {
+		return auraagent.Definition{}, fmt.Errorf("resolve agent definition: %w", err)
+	}
+	return definition, nil
+}
+
 // buildRunner constructs an ADK runner with a single-agent tree over the
 // registered model, the Aura-backed session service, and a tool gate that
 // evaluates every tool call through the broker before execution.
-func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service) (*runner.Runner, error) {
-	model, err := adkmodel.NewLLM(ctx, x.modelName)
+func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition) (*runner.Runner, error) {
+	model, err := x.resolveModel(ctx, definition)
 	if err != nil {
-		return nil, fmt.Errorf("resolve model %q: %w", x.modelName, err)
+		return nil, err
 	}
 	if x.ledger != nil {
 		wrapped, werr := usage.NewBudgeted(model, x.ledger, x.modelDefinitionID, x.logger)
@@ -217,7 +274,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 		}
 		model = wrapped
 	}
-	rootAgent, err := buildAgent(x.appName, model, x.tools, x.beforeTool)
+	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool)
 	if err != nil {
 		return nil, err
 	}
@@ -359,11 +416,49 @@ func (u *usageTracker) add(ev *session.Event) bool {
 	return u.exceeded
 }
 
-func buildAgent(name string, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback) (agent.Agent, error) {
+// resolveModel resolves the registered model for the turn: the definition's
+// model route when it declares one, else the executor's configured model.
+func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.Definition) (adkmodel.LLM, error) {
+	modelName := x.modelName
+	if definition.ModelRoute != "" {
+		if x.modelForRoute == nil {
+			return nil, invalidArgument("agent model route requires a route resolver")
+		}
+		routeModel, err := x.modelForRoute(definition.ModelRoute)
+		if err != nil {
+			return nil, fmt.Errorf("resolve model route %q: %w", definition.ModelRoute, err)
+		}
+		modelName = routeModel
+	}
+	model, err := adkmodel.NewLLM(ctx, modelName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve model %q: %w", modelName, err)
+	}
+	return model, nil
+}
+
+// toolsFor narrows the executor tool set to the definition's declared tools;
+// a definition without declared tools runs the full set.
+func (x *ADKExecutor) toolsFor(definition *auraagent.Definition) []tool.Tool {
+	if len(definition.Tools) == 0 {
+		return x.tools
+	}
+	filtered := make([]tool.Tool, 0, len(x.tools))
+	for _, t := range x.tools {
+		if slices.Contains(definition.Tools, t.Name()) {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
+func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback) (agent.Agent, error) {
 	return llmagent.New(llmagent.Config{
-		Name:  name,
-		Model: model,
-		Tools: tools,
+		Name:        name,
+		Description: definition.Description,
+		Instruction: definition.Instructions,
+		Model:       model,
+		Tools:       tools,
 		BeforeToolCallbacks: []llmagent.BeforeToolCallback{
 			gate,
 		},

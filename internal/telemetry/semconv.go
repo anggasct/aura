@@ -21,6 +21,7 @@ const (
 	AttrTurnID       = "turn.id"
 	AttrOrigin       = "turn.origin"
 	AttrTerminalKind = "turn.terminal_kind"
+	AttrAgentID      = "agent.id"
 
 	AttrGenAISystem           = "gen_ai.system"
 	AttrGenAIRequestModel     = "gen_ai.request.model"
@@ -47,6 +48,7 @@ var turnSpanAttrs = []string{
 	AttrTurnID,
 	AttrOrigin,
 	AttrTerminalKind,
+	AttrAgentID,
 	AttrSemconvVersion,
 }
 

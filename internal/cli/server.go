@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/logging"
 	"github.com/anggasct/aura/internal/model"
@@ -93,9 +94,14 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			sessions := store.NewSessionService(db)
 			events := store.NewEventStore(db)
+			agentRegistry, err := buildAgentRegistry(cfg)
+			if err != nil {
+				return err
+			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
 				runtimeadk.WithBuiltinToolExecutor(builtin),
+				runtimeadk.WithAgentResolver(agentRegistry, modelRouteResolver(cfg)),
 			)
 			if err != nil {
 				return err
@@ -105,6 +111,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
 				TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
 				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
+				DefaultAgentID:  auraagent.DefaultID,
 			}, events, store.NewDedupeStore(db), adkExecutor, logger)
 			if err != nil {
 				return err

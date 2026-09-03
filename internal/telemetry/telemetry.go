@@ -111,6 +111,9 @@ func (i *Instrument) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq
 			AttrOrigin:         string(req.Origin),
 			AttrSemconvVersion: SemconvVersion,
 		})
+		if req.AgentID != "" {
+			spanAttrs[AttrAgentID] = req.AgentID
+		}
 		ctx, span := i.tracer.Start(ctx, SpanTurn, trace.WithAttributes(toKeyValues(spanAttrs)...))
 		defer span.End()
 		start := time.Now()

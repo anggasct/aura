@@ -40,6 +40,9 @@ type TurnRequest struct {
 	Deadline       time.Time
 	Budget         Budget
 	TraceParent    string
+	// AgentID is the requested target agent definition id; empty means the
+	// default target resolved by the executor.
+	AgentID string
 }
 
 // Stable runtime event kinds. Consumers ignore unknown additive kinds.
