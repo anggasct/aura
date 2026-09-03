@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -369,6 +370,9 @@ func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 }
 
 func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("builtin tool executor requires Linux")
+	}
 	dir := t.TempDir()
 	workspace := filepath.Join(dir, "workspace")
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
