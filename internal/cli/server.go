@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
 	"github.com/anggasct/aura/internal/toolbroker"
+	"github.com/anggasct/aura/internal/tools/builtin"
 )
 
 func newServerCmd(gf *globalFlags) *cobra.Command {
@@ -78,7 +79,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					OutputBytes:   observation.OutputBytes,
 				})
 			})
-			builtin, err := newBuiltinToolExecutor(cfg, db, logger, observer, nil)
+			_, artifactRoot, _, err := storagePaths(cfg)
+			if err != nil {
+				return err
+			}
+			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, nil)
 			if err != nil {
 				return err
 			}
