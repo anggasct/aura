@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -309,6 +310,17 @@ func newWorkflowInspectCmd(gf *globalFlags) *cobra.Command {
 				}
 				if _, err := fmt.Fprintln(out, line); err != nil {
 					return err
+				}
+				if step.OutputArtifactDigest != "" {
+					if _, err := fmt.Fprintf(out, "  artifact: %s\n", step.OutputArtifactDigest); err != nil {
+						return err
+					}
+					continue
+				}
+				if len(step.Output) > 0 {
+					if _, err := fmt.Fprintf(out, "  output: %s\n", bytes.TrimSpace(step.Output)); err != nil {
+						return err
+					}
 				}
 			}
 			return nil

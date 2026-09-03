@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/workflow"
@@ -256,6 +257,68 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	}
 	if run.Status != workflow.RunSucceeded {
 		t.Fatalf("run status = %s, want the terminal succeeded state preserved", run.Status)
+	}
+}
+
+const outputWorkflowYAML = `id: outdemo
+version: 1
+goal: Inspect renders step outputs
+source: defined
+steps:
+  - id: emit
+    executor: { kind: approval }
+    timeout: 1m
+  - id: report
+    executor: { kind: approval }
+    timeout: 1m
+`
+
+func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
+	gf := writeWorkflowFixtures(t, outputWorkflowYAML)
+	ctx := t.Context()
+	result, err := config.Load(gf.configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	dir := filepath.Dir(gf.configPath)
+	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
+	if err != nil {
+		t.Fatalf("load fixture spec: %v", err)
+	}
+	db, err := openStorage(ctx, result.Config)
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	disk := workflow.NewStore(db)
+	if err := disk.SaveDefinition(ctx, spec); err != nil {
+		t.Fatalf("save definition: %v", err)
+	}
+	summary, err := disk.CreateRun(ctx, spec, nil)
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.Exec(`UPDATE workflow_step_run SET status = ?, attempt = 1, ended_at = ?, output_json = ? WHERE run_id = ? AND step_id = ?`,
+		workflow.StepSucceeded, now, `{"value":42}`, summary.ID, "emit"); err != nil {
+		t.Fatalf("seed inline output: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE workflow_step_run SET status = ?, attempt = 1, ended_at = ?, output_json = ?, output_artifact_digest = ? WHERE run_id = ? AND step_id = ?`,
+		workflow.StepSucceeded, now, `{"artifact_digest":"sha256-inspect"}`, "sha256-inspect", summary.ID, "report"); err != nil {
+		t.Fatalf("seed artifact output: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	out, err := runWorkflowCommand(t, gf, "inspect", summary.ID)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if !strings.Contains(out, "output: {\"value\":42}") {
+		t.Fatalf("inspect output = %q, want the inline step output", out)
+	}
+	if !strings.Contains(out, "artifact: sha256-inspect") {
+		t.Fatalf("inspect output = %q, want the artifact digest reference", out)
 	}
 }
 
