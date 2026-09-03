@@ -24,6 +24,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
+	"github.com/anggasct/aura/internal/tools/builtin"
 )
 
 // terminalBroker denies every tool call. The plain console never presents an
@@ -181,7 +182,11 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 		if useTTY {
 			approvals = terminal.NewApprovalBridge()
 		}
-		builtin, err := newBuiltinToolExecutor(cfg, db, logger, nil, approvalDeciderFor(approvals))
+		_, artifactRoot, _, err := storagePaths(cfg)
+		if err != nil {
+			return err
+		}
+		builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, approvalDeciderFor(approvals))
 		if err != nil {
 			return err
 		}

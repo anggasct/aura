@@ -1,6 +1,6 @@
 //go:build !linux
 
-package cli
+package toolsbuiltin
 
 import (
 	"context"
@@ -24,9 +24,9 @@ func TestBuiltinToolExecutorFailsClosedWithoutLinux(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tools.Workspace = t.TempDir()
 	cfg.Storage.Path = t.TempDir()
-	_, err = newBuiltinToolExecutor(&cfg, db, nil, nil, nil)
+	_, err = New(&cfg, db, cfg.Storage.Path, nil, nil, nil)
 	if err == nil {
-		t.Fatal("newBuiltinToolExecutor succeeded on a platform without race-safe filesystem access")
+		t.Fatal("New succeeded on a platform without race-safe filesystem access")
 	}
 	if !strings.Contains(err.Error(), "requires Linux") {
 		t.Fatalf("error = %v, want the Linux containment requirement", err)

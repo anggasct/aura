@@ -1,6 +1,6 @@
 //go:build linux
 
-package cli
+package toolsbuiltin
 
 import (
 	"context"
@@ -31,13 +31,14 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	cfg := config.Default()
 	cfg.Tools.Workspace = workspace
-	cfg.Storage.Path = filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
+	dataRoot := filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
+	cfg.Storage.Path = dataRoot
 	var observations []toolbroker.Observation
-	executor, err := newBuiltinToolExecutor(&cfg, db, nil, func(_ context.Context, observation toolbroker.Observation) {
+	executor, err := New(&cfg, db, dataRoot, nil, func(_ context.Context, observation toolbroker.Observation) {
 		observations = append(observations, observation)
 	}, nil)
 	if err != nil {
-		t.Fatalf("newBuiltinToolExecutor: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	definitions := executor.Definitions()
 	if len(definitions) != 6 {
@@ -105,10 +106,11 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tools.Workspace = workspace
 	cfg.Tools.MaxInlineResultBytes = 256
-	cfg.Storage.Path = filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
-	executor, err := newBuiltinToolExecutor(&cfg, db, nil, nil, nil)
+	dataRoot := filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
+	cfg.Storage.Path = dataRoot
+	executor, err := New(&cfg, db, dataRoot, nil, nil, nil)
 	if err != nil {
-		t.Fatalf("newBuiltinToolExecutor: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	output, err := executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID:       "call-1",
@@ -179,12 +181,12 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	cfg.Tools.MaxInlineResultBytes = 512
 	cfg.Storage.Path = dataRoot
 	var prompted *toolbroker.ApprovalPrompt
-	executor, err := newBuiltinToolExecutor(&cfg, db, nil, nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+	executor, err := New(&cfg, db, dataRoot, nil, nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 		prompted = prompt
 		return false, nil
 	})
 	if err != nil {
-		t.Fatalf("newBuiltinToolExecutor: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	_, err = executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID:       "approval-secret",
@@ -210,7 +212,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 		t.Fatalf("approval prompt leaked configured secret: %+v", prompted)
 	}
 
-	diagnosticExecutor, err := newBuiltinToolExecutor(&cfg, db, nil, nil, func(_ context.Context, _ *toolbroker.ApprovalPrompt) (bool, error) {
+	diagnosticExecutor, err := New(&cfg, db, dataRoot, nil, nil, func(_ context.Context, _ *toolbroker.ApprovalPrompt) (bool, error) {
 		return false, errors.New("approval surface failed: " + canary)
 	})
 	if err != nil {

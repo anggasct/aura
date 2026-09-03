@@ -55,9 +55,10 @@ linters:
             - "**/internal/**"
             - "!**/internal/cli/**"
             - "!**/internal/runtime/adk/**"
+            - "!**/internal/tools/builtin/**"
           deny:
             - pkg: github.com/anggasct/aura/internal/runtime/adk
-              desc: only the cli composition root may import the ADK executor adapter; depend on the runtime boundary types instead
+              desc: only the cli composition root may wire the ADK executor, with the builtin tool executor adapter as the one provider-side implementation; depend on the runtime boundary types instead
         # The root package is the shared contract layer (types, errors, fake,
         # checkpoint payload). It deliberately references the ingress and
         # checkpoint contract packages — TurnRequest carries ingress
@@ -131,6 +132,28 @@ linters:
           deny:
             - pkg: github.com/anggasct/aura/internal/runtime
               desc: checkpoint contracts are store-facing boundaries consumed by the engine, and must not reach back into the runtime tree
+        # Builtin tool adapters are assembled by the tools provider
+        # (internal/tools/builtin); the cli composition root invokes that
+        # constructor and must not reach into the adapter packages itself.
+        # Lax mode lets the tools/builtin allow entry win over the internal
+        # tools deny prefixes.
+        tools-wired-only-through-builtin:
+          list-mode: lax
+          files:
+            - "**/internal/cli/**"
+          allow:
+            - github.com/anggasct/aura/internal/tools/builtin
+          deny:
+            - pkg: github.com/anggasct/aura/internal/tools
+              desc: the builtin adapter set is assembled in internal/tools/builtin; the cli composition root calls that constructor instead
+            - pkg: github.com/anggasct/aura/internal/tools/exec
+              desc: the exec adapter is constructed by internal/tools/builtin, not by the cli composition root
+            - pkg: github.com/anggasct/aura/internal/tools/fetch
+              desc: the fetch adapter is constructed by internal/tools/builtin, not by the cli composition root
+            - pkg: github.com/anggasct/aura/internal/tools/filesystem
+              desc: the filesystem adapters are constructed by internal/tools/builtin, not by the cli composition root
+            - pkg: github.com/anggasct/aura/internal/tools/search
+              desc: the search adapter is constructed by internal/tools/builtin, not by the cli composition root
     errcheck:
       # A deliberate ignore is written `_ =` at the call site so the decision
       # stays visible in review; check-blank would make that idiom impossible.
