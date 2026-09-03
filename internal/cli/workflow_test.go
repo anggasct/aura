@@ -258,3 +258,44 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 		t.Fatalf("run status = %s, want the terminal succeeded state preserved", run.Status)
 	}
 }
+
+func TestNewWorkflowToolRunnerPropagatesConstructionErrors(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	if _, err := newWorkflowToolRunner(&config.Config{Tools: &config.Tools{}}, nil); err == nil {
+		t.Fatal("tool runner construction swallowed the storage path failure")
+	} else if !strings.Contains(err.Error(), "cannot resolve data directory") {
+		t.Fatalf("error = %v, want the data directory cause", err)
+	}
+	cfg := &config.Config{
+		Tools:   &config.Tools{Workspace: t.TempDir()},
+		Storage: config.Storage{Path: t.TempDir()},
+	}
+	if _, err := newWorkflowToolRunner(cfg, nil); err == nil {
+		t.Fatal("tool runner construction swallowed the executor failure")
+	} else if !strings.Contains(err.Error(), "storage database is required") {
+		t.Fatalf("error = %v, want the executor cause", err)
+	}
+}
+
+func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
+	gf := writeWorkflowFixtures(t, validWorkflowYAML)
+	content, err := os.ReadFile(gf.configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	trimmed := strings.ReplaceAll(string(content), "storage:\n  path: "+filepath.Dir(gf.configPath)+"\n", "")
+	if trimmed == string(content) {
+		t.Fatal("fixture rewrite removed no storage path")
+	}
+	if err := os.WriteFile(gf.configPath, []byte(trimmed), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	if _, err := runWorkflowCommand(t, gf, "start", "demo"); err == nil {
+		t.Fatal("start tolerated an unresolvable data root")
+	} else if !strings.Contains(err.Error(), "cannot resolve data directory") {
+		t.Fatalf("error = %v, want the underlying cause", err)
+	}
+}

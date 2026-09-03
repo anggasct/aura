@@ -521,6 +521,75 @@ func TestApprovalRejectionRoutesRunToFailure(t *testing.T) {
 	}
 }
 
+func TestInterpreterSignalStepTimeoutRetryConvergesOnSignal(t *testing.T) {
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		kind   Kind
+		signal string
+	}{
+		{name: "wait", kind: KindWait, signal: "wait.gate"},
+		{name: "approval", kind: KindApproval, signal: "approval.gate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			clock := durable.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
+			fake := durable.NewFake().WithClock(clock)
+			disk := newTestStore(t)
+			interpreter := NewInterpreter(disk, fake, &Options{MaxConcurrentSteps: 1, AgentResolver: registry})
+			step := StepSpec{ID: "gate", Executor: ExecutorSpec{Kind: tc.kind}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 1, Backoff: time.Minute}}
+			if tc.kind == KindWait {
+				step.Executor.Event = ptr("ci.completed")
+			}
+			spec := &Spec{
+				ID: "retry-" + tc.name, Goal: "Signal step retry", Version: 1, Source: SourceDefined,
+				Steps: []StepSpec{step},
+			}
+			if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			summary, err := interpreter.Start(ctx, spec.ID, nil)
+			if err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			waitForRunStatus(t, disk, summary.ID, RunSuspended, 2*time.Second)
+			// The first attempt times out with no signal in flight; the
+			// retry must park cleanly and converge on the next delivery.
+			deadline := time.Now().Add(2 * time.Second)
+			retried := false
+			for time.Now().Before(deadline) {
+				clock.Advance(time.Minute)
+				time.Sleep(2 * time.Millisecond)
+				steps, err := disk.Steps(ctx, summary.ID)
+				if err == nil && len(steps) == 1 && steps[0].Attempt >= 1 {
+					retried = true
+					break
+				}
+			}
+			if !retried {
+				t.Fatal("retry attempt never started after the timeout")
+			}
+			if err := fake.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, tc.signal, []byte(`{"decision":"approve"}`)); err != nil {
+				t.Fatalf("Signal on the retried step: %v", err)
+			}
+			waitForRunStatus(t, disk, summary.ID, RunSucceeded, 2*time.Second)
+			cancelDone := make(chan error, 1)
+			go func() { cancelDone <- interpreter.Cancel(ctx, summary.ID) }()
+			select {
+			case err := <-cancelDone:
+				if err != nil {
+					t.Fatalf("Cancel: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("Cancel did not return after the retried signal step")
+			}
+		})
+	}
+}
+
 func TestInterpreterTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
 	ctx := context.Background()
 	registry, err := buildTestRegistry()

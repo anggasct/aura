@@ -176,9 +176,13 @@ func buildWorkflowInterpreter(ctx context.Context, cfg *config.Config) (*workflo
 	if err != nil {
 		return nil, closeStorage, err
 	}
+	tools, err := newWorkflowToolRunner(cfg, db)
+	if err != nil {
+		return nil, closeStorage, err
+	}
 	interpreter := workflow.NewInterpreter(workflow.NewStore(db), durable.NewFake(), &workflow.Options{
 		MaxConcurrentSteps: workflowMaxConcurrentSteps(cfg),
-		Tools:              newWorkflowToolRunner(cfg, db),
+		Tools:              tools,
 		Logger:             slogDiscard{},
 	})
 	for _, spec := range specs {
@@ -211,19 +215,24 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 	})
 }
 
-func newWorkflowToolRunner(cfg *config.Config, db *sql.DB) workflow.ToolRunner {
+// newWorkflowToolRunner adapts the builtin tool executor onto the
+// interpreter port; the broker policy path stays unchanged. Construction
+// failures are returned so start exits with the underlying cause.
+func newWorkflowToolRunner(cfg *config.Config, db *sql.DB) (workflow.ToolRunner, error) {
 	if cfg.Tools == nil {
-		return nil
+		// A config without a tools section leaves the runner unwired; tool
+		// steps fail at run time with a clear executor error.
+		return nil, nil //nolint:nilnil // an absent tools section is a valid configuration
 	}
 	_, artifactRoot, _, err := storagePaths(cfg)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("resolve tool artifact root: %w", err)
 	}
 	executor, err := toolsbuiltin.New(cfg, db, artifactRoot, nil, nil, nil)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("build builtin tool executor: %w", err)
 	}
-	return &workflowToolRunner{executor: executor}
+	return &workflowToolRunner{executor: executor}, nil
 }
 
 type slogDiscard struct{}

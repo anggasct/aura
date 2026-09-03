@@ -93,7 +93,8 @@ func (c *ManualClock) Timer(d time.Duration) <-chan time.Time {
 
 // Invocation is the handler-facing execution context: Signal replaces
 // direct blocking and Sleep is a durable timer. Cancellation arrives
-// through the handler's own context parameter.
+// through the handler's own context parameter and through the context a
+// Signal caller supplies for its wait.
 type Invocation struct {
 	run     RunRef
 	payload []byte
@@ -104,7 +105,11 @@ type Invocation struct {
 }
 
 type signalQueue struct {
-	notify    chan chan signalDelivery
+	// waiter is the reply channel of the single parked Signal call, nil
+	// when none. A re-Signal for the same name replaces an abandoned
+	// waiter instead of queuing behind it, so a timed-out attempt can
+	// never wedge the next attempt's registration.
+	waiter    chan signalDelivery
 	delivered []signalDelivery
 }
 
@@ -118,14 +123,16 @@ func (i *Invocation) Run() RunRef { return i.run }
 // Payload returns the StartRequest payload.
 func (i *Invocation) Payload() []byte { return i.payload }
 
-// Signal blocks until the named signal arrives or the invocation ends. The
-// payload returns with ok=true; ok=false means the invocation was cancelled
-// before the signal arrived.
-func (i *Invocation) Signal(name string) ([]byte, bool) {
+// Signal blocks until the named signal arrives, the wait context ends, or
+// the invocation ends. The payload returns with ok=true; ok=false means
+// the invocation or the wait was cancelled before the signal arrived. A
+// cancelled wait never consumes a delivery: a payload that raced the
+// cancellation stays queued for the next waiter.
+func (i *Invocation) Signal(ctx context.Context, name string) ([]byte, bool) {
 	i.mu.Lock()
 	queue := i.signals[name]
 	if queue == nil {
-		queue = &signalQueue{notify: make(chan chan signalDelivery, 1)}
+		queue = &signalQueue{}
 		i.signals[name] = queue
 	}
 	if len(queue.delivered) > 0 {
@@ -135,14 +142,50 @@ func (i *Invocation) Signal(name string) ([]byte, bool) {
 		return delivery.payload, true
 	}
 	reply := make(chan signalDelivery, 1)
-	queue.notify <- reply
+	queue.waiter = reply
 	i.mu.Unlock()
 	select {
 	case delivery := <-reply:
+		if ctx.Err() != nil {
+			i.detachWaiter(name, reply, &delivery)
+			return nil, false
+		}
 		return delivery.payload, true
+	case <-ctx.Done():
+		i.detachWaiter(name, reply, nil)
+		return nil, false
 	case <-i.done:
 		return nil, false
 	}
+}
+
+// detachWaiter unregisters a wait abandoned through its context and
+// restores any payload that raced the cancellation so a later waiter still
+// receives it. A live waiter is woken with the payload directly instead of
+// leaving it stranded in the delivered queue.
+func (i *Invocation) detachWaiter(name string, reply chan signalDelivery, raced *signalDelivery) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	queue := i.signals[name]
+	if queue == nil {
+		return
+	}
+	if queue.waiter == reply {
+		queue.waiter = nil
+	}
+	if raced == nil {
+		select {
+		case delivery := <-reply:
+			raced = &delivery
+		default:
+			return
+		}
+	}
+	if waiter := queue.waiter; waiter != nil {
+		waiter <- *raced
+		return
+	}
+	queue.delivered = append([]signalDelivery{*raced}, queue.delivered...)
 }
 
 // Sleep blocks for the duration on the runtime clock; it returns the
@@ -271,6 +314,9 @@ func (f *Fake) Start(ctx context.Context, req StartRequest) (RunRef, error) {
 		run.state = state
 		run.detail = detail
 		run.mu.Unlock()
+		// Release any Signal caller still parked on this invocation so no
+		// waiter survives run completion.
+		cancel()
 		f.log("durable run %s finished as %s", run.ref.Key, state)
 	}()
 	return run.ref, nil
@@ -303,14 +349,14 @@ func (f *Fake) Signal(_ context.Context, run RunRef, name string, payload []byte
 	inv.mu.Lock()
 	queue := inv.signals[name]
 	if queue == nil {
-		queue = &signalQueue{notify: make(chan chan signalDelivery, 1)}
+		queue = &signalQueue{}
 		inv.signals[name] = queue
 	}
 	delivery := signalDelivery{payload: append([]byte(nil), payload...)}
-	select {
-	case waiter := <-queue.notify:
-		waiter <- delivery
-	default:
+	if queue.waiter != nil {
+		queue.waiter <- delivery
+		queue.waiter = nil
+	} else {
 		queue.delivered = append(queue.delivered, delivery)
 	}
 	inv.mu.Unlock()

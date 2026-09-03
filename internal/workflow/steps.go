@@ -151,9 +151,11 @@ func (e *stepExecution) executeAttempt(ctx context.Context, step *StepSpec, atte
 		return update, false
 	case <-timer:
 		cancel()
-		if step.Executor.Kind == KindAgent || step.Executor.Kind == KindTool {
-			<-result
-		}
+		// Every executor kind observes attempt cancellation, so the
+		// attempt goroutine always exits; draining keeps an abandoned
+		// wait/approval attempt from holding a signal waiter slot across
+		// the retry.
+		<-result
 		return &stepUpdate{
 			Status:    StepFailed,
 			Attempt:   attempt + 1,
@@ -226,7 +228,7 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec) *stepUp
 // step output.
 func (e *stepExecution) runWaitStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
 	e.suspendRun(ctx, step.ID)
-	payload, ok := e.invocation.Signal("wait." + step.ID)
+	payload, ok := e.invocation.Signal(ctx, "wait."+step.ID)
 	e.resumeRun(ctx, step.ID)
 	if !ok {
 		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: "", EndedAt: nowPtr(), Detail: errWaitCancelled.Error()}
@@ -243,7 +245,7 @@ func (e *stepExecution) runApprovalStep(ctx context.Context, step *StepSpec, att
 		}
 	}
 	e.suspendRun(ctx, step.ID)
-	payload, ok := e.invocation.Signal("approval." + step.ID)
+	payload, ok := e.invocation.Signal(ctx, "approval."+step.ID)
 	e.resumeRun(ctx, step.ID)
 	if !ok {
 		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, EndedAt: nowPtr(), Detail: errWaitCancelled.Error()}
