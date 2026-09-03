@@ -292,13 +292,18 @@ func (e *stepExecution) sinkOutput(ctx context.Context, update *stepUpdate) erro
 }
 
 // suspendRun marks the step as awaiting a signal and moves the run row to
-// suspended when it is the only waiter.
+// suspended when it is the only waiter. The waiter bookkeeping happens
+// under statusMu, but the database write never does: statusMu only guards
+// the in-memory awaiting set, and every run-status write takes writeMu, so
+// no code path holds a database write while waiting on the mutex that
+// another database writer needs.
 func (e *stepExecution) suspendRun(ctx context.Context, stepID string) {
 	e.statusMu.Lock()
-	defer e.statusMu.Unlock()
 	e.awaiting[stepID] = true
-	if len(e.awaiting) == 1 {
-		e.writeRunStatus(context.WithoutCancel(ctx), RunSuspended)
+	onlyWaiter := len(e.awaiting) == 1
+	e.statusMu.Unlock()
+	if onlyWaiter {
+		e.writeRunStatus(ctx, RunSuspended)
 	}
 }
 
@@ -306,16 +311,20 @@ func (e *stepExecution) suspendRun(ctx context.Context, stepID string) {
 // only when no sibling remains suspended.
 func (e *stepExecution) resumeRun(ctx context.Context, stepID string) {
 	e.statusMu.Lock()
-	defer e.statusMu.Unlock()
 	delete(e.awaiting, stepID)
-	if len(e.awaiting) == 0 && ctx.Err() == nil {
-		e.writeRunStatus(context.WithoutCancel(ctx), RunRunning)
+	noneLeft := len(e.awaiting) == 0 && ctx.Err() == nil
+	e.statusMu.Unlock()
+	if noneLeft {
+		e.writeRunStatus(ctx, RunRunning)
 	}
 }
 
 func (e *stepExecution) writeRunStatus(ctx context.Context, status string) {
-	if err := e.interpreter.store.SetRunStatus(ctx, e.runID, status); err != nil && e.interpreter.options.Logger != nil {
-		e.interpreter.options.Logger.WarnContext(ctx, "workflow run status persist failed", "status", status, "error", err.Error())
+	e.interpreter.writeMu.Lock()
+	defer e.interpreter.writeMu.Unlock()
+	writeCtx := context.WithoutCancel(ctx)
+	if err := e.interpreter.store.SetRunStatus(writeCtx, e.runID, status); err != nil && e.interpreter.options.Logger != nil {
+		e.interpreter.options.Logger.WarnContext(writeCtx, "workflow run status persist failed", "status", status, "error", err.Error())
 	}
 }
 
@@ -330,6 +339,14 @@ func (e *stepExecution) terminal(ctx context.Context, stepID string, update *ste
 		e.statuses[stepID] = update.Status
 		e.mu.Unlock()
 	}
+	// The whole transaction runs under writeMu, acquired before the
+	// transaction opens: a writeMu holder therefore never owns the SQLite
+	// write lock while waiting on the mutex, and a mutex holder never
+	// waits on a SQLite lock the next writeMu waiter owns. Without this
+	// ordering a step transaction holding the SQLite write lock would
+	// deadlock against a suspend/resume status write busy-waiting for it.
+	e.interpreter.writeMu.Lock()
+	defer e.interpreter.writeMu.Unlock()
 	tx, err := e.interpreter.store.BeginStepTransaction(context.WithoutCancel(ctx))
 	if err != nil {
 		return fmt.Errorf("begin step %s transition: %w", stepID, err)
@@ -344,9 +361,8 @@ func (e *stepExecution) terminal(ctx context.Context, stepID string, update *ste
 		if len(e.awaiting) > 0 {
 			runStatus = RunSuspended
 		}
-		err := e.interpreter.store.SetRunStatusTx(context.WithoutCancel(ctx), tx, e.runID, runStatus)
 		e.statusMu.Unlock()
-		if err != nil {
+		if err := e.interpreter.store.SetRunStatusTx(context.WithoutCancel(ctx), tx, e.runID, runStatus); err != nil {
 			_ = tx.Rollback()
 			return err
 		}

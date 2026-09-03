@@ -51,6 +51,9 @@ type Interpreter struct {
 	specs    *definitionRegistry
 	options  *Options
 	inflight chan struct{}
+	// writeMu serializes run-status writes across step goroutines; it is
+	// never held while another mutex is acquired.
+	writeMu sync.Mutex
 }
 
 type definitionRegistry struct {
@@ -247,8 +250,8 @@ type stepExecution struct {
 	failedStep string
 	// mu guards the working state shared across concurrent step goroutines.
 	mu sync.Mutex
-	// statusMu serializes run-status decisions with their writes; awaiting
-	// holds the steps currently suspended on a signal.
+	// statusMu guards the in-memory awaiting set of steps currently
+	// suspended on a signal; it is never held across a database write.
 	statusMu sync.Mutex
 	awaiting map[string]bool
 }
