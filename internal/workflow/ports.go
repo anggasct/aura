@@ -25,7 +25,8 @@ type ArtifactSink interface {
 }
 
 // ApprovalRequester binds one approval request to a run+step using the
-// existing approval policy surface.
+// existing approval policy surface. The port is reserved for the production
+// approval surface.
 type ApprovalRequester interface {
 	Request(ctx context.Context, runID, stepID string) error
 }

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"modernc.org/sqlite"
 )
 
 // Store persists workflow definitions and run/step projections.
@@ -32,6 +34,33 @@ func specJSON(spec *Spec) ([]byte, error) {
 	return encoded, nil
 }
 
+const (
+	sqliteConstraintUnique     = 2067 // SQLITE_CONSTRAINT_UNIQUE
+	sqliteConstraintPrimaryKey = 1555 // SQLITE_CONSTRAINT_PRIMARYKEY
+	sqliteConstraint           = 19   // SQLITE_CONSTRAINT
+)
+
+func isConstraintUnique(err error) bool {
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) {
+		code := sqliteErr.Code()
+		return code == sqliteConstraintUnique || code == sqliteConstraintPrimaryKey || code == sqliteConstraint
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+func (s *Store) beginImmediate(ctx context.Context) (*sql.Conn, error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open connection: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("begin immediate transaction: %w", err)
+	}
+	return conn, nil
+}
+
 // SaveDefinition persists one spec version idempotently by
 // (id, version, sha256); identical content is a no-op. A different spec
 // already stored under the same (id, version) is rejected.
@@ -42,22 +71,28 @@ func (s *Store) SaveDefinition(ctx context.Context, spec *Spec) error {
 	}
 	digest := sha256Hex(encoded)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.beginImmediate(ctx)
 	if err != nil {
 		return fmt.Errorf("begin definition save: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		_ = conn.Close()
+	}()
 	var stored string
-	err = tx.QueryRowContext(ctx,
+	err = conn.QueryRowContext(ctx,
 		`SELECT spec_sha256 FROM workflow_definition WHERE id = ? AND version = ?`,
 		spec.ID, spec.Version,
 	).Scan(&stored)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if _, err := tx.ExecContext(ctx,
+		if _, err := conn.ExecContext(ctx,
 			`INSERT INTO workflow_definition (id, version, goal, source, spec_json, spec_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			spec.ID, spec.Version, spec.Goal, string(spec.Source), string(encoded), digest, now,
 		); err != nil {
+			if isConstraintUnique(err) {
+				return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("definition %s version %d already exists with different content", spec.ID, spec.Version))
+			}
 			return fmt.Errorf("insert definition: %w", err)
 		}
 	case err != nil:
@@ -65,7 +100,10 @@ func (s *Store) SaveDefinition(ctx context.Context, spec *Spec) error {
 	case stored != digest:
 		return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("definition %s version %d already exists with different content", spec.ID, spec.Version))
 	}
-	return tx.Commit()
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("commit definition save: %w", err)
+	}
+	return nil
 }
 
 // Definition returns one stored spec version.

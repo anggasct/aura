@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1012,4 +1013,169 @@ func TestRunsOrdersRunsByIdentity(t *testing.T) {
 	if runs[0].ID != older || runs[1].ID != newer {
 		t.Fatalf("order = [%s %s], want identity order [%s %s]", runs[0].ID, runs[1].ID, older, newer)
 	}
+}
+
+func TestSaveDefinitionConcurrentConflict(t *testing.T) {
+	db := newTestDB(t)
+	disk := NewStore(db)
+	ctx := t.Context()
+
+	spec1 := &Spec{
+		ID:      "race-def",
+		Version: 1,
+		Goal:    "First variant",
+		Source:  SourceDefined,
+		Steps: []StepSpec{
+			{ID: "s1", Executor: ExecutorSpec{Kind: KindWait, Event: ptr("ev1")}, Timeout: time.Minute},
+		},
+	}
+	spec2 := &Spec{
+		ID:      "race-def",
+		Version: 1,
+		Goal:    "Second variant",
+		Source:  SourceDefined,
+		Steps: []StepSpec{
+			{ID: "s2", Executor: ExecutorSpec{Kind: KindWait, Event: ptr("ev2")}, Timeout: time.Minute},
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var err1, err2 error
+	start := make(chan struct{})
+
+	go func() {
+		defer wg.Done()
+		<-start
+		err1 = disk.SaveDefinition(ctx, spec1)
+	}()
+
+	go func() {
+		defer wg.Done()
+		<-start
+		err2 = disk.SaveDefinition(ctx, spec2)
+	}()
+
+	close(start)
+	wg.Wait()
+
+	successCount := 0
+	for _, err := range []error{err1, err2} {
+		if err == nil {
+			successCount++
+			continue
+		}
+		code, ok := CodeOf(err)
+		if !ok || code != ErrorCodeSpecInvalid {
+			t.Fatalf("concurrent save error = %v (code %v, ok %v), want %s", err, code, ok, ErrorCodeSpecInvalid)
+		}
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			t.Fatalf("concurrent save surfaced raw constraint error: %v", err)
+		}
+	}
+	if successCount != 1 {
+		t.Fatalf("expected exactly 1 success, got %d (err1=%v, err2=%v)", successCount, err1, err2)
+	}
+}
+
+type testApprovalRequester struct {
+	mu       sync.Mutex
+	requests [][2]string
+	err      error
+}
+
+func (r *testApprovalRequester) Request(ctx context.Context, runID, stepID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.requests = append(r.requests, [2]string{runID, stepID})
+	return r.err
+}
+
+func TestApprovalRequesterPortFailsStepAndRun(t *testing.T) {
+	ctx := context.Background()
+	spec := &Spec{
+		ID:      "approval-port-fail-flow",
+		Goal:    "Test approval requester port failure",
+		Version: 1,
+		Source:  SourceDefined,
+		Steps: []StepSpec{
+			{ID: "gate", Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
+		},
+	}
+	disk := newTestStore(t)
+	fake := durable.NewFake()
+	requester := &testApprovalRequester{err: errors.New("approval backend unavailable")}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		Approvals: requester,
+	})
+	if err := interpreter.Load(ctx, spec, ValidationDeps{}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := interpreter.Start(ctx, spec.ID, nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunFailed, 2*time.Second)
+	steps, err := disk.Steps(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps count = %d, want 1", len(steps))
+	}
+	if steps[0].Status != StepFailed {
+		t.Fatalf("step status = %s, want failed", steps[0].Status)
+	}
+	if steps[0].ErrorCode != string(ErrorCodeStepFailed) {
+		t.Fatalf("step error code = %s, want %s", steps[0].ErrorCode, ErrorCodeStepFailed)
+	}
+}
+
+func TestApprovalRequesterPortSucceedsOnSignal(t *testing.T) {
+	ctx := context.Background()
+	spec := &Spec{
+		ID:      "approval-port-success-flow",
+		Goal:    "Test approval requester port success",
+		Version: 1,
+		Source:  SourceDefined,
+		Steps: []StepSpec{
+			{ID: "gate", Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
+		},
+	}
+	disk := newTestStore(t)
+	fake := durable.NewFake()
+	requester := &testApprovalRequester{}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		Approvals: requester,
+	})
+	if err := interpreter.Load(ctx, spec, ValidationDeps{}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := interpreter.Start(ctx, spec.ID, nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunSuspended, 2*time.Second)
+	requester.mu.Lock()
+	reqCount := len(requester.requests)
+	var recorded [2]string
+	if reqCount > 0 {
+		recorded = requester.requests[0]
+	}
+	requester.mu.Unlock()
+	if reqCount != 1 {
+		t.Fatalf("requests count = %d, want 1", reqCount)
+	}
+	if recorded[0] != summary.ID || recorded[1] != "gate" {
+		t.Fatalf("recorded request = %v, want [%s gate]", recorded, summary.ID)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := fake.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, "approval.gate", []byte(`{"decision":"approve"}`)); err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunSucceeded, 2*time.Second)
 }

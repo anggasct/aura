@@ -2,13 +2,18 @@ package cli
 
 import (
 	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/store"
+	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 	"github.com/anggasct/aura/internal/workflow"
 )
 
@@ -298,11 +303,11 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := db.Exec(`UPDATE workflow_step_run SET status = ?, attempt = 1, ended_at = ?, output_json = ? WHERE run_id = ? AND step_id = ?`,
+	if _, err := db.ExecContext(ctx, `UPDATE workflow_step_run SET status = ?, attempt = 1, ended_at = ?, output_json = ? WHERE run_id = ? AND step_id = ?`,
 		workflow.StepSucceeded, now, `{"value":42}`, summary.ID, "emit"); err != nil {
 		t.Fatalf("seed inline output: %v", err)
 	}
-	if _, err := db.Exec(`UPDATE workflow_step_run SET status = ?, attempt = 1, ended_at = ?, output_json = ?, output_artifact_digest = ? WHERE run_id = ? AND step_id = ?`,
+	if _, err := db.ExecContext(ctx, `UPDATE workflow_step_run SET status = ?, attempt = 1, ended_at = ?, output_json = ?, output_artifact_digest = ? WHERE run_id = ? AND step_id = ?`,
 		workflow.StepSucceeded, now, `{"artifact_digest":"sha256-inspect"}`, "sha256-inspect", summary.ID, "report"); err != nil {
 		t.Fatalf("seed artifact output: %v", err)
 	}
@@ -325,7 +330,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 func TestNewWorkflowToolRunnerPropagatesConstructionErrors(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
-	if _, err := newWorkflowToolRunner(&config.Config{Tools: &config.Tools{}}, nil); err == nil {
+	if _, err := newWorkflowToolRunner(&config.Config{Tools: &config.Tools{}}, nil, nil); err == nil {
 		t.Fatal("tool runner construction swallowed the storage path failure")
 	} else if !strings.Contains(err.Error(), "cannot resolve data directory") {
 		t.Fatalf("error = %v, want the data directory cause", err)
@@ -334,7 +339,7 @@ func TestNewWorkflowToolRunnerPropagatesConstructionErrors(t *testing.T) {
 		Tools:   &config.Tools{Workspace: t.TempDir()},
 		Storage: config.Storage{Path: t.TempDir()},
 	}
-	if _, err := newWorkflowToolRunner(cfg, nil); err == nil {
+	if _, err := newWorkflowToolRunner(cfg, nil, nil); err == nil {
 		t.Fatal("tool runner construction swallowed the executor failure")
 	} else if !strings.Contains(err.Error(), "storage database is required") {
 		t.Fatalf("error = %v, want the executor cause", err)
@@ -361,4 +366,184 @@ func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "cannot resolve data directory") {
 		t.Fatalf("error = %v, want the underlying cause", err)
 	}
+}
+
+func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
+	dir := t.TempDir()
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	cfg := config.Default()
+	cfg.Tools.Workspace = workspace
+	cfg.Storage.Path = dir
+	ctx := t.Context()
+	db, err := store.OpenDB(ctx, filepath.Join(dir, "aura.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	runner, err := newWorkflowToolRunner(&cfg, db, slog.Default())
+	if err != nil {
+		t.Fatalf("newWorkflowToolRunner: %v", err)
+	}
+
+	toolPtr := func(s string) *string { return &s }
+	fake := durable.NewFake()
+	disk := workflow.NewStore(db)
+	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{
+		Tools:  runner,
+		Logger: slog.Default(),
+	})
+
+	spec := &workflow.Spec{
+		ID:      "covered-write-file",
+		Goal:    "Execute covered effectful tool",
+		Version: 1,
+		Source:  workflow.SourceDefined,
+		Steps: []workflow.StepSpec{
+			{ID: "approve", Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: 5 * time.Second},
+			{ID: "run_tool", DependsOn: []string{"approve"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: toolPtr("write_file")}, Timeout: 5 * time.Second},
+		},
+	}
+	deps := workflow.ValidationDeps{
+		KnownTools:     toolsbuiltin.DefinitionNames(),
+		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
+	}
+	if err := interpreter.Load(ctx, spec, deps); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	summary, err := interpreter.Start(ctx, spec.ID, nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		run, err := disk.Run(ctx, summary.ID)
+		if err == nil && run.Status == workflow.RunSuspended {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := fake.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, "approval.approve", []byte(`{"decision":"approve"}`)); err != nil {
+		t.Fatalf("Signal approve: %v", err)
+	}
+
+	for time.Now().Before(deadline) {
+		run, err := disk.Run(ctx, summary.ID)
+		if err == nil && run.Status == workflow.RunSucceeded {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	run, err := disk.Run(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("read run: %v", err)
+	}
+	if run.Status != workflow.RunSucceeded {
+		steps, _ := disk.Steps(ctx, summary.ID)
+		for _, s := range steps {
+			t.Logf("step %s: status=%s, err=%s, output=%s", s.StepID, s.Status, s.ErrorCode, string(s.Output))
+		}
+		t.Fatalf("run status = %s, want succeeded", run.Status)
+	}
+
+	steps, err := disk.Steps(ctx, summary.ID)
+	if err != nil {
+		t.Fatalf("read steps: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("steps count = %d, want 2", len(steps))
+	}
+	for _, s := range steps {
+		if s.Status != workflow.StepSucceeded {
+			t.Fatalf("step %s status = %s, want %s (err=%s)", s.StepID, s.Status, workflow.StepSucceeded, s.ErrorCode)
+		}
+	}
+
+	content, err := os.ReadFile(filepath.Join(workspace, ".workflow"))
+	if err != nil {
+		t.Fatalf("read created file: %v", err)
+	}
+	if string(content) != "ok" {
+		t.Fatalf("file content = %q, want %q", string(content), "ok")
+	}
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (n int, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestBuildWorkflowInterpreterEmitsWarningOnStatusPersistFailure(t *testing.T) {
+	gf := writeWorkflowFixtures(t, validWorkflowYAML)
+	ctx := t.Context()
+	result, err := config.Load(gf.configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	buf := &syncBuffer{}
+	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, result.Config, logger)
+	if err != nil {
+		t.Fatalf("buildWorkflowInterpreter: %v", err)
+	}
+	defer closeStorage()
+
+	db, err := openStorage(ctx, result.Config)
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_status_update BEFORE UPDATE OF status ON workflow_run
+WHEN NEW.status = 'suspended'
+BEGIN
+    SELECT RAISE(FAIL, 'forced status persist failure');
+END;`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	summary, err := interpreter.Start(ctx, "demo", nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(buf.String(), "workflow run status persist failed") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "workflow run status persist failed") {
+		t.Fatalf("logged output = %q, want status persist failure warning", out)
+	}
+	if !strings.Contains(out, "forced status persist failure") {
+		t.Fatalf("logged output = %q, want the forced trigger cause", out)
+	}
+	_ = summary
 }

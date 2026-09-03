@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -96,11 +97,17 @@ func (r *definitionRegistry) list() []*Spec {
 
 // NewInterpreter wires the single workflow engine over the port.
 func NewInterpreter(store *Store, runtime durable.Runtime, options *Options) *Interpreter {
+	if options == nil {
+		options = &Options{}
+	}
 	if options.MaxConcurrentSteps <= 0 {
 		options.MaxConcurrentSteps = 4
 	}
 	if options.HandlerName == "" {
 		options.HandlerName = "workflow"
+	}
+	if options.Logger == nil {
+		options.Logger = slog.Default()
 	}
 	interpreter := &Interpreter{
 		store:    store,
