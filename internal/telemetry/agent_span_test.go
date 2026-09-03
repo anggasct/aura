@@ -46,3 +46,39 @@ func TestTurnSpanCarriesAgentID(t *testing.T) {
 		t.Fatal("turn span lacks the agent.id attribute")
 	}
 }
+
+func TestTurnSpanCarriesDefaultAgentID(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: runtime.EventKindTurnCompleted}}}
+	inst, err := InstrumentRuntime(fr, tp, nil, nil, WithDefaultAgentID("main"))
+	if err != nil {
+		t.Fatalf("InstrumentRuntime: %v", err)
+	}
+
+	req := sampleTurnRequest()
+	req.AgentID = ""
+	for _, err := range inst.Run(context.Background(), req) {
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	}
+
+	var found bool
+	for _, span := range exporter.GetSpans() {
+		if span.Name != SpanTurn {
+			continue
+		}
+		for _, attr := range span.Attributes {
+			if attr.Key == AttrAgentID {
+				found = true
+				if attr.Value.AsString() != "main" {
+					t.Fatalf("agent.id = %q, want main", attr.Value.AsString())
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("turn span lacks the agent.id attribute for the default target")
+	}
+}

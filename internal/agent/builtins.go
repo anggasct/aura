@@ -8,10 +8,12 @@ const defaultModelRoute = "primary"
 
 var builtins = []Definition{
 	{
-		ID:           DefaultID,
-		Description:  "Conversational assistant for everyday requests.",
-		Instructions: "You are Aura, a careful local assistant. Answer directly, state uncertainty plainly, and use tools only when they are needed to answer.",
-		Tools:        []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"},
+		ID: DefaultID,
+		// The default target must keep the prompt surface it had before
+		// definitions existed: the executor maps these fields straight onto
+		// the ADK agent, so any text here would silently change every
+		// default turn's system prompt.
+		Tools: []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"},
 	},
 	{
 		ID:           "engineer",

@@ -58,15 +58,26 @@ func isContentKey(k string) bool {
 }
 
 type Instrument struct {
-	inner         runtime.AgentRuntime
-	tracer        trace.Tracer
-	turnsTotal    metric.Int64Counter
-	turnDuration  metric.Float64Histogram
-	modelDuration metric.Float64Histogram
-	dropped       *atomic.Int64
+	inner          runtime.AgentRuntime
+	tracer         trace.Tracer
+	turnsTotal     metric.Int64Counter
+	turnDuration   metric.Float64Histogram
+	modelDuration  metric.Float64Histogram
+	dropped        *atomic.Int64
+	defaultAgentID string
 }
 
-func InstrumentRuntime(inner runtime.AgentRuntime, tp trace.TracerProvider, mp metric.MeterProvider, dropped *atomic.Int64) (*Instrument, error) {
+// InstrumentOption adjusts optional instrumentation behavior.
+type InstrumentOption func(*Instrument)
+
+// WithDefaultAgentID names the definition that serves turns whose request
+// does not target one explicitly; the turn span then carries that id as
+// agent.id alongside explicitly targeted turns.
+func WithDefaultAgentID(id string) InstrumentOption {
+	return func(i *Instrument) { i.defaultAgentID = id }
+}
+
+func InstrumentRuntime(inner runtime.AgentRuntime, tp trace.TracerProvider, mp metric.MeterProvider, dropped *atomic.Int64, opts ...InstrumentOption) (*Instrument, error) {
 	if inner == nil {
 		return nil, &Error{Code: ErrorCodeInstrumentFailed, Detail: "runtime must not be nil"}
 	}
@@ -93,14 +104,20 @@ func InstrumentRuntime(inner runtime.AgentRuntime, tp trace.TracerProvider, mp m
 	if dropped == nil {
 		dropped = &atomic.Int64{}
 	}
-	return &Instrument{
+	instrument := &Instrument{
 		inner:         inner,
 		tracer:        tracer,
 		turnsTotal:    turnsTotal,
 		turnDuration:  turnDuration,
 		modelDuration: modelDuration,
 		dropped:       dropped,
-	}, nil
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(instrument)
+		}
+	}
+	return instrument, nil
 }
 
 func (i *Instrument) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
@@ -111,8 +128,12 @@ func (i *Instrument) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq
 			AttrOrigin:         string(req.Origin),
 			AttrSemconvVersion: SemconvVersion,
 		})
-		if req.AgentID != "" {
-			spanAttrs[AttrAgentID] = req.AgentID
+		agentID := req.AgentID
+		if agentID == "" {
+			agentID = i.defaultAgentID
+		}
+		if agentID != "" {
+			spanAttrs[AttrAgentID] = agentID
 		}
 		ctx, span := i.tracer.Start(ctx, SpanTurn, trace.WithAttributes(toKeyValues(spanAttrs)...))
 		defer span.End()

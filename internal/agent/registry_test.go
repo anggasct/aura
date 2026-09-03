@@ -40,50 +40,65 @@ func TestBuildRegistersBuiltins(t *testing.T) {
 func TestBuildRejectsInvalidOverrides(t *testing.T) {
 	cases := []struct {
 		name      string
-		override  config.AgentDefinition
+		overrides []config.AgentDefinition
 		wantCode  ErrorCode
 		wantField string
 	}{
 		{
 			name:      "empty id",
-			override:  config.AgentDefinition{Instructions: "x", Description: "d"},
+			overrides: []config.AgentDefinition{{Instructions: "x", Description: "d"}},
 			wantCode:  ErrorCodeDefinitionInvalid,
 			wantField: ".id",
 		},
 		{
 			name:      "unknown tool",
-			override:  config.AgentDefinition{ID: "ops", Description: "d", Instructions: "x", Tools: []string{"git_push"}},
+			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Tools: []string{"git_push"}}},
 			wantCode:  ErrorCodeUnknownTool,
 			wantField: ".tools",
 		},
 		{
 			name:      "unknown capability",
-			override:  config.AgentDefinition{ID: "ops", Description: "d", Instructions: "x", Capabilities: []string{"kernel.write"}},
+			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Capabilities: []string{"kernel.write"}}},
 			wantCode:  ErrorCodeUnknownCapability,
 			wantField: ".capabilities",
 		},
 		{
+			name:      "duplicate capability",
+			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Capabilities: []string{CapabilityWebSearch, CapabilityWebSearch}}},
+			wantCode:  ErrorCodeDefinitionInvalid,
+			wantField: ".capabilities",
+		},
+		{
 			name:      "unknown model route",
-			override:  config.AgentDefinition{ID: "ops", Description: "d", Instructions: "x", ModelRoute: "tertiary"},
+			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", ModelRoute: "tertiary"}},
 			wantCode:  ErrorCodeUnknownModelRoute,
 			wantField: ".model_route",
 		},
 		{
 			name:      "empty instructions on a new definition",
-			override:  config.AgentDefinition{ID: "ops", Description: "d"},
+			overrides: []config.AgentDefinition{{ID: "ops", Description: "d"}},
 			wantCode:  ErrorCodeDefinitionInvalid,
 			wantField: ".instructions",
 		},
 		{
 			name:      "negative turn timeout",
-			override:  config.AgentDefinition{ID: "ops", Description: "d", Instructions: "x", Limits: config.AgentLimits{TurnTimeout: -1}},
+			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Limits: config.AgentLimits{TurnTimeout: -1}}},
 			wantCode:  ErrorCodeDefinitionInvalid,
 			wantField: ".limits.turn_timeout",
+		},
+		{
+			name: "duplicate id",
+			overrides: []config.AgentDefinition{
+				{ID: "ops", Description: "first", Instructions: "a"},
+				{ID: "ops", Description: "second", Instructions: "b"},
+			},
+			wantCode:  ErrorCodeDuplicateID,
+			wantField: ".id",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			registry, err := Build([]config.AgentDefinition{tc.override}, validTools, []string{"primary", "auxiliary"})
+			registry, err := Build(tc.overrides, validTools, []string{"primary", "auxiliary"})
 			if err == nil {
 				t.Fatal("Build accepted an invalid definition")
 			}
@@ -236,11 +251,43 @@ func TestOverrideReplacesBuiltinWithoutDuplicates(t *testing.T) {
 }
 
 func TestBuiltinOverrideKeepsDefaultInstructionsWhenOmitted(t *testing.T) {
-	_, builtinErr := builtinByID("main")
-	if !builtinErr {
-		t.Fatal("main builtin missing")
+	engineerDefault, ok := builtinByID("engineer")
+	if !ok || engineerDefault.Instructions == "" {
+		t.Fatal("engineer builtin lacks default instructions")
 	}
-	override := config.AgentDefinition{ID: "main", Description: "Main override"}
+	override := config.AgentDefinition{ID: "engineer", Description: "Engineer override", Capabilities: []string{CapabilityRepositoryRead}}
+	registry, err := Build([]config.AgentDefinition{override}, validTools, []string{"primary"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	engineer, ok := registry.Lookup("engineer")
+	if !ok {
+		t.Fatal("engineer is not registered")
+	}
+	if engineer.Instructions != engineerDefault.Instructions {
+		t.Errorf("engineer override instructions = %q, want the builtin default", engineer.Instructions)
+	}
+}
+
+func TestDefaultMainKeepsPriorPromptSurface(t *testing.T) {
+	registry, err := Build(nil, validTools, []string{"primary"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	main, ok := registry.Lookup(DefaultID)
+	if !ok {
+		t.Fatal("main is not registered")
+	}
+	if main.Instructions != "" {
+		t.Errorf("main instructions = %q, want none so default turns keep the prior system prompt", main.Instructions)
+	}
+	if main.Description != "" {
+		t.Errorf("main description = %q, want none so default turns keep the prior prompt surface", main.Description)
+	}
+}
+
+func TestMainOverrideWithoutInstructionsStaysUnset(t *testing.T) {
+	override := config.AgentDefinition{ID: DefaultID, Description: "Main override"}
 	registry, err := Build([]config.AgentDefinition{override}, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -249,8 +296,8 @@ func TestBuiltinOverrideKeepsDefaultInstructionsWhenOmitted(t *testing.T) {
 	if !ok {
 		t.Fatal("main is not registered")
 	}
-	if main.Instructions == "" {
-		t.Error("main override lost the builtin default instructions")
+	if main.Instructions != "" {
+		t.Errorf("main override instructions = %q, want the empty builtin default", main.Instructions)
 	}
 }
 

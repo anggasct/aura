@@ -89,11 +89,16 @@ func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string)
 		definition := builtins[index].clone()
 		registry.upsert(&definition)
 	}
+	seen := make(map[string]struct{}, len(overrides))
 	for index := range overrides {
 		definition, err := buildOverride(&overrides[index], index, knownTools, modelRoutes)
 		if err != nil {
 			return nil, err
 		}
+		if _, duplicate := seen[definition.ID]; duplicate {
+			return nil, codedError(ErrorCodeDuplicateID, fmt.Sprintf("agents.definitions[%d].id: duplicate agent id %q", index, definition.ID))
+		}
+		seen[definition.ID] = struct{}{}
 		registry.upsert(definition)
 	}
 	return registry, nil
@@ -136,10 +141,15 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 			return nil, codedError(ErrorCodeUnknownTool, field+".tools: unknown tool "+fmt.Sprintf("%q", tool))
 		}
 	}
+	seenCapabilities := make([]string, 0, len(definition.Capabilities))
 	for _, capability := range definition.Capabilities {
 		if !knownCapability(capability) {
 			return nil, codedError(ErrorCodeUnknownCapability, field+".capabilities: unknown capability "+fmt.Sprintf("%q", capability))
 		}
+		if slices.Contains(seenCapabilities, capability) {
+			return nil, codedError(ErrorCodeDefinitionInvalid, field+".capabilities: duplicate capability "+fmt.Sprintf("%q", capability))
+		}
+		seenCapabilities = append(seenCapabilities, capability)
 	}
 	if definition.ModelRoute != "" && !slices.Contains(modelRoutes, definition.ModelRoute) {
 		return nil, codedError(ErrorCodeUnknownModelRoute, field+".model_route: unknown model route "+fmt.Sprintf("%q", definition.ModelRoute))
