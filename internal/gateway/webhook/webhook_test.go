@@ -503,6 +503,13 @@ func TestKeyRing(t *testing.T) {
 			t.Fatalf("error code = %v, want webhook_key_resolution_failed", code)
 		}
 	})
+	t.Run("empty secret fails closed", func(t *testing.T) {
+		entries := []KeyEntry{{ID: "a", SecretEnv: "EMPTY"}}
+		_, err := NewKeyRing(entries, func(string) (string, error) { return "", nil })
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeKeyResolutionFailed {
+			t.Fatalf("error code = %v, want webhook_key_resolution_failed", code)
+		}
+	})
 	t.Run("nil entries are rejected", func(t *testing.T) {
 		if _, err := NewKeyRing(nil, func(string) (string, error) { return "s", nil }); err == nil {
 			t.Fatal("nil entries accepted")

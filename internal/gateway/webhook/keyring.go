@@ -56,6 +56,9 @@ func NewKeyRing(entries []KeyEntry, source KeySource) (*KeyRing, error) {
 		if err != nil {
 			return nil, Errorf(ErrorCodeKeyResolutionFailed, "key %q secret is unavailable", entry.ID)
 		}
+		if value == "" {
+			return nil, Errorf(ErrorCodeKeyResolutionFailed, "key %q secret is unavailable", entry.ID)
+		}
 		ring.keys[entry.ID] = KeyConfig{ID: entry.ID, Secret: value, AcceptUntil: entry.AcceptUntil}
 		ring.vault.Set(entry.ID, value)
 	}
