@@ -80,3 +80,11 @@ terminal:
   in_memory_history: 100
   second_interrupt_window: 2s
   plain_approval: deny
+webhook:
+  enabled: false
+  listen_address: 127.0.0.1:8282
+  max_body_size: 1MiB
+  timestamp_tolerance: 5m0s
+  replay_retention: 24h0m0s
+  requests_per_minute: 60
+  keys: []
