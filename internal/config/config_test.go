@@ -960,6 +960,14 @@ func TestLoad_DuplicateCapabilitiesRejected(t *testing.T) {
 	}
 }
 
+func TestLoad_NegativeMaxConcurrentStepsRejected(t *testing.T) {
+	content := "version: 1\nworkflows:\n  max_concurrent_steps: -4\n"
+	_, err := Load(writeTempConfig(t, content))
+	if err == nil || !strings.Contains(err.Error(), "workflows.max_concurrent_steps must be at least 1") {
+		t.Fatalf("Load error = %v, want negative max_concurrent_steps rejection", err)
+	}
+}
+
 func TestLoad_UnknownCapability(t *testing.T) {
 	path := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: [unknown-test]\n")
 	_, err := Load(path)

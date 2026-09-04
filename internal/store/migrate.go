@@ -20,6 +20,7 @@ var migrations = []migration{
 	{version: 2, sql: usageLedgerSchemaSQL},
 	{version: 3, sql: effectIntentSchemaSQL},
 	{version: 4, sql: effectApprovalSchemaSQL},
+	{version: 5, sql: workflowSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -170,6 +171,57 @@ CREATE TABLE effect_approval (
 
 CREATE INDEX effect_approval_intent_idx
     ON effect_approval(intent_id, issued_at);
+`
+
+const workflowSchemaSQL = `
+CREATE TABLE workflow_definition (
+    id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0),
+    goal TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('defined','composed','generated')),
+    spec_json TEXT NOT NULL CHECK (json_valid(spec_json)),
+    spec_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (id, version)
+);
+
+CREATE TABLE workflow_run (
+    id TEXT PRIMARY KEY,
+    definition_id TEXT NOT NULL,
+    definition_version INTEGER NOT NULL,
+    durable_key TEXT UNIQUE,
+    goal TEXT NOT NULL,
+    input_json TEXT NOT NULL CHECK (json_valid(input_json)),
+    status TEXT NOT NULL CHECK (
+        status IN ('queued','running','suspended','succeeded','failed','cancelled')
+    ),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (definition_id, definition_version)
+        REFERENCES workflow_definition(id, version)
+        ON DELETE RESTRICT
+);
+
+CREATE INDEX workflow_run_status_idx ON workflow_run(status, created_at);
+
+CREATE TABLE workflow_step_run (
+    run_id TEXT NOT NULL REFERENCES workflow_run(id) ON DELETE CASCADE,
+    step_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('pending','ready','running','succeeded','failed','skipped')
+    ),
+    attempt INTEGER NOT NULL CHECK (attempt >= 0),
+    started_at TEXT,
+    ended_at TEXT,
+    output_json TEXT CHECK (
+        output_json IS NULL
+        OR (json_valid(output_json) AND length(output_json) <= 65536)
+    ),
+    output_artifact_digest TEXT,
+    error_code TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, step_id)
+);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

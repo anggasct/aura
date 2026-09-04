@@ -181,6 +181,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateTerminal(cfg.Terminal); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateWorkflows(cfg.Workflows); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -318,6 +321,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateAgentsShapes(doc); err != nil {
+		return err
+	}
+	if err := validateWorkflowsShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -655,6 +661,35 @@ func validateModelShapes(doc *yamlv3.Node) error {
 		}
 		if err := validateModelDefinition(nameNode.Value, definitionNode); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateWorkflowsShapes(doc *yamlv3.Node) error {
+	workflowsNode := mappingValue(doc, "workflows")
+	if workflowsNode == nil {
+		return nil
+	}
+	if workflowsNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("workflows must be a mapping at line %d", workflowsNode.Line)
+	}
+	for i := 0; i+1 < len(workflowsNode.Content); i += 2 {
+		key := workflowsNode.Content[i].Value
+		value := workflowsNode.Content[i+1]
+		switch key {
+		case "definitions_dir":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
+				return fmt.Errorf("workflows.definitions_dir must be a string at line %d", value.Line)
+			}
+		case "max_concurrent_steps":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!int" {
+				return fmt.Errorf("workflows.max_concurrent_steps must be an integer at line %d", value.Line)
+			}
+		case "default_step_timeout":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
+				return fmt.Errorf("workflows.default_step_timeout must be a duration string at line %d", value.Line)
+			}
 		}
 	}
 	return nil
@@ -1142,6 +1177,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 		cfg.Capabilities.Enabled = []string{}
 	}
 	applyToolDefaults(cfg, doc)
+	applyWorkflowDefaults(cfg, doc)
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = defaults.Server.Host
 	}
@@ -1255,6 +1291,19 @@ func applyHealthDefaults(cfg *Config, doc *yamlv3.Node, defaults Health) {
 	}
 }
 
+func applyWorkflowDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Workflows == nil {
+		cfg.Workflows = &Workflows{}
+	}
+	defaults := Default().Workflows
+	if cfg.Workflows.MaxConcurrentSteps == 0 && !configValuePresent(doc, "workflows", "max_concurrent_steps") && !envValuePresent("workflows.max_concurrent_steps") {
+		cfg.Workflows.MaxConcurrentSteps = defaults.MaxConcurrentSteps
+	}
+	if cfg.Workflows.DefaultStepTimeout == 0 && !configValuePresent(doc, "workflows", "default_step_timeout") && !envValuePresent("workflows.default_step_timeout") {
+		cfg.Workflows.DefaultStepTimeout = defaults.DefaultStepTimeout
+	}
+}
+
 func applyToolDefaults(cfg *Config, doc *yamlv3.Node) {
 	if cfg.Tools == nil {
 		return
@@ -1333,6 +1382,16 @@ func validateRuntime(runtime Runtime) error {
 func validateServer(server Server) error {
 	if server.Port < 1 || server.Port > 65535 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("server.port %d is out of range (1-65535)", server.Port)}
+	}
+	return nil
+}
+
+func validateWorkflows(workflows *Workflows) error {
+	if workflows == nil {
+		return nil
+	}
+	if workflows.MaxConcurrentSteps < 1 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.max_concurrent_steps must be at least 1"}
 	}
 	return nil
 }

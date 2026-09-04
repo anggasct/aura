@@ -141,6 +141,20 @@ func DefinitionNames() []string {
 	return names
 }
 
+// EffectfulToolNames lists tool names whose execution requires approval
+// coverage; workflow validation refuses uncovered dangerous operations.
+func EffectfulToolNames() []string {
+	registry := tools.DefinitionsByKey()
+	names := make([]string, 0, len(registry))
+	for _, definition := range registry {
+		if definition.RequiresApproval || definition.Effectful {
+			names = append(names, definition.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
 func configuredToolSecrets(cfg *config.Config) []string {
 	if cfg == nil || cfg.Tools == nil {
 		return nil
