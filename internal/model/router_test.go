@@ -352,3 +352,106 @@ func TestResolveSecretErrorOmitsAbsolutePath(t *testing.T) {
 		t.Errorf("error should name the file: %v", err)
 	}
 }
+
+func TestBuildRouterWithRoutes_FallbackExecution(t *testing.T) {
+	var candidate1Calls, candidate2Calls int
+	s1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		candidate1Calls++
+		http.Error(w, `{"error":{"message":"overloaded"}}`, http.StatusServiceUnavailable)
+	}))
+	defer s1.Close()
+
+	s2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		candidate2Calls++
+		writeFixture(t, w, fixtureBytes(t, "openai_completion.json"))
+	}))
+	defer s2.Close()
+
+	models := config.Models{
+		Definitions: map[string]config.ModelDefinition{
+			"cand-1": {
+				Protocol: config.ProtocolOpenAIChatCompat,
+				Model:    "gpt-4o",
+				BaseURL:  s1.URL,
+				Capabilities: config.ModelCapabilities{
+					ContextTokens: 128000,
+					Tokenizer:     "cl100k_base",
+				},
+			},
+			"cand-2": {
+				Protocol: config.ProtocolOpenAIChatCompat,
+				Model:    "gpt-4o-mini",
+				BaseURL:  s2.URL,
+				Capabilities: config.ModelCapabilities{
+					ContextTokens: 128000,
+					Tokenizer:     "cl100k_base",
+				},
+			},
+		},
+	}
+	routes := map[string]config.ModelRoute{
+		"primary": {
+			Candidates:          []string{"cand-1", "cand-2"},
+			MaxProviderAttempts: 8,
+		},
+	}
+
+	router, err := BuildRouterWithRoutes(nil, models, routes, nil)
+	if err != nil {
+		t.Fatalf("BuildRouterWithRoutes: %v", err)
+	}
+	if router.Circuits() == nil {
+		t.Fatal("expected non-nil circuits")
+	}
+	if len(router.Definitions()) != 2 {
+		t.Fatalf("definitions count = %d, want 2", len(router.Definitions()))
+	}
+
+	adapter, err := router.For("agent")
+	if err != nil {
+		t.Fatalf("router.For(agent): %v", err)
+	}
+
+	responses, err := collect(adapter.GenerateContent(context.Background(), sampleRequest("test"), false))
+	if err != nil {
+		t.Fatalf("GenerateContent: %v", err)
+	}
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+	if candidate1Calls < 1 || candidate2Calls != 1 {
+		t.Errorf("candidate1Calls = %d (want >= 1), candidate2Calls = %d (want 1)", candidate1Calls, candidate2Calls)
+	}
+
+	// Test ForRoute
+	primaryRoute, err := router.ForRoute("primary")
+	if err != nil || primaryRoute == nil {
+		t.Fatalf("ForRoute(primary): %v", err)
+	}
+	if _, err := router.ForRoute("unknown"); err == nil {
+		t.Fatal("expected error for unknown route")
+	}
+}
+
+func TestBuildRouterWithConfig_Validation(t *testing.T) {
+	cfg := &config.Config{
+		Models: config.Models{
+			Definitions: map[string]config.ModelDefinition{
+				"primary": {
+					Protocol: config.ProtocolOpenAIChatCompat,
+					Model:    "gpt-4o",
+					BaseURL:  "http://127.0.0.1:9999",
+				},
+			},
+		},
+		ModelRoutes: map[string]config.ModelRoute{
+			"primary": {
+				Candidates: []string{"nonexistent"},
+			},
+		},
+	}
+	_, err := BuildRouterWithConfig(nil, cfg, nil)
+	if err == nil {
+		t.Fatal("expected BuildRouterWithConfig to fail on unknown candidate")
+	}
+}
