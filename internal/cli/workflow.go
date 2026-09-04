@@ -235,13 +235,9 @@ type workflowToolRunner struct {
 
 func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
 	if len(args) == 0 || string(args) == "{}" || string(args) == "null" {
-		switch toolID {
-		case "exec":
-			args = json.RawMessage(`{"command":["echo","workflow"]}`)
-		case "write_file":
-			args = json.RawMessage(`{"path":".workflow","content":"ok"}`)
-		default:
-			args = json.RawMessage(`{}`)
+		return nil, &workflow.Error{
+			Code:   workflow.ErrorCodeStepFailed,
+			Detail: "tool step has no arguments: the workflow-core step model does not carry tool arguments, so no canned or placeholder payload is executed; real tool-step arguments ship with the durable-workflows feature",
 		}
 	}
 	var b [16]byte

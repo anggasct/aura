@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -369,10 +371,8 @@ func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 	}
 }
 
-func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("builtin tool executor requires Linux")
-	}
+func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, string) {
+	t.Helper()
 	dir := t.TempDir()
 	workspace := filepath.Join(dir, "workspace")
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
@@ -390,11 +390,73 @@ func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
 	if err := store.Migrate(ctx, db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-
 	runner, err := newWorkflowToolRunner(&cfg, db, slog.Default())
 	if err != nil {
 		t.Fatalf("newWorkflowToolRunner: %v", err)
 	}
+	return runner, db, workspace
+}
+
+// TestWorkflowToolRunnerExecutesCoveredEffectfulTool proves the broker and
+// approval-decider path unlock an effectful tool when the step carries real
+// arguments: the tool receives the authored arguments, never a placeholder
+// payload, and the effectful execution lands on disk.
+func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("builtin tool executor requires Linux")
+	}
+	runner, _, workspace := newWorkflowToolRunnerFixture(t)
+	args := json.RawMessage(`{"path":"notes.txt","content":"authored by the workflow step"}`)
+	output, err := runner.Invoke(t.Context(), "write_file", args)
+	if err != nil {
+		t.Fatalf("Invoke with real arguments: %v", err)
+	}
+	var result struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("decode tool result: %v (%s)", err, output)
+	}
+	content, err := os.ReadFile(filepath.Join(workspace, "notes.txt"))
+	if err != nil {
+		t.Fatalf("read authored file: %v", err)
+	}
+	if string(content) != "authored by the workflow step" {
+		t.Fatalf("file content = %q, want the authored arguments, not a placeholder payload", content)
+	}
+}
+
+// TestWorkflowToolRunnerRejectsEmptyArgumentsFailClosed proves a tool step
+// without authored arguments never executes a canned payload: the adapter
+// fails the step closed with the stable workflow_step_failed code and no
+// file materializes.
+func TestWorkflowToolRunnerRejectsEmptyArgumentsFailClosed(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("builtin tool executor requires Linux")
+	}
+	runner, _, workspace := newWorkflowToolRunnerFixture(t)
+	for _, args := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(`null`)} {
+		_, err := runner.Invoke(t.Context(), "write_file", args)
+		if err == nil {
+			t.Fatalf("Invoke accepted empty arguments %s", args)
+		}
+		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeStepFailed {
+			t.Fatalf("error = %v, want the stable workflow_step_failed code", err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".workflow")); !os.IsNotExist(err) {
+		t.Fatalf("placeholder payload file exists (err=%v): no canned payload may execute", err)
+	}
+}
+
+// TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter proves the
+// interpreter path with the shipped runner fails the tool step closed
+// (workflow_step_failed) instead of executing a fabricated demo payload.
+func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("builtin tool executor requires Linux")
+	}
+	runner, db, workspace := newWorkflowToolRunnerFixture(t)
 
 	toolPtr := func(s string) *string { return &s }
 	fake := durable.NewFake()
@@ -418,6 +480,7 @@ func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
 		KnownTools:     toolsbuiltin.DefinitionNames(),
 		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
 	}
+	ctx := t.Context()
 	if err := interpreter.Load(ctx, spec, deps); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -440,9 +503,10 @@ func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
 		t.Fatalf("Signal approve: %v", err)
 	}
 
+	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		run, err := disk.Run(ctx, summary.ID)
-		if err == nil && run.Status == workflow.RunSucceeded {
+		if err == nil && (run.Status == workflow.RunSucceeded || run.Status == workflow.RunFailed) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -452,33 +516,32 @@ func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read run: %v", err)
 	}
-	if run.Status != workflow.RunSucceeded {
+	if run.Status != workflow.RunFailed {
 		steps, _ := disk.Steps(ctx, summary.ID)
 		for _, s := range steps {
-			t.Logf("step %s: status=%s, err=%s, output=%s", s.StepID, s.Status, s.ErrorCode, string(s.Output))
+			t.Logf("step %s: status=%s, err=%s", s.StepID, s.Status, s.ErrorCode)
 		}
-		t.Fatalf("run status = %s, want succeeded", run.Status)
+		t.Fatalf("run status = %s, want failed (the tool step must fail closed without arguments)", run.Status)
 	}
 
 	steps, err := disk.Steps(ctx, summary.ID)
 	if err != nil {
 		t.Fatalf("read steps: %v", err)
 	}
-	if len(steps) != 2 {
-		t.Fatalf("steps count = %d, want 2", len(steps))
-	}
-	for _, s := range steps {
-		if s.Status != workflow.StepSucceeded {
-			t.Fatalf("step %s status = %s, want %s (err=%s)", s.StepID, s.Status, workflow.StepSucceeded, s.ErrorCode)
+	var toolStep *workflow.StepRun
+	for i := range steps {
+		if steps[i].StepID == "run_tool" {
+			toolStep = steps[i]
 		}
 	}
-
-	content, err := os.ReadFile(filepath.Join(workspace, ".workflow"))
-	if err != nil {
-		t.Fatalf("read created file: %v", err)
+	if toolStep == nil {
+		t.Fatalf("run_tool step not found in %d steps", len(steps))
 	}
-	if string(content) != "ok" {
-		t.Fatalf("file content = %q, want %q", string(content), "ok")
+	if toolStep.Status != workflow.StepFailed || toolStep.ErrorCode != string(workflow.ErrorCodeStepFailed) {
+		t.Fatalf("run_tool step status = %s err = %s, want failed/workflow_step_failed", toolStep.Status, toolStep.ErrorCode)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".workflow")); !os.IsNotExist(err) {
+		t.Fatalf("placeholder payload file exists (err=%v): no canned payload may execute", err)
 	}
 }
 
