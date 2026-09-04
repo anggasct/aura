@@ -289,6 +289,13 @@ linters:
         text: G702
         path: internal/channel/terminal/ttyrender\.go
 
+      # Launching the configured MCP server command is the stdio client's
+      # purpose; the command is operator-configured and trust-validated.
+      - linters:
+          - gosec
+        text: G204
+        path: internal/mcp/client\.go
+
       # Retry jitter is not a security context. Scoped to the one file that
       # needs it rather than excluded repository-wide.
       - linters:

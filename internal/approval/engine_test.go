@@ -569,3 +569,38 @@ func TestErrorsAreTyped(t *testing.T) {
 		t.Fatal("error message must not be empty")
 	}
 }
+
+func TestEngineRegisterAndUnregisterRule(t *testing.T) {
+	engine := newTestEngine(t)
+	ctx := t.Context()
+
+	req := testRequest("dynamic_tool")
+	_, err := engine.Evaluate(ctx, &req)
+	if err == nil {
+		t.Fatal("expected evaluate to fail for unregistered tool")
+	}
+
+	rule := Rule{
+		ToolName:             "dynamic_tool",
+		RequiredCapabilities: []string{"exec"},
+		AllowedTrust:         []TrustLabel{TrustOwnerInput},
+		Constraints:          Constraints{MaxOutputBytes: 1024},
+	}
+	if err := engine.RegisterRule(&rule); err != nil {
+		t.Fatalf("RegisterRule failed: %v", err)
+	}
+
+	dec, err := engine.Evaluate(ctx, &req)
+	if err != nil {
+		t.Fatalf("expected evaluate to succeed after registering rule: %v", err)
+	}
+	if dec.Outcome != OutcomeAllow {
+		t.Fatalf("expected outcome allow, got %s", dec.Outcome)
+	}
+
+	engine.UnregisterRule("dynamic_tool")
+	_, err = engine.Evaluate(ctx, &req)
+	if err == nil {
+		t.Fatal("expected evaluate to fail after unregistering rule")
+	}
+}

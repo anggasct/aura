@@ -184,6 +184,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateWorkflows(cfg.Workflows); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateMCP(cfg.MCP); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -324,6 +327,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateWorkflowsShapes(doc); err != nil {
+		return err
+	}
+	if err := validateMCPShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -689,6 +695,104 @@ func validateWorkflowsShapes(doc *yamlv3.Node) error {
 		case "default_step_timeout":
 			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
 				return fmt.Errorf("workflows.default_step_timeout must be a duration string at line %d", value.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func validateMCPShapes(doc *yamlv3.Node) error {
+	mcpNode := mappingValue(doc, "mcp")
+	if mcpNode == nil {
+		return nil
+	}
+	if mcpNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("mcp must be a mapping at line %d", mcpNode.Line)
+	}
+	serversNode := mappingValue(mcpNode, "servers")
+	if serversNode == nil {
+		return nil
+	}
+	if serversNode.Kind != yamlv3.SequenceNode {
+		return fmt.Errorf("mcp.servers must be a list at line %d", serversNode.Line)
+	}
+	stringFields := []string{"name", "transport", "command", "url", "startup_timeout", "request_timeout", "connect_timeout"}
+	listFields := []string{"args", "capabilities"}
+	for _, item := range serversNode.Content {
+		if item.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("mcp.servers entries must be mappings at line %d", item.Line)
+		}
+		for i := 0; i+1 < len(item.Content); i += 2 {
+			key := item.Content[i].Value
+			value := item.Content[i+1]
+			switch {
+			case slices.Contains(stringFields, key):
+				if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
+					return fmt.Errorf("mcp.servers.%s must be a string at line %d", key, value.Line)
+				}
+			case slices.Contains(listFields, key):
+				if value.Kind != yamlv3.SequenceNode {
+					return fmt.Errorf("mcp.servers.%s must be a list at line %d", key, value.Line)
+				}
+				for _, entry := range value.Content {
+					if entry.Kind != yamlv3.ScalarNode || entry.Tag != "!!str" {
+						return fmt.Errorf("mcp.servers.%s entries must be strings at line %d", key, entry.Line)
+					}
+				}
+			case key == "max_message_size":
+				if value.Kind != yamlv3.ScalarNode || (value.Tag != "!!str" && value.Tag != "!!int") {
+					return fmt.Errorf("mcp.servers.max_message_size must be an integer or byte-size string at line %d", value.Line)
+				}
+			case key == "environment":
+				if value.Kind != yamlv3.MappingNode {
+					return fmt.Errorf("mcp.servers.environment must be a mapping at line %d", value.Line)
+				}
+				for j := 0; j+1 < len(value.Content); j += 2 {
+					envVal := value.Content[j+1]
+					if envVal.Kind != yamlv3.ScalarNode || envVal.Tag != "!!str" {
+						return fmt.Errorf("mcp.servers.environment values must be strings at line %d", envVal.Line)
+					}
+				}
+			case key == "allow_redirects", key == "compatibility_ack":
+				if value.Kind != yamlv3.ScalarNode || value.Tag != "!!bool" {
+					return fmt.Errorf("mcp.servers.%s must be a boolean at line %d", key, value.Line)
+				}
+			case key == "restart":
+				if value.Kind != yamlv3.MappingNode {
+					return fmt.Errorf("mcp.servers.restart must be a mapping at line %d", value.Line)
+				}
+				for j := 0; j+1 < len(value.Content); j += 2 {
+					rKey := value.Content[j].Value
+					rVal := value.Content[j+1]
+					switch rKey {
+					case "max_attempts":
+						if rVal.Kind != yamlv3.ScalarNode || rVal.Tag != "!!int" {
+							return fmt.Errorf("mcp.servers.restart.max_attempts must be an integer at line %d", rVal.Line)
+						}
+					case "window":
+						if rVal.Kind != yamlv3.ScalarNode || rVal.Tag != "!!str" {
+							return fmt.Errorf("mcp.servers.restart.window must be a duration string at line %d", rVal.Line)
+						}
+					}
+				}
+			case key == "auth":
+				if value.Kind != yamlv3.MappingNode {
+					return fmt.Errorf("mcp.servers.auth must be a mapping at line %d", value.Line)
+				}
+				for j := 0; j+1 < len(value.Content); j += 2 {
+					aKey := value.Content[j].Value
+					aVal := value.Content[j+1]
+					if aVal.Kind != yamlv3.MappingNode {
+						return fmt.Errorf("mcp.servers.auth.%s must be a mapping at line %d", aKey, aVal.Line)
+					}
+					for k := 0; k+1 < len(aVal.Content); k += 2 {
+						fieldKey := aVal.Content[k].Value
+						fieldVal := aVal.Content[k+1]
+						if fieldVal.Kind != yamlv3.ScalarNode || fieldVal.Tag != "!!str" {
+							return fmt.Errorf("mcp.servers.auth.%s.%s must be a string at line %d", aKey, fieldKey, fieldVal.Line)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1178,6 +1282,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	}
 	applyToolDefaults(cfg, doc)
 	applyWorkflowDefaults(cfg, doc)
+	applyMCPDefaults(cfg, doc)
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = defaults.Server.Host
 	}
@@ -1394,6 +1499,127 @@ func validateWorkflows(workflows *Workflows) error {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.max_concurrent_steps must be at least 1"}
 	}
 	return nil
+}
+
+func validateMCP(m *MCP) error {
+	if m == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(m.Servers))
+	for i := range m.Servers {
+		s := &m.Servers[i]
+		if !mcpServerNamePattern.MatchString(s.Name) {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%d].name must match [a-z][a-z0-9_-]{0,62}", i)}
+		}
+		if _, exists := seen[s.Name]; exists {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("duplicate mcp server name %q", s.Name)}
+		}
+		seen[s.Name] = struct{}{}
+
+		switch s.Transport {
+		case "stdio":
+			if s.Command == "" {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].command is required for stdio transport", s.Name)}
+			}
+			if !filepath.IsAbs(s.Command) {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].command must be an absolute path", s.Name)}
+			}
+			if s.URL != "" {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url is not allowed for stdio transport", s.Name)}
+			}
+			if s.Auth != nil {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth is not allowed for stdio transport", s.Name)}
+			}
+		case "streamable_http":
+			if s.URL == "" {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url is required for streamable_http transport", s.Name)}
+			}
+			if s.Command != "" || len(s.Args) > 0 {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].command/args are not allowed for streamable_http transport", s.Name)}
+			}
+			if err := ValidateBaseURL(s.URL); err != nil {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url invalid: %v", s.Name, err)}
+			}
+		case "legacy_sse":
+			if !s.CompatibilityAck {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s] legacy_sse requires compatibility_ack: true", s.Name)}
+			}
+			if s.URL == "" {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url is required for legacy_sse transport", s.Name)}
+			}
+			if err := ValidateBaseURL(s.URL); err != nil {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url invalid: %v", s.Name, err)}
+			}
+		default:
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].transport must be stdio, streamable_http, or legacy_sse", s.Name)}
+		}
+
+		if s.StartupTimeout < 0 {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].startup_timeout must not be negative", s.Name)}
+		}
+		if s.RequestTimeout < 0 {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].request_timeout must not be negative", s.Name)}
+		}
+		if s.ConnectTimeout < 0 {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].connect_timeout must not be negative", s.Name)}
+		}
+		if s.MaxMessageSize < 0 {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].max_message_size must not be negative", s.Name)}
+		}
+
+		if s.Restart != nil {
+			if s.Restart.MaxAttempts < 0 {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].restart.max_attempts must not be negative", s.Name)}
+			}
+			if s.Restart.Window < 0 {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].restart.window must not be negative", s.Name)}
+			}
+		}
+
+		if s.Auth != nil {
+			if s.Auth.OAuth != nil && s.Auth.Static != nil {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth must declare either oauth or static, not both", s.Name)}
+			}
+			if s.Auth.OAuth == nil && s.Auth.Static == nil {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth must declare either oauth or static", s.Name)}
+			}
+			if s.Auth.OAuth != nil {
+				if s.Auth.OAuth.ClientIDEnv == "" {
+					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth.oauth.client_id_env is required", s.Name)}
+				}
+				if s.Auth.OAuth.ClientSecretEnv == "" {
+					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth.oauth.client_secret_env is required", s.Name)}
+				}
+			}
+			if s.Auth.Static != nil {
+				if s.Auth.Static.CredentialRef == "" {
+					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth.static.credential_ref is required", s.Name)}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func applyMCPDefaults(cfg *Config, _ *yamlv3.Node) {
+	if cfg.MCP == nil {
+		return
+	}
+	for i := range cfg.MCP.Servers {
+		s := &cfg.MCP.Servers[i]
+		if s.StartupTimeout == 0 {
+			s.StartupTimeout = Duration(10 * time.Second)
+		}
+		if s.RequestTimeout == 0 {
+			s.RequestTimeout = Duration(30 * time.Second)
+		}
+		if s.MaxMessageSize == 0 {
+			s.MaxMessageSize = 1024 * 1024
+		}
+		if s.Transport == "streamable_http" && s.ConnectTimeout == 0 {
+			s.ConnectTimeout = Duration(10 * time.Second)
+		}
+	}
 }
 
 func validateLogging(loggingConfig Logging) error {

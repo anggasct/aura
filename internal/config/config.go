@@ -23,6 +23,7 @@ type Config struct {
 	Tools        *Tools       `koanf:"tools" yaml:"tools,omitempty"`
 	Agents       *Agents      `koanf:"agents" yaml:"agents,omitempty"`
 	Workflows    *Workflows   `koanf:"workflows" yaml:"workflows,omitempty"`
+	MCP          *MCP         `koanf:"mcp" yaml:"mcp,omitempty"`
 	Server       Server       `koanf:"server" yaml:"server"`
 	Logging      Logging      `koanf:"logging" yaml:"logging"`
 	Models       Models       `koanf:"models" yaml:"models"`
@@ -250,6 +251,57 @@ type Workflows struct {
 	DefaultStepTimeout Duration `koanf:"default_step_timeout" yaml:"default_step_timeout"`
 }
 
+// MCP transport type constants.
+const (
+	MCPTransportStdio          = "stdio"
+	MCPTransportStreamableHTTP = "streamable_http"
+	MCPTransportLegacySSE      = "legacy_sse"
+)
+
+// MCP configures external Model Context Protocol tool servers.
+type MCP struct {
+	Servers []MCPServer `koanf:"servers" yaml:"servers"`
+}
+
+type MCPServer struct {
+	Name             string            `koanf:"name" yaml:"name"`
+	Transport        string            `koanf:"transport" yaml:"transport"`
+	Command          string            `koanf:"command" yaml:"command,omitempty"`
+	Args             []string          `koanf:"args" yaml:"args,omitempty"`
+	Environment      map[string]string `koanf:"environment" yaml:"environment,omitempty"`
+	Capabilities     []string          `koanf:"capabilities" yaml:"capabilities,omitempty"`
+	StartupTimeout   Duration          `koanf:"startup_timeout" yaml:"startup_timeout,omitempty"`
+	RequestTimeout   Duration          `koanf:"request_timeout" yaml:"request_timeout,omitempty"`
+	MaxMessageSize   ByteSize          `koanf:"max_message_size" yaml:"max_message_size,omitempty"`
+	Restart          *MCPRestart       `koanf:"restart" yaml:"restart,omitempty"`
+	URL              string            `koanf:"url" yaml:"url,omitempty"`
+	Auth             *MCPAuth          `koanf:"auth" yaml:"auth,omitempty"`
+	ConnectTimeout   Duration          `koanf:"connect_timeout" yaml:"connect_timeout,omitempty"`
+	AllowRedirects   *bool             `koanf:"allow_redirects" yaml:"allow_redirects,omitempty"`
+	CompatibilityAck bool              `koanf:"compatibility_ack" yaml:"compatibility_ack,omitempty"`
+}
+
+type MCPRestart struct {
+	MaxAttempts int      `koanf:"max_attempts" yaml:"max_attempts"`
+	Window      Duration `koanf:"window" yaml:"window"`
+}
+
+type MCPAuth struct {
+	OAuth  *MCPOAuth      `koanf:"oauth" yaml:"oauth,omitempty"`
+	Static *MCPStaticAuth `koanf:"static" yaml:"static,omitempty"`
+}
+
+type MCPOAuth struct {
+	ClientIDEnv     string `koanf:"client_id_env" yaml:"client_id_env"`
+	ClientSecretEnv string `koanf:"client_secret_env" yaml:"client_secret_env"`
+	TokenStore      string `koanf:"token_store" yaml:"token_store"`
+}
+
+type MCPStaticAuth struct {
+	Header        string `koanf:"header" yaml:"header,omitempty"`
+	CredentialRef string `koanf:"credential_ref" yaml:"credential_ref"`
+}
+
 type ModelCapabilities struct {
 	Streaming        bool   `koanf:"streaming" yaml:"streaming"`
 	Tools            bool   `koanf:"tools" yaml:"tools"`
@@ -272,6 +324,7 @@ const (
 var (
 	modelDefinitionNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 	envNamePattern             = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	mcpServerNamePattern       = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 )
 
 func validProtocol(p string) bool {
