@@ -233,10 +233,26 @@ func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rul
 	defCopy.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
 
 	key := defCopy.Key()
+	oldDef, hadOldDef := b.definitions[key]
+	oldAdapter, hadOldAdapter := b.adapters[key]
+
 	b.definitions[key] = &defCopy
 	b.adapters[key] = adapter
 
-	return b.engine.RegisterRule(rule)
+	if err := b.engine.RegisterRule(rule); err != nil {
+		if hadOldDef {
+			b.definitions[key] = oldDef
+		} else {
+			delete(b.definitions, key)
+		}
+		if hadOldAdapter {
+			b.adapters[key] = oldAdapter
+		} else {
+			delete(b.adapters, key)
+		}
+		return err
+	}
+	return nil
 }
 
 // UnregisterTool removes a tool and its policy rule.

@@ -20,14 +20,35 @@ type DiscoveredTool struct {
 }
 
 type ServerTrustContent struct {
-	Name         string            `json:"name"`
-	Transport    string            `json:"transport"`
-	Command      string            `json:"command,omitempty"`
-	Args         []string          `json:"args,omitempty"`
-	Environment  map[string]string `json:"environment,omitempty"`
-	URL          string            `json:"url,omitempty"`
-	Capabilities []string          `json:"capabilities"`
-	Tools        []ToolTrustInfo   `json:"tools"`
+	Name             string            `json:"name"`
+	Transport        string            `json:"transport"`
+	Command          string            `json:"command,omitempty"`
+	Args             []string          `json:"args,omitempty"`
+	Environment      map[string]string `json:"environment,omitempty"`
+	URL              string            `json:"url,omitempty"`
+	StartupTimeout   int64             `json:"startup_timeout"`
+	RequestTimeout   int64             `json:"request_timeout"`
+	ConnectTimeout   int64             `json:"connect_timeout"`
+	MaxMessageSize   int64             `json:"max_message_size"`
+	Restart          *TrustRestart     `json:"restart,omitempty"`
+	Auth             *TrustAuth        `json:"auth,omitempty"`
+	AllowRedirects   bool              `json:"allow_redirects"`
+	CompatibilityAck bool              `json:"compatibility_ack"`
+	Capabilities     []string          `json:"capabilities"`
+	Tools            []ToolTrustInfo   `json:"tools"`
+}
+
+type TrustRestart struct {
+	MaxAttempts int   `json:"max_attempts"`
+	Window      int64 `json:"window"`
+}
+
+type TrustAuth struct {
+	OAuthClientIDEnv     string `json:"oauth_client_id_env,omitempty"`
+	OAuthClientSecretEnv string `json:"oauth_client_secret_env,omitempty"`
+	OAuthTokenStore      string `json:"oauth_token_store,omitempty"`
+	StaticHeader         string `json:"static_header,omitempty"`
+	StaticCredentialRef  string `json:"static_credential_ref,omitempty"`
 }
 
 type ToolTrustInfo struct {
@@ -64,16 +85,51 @@ func ComputeTrustDigest(serverCfg *config.MCPServer, tools []DiscoveredTool) (st
 
 	sortedCaps := slices.Clone(serverCfg.Capabilities)
 	slices.Sort(sortedCaps)
+	if sortedCaps == nil {
+		sortedCaps = []string{}
+	}
+
+	var restart *TrustRestart
+	if serverCfg.Restart != nil {
+		restart = &TrustRestart{
+			MaxAttempts: serverCfg.Restart.MaxAttempts,
+			Window:      int64(serverCfg.Restart.Window),
+		}
+	}
+
+	var auth *TrustAuth
+	if serverCfg.Auth != nil {
+		auth = &TrustAuth{}
+		if serverCfg.Auth.OAuth != nil {
+			auth.OAuthClientIDEnv = serverCfg.Auth.OAuth.ClientIDEnv
+			auth.OAuthClientSecretEnv = serverCfg.Auth.OAuth.ClientSecretEnv
+			auth.OAuthTokenStore = serverCfg.Auth.OAuth.TokenStore
+		}
+		if serverCfg.Auth.Static != nil {
+			auth.StaticHeader = serverCfg.Auth.Static.Header
+			auth.StaticCredentialRef = serverCfg.Auth.Static.CredentialRef
+		}
+	}
+
+	allowRedirects := serverCfg.AllowRedirects != nil && *serverCfg.AllowRedirects
 
 	content := ServerTrustContent{
-		Name:         serverCfg.Name,
-		Transport:    serverCfg.Transport,
-		Command:      serverCfg.Command,
-		Args:         slices.Clone(serverCfg.Args),
-		Environment:  copyStringMap(serverCfg.Environment),
-		URL:          serverCfg.URL,
-		Capabilities: sortedCaps,
-		Tools:        toolInfos,
+		Name:             serverCfg.Name,
+		Transport:        serverCfg.Transport,
+		Command:          serverCfg.Command,
+		Args:             slices.Clone(serverCfg.Args),
+		Environment:      copyStringMap(serverCfg.Environment),
+		URL:              serverCfg.URL,
+		StartupTimeout:   int64(serverCfg.StartupTimeout),
+		RequestTimeout:   int64(serverCfg.RequestTimeout),
+		ConnectTimeout:   int64(serverCfg.ConnectTimeout),
+		MaxMessageSize:   int64(serverCfg.MaxMessageSize),
+		Restart:          restart,
+		Auth:             auth,
+		AllowRedirects:   allowRedirects,
+		CompatibilityAck: serverCfg.CompatibilityAck,
+		Capabilities:     sortedCaps,
+		Tools:            toolInfos,
 	}
 
 	payload, err := json.Marshal(content)

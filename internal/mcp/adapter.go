@@ -1,10 +1,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/google/jsonschema-go/jsonschema"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/toolbroker"
@@ -15,15 +18,39 @@ func FormatToolName(serverName, toolName string) string {
 }
 
 func MakeValidator(schema json.RawMessage, maxMsgSize int64) func(json.RawMessage) (json.RawMessage, error) {
+	var resolved *jsonschema.Resolved
+	var schemaErr error
+	if len(bytes.TrimSpace(schema)) > 0 && string(bytes.TrimSpace(schema)) != "null" {
+		var parsed jsonschema.Schema
+		if err := json.Unmarshal(schema, &parsed); err != nil {
+			schemaErr = err
+		} else if r, err := parsed.Resolve(nil); err != nil {
+			schemaErr = err
+		} else {
+			resolved = r
+		}
+	}
 	return func(raw json.RawMessage) (json.RawMessage, error) {
 		if len(raw) == 0 {
-			return json.RawMessage("{}"), nil
+			raw = json.RawMessage("{}")
 		}
 		if !json.Valid(raw) {
 			return nil, errors.New("invalid JSON arguments")
 		}
 		if maxMsgSize > 0 && int64(len(raw)) > maxMsgSize {
 			return nil, fmt.Errorf("arguments size %d exceeds max message size %d", len(raw), maxMsgSize)
+		}
+		if schemaErr != nil {
+			return nil, fmt.Errorf("invalid tool schema: %w", schemaErr)
+		}
+		if resolved != nil {
+			var instance any
+			if err := json.Unmarshal(raw, &instance); err != nil {
+				return nil, errors.New("invalid JSON arguments")
+			}
+			if err := resolved.Validate(instance); err != nil {
+				return nil, fmt.Errorf("arguments violate tool schema: %w", err)
+			}
 		}
 		return raw, nil
 	}
@@ -63,10 +90,8 @@ func NewAdapter(client *Client, toolName string, maxMessageSize int64) toolbroke
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultExecutionFailed, "failed to marshal tool result: %v", err)
 		}
 
-		truncated := false
 		if maxBytes > 0 && int64(len(outputBytes)) > maxBytes {
-			outputBytes = outputBytes[:maxBytes]
-			truncated = true
+			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultExecutionFailed, "tool result size %d exceeds limit %d", len(outputBytes), maxBytes)
 		}
 
 		resultClass := toolbroker.ResultOK
@@ -80,7 +105,6 @@ func NewAdapter(client *Client, toolName string, maxMessageSize int64) toolbroke
 			Class:       resultClass,
 			Untrusted:   true,
 			Output:      outputBytes,
-			Truncated:   truncated,
 		}, nil
 	}
 }

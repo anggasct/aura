@@ -74,26 +74,36 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.closed {
+		m.mu.Unlock()
 		return Errorf(ErrServerUnavailable, "manager is closed")
 	}
+	servers := slices.Clone(m.cfg.Servers)
+	transports := make(map[string]sdk.Transport, len(m.customTransports))
+	for k, v := range m.customTransports {
+		transports[k] = v
+	}
+	checker := m.capabilityChecker
+	broker := m.broker
+	registry := m.trustRegistry
+	logger := m.logger
+	m.mu.Unlock()
 
-	for i := range m.cfg.Servers {
-		serverCfg := &m.cfg.Servers[i]
+	for i := range servers {
+		serverCfg := &servers[i]
 
-		if m.capabilityChecker != nil && len(serverCfg.Capabilities) > 0 {
-			if err := m.capabilityChecker(serverCfg.Capabilities); err != nil {
+		if checker != nil && len(serverCfg.Capabilities) > 0 {
+			if err := checker(serverCfg.Capabilities); err != nil {
 				return Wrap(ErrCapabilityUnavailable, err, "required capabilities unavailable")
 			}
 		}
 
-		client, err := NewClient(serverCfg, m.logger)
+		client, err := NewClient(serverCfg, logger)
 		if err != nil {
 			return err
 		}
 
-		transport := m.customTransports[serverCfg.Name]
+		transport := transports[serverCfg.Name]
 		if err := client.Connect(ctx, transport); err != nil {
 			return err
 		}
@@ -110,7 +120,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			return err
 		}
 
-		trusted, err := m.trustRegistry.IsTrusted(ctx, serverCfg.Name, digest)
+		trusted, err := registry.IsTrusted(ctx, serverCfg.Name, digest)
 		if err != nil {
 			_ = client.Close()
 			return Wrap(ErrResultInvalid, err, "failed to check trust")
@@ -121,7 +131,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			for _, t := range discovered {
 				toolNames = append(toolNames, t.Name)
 			}
-			_ = m.trustRegistry.SaveTrust(ctx, &TrustRecord{
+			_ = registry.SaveTrust(ctx, &TrustRecord{
 				ServerName:   serverCfg.Name,
 				Digest:       digest,
 				Decision:     TrustDecisionPending,
@@ -133,6 +143,8 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 
 		registeredNames := make([]string, 0, len(discovered))
+		registerFailed := false
+		var registerErr error
 		for _, tool := range discovered {
 			namespaced := FormatToolName(serverCfg.Name, tool.Name)
 			version := "v1"
@@ -162,18 +174,36 @@ func (m *Manager) Start(ctx context.Context) error {
 			}
 
 			adapter := NewAdapter(client, tool.Name, int64(serverCfg.MaxMessageSize))
-			if err := m.broker.RegisterTool(&def, adapter, &rule); err != nil {
-				_ = client.Close()
-				return Wrap(ErrServerUnavailable, err, "failed to register tool in broker")
+			if err := broker.RegisterTool(&def, adapter, &rule); err != nil {
+				registerFailed = true
+				registerErr = Wrap(ErrServerUnavailable, err, "failed to register tool in broker")
+				break
 			}
 
 			registeredNames = append(registeredNames, namespaced)
 		}
+		if registerFailed {
+			for _, name := range registeredNames {
+				broker.UnregisterTool(name, "v1")
+			}
+			_ = client.Close()
+			return registerErr
+		}
 
+		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
+			for _, name := range registeredNames {
+				broker.UnregisterTool(name, "v1")
+			}
+			_ = client.Close()
+			return Errorf(ErrServerUnavailable, "manager is closed")
+		}
 		m.clients[serverCfg.Name] = client
 		m.registeredTools[serverCfg.Name] = registeredNames
+		m.mu.Unlock()
 
-		m.logger.InfoContext(ctx, "server tools registered",
+		logger.InfoContext(ctx, "server tools registered",
 			"component", "mcp_manager",
 			"server", serverCfg.Name,
 			"tool_count", len(registeredNames),

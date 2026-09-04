@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/anggasct/aura/internal/config"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -58,6 +61,29 @@ func (c *Client) Connect(ctx context.Context, customTransport sdk.Transport) err
 			transport = &sdk.CommandTransport{
 				Command: cmd,
 			}
+		case config.MCPTransportStreamableHTTP:
+			if c.cfg.Auth != nil {
+				return Errorf(ErrAuthRequired, "server %q requires auth", c.cfg.Name)
+			}
+			if c.cfg.URL == "" {
+				return Errorf(ErrConfigInvalid, "url is required for streamable transport")
+			}
+			allowRedirects := c.cfg.AllowRedirects != nil && *c.cfg.AllowRedirects
+			httpClient := &http.Client{
+				CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+					if !allowRedirects {
+						return http.ErrUseLastResponse
+					}
+					if len(via) >= 10 {
+						return errors.New("too many redirects")
+					}
+					return nil
+				},
+			}
+			transport = &sdk.StreamableClientTransport{
+				Endpoint:   c.cfg.URL,
+				HTTPClient: httpClient,
+			}
 		default:
 			return Errorf(ErrConfigInvalid, "unsupported transport: %s", c.cfg.Transport)
 		}
@@ -71,10 +97,14 @@ func (c *Client) Connect(ctx context.Context, customTransport sdk.Transport) err
 		Logger: c.logger,
 	})
 
+	connectTimeout := c.cfg.StartupTimeout
+	if c.cfg.Transport == config.MCPTransportStreamableHTTP && c.cfg.ConnectTimeout > 0 {
+		connectTimeout = c.cfg.ConnectTimeout
+	}
 	connectCtx := ctx
 	var cancel context.CancelFunc
-	if c.cfg.StartupTimeout > 0 {
-		connectCtx, cancel = context.WithTimeout(ctx, time.Duration(c.cfg.StartupTimeout))
+	if connectTimeout > 0 {
+		connectCtx, cancel = context.WithTimeout(ctx, time.Duration(connectTimeout))
 		defer cancel()
 	}
 
@@ -86,9 +116,6 @@ func (c *Client) Connect(ctx context.Context, customTransport sdk.Transport) err
 
 	session, err := sdkClient.Connect(connectCtx, transport, nil)
 	if err != nil {
-		if strings.Contains(err.Error(), "unsupported protocol version") {
-			return Errorf(ErrProtocolUnsupported, "%v", err)
-		}
 		return Wrap(ErrServerUnavailable, err, "failed to connect to server")
 	}
 	c.session = session
@@ -159,6 +186,9 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 		}
 		if strings.TrimSpace(t.Name) == "" {
 			return nil, Errorf(ErrSchemaInvalid, "tool has empty name")
+		}
+		if err := validateDiscoveredToolName(t.Name); err != nil {
+			return nil, err
 		}
 		if seen[t.Name] {
 			return nil, Errorf(ErrSchemaInvalid, "duplicate tool name %q", t.Name)
@@ -254,4 +284,21 @@ func buildEnvironment(env map[string]string) []string {
 	}
 	slices.Sort(result)
 	return result
+}
+
+var discoveredToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+func validateDiscoveredToolName(name string) error {
+	if name == "" || len(name) > 64 {
+		return Errorf(ErrSchemaInvalid, "tool name %q has invalid length", name)
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return Errorf(ErrSchemaInvalid, "tool name %q contains control characters", name)
+		}
+	}
+	if !discoveredToolNamePattern.MatchString(name) {
+		return Errorf(ErrSchemaInvalid, "tool name %q uses illegal characters", name)
+	}
+	return nil
 }

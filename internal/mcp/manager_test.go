@@ -284,3 +284,62 @@ func TestManagerCapabilityCheckFailure(t *testing.T) {
 		t.Fatalf("expected %s, got %s (err: %v)", ErrCapabilityUnavailable, code, err)
 	}
 }
+
+func TestManagerCloseDoesNotBlockOnSlowServer(t *testing.T) {
+	ctx := t.Context()
+	server := sdk.NewServer(&sdk.Implementation{Name: "slow-server", Version: "1.0.0"}, nil)
+	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
+		return func(ctx context.Context, method string, req sdk.Request) (sdk.Result, error) {
+			if method == "server/discover" || method == "initialize" {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(5 * time.Second):
+					return nil, context.DeadlineExceeded
+				}
+			}
+			return next(ctx, method, req)
+		}
+	})
+	sdk.AddTool(server, &sdk.Tool{Name: "echo", Description: "echo"}, func(_ context.Context, _ *sdk.CallToolRequest, in EchoInput) (*sdk.CallToolResult, EchoOutput, error) {
+		return nil, EchoOutput{Reply: in.Message}, nil
+	})
+	clientTransport, serverTransport := sdk.NewInMemoryTransports()
+	go func() { _ = server.Run(ctx, serverTransport) }()
+
+	broker, err := toolbroker.New(&toolbroker.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverName := "slow-server"
+	mcpCfg := &config.MCP{
+		Servers: []config.MCPServer{{
+			Name:           serverName,
+			Transport:      config.MCPTransportStdio,
+			RequestTimeout: config.Duration(5 * time.Second),
+			StartupTimeout: config.Duration(5 * time.Second),
+		}},
+	}
+	mgr, err := NewManager(ManagerOptions{Config: mcpCfg, Broker: broker, TrustRegistry: NewMemoryTrustRegistry()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.SetCustomTransport(serverName, clientTransport)
+
+	startDone := make(chan error, 1)
+	go func() { startDone <- mgr.Start(ctx) }()
+
+	time.Sleep(200 * time.Millisecond)
+	closeStart := time.Now()
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if elapsed := time.Since(closeStart); elapsed > 2*time.Second {
+		t.Fatalf("Close blocked behind slow server: %v", elapsed)
+	}
+	select {
+	case <-startDone:
+	case <-time.After(7 * time.Second):
+		t.Fatal("Start did not return after slow server settled")
+	}
+}

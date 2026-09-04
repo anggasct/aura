@@ -100,6 +100,76 @@ func TestComputeTrustDigest(t *testing.T) {
 			t.Fatalf("expected %s, got %s", ErrConfigInvalid, code)
 		}
 	})
+
+	t.Run("sensitive to request timeout change", func(t *testing.T) {
+		modified := *serverCfg
+		modified.RequestTimeout = serverCfg.RequestTimeout + 1
+		d, err := ComputeTrustDigest(&modified, tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d == digest1 {
+			t.Fatal("expected different digest when request timeout changes")
+		}
+	})
+
+	t.Run("sensitive to max message size change", func(t *testing.T) {
+		modified := *serverCfg
+		modified.MaxMessageSize = serverCfg.MaxMessageSize + 1
+		if modified.MaxMessageSize == 0 {
+			modified.MaxMessageSize = 2
+		}
+		d, err := ComputeTrustDigest(&modified, tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d == digest1 {
+			t.Fatal("expected different digest when max message size changes")
+		}
+	})
+
+	t.Run("nil versus empty capabilities stable", func(t *testing.T) {
+		emptyCaps := *serverCfg
+		emptyCaps.Capabilities = []string{}
+		nilCaps := *serverCfg
+		nilCaps.Capabilities = nil
+		dEmpty, err := ComputeTrustDigest(&emptyCaps, tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dNil, err := ComputeTrustDigest(&nilCaps, tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dEmpty != dNil {
+			t.Fatalf("expected nil and empty capabilities to match: %s vs %s", dEmpty, dNil)
+		}
+	})
+
+	t.Run("digest change forces new review", func(t *testing.T) {
+		ctx := t.Context()
+		registry := NewMemoryTrustRegistry()
+		if err := registry.Approve(ctx, serverCfg.Name, digest1); err != nil {
+			t.Fatal(err)
+		}
+		ok, err := registry.IsTrusted(ctx, serverCfg.Name, digest1)
+		if err != nil || !ok {
+			t.Fatalf("expected approved digest to be trusted: %v", ok)
+		}
+		modified := *serverCfg
+		modified.RequestTimeout = serverCfg.RequestTimeout + 1
+		d2, err := ComputeTrustDigest(&modified, tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ok, err = registry.IsTrusted(ctx, serverCfg.Name, d2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Fatal("expected mutated config digest to require new review")
+		}
+	})
 }
 
 func TestMemoryTrustRegistry(t *testing.T) {
