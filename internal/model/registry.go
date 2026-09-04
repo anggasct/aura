@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
+	"slices"
 	"sync"
 	"time"
 
@@ -38,8 +40,8 @@ func RegisterAdapters(logger *slog.Logger, models config.Models) error {
 		pattern string
 		spec    config.ModelDefinition
 	}
-	registrations := make([]registration, 0, 2)
-	for _, role := range []string{"primary", "auxiliary"} {
+	registrations := make([]registration, 0, len(models.Definitions))
+	for _, role := range slices.Sorted(maps.Keys(models.Definitions)) {
 		spec := models.Definitions[role]
 		_, configured, err := newAdapter(logger, role, &spec, timeout, idleTimeout)
 		if err != nil {

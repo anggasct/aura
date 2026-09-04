@@ -41,6 +41,13 @@ const (
 	AttrToolOutputBytes  = "tool.output.bytes"
 
 	AttrSemconvVersion = "aura.semconv.version"
+
+	AttrModelRoute             = "aura.model.route"
+	AttrModelCandidate         = "aura.model.candidate"
+	AttrModelFallbackAttempt   = "aura.model.fallback_attempt"
+	AttrModelCircuitState      = "aura.model.circuit_state"
+	AttrModelCircuitTransition = "aura.model.circuit_transition"
+	AttrModelNormalizedResult  = "aura.model.normalized_result"
 )
 
 var turnSpanAttrs = []string{

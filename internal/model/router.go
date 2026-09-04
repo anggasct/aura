@@ -52,9 +52,12 @@ const (
 )
 
 type Router struct {
-	primary   adkmodel.LLM
-	auxiliary adkmodel.LLM
-	routing   map[string]string
+	primary     adkmodel.LLM
+	auxiliary   adkmodel.LLM
+	routing     map[string]string
+	routes      map[string]adkmodel.LLM
+	circuits    *CircuitManager
+	definitions map[string]config.ModelDefinition
 }
 
 func NewRouter(primary, auxiliary adkmodel.LLM, routing map[string]string) (*Router, error) {
@@ -75,6 +78,17 @@ func NewRouter(primary, auxiliary adkmodel.LLM, routing map[string]string) (*Rou
 }
 
 func BuildRouter(logger *slog.Logger, models config.Models) (*Router, error) {
+	return BuildRouterWithRoutes(logger, models, nil, nil)
+}
+
+func BuildRouterWithConfig(logger *slog.Logger, cfg *config.Config, store CircuitCheckpointStore) (*Router, error) {
+	if cfg == nil {
+		return BuildRouter(logger, config.Models{})
+	}
+	return BuildRouterWithRoutes(logger, cfg.Models, cfg.ModelRoutes, store)
+}
+
+func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, store CircuitCheckpointStore) (*Router, error) {
 	if err := validateRoutingCapabilities(models); err != nil {
 		return nil, err
 	}
@@ -86,17 +100,77 @@ func BuildRouter(logger *slog.Logger, models config.Models) (*Router, error) {
 	if idleTimeout <= 0 {
 		idleTimeout = defaultStreamingIdleTimeout
 	}
-	primarySpec := models.Definitions["primary"]
-	primary, _, err := newAdapter(logger, "primary", &primarySpec, timeout, idleTimeout)
-	if err != nil {
-		return nil, err
+
+	adapters := make(map[string]adkmodel.LLM, len(models.Definitions))
+	for name, spec := range models.Definitions {
+		specCopy := spec
+		adapter, configured, err := newAdapter(logger, name, &specCopy, timeout, idleTimeout)
+		if err != nil {
+			return nil, err
+		}
+		if configured {
+			adapters[name] = adapter
+		}
 	}
-	auxiliarySpec := models.Definitions["auxiliary"]
-	auxiliary, _, err := newAdapter(logger, "auxiliary", &auxiliarySpec, timeout, idleTimeout)
-	if err != nil {
-		return nil, err
+
+	circuits := NewCircuitManager(time.Now, store).WithLogger(logger)
+	for name, spec := range models.Definitions {
+		specCopy := spec
+		digest := ComputeConfigDigest(&specCopy)
+		policy := DefaultCircuitPolicy()
+		for _, r := range routes {
+			for _, c := range r.Candidates {
+				if c == name && r.Circuit.FailureThreshold > 0 {
+					policy = CircuitPolicy{
+						FailureThreshold: r.Circuit.FailureThreshold,
+						OpenDuration:     time.Duration(r.Circuit.OpenDuration),
+						MaxOpenDuration:  time.Duration(r.Circuit.MaxOpenDuration),
+					}
+				}
+			}
+		}
+		circuits.Register(name, spec.BaseURL, digest, policy)
 	}
-	return NewRouter(primary, auxiliary, models.Routing)
+
+	routeAdapters := make(map[string]adkmodel.LLM, len(routes))
+	for name, route := range routes {
+		if err := ValidateRoute(name, route, models.Definitions, nil); err != nil {
+			return nil, err
+		}
+		fb := NewFallbackAdapter(name, route, models.Definitions, circuits, MapAdapterResolver(adapters)).WithLogger(logger)
+		routeAdapters[name] = fb
+	}
+
+	primary := routeAdapters["primary"]
+	if primary == nil {
+		primary = adapters["primary"]
+	}
+	auxiliary := routeAdapters["auxiliary"]
+	if auxiliary == nil {
+		auxiliary = adapters["auxiliary"]
+	}
+
+	r := &Router{
+		primary:     primary,
+		auxiliary:   auxiliary,
+		routing:     make(map[string]string),
+		routes:      routeAdapters,
+		circuits:    circuits,
+		definitions: models.Definitions,
+	}
+	for task, role := range defaultTaskRouting {
+		r.routing[task] = role
+	}
+	for task, role := range models.Routing {
+		if !knownTasks[task] {
+			return nil, newError(ErrorCodeNotFound, "", "", fmt.Sprintf("model: unknown task %q in models.routing", task))
+		}
+		if role != "primary" && role != "auxiliary" {
+			return nil, newError(ErrorCodeProtocolInvalid, "", "", fmt.Sprintf("model: invalid role %q for task %q in models.routing (must be primary or auxiliary)", role, task))
+		}
+		r.routing[task] = role
+	}
+	return r, nil
 }
 
 func validateRoutingCapabilities(models config.Models) error {
@@ -182,6 +256,11 @@ func (r *Router) For(task string) (adkmodel.LLM, error) {
 			return nil, newError(ErrorCodeNotFound, "", "", fmt.Sprintf("model: unknown task %q", task))
 		}
 	}
+	if r.routes != nil {
+		if adapter, exists := r.routes[role]; exists && adapter != nil {
+			return adapter, nil
+		}
+	}
 	switch role {
 	case "primary":
 		if r.primary == nil {
@@ -194,6 +273,36 @@ func (r *Router) For(task string) (adkmodel.LLM, error) {
 		}
 		return r.auxiliary, nil
 	}
+}
+
+// ForRoute resolves the adapter for a named route (e.g. "primary", "auxiliary").
+func (r *Router) ForRoute(route string) (adkmodel.LLM, error) {
+	if r.routes != nil {
+		if adapter, exists := r.routes[route]; exists && adapter != nil {
+			return adapter, nil
+		}
+	}
+	switch route {
+	case "primary":
+		if r.primary != nil {
+			return r.primary, nil
+		}
+	case "auxiliary":
+		if r.auxiliary != nil {
+			return r.auxiliary, nil
+		}
+	}
+	return nil, newError(ErrorCodeNotFound, "", "", fmt.Sprintf("model: route %q not found", route))
+}
+
+// Circuits returns the router's circuit manager.
+func (r *Router) Circuits() *CircuitManager {
+	return r.circuits
+}
+
+// Definitions returns the model definitions map.
+func (r *Router) Definitions() map[string]config.ModelDefinition {
+	return r.definitions
 }
 
 // newAdapter reports configured=false when the definition is absent, so a

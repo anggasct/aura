@@ -22,6 +22,7 @@ type RetryConfig struct {
 	Jitter     float64
 	Sleep      func(context.Context, time.Duration) error
 	RetryCount *int
+	Budget     *InvocationBudget
 }
 
 func defaultRetryConfig() RetryConfig {
@@ -56,6 +57,11 @@ func (c RetryConfig) normalized() RetryConfig {
 func retryHTTP(ctx context.Context, cfg RetryConfig, do func() (*http.Response, error)) (*http.Response, error) {
 	cfg = cfg.normalized()
 	for retry := 0; ; retry++ {
+		if cfg.Budget != nil {
+			if err := cfg.Budget.RecordAttempt(ctx); err != nil {
+				return nil, err
+			}
+		}
 		resp, err := do()
 		if err != nil {
 			// Transient transport failures are retried like retryable
@@ -63,7 +69,15 @@ func retryHTTP(ctx context.Context, cfg RetryConfig, do func() (*http.Response, 
 			if !isTransientError(err) || ctx.Err() != nil || retry >= cfg.MaxRetries {
 				return nil, err
 			}
-			if err := cfg.Sleep(ctx, exponentialDelay(cfg, retry)); err != nil {
+			delay := exponentialDelay(cfg, retry)
+			if cfg.Budget != nil {
+				var bErr error
+				delay, bErr = cfg.Budget.ReserveDelay(ctx, delay)
+				if bErr != nil {
+					return nil, bErr
+				}
+			}
+			if err := cfg.Sleep(ctx, delay); err != nil {
 				return nil, err
 			}
 			if cfg.RetryCount != nil {
@@ -83,6 +97,13 @@ func retryHTTP(ctx context.Context, cfg RetryConfig, do func() (*http.Response, 
 			delay = exponentialDelay(cfg, retry)
 		} else if delay > cfg.MaxDelay {
 			delay = cfg.MaxDelay
+		}
+		if cfg.Budget != nil {
+			var bErr error
+			delay, bErr = cfg.Budget.ReserveDelay(ctx, delay)
+			if bErr != nil {
+				return nil, bErr
+			}
 		}
 		if err := cfg.Sleep(ctx, delay); err != nil {
 			return nil, err
@@ -135,7 +156,7 @@ func classifyHTTPResponse(resp *http.Response, provider string) error {
 	status := strings.ToLower(payload.Error.Status)
 	message := strings.ToLower(payload.Error.Message)
 	switch {
-	case strings.Contains(code, "content_filter"), strings.Contains(typ, "content_filter"), strings.Contains(status, "blocked"), strings.Contains(message, "content filter"), strings.Contains(message, "safety settings"):
+	case strings.Contains(code, "content_filter"), strings.Contains(typ, "content_filter"), strings.Contains(status, "blocked"), strings.Contains(message, "content filter"), strings.Contains(message, "safety settings"), strings.Contains(code, "policy"), strings.Contains(typ, "policy"), strings.Contains(message, "safety policy"):
 		return codedError(ErrorCodeContentFiltered, ErrContentFiltered, provider+": http 400")
 	case strings.Contains(code, "context_length"), strings.Contains(typ, "context_length"), strings.Contains(message, "context_length"), strings.Contains(message, "too long"):
 		return codedError(ErrorCodeContextTooLong, ErrContextTooLong, provider+": http 400")

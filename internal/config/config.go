@@ -17,20 +17,21 @@ import (
 )
 
 type Config struct {
-	Version      int          `koanf:"version" yaml:"version"`
-	Runtime      Runtime      `koanf:"runtime" yaml:"runtime"`
-	Capabilities Capabilities `koanf:"capabilities" yaml:"capabilities"`
-	Tools        *Tools       `koanf:"tools" yaml:"tools,omitempty"`
-	Agents       *Agents      `koanf:"agents" yaml:"agents,omitempty"`
-	Workflows    *Workflows   `koanf:"workflows" yaml:"workflows,omitempty"`
-	Server       Server       `koanf:"server" yaml:"server"`
-	Logging      Logging      `koanf:"logging" yaml:"logging"`
-	Models       Models       `koanf:"models" yaml:"models"`
-	Storage      Storage      `koanf:"storage" yaml:"storage"`
-	Telemetry    Telemetry    `koanf:"telemetry" yaml:"telemetry"`
-	Usage        Usage        `koanf:"usage" yaml:"usage"`
-	Health       Health       `koanf:"health" yaml:"health"`
-	Terminal     Terminal     `koanf:"terminal" yaml:"terminal"`
+	Version      int                   `koanf:"version" yaml:"version"`
+	Runtime      Runtime               `koanf:"runtime" yaml:"runtime"`
+	Capabilities Capabilities          `koanf:"capabilities" yaml:"capabilities"`
+	Tools        *Tools                `koanf:"tools" yaml:"tools,omitempty"`
+	Agents       *Agents               `koanf:"agents" yaml:"agents,omitempty"`
+	Workflows    *Workflows            `koanf:"workflows" yaml:"workflows,omitempty"`
+	Server       Server                `koanf:"server" yaml:"server"`
+	Logging      Logging               `koanf:"logging" yaml:"logging"`
+	Models       Models                `koanf:"models" yaml:"models"`
+	ModelRoutes  map[string]ModelRoute `koanf:"model_routes" yaml:"model_routes,omitempty"`
+	Storage      Storage               `koanf:"storage" yaml:"storage"`
+	Telemetry    Telemetry             `koanf:"telemetry" yaml:"telemetry"`
+	Usage        Usage                 `koanf:"usage" yaml:"usage"`
+	Health       Health                `koanf:"health" yaml:"health"`
+	Terminal     Terminal              `koanf:"terminal" yaml:"terminal"`
 }
 
 // Terminal configures the aura chat console. render_hz bounds how often a
@@ -216,6 +217,20 @@ type ModelDefinition struct {
 	APIKeyEnv    string            `koanf:"api_key_env" yaml:"api_key_env"`
 	APIKeyFile   string            `koanf:"api_key_file" yaml:"api_key_file"`
 	Capabilities ModelCapabilities `koanf:"capabilities" yaml:"capabilities"`
+}
+
+type ModelRoute struct {
+	Candidates          []string          `koanf:"candidates" yaml:"candidates"`
+	MaxProviderAttempts int               `koanf:"max_provider_attempts" yaml:"max_provider_attempts"`
+	RetryDelayBudget    Duration          `koanf:"retry_delay_budget" yaml:"retry_delay_budget"`
+	CostBudgetUSD       float64           `koanf:"cost_budget_usd" yaml:"cost_budget_usd"`
+	Circuit             ModelRouteCircuit `koanf:"circuit" yaml:"circuit"`
+}
+
+type ModelRouteCircuit struct {
+	FailureThreshold int      `koanf:"failure_threshold" yaml:"failure_threshold"`
+	OpenDuration     Duration `koanf:"open_duration" yaml:"open_duration"`
+	MaxOpenDuration  Duration `koanf:"max_open_duration" yaml:"max_open_duration"`
 }
 
 type AgentLimits struct {

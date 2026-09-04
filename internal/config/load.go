@@ -68,36 +68,59 @@ func envKeyMapper(s string) string {
 		return path
 	}
 	const definitionsPrefix = "models_definitions_"
-	if !strings.HasPrefix(normalized, definitionsPrefix) {
-		return ""
-	}
-	remainder := strings.TrimPrefix(normalized, definitionsPrefix)
-	fields := []struct {
-		suffix string
-		path   string
-	}{
-		{suffix: "_capabilities_streaming", path: "capabilities.streaming"},
-		{suffix: "_capabilities_tools", path: "capabilities.tools"},
-		{suffix: "_capabilities_structured_output", path: "capabilities.structured_output"},
-		{suffix: "_capabilities_vision", path: "capabilities.vision"},
-		{suffix: "_capabilities_audio", path: "capabilities.audio"},
-		{suffix: "_capabilities_reasoning", path: "capabilities.reasoning"},
-		{suffix: "_capabilities_context_tokens", path: "capabilities.context_tokens"},
-		{suffix: "_capabilities_tokenizer", path: "capabilities.tokenizer"},
-		{suffix: "_capabilities_usage_reporting", path: "capabilities.usage_reporting"},
-		{suffix: "_api_key_env", path: "api_key_env"},
-		{suffix: "_api_key_file", path: "api_key_file"},
-		{suffix: "_base_url", path: "base_url"},
-		{suffix: "_protocol", path: "protocol"},
-		{suffix: "_model", path: "model"},
-	}
-	for _, field := range fields {
-		if !strings.HasSuffix(remainder, field.suffix) {
-			continue
+	if strings.HasPrefix(normalized, definitionsPrefix) {
+		remainder := strings.TrimPrefix(normalized, definitionsPrefix)
+		fields := []struct {
+			suffix string
+			path   string
+		}{
+			{suffix: "_capabilities_streaming", path: "capabilities.streaming"},
+			{suffix: "_capabilities_tools", path: "capabilities.tools"},
+			{suffix: "_capabilities_structured_output", path: "capabilities.structured_output"},
+			{suffix: "_capabilities_vision", path: "capabilities.vision"},
+			{suffix: "_capabilities_audio", path: "capabilities.audio"},
+			{suffix: "_capabilities_reasoning", path: "capabilities.reasoning"},
+			{suffix: "_capabilities_context_tokens", path: "capabilities.context_tokens"},
+			{suffix: "_capabilities_tokenizer", path: "capabilities.tokenizer"},
+			{suffix: "_capabilities_usage_reporting", path: "capabilities.usage_reporting"},
+			{suffix: "_api_key_env", path: "api_key_env"},
+			{suffix: "_api_key_file", path: "api_key_file"},
+			{suffix: "_base_url", path: "base_url"},
+			{suffix: "_protocol", path: "protocol"},
+			{suffix: "_model", path: "model"},
 		}
-		name := strings.TrimSuffix(remainder, field.suffix)
-		if modelDefinitionNamePattern.MatchString(name) {
-			return "models.definitions." + name + "." + field.path
+		for _, field := range fields {
+			if !strings.HasSuffix(remainder, field.suffix) {
+				continue
+			}
+			name := strings.TrimSuffix(remainder, field.suffix)
+			if modelDefinitionNamePattern.MatchString(name) {
+				return "models.definitions." + name + "." + field.path
+			}
+		}
+	}
+	const routesPrefix = "model_routes_"
+	if strings.HasPrefix(normalized, routesPrefix) {
+		remainder := strings.TrimPrefix(normalized, routesPrefix)
+		routeFields := []struct {
+			suffix string
+			path   string
+		}{
+			{suffix: "_max_provider_attempts", path: "max_provider_attempts"},
+			{suffix: "_retry_delay_budget", path: "retry_delay_budget"},
+			{suffix: "_cost_budget_usd", path: "cost_budget_usd"},
+			{suffix: "_circuit_failure_threshold", path: "circuit.failure_threshold"},
+			{suffix: "_circuit_open_duration", path: "circuit.open_duration"},
+			{suffix: "_circuit_max_open_duration", path: "circuit.max_open_duration"},
+		}
+		for _, field := range routeFields {
+			if !strings.HasSuffix(remainder, field.suffix) {
+				continue
+			}
+			name := strings.TrimSuffix(remainder, field.suffix)
+			if modelDefinitionNamePattern.MatchString(name) {
+				return "model_routes." + name + "." + field.path
+			}
 		}
 	}
 	return ""
@@ -152,6 +175,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	if err := validateLoadedModels(cfg.Models, routingExplicitIn(data)); err != nil {
+		return LoadResult{}, err
+	}
+	if err := validateLoadedModelRoutes(cfg.ModelRoutes, cfg.Models); err != nil {
 		return LoadResult{}, err
 	}
 	if err := validateTools(cfg.Tools, options.Build.Profile()); err != nil {
@@ -315,6 +341,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateModelShapes(doc); err != nil {
+		return err
+	}
+	if err := validateModelRoutesShapes(doc); err != nil {
 		return err
 	}
 	if err := validateToolsShapes(doc); err != nil {
@@ -666,6 +695,81 @@ func validateModelShapes(doc *yamlv3.Node) error {
 	return nil
 }
 
+func validateModelRoutesShapes(doc *yamlv3.Node) error {
+	routesNode := mappingValue(doc, "model_routes")
+	if routesNode == nil {
+		return nil
+	}
+	if routesNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("model_routes must be a mapping at line %d", routesNode.Line)
+	}
+	for i := 0; i+1 < len(routesNode.Content); i += 2 {
+		nameNode := routesNode.Content[i]
+		routeNode := routesNode.Content[i+1]
+		if !modelDefinitionNamePattern.MatchString(nameNode.Value) {
+			return fmt.Errorf("invalid model route name %q at line %d", nameNode.Value, nameNode.Line)
+		}
+		if routeNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("model_routes.%s must be a mapping at line %d", nameNode.Value, routeNode.Line)
+		}
+		if err := validateModelRouteShape(nameNode.Value, routeNode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateModelRouteShape(name string, node *yamlv3.Node) error {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valNode := node.Content[i+1]
+		field := fmt.Sprintf("model_routes.%s.%s", name, keyNode.Value)
+		switch keyNode.Value {
+		case "candidates":
+			if valNode.Kind != yamlv3.SequenceNode {
+				return fmt.Errorf("%s must be a sequence of strings at line %d", field, valNode.Line)
+			}
+			for _, item := range valNode.Content {
+				if item.Kind != yamlv3.ScalarNode || item.Tag != "!!str" {
+					return fmt.Errorf("%s must contain only string candidate identifiers at line %d", field, item.Line)
+				}
+			}
+		case "max_provider_attempts":
+			if valNode.Kind != yamlv3.ScalarNode || valNode.Tag != "!!int" {
+				return fmt.Errorf("%s must be an integer at line %d", field, valNode.Line)
+			}
+		case "retry_delay_budget":
+			if valNode.Kind != yamlv3.ScalarNode || valNode.Tag != "!!str" {
+				return fmt.Errorf("%s must be a duration string at line %d", field, valNode.Line)
+			}
+		case "cost_budget_usd":
+			if valNode.Kind != yamlv3.ScalarNode || (valNode.Tag != "!!float" && valNode.Tag != "!!int") {
+				return fmt.Errorf("%s must be a number at line %d", field, valNode.Line)
+			}
+		case "circuit":
+			if valNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("%s must be a mapping at line %d", field, valNode.Line)
+			}
+			for j := 0; j+1 < len(valNode.Content); j += 2 {
+				cKey := valNode.Content[j]
+				cVal := valNode.Content[j+1]
+				cField := fmt.Sprintf("%s.%s", field, cKey.Value)
+				switch cKey.Value {
+				case "failure_threshold":
+					if cVal.Kind != yamlv3.ScalarNode || cVal.Tag != "!!int" {
+						return fmt.Errorf("%s must be an integer at line %d", cField, cVal.Line)
+					}
+				case "open_duration", "max_open_duration":
+					if cVal.Kind != yamlv3.ScalarNode || cVal.Tag != "!!str" {
+						return fmt.Errorf("%s must be a duration string at line %d", cField, cVal.Line)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func validateWorkflowsShapes(doc *yamlv3.Node) error {
 	workflowsNode := mappingValue(doc, "workflows")
 	if workflowsNode == nil {
@@ -966,6 +1070,55 @@ func validateRouting(models Models, explicit bool) error {
 	return nil
 }
 
+func validateLoadedModelRoutes(routes map[string]ModelRoute, models Models) error {
+	if len(routes) == 0 {
+		return nil
+	}
+	var problems []error
+	for _, name := range slices.Sorted(maps.Keys(routes)) {
+		route := routes[name]
+		if !modelDefinitionNamePattern.MatchString(name) {
+			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("invalid model route name %q", name)})
+		}
+		if len(route.Candidates) < 1 {
+			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s requires at least one candidate", name)})
+		} else if len(route.Candidates) > 4 {
+			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s exceeds maximum chain depth of 4 candidates", name)})
+		}
+		seen := make(map[string]bool, len(route.Candidates))
+		for _, candidate := range route.Candidates {
+			if seen[candidate] {
+				problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s contains duplicate candidate %q", name, candidate)})
+			}
+			seen[candidate] = true
+			if len(models.Definitions) > 0 {
+				if _, ok := models.Definitions[candidate]; !ok {
+					problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s references unknown model definition %q", name, candidate)})
+				}
+			}
+		}
+		if route.MaxProviderAttempts < 0 {
+			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.max_provider_attempts must not be negative", name)})
+		}
+		if route.RetryDelayBudget < 0 {
+			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.retry_delay_budget must not be negative", name)})
+		}
+		if route.CostBudgetUSD < 0 {
+			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.cost_budget_usd must not be negative", name)})
+		}
+		if route.Circuit.FailureThreshold < 0 {
+			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.circuit.failure_threshold must not be negative", name)})
+		}
+		if route.Circuit.OpenDuration < 0 {
+			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.circuit.open_duration must not be negative", name)})
+		}
+		if route.Circuit.MaxOpenDuration < 0 {
+			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.circuit.max_open_duration must not be negative", name)})
+		}
+	}
+	return errors.Join(problems...)
+}
+
 func malformedYAMLError(err error) error {
 	return fmt.Errorf("invalid YAML: %w", err)
 }
@@ -1050,6 +1203,7 @@ func decode(data []byte) (*Config, error) {
 				stringToByteSizeHook(),
 				stringToBoolHook(),
 				stringToIntHook(),
+				stringToFloatHook(),
 				stringToStringSliceHook(),
 			),
 		},
@@ -1129,6 +1283,23 @@ func stringToIntHook() mapstructure.DecodeHookFunc {
 			return nil, fmt.Errorf("invalid integer %q", data)
 		}
 		return reflect.ValueOf(n).Convert(to).Interface(), nil
+	}
+}
+
+func stringToFloatHook() mapstructure.DecodeHookFunc {
+	return func(from, to reflect.Type, data any) (any, error) {
+		if from.Kind() != reflect.String || to.Kind() != reflect.Float64 {
+			return data, nil
+		}
+		s, ok := data.(string)
+		if !ok {
+			return data, nil
+		}
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid number %q", data)
+		}
+		return f, nil
 	}
 }
 
@@ -1243,7 +1414,44 @@ func applyDefaults(cfg *Config, data []byte) error {
 	}
 	applyHealthDefaults(cfg, doc, defaults.Health)
 	applyTerminalDefaults(cfg, doc, defaults.Terminal)
+	applyModelRouteDefaults(cfg, doc)
 	return nil
+}
+
+func applyModelRouteDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.ModelRoutes == nil && (len(cfg.Models.Definitions) > 0 || configValuePresent(doc, "model_routes")) {
+		cfg.ModelRoutes = make(map[string]ModelRoute)
+	}
+	for _, defaultName := range []string{"primary", "auxiliary"} {
+		if _, ok := cfg.Models.Definitions[defaultName]; ok {
+			route, exists := cfg.ModelRoutes[defaultName]
+			if !exists {
+				route = ModelRoute{
+					Candidates:          []string{defaultName},
+					MaxProviderAttempts: 4,
+					RetryDelayBudget:    Duration(20 * time.Second),
+				}
+				cfg.ModelRoutes[defaultName] = route
+			} else if len(route.Candidates) == 0 {
+				route.Candidates = []string{defaultName}
+				cfg.ModelRoutes[defaultName] = route
+			}
+		}
+	}
+	for name, route := range cfg.ModelRoutes {
+		mutated := false
+		if route.MaxProviderAttempts == 0 && !configValuePresent(doc, "model_routes", name, "max_provider_attempts") && !envValuePresent("model_routes."+name+".max_provider_attempts") {
+			route.MaxProviderAttempts = 4
+			mutated = true
+		}
+		if route.RetryDelayBudget == 0 && !configValuePresent(doc, "model_routes", name, "retry_delay_budget") && !envValuePresent("model_routes."+name+".retry_delay_budget") {
+			route.RetryDelayBudget = Duration(20 * time.Second)
+			mutated = true
+		}
+		if mutated {
+			cfg.ModelRoutes[name] = route
+		}
+	}
 }
 
 func applyTerminalDefaults(cfg *Config, doc *yamlv3.Node, defaults Terminal) {
@@ -1602,7 +1810,7 @@ func unknownEnvKeys() []string {
 		if known[normalized] {
 			continue
 		}
-		if strings.HasPrefix(normalized, "models_definitions_") && envKeyMapper(key) != "" {
+		if (strings.HasPrefix(normalized, "models_definitions_") || strings.HasPrefix(normalized, "model_routes_")) && envKeyMapper(key) != "" {
 			continue
 		}
 		warnings = append(warnings, key)
