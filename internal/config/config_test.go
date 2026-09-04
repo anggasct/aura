@@ -1097,3 +1097,195 @@ func TestValidateLoadedModelsReportsEveryDefinition(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_ModelRoutesValidation(t *testing.T) {
+	validModels := `
+version: 1
+models:
+  definitions:
+    primary-model:
+      protocol: openai_responses
+      model: gpt-5
+      base_url: https://api.openai.com
+      api_key_env: TEST_API_KEY
+      capabilities:
+        context_tokens: 128000
+        tokenizer: o200k
+    backup-model:
+      protocol: anthropic_messages
+      model: claude-3-7
+      base_url: https://api.anthropic.com
+      api_key_env: TEST_API_KEY
+      capabilities:
+        context_tokens: 200000
+        tokenizer: anthropic
+`
+	cases := []struct {
+		name      string
+		yaml      string
+		wantError string
+	}{
+		{
+			name: "valid_routes",
+			yaml: validModels + `
+model_routes:
+  primary:
+    candidates: ["primary-model", "backup-model"]
+    max_provider_attempts: 4
+    retry_delay_budget: 20s
+    cost_budget_usd: 1.00
+    circuit:
+      failure_threshold: 3
+      open_duration: 5m
+      max_open_duration: 1h
+`,
+		},
+		{
+			name: "zero_candidates_rejected",
+			yaml: validModels + `
+model_routes:
+  primary:
+    candidates: []
+`,
+			wantError: "requires at least one candidate",
+		},
+		{
+			name: "too_many_candidates_rejected",
+			yaml: validModels + `
+model_routes:
+  primary:
+    candidates: ["primary-model", "backup-model", "primary-model", "backup-model", "extra"]
+`,
+			wantError: "exceeds maximum chain depth of 4 candidates",
+		},
+		{
+			name: "duplicate_candidates_rejected",
+			yaml: validModels + `
+model_routes:
+  primary:
+    candidates: ["primary-model", "primary-model"]
+`,
+			wantError: "duplicate candidate",
+		},
+		{
+			name: "unknown_definition_rejected",
+			yaml: validModels + `
+model_routes:
+  primary:
+    candidates: ["nonexistent-model"]
+`,
+			wantError: "references unknown model definition",
+		},
+		{
+			name: "negative_attempts_rejected",
+			yaml: validModels + `
+model_routes:
+  primary:
+    candidates: ["primary-model"]
+    max_provider_attempts: -1
+`,
+			wantError: "max_provider_attempts must not be negative",
+		},
+		{
+			name: "unknown_key_in_route_rejected",
+			yaml: validModels + `
+model_routes:
+  primary:
+    candidates: ["primary-model"]
+    api_key: secret
+`,
+			wantError: "unknown key",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TEST_API_KEY", "secret-token")
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0o600); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			res, err := Load(path)
+			if tc.wantError != "" {
+				if err == nil {
+					t.Fatalf("Load() succeeded, want error containing %q", tc.wantError)
+				}
+				if !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("Load() error = %v, want substring %q", err, tc.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() unexpected error: %v", err)
+			}
+			r, ok := res.Config.ModelRoutes["primary"]
+			if !ok {
+				t.Fatal("expected primary route to be present")
+			}
+			if len(r.Candidates) != 2 || r.Candidates[0] != "primary-model" || r.Candidates[1] != "backup-model" {
+				t.Errorf("Candidates = %v, want [primary-model backup-model]", r.Candidates)
+			}
+			if r.MaxProviderAttempts != 4 {
+				t.Errorf("MaxProviderAttempts = %d, want 4", r.MaxProviderAttempts)
+			}
+			if time.Duration(r.RetryDelayBudget) != 20*time.Second {
+				t.Errorf("RetryDelayBudget = %v, want 20s", r.RetryDelayBudget)
+			}
+			if r.CostBudgetUSD != 1.00 {
+				t.Errorf("CostBudgetUSD = %f, want 1.00", r.CostBudgetUSD)
+			}
+			if r.Circuit.FailureThreshold != 3 {
+				t.Errorf("Circuit.FailureThreshold = %d, want 3", r.Circuit.FailureThreshold)
+			}
+		})
+	}
+}
+
+func TestLoad_ModelRoutesDefaultsAndEnv(t *testing.T) {
+	rawYAML := `
+version: 1
+models:
+  definitions:
+    primary:
+      protocol: openai_responses
+      model: gpt-5
+      base_url: https://api.openai.com
+      api_key_env: TEST_API_KEY
+      capabilities:
+        context_tokens: 128000
+        tokenizer: o200k
+    auxiliary:
+      protocol: anthropic_messages
+      model: claude-3-7
+      base_url: https://api.anthropic.com
+      api_key_env: TEST_API_KEY
+      capabilities:
+        context_tokens: 200000
+        tokenizer: anthropic
+`
+	t.Setenv("TEST_API_KEY", "secret-token")
+	t.Setenv("AURA_MODEL_ROUTES_PRIMARY_MAX_PROVIDER_ATTEMPTS", "6")
+	t.Setenv("AURA_MODEL_ROUTES_PRIMARY_COST_BUDGET_USD", "2.50")
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(rawYAML), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	res, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	r, ok := res.Config.ModelRoutes["primary"]
+	if !ok {
+		t.Fatal("expected primary route to be present in defaults")
+	}
+	if len(r.Candidates) != 1 || r.Candidates[0] != "primary" {
+		t.Errorf("Candidates = %v, want [primary]", r.Candidates)
+	}
+	if r.MaxProviderAttempts != 6 {
+		t.Errorf("MaxProviderAttempts = %d, want 6 (from env)", r.MaxProviderAttempts)
+	}
+	if r.CostBudgetUSD != 2.50 {
+		t.Errorf("CostBudgetUSD = %f, want 2.50 (from env)", r.CostBudgetUSD)
+	}
+}

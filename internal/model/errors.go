@@ -20,6 +20,9 @@ const (
 	ErrorCodeContentFiltered       ErrorCode = "model_content_filtered"
 	ErrorCodeStreamInvalid         ErrorCode = "model_stream_invalid"
 	ErrorCodeConnectionFailed      ErrorCode = "model_connection_failed"
+	ErrorCodeRouteInvalid          ErrorCode = "model_route_invalid"
+	ErrorCodeBudgetExceeded        ErrorCode = "model_budget_exceeded"
+	ErrorCodeDeadlineExceeded      ErrorCode = "model_deadline_exceeded"
 )
 
 type Error struct {
