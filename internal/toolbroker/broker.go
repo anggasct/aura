@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -121,6 +122,7 @@ type Options struct {
 }
 
 type Broker struct {
+	mu                   sync.RWMutex
 	definitions          map[string]*tools.Definition
 	engine               *approval.Engine
 	adapters             map[string]Adapter
@@ -190,6 +192,7 @@ func DefaultPolicy() approval.Policy {
 }
 
 func (b *Broker) Definitions() []tools.Definition {
+	b.mu.RLock()
 	definitions := make([]tools.Definition, 0, len(b.definitions))
 	for _, definition := range b.definitions {
 		definitionCopy := *definition
@@ -197,10 +200,70 @@ func (b *Broker) Definitions() []tools.Definition {
 		definitionCopy.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
 		definitions = append(definitions, definitionCopy)
 	}
+	b.mu.RUnlock()
 	slices.SortFunc(definitions, func(a, c tools.Definition) int {
 		return cmp.Compare(a.Key(), c.Key())
 	})
 	return definitions
+}
+
+// RegisterTool adds or updates a tool definition, its adapter, and policy rule.
+func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rule *approval.Rule) error {
+	if definition == nil {
+		return errorf(ResultInvalidArgument, "tool definition must not be nil")
+	}
+	if adapter == nil {
+		return errorf(ResultInvalidArgument, "adapter must not be nil")
+	}
+	if rule == nil {
+		return errorf(ResultInvalidArgument, "rule must not be nil")
+	}
+	if definition.Name == "" || definition.Version == "" {
+		return errorf(ResultInvalidArgument, "tool definition requires name and version")
+	}
+	if rule.ToolName != definition.Name || rule.ToolVersion != definition.Version {
+		return errorf(ResultInvalidArgument, "rule tool %q version %q does not match definition %q version %q", rule.ToolName, rule.ToolVersion, definition.Name, definition.Version)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	defCopy := *definition
+	defCopy.Schema = slices.Clone(definition.Schema)
+	defCopy.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
+
+	key := defCopy.Key()
+	oldDef, hadOldDef := b.definitions[key]
+	oldAdapter, hadOldAdapter := b.adapters[key]
+
+	b.definitions[key] = &defCopy
+	b.adapters[key] = adapter
+
+	if err := b.engine.RegisterRule(rule); err != nil {
+		if hadOldDef {
+			b.definitions[key] = oldDef
+		} else {
+			delete(b.definitions, key)
+		}
+		if hadOldAdapter {
+			b.adapters[key] = oldAdapter
+		} else {
+			delete(b.adapters, key)
+		}
+		return err
+	}
+	return nil
+}
+
+// UnregisterTool removes a tool and its policy rule.
+func (b *Broker) UnregisterTool(toolName, toolVersion string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	key := toolName + "@" + toolVersion
+	delete(b.definitions, key)
+	delete(b.adapters, key)
+	b.engine.UnregisterRule(toolName)
 }
 
 func (b *Broker) PolicyVersion() string {
@@ -265,8 +328,10 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	}
 	policyOutcome = decision.Outcome
 	key := canonical.ToolName + "@" + canonical.ToolVersion
+	b.mu.RLock()
 	definition := b.definitions[key]
 	adapter, ok := b.adapters[key]
+	b.mu.RUnlock()
 	if !ok {
 		return ToolResult{}, errorf(ResultCapabilityUnavailable, "tool %q is not available in this artifact", key)
 	}
@@ -580,7 +645,9 @@ func (b *Broker) canonicalRequest(request *ToolRequest) (ToolRequest, error) {
 	if request == nil {
 		return ToolRequest{}, errorf(ResultInvalidArgument, "request must not be nil")
 	}
+	b.mu.RLock()
 	definition, ok := b.definitions[request.ToolName+"@"+request.ToolVersion]
+	b.mu.RUnlock()
 	if !ok {
 		return ToolRequest{}, errorf(ResultPolicyDenied, "unknown tool %q version %q", request.ToolName, request.ToolVersion)
 	}
