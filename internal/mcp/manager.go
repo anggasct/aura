@@ -68,6 +68,30 @@ func (m *Manager) SetCustomTransport(serverName string, transport sdk.Transport)
 	m.customTransports[serverName] = transport
 }
 
+// enforceSpawnTrust gates process creation for stdio servers. The spawn
+// digest covers only the executable surface (command, args, environment); an
+// absent or stale approval returns mcp_trust_required and records the pending
+// digest for owner review before any process exists.
+func (m *Manager) enforceSpawnTrust(ctx context.Context, registry TrustRegistry, serverCfg *config.MCPServer) error {
+	spawnDigest, err := ComputeSpawnDigest(serverCfg)
+	if err != nil {
+		return err
+	}
+
+	spawnTrusted, err := registry.IsSpawnTrusted(ctx, serverCfg.Name, spawnDigest)
+	if err != nil {
+		return Errorf(ErrTrustRequired, "server %q spawn trust check failed: %v", serverCfg.Name, err)
+	}
+	if spawnTrusted {
+		return nil
+	}
+
+	if err := registry.SaveSpawnTrust(ctx, serverCfg.Name, spawnDigest); err != nil {
+		return Errorf(ErrTrustRequired, "server %q failed to record pending spawn trust: %v", serverCfg.Name, err)
+	}
+	return Errorf(ErrTrustRequired, "server %q command approval required for digest %s before execution", serverCfg.Name, spawnDigest)
+}
+
 func (m *Manager) Start(ctx context.Context) error {
 	if ctx == nil {
 		return Errorf(ErrConfigInvalid, "context must not be nil")
@@ -95,6 +119,14 @@ func (m *Manager) Start(ctx context.Context) error {
 		if checker != nil && len(serverCfg.Capabilities) > 0 {
 			if err := checker(serverCfg.Capabilities); err != nil {
 				return Wrap(ErrCapabilityUnavailable, err, "required capabilities unavailable")
+			}
+		}
+
+		// Trust gate must run before any exec: Connect spawns the stdio
+		// process, so an unapproved command must fail closed here.
+		if transports[serverCfg.Name] == nil && serverCfg.Transport == config.MCPTransportStdio {
+			if err := m.enforceSpawnTrust(ctx, registry, serverCfg); err != nil {
+				return err
 			}
 		}
 
@@ -131,13 +163,10 @@ func (m *Manager) Start(ctx context.Context) error {
 			for _, t := range discovered {
 				toolNames = append(toolNames, t.Name)
 			}
-			_ = registry.SaveTrust(ctx, &TrustRecord{
-				ServerName:   serverCfg.Name,
-				Digest:       digest,
-				Decision:     TrustDecisionPending,
-				Capabilities: slices.Clone(serverCfg.Capabilities),
-				Tools:        toolNames,
-			})
+			if err := registry.SaveSessionTrust(ctx, serverCfg.Name, digest, serverCfg.Capabilities, toolNames); err != nil {
+				_ = client.Close()
+				return Errorf(ErrTrustRequired, "server %q failed to record pending trust: %v", serverCfg.Name, err)
+			}
 			_ = client.Close()
 			return Errorf(ErrTrustRequired, "server %q trust review required for digest %s", serverCfg.Name, digest)
 		}

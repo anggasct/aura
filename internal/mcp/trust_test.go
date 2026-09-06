@@ -197,13 +197,7 @@ func TestMemoryTrustRegistry(t *testing.T) {
 	}
 
 	// Save pending
-	err = registry.SaveTrust(ctx, &TrustRecord{
-		ServerName:   serverName,
-		Digest:       digest,
-		Decision:     TrustDecisionPending,
-		Capabilities: []string{"read"},
-		Tools:        []string{"tool_a"},
-	})
+	err = registry.SaveSessionTrust(ctx, serverName, digest, []string{"read"}, []string{"tool_a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,4 +232,187 @@ func TestMemoryTrustRegistry(t *testing.T) {
 	if trusted {
 		t.Fatal("expected different digest to be untrusted")
 	}
+}
+
+func TestMemoryTrustRegistrySpawnApproval(t *testing.T) {
+	ctx := t.Context()
+	registry := NewMemoryTrustRegistry()
+	serverName := "spawn-gate-server"
+	digest := "spawn-digest-001"
+
+	trusted, err := registry.IsSpawnTrusted(ctx, serverName, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trusted {
+		t.Fatal("expected unapproved spawn digest to be untrusted")
+	}
+
+	if err := registry.SaveSpawnTrust(ctx, serverName, digest); err != nil {
+		t.Fatalf("SaveSpawnTrust failed: %v", err)
+	}
+	rec, err := registry.GetTrust(ctx, serverName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.SpawnDecision != TrustDecisionPending || rec.SpawnDigest != digest {
+		t.Fatalf("expected pending spawn record, got decision=%q digest=%q", rec.SpawnDecision, rec.SpawnDigest)
+	}
+
+	trusted, err = registry.IsSpawnTrusted(ctx, serverName, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trusted {
+		t.Fatal("pending spawn decision must not be trusted")
+	}
+
+	if err := registry.ApproveSpawn(ctx, serverName, digest); err != nil {
+		t.Fatalf("ApproveSpawn failed: %v", err)
+	}
+	trusted, err = registry.IsSpawnTrusted(ctx, serverName, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !trusted {
+		t.Fatal("expected trusted after spawn approval")
+	}
+
+	// Re-saving an identical approved digest is a no-op: approval survives.
+	if err := registry.SaveSpawnTrust(ctx, serverName, digest); err != nil {
+		t.Fatalf("SaveSpawnTrust (same digest) failed: %v", err)
+	}
+	trusted, err = registry.IsSpawnTrusted(ctx, serverName, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !trusted {
+		t.Fatal("expected approval to survive same-digest save")
+	}
+
+	// A changed digest resets to pending: the old approval must not carry.
+	changed := "spawn-digest-002"
+	if err := registry.SaveSpawnTrust(ctx, serverName, changed); err != nil {
+		t.Fatalf("SaveSpawnTrust (changed digest) failed: %v", err)
+	}
+	trusted, err = registry.IsSpawnTrusted(ctx, serverName, changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trusted {
+		t.Fatal("expected changed spawn digest to be untrusted until re-approval")
+	}
+	trusted, err = registry.IsSpawnTrusted(ctx, serverName, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trusted {
+		t.Fatal("expected stale spawn digest to be untrusted after change")
+	}
+
+	t.Run("invalid inputs fail", func(t *testing.T) {
+		if err := registry.SaveSpawnTrust(ctx, "", digest); err == nil {
+			t.Fatal("expected empty server name to fail")
+		}
+		if err := registry.SaveSpawnTrust(ctx, serverName, ""); err == nil {
+			t.Fatal("expected empty digest to fail")
+		}
+		if err := registry.ApproveSpawn(ctx, "", digest); err == nil {
+			t.Fatal("expected empty server name to fail on approve")
+		}
+		if err := registry.ApproveSpawn(ctx, serverName, ""); err == nil {
+			t.Fatal("expected empty digest to fail on approve")
+		}
+	})
+}
+
+func TestComputeSpawnDigest(t *testing.T) {
+	serverCfg := &config.MCPServer{
+		Name:        "spawn-server",
+		Transport:   "stdio",
+		Command:     "/usr/bin/tool",
+		Args:        []string{"--flag", "val"},
+		Environment: map[string]string{"ENV_A": "1"},
+	}
+
+	digest, err := ComputeSpawnDigest(serverCfg)
+	if err != nil {
+		t.Fatalf("ComputeSpawnDigest failed: %v", err)
+	}
+	if digest == "" {
+		t.Fatal("expected non-empty digest")
+	}
+
+	t.Run("sensitive to command change", func(t *testing.T) {
+		modified := *serverCfg
+		modified.Command = "/usr/bin/other"
+		d, err := ComputeSpawnDigest(&modified)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d == digest {
+			t.Fatal("expected different spawn digest when command changes")
+		}
+	})
+
+	t.Run("sensitive to args change", func(t *testing.T) {
+		modified := *serverCfg
+		modified.Args = []string{"--flag", "changed"}
+		d, err := ComputeSpawnDigest(&modified)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d == digest {
+			t.Fatal("expected different spawn digest when args change")
+		}
+	})
+
+	t.Run("sensitive to environment change", func(t *testing.T) {
+		modified := *serverCfg
+		modified.Environment = map[string]string{"ENV_A": "2"}
+		d, err := ComputeSpawnDigest(&modified)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d == digest {
+			t.Fatal("expected different spawn digest when environment changes")
+		}
+	})
+
+	t.Run("insensitive to timeouts and bounds", func(t *testing.T) {
+		modified := *serverCfg
+		modified.RequestTimeout = serverCfg.RequestTimeout + 1
+		modified.StartupTimeout = serverCfg.StartupTimeout + 1
+		modified.MaxMessageSize = serverCfg.MaxMessageSize + 1
+		d, err := ComputeSpawnDigest(&modified)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d != digest {
+			t.Fatal("expected identical spawn digest for non-executable changes")
+		}
+	})
+
+	t.Run("differs from session digest", func(t *testing.T) {
+		tools := []DiscoveredTool{
+			{Name: "tool_a", Description: "first", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		}
+		sessionDigest, err := ComputeTrustDigest(serverCfg, tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sessionDigest == digest {
+			t.Fatal("expected spawn digest to differ from session digest")
+		}
+	})
+
+	t.Run("nil config fails", func(t *testing.T) {
+		_, err := ComputeSpawnDigest(nil)
+		if err == nil {
+			t.Fatal("expected error for nil config")
+		}
+		if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+			t.Fatalf("expected %s, got %s", ErrConfigInvalid, code)
+		}
+	})
 }
