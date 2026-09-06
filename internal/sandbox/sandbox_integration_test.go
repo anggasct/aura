@@ -42,6 +42,19 @@ func baseSpec(t *testing.T) Spec {
 	}
 }
 
+// A session child whose isolation setup fails yields a typed
+// sandbox_init_failed from Start, with no process left behind. The bad
+// read-only root makes the child's Landlock setup fail after spawn, which is
+// exactly the one-shot runner's deterministic init-failure fixture.
+func TestIntegrationSessionInitFailureFailsClosed(t *testing.T) {
+	req := sessionRequest(t)
+	req.ReadOnlyPaths = []string{"/nonexistent-sandbox-probe-path"}
+	_, err := Start(t.Context(), req)
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
+		t.Fatalf("Start = %v, want sandbox_init_failed", err)
+	}
+}
+
 func TestIntegrationRunBasicOutput(t *testing.T) {
 	spec := baseSpec(t)
 	result, err := Run(context.Background(), &spec, "printf", "hello-sandbox")
@@ -394,34 +407,6 @@ func TestIntegrationCancelNoLeak(t *testing.T) {
 	if orphans := countSleepOrphans(); orphans != 0 {
 		t.Errorf("orphan sleep processes: %d", orphans)
 	}
-}
-
-func countOpenFDs(t *testing.T) int {
-	t.Helper()
-	entries, err := os.ReadDir("/proc/self/fd")
-	if err != nil {
-		t.Skipf("cannot read /proc/self/fd: %v", err)
-	}
-	return len(entries)
-}
-
-func countAuraCgroups(t *testing.T) int {
-	t.Helper()
-	parent, err := ownCgroupPath()
-	if err != nil {
-		t.Skipf("cannot resolve own cgroup: %v", err)
-	}
-	entries, err := os.ReadDir(parent)
-	if err != nil {
-		t.Skipf("cannot read cgroup parent: %v", err)
-	}
-	count := 0
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "aura-sandbox-") {
-			count++
-		}
-	}
-	return count
 }
 
 func countSleepOrphans() int {
