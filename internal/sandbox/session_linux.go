@@ -43,6 +43,12 @@ const sessionIODeadline = 5 * time.Second
 // exchanges and no whole-run deadline is armed here. The child's isolation
 // setup result is awaited before Start returns, so a failed setup leaves no
 // process behind.
+//
+// A lifecycle watcher is armed before the first exchange: cancellation of
+// the Start context tears the group down exactly like Close (TERM→KILL→reap,
+// cgroup release). The child command observes the context's payload only,
+// never its cancellation — teardown is the watcher's and Close's job, so
+// both paths share one termination sequence.
 func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Session, error) {
 	resolved, err := resolveExecutable(req.Executable)
 	if err != nil {
@@ -106,8 +112,12 @@ func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Sessio
 		cg = &c
 	}
 
-	// The session lifecycle is owned by Close, not by the start context, so
-	// the command observes cancellation in neither direction.
+	// The child command observes the context's payload but not its
+	// cancellation: the session's lifetime is owned by Close and by the
+	// lifecycle watcher armed below, and both run the same explicit
+	// termination sequence. If Start's caller already cancelled (or cancels
+	// during setup), the abort path reaps; otherwise the watcher takes over
+	// once the session is fully constructed.
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), "/proc/self/exe", ChildSentinel)
 	cmd.Dir = spec.WorkingDir
 	cmd.Env = append([]string(nil), spec.AllowEnv...)
@@ -173,6 +183,9 @@ func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Sessio
 		return abort(err)
 	}
 	closeAll(errR)
+	// The session is fully live: hand lifecycle ownership to the watcher so
+	// a cancelled Start context tears the group down exactly like Close.
+	ls.armWatch(ctx)
 	return &Session{sessionAPI: ls}, nil
 }
 
@@ -209,6 +222,12 @@ type linuxSession struct {
 	reapDone chan struct{}
 	reapErr  error
 	closed   bool
+	// watchStop cancels the lifecycle watcher's derived context. Written
+	// once by armWatch before the session is published, read by close under
+	// mu, so the two lifecycle owners cannot interleave: either armWatch
+	// arms first and close cancels the watcher, or close wins the flag and
+	// no watcher is armed at all.
+	watchStop context.CancelFunc
 	// pendingLine records an exchange abandoned mid-response (deadline miss).
 	// The child's response is still in flight; the next exchange drains to
 	// the next newline — deterministically the rest of that response, since
@@ -232,6 +251,73 @@ func (ls *linuxSession) markBroken() {
 
 func (ls *linuxSession) isBroken() bool {
 	return ls.brokenFlag.Load()
+}
+
+// armWatch starts the lifecycle watcher: when the Start context is
+// cancelled, the session tears down exactly as if Close had been called —
+// group TERM→KILL, reap, cgroup release. The watcher watches a context
+// derived from the Start context so it can always be released: Close cancels
+// the derived context before killing, so no goroutine ever lingers blocked
+// on a Start context that is never cancelled, and exactly one owner ever
+// drives the termination sequence.
+func (ls *linuxSession) armWatch(ctx context.Context) {
+	if ctx == nil {
+		return
+	}
+	watchC, watchStop := context.WithCancel(ctx)
+	ls.mu.Lock()
+	if ls.closed {
+		// Close won the race before the session was even published; nothing
+		// to watch.
+		ls.mu.Unlock()
+		watchStop()
+		return
+	}
+	ls.watchStop = watchStop
+	ls.mu.Unlock()
+	go func() {
+		<-watchC.Done()
+		watchStop() // release the child context's plumbing either way
+		_ = ls.close(watchC)
+	}()
+}
+
+// close terminates the session child: SIGTERM to the whole process group,
+// SIGKILL after the grace period, reap, cgroup release. Idempotent — the
+// first caller (Close or the Start-context watcher) runs the sequence once,
+// and every later call returns nil.
+func (ls *linuxSession) close(_ context.Context) error {
+	ls.mu.Lock()
+	if ls.closed || ls.pid <= 0 {
+		ls.mu.Unlock()
+		return nil
+	}
+	ls.closed = true
+	pid := ls.pid
+	// Detach the watcher before killing: after closed is set the watcher
+	// would be a no-op anyway, but stopping it means no goroutine lingers
+	// blocked on the (possibly never-cancelled) Start context after an
+	// explicit Close.
+	watchStop := ls.watchStop
+	ls.watchStop = nil
+	ls.mu.Unlock()
+	if watchStop != nil {
+		watchStop()
+	}
+
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	select {
+	case <-ls.reapDone:
+	case <-time.After(sessionCloseGrace):
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		<-ls.reapDone
+	}
+	closeAll(ls.stdin, ls.stdout, ls.stderr)
+	ls.markBroken()
+	if ls.cg != nil {
+		_ = ls.cg.destroy()
+	}
+	return nil
 }
 
 func (ls *linuxSession) request(ctx context.Context, payload []byte) ([]byte, error) {
@@ -394,33 +480,6 @@ func (ls *linuxSession) exitCause() string {
 		return fmt.Sprintf("child wait: %v", ls.reapErr)
 	}
 	return "child exited cleanly"
-}
-
-// close terminates the session child: SIGTERM to the whole process group,
-// SIGKILL after the grace period, reap, cgroup release. Idempotent.
-func (ls *linuxSession) close(_ context.Context) error {
-	ls.mu.Lock()
-	if ls.closed || ls.pid <= 0 {
-		ls.mu.Unlock()
-		return nil
-	}
-	ls.closed = true
-	pid := ls.pid
-	ls.mu.Unlock()
-
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
-	select {
-	case <-ls.reapDone:
-	case <-time.After(sessionCloseGrace):
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		<-ls.reapDone
-	}
-	closeAll(ls.stdin, ls.stdout, ls.stderr)
-	ls.markBroken()
-	if ls.cg != nil {
-		_ = ls.cg.destroy()
-	}
-	return nil
 }
 
 // exchangeTimeout is the per-exchange deadline: the sooner of the caller's

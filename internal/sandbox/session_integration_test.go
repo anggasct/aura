@@ -253,6 +253,69 @@ func TestIntegrationSessionCrashFailsClosed(t *testing.T) {
 	}
 }
 
+// Cancelling the Start context terminates and reaps the whole
+// group and releases the cgroup — the spec's ctx-cancellation trigger — with
+// the same leak bounds as an explicit Close, and no goroutine from the
+// lifecycle watcher remains.
+func TestIntegrationSessionCtxCancelTearsDown(t *testing.T) {
+	goroutinesBefore := runtime.NumGoroutine()
+	fdsBefore := countOpenFDs(t)
+	cgroupsBefore := countAuraCgroups(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	req := sessionRequest(t)
+	req.Limits.Timeout = 30 * time.Second
+	s, err := Start(ctx, req)
+	if err != nil {
+		cancel()
+		t.Skipf("containment unavailable on this host: %v", err)
+	}
+	if _, err := s.Request(ctx, []byte("warm")); err != nil {
+		cancel()
+		t.Fatalf("warm exchange: %v", err)
+	}
+	cancel()
+	// The watcher needs no nudge: cancellation is the teardown trigger. The
+	// bound covers the TERM grace and the scheduler, not the child's mood.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := s.Request(t.Context(), []byte("late")); err == nil {
+			if time.Now().After(deadline) {
+				t.Fatal("session still serving exchanges 5s after Start-context cancel")
+			}
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		break
+	}
+	if _, err := s.Request(t.Context(), []byte("late")); err == nil {
+		t.Fatal("request after ctx-cancel succeeded, want failure")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSessionClosed {
+		t.Fatalf("request after ctx-cancel = %v, want session_closed", err)
+	}
+	// Idempotent explicit Close after a watcher teardown.
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("Close after ctx-cancel: %v", err)
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("second Close after ctx-cancel = %v, want nil", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	if got := runtime.NumGoroutine(); got > goroutinesBefore+2 {
+		t.Errorf("goroutine leak: before=%d after=%d", goroutinesBefore, got)
+	}
+	if got := countOpenFDs(t); got > fdsBefore+2 {
+		t.Errorf("fd leak: before=%d after=%d", fdsBefore, got)
+	}
+	if got := countAuraCgroups(t); got > cgroupsBefore {
+		t.Errorf("cgroup leak: before=%d after=%d", cgroupsBefore, got)
+	}
+	if orphans := countHelperOrphans(t.Context()); orphans != 0 {
+		t.Errorf("orphan session-helper processes: %d", orphans)
+	}
+}
+
 // The session child shares the one-shot stack's
 // kernel-level network denial — net namespace without external linkage plus
 // the seccomp socket-deny. The property is enforced by the kernel, not by
@@ -267,6 +330,44 @@ func TestIntegrationSessionNoNetworkCapability(t *testing.T) {
 	s := startHelperSession(t, nil)
 	if got := exchange(t, s, "confined"); got != "confined" {
 		t.Fatalf("exchange = %q", got)
+	}
+}
+
+// A connect attempt from inside the session child itself is denied
+// at the syscall layer — the spec's no-network criterion, asserted directly.
+// The fixture takes the
+// @connect directive, spawns bash with a /dev/tcp redirection (a real
+// socket() syscall) inside the session child's confinement, and reports the
+// connector's exit status on the child's stdout. bash is killed by seccomp
+// (SIGSYS → status 159) before any connection can exist, the session child
+// itself survives, and the exchange answers denied-159. A warm exchange
+// beforehand proves the child was serving through the same pipes, and
+// follow-up exchanges prove the denial did not break the session. The net
+// namespace is a second, independent denial layer for any process that gets
+// as far as a connect.
+func TestIntegrationSessionConnectDenied(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available for the network-attempt fixture")
+	}
+	if !usernsAvailable() {
+		t.Skip("user namespaces unavailable: session containment (and its seccomp filter) cannot be provided")
+	}
+	s := startHelperSession(t, nil)
+	if got := exchange(t, s, "warm"); got != "warm" {
+		t.Fatalf("warm exchange = %q, want echo", got)
+	}
+	got := exchange(t, s, "@connect")
+	if got != "denied-159" {
+		t.Fatalf("connect probe = %q, want denied-159 (SIGSYS kill of the connector)", got)
+	}
+	if got := exchange(t, s, "after-connect"); got != "after-connect" {
+		t.Fatalf("session not usable after connect denial: %q", got)
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("second Close = %v, want nil", err)
 	}
 }
 

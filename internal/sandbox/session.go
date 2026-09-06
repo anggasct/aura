@@ -27,6 +27,41 @@ type SessionRequest struct {
 	ApprovalGrantID string
 }
 
+// grantValidator is the seam Start uses to resolve a SessionRequest's
+// approval grant before any child is spawned. It mirrors the one-shot
+// Registry contract: a session that carries a grant ID that does not resolve,
+// or whose grant no longer binds the session's principal, tool, capabilities,
+// and confinement digest, is refused with approval_invalid and no child
+// starts. A nil validator means the caller runs without grant enforcement —
+// the default until the MCP adoption wires the broker — and Start then
+// requires the field to be empty so the surface cannot silently imply
+// enforcement that is not there.
+type grantValidator interface {
+	validateSessionGrant(req *SessionRequest) error
+}
+
+// defaultGrantValidator is the package-wide validator backing Start. It is
+// nil until an authority is configured: with no validator, Start refuses any
+// request that carries a grant ID, so the approval fields can never be
+// silently ignored. The package-level Registry satisfies the seam
+// (validateSessionGrant), so the MCP adoption wires its broker registry as
+// the authority and sessions then resolve grants exactly like one-shot runs
+// do.
+var defaultGrantValidator grantValidator
+
+// validateSessionGrant runs the request through the validator when one is
+// configured; without one, a request may not carry a grant ID at all, so the
+// approval fields can never be decorative.
+func validateSessionGrant(v grantValidator, req *SessionRequest) error {
+	if v == nil {
+		if req.ApprovalGrantID != "" {
+			return Errorf(ErrorCodeApprovalInvalid, "request carries an approval grant but no validator is configured to enforce it")
+		}
+		return nil
+	}
+	return v.validateSessionGrant(req)
+}
+
 func (r *SessionRequest) validate() error {
 	if r == nil {
 		return Errorf(ErrorCodeInvalidArgument, "request must not be nil")
@@ -88,11 +123,28 @@ type Session struct {
 // newline-terminated line. Message encoding and richer framing stay the
 // caller's concern.
 //
+// The lifecycle is owned by two triggers, whichever happens first: Close, or
+// cancellation of ctx (or any later shutdown of its lifetime scope). When
+// ctx is cancelled the whole child process group receives SIGTERM, then
+// SIGKILL after the grace period, mirroring Close. Start itself never fails
+// because of a later ctx cancellation.
+//
+// The approval grant contract matches the one-shot path: when a grant
+// validator is configured, ApprovalGrantID must resolve to a grant that
+// still binds this session's principal, tool, capabilities, and confinement
+// digest before any child is spawned, and a session that cannot prove its
+// grant fails closed with approval_invalid. Without a validator the field
+// must be left empty — a grant ID Start cannot enforce is refused rather
+// than silently ignored.
+//
 // Start fails closed: when a mandatory kernel primitive is missing or any
 // isolation setup fails, the error carries capability_unavailable or
 // sandbox_init_failed and no process is left behind.
 func Start(ctx context.Context, req *SessionRequest) (*Session, error) {
 	if err := req.validate(); err != nil {
+		return nil, err
+	}
+	if err := validateSessionGrant(defaultGrantValidator, req); err != nil {
 		return nil, err
 	}
 	primitives, err := Negotiate()
@@ -107,7 +159,8 @@ func Start(ctx context.Context, req *SessionRequest) (*Session, error) {
 
 // Close terminates the session: the whole child process group receives
 // SIGTERM, then SIGKILL after the grace period, the child is reaped, and the
-// cgroup is released. Close is idempotent; later calls return nil.
+// cgroup is released. Cancellation of the Start context tears the session
+// down the same way. Close is idempotent; later calls return nil.
 func (s *Session) Close(ctx context.Context) error {
 	return s.close(ctx)
 }
