@@ -75,6 +75,32 @@ func landlockAvailable() bool {
 	return strings.Contains(string(data), "landlock")
 }
 
+// resolveExecutable maps a command to the path the child will exec. Bare
+// names are resolved on the parent's PATH; the resolved path becomes part of
+// the streamed child config.
+func resolveExecutable(command string) (string, error) {
+	if strings.Contains(command, "/") {
+		return command, nil
+	}
+	resolved, err := exec.LookPath(command)
+	if err != nil {
+		return "", Errorf(ErrorCodeSandboxUnavailable, "resolve %q: %v", command, err)
+	}
+	return resolved, nil
+}
+
+// childSysProcAttr is the process attribute set every sandbox child starts
+// with: its own process group, and fresh user and network namespaces mapped
+// to the calling user.
+func childSysProcAttr() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{
+		Setpgid:     true,
+		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET,
+		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
+		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
+	}
+}
+
 // run launches the tool inside a contained child. The child is a re-execution
 // of this binary under the sandbox sentinel: the parent streams the config
 // over a pipe, the child applies rlimits, Landlock, and seccomp then execs
@@ -87,13 +113,9 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 	if spec.AllowNetwork {
 		return Result{}, Errorf(ErrorCodeSandboxUnavailable, "network access is not available in this sandbox")
 	}
-	resolved := command
-	if !strings.Contains(command, "/") {
-		lp, lerr := exec.LookPath(command)
-		if lerr != nil {
-			return Result{}, Errorf(ErrorCodeSandboxUnavailable, "resolve %q: %v", command, lerr)
-		}
-		resolved = lp
+	resolved, err := resolveExecutable(command)
+	if err != nil {
+		return Result{}, err
 	}
 	payload, err := json.Marshal(childConfig{
 		WorkingDir: spec.WorkingDir, ReadOnlyPaths: spec.ReadOnlyPaths, ReadWritePaths: spec.ReadWritePaths,
@@ -130,12 +152,7 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 	cmd.Dir = spec.WorkingDir
 	cmd.Env = append([]string(nil), spec.AllowEnv...)
 	cmd.ExtraFiles = []*os.File{configR, errW}
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid:     true,
-		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET,
-		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
-		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
-	}
+	cmd.SysProcAttr = childSysProcAttr()
 	var stdout, stderr limitedBuffer
 	if spec.Limits.MaxOutputBytes > 0 {
 		stdout.limit = spec.Limits.MaxOutputBytes

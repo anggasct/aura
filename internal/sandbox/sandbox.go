@@ -29,6 +29,10 @@ const (
 	ErrorCodeSandboxPathDenied       ErrorCode = "sandbox_path_denied"
 	ErrorCodeSandboxSyscallDenied    ErrorCode = "sandbox_syscall_denied"
 	ErrorCodeSandboxResourceExceeded ErrorCode = "sandbox_resource_exceeded"
+	ErrorCodeSandboxTimeout          ErrorCode = "sandbox_timeout"
+	ErrorCodeSandboxOutputExceeded   ErrorCode = "sandbox_output_exceeded"
+	ErrorCodeSessionClosed           ErrorCode = "session_closed"
+	ErrorCodeSessionBroken           ErrorCode = "session_broken"
 	ErrorCodeApprovalInvalid         ErrorCode = "approval_invalid"
 )
 
