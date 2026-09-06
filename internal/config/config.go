@@ -31,6 +31,29 @@ type Config struct {
 	Usage        Usage        `koanf:"usage" yaml:"usage"`
 	Health       Health       `koanf:"health" yaml:"health"`
 	Terminal     Terminal     `koanf:"terminal" yaml:"terminal"`
+	Webhook      Webhook      `koanf:"webhook" yaml:"webhook"`
+}
+
+// Webhook configures the authenticated inbound event endpoint. It is
+// disabled by default; when enabled, at least one non-expired key must be
+// configured and its secret resolved from the environment at startup.
+type Webhook struct {
+	Enabled            bool         `koanf:"enabled" yaml:"enabled"`
+	Listen             string       `koanf:"listen_address" yaml:"listen_address"`
+	MaxBodySize        ByteSize     `koanf:"max_body_size" yaml:"max_body_size"`
+	TimestampTolerance Duration     `koanf:"timestamp_tolerance" yaml:"timestamp_tolerance"`
+	ReplayRetention    Duration     `koanf:"replay_retention" yaml:"replay_retention"`
+	RequestsPerMinute  int          `koanf:"requests_per_minute" yaml:"requests_per_minute"`
+	Keys               []WebhookKey `koanf:"keys" yaml:"keys"`
+}
+
+// WebhookKey is one signing key. An empty accept_until keeps the key active;
+// a past accept_until moves it to grace: still verifies, never signs new
+// rotations.
+type WebhookKey struct {
+	ID          string `koanf:"id" yaml:"id"`
+	SecretEnv   string `koanf:"secret_env" yaml:"secret_env"`
+	AcceptUntil string `koanf:"accept_until" yaml:"accept_until"`
 }
 
 // Terminal configures the aura chat console. render_hz bounds how often a
@@ -384,6 +407,13 @@ func Default() Config {
 			InMemoryHistory:     100,
 			SecondInterruptTime: Duration(2 * time.Second),
 			PlainApproval:       "deny",
+		},
+		Webhook: Webhook{
+			Listen:             "127.0.0.1:8282",
+			MaxBodySize:        ByteSize(1 << 20),
+			TimestampTolerance: Duration(5 * time.Minute),
+			ReplayRetention:    Duration(24 * time.Hour),
+			RequestsPerMinute:  60,
 		},
 	}
 }

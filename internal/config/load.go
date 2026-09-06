@@ -184,6 +184,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateWorkflows(cfg.Workflows); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateWebhook(&cfg.Webhook, cfg.Health.Listen); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -324,6 +327,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateWorkflowsShapes(doc); err != nil {
+		return err
+	}
+	if err := validateWebhookShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -529,6 +535,59 @@ func validateTelemetryShapes(doc *yamlv3.Node) error {
 		case "export_timeout":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 				return fmt.Errorf("telemetry.export_timeout must be a duration string at line %d", valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func validateWebhookShapes(doc *yamlv3.Node) error {
+	webhookNode := mappingValue(doc, "webhook")
+	if webhookNode == nil {
+		return nil
+	}
+	if webhookNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("webhook must be a mapping at line %d", webhookNode.Line)
+	}
+	for i := 0; i+1 < len(webhookNode.Content); i += 2 {
+		keyNode := webhookNode.Content[i]
+		valueNode := webhookNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("webhook.enabled must be a boolean at line %d", valueNode.Line)
+			}
+		case "listen_address":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("webhook.listen_address must be a string at line %d", valueNode.Line)
+			}
+		case "max_body_size":
+			if valueNode.Kind != yamlv3.ScalarNode || (valueNode.Tag != "!!int" && valueNode.Tag != "!!str") {
+				return fmt.Errorf("webhook.max_body_size must be a byte size at line %d", valueNode.Line)
+			}
+		case "timestamp_tolerance", "replay_retention":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("webhook.%s must be a duration string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "requests_per_minute":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("webhook.requests_per_minute must be an integer at line %d", valueNode.Line)
+			}
+		case "keys":
+			if valueNode.Kind != yamlv3.SequenceNode {
+				return fmt.Errorf("webhook.keys must be a sequence at line %d", valueNode.Line)
+			}
+			for _, item := range valueNode.Content {
+				if item.Kind != yamlv3.MappingNode {
+					return fmt.Errorf("webhook.keys entries must be mappings at line %d", item.Line)
+				}
+				for j := 0; j+1 < len(item.Content); j += 2 {
+					itemKey := item.Content[j].Value
+					itemValue := item.Content[j+1]
+					if itemValue.Kind != yamlv3.ScalarNode || itemValue.Tag != "!!str" {
+						return fmt.Errorf("webhook.keys.%s must be a string at line %d", itemKey, itemValue.Line)
+					}
+				}
 			}
 		}
 	}
@@ -1243,7 +1302,26 @@ func applyDefaults(cfg *Config, data []byte) error {
 	}
 	applyHealthDefaults(cfg, doc, defaults.Health)
 	applyTerminalDefaults(cfg, doc, defaults.Terminal)
+	applyWebhookDefaults(cfg, doc, &defaults.Webhook)
 	return nil
+}
+
+func applyWebhookDefaults(cfg *Config, doc *yamlv3.Node, defaults *Webhook) {
+	if cfg.Webhook.Listen == "" && !configValuePresent(doc, "webhook", "listen_address") && !envValuePresent("webhook.listen_address") {
+		cfg.Webhook.Listen = defaults.Listen
+	}
+	if cfg.Webhook.MaxBodySize == 0 && !configValuePresent(doc, "webhook", "max_body_size") && !envValuePresent("webhook.max_body_size") {
+		cfg.Webhook.MaxBodySize = defaults.MaxBodySize
+	}
+	if cfg.Webhook.TimestampTolerance == 0 && !configValuePresent(doc, "webhook", "timestamp_tolerance") && !envValuePresent("webhook.timestamp_tolerance") {
+		cfg.Webhook.TimestampTolerance = defaults.TimestampTolerance
+	}
+	if cfg.Webhook.ReplayRetention == 0 && !configValuePresent(doc, "webhook", "replay_retention") && !envValuePresent("webhook.replay_retention") {
+		cfg.Webhook.ReplayRetention = defaults.ReplayRetention
+	}
+	if cfg.Webhook.RequestsPerMinute == 0 && !configValuePresent(doc, "webhook", "requests_per_minute") && !envValuePresent("webhook.requests_per_minute") {
+		cfg.Webhook.RequestsPerMinute = defaults.RequestsPerMinute
+	}
 }
 
 func applyTerminalDefaults(cfg *Config, doc *yamlv3.Node, defaults Terminal) {
@@ -1536,6 +1614,85 @@ func validateLoopbackListen(listen, field string) error {
 		return nil
 	}
 	return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " must bind loopback; non-loopback probe exposure requires the authenticated admin surface"}
+}
+
+// validateWebhook owns the semantic rules of the webhook section. Secrets are
+// referenced by environment variable name only and resolved by the gateway at
+// startup; the loader never reads them.
+func validateWebhook(w *Webhook, healthListen string) error {
+	host, portText, err := net.SplitHostPort(w.Listen)
+	if err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("webhook.listen_address must be host:port: %v", err)}
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.listen_address port must be between 1 and 65535"}
+	}
+	if host == "" {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.listen_address must include a host"}
+	}
+	if w.MaxBodySize <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.max_body_size must be positive"}
+	}
+	if w.TimestampTolerance <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.timestamp_tolerance must be positive"}
+	}
+	if w.ReplayRetention <= 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.replay_retention must be positive"}
+	}
+	if w.RequestsPerMinute < 1 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.requests_per_minute must be at least 1"}
+	}
+	seen := make(map[string]bool, len(w.Keys))
+	var problems []error
+	for _, key := range w.Keys {
+		switch {
+		case key.ID == "":
+			problems = append(problems, errors.New("webhook key id must not be empty"))
+			continue
+		case seen[key.ID]:
+			problems = append(problems, fmt.Errorf("webhook key id %q is configured more than once", key.ID))
+			continue
+		}
+		seen[key.ID] = true
+		if !envNamePattern.MatchString(key.SecretEnv) {
+			problems = append(problems, fmt.Errorf("webhook key %q secret_env %q is not a valid environment variable name", key.ID, key.SecretEnv))
+		}
+		if key.AcceptUntil != "" {
+			if _, err := time.Parse(time.RFC3339, key.AcceptUntil); err != nil {
+				problems = append(problems, fmt.Errorf("webhook key %q accept_until must be an RFC3339 timestamp or empty", key.ID))
+			}
+		}
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	if !w.Enabled {
+		return nil
+	}
+	if len(w.Keys) == 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.enabled requires at least one key"}
+	}
+	now := time.Now().UTC()
+	active := false
+	for _, key := range w.Keys {
+		if key.AcceptUntil == "" {
+			active = true
+			break
+		}
+		until, err := time.Parse(time.RFC3339, key.AcceptUntil)
+		if err == nil && until.After(now) {
+			active = true
+			break
+		}
+	}
+	if !active {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.enabled requires at least one key whose accept_until has not passed"}
+	}
+	if w.Listen == healthListen {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.listen_address must differ from health.listen"}
+	}
+	return nil
 }
 
 func validateTools(toolsConfig *Tools, profile capability.Profile) error {
