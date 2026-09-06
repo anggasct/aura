@@ -43,7 +43,7 @@ const sessionIODeadline = 5 * time.Second
 // exchanges and no whole-run deadline is armed here. The child's isolation
 // setup result is awaited before Start returns, so a failed setup leaves no
 // process behind.
-func startSession(_ context.Context, req *SessionRequest, spec *Spec) (*Session, error) {
+func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Session, error) {
 	resolved, err := resolveExecutable(req.Executable)
 	if err != nil {
 		return nil, err
@@ -108,7 +108,7 @@ func startSession(_ context.Context, req *SessionRequest, spec *Spec) (*Session,
 
 	// The session lifecycle is owned by Close, not by the start context, so
 	// the command observes cancellation in neither direction.
-	cmd := exec.CommandContext(context.WithoutCancel(context.Background()), "/proc/self/exe", ChildSentinel)
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), "/proc/self/exe", ChildSentinel)
 	cmd.Dir = spec.WorkingDir
 	cmd.Env = append([]string(nil), spec.AllowEnv...)
 	// The persistent stdio pipes ride the command's own stdin/stdout/stderr
