@@ -23,6 +23,12 @@ const (
 	CircuitStateHalfOpen CircuitState = "half_open"
 )
 
+// authLockWindow is how long a circuit stays open after an auth failure.
+// Auth errors cannot recover through probing, so the candidate is locked out
+// until a config reload (digest change) or an explicit operator reset; the
+// window only has to outlive any plausible process lifetime.
+const authLockWindow = 365 * 24 * time.Hour
+
 type CircuitStatus struct {
 	Key                 string       `json:"key"`
 	DefinitionID        string       `json:"definition_id"`
@@ -258,7 +264,7 @@ func (m *CircuitManager) RecordFailure(ctx context.Context, key string, class Er
 		entry.state = CircuitStateOpen
 		entry.authFailed = true
 		entry.probeActive = false
-		entry.openUntil = now.Add(365 * 24 * time.Hour)
+		entry.openUntil = now.Add(authLockWindow)
 		entry.updatedAt = now
 		cp := m.checkpointFromEntryLocked(entry)
 		logger := m.logger

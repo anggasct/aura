@@ -122,24 +122,6 @@ func orNone(value string) string {
 	return value
 }
 
-// modelRouteResolver maps an agent definition's model route onto the model
-// registered for that routing role.
-func modelRouteResolver(cfg *config.Config) func(route string) (string, error) {
-	return func(route string) (string, error) {
-		if r, ok := cfg.ModelRoutes[route]; ok && len(r.Candidates) > 0 {
-			candidate := r.Candidates[0]
-			if def, defOk := cfg.Models.Definitions[candidate]; defOk && def.Model != "" {
-				return def.Model, nil
-			}
-		}
-		definition, ok := cfg.Models.Definitions[route]
-		if !ok || definition.Model == "" {
-			return "", fmt.Errorf("unknown model route %q", route)
-		}
-		return definition.Model, nil
-	}
-}
-
 // buildAgentRegistry validates the compiled-in definitions plus configured
 // overrides against the tool registry and configured model routes. An
 // invalid definition aborts before any session starts.

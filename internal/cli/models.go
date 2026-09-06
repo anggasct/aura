@@ -143,9 +143,9 @@ func newModelsCircuitsCmd(gf *globalFlags) *cobra.Command {
 			adapter := &storeCircuitCheckpointAdapter{store: checkpointStore}
 			cm := model.NewCircuitManager(time.Now, adapter)
 
-			for name, def := range cfg.Models.Definitions {
-				defCopy := def
-				digest := model.ComputeConfigDigest(&defCopy)
+			for name := range cfg.Models.Definitions {
+				def := cfg.Models.Definitions[name]
+				digest := model.ComputeConfigDigest(&def)
 				cm.Register(name, def.BaseURL, digest, model.DefaultCircuitPolicy())
 			}
 
@@ -204,9 +204,9 @@ func newModelsCircuitResetCmd(gf *globalFlags) *cobra.Command {
 			adapter := &storeCircuitCheckpointAdapter{store: checkpointStore}
 			cm := model.NewCircuitManager(time.Now, adapter)
 
-			for name, def := range cfg.Models.Definitions {
-				defCopy := def
-				digest := model.ComputeConfigDigest(&defCopy)
+			for name := range cfg.Models.Definitions {
+				def := cfg.Models.Definitions[name]
+				digest := model.ComputeConfigDigest(&def)
 				cm.Register(name, def.BaseURL, digest, model.DefaultCircuitPolicy())
 			}
 

@@ -988,6 +988,10 @@ func validateModelDefinition(name string, node *yamlv3.Node) error {
 					if capVal.Kind != yamlv3.ScalarNode || capVal.Tag != "!!str" {
 						return fmt.Errorf("models.definitions.%s.capabilities.tokenizer must be a string at line %d", name, capVal.Line)
 					}
+				case "micros_per_input_token", "micros_per_output_token":
+					if capVal.Kind != yamlv3.ScalarNode || capVal.Tag != "!!int" {
+						return fmt.Errorf("models.definitions.%s.capabilities.%s must be an integer at line %d", name, capKey.Value, capVal.Line)
+					}
 				}
 			}
 		}
@@ -1034,6 +1038,9 @@ func modelDefinitionProblems(name string, definition *ModelDefinition) []error {
 	}
 	if definition.Capabilities.ContextTokens <= 0 || strings.TrimSpace(definition.Capabilities.Tokenizer) == "" {
 		problems = append(problems, &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires positive context_tokens and a tokenizer", name)})
+	}
+	if definition.Capabilities.MicrosPerInputToken < 0 || definition.Capabilities.MicrosPerOutputToken < 0 {
+		problems = append(problems, &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s.capabilities cost rates must not be negative", name)})
 	}
 	return problems
 }

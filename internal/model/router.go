@@ -15,6 +15,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/usage"
 )
 
 // withoutPath strips the filesystem path from an *fs.PathError so an error
@@ -58,6 +59,14 @@ type Router struct {
 	routes      map[string]adkmodel.LLM
 	circuits    *CircuitManager
 	definitions map[string]config.ModelDefinition
+	// components keeps the raw construction output (per-definition adapters
+	// and per-route fallback adapters) so the ADK model registry can register
+	// exactly what the router dispatches through, per candidate definition
+	// and per route.
+	components struct {
+		adapters map[string]adkmodel.LLM
+		routes   map[string]adkmodel.LLM
+	}
 }
 
 func NewRouter(primary, auxiliary adkmodel.LLM, routing map[string]string) (*Router, error) {
@@ -88,9 +97,17 @@ func BuildRouterWithConfig(logger *slog.Logger, cfg *config.Config, store Circui
 	return BuildRouterWithRoutes(logger, cfg.Models, cfg.ModelRoutes, store)
 }
 
-func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, store CircuitCheckpointStore) (*Router, error) {
+// BuildComponents is the shared construction path for the model layer: it
+// builds one adapter per configured definition, registers every definition
+// and route candidate with a circuit manager, and wraps each configured
+// route in a FallbackAdapter. Both the Router and the ADK model registry
+// (RegisterAdaptersWithComponents) are assembled from it, so the two can
+// never diverge on adapter construction or circuit policy. checkpoint and
+// prices may be nil; nil circuits run in memory only and nil prices disable
+// route cost accounting.
+func BuildComponents(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry) (adapters map[string]adkmodel.LLM, circuits *CircuitManager, err error) {
 	if err := validateRoutingCapabilities(models); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	timeout := time.Duration(models.RequestTimeout)
 	if timeout <= 0 {
@@ -101,22 +118,22 @@ func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map
 		idleTimeout = defaultStreamingIdleTimeout
 	}
 
-	adapters := make(map[string]adkmodel.LLM, len(models.Definitions))
-	for name, spec := range models.Definitions {
-		specCopy := spec
-		adapter, configured, err := newAdapter(logger, name, &specCopy, timeout, idleTimeout)
+	adapters = make(map[string]adkmodel.LLM, len(models.Definitions))
+	for name := range models.Definitions {
+		spec := models.Definitions[name]
+		adapter, configured, err := newAdapter(logger, name, &spec, timeout, idleTimeout)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if configured {
 			adapters[name] = adapter
 		}
 	}
 
-	circuits := NewCircuitManager(time.Now, store).WithLogger(logger)
-	for name, spec := range models.Definitions {
-		specCopy := spec
-		digest := ComputeConfigDigest(&specCopy)
+	circuits = NewCircuitManager(time.Now, checkpoint).WithLogger(logger)
+	for name := range models.Definitions {
+		spec := models.Definitions[name]
+		digest := ComputeConfigDigest(&spec)
 		policy := DefaultCircuitPolicy()
 		for _, r := range routes {
 			for _, c := range r.Candidates {
@@ -132,11 +149,22 @@ func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map
 		circuits.Register(name, spec.BaseURL, digest, policy)
 	}
 
-	routeAdapters := make(map[string]adkmodel.LLM, len(routes))
 	for name, route := range routes {
 		if err := ValidateRoute(name, route, models.Definitions, nil); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+	}
+	return adapters, circuits, nil
+}
+
+func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, store CircuitCheckpointStore) (*Router, error) {
+	adapters, circuits, err := BuildComponents(logger, models, routes, store, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	routeAdapters := make(map[string]adkmodel.LLM, len(routes))
+	for name, route := range routes {
 		fb := NewFallbackAdapter(name, route, models.Definitions, circuits, MapAdapterResolver(adapters)).WithLogger(logger)
 		routeAdapters[name] = fb
 	}
@@ -158,6 +186,8 @@ func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map
 		circuits:    circuits,
 		definitions: models.Definitions,
 	}
+	r.components.adapters = adapters
+	r.components.routes = routeAdapters
 	for task, role := range defaultTaskRouting {
 		r.routing[task] = role
 	}
@@ -171,6 +201,18 @@ func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map
 		r.routing[task] = role
 	}
 	return r, nil
+}
+
+// BuildRouterComponents decomposes a router into the parts the ADK model
+// registry needs: the per-definition adapters and the per-route fallback
+// adapters. The maps are populated once at construction and read-only
+// afterwards, so they are returned directly without copying; callers must
+// not mutate them.
+func BuildRouterComponents(r *Router) (adapters, routes map[string]adkmodel.LLM) {
+	if r == nil {
+		return nil, nil
+	}
+	return r.components.adapters, r.components.routes
 }
 
 func validateRoutingCapabilities(models config.Models) error {

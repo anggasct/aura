@@ -275,6 +275,11 @@ type ModelCapabilities struct {
 	ContextTokens    int    `koanf:"context_tokens" yaml:"context_tokens"`
 	Tokenizer        string `koanf:"tokenizer" yaml:"tokenizer"`
 	UsageReporting   bool   `koanf:"usage_reporting" yaml:"usage_reporting"`
+	// Cost rates in integer USD micros per token. Zero rates make the
+	// definition free for route cost budgets: the route budget only counts
+	// priced usage, so an unpriced definition never trips a ceiling.
+	MicrosPerInputToken  int64 `koanf:"micros_per_input_token" yaml:"micros_per_input_token"`
+	MicrosPerOutputToken int64 `koanf:"micros_per_output_token" yaml:"micros_per_output_token"`
 }
 
 const (

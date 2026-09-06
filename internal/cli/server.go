@@ -54,6 +54,13 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer func() { _ = db.Close() }()
+			// Production model registration: definitions land in the ADK
+			// registry, configured model routes land on their FallbackAdapter
+			// with the route name as the model name, and circuit checkpoints
+			// load from storage so open circuits survive restarts.
+			if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, nil); err != nil {
+				return err
+			}
 			pipeline, err := telemetry.NewPipeline(cfg.Telemetry, logger)
 			if err != nil {
 				return err
@@ -98,10 +105,14 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			routeModel, err := model.RouteModelName(cfg, modelDefinition.Model)
+			if err != nil {
+				return err
+			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
 				runtimeadk.WithBuiltinToolExecutor(builtin),
-				runtimeadk.WithAgentResolver(agentRegistry, modelRouteResolver(cfg)),
+				runtimeadk.WithAgentResolver(agentRegistry, routeModel),
 			)
 			if err != nil {
 				return err

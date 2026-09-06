@@ -155,17 +155,20 @@ func shouldUseTTY(present chatPresentation, inTTY, outTTY bool) bool {
 // runChat is the wire for `aura chat`. It loads config, opens storage, builds
 // the runtime engine, and drives the terminal console over stdin/stdout.
 func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID string, present chatPresentation) error {
-	if _, err := model.BuildRouter(logger, cfg.Models); err != nil {
-		return err
-	}
-	if err := model.RegisterAdapters(logger, cfg.Models); err != nil {
-		return err
-	}
 	db, err := openStorage(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
+
+	// Production model registration: definitions land in the ADK registry,
+	// configured model routes land on their FallbackAdapter with the route
+	// name as the model name, and circuit checkpoints load from storage so
+	// open circuits survive restarts. AC failover, circuit, and route
+	// budget behavior run on this path.
+	if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, nil); err != nil {
+		return err
+	}
 
 	useTTY := false
 	inFile, inOk := in.(*os.File)
@@ -180,9 +183,13 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 	if err != nil {
 		return err
 	}
+	routeModel, err := model.RouteModelName(cfg, cfg.Models.Definitions["primary"].Model)
+	if err != nil {
+		return err
+	}
 	var broker runtime.ToolBroker = terminalBroker{}
 	var executorOpts []runtimeadk.ExecutorOption
-	executorOpts = append(executorOpts, runtimeadk.WithAgentResolver(registry, modelRouteResolver(cfg)))
+	executorOpts = append(executorOpts, runtimeadk.WithAgentResolver(registry, routeModel))
 	var approvals *terminal.ApprovalBridge
 	if cfg.Tools != nil {
 		if useTTY {

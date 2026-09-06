@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 )
 
@@ -72,11 +73,21 @@ func CodeOf(err error) (ErrorCode, bool) {
 	return target.Code, true
 }
 
+// ClassifyError maps an error onto a normalized failure class from typed
+// codes and package sentinels only. Error text is never inspected: provider
+// wording can change between versions, and a reworded message must not
+// reclassify a terminal policy or auth failure as fallback-eligible. A nil
+// or unrecognized error classifies as invalid_request, which is never
+// fallback-eligible, so unknown failures fail closed.
 func ClassifyError(err error) ErrorClass {
 	if err == nil {
-		return ""
+		return ErrorClassInvalidRequest
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return ErrorClassDeadline
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
 		return ErrorClassDeadline
 	}
 	if isTransientError(err) {
@@ -131,28 +142,7 @@ func ClassifyError(err error) ErrorClass {
 	if errors.Is(err, ErrConnectionFailed) || errors.Is(err, ErrStreamIdle) || errors.Is(err, ErrStreamTruncated) {
 		return ErrorClassTransient
 	}
-
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "rate limit") || strings.Contains(msg, "429"):
-		return ErrorClassRateLimited
-	case strings.Contains(msg, "overloaded") || strings.Contains(msg, "503") || strings.Contains(msg, "502") || strings.Contains(msg, "504") || strings.Contains(msg, "service unavailable"):
-		return ErrorClassOverloaded
-	case strings.Contains(msg, "unauthorized") || strings.Contains(msg, "forbidden") || strings.Contains(msg, "auth") || strings.Contains(msg, "401") || strings.Contains(msg, "403"):
-		return ErrorClassAuth
-	case strings.Contains(msg, "deadline") || strings.Contains(msg, "timeout") || strings.Contains(msg, "canceled") || strings.Contains(msg, "cancelled"):
-		return ErrorClassDeadline
-	case strings.Contains(msg, "policy") || strings.Contains(msg, "filter") || strings.Contains(msg, "safety"):
-		return ErrorClassPolicyRejected
-	case strings.Contains(msg, "unsupported") || strings.Contains(msg, "capability"):
-		return ErrorClassUnsupported
-	case strings.Contains(msg, "protocol") || strings.Contains(msg, "invalid json"):
-		return ErrorClassProtocol
-	case strings.Contains(msg, "connection") || strings.Contains(msg, "reset") || strings.Contains(msg, "broken pipe"):
-		return ErrorClassTransient
-	default:
-		return ErrorClassInvalidRequest
-	}
+	return ErrorClassInvalidRequest
 }
 
 var (
