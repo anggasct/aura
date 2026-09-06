@@ -102,7 +102,7 @@ func Start(ctx context.Context, req *SessionRequest) (*Session, error) {
 	if err := Require(primitives); err != nil {
 		return nil, err
 	}
-	return startSession(ctx, req)
+	return startSession(ctx, req, req.spec())
 }
 
 // Close terminates the session: the whole child process group receives
