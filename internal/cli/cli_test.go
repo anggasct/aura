@@ -33,9 +33,6 @@ func TestVersionCommand(t *testing.T) {
 }
 
 func TestChatWithoutModelFailsLoudly(t *testing.T) {
-	// --config points at an unreachable path so the command fails on config
-	// resolution rather than generating a default config under the user's
-	// config directory.
 	_, err := execute(t, "chat", "--config", "../../testdata/config/does-not-exist.yaml")
 	if err == nil {
 		t.Fatal("expected chat to fail loudly, got nil")
@@ -106,9 +103,6 @@ func TestExecuteContextBuiltinsViaProcessArgs(t *testing.T) {
 }
 
 func TestExecuteContextUnknownCommandViaProcessArgs(t *testing.T) {
-	// main calls ExecuteContext without explicit args; the effective args
-	// come from os.Args, and the unknown-command classification must still
-	// fire on that path.
 	oldArgs := os.Args
 	t.Cleanup(func() { os.Args = oldArgs })
 	os.Args = []string{"aura", "bogus"}

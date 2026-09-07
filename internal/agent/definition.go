@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-// Definition declares one agent as data: identity, prompt surface, tool
-// subset, capability vocabulary, model route, and per-execution limits.
-// A definition changes configuration only — execution always runs through
-// the existing runtime, broker, and approval boundaries.
 type Definition struct {
 	ID           string
 	Description  string
@@ -39,7 +35,6 @@ func (d *Definition) clone() Definition {
 	}
 }
 
-// supports reports whether the declared capability set covers required.
 func (d *Definition) supports(required []string) bool {
 	for _, need := range required {
 		if !slices.Contains(d.Capabilities, need) {
@@ -49,8 +44,6 @@ func (d *Definition) supports(required []string) bool {
 	return true
 }
 
-// unusedCapabilityCount is the specificity measure for resolution: the fewer
-// declared capabilities beyond the required set, the more specific the match.
 func (d *Definition) unusedCapabilityCount(required []string) int {
 	unused := 0
 	for _, declared := range d.Capabilities {

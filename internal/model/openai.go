@@ -401,10 +401,6 @@ func classifyHTTPStatus(status int, provider string) error {
 	return nil
 }
 
-// classifyRequestError wraps the transport error rather than formatting it,
-// so isTransientError can still reach net.ErrClosed, io.ErrUnexpectedEOF, and
-// the syscall sentinels through errors.Is. Formatting the cause into the
-// detail string silently made every transport failure look permanent.
 func classifyRequestError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err

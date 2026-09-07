@@ -36,8 +36,6 @@ func eventCountByKind(t *testing.T, db *sql.DB, turnID, kind string) int {
 	return count
 }
 
-// jsonStep is a fake executor step with a valid JSON payload, so the event
-// survives the store's payload validation.
 func jsonStep(kind string) runtime.FakeStep {
 	return runtime.FakeStep{Kind: kind, Payload: json.RawMessage(`{}`)}
 }

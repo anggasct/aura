@@ -122,7 +122,6 @@ func TestInterpreterRunsMixedWorkflowEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	// The approval step suspends; resolve it through the bound signal.
 	signalAndSettle := func(name string, payload string) {
 		t.Helper()
 		deadline := time.Now().Add(2 * time.Second)
@@ -242,8 +241,6 @@ func TestInterpreterStepTimeoutRetriesThenFailsRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	// Each attempt burns the step timeout on the runtime clock; retries
-	// interleave backoff sleeps, so keep advancing until the run fails.
 	for range 24 {
 		clock.Advance(time.Minute)
 		time.Sleep(2 * time.Millisecond)
@@ -436,7 +433,6 @@ func ptr(value string) *string { return &value }
 
 func strPtr(value string) *string { return &value }
 
-// snapshot helpers kept single-threaded-safe for assertions.
 func (f *fakeAgentRunner) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -557,8 +553,6 @@ func TestInterpreterSignalStepTimeoutRetryConvergesOnSignal(t *testing.T) {
 				t.Fatalf("Start: %v", err)
 			}
 			waitForRunStatus(t, disk, summary.ID, RunSuspended, 2*time.Second)
-			// The first attempt times out with no signal in flight; the
-			// retry must park cleanly and converge on the next delivery.
 			deadline := time.Now().Add(2 * time.Second)
 			retried := false
 			for time.Now().Before(deadline) {

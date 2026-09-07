@@ -121,9 +121,6 @@ func TestUsageEntriesNegativeLimitRejected(t *testing.T) {
 	}
 }
 
-// TestUsageSubcommandsRejectPositionalArgs: the read-only usage subcommands
-// take no positional arguments; a stray argument must be rejected as a usage
-// error so the CLI exits 2 (argument-error contract), not 1.
 func TestUsageSubcommandsRejectPositionalArgs(t *testing.T) {
 	dataRoot := t.TempDir()
 	cfg := writeUsageConfig(t, dataRoot)

@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// Status is a point-in-time snapshot of budget consumption for the current
-// UTC day and month. All amounts are integer USD micros.
 type Status struct {
 	Day                 string
 	Month               string
@@ -20,21 +18,14 @@ type Status struct {
 	ActiveReservations  int
 }
 
-// DayUsedMicros is the counted day spend (reserved + settled).
 func (s *Status) DayUsedMicros() int64 { return s.DayReservedMicros + s.DaySettledMicros }
 
-// MonthUsedMicros is the counted month spend (reserved + settled).
 func (s *Status) MonthUsedMicros() int64 { return s.MonthReservedMicros + s.MonthSettledMicros }
 
-// DayRemainingMicros is the remaining daily budget (cap - used). A zero cap
-// means the daily budget is not enforced.
 func (s *Status) DayRemainingMicros() int64 { return s.DailyCapMicros - s.DayUsedMicros() }
 
-// MonthRemainingMicros is the remaining monthly budget (cap - used). A zero
-// cap means the monthly budget is not enforced.
 func (s *Status) MonthRemainingMicros() int64 { return s.MonthlyCapMicros - s.MonthUsedMicros() }
 
-// Status reports current window consumption against the configured caps.
 func (l *Ledger) Status(ctx context.Context) (*Status, error) {
 	now := l.now()
 	day, month := windowKeys(now)
@@ -62,8 +53,6 @@ func (l *Ledger) Status(ctx context.Context) (*Status, error) {
 	return st, nil
 }
 
-// windowBreakdown splits counted spend for a window into reserved (active +
-// expired reservations) and settled (entry costs).
 func (l *Ledger) windowBreakdown(ctx context.Context, where string, args []any, reserved, settled *int64) error {
 	query := `
 		SELECT
@@ -79,7 +68,6 @@ func (l *Ledger) windowBreakdown(ctx context.Context, where string, args []any, 
 	return nil
 }
 
-// Entry is one settled usage record joined with its reservation context.
 type Entry struct {
 	ID                string
 	ReservationID     string
@@ -92,8 +80,6 @@ type Entry struct {
 	RecordedAt        time.Time
 }
 
-// Entries lists settlement entries newest first, capped at limit. A limit of
-// 0 selects the default of 50; a negative limit is an invalid argument.
 func (l *Ledger) Entries(ctx context.Context, limit int) ([]Entry, error) {
 	if limit < 0 {
 		return nil, codedError(ErrorCodeInvalidArgument, "usage: entries limit must not be negative", nil)

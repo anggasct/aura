@@ -75,9 +75,6 @@ func TestADKSessionServiceCreateGet(t *testing.T) {
 	}
 }
 
-// The ADK session service is read-only for events: the engine is the single
-// writer. AppendEvent validates the mapping but persists nothing; Get
-// reloads events that the engine (or the store directly) wrote.
 func TestADKSessionServiceAppendValidatesButDoesNotPersist(t *testing.T) {
 	_, sessions, events := newSessionTestDB(t)
 	svc, err := NewADKSessionService(sessions)
@@ -103,7 +100,6 @@ func TestADKSessionServiceAppendValidatesButDoesNotPersist(t *testing.T) {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
-	// AppendEvent must not write: no rows in the store yet.
 	got, err := svc.Get(ctx, &session.GetRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -112,8 +108,6 @@ func TestADKSessionServiceAppendValidatesButDoesNotPersist(t *testing.T) {
 		t.Fatalf("events = %d, want 0 (AppendEvent must not persist)", got.Session.Events().Len())
 	}
 
-	// The engine writes through the store with the original ADK event ID;
-	// Get must reload it with full fidelity.
 	re, err := store.RuntimeEventFromADK("session-1", "turn-1", ev)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK: %v", err)

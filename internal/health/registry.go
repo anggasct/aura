@@ -12,9 +12,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Severity is an operator-facing triage level. It is derived from Status by
-// default and carried separately so a degraded condition an operator must
-// act on can be escalated without a new Status value.
 type Severity string
 
 const (
@@ -23,7 +20,6 @@ const (
 	SeverityCritical Severity = "critical"
 )
 
-// SeverityFor maps a status to its default severity.
 func SeverityFor(s Status) Severity {
 	switch s {
 	case StatusDown:
@@ -35,8 +31,6 @@ func SeverityFor(s Status) Severity {
 	}
 }
 
-// Remediation IDs. Stable identifiers an operator can look up; the detail
-// string is human text, the ID is the contract.
 const (
 	RemediationNone            = ""
 	RemediationRunMigrations   = "run-migrations"
@@ -49,15 +43,10 @@ const (
 	RemediationRelieveLimits   = "relieve-resource-limits"
 )
 
-// Scope labels where a finding applies. Local findings are safe to print in
-// full; the distinction exists so future remote consumers can filter.
 const (
 	ScopeLocal = "local"
 )
 
-// RegisteredCheck binds a checker to its execution budget. Timeout bounds one
-// evaluation; Freshness bounds how long the previous observation may be
-// served before it is reported stale.
 type RegisteredCheck struct {
 	ID          string
 	Checker     Checker
@@ -67,23 +56,16 @@ type RegisteredCheck struct {
 	Remediation string
 }
 
-// Registry evaluates a fixed set of checks with a bounded concurrency budget
-// and remembers the first and last time each finding was observed. It never
-// mutates observed state: checkers receive the evaluation context only.
 type Registry struct {
 	checks     []RegisteredCheck
 	maxRunning int
 	now        func() time.Time
 
-	mu   sync.Mutex
-	seen map[string]Finding
-	// lastByCheck keeps each check's newest observation so a timed-out
-	// evaluation can name what the operator would have seen.
+	mu          sync.Mutex
+	seen        map[string]Finding
 	lastByCheck map[string]Finding
 }
 
-// NewRegistry builds a registry over the given checks. Duplicate check IDs
-// are rejected so a finding always maps to exactly one checker.
 func NewRegistry(checks ...RegisteredCheck) (*Registry, error) {
 	ids := make(map[string]struct{}, len(checks))
 	normalized := make([]RegisteredCheck, 0, len(checks))
@@ -127,10 +109,6 @@ const (
 	ErrorCodeInvalidCheck = "invalid_check"
 )
 
-// Evaluate runs every check within its budget and returns the observed
-// findings in a stable order (check id, component, code). A check that
-// overruns its deadline yields a stale unknown finding carrying the last
-// observation's summary instead of blocking the evaluation.
 func (r *Registry) Evaluate(ctx context.Context) []Finding {
 	type result struct {
 		check    *RegisteredCheck
@@ -146,8 +124,6 @@ func (r *Registry) Evaluate(ctx context.Context) []Finding {
 			return nil
 		})
 	}
-	// The only error groupCtx carries is the parent's cancellation, which
-	// the caller already observes; per-check failures are findings.
 	_ = group.Wait()
 
 	all := make([]Finding, 0, len(r.checks))
@@ -208,8 +184,6 @@ func (r *Registry) runCheck(ctx context.Context, check *RegisteredCheck) []Findi
 	}
 }
 
-// safeCheck converts a checker panic into a finding; a diagnostics sweep must
-// never take the process down because an observed subsystem misbehaved.
 func safeCheck(ctx context.Context, check *RegisteredCheck) (findings []Finding, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -231,10 +205,6 @@ func (r *Registry) lastFinding(check *RegisteredCheck) (Finding, bool) {
 	return finding, ok
 }
 
-// stamp fills the registry-owned fields: severity, scope, remediation, stable
-// finding ID, and first/last-seen timestamps from the observation history.
-// The observed finding is copied first — checker-owned slices must never be
-// mutated through the registry.
 func (r *Registry) stamp(check *RegisteredCheck, observed *Finding) Finding {
 	finding := *observed
 	now := r.now()
@@ -272,7 +242,6 @@ func (r *Registry) stamp(check *RegisteredCheck, observed *Finding) Finding {
 	return finding
 }
 
-// WorstStatus returns the worst status across findings.
 func WorstStatus(findings []Finding) Status {
 	worst := StatusUp
 	for i := range findings {
@@ -283,7 +252,6 @@ func WorstStatus(findings []Finding) Status {
 	return worst
 }
 
-// WorstSeverity returns the worst severity across findings.
 func WorstSeverity(findings []Finding) Severity {
 	worst := SeverityInfo
 	for i := range findings {
@@ -316,7 +284,6 @@ func compareStrings(a, b string) int {
 	}
 }
 
-// Error is the health package's typed error.
 type Error struct {
 	Code   ErrorCode
 	Detail string
@@ -328,7 +295,6 @@ func (e *Error) Error() string {
 	return string(e.Code) + ": " + e.Detail
 }
 
-// CodeOf returns the typed code of a health error.
 func CodeOf(err error) (ErrorCode, bool) {
 	var target *Error
 	if errors.As(err, &target) {
@@ -337,8 +303,6 @@ func CodeOf(err error) (ErrorCode, bool) {
 	return "", false
 }
 
-// redactedCheckError strips anything a subsystem error might carry that does
-// not belong in a finding: only the error class is operator-relevant here.
 func redactedCheckError(err error) string {
 	if code, ok := CodeOf(err); ok {
 		return string(code)

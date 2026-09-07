@@ -9,10 +9,6 @@ import (
 	"github.com/anggasct/aura/internal/runtime/channelhost"
 )
 
-// Host owns the runtime and its channel adapters. It hands each adapter the
-// runtime as its ingress sink and coordinates a single ordered shutdown: stop
-// ingress, let the adapters return, then drain the runtime so every accepted
-// turn reaches a durable terminal before the adapters close.
 type Host struct {
 	runtime  *Engine
 	adapters []runtimechannelhost.ChannelPort
@@ -24,8 +20,6 @@ type Host struct {
 	wg        sync.WaitGroup
 }
 
-// NewHost builds a host over the runtime and its adapters. Adapters may be
-// empty; the runtime must not be nil.
 func NewHost(runtime *Engine, adapters []runtimechannelhost.ChannelPort, logger *slog.Logger) (*Host, error) {
 	if runtime == nil {
 		return nil, invalidArgument("runtime must not be nil")
@@ -36,9 +30,6 @@ func NewHost(runtime *Engine, adapters []runtimechannelhost.ChannelPort, logger 
 	return &Host{runtime: runtime, adapters: adapters, logger: logger}, nil
 }
 
-// Start launches every adapter, handing each the runtime as its ingress sink.
-// Adapter goroutines run until Shutdown cancels their context; an adapter
-// that returns with an error outside shutdown is logged, not fatal.
 func (h *Host) Start(ctx context.Context) error {
 	h.mu.Lock()
 	if h.running {
@@ -62,10 +53,6 @@ func (h *Host) Start(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown stops ingress by cancelling the adapter contexts, waits for the
-// adapters to return within the runtime's shutdown grace, then drains the
-// runtime. An adapter that ignores cancellation is abandoned after the grace
-// period; the runtime drain still bounds total shutdown time.
 func (h *Host) Shutdown(ctx context.Context) error {
 	h.mu.Lock()
 	cancel := h.runCancel

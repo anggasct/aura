@@ -86,7 +86,6 @@ func TestArtifactPutDedupesAcrossSessions(t *testing.T) {
 		t.Errorf("blob rows for digest = %d, want 1 (no duplicate bytes)", blobCount)
 	}
 
-	// Unlinking one session's reference must not affect the other's ownership.
 	if err := artifacts.Unlink(ctx, "artifact-a"); err != nil {
 		t.Fatalf("Unlink a: %v", err)
 	}

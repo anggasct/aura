@@ -226,8 +226,6 @@ func TestTTYSanitizesUntrustedStream(t *testing.T) {
 		t.Fatalf("Finalize: %v", err)
 	}
 	got := out.String()
-	// The renderer's own escape sequences are limited to the styling set;
-	// untrusted ESC payloads must not appear.
 	untrusted := strings.ReplaceAll(got, dim, "")
 	untrusted = strings.ReplaceAll(untrusted, bold, "")
 	untrusted = strings.ReplaceAll(untrusted, reset, "")
@@ -282,8 +280,6 @@ func TestTTYSlowWriterStaysBoundedAndCancellable(t *testing.T) {
 	done := r.StartPump(pumpCtx, nil)
 	r.Observe(Event{Kind: "model.delta", Payload: ttPayload(t, "data")})
 	time.Sleep(5 * time.Millisecond)
-	// The first paint blocks in the writer; cancellation must stop the pump
-	// without piling on more frames.
 	stop()
 	_ = out.Close()
 	select {
@@ -429,7 +425,6 @@ func TestNoColorCompletedWinsWithoutReplayingPartial(t *testing.T) {
 	}
 }
 
-// closingWriter blocks until the renderer closes the output boundary.
 type closingWriter struct {
 	entered chan struct{}
 	closed  chan struct{}
@@ -534,9 +529,6 @@ func TestTTYNoColorEmitsProgressAfterTailRollsOver(t *testing.T) {
 }
 
 func TestNoColorDoesNotDuplicateControlBearingOutput(t *testing.T) {
-	// The streamed partial and the authoritative completed message carry the
-	// same ANSI-bearing text; sanitized comparison must recognize them as
-	// one message and emit the sanitized answer exactly once.
 	ansi := "a\x1b[31mb"
 	out := &bytes.Buffer{}
 	r := newTestTTY(out, func() int { return 80 }, false)

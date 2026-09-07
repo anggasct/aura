@@ -37,9 +37,6 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			logConfigResult(ctx, logger, &result)
-			// The runtime must not start while an enabled capability is
-			// absent from this artifact or missing its host dependency;
-			// diagnostics surfaces report the same state as findings.
 			if result.CapabilityStateError != nil {
 				return result.CapabilityStateError
 			}

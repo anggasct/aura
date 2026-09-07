@@ -39,11 +39,6 @@ func newError(code ErrorCode, capability, detail string) error {
 	return &Error{Code: code, Capability: capability, Detail: detail}
 }
 
-// IsHealthState reports whether every problem in err describes an
-// artifact or host capability state (absent from this build, wrong
-// profile or OS, missing dependency) rather than a malformed
-// configuration. Health-state problems are reported through diagnostics
-// surfaces; malformed configurations remain load errors.
 func IsHealthState(err error) bool {
 	if err == nil {
 		return false

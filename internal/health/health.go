@@ -1,10 +1,3 @@
-// Package health defines Aura's diagnostics contract: typed findings, a
-// bounded evaluator, and checkers for the conditions an operator must detect
-// (migration state, capability availability, sandbox support, backup age,
-// provider configuration, stuck effects/jobs). Checkers take narrow probes so
-// the package stays decoupled from the subsystems it observes; the composition
-// root wires real probes and presents the findings (aura status, readiness
-// probes).
 package health
 
 import (
@@ -13,7 +6,6 @@ import (
 	"time"
 )
 
-// Status is a component's coarse health state, ordered from healthy to failed.
 type Status string
 
 const (
@@ -23,8 +15,6 @@ const (
 	StatusDown     Status = "down"
 )
 
-// Component names. These are stable labels; renaming one is a breaking change
-// for diagnostics consumers.
 const (
 	ComponentMigration  = "migration"
 	ComponentCapability = "capability"
@@ -34,11 +24,6 @@ const (
 	ComponentEffectJob  = "effect_job"
 )
 
-// Finding is one typed diagnostic. Detail is operator-facing and redacted: no
-// secrets, tokens, absolute paths, or content. ID, Severity, Scope, and
-// Remediation are stable contract fields for diagnostics consumers; the
-// registry fills ID/Severity/Scope/Remediation/FirstSeen/LastSeen when a
-// checker leaves them zero.
 type Finding struct {
 	ID          string    `json:"id"`
 	Component   string    `json:"component"`
@@ -54,23 +39,18 @@ type Finding struct {
 	CheckedAt   time.Time `json:"checked_at"`
 }
 
-// Checker reports the health of one concern. A checker always returns at least
-// one finding describing its component's current state.
 type Checker interface {
 	Check(ctx context.Context) []Finding
 }
 
-// Evaluator runs a fixed set of checkers and aggregates their findings.
 type Evaluator struct {
 	checkers []Checker
 }
 
-// NewEvaluator builds an evaluator over the given checkers.
 func NewEvaluator(checkers ...Checker) *Evaluator {
 	return &Evaluator{checkers: checkers}
 }
 
-// Evaluate runs every checker and returns all findings.
 func (e *Evaluator) Evaluate(ctx context.Context) []Finding {
 	findings := make([]Finding, 0, len(e.checkers))
 	for _, c := range e.checkers {
@@ -79,8 +59,6 @@ func (e *Evaluator) Evaluate(ctx context.Context) []Finding {
 	return findings
 }
 
-// Status returns the worst status across all findings, or StatusUp when there
-// are none.
 func (e *Evaluator) Status(ctx context.Context) Status {
 	findings := e.Evaluate(ctx)
 	worst := StatusUp
@@ -105,8 +83,6 @@ func severity(s Status) int {
 	}
 }
 
-// MigrationChecker reports whether the schema is current. Versions probes the
-// applied and latest migration versions.
 type MigrationChecker struct {
 	Versions func(ctx context.Context) (applied, latest int, err error)
 }
@@ -127,12 +103,6 @@ func (c MigrationChecker) Check(ctx context.Context) []Finding {
 	}
 }
 
-// CapabilityStatus is the health-owned view of one capability across the
-// release profile dimensions: whether it is compiled into this binary,
-// whether its dependencies are present on this host, and whether the
-// operator enabled it. The composition root maps the capability registry
-// onto this shape so the health package need not import the capability
-// domain.
 type CapabilityStatus struct {
 	Name              string
 	Compiled          bool
@@ -142,12 +112,6 @@ type CapabilityStatus struct {
 	UnavailableReason string
 }
 
-// CapabilityChecker reports every capability whose declared state does not
-// hold, each with the reason an operator can act on. Capabilities that are
-// neither compiled into this artifact nor enabled are simply not part of
-// this build; configuration validation already rejects enabling them, so
-// the checker only flags capabilities the configuration asked for. An
-// aggregate up finding is emitted when everything requested is consistent.
 type CapabilityChecker struct {
 	Statuses func(ctx context.Context) []CapabilityStatus
 }
@@ -189,10 +153,6 @@ func (c CapabilityChecker) Check(ctx context.Context) []Finding {
 	return findings
 }
 
-// SandboxChecker reports whether host containment primitives are available.
-// Support returns whether any primitive is usable plus an operator detail.
-// An unsupported host is down, not degraded: containment is mandatory for
-// effectful execution, so its absence must block intake.
 type SandboxChecker struct {
 	Support func() (supported bool, detail string)
 }
@@ -206,8 +166,6 @@ func (c SandboxChecker) Check(_ context.Context) []Finding {
 	return []Finding{{Component: ComponentSandbox, Code: "sandbox_unavailable", Status: StatusDown, Detail: detail, CheckedAt: now}}
 }
 
-// StorageIntakeState classifies whether the storage surface can durably
-// accept new writes.
 type StorageIntakeState string
 
 const (
@@ -218,8 +176,6 @@ const (
 	StorageIntakeFull        StorageIntakeState = "full"
 )
 
-// StorageChecker reports whether the storage surface accepts durable intake.
-// Intake probes writability and free space without mutating state.
 type StorageChecker struct {
 	Intake func(ctx context.Context) (StorageIntakeState, string)
 }
@@ -241,8 +197,6 @@ func (c StorageChecker) Check(ctx context.Context) []Finding {
 	}
 }
 
-// BackupChecker reports whether a recent backup exists. LastBackup returns the
-// most recent backup time, or an error when none exists.
 type BackupChecker struct {
 	LastBackup func(ctx context.Context) (time.Time, error)
 	MaxAge     time.Duration
@@ -265,8 +219,6 @@ func (c BackupChecker) Check(ctx context.Context) []Finding {
 	return []Finding{{Component: ComponentBackup, Code: "ok", Status: StatusUp, Detail: "backup current", CheckedAt: now}}
 }
 
-// ProviderChecker reports whether a model provider is configured. Probe
-// returns nil when a provider resolves for the default turn task.
 type ProviderChecker struct {
 	Probe func(ctx context.Context) error
 }
@@ -279,9 +231,6 @@ func (c ProviderChecker) Check(ctx context.Context) []Finding {
 	return []Finding{{Component: ComponentProvider, Code: "ok", Status: StatusUp, Detail: "provider configured", CheckedAt: now}}
 }
 
-// EffectJobChecker reports stuck effects and jobs. Stuck probes the count of
-// effect/job records that have not reached a terminal state; the composition
-// root wires it to the effect journal once that lands.
 type EffectJobChecker struct {
 	Stuck func(ctx context.Context) (count int, err error)
 }

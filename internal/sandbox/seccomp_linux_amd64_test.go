@@ -13,7 +13,6 @@ func TestBuildSeccompFilter(t *testing.T) {
 	allowed := []int{unix.SYS_READ, unix.SYS_WRITE, unix.SYS_EXECVE}
 	f := buildSeccompFilter(allowed)
 
-	// [load arch, arch==x86_64?, kill, load nr, 3 comparisons, default kill, allow]
 	if len(f) != len(allowed)+6 {
 		t.Fatalf("filter length = %d, want %d", len(f), len(allowed)+6)
 	}
@@ -27,7 +26,6 @@ func TestBuildSeccompFilter(t *testing.T) {
 		t.Errorf("arch-mismatch fallthrough not kill_process: %+v", f[2])
 	}
 
-	// Each allowed syscall comparison must jump to ALLOW on a match.
 	allowIdx := len(f) - 1
 	for offset, want := range allowed {
 		ins := f[4+offset]

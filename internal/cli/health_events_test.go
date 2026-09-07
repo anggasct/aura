@@ -15,9 +15,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// The durable log must round-trip transitions: writes persist as runtime
-// events under the reserved system session, and history replays them
-// oldest-first for restart recovery.
 func baseTime() time.Time { return time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC) }
 
 func TestHealthEventLogRoundTrip(t *testing.T) {
@@ -49,8 +46,6 @@ func TestHealthEventLogRoundTrip(t *testing.T) {
 		t.Fatalf("history = %+v", history)
 	}
 
-	// A fresh tracker rebuilt from this log resumes at degraded and emits
-	// nothing until a real change stabilizes.
 	tracker, err := health.NewStateTracker(health.TransitionPolicy{StableFor: time.Minute, Cooldown: time.Minute}, log.sink, log.history)
 	if err != nil {
 		t.Fatalf("rebuild tracker: %v", err)
@@ -63,10 +58,6 @@ func TestHealthEventLogRoundTrip(t *testing.T) {
 	}
 }
 
-// Shutdown ordering: the drain flag flips synchronously before the socket
-// closes — the flag is set the instant Start's cancellation branch runs,
-// so once Start returns the ordering invariant is already decided, and
-// liveness survives the graceful drain window.
 func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 	dataRoot := t.TempDir()
 	db, err := store.OpenDB(t.Context(), filepath.Join(dataRoot, "aura.db"))
@@ -107,24 +98,15 @@ func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("listener did not stop")
 	}
-	// Start returned after Shutdown completed; draining must have been set
-	// on the same goroutine before Shutdown was called.
 	if !listener.readiness.Draining() {
 		t.Fatal("drain flag not set when Start returned; ordering violated")
 	}
-	// The drain flag must also have preceded the socket teardown: once the
-	// listener is gone, any lingering connection attempt fails, proving the
-	// flag outlived the socket.
 	if response, err := probeGet(t.Context(), addr, "/readyz"); err == nil {
 		_ = response.Body.Close()
 		t.Error("readyz still served after listener teardown")
 	}
 }
 
-// The periodic observer must persist transitions durably: an evaluation
-// whose bounded context expires still writes the transition, and a fresh
-// process replays it after restart. Every context fact is asserted through
-// channels, not wall-clock polling.
 func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
@@ -137,8 +119,6 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	// The evaluation hook spins until its bounded context expires, proving
-	// the persistence step ran after the evaluation context was done.
 	expired := make(chan struct{})
 	var expiredOnce sync.Once
 	evaluate := func(evalCtx context.Context) []health.Finding {
@@ -167,9 +147,6 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	observerCtx, stopObserver := context.WithCancel(ctx)
 	observerDone := listener.startObserver(observerCtx)
 
-	// Evaluation expired, then persistence completed on its own context —
-	// both observed through channels, in that order, before the observer is
-	// stopped. Nothing here sleeps or polls wall-clock.
 	select {
 	case <-expired:
 	case <-time.After(5 * time.Second):
@@ -196,8 +173,6 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 		t.Fatalf("persisted history = %+v", history)
 	}
 
-	// Restart: a fresh log replays every persisted transition and a rebuilt
-	// tracker resumes without re-emitting.
 	restarted := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
 	replayed, err := restarted.history(ctx)
 	if err != nil {
@@ -215,8 +190,6 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	}
 }
 
-// Shutdown must cancel an in-flight sink operation, and the stop function
-// must block until the observer goroutine has fully exited.
 func TestObserverStopCancelsInFlightPersistence(t *testing.T) {
 	sinkStarted := make(chan struct{})
 	var sawCancellation atomic.Bool
@@ -256,9 +229,6 @@ func TestObserverStopCancelsInFlightPersistence(t *testing.T) {
 	}
 }
 
-// Recovery replays the latest state regardless of history length: paging
-// follows sequence order, so transitions beyond any single page still
-// reach the tracker, and equal timestamps cannot reorder replay.
 func TestHistoryPagesBeyondFirstThousandEvents(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.OpenDB(ctx, filepath.Join(dataRoot(t), "aura.db"))
@@ -270,8 +240,6 @@ func TestHistoryPagesBeyondFirstThousandEvents(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
-	// 1200 transitions with identical timestamps: the latest wins and the
-	// sequence order, not the clock, decides replay.
 	stamp := baseTime()
 	for i := range 1200 {
 		status := health.StatusUp

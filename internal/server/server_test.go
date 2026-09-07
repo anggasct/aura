@@ -51,11 +51,6 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// waitForLog polls until the logger output contains want, so tests send a
-// second signal only after the first one was actually consumed by Run. A
-// fixed sleep would be race-prone; the kernel coalesces identical pending
-// signals, so the second signal must not be sent while the first is still
-// undelivered.
 func waitForLog(t *testing.T, buf *syncBuffer, want string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -326,9 +321,6 @@ func TestRunShutdownTimeout(t *testing.T) {
 	}
 }
 
-// A listener that ignores cancellation must not be able to hang the process.
-// Before the shutdown paths were unified, the context path skipped the drain
-// timeout entirely and Run blocked here forever.
 func TestRunCancellationHonorsShutdownTimeout(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})

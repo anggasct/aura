@@ -23,8 +23,6 @@ const (
 	accountingReconciled = "reconciled"
 )
 
-// Ledger enforces UTC daily/monthly budget caps using durable reservations
-// and exactly-once settlements. All money is integer USD micros.
 type Ledger struct {
 	db             *sql.DB
 	prices         *PriceRegistry
@@ -46,14 +44,6 @@ type LedgerOptions struct {
 	Logger           *slog.Logger
 }
 
-// NewLedger builds a ledger over an existing SQLite handle whose schema
-// includes the usage tables (migration v2). A zero daily and monthly cap
-// disables budget enforcement; reservations are still recorded.
-// NewLedger builds a ledger over db. The connection pool must allow more
-// than one open connection: the unique-violation recovery paths (Reserve,
-// Settle) re-read the pool outside the transaction while it still holds a
-// connection, so a pool pinned to MaxOpenConns(1) would deadlock on that
-// re-read.
 func NewLedger(db *sql.DB, opts LedgerOptions) (*Ledger, error) {
 	if db == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "usage: database handle must not be nil", nil)
@@ -86,16 +76,10 @@ func NewLedger(db *sql.DB, opts LedgerOptions) (*Ledger, error) {
 }
 
 type ReserveRequest struct {
-	// InvocationID identifies the model invocation; together with Attempt it
-	// uniquely names the reservation (retries and fallbacks are separate
-	// attempts).
-	InvocationID string
-	Attempt      int
-	// ModelDefinitionID must match a registered price record.
-	ModelDefinitionID string
-	// KnownInputTokens is the actual input size at reserve time.
-	KnownInputTokens int64
-	// RequestedMaxOutputTokens bounds the conservative reservation.
+	InvocationID             string
+	Attempt                  int
+	ModelDefinitionID        string
+	KnownInputTokens         int64
 	RequestedMaxOutputTokens int64
 }
 
@@ -112,13 +96,6 @@ type Reservation struct {
 	CreatedAt          time.Time
 }
 
-// Reserve atomically checks the UTC daily and monthly windows against the
-// caps and records a conservative reservation. The (invocation_id, attempt)
-// pair is the idempotency key: a replay or retry that re-enters with the same
-// key returns the existing reservation rather than creating a second one, so
-// one logical model attempt can never be double-counted. An attempt with no
-// applicable price is rejected when a cap is enabled; it never reserves at
-// zero cost.
 func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation, error) {
 	if err := validateReserveRequest(req); err != nil {
 		return nil, err
@@ -146,8 +123,6 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 			return nil, codedError(ErrorCodePriceNotFound,
 				fmt.Sprintf("usage: no price for model definition %q in currency %q", req.ModelDefinitionID, l.currency), nil)
 		}
-		// No cap enabled: record a zero-cost reservation marker without
-		// enforcement; the price may simply not be registered yet.
 		price = &Price{Currency: l.currency, MaxReservationRate: 100}
 	}
 
@@ -205,10 +180,6 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 			if existing != nil {
 				return existing, nil
 			}
-			// The winner row was not visible to either read; under this
-			// store's immediate-lock transactions the insert could not have
-			// proceeded past a committed winner, so this is the genuine
-			// conflict case - the caller should treat it as such and retry.
 			return nil, codedError(ErrorCodeReservationConflict,
 				fmt.Sprintf("usage: reservation for invocation %q attempt %d already exists", invocationID, attempt), err)
 		}
@@ -231,11 +202,6 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 	}, nil
 }
 
-// reservationAfterConflict resolves an idempotency conflict after a failed
-// insert: the winning row is looked up first inside the transaction, then -
-// when that read sees nothing because the winner was uncommitted under a
-// deferred snapshot - outside it. lookupInTx and lookupOutside are provided
-// by the caller so the decision is testable without a real concurrent winner.
 func reservationAfterConflict(lookupInTx, lookupOutside func() (*Reservation, bool, error)) (*Reservation, error) {
 	if existing, ok, err := lookupInTx(); err != nil {
 		return nil, err
@@ -250,12 +216,6 @@ func reservationAfterConflict(lookupInTx, lookupOutside func() (*Reservation, bo
 	return nil, errReservationNotFound
 }
 
-// settlementAfterConflict resolves an idempotency conflict after a failed
-// settlement insert: the winning entry is looked up first inside the
-// transaction, then - when that read sees nothing because the winner was
-// uncommitted under a deferred snapshot - outside it. lookupInTx and
-// lookupOutside are provided by the caller so the decision is testable
-// without a real concurrent winner.
 func settlementAfterConflict(lookupInTx, lookupOutside func() (*Settlement, error)) (*Settlement, error) {
 	if winner, err := lookupInTx(); err == nil && winner != nil {
 		return winner, nil
@@ -270,8 +230,6 @@ func settlementAfterConflict(lookupInTx, lookupOutside func() (*Settlement, erro
 	return nil, errSettlementNotFound
 }
 
-// reservationByKey reports whether a reservation exists for the
-// (invocation_id, attempt) idempotency key and returns it.
 func (l *Ledger) reservationByKey(ctx context.Context, q queryer, invocationID string, attempt int) (r *Reservation, ok bool, err error) {
 	var (
 		row       Reservation
@@ -330,11 +288,6 @@ type Settlement struct {
 	PriceVersion  string
 }
 
-// Settle closes a reservation exactly once. A duplicate settlement for the
-// same reservation returns the existing entry (idempotent). A settlement for
-// a reservation already associated with a different provider usage identity
-// is a conflict. Missing provider usage settles conservatively as estimated
-// at the reserved amount, never at zero.
 func (l *Ledger) Settle(ctx context.Context, req *SettleRequest) (*Settlement, error) {
 	if req == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "usage: settle request must not be nil", nil)
@@ -353,8 +306,6 @@ func (l *Ledger) Settle(ctx context.Context, req *SettleRequest) (*Settlement, e
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Idempotency: an existing entry for this reservation is the answer; a
-	// different provider usage identity is a mismatch conflict.
 	var existing Settlement
 	var existingProviderUsage sql.NullString
 	err = tx.QueryRowContext(ctx, `
@@ -402,14 +353,11 @@ func (l *Ledger) Settle(ctx context.Context, req *SettleRequest) (*Settlement, e
 	accounting := accountingReported
 	var cost int64
 	if price == nil || price.Currency == "" {
-		// Conservative: no price on settlement (may have been unregistered
-		// since reserve) settles at the reserved amount, never at zero.
 		accounting = accountingEstimated
 		cost = reserved
 	} else {
 		cost = price.CostMicros(req.Usage)
 		if cost <= 0 {
-			// Missing or zero-reported usage: charge the reservation.
 			accounting = accountingEstimated
 			cost = reserved
 		}
@@ -435,11 +383,6 @@ func (l *Ledger) Settle(ctx context.Context, req *SettleRequest) (*Settlement, e
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			// Concurrent duplicate settlement: read the winner. The in-tx
-			// re-read can miss it under a deferred (read-committed) snapshot,
-			// so - as in Reserve - fall back to the database outside the
-			// transaction, where the fresh snapshot sees the committed entry.
-			// Both reads missing is the genuine conflict; the caller retries.
 			winner, rerr := settlementAfterConflict(
 				func() (*Settlement, error) {
 					var w Settlement
@@ -490,9 +433,6 @@ func (l *Ledger) Settle(ctx context.Context, req *SettleRequest) (*Settlement, e
 	}, nil
 }
 
-// ExpireStale marks reservations past their TTL as expired. Expired
-// reservations remain counted toward the caps until reconciled, so a crash or
-// cancellation never silently frees budget.
 func (l *Ledger) ExpireStale(ctx context.Context) (int, error) {
 	res, err := l.db.ExecContext(ctx, `
 		UPDATE usage_reservation SET state = ?, updated_at = ?
@@ -508,9 +448,6 @@ func (l *Ledger) ExpireStale(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
-// Reconcile releases expired reservations: it converts them to reconciled so
-// they stop counting toward the caps. Settlement after reconcile is a
-// conflict.
 func (l *Ledger) Reconcile(ctx context.Context) (int, error) {
 	res, err := l.db.ExecContext(ctx, `
 		UPDATE usage_reservation SET state = ?, updated_at = ?
@@ -532,9 +469,6 @@ type WindowUsage struct {
 	UsedMicros int64
 }
 
-// WindowUsage reports the counted spend for a UTC day/month: active and
-// expired reservations count their reserved amount, settled reservations
-// count their entry cost, reconciled reservations count nothing.
 func (l *Ledger) WindowUsage(ctx context.Context, day, month string) (int64, error) {
 	var used int64
 	err := l.db.QueryRowContext(ctx, `
@@ -549,14 +483,10 @@ func (l *Ledger) WindowUsage(ctx context.Context, day, month string) (int64, err
 	return used, nil
 }
 
-// capsEnabled reports whether budget enforcement is on.
 func (l *Ledger) capsEnabled() bool {
 	return l.dailyCap > 0 || l.monthlyCap > 0
 }
 
-// windowUsed sums counted spend for the day window and the whole month
-// window. Active and expired reservations count at reserved cost, settled
-// reservations at entry cost; the pending amount is added to both totals.
 func (l *Ledger) windowUsed(ctx context.Context, q queryer, day, month string, pending int64) (dayUsed, monthUsed int64, err error) {
 	dayUsed, err = l.windowSum(ctx, q, `r.window_day = ? AND r.window_month = ?`, day, month)
 	if err != nil {

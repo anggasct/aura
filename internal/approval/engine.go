@@ -12,14 +12,8 @@ import (
 	"time"
 )
 
-// Handler executes one tool after the broker has validated its grant. The
-// handler itself never re-decides policy; it receives the decision's
-// constraints and runs the tool under them.
 type Handler func(ctx context.Context, request ToolRequest, constraints Constraints) (ToolResult, error)
 
-// Engine is the canonical ToolBroker: every invocation is evaluated exactly
-// once, and execution requires a grant bound to the evaluated request,
-// current policy, and one-shot nonce.
 type Engine struct {
 	policy  Policy
 	handler Handler
@@ -28,8 +22,6 @@ type Engine struct {
 	nonces  map[string]time.Time // nonce -> expiry; consumed on Execute
 }
 
-// NewEngine builds an immutable-policy broker. The policy is loaded from
-// trusted configuration only; nothing in a ToolRequest can alter it.
 func NewEngine(policy Policy, handler Handler) (*Engine, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("approval: invalid policy: %w", err)
@@ -64,10 +56,6 @@ func validateContext(ctx context.Context) error {
 	return nil
 }
 
-// Evaluate applies policy to a normalized structured request. Deny is the
-// fail-closed default for unknown tools, disallowed trust labels, or
-// missing capabilities. Untrusted and derived content is always data and
-// can never alter policy; it can only be more restricted.
 func (e *Engine) Evaluate(ctx context.Context, request *ToolRequest) (PolicyDecision, error) {
 	if err := validateContext(ctx); err != nil {
 		return PolicyDecision{}, err
@@ -130,7 +118,6 @@ func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecisi
 	}, nil
 }
 
-// RegisterRule dynamically adds or updates a policy rule in a thread-safe manner.
 func (e *Engine) RegisterRule(rule *Rule) error {
 	if rule == nil {
 		return Errorf(ErrorCodeInvalidArgument, "rule must not be nil")
@@ -161,19 +148,12 @@ func (e *Engine) RegisterRule(rule *Rule) error {
 	return nil
 }
 
-// UnregisterRule removes a rule from policy in a thread-safe manner.
 func (e *Engine) UnregisterRule(toolName string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.policy.Rules, toolName)
 }
 
-// Grant mints a grant only after the request has passed policy, binding
-// principal, session, tool, arguments hash, constraints, policy version,
-// expiry, and a one-shot nonce. The decision is re-derived from policy, so
-// a fabricated decision can never mint a grant; Execute is only reachable
-// through this path. Changing any bound field later invalidates
-// the grant.
 func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Duration) (ApprovalGrant, error) {
 	if err := validateContext(ctx); err != nil {
 		return ApprovalGrant{}, err
@@ -187,9 +167,6 @@ func (e *Engine) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 	return e.grantUntil(ctx, request, e.now().Add(ttl))
 }
 
-// GrantUntil mints a grant with an absolute expiry. Callers that already have
-// a user-visible deadline use this to keep the grant from outliving that
-// deadline while policy evaluation and nonce generation run.
 func (e *Engine) GrantUntil(ctx context.Context, request *ToolRequest, expiresAt time.Time) (ApprovalGrant, error) {
 	if expiresAt.IsZero() {
 		return ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "grant expiry must be set")
@@ -274,9 +251,6 @@ func (e *Engine) ValidateAndConsume(ctx context.Context, request *ToolRequest, g
 	return nil
 }
 
-// Execute runs the tool only when the grant is valid for the request and
-// current policy, and the one-shot nonce has not been consumed. The handler
-// receives the decision constraints and never re-decides policy.
 func (e *Engine) Execute(ctx context.Context, request *ToolRequest, grant *ApprovalGrant) (ToolResult, error) {
 	if err := e.ValidateAndConsume(ctx, request, grant); err != nil {
 		return ToolResult{}, err

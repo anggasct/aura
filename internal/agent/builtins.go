@@ -1,7 +1,5 @@
 package agent
 
-// DefaultID is the default turn target: the conversational agent that every
-// trigger reaches when no explicit definition is requested.
 const DefaultID = "main"
 
 const defaultModelRoute = "primary"

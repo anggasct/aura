@@ -107,9 +107,6 @@ func TestFetchRejectsQueryAndLimitsRedirects(t *testing.T) {
 	}
 }
 
-// The production construction path has no client or transport injection:
-// unsafe destinations must be denied by the mediated client before any
-// connection is dialed.
 func TestFetchMediatedClientDeniesUnsafeDestinations(t *testing.T) {
 	resolutions := 0
 	counting := resolverFunc(func(ctx context.Context, host string) ([]net.IP, error) {

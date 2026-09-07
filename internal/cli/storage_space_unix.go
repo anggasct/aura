@@ -10,17 +10,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// diskFreeBytes reports free space available to unprivileged writes for the
-// filesystem holding path. The product goes through float64 because the
-// kernel block-count types differ per platform; anything above the int64
-// range clamps to MaxInt64, far beyond any real filesystem.
 func diskFreeBytes(path string) (int64, error) {
 	free, _, _, err := diskUsage(path)
 	return free, err
 }
 
-// diskUsage reports free bytes, total capacity, and free inodes for the
-// filesystem holding path.
 func diskUsage(path string) (freeBytes, totalBytes, freeInodes int64, err error) {
 	var stats unix.Statfs_t
 	if err := unix.Statfs(path, &stats); err != nil {
@@ -41,14 +35,10 @@ func diskUsage(path string) (freeBytes, totalBytes, freeInodes int64, err error)
 	return int64(free), int64(total), freeInodes, nil
 }
 
-// writableProbe reports whether the process could write to path without
-// writing anything.
 func writableProbe(path string) error {
 	return unix.Access(path, unix.W_OK)
 }
 
-// classifyOpenError names the syscall class of a failed writable probe: a
-// read-only mount reports EROFS.
 func classifyOpenError(err error) bool {
 	return errors.Is(err, syscall.EROFS)
 }

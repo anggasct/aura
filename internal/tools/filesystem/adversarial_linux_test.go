@@ -17,11 +17,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// TestFilesystemRejectsSymlinkChainsAndMagicLinks covers the symlink
-// battery: chains whose final target escapes the workspace, internal
-// symlink-to-symlink loops, final-component symlinks that stay inside the
-// workspace (fail-closed by design), and /proc-derived magic links reached
-// through relative components.
 func TestFilesystemRejectsSymlinkChainsAndMagicLinks(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
@@ -32,26 +27,21 @@ func TestFilesystemRejectsSymlinkChainsAndMagicLinks(t *testing.T) {
 	if err := os.WriteFile(inside, []byte("inside"), 0o600); err != nil {
 		t.Fatalf("write inside: %v", err)
 	}
-	// a -> b -> ../<outside>/secret
 	if err := os.Symlink(filepath.Join(outside, "secret"), filepath.Join(workspace, "b")); err != nil {
 		t.Fatalf("symlink b: %v", err)
 	}
 	if err := os.Symlink("b", filepath.Join(workspace, "a")); err != nil {
 		t.Fatalf("symlink a: %v", err)
 	}
-	// loop -> loop
 	if err := os.Symlink("loop", filepath.Join(workspace, "loop")); err != nil {
 		t.Fatalf("symlink loop: %v", err)
 	}
-	// self-escape via relative symlink target
 	if err := os.Symlink("../"+filepath.Base(outside)+"/secret", filepath.Join(workspace, "rel")); err != nil {
 		t.Fatalf("symlink rel: %v", err)
 	}
-	// internal final-component symlink: inside-link -> inside.txt
 	if err := os.Symlink("inside.txt", filepath.Join(workspace, "inside-link")); err != nil {
 		t.Fatalf("symlink inside-link: %v", err)
 	}
-	// magic link through a relative component: proc-self -> /proc/self
 	if err := os.Symlink("/proc/self", filepath.Join(workspace, "proc-self")); err != nil {
 		t.Fatalf("symlink proc-self: %v", err)
 	}
@@ -77,9 +67,6 @@ func TestFilesystemRejectsSymlinkChainsAndMagicLinks(t *testing.T) {
 	}
 }
 
-// TestFilesystemRejectsTraversalSpellings covers absolute paths, dot-dot
-// traversal including backslash separators and dot-encoding tricks, for
-// every tool.
 func TestFilesystemRejectsTraversalSpellings(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
@@ -111,10 +98,6 @@ func TestFilesystemRejectsTraversalSpellings(t *testing.T) {
 	}
 }
 
-// TestFilesystemMapsEscapeErrnosToPolicyDenied pins the errno mapping used
-// by the openat2 resolve flags: symlink resolution (ELOOP), mount-boundary
-// crossing (EXDEV), and privileged denial (EPERM) must all surface as
-// policy_denied, never as a raw execution failure.
 func TestFilesystemMapsEscapeErrnosToPolicyDenied(t *testing.T) {
 	for _, errno := range []error{unix.ELOOP, unix.EXDEV, unix.EPERM, unix.EEXIST} {
 		err := pathError("read", "some/path", errno)
@@ -127,11 +110,6 @@ func TestFilesystemMapsEscapeErrnosToPolicyDenied(t *testing.T) {
 	}
 }
 
-// TestFilesystemRaceAgainstEntrySwapping runs the tools in a loop while an
-// attacker goroutine swaps a workspace entry between a real file inside the
-// workspace and a symlink pointing at a canary outside it. Every read must
-// return either the inside content or a typed error — never canary content —
-// and every write must never touch the canary.
 func TestFilesystemRaceAgainstEntrySwapping(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
@@ -201,10 +179,6 @@ func TestFilesystemRaceAgainstEntrySwapping(t *testing.T) {
 			if decoded.Content == "CANARY" {
 				t.Fatalf("read %q returned canary content through a swapped symlink", path)
 			}
-			// The attacker goroutine truncates and refills the inside
-			// file and the reader loop itself writes "WROTE", so both are
-			// legal in-flight states; the invariant under attack is that
-			// canary content never appears.
 			if decoded.Content != "INSIDE" && decoded.Content != "WROTE" && decoded.Content != "" {
 				t.Fatalf("read %q content = %q, want INSIDE, WROTE, or empty", path, decoded.Content)
 			}
@@ -231,10 +205,6 @@ func TestFilesystemRaceAgainstEntrySwapping(t *testing.T) {
 	}
 }
 
-// TestFilesystemRaceAgainstDirectoryRenaming renames workspace directories
-// (including their parents) while list_dir and read_file run concurrently.
-// Operations must complete against the pinned tree or fail with a typed
-// error; no hang, no outside read.
 func TestFilesystemRaceAgainstDirectoryRenaming(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
@@ -292,7 +262,6 @@ func TestFilesystemRaceAgainstDirectoryRenaming(t *testing.T) {
 					t.Fatal("read returned outside content after a directory race")
 				}
 			} else if class := classOf(err); class == toolbroker.ResultPolicyDenied || class == "" {
-				// denied or plain I/O failure (ENOENT etc.) — both fine
 			} else {
 				t.Errorf("read class = %q, err = %v", class, err)
 			}

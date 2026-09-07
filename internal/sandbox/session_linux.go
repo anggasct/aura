@@ -19,36 +19,14 @@ import (
 	"time"
 )
 
-// sessionCloseGrace is how long a closing session waits between SIGTERM and
-// SIGKILL for the child group to exit on its own.
 const sessionCloseGrace = 2 * time.Second
 
-// sessionSetupWait bounds how long Start waits for the child to report its
-// isolation setup result. Child setup is sub-second in practice; the bound
-// only matters for a wedged host.
 const sessionSetupWait = 10 * time.Second
 
-// sessionDefaultOutputLimit bounds one exchange when the request sets no
-// output limit, so a chatty child can never grow an exchange without bound.
 const sessionDefaultOutputLimit = 1 << 20
 
-// sessionIODeadline covers the phases whose bounds come from the exchange
-// deadline; a caller without any deadline still gets a finite wait.
 const sessionIODeadline = 5 * time.Second
 
-// startSession launches the long-lived confined child. The confinement setup
-// mirrors the one-shot run path — the same re-executed child, config pipe,
-// init-error pipe, cgroup attach, and fail-closed error codes — except the
-// child's stdin and stdout stay connected to the parent for repeated
-// exchanges and no whole-run deadline is armed here. The child's isolation
-// setup result is awaited before Start returns, so a failed setup leaves no
-// process behind.
-//
-// A lifecycle watcher is armed before the first exchange: cancellation of
-// the Start context tears the group down exactly like Close (TERM→KILL→reap,
-// cgroup release). The child command observes the context's payload only,
-// never its cancellation — teardown is the watcher's and Close's job, so
-// both paths share one termination sequence.
 func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Session, error) {
 	resolved, err := resolveExecutable(req.Executable)
 	if err != nil {
@@ -112,19 +90,9 @@ func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Sessio
 		cg = &c
 	}
 
-	// The child command observes the context's payload but not its
-	// cancellation: the session's lifetime is owned by Close and by the
-	// lifecycle watcher armed below, and both run the same explicit
-	// termination sequence. If Start's caller already cancelled (or cancels
-	// during setup), the abort path reaps; otherwise the watcher takes over
-	// once the session is fully constructed.
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), "/proc/self/exe", ChildSentinel)
 	cmd.Dir = spec.WorkingDir
 	cmd.Env = append([]string(nil), spec.AllowEnv...)
-	// The persistent stdio pipes ride the command's own stdin/stdout/stderr
-	// slots, so the re-execution path dups them onto fds 0, 1, and 2 exactly
-	// as it would for any child; fds 3 and 4 remain the config and
-	// init-error pipes the one-shot child expects.
 	cmd.Stdin = stdinR
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
@@ -162,7 +130,6 @@ func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Sessio
 		ls.reapErr = cmd.Wait()
 		close(ls.reapDone)
 	}()
-	// The child owns its dups of these; the parent copies are spent.
 	_ = configR.Close()
 	_, _ = configW.Write(payload)
 	_ = configW.Close()
@@ -183,16 +150,10 @@ func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Sessio
 		return abort(err)
 	}
 	closeAll(errR)
-	// The session is fully live: hand lifecycle ownership to the watcher so
-	// a cancelled Start context tears the group down exactly like Close.
 	ls.armWatch(ctx)
 	return &Session{sessionAPI: ls}, nil
 }
 
-// awaitChildSetup drains the init-error pipe until the child reports a setup
-// failure or closes the pipe after a clean setup — the same signal the
-// one-shot run path waits on. A wedged child (no result within the bound)
-// fails closed like any other setup failure.
 func awaitChildSetup(errR *os.File, limit time.Duration) error {
 	_ = errR.SetReadDeadline(time.Now().Add(limit))
 	initErr, readErr := io.ReadAll(errR)
@@ -206,38 +167,23 @@ func awaitChildSetup(errR *os.File, limit time.Duration) error {
 }
 
 type linuxSession struct {
-	// mu serializes Request calls over the child's single stdio stream: one
-	// protocol exchange at a time, from write to drained response.
-	mu     sync.Mutex
-	req    SessionRequest
-	pid    int
-	cmd    *exec.Cmd
-	cg     *cgroup
-	stdin  *os.File
-	stderr *os.File
-	stdout *os.File
-	reader *bufio.Reader
-	// reapDone closes when the direct child has been reaped; reapErr is its
-	// wait result, readable once reapDone is closed.
-	reapDone chan struct{}
-	reapErr  error
-	closed   bool
-	// watchStop cancels the lifecycle watcher's derived context. Written
-	// once by armWatch before the session is published, read by close under
-	// mu, so the two lifecycle owners cannot interleave: either armWatch
-	// arms first and close cancels the watcher, or close wins the flag and
-	// no watcher is armed at all.
-	watchStop context.CancelFunc
-	// pendingLine records an exchange abandoned mid-response (deadline miss).
-	// The child's response is still in flight; the next exchange drains to
-	// the next newline — deterministically the rest of that response, since
-	// responses strictly alternate with requests — before writing its own.
+	mu          sync.Mutex
+	req         SessionRequest
+	pid         int
+	cmd         *exec.Cmd
+	cg          *cgroup
+	stdin       *os.File
+	stderr      *os.File
+	stdout      *os.File
+	reader      *bufio.Reader
+	reapDone    chan struct{}
+	reapErr     error
+	closed      bool
+	watchStop   context.CancelFunc
 	pendingLine bool
-	// broken seals the session after child exit or stream desync; every
-	// later Request fails closed. brokenTap is closed once, at that point.
-	brokenFlag atomic.Bool
-	brokenTap  chan struct{}
-	brokeOnce  sync.Once
+	brokenFlag  atomic.Bool
+	brokenTap   chan struct{}
+	brokeOnce   sync.Once
 }
 
 var _ sessionAPI = (*linuxSession)(nil)
@@ -253,13 +199,6 @@ func (ls *linuxSession) isBroken() bool {
 	return ls.brokenFlag.Load()
 }
 
-// armWatch starts the lifecycle watcher: when the Start context is
-// cancelled, the session tears down exactly as if Close had been called —
-// group TERM→KILL, reap, cgroup release. The watcher watches a context
-// derived from the Start context so it can always be released: Close cancels
-// the derived context before killing, so no goroutine ever lingers blocked
-// on a Start context that is never cancelled, and exactly one owner ever
-// drives the termination sequence.
 func (ls *linuxSession) armWatch(ctx context.Context) {
 	if ctx == nil {
 		return
@@ -267,8 +206,6 @@ func (ls *linuxSession) armWatch(ctx context.Context) {
 	watchC, watchStop := context.WithCancel(ctx)
 	ls.mu.Lock()
 	if ls.closed {
-		// Close won the race before the session was even published; nothing
-		// to watch.
 		ls.mu.Unlock()
 		watchStop()
 		return
@@ -282,10 +219,6 @@ func (ls *linuxSession) armWatch(ctx context.Context) {
 	}()
 }
 
-// close terminates the session child: SIGTERM to the whole process group,
-// SIGKILL after the grace period, reap, cgroup release. Idempotent — the
-// first caller (Close or the Start-context watcher) runs the sequence once,
-// and every later call returns nil.
 func (ls *linuxSession) close(_ context.Context) error {
 	ls.mu.Lock()
 	if ls.closed || ls.pid <= 0 {
@@ -294,10 +227,6 @@ func (ls *linuxSession) close(_ context.Context) error {
 	}
 	ls.closed = true
 	pid := ls.pid
-	// Detach the watcher before killing: after closed is set the watcher
-	// would be a no-op anyway, but stopping it means no goroutine lingers
-	// blocked on the (possibly never-cancelled) Start context after an
-	// explicit Close.
 	watchStop := ls.watchStop
 	ls.watchStop = nil
 	ls.mu.Unlock()
@@ -334,9 +263,6 @@ func (ls *linuxSession) request(ctx context.Context, payload []byte) ([]byte, er
 	exchange, cancel := context.WithTimeout(ctx, ls.exchangeTimeout(ctx))
 	defer cancel()
 
-	// Recover a previously abandoned exchange first: discard the in-flight
-	// response up to its newline so this exchange starts aligned. The
-	// remaining exchange budget bounds the drain.
 	if ls.pendingLine {
 		if err := ls.stdout.SetReadDeadline(ioDeadline(exchange)); err != nil {
 			ls.markBroken()
@@ -357,9 +283,6 @@ func (ls *linuxSession) request(ctx context.Context, payload []byte) ([]byte, er
 	sent, err := writeFrame(exchange, ls.stdin, payload)
 	if err != nil {
 		if sent > 0 || !isDeadline(err) {
-			// A partial frame is already in the child's stdin, or the pipe
-			// failed outright; the stream can no longer be aligned to an
-			// exchange boundary.
 			ls.markBroken()
 			return nil, Errorf(ErrorCodeSessionBroken, "write to session child: %v", err)
 		}
@@ -371,12 +294,9 @@ func (ls *linuxSession) request(ctx context.Context, payload []byte) ([]byte, er
 	case err == nil:
 		return response, nil
 	case isDeadline(err):
-		// The response is still in flight; the next exchange drains it.
 		ls.pendingLine = true
 		return nil, Errorf(ErrorCodeSandboxTimeout, "response past deadline: %v", err)
 	case isOutputExceeded(err):
-		// Drain the oversized line to its newline so the session stays
-		// usable; a drain that itself times out defers recovery.
 		if derr := ls.stdout.SetReadDeadline(ioDeadline(exchange)); derr == nil {
 			derr = ls.drainLine()
 			_ = ls.stdout.SetReadDeadline(time.Time{})
@@ -399,8 +319,6 @@ func (ls *linuxSession) request(ctx context.Context, payload []byte) ([]byte, er
 	}
 }
 
-// readLine reads one newline-terminated response line, bounded by the
-// configured output limit (or the default bound when unset).
 func (ls *linuxSession) readLine(exchange context.Context) ([]byte, error) {
 	if err := ls.stdout.SetReadDeadline(ioDeadline(exchange)); err != nil {
 		return nil, err
@@ -434,10 +352,6 @@ func (ls *linuxSession) readLine(exchange context.Context) ([]byte, error) {
 	}
 }
 
-// drainLine consumes up to and including the next newline, discarding bytes.
-// From the current stream position that is deterministically the rest of the
-// abandoned response, because responses strictly alternate with requests.
-// The caller arms the read deadline.
 func (ls *linuxSession) drainLine() error {
 	for {
 		_, err := ls.reader.ReadSlice('\n')
@@ -464,8 +378,6 @@ func (ls *linuxSession) outputLimit() int64 {
 	return sessionDefaultOutputLimit
 }
 
-// exitCause describes how the child process ended, for error messages. It
-// never blocks: a child that has not been reaped reports nothing.
 func (ls *linuxSession) exitCause() string {
 	select {
 	case <-ls.reapDone:
@@ -482,8 +394,6 @@ func (ls *linuxSession) exitCause() string {
 	return "child exited cleanly"
 }
 
-// exchangeTimeout is the per-exchange deadline: the sooner of the caller's
-// remaining context deadline (if any) and the configured timeout.
 func (ls *linuxSession) exchangeTimeout(ctx context.Context) time.Duration {
 	timeout := ls.req.Limits.Timeout
 	deadline, ok := ctx.Deadline()
@@ -499,9 +409,6 @@ func closeAll(files ...*os.File) {
 	}
 }
 
-// writeFrame writes payload plus the newline delimiter under the exchange
-// deadline. It reports how many bytes were written so a partial frame can be
-// distinguished from a clean miss.
 func writeFrame(exchange context.Context, stdin *os.File, payload []byte) (int, error) {
 	if err := stdin.SetWriteDeadline(ioDeadline(exchange)); err != nil {
 		return 0, err
@@ -513,9 +420,6 @@ func writeFrame(exchange context.Context, stdin *os.File, payload []byte) (int, 
 	return stdin.Write(frame)
 }
 
-// ioDeadline is the absolute deadline for one I/O phase: the exchange's own
-// deadline when present, else a finite default so a deadline-less caller
-// still cannot block forever.
 func ioDeadline(exchange context.Context) time.Time {
 	if deadline, ok := exchange.Deadline(); ok {
 		return deadline

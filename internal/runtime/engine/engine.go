@@ -15,18 +15,12 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// Config bounds the queue. Zero fields select the contract defaults: four
-// active turns, 64 pending turns, a five-minute turn timeout, and a
-// 30-second shutdown grace.
 type Config struct {
 	MaxActiveTurns  int
 	MaxPendingTurns int
 	TurnTimeout     time.Duration
 	ShutdownTimeout time.Duration
-	// DefaultAgentID names the agent definition that serves turns whose
-	// request does not target one explicitly; it is stamped onto turn event
-	// payloads as agent_id.
-	DefaultAgentID string
+	DefaultAgentID  string
 }
 
 func (c *Config) applyDefaults() {
@@ -61,20 +55,10 @@ func (c *Config) validate() error {
 	return errors.Join(problems...)
 }
 
-// TurnExecutor runs one turn's inner loop. The fake executor is the
-// deterministic step-1 implementation; the ADK runner adapter replaces it
-// behind the same interface. Execute is named differently from the
-// runtime.AgentRuntime boundary so the queued runtime and its inner loop cannot be
-// conflated. Executor events carry kind and payload; the engine stamps
-// identity, sequence, and timestamp, and persists every event before
-// forwarding it.
 type TurnExecutor interface {
 	Execute(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error]
 }
 
-// Engine implements runtime.AgentRuntime with a bounded per-session FIFO queue,
-// global concurrency limits, durable terminal events, and stream
-// subscribers that apply bounded backpressure.
 type Engine struct {
 	cfg      Config
 	events   EventStore
@@ -91,21 +75,16 @@ type Engine struct {
 	wg       sync.WaitGroup
 }
 
-// EventStore is the subset of the store event port the runtime needs.
 type EventStore interface {
 	Append(ctx context.Context, e *store.RuntimeEvent) error
 	LastSequence(ctx context.Context, sessionID string) (uint64, error)
 }
 
-// DedupeStore claims ingress keys and reads stored turn events. The claim and
-// the accepted event land in one transaction, so a duplicate key never
-// creates a second event sequence.
 type DedupeStore interface {
 	Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *store.RuntimeEvent) (originalTurnID string, created bool, err error)
 	ListTurnEvents(ctx context.Context, turnID string) ([]store.RuntimeEvent, error)
 }
 
-// NewEngine builds a runtime over the given event and dedupe ports.
 func NewEngine(cfg Config, events EventStore, dedupe DedupeStore, executor TurnExecutor, logger *slog.Logger) (*Engine, error) {
 	if events == nil {
 		return nil, invalidArgument("event store must not be nil")
@@ -168,8 +147,6 @@ func newSubscriber() *subscriber {
 	}
 }
 
-// stop marks the subscriber abandoned; the worker stops forwarding to it but
-// the turn continues to durable completion.
 func (s *subscriber) stop() {
 	s.once.Do(func() { close(s.done) })
 }
@@ -253,10 +230,6 @@ func (s *subscriber) wasGapped() bool {
 
 var _ runtime.AgentRuntime = (*Engine)(nil)
 
-// Run submits a turn and streams its events. A duplicate idempotency key
-// replays the original turn's stored events and creates no second event
-// sequence. The request is copied, so a caller-owned TurnID is never
-// mutated.
 func (e *Engine) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		copyReq := *req
@@ -343,12 +316,6 @@ func isTerminalKind(kind string) bool {
 	return false
 }
 
-// claim validates the request, accounts a pending slot, and durably claims
-// the turn. With an idempotency key it atomically claims the dedupe row with
-// the accepted event (a duplicate reports replay and the original turn ID);
-// without one it appends the accepted event directly. On any storage failure
-// the pending slot is released. The caller owns the next step: enqueue the
-// turn, or replay/return the original for a duplicate.
 func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay bool, err error) {
 	if req == nil {
 		return store.RuntimeEvent{}, "", false, invalidArgument("turn request must not be nil")
@@ -415,10 +382,6 @@ func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted 
 	return accepted, "", false, nil
 }
 
-// enqueue registers a claimed turn on its session queue and starts it when
-// capacity allows. The subscriber, when non-nil, receives the turn's events;
-// ingress accepts pass nil because channel delivery is decoupled from the
-// caller that submitted the envelope.
 func (e *Engine) enqueue(ctx context.Context, req *runtime.TurnRequest, accepted *store.RuntimeEvent, sub *subscriber) {
 	subs := map[*subscriber]struct{}{}
 	if sub != nil {
@@ -435,9 +398,6 @@ func (e *Engine) enqueue(ctx context.Context, req *runtime.TurnRequest, accepted
 	}
 	t.start = func() { e.runTurn(turnCtx, t) }
 	e.mu.Lock()
-	// Shutdown may have begun while the accepted event was being persisted;
-	// the queue is draining and a late enqueue would orphan this turn with a
-	// durable accepted event and no terminal. Terminate it durably instead.
 	if e.shutdown {
 		e.mu.Unlock()
 		e.releasePending()
@@ -492,8 +452,6 @@ func acceptedEvent(req *runtime.TurnRequest, seq uint64, agentID string) store.R
 	}
 }
 
-// agentID returns the agent definition targeted by the request, falling back
-// to the engine's configured default target.
 func (e *Engine) agentID(req *runtime.TurnRequest) string {
 	if req.AgentID != "" {
 		return req.AgentID
@@ -509,26 +467,18 @@ func (e *Engine) nextSequence(ctx context.Context, sessionID string) (uint64, er
 	return last + 1, nil
 }
 
-// sessionQueue returns the queue for a session that has at least one turn;
-// submit creates it before any worker can touch the turn.
 func (e *Engine) sessionQueue(sessionID string) *sessionQueue {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.sessions[sessionID]
 }
 
-// lock runs fn with the per-session allocation lock held. One writer
-// allocates sequences per session, so the read-modify-append of sequence
-// allocation must be atomic against concurrent accepts and the active turn's
-// own event appends.
 func (sq *sessionQueue) lock(fn func() error) error {
 	sq.mu.Lock()
 	defer sq.mu.Unlock()
 	return fn()
 }
 
-// schedule starts queued turns while a session has no active turn and the
-// global active limit has headroom.
 func (e *Engine) schedule() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -566,9 +516,6 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 		}
 		e.active--
 		close(t.done)
-		// The turn is terminal and its subscribers are closed; drop it so a
-		// long-lived runtime does not accumulate completed turns. Replays
-		// fall back to the store when the turn is not live.
 		delete(e.turns, t.turnID)
 		e.mu.Unlock()
 		e.schedule()
@@ -581,12 +528,6 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	ctx, stop := context.WithDeadline(ctx, deadline)
 	defer stop()
 
-	// persistEvent stamps the sequence and stores the executor's event with
-	// its full fidelity — invocation, branch, author, usage — then broadcasts
-	// it. Executor events may be zero-valued except Kind and Payload (the
-	// fake executor); those get identity filled here. An event that already
-	// carries an ID (the ADK executor maps the runner's original event ID)
-	// keeps it, so the stored log is the authoritative event identity.
 	persistEvent := func(ctx context.Context, ev *store.RuntimeEvent) error {
 		if ev.ID == "" {
 			ev.ID = NewTurnID()
@@ -652,9 +593,6 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	default:
 		terminalKind, terminalPayload = runtime.EventKindTurnCompleted, completedPayload(e.agentID(&t.req))
 	}
-	// The terminal event must be durable even when the turn context is
-	// cancelled or expired: "a turn is terminal only after its terminal
-	// event is durable" holds regardless of how the turn ended.
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to persist terminal event", "error", err, "turn_id", t.turnID)
 	}
@@ -670,8 +608,6 @@ func (e *Engine) broadcast(t *turn, ev *store.RuntimeEvent) {
 	}
 }
 
-// Publish forwards an event already committed by a downstream effect path to
-// the live turn subscriber without persisting it a second time.
 func (e *Engine) Publish(ev *store.RuntimeEvent) {
 	if ev == nil || ev.TurnID == "" {
 		return
@@ -702,9 +638,6 @@ func (e *Engine) cancelTurn(turnID string) {
 	t.cancel()
 }
 
-// replay streams a duplicate turn's stored events. When the original turn is
-// still live it waits for the terminal event first, so the duplicate sees
-// the full sequence.
 func (e *Engine) replay(ctx context.Context, turnID string, sub *subscriber) {
 	defer sub.stop()
 	e.mu.Lock()
@@ -733,9 +666,6 @@ func (e *Engine) replay(ctx context.Context, turnID string, sub *subscriber) {
 	sub.closeEvents()
 }
 
-// Shutdown stops ingress, drains active turns within the grace period, then
-// cancels what remains so every accepted turn reaches a durable terminal
-// event.
 func (e *Engine) Shutdown(ctx context.Context) error {
 	e.mu.Lock()
 	e.shutdown = true
@@ -777,9 +707,6 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 			}
 		}
 		e.mu.Unlock()
-		// The first timer.C was consumed; reset for the post-cancel drain
-		// window so shutdown stays bounded when an executor ignores
-		// cancellation.
 		timer.Reset(grace)
 		select {
 		case <-done:
@@ -790,8 +717,6 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 	}
 }
 
-// terminateQueued writes a durable terminal event for a turn that never
-// started, then closes its subscribers.
 func (e *Engine) terminateQueued(ctx context.Context, t *turn) {
 	terminal := &store.RuntimeEvent{
 		ID:            NewTurnID(),

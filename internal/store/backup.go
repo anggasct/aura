@@ -19,8 +19,6 @@ const (
 	backupManifestFilename = "manifest.json"
 )
 
-// The tags pin the manifest's on-disk key names to what shipped builds
-// already write, so renaming a field here cannot change the file format.
 type BackupBlobEntry struct {
 	Digest       string `json:"Digest"`
 	SizeBytes    int64  `json:"SizeBytes"`
@@ -32,9 +30,6 @@ type BackupManifest struct {
 	Blobs     []BackupBlobEntry `json:"Blobs"`
 }
 
-// Backup writes a consistent point-in-time SQLite snapshot plus a manifest
-// derived from that snapshot, so a restored database and its manifest can
-// never disagree about which blobs exist.
 func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, error) {
 	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		return BackupManifest{}, fmt.Errorf("create backup directory: %w", err)
@@ -45,11 +40,6 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 		return BackupManifest{}, errBackupDestinationConflict()
 	}
 
-	// The snapshot is written to a unique temp name, fsynced, and renamed,
-	// so a failure can never wedge the destination and concurrent backups
-	// into the same directory cannot clobber each other. SQLite does not
-	// allow parameters in VACUUM INTO; the pinned driver substitutes the
-	// value.
 	tmp, err := os.CreateTemp(destDir, backupDatabaseFilename+".tmp-*")
 	if err != nil {
 		return BackupManifest{}, backupFail("create backup temp file", err, destDir)
@@ -85,8 +75,6 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 		return BackupManifest{}, backupFail("fsync backup directory", err, destDir)
 	}
 
-	// The manifest is read from the snapshot itself, so blobs committed
-	// after the snapshot can never appear in it without their bytes.
 	snap, err := openReadOnly(ctx, dbDest)
 	if err != nil {
 		return BackupManifest{}, backupFail("open backup snapshot", err, dbDest)
@@ -134,8 +122,6 @@ type RestoreReport struct {
 	MissingBlobFiles   []string
 }
 
-// ReadBackupManifest reads and parses the manifest stored under backupDir.
-// A missing or corrupt manifest is a typed backup error with redacted paths.
 func ReadBackupManifest(backupDir string) (BackupManifest, error) {
 	path := filepath.Join(backupDir, backupManifestFilename)
 	data, err := os.ReadFile(path)
@@ -149,10 +135,6 @@ func ReadBackupManifest(backupDir string) (BackupManifest, error) {
 	return manifest, nil
 }
 
-// VerifyRestore opens the database backed up under backupDir read-only,
-// confirms sessions, events, dedupe keys, and artifact links are present,
-// and recomputes each manifest blob's checksum against artifactRoot. It
-// never deletes or modifies data, including the backup files themselves.
 func VerifyRestore(ctx context.Context, backupDir, artifactRoot string) (RestoreReport, error) {
 	manifest, err := ReadBackupManifest(backupDir)
 	if err != nil {
@@ -219,8 +201,6 @@ func errBackupDestinationConflict() error {
 	return &Error{Code: ErrorCodeBackupDestinationConflict, Detail: "backup database already exists"}
 }
 
-// backupFail wraps a backup failure, redacting full paths from the rendered
-// message while keeping the cause chain intact.
 func backupFail(prefix string, cause error, paths ...string) error {
 	return &redactedError{prefix: prefix, cause: cause, paths: paths}
 }

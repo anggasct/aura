@@ -33,9 +33,6 @@ func TestLandlockWriteMaskPerABI(t *testing.T) {
 	}
 }
 
-// landlockABI is a kernel query (no confinement), so it is safe to call in
-// the test process. Where Landlock is present it must report a positive ABI;
-// where it is absent it must surface an error rather than a false version.
 func TestLandlockABIOrUnavailable(t *testing.T) {
 	abi, err := landlockABI()
 	if !landlockAvailable() {

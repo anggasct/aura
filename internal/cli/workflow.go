@@ -42,9 +42,6 @@ func newWorkflowCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-// workflowValidationDeps gathers the registries validation checks against.
-// A registry build failure is returned so validation fails closed instead
-// of silently skipping the resolution checks.
 func workflowValidationDeps(cfg *config.Config) (workflow.ValidationDeps, error) {
 	deps := workflow.ValidationDeps{
 		KnownTools:     toolsbuiltin.DefinitionNames(),
@@ -172,8 +169,6 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-// buildWorkflowInterpreter opens storage, loads and validates the
-// configured definitions, and wires the in-process interpreter.
 func buildWorkflowInterpreter(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*workflow.Interpreter, func(), error) {
 	db, err := openStorage(ctx, cfg)
 	if err != nil {
@@ -219,14 +214,10 @@ func workflowMaxConcurrentSteps(cfg *config.Config) int {
 	return cfg.Workflows.MaxConcurrentSteps
 }
 
-// workflowApprovalDecider approves tool executions authorized by a preceding
-// workflow approval step and verified by static validation.
 func workflowApprovalDecider(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 	return true, nil
 }
 
-// workflowToolRunner adapts the builtin tool executor onto the interpreter
-// port; the broker policy path stays unchanged.
 type workflowToolRunner struct {
 	executor *toolsbuiltin.Executor
 	db       *sql.DB
@@ -271,10 +262,6 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 	})
 }
 
-// newWorkflowToolRunner adapts the builtin tool executor onto the
-// interpreter port; the broker policy path stays unchanged. It is only
-// called when a tools section is configured; construction failures are
-// returned so start exits with the underlying cause.
 func newWorkflowToolRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger) (workflow.ToolRunner, error) {
 	_, artifactRoot, _, err := storagePaths(cfg)
 	if err != nil {

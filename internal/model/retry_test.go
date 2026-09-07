@@ -285,9 +285,6 @@ func TestAnthropic_400TypedErrors(t *testing.T) {
 	}
 }
 
-// A transport failure must survive classification with its cause chain
-// intact, or retryHTTP cannot recognise it as transient and every connection
-// reset is treated as permanent.
 func TestClassifyRequestErrorPreservesTransientCause(t *testing.T) {
 	for _, cause := range []error{syscall.ECONNRESET, syscall.EPIPE, io.ErrUnexpectedEOF, net.ErrClosed} {
 		classified := classifyRequestError(&url.Error{Op: "Post", URL: "https://provider.example", Err: cause})

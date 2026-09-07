@@ -9,9 +9,6 @@ import (
 	"github.com/anggasct/aura/internal/config"
 )
 
-// Registry holds the ordered definition set: builtins in declaration order,
-// with config overrides replacing their builtin slot and config-only
-// definitions appended in file order.
 type Registry struct {
 	definitions []Definition
 	byID        map[string]int
@@ -30,7 +27,6 @@ func (r *Registry) upsert(definition *Definition) {
 	r.definitions = append(r.definitions, *definition)
 }
 
-// Lookup returns the definition registered under id.
 func (r *Registry) Lookup(id string) (Definition, bool) {
 	index, ok := r.byID[id]
 	if !ok {
@@ -39,7 +35,6 @@ func (r *Registry) Lookup(id string) (Definition, bool) {
 	return r.definitions[index].clone(), true
 }
 
-// Definitions returns the registered definitions in stable order.
 func (r *Registry) Definitions() []Definition {
 	result := make([]Definition, 0, len(r.definitions))
 	for _, definition := range r.definitions {
@@ -48,11 +43,6 @@ func (r *Registry) Definitions() []Definition {
 	return result
 }
 
-// Resolve selects the definition for a unit of work. An explicit preference
-// must match exactly. Otherwise the eligible set is every definition whose
-// capability set covers required; the most-specific match wins — fewest
-// declared capabilities beyond the required set — with ties broken by stable
-// registry order. No eligible definition fails closed before any work starts.
 func (r *Registry) Resolve(required []string, preferID *string) (Definition, error) {
 	if preferID != nil {
 		definition, ok := r.Lookup(*preferID)
@@ -79,10 +69,6 @@ func (r *Registry) Resolve(required []string, preferID *string) (Definition, err
 	return r.definitions[best].clone(), nil
 }
 
-// Build validates the compiled-in definitions against the configured
-// tool registry and model roles, applies config overrides, and returns the
-// startup registry. Any invalid definition aborts startup with a
-// field-level error naming the offending entry.
 func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string) (*Registry, error) {
 	registry := newRegistry()
 	for index := range builtins {

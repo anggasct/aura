@@ -25,37 +25,23 @@ import (
 	"google.golang.org/genai"
 )
 
-// ADKExecutor runs turns through the ADK runner, backed by the Aura session
-// and event ports. Every tool invocation is evaluated by the runtime.ToolBroker
-// before ADK executes it, usage is accumulated across the whole turn so the
-// budget applies to retries, fallbacks, and child runs alike, and every ADK
-// event is mapped into the Aura runtime event log without losing fidelity.
 type ADKExecutor struct {
-	appName   string
-	modelName string
-	sessions  SessionPort
-	events    runtimeengine.EventStore
-	broker    runtime.ToolBroker
-	tools     []tool.Tool
-	logger    *slog.Logger
-	builtins  BuiltinToolExecutor
-	toolSeq   toolSequence
-	publisher EventPublisher
-	// agents, when set, resolves the target definition for every turn and
-	// drives the ADK agent construction from that definition; modelForRoute
-	// maps a definition's model route onto a registered model name.
-	agents        AgentResolver
-	modelForRoute func(route string) (string, error)
-	// ledger, when set with modelDefinitionID, wraps the resolved model with
-	// budget enforcement so every turn reserves before dispatch and settles
-	// provider-reported usage after.
+	appName           string
+	modelName         string
+	sessions          SessionPort
+	events            runtimeengine.EventStore
+	broker            runtime.ToolBroker
+	tools             []tool.Tool
+	logger            *slog.Logger
+	builtins          BuiltinToolExecutor
+	toolSeq           toolSequence
+	publisher         EventPublisher
+	agents            AgentResolver
+	modelForRoute     func(route string) (string, error)
 	ledger            *usage.Ledger
 	modelDefinitionID string
 }
 
-// AgentResolver selects the definition a turn runs on. The registry in the
-// agent package is the canonical implementation; the interface is declared
-// here so the executor depends only on the resolution it performs.
 type AgentResolver interface {
 	Resolve(required []string, preferID *string) (auraagent.Definition, error)
 }
@@ -64,10 +50,6 @@ type EventPublisher interface {
 	Publish(*store.RuntimeEvent)
 }
 
-// builtinEventPublisher is implemented by builtin tool executors that publish
-// tool lifecycle events as they become durable. The executor forwards the
-// runtime publisher so tool requests reach the live stream before the
-// provider is invoked.
 type builtinEventPublisher interface {
 	SetEventPublisher(func(*store.RuntimeEvent))
 }
@@ -82,11 +64,6 @@ func (x *ADKExecutor) SetEventPublisher(publisher EventPublisher) {
 	}
 }
 
-// NewADKExecutor builds an ADK-backed turn executor. modelName is resolved
-// through the ADK model registry (registered by the model package at
-// startup); broker is the tool policy gate; tools are the declared tool set.
-// Built-in tools are attached with WithBuiltinToolExecutor. Options attach
-// optional capabilities such as budget enforcement.
 func NewADKExecutor(appName, modelName string, sessions SessionPort, events runtimeengine.EventStore, broker runtime.ToolBroker, tools []tool.Tool, logger *slog.Logger, opts ...ExecutorOption) (*ADKExecutor, error) {
 	if appName == "" {
 		return nil, invalidArgument("app name must not be empty")
@@ -123,14 +100,8 @@ func NewADKExecutor(appName, modelName string, sessions SessionPort, events runt
 	return e, nil
 }
 
-// ExecutorOption configures an ADKExecutor at construction.
 type ExecutorOption func(*ADKExecutor) error
 
-// WithAgentResolver attaches declarative agent definitions: every turn
-// resolves its target definition (req.AgentID when set, else the most
-// specific default), and the ADK agent is constructed from that definition's
-// instructions, tool subset, and model route. modelForRoute maps a
-// definition's model route onto a registered model name.
 func WithAgentResolver(resolver AgentResolver, modelForRoute func(route string) (string, error)) ExecutorOption {
 	return func(e *ADKExecutor) error {
 		if resolver == nil {
@@ -142,11 +113,6 @@ func WithAgentResolver(resolver AgentResolver, modelForRoute func(route string) 
 	}
 }
 
-// WithBudgetLedger wraps the resolved model with the usage budget ledger, so a
-// turn reserves a conservative cost before dispatch, settles provider-reported
-// usage after, and is rejected before dispatch once the configured cap is
-// reached. modelDefinitionID is the pricing key (the config model definition
-// name, e.g. "primary").
 func WithBudgetLedger(ledger *usage.Ledger, modelDefinitionID string) ExecutorOption {
 	return func(e *ADKExecutor) error {
 		if ledger == nil {
@@ -177,9 +143,6 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 	}
 }
 
-// Execute runs one turn through the ADK runner. The returned events carry
-// full ADK fidelity (invocation, branch, author, actions, usage); the engine
-// stamps sequence and persists them.
 func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		definition, err := x.resolveDefinition(req)
@@ -211,10 +174,6 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 		}
 
 		turnUsage := &usageTracker{maxTokens: req.Budget.MaxTokens}
-		// WithYieldUserMessage surfaces the user's input as an event so the
-		// engine persists it through the same single-writer path; otherwise
-		// the user message would live only in the ADK session service, which
-		// no longer writes.
 		runOpts := []runner.RunOption{runner.WithYieldUserMessage()}
 		for ev, err := range adkRunner.Run(runCtx, req.PrincipalID, req.SessionID, content, agent.RunConfig{}, runOpts...) {
 			if err != nil {
@@ -241,9 +200,6 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 	}
 }
 
-// resolveDefinition picks the definition the turn runs on: the requested id
-// when the request targets one, else the deterministic default. Resolution
-// failure returns before any work starts.
 func (x *ADKExecutor) resolveDefinition(req *runtime.TurnRequest) (auraagent.Definition, error) {
 	if x.agents == nil {
 		return auraagent.Definition{}, nil
@@ -259,9 +215,6 @@ func (x *ADKExecutor) resolveDefinition(req *runtime.TurnRequest) (auraagent.Def
 	return definition, nil
 }
 
-// buildRunner constructs an ADK runner with a single-agent tree over the
-// registered model, the Aura-backed session service, and a tool gate that
-// evaluates every tool call through the broker before execution.
 func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition) (*runner.Runner, error) {
 	model, err := x.resolveModel(ctx, definition)
 	if err != nil {
@@ -290,11 +243,6 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	return r, nil
 }
 
-// toolGate evaluates one tool invocation through the broker with the full
-// identity the security contract requires — principal, session, and
-// invocation — so policy can scope per principal and session, and the audit
-// trail carries identity. A deny or an evaluation error blocks the call with
-// a stable code.
 func (x *ADKExecutor) toolGate(actx agent.Context, toolName string, args map[string]any) error {
 	raw, err := json.Marshal(args)
 	if err != nil {
@@ -366,9 +314,6 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		return nil, fmt.Errorf("read tool event sequence: %w", err)
 	}
 	request.EventSequence = sequence + 1
-	// Tool lifecycle events are published by the builtin executor as they
-	// become durable — before the provider is invoked — so a long-running
-	// tool reports progress while it runs. See SetEventPublisher.
 	output, executeErr := x.builtins.Execute(actx, request)
 	err = executeErr
 	if err != nil {
@@ -395,16 +340,12 @@ func contentFromParts(req *runtime.TurnRequest) (*genai.Content, error) {
 	return &genai.Content{Parts: parts, Role: genai.RoleUser}, nil
 }
 
-// usageTracker accumulates token usage across a whole turn so the budget
-// binds retries, fallbacks, and child runs alike.
 type usageTracker struct {
 	maxTokens int64
 	exceeded  bool
 	tokens    int64
 }
 
-// add accounts one ADK event's usage and reports whether the budget is now
-// exceeded.
 func (u *usageTracker) add(ev *session.Event) bool {
 	if ev == nil || ev.UsageMetadata == nil {
 		return u.exceeded
@@ -416,8 +357,6 @@ func (u *usageTracker) add(ev *session.Event) bool {
 	return u.exceeded
 }
 
-// resolveModel resolves the registered model for the turn: the definition's
-// model route when it declares one, else the executor's configured model.
 func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.Definition) (adkmodel.LLM, error) {
 	modelName := x.modelName
 	if definition.ModelRoute != "" {
@@ -437,8 +376,6 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 	return model, nil
 }
 
-// toolsFor narrows the executor tool set to the definition's declared tools;
-// a definition without declared tools runs the full set.
 func (x *ADKExecutor) toolsFor(definition *auraagent.Definition) []tool.Tool {
 	if len(definition.Tools) == 0 {
 		return x.tools
@@ -465,9 +402,6 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 	})
 }
 
-// beforeTool is the llmagent BeforeToolCallback: every tool invocation
-// passes through the broker's Evaluate before the tool runs. A deny or an
-// evaluation error blocks the call with a stable code.
 func (x *ADKExecutor) beforeTool(actx agent.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
 	if x.builtins != nil {
 		return x.executeBuiltinTool(actx, t.Name(), args)

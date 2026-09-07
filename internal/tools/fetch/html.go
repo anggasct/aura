@@ -13,9 +13,6 @@ func isHTML(contentType string) bool {
 	return contentType == "text/html" || contentType == "application/xhtml+xml"
 }
 
-// htmlToMarkdown renders a bounded HTML document as clean markdown for
-// model consumption. Non-visible content such as scripts and styles is
-// dropped; the rendered output is capped at maxBytes.
 func htmlToMarkdown(source []byte, maxBytes int64) (string, bool) {
 	node, err := html.Parse(bytes.NewReader(source))
 	if err != nil {
@@ -31,8 +28,6 @@ func htmlToMarkdown(source []byte, maxBytes int64) (string, bool) {
 	return rendered, truncated
 }
 
-// markdownRenderer tracks whether the last write closed an inline element
-// so word separation survives tag stripping.
 type markdownRenderer struct {
 	builder          strings.Builder
 	afterInlineClose bool
@@ -119,9 +114,6 @@ func (r *markdownRenderer) renderNode(node *html.Node) {
 	}
 }
 
-// text collapses whitespace runs so source formatting cannot leak into the
-// rendered markdown, inserting a single separating space after inline
-// closes; punctuation stays attached to the preceding word.
 func (r *markdownRenderer) text(text string) {
 	collapsed := strings.Join(strings.Fields(text), " ")
 	if collapsed == "" {
@@ -152,7 +144,6 @@ func (r *markdownRenderer) closeInline(marker string) {
 	r.afterInlineClose = true
 }
 
-// writeRawText preserves whitespace inside preformatted blocks.
 func (r *markdownRenderer) writeRawText(node *html.Node) {
 	if node.Type == html.TextNode {
 		r.builder.WriteString(node.Data)

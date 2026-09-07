@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-// staticResolver returns a fixed set of IPs per host, so tests can exercise
-// DNS-rebinding and address-class rejection without real DNS.
 type staticResolver map[string][]net.IP
 
 func (r staticResolver) LookupIP(_ context.Context, host string) ([]net.IP, error) {
@@ -90,9 +88,6 @@ func TestValidateRejectsUnixSocketAndEmptyHost(t *testing.T) {
 	}
 }
 
-// DNS rebinding: the first lookup returns a public IP, a later lookup for
-// the same host would return a private one. The pinned dialer must resolve
-// exactly once and dial the validated IP, never re-resolve.
 func TestPinnedDialerResolvesOnce(t *testing.T) {
 	var calls int
 	counting := resolverFunc(func(_ context.Context, host string) ([]net.IP, error) {
@@ -100,11 +95,6 @@ func TestPinnedDialerResolvesOnce(t *testing.T) {
 		if host != "rebind.example" {
 			t.Errorf("resolved host %q, want rebind.example", host)
 		}
-		// First lookup would be public; a re-lookup (rebinding) would be
-		// private. The dialer must not re-resolve, so only one call happens
-		// and the returned address is used as-is. 192.0.2.1 is the TEST-NET
-		// documentation range: passes the address-class checks, never
-		// dials anything.
 		return []net.IP{mustParseIP(t, "192.0.2.1")}, nil
 	})
 
@@ -123,7 +113,6 @@ func TestPinnedDialerResolvesOnce(t *testing.T) {
 	}
 }
 
-// resolverFunc adapts a function to the Resolver interface.
 type resolverFunc func(context.Context, string) ([]net.IP, error)
 
 func (f resolverFunc) LookupIP(ctx context.Context, host string) ([]net.IP, error) {
@@ -224,9 +213,6 @@ func TestNewClientRejectsCrossOriginRedirect(t *testing.T) {
 }
 
 func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
-	// First hop is a public-ish server (here, the test server itself via a
-	// host the resolver maps to a dialable address); the redirect target
-	// resolves to a private IP and must be rejected by CheckRedirect.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "http://metadata.internal/steal", http.StatusFound)
 	}))
@@ -243,9 +229,6 @@ func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
 		"metadata.internal": {net.ParseIP("169.254.169.254")},
 		"public.example":    {net.ParseIP("93.184.216.34")},
 	}
-	// httptest always binds loopback, so resolution of the first hop is
-	// loopback and would be denied before the redirect is even followed.
-	// The CheckRedirect logic is unit-tested directly instead.
 	client := NewClient(resolver)
 	if client.CheckRedirect == nil {
 		t.Fatal("CheckRedirect must be set")
@@ -259,7 +242,6 @@ func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
 		t.Fatalf("CheckRedirect = %v, want egress_denied for metadata redirect", err)
 	}
 
-	// An allowed redirect (public resolution) passes CheckRedirect.
 	okReq, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://public.example/next", http.NoBody)
 	err = client.CheckRedirect(okReq, []*http.Request{{URL: okReq.URL}})
 	if err != nil {
@@ -268,8 +250,6 @@ func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
 }
 
 func TestValidateNoResolverDefaultsToSystem(t *testing.T) {
-	// No resolver provided: Validate must not panic and must return a
-	// typed error for an unroutable host rather than crashing.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err := Validate(ctx, "https://definitely-not-a-real-host.invalid/x", nil)

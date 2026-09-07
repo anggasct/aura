@@ -195,7 +195,6 @@ func TestAnthropic_RequestBuild(t *testing.T) {
 	if captured.MaxTokens != 512 {
 		t.Errorf("max_tokens = %d", captured.MaxTokens)
 	}
-	// find assistant message with tool_use
 	var foundToolUse, foundToolResult bool
 	for _, msg := range captured.Messages {
 		for _, block := range msg.Content {

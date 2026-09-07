@@ -14,10 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// probeListener serves the loopback /livez and /readyz endpoints inside the
-// server lifecycle. It owns a health registry so findings are recomputed per
-// probe request, and a transition tracker whose observations persist as
-// runtime events; liveness is process-local and never consults either.
 type probeListener struct {
 	listen    string
 	handler   http.Handler
@@ -45,9 +41,6 @@ func buildProbeListener(cfg *config.Config, capabilities []health.CapabilityStat
 	var tracker *health.StateTracker
 	if events != nil && sessions != nil {
 		log := newHealthEventLog(events, sessions)
-		// A candidate state must hold through one evaluation cycle before it
-		// commits, and committed transitions stay at least two cycles apart:
-		// flap resistance derived from the configured cadence.
 		policy := health.TransitionPolicy{
 			StableFor: time.Duration(cfg.Health.CheckInterval),
 			Cooldown:  max(2*time.Duration(cfg.Health.CheckInterval), time.Minute),
@@ -77,7 +70,6 @@ func (p *probeListener) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("probe listener: bind %s: %w", p.listen, err)
 	}
-	// Readiness turns true only once the endpoint is actually serving.
 	p.readiness.SetStarted()
 	stopObserving := p.observeLoop(ctx)
 
@@ -112,10 +104,6 @@ func (p *probeListener) Start(ctx context.Context) error {
 	}
 }
 
-// observeLoop folds periodic evaluations into the transition tracker until
-// the context is cancelled. It exists only when a durable log is wired. The
-// returned stop function cancels the loop and blocks until the observer
-// goroutine — including any in-flight persistence — has exited.
 func (p *probeListener) observeLoop(ctx context.Context) func() {
 	observerCtx, cancel := context.WithCancel(ctx)
 	stopped := p.startObserver(observerCtx)
@@ -125,9 +113,6 @@ func (p *probeListener) observeLoop(ctx context.Context) func() {
 	}
 }
 
-// startObserver runs the periodic evaluation loop until ctx is cancelled and
-// returns a channel closed once the observer goroutine — including any
-// in-flight persistence — has exited.
 func (p *probeListener) startObserver(ctx context.Context) <-chan struct{} {
 	stopped := make(chan struct{})
 	if p.tracker == nil || p.interval <= 0 {
@@ -146,16 +131,10 @@ func (p *probeListener) startObserver(ctx context.Context) <-chan struct{} {
 				evalCtx, evalCancel := context.WithTimeout(context.WithoutCancel(ctx), p.interval)
 				findings := p.evaluate(evalCtx)
 				evalCancel()
-				// Persistence runs on its own context derived from the
-				// shutdown-aware loop context: the evaluation timeout cannot
-				// cancel the durable append, while shutdown still bounds and
-				// cancels an in-flight sink operation.
 				persistCtx, persistCancel := context.WithTimeout(ctx, p.interval)
 				_, err := p.tracker.Observe(persistCtx, findings)
 				persistCancel()
 				if err != nil {
-					// Persistence retried on the next tick; state does not
-					// advance past an unwritten transition.
 					continue
 				}
 			}

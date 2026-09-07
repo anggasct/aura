@@ -20,9 +20,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// Diagnostics exit codes: 0 healthy, 1 degraded/warning, 2 critical, 3
-// command/config/connection error. These are the status and doctor contract;
-// scripted callers rely on them.
 const (
 	exitHealthy   = 0
 	exitDegraded  = 1
@@ -31,9 +28,6 @@ const (
 	liveProbeWait = time.Second
 )
 
-// newStatusCmd builds the status command. The negotiator is injected so tests
-// can fix the reported surface without depending on the host the suite runs
-// on; the composition root passes sandbox.Negotiate.
 func newStatusCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error)) *cobra.Command {
 	var asJSON bool
 	var offline bool
@@ -70,9 +64,6 @@ func runStatus(cmd *cobra.Command, cfg *config.Config, report capability.Report,
 	return writeStatusText(cmd, primitives, negotiateErr, findings, live, liveReachable)
 }
 
-// liveReadiness probes the running process's readiness endpoint. A process
-// that is not running is not an error: the command falls back to local
-// checks and labels the live surface unreachable.
 func liveReadiness(ctx context.Context, offline bool, listen string) (live health.ProbeBody, reachable bool) {
 	if offline || listen == "" {
 		return health.ProbeBody{}, false
@@ -95,12 +86,6 @@ func liveReadiness(ctx context.Context, offline bool, listen string) (live healt
 	return body, true
 }
 
-// buildHealthRegistry assembles the offline-capable check set from the
-// loaded configuration: migration state and backup age from the store opened
-// read-only, storage intake plus per-path filesystem headroom, sandbox
-// primitives from the host, provider configuration, capability consistency
-// with this release profile, and process resource pressure. Checks never
-// mutate state and never dial a provider.
 func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilityStatus, negotiate func() (sandbox.Primitives, error), processProbe func() (health.ProcessStatus, bool)) (*health.Registry, error) {
 	dbPath, artifactRoot, backupDir, err := storagePaths(cfg)
 	if err != nil {
@@ -170,17 +155,8 @@ func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilitySta
 	)
 }
 
-// storageMinFreeBytes is the headroom intake needs for WAL growth and
-// artifact writes; below it the storage surface counts as full.
 const storageMinFreeBytes = 64 << 20
 
-// openWritableCheck opens the configured database path in append mode without
-// writing. The path comes from storagePaths (validated config), never from a
-// request, so the variable-path open is confined by construction.
-
-// storageIntakeProbe classifies the storage surface without mutating it:
-// reachability via stat, writability via an append-mode open that writes
-// nothing, and headroom via the filesystem's free-space report.
 func storageIntakeProbe(dbPath string) func(context.Context) (health.StorageIntakeState, string) {
 	return func(context.Context) (health.StorageIntakeState, string) {
 		if _, err := os.Stat(dbPath); err != nil {
@@ -203,8 +179,6 @@ func storageIntakeProbe(dbPath string) func(context.Context) (health.StorageInta
 	}
 }
 
-// mapCapabilityStatuses projects the load-time capability report onto the
-// health-owned view.
 func mapCapabilityStatuses(report capability.Report) []health.CapabilityStatus {
 	reported := report.Statuses()
 	mapped := make([]health.CapabilityStatus, 0, len(reported))
@@ -221,9 +195,6 @@ func mapCapabilityStatuses(report capability.Report) []health.CapabilityStatus {
 	return mapped
 }
 
-// diskTargets names every storage surface whose filesystem must keep
-// headroom. A not-yet-created path is probed at its nearest existing
-// ancestor so a fresh install reports real capacity instead of unknown.
 func diskTargets(dbPath, artifactRoot, backupDir string) []health.FilesystemTarget {
 	return []health.FilesystemTarget{
 		{Name: health.DiskTargetDatabase, Path: existingAncestor(dbPath)},
@@ -260,9 +231,6 @@ func schemaVersionsReadOnly(ctx context.Context, dbPath string) (applied, latest
 	return store.SchemaVersions(ctx, db)
 }
 
-// lastBackupTime reports the newest backup database mtime under the backup
-// directory. Listing is bounded to the top level of the directory: backups
-// are written as sibling directories by the storage backup path.
 func lastBackupTime(backupDir string) (time.Time, error) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
@@ -368,8 +336,6 @@ type liveStatusJSON struct {
 	Code      string `json:"code,omitempty"`
 }
 
-// formatFindingLine renders one finding in the stable text contract:
-// severity, component, code, detail, and remediation when set.
 func formatFindingLine(f *health.Finding) string {
 	var b strings.Builder
 	b.WriteString(string(f.Severity))
@@ -390,9 +356,6 @@ func formatFindingLine(f *health.Finding) string {
 	return b.String()
 }
 
-// statusExit maps the worst finding severity to the diagnostics exit code.
-// An unavailable sandbox does not change the code by itself: its finding
-// already carries degraded severity.
 func statusExit(findings []health.Finding, sandboxAvailable bool) error {
 	switch health.WorstSeverity(findings) {
 	case health.SeverityCritical:
@@ -407,10 +370,6 @@ func statusExit(findings []health.Finding, sandboxAvailable bool) error {
 	}
 }
 
-// formatSandboxStatus renders the exact containment state an operator can act
-// on: when a mandatory primitive is absent the line names every one of them,
-// matching the Require gate's vocabulary so the status surface and the
-// fail-closed gate never disagree.
 func formatSandboxStatus(have sandbox.Primitives, negotiateErr error) (string, bool) {
 	if negotiateErr != nil {
 		return "sandbox: unavailable\nreason: " + negotiateErr.Error(), false

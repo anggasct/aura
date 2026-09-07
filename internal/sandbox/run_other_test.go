@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// On non-Linux every run fails closed before a child exists, and the
-// capability layer reports effectful capabilities unavailable.
 func TestNonLinuxFailsClosed(t *testing.T) {
 	spec := Spec{
 		WorkingDir: t.TempDir(),

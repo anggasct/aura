@@ -12,8 +12,6 @@ import (
 	"modernc.org/sqlite"
 )
 
-// sqliteBusyCode is the driver's SQLITE_BUSY result code: another connection
-// held the write lock longer than the connection's busy_timeout.
 const sqliteBusyCode = 5
 
 func isTransientBusy(err error) bool {
@@ -33,14 +31,10 @@ const (
 	busyMaxDelay    = 500 * time.Millisecond
 )
 
-// beginner is the transaction-entry surface of *sql.DB.
 type beginner interface {
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
 }
 
-// busyBeginObserver, when set, runs after each begin attempt fails with
-// transient SQLITE_BUSY and before the retry sleep; tests coordinate lock
-// release on this signal so the retry path is exercised deterministically.
 var (
 	busyBeginMu       sync.Mutex
 	busyBeginObserver func()
@@ -61,8 +55,6 @@ func notifyBusyBegin() {
 	}
 }
 
-// beginTx begins a write transaction, retrying transient SQLITE_BUSY with
-// bounded jittered backoff.
 func beginTx(ctx context.Context, db beginner, operation string) (*sql.Tx, error) {
 	delay := busyBaseDelay
 	for attempt := 1; ; attempt++ {

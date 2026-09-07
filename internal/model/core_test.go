@@ -49,8 +49,6 @@ func TestAnthropicStreamAcceptsCRLF(t *testing.T) {
 
 func TestAnthropicStreamTruncatedBeforeTerminal(t *testing.T) {
 	fixture := fixtureBytes(t, "anthropic_stream.txt")
-	// Cut at the event boundary before message_stop so the remaining stream
-	// is complete events that simply never reach the terminal.
 	stopAt := bytes.Index(fixture, []byte(`"message_stop"`))
 	eventStart := bytes.LastIndex(fixture[:stopAt], []byte("\n\n"))
 	truncated := fixture[:eventStart+2]
@@ -150,13 +148,9 @@ func TestRegisterAdaptersValidatesAllBeforeRegistering(t *testing.T) {
 	invalid := config.ModelDefinition{Protocol: config.ProtocolAnthropicMessages, Model: "atomic-reg-test-1", BaseURL: "https://api.anthropic.com"}
 	models := config.Models{Definitions: map[string]config.ModelDefinition{"primary": valid, "auxiliary": invalid}}
 
-	// auxiliary is invalid (no secret and a non-loopback endpoint), so the
-	// whole registration must fail without registering primary.
 	if err := RegisterAdapters(nil, models); err == nil {
 		t.Fatal("expected registration failure for invalid auxiliary")
 	}
-	// If primary had been registered despite the failure, registering it
-	// again would hit the duplicate check.
 	if err := RegisterAdapters(nil, config.Models{Definitions: map[string]config.ModelDefinition{"primary": valid}}); err != nil {
 		t.Fatalf("re-register after failed batch: %v", err)
 	}

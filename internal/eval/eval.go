@@ -1,7 +1,3 @@
-// Package eval provides Aura's deterministic evaluation harness: golden
-// runtime-event trajectory checks and an adversarial corpus that fails on
-// unauthorized tool use or privilege elevation. The corpus is data, so new
-// cases are added without changing the runner.
 package eval
 
 import (
@@ -19,26 +15,19 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// SessionID is the session the harness creates and drives turns against.
 const SessionID = "eval-session"
 
-// Trajectory is one golden run: a scripted turn and the exact event-kind
-// sequence it must produce, in order.
 type Trajectory struct {
 	Name      string
 	Script    []runtime.FakeStep
 	WantKinds []string
 }
 
-// AbuseCase is one adversarial tool request that policy must deny.
 type AbuseCase struct {
 	Name    string
 	Request approval.ToolRequest
 }
 
-// ScriptedRuntime builds a runtime over a fresh store under dir that runs
-// script for every turn, with the eval session pre-created. The returned
-// clean func releases the store.
 func ScriptedRuntime(ctx context.Context, dir string, script []runtime.FakeStep) (runtime.AgentRuntime, func(), error) {
 	db, err := store.OpenDB(ctx, filepath.Join(dir, "aura.db"))
 	if err != nil {
@@ -62,8 +51,6 @@ func ScriptedRuntime(ctx context.Context, dir string, script []runtime.FakeStep)
 	return engine, cleanup, nil
 }
 
-// RunTrajectory drives one turn through the runtime and returns the streamed
-// events in order.
 func RunTrajectory(ctx context.Context, rt runtime.AgentRuntime, turnID string) ([]store.RuntimeEvent, error) {
 	req := &runtime.TurnRequest{TurnID: turnID, SessionID: SessionID, PrincipalID: "eval", Origin: runtime.OriginInternal}
 	var events []store.RuntimeEvent
@@ -76,8 +63,6 @@ func RunTrajectory(ctx context.Context, rt runtime.AgentRuntime, turnID string) 
 	return events, nil
 }
 
-// CheckTrajectory compares the streamed event-kind sequence against the golden
-// want, in order.
 func CheckTrajectory(events []store.RuntimeEvent, want []string) error {
 	got := make([]string, len(events))
 	for i := range events {
@@ -89,9 +74,6 @@ func CheckTrajectory(events []store.RuntimeEvent, want []string) error {
 	return nil
 }
 
-// CheckDenied asserts the broker denies the request. Denial is fail-closed: an
-// evaluation error or any non-allow outcome satisfies it; only an explicit
-// allow is a violation.
 func CheckDenied(ctx context.Context, broker runtime.ToolBroker, req *approval.ToolRequest) error {
 	decision, err := broker.Evaluate(ctx, req)
 	if err == nil && decision.Outcome == approval.OutcomeAllow {
@@ -109,8 +91,6 @@ type trajectoryFile struct {
 	WantKinds []string `json:"want_kinds"`
 }
 
-// LoadTrajectories reads every *.json golden trajectory under dir. Reads are
-// confined to dir through an os.Root, so a corpus entry cannot escape it.
 func LoadTrajectories(dir string) ([]Trajectory, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -159,8 +139,6 @@ type abuseFile struct {
 	Capabilities []string `json:"capabilities"`
 }
 
-// LoadAbuseCases reads every *.json adversarial case under dir. Reads are
-// confined to dir through an os.Root.
 func LoadAbuseCases(dir string) ([]AbuseCase, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {

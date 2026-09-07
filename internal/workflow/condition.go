@@ -49,12 +49,9 @@ func CodeOf(err error) (ErrorCode, bool) {
 	return "", false
 }
 
-// operand is one side of a condition comparison.
 type operand struct {
-	// ref is set for steps.<id>.status and steps.<id>.output.<path> forms.
-	ref  *refOperand
-	text string
-	// num and flag carry integer and boolean literals; nilText marks null.
+	ref     *refOperand
+	text    string
 	num     *int64
 	flag    *bool
 	nilText bool
@@ -67,24 +64,16 @@ type refOperand struct {
 	index   []int
 }
 
-// comparison is one equality or inequality test.
 type comparison struct {
 	left  operand
 	op    string
 	right operand
 }
 
-// condition is a conjunction of comparisons.
 type condition struct {
 	comparisons []comparison
 }
 
-// parseCondition parses the frozen grammar:
-//
-//	condition   := comparison { "&&" comparison }
-//	comparison  := operand op operand
-//	op          := "==" | "!="
-//	operand     := status_ref | output_ref | string | integer | "true" | "false" | "null"
 func parseCondition(source string) (*condition, error) {
 	tokens, err := lexCondition(source)
 	if err != nil {
@@ -111,8 +100,6 @@ func parseCondition(source string) (*condition, error) {
 	}
 }
 
-// lexCondition splits the source into tokens: operators, &&, quoted strings,
-// bracketed indices, and bare words.
 func lexCondition(source string) ([]string, error) {
 	var tokens []string
 	var current strings.Builder
@@ -252,8 +239,6 @@ func parseRef(token string) (operand, error) {
 	return operand{ref: ref}, nil
 }
 
-// parsePathSegment accepts "key" and "key[n]" forms; the index stays
-// attached to its key.
 func parsePathSegment(segment string) (key string, index *int64, err error) {
 	open := strings.IndexByte(segment, '[')
 	if open < 0 {
@@ -302,7 +287,6 @@ func parseInteger(token string) (int64, bool) {
 	return value, true
 }
 
-// referencedSteps returns every step id a condition references.
 func (c *condition) referencedSteps() []string {
 	var ids []string
 	for _, cmp := range c.comparisons {

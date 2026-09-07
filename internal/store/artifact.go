@@ -17,7 +17,6 @@ import (
 	"time"
 )
 
-// DefaultArtifactQuotaBytes is the MVP default artifact storage quota (5 GiB).
 const DefaultArtifactQuotaBytes int64 = 5 << 30
 
 type ArtifactMetadata struct {
@@ -50,7 +49,6 @@ type ArtifactLink struct {
 	Metadata   json.RawMessage
 }
 
-// Pointer parameters are required; a nil argument returns ErrorCodeInvalidArgument.
 type ArtifactStore interface {
 	Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error)
 	Open(ctx context.Context, refID string) (io.ReadCloser, ArtifactMetadata, error)
@@ -64,10 +62,6 @@ type sqliteArtifactStore struct {
 	quotaBytes int64
 }
 
-// NewArtifactStore returns a content-addressed ArtifactStore rooted at root.
-// Blob bytes are deduplicated by digest; each Put/Link call creates its own
-// artifact_ref ownership record, so sharing a blob across sessions never
-// duplicates bytes or loses per-session ownership.
 func NewArtifactStore(db *sql.DB, root string, quotaBytes int64) ArtifactStore {
 	return &sqliteArtifactStore{db: db, root: root, quotaBytes: quotaBytes}
 }
@@ -92,7 +86,6 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		}
 	}()
 
-	// quota+1 would wrap at math.MaxInt64 and copy nothing.
 	limit := s.quotaBytes
 	if limit < math.MaxInt64 {
 		limit++
@@ -124,8 +117,6 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o700); err != nil {
 		return ArtifactRef{}, fmt.Errorf("create blob directory: %w", err)
 	}
-	// Atomic rename: the file only becomes visible at its final,
-	// content-addressed path once fully written and fsynced.
 	if err := os.Rename(tmpPath, absPath); err != nil {
 		return ArtifactRef{}, fmt.Errorf("rename artifact into place: %w", err)
 	}
@@ -154,8 +145,6 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 	err = tx.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&existingMediaType)
 	switch {
 	case err == nil:
-		// Bytes already stored under this digest; reuse the recorded media type
-		// and skip quota accounting since no new space is consumed.
 		ref.MediaType = existingMediaType
 	case errors.Is(err, sql.ErrNoRows):
 		var total sql.NullInt64
@@ -169,9 +158,6 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 				Detail: fmt.Sprintf("blob %s would exceed the storage quota of %d bytes", digest, s.quotaBytes),
 			}
 		}
-		// A concurrent Put may commit the same digest between the SELECT
-		// above and this INSERT; ON CONFLICT turns that into dedupe, not an
-		// error, and the media type is re-read below.
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(digest) DO NOTHING`,
@@ -300,8 +286,6 @@ func blobRelativePath(digest string) string {
 	return path.Join("blobs", digest[:2], digest)
 }
 
-// resolveRootedPath joins a DB-controlled relative path onto root; a corrupt
-// row must never be able to turn into access outside the root.
 func resolveRootedPath(root, rel string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(rel))
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {

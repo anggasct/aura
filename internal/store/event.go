@@ -12,7 +12,6 @@ import (
 	"modernc.org/sqlite"
 )
 
-// SQLite extended result codes, see https://www.sqlite.org/rescode.html.
 const (
 	sqliteConstraintUnique     = 2067 // SQLITE_CONSTRAINT_UNIQUE
 	sqliteConstraintPrimaryKey = 1555 // SQLITE_CONSTRAINT_PRIMARYKEY
@@ -144,11 +143,6 @@ func (s *sqliteEventStore) AppendCheckpoint(ctx context.Context, event *RuntimeE
 	return nil
 }
 
-// sequenceToDB and sequenceFromDB bridge the uint64 domain counter and the
-// signed INTEGER column. Out-of-range values are rejected rather than wrapped,
-// so a corrupt row can never present itself as a valid ordering position.
-// Zero is valid here: it is the "from the beginning" cursor in ListEvents and
-// only the append boundary rejects it.
 func sequenceToDB(sequence uint64) (int64, error) {
 	if sequence > math.MaxInt64 {
 		return 0, &Error{
@@ -179,8 +173,6 @@ func schemaVersionFromDB(stored int64) (uint16, error) {
 	return uint16(stored), nil
 }
 
-// schemaVersionToDB rejects a zero schema version at the boundary, mirroring
-// the schema's CHECK (schema_version > 0).
 func schemaVersionToDB(version uint16) (int64, error) {
 	if version == 0 {
 		return 0, &Error{
@@ -191,15 +183,10 @@ func schemaVersionToDB(version uint16) (int64, error) {
 	return int64(version), nil
 }
 
-// EventWriter is the write surface shared by *sql.DB and *sql.Tx, so a caller
-// can append a runtime event inside its own transaction and keep the insert
-// atomic with whatever else that transaction commits.
 type EventWriter interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-// AppendEventTx appends a runtime event within a caller-owned transaction.
-// The event and the caller's other writes commit or roll back together.
 func AppendEventTx(ctx context.Context, tx EventWriter, e *RuntimeEvent) error {
 	if tx == nil {
 		return errNilArgument("tx")

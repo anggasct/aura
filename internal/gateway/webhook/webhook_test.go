@@ -17,9 +17,6 @@ import (
 	"time"
 )
 
-// Vectors computed independently of the Go implementation (Python hmac over
-// the documented canonical bytes) so the test proves the wire format, not
-// just self-consistency.
 const (
 	vectorSecret    = "test-secret-0123456789abcdef"
 	vectorTimestamp = "1750000000"
@@ -84,8 +81,6 @@ func TestVerifySignature(t *testing.T) {
 	})
 }
 
-// recordingDispatcher captures the accepted event for assertions and
-// controls the dispatch outcome.
 type recordingDispatcher struct {
 	mu     sync.Mutex
 	events []AcceptedEvent
@@ -356,7 +351,6 @@ func TestHandler_RateLimit(t *testing.T) {
 	if len(dispatch.events) != 3 {
 		t.Fatalf("dispatch called %d times", len(dispatch.events))
 	}
-	// A different key from a different address is an independent budget.
 	rec = httptest.NewRecorder()
 	graceReq := signedRequest(t, http.MethodPost, eventPath, "grace", "grace-secret-9876543210", vectorTimestamp, nonce(4), secondKeyBody)
 	graceReq.RemoteAddr = "10.0.0.2:5555"
@@ -364,7 +358,6 @@ func TestHandler_RateLimit(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("independent key budget not respected: %d", rec.Code)
 	}
-	// The window resets after a minute.
 	current = current.Add(61 * time.Second)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, signedRequest(t, http.MethodPost, eventPath, "primary", vectorSecret, "1750000061", nonce(5), []byte(vectorBody)))

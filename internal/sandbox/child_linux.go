@@ -13,9 +13,6 @@ import (
 
 const childInitFailedExit = 126
 
-// childConfig is the contract the parent streams to a re-executed child over
-// an inherited pipe. The child applies the limits and confinement, then execs
-// Command with Args under the allowlisted environment.
 type childConfig struct {
 	WorkingDir     string   `json:"working_dir"`
 	ReadOnlyPaths  []string `json:"read_only_paths"`
@@ -26,11 +23,6 @@ type childConfig struct {
 	Args           []string `json:"args"`
 }
 
-// RunChild is the entry point for a sandbox child re-execution. It reads the
-// streamed config, applies the resource and confinement layers in order, and
-// execs the target. It returns only when setup fails (exit 126, with the
-// cause written to the init-error pipe); a successful setup ends in execve
-// and never returns.
 func RunChild() int {
 	cfg, err := readChildConfig()
 	if err != nil {
@@ -62,10 +54,6 @@ func readChildConfig() (childConfig, error) {
 	return cfg, nil
 }
 
-// setupChild applies confinement in the order the kernel requires: close
-// stray inherited descriptors first, then rlimits, then no_new_privs (needed
-// by both Landlock restrict_self and seccomp), then Landlock, then the seccomp
-// filter immediately before exec.
 func setupChild(cfg *childConfig) error {
 	if err := closeExtraFds(); err != nil {
 		return err
@@ -90,12 +78,6 @@ func reportChildInit(err error) {
 	}
 }
 
-// closeExtraFds closes every inherited descriptor above the config (3) and
-// init-error (4) pipes. A parent fd without close-on-exec would otherwise
-// survive execve into the confined process; close_range atomically clears the
-// range so a leaked descriptor carrying secret data cannot reach the child.
-// Any failure — including a kernel without close_range — fails closed here so
-// the child never execs with an unclean descriptor set.
 func closeExtraFds() error {
 	if err := unix.CloseRange(5, ^uint(0), 0); err != nil {
 		return fmt.Errorf("close extra fds: %w", err)

@@ -18,7 +18,6 @@ import (
 func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 	ctx := t.Context()
 
-	// MCP Server with echo tool
 	server := sdk.NewServer(&sdk.Implementation{
 		Name:    "mem-server",
 		Version: "1.0.0",
@@ -67,7 +66,6 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 	}
 	mgr.SetCustomTransport(serverName, clientTransport)
 
-	// 1. Initial start fails because trust is required before tools are registered
 	err = mgr.Start(ctx)
 	if err == nil {
 		t.Fatal("expected Start to fail due to trust required")
@@ -76,7 +74,6 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 		t.Fatalf("expected %s, got %s (err: %v)", ErrTrustRequired, code, err)
 	}
 
-	// Verify no tools were registered in broker
 	namespacedTool := FormatToolName(serverName, "echo")
 	for _, def := range broker.Definitions() {
 		if def.Name == namespacedTool {
@@ -84,7 +81,6 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 		}
 	}
 
-	// 2. Approve the trust digest recorded during the attempt
 	trustRecord, err := trustRegistry.GetTrust(ctx, serverName)
 	if err != nil || trustRecord == nil {
 		t.Fatalf("expected trust record to exist: %v", err)
@@ -93,14 +89,12 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 		t.Fatalf("Approve failed: %v", err)
 	}
 
-	// Create fresh in-memory transports for the reconnect
 	clientTransport2, serverTransport2 := sdk.NewInMemoryTransports()
 	go func() {
 		_ = server.Run(ctx, serverTransport2)
 	}()
 	mgr.SetCustomTransport(serverName, clientTransport2)
 
-	// 3. Now start succeeds and registers tool
 	if err := mgr.Start(ctx); err != nil {
 		t.Fatalf("Start failed after approval: %v", err)
 	}
@@ -116,7 +110,6 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 		t.Fatalf("tool %s was not registered in broker", namespacedTool)
 	}
 
-	// 4. Invocations pass through ToolBroker with exact server/tool/argument/capability identity and Untrusted: true
 	reqArgs, err := json.Marshal(EchoInput{Message: "hello aura"})
 	if err != nil {
 		t.Fatalf("marshal reqArgs failed: %v", err)
@@ -144,7 +137,6 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 		t.Fatalf("expected ResultOK, got %s", res.Class)
 	}
 
-	// Missing capability fails closed in broker
 	toolReqNoCaps := *toolReq
 	toolReqNoCaps.Capabilities = nil
 	_, err = broker.Execute(ctx, &toolReqNoCaps)
@@ -152,7 +144,6 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 		t.Fatal("expected execution to fail closed when required capabilities are missing")
 	}
 
-	// 5. Close unregisters tools
 	if err := mgr.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
 	}
@@ -199,7 +190,6 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 	}
 	defer func() { _ = mgr.Close() }()
 
-	// First start is rejected at the spawn gate before any process exists
 	err = mgr.Start(ctx)
 	if err == nil {
 		t.Fatal("expected ErrTrustRequired on first start without approval")
@@ -208,7 +198,6 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 		t.Fatalf("expected ErrTrustRequired, got %s", code)
 	}
 
-	// Approve the recorded spawn digest so the command may execute
 	rec, err := trustRegistry.GetTrust(ctx, serverName)
 	if err != nil || rec == nil {
 		t.Fatalf("expected trust record to exist: %v", err)
@@ -217,8 +206,6 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 		t.Fatalf("ApproveSpawn failed: %v", err)
 	}
 
-	// Second start spawns and discovers, then the session digest gate
-	// requires owner review of the full config and discovered tools
 	err = mgr.Start(ctx)
 	if err == nil {
 		t.Fatal("expected ErrTrustRequired for session digest after discovery")
@@ -234,7 +221,6 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 		t.Fatalf("Approve failed: %v", err)
 	}
 
-	// Third start with both approvals succeeds
 	if err := mgr.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
@@ -267,10 +253,6 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 	}
 }
 
-// TestManagerRejectsUnapprovedStdioCommandBeforeSpawn verifies the pre-spawn
-// trust gate: an unapproved stdio command is rejected with mcp_trust_required
-// and no child process is created. The marker file would only appear if the
-// configured command actually executed.
 func TestManagerRejectsUnapprovedStdioCommandBeforeSpawn(t *testing.T) {
 	ctx := t.Context()
 
@@ -328,9 +310,6 @@ func TestManagerRejectsUnapprovedStdioCommandBeforeSpawn(t *testing.T) {
 	}
 }
 
-// TestManagerDigestChangeForcesSpawnReapproval verifies that an approved
-// command digest re-fails after the executable surface changes, and that the
-// old approval does not carry over to the new digest until re-approved.
 func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 	ctx := t.Context()
 
@@ -368,7 +347,6 @@ func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 	}
 	defer func() { _ = mgr.Close() }()
 
-	// First start: pending spawn trust recorded, rejected before spawn.
 	if err := mgr.Start(ctx); err == nil {
 		t.Fatal("expected first start to require spawn approval")
 	}
@@ -384,15 +362,11 @@ func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 		t.Fatalf("ApproveSpawn failed: %v", err)
 	}
 
-	// Second start with the approved digest gets past the spawn gate. The
-	// helper exits immediately, so the handshake fails with server
-	// unavailable — the gate itself passed.
 	err = mgr.Start(ctx)
 	if code, _ := CodeOf(err); code != ErrServerUnavailable {
 		t.Fatalf("expected past the spawn gate (server unavailable for dead helper), got %v", err)
 	}
 
-	// Swap the command for an unapproved one.
 	mutated := serverCfg
 	mutated.Command = cmdB
 	mgr2, err := NewManager(ManagerOptions{
@@ -420,7 +394,6 @@ func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 		t.Fatalf("expected spawn decision reset to pending, got %q", rec.SpawnDecision)
 	}
 
-	// The old approval must not satisfy the new digest.
 	trusted, err := trustRegistry.IsSpawnTrusted(ctx, serverCfg.Name, rec.SpawnDigest)
 	if err != nil {
 		t.Fatal(err)

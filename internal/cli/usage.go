@@ -34,9 +34,6 @@ func newUsageCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-// withUsage loads config, opens the live database, builds a ledger, and runs
-// fn. The price registry is loaded from the operator price file; a missing
-// default file is not an error.
 func withUsage(cmd *cobra.Command, gf *globalFlags, pricesPath string, fn func(context.Context, *slog.Logger, *config.Config, *usage.Ledger, *usage.PriceRegistry) error) error {
 	result, err := config.Load(gf.configPath)
 	if err != nil {
@@ -75,9 +72,6 @@ func withUsage(cmd *cobra.Command, gf *globalFlags, pricesPath string, fn func(c
 	return fn(cmd.Context(), logger, cfg, ledger, reg)
 }
 
-// loadPrices reads the operator price file into reg. An explicit path wins;
-// otherwise prices.yaml beside the config file is used. A missing default
-// file is not an error (no prices registered); a missing explicit file is.
 func loadPrices(ctx context.Context, logger *slog.Logger, configPath, explicit string, reg *usage.PriceRegistry) error {
 	path := explicit
 	explicitGiven := explicit != ""
@@ -97,8 +91,6 @@ func loadPrices(ctx context.Context, logger *slog.Logger, configPath, explicit s
 	return nil
 }
 
-// table is a tabwriter that records the first write error so callers print
-// many rows and check once.
 type table struct {
 	w   *tabwriter.Writer
 	err error
@@ -122,8 +114,6 @@ func (t *table) flush() error {
 	return t.w.Flush()
 }
 
-// noPositionalArgs rejects stray positional arguments with a typed usageError
-// so ExecuteContext exits 2 (argument-error contract), not the runtime code.
 func noPositionalArgs(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		return &usageError{fmt.Errorf("%s: unexpected argument %q", cmd.CommandPath(), args[0])}

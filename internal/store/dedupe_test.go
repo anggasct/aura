@@ -32,7 +32,6 @@ func TestDedupeAcceptClaimsAndReplays(t *testing.T) {
 		t.Fatalf("events = %+v, want the accepted event", events)
 	}
 
-	// A duplicate claim returns the original turn and writes nothing.
 	duplicate := newEvent("session-1", 2)
 	duplicate.TurnID = "turn-2"
 	duplicate.Kind = "turn.accepted"

@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// The builtin definition registry in this package is the only home for tool
-// definition data; the harness conformance suite must not carry its own copy
-// of names, versions, or schemas.
 func TestBuiltinDefinitionsHaveNoDuplicateRegistryInHarness(t *testing.T) {
 	builtins := Builtins()
 	keys := make([]string, 0, len(builtins))

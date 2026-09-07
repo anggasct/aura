@@ -203,8 +203,6 @@ func TestBudgetedConcurrentDispatch(t *testing.T) {
 	}
 }
 
-// dbClosingLLM closes the ledger database while generating, so the wrapper's
-// post-response settlement fails deterministically.
 type dbClosingLLM struct {
 	db    *sql.DB
 	usage *genai.GenerateContentResponseUsageMetadata
@@ -274,8 +272,6 @@ func TestBudgetedJoinsProviderAndSettlementErrors(t *testing.T) {
 	}
 }
 
-// errAfterResponseLLM yields a response first, then fails with providerErr, so
-// the error path carries a non-nil final response.
 type errAfterResponseLLM struct {
 	providerErr error
 }
@@ -292,9 +288,6 @@ func (f *errAfterResponseLLM) GenerateContent(_ context.Context, _ *adkmodel.LLM
 	}
 }
 
-// TestBudgetedErrorPathYieldsFinalResponse proves the error path settles and
-// yields the last successfully received response alongside the error instead
-// of a nil response, so a partial response is never dropped on provider error.
 func TestBudgetedErrorPathYieldsFinalResponse(t *testing.T) {
 	l, _ := budgetedLedger(t, 1000000)
 	providerErr := errors.New("provider exploded mid-stream")
@@ -316,8 +309,6 @@ func TestBudgetedErrorPathYieldsFinalResponse(t *testing.T) {
 	if sawErr == nil || !errors.Is(sawErr, providerErr) {
 		t.Fatalf("provider error must be surfaced, got %v", sawErr)
 	}
-	// The response delivered alongside the error must be the one the inner
-	// stream attached to the error (a fresh partial chunk), not nil.
 	if errResp == nil {
 		t.Fatal("the response attached to the provider error must be yielded, got nil")
 	}
@@ -326,8 +317,6 @@ func TestBudgetedErrorPathYieldsFinalResponse(t *testing.T) {
 	}
 }
 
-// streamStopsLLM yields one partial (non-TurnComplete) response, then stops
-// cleanly; the consumer is expected to stop before exhaustion.
 type streamStopsLLM struct{}
 
 func (f *streamStopsLLM) Name() string { return "stream-stops" }
@@ -341,7 +330,6 @@ func (f *streamStopsLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMReque
 	}
 }
 
-// noCompleteLLM exhausts cleanly but never emits a TurnComplete response.
 type noCompleteLLM struct{}
 
 func (f *noCompleteLLM) Name() string { return "no-complete" }
@@ -355,10 +343,6 @@ func (f *noCompleteLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMReques
 	}
 }
 
-// TestBudgetedConsumerStopSettlesConservative: when the consumer stops
-// iterating early, the final outcome is unknown, so the reservation must be
-// settled conservatively at the reserved amount (accountingEstimated, >= the
-// reserved cost), never at the partial usage.
 func TestBudgetedConsumerStopSettlesConservative(t *testing.T) {
 	l := newTestLedger(t, 10000000, 10000000)
 	b, err := NewBudgeted(&streamStopsLLM{}, l, "primary", nil)
@@ -366,7 +350,6 @@ func TestBudgetedConsumerStopSettlesConservative(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
-	// Stop after the first (partial) response.
 	for resp := range b.GenerateContent(context.Background(), req, false) {
 		_ = resp
 		break
@@ -382,18 +365,11 @@ func TestBudgetedConsumerStopSettlesConservative(t *testing.T) {
 	if entries[0].Accounting != accountingEstimated {
 		t.Errorf("consumer-stop accounting = %q, want estimated (conservative)", entries[0].Accounting)
 	}
-	// The reserved cost for 100 in / 200 out at the test price is > 0; the
-	// conservative settle must charge at least that, never the tiny partial
-	// usage (10 in / 20 out).
 	if entries[0].CostMicros < 100 {
 		t.Errorf("consumer-stop cost = %d, want >= reserved cost (conservative, not partial)", entries[0].CostMicros)
 	}
 }
 
-// TestBudgetedCleanExhaustionWithoutCompleteSettlesConservative: a stream
-// that ends without a TurnComplete response has no completion evidence, so it
-// must settle conservatively at the reserved amount rather than release the
-// remainder at partial usage.
 func TestBudgetedCleanExhaustionWithoutCompleteSettlesConservative(t *testing.T) {
 	l := newTestLedger(t, 10000000, 10000000)
 	b, err := NewBudgeted(&noCompleteLLM{}, l, "primary", nil)
@@ -419,9 +395,6 @@ func TestBudgetedCleanExhaustionWithoutCompleteSettlesConservative(t *testing.T)
 	}
 }
 
-// TestBudgetedSettlesCacheAndReasoningTokens: provider-reported cached-content
-// and reasoning/thought tokens must be priced into the settlement (not dropped
-// to zero), so the settled cost reflects cache/reasoning rates.
 func TestBudgetedSettlesCacheAndReasoningTokens(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
 	inner.usage = &genai.GenerateContentResponseUsageMetadata{
@@ -445,8 +418,6 @@ func TestBudgetedSettlesCacheAndReasoningTokens(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("entries = %d, want 1", len(entries))
 	}
-	// The test price (MicrosPerInputToken=10, Output=30, Cache=2, Reasoning=5)
-	// must price all four components: 50*10 + 100*30 + 30*2 + 7*5 = 3695.
 	want := testPrice("primary").CostMicros(Usage{InputTokens: 50, OutputTokens: 100, CacheTokens: 30, ReasoningTokens: 7})
 	if entries[0].CostMicros != want {
 		t.Errorf("cost = %d, want %d (cache/reasoning must be priced, not dropped)", entries[0].CostMicros, want)
@@ -480,9 +451,6 @@ func TestBudgetedCancelledContextBlocksDispatch(t *testing.T) {
 	}
 }
 
-// TestBudgetedIdempotentReplay proves a retry that re-enters the wrapper with
-// the same idempotency key collapses onto the existing reservation: one
-// reservation row, one settlement entry, never two.
 func TestBudgetedIdempotentReplay(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
 	b, err := NewBudgeted(inner, l, "primary", nil)
@@ -535,7 +503,6 @@ func TestEstimateInputTokensAccountsAllParts(t *testing.T) {
 	if withInline <= textOnly {
 		t.Errorf("inline data must raise the estimate: inline=%d text=%d", withInline, textOnly)
 	}
-	// 4000 bytes ~= 1000 tokens; the image must not be counted as zero.
 	if withInline-textOnly < 900 {
 		t.Errorf("inline data delta = %d, want ~1000 tokens for 4000 bytes", withInline-textOnly)
 	}
@@ -550,8 +517,6 @@ func TestEstimateInputTokensRejectsFileDataUnderCap(t *testing.T) {
 	if _, err := estimateInputTokens(req, true); err == nil {
 		t.Error("strict estimate must reject file_data whose size is unknown")
 	}
-	// With no cap enforced the same request is accepted (the output bound still
-	// reserves a non-zero amount); it simply cannot be precisely sized.
 	if _, err := estimateInputTokens(req, false); err != nil {
 		t.Errorf("non-strict estimate rejected file_data: %v", err)
 	}

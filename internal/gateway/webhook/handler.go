@@ -18,15 +18,11 @@ const (
 	statusPathPrefix = "/webhook/executions/"
 )
 
-// Settings are the resolved runtime knobs of the webhook surface.
 type Settings struct {
 	MaxBodySize        int64
 	TimestampTolerance time.Duration
 }
 
-// AcceptedEvent is one request that passed every enforcement gate up to and
-// including strict JSON parsing. Body and digest travel together so the
-// dispatch stage can persist replay identity without re-hashing.
 type AcceptedEvent struct {
 	KeyID      string
 	Nonce      string
@@ -35,24 +31,15 @@ type AcceptedEvent struct {
 	Envelope   Envelope
 }
 
-// ExecutionRef identifies the durable work created for an accepted event.
 type ExecutionRef struct {
 	ExecutionID string
 	TurnID      string
 }
 
-// Dispatcher persists execution identity and submits the runtime turn for an
-// authenticated event. It is the seam between request admission and durable
-// execution; replay decisions and queue admission live behind it.
 type Dispatcher interface {
 	Dispatch(ctx context.Context, event *AcceptedEvent) (ExecutionRef, error)
 }
 
-// Handler serves the inbound webhook surface. Every request passes the
-// gates in the frozen order: method, path, content type, header syntax,
-// rate, body bound, authentication, timestamp window, then strict parsing.
-// Nothing about a request body or its headers beyond identifiers, digest,
-// and outcome reaches a log line.
 type Handler struct {
 	settings Settings
 	keys     *KeyRing
@@ -62,9 +49,6 @@ type Handler struct {
 	dispatch Dispatcher
 }
 
-// NewHandler wires the handler. A nil logger falls back to the default once,
-// at construction; nil dependencies are construction errors, never runtime
-// behavior.
 func NewHandler(settings Settings, keys *KeyRing, limiter *RateLimiter, clock func() time.Time, logger *slog.Logger, dispatch Dispatcher) (*Handler, error) {
 	if keys == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "key ring must not be nil")
@@ -146,8 +130,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.logAccepted(r.Context(), auth.KeyID, digest, start)
 }
 
-// authenticate resolves the key and verifies the canonical HMAC. Unknown
-// key, expired key, and bad signature all fail identically.
 func (h *Handler) authenticate(auth RequestAuth, body []byte) bool {
 	secretValue, err := h.keys.Lookup(auth.KeyID, h.clock())
 	if err != nil {
@@ -176,8 +158,6 @@ func (h *Handler) logRejected(ctx context.Context, keyID, digest, result string,
 	)
 }
 
-// readBoundedBody reads at most one byte past the bound: the size error is
-// raised the moment the limit is exceeded, before any parsing or dispatch.
 func readBoundedBody(r *http.Request, limit int64) (body []byte, digest string, err error) {
 	if r.ContentLength > limit {
 		return nil, "", Errorf(ErrorCodeBodyTooLarge, "body exceeds the configured limit")

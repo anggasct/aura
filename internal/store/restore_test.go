@@ -168,10 +168,8 @@ func TestCollectDeletesOnlyOldUnreferencedBlobs(t *testing.T) {
 	mustCreateSession(t, db, "session-1")
 	root := t.TempDir()
 
-	// A referenced blob is never collected regardless of age.
 	referenced := mustPutArtifact(t, db, root, "artifact-keep", "session-1", []byte("keep"))
 
-	// An unreferenced blob created before the cutoff is collected.
 	oldDigest := strings.Repeat("a", 64)
 	recentDigest := strings.Repeat("b", 64)
 	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
@@ -239,9 +237,6 @@ func TestCollectSkipsBlobReferencedAfterScan(t *testing.T) {
 	mustCreateSession(t, db, "session-1")
 	root := t.TempDir()
 
-	// The blob is old and unreferenced at scan time, so it is a candidate;
-	// but a reference is linked before the conditional delete runs, which
-	// must protect the row and the file.
 	digest := strings.Repeat("a", 64)
 	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
 		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, formatTime(time.Now().Add(-48*time.Hour))); err != nil {
@@ -263,9 +258,6 @@ func TestCollectSkipsBlobReferencedAfterScan(t *testing.T) {
 		t.Fatalf("DeletedBlobs = %d, want 1 (blob unreferenced at scan time)", report.DeletedBlobs)
 	}
 
-	// Simulate the reference racing in after the candidate scan: re-insert
-	// the blob plus a reference, then run Collect again; the blob must
-	// survive because the conditional delete re-checks the reference.
 	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
 		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, formatTime(time.Now().Add(-48*time.Hour))); err != nil {
 		t.Fatalf("re-insert blob: %v", err)

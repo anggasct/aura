@@ -37,13 +37,6 @@ func (r *sqliteReconciler) Collect(ctx context.Context, before time.Time) (Colle
 	return Collect(ctx, r.db, r.root, before)
 }
 
-// Collect deletes blob files and their rows for blobs that have no artifact
-// reference and were created before the grace cutoff. The delete is
-// conditional and transactional: the NOT EXISTS reference check runs in the
-// same statement as the row delete, so a reference linked after the candidate
-// scan still protects the blob. Files are removed only when the row
-// delete actually matched; a file that cannot be removed aborts the sweep
-// with its row intact, so a failed sweep never deletes ownership data.
 func Collect(ctx context.Context, db *sql.DB, root string, before time.Time) (CollectionReport, error) {
 	candidates, err := collectionCandidates(ctx, db, before)
 	if err != nil {
@@ -118,8 +111,6 @@ func collectionCandidates(ctx context.Context, db *sql.DB, before time.Time) ([]
 		}
 		candidates = append(candidates, c)
 	}
-	// Without this a query that fails mid-iteration is indistinguishable from
-	// an empty result, and the sweep would report success having seen nothing.
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("scan collectible blobs: %w", err)
 	}

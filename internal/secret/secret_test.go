@@ -52,8 +52,6 @@ func TestReferenceRejectsInvalid(t *testing.T) {
 	}
 }
 
-// Canaries must never survive into prompts, logs, traces, errors,
-// artifacts, or child environments.
 func TestCanariesNeverAppearInChannels(t *testing.T) {
 	const (
 		apiKey = "sk-canary-a1b2c3d4e5"

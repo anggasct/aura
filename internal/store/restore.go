@@ -10,17 +10,10 @@ import (
 	"path/filepath"
 )
 
-// RestoreOptions controls offline restore behavior. Force is required to
-// replace an existing live database.
 type RestoreOptions struct {
 	Force bool
 }
 
-// Restore installs a verified backup snapshot as the live database at
-// liveDBPath. The backup is verified first (integrity, manifest, and blob
-// checksums); any verification failure aborts before the live database is
-// touched. Without Force, an existing live database is refused with
-// restore_locked. The backup files are never modified.
 func Restore(ctx context.Context, backupDir, artifactRoot, liveDBPath string, opts RestoreOptions) (RestoreReport, error) {
 	report, err := VerifyRestore(ctx, backupDir, artifactRoot)
 	if err != nil {
@@ -86,8 +79,6 @@ func copyFileSynced(ctx context.Context, src, dst string) error {
 	return syncPath(dir)
 }
 
-// copyWithContext copies until EOF or cancellation, so a large restore
-// honors ctx instead of copying to completion.
 func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
 	buf := make([]byte, 32*1024)
 	var written int64
@@ -111,9 +102,6 @@ func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, 
 	}
 }
 
-// BackupStore is the spec contract for backup/restore operations. The
-// concrete implementation composes the store's free functions so feature
-// packages can depend on the interface without importing the driver.
 type BackupStore interface {
 	CreateBackup(ctx context.Context, destDir string) (BackupManifest, error)
 	VerifyBackup(ctx context.Context, backupDir string) (BackupManifest, error)
@@ -134,8 +122,6 @@ func (s *sqliteBackupStore) CreateBackup(ctx context.Context, destDir string) (B
 	return Backup(ctx, s.db, destDir)
 }
 
-// VerifyBackup verifies the backup against the artifact root and returns its
-// manifest, per the spec interface.
 func (s *sqliteBackupStore) VerifyBackup(ctx context.Context, backupDir string) (BackupManifest, error) {
 	report, err := VerifyRestore(ctx, backupDir, s.artifactRoot)
 	if err != nil {

@@ -113,8 +113,6 @@ func TestGeminiStreamFixture(t *testing.T) {
 
 func TestGeminiStreamTruncatedBeforeTerminal(t *testing.T) {
 	fixture := fixtureBytes(t, "gemini_stream.txt")
-	// Cut at the event boundary before the STOP event so the stream is
-	// complete events that never reach the terminal marker.
 	stopAt := bytes.Index(fixture, []byte(`"finishReason":"STOP"`))
 	eventStart := bytes.LastIndex(fixture[:stopAt], []byte("\n\n"))
 	truncated := fixture[:eventStart+2]
