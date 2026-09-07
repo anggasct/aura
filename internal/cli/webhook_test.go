@@ -9,6 +9,7 @@ import (
 
 	gatewaywebhook "github.com/anggasct/aura/internal/gateway/webhook"
 	"github.com/anggasct/aura/internal/runtime"
+	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -19,6 +20,7 @@ type fakeTurnRuntime struct {
 	events    func(turnID string) []turnOutcome
 	store     store.EventStore
 	sequences map[string]uint64
+	parts     [][]runtimeingress.InputPart
 }
 
 type turnOutcome struct {
@@ -29,6 +31,7 @@ type turnOutcome struct {
 func (f *fakeTurnRuntime) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	f.mu.Lock()
 	f.calls++
+	f.parts = append(f.parts, req.Parts)
 	f.mu.Unlock()
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		if f.overload {
@@ -119,9 +122,10 @@ func webhookTestEvent() *gatewaywebhook.AcceptedEvent {
 		Nonce:      "nonce-abcdefghijklmnop",
 		BodyDigest: "digest-1",
 		Envelope: gatewaywebhook.Envelope{
-			EventID: "evt-1",
-			Subject: "hello",
-			Payload: []byte(`{"k":1}`),
+			EventID:  "evt-1",
+			Subject:  "hello",
+			Payload:  []byte(`{"k":1}`),
+			Metadata: map[string]string{"src": "ci"},
 		},
 	}
 }
@@ -165,6 +169,17 @@ func TestWebhookDispatcher_AcceptCompletesTurn(t *testing.T) {
 	}
 	if backend.submitted() != 1 {
 		t.Errorf("submitted turns = %d, want 1", backend.submitted())
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if len(backend.parts) != 1 || len(backend.parts[0]) != 3 {
+		t.Fatalf("turn parts = %v, want subject, payload, and metadata", backend.parts)
+	}
+	if backend.parts[0][0].Text != "hello" || backend.parts[0][1].Text != `{"k":1}` {
+		t.Errorf("subject/payload parts = %q, %q", backend.parts[0][0].Text, backend.parts[0][1].Text)
+	}
+	if backend.parts[0][2].Text != `{"src":"ci"}` {
+		t.Errorf("metadata part = %q, want %q", backend.parts[0][2].Text, `{"src":"ci"}`)
 	}
 }
 

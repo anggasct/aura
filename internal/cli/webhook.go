@@ -174,15 +174,30 @@ func (d *webhookDispatcher) isLive(executionID string) bool {
 func (d *webhookDispatcher) resubmitOrphaned(ctx context.Context, previous *store.WebhookExecution, event *gatewaywebhook.AcceptedEvent) {
 	sessionID, err := newWebhookID("sess_")
 	if err != nil {
+		d.logger.WarnContext(ctx, "webhook orphan resubmission skipped",
+			"component", "webhook",
+			"key_id", event.KeyID,
+			"error", err,
+		)
 		return
 	}
 	now := d.clock().UTC()
 	if err := d.createSession(ctx, sessionID, event.KeyID, now); err != nil {
+		d.logger.WarnContext(ctx, "webhook orphan resubmission skipped",
+			"component", "webhook",
+			"key_id", event.KeyID,
+			"error", err,
+		)
 		return
 	}
 	turn := webhookTurnRequest(sessionID, previous.TurnID, event)
 	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, turn)
 	if err != nil {
+		d.logger.WarnContext(ctx, "webhook orphan resubmission skipped",
+			"component", "webhook",
+			"key_id", event.KeyID,
+			"error", err,
+		)
 		return
 	}
 	d.markLive(previous.ID)
@@ -241,15 +256,24 @@ func (d *webhookDispatcher) drain(ctx context.Context, executionID string, next 
 
 func (d *webhookDispatcher) transition(ctx context.Context, executionID, state, resultEventID, errorCode string) {
 	now := d.clock().UTC()
+	var err error
 	switch state {
 	case store.WebhookExecutionStateRunning:
-		_, _ = d.executions.MarkRunning(ctx, executionID, now)
+		_, err = d.executions.MarkRunning(ctx, executionID, now)
 	case store.WebhookExecutionStateCompleted, store.WebhookExecutionStateFailed, store.WebhookExecutionStateCancelled:
-		_, _ = d.executions.MarkTerminal(ctx, executionID, state, resultEventID, errorCode, now)
+		_, err = d.executions.MarkTerminal(ctx, executionID, state, resultEventID, errorCode, now)
 	default:
 		d.logger.WarnContext(ctx, "webhook drain reached an unknown state",
 			"component", "webhook",
 			"state", state,
+		)
+		return
+	}
+	if err != nil {
+		d.logger.WarnContext(ctx, "webhook state transition failed",
+			"component", "webhook",
+			"state", state,
+			"error", err,
 		)
 	}
 }
@@ -290,10 +314,16 @@ func webhookTurnRequest(sessionID, turnID string, event *gatewaywebhook.Accepted
 }
 
 func webhookTurnParts(event *gatewaywebhook.AcceptedEvent) []runtimeingress.InputPart {
-	return []runtimeingress.InputPart{
+	parts := []runtimeingress.InputPart{
 		{Text: event.Envelope.Subject},
 		{Text: string(event.Envelope.Payload)},
 	}
+	if len(event.Envelope.Metadata) > 0 {
+		if encoded, err := json.Marshal(event.Envelope.Metadata); err == nil {
+			parts = append(parts, runtimeingress.InputPart{Text: string(encoded)})
+		}
+	}
+	return parts
 }
 
 func failedEventCode(payload []byte) string {
