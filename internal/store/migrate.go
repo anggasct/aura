@@ -22,6 +22,7 @@ var migrations = []migration{
 	{version: 4, sql: effectApprovalSchemaSQL},
 	{version: 5, sql: workflowSchemaSQL},
 	{version: 6, sql: modelCircuitCheckpointSchemaSQL},
+	{version: 7, sql: webhookExecutionSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -223,6 +224,28 @@ CREATE TABLE workflow_step_run (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (run_id, step_id)
 );
+`
+
+const webhookExecutionSchemaSQL = `
+CREATE TABLE webhook_execution (
+    id TEXT PRIMARY KEY,
+    key_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    body_digest TEXT NOT NULL,
+    turn_id TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK (state IN ('accepted','running','completed','failed','cancelled')),
+    result_event_id TEXT REFERENCES runtime_event(id) ON DELETE SET NULL,
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    UNIQUE (key_id, nonce),
+    UNIQUE (key_id, event_id)
+);
+
+CREATE INDEX webhook_execution_expiry_idx
+    ON webhook_execution(expires_at);
 `
 
 const modelCircuitCheckpointSchemaSQL = `

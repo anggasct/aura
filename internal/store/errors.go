@@ -29,6 +29,9 @@ const (
 	ErrorCodeRestoreLocked             ErrorCode = "restore_locked"
 	ErrorCodeStorageBusy               ErrorCode = "storage_busy"
 	ErrorCodeStorageUnavailable        ErrorCode = "storage_unavailable"
+	ErrorCodeWebhookExecutionConflict  ErrorCode = "webhook_execution_conflict"
+	ErrorCodeWebhookExecutionNotFound  ErrorCode = "webhook_execution_not_found"
+	ErrorCodeWebhookExecutionInvalid   ErrorCode = "webhook_execution_invalid"
 )
 
 type Error struct {
