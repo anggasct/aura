@@ -19,23 +19,15 @@ func sha256Hex(content []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Options configures the interpreter.
 type Options struct {
-	// MaxConcurrentSteps bounds concurrently running steps; overflow waits.
 	MaxConcurrentSteps int
-	// HandlerName is the durable service name the interpreter registers.
-	HandlerName string
-	// AgentResolver resolves agent steps (the agent registry).
-	AgentResolver AgentResolver
-	// Agents runs bounded agent executions.
-	Agents AgentRunner
-	// Tools invokes tools through the broker.
-	Tools ToolRunner
-	// Artifacts stores oversized step outputs content-addressed.
-	Artifacts ArtifactSink
-	// Approvals binds approval requests to the run+step.
-	Approvals ApprovalRequester
-	Logger    logger
+	HandlerName        string
+	AgentResolver      AgentResolver
+	Agents             AgentRunner
+	Tools              ToolRunner
+	Artifacts          ArtifactSink
+	Approvals          ApprovalRequester
+	Logger             logger
 }
 
 type logger interface {
@@ -43,9 +35,6 @@ type logger interface {
 	WarnContext(ctx context.Context, msg string, args ...any)
 }
 
-// Interpreter executes compiled workflow specs through the DurableRuntime
-// port, persisting run and step transitions transactionally to the
-// projections.
 type Interpreter struct {
 	store    *Store
 	durable  durable.Runtime
@@ -62,8 +51,6 @@ type definitionRegistry struct {
 	specs map[string]*compiledSpec
 }
 
-// compiledSpec pairs a registered spec with its validated execution graph;
-// the graph is built once, at load.
 type compiledSpec struct {
 	spec  *Spec
 	graph *Graph
@@ -95,7 +82,6 @@ func (r *definitionRegistry) list() []*Spec {
 	return specs
 }
 
-// NewInterpreter wires the single workflow engine over the port.
 func NewInterpreter(store *Store, runtime durable.Runtime, options *Options) *Interpreter {
 	if options == nil {
 		options = &Options{}
@@ -122,8 +108,6 @@ func NewInterpreter(store *Store, runtime durable.Runtime, options *Options) *In
 	return interpreter
 }
 
-// Load validates and registers one spec version; an invalid spec never
-// executes or persists a run.
 func (i *Interpreter) Load(ctx context.Context, spec *Spec, deps ValidationDeps) error {
 	graph, err := Compile(spec, deps)
 	if err != nil {
@@ -136,12 +120,10 @@ func (i *Interpreter) Load(ctx context.Context, spec *Spec, deps ValidationDeps)
 	return nil
 }
 
-// Definitions lists registered specs.
 func (i *Interpreter) Definitions() []*Spec {
 	return i.specs.list()
 }
 
-// Spec returns one registered spec.
 func (i *Interpreter) Spec(id string) (*Spec, bool) {
 	compiled, ok := i.specs.get(id)
 	if !ok {
@@ -150,7 +132,6 @@ func (i *Interpreter) Spec(id string) (*Spec, bool) {
 	return compiled.spec, true
 }
 
-// Start validates, persists, and enqueues a run through the durable port.
 func (i *Interpreter) Start(ctx context.Context, definitionID string, input *RunInput) (*RunSummary, error) {
 	compiled, ok := i.specs.get(definitionID)
 	if !ok {
@@ -184,7 +165,6 @@ func mustEncode(value any) []byte {
 	return encoded
 }
 
-// Signal forwards a runtime signal (wait or approval resolution).
 func (i *Interpreter) Signal(ctx context.Context, runID, name string, payload []byte) error {
 	summary, err := i.store.Run(ctx, runID)
 	if err != nil {
@@ -193,7 +173,6 @@ func (i *Interpreter) Signal(ctx context.Context, runID, name string, payload []
 	return i.durable.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, name, payload)
 }
 
-// Cancel cooperatively cancels the durable run.
 func (i *Interpreter) Cancel(ctx context.Context, runID string) error {
 	summary, err := i.store.Run(ctx, runID)
 	if err != nil {
@@ -202,7 +181,6 @@ func (i *Interpreter) Cancel(ctx context.Context, runID string) error {
 	return i.durable.Cancel(ctx, durable.RunRef{Key: summary.DurableKey})
 }
 
-// RunStatus maps the durable state onto the projection.
 func (i *Interpreter) RunStatus(ctx context.Context, runID string) (string, error) {
 	summary, err := i.store.Run(ctx, runID)
 	if err != nil {
@@ -211,9 +189,6 @@ func (i *Interpreter) RunStatus(ctx context.Context, runID string) (string, erro
 	return summary.Status, nil
 }
 
-// handleInvocation drives one run: dependency-ready steps execute
-// concurrently up to the bound; wait and approval steps suspend on their
-// signals; terminal states persist transactionally.
 func (i *Interpreter) handleInvocation(ctx context.Context, inv *durable.Invocation) error {
 	var tick tickPayload
 	if err := json.Unmarshal(inv.Payload(), &tick); err != nil {
@@ -242,7 +217,6 @@ func (i *Interpreter) handleInvocation(ctx context.Context, inv *durable.Invocat
 	return execution.run(ctx)
 }
 
-// stepExecution carries one in-flight run's working state.
 type stepExecution struct {
 	interpreter *Interpreter
 	invocation  *durable.Invocation
@@ -250,13 +224,10 @@ type stepExecution struct {
 	graph       *Graph
 	runID       string
 	input       *RunInput
-	// outputs and statuses are handler-local working state; the durable
-	// journal replays them from the same deterministic order.
-	outputs    map[string]json.RawMessage
-	statuses   map[string]string
-	failedStep string
-	// mu guards the working state shared across concurrent step goroutines.
-	mu sync.Mutex
+	outputs     map[string]json.RawMessage
+	statuses    map[string]string
+	failedStep  string
+	mu          sync.Mutex
 	// statusMu guards the in-memory awaiting set of steps currently
 	// suspended on a signal; it is never held across a database write.
 	statusMu sync.Mutex

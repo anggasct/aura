@@ -58,8 +58,6 @@ func TestLoadHealthAcceptsLoopbackListen(t *testing.T) {
 	}
 }
 
-// Probe exposure beyond loopback is the admin surface's job, never this
-// listener's.
 func TestLoadHealthRejectsNonLoopbackListen(t *testing.T) {
 	for _, listen := range []string{"0.0.0.0:8281", "192.168.1.10:8281", "example.com:8281", "8281", "127.0.0.1:notaport"} {
 		dir := t.TempDir()

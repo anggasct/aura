@@ -10,11 +10,6 @@ import (
 	"testing"
 )
 
-// cgroup controller delegation is a runtime condition, not a guarantee: a
-// process can often mkdir a child cgroup but still be denied writes to the
-// controller files unless its scope delegated them. Where writes succeed,
-// exercise the real apply/destroy path; where they do not, assert that
-// newCgroup fails closed with sandbox_init_failed rather than skipping.
 func TestCgroupLimitsAppliedOrFailsClosed(t *testing.T) {
 	if !cgroupControllersWritable() {
 		_, err := newCgroup(Limits{MemoryBytes: 1 << 20, MaxProcesses: 4})
@@ -49,6 +44,3 @@ func TestCgroupLimitsAppliedOrFailsClosed(t *testing.T) {
 		}
 	}
 }
-
-// cgroupControllersWritable is defined in cgroup_linux.go; the test exercises
-// the production probe directly.

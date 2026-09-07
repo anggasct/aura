@@ -171,7 +171,6 @@ func TestTTYEditorGestureBounded(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event {
 		return []Event{{Kind: "turn.completed"}}
 	}}
-	// The composition cap is far below the 4096-byte draft.
 	console, _, diag, cleanup := newTTYConsole(runner, newFakeSessions(), ".\n", 80)
 	defer cleanup()
 	if err := console.Run(context.Background()); err != nil {
@@ -375,9 +374,6 @@ func TestTTYSlowOutputDoesNotHangConsole(t *testing.T) {
 	}
 }
 
-// TestEditorGetsExclusiveStdin proves the line reader is paused while the
-// editor gesture runs: lines arriving during composition are consumed only
-// after the editor exits, so editor keystrokes cannot be stolen mid-draft.
 func TestEditorGetsExclusiveStdin(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "editor.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 0.3\nprintf 'composed line\\n' > \"$1\"\n"), 0o700); err != nil {
@@ -400,8 +396,6 @@ func TestEditorGetsExclusiveStdin(t *testing.T) {
 	if _, err := pw.Write([]byte(".\n")); err != nil {
 		t.Fatal(err)
 	}
-	// While the editor holds stdin (0.3s), a line written to the pipe must
-	// not be consumed as a prompt by the paused reader.
 	time.Sleep(100 * time.Millisecond)
 	if _, err := pw.Write([]byte("during-editor\n/exit\n")); err != nil {
 		t.Fatal(err)

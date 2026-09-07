@@ -62,8 +62,6 @@ func TestDiskCheckerBoundaries(t *testing.T) {
 	}
 }
 
-// The absolute floor must dominate the percentage on tiny filesystems, and
-// inode exhaustion is its own down state even with bytes to spare.
 func TestDiskCheckerFloorAndInodes(t *testing.T) {
 	base := DiskChecker{
 		WarningPercent:  15,
@@ -75,8 +73,6 @@ func TestDiskCheckerFloorAndInodes(t *testing.T) {
 	base.Targets = diskTargetsFor(DiskTargetDatabase)
 	base.Usage = func(context.Context, string) (DiskUsage, error) { return small, nil }
 	findings := base.Check(context.Background())
-	// The 512MiB floor dominates both reserves on this tiny volume, so
-	// 400MiB free is already below the critical reserve.
 	if len(findings) != 1 || findings[0].Code != "disk_critical" {
 		t.Fatalf("floor findings = %+v, want disk_critical from the absolute floor", findings)
 	}
@@ -97,8 +93,6 @@ func TestDiskCheckerFloorAndInodes(t *testing.T) {
 	}
 }
 
-// Multiple targets report independently; every healthy target collapses
-// into one aggregate finding.
 func TestDiskCheckerReportsPerTarget(t *testing.T) {
 	usageByPath := map[string]DiskUsage{
 		"/data":    {FreeBytes: 50 << 30, TotalBytes: 100 << 30, FreeInodes: 100},
@@ -117,7 +111,6 @@ func TestDiskCheckerReportsPerTarget(t *testing.T) {
 		FloorBytes:      512 << 20,
 	}
 	findings := checker.Check(context.Background())
-	// 2GiB free is under both percentage reserves of the 100GiB volume.
 	if len(findings) != 1 || findings[0].Component != ComponentStorage+"/"+DiskTargetBackups || findings[0].Code != "disk_critical" {
 		t.Fatalf("findings = %+v, want one disk_critical for backups", findings)
 	}
@@ -159,9 +152,6 @@ func TestProcessCheckerPressureMatrix(t *testing.T) {
 	}
 }
 
-// A check that degrades after a good observation must surface its staleness:
-// the stale unknown finding names the last observation instead of silently
-// reporting old data as current.
 type variableChecker struct {
 	delay    time.Duration
 	findings []Finding
@@ -197,11 +187,6 @@ func TestRegistryStalenessCarriesLastObservation(t *testing.T) {
 	}
 }
 
-// Timed-out checks and their per-attempt contexts must not leak goroutines:
-// repeated evaluations settle back to the baseline goroutine count. The
-// blocking checker signals entry and completion explicitly, so the
-// assertion runs only after every checker goroutine has provably exited —
-// no sleeps or scheduler-dependent polling.
 func TestRegistryEvaluationsDoNotLeakGoroutines(t *testing.T) {
 	block := make(chan struct{})
 	entered := make(chan struct{}, 12)
@@ -225,8 +210,6 @@ func TestRegistryEvaluationsDoNotLeakGoroutines(t *testing.T) {
 	if len(first) != 2 {
 		t.Fatalf("first evaluation findings = %d, want 2 timeouts", len(first))
 	}
-	// Both checkers are still parked inside their attempt; confirm they
-	// entered before relying on the count.
 	for range 2 {
 		select {
 		case <-entered:
@@ -239,8 +222,6 @@ func TestRegistryEvaluationsDoNotLeakGoroutines(t *testing.T) {
 	for range 5 {
 		registry.Evaluate(context.Background())
 	}
-	// Drain the entry signals of the later evaluations so their checkers
-	// are accounted for before the release.
 	for range 10 {
 		select {
 		case <-entered:
@@ -257,7 +238,6 @@ func TestRegistryEvaluationsDoNotLeakGoroutines(t *testing.T) {
 	}
 }
 
-// checkerFunc adapts a function to the Checker interface.
 type checkerFunc func(context.Context) []Finding
 
 func (f checkerFunc) Check(ctx context.Context) []Finding { return f(ctx) }

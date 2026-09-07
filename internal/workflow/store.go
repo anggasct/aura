@@ -13,7 +13,6 @@ import (
 	"modernc.org/sqlite"
 )
 
-// Store persists workflow definitions and run/step projections.
 type Store struct {
 	db *sql.DB
 }
@@ -61,9 +60,6 @@ func (s *Store) beginImmediate(ctx context.Context) (*sql.Conn, error) {
 	return conn, nil
 }
 
-// SaveDefinition persists one spec version idempotently by
-// (id, version, sha256); identical content is a no-op. A different spec
-// already stored under the same (id, version) is rejected.
 func (s *Store) SaveDefinition(ctx context.Context, spec *Spec) error {
 	encoded, err := specJSON(spec)
 	if err != nil {
@@ -106,7 +102,6 @@ func (s *Store) SaveDefinition(ctx context.Context, spec *Spec) error {
 	return nil
 }
 
-// Definition returns one stored spec version.
 func (s *Store) Definition(ctx context.Context, id string, version int) (*Spec, error) {
 	var encoded string
 	err := s.db.QueryRowContext(ctx,
@@ -122,7 +117,6 @@ func (s *Store) Definition(ctx context.Context, id string, version int) (*Spec, 
 	return decodeSpec(encoded)
 }
 
-// Definitions lists stored specs by (id, version).
 func (s *Store) Definitions(ctx context.Context) ([]*Spec, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT spec_json FROM workflow_definition ORDER BY id, version`)
 	if err != nil {
@@ -155,9 +149,6 @@ func decodeSpec(encoded string) (*Spec, error) {
 	return &spec, nil
 }
 
-// CreateRun persists a queued run plus pending rows for every step; the
-// returned run id identifies the projection while durable_key links the
-// durable execution.
 func (s *Store) CreateRun(ctx context.Context, spec *Spec, input *RunInput) (*RunSummary, error) {
 	encodedInput, err := json.Marshal(input)
 	if err != nil {
@@ -201,7 +192,6 @@ func (s *Store) CreateRun(ctx context.Context, spec *Spec, input *RunInput) (*Ru
 	return summary, nil
 }
 
-// Run returns one run summary.
 func (s *Store) Run(ctx context.Context, runID string) (*RunSummary, error) {
 	var summary RunSummary
 	var createdAt, updatedAt string
@@ -220,7 +210,6 @@ func (s *Store) Run(ctx context.Context, runID string) (*RunSummary, error) {
 	return &summary, nil
 }
 
-// Runs lists runs ordered by run identity, optionally filtered by status.
 func (s *Store) Runs(ctx context.Context, status string) ([]*RunSummary, error) {
 	query := `SELECT id, definition_id, definition_version, COALESCE(durable_key, ''), goal, status, created_at, updated_at FROM workflow_run`
 	args := []any{}
@@ -251,8 +240,6 @@ func (s *Store) Runs(ctx context.Context, status string) ([]*RunSummary, error) 
 	return runs, nil
 }
 
-// Steps lists one run's step rows in compiled order (sorted by step id; the
-// interpreter reorders by graph).
 func (s *Store) Steps(ctx context.Context, runID string) ([]*StepRun, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT step_id, status, attempt, started_at, ended_at, COALESCE(output_json, ''), COALESCE(output_artifact_digest, ''), COALESCE(error_code, ''), updated_at FROM workflow_step_run WHERE run_id = ? ORDER BY step_id`,
@@ -290,7 +277,6 @@ func (s *Store) Steps(ctx context.Context, runID string) ([]*StepRun, error) {
 	return steps, nil
 }
 
-// SetRunStatus persists one durable run-state transition.
 func (s *Store) SetRunStatus(ctx context.Context, runID, status string) error {
 	return s.exec(ctx,
 		`UPDATE workflow_run SET status = ?, updated_at = ? WHERE id = ?`,
@@ -298,7 +284,6 @@ func (s *Store) SetRunStatus(ctx context.Context, runID, status string) error {
 	)
 }
 
-// SetRunStatusTx persists the transition inside the caller's transaction.
 func (s *Store) SetRunStatusTx(ctx context.Context, tx *sql.Tx, runID, status string) error {
 	result, err := tx.ExecContext(ctx,
 		`UPDATE workflow_run SET status = ?, updated_at = ? WHERE id = ?`,
@@ -317,9 +302,6 @@ func (s *Store) SetRunStatusTx(ctx context.Context, tx *sql.Tx, runID, status st
 	return nil
 }
 
-// BeginStepTransaction exposes a transaction for the interpreter's
-// terminal step transition: the step row and, on run-terminal steps, the
-// run row commit atomically.
 func (s *Store) BeginStepTransaction(ctx context.Context) (*sql.Tx, error) {
 	return s.db.BeginTx(ctx, nil)
 }
@@ -335,7 +317,6 @@ type stepUpdate struct {
 	Detail         string
 }
 
-// UpdateStep persists one step transition inside tx.
 func UpdateStep(ctx context.Context, tx *sql.Tx, runID, stepID string, update *stepUpdate) error {
 	format := func(t *time.Time) any {
 		if t == nil {
@@ -386,7 +367,6 @@ func nullIfEmpty(value string) any {
 	return value
 }
 
-// RunInputFor reads one run's stored input.
 func (s *Store) RunInputFor(ctx context.Context, runID string) (*RunInput, error) {
 	var encoded string
 	err := s.db.QueryRowContext(ctx, `SELECT input_json FROM workflow_run WHERE id = ?`, runID).Scan(&encoded)

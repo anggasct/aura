@@ -14,8 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// The daemon's own findings are not session work, so their transitions live
-// under one reserved system session. Consumers filter by event kind.
 const (
 	healthSessionID     = "aura-health"
 	healthEventKind     = "health.transition"
@@ -24,9 +22,6 @@ const (
 	healthHistoryReplay = 1000
 )
 
-// healthEventLog persists transitions as runtime events and replays them for
-// restart recovery. Sequence allocation is serialized because the sink may
-// run on concurrent evaluation paths.
 type healthEventLog struct {
 	events   store.EventStore
 	sessions store.SessionService
@@ -76,8 +71,6 @@ func (l *healthEventLog) ensureSession(ctx context.Context) error {
 	if err == nil {
 		return nil
 	}
-	// A missing session surfaces as the raw no-rows error; anything else is
-	// a real failure.
 	if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("health event: %w", err)
 	}
@@ -90,9 +83,6 @@ func (l *healthEventLog) ensureSession(ctx context.Context) error {
 	return nil
 }
 
-// history replays every persisted transition in database sequence order so
-// a restarted tracker resumes from the true prior state. Pages follow the
-// cursor forward, so no oldest-event window can silently drop state.
 func (l *healthEventLog) history(ctx context.Context) ([]health.Transition, error) {
 	var transitions []health.Transition
 	const pageSize = 1000

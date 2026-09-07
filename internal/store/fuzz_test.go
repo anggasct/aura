@@ -9,10 +9,6 @@ import (
 	"time"
 )
 
-// FuzzEventPayload drives the event-append validation with arbitrary payloads,
-// sequences, and schema versions. The append must classify every invalid input
-// as a typed error and never panic; the executor is stubbed so the fuzz
-// exercises validation and boundary conversion, not SQLite.
 func FuzzEventPayload(f *testing.F) {
 	f.Add([]byte(`{"kind":"turn.completed"}`), uint64(1), uint16(1))
 	f.Add([]byte(`not json`), uint64(1), uint16(1))

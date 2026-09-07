@@ -51,9 +51,6 @@ func TestNegotiateReportsPrimitives(t *testing.T) {
 	if !primitives.ProcessGroups {
 		t.Fatal("process groups must always be available on Linux")
 	}
-	// Probe the kernel independently (raw syscall with arch-aware constant)
-	// and require Negotiate to agree — this catches arch-specific syscall
-	// number bugs that a tautological comparison would miss.
 	action := unix.SECCOMP_RET_ALLOW
 	_, _, errno := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_GET_ACTION_AVAIL, 0, uintptr(unsafe.Pointer(&action)))
 	want := errno != syscall.ENOSYS
@@ -66,9 +63,6 @@ func TestNegotiateReportsPrimitives(t *testing.T) {
 	t.Logf("primitives: userns=%v seccomp=%v cgroupv2=%v landlock=%v", primitives.UserNamespace, primitives.Seccomp, primitives.CgroupV2, primitives.Landlock)
 }
 
-// usernsExpected is an independent read of the kernel knobs so the test does
-// not just re-run the implementation. It mirrors what an operator checking
-// unprivileged-userns support by hand would read.
 func usernsExpected() bool {
 	data, err := os.ReadFile("/proc/sys/user/max_user_namespaces")
 	if err != nil {

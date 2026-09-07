@@ -8,15 +8,8 @@ import (
 	"time"
 )
 
-// DedupeStore atomically claims ingress keys and reads back a turn's stored
-// events. The claim and the turn.accepted event land in one transaction, so a
-// crash cannot leave a claim pointing at an event that was never written.
 type DedupeStore interface {
-	// Accept claims (source, external_id) for the accepted event's turn.
-	// When the key is already claimed and unexpired it writes nothing and
-	// returns the original turn ID with created=false.
 	Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *RuntimeEvent) (originalTurnID string, created bool, err error)
-	// ListTurnEvents returns every stored event of a turn in sequence order.
 	ListTurnEvents(ctx context.Context, turnID string) ([]RuntimeEvent, error)
 }
 
@@ -24,7 +17,6 @@ type sqliteDedupeStore struct {
 	db *sql.DB
 }
 
-// NewDedupeStore returns a DedupeStore backed by the ingress_dedupe table.
 func NewDedupeStore(db *sql.DB) DedupeStore {
 	return &sqliteDedupeStore{db: db}
 }
@@ -59,7 +51,6 @@ func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID strin
 			return "", false, classifyBusy(fmt.Errorf("expire dedupe key: %w", err))
 		}
 	case errors.Is(err, sql.ErrNoRows):
-		// Fresh key; fall through to the insert.
 	default:
 		return "", false, fmt.Errorf("read dedupe key: %w", err)
 	}

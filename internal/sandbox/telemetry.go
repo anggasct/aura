@@ -8,11 +8,6 @@ import (
 	"github.com/anggasct/aura/internal/approval"
 )
 
-// record emits one structured line per run with only the identifying and
-// accounting fields an operator needs: request id, executable, the configured
-// limits, the outcome, and the duration. Arguments, captured output, and
-// environment values are deliberately absent so a secret carried by the
-// request can never reach the log.
 func (r *Registry) record(ctx context.Context, req *SandboxRequest, grant *approval.ApprovalGrant, result Result, runErr error, duration time.Duration) {
 	r.logger.LogAttrs(ctx, slog.LevelInfo, "sandbox run",
 		slog.String("request_id", req.RequestID),
@@ -34,8 +29,6 @@ func (r *Registry) record(ctx context.Context, req *SandboxRequest, grant *appro
 	)
 }
 
-// recordDenied logs a grant resolution failure before any child starts, so an
-// operator can see replay or tampering attempts without the request's secrets.
 func (r *Registry) recordDenied(ctx context.Context, req *SandboxRequest, err error) {
 	code := "approval_invalid"
 	if c, ok := CodeOf(err); ok {

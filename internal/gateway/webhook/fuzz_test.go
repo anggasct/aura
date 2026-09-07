@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-// FuzzParseRequestAuth proves header parsing never panics and never accepts
-// a malformed header set, whatever bytes arrive.
 func FuzzParseRequestAuth(f *testing.F) {
 	f.Add("primary", "1750000000", "nonce-abcdefghijklmnop", "v1="+vectorEventSig)
 	f.Add("", "", "", "")
@@ -36,8 +34,6 @@ func FuzzParseRequestAuth(f *testing.F) {
 	})
 }
 
-// FuzzParseEnvelope proves envelope parsing never panics and never returns
-// a valid envelope for arbitrary bytes.
 func FuzzParseEnvelope(f *testing.F) {
 	f.Add([]byte(vectorBody))
 	f.Add([]byte(`{"event_id":"e","subject":"s","payload":{}}`))
@@ -54,8 +50,6 @@ func FuzzParseEnvelope(f *testing.F) {
 	})
 }
 
-// FuzzVerifySignature proves signature verification never panics on
-// arbitrary header/secret/payload combinations.
 func FuzzVerifySignature(f *testing.F) {
 	f.Add("v1="+vectorEventSig, vectorSecret, vectorTimestamp, vectorNonce, []byte(vectorBody))
 	f.Add("v1=", "", "", "", []byte(nil))

@@ -10,9 +10,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// The engine must persist ADK executor events with their full fidelity:
-// invocation and branch survive the queue's persist path, not just kind and
-// payload.
 func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	model := &fakeADKModel{answer: "engine answer", tokens: 4}
 	modelName := registerFakeModel(t, model)
@@ -57,7 +54,6 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 		t.Error("persisted ADK events lost their invocation id")
 	}
 
-	// The stored log must hold the same fidelity.
 	stored, err := sessions.ListEvents(context.Background(), "session-1", 0, 100)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
@@ -76,7 +72,6 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	}
 }
 
-// collectStream drains an engine Run stream into a channel.
 func collectStream(engine *runtimeengine.Engine, req *runtime.TurnRequest) (eventsCh <-chan store.RuntimeEvent, errCh <-chan error) {
 	events := make(chan store.RuntimeEvent, 64)
 	errs := make(chan error, 1)
@@ -95,9 +90,6 @@ func collectStream(engine *runtimeengine.Engine, req *runtime.TurnRequest) (even
 	return events, errs
 }
 
-// The engine must be the single writer: one streamed ADK event produces
-// exactly one stored row, with the original ADK event ID preserved and no
-// runner-side duplicate.
 func TestEngineSingleWriterForADKEvents(t *testing.T) {
 	model := &fakeADKModel{answer: "single writer", tokens: 2}
 	modelName := registerFakeModel(t, model)
@@ -125,8 +117,6 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 		streamed = append(streamed, ev)
 	}
 
-	// Every streamed ADK event must have exactly one stored row with the
-	// same ID — no runner-side duplicate, no engine-generated replacement.
 	stored, err := sessions.ListEvents(context.Background(), "session-1", 0, 1000)
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)

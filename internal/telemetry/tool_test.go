@@ -152,8 +152,6 @@ func TestToolRecorderRecordsPolicyApprovalExecutorDimensions(t *testing.T) {
 	}
 }
 
-// The broker observer wires the per-execution context into the recorder, so
-// a tool span started inside a turn must be its child.
 func TestToolSpanIsChildOfTurnSpanThroughBroker(t *testing.T) {
 	exporter, tp := newToolTestTracer(t)
 	reader := sdkmetric.NewManualReader()
@@ -234,8 +232,6 @@ func TestOutputByteBucketIsBounded(t *testing.T) {
 	}
 }
 
-// The broker observation adapter must forward metadata only; this pins the
-// mapping the CLI composition relies on.
 func TestBrokerObservationMapsToToolObservation(t *testing.T) {
 	exporter, tp := newToolTestTracer(t)
 	reader := sdkmetric.NewManualReader()

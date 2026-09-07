@@ -11,8 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/capability"
 )
 
-// ChildSentinel is the argv marker that distinguishes a sandbox child
-// re-execution from a normal aura invocation.
 const ChildSentinel = "__aura-sandbox-child"
 
 func IsChild(args []string) bool {
@@ -68,12 +66,6 @@ type Limits struct {
 	Timeout        time.Duration `json:"timeout"`
 }
 
-// Spec is the containment contract for one subprocess. Environment and
-// working directory are allowlisted. ReadOnlyPaths and ReadWritePaths are
-// the only filesystem roots the child may access; Landlock enforces them.
-// Network is denied by default: a spec that requests it is refused with
-// sandbox_unavailable, and the default case runs the child in an isolated
-// network namespace with no external interface.
 type Spec struct {
 	WorkingDir     string
 	ReadOnlyPaths  []string
@@ -102,15 +94,6 @@ type Result struct {
 	Truncated  bool
 }
 
-// Run executes command under the containment contract. The child starts
-// in its own process group, sees only the allowlisted environment, and is
-// confined to WorkingDir. On timeout or cancellation the whole process
-// group is killed and reaped, so descendants cannot outlive the parent.
-// Output beyond MaxOutputBytes is truncated and reported in Result.
-//
-// Run is the low-level harness: it enforces process-group, environment,
-// working-directory, output, and timeout bounds. It refuses to execute when a
-// mandatory kernel primitive is unavailable.
 func Run(ctx context.Context, spec *Spec, command string, args ...string) (Result, error) {
 	if spec == nil {
 		return Result{}, Errorf(ErrorCodeInvalidArgument, "spec must not be nil")
@@ -128,9 +111,6 @@ func Run(ctx context.Context, spec *Spec, command string, args ...string) (Resul
 	return run(ctx, spec, primitives, command, args...)
 }
 
-// Negotiate reports which host primitives can enforce the containment
-// contract, so callers can distinguish "sandbox not available" from a
-// runtime violation.
 type Primitives struct {
 	UserNamespace bool
 	Seccomp       bool
@@ -143,9 +123,6 @@ func Negotiate() (Primitives, error) {
 	return negotiate()
 }
 
-// MissingMandatory returns the sorted names of every mandatory containment
-// primitive absent from have. It is the single source of truth for the
-// fail-closed gate and the status surface, so both report the same names.
 func MissingMandatory(have Primitives) []string {
 	var missing []string
 	if !have.UserNamespace {
@@ -167,12 +144,6 @@ func MissingMandatory(have Primitives) []string {
 	return missing
 }
 
-// Require is the fail-closed gate for an effectful containment capability.
-// have is the negotiated host state. A missing mandatory primitive makes
-// full kernel-level containment unavailable, so Require returns a
-// sandbox_unavailable error naming every absent primitive. The composition
-// root must refuse to advertise or execute the capability while it returns
-// non-nil; callers reach Run only after Require passes.
 func Require(have Primitives) error {
 	missing := MissingMandatory(have)
 	if len(missing) == 0 {
@@ -181,9 +152,6 @@ func Require(have Primitives) error {
 	return Errorf(ErrorCodeSandboxUnavailable, "missing mandatory containment primitive(s): %s", strings.Join(missing, ", "))
 }
 
-// CapabilityDependencies reports the host-detected capability dependencies
-// for the configuration load path: process containment is available only
-// when every mandatory primitive negotiates.
 func CapabilityDependencies() capability.Dependencies {
 	deps := capability.Dependencies{}
 	primitives, err := Negotiate()

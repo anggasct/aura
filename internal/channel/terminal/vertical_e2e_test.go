@@ -30,9 +30,6 @@ import (
 	"google.golang.org/genai"
 )
 
-// e2eApprovalModel requests the exec tool on the first call and answers with
-// fixed text afterwards, mirroring a provider that runs one tool then
-// finishes the turn.
 type e2eApprovalModel struct {
 	mu       sync.Mutex
 	calls    int
@@ -80,12 +77,10 @@ func registerE2EModel(t *testing.T, model adkmodel.LLM) string {
 	return name
 }
 
-// e2eEffectPublisher adapts a publish function onto the journal publisher.
 type e2eEffectPublisher func(*store.RuntimeEvent)
 
 func (f e2eEffectPublisher) Publish(ev *store.RuntimeEvent) { f(ev) }
 
-// e2eBuiltinTools exposes a real tool broker as the runtime builtin executor.
 type e2eBuiltinTools struct {
 	broker  *toolbroker.Broker
 	journal *effect.Journal
@@ -137,9 +132,6 @@ func (b e2eBuiltinTools) Execute(ctx context.Context, request *runtime.BuiltinTo
 	return result.Output, nil
 }
 
-// approvalE2EStack is a full vertical slice over the real engine, ADK
-// executor, effect journal, and tool broker, with only the model provider
-// and the exec adapter replaced by fakes.
 type approvalE2EStack struct {
 	engine   runtime.AgentRuntime
 	sessions store.SessionService
@@ -318,7 +310,6 @@ func TestTerminalApprovalDefaultRejectVerticalSlice(t *testing.T) {
 	}
 }
 
-// blockingExecutor holds turns open until released, seeding engine load.
 type blockingExecutor struct {
 	started  chan struct{}
 	release  chan struct{}

@@ -397,10 +397,6 @@ func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, s
 	return runner, db, workspace
 }
 
-// TestWorkflowToolRunnerExecutesCoveredEffectfulTool proves the broker and
-// approval-decider path unlock an effectful tool when the step carries real
-// arguments: the tool receives the authored arguments, never a placeholder
-// payload, and the effectful execution lands on disk.
 func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("builtin tool executor requires Linux")
@@ -426,10 +422,6 @@ func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
 	}
 }
 
-// TestWorkflowToolRunnerRejectsEmptyArgumentsFailClosed proves a tool step
-// without authored arguments never executes a canned payload: the adapter
-// fails the step closed with the stable workflow_step_failed code and no
-// file materializes.
 func TestWorkflowToolRunnerRejectsEmptyArgumentsFailClosed(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("builtin tool executor requires Linux")
@@ -449,9 +441,6 @@ func TestWorkflowToolRunnerRejectsEmptyArgumentsFailClosed(t *testing.T) {
 	}
 }
 
-// TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter proves the
-// interpreter path with the shipped runner fails the tool step closed
-// (workflow_step_failed) instead of executing a fabricated demo payload.
 func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("builtin tool executor requires Linux")

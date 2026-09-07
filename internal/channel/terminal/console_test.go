@@ -13,12 +13,9 @@ import (
 	"time"
 )
 
-// fakeRunner deterministically scripts one turn per prompt.
 type fakeRunner struct {
-	mu    sync.Mutex
-	calls []Request
-	// eventsFor returns the event script for a prompt; the last script ends
-	// in a terminal event.
+	mu        sync.Mutex
+	calls     []Request
 	eventsFor func(prompt string) []Event
 }
 
@@ -55,8 +52,6 @@ func (f *fakeRunner) Run(ctx context.Context, req *Request) iter.Seq2[Event, err
 		f.mu.Unlock()
 		for _, ev := range events {
 			if ctx.Err() != nil {
-				// Mirror the engine: a cancelled turn ends with a durable
-				// cancelled event, not an error.
 				yield(Event{Kind: "turn.cancelled"}, nil)
 				return
 			}
@@ -67,7 +62,6 @@ func (f *fakeRunner) Run(ctx context.Context, req *Request) iter.Seq2[Event, err
 	}
 }
 
-// textPayload is the model-text payload shape the renderer decodes.
 type textPayload struct {
 	Text string `json:"text"`
 }
@@ -84,7 +78,6 @@ func completed(text string) json.RawMessage {
 	return delta(text)
 }
 
-// fakeSessions is an in-memory session store keyed by owner.
 type fakeSessions struct {
 	mu       sync.Mutex
 	next     int
@@ -354,7 +347,6 @@ func TestSecondInterruptWithinWindowEscalates(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event {
 		return []Event{{Kind: "turn.completed"}}
 	}}
-	// Input stays open so interrupts are observed before EOF.
 	pr, pw := io.Pipe()
 	console, _, _, cancel := newConsolePipeTest(runner, newFakeSessions(), pr)
 	defer cancel()
@@ -409,8 +401,6 @@ func TestFirstInterruptCancelsActiveTurnOnly(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		// Keep the pipe open; a lone interrupt must cancel the turn but not
-		// exit, so Run blocks waiting for more input.
 		done <- console.Run(context.Background())
 		_ = pw.Close()
 	}()
@@ -599,9 +589,6 @@ func TestOutputWriteFailureIsReturned(t *testing.T) {
 }
 
 func TestBatchStreamByteBudgetBounded(t *testing.T) {
-	// Near-cap ADK payloads would previously retain up to 4 MiB each across
-	// 1024 events; the normalized projection plus the aggregate byte budget
-	// must keep the retained stream small regardless of payload size.
 	big := strings.Repeat("x", 64*1024)
 	events := make([]Event, 0, maxBufferedEvents/4)
 	for range maxBufferedEvents / 4 {

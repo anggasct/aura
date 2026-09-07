@@ -14,12 +14,6 @@ import (
 	auraruntime "github.com/anggasct/aura/internal/runtime"
 )
 
-// TestLoadBoundsUnderVolume submits far more concurrent turns than the runtime
-// can run at once and asserts the configured bounds hold under volume: the
-// active and pending counts never exceed their maxima, accepted turns are
-// conserved (active + pending), excess submissions are rejected with a typed
-// runtime_overloaded, and every accepted turn still completes once capacity
-// frees up.
 func TestLoadBoundsUnderVolume(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
@@ -67,8 +61,6 @@ func TestLoadBoundsUnderVolume(t *testing.T) {
 			defer engine.mu.Unlock()
 			return engine.active, engine.pending
 		}
-		// The gate keeps active turns from completing, so once the active set
-		// saturates, accepted == active + pending (nothing has finished yet).
 		wantActive := min(accepted, cfg.MaxActiveTurns)
 		waitFor(t, func() bool { return executor.StartCount() == wantActive })
 		active, pending := counts()
@@ -87,10 +79,6 @@ func TestLoadBoundsUnderVolume(t *testing.T) {
 	})
 }
 
-// TestLoadNoLeakAfterAbandonedConsumers abandons many turn streams after their
-// first event and asserts the turns still reach a durable terminal while the
-// goroutine count returns to its baseline — no leaked turn workers or
-// subscribers under load.
 func TestLoadNoLeakAfterAbandonedConsumers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := auraruntime.NewFakeExecutor([]auraruntime.FakeStep{jsonStep(auraruntime.EventKindModelStarted), jsonStep(auraruntime.EventKindMessageCompleted)})

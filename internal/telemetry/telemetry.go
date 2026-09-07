@@ -67,12 +67,8 @@ type Instrument struct {
 	defaultAgentID string
 }
 
-// InstrumentOption adjusts optional instrumentation behavior.
 type InstrumentOption func(*Instrument)
 
-// WithDefaultAgentID names the definition that serves turns whose request
-// does not target one explicitly; the turn span then carries that id as
-// agent.id alongside explicitly targeted turns.
 func WithDefaultAgentID(id string) InstrumentOption {
 	return func(i *Instrument) { i.defaultAgentID = id }
 }

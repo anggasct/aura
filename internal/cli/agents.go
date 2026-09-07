@@ -121,8 +121,6 @@ func orNone(value string) string {
 	return value
 }
 
-// modelRouteResolver maps an agent definition's model route onto the model
-// registered for that routing role.
 func modelRouteResolver(cfg *config.Config) func(route string) (string, error) {
 	return func(route string) (string, error) {
 		definition, ok := cfg.Models.Definitions[route]
@@ -133,9 +131,6 @@ func modelRouteResolver(cfg *config.Config) func(route string) (string, error) {
 	}
 }
 
-// buildAgentRegistry validates the compiled-in definitions plus configured
-// overrides against the tool registry and configured model routes. An
-// invalid definition aborts before any session starts.
 func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
 	modelRoutes := make([]string, 0, len(cfg.Models.Definitions))
 	for route := range cfg.Models.Definitions {

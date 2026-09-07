@@ -5,8 +5,6 @@ import (
 	"fmt"
 )
 
-// ErrorCode is a stable runtime error code. Callers branch on the code, never
-// on the message; retryability is a property of the code.
 type ErrorCode string
 
 const (
@@ -25,10 +23,6 @@ const (
 	ErrorCodeCheckpointUnsupported      ErrorCode = "checkpoint_unsupported"
 )
 
-// Retryable reports whether a caller may resubmit the same work after this
-// code. A conditional code is reported non-retryable here; the caller decides
-// based on its own state (for example a deadline may be retried with a fresh
-// deadline).
 func (c ErrorCode) Retryable() bool {
 	switch c {
 	case ErrorCodeRuntimeOverloaded, ErrorCodeStorageUnavailable:
@@ -47,7 +41,6 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
 }
 
-// CodeOf extracts the stable runtime code from err, or reports absent.
 func CodeOf(err error) (ErrorCode, bool) {
 	var target *Error
 	if !errors.As(err, &target) {

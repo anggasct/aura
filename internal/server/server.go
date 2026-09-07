@@ -48,8 +48,6 @@ func New(opts Options) *Server {
 	}
 }
 
-// Add registers a listener. Add must be called before Run; the listener
-// slice is not synchronized against concurrent calls.
 func (s *Server) Add(l Listener) error {
 	if l == nil {
 		return &Error{Code: ErrorCodeInvalidArgument, Detail: "listener must not be nil"}
@@ -58,11 +56,6 @@ func (s *Server) Add(l Listener) error {
 	return nil
 }
 
-// Run starts all registered listeners and blocks until a shutdown signal, a
-// listener failure, or ctx cancellation. The first signal drains listeners
-// within the shutdown timeout; a second signal forces an immediate exit with
-// the signal's 128+signum code. It returns the first listener error, or nil
-// on a clean shutdown.
 func (s *Server) Run(ctx context.Context) error {
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -82,10 +75,6 @@ func (s *Server) Run(ctx context.Context) error {
 	var firstErr error
 	drained := false
 
-	// A shutdown request means the same thing whether it arrives on this
-	// server's own signal channel or as parent-context cancellation. Reacting
-	// to only one of them let the other path skip both the bounded drain and
-	// the force-exit watcher, and which one won was a race on a real signal.
 	if len(s.listeners) == 0 {
 		select {
 		case sig := <-sigCh:
@@ -146,8 +135,6 @@ func (s *Server) runListener(ctx context.Context, l Listener) (err error) {
 	return nil
 }
 
-// forceExitOnSecondSignal exits with the signal's 128+signum code on a
-// second signal, or returns when done closes so no goroutine outlives Run.
 func (s *Server) forceExitOnSecondSignal(ctx context.Context, sigCh <-chan os.Signal, done <-chan struct{}) {
 	select {
 	case <-done:

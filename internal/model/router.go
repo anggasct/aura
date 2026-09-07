@@ -17,8 +17,6 @@ import (
 	"github.com/anggasct/aura/internal/config"
 )
 
-// withoutPath strips the filesystem path from an *fs.PathError so an error
-// string keeps the reason without disclosing where the file lives.
 func withoutPath(err error) error {
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {
@@ -170,9 +168,6 @@ func requestHasToolResult(req *adkmodel.LLMRequest) bool {
 	return false
 }
 
-// For resolves the model for a task. An unknown task or a role with no
-// configured model is a typed error; nil is never returned as a usable
-// adapter.
 func (r *Router) For(task string) (adkmodel.LLM, error) {
 	role, ok := r.routing[task]
 	if !ok {
@@ -196,14 +191,11 @@ func (r *Router) For(task string) (adkmodel.LLM, error) {
 	}
 }
 
-// newAdapter reports configured=false when the definition is absent, so a
-// caller never has to read meaning into a nil adapter with a nil error.
 func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration) (adapter adkmodel.LLM, configured bool, err error) {
 	if spec.Protocol == "" || spec.Model == "" {
 		return nil, false, nil
 	}
 	if spec.BaseURL != "" {
-		// The URL is never echoed back: it may carry user-info credentials.
 		if err := config.ValidateBaseURL(spec.BaseURL); err != nil {
 			return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("invalid base_url: %v", err))
 		}

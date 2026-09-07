@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-// RateLimiter is a fixed-window per-minute counter keyed by both signing key
-// identifier and client address, so one compromised key and one flooding
-// address are each contained independently. It has no goroutine and no
-// ticker: windows advance lazily on Allow, driven by the injected clock.
 type RateLimiter struct {
 	limit int
 	now   func() time.Time
@@ -18,9 +14,6 @@ type RateLimiter struct {
 	counts  map[string]int
 }
 
-// NewRateLimiter allows limit requests per minute per key. A limit below 1 is
-// rejected: a limiter that admits nothing is a configuration error, not a
-// mode to run in.
 func NewRateLimiter(limit int, now func() time.Time) (*RateLimiter, error) {
 	if limit < 1 {
 		return nil, Errorf(ErrorCodeInvalidArgument, "rate limit must be at least 1")
@@ -36,9 +29,6 @@ func NewRateLimiter(limit int, now func() time.Time) (*RateLimiter, error) {
 	}, nil
 }
 
-// Allow reports whether one request from keyID at remoteAddr fits the
-// per-minute budget. Both scopes must pass; the rejected scope is returned
-// so callers log which budget was exhausted without logging credentials.
 func (l *RateLimiter) Allow(keyID, remoteAddr string) (ok bool, exhaustedScope string) {
 	now := l.now()
 	l.mu.Lock()
@@ -66,9 +56,6 @@ func (l *RateLimiter) withinLocked(scope string, now time.Time) bool {
 	return true
 }
 
-// pruneLocked drops windows that ended more than a minute ago so the maps
-// stay bounded by the distinct keys and addresses seen in the last two
-// minutes, not by process lifetime.
 func (l *RateLimiter) pruneLocked(now time.Time) {
 	for scope, window := range l.buckets {
 		if now.Sub(window) > time.Minute {

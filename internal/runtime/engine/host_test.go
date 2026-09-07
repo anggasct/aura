@@ -12,9 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/runtime/ingress"
 )
 
-// fakeChannelAdapter satisfies ChannelPort. Its only way to run work is the
-// IngressSink handed to Start; when acceptEnv is set it submits that envelope
-// through the sink exactly as a gateway adapter would.
 type fakeChannelAdapter struct {
 	name      string
 	acceptEnv *runtimeingress.IngressEnvelope

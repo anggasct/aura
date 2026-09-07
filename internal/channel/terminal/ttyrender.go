@@ -15,29 +15,22 @@ import (
 )
 
 const (
-	// maxDisplayLines bounds how many physical lines one frame may repaint,
-	// so a tiny or zero-width terminal cannot grow the repaint region.
-	maxDisplayLines = 32
-	// maxProgressLines bounds the tool/approval progress tail per frame.
+	maxDisplayLines  = 32
 	maxProgressLines = 8
 	defaultRenderHz  = 20
 	maxRenderHz      = 1000
 	minPaintWatchdog = 100 * time.Millisecond
 )
 
-// TTYOptions configures the interactive presentation renderer.
 type TTYOptions struct {
 	Out     TTYOutput
 	Width   func() int // probe per paint; zero or nil means unknown
 	Hz      int        // paint frequency; zero selects the default
 	Styling bool       // false (NO_COLOR) disables all escape sequences
-	// Stdin and Stdout wire the multiline editor gesture to the real
-	// terminal; nil disables the gesture.
-	Stdin  *os.File
-	Stdout *os.File
+	Stdin   *os.File
+	Stdout  *os.File
 }
 
-// TTYOutput must return from WriteContext when its context is cancelled.
 type TTYOutput interface {
 	WriteContext(context.Context, []byte) (int, error)
 	io.Closer
@@ -80,11 +73,6 @@ func (o fileOutput) WriteContext(ctx context.Context, p []byte) (int, error) {
 
 func (o fileOutput) Close() error { return o.file.Close() }
 
-// TTYRenderer paints streamed runtime events as in-place terminal frames.
-// Untrusted text is sanitized before entering render state; only the
-// renderer's own escape sequences reach the output. Frames coalesce at the
-// configured rate, the display is bounded regardless of stream size, and the
-// completed durable message wins over streamed partials.
 type TTYRenderer struct {
 	opt TTYOptions
 	hz  time.Duration
@@ -107,8 +95,6 @@ type TTYRenderer struct {
 	err             error
 }
 
-// NewTTYRenderer builds the interactive renderer. A nil Width probe or a
-// non-positive hz degrades presentation only.
 func NewTTYRenderer(opt TTYOptions) *TTYRenderer {
 	hz := opt.Hz
 	if hz <= 0 {
@@ -123,7 +109,6 @@ func NewTTYRenderer(opt TTYOptions) *TTYRenderer {
 	}
 }
 
-// Begin resets per-turn render state.
 func (r *TTYRenderer) Begin() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -140,8 +125,6 @@ func (r *TTYRenderer) Begin() {
 	r.progressEmitted = 0
 }
 
-// Observe folds one runtime event into render state; it never blocks the
-// event stream and never grows past the render bounds.
 func (r *TTYRenderer) Observe(ev Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -241,9 +224,6 @@ func (r *TTYRenderer) capLocked() {
 	}
 }
 
-// StartPump runs the paint loop until ctx is cancelled. Paints coalesce: a
-// slow consumer naturally skips ticks because the loop is single-threaded,
-// and a clean frame state means no write at all.
 func (r *TTYRenderer) StartPump(ctx context.Context, onError func(error)) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
@@ -294,7 +274,6 @@ func paintWatchdog(interval time.Duration) time.Duration {
 	return max(2*interval, minPaintWatchdog)
 }
 
-// Err reports the first paint failure, e.g. a closed output.
 func (r *TTYRenderer) Err() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -317,8 +296,6 @@ func (r *TTYRenderer) closeOutput() bool {
 	return true
 }
 
-// paint writes one frame when state changed since the last paint. It is
-// called from the pump only.
 func (r *TTYRenderer) Paint() error {
 	return r.paint(context.Background())
 }
@@ -341,9 +318,6 @@ func (r *TTYRenderer) paint(ctx context.Context) error {
 	return r.writeFrame(ctx, frame, lines, epoch)
 }
 
-// Finalize paints the terminal frame with the authoritative text: the
-// completed durable message when present, otherwise the streamed partial,
-// and a failure marker replaces partial text for failed turns.
 func (r *TTYRenderer) Finalize(failed, cancelled bool) error {
 	return r.finalize(context.Background(), failed, cancelled)
 }
@@ -356,8 +330,6 @@ func (r *TTYRenderer) finalize(ctx context.Context, failed, cancelled bool) erro
 	return r.writeFrame(ctx, frame, lines, epoch)
 }
 
-// buildFrame composes the frame under lock. failed turns discard partial
-// text: the durable log owns what happened, the display shows the outcome.
 func (r *TTYRenderer) buildFrame(failed, cancelled bool) (frame string, lines int) {
 	width := 0
 	if r.opt.Width != nil {
@@ -398,7 +370,6 @@ func (r *TTYRenderer) buildFrame(failed, cancelled bool) (frame string, lines in
 			r.emitted = 0
 			r.emittedPrefix = ""
 		} else {
-			// Continuation and divergence are compared on sanitized text.
 			diverged := r.emitted > 0 && (!strings.HasPrefix(text, r.emittedPrefix) || len(text) < r.emitted)
 			if diverged && r.finalSet {
 				// The completed message revises what was streamed and cannot
@@ -427,8 +398,6 @@ func (r *TTYRenderer) buildFrame(failed, cancelled bool) (frame string, lines in
 		}
 		if len(r.emittedPrefix) > maxRenderBytes {
 			r.emittedPrefix = r.emittedPrefix[len(r.emittedPrefix)-maxRenderBytes:]
-			// The prefix window slid; continuation math must restart from
-			// here even though bytes were emitted before the window.
 			r.emitted = len(r.emittedPrefix)
 		}
 		return b.String(), lines
@@ -473,11 +442,6 @@ const (
 	reset = "\x1b[0m"
 )
 
-// writeFrame serializes writes so a cancelled pump cannot interleave with
-// the final frame, and records the frame extent for the next in-place
-// repaint. A frame built before a direct write moved the frame origin is
-// dropped and re-dirtied: its cursor math would repaint over the lines the
-// direct write owns.
 func (r *TTYRenderer) writeFrame(ctx context.Context, frame string, lines int, epoch uint64) error {
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
@@ -504,11 +468,6 @@ func (r *TTYRenderer) writeOutput(ctx context.Context, p []byte) error {
 	return err
 }
 
-// DirectWrite appends text outside the frame system, for surfaces that own
-// whole lines below the live frame — the approval card and its outcome. The
-// frame origin resets so the next paint continues below the written text
-// instead of repainting over it; in-flight frames built against the old
-// origin are dropped by the epoch check in writeFrame.
 func (r *TTYRenderer) DirectWrite(ctx context.Context, text string) error {
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
@@ -523,8 +482,6 @@ func (r *TTYRenderer) DirectWrite(ctx context.Context, text string) error {
 	return nil
 }
 
-// ClearScreen erases the display when styling is available; otherwise it
-// degrades to a blank line.
 func (r *TTYRenderer) ClearScreen() error {
 	return r.clearScreen(context.Background())
 }
@@ -548,10 +505,6 @@ func (r *TTYRenderer) clearScreen(ctx context.Context) error {
 	return nil
 }
 
-// Compose opens the user's editor to collect a multi-line prompt, the
-// explicit multiline gesture of the interactive surface. ok is false when the
-// editor produced nothing to submit. The composition is bounded by the
-// configured input cap and never written to a persistent history file.
 func (r *TTYRenderer) Compose(ctx context.Context, maxBytes int) (text string, ok bool, err error) {
 	if maxBytes <= 0 {
 		return "", false, errors.New("terminal: multiline input is unbounded by configuration")

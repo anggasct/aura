@@ -309,8 +309,6 @@ func TestRejectCrossOriginRedirect(t *testing.T) {
 	}
 }
 
-// A base_url may carry credentials. The rejection must name the reason
-// without echoing the URL that contains them.
 func TestBuildRouterErrorOmitsBaseURLCredentials(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
 		"primary": {
@@ -332,7 +330,6 @@ func TestBuildRouterErrorOmitsBaseURLCredentials(t *testing.T) {
 	}
 }
 
-// A failed secret-file read must name the file, not where it lives.
 func TestResolveSecretErrorOmitsAbsolutePath(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "api-key.txt")

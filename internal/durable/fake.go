@@ -8,14 +8,10 @@ import (
 	"time"
 )
 
-// ErrUnknownRun is returned for operations on a run this runtime never
-// started.
 var ErrUnknownRun = errors.New("unknown durable run")
 
-// Clock supplies time to handlers so tests drive timers deterministically.
 type Clock interface {
 	Now() time.Time
-	// Timer returns a channel that fires once after d elapses.
 	Timer(d time.Duration) <-chan time.Time
 }
 
@@ -33,11 +29,8 @@ func (realClock) Timer(d time.Duration) <-chan time.Time {
 	return timer.C
 }
 
-// RealClock reads the wall clock.
 func RealClock() Clock { return realClock{} }
 
-// ManualClock advances only when tests tell it to, making timers
-// deterministic and instant.
 type ManualClock struct {
 	mu      sync.Mutex
 	current time.Time
@@ -59,8 +52,6 @@ func (c *ManualClock) Now() time.Time {
 	return c.current
 }
 
-// Advance moves the clock forward and fires every timer scheduled within
-// the elapsed span.
 func (c *ManualClock) Advance(d time.Duration) {
 	c.mu.Lock()
 	c.current = c.current.Add(d)
@@ -82,7 +73,6 @@ func (c *ManualClock) Advance(d time.Duration) {
 	}
 }
 
-// Timer schedules a fire time on the manual clock.
 func (c *ManualClock) Timer(d time.Duration) <-chan time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -91,10 +81,6 @@ func (c *ManualClock) Timer(d time.Duration) <-chan time.Time {
 	return ch
 }
 
-// Invocation is the handler-facing execution context: Signal replaces
-// direct blocking and Sleep is a durable timer. Cancellation arrives
-// through the handler's own context parameter and through the context a
-// Signal caller supplies for its wait.
 type Invocation struct {
 	run     RunRef
 	payload []byte
@@ -105,10 +91,6 @@ type Invocation struct {
 }
 
 type signalQueue struct {
-	// waiter is the reply channel of the single parked Signal call, nil
-	// when none. A re-Signal for the same name replaces an abandoned
-	// waiter instead of queuing behind it, so a timed-out attempt can
-	// never wedge the next attempt's registration.
 	waiter    chan signalDelivery
 	delivered []signalDelivery
 }
@@ -117,17 +99,10 @@ type signalDelivery struct {
 	payload []byte
 }
 
-// Run returns the execution this invocation belongs to.
 func (i *Invocation) Run() RunRef { return i.run }
 
-// Payload returns the StartRequest payload.
 func (i *Invocation) Payload() []byte { return i.payload }
 
-// Signal blocks until the named signal arrives, the wait context ends, or
-// the invocation ends. The payload returns with ok=true; ok=false means
-// the invocation or the wait was cancelled before the signal arrived. A
-// cancelled wait never consumes a delivery: a payload that raced the
-// cancellation stays queued for the next waiter.
 func (i *Invocation) Signal(ctx context.Context, name string) ([]byte, bool) {
 	i.mu.Lock()
 	queue := i.signals[name]
@@ -159,10 +134,6 @@ func (i *Invocation) Signal(ctx context.Context, name string) ([]byte, bool) {
 	}
 }
 
-// detachWaiter unregisters a wait abandoned through its context and
-// restores any payload that raced the cancellation so a later waiter still
-// receives it. A live waiter is woken with the payload directly instead of
-// leaving it stranded in the delivered queue.
 func (i *Invocation) detachWaiter(name string, reply chan signalDelivery, raced *signalDelivery) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -188,8 +159,6 @@ func (i *Invocation) detachWaiter(name string, reply chan signalDelivery, raced 
 	queue.delivered = append([]signalDelivery{*raced}, queue.delivered...)
 }
 
-// Sleep blocks for the duration on the runtime clock; it returns the
-// cancellation error when the invocation ends first.
 func (i *Invocation) Sleep(d time.Duration) error {
 	timer := i.clock.Timer(d)
 	select {
@@ -200,16 +169,10 @@ func (i *Invocation) Sleep(d time.Duration) error {
 	}
 }
 
-// Timer exposes the runtime clock so a handler can race a timer against
-// other channels.
 func (i *Invocation) Timer(d time.Duration) <-chan time.Time {
 	return i.clock.Timer(d)
 }
 
-// Fake is the in-process Runtime: handlers run on their own goroutine,
-// signals queue or wake waiting handlers, cancellation is cooperative, and
-// state transitions are observable. It is the conformance reference for the
-// durable adapter and proves suspension semantics in-process.
 type Fake struct {
 	mu       sync.Mutex
 	handlers map[string]Handler
@@ -228,12 +191,10 @@ type fakeRun struct {
 	detail     string
 }
 
-// NewFake returns a fake runtime on the real clock; use WithClock in tests.
 func NewFake() *Fake {
 	return &Fake{handlers: map[string]Handler{}, runs: map[string]*fakeRun{}, clock: RealClock()}
 }
 
-// WithClock overrides the clock before first use.
 func (f *Fake) WithClock(clock Clock) *Fake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -241,7 +202,6 @@ func (f *Fake) WithClock(clock Clock) *Fake {
 	return f
 }
 
-// WithLogger installs an event sink for test diagnostics.
 func (f *Fake) WithLogger(logger func(format string, args ...any)) *Fake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -249,7 +209,6 @@ func (f *Fake) WithLogger(logger func(format string, args ...any)) *Fake {
 	return f
 }
 
-// RegisterHandler installs the handler for a service name.
 func (f *Fake) RegisterHandler(name string, fn Handler) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -265,8 +224,6 @@ func (f *Fake) log(format string, args ...any) {
 	}
 }
 
-// Start runs the named handler under the request key. A key that already
-// exists returns its reference without re-running (idempotent per key).
 func (f *Fake) Start(ctx context.Context, req StartRequest) (RunRef, error) {
 	if req.Key == "" {
 		return RunRef{}, errors.New("durable start requires a key")
@@ -314,16 +271,12 @@ func (f *Fake) Start(ctx context.Context, req StartRequest) (RunRef, error) {
 		run.state = state
 		run.detail = detail
 		run.mu.Unlock()
-		// Release any Signal caller still parked on this invocation so no
-		// waiter survives run completion.
 		cancel()
 		f.log("durable run %s finished as %s", run.ref.Key, state)
 	}()
 	return run.ref, nil
 }
 
-// Signal delivers a named signal payload to the run: a waiting Signal call
-// wakes with it, otherwise it queues for the next Signal call.
 func (f *Fake) Signal(_ context.Context, run RunRef, name string, payload []byte) error {
 	f.mu.Lock()
 	run_ := f.runs[run.Key]
@@ -364,8 +317,6 @@ func (f *Fake) Signal(_ context.Context, run RunRef, name string, payload []byte
 	return nil
 }
 
-// Cancel cooperatively cancels the run; handlers observe it through their
-// context and signal waits.
 func (f *Fake) Cancel(_ context.Context, run RunRef) error {
 	f.mu.Lock()
 	target := f.runs[run.Key]
@@ -384,7 +335,6 @@ func (f *Fake) Cancel(_ context.Context, run RunRef) error {
 	return nil
 }
 
-// Status reports the run state.
 func (f *Fake) Status(_ context.Context, run RunRef) (RunStatus, error) {
 	f.mu.Lock()
 	target := f.runs[run.Key]
@@ -397,7 +347,6 @@ func (f *Fake) Status(_ context.Context, run RunRef) (RunStatus, error) {
 	return RunStatus{State: target.state, Detail: target.detail}, nil
 }
 
-// WaitReady blocks until the run reaches a terminal state, for tests.
 func (f *Fake) WaitReady(run RunRef) {
 	f.mu.Lock()
 	target := f.runs[run.Key]

@@ -33,32 +33,19 @@ var staticPragmaSet = []struct {
 	set  string
 	want string
 }{
-	// foreign_keys, journal_mode, and synchronous are fixed by contract;
-	// busy_timeout is read from the DSN so config can tune it per store.
 	{name: "foreign_keys", set: "PRAGMA foreign_keys = ON", want: "1"},
 	{name: "journal_mode", set: "PRAGMA journal_mode = WAL", want: "wal"},
 	{name: "synchronous", set: "PRAGMA synchronous = NORMAL", want: "1"},
 }
 
 type OpenOptions struct {
-	// BusyTimeout is the per-connection busy timeout; zero selects the
-	// contract default of 5s.
 	BusyTimeout time.Duration
 }
 
-// OpenDB opens a SQLite database with the contract connection policy and
-// installs a connection hook so every physical connection the pool creates -
-// not just the first - gets foreign keys, WAL, busy timeout, and synchronous
-// mode applied and verified before it is handed to a caller. Write
-// transactions begin immediately, so a transaction that reads before writing
-// waits for the write lock instead of failing on a stale snapshot.
 func OpenDB(ctx context.Context, dsn string) (*sql.DB, error) {
 	return OpenDBWithOptions(ctx, dsn, OpenOptions{})
 }
 
-// OpenDBWithOptions is OpenDB with per-store tuning (busy timeout) encoded in
-// the DSN, so the connection hook applies the configured value instead of the
-// default.
 func OpenDBWithOptions(ctx context.Context, dsn string, opts OpenOptions) (*sql.DB, error) {
 	registerConnectionPolicyOnce.Do(func() {
 		sqlite.RegisterConnectionHook(verifyConnectionPolicy)
@@ -79,9 +66,6 @@ func OpenDBWithOptions(ctx context.Context, dsn string, opts OpenOptions) (*sql.
 	return db, nil
 }
 
-// ensureOwnerOnly makes the storage directory and database file owner-only
-// before SQLite opens them, so the WAL and SHM siblings are created with the
-// database's own mode instead of the process default.
 func ensureOwnerOnly(path string) error {
 	dir := filepath.Dir(path)
 	if err := ensureOwnerOnlyDirectory(dir); err != nil {
@@ -152,8 +136,6 @@ func withConnectionOptions(path string, opts OpenOptions) string {
 	return (&url.URL{Scheme: "file", Path: path, RawQuery: query.Encode()}).String()
 }
 
-// openReadOnly opens a SQLite database without ever writing to it, so a
-// backup snapshot and its verification stay untouched.
 func openReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 	if err := validateReadOnlyPath(path); err != nil {
 		return nil, err
@@ -207,10 +189,6 @@ func validateReadOnlyFile(path, label string, required bool) error {
 	return nil
 }
 
-// OpenReadOnly opens the live database without ever writing to it: no WAL
-// switch, no migration, no pragma that persists. Diagnostics surfaces use
-// this so a status sweep is provably read-only. A missing file is a typed
-// storage-unavailable error.
 func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 	db, err := openReadOnly(ctx, path)
 	if err != nil {
@@ -240,8 +218,6 @@ func verifyConnectionPolicy(conn sqlite.ExecQuerierContext, dsn string) error {
 	pragmas = append(pragmas, staticPragmaSet...)
 
 	for _, p := range pragmas {
-		// journal_mode would mutate a read-only database; it is the only
-		// pragma here that writes to the file.
 		if readOnly && p.name == "journal_mode" {
 			continue
 		}

@@ -38,8 +38,6 @@ func newStorageCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-// storagePaths resolves the live database path, artifact root, and backup
-// directory from config. Empty paths resolve below $XDG_DATA_HOME/aura.
 func storagePaths(cfg *config.Config) (dbPath, artifactRoot, backupDir string, err error) {
 	dataRoot := cfg.Storage.Path
 	if dataRoot == "" {
@@ -68,8 +66,6 @@ func defaultDataRoot() (string, error) {
 	return filepath.Join(home, ".local", "share", "aura"), nil
 }
 
-// openStorage opens the live database with config-driven connection policy
-// and applies migrations.
 func openStorage(ctx context.Context, cfg *config.Config) (*sql.DB, error) {
 	dbPath, _, _, err := storagePaths(cfg)
 	if err != nil {
@@ -140,9 +136,6 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Verify opens the backup snapshot itself and only needs the
-			// artifact root; the live database must not be opened or
-			// created as a side effect.
 			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
 				_, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
@@ -151,8 +144,6 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 				start := time.Now()
 				report, err := store.VerifyRestore(ctx, input, artifactRoot)
 				if err != nil {
-					// Integrity or manifest failures surface as
-					// backup_invalid; the cause chain is preserved.
 					if _, ok := store.CodeOf(err); ok {
 						return err
 					}
@@ -194,8 +185,6 @@ func newStorageRestoreCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Restore is offline: the live database must not be opened
-			// before it is replaced, so the db is not needed here.
 			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
 				dbPath, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
@@ -298,9 +287,6 @@ func collectCutoff(before string) (time.Time, error) {
 	return cutoff, nil
 }
 
-// withStorage loads config, resolves storage paths, and runs fn. When needDB
-// is true the live database is opened and migrated first; offline operations
-// (restore) pass false so the database being replaced is never opened.
 func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *slog.Logger, *config.Config, *sql.DB) error) error {
 	result, err := config.Load(gf.configPath)
 	if err != nil {

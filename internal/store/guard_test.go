@@ -130,8 +130,6 @@ func TestAppendPreservesMaxValidSequence(t *testing.T) {
 	}
 }
 
-// The schema CHECK constraint makes a negative sequence unreachable through
-// SQL, so the read guard is exercised directly rather than through a row.
 func TestSequenceConversionGuards(t *testing.T) {
 	if _, err := sequenceToDB(math.MaxInt64 + 1); err == nil {
 		t.Error("sequenceToDB accepted a value above MaxInt64")
@@ -422,8 +420,6 @@ func TestArtifactPutQuotaOverflowCannotBypassQuota(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed Put: %v", err)
 	}
-	// A wrapping quota check computes a negative total and lets the write
-	// through; the guarded form must reject it.
 	if _, err := db.ExecContext(ctx, `UPDATE blob SET size_bytes = ? WHERE digest = ?`, int64(math.MaxInt64), seed.BlobDigest); err != nil {
 		t.Fatalf("corrupt size_bytes: %v", err)
 	}

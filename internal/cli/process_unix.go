@@ -13,10 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/health"
 )
 
-// processProbe collects the process's own resource pressure: descriptor use
-// against RLIMIT_NOFILE and memory use against the effective cgroup-v2
-// limit. A host without readable limits reports no evidence rather than a
-// guess; the health checker then emits no findings for it.
 func processProbe() (health.ProcessStatus, bool) {
 	status := health.ProcessStatus{}
 
@@ -44,7 +40,6 @@ func processProbe() (health.ProcessStatus, bool) {
 	return status, true
 }
 
-// fdDirectory is where the kernel exposes this process's open descriptors.
 func fdDirectory() string {
 	if _, err := os.Stat("/proc/self/fd"); err == nil {
 		return "/proc/self/fd"
@@ -52,7 +47,6 @@ func fdDirectory() string {
 	return "/dev/fd"
 }
 
-// cgroupV2Path locates this process's unified-hierarchy directory, or "".
 func cgroupV2Path() string {
 	data, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
@@ -66,9 +60,6 @@ func cgroupV2Path() string {
 	return ""
 }
 
-// readCgroupFile reads one byte-count file from the process's own cgroup v2
-// directory. The literal "max" means unbounded and reads as absent so the
-// checker never divides by an infinite limit.
 func readCgroupFile(name string) (int64, bool) {
 	path := cgroupV2Path()
 	if path == "" {

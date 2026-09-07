@@ -11,8 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/egress"
 )
 
-// TestFetchTimesOut proves a slow origin produces a deadline error the
-// broker maps to deadline_exceeded, not a hang or an unclassified failure.
 func TestFetchTimesOut(t *testing.T) {
 	adapter, err := New(Options{
 		Timeout:         50 * time.Millisecond,
@@ -36,13 +34,6 @@ func TestFetchTimesOut(t *testing.T) {
 	}
 }
 
-// TestFetchResolvesOnceAgainstRebindingResolver runs the production
-// construction path (mediated egress client, no canned transport) against a
-// rebinding resolver: the first lookup returns a public address, every later
-// lookup a private one. Within an attempt the destination must be resolved
-// exactly once and pinned; after the rebinding flip the next attempt must be
-// denied at validation. A DNS change can therefore never redirect a dial
-// after validation.
 func TestFetchResolvesOnceAgainstRebindingResolver(t *testing.T) {
 	var calls int
 	rebinding := resolverFunc(func(_ context.Context, host string) ([]net.IP, error) {
@@ -50,9 +41,6 @@ func TestFetchResolvesOnceAgainstRebindingResolver(t *testing.T) {
 		if host != "rebind.example" {
 			t.Errorf("resolved host %q, want rebind.example", host)
 		}
-		// 192.0.2.0/24 is the TEST-NET documentation range: it passes the
-		// address-class checks and never routes, so the dial fails without
-		// depending on any network.
 		if calls == 1 {
 			return []net.IP{net.ParseIP("192.0.2.1")}, nil
 		}
@@ -80,8 +68,6 @@ func TestFetchResolvesOnceAgainstRebindingResolver(t *testing.T) {
 		t.Fatalf("resolver calls after first attempt = %d, want exactly 1 (pinned destination, no re-resolution)", calls)
 	}
 
-	// After the rebinding flip the next lookup is private and must be
-	// denied before any dial.
 	_, secondErr := adapter(context.Background(), fetchRequest("https://rebind.example/doc"), constraints())
 	if code, ok := egress.CodeOf(secondErr); !ok || code != egress.ErrorCodeEgressDenied {
 		t.Fatalf("second attempt err = %v, want egress_denied for the private answer", secondErr)
@@ -91,10 +77,6 @@ func TestFetchResolvesOnceAgainstRebindingResolver(t *testing.T) {
 	}
 }
 
-// TestFetchPinsAnswerAcrossMultiAnswerLookup feeds a multi-answer lookup
-// whose answers are all public: the dial must use an answer the validation
-// checked, and with an unroutable answer set the attempt fails without
-// ever succeeding through an unchecked address.
 func TestFetchPinsAnswerAcrossMultiAnswerLookup(t *testing.T) {
 	var calls int
 	multi := resolverFunc(func(_ context.Context, host string) ([]net.IP, error) {
@@ -120,9 +102,6 @@ func TestFetchPinsAnswerAcrossMultiAnswerLookup(t *testing.T) {
 	}
 }
 
-// TestFetchRejectsSchemeDowngradeRedirect proves an https-to-http redirect
-// on the same host is rejected: the cross-origin rule pins both host and
-// scheme, so a downgrade can never be followed.
 func TestFetchRejectsSchemeDowngradeRedirect(t *testing.T) {
 	resolver := staticResolver{"public.example": {net.ParseIP("93.184.216.34")}}
 	client := egress.NewClient(resolver)

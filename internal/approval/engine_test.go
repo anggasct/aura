@@ -179,9 +179,6 @@ func TestApprovalOperationsRejectNilContext(t *testing.T) {
 	}
 }
 
-// Every invocation passes through policy exactly once; execution is
-// only reachable with a grant minted after policy passed, and reusing a
-// grant fails.
 func TestExecuteRequiresGrantFromPolicy(t *testing.T) {
 	engine := newTestEngine(t)
 	request := testRequest("read_file")
@@ -198,7 +195,6 @@ func TestExecuteRequiresGrantFromPolicy(t *testing.T) {
 		t.Errorf("ToolName = %q", result.ToolName)
 	}
 
-	// The one-shot nonce is consumed: the same grant cannot run twice.
 	if _, err := engine.Execute(context.Background(), &request, &grant); err == nil {
 		t.Fatal("expected the consumed grant to be rejected")
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
@@ -236,7 +232,6 @@ func TestExecuteForgedGrantRejected(t *testing.T) {
 	}
 }
 
-// Argument, scope, expiry, or nonce changes invalidate a grant.
 func TestGrantInvalidatedByFieldChanges(t *testing.T) {
 	engine := newTestEngine(t)
 	request := testRequest("read_file")
@@ -317,8 +312,6 @@ func TestExecuteRejectsConstraintMutations(t *testing.T) {
 	}
 }
 
-// An argument change in the request itself (tampered between grant
-// and execute) invalidates the grant, because the hash no longer matches.
 func TestExecuteRejectsTamperedArguments(t *testing.T) {
 	engine := newTestEngine(t)
 	request := testRequest("read_file")
@@ -335,9 +328,6 @@ func TestExecuteRejectsTamperedArguments(t *testing.T) {
 	}
 }
 
-// A capability change in the request invalidates the grant, so a skill or
-// MCP server whose granted capabilities changed requires a new trust
-// decision before it can execute again.
 func TestExecuteRejectsCapabilityChange(t *testing.T) {
 	engine := newTestEngine(t)
 	request := testRequest("read_file")
@@ -368,10 +358,6 @@ func TestHashCapabilitiesIsOrderIndependent(t *testing.T) {
 	}
 }
 
-// Untrusted and derived content is always data — it cannot change
-// policy or the approval outcome. The policy is immutable after
-// construction and no request field can mutate it; an untrusted request
-// with a policy-approved tool still evaluates under policy constraints.
 func TestUntrustedContentCannotModifyPolicy(t *testing.T) {
 	engine := newTestEngine(t)
 	request := testRequest("web_fetch")
@@ -387,7 +373,6 @@ func TestUntrustedContentCannotModifyPolicy(t *testing.T) {
 		t.Errorf("PolicyVersion changed to %q", engine.PolicyVersion())
 	}
 
-	// Untrusted content cannot escalate to an approval-required tool.
 	escalation := testRequest("exec")
 	escalation.Trust = TrustUntrustedExternal
 	_, err = engine.Evaluate(context.Background(), &escalation)
@@ -516,7 +501,6 @@ func TestNilArgumentsReturnInvalidArgument(t *testing.T) {
 	engine := newTestEngine(t)
 	request := testRequest("read_file")
 
-	// Nil request on every entry point.
 	if _, err := engine.Evaluate(context.Background(), nil); !isInvalidArgument(err) {
 		t.Errorf("Evaluate(nil) = %v, want invalid_argument", err)
 	}
@@ -527,7 +511,6 @@ func TestNilArgumentsReturnInvalidArgument(t *testing.T) {
 		t.Errorf("Execute(nil request) = %v, want invalid_argument", err)
 	}
 
-	// Nil grant on Execute.
 	grant, err := engine.Grant(context.Background(), &request, time.Minute)
 	if err != nil {
 		t.Fatalf("Grant: %v", err)
@@ -537,7 +520,6 @@ func TestNilArgumentsReturnInvalidArgument(t *testing.T) {
 	}
 	_ = grant
 
-	// Nil grant on ValidFor.
 	if err := (*ApprovalGrant)(nil).ValidFor(&request, "v1", time.Now()); !isInvalidArgument(err) {
 		t.Errorf("ValidFor(nil grant) = %v, want invalid_argument", err)
 	}

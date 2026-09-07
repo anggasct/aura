@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// The cli composition root must wire builtin tools exclusively through this
-// package: no direct adapter construction and no broker or effect-executor
-// assembly outside New.
 func TestCliWiresBuiltinToolsOnlyThroughThisPackage(t *testing.T) {
 	forbiddenImports := []string{
 		"github.com/anggasct/aura/internal/tools",

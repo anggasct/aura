@@ -28,18 +28,12 @@ import (
 	"github.com/anggasct/aura/internal/tools/builtin"
 )
 
-// terminalBroker denies every tool call. The plain console never presents an
-// interactive approval and has no tool grants, so tool invocation fails closed
-// rather than executing unconfined.
 type terminalBroker struct{}
 
 func (terminalBroker) Evaluate(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error) {
 	return approval.PolicyDecision{Outcome: approval.OutcomeDeny, ReasonCode: "plain_console_denies_tools"}, nil
 }
 
-// terminalRunner adapts the runtime engine to the console-facing Runner port.
-// It maps the terminal request verbatim onto the runtime TurnRequest and the
-// durable runtime events onto the console event view.
 type terminalRunner struct {
 	engine runtime.AgentRuntime
 }
@@ -78,8 +72,6 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 	}
 }
 
-// terminalSessions adapts the store session service to the console Sessions
-// port.
 type terminalSessions struct {
 	sessions store.SessionService
 	newID    func() (string, error)
@@ -134,17 +126,11 @@ func (s *terminalSessions) ListEvents(ctx context.Context, sessionID string, aft
 	return out, nil
 }
 
-// chatPresentation captures the caller's presentation choices: --plain
-// forces the plain contract, NO_COLOR disables styling without giving up
-// streaming.
 type chatPresentation struct {
 	plain   bool
 	noColor bool
 }
 
-// shouldUseTTY reports whether the interactive presentation applies. It
-// requires both surfaces to be terminals; --plain forces the plain contract
-// and NO_COLOR degrades styling only, never runtime behavior.
 func shouldUseTTY(present chatPresentation, inTTY, outTTY bool) bool {
 	if present.plain {
 		return false
@@ -152,8 +138,6 @@ func shouldUseTTY(present chatPresentation, inTTY, outTTY bool) bool {
 	return inTTY && outTTY
 }
 
-// runChat is the wire for `aura chat`. It loads config, opens storage, builds
-// the runtime engine, and drives the terminal console over stdin/stdout.
 func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID string, present chatPresentation) error {
 	if _, err := model.BuildRouter(logger, cfg.Models); err != nil {
 		return err
@@ -252,10 +236,6 @@ func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io
 	return console.Run(ctx)
 }
 
-// approvalDeciderFor adapts the console approval bridge onto the tool
-// broker's decision seam. A nil bridge (plain presentation, or a build
-// without interactive approvals) leaves the decider unset, which rejects
-// fail-closed upstream.
 func approvalDeciderFor(approvals *terminal.ApprovalBridge) toolbroker.ApprovalDecider {
 	if approvals == nil {
 		return nil

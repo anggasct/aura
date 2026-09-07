@@ -10,12 +10,6 @@ import (
 
 var _ runtimeingress.IngressSink = (*Engine)(nil)
 
-// Accept is the ingress entry point every gateway, webhook, and scheduler
-// uses. It validates the envelope's identity, claims the dedupe key
-// (source, external_id) with the accepted event, and enqueues the turn; the
-// turn then runs to a durable terminal independent of the caller. A duplicate
-// delivery returns the original turn reference and creates no second event
-// sequence.
 func (e *Engine) Accept(ctx context.Context, env *runtimeingress.IngressEnvelope) (runtimeingress.TurnRef, error) {
 	if env == nil {
 		return runtimeingress.TurnRef{}, invalidArgument("ingress envelope must not be nil")

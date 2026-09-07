@@ -9,9 +9,6 @@ import (
 	"time"
 )
 
-// ProbeBody is the complete surface of an HTTP probe response: status, one
-// stable code, the build version, and the check time. Findings and component
-// detail never appear here — they are local CLI surfaces only.
 type ProbeBody struct {
 	Status    string    `json:"status"`
 	Code      string    `json:"code"`
@@ -19,7 +16,6 @@ type ProbeBody struct {
 	CheckedAt time.Time `json:"checked_at"`
 }
 
-// Probe status and code values. Stable for monitors.
 const (
 	ProbeStatusAlive    = "alive"
 	ProbeStatusReady    = "ready"
@@ -32,9 +28,6 @@ const (
 	ProbeCodeIrrecoverable = "irrecoverable"
 )
 
-// Liveness answers only whether the process event loop is alive. It is true
-// from process start and stays true through graceful drain; only a detected
-// irrecoverable wedge clears it. Dependency degradation never touches it.
 type Liveness struct {
 	alive atomic.Bool
 }
@@ -47,13 +40,8 @@ func NewLiveness() *Liveness {
 
 func (l *Liveness) Alive() bool { return l.alive.Load() }
 
-// SetIrrecoverable clears liveness for a condition the process cannot
-// recover from. There is no setter back to alive by design.
 func (l *Liveness) SetIrrecoverable() { l.alive.Store(false) }
 
-// Readiness reports whether new ingress can be durably accepted. The
-// startup and draining states are lifecycle facts owned by the process;
-// intake-blocking findings are classified from the evaluation result.
 type Readiness struct {
 	started  atomic.Bool
 	draining atomic.Bool
@@ -65,12 +53,6 @@ func (r *Readiness) SetStarted()               { r.started.Store(true) }
 func (r *Readiness) SetDraining(draining bool) { r.draining.Store(draining) }
 func (r *Readiness) Draining() bool            { return r.draining.Load() }
 
-// intakeBlocking reports whether a finding must keep new work out. Provider
-// and backup degradation do not: they degrade without blocking intake. Any
-// non-healthy migration state blocks (writing events against a schema this
-// binary did not fully migrate is never safe intake), as does a missing
-// mandatory sandbox: the sandbox check reports that as degraded, and intake
-// must still stay closed until containment is restored.
 func intakeBlocking(f *Finding) bool {
 	switch {
 	case f.Component == ComponentMigration || f.Component == ComponentSandbox:
@@ -84,9 +66,6 @@ func intakeBlocking(f *Finding) bool {
 	}
 }
 
-// Probe evaluates readiness from the lifecycle state plus the current
-// findings. The returned code names the first blocking condition in a stable
-// order so a 503 is always explainable.
 func (r *Readiness) Probe(findings []Finding) (ready bool, code string) {
 	if !r.started.Load() {
 		return false, ProbeCodeStarting
@@ -104,7 +83,6 @@ func (r *Readiness) Probe(findings []Finding) (ready bool, code string) {
 	return true, ProbeCodeReady
 }
 
-// FindBlocking returns the intake-blocking findings in stable order.
 func FindBlocking(findings []Finding) []Finding {
 	var blocking []Finding
 	for i := range findings {
@@ -115,9 +93,6 @@ func FindBlocking(findings []Finding) []Finding {
 	return blocking
 }
 
-// LivenessHandler serves GET/HEAD /livez. The response never depends on an
-// external system, so a provider or storage outage cannot cause restart
-// loops through this endpoint.
 func LivenessHandler(live *Liveness, version string, now func() time.Time) http.HandlerFunc {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
@@ -142,9 +117,6 @@ func LivenessHandler(live *Liveness, version string, now func() time.Time) http.
 	}
 }
 
-// ReadinessHandler serves GET/HEAD /readyz. Evaluation runs under the
-// caller-provided context; findings are recomputed per request so the probe
-// reflects the current state, never a long-lived cache.
 func ReadinessHandler(ready *Readiness, evaluate func(ctx context.Context) []Finding, version string, now func() time.Time) http.HandlerFunc {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
@@ -184,7 +156,4 @@ func writeProbe(w http.ResponseWriter, r *http.Request, status int, body ProbeBo
 	_, _ = w.Write(encoded)
 }
 
-// ComponentStorage names the storage component; the migration, backup, and
-// artifact checks are its sub-surfaces but storage-level failures (read-only,
-// full, busy) report under this component.
 const ComponentStorage = "storage"

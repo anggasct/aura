@@ -18,11 +18,6 @@ var registeredModelPatterns = struct {
 	patterns map[string]bool
 }{patterns: map[string]bool{}}
 
-// RegisterAdapters registers the configured primary and auxiliary model names
-// with the model registry so NewLLM can resolve them. Call once per process:
-// overlapping patterns break NewLLM's exactly-one-match rule, so a duplicate
-// registration of the same model name is rejected. Every adapter is validated
-// before any is registered, so a failure never leaves half-registered state.
 func RegisterAdapters(logger *slog.Logger, models config.Models) error {
 	timeout := time.Duration(models.RequestTimeout)
 	if timeout <= 0 {

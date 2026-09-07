@@ -48,13 +48,10 @@ func CodeOf(err error) (ErrorCode, bool) {
 	return target.Code, true
 }
 
-// Errorf returns a typed error carrying a stable code.
 func Errorf(code ErrorCode, format string, args ...any) error {
 	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
 }
 
-// codedError preserves both the typed code (errors.As) and the cause chain
-// (errors.Is) of the wrapped error.
 func codedError(code ErrorCode, detail string, cause error) error {
 	if cause == nil {
 		return &Error{Code: code, Detail: detail}
@@ -80,7 +77,6 @@ func classifyBusy(err error) error {
 	return codedError(ErrorCodeStorageBusy, "database is busy", err)
 }
 
-// rowChecker is satisfied by both *sql.DB and *sql.Tx.
 type rowChecker interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
@@ -90,10 +86,6 @@ func rowExists(ctx context.Context, q rowChecker, query string, args ...any) boo
 	return q.QueryRowContext(ctx, query, args...).Scan(&one) == nil
 }
 
-// classifyFKReference reports which referenced row an FK failure is missing.
-// The driver's error message names no column or table, so the referenced
-// tables are probed; every check must be on a unique key for the scan to be
-// unambiguous.
 func classifyFKReference(ctx context.Context, q rowChecker, refs ...fkReference) error {
 	for _, ref := range refs {
 		if !rowExists(ctx, q, ref.existsSQL, ref.key) {

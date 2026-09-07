@@ -15,12 +15,6 @@ func seccompAvailable() bool {
 	return errno != syscall.ENOSYS
 }
 
-// allowedSyscalls is the amd64 allowlist a contained tool may issue. It covers
-// dynamic-loader setup, ordinary file and memory operations, signals, time,
-// process/thread lifecycle, and execve. Network syscalls, namespace creation
-// (unshare/setns), credential changes, module loading, bpf, ptrace, and other
-// admin/debug surfaces are intentionally absent: the BPF filter kills any
-// syscall not on this list.
 func allowedSyscalls() []int {
 	return []int{
 		unix.SYS_READ, unix.SYS_WRITE, unix.SYS_OPENAT, unix.SYS_CLOSE, unix.SYS_CLOSE_RANGE,
@@ -54,9 +48,6 @@ const (
 	seccompOffsetArch = 4
 )
 
-// buildSeccompFilter returns a classic BPF program that denies-by-default:
-// any architecture other than the native one is killed, and any syscall not
-// on the allowlist is killed. A match on an allowed syscall returns ALLOW.
 func buildSeccompFilter(allowed []int) []unix.SockFilter {
 	filter := make([]unix.SockFilter, 0, len(allowed)+6)
 	filter = append(filter,
@@ -66,8 +57,6 @@ func buildSeccompFilter(allowed []int) []unix.SockFilter {
 		bpfStmt(unix.BPF_LD|unix.BPF_W|unix.BPF_ABS, seccompOffsetNr),
 	)
 	for i, nr := range allowed {
-		// On match, skip the remaining comparisons and the default kill to
-		// reach ALLOW; that is len(allowed)-i instructions below this one.
 		filter = append(filter, bpfJump(unix.BPF_JMP|unix.BPF_JEQ|unix.BPF_K, uint32(nr), uint8(len(allowed)-i), 0))
 	}
 	filter = append(filter,
@@ -85,9 +74,6 @@ func bpfJump(code uint16, k uint32, jt, jf uint8) unix.SockFilter {
 	return unix.SockFilter{Code: code, Jt: jt, Jf: jf, K: k}
 }
 
-// applySeccomp drops the child's privileges and installs the allowlist
-// filter. It must run after rlimit and Landlock setup and immediately before
-// execve so no further Go-runtime syscall is trapped by the filter.
 func applySeccomp() error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return Errorf(ErrorCodeSandboxInitFailed, "set no_new_privs: %v", err)

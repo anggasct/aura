@@ -9,28 +9,17 @@ import (
 	auraagent "github.com/anggasct/aura/internal/agent"
 )
 
-// AgentResolver is the registry surface validation dry-runs against; the
-// interface is declared here so validation depends only on resolution.
 type AgentResolver interface {
 	Resolve(required []string, preferID *string) (auraagent.Definition, error)
 }
 
-// ValidationDeps carries the registries validation checks references
-// against; the composition root supplies them.
 type ValidationDeps struct {
-	// KnownTools lists registered tool names.
-	KnownTools []string
-	// EffectfulTools lists tool names that require approval coverage.
-	EffectfulTools []string
-	// Agents resolves agent requirements (dry-run).
-	Agents AgentResolver
-	// DefaultStepTimeout fills an omitted per-step timeout before the
-	// presence check.
+	KnownTools         []string
+	EffectfulTools     []string
+	Agents             AgentResolver
 	DefaultStepTimeout time.Duration
 }
 
-// Validate applies the frozen validation rules in order; the first failing
-// rule returns its exact field-level error.
 func Validate(spec *Spec, deps ValidationDeps) error {
 	if spec == nil {
 		return codedError(ErrorCodeSpecInvalid, "spec must not be nil")
@@ -209,8 +198,6 @@ func detectCycle(spec *Spec) error {
 	return nil
 }
 
-// hasTransitiveApproval reports whether an approval step exists among the
-// step's transitive predecessors.
 func hasTransitiveApproval(stepsByID map[string]*StepSpec, step *StepSpec) bool {
 	seen := map[string]bool{}
 	stack := append([]string(nil), step.DependsOn...)

@@ -15,9 +15,6 @@ const (
 	maxPricesFileBytes = 1 << 20
 )
 
-// pricesFile is the on-disk shape of the versioned operator price file. The
-// schema is versioned so a future format change is a deliberate migration,
-// not a silent misparse.
 type pricesFile struct {
 	Version int          `yaml:"version"`
 	Prices  []priceEntry `yaml:"prices"`
@@ -37,8 +34,6 @@ type priceEntry struct {
 	MaxReservationRate      int64  `yaml:"max_reservation_rate"`
 }
 
-// LoadPricesFile reads a versioned operator price file into a registry. The
-// effective timestamps are RFC3339; an empty effective_to means open-ended.
 func LoadPricesFile(path string, reg *PriceRegistry) error {
 	if reg == nil {
 		return codedError(ErrorCodeInvalidArgument, "usage: price registry must not be nil", nil)

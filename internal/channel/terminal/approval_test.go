@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-// approvalRunner asks one approval through the bridge mid-turn, mirroring
-// the runtime worker's position inside the event stream.
 type approvalRunner struct {
 	bridge *ApprovalBridge
 	card   *ApprovalCard
@@ -169,8 +167,6 @@ func TestApprovalEOFRejects(t *testing.T) {
 	}
 }
 
-// syncBuffer serializes writes and reads across goroutines, for tests that
-// poll the output while the console runs on another goroutine.
 type syncBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer

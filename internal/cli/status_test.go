@@ -29,8 +29,6 @@ func TestFormatSandboxStatusAvailable(t *testing.T) {
 	}
 }
 
-// The surface must name every absent primitive so an operator knows exactly
-// what the host lacks, matching the Require gate's vocabulary.
 func TestFormatSandboxStatusNamesMissing(t *testing.T) {
 	partial := sandbox.Primitives{ProcessGroups: true}
 	text, available := formatSandboxStatus(partial, nil)
@@ -84,12 +82,6 @@ func TestStatusCmdAvailableExitsClean(t *testing.T) {
 	}
 }
 
-// newStatusCmdForTest builds the status command against a fully seeded
-// temporary environment: a migrated database, a fresh backup directory, and
-// a configured primary model, so the healthy-path assertion is meaningful.
-// healthyStorage=false removes the database and backup so degraded findings
-// appear. Process-resource evidence is pinned so concurrent test load on
-// the host cannot turn the available-path assertion flaky.
 func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, error), healthyStorage bool) *cobra.Command {
 	t.Helper()
 	dataRoot := t.TempDir()
@@ -109,8 +101,6 @@ func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, err
 	return cmd
 }
 
-// pinnedProcessProbe is benign fixed process-resource evidence so
-// concurrent suite load cannot make finding-set assertions flaky.
 func pinnedProcessProbe() (health.ProcessStatus, bool) {
 	return health.ProcessStatus{FDsOpen: 10, FDsLimit: 4096, MemoryUsedBytes: 1 << 20, MemoryLimitBytes: 1 << 30, MemoryLimitKnown: true}, true
 }
@@ -133,8 +123,6 @@ func seedHealthyStorage(t *testing.T, dataRoot string) {
 	}
 }
 
-// Offline output must label the live surface unreachable, list findings in a
-// stable order, and map severity to the documented exit codes.
 func TestStatusOfflineDeterministicOutputAndExitCodes(t *testing.T) {
 	negotiate := func() (sandbox.Primitives, error) {
 		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
@@ -255,12 +243,7 @@ func TestDoctorFormatCarriesContractFields(t *testing.T) {
 	}
 }
 
-// The load path must feed the real builtin capability registry into the
-// status surface: a fresh configuration yields the shipped capability
-// statuses, never an empty report that claims consistency without data.
 func TestStatusUsesBuiltinCapabilityRegistry(t *testing.T) {
-	// Point the default-config resolution at an isolated home so the load
-	// generates a fresh configuration instead of reading this user's.
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("AURA_CONFIG", "")
 	t.Setenv("AURA_TOOLS_WORKSPACE", t.TempDir())
@@ -285,9 +268,6 @@ func TestStatusUsesBuiltinCapabilityRegistry(t *testing.T) {
 	}
 }
 
-// statusFromLoadedConfig loads a real configuration file through the
-// production load path and runs offline status against the result, so
-// assertions cover the config.Load → status contract end to end.
 func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadOptions) (*cobra.Command, string, error) {
 	t.Helper()
 	dir := t.TempDir()
@@ -327,9 +307,6 @@ func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadO
 	return cmd, out.String(), runErr
 }
 
-// A capability the configuration enabled but whose host dependency is
-// missing survives the real load path and reaches the status output with
-// the stable finding code and the critical health exit.
 func TestStatusReportsEnabledCapabilityMissingDependency(t *testing.T) {
 	registry, err := capability.BuiltinRegistry()
 	if err != nil {
@@ -356,10 +333,6 @@ func TestStatusReportsEnabledCapabilityMissingDependency(t *testing.T) {
 	}
 }
 
-// A capability enabled in configuration but absent from the artifact
-// survives the real config.Load path (default build) and is reported
-// through the status surface with the not-compiled code, not a
-// configuration error.
 func TestStatusReportsEnabledCapabilityNotCompiled(t *testing.T) {
 	build, err := capability.ParseBuild("core", "", "linux")
 	if err != nil {
@@ -382,8 +355,6 @@ func TestStatusReportsEnabledCapabilityNotCompiled(t *testing.T) {
 	}
 }
 
-// A capability name the registry does not know is a malformed
-// configuration, not a health state: the load fails outright.
 func TestStatusUnknownCapabilityIsAConfigError(t *testing.T) {
 	registry, err := capability.BuiltinRegistry()
 	if err != nil {
@@ -405,13 +376,7 @@ func TestStatusUnknownCapabilityIsAConfigError(t *testing.T) {
 	}
 }
 
-// A capability compiled into the artifact but excluded by the selected
-// profile reports the profile reason through the real load path: the
-// finding names the profile, not a generic unavailability.
 func TestStatusReportsProfileExclusionReason(t *testing.T) {
-	// exec-linux profile compiles workspace-write, but a core build does
-	// not include it: enabling it on core is an artifact state, and the
-	// status output must name the profile cause.
 	build, err := capability.ParseBuild("core", "workspace-write", "linux")
 	if err != nil {
 		t.Fatal(err)
@@ -433,8 +398,6 @@ func TestStatusReportsProfileExclusionReason(t *testing.T) {
 	}
 }
 
-// An effectful capability enabled on a non-Linux build reports the OS
-// reason through the same path.
 func TestStatusReportsNonLinuxReasonForEffectfulCapability(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		t.Skip("OS reason requires a non-Linux build parse; exercised on darwin/windows CI legs")

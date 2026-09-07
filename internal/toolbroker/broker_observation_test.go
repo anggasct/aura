@@ -65,15 +65,12 @@ func TestBrokerObservationCarriesPolicyApprovalExecutorMetadata(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// allow + auto approval + direct executor
 	if _, err := broker.Execute(context.Background(), brokerRequest("list_dir", `{"path":"."}`, "workspace-read")); err != nil {
 		t.Fatalf("list_dir: %v", err)
 	}
-	// require_approval + missing grant
 	if _, err := broker.Execute(context.Background(), brokerRequest("read_file", `{"path":"note.txt"}`, "workspace-read")); classOf(err) != ResultApprovalRequired {
 		t.Fatalf("read_file without approval = %v", err)
 	}
-	// require_approval + attached grant
 	withApproval := brokerRequest("read_file", `{"path":"note.txt"}`, "workspace-read")
 	withApproval.RequestID = "request-2"
 	withApproval.IdempotencyKey = "idempotency-2"
@@ -85,7 +82,6 @@ func TestBrokerObservationCarriesPolicyApprovalExecutorMetadata(t *testing.T) {
 	if _, err := broker.Execute(context.Background(), withApproval); err != nil {
 		t.Fatalf("read_file with approval: %v", err)
 	}
-	// pre-evaluation failure keeps the bounded not_evaluated outcome
 	if _, err := broker.Execute(context.Background(), brokerRequest("read_file", `{"path":"note.txt","extra":1}`, "workspace-read")); classOf(err) != ResultInvalidArgument {
 		t.Fatalf("invalid arguments = %v", err)
 	}

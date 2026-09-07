@@ -45,9 +45,6 @@ func TestRegistryRejectsInvalidChecks(t *testing.T) {
 	}
 }
 
-// The registry owns the contract fields: severity derived from status, scope
-// and remediation defaulted, stable finding ID, and first-seen preserved
-// across evaluations while last-seen advances.
 func TestRegistryStampsFindingsAndTracksFirstSeen(t *testing.T) {
 	base := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
 	now := base
@@ -92,8 +89,6 @@ func TestRegistryStampsFindingsAndTracksFirstSeen(t *testing.T) {
 	}
 }
 
-// A slow check becomes a stale unknown finding instead of blocking the
-// evaluation; sibling checks still complete.
 func TestRegistrySlowCheckYieldsStaleFinding(t *testing.T) {
 	registry, err := NewRegistry(
 		RegisteredCheck{
@@ -127,8 +122,6 @@ func TestRegistrySlowCheckYieldsStaleFinding(t *testing.T) {
 	}
 }
 
-// A panicking checker is contained: the sweep reports a finding instead of
-// crashing the process.
 func TestRegistryContainsCheckerPanic(t *testing.T) {
 	panicChecker := panicChecker{}
 	registry, err := NewRegistry(RegisteredCheck{ID: "boom", Checker: panicChecker})
@@ -197,8 +190,6 @@ func TestReadinessMatrix(t *testing.T) {
 	}
 }
 
-// Liveness must stay alive regardless of any finding: provider, storage, and
-// backup degradation never clear it.
 func TestLivenessIgnoresDegradation(t *testing.T) {
 	live := NewLiveness()
 	degraded := []Finding{
@@ -267,7 +258,6 @@ func TestProbeHandlers(t *testing.T) {
 		t.Fatalf("blocking readyz code = %d", recorder.Code)
 	}
 
-	// Method surface: only GET and HEAD are served.
 	recorder = httptest.NewRecorder()
 	liveHandler.ServeHTTP(recorder, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/livez", http.NoBody))
 	if recorder.Code != http.StatusMethodNotAllowed {
@@ -275,12 +265,8 @@ func TestProbeHandlers(t *testing.T) {
 	}
 }
 
-// The real SandboxChecker result must drive readiness: a host missing
-// mandatory containment yields a down finding that blocks intake (503).
 func TestSandboxCheckerThroughReadinessBlocksIntake(t *testing.T) {
 	support := func() (bool, string) {
-		// cgroup_v2 is missing on the fixture host, like the real Checker
-		// reports when containment is absent.
 		return false, "missing: cgroup_v2"
 	}
 	checker := NewRegistryCheckForTest(RegisteredCheck{
@@ -303,8 +289,6 @@ func TestSandboxCheckerThroughReadinessBlocksIntake(t *testing.T) {
 	}
 }
 
-// StorageChecker must classify every intake state to a stable code and
-// readiness must turn a blocking storage state into 503.
 func TestStorageCheckerThroughReadinessBlocksIntake(t *testing.T) {
 	states := []struct {
 		name   string
@@ -348,8 +332,6 @@ func NewRegistryCheckForTest(checks ...RegisteredCheck) *Registry {
 	return registry
 }
 
-// The readiness handler must respect request cancellation so a hung
-// evaluation cannot pin probe workers.
 func TestReadinessHandlerPassesRequestContext(t *testing.T) {
 	ready := NewReadiness()
 	ready.SetStarted()
@@ -381,8 +363,6 @@ func TestReadinessHandlerPassesRequestContext(t *testing.T) {
 	}
 }
 
-// Probe bodies never carry finding evidence: a canary planted in a finding's
-// detail must not reach the HTTP surface.
 func TestProbeBodyExcludesFindingDetail(t *testing.T) {
 	const canary = "canary-secret-zz9-6k2"
 	ready := NewReadiness()

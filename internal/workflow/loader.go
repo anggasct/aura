@@ -44,11 +44,8 @@ type retryFile struct {
 	Backoff  time.Duration `yaml:"backoff"`
 }
 
-// maxDefinitionBytes bounds one definition file read.
 const maxDefinitionBytes = 1 << 20
 
-// LoadSpecFile parses one definition file with strict unknown-key
-// rejection. The read is confined to the file's own directory.
 func LoadSpecFile(path string) (*Spec, error) {
 	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
@@ -106,8 +103,6 @@ func parseSpec(content []byte) (*Spec, error) {
 	return spec, nil
 }
 
-// LoadDefinitionsDir loads every .yaml/.yml file under dir in sorted
-// filename order; a missing directory loads nothing.
 func LoadDefinitionsDir(dir string) ([]*Spec, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

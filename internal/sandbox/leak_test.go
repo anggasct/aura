@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// countOpenFDs is the descriptor-leak probe shared by the one-shot and
-// session teardown harnesses.
 func countOpenFDs(t *testing.T) int {
 	t.Helper()
 	entries, err := os.ReadDir("/proc/self/fd")
@@ -19,8 +17,6 @@ func countOpenFDs(t *testing.T) int {
 	return len(entries)
 }
 
-// countAuraCgroups is the cgroup-leak probe shared by the one-shot and
-// session teardown harnesses.
 func countAuraCgroups(t *testing.T) int {
 	t.Helper()
 	parent, err := ownCgroupPath()

@@ -39,7 +39,6 @@ func TestComputeTrustDigest(t *testing.T) {
 		t.Fatal("expected non-empty digest")
 	}
 
-	// Permuting tool input order produces the same digest
 	toolsReversed := []DiscoveredTool{tools[1], tools[0]}
 	digest2, err := ComputeTrustDigest(serverCfg, toolsReversed)
 	if err != nil {
@@ -179,7 +178,6 @@ func TestMemoryTrustRegistry(t *testing.T) {
 	serverName := "test-server"
 	digest := "aabbcc112233"
 
-	// Initially untrusted
 	trusted, err := registry.IsTrusted(ctx, serverName, digest)
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +194,6 @@ func TestMemoryTrustRegistry(t *testing.T) {
 		t.Fatal("expected nil record initially")
 	}
 
-	// Save pending
 	err = registry.SaveSessionTrust(ctx, serverName, digest, []string{"read"}, []string{"tool_a"})
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +207,6 @@ func TestMemoryTrustRegistry(t *testing.T) {
 		t.Fatal("pending decision must not be trusted")
 	}
 
-	// Approve
 	err = registry.Approve(ctx, serverName, digest)
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +220,6 @@ func TestMemoryTrustRegistry(t *testing.T) {
 		t.Fatal("expected trusted after approval")
 	}
 
-	// Different digest is not trusted
 	trusted, err = registry.IsTrusted(ctx, serverName, "different-digest")
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +273,6 @@ func TestMemoryTrustRegistrySpawnApproval(t *testing.T) {
 		t.Fatal("expected trusted after spawn approval")
 	}
 
-	// Re-saving an identical approved digest is a no-op: approval survives.
 	if err := registry.SaveSpawnTrust(ctx, serverName, digest); err != nil {
 		t.Fatalf("SaveSpawnTrust (same digest) failed: %v", err)
 	}
@@ -290,7 +284,6 @@ func TestMemoryTrustRegistrySpawnApproval(t *testing.T) {
 		t.Fatal("expected approval to survive same-digest save")
 	}
 
-	// A changed digest resets to pending: the old approval must not carry.
 	changed := "spawn-digest-002"
 	if err := registry.SaveSpawnTrust(ctx, serverName, changed); err != nil {
 		t.Fatalf("SaveSpawnTrust (changed digest) failed: %v", err)
