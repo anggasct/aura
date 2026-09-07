@@ -65,14 +65,30 @@ func (f *FallbackAdapter) WithLogger(logger *slog.Logger) *FallbackAdapter {
 }
 
 func (f *FallbackAdapter) costMicrosFor(definitionID string, u usage.Usage) int64 {
-	if f.prices == nil || u == (usage.Usage{}) {
+	if u == (usage.Usage{}) {
 		return 0
 	}
-	price, err := f.prices.At(definitionID, "USD", time.Now())
-	if err != nil || price == nil {
-		return 0
+	if f.prices != nil {
+		price, err := f.prices.At(definitionID, "USD", time.Now())
+		if err == nil && price != nil {
+			return price.CostMicros(u)
+		}
 	}
-	return price.CostMicros(u)
+	if def, ok := f.definitions[definitionID]; ok {
+		if def.Capabilities.MicrosPerInputToken > 0 || def.Capabilities.MicrosPerOutputToken > 0 {
+			p := usage.Price{
+				ModelDefinitionID:    definitionID,
+				Currency:             "USD",
+				MicrosPerInputToken:  def.Capabilities.MicrosPerInputToken,
+				MicrosPerOutputToken: def.Capabilities.MicrosPerOutputToken,
+				EffectiveFrom:        time.Unix(0, 0),
+				MaxReservationRate:   100,
+				Source:               "config",
+			}
+			return p.CostMicros(u)
+		}
+	}
+	return 0
 }
 
 func (f *FallbackAdapter) recordCost(ctx context.Context, budget *InvocationBudget, definitionID string, resp *adkmodel.LLMResponse) error {
@@ -101,11 +117,11 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 			var bErr error
 			maxAttempts := f.route.MaxProviderAttempts
 			if maxAttempts <= 0 {
-				maxAttempts = 4
+				maxAttempts = config.DefaultModelRouteMaxProviderAttempts
 			}
 			delayBudget := time.Duration(f.route.RetryDelayBudget)
 			if delayBudget <= 0 {
-				delayBudget = 20 * time.Second
+				delayBudget = config.DefaultModelRouteRetryDelayBudget
 			}
 			budget, bErr = NewInvocationBudget(BudgetParams{
 				MaxAttempts:      maxAttempts,
@@ -281,8 +297,6 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 
 			if streamErr != nil {
 				if boundaryCrossed {
-					// Emitted output already visible to caller: boundary crossed!
-					// Must return typed error without restarting on another candidate.
 					if f.logger != nil {
 						f.logger.ErrorContext(reqCtx, "model stream interrupted after observable output",
 							"route", f.name,

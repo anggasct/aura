@@ -27,6 +27,26 @@ func RegisterAdapters(logger *slog.Logger, models config.Models) error {
 }
 
 func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry) error {
+	if prices == nil {
+		prices = usage.NewPriceRegistry()
+	}
+	for name := range models.Definitions {
+		def := models.Definitions[name]
+		if def.Capabilities.MicrosPerInputToken > 0 || def.Capabilities.MicrosPerOutputToken > 0 {
+			if existing, _ := prices.At(name, "USD", time.Now()); existing == nil {
+				_ = prices.Put(&usage.Price{
+					ModelDefinitionID:    name,
+					Currency:             "USD",
+					MicrosPerInputToken:  def.Capabilities.MicrosPerInputToken,
+					MicrosPerOutputToken: def.Capabilities.MicrosPerOutputToken,
+					EffectiveFrom:        time.Unix(0, 0),
+					MaxReservationRate:   100,
+					Source:               "config",
+				})
+			}
+		}
+	}
+
 	adapters, circuits, err := BuildComponents(logger, models, routes, checkpoint, prices)
 	if err != nil {
 		return err

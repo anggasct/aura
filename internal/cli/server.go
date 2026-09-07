@@ -40,18 +40,16 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if result.CapabilityStateError != nil {
 				return result.CapabilityStateError
 			}
-			if _, err := model.BuildRouter(logger, cfg.Models); err != nil {
-				return err
-			}
-			if err := model.RegisterAdapters(logger, cfg.Models); err != nil {
-				return err
-			}
 			db, err := openStorage(ctx, cfg)
 			if err != nil {
 				return err
 			}
 			defer func() { _ = db.Close() }()
-			if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, nil); err != nil {
+			prices, err := openPriceRegistry(ctx, logger, cfg, result.Path, "")
+			if err != nil {
+				return err
+			}
+			if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, prices); err != nil {
 				return err
 			}
 			pipeline, err := telemetry.NewPipeline(cfg.Telemetry, logger)

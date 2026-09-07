@@ -138,14 +138,19 @@ func shouldUseTTY(present chatPresentation, inTTY, outTTY bool) bool {
 	return inTTY && outTTY
 }
 
-func runChat(ctx context.Context, cfg *config.Config, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID string, present chatPresentation) error {
+func runChat(ctx context.Context, cfg *config.Config, configPath string, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID string, present chatPresentation) error {
 	db, err := openStorage(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
 
-	if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, nil); err != nil {
+	prices, err := openPriceRegistry(ctx, logger, cfg, configPath, "")
+	if err != nil {
+		return err
+	}
+
+	if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, prices); err != nil {
 		return err
 	}
 

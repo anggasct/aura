@@ -96,11 +96,11 @@ func newModelsRoutesCmd(gf *globalFlags) *cobra.Command {
 				route := cfg.ModelRoutes[routeName]
 				attempts := route.MaxProviderAttempts
 				if attempts <= 0 {
-					attempts = 4
+					attempts = config.DefaultModelRouteMaxProviderAttempts
 				}
 				delay := time.Duration(route.RetryDelayBudget)
 				if delay <= 0 {
-					delay = 20 * time.Second
+					delay = config.DefaultModelRouteRetryDelayBudget
 				}
 				cost := "-"
 				if route.CostBudgetUSD > 0 {
@@ -149,7 +149,9 @@ func newModelsCircuitsCmd(gf *globalFlags) *cobra.Command {
 				cm.Register(name, def.BaseURL, digest, model.DefaultCircuitPolicy())
 			}
 
-			_ = cm.LoadCheckpoints(cmd.Context())
+			if err := cm.LoadCheckpoints(cmd.Context()); err != nil {
+				return err
+			}
 
 			statuses := cm.Inspect()
 			out := cmd.OutOrStdout()
@@ -210,7 +212,9 @@ func newModelsCircuitResetCmd(gf *globalFlags) *cobra.Command {
 				cm.Register(name, def.BaseURL, digest, model.DefaultCircuitPolicy())
 			}
 
-			_ = cm.LoadCheckpoints(cmd.Context())
+			if err := cm.LoadCheckpoints(cmd.Context()); err != nil {
+				return err
+			}
 
 			target := args[0]
 			reset := cm.Reset(cmd.Context(), target)

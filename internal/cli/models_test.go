@@ -141,3 +141,31 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 		t.Fatal("expected circuit-reset nonexistent-model to fail")
 	}
 }
+
+func TestModelsCircuitsStorageFailure(t *testing.T) {
+	gf := &globalFlags{configPath: writeModelsConfig(t, "")}
+	ctx := t.Context()
+
+	loadRes, err := config.Load(gf.configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	db, err := openStorage(ctx, loadRes.Config)
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, "DROP TABLE model_circuit_checkpoint"); err != nil {
+		t.Fatalf("drop table: %v", err)
+	}
+	_ = db.Close()
+
+	_, err = runModelsCommand(t, gf, "circuits")
+	if err == nil {
+		t.Fatal("expected models circuits to fail when storage fails")
+	}
+
+	_, err = runModelsCommand(t, gf, "circuit-reset", "cand1")
+	if err == nil {
+		t.Fatal("expected models circuit-reset to fail when storage fails")
+	}
+}

@@ -134,3 +134,120 @@ func TestChatWireUnknownRouteFailsClosed(t *testing.T) {
 		t.Errorf("definition route resolution = %q, %v; want backup-model-failclosed, nil", got, err)
 	}
 }
+
+func TestChatWireCostBudget(t *testing.T) {
+	cases := []struct {
+		name          string
+		costBudgetUSD float64
+		inputTokens   int64
+		outputTokens  int64
+		wantErrCode   model.ErrorCode
+	}{
+		{
+			name:          "exceeded",
+			costBudgetUSD: 0.0001,
+			inputTokens:   100,
+			outputTokens:  200,
+			wantErrCode:   model.ErrorCodeBudgetExceeded,
+		},
+		{
+			name:          "under_budget",
+			costBudgetUSD: 10.0,
+			inputTokens:   100,
+			outputTokens:  200,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+			serverHits := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				serverHits++
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"priced-model","content":[{"type":"text","text":"budget verified"}],"stop_reason":"end_turn","usage":{"input_tokens":` + strconv.FormatInt(tc.inputTokens, 10) + `,"output_tokens":` + strconv.FormatInt(tc.outputTokens, 10) + `}}`))
+			}))
+			defer srv.Close()
+
+			routeName := "priced-route-" + suffix
+			cfg := &config.Config{
+				Models: config.Models{
+					Definitions: map[string]config.ModelDefinition{
+						"priced": {
+							Protocol: config.ProtocolAnthropicMessages,
+							Model:    "priced-model-" + suffix,
+							BaseURL:  srv.URL,
+							Capabilities: config.ModelCapabilities{
+								ContextTokens:        128000,
+								Tokenizer:            "cl100k_base",
+								Streaming:            true,
+								Tools:                true,
+								MicrosPerInputToken:  1000,
+								MicrosPerOutputToken: 2000,
+							},
+						},
+					},
+				},
+				ModelRoutes: map[string]config.ModelRoute{
+					routeName: {
+						Candidates:    []string{"priced"},
+						CostBudgetUSD: tc.costBudgetUSD,
+					},
+				},
+			}
+
+			prices, err := openPriceRegistry(t.Context(), nil, cfg, "", "")
+			if err != nil {
+				t.Fatalf("openPriceRegistry: %v", err)
+			}
+
+			if err := model.RegisterAdaptersWithRoutes(t.Context(), nil, cfg.Models, cfg.ModelRoutes, nil, prices); err != nil {
+				t.Fatalf("RegisterAdaptersWithRoutes: %v", err)
+			}
+
+			routeModel, err := model.RouteModelName(cfg, cfg.Models.Definitions["priced"].Model)
+			if err != nil {
+				t.Fatalf("RouteModelName: %v", err)
+			}
+			modelName, err := routeModel(routeName)
+			if err != nil {
+				t.Fatalf("resolve route: %v", err)
+			}
+
+			resolved, err := adkmodel.NewLLM(t.Context(), modelName)
+			if err != nil {
+				t.Fatalf("resolve %q through the model registry: %v", modelName, err)
+			}
+
+			req := &adkmodel.LLMRequest{
+				Contents: []*genai.Content{{
+					Role:  "user",
+					Parts: []*genai.Part{{Text: "hello"}},
+				}},
+			}
+
+			var invocationErr error
+			for _, err := range resolved.GenerateContent(t.Context(), req, false) {
+				if err != nil {
+					invocationErr = err
+					break
+				}
+			}
+
+			if tc.wantErrCode != "" {
+				if invocationErr == nil {
+					t.Fatalf("expected error %s, got nil", tc.wantErrCode)
+				}
+				code, ok := model.CodeOf(invocationErr)
+				if !ok || code != tc.wantErrCode {
+					t.Fatalf("invocation error code = %v (ok=%v), want %s; err: %v", code, ok, tc.wantErrCode, invocationErr)
+				}
+			} else if invocationErr != nil {
+				t.Fatalf("unexpected invocation error: %v", invocationErr)
+			}
+			if serverHits == 0 {
+				t.Fatal("candidate endpoint was never called")
+			}
+		})
+	}
+}

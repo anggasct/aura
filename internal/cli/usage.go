@@ -53,8 +53,8 @@ func withUsage(cmd *cobra.Command, gf *globalFlags, pricesPath string, fn func(c
 	}
 	defer func() { _ = db.Close() }()
 
-	reg := usage.NewPriceRegistry()
-	if err := loadPrices(cmd.Context(), logger, result.Path, pricesPath, reg); err != nil {
+	reg, err := openPriceRegistry(cmd.Context(), logger, cfg, result.Path, pricesPath)
+	if err != nil {
 		return err
 	}
 
@@ -72,10 +72,39 @@ func withUsage(cmd *cobra.Command, gf *globalFlags, pricesPath string, fn func(c
 	return fn(cmd.Context(), logger, cfg, ledger, reg)
 }
 
+func openPriceRegistry(ctx context.Context, logger *slog.Logger, cfg *config.Config, configPath, explicitPricesPath string) (*usage.PriceRegistry, error) {
+	reg := usage.NewPriceRegistry()
+	if cfg != nil {
+		for name := range cfg.Models.Definitions {
+			def := cfg.Models.Definitions[name]
+			if def.Capabilities.MicrosPerInputToken > 0 || def.Capabilities.MicrosPerOutputToken > 0 {
+				if err := reg.Put(&usage.Price{
+					ModelDefinitionID:    name,
+					Currency:             "USD",
+					MicrosPerInputToken:  def.Capabilities.MicrosPerInputToken,
+					MicrosPerOutputToken: def.Capabilities.MicrosPerOutputToken,
+					EffectiveFrom:        time.Unix(0, 0),
+					MaxReservationRate:   100,
+					Source:               "config",
+				}); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if err := loadPrices(ctx, logger, configPath, explicitPricesPath, reg); err != nil {
+		return nil, err
+	}
+	return reg, nil
+}
+
 func loadPrices(ctx context.Context, logger *slog.Logger, configPath, explicit string, reg *usage.PriceRegistry) error {
 	path := explicit
 	explicitGiven := explicit != ""
 	if path == "" {
+		if configPath == "" {
+			return nil
+		}
 		path = filepath.Join(filepath.Dir(configPath), defaultPricesFilename)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -87,7 +116,9 @@ func loadPrices(ctx context.Context, logger *slog.Logger, configPath, explicit s
 	if err := usage.LoadPricesFile(path, reg); err != nil {
 		return err
 	}
-	logger.DebugContext(ctx, "loaded price records", "component", "usage", "file", filepath.Base(path), "prices", len(reg.All()))
+	if logger != nil {
+		logger.DebugContext(ctx, "loaded price records", "component", "usage", "file", filepath.Base(path), "prices", len(reg.All()))
+	}
 	return nil
 }
 

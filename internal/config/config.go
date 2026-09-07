@@ -223,6 +223,11 @@ type ModelDefinition struct {
 	Capabilities ModelCapabilities `koanf:"capabilities" yaml:"capabilities"`
 }
 
+const (
+	DefaultModelRouteMaxProviderAttempts = 4
+	DefaultModelRouteRetryDelayBudget    = 20 * time.Second
+)
+
 type ModelRoute struct {
 	Candidates          []string          `koanf:"candidates" yaml:"candidates"`
 	MaxProviderAttempts int               `koanf:"max_provider_attempts" yaml:"max_provider_attempts"`

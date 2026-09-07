@@ -1570,8 +1570,8 @@ func applyModelRouteDefaults(cfg *Config, doc *yamlv3.Node) {
 			if !exists {
 				route = ModelRoute{
 					Candidates:          []string{defaultName},
-					MaxProviderAttempts: 4,
-					RetryDelayBudget:    Duration(20 * time.Second),
+					MaxProviderAttempts: DefaultModelRouteMaxProviderAttempts,
+					RetryDelayBudget:    Duration(DefaultModelRouteRetryDelayBudget),
 				}
 				cfg.ModelRoutes[defaultName] = route
 			} else if len(route.Candidates) == 0 {
@@ -1583,11 +1583,11 @@ func applyModelRouteDefaults(cfg *Config, doc *yamlv3.Node) {
 	for name, route := range cfg.ModelRoutes {
 		mutated := false
 		if route.MaxProviderAttempts == 0 && !configValuePresent(doc, "model_routes", name, "max_provider_attempts") && !envValuePresent("model_routes."+name+".max_provider_attempts") {
-			route.MaxProviderAttempts = 4
+			route.MaxProviderAttempts = DefaultModelRouteMaxProviderAttempts
 			mutated = true
 		}
 		if route.RetryDelayBudget == 0 && !configValuePresent(doc, "model_routes", name, "retry_delay_budget") && !envValuePresent("model_routes."+name+".retry_delay_budget") {
-			route.RetryDelayBudget = Duration(20 * time.Second)
+			route.RetryDelayBudget = Duration(DefaultModelRouteRetryDelayBudget)
 			mutated = true
 		}
 		if mutated {
