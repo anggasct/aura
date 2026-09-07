@@ -15,6 +15,7 @@ type Origin string
 const (
 	OriginTerminal Origin = "terminal"
 	OriginInternal Origin = "internal"
+	OriginWebhook  Origin = "webhook"
 )
 
 type Budget struct {

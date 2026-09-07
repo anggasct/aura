@@ -13,10 +13,7 @@ import (
 	"time"
 )
 
-const (
-	eventPath        = "/webhook/event"
-	statusPathPrefix = "/webhook/executions/"
-)
+const eventPath = "/webhook/event"
 
 type Settings struct {
 	MaxBodySize        int64
@@ -213,7 +210,7 @@ func writeAccepted(w http.ResponseWriter, ref ExecutionRef) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Location", statusPathPrefix+ref.ExecutionID)
+	w.Header().Set("Location", StatusPathPrefix+ref.ExecutionID)
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = w.Write(encoded)
 }
