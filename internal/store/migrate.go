@@ -21,6 +21,7 @@ var migrations = []migration{
 	{version: 3, sql: effectIntentSchemaSQL},
 	{version: 4, sql: effectApprovalSchemaSQL},
 	{version: 5, sql: workflowSchemaSQL},
+	{version: 6, sql: modelCircuitCheckpointSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -221,6 +222,17 @@ CREATE TABLE workflow_step_run (
     error_code TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (run_id, step_id)
+);
+`
+
+const modelCircuitCheckpointSchemaSQL = `
+CREATE TABLE model_circuit_checkpoint (
+    circuit_key TEXT PRIMARY KEY,
+    config_digest TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('closed','open','half_open')),
+    consecutive_failures INTEGER NOT NULL CHECK (consecutive_failures >= 0),
+    open_until TEXT,
+    updated_at TEXT NOT NULL
 );
 `
 

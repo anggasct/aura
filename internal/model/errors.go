@@ -1,8 +1,10 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 )
 
@@ -20,7 +22,30 @@ const (
 	ErrorCodeContentFiltered       ErrorCode = "model_content_filtered"
 	ErrorCodeStreamInvalid         ErrorCode = "model_stream_invalid"
 	ErrorCodeConnectionFailed      ErrorCode = "model_connection_failed"
+	ErrorCodeRouteInvalid          ErrorCode = "model_route_invalid"
+	ErrorCodeBudgetExceeded        ErrorCode = "model_budget_exceeded"
+	ErrorCodeDeadlineExceeded      ErrorCode = "model_deadline_exceeded"
+	ErrorCodeFallbackExhausted     ErrorCode = "model_fallback_exhausted"
+	ErrorCodeFallbackBoundary      ErrorCode = "model_fallback_boundary"
 )
+
+type ErrorClass string
+
+const (
+	ErrorClassTransient      ErrorClass = "transient"
+	ErrorClassRateLimited    ErrorClass = "rate_limited"
+	ErrorClassOverloaded     ErrorClass = "overloaded"
+	ErrorClassDeadline       ErrorClass = "deadline"
+	ErrorClassAuth           ErrorClass = "auth"
+	ErrorClassInvalidRequest ErrorClass = "invalid_request"
+	ErrorClassPolicyRejected ErrorClass = "policy_rejected"
+	ErrorClassUnsupported    ErrorClass = "unsupported"
+	ErrorClassProtocol       ErrorClass = "protocol"
+)
+
+func (c ErrorClass) FallbackEligible() bool {
+	return c == ErrorClassTransient || c == ErrorClassRateLimited || c == ErrorClassOverloaded
+}
 
 type Error struct {
 	Code       ErrorCode
@@ -46,6 +71,72 @@ func CodeOf(err error) (ErrorCode, bool) {
 		return "", false
 	}
 	return target.Code, true
+}
+
+func ClassifyError(err error) ErrorClass {
+	if err == nil {
+		return ErrorClassInvalidRequest
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return ErrorClassDeadline
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return ErrorClassDeadline
+	}
+	if isTransientError(err) {
+		return ErrorClassTransient
+	}
+
+	code, hasCode := CodeOf(err)
+	if hasCode {
+		switch code {
+		case ErrorCodeRateLimited:
+			return ErrorClassRateLimited
+		case ErrorCodeOverloaded:
+			return ErrorClassOverloaded
+		case ErrorCodeDeadlineExceeded:
+			return ErrorClassDeadline
+		case ErrorCodeSecretInvalid, ErrorCodeAuthFailed:
+			return ErrorClassAuth
+		case ErrorCodeContentFiltered:
+			return ErrorClassPolicyRejected
+		case ErrorCodeCapabilityUnsupported:
+			return ErrorClassUnsupported
+		case ErrorCodeContextTooLong, ErrorCodeRouteInvalid:
+			return ErrorClassInvalidRequest
+		case ErrorCodeProtocolInvalid, ErrorCodeFallbackBoundary:
+			return ErrorClassProtocol
+		case ErrorCodeConnectionFailed, ErrorCodeStreamInvalid:
+			return ErrorClassTransient
+		case ErrorCodeNotFound:
+			return ErrorClassInvalidRequest
+		case ErrorCodeBudgetExceeded:
+			return ErrorClassDeadline
+		case ErrorCodeFallbackExhausted:
+			return ErrorClassOverloaded
+		}
+	}
+
+	if errors.Is(err, ErrRateLimited) {
+		return ErrorClassRateLimited
+	}
+	if errors.Is(err, ErrOverloaded) {
+		return ErrorClassOverloaded
+	}
+	if errors.Is(err, ErrAuthFailed) {
+		return ErrorClassAuth
+	}
+	if errors.Is(err, ErrContentFiltered) {
+		return ErrorClassPolicyRejected
+	}
+	if errors.Is(err, ErrContextTooLong) || errors.Is(err, ErrModelNotFound) || errors.Is(err, ErrInvalidToolCall) {
+		return ErrorClassInvalidRequest
+	}
+	if errors.Is(err, ErrConnectionFailed) || errors.Is(err, ErrStreamIdle) || errors.Is(err, ErrStreamTruncated) {
+		return ErrorClassTransient
+	}
+	return ErrorClassInvalidRequest
 }
 
 var (

@@ -135,6 +135,13 @@ func (c *coreClient) GenerateContent(ctx context.Context, req *adkmodel.LLMReque
 			yield(nil, err)
 			return
 		}
+		if budget := BudgetFromContext(ctx); budget != nil && out != nil && out.UsageMetadata != nil {
+			if bErr := budget.RecordTokens(ctx, int(out.UsageMetadata.CandidatesTokenCount)); bErr != nil {
+				telemetry.finish(ctx, nil, bErr)
+				yield(nil, bErr)
+				return
+			}
+		}
 		telemetry.finish(ctx, out, nil)
 		yield(out, nil)
 	}
@@ -158,6 +165,9 @@ func (c *coreClient) do(ctx context.Context, req *adkmodel.LLMRequest, stream bo
 		client = c.streamClient
 	}
 	retry := retryConfigForRequest(c.retry, req)
+	if budget := BudgetFromContext(ctx); budget != nil {
+		retry.Budget = budget
+	}
 	retry.RetryCount = &retryCount
 	resp, err := retryHTTP(ctx, retry, func() (*http.Response, error) {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.codec.endpoint(c.baseURL, req, stream), bytes.NewReader(body))
@@ -180,7 +190,13 @@ func (c *coreClient) do(ctx context.Context, req *adkmodel.LLMRequest, stream bo
 func (c *coreClient) stream(ctx context.Context, body io.ReadCloser, telemetry *modelTelemetry, yield func(*adkmodel.LLMResponse, error) bool) {
 	acc := &streamAccumulator{}
 	completed := false
+	budget := BudgetFromContext(ctx)
 	err := scanSSE(ctx, body, c.idleTimeout, func(data []byte) error {
+		if budget != nil {
+			if bErr := budget.CheckActive(ctx); bErr != nil {
+				return bErr
+			}
+		}
 		ops, terminal, err := c.codec.decodeStreamEvent(data)
 		if err != nil {
 			return err
@@ -218,6 +234,13 @@ func (c *coreClient) stream(ctx context.Context, body io.ReadCloser, telemetry *
 					resp, finalErr = acc.final()
 					if finalErr != nil {
 						return finalErr
+					}
+				}
+				if budget != nil && resp != nil && resp.UsageMetadata != nil {
+					if bErr := budget.RecordTokens(ctx, int(resp.UsageMetadata.CandidatesTokenCount)); bErr != nil {
+						telemetry.finish(ctx, nil, bErr)
+						yield(nil, bErr)
+						return errStopYield
 					}
 				}
 				telemetry.finish(ctx, resp, nil)

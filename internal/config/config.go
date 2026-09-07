@@ -17,22 +17,23 @@ import (
 )
 
 type Config struct {
-	Version      int          `koanf:"version" yaml:"version"`
-	Runtime      Runtime      `koanf:"runtime" yaml:"runtime"`
-	Capabilities Capabilities `koanf:"capabilities" yaml:"capabilities"`
-	Tools        *Tools       `koanf:"tools" yaml:"tools,omitempty"`
-	Agents       *Agents      `koanf:"agents" yaml:"agents,omitempty"`
-	Workflows    *Workflows   `koanf:"workflows" yaml:"workflows,omitempty"`
-	MCP          *MCP         `koanf:"mcp" yaml:"mcp,omitempty"`
-	Server       Server       `koanf:"server" yaml:"server"`
-	Logging      Logging      `koanf:"logging" yaml:"logging"`
-	Models       Models       `koanf:"models" yaml:"models"`
-	Storage      Storage      `koanf:"storage" yaml:"storage"`
-	Telemetry    Telemetry    `koanf:"telemetry" yaml:"telemetry"`
-	Usage        Usage        `koanf:"usage" yaml:"usage"`
-	Health       Health       `koanf:"health" yaml:"health"`
-	Terminal     Terminal     `koanf:"terminal" yaml:"terminal"`
-	Webhook      Webhook      `koanf:"webhook" yaml:"webhook"`
+	Version      int                   `koanf:"version" yaml:"version"`
+	Runtime      Runtime               `koanf:"runtime" yaml:"runtime"`
+	Capabilities Capabilities          `koanf:"capabilities" yaml:"capabilities"`
+	Tools        *Tools                `koanf:"tools" yaml:"tools,omitempty"`
+	Agents       *Agents               `koanf:"agents" yaml:"agents,omitempty"`
+	Workflows    *Workflows            `koanf:"workflows" yaml:"workflows,omitempty"`
+	MCP          *MCP                  `koanf:"mcp" yaml:"mcp,omitempty"`
+	Server       Server                `koanf:"server" yaml:"server"`
+	Logging      Logging               `koanf:"logging" yaml:"logging"`
+	Models       Models                `koanf:"models" yaml:"models"`
+	ModelRoutes  map[string]ModelRoute `koanf:"model_routes" yaml:"model_routes,omitempty"`
+	Storage      Storage               `koanf:"storage" yaml:"storage"`
+	Telemetry    Telemetry             `koanf:"telemetry" yaml:"telemetry"`
+	Usage        Usage                 `koanf:"usage" yaml:"usage"`
+	Health       Health                `koanf:"health" yaml:"health"`
+	Terminal     Terminal              `koanf:"terminal" yaml:"terminal"`
+	Webhook      Webhook               `koanf:"webhook" yaml:"webhook"`
 }
 
 type Webhook struct {
@@ -222,6 +223,25 @@ type ModelDefinition struct {
 	Capabilities ModelCapabilities `koanf:"capabilities" yaml:"capabilities"`
 }
 
+const (
+	DefaultModelRouteMaxProviderAttempts = 4
+	DefaultModelRouteRetryDelayBudget    = 20 * time.Second
+)
+
+type ModelRoute struct {
+	Candidates          []string          `koanf:"candidates" yaml:"candidates"`
+	MaxProviderAttempts int               `koanf:"max_provider_attempts" yaml:"max_provider_attempts"`
+	RetryDelayBudget    Duration          `koanf:"retry_delay_budget" yaml:"retry_delay_budget"`
+	CostBudgetUSD       float64           `koanf:"cost_budget_usd" yaml:"cost_budget_usd"`
+	Circuit             ModelRouteCircuit `koanf:"circuit" yaml:"circuit"`
+}
+
+type ModelRouteCircuit struct {
+	FailureThreshold int      `koanf:"failure_threshold" yaml:"failure_threshold"`
+	OpenDuration     Duration `koanf:"open_duration" yaml:"open_duration"`
+	MaxOpenDuration  Duration `koanf:"max_open_duration" yaml:"max_open_duration"`
+}
+
 type AgentLimits struct {
 	TurnTimeout Duration `koanf:"turn_timeout" yaml:"turn_timeout"`
 }
@@ -296,15 +316,17 @@ type MCPStaticAuth struct {
 }
 
 type ModelCapabilities struct {
-	Streaming        bool   `koanf:"streaming" yaml:"streaming"`
-	Tools            bool   `koanf:"tools" yaml:"tools"`
-	StructuredOutput bool   `koanf:"structured_output" yaml:"structured_output"`
-	Vision           bool   `koanf:"vision" yaml:"vision"`
-	Audio            bool   `koanf:"audio" yaml:"audio"`
-	Reasoning        bool   `koanf:"reasoning" yaml:"reasoning"`
-	ContextTokens    int    `koanf:"context_tokens" yaml:"context_tokens"`
-	Tokenizer        string `koanf:"tokenizer" yaml:"tokenizer"`
-	UsageReporting   bool   `koanf:"usage_reporting" yaml:"usage_reporting"`
+	Streaming            bool   `koanf:"streaming" yaml:"streaming"`
+	Tools                bool   `koanf:"tools" yaml:"tools"`
+	StructuredOutput     bool   `koanf:"structured_output" yaml:"structured_output"`
+	Vision               bool   `koanf:"vision" yaml:"vision"`
+	Audio                bool   `koanf:"audio" yaml:"audio"`
+	Reasoning            bool   `koanf:"reasoning" yaml:"reasoning"`
+	ContextTokens        int    `koanf:"context_tokens" yaml:"context_tokens"`
+	Tokenizer            string `koanf:"tokenizer" yaml:"tokenizer"`
+	UsageReporting       bool   `koanf:"usage_reporting" yaml:"usage_reporting"`
+	MicrosPerInputToken  int64  `koanf:"micros_per_input_token" yaml:"micros_per_input_token"`
+	MicrosPerOutputToken int64  `koanf:"micros_per_output_token" yaml:"micros_per_output_token"`
 }
 
 const (

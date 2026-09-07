@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -121,21 +122,15 @@ func orNone(value string) string {
 	return value
 }
 
-func modelRouteResolver(cfg *config.Config) func(route string) (string, error) {
-	return func(route string) (string, error) {
-		definition, ok := cfg.Models.Definitions[route]
-		if !ok || definition.Model == "" {
-			return "", fmt.Errorf("unknown model route %q", route)
-		}
-		return definition.Model, nil
-	}
-}
-
 func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
-	modelRoutes := make([]string, 0, len(cfg.Models.Definitions))
+	routeSet := make(map[string]bool, len(cfg.Models.Definitions)+len(cfg.ModelRoutes))
 	for route := range cfg.Models.Definitions {
-		modelRoutes = append(modelRoutes, route)
+		routeSet[route] = true
 	}
+	for route := range cfg.ModelRoutes {
+		routeSet[route] = true
+	}
+	modelRoutes := slices.Collect(maps.Keys(routeSet))
 	slices.Sort(modelRoutes)
 	var overrides []config.AgentDefinition
 	if cfg.Agents != nil {

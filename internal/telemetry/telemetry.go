@@ -28,8 +28,14 @@ var contentPatterns = []string{
 }
 
 var safeKeys = map[string]bool{
-	AttrGenAIUsageInputCount:  true,
-	AttrGenAIUsageOutputCount: true,
+	AttrGenAIUsageInputCount:   true,
+	AttrGenAIUsageOutputCount:  true,
+	AttrModelRoute:             true,
+	AttrModelCandidate:         true,
+	AttrModelFallbackAttempt:   true,
+	AttrModelCircuitState:      true,
+	AttrModelCircuitTransition: true,
+	AttrModelNormalizedResult:  true,
 }
 
 func Redact(attrs map[string]any) map[string]any {

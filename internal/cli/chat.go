@@ -31,7 +31,7 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 			if result.CapabilityStateError != nil {
 				return result.CapabilityStateError
 			}
-			return runChat(ctx, cfg, logger, os.Stdin, os.Stdout, os.Stderr, sessionID, chatPresentation{
+			return runChat(ctx, cfg, result.Path, logger, os.Stdin, os.Stdout, os.Stderr, sessionID, chatPresentation{
 				plain:   plain,
 				noColor: os.Getenv("NO_COLOR") != "",
 			})
