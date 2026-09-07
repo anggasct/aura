@@ -24,7 +24,7 @@ type Engine struct {
 	policy  Policy
 	handler Handler
 	now     func() time.Time
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	nonces  map[string]time.Time // nonce -> expiry; consumed on Execute
 }
 
@@ -37,8 +37,14 @@ func NewEngine(policy Policy, handler Handler) (*Engine, error) {
 	if handler == nil {
 		return nil, errors.New("approval: handler must not be nil")
 	}
+	clonedRules := make(map[string]Rule, len(policy.Rules))
+	for k, v := range policy.Rules {
+		clonedRules[k] = v
+	}
+	policyCopy := policy
+	policyCopy.Rules = clonedRules
 	return &Engine{
-		policy:  policy,
+		policy:  policyCopy,
 		handler: handler,
 		now:     time.Now,
 		nonces:  map[string]time.Time{},
@@ -46,6 +52,8 @@ func NewEngine(policy Policy, handler Handler) (*Engine, error) {
 }
 
 func (e *Engine) PolicyVersion() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return e.policy.Version
 }
 
@@ -84,7 +92,11 @@ func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecisi
 	if !request.Trust.Valid() {
 		return PolicyDecision{}, Errorf(ErrorCodePolicyDenied, "invalid trust label %q", request.Trust)
 	}
+	e.mu.RLock()
 	rule, ok := e.policy.Rules[request.ToolName]
+	version := e.policy.Version
+	e.mu.RUnlock()
+
 	if !ok {
 		return PolicyDecision{}, Errorf(ErrorCodePolicyDenied, "unknown tool %q", request.ToolName)
 	}
@@ -105,17 +117,55 @@ func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecisi
 	if rule.RequiresApproval {
 		return PolicyDecision{
 			Outcome:       OutcomeRequireApproval,
-			PolicyVersion: e.policy.Version,
+			PolicyVersion: version,
 			ReasonCode:    string(ErrorCodeApprovalRequired),
 			Constraints:   rule.Constraints,
 		}, nil
 	}
 	return PolicyDecision{
 		Outcome:       OutcomeAllow,
-		PolicyVersion: e.policy.Version,
+		PolicyVersion: version,
 		ReasonCode:    "allow",
 		Constraints:   rule.Constraints,
 	}, nil
+}
+
+// RegisterRule dynamically adds or updates a policy rule in a thread-safe manner.
+func (e *Engine) RegisterRule(rule *Rule) error {
+	if rule == nil {
+		return Errorf(ErrorCodeInvalidArgument, "rule must not be nil")
+	}
+	if strings.TrimSpace(rule.ToolName) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "rule tool name must not be empty")
+	}
+	for _, label := range rule.AllowedTrust {
+		if !label.Valid() {
+			return Errorf(ErrorCodeInvalidArgument, "rule %q has invalid trust label %q", rule.ToolName, label)
+		}
+	}
+	for _, capability := range rule.RequiredCapabilities {
+		if strings.TrimSpace(capability) == "" {
+			return Errorf(ErrorCodeInvalidArgument, "rule %q has an empty required capability", rule.ToolName)
+		}
+	}
+	if rule.Constraints.MaxOutputBytes < 0 || rule.Constraints.Timeout < 0 {
+		return Errorf(ErrorCodeInvalidArgument, "rule %q has negative constraints", rule.ToolName)
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.policy.Rules == nil {
+		e.policy.Rules = make(map[string]Rule)
+	}
+	e.policy.Rules[rule.ToolName] = *rule
+	return nil
+}
+
+// UnregisterRule removes a rule from policy in a thread-safe manner.
+func (e *Engine) UnregisterRule(toolName string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.policy.Rules, toolName)
 }
 
 // Grant mints a grant only after the request has passed policy, binding

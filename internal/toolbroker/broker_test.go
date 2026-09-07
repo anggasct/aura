@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/tools"
 )
 
 func brokerRequest(name, arguments string, capabilities ...string) *ToolRequest {
@@ -135,4 +136,59 @@ func TestBrokerBindsExactApprovalAndReturnsUntrustedResult(t *testing.T) {
 func classOf(err error) ResultClass {
 	class, _ := CodeOf(err)
 	return class
+}
+
+func TestBrokerRegisterAndUnregisterTool(t *testing.T) {
+	broker, err := New(&Options{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	toolName := "custom_echo"
+	toolVersion := "v1"
+
+	def := tools.Definition{
+		Name:    toolName,
+		Version: toolVersion,
+		Validator: func(raw json.RawMessage) (json.RawMessage, error) {
+			return raw, nil
+		},
+	}
+	adapter := func(_ context.Context, req *ToolRequest, _ approval.Constraints) (ToolResult, error) {
+		return ToolResult{
+			ToolName:    req.ToolName,
+			ToolVersion: req.ToolVersion,
+			Class:       ResultOK,
+			Untrusted:   true,
+			Output:      req.Arguments,
+		}, nil
+	}
+	rule := approval.Rule{
+		ToolName:     toolName,
+		ToolVersion:  toolVersion,
+		AllowedTrust: []approval.TrustLabel{approval.TrustOwnerInput},
+		Constraints: approval.Constraints{
+			MaxOutputBytes: 1024,
+			Timeout:        10 * time.Second,
+		},
+	}
+
+	if err := broker.RegisterTool(&def, adapter, &rule); err != nil {
+		t.Fatalf("RegisterTool failed: %v", err)
+	}
+
+	req := brokerRequest(toolName, `{"msg":"hello"}`, "public-web")
+	res, err := broker.Execute(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Execute registered tool failed: %v", err)
+	}
+	if string(res.Output) != `{"msg":"hello"}` {
+		t.Fatalf("output = %s, want %s", res.Output, `{"msg":"hello"}`)
+	}
+
+	broker.UnregisterTool(toolName, toolVersion)
+	_, err = broker.Execute(t.Context(), req)
+	if err == nil {
+		t.Fatal("expected execute to fail after unregistering tool")
+	}
 }

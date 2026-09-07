@@ -18,6 +18,7 @@ type Definition struct {
 	RequiredCapabilities []string
 	RequiresApproval     bool
 	Effectful            bool
+	Validator            func(raw json.RawMessage) (json.RawMessage, error)
 }
 
 func (d *Definition) Key() string {
@@ -25,6 +26,9 @@ func (d *Definition) Key() string {
 }
 
 func (d *Definition) Validate(raw json.RawMessage) (json.RawMessage, error) {
+	if d.Validator != nil {
+		return d.Validator(raw)
+	}
 	value, err := decodeObject(raw)
 	if err != nil {
 		return nil, err
