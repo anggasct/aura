@@ -160,10 +160,6 @@ type SpawnTrustContent struct {
 	Environment map[string]string `json:"environment,omitempty"`
 }
 
-// ComputeSpawnDigest hashes the executable surface of a stdio server config:
-// absolute command, args, and declared environment. It is the allowlist digest
-// checked before process creation and is intentionally narrower than the
-// session digest, which also covers timeouts, bounds, and discovered tools.
 func ComputeSpawnDigest(serverCfg *config.MCPServer) (string, error) {
 	if serverCfg == nil {
 		return "", Errorf(ErrConfigInvalid, "server configuration is required")
@@ -242,8 +238,6 @@ func (r *MemoryTrustRegistry) GetTrust(_ context.Context, serverName string) (*T
 	return &recCopy, nil
 }
 
-// SaveSessionTrust records a pending review of the session digest without
-// touching the spawn approval domain: each gate manages only its own fields.
 func (r *MemoryTrustRegistry) SaveSessionTrust(_ context.Context, serverName, digest string, capabilities, tools []string) error {
 	if serverName == "" {
 		return Errorf(ErrConfigInvalid, "server name must not be empty")

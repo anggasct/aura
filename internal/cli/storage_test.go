@@ -79,9 +79,6 @@ func TestStorageGcInvalidBefore(t *testing.T) {
 }
 
 func TestStorageVerifyDoesNotCreateLiveDB(t *testing.T) {
-	// The backup is made against one data root; verify then runs against a
-	// different, never-opened root so any side effect on the live database
-	// is visible.
 	backupRoot := t.TempDir()
 	backupCfg := writeStorageConfig(t, backupRoot)
 	backupDir := filepath.Join(backupRoot, "backup-1")

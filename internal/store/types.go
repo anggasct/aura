@@ -29,7 +29,6 @@ type RuntimeEvent struct {
 	CreatedAt     time.Time
 }
 
-// Pointer parameters are required; a nil argument returns ErrorCodeInvalidArgument.
 type SessionService interface {
 	Create(ctx context.Context, sess *Session) error
 	Get(ctx context.Context, sessionID string) (Session, error)

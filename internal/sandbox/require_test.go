@@ -5,16 +5,12 @@ import (
 	"testing"
 )
 
-// Require is the fail-closed gate for an effectful capability: any missing
-// mandatory primitive makes containment unavailable, and the error must name
-// every absent primitive so the status surface can report the exact cause.
 func TestRequire(t *testing.T) {
 	allPresent := Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}
 	if err := Require(allPresent); err != nil {
 		t.Fatalf("Require(all present) = %v, want nil", err)
 	}
 
-	// A single absent mandatory primitive fails closed and is named.
 	cases := []struct {
 		name    string
 		have    Primitives
@@ -39,8 +35,6 @@ func TestRequire(t *testing.T) {
 		})
 	}
 
-	// Every primitive absent lists them all, so a host that can provide none
-	// reports the full set rather than only the first.
 	err := Require(Primitives{})
 	if err == nil {
 		t.Fatal("Require(empty) = nil, want sandbox_unavailable")

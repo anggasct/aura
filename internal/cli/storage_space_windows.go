@@ -13,8 +13,6 @@ func diskFreeBytes(string) (int64, error) {
 	return 0, errDiskSpaceUnsupported
 }
 
-// writableProbe has no portable access check; the write-path probe reports
-// unknown writability rather than a false positive.
 func writableProbe(path string) error {
 	handle, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
@@ -25,8 +23,6 @@ func writableProbe(path string) error {
 
 func classifyOpenError(error) bool { return false }
 
-// diskUsage has no portable statfs on this platform; callers report the
-// filesystem as unknown capacity.
 func diskUsage(string) (int64, int64, int64, error) {
 	return 0, 0, 0, errDiskSpaceUnsupported
 }

@@ -2,9 +2,6 @@ package config
 
 import "testing"
 
-// FuzzConfigDecode drives the config shape validation and decoder with
-// arbitrary bytes. Both stages must return an error or a result and never
-// panic, so a hostile or corrupt config file cannot crash the process at load.
 func FuzzConfigDecode(f *testing.F) {
 	f.Add([]byte("version: 1\n"))
 	f.Add([]byte("{not yaml"))

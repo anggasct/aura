@@ -28,14 +28,7 @@ func TestStructuredErrorsExposeStableCodes(t *testing.T) {
 	}
 }
 
-// TestClassifyError_IgnoresMessageText pins the typed-only classification
-// contract: classification reads typed codes and package sentinels, never
-// error text. Provider wording changes between versions, so a reworded or
-// untyped failure must fail closed to a non-fallback-eligible class — a
-// reworded policy rejection must not become transient just because the
-// message no longer contains the old keyword.
 func TestClassifyError_IgnoresMessageText(t *testing.T) {
-	// Untyped errors whose text used to classify via message substrings.
 	untyped := []error{
 		errors.New("request rejected by the provider's usage policy"),
 		errors.New("429 too many requests"),
@@ -54,12 +47,10 @@ func TestClassifyError_IgnoresMessageText(t *testing.T) {
 		}
 	}
 
-	// nil fails closed instead of returning an empty class.
 	if got := ClassifyError(nil); got != ErrorClassInvalidRequest {
 		t.Errorf("ClassifyError(nil) = %q, want invalid_request", got)
 	}
 
-	// Typed codes and sentinels still classify correctly.
 	typed := []struct {
 		err  error
 		want ErrorClass

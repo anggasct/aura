@@ -12,18 +12,10 @@ import (
 
 const cgroupV2Root = "/sys/fs/cgroup"
 
-// cgroup is a cgroup v2 subtree the sandbox created for one child process.
-// A zero value must not be used; construct one with newCgroup and destroy it
-// after the child is reaped.
 type cgroup struct {
 	path string
 }
 
-// cgroupControllersWritable reports whether the service can write the
-// controller limits the sandbox applies — pids and memory — into a child of
-// its own cgroup. A process can often mkdir a child cgroup but still be denied
-// particular controller files unless its scope delegated them, so every
-// controller the feature uses is probed rather than just one.
 func cgroupControllersWritable() bool {
 	parent, err := ownCgroupPath()
 	if err != nil {
@@ -42,9 +34,6 @@ func cgroupControllersWritable() bool {
 	return true
 }
 
-// ownCgroupPath returns the absolute path of the calling process's current
-// cgroup v2. The service must run under a delegated subtree to create child
-// cgroups here without privileges.
 func ownCgroupPath() (string, error) {
 	data, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
@@ -60,11 +49,6 @@ func ownCgroupPath() (string, error) {
 	return "", errors.New("no cgroup v2 entry for this process")
 }
 
-// newCgroup creates a uniquely-named child cgroup under the service's
-// current hierarchy and applies the resource limits the kernel enforces for
-// memory and process count. A creation failure — the hierarchy is not
-// delegated for writing — is sandbox_init_failed so the run refuses rather
-// than executing an unbounded child.
 func newCgroup(limits Limits) (cgroup, error) {
 	parent, err := ownCgroupPath()
 	if err != nil {
@@ -100,13 +84,10 @@ func (c cgroup) apply(limits Limits) error {
 	return nil
 }
 
-// attach moves pid into the cgroup so its descendants are bounded too.
 func (c cgroup) attach(pid int) error {
 	return c.writeFile("cgroup.procs", strconv.Itoa(pid))
 }
 
-// destroy removes the cgroup. It must be called only after every process has
-// exited the subtree, otherwise the kernel reports it busy.
 func (c cgroup) destroy() error {
 	return os.Remove(c.path)
 }

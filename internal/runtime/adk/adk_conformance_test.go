@@ -12,7 +12,6 @@ import (
 	"google.golang.org/adk/v2/session"
 )
 
-// loadGoldenADKEvent reads the golden fixture as an ADK event.
 func loadGoldenADKEvent(t *testing.T) *session.Event {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "runtime", "adk_event_golden.json"))
@@ -26,9 +25,6 @@ func loadGoldenADKEvent(t *testing.T) *session.Event {
 	return &ev
 }
 
-// A full-fidelity ADK event must survive mapping, persistence, replay, and
-// mapping back without losing invocation, branch, author, actions,
-// long-running tool IDs, content, or usage.
 func TestADKGoldenEventSurvivesFullRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	_, sessions, events := newSessionTestDB(t)
@@ -42,9 +38,6 @@ func TestADKGoldenEventSurvivesFullRoundTrip(t *testing.T) {
 
 	original := loadGoldenADKEvent(t)
 
-	// Mapping + persistence: the engine is the single writer, persisting the
-	// mapped event exactly as the executor yields it — original ADK event ID,
-	// turn and session identity, full fidelity payload.
 	re, err := store.RuntimeEventFromADK("session-golden", "turn-golden", original)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK: %v", err)
@@ -54,7 +47,6 @@ func TestADKGoldenEventSurvivesFullRoundTrip(t *testing.T) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	// Replay + mapping back: reload the session from the store.
 	reloaded, err := svc.Get(ctx, &session.GetRequest{SessionID: "session-golden"})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -89,8 +81,6 @@ func TestADKGoldenEventSurvivesFullRoundTrip(t *testing.T) {
 		t.Errorf("UsageMetadata = %+v, want total 30", got.UsageMetadata)
 	}
 
-	// The stored byte shape is pinned: a re-marshal of the payload must match
-	// the golden fixture's content/actions/usage.
 	persisted, err := sessions.ListEvents(ctx, "session-golden", 0, 1)
 	if err != nil || len(persisted) != 1 {
 		t.Fatalf("ListEvents = %d, %v; want 1", len(persisted), err)
@@ -109,8 +99,6 @@ func TestADKGoldenEventSurvivesFullRoundTrip(t *testing.T) {
 	}
 }
 
-// The golden fixture must keep round-tripping after ADK upgrades; the test
-// above asserts semantic fidelity, and this test pins the exact stored bytes.
 func TestADKGoldenEventStoredBytesStable(t *testing.T) {
 	original := loadGoldenADKEvent(t)
 	re, err := store.RuntimeEventFromADK("session-golden", "turn-1", original)
@@ -122,7 +110,6 @@ func TestADKGoldenEventStoredBytesStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RuntimeEventToADK: %v", err)
 	}
-	// The replay path reads ADK events; a semantic compare is the contract.
 	if roundTripped.ID != original.ID || roundTripped.Branch != original.Branch {
 		t.Errorf("round trip lost identity: %+v vs %+v", roundTripped, original)
 	}

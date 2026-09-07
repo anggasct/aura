@@ -18,9 +18,6 @@ func testSessionRequest(t *testing.T) *SessionRequest {
 	}
 }
 
-// cloneSessionRequest copies a session request deeply enough for validation
-// tests: the bound environment map and capability slice must not be shared
-// with the original, or a mutation leaks back into it.
 func cloneSessionRequest(req *SessionRequest) *SessionRequest {
 	clone := *req
 	clone.Arguments = append([]string(nil), req.Arguments...)
@@ -55,8 +52,6 @@ func TestStartValidatesRequest(t *testing.T) {
 	}
 }
 
-// TestStartNilRequest proves the pointer contract: a nil request is a typed
-// invalid_argument, never a panic.
 func TestStartNilRequest(t *testing.T) {
 	_, err := Start(t.Context(), nil)
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
@@ -64,10 +59,6 @@ func TestStartNilRequest(t *testing.T) {
 	}
 }
 
-// TestStartRejectsGrantWithoutValidator proves the fail-closed grant
-// contract: with no validator authority configured, a request that carries
-// an ApprovalGrantID is refused before any child is spawned — the field can
-// never be silently ignored.
 func TestStartRejectsGrantWithoutValidator(t *testing.T) {
 	req := testSessionRequest(t)
 	req.ApprovalGrantID = "ghost"
@@ -75,11 +66,6 @@ func TestStartRejectsGrantWithoutValidator(t *testing.T) {
 	wantApprovalInvalid(t, err)
 }
 
-// TestValidateSessionGrantResolution drives the Registry-backed seam
-// directly: a registered grant that binds the session request validates, an
-// unregistered grant ID is refused, a consumed nonce is refused, and every
-// altered bound field — the same mutation matrix as the one-shot resolve —
-// invalidates validation without consuming the one-shot nonce.
 func TestValidateSessionGrantResolution(t *testing.T) {
 	req := &SessionRequest{
 		RequestID:      "session-req-1",
@@ -108,16 +94,13 @@ func TestValidateSessionGrantResolution(t *testing.T) {
 		t.Fatalf("validateSessionGrant(bound): %v", err)
 	}
 
-	// Unregistered grant ID.
 	ghost := testSessionRequest(t)
 	ghost.ApprovalGrantID = "ghost"
 	wantApprovalInvalid(t, registry.validateSessionGrant(ghost))
 
-	// Missing grant ID under an enforcing validator.
 	empty := testSessionRequest(t)
 	wantApprovalInvalid(t, registry.validateSessionGrant(empty))
 
-	// Mutation matrix: every altered bound field fails validation.
 	mutations := map[string]func(*SessionRequest){
 		"argument":   func(r *SessionRequest) { r.Arguments = []string{"hello", "extra"} },
 		"executable": func(r *SessionRequest) { r.Executable = "cat" },
@@ -138,7 +121,6 @@ func TestValidateSessionGrantResolution(t *testing.T) {
 		})
 	}
 
-	// Policy-version drift and expiry invalidate session grants the same way.
 	registry.policyVersion = "v2"
 	wantApprovalInvalid(t, registry.validateSessionGrant(req))
 	registry.policyVersion = "v1"
@@ -146,12 +128,9 @@ func TestValidateSessionGrantResolution(t *testing.T) {
 	wantApprovalInvalid(t, registry.validateSessionGrant(req))
 	registry.now = time.Now
 
-	// None of the failed validations consumed the one-shot nonce: the
-	// one-shot path can still spend the grant exactly once afterwards.
 	contract.ApprovalGrantID = grant.GrantID
 	if _, err := registry.resolve(contract); err != nil {
 		t.Fatalf("one-shot resolve after session validations: %v", err)
 	}
-	// And once spent, the session refuses to start on the spent grant.
 	wantApprovalInvalid(t, registry.validateSessionGrant(req))
 }

@@ -23,8 +23,6 @@ type Options struct {
 	MaxDecodedBytes int64
 	Resolver        egress.Resolver
 
-	// client is unexported so external constructors can only obtain the
-	// mediated egress client; in-package tests use it as a canned seam.
 	client *http.Client
 }
 
@@ -116,13 +114,6 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 	if !allowedContentType(contentType) {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "content type is not readable")
 	}
-	// The stream is read up to the larger cap plus one byte so the encoded
-	// bound is enforceable even when the decoded cap is the smaller one:
-	// truncation to MaxDecodedBytes must never hide an over-limit wire
-	// body. With identity transfer the stream bytes are the encoded bytes;
-	// transparently decompressed responses are covered by the decoded cap
-	// because the compressed wire stream is never larger than the
-	// decompressed body.
 	readLimit := options.MaxEncodedBytes
 	if options.MaxDecodedBytes > readLimit {
 		readLimit = options.MaxDecodedBytes

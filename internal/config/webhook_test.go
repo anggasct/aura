@@ -169,8 +169,6 @@ webhook:
     - id: k
       secret_env: AURA_WEBHOOK_SECRET
 `)
-	// The webhook listener must not share the health listen address; the
-	// collision is rejected at load time instead of failing at bind time.
 	if _, err := Load(path); err == nil {
 		t.Fatal("colliding listen addresses accepted")
 	}

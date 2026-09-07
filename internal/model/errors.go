@@ -73,12 +73,6 @@ func CodeOf(err error) (ErrorCode, bool) {
 	return target.Code, true
 }
 
-// ClassifyError maps an error onto a normalized failure class from typed
-// codes and package sentinels only. Error text is never inspected: provider
-// wording can change between versions, and a reworded message must not
-// reclassify a terminal policy or auth failure as fallback-eligible. A nil
-// or unrecognized error classifies as invalid_request, which is never
-// fallback-eligible, so unknown failures fail closed.
 func ClassifyError(err error) ErrorClass {
 	if err == nil {
 		return ErrorClassInvalidRequest

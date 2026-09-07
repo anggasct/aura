@@ -78,11 +78,9 @@ func TestValidateRoute_RejectsInvalidChainDepth(t *testing.T) {
 		"m5": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
 	}
 
-	// Empty candidates (depth 0)
 	err := ValidateRoute("primary", config.ModelRoute{Candidates: nil}, defs, nil)
 	wantCode(t, err, ErrorCodeRouteInvalid)
 
-	// Five candidates (depth 5, exceeds max 4)
 	err = ValidateRoute("primary", config.ModelRoute{Candidates: []string{"m1", "m2", "m3", "m4", "m5"}}, defs, nil)
 	wantCode(t, err, ErrorCodeRouteInvalid)
 }
@@ -179,17 +177,14 @@ func TestValidateRoute_CapabilityPredicateEnforcement(t *testing.T) {
 
 	pred := &CapabilityPredicate{Vision: true}
 
-	// Satisfying candidate succeeds
 	err := ValidateRoute("vision-route", config.ModelRoute{Candidates: []string{"vision-model"}}, defs, pred)
 	if err != nil {
 		t.Fatalf("expected valid route, got %v", err)
 	}
 
-	// Missing required capability fails
 	err = ValidateRoute("vision-route", config.ModelRoute{Candidates: []string{"text-only-model"}}, defs, pred)
 	wantCode(t, err, ErrorCodeCapabilityUnsupported)
 
-	// Chain where second candidate cannot satisfy capability fails
 	err = ValidateRoute("vision-route", config.ModelRoute{Candidates: []string{"vision-model", "text-only-model"}}, defs, pred)
 	wantCode(t, err, ErrorCodeCapabilityUnsupported)
 }
@@ -256,7 +251,6 @@ func TestPredicateForRequest(t *testing.T) {
 		t.Errorf("PredicateForRequest(nil) = %+v, want empty", pred)
 	}
 
-	// Tool definition in request
 	reqTools := &adkmodel.LLMRequest{
 		Tools: map[string]any{"lookup": struct{}{}},
 	}
@@ -264,7 +258,6 @@ func TestPredicateForRequest(t *testing.T) {
 		t.Errorf("PredicateForRequest with tools should require Tools")
 	}
 
-	// Function call or response in contents
 	reqFuncCall := &adkmodel.LLMRequest{
 		Contents: []*genai.Content{{
 			Parts: []*genai.Part{{
@@ -276,7 +269,6 @@ func TestPredicateForRequest(t *testing.T) {
 		t.Errorf("PredicateForRequest with FunctionCall should require Tools")
 	}
 
-	// Image inline data
 	reqVision := &adkmodel.LLMRequest{
 		Contents: []*genai.Content{{
 			Parts: []*genai.Part{{
@@ -288,7 +280,6 @@ func TestPredicateForRequest(t *testing.T) {
 		t.Errorf("PredicateForRequest with image should require Vision")
 	}
 
-	// Audio inline data
 	reqAudio := &adkmodel.LLMRequest{
 		Contents: []*genai.Content{{
 			Parts: []*genai.Part{{
@@ -300,7 +291,6 @@ func TestPredicateForRequest(t *testing.T) {
 		t.Errorf("PredicateForRequest with audio should require Audio")
 	}
 
-	// Structured output schema
 	reqSchema := &adkmodel.LLMRequest{
 		Config: &genai.GenerateContentConfig{
 			ResponseSchema: &genai.Schema{Type: genai.TypeObject},
@@ -310,7 +300,6 @@ func TestPredicateForRequest(t *testing.T) {
 		t.Errorf("PredicateForRequest with schema should require StructuredOutput")
 	}
 
-	// JSON response MIME type
 	reqJSON := &adkmodel.LLMRequest{
 		Config: &genai.GenerateContentConfig{
 			ResponseMIMEType: "application/json",
@@ -348,7 +337,6 @@ func TestValidateRoutes_MultiRouteAndTaskCapability(t *testing.T) {
 		t.Fatalf("unexpected ValidateRoutes error: %v", err)
 	}
 
-	// Misrouting vision to a model without vision capability
 	badRouting := map[string]string{
 		"vision": "primary",
 	}

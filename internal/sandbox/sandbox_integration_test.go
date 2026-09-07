@@ -16,16 +16,6 @@ import (
 	"time"
 )
 
-// These tests exercise the fully confined Run path: the re-exec child runs in
-// fresh user and network namespaces with Landlock, seccomp, rlimit, and cgroup
-// enforcement. They require a kernel and runtime that allow an unprivileged
-// binary to create user namespaces and to write cgroup controllers — run with
-// `go test -tags=integration` in such an environment (e.g. as root, which
-// bypasses AppArmor's unprivileged-userns restriction).
-
-// TestMain intercepts the sandbox-child sentinel so the re-executed test
-// binary runs RunChild instead of the test suite. The production aura binary
-// dispatches the same sentinel from cmd/aura/main.go.
 func TestMain(m *testing.M) {
 	if IsChild(os.Args) {
 		os.Exit(RunChild())
@@ -42,10 +32,6 @@ func baseSpec(t *testing.T) Spec {
 	}
 }
 
-// A session child whose isolation setup fails yields a typed
-// sandbox_init_failed from Start, with no process left behind. The bad
-// read-only root makes the child's Landlock setup fail after spawn, which is
-// exactly the one-shot runner's deterministic init-failure fixture.
 func TestIntegrationSessionInitFailureFailsClosed(t *testing.T) {
 	req := sessionRequest(t)
 	req.ReadOnlyPaths = []string{"/nonexistent-sandbox-probe-path"}
@@ -145,9 +131,6 @@ func TestIntegrationOutputCapped(t *testing.T) {
 	}
 }
 
-// Landlock denies a read outside the declared roots. The workspace is
-// declared read-write; a sibling directory outside it is not, so a tool that
-// reads a file there must fail.
 func TestIntegrationLandlockDeniesEscape(t *testing.T) {
 	outside := t.TempDir()
 	secret := filepath.Join(outside, "secret")
@@ -164,8 +147,6 @@ func TestIntegrationLandlockDeniesEscape(t *testing.T) {
 	}
 }
 
-// An rlimit file-size bound kills a tool that writes past it. The writing
-// command is the whole script so its signal exit is the run's exit.
 func TestIntegrationRlimitFileBytes(t *testing.T) {
 	spec := baseSpec(t)
 	spec.Limits.FileBytes = 16
@@ -178,9 +159,6 @@ func TestIntegrationRlimitFileBytes(t *testing.T) {
 	}
 }
 
-// TestIntegrationInitFailureDeterministic triggers a child setup failure
-// repeatedly and asserts the typed sandbox_init_failed error is returned every
-// time, with no goroutine left blocked on the coordination path.
 func TestIntegrationInitFailureDeterministic(t *testing.T) {
 	spec := baseSpec(t)
 	spec.ReadOnlyPaths = []string{"/nonexistent-sandbox-probe-path"}
@@ -191,15 +169,12 @@ func TestIntegrationInitFailureDeterministic(t *testing.T) {
 			t.Fatalf("Run = %v, want sandbox_init_failed", err)
 		}
 	}
-	// Give the reaped goroutines a moment to exit, then assert no growth.
 	time.Sleep(100 * time.Millisecond)
 	if got := runtime.NumGoroutine(); got > before+1 {
 		t.Fatalf("goroutine leak: before=%d after=%d", before, got)
 	}
 }
 
-// A symlink inside the workspace pointing at an outside file cannot
-// smuggle access to it; Landlock follows the link to its undeclared target.
 func TestIntegrationLandlockDeniesSymlinkEscape(t *testing.T) {
 	outside := t.TempDir()
 	secret := filepath.Join(outside, "secret")
@@ -221,7 +196,6 @@ func TestIntegrationLandlockDeniesSymlinkEscape(t *testing.T) {
 	}
 }
 
-// An rlimit CPU bound kills a tool that burns past it.
 func TestIntegrationRlimitCPUTime(t *testing.T) {
 	spec := baseSpec(t)
 	spec.Limits.CPUTime = 1 * time.Second
@@ -234,7 +208,6 @@ func TestIntegrationRlimitCPUTime(t *testing.T) {
 	}
 }
 
-// A cgroup memory bound kills a tool that allocates past it.
 func TestIntegrationCgroupMemory(t *testing.T) {
 	if !cgroupControllersWritable() {
 		t.Skip("cgroup controllers not delegated on this host")
@@ -250,9 +223,6 @@ func TestIntegrationCgroupMemory(t *testing.T) {
 	}
 }
 
-// A child that attempts a network connection is denied. The seccomp
-// filter excludes socket syscalls and the network namespace has no external
-// interface, so bash's /dev/tcp open must fail and kill the child.
 func TestIntegrationNetworkDenied(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available for the network-attempt fixture")
@@ -264,7 +234,6 @@ func TestIntegrationNetworkDenied(t *testing.T) {
 	}
 }
 
-// An rlimit open-files bound is enforced: opening past MaxOpenFiles fails.
 func TestIntegrationRlimitOpenFiles(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available for the open-files fixture")
@@ -277,8 +246,6 @@ func TestIntegrationRlimitOpenFiles(t *testing.T) {
 	}
 }
 
-// A cgroup PID bound is enforced: a fork-heavy child cannot spawn past
-// MaxProcesses. Env-gated like the memory test (needs delegated controllers).
 func TestIntegrationCgroupPids(t *testing.T) {
 	if !cgroupControllersWritable() {
 		t.Skip("cgroup controllers not delegated on this host")
@@ -290,16 +257,11 @@ func TestIntegrationCgroupPids(t *testing.T) {
 	spec.Limits.MaxProcesses = 8
 	spec.Limits.MaxOutputBytes = 1 << 20
 	result, _ := Run(context.Background(), &spec, "bash", "-c", "for i in $(seq 1 200); do : & done; wait")
-	// pids.max makes fork fail with EAGAIN; bash surfaces it on stderr.
 	if !strings.Contains(result.Output, "Resource temporarily unavailable") && result.ExitCode == 0 {
 		t.Fatalf("cgroup pids not enforced: child forked past the bound (%+v)", result)
 	}
 }
 
-// A parent file descriptor opened without close-on-exec would otherwise survive
-// execve into the confined child. The child closes every descriptor above the
-// config and init-error pipes, so the secret held by the leaked fd is
-// unreadable from inside the sandbox.
 func TestIntegrationFDNoLeak(t *testing.T) {
 	tmp := t.TempDir()
 	secretPath := filepath.Join(tmp, "secret")
@@ -327,17 +289,10 @@ func TestIntegrationFDNoLeak(t *testing.T) {
 	}
 }
 
-// An elevated request bound to a registered grant executes inside the
-// containment contract.
 func TestIntegrationElevatedRunApproved(t *testing.T) {
 	req := testRequest(t)
 	req.Executable = "printf"
 	req.Arguments = []string{"approved-run"}
-	// This test proves the approved request executes, not memory enforcement
-	// (covered separately below). The re-executed runner binary's early
-	// resident set varies with platform and page-cache charging, and a tight
-	// cgroup ceiling can OOM-kill it on cold hosted runners before the
-	// target ever runs.
 	req.Limits.MemoryBytes = 0
 	grant := mintTestGrant(t, "v1", time.Minute, req)
 	registry := NewRegistry("v1", nil)
@@ -354,8 +309,6 @@ func TestIntegrationElevatedRunApproved(t *testing.T) {
 	}
 }
 
-// A request altered after approval is refused before any child starts, so the
-// contained executor never runs a tampered request.
 func TestIntegrationElevatedRunRejectsMutation(t *testing.T) {
 	req := testRequest(t)
 	req.Executable = "printf"
@@ -374,10 +327,6 @@ func TestIntegrationElevatedRunRejectsMutation(t *testing.T) {
 	}
 }
 
-// Repeated cancellation must not leak goroutines, file descriptors, cgroup
-// subtrees, or orphaned processes. Each iteration launches a long-lived child
-// and cancels it mid-run; after the sweep the parent's resource usage is back
-// at the baseline.
 func TestIntegrationCancelNoLeak(t *testing.T) {
 	goroutinesBefore := runtime.NumGoroutine()
 	fdsBefore := countOpenFDs(t)

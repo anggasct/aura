@@ -12,9 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/sandbox"
 )
 
-// newDoctorCmd builds the doctor command: the detailed local diagnostics
-// surface. Unlike status it never probes the running process; it always
-// evaluates local checks.
 func newDoctorCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error)) *cobra.Command {
 	var checkID string
 	cmd := &cobra.Command{
@@ -69,8 +66,6 @@ func filterFindingsByCheck(findings []health.Finding, checkID string) []health.F
 	return filtered
 }
 
-// formatDoctorFinding renders one finding with every registry-owned field:
-// the stable ID first so an operator can grep a single finding across runs.
 func formatDoctorFinding(f *health.Finding) string {
 	var b strings.Builder
 	b.WriteString(f.ID)

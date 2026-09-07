@@ -61,14 +61,8 @@ func adkText(event *adkRenderEvent) (text []byte, present, emptyAssistant bool) 
 	return text, present, emptyAssistant
 }
 
-// PlainRenderer is the non-TTY event renderer. It folds a turn's events into
-// the completed assistant text for stdout and diagnostics for stderr; tool
-// and approval activity is surfaced as progress lines, never as model text.
-// It emits no ANSI.
 type PlainRenderer struct{}
 
-// RenderTurn reports the completed assistant text, any diagnostics to print
-// to stderr, and whether the turn reached a durable terminal event.
 func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics []string, terminal bool) {
 	var buf []byte
 	var finalSet bool
@@ -90,8 +84,6 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 			finalSet = true
 			buf = appendLimited(nil, decodeDelta(ev.Payload))
 		case "adk_event":
-			// Batch streams carry the normalized projection; standalone
-			// renderer use may still see the raw provider shape.
 			var norm struct {
 				Text          string   `json:"text"`
 				Role          string   `json:"role"`
@@ -164,14 +156,10 @@ func (PlainRenderer) RenderTurn(stream []Event) (assistant string, diagnostics [
 	return sanitizeText(string(buf)), diagnostics, terminal
 }
 
-// SanitizeText removes terminal control sequences and invalid UTF-8 from user-visible text.
 func SanitizeText(text string) string {
 	return sanitizeText(text)
 }
 
-// decodeDelta extracts model text from a delta or completed-message payload.
-// The runtime's canonical text parts live in an adk content payload; fall
-// back to a plain "text" field for scripted events.
 func decodeDelta(payload json.RawMessage) []byte {
 	if len(payload) == 0 || len(payload) > 4*maxRenderBytes {
 		return nil

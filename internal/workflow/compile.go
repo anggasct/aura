@@ -2,8 +2,6 @@ package workflow
 
 import "slices"
 
-// Graph is the compiled execution graph: a topological step order with
-// sorted adjacency for deterministic replay.
 type Graph struct {
 	Order      []string
 	ByStep     map[string]*StepSpec
@@ -11,9 +9,6 @@ type Graph struct {
 	Dependents map[string][]string
 }
 
-// Compile validates-then-orders the spec into the execution graph.
-// Validation always precedes compilation: an invalid spec never yields a
-// graph.
 func Compile(spec *Spec, deps ValidationDeps) (*Graph, error) {
 	if err := Validate(spec, deps); err != nil {
 		return nil, err

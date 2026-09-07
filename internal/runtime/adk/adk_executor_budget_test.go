@@ -11,9 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/usage"
 )
 
-// newBudgetTestLedger builds a usage ledger over the executor's test database
-// with a priced "primary" model definition, so a turn run through the budget
-// wrapper can reserve and settle.
 func newBudgetTestLedger(t *testing.T, db *sql.DB, dailyCapMicros int64) *usage.Ledger {
 	t.Helper()
 	reg := usage.NewPriceRegistry()
@@ -39,9 +36,6 @@ func newBudgetTestLedger(t *testing.T, db *sql.DB, dailyCapMicros int64) *usage.
 	return ledger
 }
 
-// TestADKExecutorBudgetBlocksDispatch proves an exhausted budget rejects a
-// turn before the model is dispatched: the wrapper's reservation exceeds the
-// cap, so the underlying model is never called.
 func TestADKExecutorBudgetBlocksDispatch(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 5}
 	modelName := registerFakeModel(t, model)
@@ -72,8 +66,6 @@ func TestADKExecutorBudgetBlocksDispatch(t *testing.T) {
 	}
 }
 
-// TestADKExecutorBudgetSettlesTurn proves a successful turn run through the
-// budget wrapper creates exactly one settlement entry.
 func TestADKExecutorBudgetSettlesTurn(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 7}
 	modelName := registerFakeModel(t, model)

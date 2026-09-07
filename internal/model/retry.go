@@ -64,8 +64,6 @@ func retryHTTP(ctx context.Context, cfg RetryConfig, do func() (*http.Response, 
 		}
 		resp, err := do()
 		if err != nil {
-			// Transient transport failures are retried like retryable
-			// statuses; everything else (auth, protocol, context) is not.
 			if !isTransientError(err) || ctx.Err() != nil || retry >= cfg.MaxRetries {
 				return nil, err
 			}
@@ -124,9 +122,6 @@ func isRetryableStatus(status int) bool {
 	return false
 }
 
-// providerErrorBody captures the error object shape shared by the providers:
-// OpenAI/Responses (code/type/message), Anthropic (type/message), Gemini
-// (status/message).
 type providerErrorBody struct {
 	Error struct {
 		Code    string `json:"code"`

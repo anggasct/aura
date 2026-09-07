@@ -117,16 +117,10 @@ type Journal struct {
 	eventPublisher EventPublisher
 }
 
-// EventPublisher forwards a persisted tool lifecycle event to the live
-// runtime stream the moment it becomes durable, so a long-running tool
-// reports progress while it is still running instead of only after it
-// settles.
 type EventPublisher interface {
 	Publish(*store.RuntimeEvent)
 }
 
-// SetEventPublisher installs the live event publisher. It may be called after
-// construction because the runtime engine is wired after the journal.
 func (j *Journal) SetEventPublisher(p EventPublisher) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -278,8 +272,6 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("effect: commit prepare: %w", err)
 	}
-	// The committed tool request is durable; publish it to the live stream
-	// now so a long-running provider reports progress while it runs.
 	if pub := j.publisher(); pub != nil {
 		pub.Publish(&store.RuntimeEvent{
 			ID:            eventID,

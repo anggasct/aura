@@ -18,8 +18,6 @@ import (
 	"github.com/anggasct/aura/internal/usage"
 )
 
-// withoutPath strips the filesystem path from an *fs.PathError so an error
-// string keeps the reason without disclosing where the file lives.
 func withoutPath(err error) error {
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {
@@ -59,11 +57,7 @@ type Router struct {
 	routes      map[string]adkmodel.LLM
 	circuits    *CircuitManager
 	definitions map[string]config.ModelDefinition
-	// components keeps the raw construction output (per-definition adapters
-	// and per-route fallback adapters) so the ADK model registry can register
-	// exactly what the router dispatches through, per candidate definition
-	// and per route.
-	components struct {
+	components  struct {
 		adapters map[string]adkmodel.LLM
 		routes   map[string]adkmodel.LLM
 	}
@@ -97,14 +91,6 @@ func BuildRouterWithConfig(logger *slog.Logger, cfg *config.Config, store Circui
 	return BuildRouterWithRoutes(logger, cfg.Models, cfg.ModelRoutes, store)
 }
 
-// BuildComponents is the shared construction path for the model layer: it
-// builds one adapter per configured definition, registers every definition
-// and route candidate with a circuit manager, and wraps each configured
-// route in a FallbackAdapter. Both the Router and the ADK model registry
-// (RegisterAdaptersWithComponents) are assembled from it, so the two can
-// never diverge on adapter construction or circuit policy. checkpoint and
-// prices may be nil; nil circuits run in memory only and nil prices disable
-// route cost accounting.
 func BuildComponents(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry) (adapters map[string]adkmodel.LLM, circuits *CircuitManager, err error) {
 	if err := validateRoutingCapabilities(models); err != nil {
 		return nil, nil, err
@@ -203,11 +189,6 @@ func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map
 	return r, nil
 }
 
-// BuildRouterComponents decomposes a router into the parts the ADK model
-// registry needs: the per-definition adapters and the per-route fallback
-// adapters. The maps are populated once at construction and read-only
-// afterwards, so they are returned directly without copying; callers must
-// not mutate them.
 func BuildRouterComponents(r *Router) (adapters, routes map[string]adkmodel.LLM) {
 	if r == nil {
 		return nil, nil
@@ -286,9 +267,6 @@ func requestHasToolResult(req *adkmodel.LLMRequest) bool {
 	return false
 }
 
-// For resolves the model for a task. An unknown task or a role with no
-// configured model is a typed error; nil is never returned as a usable
-// adapter.
 func (r *Router) For(task string) (adkmodel.LLM, error) {
 	role, ok := r.routing[task]
 	if !ok {
@@ -317,7 +295,6 @@ func (r *Router) For(task string) (adkmodel.LLM, error) {
 	}
 }
 
-// ForRoute resolves the adapter for a named route (e.g. "primary", "auxiliary").
 func (r *Router) ForRoute(route string) (adkmodel.LLM, error) {
 	if r.routes != nil {
 		if adapter, exists := r.routes[route]; exists && adapter != nil {
@@ -337,24 +314,18 @@ func (r *Router) ForRoute(route string) (adkmodel.LLM, error) {
 	return nil, newError(ErrorCodeNotFound, "", "", fmt.Sprintf("model: route %q not found", route))
 }
 
-// Circuits returns the router's circuit manager.
 func (r *Router) Circuits() *CircuitManager {
 	return r.circuits
 }
 
-// Definitions returns the model definitions map.
 func (r *Router) Definitions() map[string]config.ModelDefinition {
 	return r.definitions
 }
-
-// newAdapter reports configured=false when the definition is absent, so a
-// caller never has to read meaning into a nil adapter with a nil error.
 func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration) (adapter adkmodel.LLM, configured bool, err error) {
 	if spec.Protocol == "" || spec.Model == "" {
 		return nil, false, nil
 	}
 	if spec.BaseURL != "" {
-		// The URL is never echoed back: it may carry user-info credentials.
 		if err := config.ValidateBaseURL(spec.BaseURL); err != nil {
 			return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("invalid base_url: %v", err))
 		}

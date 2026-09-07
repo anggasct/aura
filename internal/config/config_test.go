@@ -1076,8 +1076,6 @@ func TestResolvePath_XDGEmptyFallsBack(t *testing.T) {
 	}
 }
 
-// Definitions are independent, so an operator with several broken ones must
-// be told about all of them, not one per run in map-iteration order.
 func TestValidateLoadedModelsReportsEveryDefinition(t *testing.T) {
 	models := Models{Definitions: map[string]ModelDefinition{
 		"primary": {Protocol: "nope", Model: "m", APIKeyEnv: "K",

@@ -49,8 +49,6 @@ func (e *stepExecution) run(ctx context.Context) error {
 	return nil
 }
 
-// runStep waits for dependencies, evaluates its condition, and executes
-// within the concurrency bound; terminal transitions persist per step.
 func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[string]chan struct{}) {
 	defer close(done[step.ID])
 	for _, dependency := range step.DependsOn {
@@ -128,8 +126,6 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 	}
 }
 
-// executeAttempt runs one attempt under the timeout timer; ended reports a
-// cancelled invocation.
 func (e *stepExecution) executeAttempt(ctx context.Context, step *StepSpec, attempt int) (*stepUpdate, bool) {
 	if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepRunning, Attempt: attempt}); err != nil {
 		e.failRun(ctx, step.ID, err)
@@ -151,10 +147,6 @@ func (e *stepExecution) executeAttempt(ctx context.Context, step *StepSpec, atte
 		return update, false
 	case <-timer:
 		cancel()
-		// Every executor kind observes attempt cancellation, so the
-		// attempt goroutine always exits; draining keeps an abandoned
-		// wait/approval attempt from holding a signal waiter slot across
-		// the retry.
 		<-result
 		return &stepUpdate{
 			Status:    StepFailed,
@@ -224,8 +216,6 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec) *stepUp
 	return &stepUpdate{Status: StepSucceeded, Output: []byte(output), EndedAt: nowPtr()}
 }
 
-// runWaitStep suspends on wait.<step_id>; the signal payload becomes the
-// step output.
 func (e *stepExecution) runWaitStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
 	e.suspendRun(ctx, step.ID)
 	payload, ok := e.awaitSignal(ctx, "wait."+step.ID)
@@ -236,8 +226,6 @@ func (e *stepExecution) runWaitStep(ctx context.Context, step *StepSpec, attempt
 	return &stepUpdate{Status: StepSucceeded, Attempt: attempt + 1, EndedAt: nowPtr(), Output: payload}
 }
 
-// runApprovalStep requests approval bound to run+step and suspends on
-// approval.<step_id>; a reject payload routes the run to failure.
 func (e *stepExecution) runApprovalStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
 	if requester := e.interpreter.options.Approvals; requester != nil {
 		if err := requester.Request(ctx, e.runID, step.ID); err != nil {
@@ -273,9 +261,6 @@ func nowPtr() *time.Time {
 	return &now
 }
 
-// sinkOutput routes outputs over the inline limit through the artifact
-// sink, leaving a bounded digest reference inline; without a sink the
-// failure surfaces instead of truncating into an invalid row.
 func (e *stepExecution) sinkOutput(ctx context.Context, update *stepUpdate) error {
 	if len(update.Output) <= maxInlineOutputBytes {
 		return nil
@@ -293,12 +278,6 @@ func (e *stepExecution) sinkOutput(ctx context.Context, update *stepUpdate) erro
 	return nil
 }
 
-// suspendRun marks the step as awaiting a signal and moves the run row to
-// suspended when it is the only waiter. The waiter bookkeeping happens
-// under statusMu, but the database write never does: statusMu only guards
-// the in-memory awaiting set, and every run-status write takes writeMu, so
-// no code path holds a database write while waiting on the mutex that
-// another database writer needs.
 func (e *stepExecution) suspendRun(ctx context.Context, stepID string) {
 	e.statusMu.Lock()
 	e.awaiting[stepID] = true
@@ -309,9 +288,6 @@ func (e *stepExecution) suspendRun(ctx context.Context, stepID string) {
 	}
 }
 
-// awaitSignal parks on a runtime signal. The concurrency slot is released
-// while parked: the bound gates active execution only, so a suspended step
-// never starves a dependency-ready sibling of a slot.
 func (e *stepExecution) awaitSignal(ctx context.Context, name string) (json.RawMessage, bool) {
 	e.interpreter.release()
 	payload, ok := e.invocation.Signal(ctx, name)
@@ -319,8 +295,6 @@ func (e *stepExecution) awaitSignal(ctx context.Context, name string) (json.RawM
 	return payload, ok
 }
 
-// resumeRun clears the step's waiter flag; the run row returns to running
-// only when no sibling remains suspended.
 func (e *stepExecution) resumeRun(ctx context.Context, stepID string) {
 	e.statusMu.Lock()
 	delete(e.awaiting, stepID)
@@ -340,11 +314,6 @@ func (e *stepExecution) writeRunStatus(ctx context.Context, status string) {
 	}
 }
 
-// terminal persists one step transition and records handler state. The
-// write uses a context detached from the invocation so terminal rows stay
-// durable even when the run is cancelled mid-step. A run-terminal step
-// keeps a concurrently suspended run suspended instead of forcing it back
-// to running.
 func (e *stepExecution) terminal(ctx context.Context, stepID string, update *stepUpdate) error {
 	if update.Status != StepRunning {
 		e.mu.Lock()
@@ -395,21 +364,18 @@ func (e *stepExecution) failRun(ctx context.Context, stepID string, err error) {
 	}
 }
 
-// statusFor reads one step status under the working-state lock.
 func (e *stepExecution) statusFor(stepID string) string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.statuses[stepID]
 }
 
-// isFailed reports whether any step failed the run.
 func (e *stepExecution) isFailed() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.failedStep != ""
 }
 
-// recordSuccess records a succeeded step's status and output.
 func (e *stepExecution) recordSuccess(stepID string, output json.RawMessage) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -417,7 +383,6 @@ func (e *stepExecution) recordSuccess(stepID string, output json.RawMessage) {
 	e.outputs[stepID] = output
 }
 
-// resolvedStatus reads a status for condition evaluation.
 func (e *stepExecution) resolvedStatus(stepID string) (string, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -425,7 +390,6 @@ func (e *stepExecution) resolvedStatus(stepID string) (string, bool) {
 	return status, ok
 }
 
-// resolvedOutput reads an output for condition evaluation.
 func (e *stepExecution) resolvedOutput(stepID string) (json.RawMessage, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -433,7 +397,6 @@ func (e *stepExecution) resolvedOutput(stepID string) (json.RawMessage, bool) {
 	return output, ok
 }
 
-// evaluate executes the conjunction; missing references compare as null.
 func (e *stepExecution) evaluate(c *condition) bool {
 	for index := range c.comparisons {
 		if !e.evaluateComparison(&c.comparisons[index]) {
@@ -469,8 +432,6 @@ func jsonScalarEqual(left any, leftText string, right any, rightText string) boo
 	return fmt.Sprint(left) == fmt.Sprint(right)
 }
 
-// scalarNumber reads integers and decoded JSON numbers as float64 so
-// comparisons happen between values, not their rendered forms.
 func scalarNumber(value any) (float64, bool) {
 	switch number := value.(type) {
 	case float64:
@@ -482,8 +443,6 @@ func scalarNumber(value any) (float64, bool) {
 	}
 }
 
-// resolveOperand materializes one operand: references read step state and
-// outputs; literals carry their own values.
 func (e *stepExecution) resolveOperand(op operand) (value any, text string) {
 	if op.ref == nil {
 		switch {
@@ -515,7 +474,6 @@ func (e *stepExecution) resolveOperand(op operand) (value any, text string) {
 	return resolved, text
 }
 
-// extractJSONPath walks output JSON by keys and array indices.
 func extractJSONPath(output []byte, keys []string, indices []int) (value any, text string, ok bool) {
 	if len(output) == 0 {
 		return nil, "", false
@@ -552,7 +510,6 @@ func extractJSONPath(output []byte, keys []string, indices []int) (value any, te
 	return current, fmt.Sprint(current), true
 }
 
-// acquire bounds concurrently running steps; overflow waits, never drops.
 func (i *Interpreter) acquire() {
 	i.inflight <- struct{}{}
 }

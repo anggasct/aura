@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	// Header names are part of the frozen wire contract.
 	headerKeyID     = "X-Aura-Key-ID"
 	headerTimestamp = "X-Aura-Timestamp"
 	headerNonce     = "X-Aura-Nonce"
@@ -26,9 +25,6 @@ var (
 	digitsPattern  = regexp.MustCompile(`^-?\d+$`)
 )
 
-// RequestAuth carries the parsed authentication headers of one request. The
-// timestamp keeps its exact wire form: it participates in the signing bytes
-// verbatim, so it is never normalized before verification.
 type RequestAuth struct {
 	KeyID     string
 	Timestamp string
@@ -37,9 +33,6 @@ type RequestAuth struct {
 	Signature string
 }
 
-// ParseRequestAuth validates header syntax only. Cryptographic checks happen
-// after, against the canonical signing bytes, so a syntactically valid but
-// forged header set fails exactly like a tampered one.
 func ParseRequestAuth(header http.Header) (RequestAuth, error) {
 	auth := RequestAuth{
 		KeyID:     header.Get(headerKeyID),
@@ -70,9 +63,6 @@ func ParseRequestAuth(header http.Header) (RequestAuth, error) {
 	return auth, nil
 }
 
-// WithinTolerance checks the parsed timestamp against now. A stale or
-// far-future timestamp fails authentication, not request parsing, so it is
-// indistinguishable from a bad signature to callers.
 func (a RequestAuth) WithinTolerance(now time.Time, tolerance time.Duration) bool {
 	delta := now.Sub(time.Unix(a.Seconds, 0).UTC())
 	if delta < 0 {

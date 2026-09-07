@@ -12,9 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// The race-safe filesystem adapters require Linux, so the executor
-// constructor must fail closed on other platforms instead of composing a
-// partial tool set.
 func TestBuiltinToolExecutorFailsClosedWithoutLinux(t *testing.T) {
 	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
 	if err != nil {

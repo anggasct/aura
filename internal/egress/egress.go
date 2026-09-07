@@ -37,8 +37,6 @@ func Errorf(code ErrorCode, format string, args ...any) error {
 	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
 }
 
-// Resolver resolves host names to IP addresses. The real resolver uses the
-// system DNS; tests inject a controlled resolver to exercise rebinding.
 type Resolver interface {
 	LookupIP(ctx context.Context, host string) ([]net.IP, error)
 }
@@ -49,15 +47,11 @@ func (systemResolver) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 	return net.DefaultResolver.LookupIP(ctx, "ip", host)
 }
 
-// cloudMetadataIPs are the RFC-unspecified metadata endpoints that must
-// never be reachable from brokered web access.
 var cloudMetadataIPs = []net.IP{
 	net.ParseIP("169.254.169.254"),
 	net.ParseIP("169.254.169.253"),
 }
 
-// Destination is a validated outbound target: the original host plus the
-// concrete IP that was checked and must be dialed.
 type Destination struct {
 	Host string
 	IP   net.IP
@@ -74,10 +68,6 @@ func destinationFromContext(ctx context.Context) (Destination, bool) {
 	return destination, ok
 }
 
-// ValidateDestinationShape enforces the URL-level destination rules — https
-// scheme, host present, no credentials, query, or fragment — without
-// resolving the host, so constructors can reject unsafe endpoints before
-// any request is built.
 func ValidateDestinationShape(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -101,10 +91,6 @@ func ValidateDestinationShape(raw string) error {
 	return nil
 }
 
-// Validate resolves and validates a destination. HTTPS is required, and
-// loopback, private, link-local, unspecified, multicast, and cloud-metadata
-// addresses are rejected by default. The returned IP is the one the dialer
-// must pin, so a second DNS lookup cannot redirect to a different address.
 func Validate(ctx context.Context, raw string, resolver Resolver) (Destination, error) {
 	if resolver == nil {
 		resolver = systemResolver{}
@@ -118,8 +104,6 @@ func Validate(ctx context.Context, raw string, resolver Resolver) (Destination, 
 	}
 	host := u.Hostname()
 
-	// A literal IP is validated directly; hostnames are resolved here, once,
-	// so the caller dials the checked address (DNS-rebinding defense).
 	ip := net.ParseIP(host)
 	if ip != nil {
 		if err := rejectIP(ip); err != nil {
@@ -163,9 +147,6 @@ func rejectIP(ip net.IP) error {
 	return nil
 }
 
-// PinnedDialer resolves the destination through Validate and dials the
-// checked IP, never a re-resolved name. This closes the DNS-rebinding
-// window between validation and connection.
 type PinnedDialer struct {
 	Resolver Resolver
 }
@@ -186,9 +167,6 @@ func (d PinnedDialer) DialContext(ctx context.Context, network, address string) 
 	return dialer.DialContext(ctx, network, net.JoinHostPort(dest.IP.String(), port))
 }
 
-// validatingTransport enforces the full destination policy on every
-// request, including the initial one: scheme, credentials, query, and
-// fragment are rejected before the pinned dialer ever sees the host.
 type validatingTransport struct {
 	resolver Resolver
 	next     http.RoundTripper
@@ -202,11 +180,6 @@ func (t *validatingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return t.next.RoundTrip(req.WithContext(withDestination(req.Context(), destination)))
 }
 
-// NewClient returns the only construction path for mediated HTTP: the
-// transport validates every request and redirect hop, and all connections
-// are dialed by the pinned dialer using the validated address. There is
-// deliberately no transport-injection variant; a caller-provided
-// RoundTripper could ignore the pinned destination and bypass mediation.
 func NewClient(resolver Resolver) *http.Client {
 	if resolver == nil {
 		resolver = systemResolver{}

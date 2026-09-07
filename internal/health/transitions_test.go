@@ -32,8 +32,6 @@ func findingAt(id string, status Status) Finding {
 	return Finding{ID: id, Component: "backup", Code: "backup_stale", Status: status}
 }
 
-// First sighting transitions from none so the durable log carries complete
-// history; repeat observations of an unchanged state emit nothing.
 func TestTrackerEmitsInitialAndSuppressesUnchanged(t *testing.T) {
 	sink := &captureSink{}
 	now := baseTime()
@@ -62,8 +60,6 @@ func TestTrackerEmitsInitialAndSuppressesUnchanged(t *testing.T) {
 	}
 }
 
-// Hysteresis: a candidate state that reverts before StableFor commits
-// produces no transition.
 func TestTrackerSuppressesFlaps(t *testing.T) {
 	sink := &captureSink{}
 	now := baseTime()
@@ -84,7 +80,6 @@ func TestTrackerSuppressesFlaps(t *testing.T) {
 		t.Fatalf("flap emissions = %d (%+v), want only the initial", got, sink.codes())
 	}
 
-	// A state held past StableFor does commit exactly once.
 	now = now.Add(time.Minute)
 	if _, err := tracker.Observe(ctx, []Finding{findingAt("f", StatusDown)}); err != nil {
 		t.Fatal(err)
@@ -99,8 +94,6 @@ func TestTrackerSuppressesFlaps(t *testing.T) {
 	}
 }
 
-// Cooldown defers the second committed transition until the configured
-// interval passes, even when the debounce window already elapsed.
 func TestTrackerCooldownDefersCommit(t *testing.T) {
 	sink := &captureSink{}
 	now := baseTime()
@@ -128,9 +121,6 @@ func TestTrackerCooldownDefersCommit(t *testing.T) {
 	}
 }
 
-// A failed sink must not advance tracked state: the same transition is
-// retried on the next observation and emitted exactly once once persistence
-// recovers.
 func TestTrackerRetriesFailedPersistence(t *testing.T) {
 	sink := &captureSink{}
 	now := baseTime()
@@ -164,9 +154,6 @@ func TestTrackerRetriesFailedPersistence(t *testing.T) {
 	}
 }
 
-// Restore-from-history: a restarted tracker resumes from the last persisted
-// states, emits nothing for unchanged findings, and compares new changes
-// against the restored baseline.
 func TestTrackerRestoresFromHistory(t *testing.T) {
 	history := []Transition{
 		{FindingID: "f", From: StatusNone, To: StatusUp, At: baseTime()},

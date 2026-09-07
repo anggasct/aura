@@ -14,27 +14,18 @@ import (
 	"google.golang.org/adk/v2/session"
 )
 
-// maxEventLoad is the batch size for loading a session's full event log; a
-// session with more events loads in one query since the store rejects a
-// zero limit as "nothing".
 const maxEventLoad = 1 << 20
 
-// ADKSessionService adapts the Aura session/event ports to the ADK session
-// storage interface, so the ADK runner's event state is the Aura runtime
-// event log — never a message projection. ADK concrete types stay in this
-// adapter; the rest of the runtime sees only store ports.
 type ADKSessionService struct {
 	sessions SessionPort
 }
 
-// SessionPort is the Aura session lifecycle the adapter maps onto.
 type SessionPort interface {
 	Create(ctx context.Context, sess *store.Session) error
 	Get(ctx context.Context, sessionID string) (store.Session, error)
 	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]store.RuntimeEvent, error)
 }
 
-// NewADKSessionService wraps the Aura session port for ADK.
 func NewADKSessionService(sessions SessionPort) (*ADKSessionService, error) {
 	if sessions == nil {
 		return nil, invalidArgument("session port must not be nil")
@@ -42,8 +33,6 @@ func NewADKSessionService(sessions SessionPort) (*ADKSessionService, error) {
 	return &ADKSessionService{sessions: sessions}, nil
 }
 
-// adkSession is the ADK session view over a stored Aura session. Events are
-// lazily read from the store on first access.
 type adkSession struct {
 	id       string
 	userID   string
@@ -68,9 +57,6 @@ func (s *adkSession) Events() session.Events {
 	return &adkEvents{load: s.events}
 }
 
-// adkState is an immutable snapshot of the session metadata viewed as ADK
-// state. ADK writes state through EventActions.StateDelta; those deltas are
-// stored in event payloads, so this view is read-only by construction.
 type adkState struct {
 	values map[string]any
 }
@@ -97,7 +83,6 @@ func (s adkState) All() iter.Seq2[string, any] {
 	}
 }
 
-// adkEvents lazily loads the session's stored events in sequence order.
 type adkEvents struct {
 	load  func() ([]*session.Event, error)
 	cache []*session.Event
@@ -138,9 +123,6 @@ func (e *adkEvents) At(i int) *session.Event {
 	return e.cache[i]
 }
 
-// Create stores a new Aura session, mapping ADK state into the metadata
-// column. A client-supplied session ID is honored; otherwise one is
-// generated, mirroring ADK's autogenerate behavior.
 func (s *ADKSessionService) Create(ctx context.Context, req *session.CreateRequest) (*session.CreateResponse, error) {
 	if req == nil {
 		return nil, invalidArgument("create request must not be nil")
@@ -181,7 +163,6 @@ func (s *ADKSessionService) Create(ctx context.Context, req *session.CreateReque
 	}, nil
 }
 
-// Get loads a stored session and its events, mapping them back to ADK.
 func (s *ADKSessionService) Get(ctx context.Context, req *session.GetRequest) (*session.GetResponse, error) {
 	if req == nil {
 		return nil, invalidArgument("get request must not be nil")
@@ -200,8 +181,6 @@ func (s *ADKSessionService) Get(ctx context.Context, req *session.GetRequest) (*
 	}, nil
 }
 
-// List returns the sessions of a user. The Aura store has no user-scoped
-// list port, so this reports invalid_argument rather than a partial answer.
 func (s *ADKSessionService) List(ctx context.Context, req *session.ListRequest) (*session.ListResponse, error) {
 	if req == nil {
 		return nil, invalidArgument("list request must not be nil")
@@ -209,8 +188,6 @@ func (s *ADKSessionService) List(ctx context.Context, req *session.ListRequest) 
 	return nil, invalidArgument("adk session listing is not supported by the aura store")
 }
 
-// Delete is not supported: the Aura store keeps sessions as a durable log
-// with no destructive delete port.
 func (s *ADKSessionService) Delete(ctx context.Context, req *session.DeleteRequest) error {
 	if req == nil {
 		return invalidArgument("delete request must not be nil")
@@ -218,12 +195,6 @@ func (s *ADKSessionService) Delete(ctx context.Context, req *session.DeleteReque
 	return invalidArgument("adk session deletion is not supported by the aura store")
 }
 
-// AppendEvent validates an ADK event but does not persist it: the runtime
-// engine is the single writer for ADK events (it stamps the sequence and
-// persists every yielded event, including the user message via
-// WithYieldUserMessage). This keeps one serialized sequence allocation per
-// session and one stored row per event — a second write here would duplicate
-// the log and break replay fidelity.
 func (s *ADKSessionService) AppendEvent(ctx context.Context, adkSession session.Session, ev *session.Event) error {
 	if adkSession == nil {
 		return invalidArgument("session must not be nil")

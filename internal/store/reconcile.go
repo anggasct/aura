@@ -9,17 +9,12 @@ import (
 	"path/filepath"
 )
 
-// ReconcileReport lists storage inconsistencies. Reconcile never deletes or
-// modifies data; it only reports findings for an operator or health check.
 type ReconcileReport struct {
 	MissingBlobs   []string // digests with a blob row but no file on disk
 	CorruptedBlobs []string // digests whose file content does not match the digest
 	OrphanFiles    []string // paths on disk with no matching blob row
 }
 
-// Reconcile compares the blob table against the blob storage tree rooted at
-// root, detecting rows whose file is missing, files whose content does not
-// match their digest, and files with no owning row.
 func Reconcile(ctx context.Context, db *sql.DB, root string) (ReconcileReport, error) {
 	rows, err := db.QueryContext(ctx, `SELECT digest, relative_path FROM blob`)
 	if err != nil {

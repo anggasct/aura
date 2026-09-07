@@ -70,8 +70,6 @@ func TestAdversarialCorpusIsDenied(t *testing.T) {
 	}
 }
 
-// A trusted, authorized request must still be allowed, so the adversarial
-// suite proves discrimination rather than a blanket deny.
 func TestAuthorizedRequestIsAllowed(t *testing.T) {
 	policy := approval.Policy{
 		Version: "eval-1",

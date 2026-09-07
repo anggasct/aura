@@ -35,14 +35,10 @@ const (
 var envLookup = buildEnvLookup()
 
 type LoadResult struct {
-	Config           *Config
-	Path             string
-	DefaultGenerated bool
-	CapabilityReport capability.Report
-	// CapabilityStateError carries artifact/host capability states
-	// (enabled but not compiled, missing dependency). They are not load
-	// failures: diagnostics surfaces report them as findings, and the
-	// server refuses startup while one is set.
+	Config               *Config
+	Path                 string
+	DefaultGenerated     bool
+	CapabilityReport     capability.Report
 	CapabilityStateError error
 	Warnings             []string
 }
@@ -126,12 +122,6 @@ func envKeyMapper(s string) string {
 	return ""
 }
 
-// Load reads configuration. Path precedence: an explicit path argument, then
-// AURA_CONFIG, then the default XDG location. A missing default config is
-// auto-generated; a missing explicit or AURA_CONFIG path is an error.
-// AURA_-prefixed environment variables override file values. DefaultGenerated
-// is true when a default config was written, so callers can log it through the
-// configured logger after setup.
 func Load(path string) (LoadResult, error) {
 	build, err := capability.CurrentBuild()
 	if err != nil {
@@ -1120,8 +1110,6 @@ func validateToolWebSearchShape(node *yamlv3.Node) error {
 	return nil
 }
 
-// validateModelDefinition checks only the shape of one model definition;
-// all semantic rules live in validateLoadedModels.
 func validateModelDefinition(name string, node *yamlv3.Node) error {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		keyNode := node.Content[i]
@@ -1162,11 +1150,6 @@ func validateModelDefinition(name string, node *yamlv3.Node) error {
 	return nil
 }
 
-// validateLoadedModels owns every semantic model rule, regardless of whether
-// a definition came from the file or from environment overrides.
-// Definitions are independent of each other, so every one is reported.
-// First-error-wins told an operator about one broken definition at a time,
-// and which one depended on map iteration order.
 func validateLoadedModels(models Models, routingExplicit bool) error {
 	problems := make([]error, 0, len(models.Definitions)+1)
 	for _, name := range slices.Sorted(maps.Keys(models.Definitions)) {
@@ -1179,8 +1162,6 @@ func validateLoadedModels(models Models, routingExplicit bool) error {
 
 func modelDefinitionProblems(name string, definition *ModelDefinition) []error {
 	var problems []error
-	// The protocol checks are dependent: an empty protocol is not also an
-	// unsupported one.
 	switch {
 	case strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "":
 		problems = append(problems, &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s requires non-empty protocol and model", name)})
@@ -1208,9 +1189,6 @@ func modelDefinitionProblems(name string, definition *ModelDefinition) []error {
 	return problems
 }
 
-// routingExplicitIn reports whether the document declares a models.routing
-// section, so the semantic pass can restrict reference checks to routing the
-// user actually configured.
 func routingExplicitIn(data []byte) bool {
 	doc, err := parseDocument(data)
 	if err != nil {
@@ -1222,10 +1200,6 @@ func routingExplicitIn(data []byte) bool {
 	return false
 }
 
-// validateRouting checks routing roles and, when the file declares an
-// explicit routing section, that each referenced role exists as a defined
-// model. Default-merged routing is exempt from the reference check, since a
-// single-model config legitimately routes tasks it never runs.
 func validateRouting(models Models, explicit bool) error {
 	for task, role := range models.Routing {
 		if role != "primary" && role != "auxiliary" {
@@ -1401,8 +1375,6 @@ func stringToDurationHook() mapstructure.DecodeHookFunc {
 	}
 }
 
-// stringToByteSizeHook converts environment-provided size strings ("5GiB")
-// without loosening file decoding.
 func stringToByteSizeHook() mapstructure.DecodeHookFunc {
 	return func(from, to reflect.Type, data any) (any, error) {
 		if to != reflect.TypeOf(ByteSize(0)) {
@@ -1420,8 +1392,6 @@ func stringToByteSizeHook() mapstructure.DecodeHookFunc {
 	}
 }
 
-// stringToBoolHook and stringToIntHook convert environment-provided values,
-// which are always strings, without loosening file decoding.
 func stringToBoolHook() mapstructure.DecodeHookFunc {
 	return func(from, to reflect.Type, data any) (any, error) {
 		if from.Kind() != reflect.String || to.Kind() != reflect.Bool {
@@ -2036,9 +2006,6 @@ func validateTerminal(t Terminal) error {
 	return nil
 }
 
-// validateLoopbackListen enforces the probe exposure boundary: host:port with
-// a loopback host. Non-loopback probe exposure needs the authenticated admin
-// surface, not this listener.
 func validateLoopbackListen(listen, field string) error {
 	host, portText, err := net.SplitHostPort(listen)
 	if err != nil {
@@ -2057,9 +2024,6 @@ func validateLoopbackListen(listen, field string) error {
 	return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " must bind loopback; non-loopback probe exposure requires the authenticated admin surface"}
 }
 
-// validateWebhook owns the semantic rules of the webhook section. Secrets are
-// referenced by environment variable name only and resolved by the gateway at
-// startup; the loader never reads them.
 func validateWebhook(w *Webhook, healthListen string) error {
 	host, portText, err := net.SplitHostPort(w.Listen)
 	if err != nil {
@@ -2179,9 +2143,6 @@ func validateTools(toolsConfig *Tools, profile capability.Profile) error {
 	return nil
 }
 
-// unknownEnvKeys lists AURA_-prefixed environment variables that no config
-// path or model definition maps to, so misconfigured overrides are surfaced
-// instead of silently ignored. AURA_CONFIG is a loader input, not a value.
 func unknownEnvKeys() []string {
 	warnings := make([]string, 0, len(os.Environ()))
 	known := make(map[string]bool, len(envLookup))

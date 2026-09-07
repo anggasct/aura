@@ -13,8 +13,6 @@ import (
 	"time"
 )
 
-// TrustLabel classifies the origin of an input. Only trusted configuration
-// may define policy; untrusted and derived content is always data.
 type TrustLabel string
 
 const (
@@ -32,15 +30,10 @@ func (t TrustLabel) Valid() bool {
 	return false
 }
 
-// IsUntrusted reports whether content with this label may never become a
-// system instruction or policy rule.
 func (t TrustLabel) IsUntrusted() bool {
 	return t == TrustUntrustedExternal || t == TrustDerivedUntrusted
 }
 
-// ToolRequest is the normalized structured request evaluated by policy.
-// Authorization is decided on this structure, never on model-generated
-// prose.
 type ToolRequest struct {
 	RequestID      string
 	TurnID         string
@@ -82,18 +75,11 @@ type ToolResult struct {
 	Truncated bool
 }
 
-// ToolBroker is the single decision point every tool invocation passes
-// through before execution. A grant obtained from Evaluate is the only way
-// to reach Execute. Pointer parameters are required; a nil argument returns
-// invalid_argument rather than panicking.
 type ToolBroker interface {
 	Evaluate(ctx context.Context, request *ToolRequest) (PolicyDecision, error)
 	Execute(ctx context.Context, request *ToolRequest, grant *ApprovalGrant) (ToolResult, error)
 }
 
-// Rule is the policy for one tool. AllowedTrust restricts which input trust
-// labels may invoke the tool; empty means any valid label. Untrusted labels
-// are always honored as constraints, never as policy.
 type Rule struct {
 	ToolName             string
 	ToolVersion          string
@@ -103,8 +89,6 @@ type Rule struct {
 	Constraints          Constraints
 }
 
-// Policy is immutable after construction. It is loaded from trusted
-// configuration only; nothing in a ToolRequest can modify it.
 type Policy struct {
 	Version string
 	Rules   map[string]Rule
@@ -137,8 +121,6 @@ func (p Policy) Validate() error {
 	return errors.Join(problems...)
 }
 
-// ApprovalGrant binds everything the execution depends on. Changing any
-// bound field invalidates the grant.
 type ApprovalGrant struct {
 	GrantID          string
 	PrincipalID      string
@@ -154,9 +136,6 @@ type ApprovalGrant struct {
 	Nonce            string
 }
 
-// ValidFor checks every bound field against the request and the current
-// policy version at time now. Any mismatch is approval_invalid. Nil
-// arguments are programming errors and return invalid_argument.
 func (g *ApprovalGrant) ValidFor(request *ToolRequest, policyVersion string, now time.Time) error {
 	if g == nil {
 		return Errorf(ErrorCodeInvalidArgument, "grant must not be nil")
@@ -207,18 +186,11 @@ func (g *ApprovalGrant) ValidForConstraints(request *ToolRequest, policyVersion 
 	return nil
 }
 
-// HashArguments returns the canonical hex SHA-256 of the raw arguments, so
-// the grant binds the exact bytes evaluated, and the request cannot lie
-// about its own hash.
 func HashArguments(arguments json.RawMessage) string {
 	sum := sha256.Sum256(arguments)
 	return hex.EncodeToString(sum[:])
 }
 
-// HashCapabilities returns the canonical hex SHA-256 of a capability set.
-// Ordering is irrelevant; the set is sorted before hashing, so a grant
-// stays valid across request orderings but is invalidated the moment the
-// granted capabilities change.
 func HashCapabilities(capabilities []string) string {
 	sorted := slices.Clone(capabilities)
 	slices.Sort(sorted)

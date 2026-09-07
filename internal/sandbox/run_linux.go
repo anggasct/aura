@@ -14,11 +14,6 @@ import (
 	"time"
 )
 
-// negotiate probes the running kernel for the primitives the containment
-// contract depends on. Process groups are always available on Linux, so
-// negotiation never fails on this platform; the probe results let callers
-// decide whether kernel-level denial (Landlock, seccomp, cgroup v2) is
-// available before running untrusted children.
 func negotiate() (Primitives, error) {
 	return Primitives{
 		UserNamespace: usernsAvailable(),
@@ -29,13 +24,6 @@ func negotiate() (Primitives, error) {
 	}, nil
 }
 
-// usernsAvailable reports whether an unprivileged process may create a user
-// namespace. /proc/sys/user/max_user_namespaces is the kernel's authoritative
-// knob: 0 (or absent) means user namespaces are disabled or compiled out; a
-// positive value is the per-user creation limit. Some distros additionally
-// gate unprivileged creation via kernel.unprivileged_userns_clone. Reading
-// these knobs queries the kernel directly rather than inferring support from
-// a marketing kernel version.
 func usernsAvailable() bool {
 	data, err := os.ReadFile("/proc/sys/user/max_user_namespaces")
 	if err != nil {
@@ -75,9 +63,6 @@ func landlockAvailable() bool {
 	return strings.Contains(string(data), "landlock")
 }
 
-// resolveExecutable maps a command to the path the child will exec. Bare
-// names are resolved on the parent's PATH; the resolved path becomes part of
-// the streamed child config.
 func resolveExecutable(command string) (string, error) {
 	if strings.Contains(command, "/") {
 		return command, nil
@@ -89,9 +74,6 @@ func resolveExecutable(command string) (string, error) {
 	return resolved, nil
 }
 
-// childSysProcAttr is the process attribute set every sandbox child starts
-// with: its own process group, and fresh user and network namespaces mapped
-// to the calling user.
 func childSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		Setpgid:     true,
@@ -101,14 +83,6 @@ func childSysProcAttr() *syscall.SysProcAttr {
 	}
 }
 
-// run launches the tool inside a contained child. The child is a re-execution
-// of this binary under the sandbox sentinel: the parent streams the config
-// over a pipe, the child applies rlimits, Landlock, and seccomp then execs
-// the target in fresh user and network namespaces. Output is capped at
-// MaxOutputBytes. Timeout or cancellation kills the entire process group
-// with SIGKILL and reaps it, so nothing survives the deadline. The cgroup is
-// applied where the host delegated its controllers; Require gates the
-// capability on that delegation, so production runs always enforce it.
 func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...string) (Result, error) {
 	if spec.AllowNetwork {
 		return Result{}, Errorf(ErrorCodeSandboxUnavailable, "network access is not available in this sandbox")
@@ -188,8 +162,6 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 
 	timeout := time.NewTimer(spec.Limits.Timeout)
 	defer timeout.Stop()
-	// waitDone and initErrCh are buffered so both senders always terminate;
-	// the err reader is authoritative for setup failure, the wait reaps.
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- cmd.Wait() }()
 	initErrCh := make(chan error, 1)
@@ -214,8 +186,6 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 		return result
 	}
 
-	// The process-group kill is a second net so grandchildren die even though
-	// only the parent is held directly.
 	select {
 	case waitErr := <-waitDone:
 		initErr := <-initErrCh // child exit closed the err pipe, so the reader has finished
@@ -259,8 +229,6 @@ func isExitErr(err error) bool {
 	return errors.As(err, &exitErr)
 }
 
-// limitedBuffer accumulates child output up to a byte cap and drops the
-// rest, so a spamming child cannot exhaust parent memory.
 type limitedBuffer struct {
 	limit     int64
 	buffer    bytes.Buffer

@@ -125,9 +125,6 @@ func TestSearchRejectsUnsafeEndpointsBeforeDialing(t *testing.T) {
 	}
 }
 
-// The production construction path has no client or transport injection:
-// a provider endpoint that resolves to a private address must be denied by
-// the mediated client before any connection is dialed.
 func TestSearchMediatedClientDeniesPrivateEndpoints(t *testing.T) {
 	t.Setenv("AURA_TEST_SEARCH_TOKEN", "search-secret")
 	for _, endpoint := range []string{

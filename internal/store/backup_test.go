@@ -121,8 +121,6 @@ func TestBackupExistingDestinationFailsCleanly(t *testing.T) {
 		t.Errorf("conflict error leaks the full path: %v", err)
 	}
 
-	// The destination is not wedged: removing the snapshot lets the next
-	// backup succeed, and no partial file was left behind.
 	entries, err := os.ReadDir(destDir)
 	if err != nil {
 		t.Fatalf("read destDir: %v", err)
@@ -260,8 +258,6 @@ func TestVerifyRestoreLeavesBackupReadOnly(t *testing.T) {
 	}
 }
 
-// The manifest is an on-disk contract. Renaming a Go field must not be able
-// to change the serialized key names, so pin them here.
 func TestBackupManifestOnDiskKeyNames(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
@@ -305,8 +301,6 @@ func TestBackupManifestOnDiskKeyNames(t *testing.T) {
 	}
 }
 
-// The serialized manifest must be byte-stable: a renamed Go field must not
-// silently rename the on-disk key, or restores of older backups break.
 func TestBackupManifestMatchesGoldenBytes(t *testing.T) {
 	manifest := BackupManifest{
 		CreatedAt: time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),

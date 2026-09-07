@@ -41,9 +41,7 @@ func (m *mockCandidateLLM) GenerateContent(_ context.Context, req *adkmodel.LLMR
 			return
 		}
 
-		// Streaming mode
 		if m.errAfterChunk == 0 && m.generateErr != nil {
-			// Immediate error before any chunks
 			yield(nil, m.generateErr)
 			return
 		}
@@ -118,7 +116,6 @@ func TestFallback_TransientAndRateLimitAdvances(t *testing.T) {
 		t.Fatalf("unexpected response: %+v", gotResp)
 	}
 
-	// Verify both models were attempted in strict sequence
 	if len(primaryMock.recordedRequests) != 1 {
 		t.Errorf("primary should be attempted once")
 	}
@@ -164,7 +161,6 @@ func TestFallback_PolicyRejectionDoesNotFallback(t *testing.T) {
 
 	wantCode(t, gotErr, ErrorCodeContentFiltered)
 
-	// Backup model must NEVER be attempted when primary hits a policy filter
 	if len(backupMock.recordedRequests) != 0 {
 		t.Errorf("backup model should not be attempted on policy filter rejection")
 	}
@@ -207,7 +203,6 @@ func TestFallback_ObservableBoundaryStreamPreventsRestart(t *testing.T) {
 	}
 	route := config.ModelRoute{Candidates: []string{"primary", "backup"}}
 
-	// Primary emits 1 chunk, then fails mid-stream
 	primaryMock := &mockCandidateLLM{
 		name: "primary",
 		streamResponses: []*adkmodel.LLMResponse{
@@ -232,15 +227,12 @@ func TestFallback_ObservableBoundaryStreamPreventsRestart(t *testing.T) {
 		chunks = append(chunks, resp)
 	}
 
-	// First chunk was received
 	if len(chunks) != 1 || chunks[0].Content.Parts[0].Text != "partial response" {
 		t.Fatalf("expected 1 partial chunk, got %v", chunks)
 	}
 
-	// Mid-stream error crosses boundary and returns typed boundary error
 	wantCode(t, gotErr, ErrorCodeFallbackBoundary)
 
-	// Backup model MUST NOT be invoked because boundary was crossed!
 	if len(backupMock.recordedRequests) != 0 {
 		t.Errorf("backup model was invoked after boundary was crossed!")
 	}
@@ -253,7 +245,6 @@ func TestFallback_StreamErrorBeforeOutputFallsBack(t *testing.T) {
 	}
 	route := config.ModelRoute{Candidates: []string{"primary", "backup"}}
 
-	// Primary fails immediately before emitting ANY chunk
 	primaryMock := &mockCandidateLLM{
 		name:          "primary",
 		errAfterChunk: 0,
@@ -313,7 +304,6 @@ func TestFallback_AllCandidatesExhaustedReturnsNormalizedError(t *testing.T) {
 
 	wantCode(t, gotErr, ErrorCodeFallbackExhausted)
 
-	// Verify error message contains safe aliases and normalized classes, no secrets/raw details
 	errMsg := gotErr.Error()
 	if !strings.Contains(errMsg, "m1 (rate_limited)") || !strings.Contains(errMsg, "m2 (overloaded)") {
 		t.Errorf("expected safe aliases and normalized classes in %q", errMsg)
@@ -361,7 +351,6 @@ func TestFallback_CanonicalRequestIsolation(t *testing.T) {
 		t.Errorf("dispatched request should be a cloned copy, not pointer identical")
 	}
 
-	// Mutate dispatched request to prove isolation
 	dispatched.Contents[0].Parts[0].FunctionCall.Args["query"] = "mutated"
 	if origReq.Contents[0].Parts[0].FunctionCall.Args["query"] != "aura" {
 		t.Errorf("original request was mutated by candidate adapter modification!")

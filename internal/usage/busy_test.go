@@ -10,10 +10,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// A write lock held by another connection must not fail the reserve: the
-// begin retries transient SQLITE_BUSY until the holder releases. The lock
-// is released only after a busy begin failure has actually been observed,
-// so the retry path — not lock timing — carries the reserve.
 func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
@@ -98,15 +94,11 @@ func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 		<-reserveDone
 		t.Fatalf("Reserve did not finish: %v", ctx.Err())
 	}
-	// Reading busyFailures is safe here: the reserve goroutine finished,
-	// and every observer call precedes Reserve returning.
 	if busyFailures != 1 {
 		t.Fatalf("busy begin failures = %d, want exactly 1 before the release", busyFailures)
 	}
 }
 
-// A permanent failure at BEGIN surfaces immediately; only SQLITE_BUSY is
-// retried.
 func TestBeginTxDoesNotRetryPermanentErrors(t *testing.T) {
 	var attempts int
 	db := &fakeBeginner{onBegin: func() { attempts++ }, result: errBoom}
@@ -118,11 +110,6 @@ func TestBeginTxDoesNotRetryPermanentErrors(t *testing.T) {
 	}
 }
 
-// A busy BEGIN that never clears exhausts its attempt budget instead of
-// spinning forever: a real holder connection keeps the write lock while the
-// probe connection runs with a tiny busy_timeout, so every attempt fails with
-// genuine driver SQLITE_BUSY. The observed busy count pins the budget
-// without timing assumptions.
 func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 	ctx := context.Background()
 	dsn := t.TempDir() + "/usage.db"
@@ -166,8 +153,6 @@ func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 	if !isTransientBusy(err) {
 		t.Fatalf("err = %v (%T), want wrapped driver SQLITE_BUSY", err, err)
 	}
-	// The final attempt fails without notifying, so the observer sees
-	// exactly the retry count.
 	if busyAttempts != busyMaxAttempts-1 {
 		t.Fatalf("busy begin retries = %d, want %d before giving up", busyAttempts, busyMaxAttempts-1)
 	}

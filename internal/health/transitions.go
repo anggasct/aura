@@ -9,14 +9,8 @@ import (
 	"time"
 )
 
-// StatusNone marks a finding identity with no previously emitted state; the
-// first observation of a new identity transitions from here so the durable
-// log carries complete state history.
 const StatusNone Status = ""
 
-// Transition is one durable finding state change. It carries only stable
-// contract fields — identity, the two statuses, the code in effect, and the
-// time — never evidence detail.
 type Transition struct {
 	FindingID string    `json:"finding_id"`
 	From      Status    `json:"from"`
@@ -25,17 +19,11 @@ type Transition struct {
 	At        time.Time `json:"at"`
 }
 
-// TransitionPolicy shapes flap resistance. A candidate state must survive
-// StableFor since first seen before it commits (debounce), and successive
-// emissions for one finding identity wait at least Cooldown apart.
 type TransitionPolicy struct {
 	StableFor time.Duration
 	Cooldown  time.Duration
 }
 
-// EventSink receives committed transitions. A failed sink leaves the tracker's
-// current state untouched, so the same transition is attempted again on the
-// next observation until it is durably recorded.
 type EventSink func(ctx context.Context, t *Transition) error
 
 type pendingTransition struct {
@@ -43,9 +31,6 @@ type pendingTransition struct {
 	firstSeen time.Time
 }
 
-// StateTracker turns raw observations into durable, flap-resistant
-// transitions. It is safe for concurrent use; observations may arrive from
-// any evaluation path.
 type StateTracker struct {
 	policy TransitionPolicy
 	now    func() time.Time
@@ -57,9 +42,6 @@ type StateTracker struct {
 	lastEmit map[string]time.Time
 }
 
-// NewStateTracker builds a tracker. History seeds prior state so a restart
-// neither re-emits old states nor forgets the baseline to compare against;
-// nil history starts empty.
 func NewStateTracker(policy TransitionPolicy, sink EventSink, history func(ctx context.Context) ([]Transition, error)) (*StateTracker, error) {
 	if sink == nil {
 		return nil, errors.New("health: transition sink must not be nil")
@@ -91,13 +73,8 @@ func NewStateTracker(policy TransitionPolicy, sink EventSink, history func(ctx c
 	return tracker, nil
 }
 
-// SetClock overrides the time source; tests use this instead of sleeping.
 func (t *StateTracker) SetClock(now func() time.Time) { t.now = now }
 
-// Observe folds one evaluation's findings into the tracker. Committed
-// transitions are returned alongside any sink persistence error; the error
-// does not advance state, so the next observation retries the same
-// transition.
 func (t *StateTracker) Observe(ctx context.Context, findings []Finding) (committed []Transition, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -155,7 +132,6 @@ func (t *StateTracker) emit(ctx context.Context, transition *Transition, id stri
 	return nil
 }
 
-// Snapshot returns the currently tracked states, oldest ID first.
 func (t *StateTracker) Snapshot() []Finding {
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -27,8 +27,6 @@ type Options struct {
 	MaxBodyBytes  int64
 	Resolver      egress.Resolver
 
-	// client is unexported so external constructors can only obtain the
-	// mediated egress client; in-package tests use it as a canned seam.
 	client *http.Client
 }
 

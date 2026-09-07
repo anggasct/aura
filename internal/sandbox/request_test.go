@@ -83,8 +83,6 @@ func wantApprovalInvalid(t *testing.T, err error) {
 	}
 }
 
-// TestRegisterAcceptsMatchingGrant proves the happy path: a grant minted over
-// the request digests identically and registers, so a later resolve can bind it.
 func TestRegisterAcceptsMatchingGrant(t *testing.T) {
 	req := testRequest(t)
 	grant := mintTestGrant(t, "v1", time.Minute, req)
@@ -94,8 +92,6 @@ func TestRegisterAcceptsMatchingGrant(t *testing.T) {
 	}
 }
 
-// TestRegisterRejectsMismatchedGrant proves a grant minted for one request
-// cannot be registered against another.
 func TestRegisterRejectsMismatchedGrant(t *testing.T) {
 	req := testRequest(t)
 	grant := mintTestGrant(t, "v1", time.Minute, req)
@@ -111,9 +107,6 @@ func TestRegisterRejectsMismatchedGrant(t *testing.T) {
 	wantApprovalInvalid(t, registry.Register(context.Background(), &grant, req))
 }
 
-// TestResolveMutationMatrix proves every altered bound field invalidates
-// resolution. No failing case consumes the nonce, so the original request
-// still resolves after the sweep.
 func TestResolveMutationMatrix(t *testing.T) {
 	req := testRequest(t)
 	grant := mintTestGrant(t, "v1", time.Minute, req)
@@ -146,15 +139,12 @@ func TestResolveMutationMatrix(t *testing.T) {
 		})
 	}
 
-	// None of the rejected resolutions consumed the one-shot nonce, so the
-	// original bound request still resolves exactly once.
 	req.ApprovalGrantID = grant.GrantID
 	if _, err := registry.resolve(req); err != nil {
 		t.Fatalf("resolve original after sweep: %v", err)
 	}
 }
 
-// TestResolveNonceOneShot proves a grant executes once and never again.
 func TestResolveNonceOneShot(t *testing.T) {
 	req := testRequest(t)
 	grant := mintTestGrant(t, "v1", time.Minute, req)
@@ -170,7 +160,6 @@ func TestResolveNonceOneShot(t *testing.T) {
 	wantApprovalInvalid(t, err)
 }
 
-// TestResolveUnregistered proves an unknown grant id never reaches the executor.
 func TestResolveUnregistered(t *testing.T) {
 	registry := NewRegistry("v1", nil)
 	req := testRequest(t)
@@ -179,8 +168,6 @@ func TestResolveUnregistered(t *testing.T) {
 	wantApprovalInvalid(t, err)
 }
 
-// TestResolvePolicyVersionDrift proves reloading policy invalidates grants
-// minted under the prior version.
 func TestResolvePolicyVersionDrift(t *testing.T) {
 	req := testRequest(t)
 	grant := mintTestGrant(t, "v1", time.Minute, req)
@@ -194,9 +181,6 @@ func TestResolvePolicyVersionDrift(t *testing.T) {
 	wantApprovalInvalid(t, err)
 }
 
-// TestResolveExpiry proves an expired grant is refused even if its nonce is
-// untouched. The grant expires one minute after minting; the registry clock is
-// advanced past that window before resolution.
 func TestResolveExpiry(t *testing.T) {
 	req := testRequest(t)
 	grant := mintTestGrant(t, "v1", time.Minute, req)
@@ -210,9 +194,6 @@ func TestResolveExpiry(t *testing.T) {
 	wantApprovalInvalid(t, err)
 }
 
-// TestTelemetryRedactsSecrets proves the run telemetry line carries the
-// accounting fields an operator needs and never the request's arguments,
-// output, or environment values.
 func TestTelemetryRedactsSecrets(t *testing.T) {
 	req := testRequest(t)
 	req.Arguments = []string{"arg-SECRET-xyz"}

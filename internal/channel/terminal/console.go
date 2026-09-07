@@ -12,14 +12,8 @@ import (
 	"time"
 )
 
-// ErrInterrupted marks a console run ended by an interrupt escalation.
 var ErrInterrupted = errors.New("terminal: interrupted")
 
-// Console is the plain, line-oriented local channel. It reads UTF-8
-// newline-delimited prompts until EOF, submits each as a turn, and writes the
-// completed assistant text to stdout while diagnostics go to stderr. It emits
-// no ANSI, never presents an interactive approval, and denies approvals by
-// default.
 type Console struct {
 	runner   Runner
 	sessions Sessions
@@ -30,18 +24,13 @@ type Console struct {
 	diag   io.Writer
 	config Config
 
-	principal    string
-	sessionID    string
-	closeInput   func()
-	tty          *TTYRenderer
-	terminalSeen bool
-	approvals    *ApprovalBridge
-	// lines is the run loop's line source, stored so an in-turn approval
-	// ask can route the operator's answer. Written once in Run before any
-	// turn starts and read only from the run loop goroutine.
-	lines <-chan readLineResult
-	// The next line belongs to an approval that ended before its answer was
-	// consumed; it must not become a new model turn.
+	principal           string
+	sessionID           string
+	closeInput          func()
+	tty                 *TTYRenderer
+	terminalSeen        bool
+	approvals           *ApprovalBridge
+	lines               <-chan readLineResult
 	discardNextApproval bool
 
 	mu           sync.Mutex
@@ -52,10 +41,6 @@ type Console struct {
 	turnCancel   context.CancelFunc
 }
 
-// NewConsole builds a plain console. in/out/diag are owned by the caller; the
-// console only closes input when the caller opts in with SetInputCloser.
-// principal is the local owner identity stamped on every turn and validated on
-// session switches.
 func NewConsole(runner Runner, sessions Sessions, render Renderer, in io.Reader, out, diag io.Writer, config Config, principal string) *Console {
 	return &Console{
 		runner:    runner,
@@ -70,34 +55,18 @@ func NewConsole(runner Runner, sessions Sessions, render Renderer, in io.Reader,
 	}
 }
 
-// SetClock overrides the interrupt-window clock for tests.
 func (c *Console) SetClock(now func() time.Time) { c.now = now }
 
-// SetInterrupts wires an interrupt source so tests can drive Ctrl-C without
-// real signals. The channel carries one event per interrupt; nil (the
-// default) means interrupts never arrive.
 func (c *Console) SetInterrupts(ch <-chan struct{}) { c.interrupts = ch }
 
 func (c *Console) SetSessionID(id string) { c.sessionID = id }
 
-// SetInputCloser opts into closing the input reader when Run stops. This lets
-// callers release a blocking reader without transferring ownership by default.
 func (c *Console) SetInputCloser(closeInput func()) { c.closeInput = closeInput }
 
-// SetTTY switches the console to the interactive presentation: streamed
-// frames replace the batch plain renderer, and the multiline editor gesture
-// becomes available. nil restores the plain contract.
 func (c *Console) SetTTY(r *TTYRenderer) { c.tty = r }
 
-// SetApprovalBridge installs the interactive exact-approval path. It only
-// takes effect in the TTY presentation; the plain contract keeps denying
-// approvals by default.
 func (c *Console) SetApprovalBridge(b *ApprovalBridge) { c.approvals = b }
 
-// Run drives the console until EOF after drain, an escalated interrupt, or
-// ctx cancellation. A first interrupt cancels the active turn and waits for
-// its durable terminal state; a second interrupt within the configured window
-// escalates to Interrupted.
 func (c *Console) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("terminal: context must not be nil")
@@ -166,9 +135,6 @@ func (c *Console) Run(ctx context.Context) error {
 				ack()
 				continue
 			}
-			// The lone-period gesture composes a multi-line prompt in the
-			// user's editor; it is interactive-surface only, and a plain
-			// console submits the period as an ordinary prompt.
 			if line == "." && c.tty != nil {
 				pauseReading()
 				ack()
@@ -212,9 +178,6 @@ func (c *Console) Run(ctx context.Context) error {
 	}
 }
 
-// runTurn submits one prompt and renders its completed text to stdout and
-// diagnostics to stderr. A ctx cancellation (first interrupt) cancels the
-// turn, whose stream ends with the durable terminal event.
 func (c *Console) runTurn(ctx context.Context, line string) error {
 	turnCtx, cancel := context.WithCancel(ctx)
 	c.setTurnCancel(cancel)
@@ -240,26 +203,17 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 	if failed {
 		return errors.New("terminal: turn failed")
 	}
-	// A stream that ends without terminality is an error regardless of
-	// cancellation state: the turn owns a durable terminal event.
 	if !c.terminalSeen {
 		return errors.New("terminal: turn ended without a terminal event")
 	}
 	return nil
 }
 
-// streamItem is one event or error pumped off the turn's stream.
 type streamItem struct {
 	ev  Event
 	err error
 }
 
-// streamTurn drives the interactive renderer: events fold into bounded
-// render state, a pump coalesces frames at the configured rate, and the
-// final frame carries the authoritative completed message. An exact
-// approval ask suspends the loop's answer routing: the card is written
-// below the live frame and the next input line becomes the decision,
-// defaulting to reject on empty input, EOF, expiry, or turn end.
 func (c *Console) streamTurn(turnCtx context.Context, req *Request, failed, cancelled *bool) error {
 	c.tty.Begin()
 	producerCtx, cancelProducer := context.WithCancel(turnCtx)
@@ -424,8 +378,6 @@ loop:
 	return streamErr
 }
 
-// batchTurn collects the event stream and renders once at the end: the plain
-// contract writes only completed assistant text.
 func (c *Console) batchTurn(turnCtx context.Context, req *Request, failed, cancelled *bool) error {
 	var stream []Event
 	retained := 0
@@ -449,8 +401,6 @@ func (c *Console) batchTurn(turnCtx context.Context, req *Request, failed, cance
 			return err
 		}
 	}
-	// Failed and cancelled turns suppress partial output: the durable log
-	// owns what happened, the display shows the outcome.
 	suppressed := *failed || *cancelled
 	if !suppressed && assistant != "" {
 		if err := writeLine(c.out, assistant); err != nil {
@@ -461,9 +411,6 @@ func (c *Console) batchTurn(turnCtx context.Context, req *Request, failed, cance
 	return nil
 }
 
-// watchInterrupts feeds interrupts into the run loop: a first interrupt
-// cancels the active turn, and a second within the configured window signals
-// an escalated exit.
 func (c *Console) watchInterrupts(ctx context.Context) {
 	for {
 		select {
@@ -485,11 +432,6 @@ func (c *Console) watchInterrupts(ctx context.Context) {
 	}
 }
 
-// observeInterrupt records one interrupt and reports whether it escalates a
-// second interrupt inside the configured window. The first interrupt always
-// cancels the active turn (a no-op when idle); only a second interrupt within
-// the window forces the console to exit, which is the durable-cancellation
-// contract for first/second Ctrl-C.
 func (c *Console) observeInterrupt() bool {
 	c.mu.Lock()
 	now := c.now()
@@ -529,8 +471,6 @@ func (c *Console) cancelTurn() {
 	}
 }
 
-// drain returns nil at a clean stop; the console has no queued work because
-// turns run inline to completion.
 func (c *Console) drain() error {
 	return nil
 }
@@ -553,13 +493,8 @@ func writeLinef(w io.Writer, format string, args ...any) error {
 	return writeLine(w, fmt.Sprintf(format, args...))
 }
 
-// readLines reads newline-delimited prompts until EOF, capping each line at
-// maxBytes. Over-long lines fail the console rather than gas up memory.
 const maxBufferedEvents = 1024
 
-// maxBatchStreamBytes bounds the aggregate payload bytes a batch turn may
-// retain before rendering; extraction happens at append time so a stream of
-// large provider events cannot accumulate a process-sized buffer.
 const maxBatchStreamBytes = 2 << 20
 
 func appendRenderEvent(stream []Event, ev Event, retained int) (updated []Event, total int) {
@@ -676,10 +611,6 @@ func trimBatchStream(stream []Event, retained int) (updated []Event, total int) 
 	return stream, retained
 }
 
-// readLines reads newline-delimited prompts until EOF. pause stops reading
-// between lines and releases stdin to another consumer (the multiline editor
-// gesture); resume restarts reading afterwards. Both are safe on a stopped
-// reader.
 func readLines(ctx context.Context, r io.Reader, maxBytes int, closeInput func()) (lines <-chan readLineResult, pause, resume, stop func()) {
 	out := make(chan readLineResult)
 	readCtx, cancel := context.WithCancel(ctx)

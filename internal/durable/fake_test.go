@@ -55,7 +55,6 @@ func TestFakeSignalQueuesBeforeAndWakesAfterWait(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	<-started
-	// Signal before the handler waits: the payload must queue.
 	if err := fake.Signal(context.Background(), run, "go", []byte("green")); err != nil {
 		t.Fatalf("Signal: %v", err)
 	}
@@ -219,8 +218,6 @@ func TestSignalWaitCancellationPreservesRacedDelivery(t *testing.T) {
 	for time.Now().Before(deadline) && !detached() {
 		time.Sleep(time.Millisecond)
 	}
-	// Deliver after the abandoned wait detached itself: the payload must
-	// queue for the next waiter instead of dying with the old attempt.
 	inv.mu.Lock()
 	queue := inv.signals["x"]
 	if queue == nil {

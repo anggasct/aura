@@ -88,7 +88,6 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 	gf := &globalFlags{configPath: writeModelsConfig(t, "")}
 	ctx := context.Background()
 
-	// Initial circuits query
 	out, err := runModelsCommand(t, gf, "circuits")
 	if err != nil {
 		t.Fatalf("models circuits: %v", err)
@@ -97,7 +96,6 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 		t.Fatalf("initial circuits output missing expected content:\n%s", out)
 	}
 
-	// Now insert an open circuit checkpoint directly into store
 	loadRes, err := config.Load(gf.configPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
@@ -122,7 +120,6 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 	}
 	_ = db.Close()
 
-	// Run circuits command and verify open state is listed
 	out, err = runModelsCommand(t, gf, "circuits")
 	if err != nil {
 		t.Fatalf("models circuits: %v", err)
@@ -131,7 +128,6 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 		t.Errorf("circuits output lacks open state:\n%s", out)
 	}
 
-	// Reset the circuit for cand1
 	resetOut, err := runModelsCommand(t, gf, "circuit-reset", "cand1")
 	if err != nil {
 		t.Fatalf("models circuit-reset cand1: %v", err)
@@ -140,7 +136,6 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 		t.Errorf("circuit-reset output lacks success message:\n%s", resetOut)
 	}
 
-	// Reset nonexistent circuit fails
 	_, err = runModelsCommand(t, gf, "circuit-reset", "nonexistent-model")
 	if err == nil {
 		t.Fatal("expected circuit-reset nonexistent-model to fail")

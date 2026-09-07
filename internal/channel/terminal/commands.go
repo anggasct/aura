@@ -6,9 +6,6 @@ import (
 	"strings"
 )
 
-// dispatch runs one local slash command and reports whether the console
-// should continue reading. Slash commands never become model input; an
-// unknown command is a diagnostic, not a turn.
 func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
 	fields := strings.Fields(raw)
 	command := strings.ToLower(strings.TrimPrefix(fields[0], "/"))
@@ -37,7 +34,6 @@ func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
 	}
 }
 
-// newSession starts a fresh durable conversation owned by the local principal.
 func (c *Console) newSession(ctx context.Context) error {
 	sess, err := c.sessions.Create(ctx, c.principal)
 	if err != nil {
@@ -47,8 +43,6 @@ func (c *Console) newSession(ctx context.Context) error {
 	return writeLinef(c.diag, "new session %s", sess.ID)
 }
 
-// sessionCommand switches to a named session after validating local owner
-// access, or prints the current session when no argument is given.
 func (c *Console) sessionCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return writeLinef(c.out, "session %s", c.sessionID)
@@ -65,11 +59,9 @@ func (c *Console) sessionCommand(ctx context.Context, args []string) error {
 	return writeLinef(c.diag, "switched to session %s", sess.ID)
 }
 
-// status prints the current session and the bounded tail of its event log.
 func (c *Console) status(ctx context.Context) error {
 	events, err := c.sessions.ListEvents(ctx, c.sessionID, 0, c.config.InMemoryHistory)
 	if err != nil {
-		// A session with no events is a plain status, not an error.
 		if code := codeOf(err); code != "session_not_found" && code != "" {
 			return fmt.Errorf("terminal: session events: %w", err)
 		}

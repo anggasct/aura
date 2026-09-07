@@ -19,25 +19,15 @@ import (
 	"google.golang.org/genai"
 )
 
-// errStopYield is a distinct sentinel for "the caller stopped iterating"; it
-// must never alias io.EOF, or a dropped connection would look like a clean
-// stop.
 var errStopYield = errors.New("model: stream iterator stopped")
 
 const maxResponseBytes = 64 << 20
 
-// providerCodec is the provider-specific surface a coreClient needs:
-// request construction, endpoint selection, non-streaming decode, stream
-// event decoding, and auth headers. HTTP, retry, SSE, timeout, and error
-// classification live once in the core.
 type providerCodec interface {
 	protocol() string
 	endpoint(baseURL string, req *adkmodel.LLMRequest, stream bool) string
 	buildRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error)
 	decodeResponse(body []byte) (*adkmodel.LLMResponse, error)
-	// decodeStreamEvent maps one SSE data payload into accumulator
-	// operations. terminal marks the provider's end-of-stream marker
-	// (message_stop, [DONE], response.completed, a finish-reason chunk).
 	decodeStreamEvent(data []byte) ([]streamOp, bool, error)
 	setAuthHeaders(req *http.Request, apiKey string)
 }
@@ -54,8 +44,6 @@ const (
 	opDone
 )
 
-// streamOp is one accumulator operation decoded from a provider event. idx
-// carries the provider's tool-call index where it has one (OpenAI), or -1.
 type streamOp struct {
 	kind     streamOpKind
 	idx      int
@@ -83,8 +71,6 @@ type coreClient struct {
 	logger       *slog.Logger
 }
 
-// newCoreClient resolves a nil logger to the process default once, here, so
-// no request path reaches for a global while serving.
 func newCoreClient(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration, codec providerCodec) *coreClient {
 	if logger == nil {
 		logger = slog.Default()
@@ -168,8 +154,6 @@ func (c *coreClient) do(ctx context.Context, req *adkmodel.LLMRequest, stream bo
 		return nil, retryCount, err
 	}
 	if !stream {
-		// A long stream is gated by the idle timeout, never by a total
-		// deadline; non-streaming calls get a per-request deadline.
 		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(ctx, c.timeout)
@@ -295,8 +279,6 @@ func readCapped(body io.Reader) ([]byte, error) {
 	return data, nil
 }
 
-// validateContentType rejects a body whose media type cannot be parsed by the
-// request path, so a proxy page or error page never reaches a decoder.
 func validateContentType(contentType string, stream bool, provider string) error {
 	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 	if stream {
@@ -330,8 +312,6 @@ type toolCallAccum struct {
 	args strings.Builder
 }
 
-// streamAccumulator folds provider events into one ordered content model:
-// text and tool-call parts in appearance order, plus usage and stop reason.
 type streamAccumulator struct {
 	model        string
 	parts        []*streamPart

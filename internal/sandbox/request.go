@@ -11,12 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/approval"
 )
 
-// SandboxRequest is the elevated execution contract. An elevated run reaches
-// the contained executor only when its ApprovalGrantID resolves to a grant
-// that still binds every field below, so a request altered after approval can
-// never execute. PrincipalID, SessionID, and ToolName bind the approver;
-// Executable, Arguments, the path roots, the environment, and the Limits form
-// the binding digest.
 type SandboxRequest struct {
 	RequestID       string
 	PrincipalID     string
@@ -34,10 +28,6 @@ type SandboxRequest struct {
 	ApprovalGrantID string
 }
 
-// boundContract is the canonical form hashed into the approval grant. Path
-// roots and the environment are sorted so byte-identical requests share a
-// digest regardless of map or slice order; Arguments stay ordered because
-// argv order is semantically significant.
 type boundContract struct {
 	Executable     string   `json:"executable"`
 	Arguments      []string `json:"arguments"`
@@ -48,9 +38,6 @@ type boundContract struct {
 	Limits         Limits   `json:"limits"`
 }
 
-// DigestPayload returns the canonical JSON a broker hashes when minting an
-// approval grant for req, so the broker and the registry cannot drift on what
-// the grant binds.
 func DigestPayload(req *SandboxRequest) (json.RawMessage, error) {
 	if req == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
@@ -86,17 +73,10 @@ func sortedClone(values []string) []string {
 	return clone
 }
 
-// registeredGrant holds a grant the registry accepted after confirming it
-// binds the request the broker presented.
 type registeredGrant struct {
 	grant approval.ApprovalGrant
 }
 
-// Registry is the in-memory authority that resolves an ApprovalGrantID to a
-// bound grant and consumes its one-shot nonce on execution. The broker mints
-// grants through the approval engine and registers them here; the contained
-// executor resolves them by ID, so the sandbox never trusts a caller-supplied
-// grant object directly.
 type Registry struct {
 	mu             sync.Mutex
 	policyVersion  string
@@ -106,9 +86,6 @@ type Registry struct {
 	consumedNonces map[string]struct{}
 }
 
-// NewRegistry builds a registry bound to one policy version. The version is
-// fixed for the registry's life so a grant minted under a prior policy fails
-// validation the moment the broker reloads policy and rebuilds the registry.
 func NewRegistry(policyVersion string, logger *slog.Logger) *Registry {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -122,9 +99,6 @@ func NewRegistry(policyVersion string, logger *slog.Logger) *Registry {
 	}
 }
 
-// Register records a grant for req after confirming the grant binds this exact
-// request. A grant already registered, or one whose bound fields do not match
-// req, is refused so a mismatched or replayed grant can never reach execution.
 func (r *Registry) Register(_ context.Context, grant *approval.ApprovalGrant, req *SandboxRequest) error {
 	if grant == nil {
 		return Errorf(ErrorCodeInvalidArgument, "grant must not be nil")
@@ -150,8 +124,6 @@ func (r *Registry) Register(_ context.Context, grant *approval.ApprovalGrant, re
 	return nil
 }
 
-// assertBinds verifies the grant's bound fields match req, so registration
-// fails fast on a grant minted for a different request.
 func (r *Registry) assertBinds(grant *approval.ApprovalGrant, req *SandboxRequest) error {
 	payload, err := DigestPayload(req)
 	if err != nil {
@@ -169,10 +141,6 @@ func (r *Registry) assertBinds(grant *approval.ApprovalGrant, req *SandboxReques
 	return nil
 }
 
-// resolve validates the grant bound to req.ApprovalGrantID and consumes its
-// one-shot nonce. It is the single chokepoint every elevated run passes
-// before reaching the contained executor, so a replayed or altered request
-// fails here regardless of the caller.
 func (r *Registry) resolve(req *SandboxRequest) (approval.ApprovalGrant, error) {
 	if req == nil {
 		return approval.ApprovalGrant{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
@@ -200,9 +168,6 @@ func (r *Registry) resolve(req *SandboxRequest) (approval.ApprovalGrant, error) 
 		Arguments:    payload,
 		Capabilities: req.Capabilities,
 	}
-	// ValidFor re-checks principal, session, tool, argument digest,
-	// capabilities, policy version, and expiry. Its typed error is remapped
-	// onto the sandbox's own approval_invalid code so callers see one contract.
 	if err := entry.grant.ValidFor(toolReq, r.policyVersion, r.now()); err != nil {
 		return approval.ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "%v", err)
 	}
@@ -210,10 +175,6 @@ func (r *Registry) resolve(req *SandboxRequest) (approval.ApprovalGrant, error) 
 	return entry.grant, nil
 }
 
-// Execute resolves and consumes the request's approval grant, then runs the
-// contained executable. A grant failure is reported before any child starts;
-// a run outcome is recorded as one telemetry line carrying only non-secret
-// identifying and accounting fields.
 func (r *Registry) Execute(ctx context.Context, req *SandboxRequest) (Result, error) {
 	grant, err := r.resolve(req)
 	if err != nil {
@@ -241,10 +202,6 @@ func specFromRequest(req *SandboxRequest) *Spec {
 	}
 }
 
-// sessionContract adapts a SessionRequest to the one-shot digest contract so
-// a session grant binds exactly the same confinement fields a broker hashed
-// when minting it: executable, argv, working dir, path roots, environment,
-// and limits.
 func sessionContract(req *SessionRequest) (*SandboxRequest, error) {
 	if req == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
@@ -266,15 +223,6 @@ func sessionContract(req *SessionRequest) (*SandboxRequest, error) {
 	}, nil
 }
 
-// validateSessionGrant resolves the session's approval grant and re-checks
-// that it still binds this request — principal, session, tool, capabilities,
-// policy version, expiry, and the confinement digest — before any child is
-// spawned. The one-shot nonce is deliberately NOT consumed: a session is
-// long-lived by contract, so the grant is checked at Start (and re-checkable
-// by any future revalidation point) while remaining spendable only by the
-// one-shot path, which keeps "no session may outlive its trust grant" an
-// operator concern (revoke the grant, then Close the session) instead of a
-// silent mid-stream break.
 func (r *Registry) validateSessionGrant(req *SessionRequest) error {
 	contract, err := sessionContract(req)
 	if err != nil {

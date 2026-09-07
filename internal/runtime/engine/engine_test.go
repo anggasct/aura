@@ -76,8 +76,6 @@ func TestPerSessionFIFONoOverlap(t *testing.T) {
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
 
-		// Submit serially, waiting for each accepted event to be durable, so the
-		// submission order is deterministic and the queue preserves it.
 		errs := make(chan error, 3)
 		submit := func(n int) {
 			go func() {
@@ -90,8 +88,6 @@ func TestPerSessionFIFONoOverlap(t *testing.T) {
 			submit(i)
 		}
 
-		// The fake executor blocks on gate, so only one turn can be active at a
-		// time; the others must stay queued behind it.
 		waitFor(t, func() bool { return executor.StartCount() == 1 })
 		time.Sleep(50 * time.Millisecond)
 		if got := executor.StartCount(); got != 1 {
@@ -129,7 +125,6 @@ func TestGlobalConcurrencyLimit(t *testing.T) {
 			}(i)
 		}
 
-		// Two sessions may run concurrently, but the global cap is two.
 		waitFor(t, func() bool { return executor.StartCount() == 2 })
 		time.Sleep(50 * time.Millisecond)
 		if got := executor.StartCount(); got != 2 {
@@ -174,7 +169,6 @@ func TestDuplicateIngressReturnsOriginalTurn(t *testing.T) {
 			t.Fatalf("duplicate replayed a different turn: %q vs %q", firstEventTurn(second), firstEventTurn(first))
 		}
 
-		// The duplicate must not have created a second event sequence.
 		var count int
 		if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runtime_event WHERE turn_id = ?`, first[0].TurnID).Scan(&count); err != nil {
 			t.Fatalf("count events: %v", err)
@@ -218,7 +212,6 @@ func TestQueueOverflowIsTyped(t *testing.T) {
 		mustCreateSession(t, db, "session-c")
 
 		errs := make(chan error, 2)
-		// One turn occupies the active slot; one more fills the pending slot.
 		go func() {
 			_, err := collect(t, engine, sampleRequest("session-a", turnID(0)))
 			errs <- err
@@ -230,7 +223,6 @@ func TestQueueOverflowIsTyped(t *testing.T) {
 		}()
 		waitFor(t, func() bool { return acceptedCount(t, db, "session-b") >= 1 })
 
-		// The third turn has no room: active slot busy, pending slot full.
 		_, err := collect(t, engine, sampleRequest("session-c", turnID(2)))
 		code, ok := runtime.CodeOf(err)
 		if !ok || code != runtime.ErrorCodeRuntimeOverloaded {
@@ -364,7 +356,6 @@ func TestShutdownDrainsAndCancelsDurably(t *testing.T) {
 		}, executor)
 		mustCreateSession(t, db, "session-a")
 
-		// One active turn blocked on the gate, two more queued behind it.
 		errs := make(chan error, 3)
 		for i := range 3 {
 			go func(n int) {
@@ -378,7 +369,6 @@ func TestShutdownDrainsAndCancelsDurably(t *testing.T) {
 			t.Fatalf("Shutdown: %v", err)
 		}
 
-		// Every accepted turn must have a durable terminal event.
 		var accepted, terminals int
 		if err := db.QueryRowContext(context.Background(),
 			`SELECT COUNT(*) FROM runtime_event WHERE session_id = 'session-a' AND kind = ?`,
@@ -407,7 +397,6 @@ func TestAbandonedConsumerDoesNotBlockTurn(t *testing.T) {
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "session-a")
 
-		// The consumer reads the accepted event, then abandons the iterator.
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		seq := engine.Run(ctx, sampleRequest("session-a", "turn-abandon"))
@@ -418,8 +407,6 @@ func TestAbandonedConsumerDoesNotBlockTurn(t *testing.T) {
 		}
 		stop()
 
-		// The turn must still run to a durable completion even though its only
-		// subscriber is gone.
 		waitFor(t, func() bool { return executor.StartCount() == 1 })
 		close(gate)
 		waitForTerminalDurable(t, db, "turn-abandon")
@@ -574,14 +561,11 @@ func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 64}, executor)
 		mustCreateSession(t, db, "session-a")
 
-		// Occupy the active slot so submits queue as pending.
 		go func() {
 			_, _ = collect(t, engine, sampleRequest("session-a", "turn-0"))
 		}()
 		waitFor(t, func() bool { return executor.StartCount() == 1 })
 
-		// Burst submits racing shutdown: each must either be rejected cleanly or
-		// reach a durable terminal, and no Run stream may hang.
 		const n = 8
 		errs := make(chan error, n)
 		for i := range n {
@@ -605,7 +589,6 @@ func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 		}()
 		close(gate)
 		for i := range n {
-			// Rejection with a stable code is fine; hangs are the failure mode.
 			if err := <-errs; err != nil {
 				if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeRuntimeOverloaded {
 					t.Fatalf("submit %d: %v", i, err)
@@ -616,7 +599,6 @@ func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 			t.Fatalf("Shutdown: %v", err)
 		}
 
-		// Invariant: every accepted turn has a durable terminal event.
 		var orphans int
 		if err := db.QueryRowContext(context.Background(), `
 			SELECT COUNT(*) FROM runtime_event a
@@ -644,15 +626,12 @@ func TestCompletedTurnsArePruned(t *testing.T) {
 			}
 		}
 
-		// The terminal event is broadcast before the worker's deferred prune
-		// runs, so wait for the prune rather than asserting synchronously.
 		waitFor(t, func() bool {
 			engine.mu.Lock()
 			defer engine.mu.Unlock()
 			return len(engine.turns) == 0
 		})
 
-		// Replays of completed turns still work through the store.
 		events, err := engine.dedupe.ListTurnEvents(context.Background(), turnID(0))
 		if err != nil {
 			t.Fatalf("ListTurnEvents after prune: %v", err)
@@ -670,8 +649,6 @@ func lastKind(events []store.RuntimeEvent) string {
 	return events[len(events)-1].Kind
 }
 
-// ignoreCancelExecutor blocks until release closes, ignoring ctx
-// cancellation, so only the shutdown grace bound can end the turn.
 type ignoreCancelExecutor struct {
 	release chan struct{}
 }

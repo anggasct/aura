@@ -26,7 +26,6 @@ func TestCircuitCheckpointStore_SaveLoadDelete(t *testing.T) {
 		t.Fatalf("Save(cp1): %v", err)
 	}
 
-	// Load and verify
 	loaded, err := s.Load(ctx)
 	if err != nil {
 		t.Fatalf("Load(): %v", err)
@@ -42,7 +41,6 @@ func TestCircuitCheckpointStore_SaveLoadDelete(t *testing.T) {
 		t.Errorf("open_until = %v, want %v", got.OpenUntil, openUntil)
 	}
 
-	// Update (upsert)
 	cp1.ConsecutiveFailures = 4
 	cp1.State = "half_open"
 	if err := s.Save(ctx, &cp1); err != nil {
@@ -57,7 +55,6 @@ func TestCircuitCheckpointStore_SaveLoadDelete(t *testing.T) {
 		t.Errorf("updated checkpoint mismatch: %+v", loaded[0])
 	}
 
-	// Delete
 	if err := s.Delete(ctx, cp1.CircuitKey); err != nil {
 		t.Fatalf("Delete(): %v", err)
 	}

@@ -54,10 +54,6 @@ func NewFallbackAdapter(name string, route config.ModelRoute, definitions map[st
 	}
 }
 
-// WithPrices attaches the operator price registry used to convert
-// provider-reported usage into cost micros for the route's cost budget. A
-// nil registry leaves cost accounting disabled: unpriced deployments keep
-// working, priced ones are enforced.
 func (f *FallbackAdapter) WithPrices(prices *usage.PriceRegistry) *FallbackAdapter {
 	f.prices = prices
 	return f
@@ -68,11 +64,6 @@ func (f *FallbackAdapter) WithLogger(logger *slog.Logger) *FallbackAdapter {
 	return f
 }
 
-// costMicrosFor converts provider-reported usage into USD micros using the
-// price registry's record for the candidate definition, with the same
-// integer-micros convention as the usage ledger. A definition with no
-// applicable price costs nothing, so budget enforcement stays a no-op
-// instead of inventing a price.
 func (f *FallbackAdapter) costMicrosFor(definitionID string, u usage.Usage) int64 {
 	if f.prices == nil || u == (usage.Usage{}) {
 		return 0
@@ -84,10 +75,6 @@ func (f *FallbackAdapter) costMicrosFor(definitionID string, u usage.Usage) int6
 	return price.CostMicros(u)
 }
 
-// recordCost charges one candidate attempt's usage against the invocation
-// budget. A budget-exceeded failure is returned so the attempt stops before
-// another provider call is paid for; other failures only lose accounting,
-// never the response.
 func (f *FallbackAdapter) recordCost(ctx context.Context, budget *InvocationBudget, definitionID string, resp *adkmodel.LLMResponse) error {
 	if budget == nil || resp == nil || resp.UsageMetadata == nil {
 		return nil
@@ -251,9 +238,6 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 					if class.FallbackEligible() {
 						continue
 					}
-					// Terminal error (policy rejection, auth, unsupported, caller deadline):
-					// charge whatever usage the failed attempt produced; the
-					// attempt error is the one surfaced to the caller.
 					_ = f.recordCost(reqCtx, budget, candidate, response)
 					yield(nil, attemptErr)
 					return
@@ -263,9 +247,6 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 					f.circuits.RecordSuccess(reqCtx, circuitKey)
 				}
 				if err := f.recordCost(reqCtx, budget, candidate, response); err != nil {
-					// The ceiling was crossed by this attempt's usage: the
-					// turn fails even though a response exists, so the next
-					// invocation cannot silently keep spending.
 					yield(nil, err)
 					return
 				}
@@ -273,12 +254,9 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 				return
 			}
 
-			// Streaming mode with observable boundary tracking
 			boundaryCrossed := false
 			var streamErr error
 			aborted := false
-			// streamFinal tracks the terminal usage-bearing chunk so cost is
-			// charged once, after the stream completes successfully.
 			var streamFinal *adkmodel.LLMResponse
 
 			for resp, err := range adapter.GenerateContent(reqCtx, clonedReq, true) {
@@ -297,8 +275,6 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 			}
 
 			if aborted {
-				// The consumer stopped mid-stream; the terminal chunk may
-				// never arrive, so charge what was already observable.
 				_ = f.recordCost(reqCtx, budget, candidate, streamFinal)
 				return
 			}
@@ -325,7 +301,6 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 					return
 				}
 
-				// Failed before emitting any output: boundary not crossed
 				class := ClassifyError(streamErr)
 				if f.circuits != nil {
 					f.circuits.RecordFailure(reqCtx, circuitKey, class)
@@ -353,16 +328,12 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 				f.circuits.RecordSuccess(reqCtx, circuitKey)
 			}
 			if err := f.recordCost(reqCtx, budget, candidate, streamFinal); err != nil {
-				// Ceiling crossed by this stream's usage: surfaced to the
-				// caller after the delivered output, mirroring the
-				// non-streaming path.
 				yield(nil, err)
 				return
 			}
 			return
 		}
 
-		// All candidates exhausted: return safe aliases and normalized classes only
 		var parts []string
 		for _, ce := range candidateErrors {
 			parts = append(parts, fmt.Sprintf("%s (%s)", ce.Candidate, ce.Class))

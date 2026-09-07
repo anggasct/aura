@@ -12,8 +12,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// ToolObservation is the metadata-only record of one completed tool call.
-// Raw arguments, output, paths, URLs, and secrets never belong here.
 type ToolObservation struct {
 	Name          string
 	Status        string
@@ -24,9 +22,6 @@ type ToolObservation struct {
 	OutputBytes   int64
 }
 
-// ToolRecorder turns tool observations into spans and bounded-label
-// metrics. It is decoupled from any runtime: the broker reports after the
-// fact, so spans carry the observed start/end timestamps.
 type ToolRecorder struct {
 	tracer   trace.Tracer
 	calls    metric.Int64Counter
@@ -95,9 +90,6 @@ var byteBucketBounds = []int64{
 	4 << 20,
 }
 
-// OutputByteBucket maps a byte count to a fixed, bounded label so output
-// size is observable without a high-cardinality dimension: "0" for empty
-// output, then the smallest upper bound that fits.
 func OutputByteBucket(bytes int64) string {
 	if bytes <= 0 {
 		return "0"

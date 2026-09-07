@@ -37,9 +37,6 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			logConfigResult(ctx, logger, &result)
-			// The runtime must not start while an enabled capability is
-			// absent from this artifact or missing its host dependency;
-			// diagnostics surfaces report the same state as findings.
 			if result.CapabilityStateError != nil {
 				return result.CapabilityStateError
 			}
@@ -54,10 +51,6 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer func() { _ = db.Close() }()
-			// Production model registration: definitions land in the ADK
-			// registry, configured model routes land on their FallbackAdapter
-			// with the route name as the model name, and circuit checkpoints
-			// load from storage so open circuits survive restarts.
 			if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, nil); err != nil {
 				return err
 			}

@@ -17,9 +17,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// The probe listener must serve the documented minimal bodies: liveness
-// independent of subsystem state, readiness reflecting the evaluation, both
-// only via GET/HEAD.
 func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	dataRoot := t.TempDir()
 	db, err := store.OpenDB(t.Context(), filepath.Join(dataRoot, "aura.db"))
@@ -43,7 +40,6 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 		t.Fatalf("buildProbeListener: %v", err)
 	}
 
-	// Bind an ephemeral loopback port for the test.
 	bind, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("bind: %v", err)
@@ -61,9 +57,6 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	if liveBody.Status != health.ProbeStatusAlive {
 		t.Errorf("livez status = %q", liveBody.Status)
 	}
-	// Readiness reflects the real host: a host missing mandatory sandbox
-	// primitives must be 503 with the sandbox code, a fully contained host
-	// must be 200 ready. Everything in between is an intake-blocking bug.
 	primitives, _ := sandbox.Negotiate()
 	supported := len(sandbox.MissingMandatory(primitives)) == 0
 	readyCode, readyStatus := rawProbeStatus(t, addr, "/readyz")
@@ -134,8 +127,6 @@ func probeBody(t *testing.T, addr, path string) health.ProbeBody {
 	return body
 }
 
-// rawProbeStatus returns the probe code and HTTP status so tests can assert
-// the readiness 503 matrix against the real host state.
 func rawProbeStatus(t *testing.T, addr, path string) (code string, status int) {
 	t.Helper()
 	response, err := probeGet(t.Context(), addr, path)

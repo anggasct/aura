@@ -89,12 +89,10 @@ func TestInvocationBudget_DeadlineExceeded(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Initially active
 	if err := b.CheckActive(ctx); err != nil {
 		t.Fatalf("expected active budget, got %v", err)
 	}
 
-	// Advance time past deadline
 	currTime = now.Add(11 * time.Second)
 	err = b.CheckActive(ctx)
 	wantCode(t, err, ErrorCodeDeadlineExceeded)
@@ -159,7 +157,6 @@ func TestInvocationBudget_AttemptsCeiling(t *testing.T) {
 		}
 	}
 
-	// 4th attempt must be rejected
 	err = b.CanAttempt(ctx)
 	wantCode(t, err, ErrorCodeBudgetExceeded)
 
@@ -184,11 +181,9 @@ func TestInvocationBudget_RetryDelayBudget(t *testing.T) {
 		t.Fatalf("ReserveDelay(8s) = %v, %v; want 8s, nil", reserved, err)
 	}
 
-	// Consumed 13s, budget is 15s. Next 3s reservation exceeds 15s.
 	_, err = b.ReserveDelay(ctx, 3*time.Second)
 	wantCode(t, err, ErrorCodeBudgetExceeded)
 
-	// Zero or negative delay is allowed and consumes nothing
 	reserved, err = b.ReserveDelay(ctx, 0)
 	if err != nil || reserved != 0 {
 		t.Fatalf("ReserveDelay(0) = %v, %v; want 0, nil", reserved, err)
@@ -212,15 +207,12 @@ func TestInvocationBudget_DelayExceedsDeadlines(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Delay of 12s exceeds invocation deadline (10s)
 	_, err = b.ReserveDelay(ctx, 12*time.Second)
 	wantCode(t, err, ErrorCodeDeadlineExceeded)
 
-	// Context with shorter deadline
 	ctxShort, cancel := context.WithDeadline(context.Background(), now.Add(5*time.Second))
 	defer cancel()
 
-	// Delay of 6s exceeds context deadline (5s)
 	_, err = b.ReserveDelay(ctxShort, 6*time.Second)
 	wantCode(t, err, ErrorCodeDeadlineExceeded)
 }
@@ -236,11 +228,9 @@ func TestInvocationBudget_TokenCeiling(t *testing.T) {
 		t.Fatalf("RecordTokens(600) failed: %v", err)
 	}
 
-	// 500 more exceeds 1000 limit
 	err = b.RecordTokens(ctx, 500)
 	wantCode(t, err, ErrorCodeBudgetExceeded)
 
-	// 0 or negative tokens allowed
 	if err := b.RecordTokens(ctx, -5); err != nil {
 		t.Fatalf("RecordTokens(-5) failed: %v", err)
 	}
@@ -257,12 +247,10 @@ func TestInvocationBudget_CostCeiling(t *testing.T) {
 		t.Fatalf("RecordCost(1.20) failed: %v", err)
 	}
 
-	// Recording in micros: 500,000 micros = $0.50 -> total $1.70
 	if err := b.RecordCostMicros(ctx, 500000); err != nil {
 		t.Fatalf("RecordCostMicros(500000) failed: %v", err)
 	}
 
-	// Another $0.50 exceeds $2.00
 	err = b.RecordCost(ctx, 0.50)
 	wantCode(t, err, ErrorCodeBudgetExceeded)
 }
@@ -316,7 +304,6 @@ func TestInvocationBudget_ContextHelpers(t *testing.T) {
 		t.Fatalf("BudgetFromContext did not return injected budget")
 	}
 
-	// With nil budget, returns original context
 	if WithInvocationBudget(ctx, nil) != ctx {
 		t.Fatalf("WithInvocationBudget(ctx, nil) should return same ctx")
 	}
@@ -417,7 +404,6 @@ func TestRetryHTTP_EnforcesDelayBudgetExhaustion(t *testing.T) {
 	}
 
 	resp, err := retryHTTP(ctx, cfg, func() (*http.Response, error) {
-		// Return 429 so it attempts to retry with delay
 		return &http.Response{
 			StatusCode: http.StatusTooManyRequests,
 			Header:     http.Header{"Retry-After": []string{"1"}}, // 1 second delay

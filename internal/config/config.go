@@ -36,9 +36,6 @@ type Config struct {
 	Webhook      Webhook               `koanf:"webhook" yaml:"webhook"`
 }
 
-// Webhook configures the authenticated inbound event endpoint. It is
-// disabled by default; when enabled, at least one non-expired key must be
-// configured and its secret resolved from the environment at startup.
 type Webhook struct {
 	Enabled            bool         `koanf:"enabled" yaml:"enabled"`
 	Listen             string       `koanf:"listen_address" yaml:"listen_address"`
@@ -49,19 +46,12 @@ type Webhook struct {
 	Keys               []WebhookKey `koanf:"keys" yaml:"keys"`
 }
 
-// WebhookKey is one signing key. An empty accept_until keeps the key active;
-// a past accept_until moves it to grace: still verifies, never signs new
-// rotations.
 type WebhookKey struct {
 	ID          string `koanf:"id" yaml:"id"`
 	SecretEnv   string `koanf:"secret_env" yaml:"secret_env"`
 	AcceptUntil string `koanf:"accept_until" yaml:"accept_until"`
 }
 
-// Terminal configures the aura chat console. render_hz bounds how often a
-// TTY renderer may repaint; max_input_bytes bounds one prompt; and
-// second_interrupt_window controls how long a first interrupt stays armed
-// before a second one exits outright.
 type Terminal struct {
 	RenderHz            int      `koanf:"render_hz" yaml:"render_hz"`
 	MaxInputBytes       int      `koanf:"max_input_bytes" yaml:"max_input_bytes"`
@@ -70,9 +60,6 @@ type Terminal struct {
 	PlainApproval       string   `koanf:"plain_approval" yaml:"plain_approval"`
 }
 
-// Health configures the loopback probe listener and diagnostics budgets.
-// The listen address must be loopback; exposing probes beyond loopback
-// requires a separate authenticated admin surface.
 type Health struct {
 	Listen                    string   `koanf:"listen" yaml:"listen"`
 	CheckInterval             Duration `koanf:"check_interval" yaml:"check_interval"`
@@ -148,9 +135,6 @@ type Logging struct {
 	Format string `koanf:"format" yaml:"format"`
 }
 
-// Storage configures the SQLite data directory, connection policy, artifact
-// quota, and backup cadence. Empty path values resolve below
-// $XDG_DATA_HOME/aura at open time.
 type Storage struct {
 	Path               string   `koanf:"path" yaml:"path"`
 	BusyTimeout        Duration `koanf:"busy_timeout" yaml:"busy_timeout"`
@@ -161,16 +145,12 @@ type Storage struct {
 	BackupRetention    int      `koanf:"backup_retention" yaml:"backup_retention"`
 }
 
-// ByteSize is a byte count that parses human-readable forms ("5GiB", "512MB",
-// "1000") so storage quotas can be written naturally in config.
 type ByteSize int64
 
 func (b ByteSize) MarshalYAML() (any, error) {
 	return b.String(), nil
 }
 
-// UnmarshalText accepts a plain integer (bytes) or a size with a decimal
-// (KB/MB/GB/TB) or binary (KiB/MiB/GiB/TiB) suffix.
 func (b *ByteSize) UnmarshalText(text []byte) error {
 	value, err := parseByteSize(string(text))
 	if err != nil {
@@ -261,9 +241,6 @@ type AgentLimits struct {
 	TurnTimeout Duration `koanf:"turn_timeout" yaml:"turn_timeout"`
 }
 
-// AgentDefinition is one configured override or addition on top of the
-// compiled-in agent definitions; unknown keys are rejected and every
-// referenced tool, capability, and model route must exist.
 type AgentDefinition struct {
 	ID           string      `koanf:"id" yaml:"id"`
 	Description  string      `koanf:"description" yaml:"description"`
@@ -274,29 +251,22 @@ type AgentDefinition struct {
 	Limits       AgentLimits `koanf:"limits" yaml:"limits"`
 }
 
-// Agents configures overrides and additions to the compiled-in agent
-// definitions. A definition whose id matches a builtin replaces it.
 type Agents struct {
 	Definitions []AgentDefinition `koanf:"definitions" yaml:"definitions"`
 }
 
-// Workflows configures the declarative workflow engine: where definition
-// files load from, how many steps run concurrently, and the default
-// per-step timeout.
 type Workflows struct {
 	DefinitionsDir     string   `koanf:"definitions_dir" yaml:"definitions_dir"`
 	MaxConcurrentSteps int      `koanf:"max_concurrent_steps" yaml:"max_concurrent_steps"`
 	DefaultStepTimeout Duration `koanf:"default_step_timeout" yaml:"default_step_timeout"`
 }
 
-// MCP transport type constants.
 const (
 	MCPTransportStdio          = "stdio"
 	MCPTransportStreamableHTTP = "streamable_http"
 	MCPTransportLegacySSE      = "legacy_sse"
 )
 
-// MCP configures external Model Context Protocol tool servers.
 type MCP struct {
 	Servers []MCPServer `koanf:"servers" yaml:"servers"`
 }
@@ -341,20 +311,17 @@ type MCPStaticAuth struct {
 }
 
 type ModelCapabilities struct {
-	Streaming        bool   `koanf:"streaming" yaml:"streaming"`
-	Tools            bool   `koanf:"tools" yaml:"tools"`
-	StructuredOutput bool   `koanf:"structured_output" yaml:"structured_output"`
-	Vision           bool   `koanf:"vision" yaml:"vision"`
-	Audio            bool   `koanf:"audio" yaml:"audio"`
-	Reasoning        bool   `koanf:"reasoning" yaml:"reasoning"`
-	ContextTokens    int    `koanf:"context_tokens" yaml:"context_tokens"`
-	Tokenizer        string `koanf:"tokenizer" yaml:"tokenizer"`
-	UsageReporting   bool   `koanf:"usage_reporting" yaml:"usage_reporting"`
-	// Cost rates in integer USD micros per token. Zero rates make the
-	// definition free for route cost budgets: the route budget only counts
-	// priced usage, so an unpriced definition never trips a ceiling.
-	MicrosPerInputToken  int64 `koanf:"micros_per_input_token" yaml:"micros_per_input_token"`
-	MicrosPerOutputToken int64 `koanf:"micros_per_output_token" yaml:"micros_per_output_token"`
+	Streaming            bool   `koanf:"streaming" yaml:"streaming"`
+	Tools                bool   `koanf:"tools" yaml:"tools"`
+	StructuredOutput     bool   `koanf:"structured_output" yaml:"structured_output"`
+	Vision               bool   `koanf:"vision" yaml:"vision"`
+	Audio                bool   `koanf:"audio" yaml:"audio"`
+	Reasoning            bool   `koanf:"reasoning" yaml:"reasoning"`
+	ContextTokens        int    `koanf:"context_tokens" yaml:"context_tokens"`
+	Tokenizer            string `koanf:"tokenizer" yaml:"tokenizer"`
+	UsageReporting       bool   `koanf:"usage_reporting" yaml:"usage_reporting"`
+	MicrosPerInputToken  int64  `koanf:"micros_per_input_token" yaml:"micros_per_input_token"`
+	MicrosPerOutputToken int64  `koanf:"micros_per_output_token" yaml:"micros_per_output_token"`
 }
 
 const (
@@ -385,8 +352,6 @@ func (d Duration) MarshalYAML() (any, error) {
 	return time.Duration(d).String(), nil
 }
 
-// UnmarshalText lets direct yaml.Unmarshal and text decoding round-trip
-// durations, not only the koanf decode hook.
 func (d *Duration) UnmarshalText(text []byte) error {
 	duration, err := time.ParseDuration(string(text))
 	if err != nil {
@@ -572,9 +537,6 @@ func validKeyPaths() (paths, mapPaths, structMapPaths, listStructPaths map[strin
 	return paths, mapPaths, structMapPaths, listStructPaths
 }
 
-// ValidateBaseURL validates a model base URL: http/https scheme, a host, no
-// user info, no query or fragment, and https for anything outside the
-// loopback range. Exported so the model layer shares exactly one rule.
 func ValidateBaseURL(raw string) error {
 	if raw == "" {
 		return nil
@@ -601,8 +563,6 @@ func ValidateBaseURL(raw string) error {
 	return nil
 }
 
-// IsLoopbackBaseURL reports whether raw is an http(s) URL whose host is a
-// loopback address or the localhost name.
 func IsLoopbackBaseURL(raw string) bool {
 	if raw == "" {
 		return false

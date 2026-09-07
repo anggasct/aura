@@ -9,8 +9,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// blockingProvider blocks inside Invoke until released, recording that the
-// provider was reached.
 type blockingProvider struct {
 	entered chan struct{}
 	release chan struct{}
@@ -28,7 +26,6 @@ func (p *blockingProvider) Invoke(ctx context.Context, inv *Invocation) (Outcome
 	}
 }
 
-// channelPublisher surfaces published events as they arrive.
 type channelPublisher struct {
 	events chan *store.RuntimeEvent
 }
@@ -40,10 +37,6 @@ func (p *channelPublisher) Publish(ev *store.RuntimeEvent) {
 	}
 }
 
-// TestPreparePublishesToolRequestBeforeProviderInvocation proves the live
-// delivery contract: the committed tool request reaches the runtime
-// subscriber while the provider is still running, not after it settles. A
-// provider that never releases must not delay the event.
 func TestPreparePublishesToolRequestBeforeProviderInvocation(t *testing.T) {
 	journal, _ := newTestJournal(t)
 	published := make(chan *store.RuntimeEvent, 1)
@@ -69,8 +62,6 @@ func TestPreparePublishesToolRequestBeforeProviderInvocation(t *testing.T) {
 		done <- err
 	}()
 
-	// The provider stays blocked for the whole assertion: the event must
-	// arrive without releasing it.
 	select {
 	case ev := <-published:
 		if ev.Kind != EventKindToolRequested {
@@ -83,8 +74,6 @@ func TestPreparePublishesToolRequestBeforeProviderInvocation(t *testing.T) {
 		t.Fatal("tool.requested did not reach the subscriber while the provider was still running")
 	}
 
-	// The provider is entered only after the request was committed and
-	// published; release it and let the execution settle.
 	select {
 	case <-provider.entered:
 	case <-time.After(2 * time.Second):

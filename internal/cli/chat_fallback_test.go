@@ -16,9 +16,6 @@ import (
 	"github.com/anggasct/aura/internal/model"
 )
 
-// chatTestConfig builds a config whose primary route has two candidates over
-// two loopback endpoints, so a live chat turn exercises the production
-// registration and dispatch path end to end.
 func chatTestConfig(t *testing.T, suffix, failingURL, backupURL string) (cfg *config.Config, routeName string) {
 	t.Helper()
 	routeName = "primary-" + suffix
@@ -45,11 +42,6 @@ func chatTestConfig(t *testing.T, suffix, failingURL, backupURL string) (cfg *co
 	}, routeName
 }
 
-// TestChatWireFailsOverThroughRoute proves the production invocation path
-// executes the route chain: candidate 1 serves 503 on every request, and a
-// chat turn still completes through candidate 2 via the registered fallback
-// adapter. Before the wiring fix, model routes never reached the model
-// registry and a turn died on candidate 1's error.
 func TestChatWireFailsOverThroughRoute(t *testing.T) {
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
 
@@ -71,20 +63,14 @@ func TestChatWireFailsOverThroughRoute(t *testing.T) {
 	defer backupSrv.Close()
 
 	cfg, routeName := chatTestConfig(t, suffix, failingSrv.URL, backupSrv.URL)
-	// The spec shares one attempt budget across provider-local retries and
-	// fallback: candidate 1 consumes 1 attempt + 3 provider-local 503
-	// retries, so the route allows 8 to leave room for candidate 2.
 	route := cfg.ModelRoutes[routeName]
 	route.MaxProviderAttempts = 8
 	cfg.ModelRoutes[routeName] = route
 
-	// Register exactly as runChat does: routes land on their FallbackAdapter
-	// with the route name as the model name.
 	if err := model.RegisterAdaptersWithRoutes(context.Background(), nil, cfg.Models, cfg.ModelRoutes, nil, nil); err != nil {
 		t.Fatalf("RegisterAdaptersWithRoutes: %v", err)
 	}
 
-	// Resolve through the same name mapping runChat hands to the executor.
 	routeModel, err := model.RouteModelName(cfg, cfg.Models.Definitions["failing"].Model)
 	if err != nil {
 		t.Fatalf("RouteModelName: %v", err)
@@ -132,9 +118,6 @@ func TestChatWireFailsOverThroughRoute(t *testing.T) {
 	}
 }
 
-// TestChatWireUnknownRouteFailsClosed keeps the resolver honest: an
-// unconfigured route name is a resolution error, and a definition name still
-// resolves to its model string.
 func TestChatWireUnknownRouteFailsClosed(t *testing.T) {
 	cfg, _ := chatTestConfig(t, "failclosed", "http://127.0.0.1:1", "http://127.0.0.1:2")
 	routeModel, err := model.RouteModelName(cfg, "fallback-model")

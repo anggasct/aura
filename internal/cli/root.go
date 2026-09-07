@@ -24,9 +24,6 @@ func (e *usageError) Error() string { return e.err.Error() }
 
 func (e *usageError) Unwrap() error { return e.err }
 
-// exitCodeError carries an explicit process exit code for commands whose
-// contract defines more states than ok/usage-failure (diagnostics exit
-// codes, for example).
 type exitCodeError struct {
 	code int
 	err  error

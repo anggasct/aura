@@ -11,8 +11,6 @@ import (
 	"google.golang.org/genai"
 )
 
-// EventKindADK marks a RuntimeEvent whose Payload is an adkEventPayload
-// produced by an ADK agent turn.
 const EventKindADK = "adk_event"
 
 const adkEventSchemaVersion uint16 = 1
@@ -21,15 +19,9 @@ type adkEventPayload struct {
 	Content            *genai.Content       `json:"content,omitempty"`
 	Actions            session.EventActions `json:"actions"`
 	LongRunningToolIDs []string             `json:"longRunningToolIds,omitempty"`
-	// Partial must round-trip alongside Content: session.Event.IsFinalResponse
-	// checks both, so dropping it would make every replayed event look final.
-	Partial bool `json:"partial,omitempty"`
+	Partial            bool                 `json:"partial,omitempty"`
 }
 
-// RuntimeEventFromADK converts an ADK session event into the RuntimeEvent
-// shape this package persists, preserving invocation, branch, author,
-// actions, content, usage, and long-running tool identifiers. The caller
-// still owns Sequence assignment before Append.
 func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (RuntimeEvent, error) {
 	if ev == nil {
 		return RuntimeEvent{}, errNilArgument("event")
@@ -67,8 +59,6 @@ func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (RuntimeEv
 	}, nil
 }
 
-// RuntimeEventToADK reverses RuntimeEventFromADK, reconstructing an ADK
-// session event from a stored RuntimeEvent.
 func RuntimeEventToADK(e *RuntimeEvent) (*session.Event, error) {
 	if e == nil {
 		return nil, errNilArgument("event")
@@ -106,9 +96,6 @@ func RuntimeEventToADK(e *RuntimeEvent) (*session.Event, error) {
 	}, nil
 }
 
-// ReplayTurn reconstructs a turn's terminal ADK event from stored runtime
-// events alone, with no message projection involved. found is false when
-// the turn has not yet produced a final response.
 func ReplayTurn(ctx context.Context, db *sql.DB, sessionID, turnID string) (event *session.Event, found bool, err error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`

@@ -31,8 +31,6 @@ type dirArguments struct {
 	Recursive bool   `json:"recursive"`
 }
 
-// sysClose and sysFsync are seams so tests can inject close and fsync
-// failures into the write durability path.
 var (
 	sysClose = unix.Close
 	sysFsync = unix.Fsync
@@ -76,9 +74,6 @@ func readFile(_ context.Context, request *toolbroker.ToolRequest, options Option
 	if err != nil {
 		return toolbroker.ToolResult{}, pathError("read", args.Path, err)
 	}
-	// The os.File owns the descriptor: its Close (or finalizer) is the
-	// only close. Pairing os.NewFile with a raw unix.Close on the same fd
-	// lets a late finalizer close a recycled descriptor.
 	file := os.NewFile(uintptr(fd), "read-file")
 	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
@@ -178,10 +173,6 @@ func listDirectory(ctx context.Context, root int, relative string, recursive boo
 	defer func() { _ = file.Close() }()
 	for {
 		remaining := limit - len(result.Entries)
-		// Read at most the remaining budget plus one entry so truncation
-		// is detectable without ever materializing the full listing. An
-		// exhausted budget probes a single entry to distinguish an exact
-		// fit from a truncated listing.
 		readSize := 1
 		if remaining > 0 {
 			readSize = remaining + 1
@@ -207,8 +198,6 @@ func listDirectory(ctx context.Context, root int, relative string, recursive boo
 				return ctx.Err()
 			default:
 			}
-			// The budget is shared with recursive descents, so it must be
-			// rechecked per entry, not per batch.
 			if len(result.Entries) >= limit {
 				result.Truncated = true
 				return nil

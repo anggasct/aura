@@ -122,9 +122,6 @@ func orNone(value string) string {
 	return value
 }
 
-// buildAgentRegistry validates the compiled-in definitions plus configured
-// overrides against the tool registry and configured model routes. An
-// invalid definition aborts before any session starts.
 func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
 	routeSet := make(map[string]bool, len(cfg.Models.Definitions)+len(cfg.ModelRoutes))
 	for route := range cfg.Models.Definitions {

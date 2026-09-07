@@ -30,15 +30,10 @@ type Executor struct {
 	journal *effect.Journal
 }
 
-// effectPublisherFunc adapts a plain publish function to the effect journal's
-// EventPublisher so the runtime publisher can be forwarded.
 type effectPublisherFunc func(*store.RuntimeEvent)
 
 func (f effectPublisherFunc) Publish(ev *store.RuntimeEvent) { f(ev) }
 
-// SetEventPublisher forwards the runtime event publisher to the effect
-// journal so tool requests are published as they become durable, before the
-// provider runs.
 func (e *Executor) SetEventPublisher(publish func(*store.RuntimeEvent)) {
 	if publish == nil || e.journal == nil {
 		return
@@ -129,8 +124,6 @@ func builtinAdapters(toolsCfg *config.Tools) (map[string]toolbroker.Adapter, err
 	return adapters, nil
 }
 
-// DefinitionNames lists the registered builtin tool names in stable order;
-// consumers validate agent or workflow tool references against this set.
 func DefinitionNames() []string {
 	registry := tools.DefinitionsByKey()
 	names := make([]string, 0, len(registry))
@@ -141,8 +134,6 @@ func DefinitionNames() []string {
 	return names
 }
 
-// EffectfulToolNames lists tool names whose execution requires approval
-// coverage; workflow validation refuses uncovered dangerous operations.
 func EffectfulToolNames() []string {
 	registry := tools.DefinitionsByKey()
 	names := make([]string, 0, len(registry))

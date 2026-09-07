@@ -19,7 +19,6 @@ import (
 	"github.com/anggasct/aura/internal/config"
 )
 
-// Helper to start mock servers for all 4 protocols
 func mockProviderServer(t *testing.T, protocol string, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(handler)
@@ -53,8 +52,6 @@ func defaultCaps() config.ModelCapabilities {
 	}
 }
 
-// TestCompatibilityMatrixAllProtocols verifies that fallback chains work across all 4
-// supported protocols in multiple combinations.
 func TestCompatibilityMatrixAllProtocols(t *testing.T) {
 	protocols := []struct {
 		name     string
@@ -134,8 +131,6 @@ func TestCompatibilityMatrixAllProtocols(t *testing.T) {
 	}
 }
 
-// TestObservableBoundaryStreaming verifies that if candidate 1 emits a token
-// and then the stream fails, fallback does not switch to candidate 2.
 func TestObservableBoundaryStreaming(t *testing.T) {
 	var c1Calls, c2Calls atomic.Int32
 
@@ -148,12 +143,10 @@ func TestObservableBoundaryStreaming(t *testing.T) {
 			t.Fatal("expected Flusher")
 		}
 
-		// Emit initial chunk
 		chunk := `data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":123,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Observable partial output"},"finish_reason":null}]}` + "\n\n"
 		_, _ = w.Write([]byte(chunk))
 		flusher.Flush()
 
-		// Abruptly terminate connection without completing stream
 	})
 	defer s1.Close()
 
@@ -218,7 +211,6 @@ func TestObservableBoundaryStreaming(t *testing.T) {
 	}
 }
 
-// TestNonFallbackClassesProvePolicyAndAuthNoBypass verifies policy and auth errors do not fallback.
 func TestNonFallbackClassesProvePolicyAndAuthNoBypass(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -303,7 +295,6 @@ func TestNonFallbackClassesProvePolicyAndAuthNoBypass(t *testing.T) {
 	}
 }
 
-// TestBudgetDeterministicBackoffAndCancellation verifies cancellation and backoff handling.
 func TestBudgetDeterministicBackoffAndCancellation(t *testing.T) {
 	var c1Calls atomic.Int32
 
@@ -339,7 +330,6 @@ func TestBudgetDeterministicBackoffAndCancellation(t *testing.T) {
 		t.Fatalf("router.For: %v", err)
 	}
 
-	// Test cancellation stops immediately
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -349,8 +339,6 @@ func TestBudgetDeterministicBackoffAndCancellation(t *testing.T) {
 	}
 }
 
-// TestTelemetryAndExhaustionPrivacyRedaction verifies that exhaustion errors and telemetry logs
-// contain zero prompts, outputs, secrets, endpoints, headers, or raw provider bodies.
 func TestTelemetryAndExhaustionPrivacyRedaction(t *testing.T) {
 	secretCanary := "sk-super-secret-key-xyz987"
 	endpointCanary := "https://private-endpoint-corp.internal.example.org"
@@ -414,7 +402,6 @@ func TestTelemetryAndExhaustionPrivacyRedaction(t *testing.T) {
 		}
 	}
 
-	// Verify that ONLY safe aliases and normalized classes appear in exhaustion error
 	if !strings.Contains(errStr, "safe-candidate-1") {
 		t.Errorf("error lacks safe candidate alias: %s", errStr)
 	}
@@ -423,7 +410,6 @@ func TestTelemetryAndExhaustionPrivacyRedaction(t *testing.T) {
 	}
 }
 
-// TestHighConcurrencyRaceSafety tests concurrent access across workers.
 func TestHighConcurrencyRaceSafety(t *testing.T) {
 	s := mockProviderServer(t, config.ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
 		writeFixture(t, w, fixtureBytes(t, "openai_completion.json"))

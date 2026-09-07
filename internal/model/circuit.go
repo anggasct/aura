@@ -23,10 +23,6 @@ const (
 	CircuitStateHalfOpen CircuitState = "half_open"
 )
 
-// authLockWindow is how long a circuit stays open after an auth failure.
-// Auth errors cannot recover through probing, so the candidate is locked out
-// until a config reload (digest change) or an explicit operator reset; the
-// window only has to outlive any plausible process lifetime.
 const authLockWindow = 365 * 24 * time.Hour
 
 type CircuitStatus struct {
@@ -169,7 +165,6 @@ func (m *CircuitManager) Register(definitionID, endpoint, configDigest string, p
 
 	entry.policy = policy
 	if entry.configDigest != configDigest {
-		// Config changed: reset circuit state to fresh closed state per spec
 		entry.configDigest = configDigest
 		entry.state = CircuitStateClosed
 		entry.consecutiveFailures = 0
@@ -187,7 +182,6 @@ func (m *CircuitManager) Allow(key string) (allowed, isProbe bool) {
 
 	entry, ok := m.findEntryLocked(key)
 	if !ok {
-		// Unregistered candidate defaults to closed/allowed
 		return true, false
 	}
 
@@ -202,7 +196,6 @@ func (m *CircuitManager) Allow(key string) (allowed, isProbe bool) {
 		if now.Before(entry.openUntil) {
 			return false, false
 		}
-		// Open duration expired: transition to half-open
 		entry.state = CircuitStateHalfOpen
 		entry.updatedAt = now
 		entry.probeActive = true
@@ -285,7 +278,6 @@ func (m *CircuitManager) RecordFailure(ctx context.Context, key string, class Er
 
 	switch entry.state {
 	case CircuitStateHalfOpen:
-		// Probe failed: reopen with backoff
 		entry.state = CircuitStateOpen
 		entry.probeActive = false
 		entry.currentOpenDuration *= 2
@@ -304,7 +296,6 @@ func (m *CircuitManager) RecordFailure(ctx context.Context, key string, class Er
 			transition = "opened"
 		}
 	case CircuitStateOpen:
-		// Already open; update timestamp
 		entry.updatedAt = now
 	}
 
@@ -403,7 +394,6 @@ func (m *CircuitManager) LoadCheckpoints(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		// Stale checkpoint check: ignore if config digest changed
 		if cp.ConfigDigest != entry.configDigest {
 			continue
 		}

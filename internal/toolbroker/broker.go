@@ -54,8 +54,6 @@ type ToolResult struct {
 
 type Adapter func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error)
 
-// Bounded observation metadata values. Raw arguments, paths, URLs, and
-// content never appear in observations.
 const (
 	PolicyOutcomeAllow           = "allow"
 	PolicyOutcomeRequireApproval = "require_approval"
@@ -85,11 +83,6 @@ type Observation struct {
 
 type Observer func(context.Context, Observation)
 
-// ApprovalPrompt is the display-safe canonical scope of one approval
-// request: the exact tool identity, the canonical arguments with configured
-// secrets redacted and the display bounded, the constraints the execution
-// will run under, and the policy reason. It carries everything an operator
-// needs to decide and nothing that can alter the decision.
 type ApprovalPrompt struct {
 	ToolName       string
 	ToolVersion    string
@@ -105,9 +98,6 @@ type ApprovalPrompt struct {
 	ExpiresAt      time.Time
 }
 
-// ApprovalDecider resolves one require-approval outcome. true is valid only
-// for an explicit acceptance of the displayed prompt; false, an error, or a
-// missing decider all reject fail-closed.
 type ApprovalDecider func(ctx context.Context, prompt *ApprovalPrompt) (bool, error)
 
 type Options struct {
@@ -207,7 +197,6 @@ func (b *Broker) Definitions() []tools.Definition {
 	return definitions
 }
 
-// RegisterTool adds or updates a tool definition, its adapter, and policy rule.
 func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rule *approval.Rule) error {
 	if definition == nil {
 		return errorf(ResultInvalidArgument, "tool definition must not be nil")
@@ -255,7 +244,6 @@ func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rul
 	return nil
 }
 
-// UnregisterTool removes a tool and its policy rule.
 func (b *Broker) UnregisterTool(toolName, toolVersion string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -368,9 +356,6 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		} else {
 			approvalState = ApprovalAuto
 		}
-		// The interactive ask can block past the request deadline, so the
-		// grant must retain the original absolute expiry, not a fresh TTL
-		// captured after the ask.
 		if err := contextError(ctx, approvalExpiry); err != nil {
 			approvalState = ApprovalRejected
 			return ToolResult{}, err
@@ -398,8 +383,6 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return ToolResult{}, errorf(ResultDeadlineExceeded, "tool request ended: %v", err)
 		}
-		// An adapter that already classified its error keeps its stable
-		// broker class; only the detail is rewrapped and redacted.
 		if code, ok := CodeOf(err); ok && code.stable() {
 			return ToolResult{}, errorf(code, "%s", redact([]byte(err.Error()), b.secrets))
 		}

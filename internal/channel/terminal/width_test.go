@@ -44,8 +44,6 @@ func TestWrapTextSplitsAtWidth(t *testing.T) {
 
 func TestWrapTextKeepsWideRunesWhole(t *testing.T) {
 	lines := wrapText("你a你", 2)
-	// 你 (2) fills a line; a (1) cannot fit the next 你 (2) on the same
-	// two-column line, so each line stays within the width bound.
 	var got []string
 	for _, line := range lines {
 		got = append(got, line.text)
@@ -83,11 +81,8 @@ func TestWrapTextKeepsGraphemeClustersWhole(t *testing.T) {
 		width int
 		want  []string
 	}{
-		// ZWJ sequence: one cluster, display width two.
 		{"zwj emoji", "\U0001F469\u200D\U0001F4BB\U0001F469\u200D\U0001F4BB", 2, []string{"\U0001F469\u200D\U0001F4BB", "\U0001F469\u200D\U0001F4BB"}},
-		// Regional indicator pair: one flag cluster, width two.
 		{"flag", "\U0001F1FA\U0001F1F8\U0001F1FA\U0001F1F8", 2, []string{"\U0001F1FA\U0001F1F8", "\U0001F1FA\U0001F1F8"}},
-		// Skin-tone modifier: one cluster, width two.
 		{"modifier", "\U0001F44D\U0001F3FD\U0001F44D\U0001F3FD", 2, []string{"\U0001F44D\U0001F3FD", "\U0001F44D\U0001F3FD"}},
 	}
 	for _, tc := range cases {

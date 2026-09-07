@@ -20,8 +20,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-// e2eRunner is the production adapter shape: it maps the console request onto
-// the runtime turn boundary and surfaces durable events back to the console.
 type e2eRunner struct {
 	engine runtime.AgentRuntime
 }
@@ -55,7 +53,6 @@ func (r e2eRunner) Run(ctx context.Context, req *terminal.Request) iter.Seq2[ter
 	}
 }
 
-// e2eSessions adapts the store session service onto the console port.
 type e2eSessions struct {
 	sessions store.SessionService
 }
@@ -85,10 +82,6 @@ func (s e2eSessions) ListEvents(ctx context.Context, sessionID string, after uin
 	return out, nil
 }
 
-// TestTerminalVerticalSlice drives the plain console over a real engine and a
-// real SQLite store, with the deterministic fake executor standing in for the
-// model. This is the first end-to-end slice: durable session, submitted turn,
-// event stream, completed text on stdout, clean EOF.
 func TestTerminalVerticalSlice(t *testing.T) {
 	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
 	if err != nil {
@@ -142,10 +135,6 @@ func TestTerminalVerticalSlice(t *testing.T) {
 	}
 }
 
-// TestTerminalReplayCompletedEventWins proves the replay half of the render
-// contract: events read back from durable storage drive the interactive
-// renderer to the same authoritative completed message the live stream
-// produced, and streamed partials never survive replay.
 func TestTerminalReplayCompletedEventWins(t *testing.T) {
 	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
 	if err != nil {

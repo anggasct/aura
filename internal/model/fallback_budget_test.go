@@ -12,11 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/usage"
 )
 
-// TestFallbackCostBudgetExceeded proves the route cost budget is enforced on
-// the invocation path: provider-reported usage is priced and recorded
-// against the InvocationBudget, and a turn whose settled cost crosses
-// cost_budget_usd fails with model_budget_exceeded instead of succeeding
-// silently.
 func TestFallbackCostBudgetExceeded(t *testing.T) {
 	pricedDef := config.ModelDefinition{
 		Protocol: config.ProtocolOpenAIChatCompat,
@@ -50,7 +45,6 @@ func TestFallbackCostBudgetExceeded(t *testing.T) {
 		t.Fatalf("register price: %v", err)
 	}
 
-	// 2 input + 4 output tokens = 20 + 2000 = 2020 micros > 1000 micros cap.
 	expensive := &mockCandidateLLM{
 		name: "expensive",
 		responses: []*adkmodel.LLMResponse{
@@ -83,7 +77,6 @@ func TestFallbackCostBudgetExceeded(t *testing.T) {
 		t.Fatalf("error code = %q (found=%v), want %q", code, ok, ErrorCodeBudgetExceeded)
 	}
 
-	// The reverse direction: usage under the cap passes.
 	cheap := &mockCandidateLLM{
 		name: "expensive",
 		responses: []*adkmodel.LLMResponse{

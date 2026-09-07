@@ -13,9 +13,6 @@ func errNilArgument(name string) error {
 	return fmt.Errorf("invalid_argument: %s must not be nil", name)
 }
 
-// ApprovalCard is the display-safe canonical scope of one exact approval
-// request. Values are sanitized before they reach the output surface and
-// secret material is already redacted upstream.
 type ApprovalCard struct {
 	ToolName       string
 	ToolVersion    string
@@ -31,7 +28,6 @@ type ApprovalCard struct {
 	ExpiresAt      time.Time
 }
 
-// approvalAsk is one pending card plus its reply path.
 type approvalAsk struct {
 	card    *ApprovalCard
 	reply   chan bool
@@ -45,24 +41,16 @@ func (a *approvalAsk) answer(accepted bool) {
 	}
 }
 
-// ApprovalBridge connects the runtime's approval decisions to the console's
-// input loop. The turn worker asks through Decide and blocks; the console
-// renders the card, routes the operator's answer, and replies. Anything that
-// ends the ask without an explicit acceptance — cancellation, EOF, expiry,
-// turn end, a second concurrent ask — rejects.
 type ApprovalBridge struct {
 	mu      sync.Mutex
 	pending *approvalAsk
 	ready   chan struct{}
 }
 
-// NewApprovalBridge builds an idle bridge.
 func NewApprovalBridge() *ApprovalBridge {
 	return &ApprovalBridge{ready: make(chan struct{}, 1)}
 }
 
-// Decide blocks the caller — the runtime turn worker — until the console
-// returns the operator's answer or ctx ends.
 func (b *ApprovalBridge) Decide(ctx context.Context, card *ApprovalCard) (bool, error) {
 	if ctx == nil {
 		return false, fmt.Errorf("terminal: %w", errNilArgument("context"))
@@ -97,15 +85,10 @@ func (b *ApprovalBridge) Decide(ctx context.Context, card *ApprovalCard) (bool, 
 	}
 }
 
-// readyCh exposes the ask signal; it closes never and fires once per ask.
 func (b *ApprovalBridge) readyCh() <-chan struct{} {
 	return b.ready
 }
 
-// take claims the pending ask for rendering; nil when none is pending or
-// the ask is already being served. The ask stays pending — and concurrent
-// asks keep failing closed in Decide — until it is answered or its
-// context ends.
 func (b *ApprovalBridge) take() *approvalAsk {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -117,8 +100,6 @@ func (b *ApprovalBridge) take() *approvalAsk {
 	return ask
 }
 
-// approvalAccepted reports whether one input line is an explicit approval.
-// Everything else — including the empty default — rejects.
 func approvalAccepted(line string) bool {
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes":
@@ -127,9 +108,6 @@ func approvalAccepted(line string) bool {
 	return false
 }
 
-// renderApprovalCard lays out the bounded canonical scope. Every value is
-// sanitized and the card wraps to the display width so nothing escapes the
-// approval surface.
 func renderApprovalCard(card *ApprovalCard, width int) string {
 	arguments := limitText(sanitizeText(card.Arguments))
 	if arguments == "" {

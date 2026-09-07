@@ -16,17 +16,6 @@ import (
 	"time"
 )
 
-// The session suite needs a runnable child. The fixture is the plain
-// interpreter script testdata/session-helper.sh, materialized with the exec
-// bit into the test's temporary directory; a host without containment never
-// reaches these spawns because Start fails closed with sandbox_unavailable
-// and every spawn-dependent test skips itself.
-//
-// The fixture must stay a plain interpreter script: the confined child runs
-// under the seccomp syscall allowlist, and a compiled runtime child (a Go
-// test binary, for instance) would issue syscalls that allowlist
-// deliberately denies.
-
 func sessionFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -47,8 +36,6 @@ func sessionRequest(t *testing.T) *SessionRequest {
 	req := testSessionRequest(t)
 	helperPath := sessionFixture(t)
 	req.Executable = helperPath
-	// The fixture must live under a Landlock-declared root or the confined
-	// child could not exec it; the workspace root carries the fixture.
 	req.WorkingDir = filepath.Dir(helperPath)
 	req.Environment = map[string]string{}
 	req.Limits = Limits{Timeout: 5 * time.Second}
@@ -77,11 +64,6 @@ func exchange(t *testing.T, s *Session, payload string) string {
 	return string(response)
 }
 
-// The child runs under the full mandatory isolation stack and the
-// persistent pipes carry exchanges; Start awaits the child's setup result,
-// so any isolation-setup failure surfaces here as a typed error with no
-// process left behind (proven deterministically by the setup-failure test in
-// the integration leg).
 func TestIntegrationSessionEchoExchange(t *testing.T) {
 	s := startHelperSession(t, nil)
 	for i := range 3 {
@@ -92,8 +74,6 @@ func TestIntegrationSessionEchoExchange(t *testing.T) {
 	}
 }
 
-// Environment contract: the declared environment reaches the child
-// and the parent's ambient environment does not leak in.
 func TestIntegrationSessionEnvAllowlist(t *testing.T) {
 	t.Setenv("AURA_SESSION_CANARY", "canary-qq7-3k1")
 	req := sessionRequest(t)
@@ -107,8 +87,6 @@ func TestIntegrationSessionEnvAllowlist(t *testing.T) {
 	}
 }
 
-// A request that exceeds its deadline returns sandbox_timeout and the
-// session remains usable for a subsequent valid request.
 func TestIntegrationSessionRequestTimeoutThenRecovers(t *testing.T) {
 	s := startHelperSession(t, nil)
 	if _, err := s.Request(t.Context(), []byte("@slow 2s")); err != nil {
@@ -125,8 +103,6 @@ func TestIntegrationSessionRequestTimeoutThenRecovers(t *testing.T) {
 	}
 }
 
-// A response beyond the output bound returns sandbox_output_exceeded
-// and the session remains usable for a subsequent valid request.
 func TestIntegrationSessionOutputExceededThenRecovers(t *testing.T) {
 	req := sessionRequest(t)
 	req.Limits.MaxOutputBytes = 64
@@ -143,9 +119,6 @@ func TestIntegrationSessionOutputExceededThenRecovers(t *testing.T) {
 	}
 }
 
-// Concurrent Request calls are serialized — every response is the
-// echo of its own request, with no interleaved writes on the child's stdin.
-// Run with -race: the serialization is what the race detector observes.
 func TestIntegrationSessionConcurrentRequestsSerialize(t *testing.T) {
 	s := startHelperSession(t, nil)
 	const workers = 8
@@ -177,9 +150,6 @@ func TestIntegrationSessionConcurrentRequestsSerialize(t *testing.T) {
 	}
 }
 
-// Close terminates and reaps the whole group and releases the
-// cgroup; a leak harness asserts no process, fd, or cgroup remains, and
-// Close is idempotent.
 func TestIntegrationSessionCloseReaps(t *testing.T) {
 	goroutinesBefore := runtime.NumGoroutine()
 	fdsBefore := countOpenFDs(t)
@@ -220,7 +190,6 @@ func TestIntegrationSessionCloseReaps(t *testing.T) {
 	}
 }
 
-// A closed session refuses further exchanges instead of hanging.
 func TestSessionRequestAfterCloseFailsClosed(t *testing.T) {
 	s := startHelperSession(t, nil)
 	if err := s.Close(t.Context()); err != nil {
@@ -232,8 +201,6 @@ func TestSessionRequestAfterCloseFailsClosed(t *testing.T) {
 	}
 }
 
-// A child crash surfaces as a stable session error, subsequent
-// requests fail closed, and Close still reaps.
 func TestIntegrationSessionCrashFailsClosed(t *testing.T) {
 	s := startHelperSession(t, nil)
 	if _, err := s.Request(t.Context(), []byte("@crash")); err == nil {
@@ -253,10 +220,6 @@ func TestIntegrationSessionCrashFailsClosed(t *testing.T) {
 	}
 }
 
-// Cancelling the Start context terminates and reaps the whole
-// group and releases the cgroup — the spec's ctx-cancellation trigger — with
-// the same leak bounds as an explicit Close, and no goroutine from the
-// lifecycle watcher remains.
 func TestIntegrationSessionCtxCancelTearsDown(t *testing.T) {
 	goroutinesBefore := runtime.NumGoroutine()
 	fdsBefore := countOpenFDs(t)
@@ -275,8 +238,6 @@ func TestIntegrationSessionCtxCancelTearsDown(t *testing.T) {
 		t.Fatalf("warm exchange: %v", err)
 	}
 	cancel()
-	// The watcher needs no nudge: cancellation is the teardown trigger. The
-	// bound covers the TERM grace and the scheduler, not the child's mood.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if _, err := s.Request(t.Context(), []byte("late")); err == nil {
@@ -293,7 +254,6 @@ func TestIntegrationSessionCtxCancelTearsDown(t *testing.T) {
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSessionClosed {
 		t.Fatalf("request after ctx-cancel = %v, want session_closed", err)
 	}
-	// Idempotent explicit Close after a watcher teardown.
 	if err := s.Close(t.Context()); err != nil {
 		t.Fatalf("Close after ctx-cancel: %v", err)
 	}
@@ -316,13 +276,6 @@ func TestIntegrationSessionCtxCancelTearsDown(t *testing.T) {
 	}
 }
 
-// The session child shares the one-shot stack's
-// kernel-level network denial — net namespace without external linkage plus
-// the seccomp socket-deny. The property is enforced by the kernel, not by
-// child cooperation, so the same-primitive assertion here is that the
-// session child exchanges successfully inside that stack; the network
-// denial itself is proven for the shared primitives by
-// TestIntegrationNetworkDenied in the isolation leg.
 func TestIntegrationSessionNoNetworkCapability(t *testing.T) {
 	if !usernsAvailable() {
 		t.Skip("user namespaces unavailable: session containment (and its net namespace) cannot be provided")
@@ -333,18 +286,6 @@ func TestIntegrationSessionNoNetworkCapability(t *testing.T) {
 	}
 }
 
-// A connect attempt from inside the session child itself is denied
-// at the syscall layer — the spec's no-network criterion, asserted directly.
-// The fixture takes the
-// @connect directive, spawns bash with a /dev/tcp redirection (a real
-// socket() syscall) inside the session child's confinement, and reports the
-// connector's exit status on the child's stdout. bash is killed by seccomp
-// (SIGSYS → status 159) before any connection can exist, the session child
-// itself survives, and the exchange answers denied-159. A warm exchange
-// beforehand proves the child was serving through the same pipes, and
-// follow-up exchanges prove the denial did not break the session. The net
-// namespace is a second, independent denial layer for any process that gets
-// as far as a connect.
 func TestIntegrationSessionConnectDenied(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available for the network-attempt fixture")
@@ -371,7 +312,6 @@ func TestIntegrationSessionConnectDenied(t *testing.T) {
 	}
 }
 
-// countHelperOrphans counts surviving helper processes after teardown.
 func countHelperOrphans(ctx context.Context) int {
 	out, err := exec.CommandContext(ctx, "pgrep", "-c", "-f", "session-helper").Output()
 	if err != nil {

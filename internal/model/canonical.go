@@ -5,11 +5,6 @@ import (
 	"google.golang.org/genai"
 )
 
-// CloneCanonicalRequest produces a cleanly isolated copy of an LLM request for
-// dispatch to a candidate model. It preserves canonical messages, parts, tool
-// declarations, and configurations while ensuring provider-specific continuation
-// tokens, vendor-specific hidden fields, and response buffers do not leak across
-// provider boundaries.
 func CloneCanonicalRequest(req *adkmodel.LLMRequest) *adkmodel.LLMRequest {
 	if req == nil {
 		return nil

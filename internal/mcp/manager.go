@@ -68,10 +68,6 @@ func (m *Manager) SetCustomTransport(serverName string, transport sdk.Transport)
 	m.customTransports[serverName] = transport
 }
 
-// enforceSpawnTrust gates process creation for stdio servers. The spawn
-// digest covers only the executable surface (command, args, environment); an
-// absent or stale approval returns mcp_trust_required and records the pending
-// digest for owner review before any process exists.
 func (m *Manager) enforceSpawnTrust(ctx context.Context, registry TrustRegistry, serverCfg *config.MCPServer) error {
 	spawnDigest, err := ComputeSpawnDigest(serverCfg)
 	if err != nil {

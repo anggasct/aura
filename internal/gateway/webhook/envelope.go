@@ -18,8 +18,6 @@ const (
 	maxMetadataValueChars = 512
 )
 
-// Envelope is the strict event body. Payload and metadata stay untrusted
-// external input: they are carried, never executed or interpolated.
 type Envelope struct {
 	EventID  string            `json:"event_id"`
 	Subject  string            `json:"subject"`
@@ -27,9 +25,6 @@ type Envelope struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
-// ParseEnvelope strictly decodes a bounded, already-authenticated body.
-// Unknown top-level fields, a non-object payload, and every documented
-// length bound are enforced here so nothing downstream re-validates.
 func ParseEnvelope(body []byte) (Envelope, error) {
 	var envelope Envelope
 	// One byte past the body proves the decoder consumed exactly the input
