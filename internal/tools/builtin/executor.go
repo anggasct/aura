@@ -220,3 +220,24 @@ func (e *Executor) Execute(ctx context.Context, request *runtimeadk.BuiltinToolR
 	}
 	return result.Output, nil
 }
+
+func (e *Executor) RegisterTool(definition *tools.Definition, adapter toolbroker.Adapter, rule *approval.Rule) error {
+	if e == nil || e.broker == nil {
+		return errors.New("executor broker is not initialized")
+	}
+	return e.broker.RegisterTool(definition, adapter, rule)
+}
+
+func (e *Executor) UnregisterTool(toolName, toolVersion string) {
+	if e == nil || e.broker == nil {
+		return
+	}
+	e.broker.UnregisterTool(toolName, toolVersion)
+}
+
+func (e *Executor) Broker() *toolbroker.Broker {
+	if e == nil {
+		return nil
+	}
+	return e.broker
+}
