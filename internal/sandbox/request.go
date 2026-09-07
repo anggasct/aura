@@ -240,3 +240,72 @@ func specFromRequest(req *SandboxRequest) *Spec {
 		Limits:         req.Limits,
 	}
 }
+
+// sessionContract adapts a SessionRequest to the one-shot digest contract so
+// a session grant binds exactly the same confinement fields a broker hashed
+// when minting it: executable, argv, working dir, path roots, environment,
+// and limits.
+func sessionContract(req *SessionRequest) (*SandboxRequest, error) {
+	if req == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
+	return &SandboxRequest{
+		RequestID:       req.RequestID,
+		PrincipalID:     req.PrincipalID,
+		SessionID:       req.SessionID,
+		ToolName:        req.ToolName,
+		Executable:      req.Executable,
+		Arguments:       req.Arguments,
+		WorkingDir:      req.WorkingDir,
+		ReadOnlyPaths:   req.ReadOnlyPaths,
+		ReadWritePaths:  req.ReadWritePaths,
+		Environment:     req.Environment,
+		Capabilities:    req.Capabilities,
+		Limits:          req.Limits,
+		ApprovalGrantID: req.ApprovalGrantID,
+	}, nil
+}
+
+// validateSessionGrant resolves the session's approval grant and re-checks
+// that it still binds this request — principal, session, tool, capabilities,
+// policy version, expiry, and the confinement digest — before any child is
+// spawned. The one-shot nonce is deliberately NOT consumed: a session is
+// long-lived by contract, so the grant is checked at Start (and re-checkable
+// by any future revalidation point) while remaining spendable only by the
+// one-shot path, which keeps "no session may outlive its trust grant" an
+// operator concern (revoke the grant, then Close the session) instead of a
+// silent mid-stream break.
+func (r *Registry) validateSessionGrant(req *SessionRequest) error {
+	contract, err := sessionContract(req)
+	if err != nil {
+		return err
+	}
+	if contract.ApprovalGrantID == "" {
+		return Errorf(ErrorCodeApprovalInvalid, "session request carries no approval grant")
+	}
+	r.mu.Lock()
+	entry, ok := r.grants[contract.ApprovalGrantID]
+	_, nonceSpent := r.consumedNonces[entry.grant.Nonce]
+	r.mu.Unlock()
+	if !ok {
+		return Errorf(ErrorCodeApprovalInvalid, "approval grant %s is not registered", contract.ApprovalGrantID)
+	}
+	if nonceSpent {
+		return Errorf(ErrorCodeApprovalInvalid, "approval grant nonce was already consumed")
+	}
+	payload, err := DigestPayload(contract)
+	if err != nil {
+		return Errorf(ErrorCodeApprovalInvalid, "compute request digest: %v", err)
+	}
+	toolReq := &approval.ToolRequest{
+		PrincipalID:  contract.PrincipalID,
+		SessionID:    contract.SessionID,
+		ToolName:     contract.ToolName,
+		Arguments:    payload,
+		Capabilities: contract.Capabilities,
+	}
+	if err := entry.grant.ValidFor(toolReq, r.policyVersion, r.now()); err != nil {
+		return Errorf(ErrorCodeApprovalInvalid, "%v", err)
+	}
+	return nil
+}
