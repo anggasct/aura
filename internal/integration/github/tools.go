@@ -372,7 +372,8 @@ func fieldSchema(requiredStrings, optionalStrings, requiredNumbers []string) jso
 		"repo":           {Type: "string"},
 		"credential_ref": {Type: "string"},
 	}
-	required := []string{"repo", "credential_ref"}
+	required := make([]string, 0, 2+len(requiredStrings)+len(requiredNumbers))
+	required = append(required, "repo", "credential_ref")
 	for _, field := range requiredStrings {
 		if _, ok := properties[field]; !ok {
 			properties[field] = fieldType{Type: "string"}
