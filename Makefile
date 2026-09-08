@@ -15,7 +15,7 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration fuzz-smoke release-snapshot clean
+.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration durable-test fuzz-smoke release-snapshot clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -30,6 +30,9 @@ build-all:
 
 test:
 	$(GO) test -v -race ./...
+
+durable-test:
+	$(GO) test -race -tags durable -count=1 ./internal/durable/...
 
 vet:
 	$(GO) vet ./...

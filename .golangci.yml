@@ -154,6 +154,19 @@ linters:
               desc: the filesystem adapters are constructed by internal/tools/builtin, not by the cli composition root
             - pkg: github.com/anggasct/aura/internal/tools/search
               desc: the search adapter is constructed by internal/tools/builtin, not by the cli composition root
+        # Restate SDK types never leave the durable adapter: the domain
+        # depends on the DurableRuntime port, and only the adapter package
+        # itself may import the SDK (client, serving, and conformance
+        # helpers all live behind the port boundary).
+        restate-stays-in-adapter:
+          files:
+            - "**/internal/**"
+            - "!**/internal/durable/restate/**"
+          deny:
+            - pkg: github.com/restatedev/sdk-go
+              desc: Restate types stay inside the durable adapter; depend on the DurableRuntime port instead
+            - pkg: github.com/restatedev/sdk-go/ingress
+              desc: the Restate ingress client is owned by the durable adapter; depend on the DurableRuntime port instead
     errcheck:
       # A deliberate ignore is written `_ =` at the call site so the decision
       # stays visible in review; check-blank would make that idiom impossible.
