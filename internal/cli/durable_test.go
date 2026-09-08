@@ -93,6 +93,7 @@ func TestBuildDurableListenerExternalUnreachableFailsClosed(t *testing.T) {
 	seedHealthyStorage(t, dataRoot)
 	cfg := config.Default()
 	cfg.Storage.Path = dataRoot
+	cfg.Tools = nil
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}

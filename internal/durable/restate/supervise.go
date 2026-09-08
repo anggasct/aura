@@ -26,6 +26,8 @@ const (
 	defaultShutdownGrace = 10 * time.Second
 	defaultStableReset   = 5 * time.Minute
 
+	supervisorProbeTimeout = 2 * time.Second
+
 	SupervisionStarting = "starting"
 	SupervisionRunning  = "running"
 	SupervisionBackoff  = "backoff"
@@ -270,12 +272,18 @@ func (s *Supervisor) waitReady(ctx context.Context, exited <-chan error) (procEx
 	}
 }
 
+func supervisorProbeClient() *http.Client {
+	return &http.Client{Timeout: supervisorProbeTimeout}
+}
+
 func (s *Supervisor) probeIngress(ctx context.Context) bool {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, s.config.IngressURL+"/restate/health", http.NoBody)
+	probeCtx, cancel := context.WithTimeout(ctx, supervisorProbeTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, s.config.IngressURL+"/restate/health", http.NoBody)
 	if err != nil {
 		return false
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := supervisorProbeClient().Do(request)
 	if err != nil {
 		return false
 	}
@@ -371,11 +379,17 @@ func writeChildConfig(dataDir, ingressURL, adminURL string) (string, error) {
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("write durable runtime config: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("write durable runtime config: %w", err)
 	}
-	if err := os.Chmod(tmpName, 0o600); err != nil {
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return "", fmt.Errorf("write durable runtime config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("write durable runtime config: %w", err)
 	}
@@ -383,7 +397,19 @@ func writeChildConfig(dataDir, ingressURL, adminURL string) (string, error) {
 		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("write durable runtime config: %w", err)
 	}
+	if err := syncParentDir(dataDir); err != nil {
+		return "", fmt.Errorf("write durable runtime config: %w", err)
+	}
 	return path, nil
+}
+
+func syncParentDir(dir string) error {
+	handle, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = handle.Close() }()
+	return handle.Sync()
 }
 
 func serverBindAddress(rawURL string) (string, error) {
@@ -419,12 +445,15 @@ func RegisterDeployment(ctx context.Context, adminURL, handlerURL string) error 
 		if err != nil {
 			return fmt.Errorf("encode deployment request: %w", err)
 		}
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, adminURL+"/deployments", bytes.NewReader(body))
+		probeCtx, cancel := context.WithTimeout(ctx, supervisorProbeTimeout)
+		request, err := http.NewRequestWithContext(probeCtx, http.MethodPost, adminURL+"/deployments", bytes.NewReader(body))
 		if err != nil {
+			cancel()
 			return fmt.Errorf("build deployment request: %w", err)
 		}
 		request.Header.Set("Content-Type", "application/json")
-		response, err := http.DefaultClient.Do(request)
+		response, err := supervisorProbeClient().Do(request)
+		cancel()
 		if err != nil {
 			return &Error{Code: ErrorCodeRegistrationFailed, Detail: "durable admin endpoint is unreachable"}
 		}
@@ -454,11 +483,13 @@ func CheckExternal(ctx context.Context, ingressURL, adminURL string) error {
 }
 
 func endpointHealthy(ctx context.Context, rawURL string) bool {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
+	probeCtx, cancel := context.WithTimeout(ctx, supervisorProbeTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, rawURL, http.NoBody)
 	if err != nil {
 		return false
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := supervisorProbeClient().Do(request)
 	if err != nil {
 		return false
 	}

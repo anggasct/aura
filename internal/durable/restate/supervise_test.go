@@ -2,7 +2,6 @@ package restate
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,65 +12,35 @@ import (
 	"time"
 )
 
-const stubServerPython = `import http.server, sys
-port = int(sys.argv[1])
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path in ("/restate/health", "/version"):
-            body = b"{}"
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_response(404)
-            self.end_headers()
-    def do_POST(self):
-        if self.path == "/deployments":
-            length = int(self.headers.get("Content-Length", "0"))
-            self.rfile.read(length)
-            body = b"{}"
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_response(404)
-            self.end_headers()
-    def log_message(self, *args):
-        pass
-http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
-`
+func startProbeServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && (r.URL.Path == "/restate/health" || r.URL.Path == "/version"):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/deployments":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(probe.Close)
+	return probe
+}
 
-func writeServingStub(t *testing.T, port int) string {
+func writeSleepStub(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	serverFile := filepath.Join(dir, "stub_server.py")
-	if err := os.WriteFile(serverFile, []byte(stubServerPython), 0o600); err != nil {
-		t.Fatalf("write stub server: %v", err)
-	}
-	wrapper := fmt.Sprintf("#!/bin/sh\nif [ -n \"$ARGDUMP\" ]; then echo \"$@\" > \"$ARGDUMP\"; fi\nexec python3 %s %d\n", serverFile, port)
 	path := filepath.Join(dir, "stub-restate-server")
+	wrapper := "#!/bin/sh\nif [ -n \"$ARGDUMP\" ]; then echo \"$@\" > \"$ARGDUMP\"; fi\nexec sleep 60\n"
 	if err := os.WriteFile(path, []byte(wrapper), 0o700); err != nil {
 		t.Fatalf("write stub: %v", err)
 	}
 	return path
-}
-
-func freeStubPort(t *testing.T) int {
-	t.Helper()
-	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("free port: %v", err)
-	}
-	defer func() { _ = listener.Close() }()
-	addr, ok := listener.Addr().(*net.TCPAddr)
-	if !ok {
-		t.Fatalf("listener addr = %T, want *net.TCPAddr", listener.Addr())
-	}
-	return addr.Port
 }
 
 func writeCrashStub(t *testing.T) string {
@@ -124,17 +93,16 @@ func TestSupervisorMissingBinaryOnPATHFailsClosed(t *testing.T) {
 }
 
 func TestSupervisorSupervisedLifecycle(t *testing.T) {
-	port := freeStubPort(t)
-	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	stub := writeServingStub(t, port)
+	probe := startProbeServer(t)
+	stub := writeSleepStub(t)
 
 	supervisor, err := NewSupervisor(&SuperviseConfig{
 		BinaryPath:     stub,
 		DataDir:        filepath.Join(t.TempDir(), "restate-data"),
-		IngressURL:     base,
-		AdminURL:       base,
+		IngressURL:     probe.URL,
+		AdminURL:       probe.URL,
 		HandlerURL:     "http://127.0.0.1:9080",
-		ReadyTimeout:   15 * time.Second,
+		ReadyTimeout:   10 * time.Second,
 		RestartInitial: 10 * time.Millisecond,
 		RestartMax:     50 * time.Millisecond,
 	})
@@ -144,7 +112,7 @@ func TestSupervisorSupervisedLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- supervisor.Start(ctx) }()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		snapshot := supervisor.Snapshot()
 		if snapshot.State == SupervisionRunning && snapshot.Registered && snapshot.PID > 0 {
@@ -287,19 +255,18 @@ func TestWriteChildConfigCarriesEndpointPorts(t *testing.T) {
 }
 
 func TestSupervisorPassesChildConfigToBinary(t *testing.T) {
-	port := freeStubPort(t)
-	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	stub := writeServingStub(t, port)
+	probe := startProbeServer(t)
+	stub := writeSleepStub(t)
 	argDump := filepath.Join(t.TempDir(), "argv")
 	t.Setenv("ARGDUMP", argDump)
 
 	supervisor, err := NewSupervisor(&SuperviseConfig{
 		BinaryPath:     stub,
 		DataDir:        filepath.Join(t.TempDir(), "restate-data"),
-		IngressURL:     base,
-		AdminURL:       base,
+		IngressURL:     probe.URL,
+		AdminURL:       probe.URL,
 		HandlerURL:     "http://127.0.0.1:9080",
-		ReadyTimeout:   15 * time.Second,
+		ReadyTimeout:   10 * time.Second,
 		RestartInitial: 10 * time.Millisecond,
 		RestartMax:     50 * time.Millisecond,
 	})
@@ -309,7 +276,7 @@ func TestSupervisorPassesChildConfigToBinary(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- supervisor.Start(ctx) }()
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		snapshot := supervisor.Snapshot()
 		if snapshot.State == SupervisionRunning && snapshot.Registered {
@@ -342,7 +309,81 @@ func TestSupervisorPassesChildConfigToBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read referenced child config: %v", err)
 	}
-	if !strings.Contains(string(content), fmt.Sprintf(`bind-address = "127.0.0.1:%d"`, port)) {
-		t.Errorf("child config misses stub port binding:\n%s", content)
+	wantBind := `bind-address = "` + strings.TrimPrefix(probe.URL, "http://") + `"`
+	if !strings.Contains(string(content), wantBind) {
+		t.Errorf("child config misses stub port binding %q:\n%s", wantBind, content)
+	}
+}
+
+func startBlackHole(t *testing.T) string {
+	t.Helper()
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("black-hole listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+				_ = c.SetDeadline(time.Now().Add(30 * time.Second))
+				buf := make([]byte, 4096)
+				for {
+					if _, err := c.Read(buf); err != nil {
+						return
+					}
+				}
+			}(conn)
+		}
+	}()
+	return "http://" + listener.Addr().String()
+}
+
+func TestSupervisorBlackHoleReadinessFailsBounded(t *testing.T) {
+	blackHole := startBlackHole(t)
+	supervisor, err := NewSupervisor(&SuperviseConfig{
+		BinaryPath:     writeSleepStub(t),
+		DataDir:        filepath.Join(t.TempDir(), "restate-data"),
+		IngressURL:     blackHole,
+		AdminURL:       blackHole,
+		HandlerURL:     "http://127.0.0.1:9080",
+		ReadyTimeout:   3 * time.Second,
+		RestartInitial: time.Hour,
+		RestartMax:     time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("NewSupervisor: %v", err)
+	}
+	start := time.Now()
+	exited := make(chan error)
+	procExited, err := supervisor.waitReady(t.Context(), exited)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("waitReady on black-hole ingress succeeded, want unreachable")
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeUnreachable {
+		t.Fatalf("waitReady err = %v, want %s", err, ErrorCodeUnreachable)
+	}
+	if procExited {
+		t.Errorf("waitReady procExited = true, want false for a hung child")
+	}
+	if elapsed > 15*time.Second {
+		t.Errorf("black-hole readiness took %s, want bounded failure near the 3s ready timeout", elapsed)
+	}
+	regStart := time.Now()
+	regErr := RegisterDeployment(t.Context(), blackHole, "http://127.0.0.1:9080")
+	regElapsed := time.Since(regStart)
+	if regErr == nil {
+		t.Fatal("RegisterDeployment on black-hole admin succeeded, want registration failure")
+	}
+	if code, ok := CodeOf(regErr); !ok || code != ErrorCodeRegistrationFailed {
+		t.Fatalf("RegisterDeployment err = %v, want %s", regErr, ErrorCodeRegistrationFailed)
+	}
+	if regElapsed > 10*time.Second {
+		t.Errorf("black-hole registration took %s, want a bounded per-request timeout", regElapsed)
 	}
 }
