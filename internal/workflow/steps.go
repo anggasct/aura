@@ -217,6 +217,9 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec) *stepUp
 }
 
 func (e *stepExecution) runWaitStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
+	if update, failed := e.bindWaitCorrelation(ctx, step, attempt); failed {
+		return update
+	}
 	e.suspendRun(ctx, step.ID)
 	payload, ok := e.awaitSignal(ctx, "wait."+step.ID)
 	e.resumeRun(ctx, step.ID)

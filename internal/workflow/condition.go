@@ -9,20 +9,22 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeSpecInvalid        ErrorCode = "workflow_spec_invalid"
-	ErrorCodeDuplicateStep      ErrorCode = "workflow_duplicate_step"
-	ErrorCodeUnknownDependency  ErrorCode = "workflow_unknown_dependency"
-	ErrorCodeCycleDetected      ErrorCode = "workflow_cycle_detected"
-	ErrorCodeExecutorInvalid    ErrorCode = "workflow_executor_invalid"
-	ErrorCodeConditionInvalid   ErrorCode = "workflow_condition_invalid"
-	ErrorCodeDangerousUncovered ErrorCode = "workflow_dangerous_operation_uncovered"
-	ErrorCodeRunNotFound        ErrorCode = "workflow_run_not_found"
-	ErrorCodeDefinitionNotFound ErrorCode = "workflow_definition_not_found"
-	ErrorCodeStepFailed         ErrorCode = "workflow_step_failed"
-	ErrorCodeApprovalRejected   ErrorCode = "workflow_approval_rejected"
-	ErrorCodeStepTimeout        ErrorCode = "workflow_step_timeout"
-	ErrorCodeBudgetExhausted    ErrorCode = "workflow_budget_exhausted"
-	ErrorCodeConcurrencyBounded ErrorCode = "workflow_concurrency_bounded"
+	ErrorCodeSpecInvalid          ErrorCode = "workflow_spec_invalid"
+	ErrorCodeDuplicateStep        ErrorCode = "workflow_duplicate_step"
+	ErrorCodeUnknownDependency    ErrorCode = "workflow_unknown_dependency"
+	ErrorCodeCycleDetected        ErrorCode = "workflow_cycle_detected"
+	ErrorCodeExecutorInvalid      ErrorCode = "workflow_executor_invalid"
+	ErrorCodeConditionInvalid     ErrorCode = "workflow_condition_invalid"
+	ErrorCodeDangerousUncovered   ErrorCode = "workflow_dangerous_operation_uncovered"
+	ErrorCodeRunNotFound          ErrorCode = "workflow_run_not_found"
+	ErrorCodeDefinitionNotFound   ErrorCode = "workflow_definition_not_found"
+	ErrorCodeStepFailed           ErrorCode = "workflow_step_failed"
+	ErrorCodeCorrelationUnmatched ErrorCode = "workflow_correlation_unmatched"
+	ErrorCodeCorrelationConflict  ErrorCode = "workflow_correlation_conflict"
+	ErrorCodeApprovalRejected     ErrorCode = "workflow_approval_rejected"
+	ErrorCodeStepTimeout          ErrorCode = "workflow_step_timeout"
+	ErrorCodeBudgetExhausted      ErrorCode = "workflow_budget_exhausted"
+	ErrorCodeConcurrencyBounded   ErrorCode = "workflow_concurrency_bounded"
 )
 
 type Error struct {

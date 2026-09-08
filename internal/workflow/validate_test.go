@@ -327,3 +327,59 @@ func TestCompileProducesDeterministicTopologicalOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateWaitCorrelationFields(t *testing.T) {
+	waitSpec := func() *Spec {
+		event := "check_suite.completed"
+		return &Spec{
+			ID: "waitbind", Goal: "Wait binding", Version: 1, Source: SourceDefined,
+			Steps: []StepSpec{
+				{ID: "build", Executor: ExecutorSpec{Kind: KindTool, ToolID: strPtr("read_file")}, Timeout: time.Minute},
+				{ID: "hold", DependsOn: []string{"build"}, Executor: ExecutorSpec{Kind: KindWait, Event: &event}, Timeout: time.Minute},
+			},
+		}
+	}
+	t.Run("accepts bound wait", func(t *testing.T) {
+		spec := waitSpec()
+		spec.Steps[1].Executor.ExternalRef = strPtr("build")
+		if err := Validate(spec, testValidationDeps()); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	t.Run("accepts custom source", func(t *testing.T) {
+		spec := waitSpec()
+		spec.Steps[1].Executor.ExternalRef = strPtr("build")
+		spec.Steps[1].Executor.Source = strPtr("github")
+		if err := Validate(spec, testValidationDeps()); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	cases := []struct {
+		name   string
+		mutate func(*Spec)
+	}{
+		{"empty external ref", func(s *Spec) { s.Steps[1].Executor.ExternalRef = strPtr("") }},
+		{"unknown external ref", func(s *Spec) { s.Steps[1].Executor.ExternalRef = strPtr("ghost") }},
+		{"non-dependency external ref", func(s *Spec) {
+			s.Steps = append(s.Steps, StepSpec{ID: "other", Executor: ExecutorSpec{Kind: KindTool, ToolID: strPtr("read_file")}, Timeout: time.Minute})
+			s.Steps[1].Executor.ExternalRef = strPtr("other")
+		}},
+		{"empty source", func(s *Spec) {
+			s.Steps[1].Executor.ExternalRef = strPtr("build")
+			s.Steps[1].Executor.Source = strPtr("")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := waitSpec()
+			tc.mutate(spec)
+			err := Validate(spec, testValidationDeps())
+			if err == nil {
+				t.Fatal("Validate unexpectedly accepted the spec")
+			}
+			if code, _ := CodeOf(err); code != ErrorCodeExecutorInvalid {
+				t.Fatalf("code = %s (%v), want %s", code, err, ErrorCodeExecutorInvalid)
+			}
+		})
+	}
+}

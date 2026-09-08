@@ -2,15 +2,23 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"iter"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/durable"
 	gatewaywebhook "github.com/anggasct/aura/internal/gateway/webhook"
+	"github.com/anggasct/aura/internal/integration/github"
 	"github.com/anggasct/aura/internal/runtime"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/workflow"
 )
 
 type fakeTurnRuntime struct {
@@ -320,5 +328,202 @@ func TestWebhookDispatcher_FailedTurnRecordsCode(t *testing.T) {
 	execution := waitForExecutionState(t, executions, ref.ExecutionID, store.WebhookExecutionStateFailed)
 	if execution.ErrorCode != "model_capability_unsupported" {
 		t.Errorf("error code = %q, want model_capability_unsupported", execution.ErrorCode)
+	}
+}
+
+func githubTestStore(t *testing.T) (*sql.DB, *workflow.Store) {
+	t.Helper()
+	db, err := store.OpenDB(t.Context(), filepath.Join(t.TempDir(), "aura.db"))
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(t.Context(), db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	return db, workflow.NewStore(db)
+}
+
+func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durable.Fake) string {
+	t.Helper()
+	ctx := context.Background()
+	event := "check_suite.completed"
+	spec := &workflow.Spec{
+		ID: "github-wait", Goal: "Wait CI", Version: 1, Source: workflow.SourceDefined,
+		Steps: []workflow.StepSpec{
+			{ID: "hold", Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &event}, Timeout: time.Minute},
+		},
+	}
+	if err := disk.SaveDefinition(ctx, spec); err != nil {
+		t.Fatalf("SaveDefinition: %v", err)
+	}
+	summary, err := disk.CreateRun(ctx, spec, nil)
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	backend.RegisterHandler("waiter", func(ctx context.Context, inv durable.Invocation) error {
+		_, ok := inv.Signal(ctx, "wait.hold")
+		if !ok {
+			return context.Canceled
+		}
+		return nil
+	})
+	if _, err := backend.Start(ctx, durable.StartRequest{Handler: "waiter", Key: summary.DurableKey}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := disk.BindCorrelation(ctx, &workflow.Correlation{
+		Source: "github", EventType: event, ExternalID: "org/repo#42",
+		RunID: summary.ID, SignalName: "wait.hold", DedupeKey: "",
+	}); err != nil {
+		t.Fatalf("BindCorrelation: %v", err)
+	}
+	return summary.ID
+}
+
+func githubSuiteBody() []byte {
+	return []byte(`{"action":"completed","repository":{"full_name":"org/repo"},` +
+		`"check_suite":{"status":"completed","conclusion":"success","head_sha":"abc123",` +
+		`"html_url":"https://github.com/org/repo/suites/1","pull_requests":[{"number":42}]}}`)
+}
+
+func TestDispatcherRoutesGitHubEventToCorrelation(t *testing.T) {
+	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
+	dispatcher, _ := webhookTestSetup(t, backend)
+	_, disk := githubTestStore(t)
+	fake := durable.NewFake()
+	runID := githubTestBinding(t, disk, fake)
+	adapter, err := github.NewAdapter(disk, fake, nil)
+	if err != nil {
+		t.Fatalf("NewAdapter: %v", err)
+	}
+	dispatcher.github = adapter
+
+	event := &gatewaywebhook.AcceptedEvent{
+		KeyID: "github", Nonce: "nonce-abcdefghijklmnop", BodyDigest: "digest-github-1", Body: githubSuiteBody(),
+	}
+	ref, err := dispatcher.Dispatch(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Dispatch github event: %v", err)
+	}
+	if ref.ExecutionID != runID {
+		t.Errorf("execution id = %q, want run %q", ref.ExecutionID, runID)
+	}
+	if backend.submitted() != 0 {
+		t.Errorf("submitted turns = %d, want none for github events", backend.submitted())
+	}
+	again, err := dispatcher.Dispatch(context.Background(), event)
+	if err != nil {
+		t.Fatalf("duplicate Dispatch: %v", err)
+	}
+	if again.ExecutionID != runID {
+		t.Errorf("duplicate execution id = %q, want run %q", again.ExecutionID, runID)
+	}
+}
+
+func TestDispatcherFallsBackToTurnsForNonGitHub(t *testing.T) {
+	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
+	dispatcher, _ := webhookTestSetup(t, backend)
+	_, disk := githubTestStore(t)
+	adapter, err := github.NewAdapter(disk, durable.NewFake(), nil)
+	if err != nil {
+		t.Fatalf("NewAdapter: %v", err)
+	}
+	dispatcher.github = adapter
+
+	ref, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if ref.TurnID == "" {
+		t.Error("expected a turn execution reference for non-github events")
+	}
+	if backend.submitted() != 1 {
+		t.Errorf("submitted turns = %d, want one", backend.submitted())
+	}
+}
+
+type signalCountingRuntime struct {
+	durable.Runtime
+	mu      sync.Mutex
+	signals int
+}
+
+func (c *signalCountingRuntime) Signal(ctx context.Context, run durable.RunRef, name string, payload []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.signals++
+	return c.Runtime.Signal(ctx, run, name, payload)
+}
+
+func (c *signalCountingRuntime) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.signals
+}
+
+func envelopeWrappedGitHubEvent(t *testing.T, eventID, nonce string, payload []byte) *gatewaywebhook.AcceptedEvent {
+	t.Helper()
+	document, err := json.Marshal(gatewaywebhook.Envelope{
+		EventID: eventID, Subject: "github delivery", Payload: json.RawMessage(payload),
+	})
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	parsed, err := gatewaywebhook.ParseEnvelope(document)
+	if err != nil {
+		t.Fatalf("ParseEnvelope: %v", err)
+	}
+	sum := sha256.Sum256(document)
+	return &gatewaywebhook.AcceptedEvent{
+		KeyID: "github", Nonce: nonce,
+		BodyDigest: hex.EncodeToString(sum[:]), Body: document, Envelope: parsed,
+	}
+}
+
+func TestDispatcherRoutesEnvelopeWrappedGitHubEventToCorrelation(t *testing.T) {
+	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
+	dispatcher, _ := webhookTestSetup(t, backend)
+	_, disk := githubTestStore(t)
+	fake := durable.NewFake()
+	runID := githubTestBinding(t, disk, fake)
+	counter := &signalCountingRuntime{Runtime: fake}
+	adapter, err := github.NewAdapter(disk, counter, nil)
+	if err != nil {
+		t.Fatalf("NewAdapter: %v", err)
+	}
+	dispatcher.github = adapter
+
+	event := envelopeWrappedGitHubEvent(t, "evt-github-1", "nonce-abcdefghijklmnop", githubSuiteBody())
+	ref, err := dispatcher.Dispatch(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Dispatch envelope github event: %v", err)
+	}
+	if ref.ExecutionID != runID {
+		t.Errorf("execution id = %q, want run %q", ref.ExecutionID, runID)
+	}
+	if backend.submitted() != 0 {
+		t.Errorf("submitted turns = %d, want none for envelope github events", backend.submitted())
+	}
+	if counter.count() != 1 {
+		t.Errorf("signals = %d, want exactly one for envelope github event", counter.count())
+	}
+	reserialized := &gatewaywebhook.AcceptedEvent{
+		KeyID: "github", Nonce: "nonce-abcdefghijklmnop",
+		BodyDigest: "different-digest-for-reserialized-envelope",
+		Body:       []byte(`{"event_id":"evt-github-1","subject":"github delivery","payload":{}}`),
+		Envelope:   event.Envelope,
+	}
+	again, err := dispatcher.Dispatch(context.Background(), reserialized)
+	if err != nil {
+		t.Fatalf("redelivery Dispatch: %v", err)
+	}
+	if again.ExecutionID != runID {
+		t.Errorf("redelivery execution id = %q, want run %q", again.ExecutionID, runID)
+	}
+	if backend.submitted() != 0 {
+		t.Errorf("submitted turns after redelivery = %d, want none", backend.submitted())
+	}
+	if counter.count() != 1 {
+		t.Errorf("signals after redelivery = %d, want exactly one", counter.count())
 	}
 }

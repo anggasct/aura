@@ -213,7 +213,45 @@ func (e *stepExecution) executeActionSerial(ctx context.Context, step *StepSpec,
 	return updateFromJournaled(&record), false
 }
 
+func (e *stepExecution) bindWaitCorrelation(ctx context.Context, step *StepSpec, attempt int) (*stepUpdate, bool) {
+	if step.Executor.ExternalRef == nil || step.Executor.Event == nil {
+		return nil, false
+	}
+	output, ok := e.resolvedOutput(*step.Executor.ExternalRef)
+	if !ok {
+		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: fmt.Sprintf("wait step %s binds no output from step %q", step.ID, *step.Executor.ExternalRef), EndedAt: nowPtr()}, true
+	}
+	var decoded struct {
+		ExternalID string `json:"external_id"`
+	}
+	if err := json.Unmarshal(output, &decoded); err != nil || decoded.ExternalID == "" {
+		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: fmt.Sprintf("wait step %s needs an external_id in step %q output", step.ID, *step.Executor.ExternalRef), EndedAt: nowPtr()}, true
+	}
+	source := "github"
+	if step.Executor.Source != nil {
+		source = *step.Executor.Source
+	}
+	err := e.interpreter.store.BindCorrelation(ctx, &Correlation{
+		Source:     source,
+		EventType:  *step.Executor.Event,
+		ExternalID: decoded.ExternalID,
+		RunID:      e.runID,
+		SignalName: "wait." + step.ID,
+		DedupeKey:  "",
+	})
+	if err != nil {
+		if code, ok := CodeOf(err); ok && code == ErrorCodeCorrelationConflict {
+			return nil, false
+		}
+		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr()}, true
+	}
+	return nil, false
+}
+
 func (e *stepExecution) runWaitStepSerial(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
+	if update, failed := e.bindWaitCorrelation(ctx, step, attempt); failed {
+		return update
+	}
 	e.suspendRun(ctx, step.ID)
 	payload, timedOut, ok := e.invocation.Wait(ctx, "wait."+step.ID, step.Timeout)
 	e.resumeRun(ctx, step.ID)

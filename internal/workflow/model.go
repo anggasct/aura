@@ -51,6 +51,8 @@ type ExecutorSpec struct {
 	RequiredCapabilities []string `json:"requires,omitempty"`
 	ToolID               *string  `json:"tool,omitempty"`
 	Event                *string  `json:"event,omitempty"`
+	Source               *string  `json:"source,omitempty"`
+	ExternalRef          *string  `json:"external_ref,omitempty"`
 }
 
 type RetryPolicy struct {

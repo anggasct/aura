@@ -603,3 +603,75 @@ END;`); err != nil {
 	}
 	_ = summary
 }
+
+func TestWorkflowApproveRequiresStep(t *testing.T) {
+	gf := writeWorkflowFixtures(t, validWorkflowYAML)
+	if _, err := runWorkflowCommand(t, gf, "approve", "run-1"); err == nil {
+		t.Fatal("expected missing --step to fail, got nil")
+	}
+}
+
+func TestWorkflowSignalValidatesPayload(t *testing.T) {
+	gf := writeWorkflowFixtures(t, validWorkflowYAML)
+	if _, err := runWorkflowCommand(t, gf, "signal", "run-1", "--step", "hold", "--payload", "{oops"); err == nil {
+		t.Fatal("expected invalid payload to fail, got nil")
+	}
+}
+
+func TestWorkflowApproveUnknownRunFailsClosed(t *testing.T) {
+	gf := writeWorkflowFixtures(t, validWorkflowYAML)
+	if _, err := runWorkflowCommand(t, gf, "approve", "run-missing", "--step", "gate"); err == nil {
+		t.Fatal("expected unknown run approval to fail, got nil")
+	}
+}
+
+func TestWorkflowSignalUnknownRunFailsClosed(t *testing.T) {
+	gf := writeWorkflowFixtures(t, validWorkflowYAML)
+	if _, err := runWorkflowCommand(t, gf, "signal", "run-missing", "--step", "hold", "--payload", `{}`); err == nil {
+		t.Fatal("expected unknown run signal to fail, got nil")
+	}
+}
+
+func TestWorkflowInspectListsCorrelations(t *testing.T) {
+	gf := writeWorkflowFixtures(t, validWorkflowYAML)
+	ctx := t.Context()
+	result, err := config.Load(gf.configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	db, err := openStorage(ctx, result.Config)
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	disk := workflow.NewStore(db)
+	dir := filepath.Dir(gf.configPath)
+	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
+	if err != nil {
+		t.Fatalf("load fixture spec: %v", err)
+	}
+	if err := disk.SaveDefinition(ctx, spec); err != nil {
+		t.Fatalf("save definition: %v", err)
+	}
+	summary, err := disk.CreateRun(ctx, spec, nil)
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := disk.BindCorrelation(ctx, &workflow.Correlation{
+		Source: "github", EventType: "check_suite.completed", ExternalID: "org/repo#42",
+		RunID: summary.ID, SignalName: "wait.hold", DedupeKey: "",
+	}); err != nil {
+		t.Fatalf("bind correlation: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	out, err := runWorkflowCommand(t, gf, "inspect", summary.ID)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	for _, want := range []string{"correlation:", "org/repo#42", "awaiting"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("inspect output = %q, want %q", out, want)
+		}
+	}
+}

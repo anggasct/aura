@@ -153,6 +153,13 @@ func probeDeploymentRegistration(ctx context.Context, adminURL, handlerAddr stri
 	return deploymentAbsent
 }
 
+func durableRuntimeForConfig(cfg *config.Config, logger *slog.Logger) (durable.Runtime, error) {
+	if cfg != nil && cfg.Durable != nil && cfg.Durable.Enabled {
+		return restate.NewAdapter(restate.Config{IngressURL: cfg.Durable.Endpoint}, logger)
+	}
+	return durable.NewFake(), nil
+}
+
 func buildDurableListener(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger) (server.Listener, error) {
 	durableCfg := cfg.Durable
 	interpreter, err := buildWorkflowInterpreterWithDB(ctx, cfg, db, logger)
