@@ -72,7 +72,7 @@ func Validate(spec *Spec, deps ValidationDeps) error {
 	}
 
 	for index := range spec.Steps {
-		if err := validateExecutor(&spec.Steps[index], deps); err != nil {
+		if err := validateExecutor(&spec.Steps[index], deps, ids); err != nil {
 			return err
 		}
 	}
@@ -125,7 +125,7 @@ func Validate(spec *Spec, deps ValidationDeps) error {
 	return nil
 }
 
-func validateExecutor(step *StepSpec, deps ValidationDeps) error {
+func validateExecutor(step *StepSpec, deps ValidationDeps, ids map[string]bool) error {
 	field := fmt.Sprintf("step %q executor", step.ID)
 	switch step.Executor.Kind {
 	case KindAgent:
@@ -154,6 +154,20 @@ func validateExecutor(step *StepSpec, deps ValidationDeps) error {
 	case KindWait:
 		if step.Executor.Event == nil || *step.Executor.Event == "" {
 			return codedError(ErrorCodeExecutorInvalid, field+" needs event")
+		}
+		if step.Executor.Source != nil && *step.Executor.Source == "" {
+			return codedError(ErrorCodeExecutorInvalid, field+" source must not be empty")
+		}
+		if step.Executor.ExternalRef != nil {
+			if *step.Executor.ExternalRef == "" {
+				return codedError(ErrorCodeExecutorInvalid, field+" external_ref must not be empty")
+			}
+			if !ids[*step.Executor.ExternalRef] {
+				return codedError(ErrorCodeExecutorInvalid, field+" external_ref references unknown step "+fmt.Sprintf("%q", *step.Executor.ExternalRef))
+			}
+			if !slices.Contains(step.DependsOn, *step.Executor.ExternalRef) {
+				return codedError(ErrorCodeExecutorInvalid, field+" external_ref must reference a dependency")
+			}
 		}
 	case KindApproval:
 		if step.Executor.AgentID != nil || len(step.Executor.RequiredCapabilities) > 0 || step.Executor.ToolID != nil || step.Executor.Event != nil {

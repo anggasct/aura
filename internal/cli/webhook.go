@@ -18,9 +18,11 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	gatewaywebhook "github.com/anggasct/aura/internal/gateway/webhook"
+	"github.com/anggasct/aura/internal/integration/github"
 	"github.com/anggasct/aura/internal/runtime"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/workflow"
 )
 
 type webhookDispatcher struct {
@@ -31,6 +33,7 @@ type webhookDispatcher struct {
 	retention  time.Duration
 	clock      func() time.Time
 	logger     *slog.Logger
+	github     *github.Adapter
 	liveMu     sync.Mutex
 	live       map[string]struct{}
 }
@@ -68,6 +71,12 @@ func newWebhookDispatcher(sessions store.SessionService, executions store.Webhoo
 func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.AcceptedEvent) (gatewaywebhook.ExecutionRef, error) {
 	if event == nil {
 		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidArgument, "event must not be nil")
+	}
+	if d.github != nil {
+		handled, ref, err := d.github.Handle(ctx, event)
+		if err != nil || handled {
+			return ref, err
+		}
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -451,6 +460,15 @@ func buildWebhookListener(cfg *config.Config, db *sql.DB, backend runtime.AgentR
 	if err != nil {
 		return nil, err
 	}
+	durableRuntime, err := durableRuntimeForConfig(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+	githubAdapter, err := github.NewAdapter(workflow.NewStore(db), durableRuntime, logger)
+	if err != nil {
+		return nil, err
+	}
+	dispatcher.github = githubAdapter
 	handler, err := gatewaywebhook.NewHandler(gatewaywebhook.Settings{
 		MaxBodySize:        int64(cfg.Webhook.MaxBodySize),
 		TimestampTolerance: time.Duration(cfg.Webhook.TimestampTolerance),

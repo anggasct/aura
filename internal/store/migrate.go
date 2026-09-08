@@ -23,6 +23,7 @@ var migrations = []migration{
 	{version: 5, sql: workflowSchemaSQL},
 	{version: 6, sql: modelCircuitCheckpointSchemaSQL},
 	{version: 7, sql: webhookExecutionSchemaSQL},
+	{version: 8, sql: workflowCorrelationSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -246,6 +247,21 @@ CREATE TABLE webhook_execution (
 
 CREATE INDEX webhook_execution_expiry_idx
     ON webhook_execution(expires_at);
+`
+
+const workflowCorrelationSchemaSQL = `
+CREATE TABLE workflow_correlation (
+    source TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    run_id TEXT NOT NULL REFERENCES workflow_run(id) ON DELETE CASCADE,
+    signal_name TEXT NOT NULL,
+    dedupe_key TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (source, event_type, external_id, dedupe_key)
+);
+
+CREATE INDEX workflow_correlation_run_idx ON workflow_correlation(run_id);
 `
 
 const modelCircuitCheckpointSchemaSQL = `

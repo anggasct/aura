@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/integration/github"
 	"github.com/anggasct/aura/internal/logging"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/toolbroker"
@@ -38,14 +39,16 @@ func newWorkflowCmd(gf *globalFlags) *cobra.Command {
 		newWorkflowRunsCmd(gf),
 		newWorkflowInspectCmd(gf),
 		newWorkflowCancelCmd(gf),
+		newWorkflowApproveCmd(gf),
+		newWorkflowSignalCmd(gf),
 	)
 	return cmd
 }
 
 func workflowValidationDeps(cfg *config.Config) (workflow.ValidationDeps, error) {
 	deps := workflow.ValidationDeps{
-		KnownTools:     toolsbuiltin.DefinitionNames(),
-		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
+		KnownTools:     append(toolsbuiltin.DefinitionNames(), github.ToolNames()...),
+		EffectfulTools: append(toolsbuiltin.EffectfulToolNames(), github.ToolNames()...),
 	}
 	if cfg.Workflows != nil {
 		deps.DefaultStepTimeout = time.Duration(cfg.Workflows.DefaultStepTimeout)
@@ -206,7 +209,11 @@ func buildWorkflowInterpreterWithDB(ctx context.Context, cfg *config.Config, db 
 		}
 		options.Tools = tools
 	}
-	interpreter := workflow.NewInterpreter(workflow.NewStore(db), durable.NewFake(), options)
+	runtime, err := durableRuntimeForConfig(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+	interpreter := workflow.NewInterpreter(workflow.NewStore(db), runtime, options)
 	for _, spec := range specs {
 		if err := interpreter.Load(ctx, spec, deps); err != nil {
 			return nil, fmt.Errorf("definition %s: %w", spec.ID, err)
@@ -281,6 +288,9 @@ func newWorkflowToolRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger) 
 	executor, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, workflowApprovalDecider)
 	if err != nil {
 		return nil, fmt.Errorf("build builtin tool executor: %w", err)
+	}
+	if err := github.Register(executor, github.ToolOptions{}); err != nil {
+		return nil, fmt.Errorf("register github tools: %w", err)
 	}
 	caps := make(map[string][]string)
 	for _, def := range executor.Definitions() {
@@ -371,6 +381,20 @@ func newWorkflowInspectCmd(gf *globalFlags) *cobra.Command {
 					}
 				}
 			}
+			correlations, err := runs.ListCorrelationsByRun(ctx, run.ID)
+			if err != nil {
+				return err
+			}
+			for _, correlation := range correlations {
+				matched := "awaiting"
+				if correlation.DedupeKey != "" {
+					matched = "matched"
+				}
+				if _, err := fmt.Fprintf(out, "correlation: %s\t%s\t%s\t%s\t%s\n",
+					correlation.Source, correlation.EventType, correlation.ExternalID, correlation.SignalName, matched); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
@@ -423,4 +447,95 @@ func newWorkflowCancelCmd(gf *globalFlags) *cobra.Command {
 			return err
 		},
 	}
+}
+
+func newWorkflowApproveCmd(gf *globalFlags) *cobra.Command {
+	var stepID string
+	var reject bool
+	cmd := &cobra.Command{
+		Use:   "approve <run> --step <id> [--reject]",
+		Short: "Resolve a suspended approval step",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if stepID == "" {
+				return errors.New("step id is required: pass --step <id>")
+			}
+			ctx := cmd.Context()
+			result, err := config.Load(gf.configPath)
+			if err != nil {
+				return err
+			}
+			cfg := result.Config
+			level, format := resolveLogging(cmd, cfg)
+			logger, err := logging.Setup(level, format, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			logConfigResult(ctx, logger, &result)
+			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, cfg, logger)
+			if err != nil {
+				return err
+			}
+			defer closeStorage()
+			decision := "approve"
+			if reject {
+				decision = "reject"
+			}
+			payload, err := json.Marshal(map[string]string{"decision": decision})
+			if err != nil {
+				return fmt.Errorf("encode approval decision: %w", err)
+			}
+			if err := interpreter.Signal(ctx, args[0], "approval."+stepID, payload); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nsignal: %s\ndecision: %s\n", args[0], "approval."+stepID, decision)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&stepID, "step", "", "approval step id to resolve")
+	cmd.Flags().BoolVar(&reject, "reject", false, "reject instead of approving")
+	return cmd
+}
+
+func newWorkflowSignalCmd(gf *globalFlags) *cobra.Command {
+	var stepID string
+	var payloadFlag string
+	cmd := &cobra.Command{
+		Use:   "signal <run> --step <id> --payload json",
+		Short: "Deliver a payload to a suspended wait step",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if stepID == "" {
+				return errors.New("step id is required: pass --step <id>")
+			}
+			if !json.Valid([]byte(payloadFlag)) {
+				return errors.New("payload must be valid JSON")
+			}
+			ctx := cmd.Context()
+			result, err := config.Load(gf.configPath)
+			if err != nil {
+				return err
+			}
+			cfg := result.Config
+			level, format := resolveLogging(cmd, cfg)
+			logger, err := logging.Setup(level, format, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			logConfigResult(ctx, logger, &result)
+			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, cfg, logger)
+			if err != nil {
+				return err
+			}
+			defer closeStorage()
+			if err := interpreter.Signal(ctx, args[0], "wait."+stepID, []byte(payloadFlag)); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nsignal: %s\n", args[0], "wait."+stepID)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&stepID, "step", "", "wait step id to signal")
+	cmd.Flags().StringVar(&payloadFlag, "payload", "", "signal payload as JSON")
+	return cmd
 }
