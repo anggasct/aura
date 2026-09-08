@@ -173,11 +173,29 @@ func truncField(value string, limit int) string {
 	return value
 }
 
+func eventDocument(event *gatewaywebhook.AcceptedEvent) []byte {
+	if len(event.Envelope.Payload) > 0 {
+		return event.Envelope.Payload
+	}
+	return event.Body
+}
+
+func eventDedupeKey(event *gatewaywebhook.AcceptedEvent) string {
+	if event.Envelope.EventID != "" {
+		return event.Envelope.EventID
+	}
+	return event.BodyDigest
+}
+
 func (a *Adapter) Handle(ctx context.Context, event *gatewaywebhook.AcceptedEvent) (bool, gatewaywebhook.ExecutionRef, error) {
-	if event == nil || len(event.Body) == 0 {
+	if event == nil {
 		return false, gatewaywebhook.ExecutionRef{}, nil
 	}
-	normalized, isGitHub, err := Normalize(event.Body)
+	document := eventDocument(event)
+	if len(document) == 0 {
+		return false, gatewaywebhook.ExecutionRef{}, nil
+	}
+	normalized, isGitHub, err := Normalize(document)
 	if err != nil {
 		return true, gatewaywebhook.ExecutionRef{}, err
 	}
@@ -199,7 +217,7 @@ func (a *Adapter) Handle(ctx context.Context, event *gatewaywebhook.AcceptedEven
 	}
 	delivery := &workflow.Correlation{
 		Source: binding.Source, EventType: binding.EventType, ExternalID: binding.ExternalID,
-		RunID: binding.RunID, SignalName: binding.SignalName, DedupeKey: event.BodyDigest,
+		RunID: binding.RunID, SignalName: binding.SignalName, DedupeKey: eventDedupeKey(event),
 	}
 	if err := a.store.BindCorrelation(ctx, delivery); err != nil {
 		if code, ok := workflow.CodeOf(err); ok && code == workflow.ErrorCodeCorrelationConflict {

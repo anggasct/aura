@@ -359,22 +359,38 @@ type objectSchema struct {
 }
 
 type fieldType struct {
-	Type string `json:"type"`
+	Type    string `json:"type"`
+	Minimum *int   `json:"minimum,omitempty"`
 }
 
-func fieldSchema(extra ...string) json.RawMessage {
+func intFloor(limit int) *int {
+	return &limit
+}
+
+func fieldSchema(requiredStrings, optionalStrings, requiredNumbers []string) json.RawMessage {
 	properties := map[string]fieldType{
 		"repo":           {Type: "string"},
 		"credential_ref": {Type: "string"},
 	}
-	for _, field := range extra {
+	required := []string{"repo", "credential_ref"}
+	for _, field := range requiredStrings {
+		if _, ok := properties[field]; !ok {
+			properties[field] = fieldType{Type: "string"}
+		}
+		required = append(required, field)
+	}
+	for _, field := range optionalStrings {
 		if _, ok := properties[field]; !ok {
 			properties[field] = fieldType{Type: "string"}
 		}
 	}
+	for _, field := range requiredNumbers {
+		properties[field] = fieldType{Type: "integer", Minimum: intFloor(1)}
+		required = append(required, field)
+	}
 	encoded, err := json.Marshal(objectSchema{
 		Type: "object", Properties: properties,
-		Required: append([]string{"repo", "credential_ref"}, extra...),
+		Required: required,
 	})
 	if err != nil {
 		return json.RawMessage(`{"type":"object"}`)
@@ -438,19 +454,19 @@ func Definitions() []tools.Definition {
 	return []tools.Definition{
 		{
 			Name: ToolCreatePR, Version: ToolVersion,
-			Schema:               fieldSchema("title", "head", "base", "body"),
+			Schema:               fieldSchema([]string{"title", "head", "base"}, []string{"body"}, nil),
 			Validator:            fieldValidator([]string{"title", "head", "base"}, []string{"body"}, nil),
 			RequiredCapabilities: capabilities, RequiresApproval: true, Effectful: true,
 		},
 		{
 			Name: ToolMerge, Version: ToolVersion,
-			Schema:               fieldSchema("number", "merge_method"),
+			Schema:               fieldSchema(nil, []string{"merge_method"}, []string{"number"}),
 			Validator:            fieldValidator(nil, []string{"merge_method"}, []string{"number"}),
 			RequiredCapabilities: capabilities, RequiresApproval: true, Effectful: true,
 		},
 		{
 			Name: ToolComment, Version: ToolVersion,
-			Schema:               fieldSchema("number", "body"),
+			Schema:               fieldSchema([]string{"body"}, nil, []string{"number"}),
 			Validator:            fieldValidator([]string{"body"}, nil, []string{"number"}),
 			RequiredCapabilities: capabilities, RequiresApproval: true, Effectful: true,
 		},

@@ -2,6 +2,8 @@ package github
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -248,6 +250,115 @@ func TestHandleAdvancesRunExactlyOnce(t *testing.T) {
 	}
 	if runtime.signalCount() != 1 {
 		t.Errorf("signals = %d, want exactly one across duplicate deliveries", runtime.signalCount())
+	}
+}
+
+func envelopeAcceptedEvent(t *testing.T, eventID, nonce string, githubPayload []byte) *gatewaywebhook.AcceptedEvent {
+	t.Helper()
+	document, err := json.Marshal(gatewaywebhook.Envelope{
+		EventID: eventID, Subject: "github delivery", Payload: json.RawMessage(githubPayload),
+	})
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	parsed, err := gatewaywebhook.ParseEnvelope(document)
+	if err != nil {
+		t.Fatalf("ParseEnvelope: %v", err)
+	}
+	sum := sha256.Sum256(document)
+	return &gatewaywebhook.AcceptedEvent{
+		KeyID: "github", Nonce: nonce,
+		BodyDigest: hex.EncodeToString(sum[:]), Body: document, Envelope: parsed,
+	}
+}
+
+func startWaiter(t *testing.T, backend *durable.Fake, key string) {
+	t.Helper()
+	backend.RegisterHandler("waiter", func(ctx context.Context, inv durable.Invocation) error {
+		_, ok := inv.Signal(ctx, "wait.hold")
+		if !ok {
+			return context.Canceled
+		}
+		return nil
+	})
+	if _, err := backend.Start(context.Background(), durable.StartRequest{Handler: "waiter", Key: key}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+}
+
+func TestHandleEnvelopePayloadResolvesBinding(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeCorrelations{}
+	backend := durable.NewFake()
+	startWaiter(t, backend, "durable-1")
+	runtime := &countingRuntime{Runtime: backend}
+	adapter := testAdapter(t, store, runtime)
+	seedBinding(store, "run-1", "durable-1")
+	event := envelopeAcceptedEvent(t, "evt-1", "nonce-abcdefghijklmnop", suiteBody(t, "completed", 42, "abc123"))
+	handled, ref, err := adapter.Handle(ctx, event)
+	if err != nil || !handled || ref.ExecutionID != "run-1" {
+		t.Fatalf("Handle = %v, %+v, %v; want run-1", handled, ref, err)
+	}
+	if runtime.signalCount() != 1 {
+		t.Errorf("signals = %d, want one for envelope-wrapped delivery", runtime.signalCount())
+	}
+}
+
+func TestHandleSamePayloadDifferentIdentitySignalsTwice(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeCorrelations{}
+	backend := durable.NewFake()
+	backend.RegisterHandler("waiter", func(ctx context.Context, inv durable.Invocation) error {
+		for range 2 {
+			if _, ok := inv.Signal(ctx, "wait.hold"); !ok {
+				return context.Canceled
+			}
+		}
+		return nil
+	})
+	if _, err := backend.Start(ctx, durable.StartRequest{Handler: "waiter", Key: "durable-1"}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	runtime := &countingRuntime{Runtime: backend}
+	adapter := testAdapter(t, store, runtime)
+	seedBinding(store, "run-1", "durable-1")
+	payload := suiteBody(t, "completed", 42, "abc123")
+	first := envelopeAcceptedEvent(t, "evt-1", "nonce-aaaaaaaaaaaaaaaa", payload)
+	second := envelopeAcceptedEvent(t, "evt-2", "nonce-bbbbbbbbbbbbbbbb", payload)
+	if _, _, err := adapter.Handle(ctx, first); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	if _, _, err := adapter.Handle(ctx, second); err != nil {
+		t.Fatalf("second Handle: %v", err)
+	}
+	if runtime.signalCount() != 2 {
+		t.Errorf("signals = %d, want two for distinct delivery identities", runtime.signalCount())
+	}
+}
+
+func TestHandleIdenticalIdentityRedeliverySignalsOnce(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeCorrelations{}
+	backend := durable.NewFake()
+	startWaiter(t, backend, "durable-1")
+	runtime := &countingRuntime{Runtime: backend}
+	adapter := testAdapter(t, store, runtime)
+	seedBinding(store, "run-1", "durable-1")
+	first := envelopeAcceptedEvent(t, "evt-1", "nonce-aaaaaaaaaaaaaaaa", suiteBody(t, "completed", 42, "abc123"))
+	if _, _, err := adapter.Handle(ctx, first); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	reserialized := &gatewaywebhook.AcceptedEvent{
+		KeyID: "github", Nonce: "nonce-aaaaaaaaaaaaaaaa",
+		BodyDigest: "different-digest-for-reserialized-envelope",
+		Body:       []byte(`{"event_id":"evt-1","subject":"github delivery","payload":{}}`),
+		Envelope:   first.Envelope,
+	}
+	if _, _, err := adapter.Handle(ctx, reserialized); err != nil {
+		t.Fatalf("redelivery Handle: %v", err)
+	}
+	if runtime.signalCount() != 1 {
+		t.Errorf("signals = %d, want exactly one across identical-identity redelivery", runtime.signalCount())
 	}
 }
 

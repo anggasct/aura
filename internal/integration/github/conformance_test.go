@@ -123,3 +123,106 @@ func TestBrokerDeniesWithoutCapability(t *testing.T) {
 		t.Errorf("Evaluate without capability = %+v, %v; want capability rejection", decision, err)
 	}
 }
+
+func TestBrokerSchemasMatchValidators(t *testing.T) {
+	definitions := Definitions()
+	byName := map[string]bool{}
+	for _, definition := range definitions {
+		byName[definition.Name] = true
+	}
+	expectedRequired := map[string]map[string]bool{
+		ToolCreatePR: {"repo": true, "credential_ref": true, "title": true, "head": true, "base": true},
+		ToolMerge:    {"repo": true, "credential_ref": true, "number": true},
+		ToolComment:  {"repo": true, "credential_ref": true, "number": true, "body": true},
+	}
+	for _, definition := range definitions {
+		var schema struct {
+			Type       string `json:"type"`
+			Properties map[string]struct {
+				Type    string `json:"type"`
+				Minimum *int   `json:"minimum"`
+			} `json:"properties"`
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(definition.Schema, &schema); err != nil {
+			t.Fatalf("%s schema is not JSON: %v", definition.Name, err)
+		}
+		want, ok := expectedRequired[definition.Name]
+		if !ok {
+			t.Fatalf("unexpected tool %s", definition.Name)
+		}
+		if len(schema.Required) != len(want) {
+			t.Errorf("%s required = %v, want %d fields", definition.Name, schema.Required, len(want))
+		}
+		for _, field := range schema.Required {
+			if !want[field] {
+				t.Errorf("%s schema marks optional field %q as required", definition.Name, field)
+			}
+		}
+		for field := range want {
+			found := false
+			for _, required := range schema.Required {
+				if required == field {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s schema omits required field %q", definition.Name, field)
+			}
+		}
+		if prop, ok := schema.Properties["number"]; ok {
+			if prop.Type != "integer" {
+				t.Errorf("%s number type = %q, want integer", definition.Name, prop.Type)
+			}
+			if prop.Minimum == nil || *prop.Minimum != 1 {
+				t.Errorf("%s number minimum = %v, want 1", definition.Name, prop.Minimum)
+			}
+		} else if definition.Name == ToolMerge || definition.Name == ToolComment {
+			t.Errorf("%s schema misses number property", definition.Name)
+		}
+	}
+	minimal := map[string]string{
+		ToolCreatePR: `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_ref":"env://GITHUB_TEST_TOKEN"}`,
+		ToolMerge:    `{"repo":"org/repo","number":42,"credential_ref":"env://GITHUB_TEST_TOKEN"}`,
+		ToolComment:  `{"repo":"org/repo","number":7,"body":"hi","credential_ref":"env://GITHUB_TEST_TOKEN"}`,
+	}
+	for _, definition := range definitions {
+		raw, err := definition.Validate(json.RawMessage(minimal[definition.Name]))
+		if err != nil {
+			t.Errorf("%s rejects minimal valid arguments: %v", definition.Name, err)
+			continue
+		}
+		var schema struct {
+			Required   []string `json:"required"`
+			Properties map[string]struct {
+				Type string `json:"type"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(definition.Schema, &schema); err != nil {
+			t.Fatalf("%s schema decode: %v", definition.Name, err)
+		}
+		var document map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &document); err != nil {
+			t.Fatalf("%s validated output is not JSON: %v", definition.Name, err)
+		}
+		for _, field := range schema.Required {
+			if _, ok := document[field]; !ok {
+				t.Errorf("%s minimal arguments miss schema-required field %q", definition.Name, field)
+			}
+		}
+	}
+	wrongNumerics := map[string]string{
+		ToolMerge:   `{"repo":"org/repo","number":"42","credential_ref":"env://GITHUB_TEST_TOKEN"}`,
+		ToolComment: `{"repo":"org/repo","number":"7","body":"hi","credential_ref":"env://GITHUB_TEST_TOKEN"}`,
+	}
+	for _, definition := range definitions {
+		raw, ok := wrongNumerics[definition.Name]
+		if !ok {
+			continue
+		}
+		if _, err := definition.Validate(json.RawMessage(raw)); err == nil {
+			t.Errorf("%s accepts string-typed number, want rejection per integer schema", definition.Name)
+		}
+	}
+}

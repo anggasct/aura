@@ -2,7 +2,10 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"iter"
 	"path/filepath"
 	"sync"
@@ -436,5 +439,91 @@ func TestDispatcherFallsBackToTurnsForNonGitHub(t *testing.T) {
 	}
 	if backend.submitted() != 1 {
 		t.Errorf("submitted turns = %d, want one", backend.submitted())
+	}
+}
+
+type signalCountingRuntime struct {
+	durable.Runtime
+	mu      sync.Mutex
+	signals int
+}
+
+func (c *signalCountingRuntime) Signal(ctx context.Context, run durable.RunRef, name string, payload []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.signals++
+	return c.Runtime.Signal(ctx, run, name, payload)
+}
+
+func (c *signalCountingRuntime) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.signals
+}
+
+func envelopeWrappedGitHubEvent(t *testing.T, eventID, nonce string, payload []byte) *gatewaywebhook.AcceptedEvent {
+	t.Helper()
+	document, err := json.Marshal(gatewaywebhook.Envelope{
+		EventID: eventID, Subject: "github delivery", Payload: json.RawMessage(payload),
+	})
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	parsed, err := gatewaywebhook.ParseEnvelope(document)
+	if err != nil {
+		t.Fatalf("ParseEnvelope: %v", err)
+	}
+	sum := sha256.Sum256(document)
+	return &gatewaywebhook.AcceptedEvent{
+		KeyID: "github", Nonce: nonce,
+		BodyDigest: hex.EncodeToString(sum[:]), Body: document, Envelope: parsed,
+	}
+}
+
+func TestDispatcherRoutesEnvelopeWrappedGitHubEventToCorrelation(t *testing.T) {
+	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
+	dispatcher, _ := webhookTestSetup(t, backend)
+	_, disk := githubTestStore(t)
+	fake := durable.NewFake()
+	runID := githubTestBinding(t, disk, fake)
+	counter := &signalCountingRuntime{Runtime: fake}
+	adapter, err := github.NewAdapter(disk, counter, nil)
+	if err != nil {
+		t.Fatalf("NewAdapter: %v", err)
+	}
+	dispatcher.github = adapter
+
+	event := envelopeWrappedGitHubEvent(t, "evt-github-1", "nonce-abcdefghijklmnop", githubSuiteBody())
+	ref, err := dispatcher.Dispatch(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Dispatch envelope github event: %v", err)
+	}
+	if ref.ExecutionID != runID {
+		t.Errorf("execution id = %q, want run %q", ref.ExecutionID, runID)
+	}
+	if backend.submitted() != 0 {
+		t.Errorf("submitted turns = %d, want none for envelope github events", backend.submitted())
+	}
+	if counter.count() != 1 {
+		t.Errorf("signals = %d, want exactly one for envelope github event", counter.count())
+	}
+	reserialized := &gatewaywebhook.AcceptedEvent{
+		KeyID: "github", Nonce: "nonce-abcdefghijklmnop",
+		BodyDigest: "different-digest-for-reserialized-envelope",
+		Body:       []byte(`{"event_id":"evt-github-1","subject":"github delivery","payload":{}}`),
+		Envelope:   event.Envelope,
+	}
+	again, err := dispatcher.Dispatch(context.Background(), reserialized)
+	if err != nil {
+		t.Fatalf("redelivery Dispatch: %v", err)
+	}
+	if again.ExecutionID != runID {
+		t.Errorf("redelivery execution id = %q, want run %q", again.ExecutionID, runID)
+	}
+	if backend.submitted() != 0 {
+		t.Errorf("submitted turns after redelivery = %d, want none", backend.submitted())
+	}
+	if counter.count() != 1 {
+		t.Errorf("signals after redelivery = %d, want exactly one", counter.count())
 	}
 }
