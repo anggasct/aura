@@ -383,3 +383,34 @@ func TestValidateWaitCorrelationFields(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateToolArgumentsMustBeJSONObject(t *testing.T) {
+	toolArgsSpec := func() *Spec {
+		return &Spec{
+			ID: "toolargs", Goal: "Tool args", Version: 1, Source: SourceDefined,
+			Steps: []StepSpec{
+				{ID: "run", Executor: ExecutorSpec{Kind: KindTool, ToolID: strPtr("read_file")}, Timeout: time.Minute},
+			},
+		}
+	}
+	t.Run("accepts object args", func(t *testing.T) {
+		spec := toolArgsSpec()
+		spec.Steps[0].Executor.ToolArgs = json.RawMessage(`{"path":"notes.txt"}`)
+		if err := Validate(spec, testValidationDeps()); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	for _, args := range []string{`[1,2]`, `"text"`, `oops`} {
+		t.Run("rejects "+args, func(t *testing.T) {
+			spec := toolArgsSpec()
+			spec.Steps[0].Executor.ToolArgs = json.RawMessage(args)
+			err := Validate(spec, testValidationDeps())
+			if err == nil {
+				t.Fatal("Validate unexpectedly accepted non-object args")
+			}
+			if code, _ := CodeOf(err); code != ErrorCodeExecutorInvalid {
+				t.Fatalf("code = %s (%v), want %s", code, err, ErrorCodeExecutorInvalid)
+			}
+		})
+	}
+}

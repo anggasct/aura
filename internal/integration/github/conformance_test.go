@@ -48,7 +48,7 @@ func TestBrokerConformance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := Register(broker, ToolOptions{BaseURL: server.URL, client: server.Client()}); err != nil {
+	if err := Register(broker, ToolOptions{BaseURL: server.URL, HTTPClient: server.Client()}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	names := map[string]bool{}

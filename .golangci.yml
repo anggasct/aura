@@ -318,6 +318,16 @@ linters:
         text: G204
         path: internal/durable/restate/supervise\.go
 
+      # Handler invocations park on durable signals for unbounded durations
+      # (CI waits, human approvals); any read deadline severs those parked
+      # streams and the runs never complete. The endpoint binds loopback by
+      # default; wider exposure belongs behind network controls that own
+      # slow-client protection instead.
+      - linters:
+          - gosec
+        text: G112
+        path: internal/durable/restate/endpoint\.go
+
       # Retry jitter is not a security context. Scoped to the one file that
       # needs it rather than excluded repository-wide.
       - linters:

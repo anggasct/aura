@@ -1,6 +1,9 @@
 package workflow
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Kind string
 
@@ -46,13 +49,14 @@ type StepSpec struct {
 }
 
 type ExecutorSpec struct {
-	Kind                 Kind     `json:"kind"`
-	AgentID              *string  `json:"agent_id,omitempty"`
-	RequiredCapabilities []string `json:"requires,omitempty"`
-	ToolID               *string  `json:"tool,omitempty"`
-	Event                *string  `json:"event,omitempty"`
-	Source               *string  `json:"source,omitempty"`
-	ExternalRef          *string  `json:"external_ref,omitempty"`
+	Kind                 Kind            `json:"kind"`
+	AgentID              *string         `json:"agent_id,omitempty"`
+	RequiredCapabilities []string        `json:"requires,omitempty"`
+	ToolID               *string         `json:"tool,omitempty"`
+	ToolArgs             json.RawMessage `json:"args,omitempty"`
+	Event                *string         `json:"event,omitempty"`
+	Source               *string         `json:"source,omitempty"`
+	ExternalRef          *string         `json:"external_ref,omitempty"`
 }
 
 type RetryPolicy struct {

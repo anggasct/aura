@@ -62,7 +62,7 @@ func stubGitHubAPI(t *testing.T) *httptest.Server {
 }
 
 func toolOptions(server *httptest.Server) ToolOptions {
-	return ToolOptions{BaseURL: server.URL, client: server.Client()}
+	return ToolOptions{BaseURL: server.URL, HTTPClient: server.Client()}
 }
 
 func toolRequest(t *testing.T, args string) *toolbroker.ToolRequest {

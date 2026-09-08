@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -150,6 +151,12 @@ func validateExecutor(step *StepSpec, deps ValidationDeps, ids map[string]bool) 
 		}
 		if !slices.Contains(deps.KnownTools, *step.Executor.ToolID) {
 			return codedError(ErrorCodeExecutorInvalid, field+" references unknown tool "+fmt.Sprintf("%q", *step.Executor.ToolID))
+		}
+		if len(step.Executor.ToolArgs) != 0 {
+			var document map[string]json.RawMessage
+			if err := json.Unmarshal(step.Executor.ToolArgs, &document); err != nil || document == nil {
+				return codedError(ErrorCodeExecutorInvalid, field+" args must be a JSON object")
+			}
 		}
 	case KindWait:
 		if step.Executor.Event == nil || *step.Executor.Event == "" {
