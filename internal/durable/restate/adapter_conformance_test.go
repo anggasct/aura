@@ -40,12 +40,7 @@ func newConformanceHarness(t *testing.T) *conformanceHarness {
 }
 
 func (h *conformanceHarness) syncHandlers() {
-	h.adapter.mu.Lock()
-	handlers := make(map[string]durable.Handler, len(h.adapter.handlers))
-	for name, fn := range h.adapter.handlers {
-		handlers[name] = fn
-	}
-	h.adapter.mu.Unlock()
+	handlers := h.adapter.registry.snapshot()
 	for name, fn := range handlers {
 		h.fake.RegisterHandler(name, fn)
 	}
@@ -66,11 +61,15 @@ func (h *conformanceHarness) handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	switch {
-	case r.Method == http.MethodPost && len(parts) == 4 && parts[3] == "send":
+	case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == runMethod && parts[3] == "send":
 		key := parts[1]
-		handler := parts[2]
 		body, _ := io.ReadAll(r.Body)
-		if _, err := h.fake.Start(r.Context(), durable.StartRequest{Handler: handler, Key: key, Payload: body}); err != nil {
+		var envelope runEnvelope
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			writeConformanceError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if _, err := h.fake.Start(r.Context(), durable.StartRequest{Handler: envelope.Handler, Key: key, Payload: []byte(envelope.Payload)}); err != nil {
 			writeConformanceError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -146,7 +145,7 @@ func TestAdapterCancelWithoutHandleReturnsUnknownRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
-	first.RegisterHandler("greet", func(_ context.Context, _ *durable.Invocation) error { return nil })
+	first.RegisterHandler("greet", func(_ context.Context, _ durable.Invocation) error { return nil })
 	stub.status["run-fresh"] = statusResponse{State: "running"}
 	ref, err := first.Start(t.Context(), durable.StartRequest{Handler: "greet", Key: "run-fresh", Payload: []byte(`{}`)})
 	if err != nil {
@@ -156,7 +155,7 @@ func TestAdapterCancelWithoutHandleReturnsUnknownRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
-	fresh.RegisterHandler("greet", func(_ context.Context, _ *durable.Invocation) error { return nil })
+	fresh.RegisterHandler("greet", func(_ context.Context, _ durable.Invocation) error { return nil })
 	if err := fresh.Cancel(t.Context(), ref); !errors.Is(err, durable.ErrUnknownRun) {
 		t.Fatalf("Cancel without handle err = %v, want %v", err, durable.ErrUnknownRun)
 	}

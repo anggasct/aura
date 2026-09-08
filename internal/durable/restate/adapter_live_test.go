@@ -50,7 +50,7 @@ func TestLiveStatusUnknownRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
-	adapter.RegisterHandler("greet", func(_ context.Context, _ *durable.Invocation) error { return nil })
+	adapter.RegisterHandler("greet", func(_ context.Context, _ durable.Invocation) error { return nil })
 	if _, err := adapter.Status(t.Context(), durable.RunRef{Key: "run-never-existed"}); !errors.Is(err, durable.ErrUnknownRun) {
 		t.Errorf("status err = %v, want %v", err, durable.ErrUnknownRun)
 	}

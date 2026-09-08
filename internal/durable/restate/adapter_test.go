@@ -40,7 +40,14 @@ func newStubIngress(t *testing.T) *stubIngress {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodPost && len(parts) == 4 && parts[3] == "send":
+		case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == runMethod && parts[3] == "send":
+			var envelope runEnvelope
+			if err := json.Unmarshal(body, &envelope); err != nil {
+				t.Errorf("decode run envelope: %v", err)
+			}
+			if envelope.Handler == "" {
+				t.Error("run envelope carries no handler")
+			}
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte(`{"invocationId":"inv_` + parts[1] + `","status":"accepted"}`))
 		case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == signalMethod:
@@ -78,7 +85,7 @@ func newTestAdapter(t *testing.T, stub *stubIngress) *Adapter {
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
-	adapter.RegisterHandler("greet", func(_ context.Context, _ *durable.Invocation) error { return nil })
+	adapter.RegisterHandler("greet", func(_ context.Context, _ durable.Invocation) error { return nil })
 	return adapter
 }
 
@@ -93,14 +100,18 @@ func TestAdapterStartSendsIdempotentInvocation(t *testing.T) {
 	if ref.Key != "run-1" {
 		t.Errorf("ref = %+v, want key run-1", ref)
 	}
-	if stub.last.method != http.MethodPost || stub.last.path != "/WorkflowRun/run-1/greet/send" {
-		t.Errorf("request = %s %s, want POST /WorkflowRun/run-1/greet/send", stub.last.method, stub.last.path)
+	if stub.last.method != http.MethodPost || stub.last.path != "/WorkflowRun/run-1/run/send" {
+		t.Errorf("request = %s %s, want POST /WorkflowRun/run-1/run/send", stub.last.method, stub.last.path)
 	}
-	if stub.last.header.Get("idempotency-key") != "run-1" {
-		t.Errorf("idempotency-key = %q, want run-1", stub.last.header.Get("idempotency-key"))
+	if stub.last.header.Get("idempotency-key") != "" {
+		t.Errorf("idempotency-key = %q, want unset: workflow runs are idempotent by key", stub.last.header.Get("idempotency-key"))
 	}
-	if string(stub.last.body) != `{"in":1}` {
-		t.Errorf("body = %s, want the payload bytes", stub.last.body)
+	var envelope runEnvelope
+	if err := json.Unmarshal(stub.last.body, &envelope); err != nil {
+		t.Fatalf("decode run envelope: %v", err)
+	}
+	if envelope.Handler != "greet" || string(envelope.Payload) != `{"in":1}` {
+		t.Errorf("envelope = %+v, want handler greet with the payload bytes", envelope)
 	}
 
 	again, err := adapter.Start(t.Context(), durable.StartRequest{Handler: "greet", Key: "run-1", Payload: []byte(`{"in":1}`)})
@@ -215,7 +226,7 @@ func TestAdapterNotFoundMapping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
-	adapter.RegisterHandler("greet", func(_ context.Context, _ *durable.Invocation) error { return nil })
+	adapter.RegisterHandler("greet", func(_ context.Context, _ durable.Invocation) error { return nil })
 
 	if _, err := adapter.Status(t.Context(), durable.RunRef{Key: "run-1"}); !errors.Is(err, durable.ErrUnknownRun) {
 		t.Errorf("status err = %v, want %v", err, durable.ErrUnknownRun)
@@ -240,7 +251,7 @@ func TestAdapterRegisterHandlerPanics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
-	fn := func(_ context.Context, _ *durable.Invocation) error { return nil }
+	fn := func(_ context.Context, _ durable.Invocation) error { return nil }
 	for _, tc := range []struct {
 		name string
 		call func()

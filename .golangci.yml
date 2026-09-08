@@ -329,6 +329,13 @@ linters:
           - contextcheck
         path: internal/cli/root.go
 
+      # The invocation context reaches Restate handlers through the SDK's own
+      # handler signature (WorkflowContext embeds context.Context); the
+      # analyser cannot trace it across that framework boundary.
+      - linters:
+          - contextcheck
+        path: internal/durable/restate/workflow\.go
+
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

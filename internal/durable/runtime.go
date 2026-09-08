@@ -34,7 +34,7 @@ type Runtime interface {
 	Status(ctx context.Context, run RunRef) (RunStatus, error)
 }
 
-type Handler func(ctx context.Context, inv *Invocation) error
+type Handler func(ctx context.Context, inv Invocation) error
 
 type HandlerRegistrar interface {
 	RegisterHandler(name string, fn Handler)

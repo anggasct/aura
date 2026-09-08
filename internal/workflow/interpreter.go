@@ -189,7 +189,7 @@ func (i *Interpreter) RunStatus(ctx context.Context, runID string) (string, erro
 	return summary.Status, nil
 }
 
-func (i *Interpreter) handleInvocation(ctx context.Context, inv *durable.Invocation) error {
+func (i *Interpreter) handleInvocation(ctx context.Context, inv durable.Invocation) error {
 	var tick tickPayload
 	if err := json.Unmarshal(inv.Payload(), &tick); err != nil {
 		return fmt.Errorf("decode invocation payload: %w", err)
@@ -219,7 +219,7 @@ func (i *Interpreter) handleInvocation(ctx context.Context, inv *durable.Invocat
 
 type stepExecution struct {
 	interpreter *Interpreter
-	invocation  *durable.Invocation
+	invocation  durable.Invocation
 	spec        *Spec
 	graph       *Graph
 	runID       string

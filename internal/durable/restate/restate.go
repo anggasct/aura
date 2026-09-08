@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	restate "github.com/restatedev/sdk-go"
 	"github.com/restatedev/sdk-go/ingress"
 
 	"github.com/anggasct/aura/internal/durable"
@@ -20,6 +19,7 @@ const (
 	defaultServiceName = "WorkflowRun"
 	signalMethod       = "signal"
 	statusMethod       = "status"
+	runMethod          = "run"
 
 	unknownRunState = "unknown"
 
@@ -42,13 +42,12 @@ type statusResponse struct {
 }
 
 type Adapter struct {
-	client  *ingress.Client
-	baseURL string
-	service string
-	logger  *slog.Logger
-
+	client      *ingress.Client
+	baseURL     string
+	service     string
+	logger      *slog.Logger
+	registry    *handlerRegistry
 	mu          sync.Mutex
-	handlers    map[string]durable.Handler
 	invocations map[string]string
 }
 
@@ -68,31 +67,13 @@ func NewAdapter(cfg Config, logger *slog.Logger) (*Adapter, error) {
 		baseURL:     cfg.IngressURL,
 		service:     service,
 		logger:      logger,
-		handlers:    map[string]durable.Handler{},
+		registry:    newHandlerRegistry(),
 		invocations: map[string]string{},
 	}, nil
 }
 
 func (a *Adapter) RegisterHandler(name string, fn durable.Handler) {
-	if name == "" {
-		panic("restate adapter requires a handler name")
-	}
-	if fn == nil {
-		panic("restate adapter requires a handler function")
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if _, duplicate := a.handlers[name]; duplicate {
-		panic(fmt.Sprintf("restate adapter already has a handler for %q", name))
-	}
-	a.handlers[name] = fn
-}
-
-func (a *Adapter) registered(name string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	_, ok := a.handlers[name]
-	return ok
+	a.registry.register(name, fn)
 }
 
 func (a *Adapter) Start(ctx context.Context, req durable.StartRequest) (durable.RunRef, error) {
@@ -102,7 +83,7 @@ func (a *Adapter) Start(ctx context.Context, req durable.StartRequest) (durable.
 	if req.Handler == "" {
 		return durable.RunRef{}, errors.New("restate start requires a handler")
 	}
-	if !a.registered(req.Handler) {
+	if _, ok := a.registry.get(req.Handler); !ok {
 		return durable.RunRef{}, fmt.Errorf("restate start: no handler registered for %q", req.Handler)
 	}
 	if len(req.Payload) != 0 && !json.Valid(req.Payload) {
@@ -114,8 +95,8 @@ func (a *Adapter) Start(ctx context.Context, req durable.StartRequest) (durable.
 	}
 	ctx, cancel := withCallTimeout(ctx)
 	defer cancel()
-	response, err := ingress.Object[json.RawMessage, json.RawMessage](a.client, a.service, req.Key, req.Handler).
-		Send(ctx, json.RawMessage(payload), restate.WithIdempotencyKey(req.Key))
+	response, err := ingress.Workflow[runEnvelope, runOutput](a.client, a.service, req.Key, runMethod).
+		Send(ctx, runEnvelope{Handler: req.Handler, Payload: json.RawMessage(payload)})
 	if err != nil {
 		return durable.RunRef{}, fmt.Errorf("restate start run %q: %w", req.Key, mapIngressError(err))
 	}
@@ -141,7 +122,7 @@ func (a *Adapter) Signal(ctx context.Context, run durable.RunRef, name string, p
 	}
 	ctx, cancel := withCallTimeout(ctx)
 	defer cancel()
-	_, err := ingress.Object[signalRequest, json.RawMessage](a.client, a.service, run.Key, signalMethod).
+	_, err := ingress.Workflow[signalRequest, json.RawMessage](a.client, a.service, run.Key, signalMethod).
 		Request(ctx, signalRequest{Name: name, Payload: json.RawMessage(toSend)})
 	if err != nil {
 		return fmt.Errorf("restate signal %q on run %q: %w", name, run.Key, mapIngressError(err))
@@ -180,7 +161,7 @@ func (a *Adapter) Status(ctx context.Context, run durable.RunRef) (durable.RunSt
 	}
 	ctx, cancel := withCallTimeout(ctx)
 	defer cancel()
-	response, err := ingress.Object[json.RawMessage, statusResponse](a.client, a.service, run.Key, statusMethod).
+	response, err := ingress.Workflow[json.RawMessage, statusResponse](a.client, a.service, run.Key, statusMethod).
 		Request(ctx, json.RawMessage(`{}`))
 	if err != nil {
 		return durable.RunStatus{}, fmt.Errorf("restate status run %q: %w", run.Key, mapIngressError(err))

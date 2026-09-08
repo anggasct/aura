@@ -40,7 +40,7 @@ func ExerciseRuntime(t *testing.T, backend durable.Runtime) {
 	}
 
 	var greetCalls atomic.Int64
-	registrar.RegisterHandler("greet", func(_ context.Context, _ *durable.Invocation) error {
+	registrar.RegisterHandler("greet", func(_ context.Context, _ durable.Invocation) error {
 		greetCalls.Add(1)
 		return nil
 	})
@@ -48,7 +48,7 @@ func ExerciseRuntime(t *testing.T, backend durable.Runtime) {
 	var waiterCalls atomic.Int64
 	var mu sync.Mutex
 	var woke []string
-	registrar.RegisterHandler("waiter", func(ctx context.Context, inv *durable.Invocation) error {
+	registrar.RegisterHandler("waiter", func(ctx context.Context, inv durable.Invocation) error {
 		waiterCalls.Add(1)
 		select {
 		case <-release:
@@ -127,6 +127,66 @@ func ExerciseRuntime(t *testing.T, backend durable.Runtime) {
 		}
 	})
 
+	t.Run("wait_receives_signal_before_timeout", func(t *testing.T) {
+		awake := make(chan struct{})
+		registrar.RegisterHandler("waitbound", func(ctx context.Context, inv durable.Invocation) error {
+			close(awake)
+			payload, timedOut, ok := inv.Wait(ctx, "ping", 5*time.Second)
+			if !ok || timedOut || string(payload) != `{"up":true}` {
+				t.Errorf("Wait = %q, timedOut %v, ok %v; want the signal payload", payload, timedOut, ok)
+			}
+			return nil
+		})
+		ref, err := backend.Start(ctx, durable.StartRequest{Handler: "waitbound", Key: "k-wait-signal", Payload: []byte(`{}`)})
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		select {
+		case <-awake:
+		case <-time.After(10 * time.Second):
+			t.Fatal("handler never started waiting")
+		}
+		if err := backend.Signal(ctx, ref, "ping", []byte(`{"up":true}`)); err != nil {
+			t.Fatalf("Signal: %v", err)
+		}
+		waitForState(ctx, t, backend, ref.Key, durable.RunSucceeded)
+	})
+
+	t.Run("wait_times_out_without_signal", func(t *testing.T) {
+		registrar.RegisterHandler("waitidle", func(ctx context.Context, inv durable.Invocation) error {
+			_, timedOut, ok := inv.Wait(ctx, "never", 50*time.Millisecond)
+			if !ok || !timedOut {
+				t.Errorf("Wait = timedOut %v, ok %v; want a timeout", timedOut, ok)
+			}
+			return nil
+		})
+		ref, err := backend.Start(ctx, durable.StartRequest{Handler: "waitidle", Key: "k-wait-timeout", Payload: []byte(`{}`)})
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		waitForState(ctx, t, backend, ref.Key, durable.RunSucceeded)
+	})
+
+	t.Run("run_action_returns_function_result", func(t *testing.T) {
+		registrar.RegisterHandler("actor", func(ctx context.Context, inv durable.Invocation) error {
+			out, err := inv.RunAction(ctx, "step", func(context.Context) ([]byte, error) {
+				return []byte(`{"done":true}`), nil
+			})
+			if err != nil || string(out) != `{"done":true}` {
+				t.Errorf("RunAction = %q, %v; want the function bytes", out, err)
+			}
+			if _, err := inv.RunAction(ctx, "step", nil); err == nil {
+				t.Error("expected nil function to fail, got nil")
+			}
+			return nil
+		})
+		ref, err := backend.Start(ctx, durable.StartRequest{Handler: "actor", Key: "k-action", Payload: []byte(`{}`)})
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		waitForState(ctx, t, backend, ref.Key, durable.RunSucceeded)
+	})
+
 	t.Run("signal_unknown_run_fails", func(t *testing.T) {
 		err := backend.Signal(ctx, durable.RunRef{Key: "k-never-started"}, "wake", []byte(`{}`))
 		if !errors.Is(err, durable.ErrUnknownRun) {
@@ -136,7 +196,7 @@ func ExerciseRuntime(t *testing.T, backend durable.Runtime) {
 
 	t.Run("cancel_ends_running_run", func(t *testing.T) {
 		held := make(chan struct{})
-		registrar.RegisterHandler("hold", func(ctx context.Context, _ *durable.Invocation) error {
+		registrar.RegisterHandler("hold", func(ctx context.Context, _ durable.Invocation) error {
 			select {
 			case <-held:
 				return nil
@@ -175,7 +235,7 @@ func ExerciseRuntime(t *testing.T, backend durable.Runtime) {
 	})
 
 	t.Run("empty_payload_accepted", func(t *testing.T) {
-		registrar.RegisterHandler("emptyhold", func(ctx context.Context, _ *durable.Invocation) error {
+		registrar.RegisterHandler("emptyhold", func(ctx context.Context, _ durable.Invocation) error {
 			<-ctx.Done()
 			return ctx.Err()
 		})
