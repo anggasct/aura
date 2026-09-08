@@ -240,11 +240,12 @@ linters:
           - musttag
 
       # Every path reaching these opens is either operator-supplied config or
-      # confined to the data root by resolveRootedPath before use.
+      # confined to the data root by resolveRootedPath before use. The durable
+      # child config directory is the operator-supplied restate data dir.
       - linters:
           - gosec
         text: G304
-        path: internal/(store|config|usage)/
+        path: internal/(store|config|usage|durable/restate)/
 
       # The cgroup v2 directory comes from the kernel's /proc/self/cgroup for
       # this very process, never from external input.
@@ -308,6 +309,14 @@ linters:
           - gosec
         text: G204
         path: internal/mcp/client\.go
+
+      # Launching the configured durable runtime binary is the supervisor's
+      # purpose; the path is operator-configured and resolution fails closed
+      # when the binary is absent or not executable.
+      - linters:
+          - gosec
+        text: G204
+        path: internal/durable/restate/supervise\.go
 
       # Retry jitter is not a security context. Scoped to the one file that
       # needs it rather than excluded repository-wide.

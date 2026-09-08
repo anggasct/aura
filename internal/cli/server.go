@@ -137,6 +137,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err := srv.Add(probeListener); err != nil {
 				return err
 			}
+			if cfg.Durable != nil && cfg.Durable.Enabled {
+				durableListener, err := buildDurableListener(ctx, cfg, db, logger)
+				if err != nil {
+					return err
+				}
+				if err := srv.Add(durableListener); err != nil {
+					return err
+				}
+			}
 			if cfg.Webhook.Enabled {
 				webhookListener, err := buildWebhookListener(cfg, db, runtimeEngine, logger)
 				if err != nil {

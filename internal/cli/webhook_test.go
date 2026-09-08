@@ -206,9 +206,10 @@ func TestWebhookDispatcher_IdenticalReplayReturnsOriginal(t *testing.T) {
 
 func TestWebhookDispatcher_ChangedBodyConflicts(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	dispatcher, _ := webhookTestSetup(t, backend)
+	dispatcher, executions := webhookTestSetup(t, backend)
 
-	if _, err := dispatcher.Dispatch(t.Context(), webhookTestEvent()); err != nil {
+	first, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
+	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
 	changed := webhookTestEvent()
@@ -218,6 +219,7 @@ func TestWebhookDispatcher_ChangedBodyConflicts(t *testing.T) {
 	} else if code, ok := gatewaywebhook.CodeOf(err); !ok || code != gatewaywebhook.ErrorCodeReplayConflict {
 		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, gatewaywebhook.ErrorCodeReplayConflict)
 	}
+	waitForExecutionState(t, executions, first.ExecutionID, store.WebhookExecutionStateCompleted)
 }
 
 func TestWebhookDispatcher_OverloadLeavesNoRow(t *testing.T) {

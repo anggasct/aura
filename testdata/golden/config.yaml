@@ -28,6 +28,14 @@ workflows:
   definitions_dir: ""
   max_concurrent_steps: 4
   default_step_timeout: 15m0s
+durable:
+  enabled: false
+  mode: supervised
+  endpoint: http://127.0.0.1:8080
+  admin_endpoint: http://127.0.0.1:9070
+  handler_addr: 127.0.0.1:9080
+  restart_backoff_initial: 1s
+  restart_backoff_max: 30s
 server:
   host: 127.0.0.1
   port: 8280

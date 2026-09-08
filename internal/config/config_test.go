@@ -1287,3 +1287,64 @@ models:
 		t.Errorf("CostBudgetUSD = %f, want 2.50 (from env)", r.CostBudgetUSD)
 	}
 }
+
+func TestLoad_DurableDefaultsApplied(t *testing.T) {
+	res, err := Load(writeTempConfig(t, "version: 1\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	durable := res.Config.Durable
+	if durable == nil {
+		t.Fatal("durable section was not defaulted")
+	}
+	if durable.Enabled {
+		t.Error("durable.enabled defaults to false")
+	}
+	if durable.Mode != DurableModeSupervised {
+		t.Errorf("durable.mode = %q, want supervised", durable.Mode)
+	}
+	if durable.Endpoint != "http://127.0.0.1:8080" {
+		t.Errorf("durable.endpoint = %q", durable.Endpoint)
+	}
+	if durable.AdminEndpoint != "http://127.0.0.1:9070" {
+		t.Errorf("durable.admin_endpoint = %q", durable.AdminEndpoint)
+	}
+	if durable.HandlerAddr != "127.0.0.1:9080" {
+		t.Errorf("durable.handler_addr = %q", durable.HandlerAddr)
+	}
+	if time.Duration(durable.RestartBackoffInitial) != time.Second {
+		t.Errorf("durable.restart_backoff_initial = %s, want 1s", time.Duration(durable.RestartBackoffInitial))
+	}
+	if time.Duration(durable.RestartBackoffMax) != 30*time.Second {
+		t.Errorf("durable.restart_backoff_max = %s, want 30s", time.Duration(durable.RestartBackoffMax))
+	}
+}
+
+func TestLoad_DurableValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"bad mode", "version: 1\ndurable:\n  enabled: true\n  mode: managed\n", "durable.mode"},
+		{"bad endpoint", "version: 1\ndurable:\n  enabled: true\n  endpoint: \"http://example.com:abc\"\n", "durable.endpoint"},
+		{"bad handler addr", "version: 1\ndurable:\n  enabled: true\n  handler_addr: not-an-addr\n", "durable.handler_addr"},
+		{"inverted backoff", "version: 1\ndurable:\n  enabled: true\n  restart_backoff_initial: 30s\n  restart_backoff_max: 1s\n", "durable.restart_backoff_max"},
+		{"non-bool enabled", "version: 1\ndurable:\n  enabled: \"yes\"\n", "durable.enabled must be a boolean"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, tc.content))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoad_DurableDisabledSkipsValidation(t *testing.T) {
+	content := "version: 1\ndurable:\n  enabled: false\n  mode: managed\n  endpoint: nonsense\n"
+	if _, err := Load(writeTempConfig(t, content)); err != nil {
+		t.Fatalf("disabled durable section must not validate, got %v", err)
+	}
+}

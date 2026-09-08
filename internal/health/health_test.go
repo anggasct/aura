@@ -195,3 +195,22 @@ func TestEvaluatorEmptyIsUp(t *testing.T) {
 		t.Errorf("empty evaluator status = %s, want up", got)
 	}
 }
+
+func TestDurableChecker(t *testing.T) {
+	up := DurableChecker{State: func(context.Context) (DurableState, string) { return DurableUp, "reachable" }}
+	if f := up.Check(context.Background()); f[0].Status != StatusUp || f[0].Code != "ok" {
+		t.Errorf("up finding = %+v, want up ok", f[0])
+	}
+	disabled := DurableChecker{State: func(context.Context) (DurableState, string) { return DurableDisabled, "disabled" }}
+	if f := disabled.Check(context.Background()); f[0].Status != StatusUp || f[0].Code != "disabled" {
+		t.Errorf("disabled finding = %+v, want up disabled", f[0])
+	}
+	down := DurableChecker{State: func(context.Context) (DurableState, string) { return DurableUnreachable, "unreachable" }}
+	if f := down.Check(context.Background()); f[0].Status != StatusDown || f[0].Code != "durable_unreachable" {
+		t.Errorf("unreachable finding = %+v, want down durable_unreachable", f[0])
+	}
+	unwired := DurableChecker{}
+	if f := unwired.Check(context.Background()); f[0].Status != StatusUnknown {
+		t.Errorf("unwired finding = %+v, want unknown", f[0])
+	}
+}

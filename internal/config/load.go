@@ -200,6 +200,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateWorkflows(cfg.Workflows); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateDurable(cfg.Durable); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateMCP(cfg.MCP); err != nil {
 		return LoadResult{}, err
 	}
@@ -349,6 +352,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateWorkflowsShapes(doc); err != nil {
+		return err
+	}
+	if err := validateDurableShapes(doc); err != nil {
 		return err
 	}
 	if err := validateMCPShapes(doc); err != nil {
@@ -848,6 +854,35 @@ func validateWorkflowsShapes(doc *yamlv3.Node) error {
 		case "default_step_timeout":
 			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
 				return fmt.Errorf("workflows.default_step_timeout must be a duration string at line %d", value.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func validateDurableShapes(doc *yamlv3.Node) error {
+	durableNode := mappingValue(doc, "durable")
+	if durableNode == nil {
+		return nil
+	}
+	if durableNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("durable must be a mapping at line %d", durableNode.Line)
+	}
+	for i := 0; i+1 < len(durableNode.Content); i += 2 {
+		key := durableNode.Content[i].Value
+		value := durableNode.Content[i+1]
+		switch key {
+		case "enabled":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!bool" {
+				return fmt.Errorf("durable.enabled must be a boolean at line %d", value.Line)
+			}
+		case "mode", "binary_path", "endpoint", "admin_endpoint", "handler_addr", "data_dir":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
+				return fmt.Errorf("durable.%s must be a string at line %d", key, value.Line)
+			}
+		case "restart_backoff_initial", "restart_backoff_max":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
+				return fmt.Errorf("durable.%s must be a duration string at line %d", key, value.Line)
 			}
 		}
 	}
@@ -1489,6 +1524,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	}
 	applyToolDefaults(cfg, doc)
 	applyWorkflowDefaults(cfg, doc)
+	applyDurableDefaults(cfg, doc)
 	applyMCPDefaults(cfg, doc)
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = defaults.Server.Host
@@ -1672,6 +1708,31 @@ func applyWorkflowDefaults(cfg *Config, doc *yamlv3.Node) {
 	}
 }
 
+func applyDurableDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Durable == nil {
+		cfg.Durable = &Durable{}
+	}
+	defaults := Default().Durable
+	if cfg.Durable.Mode == "" && !configValuePresent(doc, "durable", "mode") && !envValuePresent("durable.mode") {
+		cfg.Durable.Mode = defaults.Mode
+	}
+	if cfg.Durable.Endpoint == "" && !configValuePresent(doc, "durable", "endpoint") && !envValuePresent("durable.endpoint") {
+		cfg.Durable.Endpoint = defaults.Endpoint
+	}
+	if cfg.Durable.AdminEndpoint == "" && !configValuePresent(doc, "durable", "admin_endpoint") && !envValuePresent("durable.admin_endpoint") {
+		cfg.Durable.AdminEndpoint = defaults.AdminEndpoint
+	}
+	if cfg.Durable.HandlerAddr == "" && !configValuePresent(doc, "durable", "handler_addr") && !envValuePresent("durable.handler_addr") {
+		cfg.Durable.HandlerAddr = defaults.HandlerAddr
+	}
+	if cfg.Durable.RestartBackoffInitial == 0 && !configValuePresent(doc, "durable", "restart_backoff_initial") && !envValuePresent("durable.restart_backoff_initial") {
+		cfg.Durable.RestartBackoffInitial = defaults.RestartBackoffInitial
+	}
+	if cfg.Durable.RestartBackoffMax == 0 && !configValuePresent(doc, "durable", "restart_backoff_max") && !envValuePresent("durable.restart_backoff_max") {
+		cfg.Durable.RestartBackoffMax = defaults.RestartBackoffMax
+	}
+}
+
 func applyToolDefaults(cfg *Config, doc *yamlv3.Node) {
 	if cfg.Tools == nil {
 		return
@@ -1762,6 +1823,39 @@ func validateWorkflows(workflows *Workflows) error {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.max_concurrent_steps must be at least 1"}
 	}
 	return nil
+}
+
+func validateDurable(durable *Durable) error {
+	if durable == nil || !durable.Enabled {
+		return nil
+	}
+	var problems []error
+	if durable.Mode != DurableModeSupervised && durable.Mode != DurableModeExternal {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.mode %q must be %q or %q", durable.Mode, DurableModeSupervised, DurableModeExternal)})
+	}
+	if err := ValidateBaseURL(durable.Endpoint); err != nil {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.endpoint: %v", err)})
+	} else if durable.Endpoint == "" {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.endpoint must not be empty"})
+	}
+	if err := ValidateBaseURL(durable.AdminEndpoint); err != nil {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.admin_endpoint: %v", err)})
+	} else if durable.AdminEndpoint == "" {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.admin_endpoint must not be empty"})
+	}
+	host, portRaw, err := net.SplitHostPort(durable.HandlerAddr)
+	if err != nil || host == "" {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.handler_addr %q must be host:port", durable.HandlerAddr)})
+	} else if port, convErr := strconv.Atoi(portRaw); convErr != nil || port < 1 || port > 65535 {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.handler_addr port %q is out of range (1-65535)", portRaw)})
+	}
+	if durable.RestartBackoffInitial <= 0 {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.restart_backoff_initial must be positive"})
+	}
+	if durable.RestartBackoffMax < durable.RestartBackoffInitial {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.restart_backoff_max must cover restart_backoff_initial"})
+	}
+	return errors.Join(problems...)
 }
 
 func validateMCP(m *MCP) error {

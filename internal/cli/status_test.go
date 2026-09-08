@@ -182,8 +182,8 @@ func TestStatusJSONEncodesContract(t *testing.T) {
 	if decoded.Live.Reachable {
 		t.Error("offline json must report live unreachable")
 	}
-	if len(decoded.Findings) != 8 {
-		t.Fatalf("findings = %d, want 8 (migration, backup, storage intake, disk, sandbox, capability, process, provider): %v", len(decoded.Findings), decoded.Findings)
+	if len(decoded.Findings) != 9 {
+		t.Fatalf("findings = %d, want 9 (migration, backup, storage intake, disk, sandbox, capability, process, provider, durable): %v", len(decoded.Findings), decoded.Findings)
 	}
 	for _, f := range decoded.Findings {
 		if f.ID == "" || f.Severity == "" {

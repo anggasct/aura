@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/durable/restate"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/store"
@@ -152,7 +153,26 @@ func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilitySta
 			Timeout:     checkTimeout,
 			Remediation: health.RemediationConfigureModels,
 		},
+		health.RegisteredCheck{
+			ID:          "durable",
+			Checker:     health.DurableChecker{State: durableProbeState(cfg)},
+			Timeout:     checkTimeout,
+			Remediation: health.RemediationReconcileState,
+		},
 	)
+}
+
+func durableProbeState(cfg *config.Config) func(context.Context) (health.DurableState, string) {
+	return func(ctx context.Context) (health.DurableState, string) {
+		durableCfg := cfg.Durable
+		if durableCfg == nil || !durableCfg.Enabled {
+			return health.DurableDisabled, "durable runtime is disabled"
+		}
+		if err := restate.CheckExternal(ctx, durableCfg.Endpoint, durableCfg.AdminEndpoint); err != nil {
+			return health.DurableUnreachable, "durable runtime is unreachable"
+		}
+		return health.DurableUp, "durable runtime is reachable"
+	}
 }
 
 const storageMinFreeBytes = 64 << 20
