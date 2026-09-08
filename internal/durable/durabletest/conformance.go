@@ -2,6 +2,7 @@ package durabletest
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -128,8 +129,8 @@ func ExerciseRuntime(t *testing.T, backend durable.Runtime) {
 
 	t.Run("signal_unknown_run_fails", func(t *testing.T) {
 		err := backend.Signal(ctx, durable.RunRef{Key: "k-never-started"}, "wake", []byte(`{}`))
-		if err == nil {
-			t.Fatal("expected unknown run signal to fail, got nil")
+		if !errors.Is(err, durable.ErrUnknownRun) {
+			t.Fatalf("signal unknown run err = %v, want %v", err, durable.ErrUnknownRun)
 		}
 	})
 
@@ -162,14 +163,50 @@ func ExerciseRuntime(t *testing.T, backend durable.Runtime) {
 	})
 
 	t.Run("status_unknown_run_fails", func(t *testing.T) {
-		if _, err := backend.Status(ctx, durable.RunRef{Key: "k-never-started"}); err == nil {
-			t.Fatal("expected unknown run status to fail, got nil")
+		if _, err := backend.Status(ctx, durable.RunRef{Key: "k-never-started"}); !errors.Is(err, durable.ErrUnknownRun) {
+			t.Fatalf("status unknown run err = %v, want %v", err, durable.ErrUnknownRun)
 		}
 	})
 
 	t.Run("cancel_unknown_run_fails", func(t *testing.T) {
-		if err := backend.Cancel(ctx, durable.RunRef{Key: "k-never-started"}); err == nil {
-			t.Fatal("expected unknown run cancel to fail, got nil")
+		if err := backend.Cancel(ctx, durable.RunRef{Key: "k-never-started"}); !errors.Is(err, durable.ErrUnknownRun) {
+			t.Fatalf("cancel unknown run err = %v, want %v", err, durable.ErrUnknownRun)
 		}
+	})
+
+	t.Run("empty_payload_accepted", func(t *testing.T) {
+		registrar.RegisterHandler("emptyhold", func(ctx context.Context, _ *durable.Invocation) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
+		startCases := []struct {
+			name    string
+			key     string
+			payload []byte
+		}{
+			{"nil", "k-empty-nil", nil},
+			{"empty", "k-empty-blank", []byte{}},
+			{"object", "k-empty-object", []byte(`{}`)},
+		}
+		for _, tc := range startCases {
+			if _, err := backend.Start(ctx, durable.StartRequest{Handler: "greet", Key: tc.key, Payload: tc.payload}); err != nil {
+				t.Fatalf("Start with %s payload: %v", tc.name, err)
+			}
+			waitForState(ctx, t, backend, tc.key, durable.RunSucceeded)
+		}
+		ref, err := backend.Start(ctx, durable.StartRequest{Handler: "emptyhold", Key: "k-empty-signal", Payload: nil})
+		if err != nil {
+			t.Fatalf("Start emptyhold: %v", err)
+		}
+		waitForState(ctx, t, backend, ref.Key, durable.RunRunning)
+		for _, tc := range startCases {
+			if err := backend.Signal(ctx, ref, "wake", tc.payload); err != nil {
+				t.Fatalf("Signal with %s payload: %v", tc.name, err)
+			}
+		}
+		if err := backend.Cancel(ctx, ref); err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		waitForState(ctx, t, backend, ref.Key, durable.RunCancelled, durable.RunSucceeded, durable.RunFailed)
 	})
 }

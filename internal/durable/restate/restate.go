@@ -105,13 +105,17 @@ func (a *Adapter) Start(ctx context.Context, req durable.StartRequest) (durable.
 	if !a.registered(req.Handler) {
 		return durable.RunRef{}, fmt.Errorf("restate start: no handler registered for %q", req.Handler)
 	}
-	if !json.Valid(req.Payload) {
+	if len(req.Payload) != 0 && !json.Valid(req.Payload) {
 		return durable.RunRef{}, fmt.Errorf("restate start: payload for run %q is not valid JSON", req.Key)
+	}
+	payload := req.Payload
+	if len(payload) == 0 {
+		payload = []byte(`{}`)
 	}
 	ctx, cancel := withCallTimeout(ctx)
 	defer cancel()
 	response, err := ingress.Object[json.RawMessage, json.RawMessage](a.client, a.service, req.Key, req.Handler).
-		Send(ctx, json.RawMessage(req.Payload), restate.WithIdempotencyKey(req.Key))
+		Send(ctx, json.RawMessage(payload), restate.WithIdempotencyKey(req.Key))
 	if err != nil {
 		return durable.RunRef{}, fmt.Errorf("restate start run %q: %w", req.Key, mapIngressError(err))
 	}
@@ -128,13 +132,17 @@ func (a *Adapter) Signal(ctx context.Context, run durable.RunRef, name string, p
 	if name == "" {
 		return errors.New("restate signal requires a name")
 	}
-	if !json.Valid(payload) {
+	if len(payload) != 0 && !json.Valid(payload) {
 		return fmt.Errorf("restate signal %q on run %q: payload is not valid JSON", name, run.Key)
+	}
+	toSend := payload
+	if len(toSend) == 0 {
+		toSend = []byte(`{}`)
 	}
 	ctx, cancel := withCallTimeout(ctx)
 	defer cancel()
 	_, err := ingress.Object[signalRequest, json.RawMessage](a.client, a.service, run.Key, signalMethod).
-		Request(ctx, signalRequest{Name: name, Payload: json.RawMessage(payload)})
+		Request(ctx, signalRequest{Name: name, Payload: json.RawMessage(toSend)})
 	if err != nil {
 		return fmt.Errorf("restate signal %q on run %q: %w", name, run.Key, mapIngressError(err))
 	}
@@ -156,7 +164,7 @@ func (a *Adapter) Cancel(ctx context.Context, run durable.RunRef) error {
 	invocationID := a.invocations[run.Key]
 	a.mu.Unlock()
 	if invocationID == "" {
-		return fmt.Errorf("restate cancel run %q: invocation handle is not available", run.Key)
+		return fmt.Errorf("%w: invocation handle for run %q is not available", durable.ErrUnknownRun, run.Key)
 	}
 	ctx, cancel := withCallTimeout(ctx)
 	defer cancel()

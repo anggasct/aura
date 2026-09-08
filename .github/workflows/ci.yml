@@ -62,7 +62,7 @@ jobs:
       - name: Durable conformance
         run: make durable-test
         env:
-          AURA_RESTASE_INGRESS: http://localhost:8080
+          AURA_RESTATE_INGRESS: http://localhost:8080
 
   integration:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

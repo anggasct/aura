@@ -15,7 +15,7 @@ import (
 
 func liveIngressURL(t *testing.T) string {
 	t.Helper()
-	if url := os.Getenv("AURA_RESTASE_INGRESS"); url != "" {
+	if url := os.Getenv("AURA_RESTATE_INGRESS"); url != "" {
 		return url
 	}
 	return "http://127.0.0.1:8080"
