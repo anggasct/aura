@@ -12,7 +12,7 @@ import (
 func TestFakeStartIsIdempotentPerKey(t *testing.T) {
 	fake := NewFake()
 	var runs atomic.Int64
-	fake.RegisterHandler("svc", func(_ context.Context, inv *Invocation) error {
+	fake.RegisterHandler("svc", func(_ context.Context, inv Invocation) error {
 		runs.Add(1)
 		return nil
 	})
@@ -41,7 +41,7 @@ func TestFakeSignalQueuesBeforeAndWakesAfterWait(t *testing.T) {
 	fake := NewFake()
 	started := make(chan struct{})
 	release := make(chan struct{})
-	fake.RegisterHandler("svc", func(ctx context.Context, inv *Invocation) error {
+	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
 		close(started)
 		payload, ok := inv.Signal(ctx, "go")
 		if !ok || string(payload) != "green" {
@@ -69,7 +69,7 @@ func TestFakeSignalQueuesBeforeAndWakesAfterWait(t *testing.T) {
 func TestFakeCancelTerminatesWait(t *testing.T) {
 	fake := NewFake()
 	observed := make(chan error, 1)
-	fake.RegisterHandler("svc", func(ctx context.Context, inv *Invocation) error {
+	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
 		_, ok := inv.Signal(ctx, "never")
 		observed <- map[bool]error{true: nil, false: context.Canceled}[ok]
 		return nil
@@ -102,12 +102,12 @@ func TestFakeSleepFiresOnManualClock(t *testing.T) {
 	fake := NewFake().WithClock(clock)
 	timerRegistered := make(chan struct{})
 	slept := make(chan struct{})
-	fake.RegisterHandler("svc", func(_ context.Context, inv *Invocation) error {
+	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
 		timer := inv.Timer(time.Minute)
 		close(timerRegistered)
 		select {
 		case <-timer:
-		case <-inv.done:
+		case <-ctx.Done():
 			t.Errorf("sleep ended by cancellation")
 		}
 		close(slept)
@@ -143,7 +143,7 @@ func TestFakeUnknownRunOperationsFail(t *testing.T) {
 
 func TestFakeFailureCarriesDetail(t *testing.T) {
 	fake := NewFake()
-	fake.RegisterHandler("svc", func(_ context.Context, inv *Invocation) error {
+	fake.RegisterHandler("svc", func(_ context.Context, inv Invocation) error {
 		return errors.New("step exploded")
 	})
 	run, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-1"})
@@ -161,7 +161,7 @@ func TestFakeRunCompletionReleasesParkedSignal(t *testing.T) {
 	fake := NewFake()
 	parked := make(chan struct{})
 	released := make(chan struct{})
-	fake.RegisterHandler("svc", func(runCtx context.Context, inv *Invocation) error {
+	fake.RegisterHandler("svc", func(runCtx context.Context, inv Invocation) error {
 		go func() {
 			close(parked)
 			_, ok := inv.Signal(runCtx, "late")
@@ -189,7 +189,7 @@ func TestFakeRunCompletionReleasesParkedSignal(t *testing.T) {
 }
 
 func TestSignalWaitCancellationPreservesRacedDelivery(t *testing.T) {
-	inv := &Invocation{done: make(chan struct{}), mu: &sync.Mutex{}, signals: map[string]*signalQueue{}}
+	inv := &invocation{run: RunRef{Key: "test"}, clock: RealClock(), done: make(chan struct{}), mu: &sync.Mutex{}, signals: map[string]*signalQueue{}}
 	ctx, cancel := context.WithCancel(context.Background())
 	type signalResult struct {
 		payload []byte

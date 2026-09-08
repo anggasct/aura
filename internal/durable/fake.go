@@ -81,7 +81,7 @@ func (c *ManualClock) Timer(d time.Duration) <-chan time.Time {
 	return ch
 }
 
-type Invocation struct {
+type invocation struct {
 	run     RunRef
 	payload []byte
 	done    <-chan struct{}
@@ -99,11 +99,11 @@ type signalDelivery struct {
 	payload []byte
 }
 
-func (i *Invocation) Run() RunRef { return i.run }
+func (i *invocation) Run() RunRef { return i.run }
 
-func (i *Invocation) Payload() []byte { return i.payload }
+func (i *invocation) Payload() []byte { return i.payload }
 
-func (i *Invocation) Signal(ctx context.Context, name string) ([]byte, bool) {
+func (i *invocation) Signal(ctx context.Context, name string) ([]byte, bool) {
 	i.mu.Lock()
 	queue := i.signals[name]
 	if queue == nil {
@@ -134,7 +134,7 @@ func (i *Invocation) Signal(ctx context.Context, name string) ([]byte, bool) {
 	}
 }
 
-func (i *Invocation) detachWaiter(name string, reply chan signalDelivery, raced *signalDelivery) {
+func (i *invocation) detachWaiter(name string, reply chan signalDelivery, raced *signalDelivery) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	queue := i.signals[name]
@@ -159,7 +159,7 @@ func (i *Invocation) detachWaiter(name string, reply chan signalDelivery, raced 
 	queue.delivered = append([]signalDelivery{*raced}, queue.delivered...)
 }
 
-func (i *Invocation) Sleep(d time.Duration) error {
+func (i *invocation) Sleep(d time.Duration) error {
 	timer := i.clock.Timer(d)
 	select {
 	case <-timer:
@@ -169,8 +169,53 @@ func (i *Invocation) Sleep(d time.Duration) error {
 	}
 }
 
-func (i *Invocation) Timer(d time.Duration) <-chan time.Time {
+func (i *invocation) Timer(d time.Duration) <-chan time.Time {
 	return i.clock.Timer(d)
+}
+
+func (i *invocation) Wait(ctx context.Context, name string, timeout time.Duration) (payload []byte, timedOut, ok bool) {
+	i.mu.Lock()
+	queue := i.signals[name]
+	if queue == nil {
+		queue = &signalQueue{}
+		i.signals[name] = queue
+	}
+	if len(queue.delivered) > 0 {
+		delivery := queue.delivered[0]
+		queue.delivered = queue.delivered[1:]
+		i.mu.Unlock()
+		return delivery.payload, false, true
+	}
+	reply := make(chan signalDelivery, 1)
+	queue.waiter = reply
+	i.mu.Unlock()
+	timer := i.clock.Timer(timeout)
+	select {
+	case delivery := <-reply:
+		if ctx.Err() != nil {
+			i.detachWaiter(name, reply, &delivery)
+			return nil, false, false
+		}
+		return delivery.payload, false, true
+	case <-timer:
+		i.detachWaiter(name, reply, nil)
+		return nil, true, true
+	case <-ctx.Done():
+		i.detachWaiter(name, reply, nil)
+		return nil, false, false
+	case <-i.done:
+		return nil, false, false
+	}
+}
+
+func (i *invocation) RunAction(ctx context.Context, key string, fn func(ctx context.Context) ([]byte, error)) ([]byte, error) {
+	if key == "" {
+		return nil, errors.New("durable run action requires a key")
+	}
+	if fn == nil {
+		return nil, errors.New("durable run action requires a function")
+	}
+	return fn(ctx)
 }
 
 type Fake struct {
@@ -185,7 +230,7 @@ type fakeRun struct {
 	ref        RunRef
 	cancel     context.CancelFunc
 	done       chan struct{}
-	invocation *Invocation
+	invocation *invocation
 	mu         sync.Mutex
 	state      RunState
 	detail     string
@@ -244,7 +289,7 @@ func (f *Fake) Start(ctx context.Context, req StartRequest) (RunRef, error) {
 	clock := f.clock
 	f.mu.Unlock()
 
-	inv := &Invocation{
+	inv := &invocation{
 		run:     run.ref,
 		payload: append([]byte(nil), req.Payload...),
 		done:    runCtx.Done(),
@@ -356,7 +401,7 @@ func (f *Fake) WaitReady(run RunRef) {
 	}
 }
 
-func (f *Fake) invocationFor(key string) *Invocation {
+func (f *Fake) invocationFor(key string) *invocation {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	run := f.runs[key]
