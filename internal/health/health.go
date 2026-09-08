@@ -22,6 +22,7 @@ const (
 	ComponentBackup     = "backup"
 	ComponentProvider   = "provider"
 	ComponentEffectJob  = "effect_job"
+	ComponentDurable    = "durable"
 )
 
 type Finding struct {
@@ -245,4 +246,35 @@ func (c EffectJobChecker) Check(ctx context.Context) []Finding {
 		return []Finding{{Component: ComponentEffectJob, Code: "effect_job_stuck", Status: StatusDegraded, Detail: fmt.Sprintf("%d effect/job records stuck", count), CheckedAt: now}}
 	}
 	return []Finding{{Component: ComponentEffectJob, Code: "ok", Status: StatusUp, Detail: "no stuck effects or jobs", CheckedAt: now}}
+}
+
+type DurableState string
+
+const (
+	DurableUp          DurableState = "up"
+	DurableDisabled    DurableState = "disabled"
+	DurableUnreachable DurableState = "unreachable"
+	DurableUnknown     DurableState = "unknown"
+)
+
+type DurableChecker struct {
+	State func(ctx context.Context) (DurableState, string)
+}
+
+func (c DurableChecker) Check(ctx context.Context) []Finding {
+	now := time.Now().UTC()
+	if c.State == nil {
+		return []Finding{{Component: ComponentDurable, Code: "durable_unknown", Status: StatusUnknown, Detail: "durable state is not wired", CheckedAt: now}}
+	}
+	state, detail := c.State(ctx)
+	switch state {
+	case DurableUp:
+		return []Finding{{Component: ComponentDurable, Code: "ok", Status: StatusUp, Detail: detail, CheckedAt: now}}
+	case DurableDisabled:
+		return []Finding{{Component: ComponentDurable, Code: "disabled", Status: StatusUp, Detail: detail, CheckedAt: now}}
+	case DurableUnreachable:
+		return []Finding{{Component: ComponentDurable, Code: "durable_unreachable", Status: StatusDown, Detail: detail, CheckedAt: now}}
+	default:
+		return []Finding{{Component: ComponentDurable, Code: "durable_unknown", Status: StatusUnknown, Detail: detail, CheckedAt: now}}
+	}
 }

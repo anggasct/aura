@@ -175,14 +175,22 @@ func buildWorkflowInterpreter(ctx context.Context, cfg *config.Config, logger *s
 		return nil, nil, err
 	}
 	closeStorage := func() { _ = db.Close() }
-	definitionsDir := workflowDefinitionsDir(cfg)
-	specs, err := workflow.LoadDefinitionsDir(definitionsDir)
+	interpreter, err := buildWorkflowInterpreterWithDB(ctx, cfg, db, logger)
 	if err != nil {
 		return nil, closeStorage, err
 	}
+	return interpreter, closeStorage, nil
+}
+
+func buildWorkflowInterpreterWithDB(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger) (*workflow.Interpreter, error) {
+	definitionsDir := workflowDefinitionsDir(cfg)
+	specs, err := workflow.LoadDefinitionsDir(definitionsDir)
+	if err != nil {
+		return nil, err
+	}
 	deps, err := workflowValidationDeps(cfg)
 	if err != nil {
-		return nil, closeStorage, err
+		return nil, err
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -194,17 +202,17 @@ func buildWorkflowInterpreter(ctx context.Context, cfg *config.Config, logger *s
 	if cfg.Tools != nil {
 		tools, err := newWorkflowToolRunner(cfg, db, logger)
 		if err != nil {
-			return nil, closeStorage, err
+			return nil, err
 		}
 		options.Tools = tools
 	}
 	interpreter := workflow.NewInterpreter(workflow.NewStore(db), durable.NewFake(), options)
 	for _, spec := range specs {
 		if err := interpreter.Load(ctx, spec, deps); err != nil {
-			return nil, closeStorage, fmt.Errorf("definition %s: %w", spec.ID, err)
+			return nil, fmt.Errorf("definition %s: %w", spec.ID, err)
 		}
 	}
-	return interpreter, closeStorage, nil
+	return interpreter, nil
 }
 
 func workflowMaxConcurrentSteps(cfg *config.Config) int {

@@ -23,6 +23,7 @@ type Config struct {
 	Tools        *Tools                `koanf:"tools" yaml:"tools,omitempty"`
 	Agents       *Agents               `koanf:"agents" yaml:"agents,omitempty"`
 	Workflows    *Workflows            `koanf:"workflows" yaml:"workflows,omitempty"`
+	Durable      *Durable              `koanf:"durable" yaml:"durable,omitempty"`
 	MCP          *MCP                  `koanf:"mcp" yaml:"mcp,omitempty"`
 	Server       Server                `koanf:"server" yaml:"server"`
 	Logging      Logging               `koanf:"logging" yaml:"logging"`
@@ -267,6 +268,23 @@ type Workflows struct {
 }
 
 const (
+	DurableModeSupervised = "supervised"
+	DurableModeExternal   = "external"
+)
+
+type Durable struct {
+	Enabled               bool     `koanf:"enabled" yaml:"enabled"`
+	Mode                  string   `koanf:"mode" yaml:"mode"`
+	BinaryPath            string   `koanf:"binary_path" yaml:"binary_path,omitempty"`
+	Endpoint              string   `koanf:"endpoint" yaml:"endpoint"`
+	AdminEndpoint         string   `koanf:"admin_endpoint" yaml:"admin_endpoint"`
+	HandlerAddr           string   `koanf:"handler_addr" yaml:"handler_addr"`
+	DataDir               string   `koanf:"data_dir" yaml:"data_dir,omitempty"`
+	RestartBackoffInitial Duration `koanf:"restart_backoff_initial" yaml:"restart_backoff_initial"`
+	RestartBackoffMax     Duration `koanf:"restart_backoff_max" yaml:"restart_backoff_max"`
+}
+
+const (
 	MCPTransportStdio          = "stdio"
 	MCPTransportStreamableHTTP = "streamable_http"
 	MCPTransportLegacySSE      = "legacy_sse"
@@ -380,6 +398,15 @@ func Default() Config {
 		Workflows: &Workflows{
 			MaxConcurrentSteps: 4,
 			DefaultStepTimeout: Duration(15 * time.Minute),
+		},
+		Durable: &Durable{
+			Enabled:               false,
+			Mode:                  DurableModeSupervised,
+			Endpoint:              "http://127.0.0.1:8080",
+			AdminEndpoint:         "http://127.0.0.1:9070",
+			HandlerAddr:           "127.0.0.1:9080",
+			RestartBackoffInitial: Duration(time.Second),
+			RestartBackoffMax:     Duration(30 * time.Second),
 		},
 		Tools: &Tools{
 			Workspace:            "/srv/aura/workspace",

@@ -309,6 +309,14 @@ linters:
         text: G204
         path: internal/mcp/client\.go
 
+      # Launching the configured durable runtime binary is the supervisor's
+      # purpose; the path is operator-configured and resolution fails closed
+      # when the binary is absent or not executable.
+      - linters:
+          - gosec
+        text: G204
+        path: internal/durable/restate/supervise\.go
+
       # Retry jitter is not a security context. Scoped to the one file that
       # needs it rather than excluded repository-wide.
       - linters:
