@@ -186,7 +186,9 @@ func (l *durableListener) Name() string { return "durable" }
 
 func (l *durableListener) Start(ctx context.Context) error {
 	if l.config.Mode == config.DurableModeExternal {
-		if err := restate.CheckExternal(ctx, l.config.Endpoint, l.config.AdminEndpoint); err != nil {
+		gateCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if err := restate.CheckExternal(gateCtx, l.config.Endpoint, l.config.AdminEndpoint); err != nil {
 			return err
 		}
 		return l.serveEndpointUntilDone(ctx)
