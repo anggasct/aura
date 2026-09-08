@@ -34,11 +34,15 @@ func (i *invocation) Signal(ctx context.Context, name string) ([]byte, bool) {
 	return []byte(output), true
 }
 
-func (i *invocation) Sleep(d time.Duration) error {
-	if err := restate.Sleep(i.runtime, d); err != nil {
-		return errors.New(err.Error())
+func wrapSleepError(err error) error {
+	if err == nil {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("restate sleep: %w", err)
+}
+
+func (i *invocation) Sleep(d time.Duration) error {
+	return wrapSleepError(restate.Sleep(i.runtime, d))
 }
 
 func (i *invocation) Timer(time.Duration) <-chan time.Time {

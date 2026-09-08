@@ -234,7 +234,7 @@ func (e *stepExecution) runWaitStepSerial(ctx context.Context, step *StepSpec, a
 
 func (e *stepExecution) runApprovalStepSerial(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
 	if requester := e.interpreter.options.Approvals; requester != nil {
-		if _, err := e.invocation.RunAction(ctx, "run/"+e.runID+"/step/"+step.ID+"/approval-request", func(actionCtx context.Context) ([]byte, error) {
+		if _, err := e.invocation.RunAction(ctx, "run/"+e.runID+"/step/"+step.ID+"/approval-request/attempt/"+strconv.Itoa(attempt), func(actionCtx context.Context) ([]byte, error) {
 			if err := requester.Request(actionCtx, e.runID, step.ID); err != nil {
 				return nil, err
 			}

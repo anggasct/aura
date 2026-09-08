@@ -3,6 +3,9 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -241,5 +244,106 @@ func TestDriveSerialResumeConverges(t *testing.T) {
 		if step.Status != StepSucceeded {
 			t.Errorf("step %s = %s, want %s", step.StepID, step.Status, StepSucceeded)
 		}
+	}
+}
+
+type flakyApprovalRequester struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (r *flakyApprovalRequester) Request(_ context.Context, _, _ string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	if r.calls == 1 {
+		return errors.New("transient approval backend failure")
+	}
+	return nil
+}
+
+func (r *flakyApprovalRequester) requestCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+type keyRecordingInvocation struct {
+	durable.Invocation
+	mu   sync.Mutex
+	keys []string
+}
+
+func (k *keyRecordingInvocation) RunAction(ctx context.Context, key string, fn func(ctx context.Context) ([]byte, error)) ([]byte, error) {
+	k.mu.Lock()
+	k.keys = append(k.keys, key)
+	k.mu.Unlock()
+	return k.Invocation.RunAction(ctx, key, fn)
+}
+
+func (k *keyRecordingInvocation) approvalRequestKeys() []string {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	var matched []string
+	for _, key := range k.keys {
+		if strings.Contains(key, "approval-request") {
+			matched = append(matched, key)
+		}
+	}
+	return matched
+}
+
+func TestDriveSerialApprovalRequestRetryUsesDistinctKeys(t *testing.T) {
+	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	fake := durable.NewFake()
+	disk := newTestStore(t)
+	requester := &flakyApprovalRequester{}
+	interpreter := NewInterpreter(disk, fake, &Options{
+		MaxConcurrentSteps: 2,
+		AgentResolver:      registry,
+		Agents:             &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},
+		Tools:              &fakeToolRunner{},
+		Approvals:          requester,
+	})
+	spec := &Spec{
+		ID: "serial-approval-retry", Goal: "Serial approval retry", Version: 1, Source: SourceDefined,
+		Steps: []StepSpec{
+			{ID: "gate", Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second, Retry: RetryPolicy{Attempts: 1, Backoff: time.Millisecond}},
+		},
+	}
+	runID := startSerialRun(t, interpreter, disk, spec, nil)
+	inv, holder := holdInvocation(t, fake, "holder-approval-retry")
+	recording := &keyRecordingInvocation{Invocation: inv}
+
+	done := make(chan struct{})
+	var terminal string
+	var driveErr error
+	go func() {
+		defer close(done)
+		terminal, driveErr = interpreter.DriveSerial(ctx, recording, runID)
+	}()
+	waitForRunStatus(t, disk, runID, RunSuspended, 2*time.Second)
+	signalHolder(t, fake, holder, "approval.gate", `{"decision":"approve"}`)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("serial drive never finished")
+	}
+	if driveErr != nil {
+		t.Fatalf("DriveSerial: %v", driveErr)
+	}
+	if terminal != RunSucceeded {
+		t.Fatalf("terminal = %s, want %s", terminal, RunSucceeded)
+	}
+	if got := requester.requestCount(); got != 2 {
+		t.Fatalf("approval requests = %d, want 2", got)
+	}
+	keys := recording.approvalRequestKeys()
+	if len(keys) != 2 || keys[0] == keys[1] {
+		t.Fatalf("approval-request keys = %v, want two distinct keys", keys)
 	}
 }

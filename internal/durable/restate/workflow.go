@@ -65,6 +65,33 @@ func buildService(ctx context.Context, serviceName string, registry *handlerRegi
 	return definition
 }
 
+type runStateWriter interface {
+	setState(state durable.RunState, detail string)
+	key() string
+}
+
+type workflowStateWriter struct {
+	ctx restate.WorkflowContext
+}
+
+func (w workflowStateWriter) setState(state durable.RunState, detail string) {
+	restate.Set(w.ctx, runStateKey, string(state))
+	restate.Set(w.ctx, runDetailKey, detail)
+}
+
+func (w workflowStateWriter) key() string { return restate.Key(w.ctx) }
+
+func failRegisteredRun(ctx context.Context, logger *slog.Logger, writer runStateWriter, err error) (runOutput, error) {
+	detail := err.Error()
+	if ctx.Err() != nil {
+		writer.setState(durable.RunCancelled, detail)
+		logger.InfoContext(ctx, "durable run cancelled", "key", writer.key())
+		return runOutput{State: string(durable.RunCancelled), Detail: detail}, ctx.Err()
+	}
+	writer.setState(durable.RunFailed, detail)
+	logger.InfoContext(ctx, "durable run failed", "key", writer.key())
+	return runOutput{State: string(durable.RunFailed), Detail: detail}, nil
+}
 func serveRun(ctx context.Context, registry *handlerRegistry, logger *slog.Logger, input runEnvelope) (runOutput, error) {
 	wctx, ok := ctx.(restate.WorkflowContext)
 	if !ok {
@@ -82,15 +109,7 @@ func serveRun(ctx context.Context, registry *handlerRegistry, logger *slog.Logge
 	}
 	inv := &invocation{runtime: wctx, ref: durable.RunRef{Key: restate.Key(wctx)}, payload: payload}
 	if err := handler(ctx, inv); err != nil {
-		detail := err.Error()
-		restate.Set(wctx, runStateKey, string(durable.RunFailed))
-		restate.Set(wctx, runDetailKey, detail)
-		if ctx.Err() != nil {
-			logger.InfoContext(ctx, "durable run cancelled", "key", restate.Key(wctx))
-			return runOutput{State: string(durable.RunCancelled), Detail: detail}, ctx.Err()
-		}
-		logger.InfoContext(ctx, "durable run failed", "key", restate.Key(wctx))
-		return runOutput{State: string(durable.RunFailed), Detail: detail}, nil
+		return failRegisteredRun(ctx, logger, workflowStateWriter{ctx: wctx}, err)
 	}
 	restate.Set(wctx, runStateKey, string(durable.RunSucceeded))
 	return runOutput{State: string(durable.RunSucceeded)}, nil

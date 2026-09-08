@@ -233,6 +233,16 @@ func TestAdapterNotFoundMapping(t *testing.T) {
 	}
 }
 
+func TestWrapSleepErrorPreservesChain(t *testing.T) {
+	if err := wrapSleepError(nil); err != nil {
+		t.Fatalf("wrap nil = %v, want nil", err)
+	}
+	wrapped := wrapSleepError(context.Canceled)
+	if !errors.Is(wrapped, context.Canceled) {
+		t.Fatalf("wrapped = %v, want context.Canceled detectable", wrapped)
+	}
+}
+
 func TestAdapterConfigValidation(t *testing.T) {
 	if _, err := NewAdapter(Config{}, nil); err == nil {
 		t.Error("expected empty ingress URL to fail, got nil")
