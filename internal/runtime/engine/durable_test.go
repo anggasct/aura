@@ -147,6 +147,16 @@ func TestDurableQueueOverflowFailsClosed(t *testing.T) {
 		if !ok || code != runtime.ErrorCodeRuntimeOverloaded {
 			t.Fatalf("code = %v, want runtime_overloaded", err)
 		}
+		if got := acceptedCount(t, db, "session-a"); got != 1 {
+			t.Fatalf("accepted events = %d, want 1 (overloaded admit must persist nothing)", got)
+		}
+		rejected, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-1")
+		if err != nil {
+			t.Fatalf("list rejected turn events: %v", err)
+		}
+		if len(rejected) != 0 {
+			t.Fatalf("rejected turn events = %d, want 0 (no orphan open turn)", len(rejected))
+		}
 	})
 }
 
@@ -255,12 +265,66 @@ func TestDurableRecoverSessionRestarts(t *testing.T) {
 		if err := engine.RecoverSession(ctx, "session-a", []string{"turn-0"}, nil); err != nil {
 			t.Fatalf("recover: %v", err)
 		}
+		engine.mu.Lock()
+		pending := engine.pending
+		engine.mu.Unlock()
+		if pending < 0 {
+			t.Fatalf("pending = %d, want non-negative after recover", pending)
+		}
 		events := collectDurableTerminal(t, db, "turn-0")
 		if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
 			t.Fatalf("recovered turn terminal = %q, want turn.completed", last.Kind)
 		}
 		if got := executor.StartCount(); got != 1 {
 			t.Fatalf("StartCount = %d, want 1", got)
+		}
+	})
+}
+
+func TestDurableRecoverKeepsPendingNonNegative(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`)},
+		})
+		engine, stub, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		mustCreateSession(t, db, "session-a")
+		mustCreateSession(t, db, "session-b")
+
+		ctx := context.Background()
+		if _, err := stub.Admit(ctx, admitRequestFor("session-a", "turn-0", "")); err != nil {
+			t.Fatalf("direct admit session-a: %v", err)
+		}
+		if _, err := stub.Admit(ctx, admitRequestFor("session-b", "turn-1", "")); err != nil {
+			t.Fatalf("direct admit session-b: %v", err)
+		}
+		for _, tc := range []struct{ session, turn string }{
+			{"session-a", "turn-0"},
+			{"session-b", "turn-1"},
+		} {
+			if err := engine.RecoverSession(ctx, tc.session, []string{tc.turn}, nil); err != nil {
+				t.Fatalf("recover %s: %v", tc.session, err)
+			}
+			engine.mu.Lock()
+			pending := engine.pending
+			engine.mu.Unlock()
+			if pending < 0 {
+				t.Fatalf("pending = %d, want non-negative after recovering %s", pending, tc.session)
+			}
+		}
+		for _, turn := range []string{"turn-0", "turn-1"} {
+			events := collectDurableTerminal(t, db, turn)
+			if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
+				t.Fatalf("recovered %s terminal = %q, want turn.completed", turn, last.Kind)
+			}
+		}
+		engine.mu.Lock()
+		pending := engine.pending
+		engine.mu.Unlock()
+		if pending < 0 {
+			t.Fatalf("pending = %d, want non-negative after multi-session recovery", pending)
+		}
+		if got := executor.StartCount(); got != 2 {
+			t.Fatalf("StartCount = %d, want 2", got)
 		}
 	})
 }

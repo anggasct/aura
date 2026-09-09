@@ -41,6 +41,13 @@ func (s *stubSessionStore) Admit(ctx context.Context, req *runtimesessions.Admit
 	} else if original != "" {
 		return runtimesessions.AdmitResult{Replayed: true, OriginalTurnID: original}, nil
 	}
+	held := len(state.Queue)
+	if state.Active != nil {
+		held++
+	}
+	if held >= req.MaxPending {
+		return runtimesessions.AdmitResult{Overloaded: true}, nil
+	}
 	accepted := &store.RuntimeEvent{
 		ID:            req.AcceptedEventID,
 		SessionID:     req.Turn.SessionID,

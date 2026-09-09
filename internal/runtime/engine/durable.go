@@ -287,6 +287,12 @@ func (e *Engine) RecoverSession(ctx context.Context, sessionID string, open, ter
 	if err != nil {
 		return codedError(runtime.ErrorCodeStorageUnavailable, "durable recover failed", err)
 	}
+	e.mu.Lock()
+	shutdown := e.shutdown
+	if !shutdown {
+		e.pending++
+	}
+	e.mu.Unlock()
 	e.stageDurable(ctx, req, accepted, nil, true)
 	return nil
 }
