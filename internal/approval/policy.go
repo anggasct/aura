@@ -51,16 +51,16 @@ type ToolRequest struct {
 }
 
 type Constraints struct {
-	AllowNetwork   bool
-	MaxOutputBytes int64
-	Timeout        time.Duration
+	AllowNetwork   bool          `json:"allow_network"`
+	MaxOutputBytes int64         `json:"max_output_bytes"`
+	Timeout        time.Duration `json:"timeout"`
 }
 
 type PolicyDecision struct {
-	Outcome       string // allow, deny, require_approval
-	PolicyVersion string
-	ReasonCode    string
-	Constraints   Constraints
+	Outcome       string      `json:"outcome"` // allow, deny, require_approval
+	PolicyVersion string      `json:"policy_version"`
+	ReasonCode    string      `json:"reason_code"`
+	Constraints   Constraints `json:"constraints"`
 }
 
 const (

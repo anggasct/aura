@@ -219,12 +219,14 @@ func (i *invocation) RunAction(ctx context.Context, key string, fn func(ctx cont
 }
 
 type Fake struct {
-	mu       sync.Mutex
-	handlers map[string]Handler
-	calls    map[string]CallHandler
-	runs     map[string]*fakeRun
-	clock    Clock
-	logger   func(format string, args ...any)
+	mu        sync.Mutex
+	handlers  map[string]Handler
+	calls     map[string]CallHandler
+	consumed  map[string]struct{}
+	deadlines map[string]time.Time
+	runs      map[string]*fakeRun
+	clock     Clock
+	logger    func(format string, args ...any)
 }
 
 type fakeRun struct {
@@ -440,4 +442,44 @@ func (f *Fake) invocationFor(key string) *invocation {
 		return nil
 	}
 	return run.invocation
+}
+
+func (f *Fake) ResolveApproval(ctx context.Context, req ResolveApprovalRequest) error {
+	if req.ApprovalID == "" {
+		return errors.New("durable resolve approval requires an approval id")
+	}
+	runKey, signal, err := ParseApprovalAddr(req.ApprovalID)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	if f.consumed == nil {
+		f.consumed = map[string]struct{}{}
+	}
+	if _, ok := f.consumed[req.ApprovalID]; ok {
+		f.mu.Unlock()
+		return fmt.Errorf("durable approval %q was already consumed", req.ApprovalID)
+	}
+	f.consumed[req.ApprovalID] = struct{}{}
+	f.mu.Unlock()
+	return f.Signal(ctx, RunRef{Key: runKey}, signal, req.Payload)
+}
+
+func (f *Fake) RegisterTurnDeadline(sessionID string, deadline time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.deadlines == nil {
+		f.deadlines = map[string]time.Time{}
+	}
+	f.deadlines[sessionID] = deadline
+}
+
+func (f *Fake) TurnDeadline(_ context.Context, sessionID string) (time.Time, bool, error) {
+	if sessionID == "" {
+		return time.Time{}, false, errors.New("durable turn deadline requires a session id")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	deadline, ok := f.deadlines[sessionID]
+	return deadline, ok, nil
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -21,7 +22,12 @@ type Config struct {
 	TurnTimeout     time.Duration
 	ShutdownTimeout time.Duration
 	DefaultAgentID  string
-	SessionStore    SessionStore
+	Durable         *DurableConfig
+}
+
+type DurableConfig struct {
+	Sessions SessionStore
+	Runtime  durable.Runtime
 }
 
 func (c *Config) applyDefaults() {
@@ -61,12 +67,13 @@ type TurnExecutor interface {
 }
 
 type Engine struct {
-	cfg          Config
-	events       EventStore
-	dedupe       DedupeStore
-	executor     TurnExecutor
-	logger       *slog.Logger
-	sessionStore SessionStore
+	cfg            Config
+	events         EventStore
+	dedupe         DedupeStore
+	executor       TurnExecutor
+	logger         *slog.Logger
+	sessionStore   SessionStore
+	durableRuntime durable.Runtime
 
 	mu       sync.Mutex
 	sessions map[string]*sessionQueue
@@ -86,6 +93,7 @@ type Engine struct {
 type EventStore interface {
 	Append(ctx context.Context, e *store.RuntimeEvent) error
 	AppendSequenced(ctx context.Context, sessionID string, e *store.RuntimeEvent) (uint64, error)
+	UpsertEvent(ctx context.Context, e *store.RuntimeEvent) (uint64, bool, error)
 	LastSequence(ctx context.Context, sessionID string) (uint64, error)
 }
 
@@ -112,18 +120,24 @@ func NewEngine(cfg Config, events EventStore, dedupe DedupeStore, executor TurnE
 		return nil, err
 	}
 	engine := &Engine{
-		cfg:          cfg,
-		events:       events,
-		dedupe:       dedupe,
-		executor:     executor,
-		logger:       logger,
-		sessionStore: cfg.SessionStore,
-		sessions:     make(map[string]*sessionQueue),
-		turns:        make(map[string]*turn),
-		staged:       make(map[string]*turn),
-		granted:      make(map[string]struct{}),
-		sesKeys:      make(map[string]struct{}),
-		recovered:    make(chan struct{}),
+		cfg:       cfg,
+		events:    events,
+		dedupe:    dedupe,
+		executor:  executor,
+		logger:    logger,
+		sessions:  make(map[string]*sessionQueue),
+		turns:     make(map[string]*turn),
+		staged:    make(map[string]*turn),
+		granted:   make(map[string]struct{}),
+		sesKeys:   make(map[string]struct{}),
+		recovered: make(chan struct{}),
+	}
+	if cfg.Durable != nil {
+		engine.sessionStore = cfg.Durable.Sessions
+		engine.durableRuntime = cfg.Durable.Runtime
+	}
+	if registrar, ok := engine.durableRuntime.(durable.HandlerRegistrar); ok {
+		registrar.RegisterHandler("turn", engine.serveTurn)
 	}
 	return engine, nil
 }
@@ -145,12 +159,26 @@ type turn struct {
 }
 
 type subscriber struct {
-	events chan store.RuntimeEvent
-	done   chan struct{}
-	once   sync.Once
-	mu     sync.Mutex
-	closed bool
-	gapped bool
+	events  chan store.RuntimeEvent
+	done    chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	closed  bool
+	gapped  bool
+	lastSeq uint64
+}
+
+func (s *subscriber) trackLocked(ev *store.RuntimeEvent) bool {
+	if ev == nil {
+		return false
+	}
+	if ev.Sequence != 0 {
+		if ev.Sequence <= s.lastSeq {
+			return false
+		}
+		s.lastSeq = ev.Sequence
+	}
+	return true
 }
 
 const subscriberBufferSize = 64
@@ -169,7 +197,7 @@ func (s *subscriber) stop() {
 func (s *subscriber) send(ev *store.RuntimeEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || ev == nil {
+	if s.closed || !s.trackLocked(ev) {
 		return
 	}
 	select {
@@ -214,7 +242,7 @@ func (s *subscriber) makeRoomLocked() bool {
 func (s *subscriber) sendContext(ctx context.Context, ev *store.RuntimeEvent) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
+	if s.closed || !s.trackLocked(ev) {
 		return false
 	}
 	select {
@@ -544,11 +572,8 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 		if sq := e.sessions[t.req.SessionID]; sq != nil {
 			sq.active = false
 		}
-		e.active--
-		close(t.done)
-		delete(e.turns, t.turnID)
 		e.mu.Unlock()
-		e.schedule(ctx)
+		e.finishTurn(ctx, t)
 	}()
 
 	deadline := t.req.Deadline
@@ -559,20 +584,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	defer stop()
 
 	persistEvent := func(ctx context.Context, ev *store.RuntimeEvent) error {
-		if ev.ID == "" {
-			ev.ID = NewTurnID()
-		}
-		ev.SessionID = t.req.SessionID
-		ev.TurnID = t.turnID
-		if ev.Author == "" {
-			ev.Author = t.req.PrincipalID
-		}
-		if ev.SchemaVersion == 0 {
-			ev.SchemaVersion = 1
-		}
-		if ev.CreatedAt.IsZero() {
-			ev.CreatedAt = time.Now().UTC()
-		}
+		e.fillTurnEvent(t, ev)
 		if e.sessionStore != nil {
 			if _, err := e.events.AppendSequenced(ctx, t.req.SessionID, ev); err != nil {
 				return codedError(runtime.ErrorCodeStorageUnavailable, "failed to persist "+ev.Kind, err)
@@ -616,20 +628,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 		}
 	}
 
-	switch {
-	case ctx.Err() == context.Canceled:
-		terminalKind, terminalPayload = runtime.EventKindTurnCancelled, cancelledPayload("turn cancelled", e.agentID(&t.req))
-	case ctx.Err() == context.DeadlineExceeded:
-		terminalKind, terminalPayload = runtime.EventKindTurnFailed, failedPayload(runtime.ErrorCodeTurnDeadlineExceeded, "turn deadline elapsed", nil, e.agentID(&t.req))
-	case execErr != nil:
-		code, ok := runtime.CodeOf(execErr)
-		if !ok {
-			code = runtime.ErrorCodeRuntimeInternal
-		}
-		terminalKind, terminalPayload = runtime.EventKindTurnFailed, failedPayload(code, "turn execution failed", execErr, e.agentID(&t.req))
-	default:
-		terminalKind, terminalPayload = runtime.EventKindTurnCompleted, completedPayload(e.agentID(&t.req))
-	}
+	terminalKind, terminalPayload = e.terminalOutcome(ctx, execErr, &t.req)
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to persist terminal event", "error", err, "turn_id", t.turnID)
 	}

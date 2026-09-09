@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -177,6 +178,16 @@ func buildDurableListener(ctx context.Context, cfg *config.Config, db *sql.DB, l
 	endpoint.RegisterSessionTurns(restate.SessionStores{
 		Events: store.NewEventStore(db),
 		Dedupe: store.NewDedupeStore(db),
+	})
+	endpoint.RegisterHandler("turn", func(ctx context.Context, inv durable.Invocation) error {
+		if engine == nil {
+			return errors.New("durable turn drive requires an engine")
+		}
+		var desc runtimesessions.Descriptor
+		if err := json.Unmarshal(inv.Payload(), &desc); err != nil {
+			return fmt.Errorf("decode durable turn payload: %w", err)
+		}
+		return engine.DriveTurn(ctx, inv, &desc)
 	})
 	endpoint.RegisterHandler("workflow", func(ctx context.Context, inv durable.Invocation) error {
 		var tick struct {

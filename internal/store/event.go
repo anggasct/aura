@@ -103,6 +103,48 @@ func (s *sqliteEventStore) AppendSequenced(ctx context.Context, sessionID string
 	return assigned, nil
 }
 
+func (s *sqliteEventStore) UpsertEvent(ctx context.Context, e *RuntimeEvent) (sequence uint64, existed bool, err error) {
+	if e == nil {
+		return 0, false, errNilArgument("event")
+	}
+	if e.ID == "" {
+		return 0, false, Errorf(ErrorCodeInvalidArgument, "upsert event requires an id")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, false, fmt.Errorf("begin upsert event: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var stored int64
+	err = tx.QueryRowContext(ctx, `SELECT sequence FROM runtime_event WHERE id = ?`, e.ID).Scan(&stored)
+	switch {
+	case err == nil:
+		assigned, err := sequenceFromDB(stored)
+		if err != nil {
+			return 0, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, false, classifyBusy(fmt.Errorf("commit upsert event: %w", err))
+		}
+		return assigned, true, nil
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return 0, false, fmt.Errorf("lookup upsert event: %w", err)
+	}
+	assigned, err := assignNextSequence(ctx, tx, e.SessionID)
+	if err != nil {
+		return 0, false, err
+	}
+	e.Sequence = assigned
+	if err := appendEvent(ctx, tx, e); err != nil {
+		return 0, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, false, classifyBusy(fmt.Errorf("commit upsert event: %w", err))
+	}
+	return assigned, false, nil
+}
+
 func assignNextSequence(ctx context.Context, tx *sql.Tx, sessionID string) (uint64, error) {
 	var highest sql.NullInt64
 	if err := tx.QueryRowContext(ctx,

@@ -11,6 +11,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/store"
@@ -19,6 +20,7 @@ import (
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
 	adkmodel "google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/platform"
 	"google.golang.org/adk/v2/runner"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool"
@@ -151,6 +153,9 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 			return
 		}
 		runCtx := withTurnID(ctx, req.TurnID)
+		if _, ok := durable.TurnScopeFrom(runCtx); ok {
+			runCtx = platform.WithTaskRunner(runCtx, runTasksSequential)
+		}
 		if definition.Limits.TurnTimeout > 0 {
 			var cancel context.CancelFunc
 			runCtx, cancel = context.WithTimeout(runCtx, definition.Limits.TurnTimeout)
@@ -226,6 +231,9 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 			return nil, fmt.Errorf("wrap model with budget: %w", werr)
 		}
 		model = wrapped
+	}
+	if _, ok := durable.TurnScopeFrom(ctx); ok {
+		model = journalModel(model)
 	}
 	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool)
 	if err != nil {

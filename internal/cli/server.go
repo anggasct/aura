@@ -108,13 +108,16 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var sessionStore runtimeengine.SessionStore
+			var durableConfig *runtimeengine.DurableConfig
 			if cfg.Durable != nil && cfg.Durable.Enabled {
 				sessionRuntime, err := durableRuntimeForConfig(cfg, logger)
 				if err != nil {
 					return err
 				}
-				sessionStore = &durableSessionStore{runtime: sessionRuntime}
+				durableConfig = &runtimeengine.DurableConfig{
+					Sessions: &durableSessionStore{runtime: sessionRuntime},
+					Runtime:  sessionRuntime,
+				}
 			}
 			runtimeEngine, err := runtimeengine.NewEngine(runtimeengine.Config{
 				MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
@@ -122,14 +125,14 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
 				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 				DefaultAgentID:  auraagent.DefaultID,
-				SessionStore:    sessionStore,
+				Durable:         durableConfig,
 			}, events, store.NewDedupeStore(db), adkExecutor, logger)
 			if err != nil {
 				return err
 			}
 			adkExecutor.SetEventPublisher(runtimeEngine)
 			var recoveryEngine *runtimeengine.Engine
-			if sessionStore != nil {
+			if durableConfig != nil {
 				recoveryEngine = runtimeEngine
 			}
 			host, err := runtimeengine.NewHost(runtimeEngine, nil, logger)

@@ -401,3 +401,45 @@ func TestDurableAdmitWaitsForRecoveryGate(t *testing.T) {
 		t.Fatalf("terminal = %q, want turn.completed", last.Kind)
 	}
 }
+
+func TestDurableLongStreamReplaysFullyFromStore(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const deltas = 100
+		script := make([]runtime.FakeStep, 0, deltas+1)
+		for i := range deltas {
+			script = append(script, runtime.FakeStep{
+				Kind:    runtime.EventKindModelDelta,
+				Payload: []byte(`{"n":` + string(rune('0'+i%10)) + `}`),
+			})
+		}
+		script = append(script, runtime.FakeStep{Kind: runtime.EventKindMessageCompleted, Payload: []byte(`{}`)})
+		executor := runtime.NewFakeExecutor(script)
+		engine, _, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		mustCreateSession(t, db, "session-a")
+
+		events, err := collect(t, engine, sampleRequest("session-a", "turn-0"))
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if len(events) != deltas+3 {
+			t.Fatalf("streamed events = %d, want %d", len(events), deltas+3)
+		}
+		for i := 1; i < len(events); i++ {
+			if events[i].Sequence != events[i-1].Sequence+1 {
+				t.Fatalf("stream sequences not contiguous at %d: %d after %d", i, events[i].Sequence, events[i-1].Sequence)
+			}
+		}
+		stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-0")
+		if err != nil {
+			t.Fatalf("list turn events: %v", err)
+		}
+		if len(stored) != len(events) {
+			t.Fatalf("stored events = %d, want %d", len(stored), len(events))
+		}
+		for i := range stored {
+			if stored[i].Kind != events[i].Kind || string(stored[i].Payload) != string(events[i].Payload) {
+				t.Fatalf("stored event %d diverges from the stream", i)
+			}
+		}
+	})
+}
