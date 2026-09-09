@@ -36,7 +36,7 @@ type ToolOptions struct {
 	Timeout          time.Duration
 	MaxResponseBytes int64
 
-	client *http.Client
+	HTTPClient *http.Client
 }
 
 func baseURLOrDefault(raw string) string {
@@ -73,7 +73,7 @@ type client struct {
 }
 
 func newClient(options ToolOptions) *client {
-	httpClient := options.client
+	httpClient := options.HTTPClient
 	if httpClient == nil {
 		httpClient = egress.NewClient(options.Resolver)
 	}

@@ -204,12 +204,19 @@ func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec) *stepU
 	return &stepUpdate{Status: StepSucceeded, Output: []byte(output), EndedAt: nowPtr()}
 }
 
+func toolArguments(step *StepSpec) json.RawMessage {
+	if len(step.Executor.ToolArgs) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return append(json.RawMessage(nil), step.Executor.ToolArgs...)
+}
+
 func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec) *stepUpdate {
 	runner := e.interpreter.options.Tools
 	if runner == nil || step.Executor.ToolID == nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: "no tool runner is wired", EndedAt: nowPtr()}
 	}
-	output, err := runner.Invoke(ctx, *step.Executor.ToolID, json.RawMessage(`{}`))
+	output, err := runner.Invoke(ctx, *step.Executor.ToolID, toolArguments(step))
 	if err != nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr()}
 	}
