@@ -221,6 +221,7 @@ func (i *invocation) RunAction(ctx context.Context, key string, fn func(ctx cont
 type Fake struct {
 	mu       sync.Mutex
 	handlers map[string]Handler
+	calls    map[string]CallHandler
 	runs     map[string]*fakeRun
 	clock    Clock
 	logger   func(format string, args ...any)
@@ -258,6 +259,36 @@ func (f *Fake) RegisterHandler(name string, fn Handler) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.handlers[name] = fn
+}
+
+type CallHandler func(ctx context.Context, key string, payload []byte) ([]byte, error)
+
+func (f *Fake) RegisterCall(service, handler string, fn CallHandler) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.calls == nil {
+		f.calls = map[string]CallHandler{}
+	}
+	f.calls[service+"\x00"+handler] = fn
+}
+
+func (f *Fake) Call(ctx context.Context, req CallRequest) ([]byte, error) {
+	if req.Service == "" {
+		return nil, errors.New("durable call requires a service")
+	}
+	if req.Key == "" {
+		return nil, errors.New("durable call requires a key")
+	}
+	if req.Handler == "" {
+		return nil, errors.New("durable call requires a handler")
+	}
+	f.mu.Lock()
+	fn := f.calls[req.Service+"\x00"+req.Handler]
+	f.mu.Unlock()
+	if fn == nil {
+		return nil, fmt.Errorf("durable call: no handler registered for %q on service %q", req.Handler, req.Service)
+	}
+	return fn(ctx, req.Key, req.Payload)
 }
 
 func (f *Fake) log(format string, args ...any) {

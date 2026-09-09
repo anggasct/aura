@@ -3,6 +3,7 @@ package durable
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -242,5 +243,42 @@ func TestSignalWaitCancellationPreservesRacedDelivery(t *testing.T) {
 	payload, ok := inv.Signal(context.Background(), "x")
 	if !ok || string(payload) != "raced" {
 		t.Fatalf("next Signal = %q, %v; want the raced delivery", payload, ok)
+	}
+}
+
+func TestFakeCallDispatchesByServiceAndHandler(t *testing.T) {
+	fake := NewFake()
+	fake.RegisterCall("SessionTurns", "admit", func(_ context.Context, key string, payload []byte) ([]byte, error) {
+		return []byte(`{"key":` + strconv.Quote(key) + `,"payload":` + string(payload) + `}`), nil
+	})
+	out, err := fake.Call(context.Background(), CallRequest{
+		Service: "SessionTurns",
+		Key:     "session-1",
+		Handler: "admit",
+		Payload: []byte(`{"turn":"turn-1"}`),
+	})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	want := `{"key":"session-1","payload":{"turn":"turn-1"}}`
+	if string(out) != want {
+		t.Fatalf("response = %s, want %s", out, want)
+	}
+}
+
+func TestFakeCallRejectsUnknownAndInvalid(t *testing.T) {
+	fake := NewFake()
+	cases := map[string]CallRequest{
+		"unknown handler": {Service: "SessionTurns", Key: "s", Handler: "nope", Payload: []byte(`{}`)},
+		"missing service": {Key: "s", Handler: "admit"},
+		"missing key":     {Service: "SessionTurns", Handler: "admit"},
+		"missing handler": {Service: "SessionTurns", Key: "s"},
+	}
+	for name, req := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := fake.Call(context.Background(), req); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
 	}
 }

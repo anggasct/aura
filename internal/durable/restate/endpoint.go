@@ -29,9 +29,10 @@ type Endpoint struct {
 	addr     string
 	service  string
 
-	mu     sync.Mutex
-	server *http.Server
-	bound  net.Addr
+	mu       sync.Mutex
+	server   *http.Server
+	bound    net.Addr
+	sessions *SessionStores
 }
 
 func NewEndpoint(cfg EndpointConfig, logger *slog.Logger) (*Endpoint, error) {
@@ -57,6 +58,12 @@ func NewEndpoint(cfg EndpointConfig, logger *slog.Logger) (*Endpoint, error) {
 
 func (e *Endpoint) RegisterHandler(name string, fn durable.Handler) {
 	e.registry.register(name, fn)
+}
+
+func (e *Endpoint) RegisterSessionTurns(stores SessionStores) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.sessions = &stores
 }
 
 func (e *Endpoint) Addr() string {
@@ -121,5 +128,11 @@ func (e *Endpoint) Stop(ctx context.Context) error {
 
 func (e *Endpoint) boundHandler(ctx context.Context) (http.HandlerFunc, error) {
 	e.runtime.Bind(buildService(ctx, e.service, e.registry, e.logger))
+	e.mu.Lock()
+	binding := e.sessions
+	e.mu.Unlock()
+	if binding != nil {
+		e.runtime.Bind(buildSessionService(*binding, e.logger))
+	}
 	return e.runtime.Handler()
 }

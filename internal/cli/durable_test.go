@@ -106,7 +106,7 @@ func TestBuildDurableListenerExternalUnreachableFailsClosed(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	listener, err := buildDurableListener(t.Context(), &cfg, db, nil)
+	listener, err := buildDurableListener(t.Context(), &cfg, db, nil, nil)
 	if err != nil {
 		t.Fatalf("buildDurableListener: %v", err)
 	}

@@ -18,13 +18,17 @@ func (e *Engine) Accept(ctx context.Context, env *runtimeingress.IngressEnvelope
 	if err != nil {
 		return runtimeingress.TurnRef{}, err
 	}
-	accepted, originalTurnID, replay, err := e.claim(ctx, req)
+	accepted, originalTurnID, replay, granted, err := e.claim(ctx, req)
 	if err != nil {
 		return runtimeingress.TurnRef{}, err
 	}
 	if replay {
 		e.releasePending()
 		return runtimeingress.TurnRef{TurnID: originalTurnID, SessionID: req.SessionID, Replayed: true}, nil
+	}
+	if e.sessionStore != nil {
+		e.stageDurable(ctx, req, &accepted, nil, granted)
+		return runtimeingress.TurnRef{TurnID: req.TurnID, SessionID: req.SessionID}, nil
 	}
 	e.enqueue(ctx, req, &accepted, nil)
 	return runtimeingress.TurnRef{TurnID: req.TurnID, SessionID: req.SessionID}, nil
