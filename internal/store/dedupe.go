@@ -55,6 +55,13 @@ func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID strin
 		return "", false, fmt.Errorf("read dedupe key: %w", err)
 	}
 
+	if accepted.Sequence == 0 {
+		assigned, err := assignNextSequence(ctx, tx, accepted.SessionID)
+		if err != nil {
+			return "", false, err
+		}
+		accepted.Sequence = assigned
+	}
 	if err := appendEvent(ctx, tx, accepted); err != nil {
 		return "", false, err
 	}

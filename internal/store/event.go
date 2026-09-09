@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"modernc.org/sqlite"
@@ -77,6 +78,94 @@ func (s *sqliteEventStore) LastSequence(ctx context.Context, sessionID string) (
 		return 0, nil
 	}
 	return sequenceFromDB(seq.Int64)
+}
+
+func (s *sqliteEventStore) AppendSequenced(ctx context.Context, sessionID string, e *RuntimeEvent) (uint64, error) {
+	if e == nil {
+		return 0, errNilArgument("event")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin sequenced append: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	assigned, err := assignNextSequence(ctx, tx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	e.Sequence = assigned
+	if err := appendEvent(ctx, tx, e); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, classifyBusy(fmt.Errorf("commit sequenced append: %w", err))
+	}
+	return assigned, nil
+}
+
+func assignNextSequence(ctx context.Context, tx *sql.Tx, sessionID string) (uint64, error) {
+	var highest sql.NullInt64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT MAX(sequence) FROM runtime_event WHERE session_id = ?`, sessionID,
+	).Scan(&highest); err != nil {
+		return 0, fmt.Errorf("read max sequence for session %s: %w", sessionID, err)
+	}
+	next := int64(1)
+	if highest.Valid {
+		if highest.Int64 == math.MaxInt64 {
+			return 0, &Error{
+				Code:   ErrorCodeEventSequenceInvalid,
+				Detail: fmt.Sprintf("stored sequence for session %s is exhausted", sessionID),
+			}
+		}
+		next = highest.Int64 + 1
+	}
+	return sequenceFromDB(next)
+}
+
+type TurnActivity struct {
+	TurnID string
+	Kinds  []string
+}
+
+func (s *sqliteEventStore) ListTurnActivity(ctx context.Context, since time.Time) (map[string][]TurnActivity, error) {
+	if since.IsZero() {
+		return nil, Errorf(ErrorCodeInvalidArgument, "turn activity scan requires a start time")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT session_id, turn_id, kind FROM runtime_event WHERE created_at >= ? ORDER BY session_id, turn_id`,
+		formatTime(since.UTC()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list turn activity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	activity := map[string][]TurnActivity{}
+	index := map[string]map[string]int{}
+	for rows.Next() {
+		var sessionID, turnID, kind string
+		if err := rows.Scan(&sessionID, &turnID, &kind); err != nil {
+			return nil, fmt.Errorf("scan turn activity: %w", err)
+		}
+		byTurn, ok := index[sessionID]
+		if !ok {
+			byTurn = map[string]int{}
+			index[sessionID] = byTurn
+		}
+		at, ok := byTurn[turnID]
+		if !ok {
+			activity[sessionID] = append(activity[sessionID], TurnActivity{TurnID: turnID})
+			at = len(activity[sessionID]) - 1
+			byTurn[turnID] = at
+		}
+		if !slices.Contains(activity[sessionID][at].Kinds, kind) {
+			activity[sessionID][at].Kinds = append(activity[sessionID][at].Kinds, kind)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list turn activity: %w", err)
+	}
+	return activity, nil
 }
 
 func (s *sqliteEventStore) LookupEvent(ctx context.Context, id string) (RuntimeEvent, bool, error) {

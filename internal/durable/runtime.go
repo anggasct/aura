@@ -27,11 +27,19 @@ type RunStatus struct {
 	Detail string
 }
 
+type CallRequest struct {
+	Service string
+	Key     string
+	Handler string
+	Payload []byte
+}
+
 type Runtime interface {
 	Start(ctx context.Context, req StartRequest) (RunRef, error)
 	Signal(ctx context.Context, run RunRef, name string, payload []byte) error
 	Cancel(ctx context.Context, run RunRef) error
 	Status(ctx context.Context, run RunRef) (RunStatus, error)
+	Call(ctx context.Context, req CallRequest) ([]byte, error)
 }
 
 type Handler func(ctx context.Context, inv Invocation) error

@@ -21,6 +21,7 @@ type Config struct {
 	TurnTimeout     time.Duration
 	ShutdownTimeout time.Duration
 	DefaultAgentID  string
+	SessionStore    SessionStore
 }
 
 func (c *Config) applyDefaults() {
@@ -60,23 +61,31 @@ type TurnExecutor interface {
 }
 
 type Engine struct {
-	cfg      Config
-	events   EventStore
-	dedupe   DedupeStore
-	executor TurnExecutor
-	logger   *slog.Logger
+	cfg          Config
+	events       EventStore
+	dedupe       DedupeStore
+	executor     TurnExecutor
+	logger       *slog.Logger
+	sessionStore SessionStore
 
 	mu       sync.Mutex
 	sessions map[string]*sessionQueue
 	turns    map[string]*turn
+	staged   map[string]*turn
+	granted  map[string]struct{}
+	sesKeys  map[string]struct{}
 	pending  int
 	active   int
 	shutdown bool
 	wg       sync.WaitGroup
+
+	recovered   chan struct{}
+	recoverOnce sync.Once
 }
 
 type EventStore interface {
 	Append(ctx context.Context, e *store.RuntimeEvent) error
+	AppendSequenced(ctx context.Context, sessionID string, e *store.RuntimeEvent) (uint64, error)
 	LastSequence(ctx context.Context, sessionID string) (uint64, error)
 }
 
@@ -102,15 +111,21 @@ func NewEngine(cfg Config, events EventStore, dedupe DedupeStore, executor TurnE
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	return &Engine{
-		cfg:      cfg,
-		events:   events,
-		dedupe:   dedupe,
-		executor: executor,
-		logger:   logger,
-		sessions: make(map[string]*sessionQueue),
-		turns:    make(map[string]*turn),
-	}, nil
+	engine := &Engine{
+		cfg:          cfg,
+		events:       events,
+		dedupe:       dedupe,
+		executor:     executor,
+		logger:       logger,
+		sessionStore: cfg.SessionStore,
+		sessions:     make(map[string]*sessionQueue),
+		turns:        make(map[string]*turn),
+		staged:       make(map[string]*turn),
+		granted:      make(map[string]struct{}),
+		sesKeys:      make(map[string]struct{}),
+		recovered:    make(chan struct{}),
+	}
+	return engine, nil
 }
 
 type sessionQueue struct {
@@ -316,15 +331,15 @@ func isTerminalKind(kind string) bool {
 	return false
 }
 
-func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay bool, err error) {
+func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay, granted bool, err error) {
 	if req == nil {
-		return store.RuntimeEvent{}, "", false, invalidArgument("turn request must not be nil")
+		return store.RuntimeEvent{}, "", false, false, invalidArgument("turn request must not be nil")
 	}
 	if req.SessionID == "" {
-		return store.RuntimeEvent{}, "", false, invalidArgument("session id must not be empty")
+		return store.RuntimeEvent{}, "", false, false, invalidArgument("session id must not be empty")
 	}
 	if req.Origin == "" {
-		return store.RuntimeEvent{}, "", false, invalidArgument("origin must not be empty")
+		return store.RuntimeEvent{}, "", false, false, invalidArgument("origin must not be empty")
 	}
 	if req.TurnID == "" {
 		req.TurnID = NewTurnID()
@@ -333,13 +348,20 @@ func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted 
 	e.mu.Lock()
 	if e.shutdown {
 		e.mu.Unlock()
-		return store.RuntimeEvent{}, "", false, codedError(runtime.ErrorCodeRuntimeOverloaded, "runtime is shutting down", nil)
+		return store.RuntimeEvent{}, "", false, false, codedError(runtime.ErrorCodeRuntimeOverloaded, "runtime is shutting down", nil)
 	}
 	if e.pending >= e.cfg.MaxPendingTurns {
 		e.mu.Unlock()
-		return store.RuntimeEvent{}, "", false, codedError(runtime.ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
+		return store.RuntimeEvent{}, "", false, false, codedError(runtime.ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
 	}
 	e.pending++
+	e.mu.Unlock()
+
+	if e.sessionStore != nil {
+		return e.claimDurable(ctx, req)
+	}
+
+	e.mu.Lock()
 	sq := e.sessions[req.SessionID]
 	if sq == nil {
 		sq = &sessionQueue{}
@@ -362,9 +384,9 @@ func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted 
 		})
 		if err != nil {
 			e.releasePending()
-			return store.RuntimeEvent{}, "", false, codedError(runtime.ErrorCodeStorageUnavailable, "dedupe claim failed", err)
+			return store.RuntimeEvent{}, "", false, false, codedError(runtime.ErrorCodeStorageUnavailable, "dedupe claim failed", err)
 		}
-		return accepted, originalTurnID, replay, nil
+		return accepted, originalTurnID, replay, false, nil
 	}
 
 	err = sq.lock(func() error {
@@ -377,9 +399,9 @@ func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted 
 	})
 	if err != nil {
 		e.releasePending()
-		return store.RuntimeEvent{}, "", false, codedError(runtime.ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
+		return store.RuntimeEvent{}, "", false, false, codedError(runtime.ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
 	}
-	return accepted, "", false, nil
+	return accepted, "", false, false, nil
 }
 
 func (e *Engine) enqueue(ctx context.Context, req *runtime.TurnRequest, accepted *store.RuntimeEvent, sub *subscriber) {
@@ -408,11 +430,11 @@ func (e *Engine) enqueue(ctx context.Context, req *runtime.TurnRequest, accepted
 	e.turns[req.TurnID] = t
 	e.mu.Unlock()
 
-	e.schedule()
+	e.schedule(ctx)
 }
 
 func (e *Engine) submit(ctx context.Context, req *runtime.TurnRequest) (*subscriber, error) {
-	accepted, originalTurnID, replay, err := e.claim(ctx, req)
+	accepted, originalTurnID, replay, granted, err := e.claim(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -420,6 +442,10 @@ func (e *Engine) submit(ctx context.Context, req *runtime.TurnRequest) (*subscri
 	if replay {
 		e.releasePending()
 		go e.replay(ctx, originalTurnID, sub)
+		return sub, nil
+	}
+	if e.sessionStore != nil {
+		e.stageDurable(ctx, req, &accepted, sub, granted)
 		return sub, nil
 	}
 	e.enqueue(ctx, req, &accepted, sub)
@@ -479,7 +505,11 @@ func (sq *sessionQueue) lock(fn func() error) error {
 	return fn()
 }
 
-func (e *Engine) schedule() {
+func (e *Engine) schedule(ctx context.Context) {
+	if e.sessionStore != nil {
+		e.scheduleDurable(ctx)
+		return
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.startRunnableLocked()
@@ -518,7 +548,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 		close(t.done)
 		delete(e.turns, t.turnID)
 		e.mu.Unlock()
-		e.schedule()
+		e.schedule(ctx)
 	}()
 
 	deadline := t.req.Deadline
@@ -542,6 +572,13 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 		}
 		if ev.CreatedAt.IsZero() {
 			ev.CreatedAt = time.Now().UTC()
+		}
+		if e.sessionStore != nil {
+			if _, err := e.events.AppendSequenced(ctx, t.req.SessionID, ev); err != nil {
+				return codedError(runtime.ErrorCodeStorageUnavailable, "failed to persist "+ev.Kind, err)
+			}
+			e.broadcast(t, ev)
+			return nil
 		}
 		err := e.sessionQueue(t.req.SessionID).lock(func() error {
 			seq, err := e.nextSequence(ctx, t.req.SessionID)
@@ -595,6 +632,9 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	}
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to persist terminal event", "error", err, "turn_id", t.turnID)
+	}
+	if e.sessionStore != nil {
+		e.releaseTurn(ctx, t)
 	}
 
 	for sub := range t.subs {
@@ -674,11 +714,33 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 		queued = append(queued, sq.queue...)
 		sq.queue = nil
 	}
+	var staged []*turn
+	var sesKeys []string
+	if e.sessionStore != nil {
+		for _, t := range e.staged {
+			staged = append(staged, t)
+		}
+		clear(e.staged)
+		clear(e.granted)
+		for key := range e.sesKeys {
+			sesKeys = append(sesKeys, key)
+		}
+		clear(e.sesKeys)
+	}
 	e.pending = 0
 	e.mu.Unlock()
 
+	drainCtx := context.WithoutCancel(ctx)
 	for _, t := range queued {
-		e.terminateQueued(context.WithoutCancel(ctx), t)
+		e.terminateQueued(drainCtx, t)
+	}
+	for _, t := range staged {
+		e.terminateStaged(drainCtx, t)
+	}
+	for _, key := range sesKeys {
+		if _, err := e.sessionStore.Abort(drainCtx, key); err != nil {
+			e.logger.ErrorContext(drainCtx, "runtime failed to abort durable session", "error", err)
+		}
 	}
 
 	done := make(chan struct{})

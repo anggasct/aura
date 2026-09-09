@@ -176,6 +176,33 @@ func (a *Adapter) Status(ctx context.Context, run durable.RunRef) (durable.RunSt
 	return durable.RunStatus{State: state, Detail: response.Detail}, nil
 }
 
+func (a *Adapter) Call(ctx context.Context, req durable.CallRequest) ([]byte, error) {
+	if req.Service == "" {
+		return nil, errors.New("restate call requires a service")
+	}
+	if req.Key == "" {
+		return nil, errors.New("restate call requires a key")
+	}
+	if req.Handler == "" {
+		return nil, errors.New("restate call requires a handler")
+	}
+	if len(req.Payload) != 0 && !json.Valid(req.Payload) {
+		return nil, fmt.Errorf("restate call %q on %q key %q: payload is not valid JSON", req.Handler, req.Service, req.Key)
+	}
+	toSend := req.Payload
+	if len(toSend) == 0 {
+		toSend = []byte(`{}`)
+	}
+	ctx, cancel := withCallTimeout(ctx)
+	defer cancel()
+	response, err := ingress.Object[json.RawMessage, json.RawMessage](a.client, req.Service, req.Key, req.Handler).
+		Request(ctx, json.RawMessage(toSend))
+	if err != nil {
+		return nil, fmt.Errorf("restate call %q on %q key %q: %w", req.Handler, req.Service, req.Key, mapIngressError(err))
+	}
+	return []byte(response), nil
+}
+
 func withCallTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, ok := ctx.Deadline(); ok {
 		return context.WithCancel(ctx)

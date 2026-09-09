@@ -39,4 +39,6 @@ type EventStore interface {
 	Append(ctx context.Context, e *RuntimeEvent) error
 	AppendBatch(ctx context.Context, events []RuntimeEvent) error
 	LastSequence(ctx context.Context, sessionID string) (uint64, error)
+	AppendSequenced(ctx context.Context, sessionID string, e *RuntimeEvent) (uint64, error)
+	ListTurnActivity(ctx context.Context, since time.Time) (map[string][]TurnActivity, error)
 }

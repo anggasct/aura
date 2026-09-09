@@ -108,17 +108,30 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var sessionStore runtimeengine.SessionStore
+			if cfg.Durable != nil && cfg.Durable.Enabled {
+				sessionRuntime, err := durableRuntimeForConfig(cfg, logger)
+				if err != nil {
+					return err
+				}
+				sessionStore = &durableSessionStore{runtime: sessionRuntime}
+			}
 			runtimeEngine, err := runtimeengine.NewEngine(runtimeengine.Config{
 				MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
 				MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
 				TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
 				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 				DefaultAgentID:  auraagent.DefaultID,
+				SessionStore:    sessionStore,
 			}, events, store.NewDedupeStore(db), adkExecutor, logger)
 			if err != nil {
 				return err
 			}
 			adkExecutor.SetEventPublisher(runtimeEngine)
+			var recoveryEngine *runtimeengine.Engine
+			if sessionStore != nil {
+				recoveryEngine = runtimeEngine
+			}
 			host, err := runtimeengine.NewHost(runtimeEngine, nil, logger)
 			if err != nil {
 				return err
@@ -138,7 +151,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			if cfg.Durable != nil && cfg.Durable.Enabled {
-				durableListener, err := buildDurableListener(ctx, cfg, db, logger)
+				durableListener, err := buildDurableListener(ctx, cfg, db, logger, recoveryEngine)
 				if err != nil {
 					return err
 				}
