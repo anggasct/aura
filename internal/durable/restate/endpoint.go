@@ -89,13 +89,10 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	e.mu.Lock()
-	// No read timeout: handler invocations park on durable signals for
-	// minutes or longer, and a read deadline severs those parked streams.
-	// The endpoint binds loopback by default; expose it wider only behind
-	// network controls that own slow-client protection instead.
 	e.server = &http.Server{
-		Handler:   handler,
-		Protocols: &protocols,
+		Handler:           handler,
+		Protocols:         &protocols,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 	e.bound = listener.Addr()
 	srv := e.server
