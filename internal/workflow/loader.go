@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,6 +37,7 @@ type executorFile struct {
 	AgentID  *string  `yaml:"agent_id"`
 	Requires []string `yaml:"requires"`
 	ToolID   *string  `yaml:"tool"`
+	Args     any      `yaml:"args"`
 	Event    *string  `yaml:"event"`
 }
 
@@ -98,9 +100,56 @@ func parseSpec(content []byte) (*Spec, error) {
 		step.Executor.RequiredCapabilities = entry.Executor.Requires
 		step.Executor.ToolID = entry.Executor.ToolID
 		step.Executor.Event = entry.Executor.Event
+		if entry.Executor.Args != nil {
+			raw, err := decodeToolArgs(index, entry.Executor.Args)
+			if err != nil {
+				return nil, err
+			}
+			step.Executor.ToolArgs = raw
+		}
 		spec.Steps = append(spec.Steps, step)
 	}
 	return spec, nil
+}
+
+func decodeToolArgs(index int, value any) (json.RawMessage, error) {
+	invalid := func() error {
+		return codedError(ErrorCodeExecutorInvalid, fmt.Sprintf("steps[%d] executor args must be a mapping", index))
+	}
+	document, ok := normalizeToolArgs(value)
+	if !ok {
+		return nil, invalid()
+	}
+	if len(document) == 0 {
+		return json.RawMessage(`{}`), nil
+	}
+	raw, err := json.Marshal(document)
+	if err != nil {
+		return nil, invalid()
+	}
+	return raw, nil
+}
+
+func normalizeToolArgs(value any) (map[string]any, bool) {
+	switch document := value.(type) {
+	case map[string]any:
+		if document == nil {
+			return nil, false
+		}
+		return document, true
+	case map[interface{}]any:
+		converted := make(map[string]any, len(document))
+		for key, item := range document {
+			name, ok := key.(string)
+			if !ok {
+				return nil, false
+			}
+			converted[name] = item
+		}
+		return converted, true
+	default:
+		return nil, false
+	}
 }
 
 func LoadDefinitionsDir(dir string) ([]*Spec, error) {
