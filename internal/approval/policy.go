@@ -122,18 +122,18 @@ func (p Policy) Validate() error {
 }
 
 type ApprovalGrant struct {
-	GrantID          string
-	PrincipalID      string
-	SessionID        string
-	ToolName         string
-	ToolVersion      string
-	ArgumentsHash    string
-	RequestDigest    string
-	CapabilitiesHash string
-	Constraints      Constraints
-	PolicyVersion    string
-	ExpiresAt        time.Time
-	Nonce            string
+	GrantID          string      `json:"grant_id"`
+	PrincipalID      string      `json:"principal_id"`
+	SessionID        string      `json:"session_id"`
+	ToolName         string      `json:"tool_name"`
+	ToolVersion      string      `json:"tool_version"`
+	ArgumentsHash    string      `json:"arguments_hash"`
+	RequestDigest    string      `json:"request_digest"`
+	CapabilitiesHash string      `json:"capabilities_hash"`
+	Constraints      Constraints `json:"constraints"`
+	PolicyVersion    string      `json:"policy_version"`
+	ExpiresAt        time.Time   `json:"expires_at"`
+	Nonce            string      `json:"nonce"`
 }
 
 func (g *ApprovalGrant) ValidFor(request *ToolRequest, policyVersion string, now time.Time) error {
