@@ -140,3 +140,108 @@ func TestBrokerDurableParkRejects(t *testing.T) {
 	_, _, _, finish := parkBroker(t, false)
 	finish()
 }
+
+func TestBrokerDurableParkReplaysDeterministically(t *testing.T) {
+	policy := DefaultPolicy()
+	readRule := policy.Rules["read_file"]
+	readRule.RequiresApproval = true
+	policy.Rules["read_file"] = readRule
+	var calls int
+	broker, err := New(&Options{
+		Policy: policy,
+		Adapters: map[string]Adapter{
+			"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+				calls++
+				return ToolResult{Output: []byte(`{"content":"x"}`)}, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	backend := durable.NewFake()
+	invCh := make(chan durable.Invocation, 1)
+	backend.RegisterHandler("driver", func(_ context.Context, inv durable.Invocation) error {
+		invCh <- inv
+		select {}
+	})
+	if _, err := backend.Start(context.Background(), durable.StartRequest{Handler: "driver", Key: "turn-1"}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	var inv durable.Invocation
+	select {
+	case inv = <-invCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("driver invocation never started")
+	}
+	sink := &recordingSink{ready: make(chan struct{})}
+	runOnce := func() error {
+		ctx := WithApprovalSink(context.Background(), sink)
+		ctx = durable.WithTurnScope(ctx, durable.NewTurnScope(inv))
+		returned := make(chan error, 1)
+		go func() {
+			_, err := broker.Execute(ctx, brokerRequest("read_file", `{"path":"note.txt"}`, "workspace-read"))
+			returned <- err
+		}()
+		return <-returned
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		ctx := WithApprovalSink(context.Background(), sink)
+		ctx = durable.WithTurnScope(ctx, durable.NewTurnScope(inv))
+		_, err := broker.Execute(ctx, brokerRequest("read_file", `{"path":"note.txt"}`, "workspace-read"))
+		firstDone <- err
+	}()
+	select {
+	case <-sink.ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("approval event never emitted")
+	}
+	firstEvents := sink.snapshot()
+	if len(firstEvents) != 1 {
+		t.Fatalf("first approval events = %d, want 1", len(firstEvents))
+	}
+	decision, err := json.Marshal(ApprovalDecision{Approved: true})
+	if err != nil {
+		t.Fatalf("marshal decision: %v", err)
+	}
+	if err := backend.ResolveApproval(context.Background(), durable.ResolveApprovalRequest{
+		ApprovalID: firstEvents[0].ApprovalID,
+		Payload:    decision,
+	}); err != nil {
+		t.Fatalf("ResolveApproval: %v", err)
+	}
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatalf("first Execute: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first Execute never returned")
+	}
+	if calls != 1 {
+		t.Fatalf("adapter calls after first run = %d, want 1", calls)
+	}
+	if err := runOnce(); err != nil {
+		t.Fatalf("replayed Execute: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("adapter calls after replay = %d, want 1 (single consumption)", calls)
+	}
+	replayed := sink.snapshot()
+	if len(replayed) != 2 {
+		t.Fatalf("approval events after replay = %d, want 2 (original plus identical replay emit)", len(replayed))
+	}
+	if replayed[0].ApprovalID != replayed[1].ApprovalID {
+		t.Fatalf("replayed signal %q differs from original %q", replayed[1].ApprovalID, replayed[0].ApprovalID)
+	}
+	if !replayed[0].ExpiresAt.Equal(replayed[1].ExpiresAt) {
+		t.Fatalf("replayed expiry %v differs from original %v", replayed[1].ExpiresAt, replayed[0].ExpiresAt)
+	}
+	if err := backend.ResolveApproval(context.Background(), durable.ResolveApprovalRequest{
+		ApprovalID: firstEvents[0].ApprovalID,
+		Payload:    decision,
+	}); err == nil {
+		t.Fatal("expected a double-consume error after replay")
+	}
+}

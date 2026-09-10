@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/runtime"
 	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
 	"github.com/anggasct/aura/internal/store"
@@ -135,6 +136,18 @@ func newDurableTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*En
 	engine, db, events := newTestRuntime(t, cfg, executor)
 	stub := newStubSessionStore(events, store.NewDedupeStore(db))
 	engine.sessionStore = stub
+	engine.MarkRecovered()
+	return engine, stub, db
+}
+
+func newDurableLiveTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *stubSessionStore, *sql.DB) {
+	t.Helper()
+	engine, db, events := newTestRuntime(t, cfg, executor)
+	stub := newStubSessionStore(events, store.NewDedupeStore(db))
+	backend := durable.NewFake()
+	engine.sessionStore = stub
+	engine.durableRuntime = backend
+	backend.RegisterHandler("turn", engine.serveTurn)
 	engine.MarkRecovered()
 	return engine, stub, db
 }

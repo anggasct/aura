@@ -88,6 +88,14 @@ type invocation struct {
 	clock   Clock
 	mu      *sync.Mutex
 	signals map[string]*signalQueue
+	journal map[string][]byte
+	waits   map[string]waitResult
+}
+
+type waitResult struct {
+	payload  []byte
+	timedOut bool
+	ok       bool
 }
 
 type signalQueue struct {
@@ -175,6 +183,11 @@ func (i *invocation) Timer(d time.Duration) <-chan time.Time {
 
 func (i *invocation) Wait(ctx context.Context, name string, timeout time.Duration) (payload []byte, timedOut, ok bool) {
 	i.mu.Lock()
+	if cached, found := i.waits[name]; found && cached.ok {
+		out := append([]byte(nil), cached.payload...)
+		i.mu.Unlock()
+		return out, cached.timedOut, true
+	}
 	queue := i.signals[name]
 	if queue == nil {
 		queue = &signalQueue{}
@@ -183,6 +196,11 @@ func (i *invocation) Wait(ctx context.Context, name string, timeout time.Duratio
 	if len(queue.delivered) > 0 {
 		delivery := queue.delivered[0]
 		queue.delivered = queue.delivered[1:]
+		cached := append([]byte(nil), delivery.payload...)
+		if i.waits == nil {
+			i.waits = map[string]waitResult{}
+		}
+		i.waits[name] = waitResult{payload: cached, timedOut: false, ok: true}
 		i.mu.Unlock()
 		return delivery.payload, false, true
 	}
@@ -196,9 +214,21 @@ func (i *invocation) Wait(ctx context.Context, name string, timeout time.Duratio
 			i.detachWaiter(name, reply, &delivery)
 			return nil, false, false
 		}
+		i.mu.Lock()
+		if i.waits == nil {
+			i.waits = map[string]waitResult{}
+		}
+		i.waits[name] = waitResult{payload: append([]byte(nil), delivery.payload...), timedOut: false, ok: true}
+		i.mu.Unlock()
 		return delivery.payload, false, true
 	case <-timer:
 		i.detachWaiter(name, reply, nil)
+		i.mu.Lock()
+		if i.waits == nil {
+			i.waits = map[string]waitResult{}
+		}
+		i.waits[name] = waitResult{timedOut: true, ok: true}
+		i.mu.Unlock()
 		return nil, true, true
 	case <-ctx.Done():
 		i.detachWaiter(name, reply, nil)
@@ -215,7 +245,28 @@ func (i *invocation) RunAction(ctx context.Context, key string, fn func(ctx cont
 	if fn == nil {
 		return nil, errors.New("durable run action requires a function")
 	}
-	return fn(ctx)
+	i.mu.Lock()
+	if i.journal == nil {
+		i.journal = map[string][]byte{}
+	}
+	if cached, ok := i.journal[key]; ok {
+		out := append([]byte(nil), cached...)
+		i.mu.Unlock()
+		return out, nil
+	}
+	i.mu.Unlock()
+	out, err := fn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	i.mu.Lock()
+	if i.journal == nil {
+		i.journal = map[string][]byte{}
+	}
+	i.journal[key] = append([]byte(nil), out...)
+	cached := append([]byte(nil), out...)
+	i.mu.Unlock()
+	return cached, nil
 }
 
 type Fake struct {

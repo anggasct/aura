@@ -429,6 +429,19 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		if ev.ID == "" {
 			ev.ID = scope.NextEventID(req.TurnID)
 		}
+		if ev.CreatedAt.IsZero() {
+			nowRaw, clockErr := scope.Invocation().RunAction(ctx, scope.NextClock(), func(ctx context.Context) ([]byte, error) {
+				return json.Marshal(time.Now().UTC())
+			})
+			if clockErr != nil {
+				return codedError(runtime.ErrorCodeStorageUnavailable, "failed to journal "+ev.Kind, clockErr)
+			}
+			var journaled time.Time
+			if err := json.Unmarshal(nowRaw, &journaled); err != nil {
+				return codedError(runtime.ErrorCodeStorageUnavailable, "failed to decode durable clock", err)
+			}
+			ev.CreatedAt = journaled.UTC()
+		}
 		e.fillTurnEvent(t, ev)
 		sequence, _, err := e.events.UpsertEvent(ctx, ev)
 		if err != nil {
@@ -436,6 +449,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		}
 		ev.Sequence = sequence
 		e.broadcast(t, ev)
+		e.Publish(ev)
 		return nil
 	}
 	emit := func(ctx context.Context, kind string, payload []byte) error {
@@ -462,6 +476,18 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		return err
 	}
 	return nil
+}
+
+func (e *Engine) replayStoredToLive(ctx context.Context, t *turn) {
+	events, err := e.dedupe.ListTurnEvents(context.WithoutCancel(ctx), t.turnID)
+	if err != nil {
+		e.logger.ErrorContext(ctx, "durable turn replay failed", "error", err, "turn_id", t.turnID)
+		return
+	}
+	for i := range events {
+		ev := events[i]
+		e.broadcast(t, &ev)
+	}
 }
 
 func (e *Engine) pollDurableTurn(ctx context.Context, t *turn) {
@@ -498,6 +524,7 @@ func (e *Engine) pollDurableTurn(ctx context.Context, t *turn) {
 			switch status.State {
 			case durable.RunSucceeded, durable.RunFailed, durable.RunCancelled:
 				e.releaseTurn(ctx, t)
+				e.replayStoredToLive(ctx, t)
 				for sub := range t.subs {
 					sub.closeEvents()
 				}
@@ -514,6 +541,10 @@ func (e *Engine) cancelDurableTurn(ctx context.Context, t *turn, ref durable.Run
 		e.logger.DebugContext(ctx, "durable turn cancel failed", "error", err, "turn_id", t.turnID)
 	}
 	if e.hasTerminalEvent(ctx, t) {
+		e.replayStoredToLive(ctx, t)
+		for sub := range t.subs {
+			sub.closeEvents()
+		}
 		e.releaseTurn(ctx, t)
 		return
 	}

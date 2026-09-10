@@ -371,16 +371,28 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			approvalState = ApprovalRejected
 			return ToolResult{}, err
 		}
-		newGrant, grantErr := b.engine.GrantUntil(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), approvalExpiry)
-		err = grantErr
-		if err != nil {
-			return ToolResult{}, mapApprovalError(err)
+		if durableScope, ok := durable.TurnScopeFrom(ctx); ok {
+			journaled, grantErr := b.grantDurableUntil(ctx, durableScope, &canonical, approvalExpiry)
+			if grantErr != nil {
+				return ToolResult{}, mapApprovalError(grantErr)
+			}
+			grant = &journaled
+		} else {
+			newGrant, grantErr := b.engine.GrantUntil(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), approvalExpiry)
+			err = grantErr
+			if err != nil {
+				return ToolResult{}, mapApprovalError(err)
+			}
+			grant = &newGrant
 		}
-		grant = &newGrant
 	} else {
 		approvalState = ApprovalAttached
 	}
-	if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), grant); err != nil {
+	if durableScope, ok := durable.TurnScopeFrom(ctx); ok {
+		if err := b.validateDurable(ctx, durableScope, &canonical, grant); err != nil {
+			return ToolResult{}, mapApprovalError(err)
+		}
+	} else if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), grant); err != nil {
 		return ToolResult{}, mapApprovalError(err)
 	}
 	if scope, ok := durable.TurnScopeFrom(ctx); ok {

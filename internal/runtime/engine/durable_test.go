@@ -443,3 +443,38 @@ func TestDurableLongStreamReplaysFullyFromStore(t *testing.T) {
 		}
 	})
 }
+
+func TestDurableLiveStreamDeliversPersistedSequence(t *testing.T) {
+	script := []runtime.FakeStep{
+		{Kind: runtime.EventKindModelStarted, Payload: []byte(`{"s":1}`)},
+		{Kind: runtime.EventKindModelDelta, Payload: []byte(`{"d":1}`)},
+		{Kind: runtime.EventKindModelDelta, Payload: []byte(`{"d":2}`)},
+		{Kind: runtime.EventKindMessageCompleted, Payload: []byte(`{}`)},
+	}
+	executor := runtime.NewFakeExecutor(script)
+	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	mustCreateSession(t, db, "session-live")
+
+	streamed, err := collect(t, engine, sampleRequest("session-live", "turn-live-0"))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-live-0")
+	if err != nil {
+		t.Fatalf("list turn events: %v", err)
+	}
+	if len(streamed) != len(stored) {
+		t.Fatalf("streamed events = %d, stored = %d, want equal", len(streamed), len(stored))
+	}
+	for i := range stored {
+		if streamed[i].Kind != stored[i].Kind || streamed[i].Sequence != stored[i].Sequence {
+			t.Fatalf("event %d diverges: stream %+v vs stored %+v", i, streamed[i], stored[i])
+		}
+		if i > 0 && streamed[i].Sequence != streamed[i-1].Sequence+1 {
+			t.Fatalf("stream sequences not contiguous at %d", i)
+		}
+	}
+	if last := streamed[len(streamed)-1]; !isTerminalKind(last.Kind) {
+		t.Fatalf("terminal kind = %q, want completed/failed/cancelled", last.Kind)
+	}
+}

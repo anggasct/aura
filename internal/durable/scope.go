@@ -8,10 +8,11 @@ import (
 )
 
 type TurnScope struct {
-	mu  sync.Mutex
-	inv Invocation
-	ops uint64
-	evs uint64
+	mu     sync.Mutex
+	inv    Invocation
+	ops    uint64
+	evs    uint64
+	clocks uint64
 }
 
 func NewTurnScope(inv Invocation) *TurnScope {
@@ -37,6 +38,13 @@ func (s *TurnScope) NextEventID(turnID string) string {
 	defer s.mu.Unlock()
 	s.evs++
 	return fmt.Sprintf("%s-ev-%d", turnID, s.evs)
+}
+
+func (s *TurnScope) NextClock() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clocks++
+	return fmt.Sprintf("clock-%d", s.clocks)
 }
 
 type turnScopeKey struct{}
