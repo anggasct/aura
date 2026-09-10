@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/sandbox"
@@ -44,12 +45,12 @@ type ToolRequest struct {
 }
 
 type ToolResult struct {
-	ToolName    string
-	ToolVersion string
-	Class       ResultClass
-	Untrusted   bool
-	Output      json.RawMessage
-	Truncated   bool
+	ToolName    string          `json:"tool_name"`
+	ToolVersion string          `json:"tool_version"`
+	Class       ResultClass     `json:"class"`
+	Untrusted   bool            `json:"untrusted"`
+	Output      json.RawMessage `json:"output"`
+	Truncated   bool            `json:"truncated"`
 }
 
 type Adapter func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error)
@@ -309,7 +310,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if err := contextError(ctx, canonical.Deadline); err != nil {
 		return ToolResult{}, err
 	}
-	decision, err := b.engine.Evaluate(ctx, toApprovalRequest(&canonical, b.PolicyVersion()))
+	decision, evalKey, err := b.evaluatePolicy(ctx, toApprovalRequest(&canonical, b.PolicyVersion()))
 	if err != nil {
 		policyOutcome = PolicyOutcomeDeny
 		return ToolResult{}, mapApprovalError(err)
@@ -334,9 +335,19 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 
 	approvalExpiry := absoluteApprovalExpiry(canonical.Deadline)
 	grant := canonical.Approval
-	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && b.decider == nil {
-		approvalState = ApprovalMissing
-		return ToolResult{}, errorf(ResultApprovalRequired, "tool %q requires approval", key)
+	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil {
+		if scope, ok := durable.TurnScopeFrom(ctx); ok {
+			parked, err := b.parkForApproval(ctx, scope, evalKey, &canonical, approvalExpiry)
+			if err != nil {
+				approvalState = ApprovalRejected
+				return ToolResult{}, err
+			}
+			approvalState = ApprovalApproved
+			grant = parked
+		} else if b.decider == nil {
+			approvalState = ApprovalMissing
+			return ToolResult{}, errorf(ResultApprovalRequired, "tool %q requires approval", key)
+		}
 	}
 	if grant == nil {
 		if decision.Outcome == approval.OutcomeRequireApproval {
@@ -360,24 +371,41 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			approvalState = ApprovalRejected
 			return ToolResult{}, err
 		}
-		newGrant, grantErr := b.engine.GrantUntil(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), approvalExpiry)
-		err = grantErr
-		if err != nil {
-			return ToolResult{}, mapApprovalError(err)
+		if durableScope, ok := durable.TurnScopeFrom(ctx); ok {
+			journaled, grantErr := b.grantDurableUntil(ctx, durableScope, &canonical, approvalExpiry)
+			if grantErr != nil {
+				return ToolResult{}, mapApprovalError(grantErr)
+			}
+			grant = &journaled
+		} else {
+			newGrant, grantErr := b.engine.GrantUntil(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), approvalExpiry)
+			err = grantErr
+			if err != nil {
+				return ToolResult{}, mapApprovalError(err)
+			}
+			grant = &newGrant
 		}
-		grant = &newGrant
 	} else {
 		approvalState = ApprovalAttached
 	}
-	if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), grant); err != nil {
+	if durableScope, ok := durable.TurnScopeFrom(ctx); ok {
+		if err := b.validateDurable(ctx, durableScope, &canonical, grant); err != nil {
+			return ToolResult{}, mapApprovalError(err)
+		}
+	} else if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), grant); err != nil {
 		return ToolResult{}, mapApprovalError(err)
+	}
+	if scope, ok := durable.TurnScopeFrom(ctx); ok {
+		result, err = b.executeDurable(ctx, scope, &canonical, decision.Constraints, adapter, definition.Effectful)
+	} else if definition.Effectful {
+		result, err = b.executeEffect(ctx, &canonical, decision.Constraints, adapter)
+	} else {
+		result, err = adapter(ctx, &canonical, decision.Constraints)
 	}
 	if definition.Effectful {
 		executorClass = ExecutorEffect
-		result, err = b.executeEffect(ctx, &canonical, decision.Constraints, adapter)
 	} else {
 		executorClass = ExecutorDirect
-		result, err = adapter(ctx, &canonical, decision.Constraints)
 	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

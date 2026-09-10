@@ -248,6 +248,9 @@ func (s *sessionServer) status(ctx restate.ObjectSharedContext, _ json.RawMessag
 	result := runtimesessions.StatusResult{QueueDepth: len(state.Queue), LastSequence: state.LastSequence}
 	if state.Active != nil {
 		result.ActiveTurnID = state.Active.Descriptor.TurnID
+		if !state.Active.Descriptor.Deadline.IsZero() {
+			result.Deadline = state.Active.Descriptor.Deadline.UTC().Format(time.RFC3339Nano)
+		}
 	}
 	return result, nil
 }

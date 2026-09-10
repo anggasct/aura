@@ -13,6 +13,7 @@ import (
 	"github.com/restatedev/sdk-go/ingress"
 
 	"github.com/anggasct/aura/internal/durable"
+	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
 )
 
 const (
@@ -201,6 +202,44 @@ func (a *Adapter) Call(ctx context.Context, req durable.CallRequest) ([]byte, er
 		return nil, fmt.Errorf("restate call %q on %q key %q: %w", req.Handler, req.Service, req.Key, mapIngressError(err))
 	}
 	return []byte(response), nil
+}
+
+func (a *Adapter) ResolveApproval(ctx context.Context, req durable.ResolveApprovalRequest) error {
+	if req.ApprovalID == "" {
+		return errors.New("restate resolve approval requires an approval id")
+	}
+	runKey, signal, err := durable.ParseApprovalAddr(req.ApprovalID)
+	if err != nil {
+		return err
+	}
+	return a.Signal(ctx, durable.RunRef{Key: runKey}, signal, req.Payload)
+}
+
+func (a *Adapter) TurnDeadline(ctx context.Context, sessionID string) (time.Time, bool, error) {
+	if sessionID == "" {
+		return time.Time{}, false, errors.New("restate turn deadline requires a session id")
+	}
+	raw, err := a.Call(ctx, durable.CallRequest{
+		Service: SessionServiceName,
+		Key:     sessionID,
+		Handler: SessionStatusHandler,
+		Payload: []byte(`{}`),
+	})
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	var status runtimesessions.StatusResult
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return time.Time{}, false, fmt.Errorf("decode session status: %w", err)
+	}
+	if status.Deadline == "" {
+		return time.Time{}, false, nil
+	}
+	deadline, err := time.Parse(time.RFC3339Nano, status.Deadline)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("decode session deadline: %w", err)
+	}
+	return deadline, true, nil
 }
 
 func withCallTimeout(ctx context.Context) (context.Context, context.CancelFunc) {

@@ -2,12 +2,16 @@ package runtimeengine
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"time"
 
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/toolbroker"
 )
 
 type SessionStore interface {
@@ -58,6 +62,14 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRe
 
 func (e *Engine) MarkRecovered() {
 	e.recoverOnce.Do(func() { close(e.recovered) })
+}
+
+func (e *Engine) serveTurn(ctx context.Context, inv durable.Invocation) error {
+	var desc runtimesessions.Descriptor
+	if err := json.Unmarshal(inv.Payload(), &desc); err != nil {
+		return invalidArgument("durable turn payload is not a descriptor")
+	}
+	return e.DriveTurn(ctx, inv, &desc)
 }
 
 func (e *Engine) claimDurable(ctx context.Context, req *runtime.TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay, granted bool, err error) {
@@ -129,7 +141,11 @@ func (e *Engine) stageDurable(ctx context.Context, req *runtime.TurnRequest, acc
 		cancel:   cancel,
 		done:     make(chan struct{}),
 	}
-	t.start = func() { e.runTurn(turnCtx, t) }
+	if e.durableRuntime != nil {
+		t.start = func() { e.pollDurableTurn(turnCtx, t) }
+	} else {
+		t.start = func() { e.runTurn(turnCtx, t) }
+	}
 	e.mu.Lock()
 	if e.shutdown {
 		e.mu.Unlock()
@@ -200,7 +216,14 @@ func (e *Engine) releaseTurn(ctx context.Context, t *turn) {
 	ctx = context.WithoutCancel(ctx)
 	result, err := e.sessionStore.Release(ctx, t.req.SessionID, t.turnID)
 	if err != nil {
-		e.logger.ErrorContext(ctx, "runtime failed to release durable turn", "error", err, "turn_id", t.turnID)
+		e.mu.Lock()
+		shutdown := e.shutdown
+		e.mu.Unlock()
+		if shutdown {
+			e.logger.DebugContext(ctx, "runtime failed to release durable turn during shutdown", "error", err, "turn_id", t.turnID)
+		} else {
+			e.logger.ErrorContext(ctx, "runtime failed to release durable turn", "error", err, "turn_id", t.turnID)
+		}
 		return
 	}
 	if result.ToStart != nil {
@@ -326,4 +349,257 @@ func (e *Engine) terminateStaged(ctx context.Context, t *turn) {
 		close(t.done)
 	}
 	e.mu.Unlock()
+}
+
+func (e *Engine) fillTurnEvent(t *turn, ev *store.RuntimeEvent) {
+	if ev.ID == "" {
+		ev.ID = NewTurnID()
+	}
+	ev.SessionID = t.req.SessionID
+	ev.TurnID = t.turnID
+	if ev.Author == "" {
+		ev.Author = t.req.PrincipalID
+	}
+	if ev.SchemaVersion == 0 {
+		ev.SchemaVersion = 1
+	}
+	if ev.CreatedAt.IsZero() {
+		ev.CreatedAt = time.Now().UTC()
+	}
+}
+
+func (e *Engine) terminalOutcome(ctx context.Context, execErr error, req *runtime.TurnRequest) (kind string, payload []byte) {
+	switch {
+	case ctx.Err() == context.Canceled:
+		return runtime.EventKindTurnCancelled, cancelledPayload("turn cancelled", e.agentID(req))
+	case ctx.Err() == context.DeadlineExceeded:
+		return runtime.EventKindTurnFailed, failedPayload(runtime.ErrorCodeTurnDeadlineExceeded, "turn deadline elapsed", nil, e.agentID(req))
+	case execErr != nil:
+		code, ok := runtime.CodeOf(execErr)
+		if !ok {
+			code = runtime.ErrorCodeRuntimeInternal
+		}
+		return runtime.EventKindTurnFailed, failedPayload(code, "turn execution failed", execErr, e.agentID(req))
+	default:
+		return runtime.EventKindTurnCompleted, completedPayload(e.agentID(req))
+	}
+}
+
+func (e *Engine) finishTurn(ctx context.Context, t *turn) {
+	e.mu.Lock()
+	e.active--
+	close(t.done)
+	delete(e.turns, t.turnID)
+	e.mu.Unlock()
+	e.schedule(ctx)
+}
+
+const durableStatusPoll = 500 * time.Millisecond
+
+func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *runtimesessions.Descriptor) error {
+	if inv == nil {
+		return invalidArgument("durable turn drive requires an invocation")
+	}
+	if desc == nil {
+		return invalidArgument("durable turn drive requires a descriptor")
+	}
+	if err := desc.Validate(); err != nil {
+		return err
+	}
+	scope := durable.NewTurnScope(inv)
+	if scope == nil {
+		return invalidArgument("durable turn drive requires an invocation")
+	}
+	ctx = durable.WithTurnScope(ctx, scope)
+	ctx = toolbroker.WithApprovalSink(ctx, toolbroker.NewApprovalEventSink(e.events, e.Publish))
+	req := turnRequestFromDescriptor(desc)
+	accepted, err := e.acceptedForReleased(ctx, req)
+	if err != nil {
+		return err
+	}
+	t := &turn{req: *req, turnID: req.TurnID, accepted: *accepted}
+	deadline := req.Deadline
+	if deadline.IsZero() {
+		deadline = accepted.CreatedAt.Add(e.cfg.TurnTimeout)
+	}
+	ctx, stop := context.WithDeadline(ctx, deadline)
+	defer stop()
+
+	persist := func(ctx context.Context, ev *store.RuntimeEvent) error {
+		if ev.ID == "" {
+			ev.ID = scope.NextEventID(req.TurnID)
+		}
+		if ev.CreatedAt.IsZero() {
+			nowRaw, clockErr := scope.Invocation().RunAction(ctx, scope.NextClock(), func(ctx context.Context) ([]byte, error) {
+				return json.Marshal(time.Now().UTC())
+			})
+			if clockErr != nil {
+				return codedError(runtime.ErrorCodeStorageUnavailable, "failed to journal "+ev.Kind, clockErr)
+			}
+			var journaled time.Time
+			if err := json.Unmarshal(nowRaw, &journaled); err != nil {
+				return codedError(runtime.ErrorCodeStorageUnavailable, "failed to decode durable clock", err)
+			}
+			ev.CreatedAt = journaled.UTC()
+		}
+		e.fillTurnEvent(t, ev)
+		sequence, _, err := e.events.UpsertEvent(ctx, ev)
+		if err != nil {
+			return codedError(runtime.ErrorCodeStorageUnavailable, "failed to persist "+ev.Kind, err)
+		}
+		ev.Sequence = sequence
+		e.broadcast(t, ev)
+		e.Publish(ev)
+		return nil
+	}
+	emit := func(ctx context.Context, kind string, payload []byte) error {
+		ev := &store.RuntimeEvent{Kind: kind, Payload: payload}
+		return persist(ctx, ev)
+	}
+
+	var execErr error
+	for ev, err := range e.executor.Execute(ctx, req) {
+		if err != nil {
+			execErr = err
+			break
+		}
+		if emitErr := persist(ctx, &ev); emitErr != nil {
+			execErr = emitErr
+			break
+		}
+	}
+	if ctx.Err() == context.Canceled {
+		return ctx.Err()
+	}
+	terminalKind, terminalPayload := e.terminalOutcome(ctx, execErr, req)
+	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (e *Engine) replayStoredToLive(ctx context.Context, t *turn) {
+	events, err := e.dedupe.ListTurnEvents(context.WithoutCancel(ctx), t.turnID)
+	if err != nil {
+		e.logger.ErrorContext(ctx, "durable turn replay failed", "error", err, "turn_id", t.turnID)
+		return
+	}
+	for i := range events {
+		ev := events[i]
+		e.broadcast(t, &ev)
+	}
+}
+
+func (e *Engine) pollDurableTurn(ctx context.Context, t *turn) {
+	defer e.finishTurn(ctx, t)
+	e.broadcast(t, &t.accepted)
+	desc := turnDescriptorFromRequest(&t.req)
+	payload, err := json.Marshal(desc)
+	if err != nil {
+		e.failDurableStart(ctx, t, err)
+		return
+	}
+	ref, err := e.durableRuntime.Start(ctx, durable.StartRequest{Handler: "turn", Key: t.turnID, Payload: payload})
+	if err != nil {
+		e.failDurableStart(ctx, t, err)
+		return
+	}
+	ticker := time.NewTicker(durableStatusPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			e.cancelDurableTurn(ctx, t, ref)
+			return
+		case <-ticker.C:
+			status, err := e.durableRuntime.Status(ctx, ref)
+			if err != nil {
+				if errors.Is(err, durable.ErrUnknownRun) {
+					e.failDurableStart(ctx, t, err)
+					return
+				}
+				e.logger.DebugContext(ctx, "durable turn status probe failed", "error", err, "turn_id", t.turnID)
+				continue
+			}
+			switch status.State {
+			case durable.RunSucceeded, durable.RunFailed, durable.RunCancelled:
+				e.releaseTurn(ctx, t)
+				e.replayStoredToLive(ctx, t)
+				for sub := range t.subs {
+					sub.closeEvents()
+				}
+				return
+			case durable.RunRunning, durable.RunSuspended:
+				continue
+			}
+		}
+	}
+}
+
+func (e *Engine) cancelDurableTurn(ctx context.Context, t *turn, ref durable.RunRef) {
+	if err := e.durableRuntime.Cancel(context.WithoutCancel(ctx), ref); err != nil {
+		e.logger.DebugContext(ctx, "durable turn cancel failed", "error", err, "turn_id", t.turnID)
+	}
+	if e.hasTerminalEvent(ctx, t) {
+		e.replayStoredToLive(ctx, t)
+		for sub := range t.subs {
+			sub.closeEvents()
+		}
+		e.releaseTurn(ctx, t)
+		return
+	}
+	cancelled := &store.RuntimeEvent{
+		ID:            t.turnID + "-cancel",
+		SessionID:     t.req.SessionID,
+		TurnID:        t.turnID,
+		Author:        t.req.PrincipalID,
+		Kind:          runtime.EventKindTurnCancelled,
+		SchemaVersion: 1,
+		Payload:       cancelledPayload("turn cancelled", e.agentID(&t.req)),
+		CreatedAt:     time.Now().UTC(),
+	}
+	if _, _, err := e.events.UpsertEvent(context.WithoutCancel(ctx), cancelled); err != nil {
+		e.logger.ErrorContext(ctx, "runtime failed to persist turn cancellation", "error", err, "turn_id", t.turnID)
+	}
+	e.broadcast(t, &t.accepted)
+	e.broadcast(t, cancelled)
+	for sub := range t.subs {
+		sub.closeEvents()
+	}
+	e.releaseTurn(ctx, t)
+}
+
+func (e *Engine) hasTerminalEvent(ctx context.Context, t *turn) bool {
+	events, err := e.dedupe.ListTurnEvents(ctx, t.turnID)
+	if err != nil {
+		return false
+	}
+	for i := range events {
+		if isTerminalKind(events[i].Kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) failDurableStart(ctx context.Context, t *turn, cause error) {
+	terminal := &store.RuntimeEvent{
+		ID:            t.turnID + "-terminal",
+		SessionID:     t.req.SessionID,
+		TurnID:        t.turnID,
+		Author:        t.req.PrincipalID,
+		Kind:          runtime.EventKindTurnFailed,
+		SchemaVersion: 1,
+		Payload:       failedPayload(runtime.ErrorCodeStorageUnavailable, "durable turn did not start", cause, e.agentID(&t.req)),
+		CreatedAt:     time.Now().UTC(),
+	}
+	if _, _, err := e.events.UpsertEvent(context.WithoutCancel(ctx), terminal); err != nil {
+		e.logger.ErrorContext(ctx, "runtime failed to persist turn start failure", "error", err, "turn_id", t.turnID)
+	}
+	e.broadcast(t, &t.accepted)
+	e.broadcast(t, terminal)
+	for sub := range t.subs {
+		sub.closeEvents()
+	}
+	e.releaseTurn(ctx, t)
 }

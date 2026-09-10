@@ -46,4 +46,5 @@ type StatusResult struct {
 	QueueDepth   int    `json:"queue_depth"`
 	ActiveTurnID string `json:"active_turn_id"`
 	LastSequence uint64 `json:"last_sequence"`
+	Deadline     string `json:"deadline,omitempty"`
 }

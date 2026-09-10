@@ -33,6 +33,11 @@ type Endpoint struct {
 	server   *http.Server
 	bound    net.Addr
 	sessions *SessionStores
+	inflight map[*inflightCall]struct{}
+}
+
+type inflightCall struct {
+	cancel context.CancelFunc
 }
 
 func NewEndpoint(cfg EndpointConfig, logger *slog.Logger) (*Endpoint, error) {
@@ -53,6 +58,7 @@ func NewEndpoint(cfg EndpointConfig, logger *slog.Logger) (*Endpoint, error) {
 		logger:   logger,
 		addr:     addr,
 		service:  service,
+		inflight: map[*inflightCall]struct{}{},
 	}, nil
 }
 
@@ -106,6 +112,7 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	e.mu.Unlock()
 	go func() {
 		<-ctx.Done()
+		e.cancelInflight()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
@@ -116,7 +123,16 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	return nil
 }
 
+func (e *Endpoint) cancelInflight() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for call := range e.inflight {
+		call.cancel()
+	}
+}
+
 func (e *Endpoint) Stop(ctx context.Context) error {
+	e.cancelInflight()
 	e.mu.Lock()
 	srv := e.server
 	e.mu.Unlock()
@@ -134,5 +150,22 @@ func (e *Endpoint) boundHandler(ctx context.Context) (http.HandlerFunc, error) {
 	if binding != nil {
 		e.runtime.Bind(buildSessionService(*binding, e.logger))
 	}
-	return e.runtime.Handler()
+	inner, err := e.runtime.Handler()
+	if err != nil {
+		return nil, err
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		callCtx, cancel := context.WithCancel(r.Context())
+		call := &inflightCall{cancel: cancel}
+		e.mu.Lock()
+		e.inflight[call] = struct{}{}
+		e.mu.Unlock()
+		defer func() {
+			cancel()
+			e.mu.Lock()
+			delete(e.inflight, call)
+			e.mu.Unlock()
+		}()
+		inner.ServeHTTP(w, r.WithContext(callCtx))
+	}, nil
 }

@@ -282,3 +282,50 @@ func TestFakeCallRejectsUnknownAndInvalid(t *testing.T) {
 		})
 	}
 }
+
+func TestFakeResolveApprovalConsumesOnce(t *testing.T) {
+	fake := NewFake()
+	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
+		_, _, _ = inv.Wait(ctx, "approval-op-1", time.Minute)
+		return nil
+	})
+	ref, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "turn-1"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	_ = ref
+	addr := FormatApprovalAddr("turn-1", "approval-op-1")
+	if err := fake.ResolveApproval(context.Background(), ResolveApprovalRequest{ApprovalID: addr, Payload: []byte(`{"decision":"approve"}`)}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if err := fake.ResolveApproval(context.Background(), ResolveApprovalRequest{ApprovalID: addr, Payload: []byte(`{"decision":"approve"}`)}); err == nil {
+		t.Fatal("expected a double-consume error")
+	}
+	if _, _, err := fake.TurnDeadline(context.Background(), "session-1"); err != nil {
+		t.Fatalf("deadline lookup: %v", err)
+	}
+	when := time.Now().Add(time.Hour).Truncate(time.Second)
+	fake.RegisterTurnDeadline("session-1", when)
+	deadline, ok, err := fake.TurnDeadline(context.Background(), "session-1")
+	if err != nil || !ok || !deadline.Equal(when) {
+		t.Fatalf("deadline = %v %v (%v), want %v true", deadline, ok, err, when)
+	}
+	if err := fake.ResolveApproval(context.Background(), ResolveApprovalRequest{}); err == nil {
+		t.Fatal("expected an empty-id error")
+	}
+	if _, _, err := fake.TurnDeadline(context.Background(), ""); err == nil {
+		t.Fatal("expected an empty-session error")
+	}
+}
+
+func TestParseApprovalAddr(t *testing.T) {
+	runKey, signal, err := ParseApprovalAddr("turn-1/approval-op-2")
+	if err != nil || runKey != "turn-1" || signal != "approval-op-2" {
+		t.Fatalf("parsed = %q %q (%v)", runKey, signal, err)
+	}
+	for _, bad := range []string{"", "noslash", "/signal", "run/"} {
+		if _, _, err := ParseApprovalAddr(bad); err == nil {
+			t.Fatalf("expected an error for %q", bad)
+		}
+	}
+}
