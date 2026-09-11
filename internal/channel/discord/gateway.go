@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/net/websocket"
+
+	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
 func (a *Adapter) dialGateway(ctx context.Context, url string) (*websocket.Conn, error) {
@@ -339,10 +341,40 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if !admitted {
 		return false, nil
 	}
+	if len(msg.Attachments) > 0 && !a.intakeAttachments(ctx, msg, envelope) {
+		return false, nil
+	}
 	if _, err := a.sink.Accept(ctx, envelope); err != nil {
 		return false, fmt.Errorf("accept ingress: %w", err)
 	}
 	return true, nil
+}
+
+func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope) bool {
+	summaries, err := a.storeAttachments(ctx, msg.Attachments, envelope.ConversationID, envelope.PrincipalID, msg.ID)
+	if err != nil {
+		a.logger.WarnContext(ctx, "attachment intake failed", "component", "discord")
+		return false
+	}
+	if err := attachArtifacts(envelope, summaries); err != nil {
+		a.logger.WarnContext(ctx, "attachment reference failed", "component", "discord")
+		return false
+	}
+	return true
+}
+
+func attachArtifacts(envelope *runtimeingress.IngressEnvelope, summaries []artifactSummary) error {
+	var reference replyReference
+	if err := json.Unmarshal(envelope.ReplyContext, &reference); err != nil {
+		return Errorf(ErrorCodeProtocolInvalid, "reply context is not decodable")
+	}
+	reference.Artifacts = summaries
+	raw, err := json.Marshal(reference)
+	if err != nil {
+		return Errorf(ErrorCodeProtocolInvalid, "reply context is not serializable")
+	}
+	envelope.ReplyContext = raw
+	return nil
 }
 
 func (a *Adapter) saveCursor(ctx context.Context, sessionID string, sequence int64) {

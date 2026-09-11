@@ -19,7 +19,8 @@ func TestAdapter_AdmitsAllowlistedMessage(t *testing.T) {
 	sink := newMemorySink()
 	resumes := &memoryResumeStore{}
 	logs := &logCapture{}
-	adapter, cancel, done := startTestAdapter(t, gateway, sink, resumes, logs)
+	tc := startTestAdapter(t, gateway, sink, resumes, logs)
+	adapter, cancel, done := tc.adapter, tc.cancel, tc.done
 	defer cancel()
 
 	ws := gateway.nextConn(5 * time.Second)
@@ -76,7 +77,8 @@ func TestAdapter_ReplayAcrossRestartAdmitsOneTurn(t *testing.T) {
 	gateway := newFakeGateway(t, true)
 	sink := newMemorySink()
 	resumes := &memoryResumeStore{}
-	_, cancel, done := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	tc := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	cancel, done := tc.cancel, tc.done
 
 	first := gateway.nextConn(5 * time.Second)
 	gateway.send(first, opHello, helloData(30), nil, "")
@@ -95,10 +97,11 @@ func TestAdapter_ReplayAcrossRestartAdmitsOneTurn(t *testing.T) {
 		t.Fatal("first Start() did not return after cancel")
 	}
 
-	_, secondCancel, secondDone := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	second := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	secondCancel, secondDone := second.cancel, second.done
 	defer secondCancel()
-	second := gateway.nextConn(5 * time.Second)
-	gateway.send(second, opHello, helloData(30), nil, "")
+	secondConn := gateway.nextConn(5 * time.Second)
+	gateway.send(secondConn, opHello, helloData(30), nil, "")
 	resumeFrame := gateway.nextFrame(5 * time.Second)
 	if frameOp(t, resumeFrame) != opResume {
 		t.Fatalf("reconnect frame op = %v, want resume", resumeFrame["op"])
@@ -110,7 +113,7 @@ func TestAdapter_ReplayAcrossRestartAdmitsOneTurn(t *testing.T) {
 	if seq, _ := payload["seq"].(float64); int64(seq) != 2 {
 		t.Errorf("resume seq = %v, want 2", seq)
 	}
-	gateway.send(second, opDispatch, messageData("1002", "333", "222", "111", "again", []string{"999"}), seqPtr(2), eventMessageCreate)
+	gateway.send(secondConn, opDispatch, messageData("1002", "333", "222", "111", "again", []string{"999"}), seqPtr(2), eventMessageCreate)
 	waitFor(t, 5*time.Second, func() bool {
 		calls, _ := sink.stats("message:1002")
 		return calls == 2
@@ -131,7 +134,8 @@ func TestAdapter_InvalidSessionStartsFreshAndReportsGap(t *testing.T) {
 	sink := newMemorySink()
 	resumes := &memoryResumeStore{}
 	logs := &logCapture{}
-	adapter, cancel, done := startTestAdapter(t, gateway, sink, resumes, logs)
+	tc := startTestAdapter(t, gateway, sink, resumes, logs)
+	adapter, cancel, done := tc.adapter, tc.cancel, tc.done
 	defer cancel()
 
 	first := gateway.nextConn(5 * time.Second)
@@ -187,7 +191,8 @@ func TestAdapter_StaleDigestStartsFresh(t *testing.T) {
 	resumes := &memoryResumeStore{}
 	resumes.cursor = ResumeCursor{SessionID: "old-session", Sequence: 9, ConfigDigest: "stale", UpdatedAt: time.Now().UTC()}
 	resumes.found = true
-	_, cancel, done := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	tc := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	cancel, done := tc.cancel, tc.done
 	defer cancel()
 
 	fresh := gateway.nextConn(5 * time.Second)
@@ -207,7 +212,8 @@ func TestAdapter_MissedHeartbeatReconnectsWithResume(t *testing.T) {
 	gateway := newFakeGateway(t, true)
 	sink := newMemorySink()
 	resumes := &memoryResumeStore{}
-	_, cancel, done := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	tc := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	cancel, done := tc.cancel, tc.done
 	defer cancel()
 
 	first := gateway.nextConn(5 * time.Second)
@@ -241,7 +247,8 @@ func TestAdapter_SelfLookupFailureDegradesGuildMentions(t *testing.T) {
 	resumes := &memoryResumeStore{}
 	resumes.cursor = ResumeCursor{SessionID: "old-session", Sequence: 4, ConfigDigest: "", UpdatedAt: time.Now().UTC()}
 	resumes.found = true
-	_, cancel, done := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	tc := startTestAdapter(t, gateway, sink, resumes, &logCapture{})
+	cancel, done := tc.cancel, tc.done
 	defer cancel()
 
 	ws := gateway.nextConn(5 * time.Second)
@@ -273,7 +280,7 @@ func TestAdapter_TokenUnavailableNeverDials(t *testing.T) {
 	resumes := &memoryResumeStore{}
 	cfg := testAdapterConfig()
 	cfg.BotTokenRef = "file:///nonexistent-token-file"
-	adapter, err := New(&cfg, resumes, nil)
+	adapter, err := New(&cfg, resumes, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, nil)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}

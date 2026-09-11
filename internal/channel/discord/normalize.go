@@ -10,9 +10,10 @@ import (
 )
 
 type replyReference struct {
-	ChannelID string `json:"channel_id"`
-	MessageID string `json:"message_id"`
-	GuildID   string `json:"guild_id,omitempty"`
+	ChannelID string            `json:"channel_id"`
+	MessageID string            `json:"message_id"`
+	GuildID   string            `json:"guild_id,omitempty"`
+	Artifacts []artifactSummary `json:"artifacts,omitempty"`
 }
 
 func normalizeMessage(cfg *config.Discord, selfID, instance string, msg *messagePayload) (*runtimeingress.IngressEnvelope, bool, error) {

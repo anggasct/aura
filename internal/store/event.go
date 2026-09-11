@@ -164,6 +164,23 @@ func assignNextSequence(ctx context.Context, tx *sql.Tx, sessionID string) (uint
 	return sequenceFromDB(next)
 }
 
+func AllocateSequenceTx(ctx context.Context, tx *sql.Tx, sessionID string) (uint64, error) {
+	if tx == nil {
+		return 0, errNilArgument("tx")
+	}
+	if sessionID == "" {
+		return 0, &Error{Code: ErrorCodeInvalidArgument, Detail: "session id must not be empty"}
+	}
+	if !rowExists(ctx, tx, `SELECT 1 FROM session WHERE id = ?`, sessionID) {
+		return 0, &Error{Code: ErrorCodeSessionNotFound, Detail: "session does not exist"}
+	}
+	sequence, err := assignNextSequence(ctx, tx, sessionID)
+	if err != nil {
+		return 0, classifyBusy(fmt.Errorf("allocate sequence: %w", err))
+	}
+	return sequence, nil
+}
+
 func (s *sqliteEventStore) LookupEvent(ctx context.Context, id string) (RuntimeEvent, bool, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+` FROM runtime_event WHERE id = ?`, id,

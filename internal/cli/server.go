@@ -131,7 +131,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			adkExecutor.SetEventPublisher(runtimeEngine)
-			channelAdapters, discordChecks, err := buildChannelAdapters(cfg, db, logger)
+			channelAdapters, discordChecks, err := buildChannelAdapters(cfg, db, artifactRoot, logger)
 			if err != nil {
 				return err
 			}

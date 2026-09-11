@@ -12,6 +12,10 @@ const (
 	ErrorCodeConnectionFailed    ErrorCode = "connection_failed"
 	ErrorCodeProtocolInvalid     ErrorCode = "protocol_invalid"
 	ErrorCodeDeliveryUnavailable ErrorCode = "delivery_unavailable"
+	ErrorCodeDeliveryAmbiguous   ErrorCode = "delivery_ambiguous"
+	ErrorCodeDeliveryFailed      ErrorCode = "delivery_failed"
+	ErrorCodeMessageTooLarge     ErrorCode = "message_too_large"
+	ErrorCodeAttachmentRejected  ErrorCode = "attachment_rejected"
 )
 
 type Error struct {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +27,7 @@ const (
 	maxRestBytes   = 1 << 16
 	writeTimeout   = 10 * time.Second
 	restTimeout    = 10 * time.Second
+	mediaTimeout   = 60 * time.Second
 	helloTimeout   = 15 * time.Second
 	backoffBase    = time.Second
 	backoffMax     = time.Minute
@@ -63,6 +65,13 @@ type Adapter struct {
 	retryBase    time.Duration
 	retryCap     time.Duration
 	invalidDelay time.Duration
+	rateCap      time.Duration
+	effects      EffectRunner
+	media        MediaStore
+	sessions     SessionEnsurer
+	gate         *editGate
+	postedMu     sync.Mutex
+	posted       map[string][]string
 	selfID       string
 	sessionID    string
 	sequence     atomic.Int64
@@ -71,12 +80,21 @@ type Adapter struct {
 	gap          atomic.Bool
 }
 
-func New(cfg *config.Discord, resumes ResumeStore, logger *slog.Logger) (*Adapter, error) {
+func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
 	if cfg == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "discord config must not be nil")
 	}
 	if resumes == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "resume store must not be nil")
+	}
+	if effects == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "effect runner must not be nil")
+	}
+	if media == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "media store must not be nil")
+	}
+	if sessions == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "session ensurer must not be nil")
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -90,13 +108,19 @@ func New(cfg *config.Discord, resumes ResumeStore, logger *slog.Logger) (*Adapte
 		tokenRef:     tokenRef,
 		digest:       digestDiscordConfig(cfg),
 		resumes:      resumes,
+		effects:      effects,
+		media:        media,
+		sessions:     sessions,
 		logger:       logger,
 		gatewayURL:   gatewayURL,
 		restBase:     discordRestBase,
-		httpClient:   &http.Client{Timeout: restTimeout},
+		httpClient:   &http.Client{Timeout: mediaTimeout},
+		gate:         newEditGate(time.Duration(cfg.MinEditInterval)),
+		posted:       map[string][]string{},
 		retryBase:    backoffBase,
 		retryCap:     backoffMax,
 		invalidDelay: invalidWait,
+		rateCap:      rateLimitCap,
 	}
 	adapter.state.Store(int32(stateDown))
 	return adapter, nil
@@ -138,11 +162,23 @@ func (a *Adapter) Start(ctx context.Context, sink runtimeingress.IngressSink) er
 	return a.connectLoop(ctx)
 }
 
-func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryRequest) (runtimechannelhost.ProviderReceipt, error) {
-	if req == nil {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request must not be nil")
+func (a *Adapter) postedMessages(key string) ([]string, bool) {
+	a.postedMu.Lock()
+	defer a.postedMu.Unlock()
+	ids, ok := a.posted[key]
+	return ids, ok && len(ids) > 0
+}
+
+func (a *Adapter) rememberPosted(key string, ids []string) {
+	a.postedMu.Lock()
+	defer a.postedMu.Unlock()
+	if len(a.posted) >= maxTrackedDeliveries {
+		for drop := range a.posted {
+			delete(a.posted, drop)
+			break
+		}
 	}
-	return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeDeliveryUnavailable, "direct delivery is not available")
+	a.posted[key] = ids
 }
 
 func (a *Adapter) Health(ctx context.Context) runtimechannelhost.ChannelHealth {

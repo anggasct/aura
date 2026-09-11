@@ -92,3 +92,21 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 		t.Fatal("event publisher was not forwarded to the effect journal")
 	}
 }
+
+func TestNewChannelEffectsBuildsExecutor(t *testing.T) {
+	if _, err := NewChannelEffects(nil, nil); err == nil {
+		t.Fatal("nil database accepted")
+	}
+	dataRoot := t.TempDir()
+	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if _, err := NewChannelEffects(db, nil); err != nil {
+		t.Fatalf("NewChannelEffects: %v", err)
+	}
+}

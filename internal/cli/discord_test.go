@@ -33,7 +33,7 @@ func enabledDiscordConfig() config.Config {
 func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 	db := discordTestDB(t)
 	defaults := config.Default()
-	adapters, checks, err := buildChannelAdapters(&defaults, db, nil)
+	adapters, checks, err := buildChannelAdapters(&defaults, db, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -45,7 +45,7 @@ func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 func TestBuildChannelAdapters_EnabledBuildsAdapterAndCheck(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
-	adapters, checks, err := buildChannelAdapters(&cfg, db, nil)
+	adapters, checks, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -64,7 +64,7 @@ func TestBuildChannelAdapters_RejectsBadTokenRef(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
 	cfg.Channels.Discord.BotTokenRef = "not-a-reference"
-	if _, _, err := buildChannelAdapters(&cfg, db, nil); err == nil {
+	if _, _, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil); err == nil {
 		t.Fatal("bad token reference accepted")
 	}
 }
@@ -95,5 +95,25 @@ func TestDiscordResumeStore_RoundTrip(t *testing.T) {
 	}
 	if _, found, err := wrapper.Load(ctx); err != nil || found {
 		t.Errorf("Load() after delete: %v, found = %v", err, found)
+	}
+}
+
+func TestDiscordSessionEnsurer_CreatesOnce(t *testing.T) {
+	db := discordTestDB(t)
+	ensurer := &discordSessionEnsurer{sessions: store.NewSessionService(db)}
+	ctx := t.Context()
+
+	if err := ensurer.EnsureSession(ctx, "dm:111", "111"); err != nil {
+		t.Fatalf("EnsureSession(): %v", err)
+	}
+	session, err := store.NewSessionService(db).Get(ctx, "dm:111")
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if session.OwnerID != "111" {
+		t.Errorf("owner = %q, want principal", session.OwnerID)
+	}
+	if err := ensurer.EnsureSession(ctx, "dm:111", "111"); err != nil {
+		t.Fatalf("second EnsureSession(): %v", err)
 	}
 }
