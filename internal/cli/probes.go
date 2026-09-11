@@ -23,11 +23,11 @@ type probeListener struct {
 	interval  time.Duration
 }
 
-func buildProbeListener(cfg *config.Config, capabilities []health.CapabilityStatus, events store.EventStore, sessions store.SessionService) (*probeListener, error) {
+func buildProbeListener(cfg *config.Config, capabilities []health.CapabilityStatus, events store.EventStore, sessions store.SessionService, extra ...health.RegisteredCheck) (*probeListener, error) {
 	if cfg == nil {
 		return nil, errors.New("probe listener requires configuration")
 	}
-	registry, err := buildHealthRegistry(cfg, capabilities, sandbox.Negotiate, processProbe)
+	registry, err := buildHealthRegistry(cfg, capabilities, sandbox.Negotiate, processProbe, extra...)
 	if err != nil {
 		return nil, err
 	}

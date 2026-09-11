@@ -209,6 +209,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateWebhook(&cfg.Webhook, cfg.Health.Listen); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateDiscord(&cfg.Channels.Discord); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -361,6 +364,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateWebhookShapes(doc); err != nil {
+		return err
+	}
+	if err := validateDiscordShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -625,7 +631,57 @@ func validateWebhookShapes(doc *yamlv3.Node) error {
 	return nil
 }
 
+func validateDiscordShapes(doc *yamlv3.Node) error {
+	channelsNode := mappingValue(doc, "channels")
+	if channelsNode == nil {
+		return nil
+	}
+	if channelsNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("channels must be a mapping at line %d", channelsNode.Line)
+	}
+	discordNode := mappingValue(channelsNode, "discord")
+	if discordNode == nil {
+		return nil
+	}
+	if discordNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("channels.discord must be a mapping at line %d", discordNode.Line)
+	}
+	for i := 0; i+1 < len(discordNode.Content); i += 2 {
+		keyNode := discordNode.Content[i]
+		valueNode := discordNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled", "accept_dms":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("channels.discord.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "instance", "bot_token_ref":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("channels.discord.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "allowed_user_ids", "allowed_guild_ids", "allowed_channel_ids":
+			if valueNode.Kind != yamlv3.SequenceNode {
+				return fmt.Errorf("channels.discord.%s must be a sequence at line %d", keyNode.Value, valueNode.Line)
+			}
+			for _, item := range valueNode.Content {
+				if item.Kind != yamlv3.ScalarNode || item.Tag != "!!str" {
+					return fmt.Errorf("channels.discord.%s entries must be quoted strings at line %d", keyNode.Value, item.Line)
+				}
+			}
+		case "min_edit_interval":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("channels.discord.min_edit_interval must be a duration string at line %d", valueNode.Line)
+			}
+		case "max_attachment_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("channels.discord.max_attachment_bytes must be an integer at line %d", valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
 func mappingValue(node *yamlv3.Node, key string) *yamlv3.Node {
+
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		if node.Content[i].Value == key {
 			return node.Content[i+1]
@@ -1593,6 +1649,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyTerminalDefaults(cfg, doc, defaults.Terminal)
 	applyModelRouteDefaults(cfg, doc)
 	applyWebhookDefaults(cfg, doc, &defaults.Webhook)
+	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
 }
 
@@ -1647,6 +1704,25 @@ func applyWebhookDefaults(cfg *Config, doc *yamlv3.Node, defaults *Webhook) {
 	}
 	if cfg.Webhook.RequestsPerMinute == 0 && !configValuePresent(doc, "webhook", "requests_per_minute") && !envValuePresent("webhook.requests_per_minute") {
 		cfg.Webhook.RequestsPerMinute = defaults.RequestsPerMinute
+	}
+}
+
+func applyDiscordDefaults(cfg *Config, doc *yamlv3.Node, defaults *Discord) {
+	discord := &cfg.Channels.Discord
+	if discord.Instance == "" && !configValuePresent(doc, "channels", "discord", "instance") && !envValuePresent("channels.discord.instance") {
+		discord.Instance = defaults.Instance
+	}
+	if discord.BotTokenRef == "" && !configValuePresent(doc, "channels", "discord", "bot_token_ref") && !envValuePresent("channels.discord.bot_token_ref") {
+		discord.BotTokenRef = defaults.BotTokenRef
+	}
+	if !discord.AcceptDMs && !configValuePresent(doc, "channels", "discord", "accept_dms") && !envValuePresent("channels.discord.accept_dms") {
+		discord.AcceptDMs = defaults.AcceptDMs
+	}
+	if discord.MinEditInterval == 0 && !configValuePresent(doc, "channels", "discord", "min_edit_interval") && !envValuePresent("channels.discord.min_edit_interval") {
+		discord.MinEditInterval = defaults.MinEditInterval
+	}
+	if discord.MaxAttachmentBytes == 0 && !configValuePresent(doc, "channels", "discord", "max_attachment_bytes") && !envValuePresent("channels.discord.max_attachment_bytes") {
+		discord.MaxAttachmentBytes = defaults.MaxAttachmentBytes
 	}
 }
 
@@ -2192,6 +2268,72 @@ func validateWebhook(w *Webhook, healthListen string) error {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.listen_address must differ from health.listen"}
 	}
 	return nil
+}
+
+func validateDiscord(discord *Discord) error {
+	if discord == nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord must not be nil"}
+	}
+	var problems []error
+	if discord.Instance == "" {
+		problems = append(problems, errors.New("channels.discord.instance must not be empty"))
+	}
+	if discord.BotTokenRef != "" && !strings.HasPrefix(discord.BotTokenRef, "env://") && !strings.HasPrefix(discord.BotTokenRef, "file://") {
+		problems = append(problems, fmt.Errorf("channels.discord.bot_token_ref %q must use env:// or file://", discord.BotTokenRef))
+	}
+	for _, list := range []struct {
+		name string
+		ids  []string
+	}{
+		{"allowed_user_ids", discord.AllowedUserIDs},
+		{"allowed_guild_ids", discord.AllowedGuildIDs},
+		{"allowed_channel_ids", discord.AllowedChannelIDs},
+	} {
+		seen := make(map[string]bool, len(list.ids))
+		for _, id := range list.ids {
+			switch {
+			case id == "":
+				problems = append(problems, fmt.Errorf("channels.discord.%s must not contain empty ids", list.name))
+			case !isSnowflake(id):
+				problems = append(problems, fmt.Errorf("channels.discord.%s id %q is not a decimal snowflake", list.name, id))
+			case seen[id]:
+				problems = append(problems, fmt.Errorf("channels.discord.%s id %q is configured more than once", list.name, id))
+			default:
+				seen[id] = true
+			}
+		}
+	}
+	if discord.MinEditInterval <= 0 {
+		problems = append(problems, errors.New("channels.discord.min_edit_interval must be positive"))
+	}
+	if discord.MaxAttachmentBytes <= 0 {
+		problems = append(problems, errors.New("channels.discord.max_attachment_bytes must be positive"))
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	if !discord.Enabled {
+		return nil
+	}
+	if discord.BotTokenRef == "" {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord.enabled requires bot_token_ref"}
+	}
+	if len(discord.AllowedUserIDs) == 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord.enabled requires at least one allowed_user_ids entry"}
+	}
+	return nil
+}
+
+func isSnowflake(id string) bool {
+	if id == "" {
+		return false
+	}
+	for i := range len(id) {
+		if id[i] < '0' || id[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func validateTools(toolsConfig *Tools, profile capability.Profile) error {

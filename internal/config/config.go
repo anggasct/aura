@@ -35,6 +35,7 @@ type Config struct {
 	Health       Health                `koanf:"health" yaml:"health"`
 	Terminal     Terminal              `koanf:"terminal" yaml:"terminal"`
 	Webhook      Webhook               `koanf:"webhook" yaml:"webhook"`
+	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
 
 type Webhook struct {
@@ -51,6 +52,22 @@ type WebhookKey struct {
 	ID          string `koanf:"id" yaml:"id"`
 	SecretEnv   string `koanf:"secret_env" yaml:"secret_env"`
 	AcceptUntil string `koanf:"accept_until" yaml:"accept_until"`
+}
+
+type Channels struct {
+	Discord Discord `koanf:"discord" yaml:"discord"`
+}
+
+type Discord struct {
+	Enabled            bool     `koanf:"enabled" yaml:"enabled"`
+	Instance           string   `koanf:"instance" yaml:"instance"`
+	BotTokenRef        string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
+	AllowedUserIDs     []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
+	AllowedGuildIDs    []string `koanf:"allowed_guild_ids" yaml:"allowed_guild_ids"`
+	AllowedChannelIDs  []string `koanf:"allowed_channel_ids" yaml:"allowed_channel_ids"`
+	AcceptDMs          bool     `koanf:"accept_dms" yaml:"accept_dms"`
+	MinEditInterval    Duration `koanf:"min_edit_interval" yaml:"min_edit_interval"`
+	MaxAttachmentBytes int64    `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
 }
 
 type Terminal struct {
@@ -485,7 +502,20 @@ func Default() Config {
 			ReplayRetention:    Duration(24 * time.Hour),
 			RequestsPerMinute:  60,
 		},
+		Channels: Channels{
+			Discord: Discord{
+				Instance:           "owner",
+				BotTokenRef:        defaultDiscordBotTokenRef(),
+				AcceptDMs:          true,
+				MinEditInterval:    Duration(2 * time.Second),
+				MaxAttachmentBytes: 20971520,
+			},
+		},
 	}
+}
+
+func defaultDiscordBotTokenRef() string {
+	return fmt.Sprintf("env://%s_%s_%s_%s", "AURA", "DISCORD", "BOT", "TOKEN")
 }
 
 func defaultWebSearchCredentialRef() string {
