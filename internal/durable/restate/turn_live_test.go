@@ -263,7 +263,6 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 		t.Fatalf("NewEngine: %v", err)
 	}
 	executor.SetEventPublisher(engine)
-	engine.MarkRecovered()
 
 	rig := &liveTurnRig{
 		t: t, db: db, events: events, adapter: adapter,
@@ -294,8 +293,8 @@ func (l *liveSessionCalls) Release(ctx context.Context, sessionID, turnID string
 	return liveSessionCall[runtimesessions.ReleaseResult](ctx, l.runtime, sessionID, SessionReleaseHandler, runtimesessions.ReleaseRequest{TurnID: turnID})
 }
 
-func (l *liveSessionCalls) Recover(ctx context.Context, sessionID string, open, terminal []string) (runtimesessions.RecoverResult, error) {
-	return liveSessionCall[runtimesessions.RecoverResult](ctx, l.runtime, sessionID, SessionRecoverHandler, runtimesessions.RecoverRequest{Open: open, Terminal: terminal})
+func (l *liveSessionCalls) Status(ctx context.Context, sessionID string) (runtimesessions.StatusResult, error) {
+	return liveSessionCall[runtimesessions.StatusResult](ctx, l.runtime, sessionID, SessionStatusHandler, json.RawMessage(`{}`))
 }
 
 func (l *liveSessionCalls) Abort(ctx context.Context, sessionID string) (runtimesessions.AbortResult, error) {

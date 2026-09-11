@@ -17,7 +17,7 @@ import (
 type SessionStore interface {
 	Admit(ctx context.Context, req *runtimesessions.AdmitRequest) (runtimesessions.AdmitResult, error)
 	Release(ctx context.Context, sessionID, turnID string) (runtimesessions.ReleaseResult, error)
-	Recover(ctx context.Context, sessionID string, open, terminal []string) (runtimesessions.RecoverResult, error)
+	Status(ctx context.Context, sessionID string) (runtimesessions.StatusResult, error)
 	Abort(ctx context.Context, sessionID string) (runtimesessions.AbortResult, error)
 }
 
@@ -60,10 +60,6 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRe
 	}
 }
 
-func (e *Engine) MarkRecovered() {
-	e.recoverOnce.Do(func() { close(e.recovered) })
-}
-
 func (e *Engine) serveTurn(ctx context.Context, inv durable.Invocation) error {
 	var desc runtimesessions.Descriptor
 	if err := json.Unmarshal(inv.Payload(), &desc); err != nil {
@@ -75,16 +71,6 @@ func (e *Engine) serveTurn(ctx context.Context, inv durable.Invocation) error {
 func (e *Engine) claimDurable(ctx context.Context, req *runtime.TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay, granted bool, err error) {
 	if e.sessionStore == nil {
 		return store.RuntimeEvent{}, "", false, false, invalidArgument("durable session store is not configured")
-	}
-	select {
-	case <-e.recovered:
-	default:
-		select {
-		case <-e.recovered:
-		case <-ctx.Done():
-			e.releasePending()
-			return store.RuntimeEvent{}, "", false, false, codedError(runtime.ErrorCodeRuntimeOverloaded, "durable recovery pending", ctx.Err())
-		}
 	}
 	descriptor := turnDescriptorFromRequest(req)
 	eventID := NewTurnID()
@@ -263,6 +249,62 @@ func (e *Engine) releaseTurn(ctx context.Context, t *turn) {
 	}
 }
 
+func (e *Engine) advanceDurable(ctx context.Context, t *turn) {
+	if e.sessionStore == nil {
+		return
+	}
+	status, err := e.sessionStore.Status(ctx, t.req.SessionID)
+	if err != nil {
+		e.releaseTurn(ctx, t)
+		return
+	}
+	if status.Active == nil || status.Active.Descriptor.TurnID == "" {
+		if status.QueueDepth == 0 {
+			e.mu.Lock()
+			delete(e.sesKeys, t.req.SessionID)
+			e.mu.Unlock()
+		}
+		return
+	}
+	if status.Active.Descriptor.TurnID == t.turnID {
+		e.releaseTurn(ctx, t)
+		return
+	}
+	next := runtimesessions.QueuedTurn{Descriptor: status.Active.Descriptor, Sequence: status.Active.Sequence}
+	e.mu.Lock()
+	shutdown := e.shutdown
+	staged, ok := e.staged[next.Descriptor.TurnID]
+	if ok {
+		if staged.req.SessionID != t.req.SessionID {
+			e.mu.Unlock()
+			e.logger.ErrorContext(ctx, "durable advance returned a turn from another session", "turn_id", next.Descriptor.TurnID)
+			return
+		}
+		if shutdown {
+			e.mu.Unlock()
+			e.terminateStaged(context.WithoutCancel(ctx), staged)
+			return
+		}
+		if e.granted == nil {
+			e.granted = map[string]struct{}{}
+		}
+		e.granted[staged.turnID] = struct{}{}
+		e.mu.Unlock()
+		e.scheduleDurable(ctx)
+	} else {
+		e.mu.Unlock()
+		if shutdown {
+			return
+		}
+		e.startReleasedTurn(ctx, &next)
+	}
+	if status.QueueDepth == 0 {
+		e.mu.Lock()
+		delete(e.sesKeys, t.req.SessionID)
+		e.mu.Unlock()
+	}
+}
+
 func (e *Engine) startReleasedTurn(ctx context.Context, started *runtimesessions.QueuedTurn) {
 	if started.Descriptor.TurnID == "" {
 		e.logger.ErrorContext(ctx, "durable release returned an empty turn")
@@ -289,35 +331,6 @@ func (e *Engine) acceptedForReleased(ctx context.Context, req *runtime.TurnReque
 		}
 	}
 	return nil, invalidArgument("released turn has no accepted event")
-}
-
-func (e *Engine) RecoverSession(ctx context.Context, sessionID string, open, terminal []string) error {
-	if e.sessionStore == nil {
-		return invalidArgument("durable session store is not configured")
-	}
-	if sessionID == "" {
-		return invalidArgument("recover requires a session id")
-	}
-	result, err := e.sessionStore.Recover(ctx, sessionID, open, terminal)
-	if err != nil {
-		return codedError(runtime.ErrorCodeStorageUnavailable, "durable recover failed", err)
-	}
-	if !result.Found || result.ToStart == nil {
-		return nil
-	}
-	req := turnRequestFromDescriptor(&result.ToStart.Descriptor)
-	accepted, err := e.acceptedForReleased(ctx, req)
-	if err != nil {
-		return codedError(runtime.ErrorCodeStorageUnavailable, "durable recover failed", err)
-	}
-	e.mu.Lock()
-	shutdown := e.shutdown
-	if !shutdown {
-		e.pending++
-	}
-	e.mu.Unlock()
-	e.stageDurable(ctx, req, accepted, nil, true)
-	return nil
 }
 
 func (e *Engine) terminateStaged(ctx context.Context, t *turn) {
@@ -475,6 +488,42 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		return err
 	}
+	return e.releaseAndChain(context.WithoutCancel(ctx), scope, req)
+}
+
+func (e *Engine) releaseAndChain(ctx context.Context, scope *durable.TurnScope, req *runtime.TurnRequest) error {
+	if e.sessionStore == nil {
+		return invalidArgument("durable session store is not configured")
+	}
+	if e.durableRuntime == nil {
+		return invalidArgument("durable runtime is not configured")
+	}
+	raw, err := scope.Invocation().RunAction(ctx, "release", func(ctx context.Context) ([]byte, error) {
+		result, err := e.sessionStore.Release(ctx, req.SessionID, req.TurnID)
+		if err != nil {
+			return nil, err
+		}
+		if result.ToStart == nil {
+			return []byte(`{}`), nil
+		}
+		next := turnRequestFromDescriptor(&result.ToStart.Descriptor)
+		payload, err := json.Marshal(turnDescriptorFromRequest(next))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := e.durableRuntime.Start(ctx, durable.StartRequest{Handler: "turn", Key: next.TurnID, Payload: payload}); err != nil {
+			return nil, err
+		}
+		return payload, nil
+	})
+	if err != nil {
+		return codedError(runtime.ErrorCodeStorageUnavailable, "failed to release durable turn", err)
+	}
+	if string(raw) == `{}` {
+		e.mu.Lock()
+		delete(e.sesKeys, req.SessionID)
+		e.mu.Unlock()
+	}
 	return nil
 }
 
@@ -491,6 +540,7 @@ func (e *Engine) replayStoredToLive(ctx context.Context, t *turn) {
 }
 
 func (e *Engine) pollDurableTurn(ctx context.Context, t *turn) {
+	defer e.wg.Done()
 	defer e.finishTurn(ctx, t)
 	e.broadcast(t, &t.accepted)
 	desc := turnDescriptorFromRequest(&t.req)
@@ -522,7 +572,14 @@ func (e *Engine) pollDurableTurn(ctx context.Context, t *turn) {
 				continue
 			}
 			switch status.State {
-			case durable.RunSucceeded, durable.RunFailed, durable.RunCancelled:
+			case durable.RunSucceeded:
+				e.advanceDurable(ctx, t)
+				e.replayStoredToLive(ctx, t)
+				for sub := range t.subs {
+					sub.closeEvents()
+				}
+				return
+			case durable.RunFailed, durable.RunCancelled:
 				e.releaseTurn(ctx, t)
 				e.replayStoredToLive(ctx, t)
 				for sub := range t.subs {

@@ -3,25 +3,17 @@ package runtimeengine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"iter"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/runtime"
 	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
 	"github.com/anggasct/aura/internal/store"
 )
-
-func testDescriptorFor(sessionID, turnID, key string) runtimesessions.Descriptor {
-	return runtimesessions.Descriptor{
-		TurnID:         turnID,
-		SessionID:      sessionID,
-		PrincipalID:    "user-1",
-		Origin:         "terminal",
-		Parts:          []runtimesessions.Part{{Text: "hello"}},
-		IdempotencyKey: key,
-	}
-}
 
 func collectDurableTerminal(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
 	t.Helper()
@@ -200,10 +192,10 @@ func TestDurableParityWithLegacy(t *testing.T) {
 		legacyTranscripts := runAll(legacy, legacyDB)
 
 		durableExecutor := runtime.NewFakeExecutor(script)
-		durable, _, durableDB := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, durableExecutor)
+		durableEngine, _, durableDB := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, durableExecutor)
 		mustCreateSession(t, durableDB, "session-a")
 		mustCreateSession(t, durableDB, "session-b")
-		durableTranscripts := runAll(durable, durableDB)
+		durableTranscripts := runAll(durableEngine, durableDB)
 
 		if len(legacyTranscripts) != len(durableTranscripts) {
 			t.Fatalf("transcript count = %d, want %d", len(durableTranscripts), len(legacyTranscripts))
@@ -246,117 +238,6 @@ func TestDurableShutdownCancelsStaged(t *testing.T) {
 	})
 }
 
-func TestDurableRecoverSessionRestarts(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
-			{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`)},
-		})
-		engine, stub, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
-		mustCreateSession(t, db, "session-a")
-
-		ctx := context.Background()
-		admit, err := stub.Admit(ctx, admitRequestFor("session-a", "turn-0", ""))
-		if err != nil {
-			t.Fatalf("direct admit: %v", err)
-		}
-		if admit.ToStart == nil {
-			t.Fatal("expected an immediate start grant")
-		}
-		if err := engine.RecoverSession(ctx, "session-a", []string{"turn-0"}, nil); err != nil {
-			t.Fatalf("recover: %v", err)
-		}
-		engine.mu.Lock()
-		pending := engine.pending
-		engine.mu.Unlock()
-		if pending < 0 {
-			t.Fatalf("pending = %d, want non-negative after recover", pending)
-		}
-		events := collectDurableTerminal(t, db, "turn-0")
-		if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
-			t.Fatalf("recovered turn terminal = %q, want turn.completed", last.Kind)
-		}
-		if got := executor.StartCount(); got != 1 {
-			t.Fatalf("StartCount = %d, want 1", got)
-		}
-	})
-}
-
-func TestDurableRecoverKeepsPendingNonNegative(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
-			{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`)},
-		})
-		engine, stub, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
-		mustCreateSession(t, db, "session-a")
-		mustCreateSession(t, db, "session-b")
-
-		ctx := context.Background()
-		if _, err := stub.Admit(ctx, admitRequestFor("session-a", "turn-0", "")); err != nil {
-			t.Fatalf("direct admit session-a: %v", err)
-		}
-		if _, err := stub.Admit(ctx, admitRequestFor("session-b", "turn-1", "")); err != nil {
-			t.Fatalf("direct admit session-b: %v", err)
-		}
-		for _, tc := range []struct{ session, turn string }{
-			{"session-a", "turn-0"},
-			{"session-b", "turn-1"},
-		} {
-			if err := engine.RecoverSession(ctx, tc.session, []string{tc.turn}, nil); err != nil {
-				t.Fatalf("recover %s: %v", tc.session, err)
-			}
-			engine.mu.Lock()
-			pending := engine.pending
-			engine.mu.Unlock()
-			if pending < 0 {
-				t.Fatalf("pending = %d, want non-negative after recovering %s", pending, tc.session)
-			}
-		}
-		for _, turn := range []string{"turn-0", "turn-1"} {
-			events := collectDurableTerminal(t, db, turn)
-			if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
-				t.Fatalf("recovered %s terminal = %q, want turn.completed", turn, last.Kind)
-			}
-		}
-		engine.mu.Lock()
-		pending := engine.pending
-		engine.mu.Unlock()
-		if pending < 0 {
-			t.Fatalf("pending = %d, want non-negative after multi-session recovery", pending)
-		}
-		if got := executor.StartCount(); got != 2 {
-			t.Fatalf("StartCount = %d, want 2", got)
-		}
-	})
-}
-
-func TestDurableRecoverSessionSkipsTerminal(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
-			{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`)},
-		})
-		engine, _, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
-		mustCreateSession(t, db, "session-a")
-
-		if _, err := collect(t, engine, sampleRequest("session-a", "turn-0")); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-		if err := engine.RecoverSession(context.Background(), "session-a", nil, []string{"turn-0"}); err != nil {
-			t.Fatalf("recover: %v", err)
-		}
-		if got := executor.StartCount(); got != 1 {
-			t.Fatalf("StartCount = %d, want 1 (terminal turn must not restart)", got)
-		}
-	})
-}
-
-func admitRequestFor(sessionID, turnID, key string) *runtimesessions.AdmitRequest {
-	return &runtimesessions.AdmitRequest{
-		Turn:            testDescriptorFor(sessionID, turnID, key),
-		AcceptedEventID: "event-" + turnID,
-		MaxPending:      16,
-	}
-}
-
 func TestDescriptorRoundTripPreservesDeadline(t *testing.T) {
 	deadline := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
 	req := sampleRequest("session-a", "turn-0")
@@ -369,36 +250,6 @@ func TestDescriptorRoundTripPreservesDeadline(t *testing.T) {
 	}
 	if roundTripped.Budget.MaxTokens != 1000 || roundTripped.TurnID != "turn-0" || string(roundTripped.Origin) != "terminal" {
 		t.Fatalf("round trip lost fields: %+v", roundTripped)
-	}
-}
-
-func TestDurableAdmitWaitsForRecoveryGate(t *testing.T) {
-	executor := runtime.NewFakeExecutor([]runtime.FakeStep{
-		{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`)},
-	})
-	engine, _, db := newUnrecoveredDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
-	mustCreateSession(t, db, "session-a")
-
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	for ev, err := range engine.Run(cancelled, sampleRequest("session-a", "turn-0")) {
-		_ = ev
-		if err == nil {
-			t.Fatal("expected a recovery-pending error")
-		}
-		if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeRuntimeOverloaded {
-			t.Fatalf("code = %v, want runtime_overloaded", err)
-		}
-		break
-	}
-	engine.MarkRecovered()
-	engine.MarkRecovered()
-	events, err := collect(t, engine, sampleRequest("session-a", "turn-1"))
-	if err != nil {
-		t.Fatalf("run after recovery: %v", err)
-	}
-	if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
-		t.Fatalf("terminal = %q, want turn.completed", last.Kind)
 	}
 }
 
@@ -476,5 +327,260 @@ func TestDurableLiveStreamDeliversPersistedSequence(t *testing.T) {
 	}
 	if last := streamed[len(streamed)-1]; !isTerminalKind(last.Kind) {
 		t.Fatalf("terminal kind = %q, want completed/failed/cancelled", last.Kind)
+	}
+}
+
+func TestDurableChainCompletesFIFO(t *testing.T) {
+	gate := make(chan struct{})
+	executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+		{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
+	})
+	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	mustCreateSession(t, db, "session-a")
+
+	errs := make(chan error, 3)
+	submit := func(n int) {
+		go func() {
+			_, err := collect(t, engine, sampleRequest("session-a", turnID(n)))
+			errs <- err
+		}()
+		waitFor(t, func() bool { return acceptedCount(t, db, "session-a") > n })
+	}
+	for i := range 3 {
+		submit(i)
+	}
+	waitFor(t, func() bool { return executor.StartCount() == 1 })
+	time.Sleep(50 * time.Millisecond)
+	if got := executor.StartCount(); got != 1 {
+		t.Fatalf("StartCount = %d, want 1 (single active turn per session)", got)
+	}
+	close(gate)
+	waitFor(t, func() bool { return executor.StartCount() == 3 })
+	for i := range 3 {
+		if err := <-errs; err != nil {
+			t.Fatalf("turn %d: %v", i, err)
+		}
+	}
+	if got := executor.StartOrder(); got[0] != turnID(0) || got[1] != turnID(1) || got[2] != turnID(2) {
+		t.Fatalf("StartOrder = %v, want FIFO order", got)
+	}
+	for i := range 3 {
+		events := collectDurableTerminal(t, db, turnID(i))
+		if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
+			t.Fatalf("turn %d terminal = %q, want turn.completed", i, last.Kind)
+		}
+	}
+}
+
+func TestDurableResumeNeedsNoScan(t *testing.T) {
+	executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+		{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`)},
+	})
+	_, db, events := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	mustCreateSession(t, db, "session-a")
+	stub := newStubSessionStore(events, store.NewDedupeStore(db))
+	backend := durable.NewFake()
+	ctx := context.Background()
+	for _, turn := range []string{"turn-0", "turn-1"} {
+		desc := turnDescriptorFromRequest(sampleRequest("session-a", turn))
+		if _, err := stub.Admit(ctx, &runtimesessions.AdmitRequest{
+			Turn:            desc,
+			AcceptedEventID: "event-" + turn,
+			MaxPending:      16,
+		}); err != nil {
+			t.Fatalf("preload admit %s: %v", turn, err)
+		}
+	}
+	restarted, err := NewEngine(Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, events, store.NewDedupeStore(db), executor, nil)
+	if err != nil {
+		t.Fatalf("restarted engine: %v", err)
+	}
+	restarted.sessionStore = stub
+	restarted.durableRuntime = backend
+	backend.RegisterHandler("turn", restarted.serveTurn)
+	desc := turnDescriptorFromRequest(sampleRequest("session-a", "turn-0"))
+	payload, err := json.Marshal(desc)
+	if err != nil {
+		t.Fatalf("marshal descriptor: %v", err)
+	}
+	if _, err := backend.Start(ctx, durable.StartRequest{Handler: "turn", Key: "turn-0", Payload: payload}); err != nil {
+		t.Fatalf("restart run turn-0: %v", err)
+	}
+	for _, turn := range []string{"turn-0", "turn-1"} {
+		events := collectDurableTerminal(t, db, turn)
+		if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
+			t.Fatalf("%s terminal = %q, want turn.completed", turn, last.Kind)
+		}
+	}
+	if got := executor.StartCount(); got != 2 {
+		t.Fatalf("StartCount = %d, want 2 (queued turn resumes without a boot scan)", got)
+	}
+	if got := executor.StartOrder(); got[0] != "turn-0" || got[1] != "turn-1" {
+		t.Fatalf("StartOrder = %v, want admission order", got)
+	}
+}
+
+func TestDurableDeadlineIsTerminal(t *testing.T) {
+	gate := make(chan struct{})
+	defer close(gate)
+	executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+	engine, _, db := newDurableLiveTestRuntime(t, Config{
+		MaxActiveTurns: 2, MaxPendingTurns: 4, TurnTimeout: 200 * time.Millisecond,
+	}, executor)
+	mustCreateSession(t, db, "session-a")
+
+	events, err := collect(t, engine, sampleRequest("session-a", "turn-deadline"))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	last := events[len(events)-1]
+	if last.Kind != runtime.EventKindTurnFailed {
+		t.Fatalf("terminal kind = %q, want turn.failed", last.Kind)
+	}
+	var payload struct {
+		Code runtime.ErrorCode `json:"code"`
+	}
+	if err := json.Unmarshal(last.Payload, &payload); err != nil {
+		t.Fatalf("decode terminal payload: %v", err)
+	}
+	if payload.Code != runtime.ErrorCodeTurnDeadlineExceeded {
+		t.Fatalf("terminal code = %q, want turn_deadline_exceeded", payload.Code)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM runtime_event WHERE turn_id = 'turn-deadline' AND kind = ?`,
+		runtime.EventKindTurnFailed).Scan(&count); err != nil {
+		t.Fatalf("count terminal: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("durable deadline terminals = %d, want 1", count)
+	}
+}
+
+type errorExecutor struct {
+	err error
+}
+
+func (e errorExecutor) Execute(_ context.Context, _ *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+	return func(yield func(store.RuntimeEvent, error) bool) {
+		yield(store.RuntimeEvent{}, e.err)
+	}
+}
+
+func TestDurableBudgetExhaustedIsTerminal(t *testing.T) {
+	executor := errorExecutor{err: &runtime.Error{Code: runtime.ErrorCodeBudgetExhausted, Detail: "test budget"}}
+	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	mustCreateSession(t, db, "session-a")
+
+	events, err := collect(t, engine, sampleRequest("session-a", "turn-budget"))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	last := events[len(events)-1]
+	if last.Kind != runtime.EventKindTurnFailed {
+		t.Fatalf("terminal kind = %q, want turn.failed", last.Kind)
+	}
+	var payload struct {
+		Code runtime.ErrorCode `json:"code"`
+	}
+	if err := json.Unmarshal(last.Payload, &payload); err != nil {
+		t.Fatalf("decode terminal payload: %v", err)
+	}
+	if payload.Code != runtime.ErrorCodeBudgetExhausted {
+		t.Fatalf("terminal code = %q, want budget_exhausted", payload.Code)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM runtime_event WHERE turn_id = 'turn-budget' AND kind = ?`,
+		runtime.EventKindTurnFailed).Scan(&count); err != nil {
+		t.Fatalf("count terminal: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("durable budget terminals = %d, want 1", count)
+	}
+}
+
+func TestDurableCancelIsTerminal(t *testing.T) {
+	gate := make(chan struct{})
+	executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	mustCreateSession(t, db, "session-a")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	streamed := make(chan store.RuntimeEvent, 16)
+	errs := make(chan error, 1)
+	go func() {
+		for ev, err := range engine.Run(ctx, sampleRequest("session-a", "turn-cancel")) {
+			if err != nil {
+				errs <- err
+				return
+			}
+			streamed <- ev
+		}
+		close(streamed)
+		errs <- nil
+	}()
+	waitFor(t, func() bool { return executor.StartCount() == 1 })
+	cancel()
+	for ev := range streamed {
+		if isTerminalKind(ev.Kind) {
+			if ev.Kind != runtime.EventKindTurnCancelled {
+				t.Fatalf("terminal kind = %q, want turn.cancelled", ev.Kind)
+			}
+		}
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("cancelled run: %v", err)
+	}
+	close(gate)
+	var count int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM runtime_event WHERE turn_id = 'turn-cancel' AND kind = ?`,
+		runtime.EventKindTurnCancelled).Scan(&count); err != nil {
+		t.Fatalf("count terminal: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("durable cancel terminals = %d, want 1", count)
+	}
+	next, err := collect(t, engine, sampleRequest("session-a", "turn-next"))
+	if err != nil {
+		t.Fatalf("turn after cancel: %v", err)
+	}
+	if last := next[len(next)-1]; last.Kind != runtime.EventKindTurnCompleted {
+		t.Fatalf("next terminal = %q, want turn.completed (cancel must advance the queue)", last.Kind)
+	}
+}
+
+func TestDurableShutdownDrainsActive(t *testing.T) {
+	gate := make(chan struct{})
+	executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+	engine, _, db := newDurableLiveTestRuntime(t, Config{
+		MaxActiveTurns: 1, MaxPendingTurns: 4, ShutdownTimeout: 5 * time.Second,
+	}, executor)
+	mustCreateSession(t, db, "session-a")
+
+	errs := make(chan error, 1)
+	go func() {
+		_, err := collect(t, engine, sampleRequest("session-a", "turn-0"))
+		errs <- err
+	}()
+	waitFor(t, func() bool { return executor.StartCount() == 1 })
+	shutdownErr := make(chan error, 1)
+	go func() { shutdownErr <- engine.Shutdown(context.Background()) }()
+	waitFor(t, func() bool {
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		return engine.shutdown
+	})
+	close(gate)
+	if err := <-shutdownErr; err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("drained turn: %v", err)
+	}
+	events := collectDurableTerminal(t, db, "turn-0")
+	if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
+		t.Fatalf("drained terminal = %q, want turn.completed", last.Kind)
 	}
 }

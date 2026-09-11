@@ -18,7 +18,6 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/durable/restate"
-	"github.com/anggasct/aura/internal/runtime"
 	runtimeengine "github.com/anggasct/aura/internal/runtime/engine"
 	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
 	"github.com/anggasct/aura/internal/server"
@@ -199,15 +198,13 @@ func buildDurableListener(ctx context.Context, cfg *config.Config, db *sql.DB, l
 		_, err := interpreter.DriveSerial(ctx, inv, tick.RunID)
 		return err
 	})
-	return &durableListener{config: durableCfg, endpoint: endpoint, logger: logger, engine: engine, events: store.NewEventStore(db)}, nil
+	return &durableListener{config: durableCfg, endpoint: endpoint, logger: logger}, nil
 }
 
 type durableListener struct {
 	config   *config.Durable
 	endpoint *restate.Endpoint
 	logger   *slog.Logger
-	engine   *runtimeengine.Engine
-	events   store.EventStore
 }
 
 func (l *durableListener) Name() string { return "durable" }
@@ -218,9 +215,6 @@ func (l *durableListener) Start(ctx context.Context) error {
 		defer cancel()
 		if err := restate.CheckExternal(gateCtx, l.config.Endpoint, l.config.AdminEndpoint); err != nil {
 			return err
-		}
-		if l.engine != nil {
-			go l.recoverExternal(ctx)
 		}
 		return l.serveEndpointUntilDone(ctx)
 	}
@@ -240,9 +234,6 @@ func (l *durableListener) Start(ctx context.Context) error {
 	endpointCtx, stopEndpoint := context.WithCancel(ctx)
 	endpointDone := make(chan error, 1)
 	go func() { endpointDone <- l.endpoint.Start(endpointCtx) }()
-	if l.engine != nil {
-		go l.recoverSupervised(ctx, supervisor)
-	}
 	supervisorErr := supervisor.Start(ctx)
 	stopEndpoint()
 	select {
@@ -282,8 +273,6 @@ func (l *durableListener) serveEndpointUntilDone(ctx context.Context) error {
 	}
 }
 
-const sessionRecoveryWindow = 24 * time.Hour
-
 type durableSessionStore struct {
 	runtime durable.Runtime
 }
@@ -318,116 +307,10 @@ func (s *durableSessionStore) Release(ctx context.Context, sessionID, turnID str
 	return callSessionObject[runtimesessions.ReleaseResult](ctx, s.runtime, sessionID, restate.SessionReleaseHandler, runtimesessions.ReleaseRequest{TurnID: turnID})
 }
 
-func (s *durableSessionStore) Recover(ctx context.Context, sessionID string, open, terminal []string) (runtimesessions.RecoverResult, error) {
-	return callSessionObject[runtimesessions.RecoverResult](ctx, s.runtime, sessionID, restate.SessionRecoverHandler, runtimesessions.RecoverRequest{Open: open, Terminal: terminal})
+func (s *durableSessionStore) Status(ctx context.Context, sessionID string) (runtimesessions.StatusResult, error) {
+	return callSessionObject[runtimesessions.StatusResult](ctx, s.runtime, sessionID, restate.SessionStatusHandler, json.RawMessage(`{}`))
 }
 
 func (s *durableSessionStore) Abort(ctx context.Context, sessionID string) (runtimesessions.AbortResult, error) {
 	return callSessionObject[runtimesessions.AbortResult](ctx, s.runtime, sessionID, restate.SessionAbortHandler, json.RawMessage(`{}`))
-}
-
-func recoverDurableSessions(ctx context.Context, engine *runtimeengine.Engine, events store.EventStore, logger *slog.Logger) error {
-	activity, err := events.ListTurnActivity(ctx, time.Now().Add(-sessionRecoveryWindow))
-	if err != nil {
-		return fmt.Errorf("scan recent turn activity: %w", err)
-	}
-	restored := 0
-	for sessionID, turns := range activity {
-		var open, terminal []string
-		for _, turn := range turns {
-			if hasTerminalKind(turn.Kinds) {
-				terminal = append(terminal, turn.TurnID)
-			} else {
-				open = append(open, turn.TurnID)
-			}
-		}
-		before := len(open)
-		if err := engine.RecoverSession(ctx, sessionID, open, terminal); err != nil {
-			return fmt.Errorf("recover session: %w", err)
-		}
-		restored += before
-	}
-	logger.InfoContext(ctx, "durable session recovery complete",
-		"component", "runtime",
-		"sessions", len(activity),
-		"open_turns", restored,
-	)
-	return nil
-}
-
-func hasTerminalKind(kinds []string) bool {
-	for _, kind := range kinds {
-		switch kind {
-		case runtime.EventKindTurnCompleted, runtime.EventKindTurnFailed, runtime.EventKindTurnCancelled:
-			return true
-		}
-	}
-	return false
-}
-
-const sessionRecoveryTimeout = 3 * time.Minute
-const sessionRecoveryPoll = 500 * time.Millisecond
-
-func (l *durableListener) recoverSupervised(ctx context.Context, supervisor *restate.Supervisor) {
-	err := l.waitSupervisorReady(ctx, supervisor)
-	if err == nil {
-		err = l.recoverSessions(ctx)
-	}
-	l.finishSessionRecovery(ctx, err)
-}
-
-func (l *durableListener) waitSupervisorReady(ctx context.Context, supervisor *restate.Supervisor) error {
-	deadline := time.Now().Add(sessionRecoveryTimeout)
-	for {
-		snapshot := supervisor.Snapshot()
-		if snapshot.State == restate.SupervisionRunning && snapshot.Registered {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("durable runtime did not become ready: %s", snapshot.State)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(sessionRecoveryPoll):
-		}
-	}
-}
-
-func (l *durableListener) recoverExternal(ctx context.Context) {
-	deadline := time.Now().Add(sessionRecoveryTimeout)
-	for {
-		err := l.recoverSessions(ctx)
-		if err == nil {
-			l.finishSessionRecovery(ctx, nil)
-			return
-		}
-		if time.Now().After(deadline) {
-			l.finishSessionRecovery(ctx, err)
-			return
-		}
-		select {
-		case <-ctx.Done():
-			l.finishSessionRecovery(ctx, ctx.Err())
-			return
-		case <-time.After(2 * time.Second):
-		}
-	}
-}
-
-func (l *durableListener) finishSessionRecovery(ctx context.Context, err error) {
-	if err != nil {
-		l.logger.ErrorContext(ctx, "durable session recovery failed; queued turns resume on the next boot",
-			"component", "runtime", "error", err)
-	}
-	if l.engine != nil {
-		l.engine.MarkRecovered()
-	}
-}
-
-func (l *durableListener) recoverSessions(ctx context.Context) error {
-	if l.engine == nil || l.events == nil {
-		return nil
-	}
-	return recoverDurableSessions(ctx, l.engine, l.events, l.logger)
 }

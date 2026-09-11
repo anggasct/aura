@@ -141,69 +141,6 @@ func TestReleaseMismatchFailsLoudly(t *testing.T) {
 	}
 }
 
-func TestRecoverRestartsOpenTurnsInOrder(t *testing.T) {
-	state := NewState()
-	for i, id := range []string{"turn-1", "turn-2", "turn-3"} {
-		if _, err := Enqueue(state, testDescriptor(id), uint64(i+1), 8); err != nil {
-			t.Fatalf("enqueue %s: %v", id, err)
-		}
-	}
-	restarted, found, err := Recover(state, []string{"turn-1", "turn-2", "turn-3"}, nil)
-	if err != nil {
-		t.Fatalf("recover: %v", err)
-	}
-	if !found || restarted.Descriptor.TurnID != "turn-1" {
-		t.Fatalf("expected turn-1 to restart, got %+v found=%v", restarted, found)
-	}
-	if len(state.Queue) != 2 || state.Queue[0].Descriptor.TurnID != "turn-2" {
-		t.Fatalf("queue order not preserved: %+v", state.Queue)
-	}
-}
-
-func TestRecoverDropsTerminalActive(t *testing.T) {
-	state := NewState()
-	for i, id := range []string{"turn-1", "turn-2"} {
-		if _, err := Enqueue(state, testDescriptor(id), uint64(i+1), 8); err != nil {
-			t.Fatalf("enqueue %s: %v", id, err)
-		}
-	}
-	restarted, found, err := Recover(state, []string{"turn-2"}, []string{"turn-1"})
-	if err != nil {
-		t.Fatalf("recover: %v", err)
-	}
-	if !found || restarted.Descriptor.TurnID != "turn-2" {
-		t.Fatalf("expected turn-2 to restart, got %+v found=%v", restarted, found)
-	}
-	if _, ok := state.Dedupe["key-turn-1"]; !ok {
-		t.Fatal("completed turn dedupe entry must be retained")
-	}
-}
-
-func TestRecoverPrunesUnknownEntries(t *testing.T) {
-	state := NewState()
-	for i, id := range []string{"turn-1", "turn-2"} {
-		if _, err := Enqueue(state, testDescriptor(id), uint64(i+1), 8); err != nil {
-			t.Fatalf("enqueue %s: %v", id, err)
-		}
-	}
-	if err := NoteReplay(state, "key-ghost", "turn-ghost"); err != nil {
-		t.Fatalf("note replay: %v", err)
-	}
-	_, found, err := Recover(state, nil, nil)
-	if err != nil {
-		t.Fatalf("recover: %v", err)
-	}
-	if found {
-		t.Fatal("no turn must restart when nothing is open")
-	}
-	if len(state.Queue) != 0 || state.Active != nil {
-		t.Fatalf("queue and active must be empty: %+v %+v", state.Queue, state.Active)
-	}
-	if len(state.Dedupe) != 0 {
-		t.Fatalf("dedupe must be pruned: %v", state.Dedupe)
-	}
-}
-
 func TestDedupeStaysBounded(t *testing.T) {
 	state := NewState()
 	for i := range MaxDedupeEntries + 10 {

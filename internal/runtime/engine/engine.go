@@ -85,9 +85,6 @@ type Engine struct {
 	active   int
 	shutdown bool
 	wg       sync.WaitGroup
-
-	recovered   chan struct{}
-	recoverOnce sync.Once
 }
 
 type EventStore interface {
@@ -120,17 +117,16 @@ func NewEngine(cfg Config, events EventStore, dedupe DedupeStore, executor TurnE
 		return nil, err
 	}
 	engine := &Engine{
-		cfg:       cfg,
-		events:    events,
-		dedupe:    dedupe,
-		executor:  executor,
-		logger:    logger,
-		sessions:  make(map[string]*sessionQueue),
-		turns:     make(map[string]*turn),
-		staged:    make(map[string]*turn),
-		granted:   make(map[string]struct{}),
-		sesKeys:   make(map[string]struct{}),
-		recovered: make(chan struct{}),
+		cfg:      cfg,
+		events:   events,
+		dedupe:   dedupe,
+		executor: executor,
+		logger:   logger,
+		sessions: make(map[string]*sessionQueue),
+		turns:    make(map[string]*turn),
+		staged:   make(map[string]*turn),
+		granted:  make(map[string]struct{}),
+		sesKeys:  make(map[string]struct{}),
 	}
 	if cfg.Durable != nil {
 		engine.sessionStore = cfg.Durable.Sessions

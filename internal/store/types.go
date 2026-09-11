@@ -41,5 +41,4 @@ type EventStore interface {
 	LastSequence(ctx context.Context, sessionID string) (uint64, error)
 	AppendSequenced(ctx context.Context, sessionID string, e *RuntimeEvent) (uint64, error)
 	UpsertEvent(ctx context.Context, e *RuntimeEvent) (uint64, bool, error)
-	ListTurnActivity(ctx context.Context, since time.Time) (map[string][]TurnActivity, error)
 }

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"slices"
 	"time"
 
 	"modernc.org/sqlite"
@@ -163,51 +162,6 @@ func assignNextSequence(ctx context.Context, tx *sql.Tx, sessionID string) (uint
 		next = highest.Int64 + 1
 	}
 	return sequenceFromDB(next)
-}
-
-type TurnActivity struct {
-	TurnID string
-	Kinds  []string
-}
-
-func (s *sqliteEventStore) ListTurnActivity(ctx context.Context, since time.Time) (map[string][]TurnActivity, error) {
-	if since.IsZero() {
-		return nil, Errorf(ErrorCodeInvalidArgument, "turn activity scan requires a start time")
-	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT session_id, turn_id, kind FROM runtime_event WHERE created_at >= ? ORDER BY session_id, turn_id`,
-		formatTime(since.UTC()),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list turn activity: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	activity := map[string][]TurnActivity{}
-	index := map[string]map[string]int{}
-	for rows.Next() {
-		var sessionID, turnID, kind string
-		if err := rows.Scan(&sessionID, &turnID, &kind); err != nil {
-			return nil, fmt.Errorf("scan turn activity: %w", err)
-		}
-		byTurn, ok := index[sessionID]
-		if !ok {
-			byTurn = map[string]int{}
-			index[sessionID] = byTurn
-		}
-		at, ok := byTurn[turnID]
-		if !ok {
-			activity[sessionID] = append(activity[sessionID], TurnActivity{TurnID: turnID})
-			at = len(activity[sessionID]) - 1
-			byTurn[turnID] = at
-		}
-		if !slices.Contains(activity[sessionID][at].Kinds, kind) {
-			activity[sessionID][at].Kinds = append(activity[sessionID][at].Kinds, kind)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list turn activity: %w", err)
-	}
-	return activity, nil
 }
 
 func (s *sqliteEventStore) LookupEvent(ctx context.Context, id string) (RuntimeEvent, bool, error) {
