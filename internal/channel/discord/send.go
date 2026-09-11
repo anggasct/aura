@@ -61,39 +61,34 @@ func neutralizeMentions(text string) string {
 }
 
 func splitMessage(text string) []string {
-	if len(text) <= discordMessageLimit {
+	if len([]rune(text)) <= discordMessageLimit {
 		return []string{text}
 	}
 	var chunks []string
 	var current strings.Builder
+	currentRunes := 0
 	flush := func() {
-		if current.Len() > 0 {
+		if currentRunes > 0 {
 			chunks = append(chunks, current.String())
 			current.Reset()
+			currentRunes = 0
 		}
 	}
 	for _, line := range strings.SplitAfter(text, "\n") {
-		for line != "" {
-			room := discordMessageLimit - current.Len()
+		runes := []rune(line)
+		for len(runes) > 0 {
+			room := discordMessageLimit - currentRunes
 			if room <= 0 {
 				flush()
 				room = discordMessageLimit
 			}
 			take := room
-			if len(line) < take {
-				take = len(line)
-			} else {
-				for take > 0 && line[take-1] >= 0x80 {
-					take--
-				}
-				if take == 0 {
-					for take < len(line) && line[take] >= 0x80 {
-						take++
-					}
-				}
+			if len(runes) < take {
+				take = len(runes)
 			}
-			current.WriteString(line[:take])
-			line = line[take:]
+			current.WriteString(string(runes[:take]))
+			currentRunes += take
+			runes = runes[take:]
 		}
 	}
 	flush()

@@ -318,13 +318,13 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 		pub.Publish(&store.RuntimeEvent{
 			ID:            eventID,
 			SessionID:     req.SessionID,
-			Sequence:      req.EventSequence,
+			Sequence:      sequence,
 			TurnID:        req.TurnID,
 			InvocationID:  req.EventInvocation,
 			Branch:        req.EventBranch,
 			Author:        req.EventAuthor,
-			Kind:          EventKindToolRequested,
-			SchemaVersion: toolRequestedSchemaVersion,
+			Kind:          kind,
+			SchemaVersion: schemaVersion,
 			Payload:       payload,
 			CreatedAt:     now,
 		})

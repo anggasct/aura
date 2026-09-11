@@ -206,6 +206,25 @@ func TestSplitMessage_RuneSafe(t *testing.T) {
 	}
 }
 
+func TestSplitMessage_LongNonASCIIRun(t *testing.T) {
+	text := strings.Repeat("中", 2500)
+	chunks := splitMessage(text)
+	if len(chunks) != 2 {
+		t.Fatalf("chunks = %d, want 2", len(chunks))
+	}
+	for _, chunk := range chunks {
+		if got := len([]rune(chunk)); got > discordMessageLimit {
+			t.Fatalf("chunk of %d runes exceeds the limit", got)
+		}
+	}
+	if got := len([]rune(chunks[0])); got != discordMessageLimit {
+		t.Errorf("first chunk = %d runes, want %d", got, discordMessageLimit)
+	}
+	if strings.Join(chunks, "") != text {
+		t.Error("chunks do not reassemble")
+	}
+}
+
 func TestDeliver_UploadsRemainderAsFile(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "m")
