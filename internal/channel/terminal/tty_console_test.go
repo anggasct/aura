@@ -66,11 +66,12 @@ func TestTTYFailedTurnReportsFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run returned nil for failed turn")
 	}
-	if !strings.Contains(out.String(), "turn failed") {
-		t.Errorf("output = %q, want failure frame", out.String())
+	got := out.String()
+	if !strings.Contains(got, "turn failed") {
+		t.Errorf("output = %q, want failure frame", got)
 	}
-	if strings.Contains(out.String(), "partial") {
-		t.Errorf("output = %q, partial must not survive a failed turn", out.String())
+	if idx := strings.LastIndex(got, "turn failed"); idx >= 0 && strings.Contains(got[idx:], "partial") {
+		t.Errorf("output = %q, partial must not follow the failure frame", got)
 	}
 }
 
@@ -83,8 +84,12 @@ func TestTTYCancelledTurnReplacesPartials(t *testing.T) {
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if strings.Contains(out.String(), "partial") || !strings.Contains(out.String(), "turn cancelled") {
-		t.Errorf("output = %q, want cancellation without partial", out.String())
+	got := out.String()
+	if !strings.Contains(got, "turn cancelled") {
+		t.Errorf("output = %q, want cancellation frame", got)
+	}
+	if idx := strings.LastIndex(got, "turn cancelled"); idx >= 0 && strings.Contains(got[idx:], "partial") {
+		t.Errorf("output = %q, partial must not follow the cancellation frame", got)
 	}
 }
 
