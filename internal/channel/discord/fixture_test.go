@@ -2,8 +2,11 @@ package discord
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +19,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/effect"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
@@ -24,14 +28,15 @@ const testToken = "tok-secret-probe-9f8e7d"
 var errDialBlocked = errors.New("dial blocked")
 
 type memorySink struct {
-	mu    sync.Mutex
-	calls map[string]int
-	turns map[string]int
-	order []string
+	mu        sync.Mutex
+	calls     map[string]int
+	turns     map[string]int
+	order     []string
+	envelopes map[string]*runtimeingress.IngressEnvelope
 }
 
 func newMemorySink() *memorySink {
-	return &memorySink{calls: map[string]int{}, turns: map[string]int{}}
+	return &memorySink{calls: map[string]int{}, turns: map[string]int{}, envelopes: map[string]*runtimeingress.IngressEnvelope{}}
 }
 
 func (s *memorySink) Accept(ctx context.Context, env *runtimeingress.IngressEnvelope) (runtimeingress.TurnRef, error) {
@@ -39,6 +44,7 @@ func (s *memorySink) Accept(ctx context.Context, env *runtimeingress.IngressEnve
 	defer s.mu.Unlock()
 	s.calls[env.ExternalID]++
 	s.order = append(s.order, env.ExternalID)
+	s.envelopes[env.ExternalID] = env
 	if s.turns[env.ExternalID] > 0 {
 		return runtimeingress.TurnRef{TurnID: "turn-" + env.ExternalID, SessionID: env.ConversationID, Replayed: true}, nil
 	}
@@ -231,18 +237,20 @@ func testAdapterConfig() config.Discord {
 	}
 }
 
-func startTestAdapter(t *testing.T, gateway *fakeGateway, sink *memorySink, resumes *memoryResumeStore, logs *logCapture) (*Adapter, context.CancelFunc, chan error) {
+func startTestAdapter(t *testing.T, gateway *fakeGateway, sink *memorySink, resumes *memoryResumeStore, logs *logCapture) *testContext {
 	t.Helper()
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	logger := slog.New(slog.NewTextHandler(logs, nil))
+	deps := &testDoubles{effects: newFakeEffectRunner(), media: &fakeMediaStore{}, sessions: &fakeSessionEnsurer{}}
 	discordCfg := testAdapterConfig()
-	adapter, err := New(&discordCfg, resumes, logger)
+	adapter, err := New(&discordCfg, resumes, deps.effects, deps.media, deps.sessions, logger)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
 	adapter.retryBase = 5 * time.Millisecond
 	adapter.retryCap = 50 * time.Millisecond
 	adapter.invalidDelay = 5 * time.Millisecond
+	adapter.rateCap = 50 * time.Millisecond
 	adapter.restBase = gateway.self.URL
 	adapter.dial = func(ctx context.Context, url string) (*websocket.Conn, error) {
 		type dialResult struct {
@@ -264,7 +272,145 @@ func startTestAdapter(t *testing.T, gateway *fakeGateway, sink *memorySink, resu
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- adapter.Start(ctx, sink) }()
-	return adapter, cancel, done
+	return &testContext{adapter: adapter, cancel: cancel, done: done, sink: sink, resumes: resumes, doubles: deps, logs: logs}
+}
+
+type testDoubles struct {
+	effects  *fakeEffectRunner
+	media    *fakeMediaStore
+	sessions *fakeSessionEnsurer
+}
+
+type testContext struct {
+	adapter *Adapter
+	cancel  context.CancelFunc
+	done    chan error
+	sink    *memorySink
+	resumes *memoryResumeStore
+	doubles *testDoubles
+	logs    *logCapture
+}
+
+func (c *testContext) stop(t *testing.T) {
+	t.Helper()
+	c.cancel()
+	select {
+	case err := <-c.done:
+		if err != nil {
+			t.Fatalf("Start(): %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start() did not return after cancel")
+	}
+}
+
+type fakeIntent struct {
+	state   effect.State
+	receipt json.RawMessage
+	digest  string
+}
+
+type fakeEffectRunner struct {
+	mu               sync.Mutex
+	intents          map[string]*fakeIntent
+	invocations      int
+	crashAfterInvoke bool
+	invokeErr        error
+}
+
+func newFakeEffectRunner() *fakeEffectRunner {
+	return &fakeEffectRunner{intents: map[string]*fakeIntent{}}
+}
+
+func (f *fakeEffectRunner) Execute(ctx context.Context, req *effect.PrepareRequest, provider effect.Provider) (*effect.Intent, error) {
+	digest := sha256.Sum256(req.Request)
+	key := req.Provider + "|" + req.Operation + "|" + req.IdempotencyKey
+	f.mu.Lock()
+	existing, ok := f.intents[key]
+	if ok && existing.digest != string(digest[:]) {
+		f.mu.Unlock()
+		return nil, errors.New("idempotency conflict")
+	}
+	if ok {
+		intent := &effect.Intent{ID: "intent-" + key, SessionID: req.SessionID, State: existing.state, ProviderReceipt: existing.receipt}
+		f.mu.Unlock()
+		return intent, nil
+	}
+	f.intents[key] = &fakeIntent{state: effect.StateStarted, digest: string(digest[:])}
+	crash := f.crashAfterInvoke
+	invokeErr := f.invokeErr
+	f.mu.Unlock()
+	outcome, err := provider.Invoke(ctx, &effect.Invocation{
+		IntentID:       "intent-" + key,
+		IdempotencyKey: req.IdempotencyKey,
+		Provider:       req.Provider,
+		Operation:      req.Operation,
+		Classification: req.Classification,
+		Request:        req.Request,
+	})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.invocations++
+	if crash {
+		f.intents[key].state = effect.StateUnknown
+		return &effect.Intent{ID: "intent-" + key, SessionID: req.SessionID, State: effect.StateUnknown}, errDialBlocked
+	}
+	if invokeErr != nil {
+		return nil, invokeErr
+	}
+	if err != nil {
+		f.intents[key].state = effect.StateUnknown
+		return &effect.Intent{ID: "intent-" + key, SessionID: req.SessionID, State: effect.StateUnknown}, err
+	}
+	if outcome.Ambiguous {
+		f.intents[key].state = effect.StateUnknown
+		return &effect.Intent{ID: "intent-" + key, SessionID: req.SessionID, State: effect.StateUnknown}, nil
+	}
+	if !outcome.Succeeded {
+		f.intents[key].state = effect.StateFailed
+		return &effect.Intent{ID: "intent-" + key, SessionID: req.SessionID, State: effect.StateFailed}, nil
+	}
+	f.intents[key].state = effect.StateSucceeded
+	f.intents[key].receipt = outcome.Receipt
+	return &effect.Intent{ID: "intent-" + key, SessionID: req.SessionID, State: effect.StateSucceeded, ProviderReceipt: outcome.Receipt}, nil
+}
+
+type fakeMediaStore struct {
+	mu   sync.Mutex
+	puts int
+}
+
+func (s *fakeMediaStore) Put(ctx context.Context, content io.Reader, meta *ArtifactMeta) (ArtifactReceipt, error) {
+	body, err := io.ReadAll(io.LimitReader(content, 1<<26))
+	if err != nil {
+		return ArtifactReceipt{}, err
+	}
+	sum := sha256.Sum256(body)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.puts++
+	return ArtifactReceipt{
+		RefID:     "ref-" + hex.EncodeToString(sum[:])[:12],
+		Digest:    hex.EncodeToString(sum[:]),
+		SizeBytes: int64(len(body)),
+	}, nil
+}
+
+type fakeSessionEnsurer struct {
+	mu       sync.Mutex
+	sessions map[string]string
+}
+
+func (s *fakeSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessions == nil {
+		s.sessions = map[string]string{}
+	}
+	if _, ok := s.sessions[sessionID]; !ok {
+		s.sessions[sessionID] = ownerID
+	}
+	return nil
 }
 
 func waitFor(t *testing.T, timeout time.Duration, condition func() bool, what string) {

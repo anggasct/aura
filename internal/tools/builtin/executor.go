@@ -81,6 +81,20 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 	return &Executor{broker: broker, journal: journal}, nil
 }
 
+func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {
+	if db == nil {
+		return nil, errors.New("storage database is required")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	journal, err := effect.NewJournal(db, effect.Options{Logger: logger})
+	if err != nil {
+		return nil, err
+	}
+	return effect.NewExecutor(journal)
+}
+
 func builtinAdapters(toolsCfg *config.Tools) (map[string]toolbroker.Adapter, error) {
 	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")

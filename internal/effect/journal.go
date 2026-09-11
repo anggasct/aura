@@ -55,7 +55,11 @@ func (s State) valid() bool {
 
 const EventKindToolRequested = "tool.requested"
 
+const EventKindChannelRequested = "channel.requested"
+
 const toolRequestedSchemaVersion uint16 = 1
+
+const channelRequestedSchemaVersion uint16 = 1
 
 type toolRequestedPayload struct {
 	EffectIntentID string         `json:"effect_intent_id"`
@@ -66,6 +70,15 @@ type toolRequestedPayload struct {
 	IdempotencyKey string         `json:"idempotency_key"`
 	RequestDigest  string         `json:"request_digest"`
 	RetryOf        string         `json:"retry_of,omitempty"`
+}
+
+type channelRequestedPayload struct {
+	EffectIntentID string         `json:"effect_intent_id"`
+	Provider       string         `json:"provider"`
+	Operation      string         `json:"operation"`
+	Classification Classification `json:"classification"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	RequestDigest  string         `json:"request_digest"`
 }
 
 type Intent struct {
@@ -99,6 +112,7 @@ type PrepareRequest struct {
 	Operation      string
 	Classification Classification
 	Request        json.RawMessage
+	EventKind      string
 
 	EventID         string
 	EventSequence   uint64
@@ -234,17 +248,45 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 		return nil, fmt.Errorf("effect: insert intent: %w", err)
 	}
 
-	payload, err := json.Marshal(toolRequestedPayload{
-		EffectIntentID: intentID,
-		ToolCallID:     req.ToolCallID,
-		Provider:       req.Provider,
-		Operation:      req.Operation,
-		Classification: req.Classification,
-		IdempotencyKey: req.IdempotencyKey,
-		RequestDigest:  digest,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("effect: marshal tool.requested payload: %w", err)
+	kind := req.EventKind
+	if kind == "" {
+		kind = EventKindToolRequested
+	}
+	var payload json.RawMessage
+	var sequence uint64
+	var schemaVersion uint16
+	if kind == EventKindChannelRequested {
+		sequence, err = store.AllocateSequenceTx(ctx, tx, req.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		payload, err = json.Marshal(channelRequestedPayload{
+			EffectIntentID: intentID,
+			Provider:       req.Provider,
+			Operation:      req.Operation,
+			Classification: req.Classification,
+			IdempotencyKey: req.IdempotencyKey,
+			RequestDigest:  digest,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("effect: marshal channel.requested payload: %w", err)
+		}
+		schemaVersion = channelRequestedSchemaVersion
+	} else {
+		payload, err = json.Marshal(toolRequestedPayload{
+			EffectIntentID: intentID,
+			ToolCallID:     req.ToolCallID,
+			Provider:       req.Provider,
+			Operation:      req.Operation,
+			Classification: req.Classification,
+			IdempotencyKey: req.IdempotencyKey,
+			RequestDigest:  digest,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("effect: marshal tool.requested payload: %w", err)
+		}
+		sequence = req.EventSequence
+		schemaVersion = toolRequestedSchemaVersion
 	}
 	eventID := req.EventID
 	if eventID == "" {
@@ -256,13 +298,13 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	if err := store.AppendEventTx(ctx, tx, &store.RuntimeEvent{
 		ID:            eventID,
 		SessionID:     req.SessionID,
-		Sequence:      req.EventSequence,
+		Sequence:      sequence,
 		TurnID:        req.TurnID,
 		InvocationID:  req.EventInvocation,
 		Branch:        req.EventBranch,
 		Author:        req.EventAuthor,
-		Kind:          EventKindToolRequested,
-		SchemaVersion: toolRequestedSchemaVersion,
+		Kind:          kind,
+		SchemaVersion: schemaVersion,
 		Payload:       payload,
 		CreatedAt:     now,
 	}); err != nil {
@@ -327,12 +369,6 @@ func validatePrepare(req *PrepareRequest) error {
 	if req.SessionID == "" {
 		problems = append(problems, errors.New("session_id must not be empty"))
 	}
-	if req.TurnID == "" {
-		problems = append(problems, errors.New("turn_id must not be empty"))
-	}
-	if req.ToolCallID == "" {
-		problems = append(problems, errors.New("tool_call_id must not be empty"))
-	}
 	if req.IdempotencyKey == "" {
 		problems = append(problems, errors.New("idempotency_key must not be empty"))
 	}
@@ -349,8 +385,29 @@ func validatePrepare(req *PrepareRequest) error {
 	if len(req.Request) == 0 || !json.Valid(req.Request) {
 		problems = append(problems, errors.New("request must be valid JSON"))
 	}
-	if req.EventSequence == 0 {
-		problems = append(problems, errors.New("event_sequence must be positive"))
+	switch req.EventKind {
+	case "", EventKindToolRequested:
+		if req.TurnID == "" {
+			problems = append(problems, errors.New("turn_id must not be empty"))
+		}
+		if req.ToolCallID == "" {
+			problems = append(problems, errors.New("tool_call_id must not be empty"))
+		}
+		if req.EventSequence == 0 {
+			problems = append(problems, errors.New("event_sequence must be positive"))
+		}
+	case EventKindChannelRequested:
+		if req.TurnID != "" {
+			problems = append(problems, errors.New("turn_id must be empty for channel requests"))
+		}
+		if req.ToolCallID != "" {
+			problems = append(problems, errors.New("tool_call_id must be empty for channel requests"))
+		}
+		if req.EventSequence != 0 {
+			problems = append(problems, errors.New("event_sequence must be zero for channel requests; the journal allocates it"))
+		}
+	default:
+		problems = append(problems, fmt.Errorf("event_kind %q is not supported", req.EventKind))
 	}
 	if len(problems) > 0 {
 		return codedError(ErrorCodeInvalidArgument, "effect: invalid prepare request", errors.Join(problems...))

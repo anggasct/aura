@@ -53,12 +53,13 @@ type userPayload struct {
 }
 
 type messagePayload struct {
-	ID        string        `json:"id"`
-	ChannelID string        `json:"channel_id"`
-	GuildID   string        `json:"guild_id"`
-	Author    userPayload   `json:"author"`
-	Content   string        `json:"content"`
-	Mentions  []userPayload `json:"mentions"`
+	ID          string              `json:"id"`
+	ChannelID   string              `json:"channel_id"`
+	GuildID     string              `json:"guild_id"`
+	Author      userPayload         `json:"author"`
+	Content     string              `json:"content"`
+	Mentions    []userPayload       `json:"mentions"`
+	Attachments []attachmentPayload `json:"attachments"`
 }
 
 type identifyPayload struct {
