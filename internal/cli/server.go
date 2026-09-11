@@ -131,10 +131,6 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			adkExecutor.SetEventPublisher(runtimeEngine)
-			var recoveryEngine *runtimeengine.Engine
-			if durableConfig != nil {
-				recoveryEngine = runtimeEngine
-			}
 			host, err := runtimeengine.NewHost(runtimeEngine, nil, logger)
 			if err != nil {
 				return err
@@ -154,7 +150,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			if cfg.Durable != nil && cfg.Durable.Enabled {
-				durableListener, err := buildDurableListener(ctx, cfg, db, logger, recoveryEngine)
+				durableListener, err := buildDurableListener(ctx, cfg, db, logger, runtimeEngine)
 				if err != nil {
 					return err
 				}

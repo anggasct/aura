@@ -203,52 +203,6 @@ func (s *State) popLocked() *QueuedTurn {
 	return &out
 }
 
-func Recover(s *State, open, terminal []string) (QueuedTurn, bool, error) {
-	if err := s.Validate(); err != nil {
-		return QueuedTurn{}, false, err
-	}
-	keep := make(map[string]struct{}, len(open)+len(terminal))
-	for _, id := range open {
-		keep[id] = struct{}{}
-	}
-	for _, id := range terminal {
-		keep[id] = struct{}{}
-	}
-	kept := s.Queue[:0]
-	for i := range s.Queue {
-		if _, ok := keep[s.Queue[i].Descriptor.TurnID]; ok {
-			kept = append(kept, s.Queue[i])
-		}
-	}
-	clear(s.Queue[len(kept):])
-	s.Queue = kept
-	for key, turnID := range s.Dedupe {
-		if _, ok := keep[turnID]; !ok {
-			delete(s.Dedupe, key)
-		}
-	}
-	if s.Active != nil {
-		active := *s.Active
-		s.Active = nil
-		if _, ok := keep[active.Descriptor.TurnID]; ok && containsTurn(open, active.Descriptor.TurnID) {
-			s.Queue = append([]QueuedTurn{{Descriptor: active.Descriptor, Sequence: active.Sequence}}, s.Queue...)
-		}
-	}
-	if len(s.Queue) == 0 {
-		return QueuedTurn{}, false, nil
-	}
-	return *s.popLocked(), true, nil
-}
-
-func containsTurn(ids []string, want string) bool {
-	for _, id := range ids {
-		if id == want {
-			return true
-		}
-	}
-	return false
-}
-
 func Abort(s *State) ([]QueuedTurn, error) {
 	if err := s.Validate(); err != nil {
 		return nil, err

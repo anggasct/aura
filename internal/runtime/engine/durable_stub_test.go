@@ -105,18 +105,15 @@ func (s *stubSessionStore) Release(_ context.Context, sessionID, turnID string) 
 	return runtimesessions.Release(s.stateLocked(sessionID), turnID)
 }
 
-func (s *stubSessionStore) Recover(_ context.Context, sessionID string, open, terminal []string) (runtimesessions.RecoverResult, error) {
+func (s *stubSessionStore) Status(_ context.Context, sessionID string) (runtimesessions.StatusResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	restarted, found, err := runtimesessions.Recover(s.stateLocked(sessionID), open, terminal)
-	if err != nil {
-		return runtimesessions.RecoverResult{}, err
-	}
-	result := runtimesessions.RecoverResult{QueueDepth: len(s.states[sessionID].Queue)}
-	if found {
-		toStart := restarted
-		result.ToStart = &toStart
-		result.Found = true
+	state := s.stateLocked(sessionID)
+	result := runtimesessions.StatusResult{QueueDepth: len(state.Queue), LastSequence: state.LastSequence}
+	if state.Active != nil {
+		active := *state.Active
+		result.ActiveTurnID = active.Descriptor.TurnID
+		result.Active = &active
 	}
 	return result, nil
 }
@@ -136,7 +133,6 @@ func newDurableTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*En
 	engine, db, events := newTestRuntime(t, cfg, executor)
 	stub := newStubSessionStore(events, store.NewDedupeStore(db))
 	engine.sessionStore = stub
-	engine.MarkRecovered()
 	return engine, stub, db
 }
 
@@ -148,14 +144,5 @@ func newDurableLiveTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) 
 	engine.sessionStore = stub
 	engine.durableRuntime = backend
 	backend.RegisterHandler("turn", engine.serveTurn)
-	engine.MarkRecovered()
-	return engine, stub, db
-}
-
-func newUnrecoveredDurableTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *stubSessionStore, *sql.DB) {
-	t.Helper()
-	engine, db, events := newTestRuntime(t, cfg, executor)
-	stub := newStubSessionStore(events, store.NewDedupeStore(db))
-	engine.sessionStore = stub
 	return engine, stub, db
 }

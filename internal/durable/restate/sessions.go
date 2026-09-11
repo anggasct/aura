@@ -21,7 +21,6 @@ const (
 
 	SessionAdmitHandler   = "admit"
 	SessionReleaseHandler = "release"
-	SessionRecoverHandler = "recover"
 	SessionAbortHandler   = "abort"
 	SessionStatusHandler  = "status"
 
@@ -59,7 +58,6 @@ func buildSessionService(stores SessionStores, logger *slog.Logger) restate.Serv
 	definition := restate.NewObject(SessionServiceName)
 	definition.Handler(SessionAdmitHandler, restate.NewObjectHandler(server.admit))
 	definition.Handler(SessionReleaseHandler, restate.NewObjectHandler(server.release))
-	definition.Handler(SessionRecoverHandler, restate.NewObjectHandler(server.recover))
 	definition.Handler(SessionAbortHandler, restate.NewObjectHandler(server.abort))
 	definition.Handler(SessionStatusHandler, restate.NewObjectSharedHandler(server.status))
 	return definition
@@ -208,25 +206,6 @@ func (s *sessionServer) release(ctx restate.ObjectContext, req runtimesessions.R
 	return runtimesessions.ReleaseResult{ToStart: released.ToStart, QueueDepth: len(state.Queue)}, nil
 }
 
-func (s *sessionServer) recover(ctx restate.ObjectContext, req runtimesessions.RecoverRequest) (runtimesessions.RecoverResult, error) {
-	state, err := loadSessionState(ctx)
-	if err != nil {
-		return runtimesessions.RecoverResult{}, err
-	}
-	restarted, found, err := runtimesessions.Recover(state, req.Open, req.Terminal)
-	if err != nil {
-		return runtimesessions.RecoverResult{}, sessionTerminal(err)
-	}
-	saveSessionState(ctx, state)
-	result := runtimesessions.RecoverResult{QueueDepth: len(state.Queue)}
-	if found {
-		toStart := restarted
-		result.ToStart = &toStart
-		result.Found = true
-	}
-	return result, nil
-}
-
 func (s *sessionServer) abort(ctx restate.ObjectContext, _ json.RawMessage) (runtimesessions.AbortResult, error) {
 	state, err := loadSessionState(ctx)
 	if err != nil {
@@ -247,7 +226,9 @@ func (s *sessionServer) status(ctx restate.ObjectSharedContext, _ json.RawMessag
 	}
 	result := runtimesessions.StatusResult{QueueDepth: len(state.Queue), LastSequence: state.LastSequence}
 	if state.Active != nil {
-		result.ActiveTurnID = state.Active.Descriptor.TurnID
+		active := *state.Active
+		result.ActiveTurnID = active.Descriptor.TurnID
+		result.Active = &active
 		if !state.Active.Descriptor.Deadline.IsZero() {
 			result.Deadline = state.Active.Descriptor.Deadline.UTC().Format(time.RFC3339Nano)
 		}
