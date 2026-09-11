@@ -32,6 +32,7 @@ const (
 	ErrorCodeWebhookExecutionConflict  ErrorCode = "webhook_execution_conflict"
 	ErrorCodeWebhookExecutionNotFound  ErrorCode = "webhook_execution_not_found"
 	ErrorCodeWebhookExecutionInvalid   ErrorCode = "webhook_execution_invalid"
+	ErrorCodeChannelResumeInvalid      ErrorCode = "channel_resume_invalid"
 )
 
 type Error struct {

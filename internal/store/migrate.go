@@ -24,6 +24,7 @@ var migrations = []migration{
 	{version: 6, sql: modelCircuitCheckpointSchemaSQL},
 	{version: 7, sql: webhookExecutionSchemaSQL},
 	{version: 8, sql: workflowCorrelationSchemaSQL},
+	{version: 9, sql: channelResumeSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -262,6 +263,18 @@ CREATE TABLE workflow_correlation (
 );
 
 CREATE INDEX workflow_correlation_run_idx ON workflow_correlation(run_id);
+`
+
+const channelResumeSchemaSQL = `
+CREATE TABLE channel_resume (
+    source TEXT NOT NULL,
+    instance TEXT NOT NULL,
+    gateway_session_id TEXT NOT NULL,
+    last_sequence INTEGER NOT NULL CHECK (last_sequence >= 0),
+    config_digest TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (source, instance)
+);
 `
 
 const modelCircuitCheckpointSchemaSQL = `

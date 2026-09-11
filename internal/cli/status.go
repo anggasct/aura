@@ -87,13 +87,14 @@ func liveReadiness(ctx context.Context, offline bool, listen string) (live healt
 	return body, true
 }
 
-func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilityStatus, negotiate func() (sandbox.Primitives, error), processProbe func() (health.ProcessStatus, bool)) (*health.Registry, error) {
+func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilityStatus, negotiate func() (sandbox.Primitives, error), processProbe func() (health.ProcessStatus, bool), extra ...health.RegisteredCheck) (*health.Registry, error) {
 	dbPath, artifactRoot, backupDir, err := storagePaths(cfg)
 	if err != nil {
 		return nil, err
 	}
 	checkTimeout := time.Duration(cfg.Health.CheckTimeout)
-	return health.NewRegistry(
+	checks := make([]health.RegisteredCheck, 0, 9+len(extra))
+	checks = append(checks,
 		health.RegisteredCheck{
 			ID:          "migration",
 			Checker:     health.MigrationChecker{Versions: func(ctx context.Context) (applied, latest int, err error) { return schemaVersionsReadOnly(ctx, dbPath) }},
@@ -160,6 +161,7 @@ func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilitySta
 			Remediation: health.RemediationReconcileState,
 		},
 	)
+	return health.NewRegistry(append(checks, extra...)...)
 }
 
 func durableProbeState(cfg *config.Config) func(context.Context) (health.DurableState, string) {

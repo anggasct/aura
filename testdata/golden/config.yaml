@@ -96,3 +96,14 @@ webhook:
   replay_retention: 24h0m0s
   requests_per_minute: 60
   keys: []
+channels:
+  discord:
+    enabled: false
+    instance: owner
+    bot_token_ref: env://AURA_DISCORD_BOT_TOKEN
+    allowed_user_ids: []
+    allowed_guild_ids: []
+    allowed_channel_ids: []
+    accept_dms: true
+    min_edit_interval: 2s
+    max_attachment_bytes: 20971520

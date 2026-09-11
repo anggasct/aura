@@ -131,14 +131,18 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			adkExecutor.SetEventPublisher(runtimeEngine)
-			host, err := runtimeengine.NewHost(runtimeEngine, nil, logger)
+			channelAdapters, discordChecks, err := buildChannelAdapters(cfg, db, logger)
+			if err != nil {
+				return err
+			}
+			host, err := runtimeengine.NewHost(runtimeEngine, channelAdapters, logger)
 			if err != nil {
 				return err
 			}
 			if err := host.Start(ctx); err != nil {
 				return err
 			}
-			probeListener, err := buildProbeListener(cfg, mapCapabilityStatuses(result.CapabilityReport), store.NewEventStore(db), store.NewSessionService(db))
+			probeListener, err := buildProbeListener(cfg, mapCapabilityStatuses(result.CapabilityReport), store.NewEventStore(db), store.NewSessionService(db), discordChecks...)
 			if err != nil {
 				return err
 			}
