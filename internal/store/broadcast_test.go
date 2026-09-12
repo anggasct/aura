@@ -356,6 +356,32 @@ func TestBroadcastStore_DeferExtendsCursor(t *testing.T) {
 	}
 }
 
+func TestBroadcastStore_DeferNoopReleasesTransaction(t *testing.T) {
+	db := newTestDB(t)
+	s := NewBroadcastStore(db)
+	ctx := t.Context()
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+
+	if err := s.DeferDestination(ctx, "default", now.Add(time.Minute)); err != nil {
+		t.Fatalf("defer: %v", err)
+	}
+	for range 20 {
+		if err := s.DeferDestination(ctx, "default", now); err != nil {
+			t.Fatalf("noop defer: %v", err)
+		}
+	}
+	slot, err := s.ClaimDispatchSlot(ctx, "default", now, 5*time.Second)
+	if err != nil {
+		t.Fatalf("write after noop defers: %v", err)
+	}
+	if !slot.Equal(now.Add(time.Minute)) {
+		t.Errorf("slot after noop defers = %v, want deferred instant", slot)
+	}
+	if got := db.Stats().InUse; got != 0 {
+		t.Errorf("open connections in use = %d, want 0 (leaked transaction)", got)
+	}
+}
+
 func TestBroadcastStore_ConcurrentSlotsSerialized(t *testing.T) {
 	db := newTestDB(t)
 	s := NewBroadcastStore(db)

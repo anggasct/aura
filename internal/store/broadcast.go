@@ -418,7 +418,6 @@ func (s *sqliteBroadcastStore) DeferDestination(ctx context.Context, alias strin
 			return Errorf(ErrorCodeBroadcastInvalid, "destination cursor is not a valid timestamp")
 		}
 		if !cursor.Before(until.UTC()) {
-			committed = true
 			return nil
 		}
 	}

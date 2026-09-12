@@ -2,6 +2,7 @@ package broadcast
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -149,5 +150,40 @@ func TestCreateDigest_RejectsMixedOrUrgent(t *testing.T) {
 	var nilCtx context.Context
 	if _, _, err := broadcaster.CreateDigest(nilCtx, urgent, 0); err == nil {
 		t.Error("nil context accepted")
+	}
+}
+
+func TestCreateDigest_RejectsOversizeGroup(t *testing.T) {
+	broadcaster := testBroadcaster()
+	store := newFakeItemStore()
+	broadcaster.items = store
+	base := time.Date(2026, 9, 12, 23, 30, 0, 0, time.UTC)
+	group := make([]Item, 0, broadcaster.maxDigestItems+1)
+	for i := range broadcaster.maxDigestItems + 1 {
+		item := digestItem("over-"+strconv.Itoa(i), "default", PriorityInfo, base, 1)
+		item.IdempotencyKey = "key-" + item.ID
+		group = append(group, item)
+	}
+	for i := range group {
+		record := ItemRecord{
+			ID: group[i].ID, Producer: group[i].Producer, IdempotencyKey: group[i].IdempotencyKey,
+			ContentDigest: digestContent(group[i].ContentJSON), Priority: group[i].Priority,
+			DestinationAlias: group[i].DestinationAlias, ContentJSON: group[i].ContentJSON,
+			State: StateHeld, NotBefore: group[i].NotBefore, CreatedAt: base, UpdatedAt: base,
+		}
+		if _, _, err := store.Insert(t.Context(), &record); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	if _, _, err := broadcaster.CreateDigest(t.Context(), group, 0); err == nil {
+		t.Fatal("oversize group accepted")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		t.Fatalf("oversize group code = %v, %v; want invalid_argument", code, ok)
+	}
+	for _, item := range group {
+		child := store.records[item.ID]
+		if child.State != StateHeld || child.DigestParentID != "" {
+			t.Errorf("child %s not left held: %+v", item.ID, child)
+		}
 	}
 }

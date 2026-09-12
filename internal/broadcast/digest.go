@@ -131,6 +131,9 @@ func (b *Broadcaster) CreateDigest(ctx context.Context, group []Item, index int)
 	if first.Priority == PriorityUrgent {
 		return Item{}, false, Errorf(ErrorCodeInvalidArgument, "urgent items are never digested")
 	}
+	if len(group) > b.maxDigestItems {
+		return Item{}, false, Errorf(ErrorCodeInvalidArgument, "digest group exceeds the item bound")
+	}
 	content, err := renderDigestContent(first.NotBefore, first.DestinationAlias, first.Priority, group)
 	if err != nil {
 		return Item{}, false, err
