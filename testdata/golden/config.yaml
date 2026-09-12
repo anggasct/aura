@@ -96,6 +96,18 @@ webhook:
   replay_retention: 24h0m0s
   requests_per_minute: 60
   keys: []
+broadcast:
+  timezone: UTC
+  quiet_hours:
+    enabled: true
+    start: "23:00"
+    end: "07:00"
+  max_digest_items: 20
+  max_digest_bytes: 12000
+  max_attempts: 3
+  max_delivery_age: 24h0m0s
+  destinations: {}
+  fallback: {}
 channels:
   discord:
     enabled: false

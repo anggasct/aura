@@ -33,6 +33,9 @@ const (
 	ErrorCodeWebhookExecutionNotFound  ErrorCode = "webhook_execution_not_found"
 	ErrorCodeWebhookExecutionInvalid   ErrorCode = "webhook_execution_invalid"
 	ErrorCodeChannelResumeInvalid      ErrorCode = "channel_resume_invalid"
+	ErrorCodeBroadcastConflict         ErrorCode = "broadcast_conflict"
+	ErrorCodeBroadcastNotFound         ErrorCode = "broadcast_not_found"
+	ErrorCodeBroadcastInvalid          ErrorCode = "broadcast_invalid"
 )
 
 type Error struct {

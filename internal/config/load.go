@@ -21,6 +21,7 @@ import (
 	"github.com/knadh/koanf/v2"
 	yamlv3 "gopkg.in/yaml.v3"
 
+	broadcastpkg "github.com/anggasct/aura/internal/broadcast"
 	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/logging"
 	"github.com/anggasct/aura/internal/sandbox"
@@ -212,6 +213,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateDiscord(&cfg.Channels.Discord); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateBroadcast(&cfg.Broadcast); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -367,6 +371,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateDiscordShapes(doc); err != nil {
+		return err
+	}
+	if err := validateBroadcastShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -674,6 +681,59 @@ func validateDiscordShapes(doc *yamlv3.Node) error {
 		case "max_attachment_bytes":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
 				return fmt.Errorf("channels.discord.max_attachment_bytes must be an integer at line %d", valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func validateBroadcastShapes(doc *yamlv3.Node) error {
+	broadcastNode := mappingValue(doc, "broadcast")
+	if broadcastNode == nil {
+		return nil
+	}
+	if broadcastNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("broadcast must be a mapping at line %d", broadcastNode.Line)
+	}
+	for i := 0; i+1 < len(broadcastNode.Content); i += 2 {
+		keyNode := broadcastNode.Content[i]
+		valueNode := broadcastNode.Content[i+1]
+		switch keyNode.Value {
+		case "timezone", "max_delivery_age":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("broadcast.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "max_digest_items", "max_digest_bytes", "max_attempts":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("broadcast.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "quiet_hours":
+			if valueNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("broadcast.quiet_hours must be a mapping at line %d", valueNode.Line)
+			}
+			for j := 0; j+1 < len(valueNode.Content); j += 2 {
+				quietKey := valueNode.Content[j]
+				quietValue := valueNode.Content[j+1]
+				switch quietKey.Value {
+				case "enabled":
+					if quietValue.Kind != yamlv3.ScalarNode || quietValue.Tag != "!!bool" {
+						return fmt.Errorf("broadcast.quiet_hours.enabled must be a boolean at line %d", quietValue.Line)
+					}
+				case "start", "end":
+					if quietValue.Kind != yamlv3.ScalarNode || quietValue.Tag != "!!str" {
+						return fmt.Errorf("broadcast.quiet_hours.%s must be a string at line %d", quietKey.Value, quietValue.Line)
+					}
+				}
+			}
+		case "destinations", "fallback":
+			if valueNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("broadcast.%s must be a mapping at line %d", keyNode.Value, valueNode.Line)
+			}
+			for j := 0; j+1 < len(valueNode.Content); j += 2 {
+				entry := valueNode.Content[j+1]
+				if entry.Kind != yamlv3.ScalarNode || entry.Tag != "!!str" {
+					return fmt.Errorf("broadcast.%s entries must be strings at line %d", keyNode.Value, entry.Line)
+				}
 			}
 		}
 	}
@@ -1649,6 +1709,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyTerminalDefaults(cfg, doc, defaults.Terminal)
 	applyModelRouteDefaults(cfg, doc)
 	applyWebhookDefaults(cfg, doc, &defaults.Webhook)
+	applyBroadcastDefaults(cfg, doc, &defaults.Broadcast)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
 }
@@ -1704,6 +1765,39 @@ func applyWebhookDefaults(cfg *Config, doc *yamlv3.Node, defaults *Webhook) {
 	}
 	if cfg.Webhook.RequestsPerMinute == 0 && !configValuePresent(doc, "webhook", "requests_per_minute") && !envValuePresent("webhook.requests_per_minute") {
 		cfg.Webhook.RequestsPerMinute = defaults.RequestsPerMinute
+	}
+}
+
+func applyBroadcastDefaults(cfg *Config, doc *yamlv3.Node, defaults *Broadcast) {
+	if cfg.Broadcast.Timezone == "" && !configValuePresent(doc, "broadcast", "timezone") && !envValuePresent("broadcast.timezone") {
+		cfg.Broadcast.Timezone = defaults.Timezone
+	}
+	if !cfg.Broadcast.QuietHours.Enabled && !configValuePresent(doc, "broadcast", "quiet_hours", "enabled") && !envValuePresent("broadcast.quiet_hours.enabled") {
+		cfg.Broadcast.QuietHours.Enabled = defaults.QuietHours.Enabled
+	}
+	if cfg.Broadcast.QuietHours.Start == "" && !configValuePresent(doc, "broadcast", "quiet_hours", "start") && !envValuePresent("broadcast.quiet_hours.start") {
+		cfg.Broadcast.QuietHours.Start = defaults.QuietHours.Start
+	}
+	if cfg.Broadcast.QuietHours.End == "" && !configValuePresent(doc, "broadcast", "quiet_hours", "end") && !envValuePresent("broadcast.quiet_hours.end") {
+		cfg.Broadcast.QuietHours.End = defaults.QuietHours.End
+	}
+	if cfg.Broadcast.MaxDigestItems == 0 && !configValuePresent(doc, "broadcast", "max_digest_items") && !envValuePresent("broadcast.max_digest_items") {
+		cfg.Broadcast.MaxDigestItems = defaults.MaxDigestItems
+	}
+	if cfg.Broadcast.MaxDigestBytes == 0 && !configValuePresent(doc, "broadcast", "max_digest_bytes") && !envValuePresent("broadcast.max_digest_bytes") {
+		cfg.Broadcast.MaxDigestBytes = defaults.MaxDigestBytes
+	}
+	if cfg.Broadcast.MaxAttempts == 0 && !configValuePresent(doc, "broadcast", "max_attempts") && !envValuePresent("broadcast.max_attempts") {
+		cfg.Broadcast.MaxAttempts = defaults.MaxAttempts
+	}
+	if cfg.Broadcast.MaxDeliveryAge == 0 && !configValuePresent(doc, "broadcast", "max_delivery_age") && !envValuePresent("broadcast.max_delivery_age") {
+		cfg.Broadcast.MaxDeliveryAge = defaults.MaxDeliveryAge
+	}
+	if cfg.Broadcast.Destinations == nil {
+		cfg.Broadcast.Destinations = map[string]string{}
+	}
+	if cfg.Broadcast.Fallback == nil {
+		cfg.Broadcast.Fallback = map[string]string{}
 	}
 }
 
@@ -2322,6 +2416,83 @@ func validateDiscord(discord *Discord) error {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord.enabled requires at least one allowed_user_ids entry"}
 	}
 	return nil
+}
+
+func validateBroadcast(broadcast *Broadcast) error {
+	if broadcast == nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "broadcast must not be nil"}
+	}
+	var problems []error
+	if broadcast.Timezone == "" {
+		problems = append(problems, errors.New("broadcast.timezone must not be empty"))
+	} else if _, err := time.LoadLocation(broadcast.Timezone); err != nil {
+		problems = append(problems, fmt.Errorf("broadcast.timezone %q is not a valid IANA timezone", broadcast.Timezone))
+	}
+	if broadcast.QuietHours.Start == "" || !validHourMinute(broadcast.QuietHours.Start) {
+		problems = append(problems, fmt.Errorf("broadcast.quiet_hours.start %q must be HH:MM", broadcast.QuietHours.Start))
+	}
+	if broadcast.QuietHours.End == "" || !validHourMinute(broadcast.QuietHours.End) {
+		problems = append(problems, fmt.Errorf("broadcast.quiet_hours.end %q must be HH:MM", broadcast.QuietHours.End))
+	}
+	if broadcast.MaxDigestItems <= 0 {
+		problems = append(problems, errors.New("broadcast.max_digest_items must be positive"))
+	}
+	if broadcast.MaxDigestBytes <= 0 {
+		problems = append(problems, errors.New("broadcast.max_digest_bytes must be positive"))
+	}
+	if broadcast.MaxAttempts <= 0 {
+		problems = append(problems, errors.New("broadcast.max_attempts must be positive"))
+	}
+	if broadcast.MaxDeliveryAge <= 0 {
+		problems = append(problems, errors.New("broadcast.max_delivery_age must be positive"))
+	}
+	for alias, route := range broadcast.Destinations {
+		if !validBroadcastAlias(alias) {
+			problems = append(problems, fmt.Errorf("broadcast.destinations alias %q is not valid", alias))
+		}
+		if !validBroadcastRoute(route) {
+			problems = append(problems, fmt.Errorf("broadcast.destinations[%s] route %q is not a channel destination", alias, route))
+		}
+	}
+	for alias, route := range broadcast.Fallback {
+		if !validBroadcastAlias(alias) {
+			problems = append(problems, fmt.Errorf("broadcast.fallback alias %q is not valid", alias))
+		}
+		if route == "" {
+			continue
+		}
+		if !validBroadcastRoute(route) {
+			problems = append(problems, fmt.Errorf("broadcast.fallback[%s] route %q is not a channel destination", alias, route))
+		}
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validHourMinute(value string) bool {
+	if len(value) != 5 || value[2] != ':' {
+		return false
+	}
+	hour, err := strconv.Atoi(value[:2])
+	if err != nil {
+		return false
+	}
+	minute, err := strconv.Atoi(value[3:])
+	if err != nil {
+		return false
+	}
+	return hour >= 0 && hour < 24 && minute >= 0 && minute < 60
+}
+
+func validBroadcastAlias(alias string) bool {
+	return broadcastpkg.ValidAlias(alias)
+}
+
+func validBroadcastRoute(route string) bool {
+	_, _, err := broadcastpkg.ParseRoute(route)
+	return err == nil
 }
 
 func isSnowflake(id string) bool {
