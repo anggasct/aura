@@ -171,6 +171,24 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			} else if resumed > 0 {
 				logger.InfoContext(ctx, "resumed broadcast runs", "component", "broadcast", "count", resumed)
 			}
+			cronBroadcaster, err := buildCronBroadcaster(cfg, db, broadcastRuntime, broadcastWiring)
+			if err != nil {
+				return err
+			}
+			scheduleRunner, err := buildScheduleRunner(db, logger, runtimeEngine, cronBroadcaster)
+			if err != nil {
+				return err
+			}
+			if durableConfig == nil {
+				if err := registerScheduleHandler(broadcastRuntime, scheduleRunner); err != nil {
+					return err
+				}
+			}
+			if resumedJobs, err := resumeScheduleRuns(ctx, broadcastRuntime, db); err != nil {
+				return err
+			} else if resumedJobs > 0 {
+				logger.InfoContext(ctx, "resumed schedule runs", "component", "schedule", "count", resumedJobs)
+			}
 			if err := host.Start(ctx); err != nil {
 				return err
 			}
@@ -191,6 +209,9 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				if err := registerBroadcastHandler(durableListener, broadcastRunner); err != nil {
+					return err
+				}
+				if err := registerScheduleHandler(durableListener, scheduleRunner); err != nil {
 					return err
 				}
 				if err := srv.Add(durableListener); err != nil {
