@@ -26,6 +26,7 @@ func testQuietBroadcaster(t *testing.T, zone, start, end string) *Broadcaster {
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("New(): %v", err)

@@ -242,6 +242,7 @@ func newRunnerFixtureWithPolicy(policy RunPolicy, scripts []sendScript) *runnerF
 		map[string]Sender{"discord": sender},
 		policy,
 		nil,
+		nil,
 	)
 	if err != nil {
 		panic(err)
@@ -583,26 +584,26 @@ func TestNewRunner_RejectsBadPolicy(t *testing.T) {
 	senders := map[string]Sender{"discord": &fakeSender{}}
 	routes := map[string]string{"default": "discord:owner"}
 	good := testRunPolicy()
-	if _, err := NewRunner(nil, routes, senders, good, nil); err == nil {
+	if _, err := NewRunner(nil, routes, senders, good, nil, nil); err == nil {
 		t.Error("nil store accepted")
 	}
 	badAttempts := testRunPolicy()
 	badAttempts.MaxAttempts = 0
-	if _, err := NewRunner(store, routes, senders, badAttempts, nil); err == nil {
+	if _, err := NewRunner(store, routes, senders, badAttempts, nil, nil); err == nil {
 		t.Error("non-positive attempts accepted")
 	}
 	badAge := testRunPolicy()
 	badAge.MaxDeliveryAge = 0
-	if _, err := NewRunner(store, routes, senders, badAge, nil); err == nil {
+	if _, err := NewRunner(store, routes, senders, badAge, nil, nil); err == nil {
 		t.Error("non-positive age accepted")
 	}
 	badGap := testRunPolicy()
 	badGap.DispatchGap = -time.Second
-	if _, err := NewRunner(store, routes, senders, badGap, nil); err == nil {
+	if _, err := NewRunner(store, routes, senders, badGap, nil, nil); err == nil {
 		t.Error("negative gap accepted")
 	}
 	badRoute := map[string]string{"default": "https://evil.example/hook"}
-	if _, err := NewRunner(store, badRoute, senders, good, nil); err == nil {
+	if _, err := NewRunner(store, badRoute, senders, good, nil, nil); err == nil {
 		t.Error("bad route accepted")
 	}
 }
@@ -651,6 +652,7 @@ func TestSubmit_StartsRun(t *testing.T) {
 			started = append(started, itemID)
 			return nil
 		},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
@@ -673,6 +675,7 @@ func TestSubmit_StartsRun(t *testing.T) {
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),
 		func(context.Context, string) error { return errors.New("runtime down") },
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("New(): %v", err)

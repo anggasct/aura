@@ -137,9 +137,10 @@ type Broadcaster struct {
 	channels       ChannelRegistry
 	items          ItemStore
 	starter        Starter
+	observer       Observer
 }
 
-func New(policy Policy, channels ChannelRegistry, items ItemStore, starter Starter) (*Broadcaster, error) {
+func New(policy Policy, channels ChannelRegistry, items ItemStore, starter Starter, observer Observer) (*Broadcaster, error) {
 	if channels == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "channel registry must not be nil")
 	}
@@ -176,6 +177,7 @@ func New(policy Policy, channels ChannelRegistry, items ItemStore, starter Start
 		channels:       channels,
 		items:          items,
 		starter:        starter,
+		observer:       observer,
 	}, nil
 }
 
@@ -311,6 +313,11 @@ func (b *Broadcaster) Submit(ctx context.Context, notification *Notification) (I
 			return Item{}, false, Errorf(ErrorCodeUnavailable, "broadcast run did not start")
 		}
 	}
+	b.observe(ctx, &Observation{
+		Priority: record.Priority,
+		State:    record.State,
+		Result:   ResultSubmitted,
+	})
 	return Item{
 		ID:               record.ID,
 		Producer:         record.Producer,

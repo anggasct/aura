@@ -516,6 +516,35 @@ func TestBroadcastStore_SettleAndAttempt(t *testing.T) {
 	}
 }
 
+func TestBroadcastStore_ListHeldHonorsLimit(t *testing.T) {
+	db := newTestDB(t)
+	s := NewBroadcastStore(db)
+	ctx := t.Context()
+	morning := time.Date(2026, 9, 13, 7, 0, 0, 0, time.UTC)
+	for i := range 5 {
+		item := testBroadcastItem("held-"+string(rune('a'+i)), "cron", "key-"+string(rune('a'+i)))
+		item.State = BroadcastStateHeld
+		item.NotBefore = morning
+		if _, _, err := s.InsertItem(ctx, item); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	held, err := s.ListHeld(ctx, "default", BroadcastPriorityInfo, morning, 3)
+	if err != nil {
+		t.Fatalf("ListHeld(): %v", err)
+	}
+	if len(held) != 3 {
+		t.Errorf("held rows = %d, want bounded 3", len(held))
+	}
+	active, err := s.ListActive(ctx, 2)
+	if err != nil {
+		t.Fatalf("ListActive(): %v", err)
+	}
+	if len(active) != 2 {
+		t.Errorf("active rows = %d, want bounded 2", len(active))
+	}
+}
+
 func TestBroadcastStore_SchemaVersion(t *testing.T) {
 	db := newTestDB(t)
 	applied, latest, err := SchemaVersions(t.Context(), db)
