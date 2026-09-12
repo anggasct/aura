@@ -270,6 +270,9 @@ func (s *sqliteScheduleStore) RecordFire(ctx context.Context, occurrence *Schedu
 		if isConstraintUnique(err) {
 			return &Error{Code: ErrorCodeScheduleConflict, Detail: "occurrence already recorded for this fire"}
 		}
+		if isConstraintForeignKey(err) {
+			return &Error{Code: ErrorCodeScheduleNotFound, Detail: fmt.Sprintf("schedule job %q does not exist", occurrence.JobID)}
+		}
 		return classifyBusy(fmt.Errorf("record occurrence fire: %w", err))
 	}
 	return nil

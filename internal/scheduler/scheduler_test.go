@@ -274,3 +274,33 @@ func TestService_RunNowUsesCurrentTime(t *testing.T) {
 		t.Error("run-now on deleted job accepted")
 	}
 }
+
+func TestService_RunNowCreatesDistinctOccurrences(t *testing.T) {
+	service := testService()
+	created, err := service.Create(t.Context(), testJobSpec())
+	if err != nil {
+		t.Fatalf("Create(): %v", err)
+	}
+	stamp := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
+	first, err := service.RunNow(t.Context(), created.ID, stamp)
+	if err != nil {
+		t.Fatalf("first RunNow(): %v", err)
+	}
+	second, err := service.RunNow(t.Context(), created.ID, stamp)
+	if err != nil {
+		t.Fatalf("second RunNow(): %v", err)
+	}
+	if first.ID == second.ID {
+		t.Errorf("manual invocations converged on %q", first.ID)
+	}
+	if first.ScheduledForUTC.Equal(second.ScheduledForUTC) {
+		t.Error("manual invocations share the same fire time")
+	}
+	scheduled, _, err := service.RecordFire(t.Context(), created.ID, stamp, created.Version)
+	if err != nil {
+		t.Fatalf("RecordFire(): %v", err)
+	}
+	if first.ID == scheduled.ID || second.ID == scheduled.ID {
+		t.Error("manual invocation converged with a scheduled fire")
+	}
+}

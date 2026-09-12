@@ -104,7 +104,7 @@ func parseField(raw string, spec fieldSpec) (Field, error) {
 	if raw == "" {
 		return Field{}, Errorf(ErrorCodeExpressionInvalid, "field must not be empty")
 	}
-	starred := false
+	starred := raw == "*"
 	values := map[int]bool{}
 	for _, part := range strings.Split(raw, ",") {
 		if part == "" {
@@ -123,7 +123,6 @@ func parseField(raw string, spec fieldSpec) (Field, error) {
 		low, high := spec.min, spec.max
 		switch span {
 		case "", "*":
-			starred = starred || span == "*"
 		default:
 			bounds := strings.SplitN(span, "-", 2)
 			var err error

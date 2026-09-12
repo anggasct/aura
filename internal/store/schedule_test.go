@@ -160,3 +160,22 @@ func TestScheduleStore_SchemaVersionTwelve(t *testing.T) {
 		t.Errorf("schema = applied %d latest %d, want 12", applied, latest)
 	}
 }
+
+func TestScheduleStore_RecordFireMissingJob(t *testing.T) {
+	db := newTestDB(t)
+	s := NewScheduleStore(db)
+	ctx := t.Context()
+
+	fire := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 9, 12, 21, 0, 5, 0, time.UTC)
+	err := s.RecordFire(ctx, &ScheduledOccurrence{
+		ID: "cron-missing-1", JobID: "missing-job", JobVersion: 1, ScheduledForUTC: fire,
+		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
+	})
+	if err == nil {
+		t.Fatal("fire for missing job accepted")
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeScheduleNotFound {
+		t.Errorf("missing-job code = %v, %v; want %v", code, ok, ErrorCodeScheduleNotFound)
+	}
+}

@@ -139,3 +139,22 @@ func TestNextFireRejectsNilLocation(t *testing.T) {
 		t.Error("nil location accepted")
 	}
 }
+
+func TestNextFireSteppedDayOfMonth(t *testing.T) {
+	schedule := mustParse(t, "0 0 */2 * *")
+	got, err := NextFire(schedule, time.UTC, time.Date(2026, 4, 3, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("NextFire(): %v", err)
+	}
+	if !got.Equal(time.Date(2026, 4, 5, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("stepped fire = %v, want 2026-04-05", got)
+	}
+}
+
+func TestNextFireRejectsNilSchedule(t *testing.T) {
+	if _, err := NextFire(nil, time.UTC, time.Now()); err == nil {
+		t.Error("nil schedule accepted")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		t.Errorf("nil schedule code = %v, %v", code, ok)
+	}
+}

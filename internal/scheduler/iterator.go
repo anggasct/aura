@@ -9,6 +9,9 @@ import (
 const maxIteratorJumps = 200000
 
 func NextFire(schedule *Schedule, loc *time.Location, after time.Time) (time.Time, error) {
+	if schedule == nil {
+		return time.Time{}, Errorf(ErrorCodeInvalidArgument, "schedule must not be nil")
+	}
 	if loc == nil {
 		return time.Time{}, Errorf(ErrorCodeTimezoneInvalid, "location must not be nil")
 	}

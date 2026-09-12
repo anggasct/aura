@@ -106,3 +106,19 @@ func TestDayMatchesDomDowSemantics(t *testing.T) {
 		t.Error("restricted dom+dow must combine with OR")
 	}
 }
+
+func TestParseSteppedDayFieldsRestricted(t *testing.T) {
+	schedule, err := ParseExpression("0 0 */2 * *")
+	if err != nil {
+		t.Fatalf("ParseExpression(): %v", err)
+	}
+	if schedule.DayOfMonth.starred {
+		t.Error("stepped day-of-month must not be starred")
+	}
+	if !schedule.DayOfWeek.starred {
+		t.Error("unrestricted day-of-week must stay starred")
+	}
+	if !schedule.DayOfMonth.contains(5) || schedule.DayOfMonth.contains(4) {
+		t.Errorf("stepped days wrong: %+v", schedule.DayOfMonth)
+	}
+}

@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"strings"
 	"time"
@@ -251,6 +252,20 @@ func occurrenceID(jobID string, fire time.Time) string {
 	return "cron-" + jobID + "-" + strings.ReplaceAll(fire.UTC().Format("20060102T150405"), ":", "")
 }
 
+func newManualOccurrence(jobID string, fire time.Time, version int64, now time.Time) (Occurrence, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return Occurrence{}, Errorf(ErrorCodeUnavailable, "manual occurrence identity is unavailable")
+	}
+	nanos := int64(binary.BigEndian.Uint32(raw[:4])%999999999) + 1
+	scheduledFor := fire.UTC().Add(time.Duration(nanos) * time.Nanosecond)
+	id := occurrenceID(jobID, fire) + "-manual-" + hex.EncodeToString(raw[4:])
+	return Occurrence{
+		ID: id, JobID: jobID, JobVersion: version, ScheduledForUTC: scheduledFor,
+		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
+	}, nil
+}
+
 func (s *Service) RecordFire(ctx context.Context, jobID string, fire time.Time, version int64) (Occurrence, bool, error) {
 	if ctx == nil {
 		return Occurrence{}, false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
@@ -279,6 +294,9 @@ func (s *Service) RunNow(ctx context.Context, id string, now time.Time) (Occurre
 	if ctx == nil {
 		return Occurrence{}, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
 	}
+	if err := ctx.Err(); err != nil {
+		return Occurrence{}, err
+	}
 	stored, found, err := s.jobs.Job(ctx, id)
 	if err != nil {
 		return Occurrence{}, err
@@ -289,10 +307,19 @@ func (s *Service) RunNow(ctx context.Context, id string, now time.Time) (Occurre
 	if stored.State == JobDeleted {
 		return Occurrence{}, Errorf(ErrorCodeJobStateInvalid, "deleted jobs do not fire")
 	}
-	fire := now.UTC().Truncate(time.Second)
-	occurrence, _, err := s.RecordFire(ctx, id, fire, stored.Version)
-	if err != nil {
-		return Occurrence{}, err
+	base := now.UTC().Truncate(time.Second)
+	for range 5 {
+		candidate, err := newManualOccurrence(id, base, stored.Version, time.Now().UTC())
+		if err != nil {
+			return Occurrence{}, err
+		}
+		if err := s.jobs.RecordFire(ctx, &candidate); err != nil {
+			if code, ok := CodeOf(err); ok && code == ErrorCodeOccurrenceConflict {
+				continue
+			}
+			return Occurrence{}, err
+		}
+		return candidate, nil
 	}
-	return occurrence, nil
+	return Occurrence{}, Errorf(ErrorCodeUnavailable, "manual occurrence identity is unavailable")
 }
