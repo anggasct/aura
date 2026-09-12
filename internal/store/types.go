@@ -35,6 +35,10 @@ type SessionService interface {
 	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]RuntimeEvent, error)
 }
 
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
 type EventStore interface {
 	Append(ctx context.Context, e *RuntimeEvent) error
 	AppendBatch(ctx context.Context, events []RuntimeEvent) error

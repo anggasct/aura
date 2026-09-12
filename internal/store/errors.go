@@ -36,6 +36,9 @@ const (
 	ErrorCodeBroadcastConflict         ErrorCode = "broadcast_conflict"
 	ErrorCodeBroadcastNotFound         ErrorCode = "broadcast_not_found"
 	ErrorCodeBroadcastInvalid          ErrorCode = "broadcast_invalid"
+	ErrorCodeScheduleConflict          ErrorCode = "schedule_conflict"
+	ErrorCodeScheduleNotFound          ErrorCode = "schedule_not_found"
+	ErrorCodeScheduleInvalid           ErrorCode = "schedule_invalid"
 )
 
 type Error struct {

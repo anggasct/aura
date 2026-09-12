@@ -280,11 +280,7 @@ func (s *sqliteBroadcastStore) findItem(ctx context.Context, query string, args 
 	return item, found, nil
 }
 
-type broadcastRowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanOneBroadcastItem(row broadcastRowScanner) (BroadcastItem, bool, error) {
+func scanOneBroadcastItem(row rowScanner) (BroadcastItem, bool, error) {
 	var item BroadcastItem
 	var notBeforeRaw, createdAtRaw, updatedAtRaw string
 	var effectID, digestParentID sql.NullString

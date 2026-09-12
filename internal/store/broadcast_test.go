@@ -551,11 +551,11 @@ func TestBroadcastStore_SchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}
-	if latest != 11 {
-		t.Errorf("latest schema = %d, want 11", latest)
+	if latest != 12 {
+		t.Errorf("latest schema = %d, want 12", latest)
 	}
-	if applied != 11 {
-		t.Errorf("applied schema = %d, want 11", applied)
+	if applied != 12 {
+		t.Errorf("applied schema = %d, want 12", applied)
 	}
 	var ddl string
 	if err := db.QueryRowContext(t.Context(), `SELECT sql FROM sqlite_master WHERE name = 'broadcast_item'`).Scan(&ddl); err != nil {
