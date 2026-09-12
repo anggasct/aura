@@ -23,9 +23,10 @@ const (
 const requiredIntents = intentGuilds | intentGuildMessages | intentDirectMessages | intentMessageContent
 
 const (
-	eventReady         = "READY"
-	eventMessageCreate = "MESSAGE_CREATE"
-	eventGuildCreate   = "GUILD_CREATE"
+	eventReady             = "READY"
+	eventMessageCreate     = "MESSAGE_CREATE"
+	eventInteractionCreate = "INTERACTION_CREATE"
+	eventGuildCreate       = "GUILD_CREATE"
 )
 
 const gatewayURL = "wss://gateway.discord.gg/?v=10&encoding=json"
@@ -83,4 +84,71 @@ type resumePayload struct {
 type sendEnvelope struct {
 	Op   int `json:"op"`
 	Data any `json:"d"`
+}
+
+const (
+	interactionMessageComponent = 3
+)
+
+const (
+	componentActionRow = 1
+	componentButton    = 2
+)
+
+const (
+	buttonStylePrimary = 1
+	buttonStyleDanger  = 4
+)
+
+const (
+	callbackDeferredUpdate = 6
+	callbackUpdateMessage  = 7
+)
+
+type interactionPayload struct {
+	ID        string                 `json:"id"`
+	Token     string                 `json:"token"`
+	Type      int                    `json:"type"`
+	GuildID   string                 `json:"guild_id"`
+	ChannelID string                 `json:"channel_id"`
+	Member    *interactionMember     `json:"member"`
+	User      *userPayload           `json:"user"`
+	Message   *interactionMessageRef `json:"message"`
+	Data      interactionData        `json:"data"`
+}
+
+type interactionMember struct {
+	User userPayload `json:"user"`
+}
+
+type interactionMessageRef struct {
+	ID        string `json:"id"`
+	ChannelID string `json:"channel_id"`
+}
+
+type interactionData struct {
+	CustomID      string `json:"custom_id"`
+	ComponentType int    `json:"component_type"`
+}
+
+func (p *interactionPayload) actorID() string {
+	if p.Member != nil && p.Member.User.ID != "" {
+		return p.Member.User.ID
+	}
+	if p.User != nil {
+		return p.User.ID
+	}
+	return ""
+}
+
+type componentPayload struct {
+	Type       int             `json:"type"`
+	Components []buttonPayload `json:"components,omitempty"`
+}
+
+type buttonPayload struct {
+	Type     int    `json:"type"`
+	Style    int    `json:"style"`
+	Label    string `json:"label"`
+	CustomID string `json:"custom_id"`
 }

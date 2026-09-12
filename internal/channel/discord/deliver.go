@@ -105,6 +105,12 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	if req.Channel == "" || req.ConversationID == "" {
 		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request is missing channel or conversation")
 	}
+	select {
+	case a.deliverSem <- struct{}{}:
+	case <-ctx.Done():
+		return runtimechannelhost.ProviderReceipt{}, ctx.Err()
+	}
+	defer func() { <-a.deliverSem }()
 	var texts []string
 	for _, part := range req.Parts {
 		if strings.TrimSpace(part.Text) != "" {

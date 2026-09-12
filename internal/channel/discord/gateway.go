@@ -188,15 +188,50 @@ func (a *Adapter) runSession(ctx context.Context, ws *websocket.Conn, token stri
 		a.state.Store(int32(stateLive))
 	}
 	a.logger.InfoContext(ctx, "gateway session running", "component", "discord", "resumed", resume)
-	return a.pump(ctx, ws, interval)
+	session, cancel := context.WithCancel(ctx)
+	defer cancel()
+	queue := make(chan intakeItem, intakeQueueCap)
+	dispatchDone := make(chan struct{})
+	go a.dispatchIntake(session, queue, dispatchDone)
+	err = a.pump(session, ws, interval, queue)
+	close(queue)
+	<-dispatchDone
+	return err
 }
 
-func (a *Adapter) pump(ctx context.Context, ws *websocket.Conn, interval time.Duration) error {
+type intakeItem struct {
+	msg *messagePayload
+	seq *int64
+}
+
+func (a *Adapter) dispatchIntake(ctx context.Context, queue <-chan intakeItem, done chan<- struct{}) {
+	defer close(done)
+	for item := range queue {
+		admitted, err := a.admit(ctx, item.msg)
+		if err != nil {
+			return
+		}
+		if admitted && item.seq != nil {
+			a.saveCursor(ctx, a.sessionID, *item.seq)
+		}
+	}
+}
+
+func (a *Adapter) pump(ctx context.Context, ws *websocket.Conn, interval time.Duration, queue chan<- intakeItem) error {
 	session, cancel := context.WithCancel(ctx)
 	defer cancel()
 	beat := make(chan struct{}, 1)
 	acked := make(chan struct{}, 16)
 	done := make(chan struct{})
+	stopped := make(chan struct{})
+	defer close(stopped)
+	go func() {
+		select {
+		case <-session.Done():
+			_ = ws.Close()
+		case <-stopped:
+		}
+	}()
 	go a.heartbeatLoop(session, ws, interval, beat, acked, done)
 	defer func() {
 		cancel()
@@ -216,7 +251,7 @@ func (a *Adapter) pump(ctx context.Context, ws *websocket.Conn, interval time.Du
 		}
 		switch envelope.Op {
 		case opDispatch:
-			if err := a.handleDispatch(session, envelope); err != nil {
+			if err := a.handleDispatch(session, envelope, queue); err != nil {
 				return err
 			}
 		case opHeartbeat:
@@ -298,7 +333,7 @@ func (a *Adapter) handleInvalidSession(ctx context.Context, envelope *gatewayEnv
 	return nil
 }
 
-func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope) error {
+func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope, queue chan<- intakeItem) error {
 	switch envelope.Type {
 	case eventReady:
 		var ready readyPayload
@@ -320,13 +355,18 @@ func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope)
 		if err := json.Unmarshal(envelope.Data, &msg); err != nil {
 			return Errorf(ErrorCodeProtocolInvalid, "message payload is not decodable")
 		}
-		admitted, err := a.admit(ctx, &msg)
-		if err != nil {
-			return err
+		select {
+		case queue <- intakeItem{msg: &msg, seq: envelope.Seq}:
+			return nil
+		case <-ctx.Done():
+			return nil
 		}
-		if admitted && envelope.Seq != nil {
-			a.saveCursor(ctx, a.sessionID, *envelope.Seq)
+	case eventInteractionCreate:
+		var interaction interactionPayload
+		if err := json.Unmarshal(envelope.Data, &interaction); err != nil {
+			return Errorf(ErrorCodeProtocolInvalid, "interaction payload is not decodable")
 		}
+		a.resolveComponentClick(ctx, &interaction)
 		return nil
 	default:
 		return nil
@@ -341,6 +381,7 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if !admitted {
 		return false, nil
 	}
+	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, guildID: msg.GuildID, channelID: msg.ChannelID})
 	if len(msg.Attachments) > 0 && !a.intakeAttachments(ctx, msg, envelope) {
 		return false, nil
 	}

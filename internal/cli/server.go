@@ -82,7 +82,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, nil)
+			channelAdapters, discordChecks, approvalDecider, err := buildChannelAdapters(cfg, db, artifactRoot, logger)
+			if err != nil {
+				return err
+			}
+			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider)
 			if err != nil {
 				return err
 			}
@@ -131,10 +135,6 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			adkExecutor.SetEventPublisher(runtimeEngine)
-			channelAdapters, discordChecks, err := buildChannelAdapters(cfg, db, artifactRoot, logger)
-			if err != nil {
-				return err
-			}
 			host, err := runtimeengine.NewHost(runtimeEngine, channelAdapters, logger)
 			if err != nil {
 				return err
