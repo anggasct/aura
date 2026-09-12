@@ -21,6 +21,7 @@ import (
 	"github.com/knadh/koanf/v2"
 	yamlv3 "gopkg.in/yaml.v3"
 
+	broadcastpkg "github.com/anggasct/aura/internal/broadcast"
 	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/logging"
 	"github.com/anggasct/aura/internal/sandbox"
@@ -2486,39 +2487,12 @@ func validHourMinute(value string) bool {
 }
 
 func validBroadcastAlias(alias string) bool {
-	if alias == "" || len(alias) > 64 {
-		return false
-	}
-	for i := range len(alias) {
-		c := alias[i]
-		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' {
-			return false
-		}
-	}
-	return true
+	return broadcastpkg.ValidAlias(alias)
 }
 
 func validBroadcastRoute(route string) bool {
-	if route == "" || strings.Contains(route, "://") {
-		return false
-	}
-	parts := strings.Split(route, ":")
-	if len(parts) < 1 || len(parts) > 2 {
-		return false
-	}
-	if parts[0] == "" {
-		return false
-	}
-	for i := range len(parts[0]) {
-		c := parts[0][i]
-		if (c < 'a' || c > 'z') && c != '-' && c != '_' {
-			return false
-		}
-	}
-	if len(parts) == 2 && parts[1] == "" {
-		return false
-	}
-	return true
+	_, _, err := broadcastpkg.ParseRoute(route)
+	return err == nil
 }
 
 func isSnowflake(id string) bool {

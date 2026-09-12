@@ -3,8 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	broadcastpkg "github.com/anggasct/aura/internal/broadcast"
 )
 
 func writeBroadcastConfig(t *testing.T, content string) string {
@@ -50,6 +53,7 @@ broadcast:
   destinations:
     default: discord:owner
     plain: discord
+    digits: discord2:owner
   fallback:
     default: discord:owner
     empty: ""
@@ -80,6 +84,9 @@ func TestLoad_BroadcastRejectsInvalid(t *testing.T) {
 		{"bad alias", "  destinations: {\"BAD ALIAS\": discord}\n"},
 		{"credential route", "  destinations: {default: \"https://evil.example/hook\"}\n"},
 		{"empty source", "  destinations: {default: \":owner\"}\n"},
+		{"slash instance", "  destinations: {default: \"discord:foo/bar\"}\n"},
+		{"space instance", "  destinations: {default: \"discord:has space\"}\n"},
+		{"long instance", "  destinations: {default: \"discord:" + strings.Repeat("a", 200) + "\"}\n"},
 		{"bad fallback", "  fallback: {default: \"a:b:c\"}\n"},
 	}
 	for _, tc := range cases {
@@ -108,5 +115,33 @@ func TestLoad_BroadcastRejectsBadShapes(t *testing.T) {
 	path = writeBroadcastConfig(t, "version: 1\nbroadcast:\n  bogus_key: 1\n")
 	if _, err := Load(path); err == nil {
 		t.Error("unknown broadcast key accepted")
+	}
+}
+
+func TestLoad_BroadcastRouteParity(t *testing.T) {
+	corpus := []struct {
+		route string
+		want  bool
+	}{
+		{"discord:owner", true},
+		{"discord", true},
+		{"discord2:owner", true},
+		{"discord:foo/bar", false},
+		{"discord:has space", false},
+		{"discord:" + strings.Repeat("a", 200), false},
+	}
+	for _, tc := range corpus {
+		_, _, err := broadcastpkg.ParseRoute(tc.route)
+		if got := err == nil; got != tc.want {
+			t.Errorf("ParseRoute(%q) = %v, want accept=%v", tc.route, got, tc.want)
+		}
+		if got := validBroadcastRoute(tc.route); got != tc.want {
+			t.Errorf("validBroadcastRoute(%q) = %v, want %v", tc.route, got, tc.want)
+		}
+		path := writeBroadcastConfig(t, "version: 1\nbroadcast:\n  destinations: {default: \""+tc.route+"\"}\n")
+		_, err = Load(path)
+		if got := err == nil; got != tc.want {
+			t.Errorf("Load(%q) accepted = %v, want %v", tc.route, got, tc.want)
+		}
 	}
 }

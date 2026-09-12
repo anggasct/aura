@@ -238,7 +238,13 @@ func TestParseRoute(t *testing.T) {
 	if err != nil || source != "discord" || instance != "owner" {
 		t.Errorf("ParseRoute() = %q, %q, %v", source, instance, err)
 	}
-	for _, raw := range []string{"", "https://x.example/y", "a:b:c", ":owner", "discord:", "has space", "UPPER"} {
+	for _, raw := range []string{"discord", "discord2:owner"} {
+		if _, _, err := ParseRoute(raw); err != nil {
+			t.Errorf("route %q rejected: %v", raw, err)
+		}
+	}
+	longInstance := "discord:" + strings.Repeat("a", maxAliasRunes+1)
+	for _, raw := range []string{"", "https://x.example/y", "a:b:c", ":owner", "discord:", "has space", "UPPER", "discord:foo/bar", "discord:has space", "discord:has\ttab", "discord:has\nnewline", longInstance} {
 		if _, _, err := ParseRoute(raw); err == nil {
 			t.Errorf("route %q accepted", raw)
 		}
