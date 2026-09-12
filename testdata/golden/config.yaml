@@ -109,6 +109,11 @@ broadcast:
   min_dispatch_gap: 5s
   destinations: {}
   fallback: {}
+scheduler:
+  enabled: true
+  default_timezone: UTC
+  default_catch_up_grace: 15m0s
+  occurrence_retention: 720h0m0s
 channels:
   discord:
     enabled: false

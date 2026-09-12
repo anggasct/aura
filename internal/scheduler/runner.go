@@ -55,19 +55,29 @@ type RunStore interface {
 	ActiveOccurrence(ctx context.Context, jobID string) (Occurrence, bool, error)
 	AttachTurn(ctx context.Context, id, turnID string, now time.Time) error
 	SettleOccurrence(ctx context.Context, id, state, turnID, resultEventID, safeErrorCode string, now time.Time) error
+	PendingFire(ctx context.Context, jobID string) (Occurrence, bool, error)
+	PruneOccurrences(ctx context.Context, jobID string, before time.Time, limit int) (int, error)
 }
+
+const defaultRetention = 720 * time.Hour
+
+const pruneBatchLimit = 100
+
+const wakeInterval = 5 * time.Minute
 
 type Runner struct {
 	jobs      RunStore
 	turns     TurnRunner
 	notify    Notifier
 	overlap   time.Duration
+	retention time.Duration
 	logger    *slog.Logger
 	principal string
 	now       func() time.Time
+	observer  Observer
 }
 
-func NewRunner(jobs RunStore, turns TurnRunner, notify Notifier, logger *slog.Logger) (*Runner, error) {
+func NewRunner(jobs RunStore, turns TurnRunner, notify Notifier, logger *slog.Logger, retention time.Duration, observer Observer) (*Runner, error) {
 	if jobs == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "run store must not be nil")
 	}
@@ -77,10 +87,13 @@ func NewRunner(jobs RunStore, turns TurnRunner, notify Notifier, logger *slog.Lo
 	if notify == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "notifier must not be nil")
 	}
+	if retention <= 0 {
+		retention = defaultRetention
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Runner{jobs: jobs, turns: turns, notify: notify, overlap: overlapPollInterval, logger: logger, principal: "cron", now: func() time.Time {
+	return &Runner{jobs: jobs, turns: turns, notify: notify, overlap: overlapPollInterval, retention: retention, logger: logger, principal: "cron", observer: observer, now: func() time.Time {
 		return time.Now().UTC()
 	}}, nil
 }
@@ -140,6 +153,18 @@ func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 		if !found || job.State == JobDeleted || job.State == JobPaused {
 			return nil
 		}
+		if pending, found, err := r.jobs.PendingFire(ctx, id); err != nil {
+			return err
+		} else if found {
+			now, err := r.clock(ctx, inv, "pending:"+strconv.FormatUint(iter, 10))
+			if err != nil {
+				return err
+			}
+			if _, err := r.fireDue(ctx, inv, &job, pending.ScheduledForUTC, now, iter); err != nil {
+				return err
+			}
+			continue
+		}
 		fire, err := NextFire(&schedule, location, anchor)
 		if err != nil {
 			return err
@@ -149,7 +174,11 @@ func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 			return err
 		}
 		if fire.After(now) {
-			if err := inv.Sleep(fire.Sub(now)); err != nil {
+			remaining := fire.Sub(now)
+			if remaining > wakeInterval {
+				remaining = wakeInterval
+			}
+			if err := inv.Sleep(remaining); err != nil {
 				return err
 			}
 			continue
@@ -167,6 +196,11 @@ func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, fire, now time.Time, iter uint64) (bool, error) {
 	tag := strconv.FormatUint(iter, 10)
 	grace := time.Duration(job.CatchUpGraceSeconds) * time.Second
+	lag := now.Sub(fire)
+	if lag < 0 {
+		lag = 0
+	}
+	r.observe(ctx, &Observation{State: OccurrenceFired, Result: ResultFired, Lag: lag})
 	if now.Sub(fire) > grace {
 		occurrence, replayed, err := r.recordFire(ctx, job, fire, now)
 		if err != nil {
@@ -181,7 +215,7 @@ func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, 
 				return true, nil
 			}
 		}
-		if err := r.settle(ctx, occurrence.ID, OccurrenceExpired, "", "", now); err != nil {
+		if err := r.settle(ctx, job.ID, &occurrence, OccurrenceExpired, "", "", now); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -213,7 +247,7 @@ func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, 
 					return true, nil
 				}
 			}
-			if err := r.settle(ctx, occurrence.ID, OccurrenceSkippedOverlap, "", "", now); err != nil {
+			if err := r.settle(ctx, job.ID, &occurrence, OccurrenceSkippedOverlap, "", "", now); err != nil {
 				return false, err
 			}
 			return true, nil
@@ -242,6 +276,7 @@ func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, 
 		})
 		if err != nil {
 			if code, ok := CodeOf(err); ok && code == ErrorCodeRuntimeOverloaded {
+				r.observe(ctx, &Observation{State: occurrence.State, Result: ResultRetried})
 				expired, err := r.awaitCapacity(ctx, inv, job, fire, tag+":"+strconv.Itoa(retry))
 				if err != nil {
 					return false, err
@@ -251,7 +286,7 @@ func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, 
 					if err != nil {
 						return false, err
 					}
-					if err := r.settle(ctx, occurrence.ID, OccurrenceExpired, "", "", settled); err != nil {
+					if err := r.settle(ctx, job.ID, &occurrence, OccurrenceExpired, "", "", settled); err != nil {
 						return false, err
 					}
 					return true, nil
@@ -273,7 +308,7 @@ func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, 
 		if err != nil {
 			return false, err
 		}
-		if err := r.settle(ctx, occurrence.ID, terminal, result.TurnID, code, settled); err != nil {
+		if err := r.settle(ctx, job.ID, &occurrence, terminal, result.TurnID, code, settled); err != nil {
 			return false, err
 		}
 		priority := PriorityInfo
@@ -340,8 +375,25 @@ func (r *Runner) awaitActive(ctx context.Context, inv durable.Invocation, job *J
 	}
 }
 
-func (r *Runner) settle(ctx context.Context, id, state, turnID, safeErrorCode string, now time.Time) error {
-	return r.jobs.SettleOccurrence(ctx, id, state, turnID, "", safeErrorCode, now)
+func (r *Runner) settle(ctx context.Context, jobID string, occurrence *Occurrence, state, turnID, safeErrorCode string, now time.Time) error {
+	if err := r.jobs.SettleOccurrence(ctx, occurrence.ID, state, turnID, "", safeErrorCode, now); err != nil {
+		return err
+	}
+	age := now.Sub(occurrence.CreatedAt)
+	if age < 0 {
+		age = 0
+	}
+	r.observe(ctx, &Observation{State: state, Result: ResultSettled, Age: age})
+	if err := r.pruneHistory(ctx, jobID, now); err != nil {
+		r.logger.WarnContext(ctx, "occurrence prune failed", "component", "schedule")
+	}
+	return nil
+}
+
+func (r *Runner) pruneHistory(ctx context.Context, jobID string, now time.Time) error {
+	cutoff := now.Add(-r.retention)
+	_, err := r.jobs.PruneOccurrences(ctx, jobID, cutoff, pruneBatchLimit)
+	return err
 }
 
 func (r *Runner) recordFire(ctx context.Context, job *Job, fire, now time.Time) (Occurrence, bool, error) {

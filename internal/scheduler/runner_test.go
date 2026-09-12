@@ -31,7 +31,7 @@ func (s *fakeJobStore) ActiveOccurrence(_ context.Context, jobID string) (Occurr
 	return *best, true, nil
 }
 
-func (s *fakeJobStore) AttachTurn(_ context.Context, id, turnID string, _ time.Time) error {
+func (s *fakeJobStore) AttachTurn(_ context.Context, id, turnID string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	occurrence, ok := s.occurrences[id]
@@ -42,11 +42,12 @@ func (s *fakeJobStore) AttachTurn(_ context.Context, id, turnID string, _ time.T
 		return Errorf(ErrorCodeOccurrenceConflict, "occurrence is no longer fired")
 	}
 	occurrence.TurnID = turnID
+	occurrence.UpdatedAt = now
 	s.occurrences[id] = occurrence
 	return nil
 }
 
-func (s *fakeJobStore) SettleOccurrence(_ context.Context, id, state, turnID, _, _ string, _ time.Time) error {
+func (s *fakeJobStore) SettleOccurrence(_ context.Context, id, state, turnID, _, _ string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	occurrence, ok := s.occurrences[id]
@@ -60,8 +61,49 @@ func (s *fakeJobStore) SettleOccurrence(_ context.Context, id, state, turnID, _,
 	if turnID != "" {
 		occurrence.TurnID = turnID
 	}
+	occurrence.UpdatedAt = now
 	s.occurrences[id] = occurrence
 	return nil
+}
+
+func (s *fakeJobStore) PendingFire(_ context.Context, jobID string) (Occurrence, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var best *Occurrence
+	for id := range s.occurrences {
+		occurrence := s.occurrences[id]
+		if occurrence.JobID != jobID || occurrence.State != OccurrenceFired || occurrence.TurnID != "" {
+			continue
+		}
+		if best == nil || occurrence.ScheduledForUTC.Before(best.ScheduledForUTC) {
+			next := occurrence
+			best = &next
+		}
+	}
+	if best == nil {
+		return Occurrence{}, false, nil
+	}
+	return *best, true, nil
+}
+
+func (s *fakeJobStore) PruneOccurrences(_ context.Context, jobID string, before time.Time, limit int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pruned := 0
+	for id := range s.occurrences {
+		if pruned >= limit {
+			break
+		}
+		occurrence := s.occurrences[id]
+		if occurrence.JobID != jobID || occurrence.State == OccurrenceFired {
+			continue
+		}
+		if occurrence.UpdatedAt.Before(before) {
+			delete(s.occurrences, id)
+			pruned++
+		}
+	}
+	return pruned, nil
 }
 
 type turnScript struct {
@@ -125,7 +167,7 @@ func newScheduleFixture(t *testing.T, spec *JobSpec, scripts []turnScript) *sche
 	store := newFakeJobStore()
 	turns := &fakeTurnRunner{scripts: scripts}
 	notify := &fakeNotifier{}
-	runner, err := NewRunner(store, turns, notify, nil)
+	runner, err := NewRunner(store, turns, notify, nil, 0, nil)
 	if err != nil {
 		t.Fatalf("NewRunner(): %v", err)
 	}
@@ -274,7 +316,7 @@ func TestRunner_ExpiredFireReplayAdvances(t *testing.T) {
 	if !done {
 		t.Fatal("first expired fire did not advance")
 	}
-	fresh, err := NewRunner(fixture.store, fixture.turns, fixture.notify, nil)
+	fresh, err := NewRunner(fixture.store, fixture.turns, fixture.notify, nil, 0, nil)
 	if err != nil {
 		t.Fatalf("NewRunner(): %v", err)
 	}
@@ -305,7 +347,7 @@ func TestRunner_SkipOverlapWithoutTurn(t *testing.T) {
 	active := Occurrence{
 		ID: "cron-active", JobID: fixture.job.ID, JobVersion: 1,
 		ScheduledForUTC: time.Date(2026, 9, 12, 11, 0, 0, 0, time.UTC),
-		State:           OccurrenceFired, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		State:           OccurrenceFired, TurnID: "turn-active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	fixture.store.mu.Lock()
 	fixture.store.occurrences[active.ID] = active
@@ -323,7 +365,7 @@ func TestRunner_SkippedFireReplayAdvances(t *testing.T) {
 	active := Occurrence{
 		ID: "cron-active", JobID: fixture.job.ID, JobVersion: 1,
 		ScheduledForUTC: time.Date(2026, 9, 12, 11, 0, 0, 0, time.UTC),
-		State:           OccurrenceFired, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		State:           OccurrenceFired, TurnID: "turn-active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	fixture.store.mu.Lock()
 	fixture.store.occurrences[active.ID] = active
@@ -338,7 +380,7 @@ func TestRunner_SkippedFireReplayAdvances(t *testing.T) {
 	if !done {
 		t.Fatal("first skipped fire did not advance")
 	}
-	fresh, err := NewRunner(fixture.store, fixture.turns, fixture.notify, nil)
+	fresh, err := NewRunner(fixture.store, fixture.turns, fixture.notify, nil, 0, nil)
 	if err != nil {
 		t.Fatalf("NewRunner(): %v", err)
 	}
@@ -374,7 +416,7 @@ func TestRunner_QueueOneWaitsThenPausesCleanly(t *testing.T) {
 	active := Occurrence{
 		ID: "cron-active", JobID: fixture.job.ID, JobVersion: 1,
 		ScheduledForUTC: time.Date(2026, 9, 12, 11, 0, 0, 0, time.UTC),
-		State:           OccurrenceFired, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		State:           OccurrenceFired, TurnID: "turn-active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	fixture.store.mu.Lock()
 	fixture.store.occurrences[active.ID] = active
@@ -506,17 +548,17 @@ func TestRunner_RejectsBadWiring(t *testing.T) {
 	store := newFakeJobStore()
 	turns := &fakeTurnRunner{}
 	notify := &fakeNotifier{}
-	if _, err := NewRunner(nil, turns, notify, nil); err == nil {
+	if _, err := NewRunner(nil, turns, notify, nil, 0, nil); err == nil {
 		t.Error("nil store accepted")
 	}
-	if _, err := NewRunner(store, nil, notify, nil); err == nil {
+	if _, err := NewRunner(store, nil, notify, nil, 0, nil); err == nil {
 		t.Error("nil turns accepted")
 	}
-	if _, err := NewRunner(store, turns, nil, nil); err == nil {
+	if _, err := NewRunner(store, turns, nil, nil, 0, nil); err == nil {
 		t.Error("nil notifier accepted")
 	}
 	var nilCtx context.Context
-	runner, err := NewRunner(store, turns, notify, nil)
+	runner, err := NewRunner(store, turns, notify, nil, 0, nil)
 	if err != nil {
 		t.Fatalf("NewRunner(): %v", err)
 	}
