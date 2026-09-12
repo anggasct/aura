@@ -145,7 +145,12 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			broadcastWiring := buildBroadcastSenders(channelAdapters, broadcastEffects, store.NewSessionService(db))
-			broadcastRunner, err := buildBroadcastRunner(cfg, db, logger, broadcastWiring)
+			broadcastRecorder, err := telemetry.NewBroadcastRecorder(pipeline.MeterProvider())
+			if err != nil {
+				return err
+			}
+			broadcastObserver := broadcastRecorderObserver(broadcastRecorder)
+			broadcastRunner, err := buildBroadcastRunner(cfg, db, logger, broadcastWiring, broadcastObserver)
 			if err != nil {
 				return err
 			}

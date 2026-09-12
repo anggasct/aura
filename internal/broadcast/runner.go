@@ -73,9 +73,10 @@ type Runner struct {
 	maxDigestItems int
 	maxDigestBytes int64
 	logger         *slog.Logger
+	observer       Observer
 }
 
-func NewRunner(items RunStore, routes map[string]string, senders map[string]Sender, policy RunPolicy, logger *slog.Logger) (*Runner, error) {
+func NewRunner(items RunStore, routes map[string]string, senders map[string]Sender, policy RunPolicy, logger *slog.Logger, observer Observer) (*Runner, error) {
 	if items == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "run store must not be nil")
 	}
@@ -128,6 +129,7 @@ func NewRunner(items RunStore, routes map[string]string, senders map[string]Send
 		maxDigestItems: policy.MaxDigestItems,
 		maxDigestBytes: policy.MaxDigestBytes,
 		logger:         logger,
+		observer:       observer,
 	}, nil
 }
 
@@ -318,12 +320,15 @@ func (r *Runner) releaseWindow(ctx context.Context, inv durable.Invocation, self
 			}
 			continue
 		}
-		parent, _, err := r.createDigest(ctx, group, index)
+		parent, replayed, err := r.createDigest(ctx, group, index)
 		if err != nil {
 			if code, ok := CodeOf(err); ok && code == ErrorCodeConflict {
 				continue
 			}
 			return err
+		}
+		if !replayed {
+			r.observe(ctx, &Observation{Priority: parent.Priority, State: StateScheduled, Result: ResultDigested, DigestCount: len(group)})
 		}
 		if err := r.deliverOne(ctx, inv, &parent, parent.ID); err != nil {
 			return err
@@ -358,7 +363,7 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 		if err != nil {
 			return err
 		}
-		return r.items.Settle(ctx, item.ID, StateFailed, "", now)
+		return r.settleObserved(ctx, item, StateFailed, "", now, 0, ResultFailed)
 	}
 	source, instance, err := ParseRoute(routeValue)
 	if err != nil {
@@ -370,7 +375,7 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 		if clockErr != nil {
 			return clockErr
 		}
-		return r.items.Settle(ctx, item.ID, StateFailed, "", now)
+		return r.settleObserved(ctx, item, StateFailed, "", now, 0, ResultFailed)
 	}
 	text := RenderText(item.ContentJSON)
 	sessionID := "broadcast:" + item.DestinationAlias
@@ -383,11 +388,14 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 			return err
 		}
 		if now.Sub(item.CreatedAt) > r.maxAge {
-			return r.items.Settle(ctx, item.ID, StateFailed, "", now)
+			return r.settleObserved(ctx, item, StateFailed, "", now, attempt-1, ResultFailed)
 		}
 		slot, err := r.items.ClaimDispatchSlot(ctx, item.DestinationAlias, now, r.gap)
 		if err != nil {
 			return err
+		}
+		if slot.After(now) {
+			r.observe(ctx, &Observation{Priority: item.Priority, State: item.State, Result: ResultRateDelayed, RateDelay: slot.Sub(now)})
 		}
 		if err := r.sleepUntil(inv, now, slot); err != nil {
 			return err
@@ -403,32 +411,33 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 		}, keyBase, attempt)
 		if sendErr != nil {
 			if attempt < r.maxAttempts {
+				r.observe(ctx, &Observation{Priority: item.Priority, State: item.State, Result: ResultRetried, Attempts: attempt})
 				if err := inv.Sleep(retryBackoff(attempt)); err != nil {
 					return err
 				}
 				continue
 			}
-			return r.fallbackOrFail(ctx, inv, item, keyBase, text, sessionID, "")
+			return r.fallbackOrFail(ctx, inv, item, keyBase, text, sessionID, "", attempt)
 		}
 		if outcome.Ambiguous {
-			return r.items.Settle(ctx, item.ID, StateUnknown, outcome.IntentID, now)
+			return r.settleObserved(ctx, item, StateUnknown, outcome.IntentID, now, attempt, ResultUnknown)
 		}
 		if outcome.Succeeded {
-			return r.items.Settle(ctx, item.ID, StateSucceeded, outcome.IntentID, now)
+			return r.settleObserved(ctx, item, StateSucceeded, outcome.IntentID, now, attempt, ResultDelivered)
 		}
-		return r.fallbackOrFail(ctx, inv, item, keyBase, text, sessionID, outcome.IntentID)
+		return r.fallbackOrFail(ctx, inv, item, keyBase, text, sessionID, outcome.IntentID, attempt)
 	}
 	return nil
 }
 
-func (r *Runner) fallbackOrFail(ctx context.Context, inv durable.Invocation, item *Item, keyBase, text, sessionID, intentID string) error {
+func (r *Runner) fallbackOrFail(ctx context.Context, inv durable.Invocation, item *Item, keyBase, text, sessionID, intentID string, attempts int) error {
 	routeValue, ok := r.fallback[item.DestinationAlias]
 	if !ok || routeValue == "" {
 		now, err := r.clock(ctx, inv, "failed:"+keyBase)
 		if err != nil {
 			return err
 		}
-		return r.items.Settle(ctx, item.ID, StateFailed, intentID, now)
+		return r.settleObserved(ctx, item, StateFailed, intentID, now, attempts, ResultFailed)
 	}
 	source, instance, err := ParseRoute(routeValue)
 	if err != nil {
@@ -440,8 +449,9 @@ func (r *Runner) fallbackOrFail(ctx context.Context, inv durable.Invocation, ite
 		if clockErr != nil {
 			return clockErr
 		}
-		return r.items.Settle(ctx, item.ID, StateFailed, intentID, now)
+		return r.settleObserved(ctx, item, StateFailed, intentID, now, attempts, ResultFailed)
 	}
+	r.observe(ctx, &Observation{Priority: item.Priority, State: item.State, Result: ResultFallback, Attempts: attempts})
 	outcome, sendErr := r.journaledSend(ctx, inv, fallbackSender, &SendRequest{Route: Route{Source: source, Instance: instance},
 		Text:           text,
 		SessionID:      sessionID,
@@ -452,15 +462,29 @@ func (r *Runner) fallbackOrFail(ctx context.Context, inv durable.Invocation, ite
 		return err
 	}
 	if sendErr != nil {
-		return r.items.Settle(ctx, item.ID, StateUnknown, intentID, now)
+		return r.settleObserved(ctx, item, StateUnknown, intentID, now, attempts, ResultUnknown)
 	}
 	if outcome.Ambiguous {
-		return r.items.Settle(ctx, item.ID, StateUnknown, outcome.IntentID, now)
+		return r.settleObserved(ctx, item, StateUnknown, outcome.IntentID, now, attempts, ResultUnknown)
 	}
 	if outcome.Succeeded {
-		return r.items.Settle(ctx, item.ID, StateSucceeded, outcome.IntentID, now)
+		return r.settleObserved(ctx, item, StateSucceeded, outcome.IntentID, now, attempts, ResultDelivered)
 	}
-	return r.items.Settle(ctx, item.ID, StateFailed, outcome.IntentID, now)
+	return r.settleObserved(ctx, item, StateFailed, outcome.IntentID, now, attempts, ResultFailed)
+}
+
+func (r *Runner) settleObserved(ctx context.Context, item *Item, state, effectID string, now time.Time, attempts int, result string) error {
+	if err := r.items.Settle(ctx, item.ID, state, effectID, now); err != nil {
+		return err
+	}
+	r.observe(ctx, &Observation{
+		Priority: item.Priority,
+		State:    state,
+		Result:   result,
+		Attempts: attempts,
+		Age:      now.Sub(item.CreatedAt),
+	})
+	return nil
 }
 
 type journaledOutcome struct {

@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/effect"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/telemetry"
 )
 
 type broadcastItemStore struct {
@@ -289,7 +290,7 @@ func buildBroadcastSenders(adapters []runtimechannelhost.ChannelPort, effects *e
 	return out
 }
 
-func buildBroadcastRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger, channels *broadcastChannels) (*broadcast.Runner, error) {
+func buildBroadcastRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger, channels *broadcastChannels, observer broadcast.Observer) (*broadcast.Runner, error) {
 	if cfg == nil {
 		return nil, errors.New("broadcast config must not be nil")
 	}
@@ -306,6 +307,7 @@ func buildBroadcastRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger, c
 			MaxDigestBytes: cfg.Broadcast.MaxDigestBytes,
 		},
 		logger,
+		observer,
 	)
 }
 
@@ -358,4 +360,21 @@ func broadcastEffectProviders(cfg *config.Config, db *sql.DB, logger *slog.Logge
 	}
 	providers["discord"] = adapter
 	return providers, nil
+}
+
+func broadcastRecorderObserver(recorder *telemetry.BroadcastRecorder) broadcast.Observer {
+	if recorder == nil {
+		return nil
+	}
+	return func(ctx context.Context, observation *broadcast.Observation) {
+		recorder.Record(ctx, &telemetry.BroadcastObservation{
+			Priority:    observation.Priority,
+			State:       observation.State,
+			Result:      observation.Result,
+			Attempts:    observation.Attempts,
+			Age:         observation.Age,
+			RateDelay:   observation.RateDelay,
+			DigestCount: observation.DigestCount,
+		})
+	}
 }
