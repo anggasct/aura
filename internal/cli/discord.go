@@ -120,16 +120,7 @@ func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, l
 	if cfg == nil || !cfg.Channels.Discord.Enabled {
 		return nil, nil, nil, nil
 	}
-	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	adapter, err := discord.New(&cfg.Channels.Discord, &discordResumeStore{
-		store:    store.NewChannelResumeStore(db),
-		instance: cfg.Channels.Discord.Instance,
-	}, executor, &discordMediaStore{
-		store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
-	}, &discordSessionEnsurer{sessions: store.NewSessionService(db)}, logger)
+	adapter, err := newDiscordAdapter(cfg, db, artifactRoot, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -140,6 +131,19 @@ func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, l
 		Remediation: discord.RemediationReviewGateway,
 	}}
 	return []runtimechannelhost.ChannelPort{adapter}, checks, discordApprovalDecider(adapter), nil
+}
+
+func newDiscordAdapter(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger) (*discord.Adapter, error) {
+	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
+	if err != nil {
+		return nil, err
+	}
+	return discord.New(&cfg.Channels.Discord, &discordResumeStore{
+		store:    store.NewChannelResumeStore(db),
+		instance: cfg.Channels.Discord.Instance,
+	}, executor, &discordMediaStore{
+		store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
+	}, &discordSessionEnsurer{sessions: store.NewSessionService(db)}, logger)
 }
 
 func discordApprovalDecider(adapter *discord.Adapter) toolbroker.ApprovalDecider {

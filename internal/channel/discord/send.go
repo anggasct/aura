@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	opSendMessage = "send_message"
+	OpSendMessage = "send_message"
 	opEditMessage = "edit_message"
 )
 
@@ -36,7 +36,7 @@ type EffectRunner interface {
 	Execute(ctx context.Context, req *effect.PrepareRequest, provider effect.Provider) (*effect.Intent, error)
 }
 
-type sendOperation struct {
+type SendOperation struct {
 	ChannelID string `json:"channel_id"`
 	Text      string `json:"text"`
 	ReplyTo   string `json:"reply_to_message_id,omitempty"`
@@ -109,7 +109,7 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "invocation must not be nil")
 	}
 	switch invocation.Operation {
-	case opSendMessage:
+	case OpSendMessage:
 		return a.invokeSend(ctx, invocation)
 	case opEditMessage:
 		return a.invokeEdit(ctx, invocation)
@@ -119,7 +119,7 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 }
 
 func (a *Adapter) invokeSend(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
-	var operation sendOperation
+	var operation SendOperation
 	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is not decodable")
 	}
@@ -180,7 +180,7 @@ func restDeadline(ctx context.Context, deadline time.Time) (context.Context, con
 	return context.WithDeadline(ctx, timeout)
 }
 
-func (a *Adapter) postMessage(ctx context.Context, token string, operation *sendOperation) (string, effect.Outcome, error) {
+func (a *Adapter) postMessage(ctx context.Context, token string, operation *SendOperation) (string, effect.Outcome, error) {
 	body, contentType, err := sendBody(operation)
 	if err != nil {
 		return "", effect.Outcome{}, err
@@ -256,7 +256,7 @@ func isDialError(err error) bool {
 	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
-func sendBody(operation *sendOperation) (body []byte, contentType string, err error) {
+func sendBody(operation *SendOperation) (body []byte, contentType string, err error) {
 	message := map[string]any{
 		"content":          operation.Text,
 		"allowed_mentions": map[string]any{"parse": []string{}},

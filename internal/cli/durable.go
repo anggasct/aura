@@ -209,6 +209,13 @@ type durableListener struct {
 
 func (l *durableListener) Name() string { return "durable" }
 
+func (l *durableListener) RegisterHandler(name string, fn durable.Handler) {
+	if l == nil || l.endpoint == nil || fn == nil {
+		return
+	}
+	l.endpoint.RegisterHandler(name, fn)
+}
+
 func (l *durableListener) Start(ctx context.Context) error {
 	if l.config.Mode == config.DurableModeExternal {
 		gateCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

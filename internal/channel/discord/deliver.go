@@ -236,7 +236,7 @@ func (a *Adapter) postChunks(ctx context.Context, req *runtimechannelhost.Delive
 }
 
 func (a *Adapter) executePost(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, replyTo *string, index int, text string, upload *uploadChunk) (string, error) {
-	operation := sendOperation{ChannelID: channelID, Text: text}
+	operation := SendOperation{ChannelID: channelID, Text: text}
 	if replyTo != nil {
 		operation.ReplyTo = *replyTo
 	}
@@ -254,7 +254,7 @@ func (a *Adapter) executePost(ctx context.Context, req *runtimechannelhost.Deliv
 		SessionID:      req.ConversationID,
 		IdempotencyKey: idempotencyKey(keyBase(req), label, text),
 		Provider:       "discord",
-		Operation:      opSendMessage,
+		Operation:      OpSendMessage,
 		Classification: effect.ClassificationEffectful,
 		Request:        request,
 		EventKind:      effect.EventKindChannelRequested,
