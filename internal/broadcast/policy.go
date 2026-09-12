@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/wallclock"
 )
 
 type QuietConfig struct {
@@ -40,38 +42,6 @@ func inQuietWindow(wallMin, startMin, endMin int) bool {
 	return wallMin >= startMin || wallMin < endMin
 }
 
-func resolveLocalInstant(loc *time.Location, year int, month time.Month, day, hour, minute int) time.Time {
-	roundTrips := func(instant time.Time) bool {
-		wall := instant.In(loc)
-		return wall.Year() == year && wall.Month() == month && wall.Day() == day &&
-			wall.Hour() == hour && wall.Minute() == minute
-	}
-	midnight := time.Date(year, month, day, 0, 0, 0, 0, loc)
-	_, midnightOffset := midnight.Zone()
-	first := time.Date(year, month, day, hour, minute, 0, 0, time.UTC).Add(-time.Duration(midnightOffset) * time.Second)
-	if roundTrips(first) {
-		return first
-	}
-	_, guessOffset := first.Zone()
-	second := time.Date(year, month, day, hour, minute, 0, 0, time.UTC).Add(-time.Duration(guessOffset) * time.Second)
-	if roundTrips(second) {
-		return second
-	}
-	target := hour*60 + minute
-	start := time.Date(year, month, day, 0, 0, 0, 0, loc)
-	for step := range 24 * 60 {
-		forward := start.Add(time.Duration(step+1) * time.Minute)
-		wall := forward.In(loc)
-		if wall.Year() != year || wall.Month() != month || wall.Day() != day {
-			return forward
-		}
-		if wall.Hour()*60+wall.Minute() >= target {
-			return forward
-		}
-	}
-	return first
-}
-
 func quietRelease(now time.Time, quiet QuietConfig) time.Time {
 	wall := now.In(quiet.Location)
 	wallMin := wall.Hour()*60 + wall.Minute()
@@ -79,10 +49,10 @@ func quietRelease(now time.Time, quiet QuietConfig) time.Time {
 		return now
 	}
 	endHour, endMinute := quiet.EndMin/60, quiet.EndMin%60
-	release := resolveLocalInstant(quiet.Location, wall.Year(), wall.Month(), wall.Day(), endHour, endMinute)
+	release := wallclock.ResolveLocalInstant(quiet.Location, wall.Year(), wall.Month(), wall.Day(), endHour, endMinute)
 	if !release.After(now) {
 		next := now.In(quiet.Location).AddDate(0, 0, 1)
-		release = resolveLocalInstant(quiet.Location, next.Year(), next.Month(), next.Day(), endHour, endMinute)
+		release = wallclock.ResolveLocalInstant(quiet.Location, next.Year(), next.Month(), next.Day(), endHour, endMinute)
 	}
 	return release
 }
