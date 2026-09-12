@@ -318,6 +318,52 @@ func TestRunner_SkipOverlapWithoutTurn(t *testing.T) {
 	}
 }
 
+func TestRunner_SkippedFireReplayAdvances(t *testing.T) {
+	fixture := newScheduleFixture(t, nil, nil)
+	active := Occurrence{
+		ID: "cron-active", JobID: fixture.job.ID, JobVersion: 1,
+		ScheduledForUTC: time.Date(2026, 9, 12, 11, 0, 0, 0, time.UTC),
+		State:           OccurrenceFired, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	fixture.store.mu.Lock()
+	fixture.store.occurrences[active.ID] = active
+	fixture.store.mu.Unlock()
+	fire := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := fire.Add(time.Minute)
+	inv := stubInvocation{}
+	done, err := fixture.runner.fireDue(t.Context(), inv, &fixture.job, fire, now, 1)
+	if err != nil {
+		t.Fatalf("first skipped fire: %v", err)
+	}
+	if !done {
+		t.Fatal("first skipped fire did not advance")
+	}
+	fresh, err := NewRunner(fixture.store, fixture.turns, fixture.notify, nil)
+	if err != nil {
+		t.Fatalf("NewRunner(): %v", err)
+	}
+	done, err = fresh.fireDue(t.Context(), inv, &fixture.job, fire, now, 1)
+	if err != nil {
+		t.Fatalf("skipped replay: %v", err)
+	}
+	if !done {
+		t.Fatal("skipped replay did not advance")
+	}
+	if fixture.turns.callCount() != 0 {
+		t.Error("skipped replay ran a turn")
+	}
+	occurrence, found, err := fixture.store.OccurrenceByFire(t.Context(), fixture.job.ID, fire.UTC())
+	if err != nil {
+		t.Fatalf("OccurrenceByFire(): %v", err)
+	}
+	if !found {
+		t.Fatal("skipped occurrence missing after replay")
+	}
+	if occurrence.State != OccurrenceSkippedOverlap {
+		t.Errorf("occurrence state = %q, want skipped_overlap", occurrence.State)
+	}
+}
+
 func TestRunner_QueueOneWaitsThenPausesCleanly(t *testing.T) {
 	spec := &JobSpec{
 		Name: "nightly", CronExpression: "* * * * *", Timezone: "UTC",

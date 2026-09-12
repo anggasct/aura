@@ -200,9 +200,18 @@ func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, 
 			return false, err
 		}
 		if found {
-			occurrence, _, err := r.recordFire(ctx, job, fire, now)
+			occurrence, replayed, err := r.recordFire(ctx, job, fire, now)
 			if err != nil {
 				return false, err
+			}
+			if replayed {
+				current, found, err := r.jobs.OccurrenceByFire(ctx, job.ID, fire.UTC())
+				if err != nil {
+					return false, err
+				}
+				if found && current.State != OccurrenceFired {
+					return true, nil
+				}
 			}
 			if err := r.settle(ctx, occurrence.ID, OccurrenceSkippedOverlap, "", "", now); err != nil {
 				return false, err
