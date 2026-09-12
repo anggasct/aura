@@ -12,14 +12,16 @@ import (
 )
 
 type fakeRunStore struct {
-	mu      sync.Mutex
-	records map[string]ItemRecord
-	byKey   map[string]string
-	cursors map[string]time.Time
+	mu           sync.Mutex
+	records      map[string]ItemRecord
+	byKey        map[string]string
+	cursors      map[string]time.Time
+	attemptTimes map[string][]time.Time
+	slotTimes    []time.Time
 }
 
 func newFakeRunStore() *fakeRunStore {
-	return &fakeRunStore{records: map[string]ItemRecord{}, byKey: map[string]string{}, cursors: map[string]time.Time{}}
+	return &fakeRunStore{records: map[string]ItemRecord{}, byKey: map[string]string{}, cursors: map[string]time.Time{}, attemptTimes: map[string][]time.Time{}}
 }
 
 func (s *fakeRunStore) seed(record *ItemRecord) {
@@ -129,13 +131,17 @@ func (s *fakeRunStore) Settle(_ context.Context, id, state, effectID string, _ t
 	return nil
 }
 
-func (s *fakeRunStore) NoteAttempt(_ context.Context, id string, attempt int64, _ time.Time) error {
+func (s *fakeRunStore) NoteAttempt(_ context.Context, id string, attempt int64, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.records[id]
 	if !ok {
 		return Errorf(ErrorCodeInvalidArgument, "broadcast item not found")
 	}
+	if s.attemptTimes == nil {
+		s.attemptTimes = map[string][]time.Time{}
+	}
+	s.attemptTimes[id] = append(s.attemptTimes[id], now.UTC())
 	if attempt > record.AttemptCount {
 		record.AttemptCount = attempt
 		s.records[id] = record
@@ -146,6 +152,7 @@ func (s *fakeRunStore) NoteAttempt(_ context.Context, id string, attempt int64, 
 func (s *fakeRunStore) ClaimDispatchSlot(_ context.Context, alias string, now time.Time, gap time.Duration) (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.slotTimes = append(s.slotTimes, now.UTC())
 	slot := now.UTC()
 	if cursor, ok := s.cursors[alias]; ok && cursor.After(slot) {
 		slot = cursor
@@ -159,6 +166,12 @@ func (s *fakeRunStore) stateOf(id string) (state string, attempts int64, effect 
 	defer s.mu.Unlock()
 	record := s.records[id]
 	return record.State, record.AttemptCount, record.EffectID
+}
+
+func (s *fakeRunStore) attemptStamps(id string) []time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]time.Time(nil), s.attemptTimes[id]...)
 }
 
 type sendScript struct {
@@ -335,6 +348,80 @@ func TestRunner_TransportErrorRetriesThenSucceeds(t *testing.T) {
 	}
 }
 
+func TestRunner_HeldItemWaitsUntilRelease(t *testing.T) {
+	fixture := newRunnerFixture([]sendScript{successOutcome("intent-held")})
+	release := time.Now().UTC().Add(time.Hour)
+	fixture.store.seed(&ItemRecord{
+		ID: "bcst-held", Producer: "cron", IdempotencyKey: "key-held", ContentDigest: "d-held",
+		Priority: PriorityInfo, DestinationAlias: "default", ContentJSON: `{"text":"held"}`,
+		State: StateHeld, NotBefore: release, CreatedAt: release.Add(-time.Hour), UpdatedAt: release.Add(-time.Hour),
+	})
+	startBroadcastRun(t, fixture, "bcst-held")
+	time.Sleep(200 * time.Millisecond)
+	if got := fixture.sender.callCount(); got != 0 {
+		t.Fatalf("sends before release = %d, want 0", got)
+	}
+	waitBroadcastState(t, fixture, "bcst-held", StateSucceeded)
+	if fixture.sender.callCount() != 1 {
+		t.Fatalf("sends after release = %d, want 1", fixture.sender.callCount())
+	}
+}
+
+func TestRunner_RetryAttemptsUseFreshClock(t *testing.T) {
+	fixture := newRunnerFixture([]sendScript{
+		{err: errors.New("connection reset")},
+		{err: errors.New("connection reset")},
+		successOutcome("intent-3"),
+	})
+	now := time.Now().UTC()
+	fixture.store.seed(&ItemRecord{
+		ID: "bcst-retry", Producer: "cron", IdempotencyKey: "key-retry", ContentDigest: "d-retry",
+		Priority: PriorityWarning, DestinationAlias: "default", ContentJSON: `{"text":"hello"}`,
+		State: StateScheduled, NotBefore: now, CreatedAt: now, UpdatedAt: now,
+	})
+	startBroadcastRun(t, fixture, "bcst-retry")
+	waitBroadcastState(t, fixture, "bcst-retry", StateSucceeded)
+	if fixture.sender.callCount() != 3 {
+		t.Fatalf("sends = %d, want 3 attempts", fixture.sender.callCount())
+	}
+	stamps := fixture.store.attemptStamps("bcst-retry")
+	if len(stamps) != 3 {
+		t.Fatalf("attempt timestamps = %d, want 3", len(stamps))
+	}
+	if stamps[0].Equal(stamps[1]) || stamps[1].Equal(stamps[2]) || stamps[0].Equal(stamps[2]) {
+		t.Errorf("attempt timestamps are not distinct: %v", stamps)
+	}
+}
+
+func TestRunner_WindowRunUsesIndependentClocks(t *testing.T) {
+	fixture := newRunnerFixture([]sendScript{successOutcome("intent-a"), successOutcome("intent-b")})
+	base := time.Now().UTC().Add(-time.Hour)
+	fixture.store.seed(&ItemRecord{
+		ID: "bcst-wa", Producer: "cron", IdempotencyKey: "key-wa", ContentDigest: "d-wa",
+		Priority: PriorityInfo, DestinationAlias: "default", ContentJSON: `{"text":"a"}`,
+		State: StateHeld, NotBefore: base, CreatedAt: base, UpdatedAt: base,
+	})
+	fixture.store.seed(&ItemRecord{
+		ID: "bcst-wb", Producer: "cron", IdempotencyKey: "key-wb", ContentDigest: "d-wb",
+		Priority: PriorityInfo, DestinationAlias: "default", ContentJSON: `{"text":"b"}`,
+		State: StateHeld, NotBefore: base.Add(time.Minute), CreatedAt: base, UpdatedAt: base,
+	})
+	startBroadcastRun(t, fixture, "bcst-wa")
+	waitBroadcastState(t, fixture, "bcst-wa", StateSucceeded)
+	waitBroadcastState(t, fixture, "bcst-wb", StateSucceeded)
+	if fixture.sender.callCount() != 2 {
+		t.Fatalf("sends = %d, want 2 independent deliveries", fixture.sender.callCount())
+	}
+	first := fixture.store.attemptStamps("bcst-wa")
+	second := fixture.store.attemptStamps("bcst-wb")
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatalf("missing attempt timestamps: %v %v", first, second)
+	}
+	if first[0].Equal(second[0]) {
+		t.Errorf("window items share one clock timestamp: %v", first[0])
+	}
+}
+
 func TestRunner_DefinitiveFailureFallsBack(t *testing.T) {
 	policy := testRunPolicy()
 	policy.Fallback = map[string]string{"default": "discord:fallback-channel"}
@@ -408,6 +495,7 @@ func TestRunner_HeldItemsDigestOnce(t *testing.T) {
 		State: StateHeld, NotBefore: release, CreatedAt: release.Add(-30 * time.Minute), UpdatedAt: release.Add(-30 * time.Minute),
 	})
 	startBroadcastRun(t, fixture, "bcst-1")
+	time.Sleep(100 * time.Millisecond)
 	fixture.clock.Advance(24 * time.Hour)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {

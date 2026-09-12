@@ -246,8 +246,32 @@ func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 	if now.Sub(item.CreatedAt) > r.maxAge {
 		return r.items.Settle(ctx, id, StateFailed, item.EffectID, now)
 	}
+	if item.NotBefore.After(now) {
+		if err := r.sleepUntil(inv, now, item.NotBefore); err != nil {
+			return err
+		}
+		fresh, err := r.clock(ctx, inv, "release:"+id)
+		if err != nil {
+			return err
+		}
+		now = fresh
+		if now.Before(item.NotBefore) {
+			now = item.NotBefore
+		}
+		if now.Sub(item.CreatedAt) > r.maxAge {
+			return r.items.Settle(ctx, id, StateFailed, item.EffectID, now)
+		}
+		current, found, err := r.items.Load(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !found || terminalState(current.State) {
+			return nil
+		}
+		item = current
+	}
 	if item.State == StateHeld {
-		if err := r.releaseWindow(ctx, inv, &item); err != nil {
+		if err := r.releaseWindow(ctx, inv, &item, now); err != nil {
 			return err
 		}
 		current, found, err := r.items.Load(ctx, id)
@@ -270,8 +294,8 @@ func toItems(records []FullItem) []Item {
 	return items
 }
 
-func (r *Runner) releaseWindow(ctx context.Context, inv durable.Invocation, self *FullItem) error {
-	members, err := r.items.ListHeld(ctx, self.DestinationAlias, self.Priority, self.NotBefore, maxReleaseScan)
+func (r *Runner) releaseWindow(ctx context.Context, inv durable.Invocation, self *FullItem, now time.Time) error {
+	members, err := r.items.ListHeld(ctx, self.DestinationAlias, self.Priority, now, maxReleaseScan)
 	if err != nil {
 		return err
 	}
@@ -354,7 +378,7 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		now, err := r.clock(ctx, inv, "attempt")
+		now, err := r.clock(ctx, inv, "attempt:"+keyBase+":a"+strconv.Itoa(attempt))
 		if err != nil {
 			return err
 		}
