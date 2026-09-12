@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/health"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/toolbroker"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
@@ -115,13 +116,13 @@ func (s *discordMediaStore) Put(ctx context.Context, content io.Reader, meta *di
 	return discord.ArtifactReceipt{RefID: ref.ID, Digest: ref.BlobDigest, SizeBytes: ref.SizeBytes}, nil
 }
 
-func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, error) {
+func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, toolbroker.ApprovalDecider, error) {
 	if cfg == nil || !cfg.Channels.Discord.Enabled {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	adapter, err := discord.New(&cfg.Channels.Discord, &discordResumeStore{
 		store:    store.NewChannelResumeStore(db),
@@ -130,7 +131,7 @@ func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, l
 		store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
 	}, &discordSessionEnsurer{sessions: store.NewSessionService(db)}, logger)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	checks := []health.RegisteredCheck{{
 		ID:          "discord",
@@ -138,5 +139,30 @@ func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, l
 		Timeout:     time.Duration(cfg.Health.CheckTimeout),
 		Remediation: discord.RemediationReviewGateway,
 	}}
-	return []runtimechannelhost.ChannelPort{adapter}, checks, nil
+	return []runtimechannelhost.ChannelPort{adapter}, checks, discordApprovalDecider(adapter), nil
+}
+
+func discordApprovalDecider(adapter *discord.Adapter) toolbroker.ApprovalDecider {
+	if adapter == nil {
+		return nil
+	}
+	return func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+		if prompt == nil {
+			return false, errors.New("approval prompt must not be nil")
+		}
+		return adapter.Decide(ctx, &discord.ApprovalPrompt{
+			ToolName:       prompt.ToolName,
+			ToolVersion:    prompt.ToolVersion,
+			SessionID:      prompt.SessionID,
+			TurnID:         prompt.TurnID,
+			PrincipalID:    prompt.PrincipalID,
+			Arguments:      prompt.Arguments,
+			Network:        prompt.Network,
+			Timeout:        prompt.Timeout,
+			MaxOutputBytes: prompt.MaxOutputBytes,
+			PolicyVersion:  prompt.PolicyVersion,
+			ReasonCode:     prompt.ReasonCode,
+			ExpiresAt:      prompt.ExpiresAt,
+		})
+	}
 }

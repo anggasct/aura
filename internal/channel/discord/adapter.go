@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -34,6 +35,11 @@ const (
 	invalidWait    = 2 * time.Second
 	readMultiplier = 2
 	stableSession  = time.Minute
+)
+
+const (
+	intakeQueueCap     = 128
+	maxDeliverInflight = 8
 )
 
 const discordRestBase = "https://discord.com/api/v10"
@@ -72,6 +78,13 @@ type Adapter struct {
 	gate         *editGate
 	postedMu     sync.Mutex
 	posted       map[string][]string
+	approvalsMu  sync.Mutex
+	approvals    map[string]*pendingApproval
+	seen         map[string]struct{}
+	approvalKey  [32]byte
+	targetsMu    sync.Mutex
+	targets      map[string]approvalBinding
+	deliverSem   chan struct{}
 	selfID       string
 	sessionID    string
 	sequence     atomic.Int64
@@ -103,6 +116,10 @@ func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media M
 	if err != nil {
 		return nil, err
 	}
+	var approvalKey [32]byte
+	if _, err := rand.Read(approvalKey[:]); err != nil {
+		return nil, Errorf(ErrorCodeConnectionFailed, "approval token key is unavailable")
+	}
 	adapter := &Adapter{
 		cfg:          cfg,
 		tokenRef:     tokenRef,
@@ -117,6 +134,11 @@ func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media M
 		httpClient:   &http.Client{Timeout: mediaTimeout},
 		gate:         newEditGate(time.Duration(cfg.MinEditInterval)),
 		posted:       map[string][]string{},
+		approvals:    map[string]*pendingApproval{},
+		seen:         map[string]struct{}{},
+		approvalKey:  approvalKey,
+		targets:      map[string]approvalBinding{},
+		deliverSem:   make(chan struct{}, maxDeliverInflight),
 		retryBase:    backoffBase,
 		retryCap:     backoffMax,
 		invalidDelay: invalidWait,

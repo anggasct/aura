@@ -33,7 +33,7 @@ func enabledDiscordConfig() config.Config {
 func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 	db := discordTestDB(t)
 	defaults := config.Default()
-	adapters, checks, err := buildChannelAdapters(&defaults, db, t.TempDir(), nil)
+	adapters, checks, _, err := buildChannelAdapters(&defaults, db, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -45,9 +45,12 @@ func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 func TestBuildChannelAdapters_EnabledBuildsAdapterAndCheck(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
-	adapters, checks, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil)
+	adapters, checks, decider, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
+	}
+	if decider == nil {
+		t.Error("decider is nil for enabled adapter")
 	}
 	if len(adapters) != 1 {
 		t.Fatalf("adapters = %d, want 1", len(adapters))
@@ -64,7 +67,7 @@ func TestBuildChannelAdapters_RejectsBadTokenRef(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
 	cfg.Channels.Discord.BotTokenRef = "not-a-reference"
-	if _, _, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil); err == nil {
+	if _, _, _, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil); err == nil {
 		t.Fatal("bad token reference accepted")
 	}
 }
