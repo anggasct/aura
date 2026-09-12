@@ -219,6 +219,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateScheduler(&cfg.Scheduler); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateMemory(&cfg.Memory); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -380,6 +383,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateSchedulerShapes(doc); err != nil {
+		return err
+	}
+	if err := validateMemoryShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -765,6 +771,35 @@ func validateSchedulerShapes(doc *yamlv3.Node) error {
 		case "default_timezone", "default_catch_up_grace", "occurrence_retention":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 				return fmt.Errorf("scheduler.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func validateMemoryShapes(doc *yamlv3.Node) error {
+	memoryNode := mappingValue(doc, "memory")
+	if memoryNode == nil {
+		return nil
+	}
+	if memoryNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("memory must be a mapping at line %d", memoryNode.Line)
+	}
+	for i := 0; i+1 < len(memoryNode.Content); i += 2 {
+		keyNode := memoryNode.Content[i]
+		valueNode := memoryNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled", "english_stemming":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("memory.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "max_documents", "recall_token_budget":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("memory.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "locale", "summary_prompt_version", "summary_ttl":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("memory.%s must be a string at line %d", keyNode.Value, valueNode.Line)
 			}
 		}
 	}
@@ -1742,6 +1777,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyWebhookDefaults(cfg, doc, &defaults.Webhook)
 	applyBroadcastDefaults(cfg, doc, &defaults.Broadcast)
 	applySchedulerDefaults(cfg, doc, &defaults.Scheduler)
+	applyMemoryDefaults(cfg, doc, &defaults.Memory)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
 }
@@ -1848,6 +1884,24 @@ func applySchedulerDefaults(cfg *Config, doc *yamlv3.Node, defaults *Scheduler) 
 	}
 	if cfg.Scheduler.OccurrenceRetention == 0 && !configValuePresent(doc, "scheduler", "occurrence_retention") && !envValuePresent("scheduler.occurrence_retention") {
 		cfg.Scheduler.OccurrenceRetention = defaults.OccurrenceRetention
+	}
+}
+
+func applyMemoryDefaults(cfg *Config, doc *yamlv3.Node, defaults *Memory) {
+	if !cfg.Memory.Enabled && !configValuePresent(doc, "memory", "enabled") && !envValuePresent("memory.enabled") {
+		cfg.Memory.Enabled = defaults.Enabled
+	}
+	if cfg.Memory.MaxDocuments == 0 && !configValuePresent(doc, "memory", "max_documents") && !envValuePresent("memory.max_documents") {
+		cfg.Memory.MaxDocuments = defaults.MaxDocuments
+	}
+	if cfg.Memory.RecallTokenBudget == 0 && !configValuePresent(doc, "memory", "recall_token_budget") && !envValuePresent("memory.recall_token_budget") {
+		cfg.Memory.RecallTokenBudget = defaults.RecallTokenBudget
+	}
+	if cfg.Memory.SummaryPromptVersion == "" && !configValuePresent(doc, "memory", "summary_prompt_version") && !envValuePresent("memory.summary_prompt_version") {
+		cfg.Memory.SummaryPromptVersion = defaults.SummaryPromptVersion
+	}
+	if cfg.Memory.SummaryTTL == 0 && !configValuePresent(doc, "memory", "summary_ttl") && !envValuePresent("memory.summary_ttl") {
+		cfg.Memory.SummaryTTL = defaults.SummaryTTL
 	}
 }
 
@@ -2539,6 +2593,29 @@ func validateScheduler(scheduler *Scheduler) error {
 	}
 	if scheduler.OccurrenceRetention <= 0 {
 		problems = append(problems, errors.New("scheduler.occurrence_retention must be positive"))
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateMemory(memory *Memory) error {
+	if memory == nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "memory must not be nil"}
+	}
+	var problems []error
+	if memory.MaxDocuments <= 0 || memory.MaxDocuments > 50 {
+		problems = append(problems, errors.New("memory.max_documents must be between 1 and 50"))
+	}
+	if memory.RecallTokenBudget <= 0 || memory.RecallTokenBudget > 8000 {
+		problems = append(problems, errors.New("memory.recall_token_budget must be between 1 and 8000"))
+	}
+	if strings.TrimSpace(memory.SummaryPromptVersion) == "" {
+		problems = append(problems, errors.New("memory.summary_prompt_version must not be empty"))
+	}
+	if memory.SummaryTTL <= 0 {
+		problems = append(problems, errors.New("memory.summary_ttl must be positive"))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

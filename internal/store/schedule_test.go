@@ -250,14 +250,18 @@ func TestScheduleStore_ActiveJobsAndListJobs(t *testing.T) {
 	}
 }
 
-func TestScheduleStore_SchemaVersionTwelve(t *testing.T) {
+func TestScheduleStore_SchemaAppliesCleanly(t *testing.T) {
 	db := newTestDB(t)
 	applied, latest, err := SchemaVersions(t.Context(), db)
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}
-	if latest != 12 || applied != 12 {
-		t.Errorf("schema = applied %d latest %d, want 12", applied, latest)
+	if applied != latest {
+		t.Errorf("applied schema = %d, latest = %d; want fully migrated", applied, latest)
+	}
+	var ddl string
+	if err := db.QueryRowContext(t.Context(), `SELECT sql FROM sqlite_master WHERE name = 'scheduled_occurrence'`).Scan(&ddl); err != nil {
+		t.Fatalf("scheduled_occurrence DDL: %v", err)
 	}
 }
 

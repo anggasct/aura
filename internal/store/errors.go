@@ -39,6 +39,9 @@ const (
 	ErrorCodeScheduleConflict          ErrorCode = "schedule_conflict"
 	ErrorCodeScheduleNotFound          ErrorCode = "schedule_not_found"
 	ErrorCodeScheduleInvalid           ErrorCode = "schedule_invalid"
+	ErrorCodeMemoryConflict            ErrorCode = "memory_conflict"
+	ErrorCodeMemoryNotFound            ErrorCode = "memory_not_found"
+	ErrorCodeMemoryInvalid             ErrorCode = "memory_invalid"
 )
 
 type Error struct {
