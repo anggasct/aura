@@ -191,11 +191,13 @@ func (a *Adapter) runSession(ctx context.Context, ws *websocket.Conn, token stri
 	session, cancel := context.WithCancel(ctx)
 	defer cancel()
 	queue := make(chan intakeItem, intakeQueueCap)
-	dispatchDone := make(chan struct{})
-	go a.dispatchIntake(session, queue, dispatchDone)
+	dispatchDone := make(chan error, 1)
+	go a.dispatchIntake(session, cancel, queue, dispatchDone)
 	err = a.pump(session, ws, interval, queue)
 	close(queue)
-	<-dispatchDone
+	if dispatchErr := <-dispatchDone; err == nil {
+		err = dispatchErr
+	}
 	return err
 }
 
@@ -204,17 +206,21 @@ type intakeItem struct {
 	seq *int64
 }
 
-func (a *Adapter) dispatchIntake(ctx context.Context, queue <-chan intakeItem, done chan<- struct{}) {
+func (a *Adapter) dispatchIntake(ctx context.Context, cancel context.CancelFunc, queue <-chan intakeItem, done chan<- error) {
 	defer close(done)
 	for item := range queue {
 		admitted, err := a.admit(ctx, item.msg)
 		if err != nil {
+			a.logger.WarnContext(ctx, "intake dispatch failed", "component", "discord")
+			cancel()
+			done <- err
 			return
 		}
 		if admitted && item.seq != nil {
 			a.saveCursor(ctx, a.sessionID, *item.seq)
 		}
 	}
+	done <- nil
 }
 
 func (a *Adapter) pump(ctx context.Context, ws *websocket.Conn, interval time.Duration, queue chan<- intakeItem) error {

@@ -472,3 +472,85 @@ func TestRenderApprovalCardBoundsArguments(t *testing.T) {
 		t.Errorf("card runes = %d, want bounded arguments", len([]rune(card)))
 	}
 }
+
+func TestDecide_ClickDuringCardPostStillDisables(t *testing.T) {
+	var mu sync.Mutex
+	var patches []patchCall
+	postSeen := make(chan string, 1)
+	allowPost := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(io.LimitReader(r.Body, approvalHTTPBytes))
+		_ = r.Body.Close()
+		var decoded map[string]any
+		_ = json.Unmarshal(body, &decoded)
+		path := strings.Trim(r.URL.Path, "/")
+		segments := strings.Split(path, "/")
+		switch {
+		case r.Method == http.MethodPost && len(segments) == 3 && segments[0] == "channels" && segments[2] == "messages":
+			approve := ""
+			if components, _ := decoded["components"].([]any); len(components) == 1 {
+				if row, _ := components[0].(map[string]any); row != nil {
+					if buttons, _ := row["components"].([]any); len(buttons) == 2 {
+						if first, _ := buttons[0].(map[string]any); first != nil {
+							approve, _ = first["custom_id"].(string)
+						}
+					}
+				}
+			}
+			select {
+			case postSeen <- approve:
+			default:
+			}
+			<-allowPost
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"card-race"}`))
+		case r.Method == http.MethodPost && len(segments) == 4 && segments[0] == "interactions" && segments[3] == "callback":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPatch && len(segments) == 4 && segments[0] == "channels" && segments[2] == "messages":
+			mu.Lock()
+			patches = append(patches, patchCall{channel: segments[1], message: segments[3], body: decoded})
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
+	logs := &logCapture{}
+	logger := slog.New(slog.NewTextHandler(logs, nil))
+	cfg := testAdapterConfig()
+	adapter, err := New(&cfg, &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, logger)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	adapter.restBase = srv.URL
+	adapter.rememberTarget("dm:111", approvalBinding{principal: "111", channelID: "333"})
+
+	result := decideAsync(t.Context(), adapter, testPrompt("dm:111", time.Now().Add(time.Minute)))
+	var approve string
+	select {
+	case approve = <-postSeen:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for approval card post")
+	}
+	if approve == "" {
+		t.Fatal("card post carries no approve custom id")
+	}
+	adapter.resolveComponentClick(t.Context(), clickPayload("ix-race", "111", "", "333", approve))
+	close(allowPost)
+	outcome := awaitDecide(t, result, 5*time.Second)
+	if outcome.err != nil || !outcome.accepted {
+		t.Fatalf("Decide() = %v, %v; want accepted", outcome.accepted, outcome.err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(patches) != 1 {
+		t.Fatalf("disable patches = %d, want exactly 1", len(patches))
+	}
+	if patches[0].message != "card-race" {
+		t.Errorf("disabled message = %q, want card-race", patches[0].message)
+	}
+}

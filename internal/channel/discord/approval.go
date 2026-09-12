@@ -201,14 +201,24 @@ func (a *Adapter) Decide(ctx context.Context, prompt *ApprovalPrompt) (bool, err
 	select {
 	case outcome := <-pending.result:
 		a.dropApproval(tokenID, pending)
+		a.approvalsMu.Lock()
+		cardChannel, cardMessage := pending.cardChannel, pending.cardMessage
+		a.approvalsMu.Unlock()
+		a.disableApprovalCard(context.WithoutCancel(ctx), token, cardChannel, cardMessage)
 		return outcome.accepted, nil
 	case <-timer.C:
 		a.dropApproval(tokenID, pending)
-		a.disableApprovalCard(context.WithoutCancel(ctx), token, pending.cardChannel, pending.cardMessage)
+		a.approvalsMu.Lock()
+		cardChannel, cardMessage := pending.cardChannel, pending.cardMessage
+		a.approvalsMu.Unlock()
+		a.disableApprovalCard(context.WithoutCancel(ctx), token, cardChannel, cardMessage)
 		return false, nil
 	case <-ctx.Done():
 		a.dropApproval(tokenID, pending)
-		a.disableApprovalCard(context.WithoutCancel(ctx), token, pending.cardChannel, pending.cardMessage)
+		a.approvalsMu.Lock()
+		cardChannel, cardMessage := pending.cardChannel, pending.cardMessage
+		a.approvalsMu.Unlock()
+		a.disableApprovalCard(context.WithoutCancel(ctx), token, cardChannel, cardMessage)
 		return false, ctx.Err()
 	}
 }
@@ -388,10 +398,6 @@ func (a *Adapter) resolveComponentClick(ctx context.Context, interaction *intera
 		return
 	}
 	pending.decided = true
-	cardChannel, cardMessage := pending.cardChannel, pending.cardMessage
 	a.approvalsMu.Unlock()
 	pending.result <- approvalOutcome{accepted: action == approvalActionOk}
-	if token, err := a.tokenRef.Resolve(); err == nil {
-		a.disableApprovalCard(context.WithoutCancel(ctx), token, cardChannel, cardMessage)
-	}
 }

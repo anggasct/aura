@@ -2,6 +2,9 @@ package discord
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/health"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
 func TestAdapter_AdmitsAllowlistedMessage(t *testing.T) {
@@ -311,5 +315,88 @@ func TestAdapter_TokenUnavailableNeverDials(t *testing.T) {
 	case <-gateway.conns:
 		t.Fatal("gateway dialed without a token")
 	default:
+	}
+}
+
+type failingSink struct {
+	calls atomic.Int64
+}
+
+func (s *failingSink) Accept(ctx context.Context, env *runtimeingress.IngressEnvelope) (runtimeingress.TurnRef, error) {
+	s.calls.Add(1)
+	return runtimeingress.TurnRef{}, errors.New("ingress unavailable")
+}
+
+func TestAdapter_IntakeErrorReconnectsInsteadOfStalling(t *testing.T) {
+	gateway := newFakeGateway(t, true)
+	sink := &failingSink{}
+	resumes := &memoryResumeStore{}
+	logs := &logCapture{}
+	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
+	logger := slog.New(slog.NewTextHandler(logs, nil))
+	cfg := testAdapterConfig()
+	adapter, err := New(&cfg, resumes, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, logger)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	adapter.retryBase = 5 * time.Millisecond
+	adapter.retryCap = 50 * time.Millisecond
+	adapter.invalidDelay = 5 * time.Millisecond
+	adapter.rateCap = 50 * time.Millisecond
+	adapter.restBase = gateway.self.URL
+	adapter.dial = func(ctx context.Context, url string) (*websocket.Conn, error) {
+		type dialResult struct {
+			ws  *websocket.Conn
+			err error
+		}
+		result := make(chan dialResult, 1)
+		go func() {
+			ws, err := websocket.Dial(gateway.url, "", "http://localhost/")
+			result <- dialResult{ws, err}
+		}()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case outcome := <-result:
+			return outcome.ws, outcome.err
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- adapter.Start(ctx, sink) }()
+
+	first := gateway.nextConn(5 * time.Second)
+	gateway.send(first, opHello, helloData(30), nil, "")
+	gateway.nextFrame(5 * time.Second)
+	gateway.send(first, opDispatch, readyData("session-intake-fail", "999"), seqPtr(0), eventReady)
+	for i := range intakeQueueCap + 32 {
+		raw, err := json.Marshal(map[string]any{"op": opDispatch, "d": messageData("fail-1", "333", "222", "111", "hello", []string{"999"}), "s": int64(i + 1), "t": eventMessageCreate})
+		if err != nil {
+			t.Fatalf("marshal frame: %v", err)
+		}
+		if err := websocket.Message.Send(first, raw); err != nil {
+			break
+		}
+	}
+	second := gateway.nextConn(5 * time.Second)
+	if second == nil {
+		t.Fatal("session did not reconnect after intake failure")
+	}
+	gateway.send(second, opHello, helloData(30), nil, "")
+	frame := gateway.nextFrame(5 * time.Second)
+	if frameOp(t, frame) != opResume && frameOp(t, frame) != opIdentify {
+		t.Fatalf("reconnect frame op = %v, want resume or identify", frame["op"])
+	}
+	if got := sink.calls.Load(); got == 0 {
+		t.Error("failing sink saw no admissions")
+	}
+	if body := logs.String(); !strings.Contains(body, "intake dispatch failed") {
+		t.Error("dispatcher error was not logged")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("Start() returned early: %v", err)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
