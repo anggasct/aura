@@ -175,7 +175,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			scheduleRunner, err := buildScheduleRunner(db, logger, runtimeEngine, cronBroadcaster)
+			scheduleRecorder, err := telemetry.NewScheduleRecorder(pipeline.MeterProvider())
+			if err != nil {
+				return err
+			}
+			scheduleRunner, err := buildScheduleRunner(db, logger, runtimeEngine, cronBroadcaster, time.Duration(cfg.Scheduler.OccurrenceRetention), scheduleRecorderObserver(scheduleRecorder))
 			if err != nil {
 				return err
 			}

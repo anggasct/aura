@@ -218,7 +218,7 @@ func TestScheduleStoreAdapterRoundTrip(t *testing.T) {
 func TestBuildScheduleRunnerSmoke(t *testing.T) {
 	db := cronTestDB(t)
 	var started []string
-	runner, err := buildScheduleRunner(db, slog.Default(), &fakeCronEngine{}, testCronBroadcaster(t, db, &started))
+	runner, err := buildScheduleRunner(db, slog.Default(), &fakeCronEngine{}, testCronBroadcaster(t, db, &started), 0, nil)
 	if err != nil {
 		t.Fatalf("buildScheduleRunner(): %v", err)
 	}
@@ -238,7 +238,7 @@ func (r *recordingScheduleRegistrar) RegisterHandler(name string, _ durable.Hand
 func TestRegisterScheduleHandler(t *testing.T) {
 	db := cronTestDB(t)
 	var started []string
-	runner, err := buildScheduleRunner(db, slog.Default(), &fakeCronEngine{}, testCronBroadcaster(t, db, &started))
+	runner, err := buildScheduleRunner(db, slog.Default(), &fakeCronEngine{}, testCronBroadcaster(t, db, &started), 0, nil)
 	if err != nil {
 		t.Fatalf("buildScheduleRunner(): %v", err)
 	}

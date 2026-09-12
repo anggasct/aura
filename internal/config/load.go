@@ -216,6 +216,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateBroadcast(&cfg.Broadcast); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateScheduler(&cfg.Scheduler); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -374,6 +377,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateBroadcastShapes(doc); err != nil {
+		return err
+	}
+	if err := validateSchedulerShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -734,6 +740,31 @@ func validateBroadcastShapes(doc *yamlv3.Node) error {
 				if entry.Kind != yamlv3.ScalarNode || entry.Tag != "!!str" {
 					return fmt.Errorf("broadcast.%s entries must be strings at line %d", keyNode.Value, entry.Line)
 				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateSchedulerShapes(doc *yamlv3.Node) error {
+	schedulerNode := mappingValue(doc, "scheduler")
+	if schedulerNode == nil {
+		return nil
+	}
+	if schedulerNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("scheduler must be a mapping at line %d", schedulerNode.Line)
+	}
+	for i := 0; i+1 < len(schedulerNode.Content); i += 2 {
+		keyNode := schedulerNode.Content[i]
+		valueNode := schedulerNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("scheduler.enabled must be a boolean at line %d", valueNode.Line)
+			}
+		case "default_timezone", "default_catch_up_grace", "occurrence_retention":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("scheduler.%s must be a string at line %d", keyNode.Value, valueNode.Line)
 			}
 		}
 	}
@@ -1710,6 +1741,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyModelRouteDefaults(cfg, doc)
 	applyWebhookDefaults(cfg, doc, &defaults.Webhook)
 	applyBroadcastDefaults(cfg, doc, &defaults.Broadcast)
+	applySchedulerDefaults(cfg, doc, &defaults.Scheduler)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
 }
@@ -1801,6 +1833,21 @@ func applyBroadcastDefaults(cfg *Config, doc *yamlv3.Node, defaults *Broadcast) 
 	}
 	if cfg.Broadcast.Fallback == nil {
 		cfg.Broadcast.Fallback = map[string]string{}
+	}
+}
+
+func applySchedulerDefaults(cfg *Config, doc *yamlv3.Node, defaults *Scheduler) {
+	if !cfg.Scheduler.Enabled && !configValuePresent(doc, "scheduler", "enabled") && !envValuePresent("scheduler.enabled") {
+		cfg.Scheduler.Enabled = defaults.Enabled
+	}
+	if cfg.Scheduler.DefaultTimezone == "" && !configValuePresent(doc, "scheduler", "default_timezone") && !envValuePresent("scheduler.default_timezone") {
+		cfg.Scheduler.DefaultTimezone = defaults.DefaultTimezone
+	}
+	if cfg.Scheduler.DefaultCatchUpGrace == 0 && !configValuePresent(doc, "scheduler", "default_catch_up_grace") && !envValuePresent("scheduler.default_catch_up_grace") {
+		cfg.Scheduler.DefaultCatchUpGrace = defaults.DefaultCatchUpGrace
+	}
+	if cfg.Scheduler.OccurrenceRetention == 0 && !configValuePresent(doc, "scheduler", "occurrence_retention") && !envValuePresent("scheduler.occurrence_retention") {
+		cfg.Scheduler.OccurrenceRetention = defaults.OccurrenceRetention
 	}
 }
 
@@ -2470,6 +2517,28 @@ func validateBroadcast(broadcast *Broadcast) error {
 		if !validBroadcastRoute(route) {
 			problems = append(problems, fmt.Errorf("broadcast.fallback[%s] route %q is not a channel destination", alias, route))
 		}
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateScheduler(scheduler *Scheduler) error {
+	if scheduler == nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "scheduler must not be nil"}
+	}
+	var problems []error
+	if scheduler.DefaultTimezone == "" {
+		problems = append(problems, errors.New("scheduler.default_timezone must not be empty"))
+	} else if _, err := time.LoadLocation(scheduler.DefaultTimezone); err != nil {
+		problems = append(problems, fmt.Errorf("scheduler.default_timezone %q is not a valid IANA timezone", scheduler.DefaultTimezone))
+	}
+	if scheduler.DefaultCatchUpGrace < 0 {
+		problems = append(problems, errors.New("scheduler.default_catch_up_grace must not be negative"))
+	}
+	if scheduler.OccurrenceRetention <= 0 {
+		problems = append(problems, errors.New("scheduler.occurrence_retention must be positive"))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

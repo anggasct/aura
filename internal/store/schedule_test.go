@@ -150,6 +150,106 @@ func TestScheduleStore_RejectsInvalidRows(t *testing.T) {
 	}
 }
 
+func TestScheduleStore_PendingFireAndPrune(t *testing.T) {
+	db := newTestDB(t)
+	s := NewScheduleStore(db)
+	ctx := t.Context()
+
+	if err := s.InsertJob(ctx, testScheduledJob("job-1")); err != nil {
+		t.Fatalf("seed job: %v", err)
+	}
+	fire := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
+	now := fire.Add(time.Minute)
+	orphan := &ScheduledOccurrence{
+		ID: "cron-orphan", JobID: "job-1", JobVersion: 1, ScheduledForUTC: fire,
+		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.RecordFire(ctx, orphan); err != nil {
+		t.Fatalf("seed orphan: %v", err)
+	}
+	pending, found, err := s.PendingFire(ctx, "job-1")
+	if err != nil || !found || pending.ID != "cron-orphan" {
+		t.Errorf("PendingFire() = %+v, %v, %v", pending.ID, found, err)
+	}
+	if _, found, err := s.PendingFire(ctx, "missing"); err != nil || found {
+		t.Errorf("missing PendingFire() = %v, %v", found, err)
+	}
+	attached := &ScheduledOccurrence{
+		ID: "cron-attached", JobID: "job-1", JobVersion: 1, ScheduledForUTC: fire.Add(time.Hour),
+		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.RecordFire(ctx, attached); err != nil {
+		t.Fatalf("seed attached: %v", err)
+	}
+	if err := s.AttachTurn(ctx, "cron-attached", "turn-1", now); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	pending, found, err = s.PendingFire(ctx, "job-1")
+	if err != nil || !found || pending.ID != "cron-orphan" {
+		t.Errorf("PendingFire() skips attached rows: %+v, %v, %v", pending.ID, found, err)
+	}
+
+	old := now.Add(-1000 * time.Hour)
+	terminal := &ScheduledOccurrence{
+		ID: "cron-old", JobID: "job-1", JobVersion: 1, ScheduledForUTC: old,
+		State: OccurrenceCompleted, CreatedAt: old, UpdatedAt: old,
+	}
+	if err := s.RecordFire(ctx, terminal); err != nil {
+		t.Fatalf("seed terminal: %v", err)
+	}
+	pruned, err := s.PruneOccurrences(ctx, "job-1", now.Add(-720*time.Hour), 100)
+	if err != nil {
+		t.Fatalf("PruneOccurrences(): %v", err)
+	}
+	if pruned != 1 {
+		t.Errorf("pruned = %d, want 1 (active rows never pruned)", pruned)
+	}
+	if _, found, err := s.OccurrenceByFire(ctx, "job-1", old); err != nil || found {
+		t.Errorf("pruned row lookup = %v, %v; want not found", found, err)
+	}
+	if pruned, err := s.PruneOccurrences(ctx, "job-1", now, 100); err != nil || pruned != 0 {
+		t.Errorf("fresh prune = %d, %v; want 0", pruned, err)
+	}
+	if _, err := s.PruneOccurrences(ctx, "", now, 100); err == nil {
+		t.Error("empty alias prune accepted")
+	}
+	if _, err := s.PruneOccurrences(ctx, "job-1", now, 0); err == nil {
+		t.Error("non-positive prune limit accepted")
+	}
+}
+
+func TestScheduleStore_ActiveJobsAndListJobs(t *testing.T) {
+	db := newTestDB(t)
+	s := NewScheduleStore(db)
+	ctx := t.Context()
+
+	if err := s.InsertJob(ctx, testScheduledJob("job-1")); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	paused := testScheduledJob("job-2")
+	paused.State = ScheduleJobPaused
+	if err := s.InsertJob(ctx, paused); err != nil {
+		t.Fatalf("seed paused: %v", err)
+	}
+	active, err := s.ActiveJobs(ctx, 10)
+	if err != nil {
+		t.Fatalf("ActiveJobs(): %v", err)
+	}
+	if len(active) != 1 || active[0].ID != "job-1" {
+		t.Errorf("active jobs = %+v", active)
+	}
+	all, err := s.ListJobs(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListJobs(): %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("all jobs = %d, want 2", len(all))
+	}
+	if _, err := s.ListJobs(ctx, 0); err == nil {
+		t.Error("non-positive limit accepted")
+	}
+}
+
 func TestScheduleStore_SchemaVersionTwelve(t *testing.T) {
 	db := newTestDB(t)
 	applied, latest, err := SchemaVersions(t.Context(), db)

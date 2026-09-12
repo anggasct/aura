@@ -18,6 +18,7 @@ import (
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/scheduler"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/telemetry"
 )
 
 type scheduleStore struct {
@@ -134,6 +135,31 @@ func (s *scheduleStore) AttachTurn(ctx context.Context, id, turnID string, now t
 		return errors.New("schedule store must not be nil")
 	}
 	return mapScheduleStoreError(s.store.AttachTurn(ctx, id, turnID, now))
+}
+
+func (s *scheduleStore) PendingFire(ctx context.Context, jobID string) (scheduler.Occurrence, bool, error) {
+	if s.store == nil {
+		return scheduler.Occurrence{}, false, errors.New("schedule store must not be nil")
+	}
+	item, found, err := s.store.PendingFire(ctx, jobID)
+	if err != nil {
+		return scheduler.Occurrence{}, false, mapScheduleStoreError(err)
+	}
+	if !found {
+		return scheduler.Occurrence{}, false, nil
+	}
+	return toScheduleOccurrence(&item), true, nil
+}
+
+func (s *scheduleStore) PruneOccurrences(ctx context.Context, jobID string, before time.Time, limit int) (int, error) {
+	if s.store == nil {
+		return 0, errors.New("schedule store must not be nil")
+	}
+	count, err := s.store.PruneOccurrences(ctx, jobID, before, limit)
+	if err != nil {
+		return 0, mapScheduleStoreError(err)
+	}
+	return count, nil
 }
 
 func (s *scheduleStore) SettleOccurrence(ctx context.Context, id, state, turnID, resultEventID, safeErrorCode string, now time.Time) error {
@@ -273,13 +299,15 @@ func notifyContentJSON(text string) string {
 	return string(raw)
 }
 
-func buildScheduleRunner(db *sql.DB, logger *slog.Logger, engine cronTurnEngine, broadcaster *broadcast.Broadcaster) (*scheduler.Runner, error) {
+func buildScheduleRunner(db *sql.DB, logger *slog.Logger, engine cronTurnEngine, broadcaster *broadcast.Broadcaster, retention time.Duration, observer scheduler.Observer) (*scheduler.Runner, error) {
 	turns := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
 	return scheduler.NewRunner(
 		&scheduleStore{store: store.NewScheduleStore(db)},
 		turns,
 		&cronNotifier{broadcaster: broadcaster},
 		logger,
+		retention,
+		observer,
 	)
 }
 
@@ -352,4 +380,18 @@ func resumeScheduleRuns(ctx context.Context, rt durable.Runtime, db *sql.DB) (in
 		}
 	}
 	return len(jobs), nil
+}
+
+func scheduleRecorderObserver(recorder *telemetry.ScheduleRecorder) scheduler.Observer {
+	if recorder == nil {
+		return nil
+	}
+	return func(ctx context.Context, observation *scheduler.Observation) {
+		recorder.Record(ctx, &telemetry.ScheduleObservation{
+			State:  observation.State,
+			Result: observation.Result,
+			Lag:    observation.Lag,
+			Age:    observation.Age,
+		})
+	}
 }

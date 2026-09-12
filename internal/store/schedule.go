@@ -77,6 +77,9 @@ type ScheduleStore interface {
 	RecordFire(ctx context.Context, occurrence *ScheduledOccurrence) error
 	OccurrenceByFire(ctx context.Context, jobID string, scheduledFor time.Time) (ScheduledOccurrence, bool, error)
 	ActiveJobs(ctx context.Context, limit int) ([]ScheduledJob, error)
+	PendingFire(ctx context.Context, jobID string) (ScheduledOccurrence, bool, error)
+	PruneOccurrences(ctx context.Context, jobID string, before time.Time, limit int) (int, error)
+	ListJobs(ctx context.Context, limit int) ([]ScheduledJob, error)
 	ActiveOccurrence(ctx context.Context, jobID string) (ScheduledOccurrence, bool, error)
 	AttachTurn(ctx context.Context, id, turnID string, now time.Time) error
 	SettleOccurrence(ctx context.Context, id, state, turnID, resultEventID, safeErrorCode string, now time.Time) error
@@ -536,6 +539,97 @@ func (s *sqliteScheduleStore) ActiveJobs(ctx context.Context, limit int) ([]Sche
 	}
 	if err := rows.Err(); err != nil {
 		return nil, classifyBusy(fmt.Errorf("list active jobs: %w", err))
+	}
+	return jobs, nil
+}
+
+func (s *sqliteScheduleStore) PendingFire(ctx context.Context, jobID string) (ScheduledOccurrence, bool, error) {
+	if s.db == nil {
+		return ScheduledOccurrence{}, false, errNilArgument("db")
+	}
+	if jobID == "" {
+		return ScheduledOccurrence{}, false, Errorf(ErrorCodeInvalidArgument, "job id must not be empty")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, job_id, job_version, scheduled_for_utc, state, turn_id,
+		result_event_id, safe_error_code, created_at, updated_at
+		FROM scheduled_occurrence
+		WHERE job_id = ? AND state = ? AND (turn_id IS NULL OR turn_id = '')
+		ORDER BY scheduled_for_utc, id LIMIT 1`,
+		jobID, OccurrenceFired)
+	if err != nil {
+		return ScheduledOccurrence{}, false, classifyBusy(fmt.Errorf("load pending fire: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		_ = rows.Close()
+		return ScheduledOccurrence{}, false, nil
+	}
+	item, err := scanScheduledOccurrence(rows)
+	if err != nil {
+		_ = rows.Close()
+		return ScheduledOccurrence{}, false, err
+	}
+	return item, true, nil
+}
+
+func (s *sqliteScheduleStore) PruneOccurrences(ctx context.Context, jobID string, before time.Time, limit int) (int, error) {
+	if s.db == nil {
+		return 0, errNilArgument("db")
+	}
+	if jobID == "" {
+		return 0, Errorf(ErrorCodeInvalidArgument, "job id must not be empty")
+	}
+	if limit <= 0 {
+		return 0, Errorf(ErrorCodeInvalidArgument, "prune limit must be positive")
+	}
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM scheduled_occurrence WHERE id IN (
+			SELECT id FROM scheduled_occurrence
+			WHERE job_id = ? AND state IN ('completed','failed','expired','skipped_overlap','cancelled')
+			AND updated_at < ? ORDER BY updated_at, id LIMIT ?
+		)`,
+		jobID, formatTime(before.UTC()), limit)
+	if err != nil {
+		return 0, classifyBusy(fmt.Errorf("prune occurrences: %w", err))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, classifyBusy(fmt.Errorf("prune occurrences: %w", err))
+	}
+	return int(affected), nil
+}
+
+func (s *sqliteScheduleStore) ListJobs(ctx context.Context, limit int) ([]ScheduledJob, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if limit <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list limit must be positive")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
+		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at
+		FROM scheduled_job ORDER BY created_at DESC, id DESC LIMIT ?`,
+		limit)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("list jobs: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	jobs := []ScheduledJob{}
+	for rows.Next() {
+		job, found, err := scanOneScheduledJob(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if !found {
+			break
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list jobs: %w", err))
 	}
 	return jobs, nil
 }

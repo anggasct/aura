@@ -36,6 +36,7 @@ type Config struct {
 	Terminal     Terminal              `koanf:"terminal" yaml:"terminal"`
 	Webhook      Webhook               `koanf:"webhook" yaml:"webhook"`
 	Broadcast    Broadcast             `koanf:"broadcast" yaml:"broadcast"`
+	Scheduler    Scheduler             `koanf:"scheduler" yaml:"scheduler"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
 
@@ -69,6 +70,13 @@ type Broadcast struct {
 	MinDispatchGap Duration          `koanf:"min_dispatch_gap" yaml:"min_dispatch_gap"`
 	Destinations   map[string]string `koanf:"destinations" yaml:"destinations"`
 	Fallback       map[string]string `koanf:"fallback" yaml:"fallback"`
+}
+
+type Scheduler struct {
+	Enabled             bool     `koanf:"enabled" yaml:"enabled"`
+	DefaultTimezone     string   `koanf:"default_timezone" yaml:"default_timezone"`
+	DefaultCatchUpGrace Duration `koanf:"default_catch_up_grace" yaml:"default_catch_up_grace"`
+	OccurrenceRetention Duration `koanf:"occurrence_retention" yaml:"occurrence_retention"`
 }
 
 type QuietHours struct {
@@ -540,6 +548,12 @@ func Default() Config {
 			MinDispatchGap: Duration(5 * time.Second),
 			Destinations:   map[string]string{},
 			Fallback:       map[string]string{},
+		},
+		Scheduler: Scheduler{
+			Enabled:             true,
+			DefaultTimezone:     "UTC",
+			DefaultCatchUpGrace: Duration(15 * time.Minute),
+			OccurrenceRetention: Duration(720 * time.Hour),
 		},
 	}
 }
