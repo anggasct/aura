@@ -168,9 +168,18 @@ func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, 
 	tag := strconv.FormatUint(iter, 10)
 	grace := time.Duration(job.CatchUpGraceSeconds) * time.Second
 	if now.Sub(fire) > grace {
-		occurrence, _, err := r.recordFire(ctx, job, fire, now)
+		occurrence, replayed, err := r.recordFire(ctx, job, fire, now)
 		if err != nil {
 			return false, err
+		}
+		if replayed {
+			current, found, err := r.jobs.OccurrenceByFire(ctx, job.ID, fire.UTC())
+			if err != nil {
+				return false, err
+			}
+			if found && current.State != OccurrenceFired {
+				return true, nil
+			}
 		}
 		if err := r.settle(ctx, occurrence.ID, OccurrenceExpired, "", "", now); err != nil {
 			return false, err

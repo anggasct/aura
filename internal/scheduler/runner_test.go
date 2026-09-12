@@ -237,6 +237,69 @@ func TestRunner_ExpiredFireSkipsTurn(t *testing.T) {
 	}
 }
 
+type stubInvocation struct{}
+
+func (stubInvocation) Run() durable.RunRef { return durable.RunRef{} }
+
+func (stubInvocation) Payload() []byte { return nil }
+
+func (stubInvocation) Signal(context.Context, string) ([]byte, bool) { return nil, false }
+
+func (stubInvocation) Sleep(time.Duration) error { return nil }
+
+func (stubInvocation) Timer(time.Duration) <-chan time.Time { return nil }
+
+func (stubInvocation) Wait(ctx context.Context, name string, timeout time.Duration) (payload []byte, timedOut, ok bool) {
+	return nil, false, false
+}
+
+func (stubInvocation) RunAction(context.Context, string, func(context.Context) ([]byte, error)) ([]byte, error) {
+	return nil, errors.New("stub invocation does not support actions")
+}
+
+func TestRunner_ExpiredFireReplayAdvances(t *testing.T) {
+	spec := &JobSpec{
+		Name: "nightly", CronExpression: "* * * * *", Timezone: "UTC",
+		Prompt: "summarize", OriginChannel: "discord", OriginDestination: "default",
+		OverlapPolicy: OverlapSkip, CatchUpGraceSeconds: 60,
+	}
+	fixture := newScheduleFixture(t, spec, nil)
+	fire := time.Date(2026, 9, 12, 12, 1, 0, 0, time.UTC)
+	now := fire.Add(time.Hour)
+	inv := stubInvocation{}
+	done, err := fixture.runner.fireDue(t.Context(), inv, &fixture.job, fire, now, 1)
+	if err != nil {
+		t.Fatalf("first expired fire: %v", err)
+	}
+	if !done {
+		t.Fatal("first expired fire did not advance")
+	}
+	fresh, err := NewRunner(fixture.store, fixture.turns, fixture.notify, nil)
+	if err != nil {
+		t.Fatalf("NewRunner(): %v", err)
+	}
+	done, err = fresh.fireDue(t.Context(), inv, &fixture.job, fire, now, 1)
+	if err != nil {
+		t.Fatalf("expired replay: %v", err)
+	}
+	if !done {
+		t.Fatal("expired replay did not advance")
+	}
+	if fixture.turns.callCount() != 0 {
+		t.Error("expired replay ran a turn")
+	}
+	occurrence, found, err := fixture.store.OccurrenceByFire(t.Context(), fixture.job.ID, fire.UTC())
+	if err != nil {
+		t.Fatalf("OccurrenceByFire(): %v", err)
+	}
+	if !found {
+		t.Fatal("expired occurrence missing after replay")
+	}
+	if occurrence.State != OccurrenceExpired {
+		t.Errorf("occurrence state = %q, want expired", occurrence.State)
+	}
+}
+
 func TestRunner_SkipOverlapWithoutTurn(t *testing.T) {
 	fixture := newScheduleFixture(t, nil, nil)
 	active := Occurrence{
