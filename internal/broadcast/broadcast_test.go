@@ -34,6 +34,30 @@ func (s *fakeItemStore) Insert(_ context.Context, record *ItemRecord) (ItemRecor
 	return *record, false, nil
 }
 
+func (s *fakeItemStore) CreateDigest(_ context.Context, parent *ItemRecord, childIDs []string) (ItemRecord, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := parent.Producer + "|" + parent.IdempotencyKey
+	if id, ok := s.byKey[key]; ok {
+		return s.records[id], true, nil
+	}
+	for _, id := range childIDs {
+		child, ok := s.records[id]
+		if !ok || child.State != StateHeld {
+			return ItemRecord{}, false, Errorf(ErrorCodeConflict, "digest children are not all held")
+		}
+	}
+	s.records[parent.ID] = *parent
+	s.byKey[key] = parent.ID
+	for _, id := range childIDs {
+		child := s.records[id]
+		child.State = StateCancelled
+		child.DigestParentID = parent.ID
+		s.records[id] = child
+	}
+	return *parent, false, nil
+}
+
 type fakeRegistry struct {
 	registered map[string]bool
 }
@@ -42,9 +66,17 @@ func (r *fakeRegistry) Registered(source string) bool {
 	return r.registered[source]
 }
 
+func testPolicy() Policy {
+	return Policy{
+		Destinations:   map[string]string{"default": "discord:owner", "plain": "discord"},
+		MaxDigestItems: 20,
+		MaxDigestBytes: 12000,
+	}
+}
+
 func testBroadcaster() *Broadcaster {
 	broadcaster, err := New(
-		map[string]string{"default": "discord:owner", "plain": "discord"},
+		testPolicy(),
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),
 	)
@@ -151,8 +183,10 @@ func TestSubmit_RejectsUnconfiguredOrUnknown(t *testing.T) {
 		t.Errorf("unknown alias code = %v, %v", code, ok)
 	}
 
+	foreignPolicy := testPolicy()
+	foreignPolicy.Destinations = map[string]string{"default": "telegram:owner"}
 	foreign, err := New(
-		map[string]string{"default": "telegram:owner"},
+		foreignPolicy,
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),
 	)
@@ -219,17 +253,31 @@ func TestSubmit_RejectsInvalidNotifications(t *testing.T) {
 }
 
 func TestNew_RejectsBadWiring(t *testing.T) {
-	if _, err := New(map[string]string{"default": "discord:owner"}, nil, newFakeItemStore()); err == nil {
+	if _, err := New(testPolicy(), nil, newFakeItemStore()); err == nil {
 		t.Error("nil registry accepted")
 	}
-	if _, err := New(map[string]string{"default": "discord:owner"}, &fakeRegistry{}, nil); err == nil {
+	if _, err := New(testPolicy(), &fakeRegistry{}, nil); err == nil {
 		t.Error("nil store accepted")
 	}
-	if _, err := New(map[string]string{"BAD ALIAS": "discord"}, &fakeRegistry{}, newFakeItemStore()); err == nil {
+	badAlias := testPolicy()
+	badAlias.Destinations = map[string]string{"BAD ALIAS": "discord"}
+	if _, err := New(badAlias, &fakeRegistry{}, newFakeItemStore()); err == nil {
 		t.Error("bad alias accepted")
 	}
-	if _, err := New(map[string]string{"default": "https://evil.example/hook"}, &fakeRegistry{}, newFakeItemStore()); err == nil {
+	badRoute := testPolicy()
+	badRoute.Destinations = map[string]string{"default": "https://evil.example/hook"}
+	if _, err := New(badRoute, &fakeRegistry{}, newFakeItemStore()); err == nil {
 		t.Error("credential-bearing route accepted")
+	}
+	noLimits := testPolicy()
+	noLimits.MaxDigestItems = 0
+	if _, err := New(noLimits, &fakeRegistry{}, newFakeItemStore()); err == nil {
+		t.Error("non-positive digest bound accepted")
+	}
+	noLocation := testPolicy()
+	noLocation.Quiet = QuietConfig{Enabled: true, StartMin: 1380, EndMin: 420}
+	if _, err := New(noLocation, &fakeRegistry{}, newFakeItemStore()); err == nil {
+		t.Error("quiet hours without location accepted")
 	}
 }
 

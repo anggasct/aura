@@ -106,6 +106,7 @@ broadcast:
   max_digest_bytes: 12000
   max_attempts: 3
   max_delivery_age: 24h0m0s
+  min_dispatch_gap: 5s
   destinations: {}
   fallback: {}
 channels:

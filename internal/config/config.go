@@ -66,6 +66,7 @@ type Broadcast struct {
 	MaxDigestBytes int64             `koanf:"max_digest_bytes" yaml:"max_digest_bytes"`
 	MaxAttempts    int               `koanf:"max_attempts" yaml:"max_attempts"`
 	MaxDeliveryAge Duration          `koanf:"max_delivery_age" yaml:"max_delivery_age"`
+	MinDispatchGap Duration          `koanf:"min_dispatch_gap" yaml:"min_dispatch_gap"`
 	Destinations   map[string]string `koanf:"destinations" yaml:"destinations"`
 	Fallback       map[string]string `koanf:"fallback" yaml:"fallback"`
 }
@@ -536,6 +537,7 @@ func Default() Config {
 			MaxDigestBytes: 12000,
 			MaxAttempts:    3,
 			MaxDeliveryAge: Duration(24 * time.Hour),
+			MinDispatchGap: Duration(5 * time.Second),
 			Destinations:   map[string]string{},
 			Fallback:       map[string]string{},
 		},

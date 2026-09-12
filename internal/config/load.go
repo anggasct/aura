@@ -699,7 +699,7 @@ func validateBroadcastShapes(doc *yamlv3.Node) error {
 		keyNode := broadcastNode.Content[i]
 		valueNode := broadcastNode.Content[i+1]
 		switch keyNode.Value {
-		case "timezone", "max_delivery_age":
+		case "timezone", "max_delivery_age", "min_dispatch_gap":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 				return fmt.Errorf("broadcast.%s must be a string at line %d", keyNode.Value, valueNode.Line)
 			}
@@ -1793,6 +1793,9 @@ func applyBroadcastDefaults(cfg *Config, doc *yamlv3.Node, defaults *Broadcast) 
 	if cfg.Broadcast.MaxDeliveryAge == 0 && !configValuePresent(doc, "broadcast", "max_delivery_age") && !envValuePresent("broadcast.max_delivery_age") {
 		cfg.Broadcast.MaxDeliveryAge = defaults.MaxDeliveryAge
 	}
+	if cfg.Broadcast.MinDispatchGap == 0 && !configValuePresent(doc, "broadcast", "min_dispatch_gap") && !envValuePresent("broadcast.min_dispatch_gap") {
+		cfg.Broadcast.MinDispatchGap = defaults.MinDispatchGap
+	}
 	if cfg.Broadcast.Destinations == nil {
 		cfg.Broadcast.Destinations = map[string]string{}
 	}
@@ -2445,6 +2448,9 @@ func validateBroadcast(broadcast *Broadcast) error {
 	}
 	if broadcast.MaxDeliveryAge <= 0 {
 		problems = append(problems, errors.New("broadcast.max_delivery_age must be positive"))
+	}
+	if broadcast.MinDispatchGap < 0 {
+		problems = append(problems, errors.New("broadcast.min_dispatch_gap must not be negative"))
 	}
 	for alias, route := range broadcast.Destinations {
 		if !validBroadcastAlias(alias) {

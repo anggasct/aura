@@ -41,6 +41,9 @@ func TestLoad_BroadcastDefaults(t *testing.T) {
 	if broadcast.MaxDeliveryAge != Duration(24*time.Hour) {
 		t.Errorf("max_delivery_age = %v", broadcast.MaxDeliveryAge)
 	}
+	if broadcast.MinDispatchGap != Duration(5*time.Second) {
+		t.Errorf("min_dispatch_gap = %v", broadcast.MinDispatchGap)
+	}
 	if len(broadcast.Destinations) != 0 || len(broadcast.Fallback) != 0 {
 		t.Errorf("routes default = %+v/%+v, want deny-all empty", broadcast.Destinations, broadcast.Fallback)
 	}
@@ -81,6 +84,7 @@ func TestLoad_BroadcastRejectsInvalid(t *testing.T) {
 		{"bad quiet end", "  quiet_hours: {enabled: true, start: \"23:00\", end: \"7am\"}\n"},
 		{"zero digest items", "  max_digest_items: 0\n"},
 		{"zero attempts", "  max_attempts: 0\n"},
+		{"negative dispatch gap", "  min_dispatch_gap: -5s\n"},
 		{"bad alias", "  destinations: {\"BAD ALIAS\": discord}\n"},
 		{"credential route", "  destinations: {default: \"https://evil.example/hook\"}\n"},
 		{"empty source", "  destinations: {default: \":owner\"}\n"},
