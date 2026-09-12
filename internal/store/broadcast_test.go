@@ -416,6 +416,106 @@ func TestBroadcastStore_ConcurrentSlotsSerialized(t *testing.T) {
 	}
 }
 
+func TestBroadcastStore_ListHeldAndActive(t *testing.T) {
+	db := newTestDB(t)
+	s := NewBroadcastStore(db)
+	ctx := t.Context()
+
+	seed := func(id, state, alias string, notBefore time.Time) {
+		t.Helper()
+		item := testBroadcastItem(id, "cron", "key-"+id)
+		item.State = state
+		item.DestinationAlias = alias
+		item.NotBefore = notBefore
+		if _, _, err := s.InsertItem(ctx, item); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	morning := time.Date(2026, 9, 13, 7, 0, 0, 0, time.UTC)
+	seed("held-1", BroadcastStateHeld, "default", morning)
+	seed("held-2", BroadcastStateHeld, "default", morning.Add(time.Hour))
+	seed("held-other", BroadcastStateHeld, "plain", morning)
+	seed("sched-1", BroadcastStateScheduled, "default", morning)
+	seed("done-1", BroadcastStateSucceeded, "default", morning)
+
+	held, err := s.ListHeld(ctx, "default", BroadcastPriorityInfo, morning, 10)
+	if err != nil {
+		t.Fatalf("ListHeld(): %v", err)
+	}
+	if len(held) != 1 || held[0].ID != "held-1" {
+		t.Errorf("held due = %v, want [held-1]", held)
+	}
+	all, err := s.ListHeld(ctx, "default", BroadcastPriorityInfo, morning.Add(2*time.Hour), 10)
+	if err != nil || len(all) != 2 || all[0].ID != "held-1" || all[1].ID != "held-2" {
+		t.Errorf("held window = %v, %v; want ordered held-1, held-2", all, err)
+	}
+	if _, err := s.ListHeld(ctx, "", BroadcastPriorityInfo, morning, 10); err == nil {
+		t.Error("empty alias accepted")
+	}
+	if _, err := s.ListHeld(ctx, "default", BroadcastPriorityInfo, morning, 0); err == nil {
+		t.Error("non-positive limit accepted")
+	}
+
+	active, err := s.ListActive(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListActive(): %v", err)
+	}
+	if len(active) != 4 {
+		t.Fatalf("active = %d, want 4 (done excluded)", len(active))
+	}
+	for _, item := range active {
+		if item.State == BroadcastStateSucceeded {
+			t.Errorf("terminal item listed: %+v", item)
+		}
+	}
+}
+
+func TestBroadcastStore_SettleAndAttempt(t *testing.T) {
+	db := newTestDB(t)
+	s := NewBroadcastStore(db)
+	ctx := t.Context()
+	now := time.Date(2026, 9, 13, 7, 0, 0, 0, time.UTC)
+
+	if _, _, err := s.InsertItem(ctx, testBroadcastItem("bcst-1", "cron", "key-1")); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES ('sess-1','cron','{}','2026-09-12T12:00:00Z','2026-09-12T12:00:00Z')`); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO effect_intent (id, session_id, turn_id, tool_call_id, idempotency_key, provider, operation, classification, state, request_digest, request_json, prepared_at, updated_at) VALUES ('effect-1','sess-1','','','key-1','discord','send_message','effectful','succeeded','digest','{}','2026-09-12T12:00:00Z','2026-09-12T12:00:00Z')`); err != nil {
+		t.Fatalf("seed effect: %v", err)
+	}
+	if err := s.NoteAttempt(ctx, "bcst-1", 2, now); err != nil {
+		t.Fatalf("NoteAttempt(): %v", err)
+	}
+	if err := s.Settle(ctx, "bcst-1", BroadcastStateSucceeded, "effect-1", now); err != nil {
+		t.Fatalf("Settle(): %v", err)
+	}
+	item, err := s.Item(ctx, "bcst-1")
+	if err != nil {
+		t.Fatalf("Item(): %v", err)
+	}
+	if item.State != BroadcastStateSucceeded || item.EffectID != "effect-1" || item.AttemptCount != 2 {
+		t.Errorf("settled item mismatch: %+v", item)
+	}
+	if err := s.Settle(ctx, "bcst-1", BroadcastStateFailed, "", now); err == nil {
+		t.Error("double settle accepted")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBroadcastConflict {
+		t.Errorf("double settle code = %v, %v; want broadcast_conflict", code, ok)
+	}
+	if err := s.Settle(ctx, "missing", BroadcastStateFailed, "", now); err == nil {
+		t.Error("missing settle accepted")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBroadcastNotFound {
+		t.Errorf("missing settle code = %v, %v; want broadcast_not_found", code, ok)
+	}
+	if err := s.Settle(ctx, "bcst-1", "flying", "", now); err == nil {
+		t.Error("non-terminal settle accepted")
+	}
+	if err := s.NoteAttempt(ctx, "bcst-1", -1, now); err == nil {
+		t.Error("negative attempt accepted")
+	}
+}
+
 func TestBroadcastStore_SchemaVersion(t *testing.T) {
 	db := newTestDB(t)
 	applied, latest, err := SchemaVersions(t.Context(), db)

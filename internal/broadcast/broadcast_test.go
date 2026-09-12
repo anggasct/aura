@@ -79,6 +79,7 @@ func testBroadcaster() *Broadcaster {
 		testPolicy(),
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),
+		nil,
 	)
 	if err != nil {
 		panic(err)
@@ -189,6 +190,7 @@ func TestSubmit_RejectsUnconfiguredOrUnknown(t *testing.T) {
 		foreignPolicy,
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
@@ -253,30 +255,30 @@ func TestSubmit_RejectsInvalidNotifications(t *testing.T) {
 }
 
 func TestNew_RejectsBadWiring(t *testing.T) {
-	if _, err := New(testPolicy(), nil, newFakeItemStore()); err == nil {
+	if _, err := New(testPolicy(), nil, newFakeItemStore(), nil); err == nil {
 		t.Error("nil registry accepted")
 	}
-	if _, err := New(testPolicy(), &fakeRegistry{}, nil); err == nil {
+	if _, err := New(testPolicy(), &fakeRegistry{}, nil, nil); err == nil {
 		t.Error("nil store accepted")
 	}
 	badAlias := testPolicy()
 	badAlias.Destinations = map[string]string{"BAD ALIAS": "discord"}
-	if _, err := New(badAlias, &fakeRegistry{}, newFakeItemStore()); err == nil {
+	if _, err := New(badAlias, &fakeRegistry{}, newFakeItemStore(), nil); err == nil {
 		t.Error("bad alias accepted")
 	}
 	badRoute := testPolicy()
 	badRoute.Destinations = map[string]string{"default": "https://evil.example/hook"}
-	if _, err := New(badRoute, &fakeRegistry{}, newFakeItemStore()); err == nil {
+	if _, err := New(badRoute, &fakeRegistry{}, newFakeItemStore(), nil); err == nil {
 		t.Error("credential-bearing route accepted")
 	}
 	noLimits := testPolicy()
 	noLimits.MaxDigestItems = 0
-	if _, err := New(noLimits, &fakeRegistry{}, newFakeItemStore()); err == nil {
+	if _, err := New(noLimits, &fakeRegistry{}, newFakeItemStore(), nil); err == nil {
 		t.Error("non-positive digest bound accepted")
 	}
 	noLocation := testPolicy()
 	noLocation.Quiet = QuietConfig{Enabled: true, StartMin: 1380, EndMin: 420}
-	if _, err := New(noLocation, &fakeRegistry{}, newFakeItemStore()); err == nil {
+	if _, err := New(noLocation, &fakeRegistry{}, newFakeItemStore(), nil); err == nil {
 		t.Error("quiet hours without location accepted")
 	}
 }

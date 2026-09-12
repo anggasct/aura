@@ -134,35 +134,26 @@ func (b *Broadcaster) CreateDigest(ctx context.Context, group []Item, index int)
 	if len(group) > b.maxDigestItems {
 		return Item{}, false, Errorf(ErrorCodeInvalidArgument, "digest group exceeds the item bound")
 	}
-	content, err := renderDigestContent(first.NotBefore, first.DestinationAlias, first.Priority, group)
+	parent, err := buildDigestParent(group, index, b.maxDigestBytes)
 	if err != nil {
 		return Item{}, false, err
 	}
-	if int64(len(content)) > b.maxDigestBytes {
-		return Item{}, false, Errorf(ErrorCodeInvalidArgument, "digest content exceeds the byte bound")
+	record, replayed, err := b.items.CreateDigest(ctx, parent, childIDsOf(group))
+	if err != nil {
+		return Item{}, false, err
 	}
-	now := time.Now().UTC()
-	key := digestParentKey(first.NotBefore, first.DestinationAlias, first.Priority, index)
+	return recordToItem(&record), replayed, nil
+}
+
+func childIDsOf(group []Item) []string {
 	childIDs := make([]string, 0, len(group))
 	for i := range group {
 		childIDs = append(childIDs, group[i].ID)
 	}
-	record, replayed, err := b.items.CreateDigest(ctx, &ItemRecord{
-		ID:               digestParentID(key),
-		Producer:         digestProducer,
-		IdempotencyKey:   key,
-		ContentDigest:    digestContent(content),
-		Priority:         first.Priority,
-		DestinationAlias: first.DestinationAlias,
-		ContentJSON:      content,
-		State:            StateScheduled,
-		NotBefore:        first.NotBefore,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}, childIDs)
-	if err != nil {
-		return Item{}, false, err
-	}
+	return childIDs
+}
+
+func recordToItem(record *ItemRecord) Item {
 	return Item{
 		ID:               record.ID,
 		Producer:         record.Producer,
@@ -174,5 +165,31 @@ func (b *Broadcaster) CreateDigest(ctx context.Context, group []Item, index int)
 		State:            record.State,
 		NotBefore:        record.NotBefore,
 		CreatedAt:        record.CreatedAt,
-	}, replayed, nil
+	}
+}
+
+func buildDigestParent(group []Item, index int, maxBytes int64) (*ItemRecord, error) {
+	first := group[0]
+	content, err := renderDigestContent(first.NotBefore, first.DestinationAlias, first.Priority, group)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(content)) > maxBytes {
+		return nil, Errorf(ErrorCodeInvalidArgument, "digest content exceeds the byte bound")
+	}
+	now := time.Now().UTC()
+	key := digestParentKey(first.NotBefore, first.DestinationAlias, first.Priority, index)
+	return &ItemRecord{
+		ID:               digestParentID(key),
+		Producer:         digestProducer,
+		IdempotencyKey:   key,
+		ContentDigest:    digestContent(content),
+		Priority:         first.Priority,
+		DestinationAlias: first.DestinationAlias,
+		ContentJSON:      content,
+		State:            StateScheduled,
+		NotBefore:        first.NotBefore,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}, nil
 }

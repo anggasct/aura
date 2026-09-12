@@ -9,6 +9,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/logging"
 	"github.com/anggasct/aura/internal/model"
 	"github.com/anggasct/aura/internal/runtime/adk"
@@ -139,6 +140,32 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			broadcastEffects, err := toolsbuiltin.NewChannelEffects(db, logger)
+			if err != nil {
+				return err
+			}
+			broadcastWiring := buildBroadcastSenders(channelAdapters, broadcastEffects, store.NewSessionService(db))
+			broadcastRunner, err := buildBroadcastRunner(cfg, db, logger, broadcastWiring)
+			if err != nil {
+				return err
+			}
+			var broadcastRuntime durable.Runtime
+			if durableConfig != nil {
+				broadcastRuntime = durableConfig.Runtime
+			} else {
+				broadcastRuntime, err = durableRuntimeForConfig(cfg, logger)
+				if err != nil {
+					return err
+				}
+				if err := registerBroadcastHandler(broadcastRuntime, broadcastRunner); err != nil {
+					return err
+				}
+			}
+			if resumed, err := resumeBroadcastRunners(ctx, broadcastRuntime, db); err != nil {
+				return err
+			} else if resumed > 0 {
+				logger.InfoContext(ctx, "resumed broadcast runs", "component", "broadcast", "count", resumed)
+			}
 			if err := host.Start(ctx); err != nil {
 				return err
 			}
@@ -156,6 +183,9 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if cfg.Durable != nil && cfg.Durable.Enabled {
 				durableListener, err := buildDurableListener(ctx, cfg, db, logger, runtimeEngine)
 				if err != nil {
+					return err
+				}
+				if err := registerBroadcastHandler(durableListener, broadcastRunner); err != nil {
 					return err
 				}
 				if err := srv.Add(durableListener); err != nil {

@@ -77,8 +77,8 @@ type Notification struct {
 }
 
 type Route struct {
-	Source   string
-	Instance string
+	Source   string `json:"source"`
+	Instance string `json:"instance"`
 }
 
 type Item struct {
@@ -106,6 +106,8 @@ type ItemRecord struct {
 	NotBefore        time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	AttemptCount     int64
+	EffectID         string
 	DigestParentID   string
 }
 
@@ -117,6 +119,8 @@ type ItemStore interface {
 type ChannelRegistry interface {
 	Registered(source string) bool
 }
+
+type Starter func(ctx context.Context, itemID string) error
 
 type Policy struct {
 	Destinations   map[string]string
@@ -132,9 +136,10 @@ type Broadcaster struct {
 	maxDigestBytes int64
 	channels       ChannelRegistry
 	items          ItemStore
+	starter        Starter
 }
 
-func New(policy Policy, channels ChannelRegistry, items ItemStore) (*Broadcaster, error) {
+func New(policy Policy, channels ChannelRegistry, items ItemStore, starter Starter) (*Broadcaster, error) {
 	if channels == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "channel registry must not be nil")
 	}
@@ -170,6 +175,7 @@ func New(policy Policy, channels ChannelRegistry, items ItemStore) (*Broadcaster
 		maxDigestBytes: policy.MaxDigestBytes,
 		channels:       channels,
 		items:          items,
+		starter:        starter,
 	}, nil
 }
 
@@ -299,6 +305,11 @@ func (b *Broadcaster) Submit(ctx context.Context, notification *Notification) (I
 	})
 	if err != nil {
 		return Item{}, false, err
+	}
+	if b.starter != nil {
+		if err := b.starter(ctx, record.ID); err != nil {
+			return Item{}, false, Errorf(ErrorCodeUnavailable, "broadcast run did not start")
+		}
 	}
 	return Item{
 		ID:               record.ID,

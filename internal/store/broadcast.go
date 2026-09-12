@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -50,6 +52,11 @@ type BroadcastStore interface {
 	ClaimDispatchSlot(ctx context.Context, alias string, now time.Time, gap time.Duration) (time.Time, error)
 	DeferDestination(ctx context.Context, alias string, until time.Time) error
 	DestinationCursor(ctx context.Context, alias string) (time.Time, bool, error)
+	ListHeld(ctx context.Context, alias, priority string, notBefore time.Time, limit int) ([]BroadcastItem, error)
+	ListActive(ctx context.Context, limit int) ([]BroadcastItem, error)
+	ListItems(ctx context.Context, states []string, limit int) ([]BroadcastItem, error)
+	Settle(ctx context.Context, id, state, effectID string, now time.Time) error
+	NoteAttempt(ctx context.Context, id string, attempt int64, now time.Time) error
 }
 
 type sqliteBroadcastStore struct {
@@ -263,10 +270,25 @@ func (s *sqliteBroadcastStore) CreateDigest(ctx context.Context, parent *Broadca
 }
 
 func (s *sqliteBroadcastStore) findItem(ctx context.Context, query string, args ...any) (BroadcastItem, bool, error) {
+	item, found, err := scanOneBroadcastItem(s.db.QueryRowContext(ctx, query, args...))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return BroadcastItem{}, false, nil
+		}
+		return BroadcastItem{}, false, classifyBusy(fmt.Errorf("load broadcast item: %w", err))
+	}
+	return item, found, nil
+}
+
+type broadcastRowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanOneBroadcastItem(row broadcastRowScanner) (BroadcastItem, bool, error) {
 	var item BroadcastItem
 	var notBeforeRaw, createdAtRaw, updatedAtRaw string
 	var effectID, digestParentID sql.NullString
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(
+	err := row.Scan(
 		&item.ID,
 		&item.Producer,
 		&item.IdempotencyKey,
@@ -286,8 +308,38 @@ func (s *sqliteBroadcastStore) findItem(ctx context.Context, query string, args 
 		return BroadcastItem{}, false, nil
 	}
 	if err != nil {
-		return BroadcastItem{}, false, classifyBusy(fmt.Errorf("load broadcast item: %w", err))
+		return BroadcastItem{}, false, err
 	}
+	return finishBroadcastItemScan(&item, notBeforeRaw, createdAtRaw, updatedAtRaw, effectID, digestParentID)
+}
+
+func scanBroadcastItem(rows *sql.Rows) (BroadcastItem, error) {
+	var item BroadcastItem
+	var notBeforeRaw, createdAtRaw, updatedAtRaw string
+	var effectID, digestParentID sql.NullString
+	if err := rows.Scan(
+		&item.ID,
+		&item.Producer,
+		&item.IdempotencyKey,
+		&item.ContentDigest,
+		&item.Priority,
+		&item.DestinationAlias,
+		&item.ContentJSON,
+		&item.State,
+		&notBeforeRaw,
+		&item.AttemptCount,
+		&effectID,
+		&digestParentID,
+		&createdAtRaw,
+		&updatedAtRaw,
+	); err != nil {
+		return BroadcastItem{}, classifyBusy(fmt.Errorf("scan broadcast item: %w", err))
+	}
+	finished, _, err := finishBroadcastItemScan(&item, notBeforeRaw, createdAtRaw, updatedAtRaw, effectID, digestParentID)
+	return finished, err
+}
+
+func finishBroadcastItemScan(item *BroadcastItem, notBeforeRaw, createdAtRaw, updatedAtRaw string, effectID, digestParentID sql.NullString) (BroadcastItem, bool, error) {
 	if !validBroadcastPriority(item.Priority) || !validBroadcastState(item.State) {
 		return BroadcastItem{}, false, Errorf(ErrorCodeBroadcastInvalid, "broadcast row carries an invalid priority or state")
 	}
@@ -308,7 +360,7 @@ func (s *sqliteBroadcastStore) findItem(ctx context.Context, query string, args 
 	item.UpdatedAt = updatedAt
 	item.EffectID = effectID.String
 	item.DigestParentID = digestParentID.String
-	return item, true, nil
+	return *item, true, nil
 }
 
 func (s *sqliteBroadcastStore) DestinationCursor(ctx context.Context, alias string) (time.Time, bool, error) {
@@ -434,4 +486,189 @@ func (s *sqliteBroadcastStore) DeferDestination(ctx context.Context, alias strin
 	}
 	committed = true
 	return nil
+}
+
+func validSettleState(state string) bool {
+	switch state {
+	case BroadcastStateSucceeded, BroadcastStateFailed, BroadcastStateUnknown, BroadcastStateCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *sqliteBroadcastStore) ListHeld(ctx context.Context, alias, priority string, notBefore time.Time, limit int) ([]BroadcastItem, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if alias == "" || priority == "" {
+		return nil, Errorf(ErrorCodeInvalidArgument, "destination alias and priority must not be empty")
+	}
+	if limit <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list limit must be positive")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+selectBroadcastItemColumns+` FROM broadcast_item
+		WHERE state = '`+BroadcastStateHeld+`' AND destination_alias = ? AND priority = ? AND not_before <= ?
+		ORDER BY created_at, id LIMIT ?`,
+		alias, priority, formatTime(notBefore.UTC()), limit)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("list held broadcast items: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	items := []BroadcastItem{}
+	for rows.Next() {
+		item, err := scanBroadcastItem(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list held broadcast items: %w", err))
+	}
+	return items, nil
+}
+
+func (s *sqliteBroadcastStore) ListActive(ctx context.Context, limit int) ([]BroadcastItem, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if limit <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list limit must be positive")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+selectBroadcastItemColumns+` FROM broadcast_item
+		WHERE state IN ('`+BroadcastStateHeld+`','`+BroadcastStateScheduled+`','`+BroadcastStateStarted+`')
+		ORDER BY not_before, created_at, id LIMIT ?`,
+		limit)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("list active broadcast items: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	items := []BroadcastItem{}
+	for rows.Next() {
+		item, err := scanBroadcastItem(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list active broadcast items: %w", err))
+	}
+	return items, nil
+}
+
+func (s *sqliteBroadcastStore) Settle(ctx context.Context, id, state, effectID string, now time.Time) error {
+	if s.db == nil {
+		return errNilArgument("db")
+	}
+	if id == "" {
+		return Errorf(ErrorCodeInvalidArgument, "broadcast id must not be empty")
+	}
+	if !validSettleState(state) {
+		return Errorf(ErrorCodeInvalidArgument, "settle state is not terminal")
+	}
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE broadcast_item SET state = ?, effect_id = ?, updated_at = ?
+		WHERE id = ? AND state IN ('`+BroadcastStateHeld+`','`+BroadcastStateScheduled+`','`+BroadcastStateStarted+`','`+BroadcastStateUnknown+`')`,
+		state, nullText(effectID), formatTime(now.UTC()), id)
+	if err != nil {
+		return classifyBusy(fmt.Errorf("settle broadcast item: %w", err))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return classifyBusy(fmt.Errorf("settle broadcast item: %w", err))
+	}
+	if affected == 0 {
+		_, findErr := s.Item(ctx, id)
+		if findErr != nil {
+			return findErr
+		}
+		return &Error{Code: ErrorCodeBroadcastConflict, Detail: "broadcast item is already terminal"}
+	}
+	return nil
+}
+
+func (s *sqliteBroadcastStore) NoteAttempt(ctx context.Context, id string, attempt int64, now time.Time) error {
+	if s.db == nil {
+		return errNilArgument("db")
+	}
+	if id == "" {
+		return Errorf(ErrorCodeInvalidArgument, "broadcast id must not be empty")
+	}
+	if attempt < 0 {
+		return Errorf(ErrorCodeInvalidArgument, "attempt count must not be negative")
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE broadcast_item SET attempt_count = CASE WHEN attempt_count < ? THEN ? ELSE attempt_count END,
+		updated_at = ? WHERE id = ?`,
+		attempt, attempt, formatTime(now.UTC()), id)
+	if err != nil {
+		return classifyBusy(fmt.Errorf("note broadcast attempt: %w", err))
+	}
+	return nil
+}
+
+func (s *sqliteBroadcastStore) ListItems(ctx context.Context, states []string, limit int) ([]BroadcastItem, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if limit <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list limit must be positive")
+	}
+	for _, state := range states {
+		if !validBroadcastState(state) {
+			return nil, Errorf(ErrorCodeInvalidArgument, "broadcast state filter is not valid")
+		}
+	}
+	if len(states) == 0 {
+		return s.listBroadcastItems(ctx,
+			`SELECT `+selectBroadcastItemColumns+` FROM broadcast_item ORDER BY created_at DESC, id DESC LIMIT ?`,
+			limit)
+	}
+	merged := []BroadcastItem{}
+	for _, state := range states {
+		items, err := s.listBroadcastItems(ctx,
+			`SELECT `+selectBroadcastItemColumns+` FROM broadcast_item WHERE state = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+			state, limit)
+		if err != nil {
+			return nil, err
+		}
+		merged = append(merged, items...)
+	}
+	slices.SortFunc(merged, func(a, b BroadcastItem) int {
+		if a.CreatedAt.Equal(b.CreatedAt) {
+			return strings.Compare(b.ID, a.ID)
+		}
+		return b.CreatedAt.Compare(a.CreatedAt)
+	})
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+	return merged, nil
+}
+
+func (s *sqliteBroadcastStore) listBroadcastItems(ctx context.Context, query string, args ...any) ([]BroadcastItem, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("list broadcast items: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	items := []BroadcastItem{}
+	for rows.Next() {
+		item, err := scanBroadcastItem(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list broadcast items: %w", err))
+	}
+	return items, nil
 }
