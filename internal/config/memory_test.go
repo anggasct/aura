@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,7 +47,6 @@ memory:
   enabled: false
   max_documents: 25
   recall_token_budget: 4000
-  english_stemming: true
   summary_prompt_version: memory-summary-v2
   summary_ttl: 48h
 `)
@@ -55,8 +55,11 @@ memory:
 		t.Fatalf("Load: %v", err)
 	}
 	memory := res.Config.Memory
-	if memory.Enabled || memory.MaxDocuments != 25 || !memory.EnglishStemming {
+	if memory.Enabled || memory.MaxDocuments != 25 || memory.EnglishStemming {
 		t.Errorf("memory = %+v", memory)
+	}
+	if strings.TrimSpace(memory.Locale) != "" {
+		t.Errorf("locale = %q, want empty", memory.Locale)
 	}
 }
 
@@ -77,6 +80,24 @@ func TestLoad_MemoryRejectsInvalid(t *testing.T) {
 			path := writeMemoryConfig(t, "version: 1\nmemory:\n"+tc.body)
 			if _, err := Load(path); err == nil {
 				t.Errorf("invalid memory accepted:\n%s", tc.body)
+			}
+		})
+	}
+}
+
+func TestLoad_MemoryRejectsUnsupportedTokenizerOptions(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"stemming opt-in", "  english_stemming: true\n"},
+		{"explicit locale", "  locale: en\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeMemoryConfig(t, "version: 1\nmemory:\n"+tc.body)
+			if _, err := Load(path); err == nil {
+				t.Errorf("unsupported tokenizer option accepted:\n%s", tc.body)
 			}
 		})
 	}

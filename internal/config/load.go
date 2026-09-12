@@ -2617,6 +2617,12 @@ func validateMemory(memory *Memory) error {
 	if memory.SummaryTTL <= 0 {
 		problems = append(problems, errors.New("memory.summary_ttl must be positive"))
 	}
+	if memory.EnglishStemming {
+		problems = append(problems, errors.New("memory.english_stemming is not supported by this build"))
+	}
+	if strings.TrimSpace(memory.Locale) != "" {
+		problems = append(problems, errors.New("memory.locale is not supported by this build"))
+	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
 	}

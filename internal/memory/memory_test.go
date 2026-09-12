@@ -393,3 +393,45 @@ func TestWatermarkAndPurge(t *testing.T) {
 		t.Error("non-positive purge limit accepted")
 	}
 }
+
+func TestRecallMultilingualContent(t *testing.T) {
+	service := testService()
+	now := time.Now().UTC()
+	documents := []struct {
+		content string
+		query   string
+	}{
+		{"les enfants jouent au café", "café"},
+		{"Überweisung an das Konto", "Überweisung"},
+		{"jadwal rapat besok pagi", "rapat"},
+		{"اجتماع الفريق غدا", "اجتماع"},
+	}
+	for i, tc := range documents {
+		event := &Event{
+			ID: "ev-multi", SessionID: "sess-1", Sequence: uint64(i + 1), Author: "user",
+			Kind: "adk_event", Payload: adkPayload(t, "user", tc.content, false), CreatedAt: now,
+		}
+		if _, indexed, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+			t.Fatalf("ProjectEvent(%q): %v", tc.content, err)
+		} else if !indexed {
+			t.Fatalf("multilingual event skipped: %q", tc.content)
+		}
+	}
+	for _, tc := range documents {
+		recalled, err := service.Recall(t.Context(), &RecallRequest{
+			OwnerID: "owner-1", SessionID: "sess-1", Query: tc.query,
+		})
+		if err != nil {
+			t.Fatalf("Recall(%q): %v", tc.query, err)
+		}
+		found := false
+		for _, document := range recalled {
+			if strings.Contains(document.Content, tc.query) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("query %q returned %+v, want content holding %q", tc.query, recalled, tc.query)
+		}
+	}
+}

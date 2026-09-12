@@ -269,3 +269,69 @@ func TestMemoryStore_SchemaVersionThirteen(t *testing.T) {
 		t.Errorf("fts tokenizer wrong: %s", ftsSQL)
 	}
 }
+
+func TestMemoryStore_MultilingualRetrieval(t *testing.T) {
+	db := newTestDB(t)
+	s := NewMemoryStore(db)
+	ctx := t.Context()
+	seedMemorySession(t, db, "sess-1", "owner-1")
+
+	documents := []struct {
+		id      string
+		content string
+		query   string
+	}{
+		{"mem-fr", "les enfants jouent au café", "café"},
+		{"mem-de", "Überweisung an das Konto", "Überweisung"},
+		{"mem-id", "jadwal rapat besok pagi", "rapat"},
+		{"mem-ar", "اجتماع الفريق غدا", "اجتماع"},
+	}
+	for i, tc := range documents {
+		document := testMemoryDocument(tc.id, "sess-1", MemoryKindEventText)
+		document.Content = tc.content
+		document.FromSequence = int64(i + 1)
+		document.ToSequence = int64(i + 1)
+		if _, err := s.UpsertDocument(ctx, document); err != nil {
+			t.Fatalf("seed %s: %v", tc.id, err)
+		}
+	}
+	for _, tc := range documents {
+		hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: tc.query, Limit: 10})
+		if err != nil {
+			t.Fatalf("Search(%q): %v", tc.query, err)
+		}
+		found := false
+		for _, hit := range hits {
+			if hit.ID == tc.id {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("query %q missing %s: %+v", tc.query, tc.id, hits)
+		}
+	}
+}
+
+func TestMemoryStore_SearchDoesNotStemByDefault(t *testing.T) {
+	db := newTestDB(t)
+	s := NewMemoryStore(db)
+	ctx := t.Context()
+	seedMemorySession(t, db, "sess-1", "owner-1")
+
+	document := testMemoryDocument("mem-1", "sess-1", MemoryKindEventText)
+	document.Content = "the nightly backup finished"
+	if _, err := s.UpsertDocument(ctx, document); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	exact, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backup", Limit: 10})
+	if err != nil || len(exact) != 1 {
+		t.Fatalf("exact search = %d, %v; want 1", len(exact), err)
+	}
+	inflected, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backups", Limit: 10})
+	if err != nil {
+		t.Fatalf("inflected search: %v", err)
+	}
+	if len(inflected) != 0 {
+		t.Errorf("inflected search matched without stemming: %+v", inflected)
+	}
+}
