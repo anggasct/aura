@@ -35,6 +35,7 @@ type Config struct {
 	Health       Health                `koanf:"health" yaml:"health"`
 	Terminal     Terminal              `koanf:"terminal" yaml:"terminal"`
 	Webhook      Webhook               `koanf:"webhook" yaml:"webhook"`
+	Broadcast    Broadcast             `koanf:"broadcast" yaml:"broadcast"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
 
@@ -56,6 +57,23 @@ type WebhookKey struct {
 
 type Channels struct {
 	Discord Discord `koanf:"discord" yaml:"discord"`
+}
+
+type Broadcast struct {
+	Timezone       string            `koanf:"timezone" yaml:"timezone"`
+	QuietHours     QuietHours        `koanf:"quiet_hours" yaml:"quiet_hours"`
+	MaxDigestItems int               `koanf:"max_digest_items" yaml:"max_digest_items"`
+	MaxDigestBytes int64             `koanf:"max_digest_bytes" yaml:"max_digest_bytes"`
+	MaxAttempts    int               `koanf:"max_attempts" yaml:"max_attempts"`
+	MaxDeliveryAge Duration          `koanf:"max_delivery_age" yaml:"max_delivery_age"`
+	Destinations   map[string]string `koanf:"destinations" yaml:"destinations"`
+	Fallback       map[string]string `koanf:"fallback" yaml:"fallback"`
+}
+
+type QuietHours struct {
+	Enabled bool   `koanf:"enabled" yaml:"enabled"`
+	Start   string `koanf:"start" yaml:"start"`
+	End     string `koanf:"end" yaml:"end"`
 }
 
 type Discord struct {
@@ -510,6 +528,16 @@ func Default() Config {
 				MinEditInterval:    Duration(2 * time.Second),
 				MaxAttachmentBytes: 20971520,
 			},
+		},
+		Broadcast: Broadcast{
+			Timezone:       "UTC",
+			QuietHours:     QuietHours{Enabled: true, Start: "23:00", End: "07:00"},
+			MaxDigestItems: 20,
+			MaxDigestBytes: 12000,
+			MaxAttempts:    3,
+			MaxDeliveryAge: Duration(24 * time.Hour),
+			Destinations:   map[string]string{},
+			Fallback:       map[string]string{},
 		},
 	}
 }
