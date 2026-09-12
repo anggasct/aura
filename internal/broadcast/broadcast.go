@@ -106,31 +106,55 @@ type ItemRecord struct {
 	NotBefore        time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	DigestParentID   string
 }
 
 type ItemStore interface {
 	Insert(ctx context.Context, record *ItemRecord) (ItemRecord, bool, error)
+	CreateDigest(ctx context.Context, parent *ItemRecord, childIDs []string) (ItemRecord, bool, error)
 }
 
 type ChannelRegistry interface {
 	Registered(source string) bool
 }
 
-type Broadcaster struct {
-	destinations map[string]string
-	channels     ChannelRegistry
-	items        ItemStore
+type Policy struct {
+	Destinations   map[string]string
+	Quiet          QuietConfig
+	MaxDigestItems int
+	MaxDigestBytes int64
 }
 
-func New(destinations map[string]string, channels ChannelRegistry, items ItemStore) (*Broadcaster, error) {
+type Broadcaster struct {
+	destinations   map[string]string
+	quiet          QuietConfig
+	maxDigestItems int
+	maxDigestBytes int64
+	channels       ChannelRegistry
+	items          ItemStore
+}
+
+func New(policy Policy, channels ChannelRegistry, items ItemStore) (*Broadcaster, error) {
 	if channels == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "channel registry must not be nil")
 	}
 	if items == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "item store must not be nil")
 	}
-	routes := make(map[string]string, len(destinations))
-	for alias, route := range destinations {
+	if policy.MaxDigestItems <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "digest item bound must be positive")
+	}
+	if policy.MaxDigestBytes <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "digest byte bound must be positive")
+	}
+	if policy.Quiet.Enabled && policy.Quiet.Location == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "quiet hours location must not be nil")
+	}
+	if policy.Quiet.Enabled && (policy.Quiet.StartMin < 0 || policy.Quiet.StartMin >= 24*60 || policy.Quiet.EndMin < 0 || policy.Quiet.EndMin >= 24*60) {
+		return nil, Errorf(ErrorCodeInvalidArgument, "quiet hours bounds are not valid")
+	}
+	routes := make(map[string]string, len(policy.Destinations))
+	for alias, route := range policy.Destinations {
 		if !ValidAlias(alias) {
 			return nil, Errorf(ErrorCodeInvalidArgument, "destination alias is not valid")
 		}
@@ -139,7 +163,14 @@ func New(destinations map[string]string, channels ChannelRegistry, items ItemSto
 		}
 		routes[alias] = route
 	}
-	return &Broadcaster{destinations: routes, channels: channels, items: items}, nil
+	return &Broadcaster{
+		destinations:   routes,
+		quiet:          policy.Quiet,
+		maxDigestItems: policy.MaxDigestItems,
+		maxDigestBytes: policy.MaxDigestBytes,
+		channels:       channels,
+		items:          items,
+	}, nil
 }
 
 func ValidAlias(alias string) bool {
@@ -252,6 +283,7 @@ func (b *Broadcaster) Submit(ctx context.Context, notification *Notification) (I
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
+	state, notBefore := b.releaseFor(notification.Priority, createdAt)
 	record, replayed, err := b.items.Insert(ctx, &ItemRecord{
 		ID:               id,
 		Producer:         notification.Producer,
@@ -260,8 +292,8 @@ func (b *Broadcaster) Submit(ctx context.Context, notification *Notification) (I
 		Priority:         notification.Priority,
 		DestinationAlias: notification.DestinationAlias,
 		ContentJSON:      notification.ContentJSON,
-		State:            StateScheduled,
-		NotBefore:        createdAt,
+		State:            state,
+		NotBefore:        notBefore,
 		CreatedAt:        createdAt,
 		UpdatedAt:        createdAt,
 	})

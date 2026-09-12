@@ -26,6 +26,7 @@ var migrations = []migration{
 	{version: 8, sql: workflowCorrelationSchemaSQL},
 	{version: 9, sql: channelResumeSchemaSQL},
 	{version: 10, sql: broadcastItemSchemaSQL},
+	{version: 11, sql: broadcastDestinationSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -297,6 +298,14 @@ CREATE TABLE broadcast_item (
     UNIQUE(producer, idempotency_key)
 );
 CREATE INDEX broadcast_due_idx ON broadcast_item(state, not_before, priority, created_at, id);
+`
+
+const broadcastDestinationSchemaSQL = `
+CREATE TABLE broadcast_destination (
+    alias TEXT PRIMARY KEY,
+    next_eligible_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 `
 
 const modelCircuitCheckpointSchemaSQL = `
