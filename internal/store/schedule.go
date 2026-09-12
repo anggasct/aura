@@ -76,6 +76,9 @@ type ScheduleStore interface {
 	SetJobState(ctx context.Context, id, state string, now time.Time) error
 	RecordFire(ctx context.Context, occurrence *ScheduledOccurrence) error
 	OccurrenceByFire(ctx context.Context, jobID string, scheduledFor time.Time) (ScheduledOccurrence, bool, error)
+	ActiveJobs(ctx context.Context, limit int) ([]ScheduledJob, error)
+	ActiveOccurrence(ctx context.Context, jobID string) (ScheduledOccurrence, bool, error)
+	AttachTurn(ctx context.Context, id, turnID string, now time.Time) error
 	SettleOccurrence(ctx context.Context, id, state, turnID, resultEventID, safeErrorCode string, now time.Time) error
 	Occurrences(ctx context.Context, jobID string, limit int) ([]ScheduledOccurrence, error)
 }
@@ -303,8 +306,8 @@ func (s *sqliteScheduleStore) SettleOccurrence(ctx context.Context, id, state, t
 		return classifyBusy(fmt.Errorf("settle occurrence: %w", err))
 	}
 	if affected == 0 {
-		if _, findErr := s.findOccurrence(ctx, id); findErr != nil {
-			return findErr
+		if err := s.requireOccurrence(ctx, id); err != nil {
+			return err
 		}
 		return &Error{Code: ErrorCodeScheduleConflict, Detail: "occurrence is already terminal"}
 	}
@@ -375,25 +378,16 @@ func scanOneScheduledJob(row rowScanner) (ScheduledJob, bool, error) {
 	return job, true, nil
 }
 
-func (s *sqliteScheduleStore) findOccurrence(ctx context.Context, id string) (ScheduledOccurrence, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, job_id, job_version, scheduled_for_utc, state, turn_id,
-		result_event_id, safe_error_code, created_at, updated_at
-		FROM scheduled_occurrence WHERE id = ?`, id)
+func (s *sqliteScheduleStore) requireOccurrence(ctx context.Context, id string) error {
+	var present int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM scheduled_occurrence WHERE id = ?`, id).Scan(&present)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &Error{Code: ErrorCodeScheduleNotFound, Detail: "occurrence not found"}
+	}
 	if err != nil {
-		return ScheduledOccurrence{}, classifyBusy(fmt.Errorf("load occurrence: %w", err))
+		return classifyBusy(fmt.Errorf("load occurrence: %w", err))
 	}
-	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		_ = rows.Close()
-		return ScheduledOccurrence{}, &Error{Code: ErrorCodeScheduleNotFound, Detail: "occurrence not found"}
-	}
-	item, err := scanScheduledOccurrence(rows)
-	if err != nil {
-		_ = rows.Close()
-		return ScheduledOccurrence{}, err
-	}
-	return item, nil
+	return nil
 }
 
 func scanScheduledOccurrence(rows *sql.Rows) (ScheduledOccurrence, error) {
@@ -430,6 +424,60 @@ func scanScheduledOccurrence(rows *sql.Rows) (ScheduledOccurrence, error) {
 	return item, nil
 }
 
+func (s *sqliteScheduleStore) ActiveOccurrence(ctx context.Context, jobID string) (ScheduledOccurrence, bool, error) {
+	if s.db == nil {
+		return ScheduledOccurrence{}, false, errNilArgument("db")
+	}
+	if jobID == "" {
+		return ScheduledOccurrence{}, false, Errorf(ErrorCodeInvalidArgument, "job id must not be empty")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, job_id, job_version, scheduled_for_utc, state, turn_id,
+		result_event_id, safe_error_code, created_at, updated_at
+		FROM scheduled_occurrence WHERE job_id = ? AND state = ? ORDER BY scheduled_for_utc DESC, id DESC LIMIT 1`,
+		jobID, OccurrenceFired)
+	if err != nil {
+		return ScheduledOccurrence{}, false, classifyBusy(fmt.Errorf("load active occurrence: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		_ = rows.Close()
+		return ScheduledOccurrence{}, false, nil
+	}
+	item, err := scanScheduledOccurrence(rows)
+	if err != nil {
+		_ = rows.Close()
+		return ScheduledOccurrence{}, false, err
+	}
+	return item, true, nil
+}
+
+func (s *sqliteScheduleStore) AttachTurn(ctx context.Context, id, turnID string, now time.Time) error {
+	if s.db == nil {
+		return errNilArgument("db")
+	}
+	if id == "" || turnID == "" {
+		return Errorf(ErrorCodeInvalidArgument, "occurrence and turn ids must not be empty")
+	}
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE scheduled_occurrence SET turn_id = ?, updated_at = ? WHERE id = ? AND state = ?`,
+		turnID, formatTime(now.UTC()), id, OccurrenceFired)
+	if err != nil {
+		return classifyBusy(fmt.Errorf("attach turn: %w", err))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return classifyBusy(fmt.Errorf("attach turn: %w", err))
+	}
+	if affected == 0 {
+		if err := s.requireOccurrence(ctx, id); err != nil {
+			return err
+		}
+		return &Error{Code: ErrorCodeScheduleConflict, Detail: "occurrence is no longer fired"}
+	}
+	return nil
+}
+
 func (s *sqliteScheduleStore) OccurrenceByFire(ctx context.Context, jobID string, scheduledFor time.Time) (ScheduledOccurrence, bool, error) {
 	if s.db == nil {
 		return ScheduledOccurrence{}, false, errNilArgument("db")
@@ -456,4 +504,38 @@ func (s *sqliteScheduleStore) OccurrenceByFire(ctx context.Context, jobID string
 		return ScheduledOccurrence{}, false, err
 	}
 	return item, true, nil
+}
+
+func (s *sqliteScheduleStore) ActiveJobs(ctx context.Context, limit int) ([]ScheduledJob, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if limit <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list limit must be positive")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
+		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at
+		FROM scheduled_job WHERE state = ? ORDER BY id LIMIT ?`,
+		ScheduleJobActive, limit)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("list active jobs: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	jobs := []ScheduledJob{}
+	for rows.Next() {
+		job, found, err := scanOneScheduledJob(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if !found {
+			break
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list active jobs: %w", err))
+	}
+	return jobs, nil
 }
