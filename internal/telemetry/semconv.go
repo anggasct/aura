@@ -18,6 +18,9 @@ const (
 	MetricMemoryRecallsTotal    = "memory.recalls.total"
 	MetricMemoryRecallDuration  = "memory.recall.duration"
 	MetricMemoryRecallDocuments = "memory.recall.documents"
+	MetricMCPCallsTotal         = "mcp.calls.total"
+	MetricMCPCallDuration       = "mcp.call.duration"
+	MetricMCPResponseSize       = "mcp.response.size"
 )
 
 const (
@@ -62,6 +65,12 @@ const (
 	AttrRecallModelSystem    = "aura.recall.model_system"
 	AttrRecallModelName      = "aura.recall.model_name"
 	AttrRecallSummaryVersion = "aura.recall.summary_version"
+
+	AttrMCPServer    = "mcp.server"
+	AttrMCPTransport = "mcp.transport"
+	AttrMCPTool      = "mcp.tool"
+	AttrMCPOutcome   = "mcp.outcome"
+	AttrMCPCode      = "mcp.code"
 )
 
 var turnSpanAttrs = []string{
@@ -114,6 +123,9 @@ var metricLabelAttrs = map[string][]string{
 	MetricMemoryRecallsTotal:    {AttrRecallOutcome, AttrRecallModelSystem},
 	MetricMemoryRecallDuration:  {AttrRecallOutcome},
 	MetricMemoryRecallDocuments: {AttrRecallOutcome},
+	MetricMCPCallsTotal:         {AttrMCPServer, AttrMCPTransport, AttrMCPTool, AttrMCPOutcome, AttrMCPCode},
+	MetricMCPCallDuration:       {AttrMCPServer, AttrMCPOutcome},
+	MetricMCPResponseSize:       {AttrMCPServer, AttrMCPOutcome},
 }
 
 func AllowedSpanAttrs(spanName string) []string {

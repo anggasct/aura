@@ -8,6 +8,10 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/egress"
+	"github.com/anggasct/aura/internal/mcp"
+	"github.com/anggasct/aura/internal/telemetry"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 type stubEgressResolver struct {
@@ -95,5 +99,37 @@ func TestMCPHTTPClientValidates(t *testing.T) {
 	}
 	if client.CheckRedirect == nil {
 		t.Error("redirect validation missing")
+	}
+}
+
+func TestMCPRecorderObserverBridge(t *testing.T) {
+	if observer := mcpRecorderObserver(nil); observer != nil {
+		t.Error("nil recorder produced an observer")
+	}
+	reader := sdkmetric.NewManualReader()
+	recorder, err := telemetry.NewMCPRecorder(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))
+	if err != nil {
+		t.Fatalf("NewMCPRecorder(): %v", err)
+	}
+	observer := mcpRecorderObserver(recorder)
+	if observer == nil {
+		t.Fatal("observer missing")
+	}
+	observer(t.Context(), &mcp.Observation{
+		Server: "docs", Transport: "stdio", Tool: "search",
+		Result: "tool_call", ResultCode: "ok", SizeBytes: 64,
+	})
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect(): %v", err)
+	}
+	names := map[string]bool{}
+	for _, scope := range rm.ScopeMetrics {
+		for _, point := range scope.Metrics {
+			names[point.Name] = true
+		}
+	}
+	if !names[telemetry.MetricMCPCallsTotal] {
+		t.Error("bridged observation produced no metric")
 	}
 }

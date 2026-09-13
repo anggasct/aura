@@ -17,18 +17,34 @@ func FormatToolName(serverName, toolName string) string {
 	return fmt.Sprintf("mcp_%s_%s", serverName, toolName)
 }
 
+func parseToolSchema(schema json.RawMessage) (*jsonschema.Resolved, error) {
+	var parsed jsonschema.Schema
+	if err := json.Unmarshal(schema, &parsed); err != nil {
+		return nil, err
+	}
+	return parsed.Resolve(nil)
+}
+
+func hasToolSchema(schema json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(schema)
+	return len(trimmed) > 0 && string(trimmed) != "null"
+}
+
+func validateToolSchema(toolName string, schema json.RawMessage) error {
+	if !hasToolSchema(schema) {
+		return nil
+	}
+	if _, err := parseToolSchema(schema); err != nil {
+		return Wrap(ErrSchemaInvalid, err, fmt.Sprintf("tool %q schema is not a valid json schema", toolName))
+	}
+	return nil
+}
+
 func MakeValidator(schema json.RawMessage, maxMsgSize int64) func(json.RawMessage) (json.RawMessage, error) {
 	var resolved *jsonschema.Resolved
 	var schemaErr error
-	if len(bytes.TrimSpace(schema)) > 0 && string(bytes.TrimSpace(schema)) != "null" {
-		var parsed jsonschema.Schema
-		if err := json.Unmarshal(schema, &parsed); err != nil {
-			schemaErr = err
-		} else if r, err := parsed.Resolve(nil); err != nil {
-			schemaErr = err
-		} else {
-			resolved = r
-		}
+	if hasToolSchema(schema) {
+		resolved, schemaErr = parseToolSchema(schema)
 	}
 	return func(raw json.RawMessage) (json.RawMessage, error) {
 		if len(raw) == 0 {

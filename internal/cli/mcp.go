@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/mcp"
 	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/telemetry"
 )
 
 type mcpEndpointPolicy struct {
@@ -50,4 +51,22 @@ func (mcpSecretResolver) ResolveSecret(_ context.Context, ref string) (string, e
 
 func mcpHTTPClient(resolver egress.Resolver) *http.Client {
 	return egress.NewClient(resolver)
+}
+
+func mcpRecorderObserver(recorder *telemetry.MCPRecorder) mcp.Observer {
+	if recorder == nil {
+		return nil
+	}
+	return func(ctx context.Context, observation *mcp.Observation) {
+		recorder.Record(ctx, &telemetry.MCPObservation{
+			Server:    observation.Server,
+			Transport: observation.Transport,
+			Tool:      observation.Tool,
+			Count:     observation.Count,
+			Outcome:   observation.Result,
+			Code:      observation.ResultCode,
+			SizeBytes: observation.SizeBytes,
+			Duration:  observation.Duration,
+		})
+	}
 }
