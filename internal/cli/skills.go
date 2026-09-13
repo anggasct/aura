@@ -56,6 +56,14 @@ func (a *skillStoreRegistry) ListByState(ctx context.Context, state string, limi
 	return out, nil
 }
 
+func (a *skillStoreRegistry) AcceptSkill(ctx context.Context, id, digest, granted string) error {
+	return mapSkillStoreError(a.inner.AcceptSkill(ctx, id, digest, granted))
+}
+
+func (a *skillStoreRegistry) RejectSkill(ctx context.Context, id string) error {
+	return mapSkillStoreError(a.inner.RejectSkill(ctx, id))
+}
+
 func skillRowToRecord(row *store.SkillRow) skills.Record {
 	return skills.Record{
 		ID:         row.ID,
@@ -79,6 +87,8 @@ func mapSkillStoreError(err error) error {
 		return skills.Errorf(skills.ErrorCodeSkillNotFound, "skill is not registered")
 	case store.ErrorCodeSkillInvalid:
 		return skills.Errorf(skills.ErrorCodeSkillInvalid, "skill record is not valid")
+	case store.ErrorCodeSkillDigestChanged:
+		return skills.Errorf(skills.ErrorCodeSkillDigestChanged, "skill content changed since review")
 	case store.ErrorCodeInvalidArgument:
 		return skills.Errorf(skills.ErrorCodeInvalidArgument, "skill argument is not valid")
 	default:
@@ -113,12 +123,15 @@ func buildSkillsEngine(ctx context.Context, cfg *config.Skills, db *sql.DB, logg
 		}
 		roots = append(roots, dir)
 	}
-	engine, err := skills.NewEngine(&skillStoreRegistry{inner: store.NewSkillStore(db)}, skills.EngineConfig{
-		Dirs:                roots,
-		MaxIndexed:          cfg.MaxIndexedSkills,
-		MaxInstructionRunes: cfg.MaxInstructionTokens * skills.CharsPerToken,
-		PolicyVersion:       skills.PolicyVersion,
-		Logger:              logger,
+	engine, err := skills.NewEngine(&skillStoreRegistry{inner: store.NewSkillStore(db)}, &skills.EngineConfig{
+		Dirs:                 roots,
+		MaxIndexed:           cfg.MaxIndexedSkills,
+		MaxInstructionRunes:  cfg.MaxInstructionTokens * skills.CharsPerToken,
+		MaxResourceBytes:     cfg.MaxResourceBytes,
+		ScriptToolName:       "exec",
+		ScriptToolCapability: "shell.execute",
+		PolicyVersion:        skills.PolicyVersion,
+		Logger:               logger,
 	})
 	if err != nil {
 		return nil, err
