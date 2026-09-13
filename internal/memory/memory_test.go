@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -27,7 +28,7 @@ func newFakeDocumentStore() *fakeDocumentStore {
 func (s *fakeDocumentStore) UpsertDocument(_ context.Context, document *StoredDocument) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := fakeDocKey(document.SessionID, document.Kind, document.FromSequence, document.ToSequence)
+	key := fakeDocKey(document.SessionID, document.Kind, document.PromptVersion, document.FromSequence, document.ToSequence)
 	if _, ok := s.byKey[key]; ok {
 		return false, nil
 	}
@@ -84,8 +85,8 @@ func (s *fakeDocumentStore) Search(_ context.Context, query *StoredQuery) ([]Sto
 	return hits, nil
 }
 
-func fakeDocKey(sessionID, kind string, from, to int64) string {
-	return fmt.Sprintf("%s|%s|%d|%d", sessionID, kind, from, to)
+func fakeDocKey(sessionID, kind, promptVersion string, from, to int64) string {
+	return fmt.Sprintf("%s|%s|%s|%d|%d", sessionID, kind, promptVersion, from, to)
 }
 
 func (s *fakeDocumentStore) DeleteSessionDocuments(_ context.Context, sessionID string) error {
@@ -95,7 +96,7 @@ func (s *fakeDocumentStore) DeleteSessionDocuments(_ context.Context, sessionID 
 		record := s.records[id]
 		if record.SessionID == sessionID {
 			delete(s.records, id)
-			delete(s.byKey, fakeDocKey(record.SessionID, record.Kind, record.FromSequence, record.ToSequence))
+			delete(s.byKey, fakeDocKey(record.SessionID, record.Kind, record.PromptVersion, record.FromSequence, record.ToSequence))
 		}
 	}
 	return nil
@@ -133,7 +134,27 @@ func (s *fakeSecrets) Contains(text string) bool {
 }
 
 func testService() *Service {
-	service, err := NewService(newFakeDocumentStore(), &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, Config{})
+	return testServiceWithStore(newFakeDocumentStore())
+}
+
+func testServiceWithStore(store *fakeDocumentStore) *Service {
+	service, err := NewService(store, &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, Config{})
+	if err != nil {
+		panic(err)
+	}
+	return service
+}
+
+type failingDocumentStore struct {
+	*fakeDocumentStore
+}
+
+func (s *failingDocumentStore) Search(_ context.Context, _ *StoredQuery) ([]StoredHit, error) {
+	return nil, errors.New("projection unavailable")
+}
+
+func NewServiceWithStoreError() *Service {
+	service, err := NewService(&failingDocumentStore{fakeDocumentStore: newFakeDocumentStore()}, nil, Config{})
 	if err != nil {
 		panic(err)
 	}
