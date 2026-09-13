@@ -24,6 +24,7 @@ type ManagerOptions struct {
 	HTTPClient        *http.Client
 	EndpointPolicy    EndpointPolicy
 	SecretResolver    SecretResolver
+	Observer          Observer
 	Logger            *slog.Logger
 	CapabilityChecker func([]string) error
 }
@@ -35,6 +36,7 @@ type Manager struct {
 	httpClient        *http.Client
 	endpointPolicy    EndpointPolicy
 	secretResolver    SecretResolver
+	observer          Observer
 	logger            *slog.Logger
 	capabilityChecker func([]string) error
 	clients           map[string]*Client
@@ -77,6 +79,7 @@ func NewManager(opts *ManagerOptions) (*Manager, error) {
 		httpClient:        opts.HTTPClient,
 		endpointPolicy:    opts.EndpointPolicy,
 		secretResolver:    opts.SecretResolver,
+		observer:          opts.Observer,
 		logger:            opts.Logger,
 		capabilityChecker: opts.CapabilityChecker,
 		clients:           make(map[string]*Client),
@@ -133,6 +136,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	httpClient := m.httpClient
 	endpointPolicy := m.endpointPolicy
 	secretResolver := m.secretResolver
+	observer := m.observer
 	m.mu.Unlock()
 
 	for i := range servers {
@@ -156,6 +160,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			WithHTTPClient(httpClient),
 			WithEndpointPolicy(endpointPolicy),
 			WithSecretResolver(secretResolver),
+			WithObserver(observer),
 		)
 		if err != nil {
 			return err

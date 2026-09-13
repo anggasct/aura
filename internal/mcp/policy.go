@@ -40,3 +40,9 @@ func WithOAuthCodeFetcher(fetch sdkauth.AuthorizationCodeFetcher) ClientOption {
 		c.oauthFetch = fetch
 	}
 }
+
+func WithObserver(observer Observer) ClientOption {
+	return func(c *Client) {
+		c.observer = observer
+	}
+}

@@ -60,6 +60,9 @@ func TestMetricNamesPinned(t *testing.T) {
 		"MetricMemoryRecallsTotal":    "memory.recalls.total",
 		"MetricMemoryRecallDuration":  "memory.recall.duration",
 		"MetricMemoryRecallDocuments": "memory.recall.documents",
+		"MetricMCPCallsTotal":         "mcp.calls.total",
+		"MetricMCPCallDuration":       "mcp.call.duration",
+		"MetricMCPResponseSize":       "mcp.response.size",
 	}
 	for name, got := range metrics {
 		if got != want[name] {
@@ -164,6 +167,9 @@ func TestMetricLabelsBounded(t *testing.T) {
 		{MetricMemoryRecallsTotal, []string{AttrRecallOutcome, AttrRecallModelSystem}},
 		{MetricMemoryRecallDuration, []string{AttrRecallOutcome}},
 		{MetricMemoryRecallDocuments, []string{AttrRecallOutcome}},
+		{MetricMCPCallsTotal, []string{AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode}},
+		{MetricMCPCallDuration, []string{AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome}},
+		{MetricMCPResponseSize, []string{AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome}},
 	}
 	for _, tc := range cases {
 		got := AllowedMetricLabels(tc.metric)
@@ -190,6 +196,9 @@ func TestMetricLabelsExcludeHighCardinality(t *testing.T) {
 		MetricMemoryRecallsTotal:    AllowedMetricLabels(MetricMemoryRecallsTotal),
 		MetricMemoryRecallDuration:  AllowedMetricLabels(MetricMemoryRecallDuration),
 		MetricMemoryRecallDocuments: AllowedMetricLabels(MetricMemoryRecallDocuments),
+		MetricMCPCallsTotal:         AllowedMetricLabels(MetricMCPCallsTotal),
+		MetricMCPCallDuration:       AllowedMetricLabels(MetricMCPCallDuration),
+		MetricMCPResponseSize:       AllowedMetricLabels(MetricMCPResponseSize),
 	} {
 		for _, label := range labels {
 			for _, hc := range highCardinality {
