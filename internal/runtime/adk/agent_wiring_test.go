@@ -173,7 +173,7 @@ func TestBuildAgentCarriesDefinitionSurface(t *testing.T) {
 	}
 	built, err := buildAgent("aura", &definition, &fakeADKModel{answer: "x"}, nil, func(agent.Context, tool.Tool, map[string]any) (map[string]any, error) {
 		return map[string]any{}, nil
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("buildAgent: %v", err)
 	}

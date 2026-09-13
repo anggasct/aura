@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/runtime"
 )
 
 const (
@@ -162,11 +163,13 @@ type Config struct {
 	MaxContentBytes      int
 	SummaryPromptVersion string
 	SummaryTTL           time.Duration
+	Observer             Observer
 }
 
 type Service struct {
 	documents     DocumentStore
 	secrets       Secrets
+	observer      Observer
 	maxDocs       int
 	tokens        int
 	maxBytes      int
@@ -201,6 +204,7 @@ func NewService(documents DocumentStore, secrets Secrets, config Config) (*Servi
 	return &Service{
 		documents:     documents,
 		secrets:       secrets,
+		observer:      config.Observer,
 		maxDocs:       maxDocs,
 		tokens:        tokens,
 		maxBytes:      maxBytes,
@@ -627,4 +631,24 @@ func (s *Service) RecallWithSummary(ctx context.Context, req *RecallRequest, mod
 		return RecallContext{Query: req.Query, Documents: documents, Provenance: provenanceFor(documents)}, nil
 	}
 	return s.Summarize(ctx, req.OwnerID, req.SessionID, req.Query, documents, model, summarizer)
+}
+
+func (c *RecallContext) Evidence() *runtime.UntrustedRecall {
+	documents := make([]runtime.UntrustedDocument, 0, len(c.Documents))
+	for i := range c.Documents {
+		documents = append(documents, runtime.UntrustedDocument{
+			ID:           c.Documents[i].ID,
+			SessionID:    c.Documents[i].SessionID,
+			FromSequence: c.Documents[i].FromSequence,
+			ToSequence:   c.Documents[i].ToSequence,
+			Trust:        c.Documents[i].Trust,
+			Content:      c.Documents[i].Content,
+		})
+	}
+	return &runtime.UntrustedRecall{
+		Query:     c.Query,
+		Summary:   c.Summary,
+		Trust:     c.Trust,
+		Documents: documents,
+	}
 }
