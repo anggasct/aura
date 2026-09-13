@@ -94,6 +94,56 @@ func TestCappedTransportPassesSmallBodies(t *testing.T) {
 	}
 }
 
+func TestCappedTransportExactLimitAllowed(t *testing.T) {
+	inner := &stubRoundTripper{roundTrip: func(_ *http.Request) (*http.Response, error) {
+		return cannedResponse(strings.Repeat("x", 16), -1), nil
+	}}
+	transport := &cappedTransport{next: inner, limit: 16}
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1/x", http.NoBody)
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip(): %v", err)
+	}
+	var body []byte
+	buf := make([]byte, 4)
+	for {
+		n, err := resp.Body.Read(buf)
+		body = append(body, buf[:n]...)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = resp.Body.Close()
+			t.Fatalf("Read(): %v", err)
+		}
+	}
+	_ = resp.Body.Close()
+	if len(body) != 16 {
+		t.Fatalf("body length = %d, want 16", len(body))
+	}
+}
+
+func TestCappedTransportLimitPlusOneRejected(t *testing.T) {
+	inner := &stubRoundTripper{roundTrip: func(_ *http.Request) (*http.Response, error) {
+		return cannedResponse(strings.Repeat("x", 17), -1), nil
+	}}
+	transport := &cappedTransport{next: inner, limit: 16}
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1/x", http.NoBody)
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip(): %v", err)
+	}
+	if _, err := io.ReadAll(resp.Body); err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("limit-plus-one body accepted")
+	} else if !isResponseTooLarge(err) {
+		_ = resp.Body.Close()
+		t.Fatalf("error = %v, want overflow", err)
+	} else {
+		_ = resp.Body.Close()
+	}
+}
+
 type closeTracker struct {
 	io.ReadCloser
 	closed *bool

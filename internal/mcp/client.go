@@ -156,10 +156,11 @@ func (c *Client) streamableTransport(ctx context.Context) (sdk.Transport, error)
 	if strings.TrimSpace(c.cfg.URL) == "" {
 		return nil, Errorf(ErrConfigInvalid, "url is required for streamable transport")
 	}
-	if c.endpointPolicy != nil {
-		if err := c.endpointPolicy.ValidateEndpoint(ctx, c.cfg.URL); err != nil {
-			return nil, Wrap(ErrEgressDenied, err, "server endpoint rejected")
-		}
+	if c.endpointPolicy == nil {
+		return nil, Errorf(ErrEgressDenied, "server %q has no endpoint policy configured", c.cfg.Name)
+	}
+	if err := c.endpointPolicy.ValidateEndpoint(ctx, c.cfg.URL); err != nil {
+		return nil, Wrap(ErrEgressDenied, err, "server endpoint rejected")
 	}
 	if c.httpClient == nil {
 		return nil, Errorf(ErrEgressDenied, "server %q has no http client configured", c.cfg.Name)
@@ -370,9 +371,11 @@ func (c *Client) Close() error {
 	if c.apiClient != nil {
 		c.apiClient.CloseIdleConnections()
 	}
-	if c.cmd != nil && c.cmd.Process != nil && c.cmd.ProcessState == nil {
-		_ = c.cmd.Process.Kill()
-		_ = c.cmd.Wait()
+	if c.cmd != nil && c.cmd.Process != nil {
+		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+		if c.cmd.ProcessState == nil {
+			_ = c.cmd.Wait()
+		}
 	}
 	return sessionErr
 }

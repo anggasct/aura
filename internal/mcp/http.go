@@ -45,16 +45,21 @@ type cappedReader struct {
 
 func (r *cappedReader) Read(p []byte) (int, error) {
 	if r.remaining <= 0 {
-		return 0, errResponseTooLarge
+		var probe [1]byte
+		n, err := r.source.Read(probe[:])
+		if n > 0 {
+			return 0, errResponseTooLarge
+		}
+		if err == nil {
+			return 0, nil
+		}
+		return 0, err
 	}
 	if int64(len(p)) > r.remaining {
 		p = p[:r.remaining]
 	}
 	n, err := r.source.Read(p)
 	r.remaining -= int64(n)
-	if r.remaining <= 0 && err == nil {
-		return n, errResponseTooLarge
-	}
 	return n, err
 }
 

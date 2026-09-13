@@ -163,6 +163,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 		transport := transports[serverCfg.Name]
 		if err := client.Connect(ctx, transport); err != nil {
+			_ = client.Close()
 			return err
 		}
 
