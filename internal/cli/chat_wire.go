@@ -190,6 +190,13 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		broker = builtin
 		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
 	}
+	if cfg.Memory.Enabled {
+		memoryProvider, err := buildMemoryProvider(cfg, db, nil)
+		if err != nil {
+			return err
+		}
+		executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryProvider))
+	}
 	executor, err := runtimeadk.NewADKExecutor(
 		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,
 	)

@@ -42,6 +42,11 @@ type ADKExecutor struct {
 	modelForRoute     func(route string) (string, error)
 	ledger            *usage.Ledger
 	modelDefinitionID string
+	recall            RecallProvider
+}
+
+type RecallProvider interface {
+	RecallTurn(ctx context.Context, req *runtime.TurnRequest) (*runtime.UntrustedRecall, error)
 }
 
 type AgentResolver interface {
@@ -145,6 +150,16 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 	}
 }
 
+func WithRecallProvider(provider RecallProvider) ExecutorOption {
+	return func(e *ADKExecutor) error {
+		if provider == nil {
+			return invalidArgument("recall provider must not be nil")
+		}
+		e.recall = provider
+		return nil
+	}
+}
+
 func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		definition, err := x.resolveDefinition(req)
@@ -166,7 +181,22 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 			yield(store.RuntimeEvent{}, err)
 			return
 		}
-		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition)
+		recallAttached := req.UntrustedContext != nil
+		if x.recall != nil && !recallAttached {
+			evidence, rerr := x.recall.RecallTurn(runCtx, req)
+			if rerr != nil {
+				if req.RequireRecall {
+					yield(store.RuntimeEvent{}, codedError(runtime.ErrorCodeStorageUnavailable, "required recall is unavailable", rerr))
+					return
+				}
+			} else if evidence != nil {
+				scoped := *req
+				scoped.UntrustedContext = evidence
+				req = &scoped
+				recallAttached = true
+			}
+		}
+		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, recallAttached)
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
@@ -220,7 +250,7 @@ func (x *ADKExecutor) resolveDefinition(req *runtime.TurnRequest) (auraagent.Def
 	return definition, nil
 }
 
-func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition) (*runner.Runner, error) {
+func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, recallAttached bool) (*runner.Runner, error) {
 	model, err := x.resolveModel(ctx, definition)
 	if err != nil {
 		return nil, err
@@ -235,7 +265,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool)
+	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool, recallAttached)
 	if err != nil {
 		return nil, err
 	}
@@ -342,6 +372,9 @@ func contentFromParts(req *runtime.TurnRequest) (*genai.Content, error) {
 		}
 		parts = append(parts, &genai.Part{Text: p.Text})
 	}
+	if block := renderUntrustedRecall(req.UntrustedContext); strings.TrimSpace(block) != "" {
+		parts = append(parts, &genai.Part{Text: block})
+	}
 	if len(parts) == 0 {
 		return nil, invalidArgument("turn has no input parts")
 	}
@@ -397,11 +430,15 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition) []tool.Tool {
 	return filtered
 }
 
-func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback) (agent.Agent, error) {
+func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool) (agent.Agent, error) {
+	instruction := definition.Instructions
+	if recallAttached {
+		instruction = strings.TrimSpace(instruction) + "\n\n" + recallEvidenceCaveat
+	}
 	return llmagent.New(llmagent.Config{
 		Name:        name,
 		Description: definition.Description,
-		Instruction: definition.Instructions,
+		Instruction: instruction,
 		Model:       model,
 		Tools:       tools,
 		BeforeToolCallbacks: []llmagent.BeforeToolCallback{

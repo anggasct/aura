@@ -22,14 +22,16 @@ func TestSemconvVersionPinned(t *testing.T) {
 
 func TestSpanNamesPinned(t *testing.T) {
 	spans := map[string]string{
-		"SpanTurn":  SpanTurn,
-		"SpanModel": SpanModel,
-		"SpanTool":  SpanTool,
+		"SpanTurn":         SpanTurn,
+		"SpanModel":        SpanModel,
+		"SpanTool":         SpanTool,
+		"SpanMemoryRecall": SpanMemoryRecall,
 	}
 	want := map[string]string{
-		"SpanTurn":  "turn",
-		"SpanModel": "model",
-		"SpanTool":  "tool",
+		"SpanTurn":         "turn",
+		"SpanModel":        "model",
+		"SpanTool":         "tool",
+		"SpanMemoryRecall": "memory_recall",
 	}
 	for name, got := range spans {
 		if got != want[name] {
@@ -40,18 +42,24 @@ func TestSpanNamesPinned(t *testing.T) {
 
 func TestMetricNamesPinned(t *testing.T) {
 	metrics := map[string]string{
-		"MetricTurnsTotal":       MetricTurnsTotal,
-		"MetricTurnDuration":     MetricTurnDuration,
-		"MetricModelDuration":    MetricModelDuration,
-		"MetricToolCallsTotal":   MetricToolCallsTotal,
-		"MetricToolCallDuration": MetricToolCallDuration,
+		"MetricTurnsTotal":            MetricTurnsTotal,
+		"MetricTurnDuration":          MetricTurnDuration,
+		"MetricModelDuration":         MetricModelDuration,
+		"MetricToolCallsTotal":        MetricToolCallsTotal,
+		"MetricToolCallDuration":      MetricToolCallDuration,
+		"MetricMemoryRecallsTotal":    MetricMemoryRecallsTotal,
+		"MetricMemoryRecallDuration":  MetricMemoryRecallDuration,
+		"MetricMemoryRecallDocuments": MetricMemoryRecallDocuments,
 	}
 	want := map[string]string{
-		"MetricTurnsTotal":       "runtime.turns.total",
-		"MetricTurnDuration":     "runtime.turn.duration",
-		"MetricModelDuration":    "gen_ai.client.operation.duration",
-		"MetricToolCallsTotal":   "tools.calls.total",
-		"MetricToolCallDuration": "tools.call.duration",
+		"MetricTurnsTotal":            "runtime.turns.total",
+		"MetricTurnDuration":          "runtime.turn.duration",
+		"MetricModelDuration":         "gen_ai.client.operation.duration",
+		"MetricToolCallsTotal":        "tools.calls.total",
+		"MetricToolCallDuration":      "tools.call.duration",
+		"MetricMemoryRecallsTotal":    "memory.recalls.total",
+		"MetricMemoryRecallDuration":  "memory.recall.duration",
+		"MetricMemoryRecallDocuments": "memory.recall.documents",
 	}
 	for name, got := range metrics {
 		if got != want[name] {
@@ -153,6 +161,9 @@ func TestMetricLabelsBounded(t *testing.T) {
 		{MetricModelDuration, []string{AttrGenAISystem, AttrGenAIOperationName}},
 		{MetricToolCallsTotal, []string{AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket}},
 		{MetricToolCallDuration, []string{AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket}},
+		{MetricMemoryRecallsTotal, []string{AttrRecallOutcome, AttrRecallModelSystem}},
+		{MetricMemoryRecallDuration, []string{AttrRecallOutcome}},
+		{MetricMemoryRecallDocuments, []string{AttrRecallOutcome}},
 	}
 	for _, tc := range cases {
 		got := AllowedMetricLabels(tc.metric)
@@ -171,11 +182,14 @@ func TestMetricLabelsBounded(t *testing.T) {
 func TestMetricLabelsExcludeHighCardinality(t *testing.T) {
 	highCardinality := []string{AttrSessionID, AttrTurnID}
 	for metric, labels := range map[string][]string{
-		MetricTurnsTotal:       AllowedMetricLabels(MetricTurnsTotal),
-		MetricTurnDuration:     AllowedMetricLabels(MetricTurnDuration),
-		MetricModelDuration:    AllowedMetricLabels(MetricModelDuration),
-		MetricToolCallsTotal:   AllowedMetricLabels(MetricToolCallsTotal),
-		MetricToolCallDuration: AllowedMetricLabels(MetricToolCallDuration),
+		MetricTurnsTotal:            AllowedMetricLabels(MetricTurnsTotal),
+		MetricTurnDuration:          AllowedMetricLabels(MetricTurnDuration),
+		MetricModelDuration:         AllowedMetricLabels(MetricModelDuration),
+		MetricToolCallsTotal:        AllowedMetricLabels(MetricToolCallsTotal),
+		MetricToolCallDuration:      AllowedMetricLabels(MetricToolCallDuration),
+		MetricMemoryRecallsTotal:    AllowedMetricLabels(MetricMemoryRecallsTotal),
+		MetricMemoryRecallDuration:  AllowedMetricLabels(MetricMemoryRecallDuration),
+		MetricMemoryRecallDocuments: AllowedMetricLabels(MetricMemoryRecallDocuments),
 	} {
 		for _, label := range labels {
 			for _, hc := range highCardinality {

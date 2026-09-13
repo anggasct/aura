@@ -24,16 +24,34 @@ type Budget struct {
 }
 
 type TurnRequest struct {
-	TurnID         string
-	SessionID      string
-	PrincipalID    string
-	Origin         Origin
-	Parts          []runtimeingress.InputPart
-	IdempotencyKey string
-	Deadline       time.Time
-	Budget         Budget
-	TraceParent    string
-	AgentID        string
+	TurnID           string
+	SessionID        string
+	PrincipalID      string
+	Origin           Origin
+	Parts            []runtimeingress.InputPart
+	UntrustedContext *UntrustedRecall
+	RequireRecall    bool
+	IdempotencyKey   string
+	Deadline         time.Time
+	Budget           Budget
+	TraceParent      string
+	AgentID          string
+}
+
+type UntrustedDocument struct {
+	ID           string
+	SessionID    string
+	FromSequence uint64
+	ToSequence   uint64
+	Trust        approval.TrustLabel
+	Content      string
+}
+
+type UntrustedRecall struct {
+	Query     string
+	Summary   string
+	Trust     approval.TrustLabel
+	Documents []UntrustedDocument
 }
 
 const (
@@ -48,6 +66,11 @@ const (
 	EventKindTurnCompleted    = "turn.completed"
 	EventKindTurnFailed       = "turn.failed"
 	EventKindTurnCancelled    = "turn.cancelled"
+)
+
+const (
+	RecallEvidenceStart = "[untrusted recall evidence"
+	RecallEvidenceEnd   = "[/untrusted recall evidence]"
 )
 
 type AgentRuntime interface {

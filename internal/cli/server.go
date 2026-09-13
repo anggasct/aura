@@ -105,10 +105,24 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			adkExecutor, err := runtimeadk.NewADKExecutor(
-				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
+			executorOpts := []runtimeadk.ExecutorOption{
 				runtimeadk.WithBuiltinToolExecutor(builtin),
 				runtimeadk.WithAgentResolver(agentRegistry, routeModel),
+			}
+			if cfg.Memory.Enabled {
+				memoryRecorder, err := telemetry.NewMemoryRecorder(pipeline.MeterProvider())
+				if err != nil {
+					return err
+				}
+				memoryProvider, err := buildMemoryProvider(cfg, db, memoryRecorderObserver(memoryRecorder))
+				if err != nil {
+					return err
+				}
+				executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryProvider))
+			}
+			adkExecutor, err := runtimeadk.NewADKExecutor(
+				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
+				executorOpts...,
 			)
 			if err != nil {
 				return err

@@ -3,17 +3,21 @@ package telemetry
 const SemconvVersion = "1.30.0"
 
 const (
-	SpanTurn  = "turn"
-	SpanModel = "model"
-	SpanTool  = "tool"
+	SpanTurn         = "turn"
+	SpanModel        = "model"
+	SpanTool         = "tool"
+	SpanMemoryRecall = "memory_recall"
 )
 
 const (
-	MetricTurnsTotal       = "runtime.turns.total"
-	MetricTurnDuration     = "runtime.turn.duration"
-	MetricModelDuration    = "gen_ai.client.operation.duration"
-	MetricToolCallsTotal   = "tools.calls.total"
-	MetricToolCallDuration = "tools.call.duration"
+	MetricTurnsTotal            = "runtime.turns.total"
+	MetricTurnDuration          = "runtime.turn.duration"
+	MetricModelDuration         = "gen_ai.client.operation.duration"
+	MetricToolCallsTotal        = "tools.calls.total"
+	MetricToolCallDuration      = "tools.call.duration"
+	MetricMemoryRecallsTotal    = "memory.recalls.total"
+	MetricMemoryRecallDuration  = "memory.recall.duration"
+	MetricMemoryRecallDocuments = "memory.recall.documents"
 )
 
 const (
@@ -48,6 +52,16 @@ const (
 	AttrModelCircuitState      = "aura.model.circuit_state"
 	AttrModelCircuitTransition = "aura.model.circuit_transition"
 	AttrModelNormalizedResult  = "aura.model.normalized_result"
+
+	AttrRecallOutcome        = "aura.recall.outcome"
+	AttrRecallSummarized     = "aura.recall.summarized"
+	AttrRecallDocuments      = "aura.recall.documents"
+	AttrRecallScreened       = "aura.recall.screened"
+	AttrRecallScores         = "aura.recall.scores"
+	AttrRecallSources        = "aura.recall.sources"
+	AttrRecallModelSystem    = "aura.recall.model_system"
+	AttrRecallModelName      = "aura.recall.model_name"
+	AttrRecallSummaryVersion = "aura.recall.summary_version"
 )
 
 var turnSpanAttrs = []string{
@@ -78,12 +92,28 @@ var toolSpanAttrs = []string{
 	AttrSemconvVersion,
 }
 
+var memoryRecallSpanAttrs = []string{
+	AttrRecallOutcome,
+	AttrRecallSummarized,
+	AttrRecallDocuments,
+	AttrRecallScreened,
+	AttrRecallScores,
+	AttrRecallSources,
+	AttrRecallModelSystem,
+	AttrRecallModelName,
+	AttrRecallSummaryVersion,
+	AttrSemconvVersion,
+}
+
 var metricLabelAttrs = map[string][]string{
-	MetricTurnsTotal:       {AttrOrigin, AttrTerminalKind},
-	MetricTurnDuration:     {AttrOrigin, AttrTerminalKind},
-	MetricModelDuration:    {AttrGenAISystem, AttrGenAIOperationName},
-	MetricToolCallsTotal:   {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
-	MetricToolCallDuration: {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
+	MetricTurnsTotal:            {AttrOrigin, AttrTerminalKind},
+	MetricTurnDuration:          {AttrOrigin, AttrTerminalKind},
+	MetricModelDuration:         {AttrGenAISystem, AttrGenAIOperationName},
+	MetricToolCallsTotal:        {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
+	MetricToolCallDuration:      {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
+	MetricMemoryRecallsTotal:    {AttrRecallOutcome, AttrRecallModelSystem},
+	MetricMemoryRecallDuration:  {AttrRecallOutcome},
+	MetricMemoryRecallDocuments: {AttrRecallOutcome},
 }
 
 func AllowedSpanAttrs(spanName string) []string {
@@ -94,6 +124,8 @@ func AllowedSpanAttrs(spanName string) []string {
 		return modelSpanAttrs
 	case SpanTool:
 		return toolSpanAttrs
+	case SpanMemoryRecall:
+		return memoryRecallSpanAttrs
 	default:
 		return nil
 	}
