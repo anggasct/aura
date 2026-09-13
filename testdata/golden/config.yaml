@@ -122,6 +122,15 @@ memory:
   english_stemming: false
   summary_prompt_version: memory-summary-v1
   summary_ttl: 720h0m0s
+skills:
+  enabled: true
+  roots:
+    - /srv/aura/skills
+  auto_select: true
+  max_indexed_skills: 256
+  max_instruction_tokens: 5000
+  max_resource_bytes: 8388608
+  quarantine_retention: 720h0m0s
 channels:
   discord:
     enabled: false

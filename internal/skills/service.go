@@ -28,6 +28,8 @@ type Record struct {
 
 type Registry interface {
 	UpsertScan(ctx context.Context, record *Record) (bool, error)
+	Get(ctx context.Context, id string) (Record, error)
+	ListByState(ctx context.Context, state string, limit int) ([]Record, error)
 }
 
 type ScanSummary struct {
@@ -44,6 +46,10 @@ func RegisterScan(ctx context.Context, registry Registry, dir, scope string) (Sc
 		return ScanSummary{}, nil, errNilArgument("registry")
 	}
 	result := ScanDir(ctx, dir, scope)
+	return registerResult(ctx, registry, dir, scope, result)
+}
+
+func registerResult(ctx context.Context, registry Registry, dir, scope string, result ScanResult) (ScanSummary, []string, error) {
 	if result.Err != nil {
 		return ScanSummary{}, nil, result.Err
 	}

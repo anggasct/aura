@@ -174,6 +174,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateTools(cfg.Tools, options.Build.Profile()); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateSkills(cfg.Skills, options.Build.Profile()); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
 		return LoadResult{}, err
 	}
@@ -386,6 +389,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateMemoryShapes(doc); err != nil {
+		return err
+	}
+	if err := validateSkillsShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -811,6 +817,44 @@ func mappingValue(node *yamlv3.Node, key string) *yamlv3.Node {
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		if node.Content[i].Value == key {
 			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func validateSkillsShapes(doc *yamlv3.Node) error {
+	skillsNode := mappingValue(doc, "skills")
+	if skillsNode == nil {
+		return nil
+	}
+	if skillsNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("skills must be a mapping at line %d", skillsNode.Line)
+	}
+	for i := 0; i+1 < len(skillsNode.Content); i += 2 {
+		keyNode := skillsNode.Content[i]
+		valueNode := skillsNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled", "auto_select":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("skills.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "max_indexed_skills", "max_instruction_tokens", "max_resource_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("skills.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "quarantine_retention":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("skills.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "roots":
+			if valueNode.Kind != yamlv3.SequenceNode {
+				return fmt.Errorf("skills.roots must be a sequence at line %d", valueNode.Line)
+			}
+			for _, item := range valueNode.Content {
+				if item.Kind != yamlv3.ScalarNode || item.Tag != "!!str" {
+					return fmt.Errorf("skills.roots entries must be strings at line %d", item.Line)
+				}
+			}
 		}
 	}
 	return nil
@@ -1778,6 +1822,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyBroadcastDefaults(cfg, doc, &defaults.Broadcast)
 	applySchedulerDefaults(cfg, doc, &defaults.Scheduler)
 	applyMemoryDefaults(cfg, doc, &defaults.Memory)
+	applySkillsDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
 }
@@ -1902,6 +1947,34 @@ func applyMemoryDefaults(cfg *Config, doc *yamlv3.Node, defaults *Memory) {
 	}
 	if cfg.Memory.SummaryTTL == 0 && !configValuePresent(doc, "memory", "summary_ttl") && !envValuePresent("memory.summary_ttl") {
 		cfg.Memory.SummaryTTL = defaults.SummaryTTL
+	}
+}
+
+func applySkillsDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Skills == nil {
+		return
+	}
+	defaults := Default().Skills
+	if !cfg.Skills.Enabled && !configValuePresent(doc, "skills", "enabled") && !envValuePresent("skills.enabled") {
+		cfg.Skills.Enabled = defaults.Enabled
+	}
+	if cfg.Skills.Roots == nil && !configValuePresent(doc, "skills", "roots") && !envValuePresent("skills.roots") {
+		cfg.Skills.Roots = defaults.Roots
+	}
+	if !cfg.Skills.AutoSelect && !configValuePresent(doc, "skills", "auto_select") && !envValuePresent("skills.auto_select") {
+		cfg.Skills.AutoSelect = defaults.AutoSelect
+	}
+	if cfg.Skills.MaxIndexedSkills == 0 && !configValuePresent(doc, "skills", "max_indexed_skills") && !envValuePresent("skills.max_indexed_skills") {
+		cfg.Skills.MaxIndexedSkills = defaults.MaxIndexedSkills
+	}
+	if cfg.Skills.MaxInstructionTokens == 0 && !configValuePresent(doc, "skills", "max_instruction_tokens") && !envValuePresent("skills.max_instruction_tokens") {
+		cfg.Skills.MaxInstructionTokens = defaults.MaxInstructionTokens
+	}
+	if cfg.Skills.MaxResourceBytes == 0 && !configValuePresent(doc, "skills", "max_resource_bytes") && !envValuePresent("skills.max_resource_bytes") {
+		cfg.Skills.MaxResourceBytes = defaults.MaxResourceBytes
+	}
+	if cfg.Skills.QuarantineRetention == 0 && !configValuePresent(doc, "skills", "quarantine_retention") && !envValuePresent("skills.quarantine_retention") {
+		cfg.Skills.QuarantineRetention = defaults.QuarantineRetention
 	}
 }
 
@@ -2622,6 +2695,45 @@ func validateMemory(memory *Memory) error {
 	}
 	if strings.TrimSpace(memory.Locale) != "" {
 		problems = append(problems, errors.New("memory.locale is not supported by this build"))
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateSkills(skillsConfig *Skills, profile capability.Profile) error {
+	if skillsConfig == nil {
+		if profile != capability.ProfileCore {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("skills section is required for build profile %q", profile)}
+		}
+		return nil
+	}
+	var problems []error
+	if len(skillsConfig.Roots) == 0 {
+		problems = append(problems, errors.New("skills.roots must list at least one directory"))
+	}
+	for _, root := range skillsConfig.Roots {
+		switch {
+		case strings.TrimSpace(root) == "":
+			problems = append(problems, errors.New("skills.roots entries must not be empty"))
+		case !filepath.IsAbs(root):
+			problems = append(problems, fmt.Errorf("skills root %q must be an absolute path", root))
+		case filepath.Clean(root) != root:
+			problems = append(problems, fmt.Errorf("skills root %q must be clean", root))
+		}
+	}
+	if skillsConfig.MaxIndexedSkills <= 0 || skillsConfig.MaxIndexedSkills > 4096 {
+		problems = append(problems, errors.New("skills.max_indexed_skills must be between 1 and 4096"))
+	}
+	if skillsConfig.MaxInstructionTokens <= 0 || skillsConfig.MaxInstructionTokens > 128000 {
+		problems = append(problems, errors.New("skills.max_instruction_tokens must be between 1 and 128000"))
+	}
+	if skillsConfig.MaxResourceBytes <= 0 || skillsConfig.MaxResourceBytes > 1<<30 {
+		problems = append(problems, errors.New("skills.max_resource_bytes must be between 1 and 1073741824"))
+	}
+	if skillsConfig.QuarantineRetention <= 0 {
+		problems = append(problems, errors.New("skills.quarantine_retention must be positive"))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

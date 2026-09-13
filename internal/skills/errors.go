@@ -8,9 +8,10 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeInvalidArgument ErrorCode = "invalid_argument"
-	ErrorCodeSkillInvalid    ErrorCode = "skill_invalid"
-	ErrorCodeSkillNotFound   ErrorCode = "skill_not_found"
+	ErrorCodeInvalidArgument  ErrorCode = "invalid_argument"
+	ErrorCodeSkillInvalid     ErrorCode = "skill_invalid"
+	ErrorCodeSkillNotFound    ErrorCode = "skill_not_found"
+	ErrorCodeSkillUnavailable ErrorCode = "skill_unavailable"
 )
 
 type Error struct {
