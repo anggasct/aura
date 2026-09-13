@@ -126,6 +126,7 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 
 	session, streamCancel, err := c.dialSession(ctx, sdkClient, transport, time.Duration(connectTimeout))
 	if err != nil {
+		c.closeContainedLocked(ctx)
 		c.observeFailure(ctx, start, c.protocolVersion, "", err)
 		return err
 	}
@@ -141,6 +142,7 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	if initResult == nil {
 		_ = session.Close()
 		c.session = nil
+		c.closeContainedLocked(ctx)
 		err := Errorf(ErrServerUnavailable, "no initialize result from server")
 		c.observeFailure(ctx, start, c.protocolVersion, "", err)
 		return err
@@ -149,6 +151,7 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	if !IsSupportedProtocolVersion(initResult.ProtocolVersion) {
 		_ = session.Close()
 		c.session = nil
+		c.closeContainedLocked(ctx)
 		err := Errorf(ErrProtocolUnsupported, "unsupported protocol version: %s", initResult.ProtocolVersion)
 		c.observeFailure(ctx, start, c.protocolVersion, "", err)
 		return err
@@ -157,6 +160,7 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	if initResult.Capabilities == nil || initResult.Capabilities.Tools == nil {
 		_ = session.Close()
 		c.session = nil
+		c.closeContainedLocked(ctx)
 		err := Errorf(ErrCapabilityUnavailable, "server does not advertise tool capabilities")
 		c.observeFailure(ctx, start, c.protocolVersion, "", err)
 		return err
@@ -372,7 +376,7 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 	toolsResult, err := session.ListTools(listCtx, nil)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			c.noteDead()
+			c.noteDead(ctx)
 			err := Errorf(ErrRequestTimeout, "list tools request timed out")
 			c.observeFailure(ctx, start, version, "", err)
 			return nil, err
@@ -382,7 +386,7 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 			c.observeFailure(ctx, start, version, "", err)
 			return nil, err
 		}
-		c.noteDead()
+		c.noteDead(ctx)
 		err := Wrap(ErrServerUnavailable, err, "failed to list tools")
 		c.observeFailure(ctx, start, version, "", err)
 		return nil, err
@@ -494,7 +498,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 	res, err := session.CallTool(callCtx, params)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			c.noteDead()
+			c.noteDead(ctx)
 			err := Errorf(ErrRequestTimeout, "tool call timed out")
 			c.observeFailure(ctx, start, version, toolName, err)
 			return nil, err
@@ -504,7 +508,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 			c.observeFailure(ctx, start, version, toolName, err)
 			return nil, err
 		}
-		c.noteDead()
+		c.noteDead(ctx)
 		err := Wrap(ErrServerUnavailable, err, "tool call failed")
 		c.observeFailure(ctx, start, version, toolName, err)
 		return nil, err
@@ -549,9 +553,7 @@ func (c *Client) Close(ctx context.Context) error {
 	if c.apiClient != nil {
 		c.apiClient.CloseIdleConnections()
 	}
-	if c.containedSession != nil {
-		_ = c.containedSession.Close(ctx)
-	}
+	c.closeContainedLocked(ctx)
 	return sessionErr
 }
 

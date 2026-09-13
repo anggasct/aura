@@ -270,6 +270,102 @@ func TestContainedCloseEndsSession(t *testing.T) {
 	}
 }
 
+func TestContainedReconnectClosesPriorSession(t *testing.T) {
+	ctx := t.Context()
+	first := &scriptedSession{}
+	second := &scriptedSession{}
+	starter := &stubSessionStarter{session: first}
+	cfg := containedStdioConfig()
+	cfg.Restart = &config.MCPRestart{MaxAttempts: 3, Window: config.Duration(time.Minute)}
+	client, err := NewClient(cfg, nil, WithSessionStarter(starter))
+	if err != nil {
+		t.Fatalf("NewClient(): %v", err)
+	}
+	defer func() { _ = client.Close(t.Context()) }()
+	if err := client.Connect(ctx, nil); err != nil {
+		t.Fatalf("Connect(): %v", err)
+	}
+	client.mu.Lock()
+	if client.containedSession != ContainedSession(first) {
+		client.mu.Unlock()
+		t.Fatal("first contained session is not the live handle")
+	}
+	client.mu.Unlock()
+	client.noteDead(ctx)
+	first.mu.Lock()
+	if first.closed != 1 {
+		first.mu.Unlock()
+		t.Fatalf("first closed = %d, want exactly once after drop", first.closed)
+	}
+	first.mu.Unlock()
+	starter.mu.Lock()
+	starter.session = second
+	starter.mu.Unlock()
+	if err := client.ensureConnected(ctx); err != nil {
+		t.Fatalf("ensureConnected(): %v", err)
+	}
+	starter.mu.Lock()
+	calls := len(starter.requests)
+	starter.mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("starter calls = %d, want 2", calls)
+	}
+	first.mu.Lock()
+	if first.closed != 1 {
+		first.mu.Unlock()
+		t.Fatalf("first closed = %d, want exactly once after reconnect", first.closed)
+	}
+	first.mu.Unlock()
+	second.mu.Lock()
+	if second.closed != 0 {
+		second.mu.Unlock()
+		t.Fatal("second session closed unexpectedly")
+	}
+	second.mu.Unlock()
+	client.mu.Lock()
+	live := client.containedSession
+	session := client.session
+	client.mu.Unlock()
+	if live != ContainedSession(second) {
+		t.Fatal("second contained session is not the live handle")
+	}
+	if session == nil {
+		t.Fatal("sdk session is not connected after reconnect")
+	}
+}
+
+func TestContainedFailedStartClosesPriorSession(t *testing.T) {
+	ctx := t.Context()
+	first := &scriptedSession{}
+	starter := &stubSessionStarter{session: first}
+	client, err := NewClient(containedStdioConfig(), nil, WithSessionStarter(starter))
+	if err != nil {
+		t.Fatalf("NewClient(): %v", err)
+	}
+	defer func() { _ = client.Close(t.Context()) }()
+	if err := client.Connect(ctx, nil); err != nil {
+		t.Fatalf("Connect(): %v", err)
+	}
+	starter.mu.Lock()
+	starter.err = errors.New("sandbox unavailable")
+	starter.mu.Unlock()
+	if err := client.Connect(ctx, nil); err == nil {
+		t.Fatal("failed containment accepted")
+	}
+	first.mu.Lock()
+	if first.closed != 1 {
+		first.mu.Unlock()
+		t.Fatalf("first closed = %d, want exactly once after failed restart", first.closed)
+	}
+	first.mu.Unlock()
+	client.mu.Lock()
+	live := client.containedSession
+	client.mu.Unlock()
+	if live != nil {
+		t.Fatal("contained handle not released after failed start")
+	}
+}
+
 func TestSessionTransportBounds(t *testing.T) {
 	transport, err := newSessionTransport(&scriptedSession{}, "s")
 	if err != nil {

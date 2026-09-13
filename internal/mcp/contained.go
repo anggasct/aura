@@ -52,6 +52,15 @@ type sessionTransport struct {
 	closed  atomic.Bool
 }
 
+func (c *Client) closeContainedLocked(ctx context.Context) {
+	if c.containedSession == nil {
+		return
+	}
+	session := c.containedSession
+	c.containedSession = nil
+	_ = session.Close(ctx)
+}
+
 func (c *Client) containedTransport(ctx context.Context) (sdk.Transport, error) {
 	if ctx == nil {
 		return nil, Errorf(ErrConfigInvalid, "context must not be nil")
@@ -67,6 +76,7 @@ func (c *Client) containedTransport(ctx context.Context) (sdk.Transport, error) 
 	for key, value := range c.cfg.Environment {
 		environment[key] = value
 	}
+	c.closeContainedLocked(ctx)
 	session, err := c.sessionStarter.StartSession(ctx, &ContainedSessionRequest{
 		RequestID:      containedRequestID(c.cfg.Name),
 		ServerName:     c.cfg.Name,

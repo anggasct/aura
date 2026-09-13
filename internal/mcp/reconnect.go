@@ -58,17 +58,18 @@ func (c *Client) ensureConnected(ctx context.Context) error {
 	return c.connectLocked(ctx, nil)
 }
 
-func (c *Client) noteDeadLocked() {
+func (c *Client) noteDeadLocked(ctx context.Context) {
 	if c.session != nil {
 		_ = c.session.Close()
 		c.session = nil
 	}
+	c.closeContainedLocked(ctx)
 }
 
-func (c *Client) noteDead() {
+func (c *Client) noteDead(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.noteDeadLocked()
+	c.noteDeadLocked(ctx)
 }
 
 func (c *Client) dialSession(ctx context.Context, sdkClient *sdk.Client, transport sdk.Transport, timeout time.Duration) (*sdk.ClientSession, context.CancelFunc, error) {
