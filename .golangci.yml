@@ -318,6 +318,14 @@ linters:
         text: G304
         path: internal/mcp/persist\.go
 
+      # Staged draft directories are confined to the configured skill root
+      # pending area with 0700 parents; the directory fsync after link is the
+      # documented durability step, not an arbitrary open.
+      - linters:
+          - gosec
+        text: G304
+        path: internal/skills/lifecycle\.go
+
       # Serializing OAuth tokens is this file's purpose: they are persisted
       # to the 0600 owner-only store and never enter logs or error strings,
       # which the redaction tests enforce.

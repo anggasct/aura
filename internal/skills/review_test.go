@@ -106,6 +106,12 @@ func TestAcceptBindsGrants(t *testing.T) {
 	if updated.State != StateActive {
 		t.Errorf("state = %q", updated.State)
 	}
+	activation, err := engine.Activate(t.Context(), "net-tools", "explicit")
+	if err != nil {
+		t.Errorf("accepted skill should activate without refresh: %v", err)
+	} else if activation.SkillID != id {
+		t.Errorf("skill id = %q", activation.SkillID)
+	}
 	var grants []string
 	if err := json.Unmarshal([]byte(updated.Granted), &grants); err != nil {
 		t.Fatalf("grants: %v", err)

@@ -8,6 +8,11 @@ import (
 )
 
 const (
+	OriginLocal   = "local"
+	OriginPending = "pending"
+)
+
+const (
 	StateQuarantined = "quarantined"
 	StateActive      = "active"
 	StateDisabled    = "disabled"
@@ -24,18 +29,22 @@ type Record struct {
 	Validation string
 	Requested  string
 	Granted    string
+	ReviewedAt string
 }
 
 type Registry interface {
 	UpsertScan(ctx context.Context, record *Record) (bool, error)
 	Get(ctx context.Context, id string) (Record, error)
 	ListByState(ctx context.Context, state string, limit int) ([]Record, error)
+	ListAll(ctx context.Context, limit int) ([]Record, error)
 	AcceptSkill(ctx context.Context, id, digest, granted string) error
 	RejectSkill(ctx context.Context, id string) error
+	DisableSkill(ctx context.Context, id string) error
 }
 
 type ScanSummary struct {
 	ID       string
+	Digest   string
 	Inserted bool
 	Valid    bool
 }
@@ -48,10 +57,10 @@ func RegisterScan(ctx context.Context, registry Registry, dir, scope string) (Sc
 		return ScanSummary{}, nil, errNilArgument("registry")
 	}
 	result := ScanDir(ctx, dir, scope)
-	return registerResult(ctx, registry, dir, scope, result)
+	return registerResult(ctx, registry, dir, scope, OriginLocal, result)
 }
 
-func registerResult(ctx context.Context, registry Registry, dir, scope string, result ScanResult) (ScanSummary, []string, error) {
+func registerResult(ctx context.Context, registry Registry, dir, scope, kind string, result ScanResult) (ScanSummary, []string, error) {
 	if result.Err != nil {
 		return ScanSummary{}, nil, result.Err
 	}
@@ -76,7 +85,7 @@ func registerResult(ctx context.Context, registry Registry, dir, scope string, r
 		State:   StateQuarantined,
 		Granted: "[]",
 	}
-	origin, err := json.Marshal(map[string]string{"kind": "local", "scope": scope, "root": dir})
+	origin, err := json.Marshal(map[string]string{"kind": kind, "scope": scope, "root": dir})
 	if err != nil {
 		return ScanSummary{}, nil, codedError(ErrorCodeSkillInvalid, "encode skill origin", err)
 	}
@@ -107,7 +116,7 @@ func registerResult(ctx context.Context, registry Registry, dir, scope string, r
 	if err != nil {
 		return ScanSummary{}, nil, err
 	}
-	return ScanSummary{ID: record.ID, Inserted: inserted, Valid: len(result.Findings) == 0}, result.Findings, nil
+	return ScanSummary{ID: record.ID, Digest: record.Digest, Inserted: inserted, Valid: len(result.Findings) == 0}, result.Findings, nil
 }
 
 func quarantineDigest(scope, name string, findings []string) string {

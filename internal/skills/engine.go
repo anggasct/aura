@@ -11,9 +11,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 const ContextKindUntrusted = "untrusted_skill_context"
+
+const maxConflictScan = 4096
 
 const PolicyVersion = "1"
 
@@ -28,6 +31,7 @@ type EngineConfig struct {
 	MaxResourceBytes     int64
 	ScriptToolName       string
 	ScriptToolCapability string
+	QuarantineRetention  time.Duration
 	PolicyVersion        string
 	Logger               *slog.Logger
 }
@@ -69,6 +73,7 @@ type Engine struct {
 	maxRunes         int
 	maxResource      int64
 	maxCount         int
+	retention        time.Duration
 	roots            []rootDir
 	scriptTool       string
 	scriptCapability string
@@ -103,6 +108,9 @@ func NewEngine(registry Registry, config *EngineConfig) (*Engine, error) {
 	if strings.TrimSpace(config.ScriptToolName) == "" || strings.TrimSpace(config.ScriptToolCapability) == "" {
 		return nil, Errorf(ErrorCodeInvalidArgument, "script tool mapping must not be empty")
 	}
+	if config.QuarantineRetention < 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "quarantine retention must not be negative")
+	}
 	if strings.TrimSpace(config.PolicyVersion) == "" {
 		return nil, Errorf(ErrorCodeInvalidArgument, "policy version must not be empty")
 	}
@@ -127,6 +135,7 @@ func NewEngine(registry Registry, config *EngineConfig) (*Engine, error) {
 		maxRunes:         config.MaxInstructionRunes,
 		maxResource:      config.MaxResourceBytes,
 		maxCount:         config.MaxIndexed,
+		retention:        config.QuarantineRetention,
 		roots:            roots,
 		scriptTool:       config.ScriptToolName,
 		scriptCapability: config.ScriptToolCapability,
@@ -143,15 +152,29 @@ func (e *Engine) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	records, err := e.registry.ListByState(ctx, StateActive, e.maxCount+1)
+	records, err := e.registry.ListByState(ctx, StateActive, maxConflictScan)
 	if err != nil {
 		return err
 	}
 	slices.SortFunc(records, func(a, b Record) int { return strings.Compare(a.ID, b.ID) })
+	conflicted := make(map[string]bool)
+	for _, group := range findConflicts(records) {
+		for _, id := range group.IDs {
+			conflicted[id] = true
+		}
+		if len(conflicted) > 0 {
+			e.logger.InfoContext(ctx, "skill name collision",
+				"component", "skills",
+				"name", group.Name)
+		}
+	}
 	entries := make([]Entry, 0, len(records))
 	loaded := make(map[string]*loadedPackage, len(records))
 	for i := range records {
 		record := &records[i]
+		if conflicted[record.ID] {
+			continue
+		}
 		scanned, ok := fresh[record.ID]
 		if !ok || scanned.Manifest == nil {
 			continue
@@ -181,6 +204,7 @@ func (e *Engine) Refresh(ctx context.Context) error {
 		"component", "skills",
 		"roots", len(e.roots),
 		"indexed", len(entries))
+	e.sweepRetention(ctx)
 	return nil
 }
 
@@ -209,7 +233,7 @@ func (e *Engine) scanRoots(ctx context.Context) (map[string]*ScannedDir, error) 
 		for _, name := range names {
 			dir := filepath.Join(root.dir, name)
 			result := ScanDir(ctx, dir, root.scope)
-			summary, _, err := registerResult(ctx, e.registry, dir, root.scope, result)
+			summary, _, err := registerResult(ctx, e.registry, dir, root.scope, OriginLocal, result)
 			if err != nil {
 				return nil, err
 			}
@@ -246,6 +270,56 @@ func readRootDirs(handle *os.Root) ([]string, error) {
 		names = append(names, entry.Name())
 	}
 	return names, nil
+}
+
+func (e *Engine) evict(id string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.entries, id)
+	kept := e.index[:0]
+	for _, entry := range e.index {
+		if entry.ID != id {
+			kept = append(kept, entry)
+		}
+	}
+	e.index = kept
+}
+
+func (e *Engine) indexOne(ctx context.Context, id, digest string) {
+	record, err := e.registry.Get(ctx, id)
+	if err != nil || record.State != StateActive || record.Digest != digest {
+		return
+	}
+	origin, err := parseLocalOrigin(record.Origin)
+	if err != nil {
+		return
+	}
+	result := ScanDir(ctx, origin.Root, origin.Scope)
+	if result.Err != nil || result.Scanned == nil || result.Scanned.Manifest == nil {
+		return
+	}
+	if result.Scanned.Digest != digest {
+		return
+	}
+	requested, err := decodeCapabilities(record.Requested)
+	if err != nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.index) >= e.maxCount {
+		return
+	}
+	result.Scanned.Contents = nil
+	e.entries[id] = &loadedPackage{record: record, manifest: result.Scanned.Manifest, files: result.Scanned.Files}
+	e.index = append(e.index, Entry{
+		ID:          record.ID,
+		Name:        record.Name,
+		Description: result.Scanned.Manifest.Description,
+		Origin:      record.Origin,
+		Digest:      record.Digest,
+		Requested:   requested,
+	})
 }
 
 func (e *Engine) Catalog() []Entry {

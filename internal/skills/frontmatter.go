@@ -54,6 +54,15 @@ const (
 
 var validNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
 
+func validSkillName(name string) bool {
+	return len([]rune(name)) <= maxNameRunes && validNamePattern.MatchString(name) && !strings.Contains(name, "--")
+}
+
+func validSkillDescription(description string) bool {
+	count := len([]rune(description))
+	return count > 0 && count <= maxDescriptionRunes
+}
+
 type Manifest struct {
 	Name          string
 	Description   string
@@ -221,7 +230,7 @@ func (m *Manifest) bind(fields map[string]any) []string {
 	switch {
 	case !namePresent:
 		findings = append(findings, FindingNameMissing)
-	case !nameText || len([]rune(name)) > maxNameRunes || !validNamePattern.MatchString(name) || strings.Contains(name, "--"):
+	case !nameText || !validSkillName(name):
 		findings = append(findings, FindingNameInvalid)
 	default:
 		m.Name = name
@@ -230,7 +239,7 @@ func (m *Manifest) bind(fields map[string]any) []string {
 	switch {
 	case !descPresent:
 		findings = append(findings, FindingDescriptionMissing)
-	case !descText || len([]rune(description)) == 0 || len([]rune(description)) > maxDescriptionRunes:
+	case !descText || !validSkillDescription(description):
 		findings = append(findings, FindingDescriptionInvalid)
 	default:
 		m.Description = description
