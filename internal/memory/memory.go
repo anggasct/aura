@@ -302,6 +302,27 @@ func cleanText(text string, maxBytes int) (string, bool) {
 	return trimmed, true
 }
 
+func stripRecallEvidence(text string) (string, bool) {
+	if !strings.Contains(text, runtime.RecallEvidenceStart) {
+		return text, false
+	}
+	had := false
+	for {
+		start := strings.Index(text, runtime.RecallEvidenceStart)
+		if start < 0 {
+			break
+		}
+		had = true
+		rest := text[start:]
+		end := strings.Index(rest, runtime.RecallEvidenceEnd)
+		if end < 0 {
+			return "", true
+		}
+		text = text[:start] + rest[end+len(runtime.RecallEvidenceEnd):]
+	}
+	return text, had
+}
+
 func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event) (Document, bool, error) {
 	if ctx == nil {
 		return Document{}, false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
@@ -329,6 +350,12 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	text, ok := extractText(event.Payload)
 	if !ok {
 		return Document{}, false, nil
+	}
+	if stripped, had := stripRecallEvidence(text); had {
+		if strings.TrimSpace(stripped) == "" {
+			return Document{}, false, nil
+		}
+		text = stripped
 	}
 	content, ok := cleanText(text, s.maxBytes)
 	if !ok {

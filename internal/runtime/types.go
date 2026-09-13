@@ -68,6 +68,11 @@ const (
 	EventKindTurnCancelled    = "turn.cancelled"
 )
 
+const (
+	RecallEvidenceStart = "[untrusted recall evidence"
+	RecallEvidenceEnd   = "[/untrusted recall evidence]"
+)
+
 type AgentRuntime interface {
 	Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error]
 }
