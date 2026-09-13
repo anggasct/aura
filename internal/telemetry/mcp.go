@@ -13,6 +13,7 @@ import (
 type MCPObservation struct {
 	Server    string
 	Transport string
+	Protocol  string
 	Tool      string
 	Count     int
 	Outcome   string
@@ -35,15 +36,15 @@ func NewMCPRecorder(mp metric.MeterProvider) (*MCPRecorder, error) {
 	var err error
 	recorder := &MCPRecorder{}
 	if recorder.calls, err = meter.Int64Counter(MetricMCPCallsTotal,
-		metric.WithDescription("mcp operations by server, transport, tool, outcome, and code")); err != nil {
+		metric.WithDescription("mcp operations by server, transport, protocol, tool, outcome, and code")); err != nil {
 		return nil, fmt.Errorf("telemetry: create mcp calls counter: %w", err)
 	}
 	if recorder.duration, err = meter.Float64Histogram(MetricMCPCallDuration,
-		metric.WithUnit("s"), metric.WithDescription("mcp operation duration in seconds by server and outcome")); err != nil {
+		metric.WithUnit("s"), metric.WithDescription("mcp operation duration in seconds by server, protocol and outcome")); err != nil {
 		return nil, fmt.Errorf("telemetry: create mcp call duration histogram: %w", err)
 	}
 	if recorder.size, err = meter.Float64Histogram(MetricMCPResponseSize,
-		metric.WithUnit("By"), metric.WithDescription("mcp response size in bytes by server and outcome")); err != nil {
+		metric.WithUnit("By"), metric.WithDescription("mcp response size in bytes by server, protocol and outcome")); err != nil {
 		return nil, fmt.Errorf("telemetry: create mcp response size histogram: %w", err)
 	}
 	return recorder, nil
@@ -56,12 +57,14 @@ func (r *MCPRecorder) Record(ctx context.Context, observation *MCPObservation) {
 	full := metric.WithAttributes(
 		attribute.String(AttrMCPServer, observation.Server),
 		attribute.String(AttrMCPTransport, observation.Transport),
+		attribute.String(AttrMCPProtocol, observation.Protocol),
 		attribute.String(AttrMCPTool, observation.Tool),
 		attribute.String(AttrMCPOutcome, observation.Outcome),
 		attribute.String(AttrMCPCode, observation.Code),
 	)
 	brief := metric.WithAttributes(
 		attribute.String(AttrMCPServer, observation.Server),
+		attribute.String(AttrMCPProtocol, observation.Protocol),
 		attribute.String(AttrMCPOutcome, observation.Outcome),
 	)
 	r.calls.Add(ctx, 1, full)

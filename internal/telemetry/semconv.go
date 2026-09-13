@@ -68,6 +68,7 @@ const (
 
 	AttrMCPServer    = "mcp.server"
 	AttrMCPTransport = "mcp.transport"
+	AttrMCPProtocol  = "mcp.protocol"
 	AttrMCPTool      = "mcp.tool"
 	AttrMCPOutcome   = "mcp.outcome"
 	AttrMCPCode      = "mcp.code"
@@ -123,9 +124,9 @@ var metricLabelAttrs = map[string][]string{
 	MetricMemoryRecallsTotal:    {AttrRecallOutcome, AttrRecallModelSystem},
 	MetricMemoryRecallDuration:  {AttrRecallOutcome},
 	MetricMemoryRecallDocuments: {AttrRecallOutcome},
-	MetricMCPCallsTotal:         {AttrMCPServer, AttrMCPTransport, AttrMCPTool, AttrMCPOutcome, AttrMCPCode},
-	MetricMCPCallDuration:       {AttrMCPServer, AttrMCPOutcome},
-	MetricMCPResponseSize:       {AttrMCPServer, AttrMCPOutcome},
+	MetricMCPCallsTotal:         {AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode},
+	MetricMCPCallDuration:       {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
+	MetricMCPResponseSize:       {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
 }
 
 func AllowedSpanAttrs(spanName string) []string {

@@ -75,7 +75,7 @@ func TestMCPObservationCarriesNoContent(t *testing.T) {
 			}
 		}
 	}
-	for _, required := range []string{"server", "transport", "tool", "outcome", "code", "sizebytes", "duration"} {
+	for _, required := range []string{"server", "transport", "protocol", "tool", "outcome", "code", "sizebytes", "duration"} {
 		if !observed[required] {
 			t.Errorf("MCPObservation lost required field %q", required)
 		}

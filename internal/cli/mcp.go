@@ -61,6 +61,7 @@ func mcpRecorderObserver(recorder *telemetry.MCPRecorder) mcp.Observer {
 		recorder.Record(ctx, &telemetry.MCPObservation{
 			Server:    observation.Server,
 			Transport: observation.Transport,
+			Protocol:  observation.ProtocolVersion,
 			Tool:      observation.Tool,
 			Count:     observation.Count,
 			Outcome:   observation.Result,

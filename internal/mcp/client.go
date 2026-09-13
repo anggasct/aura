@@ -394,6 +394,7 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 	seen := make(map[string]bool)
 	discovered := make([]DiscoveredTool, 0, len(toolsResult.Tools))
 	maxMsgSize := maxMessageBytes(c.cfg)
+	var discoverySize int64
 
 	for _, t := range toolsResult.Tools {
 		if t == nil {
@@ -420,6 +421,7 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 		if err := validateToolSchema(t.Name, schemaBytes); err != nil {
 			return nil, err
 		}
+		discoverySize += int64(len(schemaBytes))
 
 		discovered = append(discovered, DiscoveredTool{
 			Name:        t.Name,
@@ -438,6 +440,7 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 		Count:           len(discovered),
 		Result:          ResultDiscovered,
 		ResultCode:      ResultCodeOK,
+		SizeBytes:       discoverySize,
 		Duration:        time.Since(start),
 	})
 
@@ -512,6 +515,10 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 	c.mu.Lock()
 	c.resetReconnectsLocked()
 	c.mu.Unlock()
+	var resultSize int64
+	if raw, err := json.Marshal(res); err == nil {
+		resultSize = int64(len(raw))
+	}
 	c.observe(ctx, &Observation{
 		Server:          c.cfg.Name,
 		Transport:       c.cfg.Transport,
@@ -519,6 +526,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 		Tool:            toolName,
 		Result:          ResultToolCall,
 		ResultCode:      ResultCodeOK,
+		SizeBytes:       resultSize,
 		Duration:        time.Since(start),
 	})
 	return res, nil

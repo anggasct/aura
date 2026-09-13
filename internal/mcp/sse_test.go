@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -112,5 +113,49 @@ func TestLegacySSECheckerEmitsFinding(t *testing.T) {
 	var nilCtx context.Context
 	if findings := NewLegacySSEChecker(nil).Check(nilCtx); len(findings) != 0 {
 		t.Errorf("nil context findings = %d", len(findings))
+	}
+}
+
+func TestLegacyHandshakeCancelCarriesStableCode(t *testing.T) {
+	blocking := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(blocking.Close)
+	serverCfg := &config.MCPServer{
+		Name:             "legacy-cancel",
+		Transport:        config.MCPTransportLegacySSE,
+		URL:              blocking.URL,
+		CompatibilityAck: true,
+		RequestTimeout:   config.Duration(10 * time.Second),
+		ConnectTimeout:   config.Duration(10 * time.Second),
+		StartupTimeout:   config.Duration(10 * time.Second),
+		MaxMessageSize:   1 << 20,
+	}
+	client, err := NewClient(serverCfg, nil,
+		WithHTTPClient(&http.Client{}),
+		WithEndpointPolicy(stubEndpointPolicy{}),
+	)
+	if err != nil {
+		t.Fatalf("NewClient(): %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	err = client.Connect(ctx, nil)
+	if err == nil {
+		t.Fatal("cancelled legacy handshake accepted")
+	}
+	code, ok := CodeOf(err)
+	if !ok {
+		t.Fatalf("cancelled handshake error carries no code: %v", err)
+	}
+	if code != ErrServerUnavailable {
+		t.Fatalf("code = %q, want %q (err: %v)", code, ErrServerUnavailable, err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled handshake error does not match context.Canceled: %v", err)
 	}
 }

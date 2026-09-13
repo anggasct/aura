@@ -115,7 +115,7 @@ func (c *Client) dialSession(ctx context.Context, sdkClient *sdk.Client, transpo
 				_ = res.session.Close()
 			}
 		}()
-		return nil, nil, ctx.Err()
+		return nil, nil, Wrap(ErrServerUnavailable, ctx.Err(), "legacy connect cancelled")
 	case <-timer:
 		streamCancel()
 		go func() {

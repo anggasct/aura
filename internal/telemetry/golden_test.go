@@ -167,9 +167,9 @@ func TestMetricLabelsBounded(t *testing.T) {
 		{MetricMemoryRecallsTotal, []string{AttrRecallOutcome, AttrRecallModelSystem}},
 		{MetricMemoryRecallDuration, []string{AttrRecallOutcome}},
 		{MetricMemoryRecallDocuments, []string{AttrRecallOutcome}},
-		{MetricMCPCallsTotal, []string{AttrMCPServer, AttrMCPTransport, AttrMCPTool, AttrMCPOutcome, AttrMCPCode}},
-		{MetricMCPCallDuration, []string{AttrMCPServer, AttrMCPOutcome}},
-		{MetricMCPResponseSize, []string{AttrMCPServer, AttrMCPOutcome}},
+		{MetricMCPCallsTotal, []string{AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode}},
+		{MetricMCPCallDuration, []string{AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome}},
+		{MetricMCPResponseSize, []string{AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome}},
 	}
 	for _, tc := range cases {
 		got := AllowedMetricLabels(tc.metric)
