@@ -37,6 +37,7 @@ type Config struct {
 	Webhook      Webhook               `koanf:"webhook" yaml:"webhook"`
 	Broadcast    Broadcast             `koanf:"broadcast" yaml:"broadcast"`
 	Scheduler    Scheduler             `koanf:"scheduler" yaml:"scheduler"`
+	Memory       Memory                `koanf:"memory" yaml:"memory"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
 
@@ -77,6 +78,16 @@ type Scheduler struct {
 	DefaultTimezone     string   `koanf:"default_timezone" yaml:"default_timezone"`
 	DefaultCatchUpGrace Duration `koanf:"default_catch_up_grace" yaml:"default_catch_up_grace"`
 	OccurrenceRetention Duration `koanf:"occurrence_retention" yaml:"occurrence_retention"`
+}
+
+type Memory struct {
+	Enabled              bool     `koanf:"enabled" yaml:"enabled"`
+	MaxDocuments         int      `koanf:"max_documents" yaml:"max_documents"`
+	RecallTokenBudget    int      `koanf:"recall_token_budget" yaml:"recall_token_budget"`
+	Locale               string   `koanf:"locale" yaml:"locale"`
+	EnglishStemming      bool     `koanf:"english_stemming" yaml:"english_stemming"`
+	SummaryPromptVersion string   `koanf:"summary_prompt_version" yaml:"summary_prompt_version"`
+	SummaryTTL           Duration `koanf:"summary_ttl" yaml:"summary_ttl"`
 }
 
 type QuietHours struct {
@@ -554,6 +565,13 @@ func Default() Config {
 			DefaultTimezone:     "UTC",
 			DefaultCatchUpGrace: Duration(15 * time.Minute),
 			OccurrenceRetention: Duration(720 * time.Hour),
+		},
+		Memory: Memory{
+			Enabled:              true,
+			MaxDocuments:         10,
+			RecallTokenBudget:    2000,
+			SummaryPromptVersion: "memory-summary-v1",
+			SummaryTTL:           Duration(720 * time.Hour),
 		},
 	}
 }
