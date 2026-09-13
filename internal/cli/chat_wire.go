@@ -235,7 +235,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		if err != nil {
 			return err
 		}
-		console.SetSkills(&skillTerminalBridge{engine: skillEngine})
+		console.SetSkills(&skillTerminalBridge{engine: skillEngine, root: cfg.Skills.Roots[0]})
 	}
 	console.SetInputCloser(func() { _ = os.Stdin.Close() })
 	console.SetSessionID(sessionID)

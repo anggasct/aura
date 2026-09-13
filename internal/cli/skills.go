@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/config"
@@ -57,15 +58,28 @@ func (a *skillStoreRegistry) ListByState(ctx context.Context, state string, limi
 }
 
 func (a *skillStoreRegistry) AcceptSkill(ctx context.Context, id, digest, granted string) error {
-	return mapSkillStoreError(a.inner.AcceptSkill(ctx, id, digest, granted))
+	if err := a.inner.AcceptSkill(ctx, id, digest, granted); err != nil {
+		return mapSkillStoreError(err)
+	}
+	return nil
 }
 
 func (a *skillStoreRegistry) RejectSkill(ctx context.Context, id string) error {
-	return mapSkillStoreError(a.inner.RejectSkill(ctx, id))
+	if err := a.inner.RejectSkill(ctx, id); err != nil {
+		return mapSkillStoreError(err)
+	}
+	return nil
+}
+
+func (a *skillStoreRegistry) DisableSkill(ctx context.Context, id string) error {
+	if err := a.inner.DisableSkill(ctx, id); err != nil {
+		return mapSkillStoreError(err)
+	}
+	return nil
 }
 
 func skillRowToRecord(row *store.SkillRow) skills.Record {
-	return skills.Record{
+	record := skills.Record{
 		ID:         row.ID,
 		Name:       row.Name,
 		Origin:     row.Origin,
@@ -75,6 +89,22 @@ func skillRowToRecord(row *store.SkillRow) skills.Record {
 		Requested:  row.Requested,
 		Granted:    row.Granted,
 	}
+	if row.ReviewedAt != nil {
+		record.ReviewedAt = row.ReviewedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return record
+}
+
+func (a *skillStoreRegistry) ListAll(ctx context.Context, limit int) ([]skills.Record, error) {
+	rows, err := a.inner.ListSkills(ctx, limit)
+	if err != nil {
+		return nil, mapSkillStoreError(err)
+	}
+	out := make([]skills.Record, 0, len(rows))
+	for i := range rows {
+		out = append(out, skillRowToRecord(&rows[i]))
+	}
+	return out, nil
 }
 
 func mapSkillStoreError(err error) error {
@@ -98,6 +128,7 @@ func mapSkillStoreError(err error) error {
 
 type skillTerminalBridge struct {
 	engine *skills.Engine
+	root   string
 }
 
 func (b *skillTerminalBridge) ActivateSkill(ctx context.Context, name string) (terminal.SkillContext, error) {
@@ -110,6 +141,14 @@ func (b *skillTerminalBridge) ActivateSkill(ctx context.Context, name string) (t
 		Caveat: activation.Context.Caveat,
 		Text:   activation.Context.Text,
 	}, nil
+}
+
+func (b *skillTerminalBridge) CreateSkill(ctx context.Context, name, description string) (terminal.SkillDraft, error) {
+	summary, err := b.engine.StageDraft(ctx, name, description, b.root)
+	if err != nil {
+		return terminal.SkillDraft{}, err
+	}
+	return terminal.SkillDraft{ID: summary.ID, Digest: summary.Digest}, nil
 }
 
 func buildSkillsEngine(ctx context.Context, cfg *config.Skills, db *sql.DB, logger *slog.Logger) (*skills.Engine, error) {

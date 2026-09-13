@@ -66,13 +66,42 @@ func (f *fakeRegistry) AcceptSkill(_ context.Context, id, digest, granted string
 		return Errorf(ErrorCodeSkillNotFound, "skill is not registered")
 	}
 	if record.State != StateQuarantined {
-		return Errorf(ErrorCodeSkillInvalid, "skill is not reviewable")
+		return Errorf(ErrorCodeSkillInvalid, "skill state does not allow the transition")
 	}
 	if record.Digest != digest {
 		return Errorf(ErrorCodeSkillDigestChanged, "skill content changed since review")
 	}
 	record.State = StateActive
 	record.Granted = granted
+	return nil
+}
+
+func (f *fakeRegistry) ListAll(_ context.Context, limit int) ([]Record, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]Record, 0, len(f.records))
+	for _, record := range f.records {
+		out = append(out, *record)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRegistry) DisableSkill(_ context.Context, id string) error {
+	if f.err != nil {
+		return f.err
+	}
+	record, exists := f.records[id]
+	if !exists {
+		return Errorf(ErrorCodeSkillNotFound, "skill is not registered")
+	}
+	if record.State != StateActive {
+		return Errorf(ErrorCodeSkillInvalid, "skill state does not allow the transition")
+	}
+	record.State = StateDisabled
 	return nil
 }
 
@@ -85,7 +114,7 @@ func (f *fakeRegistry) RejectSkill(_ context.Context, id string) error {
 		return Errorf(ErrorCodeSkillNotFound, "skill is not registered")
 	}
 	if record.State != StateQuarantined {
-		return Errorf(ErrorCodeSkillInvalid, "skill is not reviewable")
+		return Errorf(ErrorCodeSkillInvalid, "skill state does not allow the transition")
 	}
 	record.State = StateRejected
 	return nil

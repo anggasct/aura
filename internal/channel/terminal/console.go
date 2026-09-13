@@ -27,6 +27,7 @@ type Console struct {
 	principal           string
 	sessionID           string
 	skills              Skills
+	pendingSkill        string
 	closeInput          func()
 	tty                 *TTYRenderer
 	terminalSeen        bool
@@ -137,6 +138,18 @@ func (c *Console) Run(ctx context.Context) error {
 			if line == "" {
 				ack()
 				continue
+			}
+			if c.pendingSkill != "" && !strings.HasPrefix(line, "/") {
+				ack()
+				name := c.pendingSkill
+				c.pendingSkill = ""
+				if err := c.finishSkillCreate(ctx, name, line); err != nil {
+					return err
+				}
+				continue
+			}
+			if c.pendingSkill != "" {
+				c.pendingSkill = ""
 			}
 			if line == "." && c.tty != nil {
 				pauseReading()

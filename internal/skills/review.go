@@ -66,8 +66,11 @@ func parseLocalOrigin(raw string) (localOrigin, error) {
 	if err := json.Unmarshal([]byte(raw), &origin); err != nil {
 		return localOrigin{}, Errorf(ErrorCodeSkillInvalid, "skill origin is not valid")
 	}
-	if origin.Kind != "local" || !validScope(origin.Scope) || origin.Root == "" {
+	if origin.Kind != OriginLocal && origin.Kind != OriginPending {
 		return localOrigin{}, Errorf(ErrorCodeSkillInvalid, "skill origin is not supported")
+	}
+	if !validScope(origin.Scope) || origin.Root == "" {
+		return localOrigin{}, Errorf(ErrorCodeSkillInvalid, "skill origin is not valid")
 	}
 	return origin, nil
 }
@@ -189,7 +192,7 @@ func (e *Engine) Accept(ctx context.Context, id, expectedDigest string, grants [
 		return AuditEvent{}, err
 	}
 	if record.State != StateQuarantined {
-		return AuditEvent{}, Errorf(ErrorCodeSkillInvalid, "skill is not reviewable")
+		return AuditEvent{}, Errorf(ErrorCodeSkillInvalid, "skill state does not allow the transition")
 	}
 	if record.Digest != expectedDigest {
 		return AuditEvent{}, Errorf(ErrorCodeSkillDigestChanged, "skill content changed since review")
@@ -201,6 +204,8 @@ func (e *Engine) Accept(ctx context.Context, id, expectedDigest string, grants [
 	if err := e.registry.AcceptSkill(ctx, id, expectedDigest, string(encoded)); err != nil {
 		return AuditEvent{}, err
 	}
+	e.evict(id)
+	e.indexOne(ctx, id, expectedDigest)
 	return e.audit(ctx, id, expectedDigest, DecisionAccepted, ""), nil
 }
 
@@ -219,11 +224,12 @@ func (e *Engine) Reject(ctx context.Context, id, reason string) (AuditEvent, err
 		return AuditEvent{}, err
 	}
 	if record.State != StateQuarantined {
-		return AuditEvent{}, Errorf(ErrorCodeSkillInvalid, "skill is not reviewable")
+		return AuditEvent{}, Errorf(ErrorCodeSkillInvalid, "skill state does not allow the transition")
 	}
 	if err := e.registry.RejectSkill(ctx, id); err != nil {
 		return AuditEvent{}, err
 	}
+	e.evict(id)
 	return e.audit(ctx, id, record.Digest, DecisionRejected, reason), nil
 }
 

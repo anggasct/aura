@@ -14,6 +14,12 @@ type SkillContext struct {
 
 type Skills interface {
 	ActivateSkill(ctx context.Context, name string) (SkillContext, error)
+	CreateSkill(ctx context.Context, name, description string) (SkillDraft, error)
+}
+
+type SkillDraft struct {
+	ID     string
+	Digest string
 }
 
 func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
@@ -41,6 +47,8 @@ func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
 		return true, c.status(ctx)
 	case "skill":
 		return true, c.skillCommand(ctx, args)
+	case "skill-create":
+		return true, c.skillCreateCommand(ctx, args)
 	default:
 		return true, writeLinef(c.diag, "aura: unknown command %s (try /help)", fields[0])
 	}
@@ -91,6 +99,38 @@ func (c *Console) skillCommand(ctx context.Context, args []string) error {
 	return writeLine(c.out, activated.Text)
 }
 
+func (c *Console) skillCreateCommand(ctx context.Context, args []string) error {
+	if c.skills == nil {
+		return writeLine(c.diag, "skill support is not available")
+	}
+	switch len(args) {
+	case 0:
+		return writeLine(c.diag, "usage: /skill-create <name> [description]")
+	case 1:
+		c.pendingSkill = args[0]
+		return writeLine(c.out, "describe the skill in one line:")
+	default:
+		return c.finishSkillCreate(ctx, args[0], strings.Join(args[1:], " "))
+	}
+}
+
+func (c *Console) finishSkillCreate(ctx context.Context, name, description string) error {
+	if c.skills == nil {
+		return writeLine(c.diag, "skill support is not available")
+	}
+	draft, err := c.skills.CreateSkill(ctx, name, description)
+	if err != nil {
+		return writeLinef(c.diag, "aura: skill-create %s: %v", name, err)
+	}
+	if err := writeLinef(c.out, "draft %s", draft.ID); err != nil {
+		return err
+	}
+	if err := writeLinef(c.out, "digest %s", draft.Digest); err != nil {
+		return err
+	}
+	return writeLine(c.out, "review with: aura skills review "+draft.ID)
+}
+
 func (c *Console) status(ctx context.Context) error {
 	events, err := c.sessions.ListEvents(ctx, c.sessionID, 0, c.config.InMemoryHistory)
 	if err != nil {
@@ -122,5 +162,6 @@ func helpText() string {
 		"  /cancel            cancel the active turn\n" +
 		"  /status            show the current session\n" +
 		"  /skill <name>      activate a skill\n" +
+		"  /skill-create      stage a skill draft\n" +
 		"  .                  compose a multi-line prompt in $EDITOR (interactive)\n"
 }

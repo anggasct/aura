@@ -36,8 +36,10 @@ type SkillStore interface {
 	UpsertScan(ctx context.Context, row *SkillRow) (bool, error)
 	GetSkill(ctx context.Context, id string) (SkillRow, error)
 	ListSkillsByState(ctx context.Context, state string, limit int) ([]SkillRow, error)
+	ListSkills(ctx context.Context, limit int) ([]SkillRow, error)
 	AcceptSkill(ctx context.Context, id, digest, granted string) error
 	RejectSkill(ctx context.Context, id string) error
+	DisableSkill(ctx context.Context, id string) error
 }
 
 type sqliteSkillStore struct {
@@ -270,5 +272,70 @@ func (s *sqliteSkillStore) classifyReviewConflict(ctx context.Context, id, diges
 	if digest != "" && current != digest {
 		return Errorf(ErrorCodeSkillDigestChanged, "skill content changed since review")
 	}
-	return Errorf(ErrorCodeSkillInvalid, "skill is not reviewable")
+	return Errorf(ErrorCodeSkillInvalid, "skill state does not allow the transition")
+}
+
+func (s *sqliteSkillStore) ListSkills(ctx context.Context, limit int) ([]SkillRow, error) {
+	if ctx == nil {
+		return nil, errNilArgument("ctx")
+	}
+	if limit < 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "limit must not be negative")
+	}
+	if limit == 0 {
+		limit = defaultSkillListLimit
+	}
+	if limit > maxSkillListLimit {
+		limit = maxSkillListLimit
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, canonical_name, origin_json, content_digest, state, validation_json, requested_capabilities_json, granted_capabilities_json, reviewed_at, created_at, updated_at
+FROM skill_package ORDER BY updated_at DESC, id ASC LIMIT ?
+`, limit)
+	if err != nil {
+		return nil, classifyBusy(codedError(ErrorCodeStorageUnavailable, "list skills", err))
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]SkillRow, 0, limit)
+	for rows.Next() {
+		var row SkillRow
+		var reviewed, created, updated sql.NullString
+		if err := rows.Scan(&row.ID, &row.Name, &row.Origin, &row.Digest, &row.State, &row.Validation, &row.Requested, &row.Granted, &reviewed, &created, &updated); err != nil {
+			return nil, codedError(ErrorCodeStorageUnavailable, "list skills", err)
+		}
+		if err := row.bindTimes(reviewed, created, updated); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, codedError(ErrorCodeStorageUnavailable, "list skills", err)
+	}
+	return out, nil
+}
+
+func (s *sqliteSkillStore) DisableSkill(ctx context.Context, id string) error {
+	if ctx == nil {
+		return errNilArgument("ctx")
+	}
+	if id == "" {
+		return Errorf(ErrorCodeInvalidArgument, "skill id must not be empty")
+	}
+	now := formatTime(time.Now().UTC())
+	result, err := s.db.ExecContext(ctx, `
+UPDATE skill_package
+SET state = ?, updated_at = ?
+WHERE id = ? AND state = ?
+`, SkillStateDisabled, now, id, SkillStateActive)
+	if err != nil {
+		return classifyBusy(codedError(ErrorCodeStorageUnavailable, "disable skill", err))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "disable skill", err)
+	}
+	if affected == 1 {
+		return nil
+	}
+	return s.classifyReviewConflict(ctx, id, "")
 }
