@@ -36,11 +36,14 @@ func activateRecord(t *testing.T, registry *fakeRegistry, id string, grants []st
 
 func newTestEngine(t *testing.T, registry Registry, root string) *Engine {
 	t.Helper()
-	engine, err := NewEngine(registry, EngineConfig{
-		Dirs:                []string{root},
-		MaxIndexed:          16,
-		MaxInstructionRunes: 8192,
-		PolicyVersion:       "1",
+	engine, err := NewEngine(registry, &EngineConfig{
+		Dirs:                 []string{root},
+		MaxIndexed:           16,
+		MaxInstructionRunes:  8192,
+		MaxResourceBytes:     65536,
+		ScriptToolName:       "exec",
+		ScriptToolCapability: "shell.execute",
+		PolicyVersion:        "1",
 	})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
@@ -162,11 +165,14 @@ func TestActivateAmbiguousNameFails(t *testing.T) {
 	first := makeEngineRoot(t, map[string]string{"same": "one"})
 	second := makeEngineRoot(t, map[string]string{"same": "two"})
 	registry := &fakeRegistry{}
-	engine, err := NewEngine(registry, EngineConfig{
-		Dirs:                []string{first, second},
-		MaxIndexed:          16,
-		MaxInstructionRunes: 8192,
-		PolicyVersion:       "1",
+	engine, err := NewEngine(registry, &EngineConfig{
+		Dirs:                 []string{first, second},
+		MaxIndexed:           16,
+		MaxInstructionRunes:  8192,
+		MaxResourceBytes:     65536,
+		ScriptToolName:       "exec",
+		ScriptToolCapability: "shell.execute",
+		PolicyVersion:        "1",
 	})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
@@ -251,15 +257,20 @@ func TestHostileInstructionsStayUntrusted(t *testing.T) {
 func TestEngineConfigInvalid(t *testing.T) {
 	registry := &fakeRegistry{}
 	valid := EngineConfig{
-		Dirs:                []string{t.TempDir()},
-		MaxIndexed:          16,
-		MaxInstructionRunes: 8192,
-		PolicyVersion:       "1",
+		Dirs:                 []string{t.TempDir()},
+		MaxIndexed:           16,
+		MaxInstructionRunes:  8192,
+		MaxResourceBytes:     65536,
+		ScriptToolName:       "exec",
+		ScriptToolCapability: "shell.execute",
+		PolicyVersion:        "1",
 	}
 	cases := map[string]func(*EngineConfig){
 		"nil registry":  func(*EngineConfig) {},
 		"zero indexed":  func(c *EngineConfig) { c.MaxIndexed = 0 },
 		"zero runes":    func(c *EngineConfig) { c.MaxInstructionRunes = 0 },
+		"zero resource": func(c *EngineConfig) { c.MaxResourceBytes = 0 },
+		"empty script":  func(c *EngineConfig) { c.ScriptToolName = "" },
 		"empty policy":  func(c *EngineConfig) { c.PolicyVersion = "" },
 		"relative root": func(c *EngineConfig) { c.Dirs[0] = "relative/path" },
 		"unclean root":  func(c *EngineConfig) { c.Dirs[0] += "/.." },
@@ -272,7 +283,7 @@ func TestEngineConfigInvalid(t *testing.T) {
 			if name != "nil registry" {
 				reg = registry
 			}
-			if _, err := NewEngine(reg, config); !isCode(err, ErrorCodeInvalidArgument) {
+			if _, err := NewEngine(reg, &config); !isCode(err, ErrorCodeInvalidArgument) {
 				t.Errorf("err = %v", err)
 			}
 		})
@@ -280,12 +291,26 @@ func TestEngineConfigInvalid(t *testing.T) {
 	if err := validEngine(t).Refresh(nilCtxForTest()); !isCode(err, ErrorCodeInvalidArgument) {
 		t.Errorf("nil refresh ctx err = %v", err)
 	}
+	if _, err := NewEngine(registry, nil); !isCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("nil config err = %v", err)
+	}
+	if _, err := engineActivateNil(t); !isCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("nil activation err = %v", err)
+	}
+}
+
+func engineActivateNil(t *testing.T) (Activation, error) {
+	t.Helper()
+	engine := validEngine(t)
+	var activation *Activation
+	_, err := engine.ReadResource(t.Context(), activation, "x.md")
+	return Activation{}, err
 }
 
 func validEngine(t *testing.T) *Engine {
 	t.Helper()
-	engine, err := NewEngine(&fakeRegistry{}, EngineConfig{
-		MaxIndexed: 1, MaxInstructionRunes: 1, PolicyVersion: "1",
+	engine, err := NewEngine(&fakeRegistry{}, &EngineConfig{
+		MaxIndexed: 1, MaxInstructionRunes: 1, MaxResourceBytes: 1, ScriptToolName: "exec", ScriptToolCapability: "shell.execute", PolicyVersion: "1",
 	})
 	if err != nil {
 		t.Fatalf("engine: %v", err)

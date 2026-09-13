@@ -44,6 +44,7 @@ const (
 	ErrorCodeMemoryInvalid             ErrorCode = "memory_invalid"
 	ErrorCodeSkillNotFound             ErrorCode = "skill_not_found"
 	ErrorCodeSkillInvalid              ErrorCode = "skill_invalid"
+	ErrorCodeSkillDigestChanged        ErrorCode = "skill_digest_changed"
 )
 
 type Error struct {

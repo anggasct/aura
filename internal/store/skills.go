@@ -36,6 +36,8 @@ type SkillStore interface {
 	UpsertScan(ctx context.Context, row *SkillRow) (bool, error)
 	GetSkill(ctx context.Context, id string) (SkillRow, error)
 	ListSkillsByState(ctx context.Context, state string, limit int) ([]SkillRow, error)
+	AcceptSkill(ctx context.Context, id, digest, granted string) error
+	RejectSkill(ctx context.Context, id string) error
 }
 
 type sqliteSkillStore struct {
@@ -199,4 +201,74 @@ func (row *SkillRow) bindTimes(reviewed, created, updated sql.NullString) error 
 	}
 	row.UpdatedAt = updatedAt
 	return nil
+}
+
+func (s *sqliteSkillStore) AcceptSkill(ctx context.Context, id, digest, granted string) error {
+	if ctx == nil {
+		return errNilArgument("ctx")
+	}
+	if id == "" || digest == "" {
+		return Errorf(ErrorCodeInvalidArgument, "skill id and digest must not be empty")
+	}
+	if !json.Valid([]byte(granted)) {
+		return Errorf(ErrorCodeSkillInvalid, "skill grants must be valid JSON")
+	}
+	now := formatTime(time.Now().UTC())
+	result, err := s.db.ExecContext(ctx, `
+UPDATE skill_package
+SET state = ?, granted_capabilities_json = ?, reviewed_at = ?, updated_at = ?
+WHERE id = ? AND state = ? AND content_digest = ?
+`, SkillStateActive, granted, now, now, id, SkillStateQuarantined, digest)
+	if err != nil {
+		return classifyBusy(codedError(ErrorCodeStorageUnavailable, "accept skill", err))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "accept skill", err)
+	}
+	if affected == 1 {
+		return nil
+	}
+	return s.classifyReviewConflict(ctx, id, digest)
+}
+
+func (s *sqliteSkillStore) RejectSkill(ctx context.Context, id string) error {
+	if ctx == nil {
+		return errNilArgument("ctx")
+	}
+	if id == "" {
+		return Errorf(ErrorCodeInvalidArgument, "skill id must not be empty")
+	}
+	now := formatTime(time.Now().UTC())
+	result, err := s.db.ExecContext(ctx, `
+UPDATE skill_package
+SET state = ?, reviewed_at = ?, updated_at = ?
+WHERE id = ? AND state = ?
+`, SkillStateRejected, now, now, id, SkillStateQuarantined)
+	if err != nil {
+		return classifyBusy(codedError(ErrorCodeStorageUnavailable, "reject skill", err))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return codedError(ErrorCodeStorageUnavailable, "reject skill", err)
+	}
+	if affected == 1 {
+		return nil
+	}
+	return s.classifyReviewConflict(ctx, id, "")
+}
+
+func (s *sqliteSkillStore) classifyReviewConflict(ctx context.Context, id, digest string) error {
+	var state, current string
+	err := s.db.QueryRowContext(ctx, `SELECT state, content_digest FROM skill_package WHERE id = ?`, id).Scan(&state, &current)
+	if err == sql.ErrNoRows {
+		return Errorf(ErrorCodeSkillNotFound, "skill is not registered")
+	}
+	if err != nil {
+		return classifyBusy(codedError(ErrorCodeStorageUnavailable, "read skill", err))
+	}
+	if digest != "" && current != digest {
+		return Errorf(ErrorCodeSkillDigestChanged, "skill content changed since review")
+	}
+	return Errorf(ErrorCodeSkillInvalid, "skill is not reviewable")
 }

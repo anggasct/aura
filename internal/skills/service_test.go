@@ -57,6 +57,40 @@ func (f *fakeRegistry) ListByState(_ context.Context, state string, limit int) (
 	return out, nil
 }
 
+func (f *fakeRegistry) AcceptSkill(_ context.Context, id, digest, granted string) error {
+	if f.err != nil {
+		return f.err
+	}
+	record, exists := f.records[id]
+	if !exists {
+		return Errorf(ErrorCodeSkillNotFound, "skill is not registered")
+	}
+	if record.State != StateQuarantined {
+		return Errorf(ErrorCodeSkillInvalid, "skill is not reviewable")
+	}
+	if record.Digest != digest {
+		return Errorf(ErrorCodeSkillDigestChanged, "skill content changed since review")
+	}
+	record.State = StateActive
+	record.Granted = granted
+	return nil
+}
+
+func (f *fakeRegistry) RejectSkill(_ context.Context, id string) error {
+	if f.err != nil {
+		return f.err
+	}
+	record, exists := f.records[id]
+	if !exists {
+		return Errorf(ErrorCodeSkillNotFound, "skill is not registered")
+	}
+	if record.State != StateQuarantined {
+		return Errorf(ErrorCodeSkillInvalid, "skill is not reviewable")
+	}
+	record.State = StateRejected
+	return nil
+}
+
 func TestRegisterScanValid(t *testing.T) {
 	dir := makeValidPackage(t)
 	registry := &fakeRegistry{}

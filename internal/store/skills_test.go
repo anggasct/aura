@@ -152,3 +152,84 @@ func TestSkillConcurrentUpsertSameDigest(t *testing.T) {
 		t.Errorf("inserted winners = %d, want exactly 1", wins)
 	}
 }
+
+func TestSkillAcceptBindsDigestAndGrants(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	store := NewSkillStore(db)
+
+	row := testSkillRow("local/pdf@0123456789ab")
+	if _, err := store.UpsertScan(ctx, row); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := store.AcceptSkill(ctx, row.ID, row.Digest, `["read"]`); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	got, err := store.GetSkill(ctx, row.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.State != SkillStateActive || got.Granted != `["read"]` {
+		t.Errorf("row = %+v", got)
+	}
+	if got.ReviewedAt == nil {
+		t.Errorf("reviewed_at not set")
+	}
+	if err := store.AcceptSkill(ctx, row.ID, row.Digest, `[]`); err == nil {
+		t.Errorf("second accept should fail")
+	} else {
+		wantCode(t, err, ErrorCodeSkillInvalid)
+	}
+}
+
+func TestSkillAcceptRejectsChangedDigest(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	store := NewSkillStore(db)
+
+	row := testSkillRow("local/pdf@0123456789ab")
+	if _, err := store.UpsertScan(ctx, row); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	err := store.AcceptSkill(ctx, row.ID, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", `[]`)
+	wantCode(t, err, ErrorCodeSkillDigestChanged)
+	if err := store.RejectSkill(ctx, "local/missing@0123456789ab"); err == nil {
+		t.Errorf("missing reject should fail")
+	} else {
+		wantCode(t, err, ErrorCodeSkillNotFound)
+	}
+}
+
+func TestSkillRejectTransitions(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	store := NewSkillStore(db)
+
+	row := testSkillRow("local/pdf@0123456789ab")
+	if _, err := store.UpsertScan(ctx, row); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := store.RejectSkill(ctx, row.ID); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	got, err := store.GetSkill(ctx, row.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.State != SkillStateRejected || got.ReviewedAt == nil {
+		t.Errorf("row = %+v", got)
+	}
+	if err := store.RejectSkill(ctx, row.ID); err == nil {
+		t.Errorf("second reject should fail")
+	} else {
+		wantCode(t, err, ErrorCodeSkillInvalid)
+	}
+	if err := store.AcceptSkill(nilCtxForStore(), row.ID, row.Digest, `[]`); err == nil {
+		t.Errorf("nil ctx should fail")
+	}
+}
+
+func nilCtxForStore() context.Context {
+	var ctx context.Context
+	return ctx
+}

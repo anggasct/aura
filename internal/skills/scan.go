@@ -48,6 +48,7 @@ type ScannedDir struct {
 	Manifest  *Manifest
 	Digest    string
 	Files     []FileEntry
+	Contents  map[string][]byte
 	SizeBytes int64
 }
 
@@ -78,6 +79,7 @@ func ScanDir(ctx context.Context, dir, scope string) ScanResult {
 			Scope:     scope,
 			Name:      dirBase(dir),
 			Files:     walker.files,
+			Contents:  walker.contents,
 			SizeBytes: walker.total,
 		}
 		scanned.Digest = digestPackage(walker.files, walker.contents)
@@ -86,6 +88,7 @@ func ScanDir(ctx context.Context, dir, scope string) ScanResult {
 	scanned := &ScannedDir{
 		Scope:     scope,
 		Files:     walker.files,
+		Contents:  walker.contents,
 		SizeBytes: walker.total,
 	}
 	scanned.Digest = digestPackage(walker.files, walker.contents)
