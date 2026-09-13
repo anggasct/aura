@@ -28,6 +28,11 @@ const (
 	maxContentBytes     = 1 << 16
 )
 
+const (
+	defaultSummaryPromptVersion = "memory-summary-v1"
+	defaultSummaryTTL           = 720 * time.Hour
+)
+
 type Event struct {
 	ID        string
 	SessionID string
@@ -65,16 +70,19 @@ type DocumentStore interface {
 }
 
 type StoredDocument struct {
-	ID           string
-	OwnerID      string
-	SessionID    string
-	Kind         string
-	FromSequence int64
-	ToSequence   int64
-	Content      string
-	TrustLabel   string
-	CreatedAt    time.Time
-	ExpiresAt    *time.Time
+	ID            string
+	OwnerID       string
+	SessionID     string
+	Kind          string
+	FromSequence  int64
+	ToSequence    int64
+	Content       string
+	TrustLabel    string
+	PromptVersion string
+	ModelProtocol string
+	ModelName     string
+	CreatedAt     time.Time
+	ExpiresAt     *time.Time
 }
 
 type StoredQuery struct {
@@ -100,29 +108,70 @@ type RecallRequest struct {
 }
 
 type RecallDocument struct {
-	ID           string
+	ID            string
+	SessionID     string
+	FromSequence  uint64
+	ToSequence    uint64
+	Content       string
+	Trust         approval.TrustLabel
+	PromptVersion string
+	ModelProtocol string
+	ModelName     string
+	Score         float64
+	CreatedAt     time.Time
+	ExpiresAt     *time.Time
+}
+
+type ProvenanceRef struct {
+	DocumentID   string
 	SessionID    string
 	FromSequence uint64
 	ToSequence   uint64
-	Content      string
-	Trust        approval.TrustLabel
-	Score        float64
-	CreatedAt    time.Time
-	ExpiresAt    *time.Time
+}
+
+type RecallContext struct {
+	Query      string
+	Documents  []RecallDocument
+	Summary    string
+	Provenance []ProvenanceRef
+	Trust      approval.TrustLabel
+}
+
+type SummaryModel struct {
+	Protocol         string
+	Name             string
+	Tokenizer        string
+	ContextTokens    int
+	StructuredOutput bool
+}
+
+type SummaryPrompt struct {
+	Version   string
+	Query     string
+	Documents []RecallDocument
+	MaxTokens int
+}
+
+type Summarizer interface {
+	Summarize(ctx context.Context, prompt *SummaryPrompt) (string, error)
 }
 
 type Config struct {
-	MaxDocuments    int
-	TokenBudget     int
-	MaxContentBytes int
+	MaxDocuments         int
+	TokenBudget          int
+	MaxContentBytes      int
+	SummaryPromptVersion string
+	SummaryTTL           time.Duration
 }
 
 type Service struct {
-	documents DocumentStore
-	secrets   Secrets
-	maxDocs   int
-	tokens    int
-	maxBytes  int
+	documents     DocumentStore
+	secrets       Secrets
+	maxDocs       int
+	tokens        int
+	maxBytes      int
+	summaryPrompt string
+	summaryTTL    time.Duration
 }
 
 func NewService(documents DocumentStore, secrets Secrets, config Config) (*Service, error) {
@@ -141,7 +190,23 @@ func NewService(documents DocumentStore, secrets Secrets, config Config) (*Servi
 	if maxBytes == 0 {
 		maxBytes = maxContentBytes
 	}
-	return &Service{documents: documents, secrets: secrets, maxDocs: maxDocs, tokens: tokens, maxBytes: maxBytes}, nil
+	summaryPrompt := config.SummaryPromptVersion
+	if summaryPrompt == "" {
+		summaryPrompt = defaultSummaryPromptVersion
+	}
+	summaryTTL := config.SummaryTTL
+	if summaryTTL == 0 {
+		summaryTTL = defaultSummaryTTL
+	}
+	return &Service{
+		documents:     documents,
+		secrets:       secrets,
+		maxDocs:       maxDocs,
+		tokens:        tokens,
+		maxBytes:      maxBytes,
+		summaryPrompt: summaryPrompt,
+		summaryTTL:    summaryTTL,
+	}, nil
 }
 
 func trustFor(author, kind string) (approval.TrustLabel, bool) {
@@ -200,11 +265,11 @@ func extractText(payload json.RawMessage) (string, bool) {
 	return "", false
 }
 
-func documentID(sessionID, kind string, from, to uint64) string {
+func documentID(sessionID, kind string, from, to uint64, promptVersion string) string {
 	var numbers [16]byte
 	binary.BigEndian.PutUint64(numbers[:8], from)
 	binary.BigEndian.PutUint64(numbers[8:], to)
-	sum := sha256.Sum256([]byte(sessionID + "|" + kind + "|" + hex.EncodeToString(numbers[:])))
+	sum := sha256.Sum256([]byte(sessionID + "|" + kind + "|" + promptVersion + "|" + hex.EncodeToString(numbers[:])))
 	return "mem_" + hex.EncodeToString(sum[:])[:16]
 }
 
@@ -273,7 +338,7 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 		createdAt = time.Now().UTC()
 	}
 	document := Document{
-		ID:           documentID(event.SessionID, KindEventText, event.Sequence, event.Sequence),
+		ID:           documentID(event.SessionID, KindEventText, event.Sequence, event.Sequence, ""),
 		OwnerID:      ownerID,
 		SessionID:    event.SessionID,
 		Kind:         KindEventText,
@@ -354,22 +419,25 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 		used += estimate
 		from, err := sequenceFromDB(hits[i].FromSequence)
 		if err != nil {
-			return nil, err
+			return nil, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 		}
 		to, err := sequenceFromDB(hits[i].ToSequence)
 		if err != nil {
-			return nil, err
+			return nil, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 		}
 		documents = append(documents, RecallDocument{
-			ID:           hits[i].ID,
-			SessionID:    hits[i].SessionID,
-			FromSequence: from,
-			ToSequence:   to,
-			Content:      hits[i].Content,
-			Trust:        approval.TrustLabel(hits[i].TrustLabel),
-			Score:        hits[i].Rank,
-			CreatedAt:    hits[i].CreatedAt,
-			ExpiresAt:    hits[i].ExpiresAt,
+			ID:            hits[i].ID,
+			SessionID:     hits[i].SessionID,
+			FromSequence:  from,
+			ToSequence:    to,
+			Content:       hits[i].Content,
+			Trust:         approval.TrustLabel(hits[i].TrustLabel),
+			PromptVersion: hits[i].PromptVersion,
+			ModelProtocol: hits[i].ModelProtocol,
+			ModelName:     hits[i].ModelName,
+			Score:         hits[i].Rank,
+			CreatedAt:     hits[i].CreatedAt,
+			ExpiresAt:     hits[i].ExpiresAt,
 		})
 	}
 	return documents, nil
@@ -430,4 +498,133 @@ func (s *Service) PurgeExpired(ctx context.Context, now time.Time, limit int) (i
 		return 0, Errorf(ErrorCodeInvalidArgument, "purge limit must be positive")
 	}
 	return s.documents.DeleteExpiredSummaries(ctx, now.UTC(), limit)
+}
+
+func provenanceFor(documents []RecallDocument) []ProvenanceRef {
+	refs := make([]ProvenanceRef, 0, len(documents))
+	for i := range documents {
+		document := &documents[i]
+		refs = append(refs, ProvenanceRef{
+			DocumentID:   document.ID,
+			SessionID:    document.SessionID,
+			FromSequence: document.FromSequence,
+			ToSequence:   document.ToSequence,
+		})
+	}
+	return refs
+}
+
+func (s *Service) checkSummaryCapability(query string, documents []RecallDocument, model *SummaryModel) (int, error) {
+	if model == nil {
+		return 0, Errorf(ErrorCodeInvalidArgument, "summary model must not be nil")
+	}
+	if strings.TrimSpace(model.Protocol) == "" || strings.TrimSpace(model.Name) == "" {
+		return 0, Errorf(ErrorCodeInvalidArgument, "summary model identity must not be empty")
+	}
+	if !model.StructuredOutput {
+		return 0, Errorf(ErrorCodeModelCapabilityUnsupported, "summary model lacks structured output")
+	}
+	input := estimateTokens(query)
+	for i := range documents {
+		input += estimateTokens(documents[i].Content)
+	}
+	if strings.TrimSpace(model.Tokenizer) == "" {
+		input *= 2
+	}
+	if model.ContextTokens > 0 && input+s.tokens > model.ContextTokens {
+		return 0, Errorf(ErrorCodeModelCapabilityUnsupported, "summary input exceeds model context")
+	}
+	return s.tokens, nil
+}
+
+func (s *Service) Summarize(ctx context.Context, ownerID, sessionID, query string, documents []RecallDocument, model *SummaryModel, summarizer Summarizer) (RecallContext, error) {
+	if ctx == nil {
+		return RecallContext{}, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return RecallContext{}, err
+	}
+	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(sessionID) == "" {
+		return RecallContext{}, Errorf(ErrorCodeInvalidArgument, "owner and session must not be empty")
+	}
+	if len(documents) == 0 {
+		return RecallContext{}, Errorf(ErrorCodeInvalidArgument, "summary requires at least one document")
+	}
+	if summarizer == nil {
+		return RecallContext{}, Errorf(ErrorCodeInvalidArgument, "summarizer must not be nil")
+	}
+	maxTokens, err := s.checkSummaryCapability(query, documents, model)
+	if err != nil {
+		return RecallContext{}, err
+	}
+	summary, err := summarizer.Summarize(ctx, &SummaryPrompt{
+		Version:   s.summaryPrompt,
+		Query:     query,
+		Documents: documents,
+		MaxTokens: maxTokens,
+	})
+	if err != nil {
+		return RecallContext{}, err
+	}
+	content, ok := cleanText(summary, s.maxBytes)
+	if !ok {
+		return RecallContext{}, Errorf(ErrorCodeUnavailable, "summarizer returned no usable content")
+	}
+	if s.secrets != nil && s.secrets.Contains(content) {
+		return RecallContext{}, Errorf(ErrorCodeUnavailable, "summarizer returned no usable content")
+	}
+	from, to := documents[0].FromSequence, documents[0].ToSequence
+	for i := range documents[1:] {
+		document := &documents[1+i]
+		if document.FromSequence < from {
+			from = document.FromSequence
+		}
+		if document.ToSequence > to {
+			to = document.ToSequence
+		}
+	}
+	now := time.Now().UTC()
+	record := &StoredDocument{
+		ID:            documentID(sessionID, KindSummary, from, to, s.summaryPrompt),
+		OwnerID:       ownerID,
+		SessionID:     sessionID,
+		Kind:          KindSummary,
+		Content:       content,
+		TrustLabel:    string(approval.TrustDerivedUntrusted),
+		PromptVersion: s.summaryPrompt,
+		ModelProtocol: model.Protocol,
+		ModelName:     model.Name,
+		CreatedAt:     now,
+	}
+	if record.FromSequence, err = sequenceToDB(from); err != nil {
+		return RecallContext{}, Errorf(ErrorCodeProjectionCorrupt, "summary source range is not valid")
+	}
+	if record.ToSequence, err = sequenceToDB(to); err != nil {
+		return RecallContext{}, Errorf(ErrorCodeProjectionCorrupt, "summary source range is not valid")
+	}
+	if s.summaryTTL > 0 {
+		expires := now.Add(s.summaryTTL)
+		record.ExpiresAt = &expires
+	}
+	if _, err := s.documents.UpsertDocument(ctx, record); err != nil {
+		return RecallContext{}, err
+	}
+	return RecallContext{
+		Query:      query,
+		Documents:  documents,
+		Summary:    content,
+		Provenance: provenanceFor(documents),
+		Trust:      approval.TrustDerivedUntrusted,
+	}, nil
+}
+
+func (s *Service) RecallWithSummary(ctx context.Context, req *RecallRequest, model *SummaryModel, summarizer Summarizer) (RecallContext, error) {
+	documents, err := s.Recall(ctx, req)
+	if err != nil {
+		return RecallContext{}, err
+	}
+	if model == nil || summarizer == nil || len(documents) == 0 {
+		return RecallContext{Query: req.Query, Documents: documents, Provenance: provenanceFor(documents)}, nil
+	}
+	return s.Summarize(ctx, req.OwnerID, req.SessionID, req.Query, documents, model, summarizer)
 }
