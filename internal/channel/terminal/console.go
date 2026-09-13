@@ -26,6 +26,7 @@ type Console struct {
 
 	principal           string
 	sessionID           string
+	skills              Skills
 	closeInput          func()
 	tty                 *TTYRenderer
 	terminalSeen        bool
@@ -60,6 +61,8 @@ func (c *Console) SetClock(now func() time.Time) { c.now = now }
 func (c *Console) SetInterrupts(ch <-chan struct{}) { c.interrupts = ch }
 
 func (c *Console) SetSessionID(id string) { c.sessionID = id }
+
+func (c *Console) SetSkills(skills Skills) { c.skills = skills }
 
 func (c *Console) SetInputCloser(closeInput func()) { c.closeInput = closeInput }
 

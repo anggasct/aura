@@ -30,6 +30,33 @@ func (f *fakeRegistry) UpsertScan(_ context.Context, record *Record) (bool, erro
 	return true, nil
 }
 
+func (f *fakeRegistry) Get(_ context.Context, id string) (Record, error) {
+	if f.err != nil {
+		return Record{}, f.err
+	}
+	record, exists := f.records[id]
+	if !exists {
+		return Record{}, Errorf(ErrorCodeSkillNotFound, "skill is not registered")
+	}
+	return *record, nil
+}
+
+func (f *fakeRegistry) ListByState(_ context.Context, state string, limit int) ([]Record, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]Record, 0)
+	for _, record := range f.records {
+		if record.State == state {
+			out = append(out, *record)
+		}
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func TestRegisterScanValid(t *testing.T) {
 	dir := makeValidPackage(t)
 	registry := &fakeRegistry{}

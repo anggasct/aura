@@ -72,7 +72,7 @@ func TestObserver_DeliveryLifecycle(t *testing.T) {
 	recorder := &recordingObserver{}
 	fixture := newRunnerFixture([]sendScript{successOutcome("intent-1")})
 	fixture.runner.observer = recorder.observe
-	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := freshFixtureTime()
 	seedRunItem(fixture, "bcst-1", StateScheduled, now)
 	startBroadcastRun(t, fixture, "bcst-1")
 	waitBroadcastState(t, fixture, "bcst-1", StateSucceeded)

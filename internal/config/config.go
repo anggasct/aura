@@ -38,6 +38,7 @@ type Config struct {
 	Broadcast    Broadcast             `koanf:"broadcast" yaml:"broadcast"`
 	Scheduler    Scheduler             `koanf:"scheduler" yaml:"scheduler"`
 	Memory       Memory                `koanf:"memory" yaml:"memory"`
+	Skills       *Skills               `koanf:"skills" yaml:"skills,omitempty"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
 
@@ -94,6 +95,16 @@ type QuietHours struct {
 	Enabled bool   `koanf:"enabled" yaml:"enabled"`
 	Start   string `koanf:"start" yaml:"start"`
 	End     string `koanf:"end" yaml:"end"`
+}
+
+type Skills struct {
+	Enabled              bool     `koanf:"enabled" yaml:"enabled"`
+	Roots                []string `koanf:"roots" yaml:"roots"`
+	AutoSelect           bool     `koanf:"auto_select" yaml:"auto_select"`
+	MaxIndexedSkills     int      `koanf:"max_indexed_skills" yaml:"max_indexed_skills"`
+	MaxInstructionTokens int      `koanf:"max_instruction_tokens" yaml:"max_instruction_tokens"`
+	MaxResourceBytes     int64    `koanf:"max_resource_bytes" yaml:"max_resource_bytes"`
+	QuarantineRetention  Duration `koanf:"quarantine_retention" yaml:"quarantine_retention"`
 }
 
 type Discord struct {
@@ -572,6 +583,15 @@ func Default() Config {
 			RecallTokenBudget:    2000,
 			SummaryPromptVersion: "memory-summary-v1",
 			SummaryTTL:           Duration(720 * time.Hour),
+		},
+		Skills: &Skills{
+			Enabled:              true,
+			Roots:                []string{"/srv/aura/skills"},
+			AutoSelect:           true,
+			MaxIndexedSkills:     256,
+			MaxInstructionTokens: 5000,
+			MaxResourceBytes:     8388608,
+			QuarantineRetention:  Duration(720 * time.Hour),
 		},
 	}
 }

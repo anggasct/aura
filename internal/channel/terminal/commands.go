@@ -6,6 +6,16 @@ import (
 	"strings"
 )
 
+type SkillContext struct {
+	ID     string
+	Caveat string
+	Text   string
+}
+
+type Skills interface {
+	ActivateSkill(ctx context.Context, name string) (SkillContext, error)
+}
+
 func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
 	fields := strings.Fields(raw)
 	command := strings.ToLower(strings.TrimPrefix(fields[0], "/"))
@@ -29,6 +39,8 @@ func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
 		return true, nil
 	case "status":
 		return true, c.status(ctx)
+	case "skill":
+		return true, c.skillCommand(ctx, args)
 	default:
 		return true, writeLinef(c.diag, "aura: unknown command %s (try /help)", fields[0])
 	}
@@ -57,6 +69,26 @@ func (c *Console) sessionCommand(ctx context.Context, args []string) error {
 	}
 	c.sessionID = sess.ID
 	return writeLinef(c.diag, "switched to session %s", sess.ID)
+}
+
+func (c *Console) skillCommand(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return writeLine(c.diag, "usage: /skill <name>")
+	}
+	if c.skills == nil {
+		return writeLine(c.diag, "skill support is not available")
+	}
+	activated, err := c.skills.ActivateSkill(ctx, args[0])
+	if err != nil {
+		return writeLinef(c.diag, "aura: skill %s: %v", args[0], err)
+	}
+	if err := writeLinef(c.out, "skill %s", activated.ID); err != nil {
+		return err
+	}
+	if err := writeLine(c.out, activated.Caveat); err != nil {
+		return err
+	}
+	return writeLine(c.out, activated.Text)
 }
 
 func (c *Console) status(ctx context.Context) error {
@@ -89,5 +121,6 @@ func helpText() string {
 		"  /session [id]      show or switch to a session\n" +
 		"  /cancel            cancel the active turn\n" +
 		"  /status            show the current session\n" +
+		"  /skill <name>      activate a skill\n" +
 		"  .                  compose a multi-line prompt in $EDITOR (interactive)\n"
 }

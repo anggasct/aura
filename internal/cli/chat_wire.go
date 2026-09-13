@@ -230,6 +230,13 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		},
 		principal,
 	)
+	if cfg.Skills != nil && cfg.Skills.Enabled {
+		skillEngine, err := buildSkillsEngine(ctx, cfg.Skills, db, logger)
+		if err != nil {
+			return err
+		}
+		console.SetSkills(&skillTerminalBridge{engine: skillEngine})
+	}
 	console.SetInputCloser(func() { _ = os.Stdin.Close() })
 	console.SetSessionID(sessionID)
 	if useTTY {
