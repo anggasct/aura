@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -79,6 +80,86 @@ func TestStageDraft(t *testing.T) {
 	}
 	if _, err := engine.StageDraft(nilCtxForTest(), "x", "y", root); !isCode(err, ErrorCodeInvalidArgument) {
 		t.Errorf("nil ctx err = %v", err)
+	}
+}
+
+func TestStageDraftDescriptionRoundTrip(t *testing.T) {
+	cases := []string{
+		"line1\nfoo: bar",
+		"line1\nlicense: MIT",
+		"a\n continued",
+		"line1\n---\nfoo: bar",
+		"line1: value\nsecond: line",
+	}
+	for i, description := range cases {
+		root := t.TempDir()
+		registry := &fakeRegistry{}
+		engine := lifecycleEngine(t, registry, root)
+		name := strings.Repeat("a", 1) + string(rune('a'+i)) + "probe"
+		summary, err := engine.StageDraft(t.Context(), name, description, root)
+		if err != nil {
+			t.Fatalf("case %d stage: %v", i, err)
+		}
+		if !summary.Valid {
+			t.Fatalf("case %d should stage valid, got %+v", i, summary)
+		}
+		reviewed, err := engine.Review(t.Context(), summary.ID)
+		if err != nil {
+			t.Fatalf("case %d review: %v", i, err)
+		}
+		if reviewed.Description != description {
+			t.Errorf("case %d stored = %q, want %q", i, reviewed.Description, description)
+		}
+		content, err := os.ReadFile(filepath.Join(root, "pending", name, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("case %d bytes: %v", i, err)
+		}
+		manifest, findings := ParseSkillFile(content)
+		if len(findings) != 0 {
+			t.Errorf("case %d findings = %v", i, findings)
+		}
+		if manifest == nil {
+			t.Fatalf("case %d manifest is nil", i)
+		}
+		if manifest.Description != description {
+			t.Errorf("case %d manifest = %q, want %q", i, manifest.Description, description)
+		}
+		if len(manifest.UnknownFields) != 0 {
+			t.Errorf("case %d unknown fields = %v", i, manifest.UnknownFields)
+		}
+		if manifest.License == "MIT" {
+			t.Errorf("case %d description leaked into license", i)
+		}
+	}
+}
+
+func TestConcurrentDuplicateStage(t *testing.T) {
+	root := t.TempDir()
+	registry := &fakeRegistry{}
+	engine := lifecycleEngine(t, registry, root)
+	const workers = 8
+	results := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := engine.StageDraft(context.Background(), "racy", "Racy draft.", root)
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	succeeded := 0
+	for err := range results {
+		if err == nil {
+			succeeded++
+		} else if !isCode(err, ErrorCodeInvalidArgument) {
+			t.Errorf("duplicate err = %v, want invalid_argument", err)
+		}
+	}
+	if succeeded != 1 {
+		t.Errorf("concurrent duplicate stage successes = %d, want exactly 1", succeeded)
 	}
 }
 

@@ -124,24 +124,23 @@ func newSkillsShowCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer func() { _ = db.Close() }()
-			report, err := engine.Doctor(cmd.Context())
+			bundle, err := engine.Review(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
-			for _, row := range report.Rows {
-				if row.ID != args[0] {
-					continue
-				}
-				return writeSkillLines(cmd, []string{
-					"id: " + row.ID,
-					"name: " + row.Name,
-					"state: " + row.State,
-					"digest: " + row.Digest,
-					"origin: " + row.Origin,
-					"findings: " + strings.Join(row.Findings, ","),
-				})
-			}
-			return fmt.Errorf("skill %q is not registered", args[0])
+			return writeSkillLines(cmd, []string{
+				"id: " + bundle.ID,
+				"name: " + bundle.Name,
+				"state: " + bundle.State,
+				"digest: " + bundle.Digest,
+				"origin: " + bundle.Origin,
+				"description: " + bundle.Description,
+				"compatibility: " + bundle.Compatibility,
+				"requested: " + strings.Join(bundle.Requested, ","),
+				"granted: " + strings.Join(bundle.Granted, ","),
+				"reviewed: " + bundle.ReviewedAt,
+				"findings: " + strings.Join(bundle.Findings, ","),
+			})
 		},
 	}
 }

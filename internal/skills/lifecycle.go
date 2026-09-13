@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -54,11 +56,23 @@ func (e *Engine) StageDraft(ctx context.Context, name, description, root string)
 		return ScanSummary{}, codedError(ErrorCodeSkillUnavailable, "prepare staging area", err)
 	}
 	pkgdir := filepath.Join(pending, name)
-	if _, err := os.Lstat(pkgdir); err == nil {
-		return ScanSummary{}, Errorf(ErrorCodeInvalidArgument, "skill draft already exists")
+	if err := os.Mkdir(pkgdir, 0o700); err != nil {
+		if os.IsExist(err) {
+			return ScanSummary{}, Errorf(ErrorCodeInvalidArgument, "skill draft already exists")
+		}
+		return ScanSummary{}, codedError(ErrorCodeSkillUnavailable, "prepare staging area", err)
 	}
-	document := "---\nname: " + name + "\ndescription: " + description + "\n---\n# " + name + "\n\n" + description + "\n"
+	front, err := yaml.Marshal(struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}{Name: name, Description: description})
+	if err != nil {
+		_ = os.RemoveAll(pkgdir)
+		return ScanSummary{}, codedError(ErrorCodeSkillUnavailable, "stage skill draft", err)
+	}
+	document := "---\n" + string(front) + "---\n# " + name + "\n\n" + description + "\n"
 	if err := atomicWriteFile(pkgdir, "SKILL.md", []byte(document)); err != nil {
+		_ = os.RemoveAll(pkgdir)
 		return ScanSummary{}, err
 	}
 	result := ScanDir(ctx, pkgdir, scope)
@@ -108,9 +122,26 @@ func atomicWriteFile(dir, name string, content []byte) error {
 		_ = os.Remove(tmpName)
 		return codedError(ErrorCodeSkillUnavailable, "stage skill draft", err)
 	}
-	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
+	final := filepath.Join(dir, name)
+	if err := os.Link(tmpName, final); err != nil {
 		_ = os.Remove(tmpName)
+		if os.IsExist(err) {
+			return Errorf(ErrorCodeInvalidArgument, "skill draft already exists")
+		}
 		return codedError(ErrorCodeSkillUnavailable, "stage skill draft", err)
+	}
+	_ = os.Remove(tmpName)
+	dirHandle, err := os.Open(dir)
+	if err != nil {
+		return codedError(ErrorCodeSkillUnavailable, "stage skill draft", err)
+	}
+	syncErr := dirHandle.Sync()
+	closeErr := dirHandle.Close()
+	if syncErr != nil {
+		return codedError(ErrorCodeSkillUnavailable, "stage skill draft", syncErr)
+	}
+	if closeErr != nil {
+		return codedError(ErrorCodeSkillUnavailable, "stage skill draft", closeErr)
 	}
 	return nil
 }

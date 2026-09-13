@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/anggasct/aura/internal/config"
 )
 
 func writeSkillsCLIConfig(t *testing.T, skillsSection string) string {
@@ -89,6 +92,21 @@ func TestSkillsCreateReviewAcceptFlow(t *testing.T) {
 	if !strings.Contains(out, "state: quarantined") {
 		t.Errorf("out = %q", out)
 	}
+	if !strings.Contains(out, "description: Flow skill.") {
+		t.Errorf("show description missing: %q", out)
+	}
+	if !strings.Contains(out, "compatibility: ") {
+		t.Errorf("show compatibility missing: %q", out)
+	}
+	if !strings.Contains(out, "requested: ") {
+		t.Errorf("show requested missing: %q", out)
+	}
+	if !strings.Contains(out, "granted: ") {
+		t.Errorf("show granted missing: %q", out)
+	}
+	if !strings.Contains(out, "reviewed: ") {
+		t.Errorf("show reviewed missing: %q", out)
+	}
 
 	out, err = runSkillsCommand(t, cfg, "review", id)
 	if err != nil {
@@ -147,6 +165,54 @@ func TestSkillsRejectFlow(t *testing.T) {
 	}
 	if _, err := runSkillsCommand(t, cfg, "review", id); err == nil {
 		t.Errorf("review of rejected should fail")
+	}
+}
+
+func TestSkillsRetentionWiringThroughCLIHelper(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := writeSkillsCLIConfig(t, "skills:\n  enabled: true\n  roots: ["+root+"]\n  quarantine_retention: 1h\n")
+	result, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if result.Config.Skills == nil {
+		t.Fatalf("skills config is nil")
+	}
+	db, err := openStorage(t.Context(), result.Config)
+	if err != nil {
+		t.Fatalf("storage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	engine, err := buildSkillsEngine(t.Context(), result.Config.Skills, db, nil)
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+	stale, err := engine.StageDraft(t.Context(), "stale-one", "Stale draft.", root)
+	if err != nil {
+		t.Fatalf("stage stale: %v", err)
+	}
+	fresh, err := engine.StageDraft(t.Context(), "fresh-one", "Fresh draft.", root)
+	if err != nil {
+		t.Fatalf("stage fresh: %v", err)
+	}
+	if _, err := engine.Reject(t.Context(), stale.ID, "stale"); err != nil {
+		t.Fatalf("reject stale: %v", err)
+	}
+	if _, err := engine.Reject(t.Context(), fresh.ID, "fresh"); err != nil {
+		t.Fatalf("reject fresh: %v", err)
+	}
+	past := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339Nano)
+	if _, err := db.ExecContext(t.Context(), `UPDATE skill_package SET reviewed_at = ?, updated_at = ? WHERE id = ?`, past, past, stale.ID); err != nil {
+		t.Fatalf("age stale: %v", err)
+	}
+	if err := engine.Refresh(t.Context()); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "pending", "stale-one")); !os.IsNotExist(err) {
+		t.Errorf("expired rejection should collect bytes, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "pending", "fresh-one")); err != nil {
+		t.Errorf("fresh rejection should retain bytes: %v", err)
 	}
 }
 

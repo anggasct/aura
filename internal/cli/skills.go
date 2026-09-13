@@ -169,6 +169,7 @@ func buildSkillsEngine(ctx context.Context, cfg *config.Skills, db *sql.DB, logg
 		MaxResourceBytes:     cfg.MaxResourceBytes,
 		ScriptToolName:       "exec",
 		ScriptToolCapability: "shell.execute",
+		QuarantineRetention:  time.Duration(cfg.QuarantineRetention),
 		PolicyVersion:        skills.PolicyVersion,
 		Logger:               logger,
 	})

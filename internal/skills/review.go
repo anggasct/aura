@@ -43,6 +43,7 @@ type ReviewBundle struct {
 	Files         []string
 	Links         []string
 	Findings      []string
+	ReviewedAt    string
 	DigestChanged bool
 }
 
@@ -95,10 +96,11 @@ func (e *Engine) Review(ctx context.Context, id string) (ReviewBundle, error) {
 		return ReviewBundle{}, result.Err
 	}
 	bundle := ReviewBundle{
-		ID:     record.ID,
-		Name:   record.Name,
-		Origin: record.Origin,
-		State:  record.State,
+		ID:         record.ID,
+		Name:       record.Name,
+		Origin:     record.Origin,
+		State:      record.State,
+		ReviewedAt: record.ReviewedAt,
 	}
 	requested, err := decodeCapabilities(record.Requested)
 	if err != nil {
