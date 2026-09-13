@@ -76,11 +76,11 @@ func (s *fakeDocumentStore) Search(_ context.Context, query *StoredQuery) ([]Sto
 		if matched {
 			hits = append(hits, StoredHit{StoredDocument: record, Rank: -1})
 		}
-		if len(hits) >= query.Limit {
-			break
-		}
 	}
 	slices.SortFunc(hits, func(a, b StoredHit) int { return strings.Compare(a.ID, b.ID) })
+	if len(hits) > query.Limit {
+		hits = hits[:query.Limit]
+	}
 	return hits, nil
 }
 
