@@ -29,6 +29,7 @@ var migrations = []migration{
 	{version: 11, sql: broadcastDestinationSchemaSQL},
 	{version: 12, sql: scheduleSchemaSQL},
 	{version: 13, sql: memoryDocumentSchemaSQL},
+	{version: 14, sql: skillPackageSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -395,6 +396,25 @@ CREATE TRIGGER memory_document_fts_update AFTER UPDATE OF content ON memory_docu
     INSERT INTO memory_document_fts(memory_document_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
     INSERT INTO memory_document_fts(rowid, content) VALUES (new.rowid, new.content);
 END;
+`
+
+const skillPackageSchemaSQL = `
+CREATE TABLE skill_package (
+    id TEXT PRIMARY KEY,
+    canonical_name TEXT NOT NULL,
+    origin_json TEXT NOT NULL,
+    content_digest TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('quarantined','active','disabled','rejected','conflict')),
+    validation_json TEXT NOT NULL,
+    requested_capabilities_json TEXT NOT NULL DEFAULT '[]',
+    granted_capabilities_json TEXT NOT NULL DEFAULT '[]',
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (canonical_name, origin_json, content_digest)
+);
+CREATE INDEX skill_state_name_idx
+    ON skill_package(state, canonical_name, id);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {
