@@ -8,12 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -23,23 +20,24 @@ import (
 )
 
 type Client struct {
-	cfg             *config.MCPServer
-	logger          *slog.Logger
-	session         *sdk.ClientSession
-	transport       sdk.Transport
-	httpClient      *http.Client
-	apiClient       *http.Client
-	endpointPolicy  EndpointPolicy
-	secretResolver  SecretResolver
-	oauthFetch      sdkauth.AuthorizationCodeFetcher
-	observer        Observer
-	cmd             *exec.Cmd
-	streamCancel    context.CancelFunc
-	protocolVersion string
-	restarts        []time.Time
-	customTransport bool
-	mu              sync.Mutex
-	closed          bool
+	cfg              *config.MCPServer
+	logger           *slog.Logger
+	session          *sdk.ClientSession
+	transport        sdk.Transport
+	httpClient       *http.Client
+	apiClient        *http.Client
+	endpointPolicy   EndpointPolicy
+	secretResolver   SecretResolver
+	oauthFetch       sdkauth.AuthorizationCodeFetcher
+	observer         Observer
+	sessionStarter   SessionStarter
+	containedSession ContainedSession
+	streamCancel     context.CancelFunc
+	protocolVersion  string
+	restarts         []time.Time
+	customTransport  bool
+	mu               sync.Mutex
+	closed           bool
 }
 
 func NewClient(cfg *config.MCPServer, logger *slog.Logger, opts ...ClientOption) (*Client, error) {
@@ -81,13 +79,12 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	if transport == nil {
 		switch c.cfg.Transport {
 		case config.MCPTransportStdio:
-			cmd := exec.CommandContext(ctx, c.cfg.Command, c.cfg.Args...)
-			cmd.Env = buildEnvironment(c.cfg.Environment)
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			c.cmd = cmd
-			transport = &sdk.CommandTransport{
-				Command: cmd,
+			contained, err := c.containedTransport(ctx)
+			if err != nil {
+				c.observeFailure(ctx, start, c.protocolVersion, "", err)
+				return err
 			}
+			transport = contained
 		case config.MCPTransportStreamableHTTP:
 			streamable, err := c.streamableTransport(ctx)
 			if err != nil {
@@ -532,7 +529,10 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 	return res, nil
 }
 
-func (c *Client) Close() error {
+func (c *Client) Close(ctx context.Context) error {
+	if ctx == nil {
+		return Errorf(ErrConfigInvalid, "context must not be nil")
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -549,11 +549,8 @@ func (c *Client) Close() error {
 	if c.apiClient != nil {
 		c.apiClient.CloseIdleConnections()
 	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
-		if c.cmd.ProcessState == nil {
-			_ = c.cmd.Wait()
-		}
+	if c.containedSession != nil {
+		_ = c.containedSession.Close(ctx)
 	}
 	return sessionErr
 }
@@ -563,15 +560,6 @@ func (c *Client) ServerName() string {
 		return ""
 	}
 	return c.cfg.Name
-}
-
-func buildEnvironment(env map[string]string) []string {
-	result := make([]string, 0, len(env))
-	for k, v := range env {
-		result = append(result, k+"="+v)
-	}
-	slices.Sort(result)
-	return result
 }
 
 var discoveredToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)

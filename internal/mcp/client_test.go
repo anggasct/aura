@@ -61,7 +61,7 @@ func TestClientInMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient failed: %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(ctx) }()
 
 	if err := client.Connect(ctx, clientTransport); err != nil {
 		t.Fatalf("Connect failed: %v", err)
@@ -110,7 +110,7 @@ func TestClientMissingToolCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(ctx) }()
 
 	err = client.Connect(ctx, clientTransport)
 	if err == nil {
@@ -180,22 +180,22 @@ func TestClientStdioTransport(t *testing.T) {
 	serverCfg := &config.MCPServer{
 		Name:           "local-stdio",
 		Transport:      config.MCPTransportStdio,
-		Command:        os.Args[0],
-		Args:           []string{"-test.run=TestHelperProcess", "--"},
-		Environment:    map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+		Command:        "/bin/contained-stdio",
+		Environment:    map[string]string{"SERVER_MODE": "test"},
 		StartupTimeout: config.Duration(10 * time.Second),
 		RequestTimeout: config.Duration(10 * time.Second),
 		MaxMessageSize: 1024 * 1024,
 	}
 
-	client, err := NewClient(serverCfg, nil)
+	starter := &stubSessionStarter{session: &scriptedSession{toolNames: []string{"ping"}}}
+	client, err := NewClient(serverCfg, nil, WithSessionStarter(starter))
 	if err != nil {
 		t.Fatalf("NewClient failed: %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(ctx) }()
 
 	if err := client.Connect(ctx, nil); err != nil {
-		t.Fatalf("Connect over stdio failed: %v", err)
+		t.Fatalf("Connect over contained stdio failed: %v", err)
 	}
 
 	tools, err := client.DiscoverTools(ctx)
@@ -249,7 +249,7 @@ func TestClientUnsupportedProtocolVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(ctx) }()
 
 	err = client.Connect(ctx, clientTransport)
 	if err == nil {
@@ -311,7 +311,7 @@ func TestClientDiscoveryValidation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer func() { _ = client.Close() }()
+		defer func() { _ = client.Close(ctx) }()
 
 		if err := client.Connect(ctx, clientTransport); err != nil {
 			t.Fatalf("Connect failed: %v", err)
@@ -360,7 +360,7 @@ func TestClientDiscoveryValidation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer func() { _ = client.Close() }()
+		defer func() { _ = client.Close(ctx) }()
 
 		if err := client.Connect(ctx, clientTransport); err != nil {
 			t.Fatalf("Connect failed: %v", err)
@@ -402,7 +402,7 @@ func TestClientStreamableHTTPTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient failed: %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(ctx) }()
 
 	if err := client.Connect(ctx, nil); err != nil {
 		t.Fatalf("Connect over streamable HTTP failed: %v", err)
@@ -433,7 +433,7 @@ func TestClientStreamableHTTPRequiresAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(ctx) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("expected unresolvable credential to fail")
 	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
@@ -453,7 +453,7 @@ func TestClientStreamableHTTPWithoutClientFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(ctx) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("expected missing http client to fail closed")
 	} else if code, ok := CodeOf(err); !ok || code != ErrEgressDenied {
@@ -473,7 +473,7 @@ func TestClientStreamableHTTPWithoutPolicyFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(ctx) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("expected missing endpoint policy to fail closed")
 	} else if code, ok := CodeOf(err); !ok || code != ErrEgressDenied {
@@ -520,7 +520,7 @@ func TestClientDiscoveryNameValidation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer func() { _ = client.Close() }()
+			defer func() { _ = client.Close(ctx) }()
 			if err := client.Connect(ctx, clientTransport); err != nil {
 				t.Fatalf("Connect failed: %v", err)
 			}

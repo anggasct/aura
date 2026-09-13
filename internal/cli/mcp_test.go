@@ -190,7 +190,7 @@ func TestMCPRecorderBridgeCarriesProtocolAndSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(ctx) }()
 	if err := client.Connect(ctx, clientTransport); err != nil {
 		t.Fatalf("Connect(): %v", err)
 	}

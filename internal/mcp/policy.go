@@ -46,3 +46,9 @@ func WithObserver(observer Observer) ClientOption {
 		c.observer = observer
 	}
 }
+
+func WithSessionStarter(starter SessionStarter) ClientOption {
+	return func(c *Client) {
+		c.sessionStarter = starter
+	}
+}

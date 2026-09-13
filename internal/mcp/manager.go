@@ -24,6 +24,7 @@ type ManagerOptions struct {
 	HTTPClient        *http.Client
 	EndpointPolicy    EndpointPolicy
 	SecretResolver    SecretResolver
+	SessionStarter    SessionStarter
 	Observer          Observer
 	Logger            *slog.Logger
 	CapabilityChecker func([]string) error
@@ -36,6 +37,7 @@ type Manager struct {
 	httpClient        *http.Client
 	endpointPolicy    EndpointPolicy
 	secretResolver    SecretResolver
+	sessionStarter    SessionStarter
 	observer          Observer
 	logger            *slog.Logger
 	capabilityChecker func([]string) error
@@ -79,6 +81,7 @@ func NewManager(opts *ManagerOptions) (*Manager, error) {
 		httpClient:        opts.HTTPClient,
 		endpointPolicy:    opts.EndpointPolicy,
 		secretResolver:    opts.SecretResolver,
+		sessionStarter:    opts.SessionStarter,
 		observer:          opts.Observer,
 		logger:            opts.Logger,
 		capabilityChecker: opts.CapabilityChecker,
@@ -136,6 +139,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	httpClient := m.httpClient
 	endpointPolicy := m.endpointPolicy
 	secretResolver := m.secretResolver
+	sessionStarter := m.sessionStarter
 	observer := m.observer
 	m.mu.Unlock()
 
@@ -160,6 +164,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			WithHTTPClient(httpClient),
 			WithEndpointPolicy(endpointPolicy),
 			WithSecretResolver(secretResolver),
+			WithSessionStarter(sessionStarter),
 			WithObserver(observer),
 		)
 		if err != nil {
@@ -168,25 +173,25 @@ func (m *Manager) Start(ctx context.Context) error {
 
 		transport := transports[serverCfg.Name]
 		if err := client.Connect(ctx, transport); err != nil {
-			_ = client.Close()
+			_ = client.Close(ctx)
 			return err
 		}
 
 		discovered, err := client.DiscoverTools(ctx)
 		if err != nil {
-			_ = client.Close()
+			_ = client.Close(ctx)
 			return err
 		}
 
 		digest, err := ComputeTrustDigest(serverCfg, discovered)
 		if err != nil {
-			_ = client.Close()
+			_ = client.Close(ctx)
 			return err
 		}
 
 		trusted, err := registry.IsTrusted(ctx, serverCfg.Name, digest)
 		if err != nil {
-			_ = client.Close()
+			_ = client.Close(ctx)
 			return Wrap(ErrResultInvalid, err, "failed to check trust")
 		}
 
@@ -196,10 +201,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				toolNames = append(toolNames, t.Name)
 			}
 			if err := registry.SaveSessionTrust(ctx, serverCfg.Name, digest, serverCfg.Capabilities, toolNames); err != nil {
-				_ = client.Close()
+				_ = client.Close(ctx)
 				return Errorf(ErrTrustRequired, "server %q failed to record pending trust: %v", serverCfg.Name, err)
 			}
-			_ = client.Close()
+			_ = client.Close(ctx)
 			return Errorf(ErrTrustRequired, "server %q trust review required for digest %s", serverCfg.Name, digest)
 		}
 
@@ -247,7 +252,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			for _, name := range registeredNames {
 				broker.UnregisterTool(name, "v1")
 			}
-			_ = client.Close()
+			_ = client.Close(ctx)
 			return registerErr
 		}
 
@@ -257,7 +262,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			for _, name := range registeredNames {
 				broker.UnregisterTool(name, "v1")
 			}
-			_ = client.Close()
+			_ = client.Close(ctx)
 			return Errorf(ErrServerUnavailable, "manager is closed")
 		}
 		m.clients[serverCfg.Name] = client
@@ -274,7 +279,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	return nil
 }
 
-func (m *Manager) Close() error {
+func (m *Manager) Close(ctx context.Context) error {
+	if ctx == nil {
+		return Errorf(ErrConfigInvalid, "context must not be nil")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -291,7 +299,7 @@ func (m *Manager) Close() error {
 	}
 
 	for serverName, client := range m.clients {
-		if err := client.Close(); err != nil {
+		if err := client.Close(ctx); err != nil {
 			errs = append(errs, err)
 		}
 		delete(m.clients, serverName)
