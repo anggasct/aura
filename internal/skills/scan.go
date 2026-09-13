@@ -154,6 +154,11 @@ func (w *dirWalker) fail(finding string) {
 	w.findings = append(w.findings, finding)
 }
 
+func (w *dirWalker) observe(folded, child string) bool {
+	first, exists := w.seen[folded]
+	return !exists || first == child
+}
+
 func (w *dirWalker) lstat(child string) (fs.FileInfo, bool) {
 	info, err := w.root.Lstat(child)
 	if err != nil {
@@ -210,7 +215,7 @@ func (w *dirWalker) walk(ctx context.Context, rel string, depth int) error {
 			return nil
 		}
 		folded := strings.ToLower(child)
-		if first, exists := w.seen[folded]; exists && first != child {
+		if !w.observe(folded, child) {
 			w.fail(FindingCaseCollision)
 			return nil
 		}

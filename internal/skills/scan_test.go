@@ -171,11 +171,25 @@ func TestScanDirInvalid(t *testing.T) {
 		writePackageFile(t, dir, "big.bin", strings.Repeat("a", maxSkillFileBytes+1))
 		scanFinding(t, dir, FindingFileTooLarge)
 	})
-	t.Run("case collision", func(t *testing.T) {
-		dir := t.TempDir()
-		writePackageFile(t, dir, "SKILL.md", validSkillDocument)
-		writePackageFile(t, dir, "Skill.md", validSkillDocument)
-		scanFinding(t, dir, FindingCaseCollision)
+	t.Run("case collision guard", func(t *testing.T) {
+		walker := &dirWalker{seen: make(map[string]string)}
+		if !walker.observe("skill.md", "SKILL.md") {
+			t.Fatalf("first observation should pass")
+		}
+		walker.seen["skill.md"] = "SKILL.md"
+		if walker.observe("skill.md", "SKILL.md") != true {
+			t.Errorf("same path should not collide")
+		}
+		if walker.observe("skill.md", "Skill.md") {
+			t.Errorf("case variant in the same directory should collide")
+		}
+		if !walker.observe("sub/skill.md", "sub/Skill.md") {
+			t.Fatalf("first observation in another directory should pass")
+		}
+		walker.seen["sub/skill.md"] = "sub/Skill.md"
+		if !walker.observe("other/skill.md", "other/SKILL.md") {
+			t.Errorf("same name in a different directory should not collide")
+		}
 	})
 	t.Run("control character name", func(t *testing.T) {
 		dir := t.TempDir()
