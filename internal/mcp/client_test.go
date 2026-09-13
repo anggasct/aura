@@ -395,7 +395,7 @@ func TestClientStreamableHTTPTransport(t *testing.T) {
 		StartupTimeout: config.Duration(5 * time.Second),
 		MaxMessageSize: 1024 * 1024,
 	}
-	client, err := NewClient(serverCfg, nil)
+	client, err := NewClient(serverCfg, nil, WithHTTPClient(&http.Client{}))
 	if err != nil {
 		t.Fatalf("NewClient failed: %v", err)
 	}
@@ -423,15 +423,35 @@ func TestClientStreamableHTTPRequiresAuth(t *testing.T) {
 			Static: &config.MCPStaticAuth{CredentialRef: "secret://key"},
 		},
 	}
+	client, err := NewClient(serverCfg, nil, WithHTTPClient(&http.Client{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	if err := client.Connect(ctx, nil); err == nil {
+		t.Fatal("expected unresolvable credential to fail")
+	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+		t.Fatalf("expected %s, got %s (%v)", ErrAuthRequired, code, err)
+	}
+}
+
+func TestClientStreamableHTTPWithoutClientFailsClosed(t *testing.T) {
+	ctx := t.Context()
+	serverCfg := &config.MCPServer{
+		Name:           "bare-server",
+		Transport:      config.MCPTransportStreamableHTTP,
+		URL:            "http://127.0.0.1:9/mcp",
+		RequestTimeout: config.Duration(5 * time.Second),
+	}
 	client, err := NewClient(serverCfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = client.Close() }()
 	if err := client.Connect(ctx, nil); err == nil {
-		t.Fatal("expected auth-gated connect to fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
-		t.Fatalf("expected %s, got %s (%v)", ErrAuthRequired, code, err)
+		t.Fatal("expected missing http client to fail closed")
+	} else if code, ok := CodeOf(err); !ok || code != ErrEgressDenied {
+		t.Fatalf("expected %s, got %s (%v)", ErrEgressDenied, code, err)
 	}
 }
 

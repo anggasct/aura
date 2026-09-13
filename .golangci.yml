@@ -310,6 +310,22 @@ linters:
         text: G204
         path: internal/mcp/client\.go
 
+      # Token and trust store paths are operator-configured, cleaned, and
+      # confined to a 0700 parent; the directory fsync after rename is the
+      # documented durability step, not an arbitrary open.
+      - linters:
+          - gosec
+        text: G304
+        path: internal/mcp/persist\.go
+
+      # Serializing OAuth tokens is this file's purpose: they are persisted
+      # to the 0600 owner-only store and never enter logs or error strings,
+      # which the redaction tests enforce.
+      - linters:
+          - gosec
+        text: G117
+        path: internal/mcp/persist\.go
+
       # Launching the configured durable runtime binary is the supervisor's
       # purpose; the path is operator-configured and resolution fails closed
       # when the binary is absent or not executable.

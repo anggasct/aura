@@ -56,7 +56,7 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 
 	trustRegistry := NewMemoryTrustRegistry()
 
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config:        mcpCfg,
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -180,7 +180,7 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 
 	trustRegistry := NewMemoryTrustRegistry()
 
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config:        mcpCfg,
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -282,7 +282,7 @@ func TestManagerRejectsUnapprovedStdioCommandBeforeSpawn(t *testing.T) {
 	mcpCfg := &config.MCP{Servers: []config.MCPServer{serverCfg}}
 
 	trustRegistry := NewMemoryTrustRegistry()
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config:        mcpCfg,
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -337,7 +337,7 @@ func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 	}
 
 	trustRegistry := NewMemoryTrustRegistry()
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config:        &config.MCP{Servers: []config.MCPServer{serverCfg}},
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -369,7 +369,7 @@ func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 
 	mutated := serverCfg
 	mutated.Command = cmdB
-	mgr2, err := NewManager(ManagerOptions{
+	mgr2, err := NewManager(&ManagerOptions{
 		Config:        &config.MCP{Servers: []config.MCPServer{mutated}},
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -430,7 +430,7 @@ func TestManagerCapabilityCheckFailure(t *testing.T) {
 		Servers: []config.MCPServer{serverCfg},
 	}
 
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config: mcpCfg,
 		Broker: broker,
 		CapabilityChecker: func(caps []string) error {
@@ -485,7 +485,7 @@ func TestManagerCloseDoesNotBlockOnSlowServer(t *testing.T) {
 			StartupTimeout: config.Duration(5 * time.Second),
 		}},
 	}
-	mgr, err := NewManager(ManagerOptions{Config: mcpCfg, Broker: broker, TrustRegistry: NewMemoryTrustRegistry()})
+	mgr, err := NewManager(&ManagerOptions{Config: mcpCfg, Broker: broker, TrustRegistry: NewMemoryTrustRegistry()})
 	if err != nil {
 		t.Fatal(err)
 	}

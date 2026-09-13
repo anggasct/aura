@@ -7,38 +7,53 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
 	"github.com/anggasct/aura/internal/config"
+	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type Client struct {
-	cfg       *config.MCPServer
-	logger    *slog.Logger
-	session   *sdk.ClientSession
-	transport sdk.Transport
-	mu        sync.Mutex
-	closed    bool
+	cfg            *config.MCPServer
+	logger         *slog.Logger
+	session        *sdk.ClientSession
+	transport      sdk.Transport
+	httpClient     *http.Client
+	apiClient      *http.Client
+	endpointPolicy EndpointPolicy
+	secretResolver SecretResolver
+	oauthFetch     sdkauth.AuthorizationCodeFetcher
+	cmd            *exec.Cmd
+	mu             sync.Mutex
+	closed         bool
 }
 
-func NewClient(cfg *config.MCPServer, logger *slog.Logger) (*Client, error) {
+func NewClient(cfg *config.MCPServer, logger *slog.Logger, opts ...ClientOption) (*Client, error) {
 	if cfg == nil {
 		return nil, Errorf(ErrConfigInvalid, "server configuration is required")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Client{
+	client := &Client{
 		cfg:    cfg,
 		logger: logger,
-	}, nil
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(client)
+		}
+	}
+	return client, nil
 }
 
 func (c *Client) Connect(ctx context.Context, customTransport sdk.Transport) error {
@@ -58,32 +73,17 @@ func (c *Client) Connect(ctx context.Context, customTransport sdk.Transport) err
 		case config.MCPTransportStdio:
 			cmd := exec.CommandContext(ctx, c.cfg.Command, c.cfg.Args...)
 			cmd.Env = buildEnvironment(c.cfg.Environment)
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			c.cmd = cmd
 			transport = &sdk.CommandTransport{
 				Command: cmd,
 			}
 		case config.MCPTransportStreamableHTTP:
-			if c.cfg.Auth != nil {
-				return Errorf(ErrAuthRequired, "server %q requires auth", c.cfg.Name)
+			streamable, err := c.streamableTransport(ctx)
+			if err != nil {
+				return err
 			}
-			if c.cfg.URL == "" {
-				return Errorf(ErrConfigInvalid, "url is required for streamable transport")
-			}
-			allowRedirects := c.cfg.AllowRedirects != nil && *c.cfg.AllowRedirects
-			httpClient := &http.Client{
-				CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-					if !allowRedirects {
-						return http.ErrUseLastResponse
-					}
-					if len(via) >= 10 {
-						return errors.New("too many redirects")
-					}
-					return nil
-				},
-			}
-			transport = &sdk.StreamableClientTransport{
-				Endpoint:   c.cfg.URL,
-				HTTPClient: httpClient,
-			}
+			transport = streamable
 		default:
 			return Errorf(ErrConfigInvalid, "unsupported transport: %s", c.cfg.Transport)
 		}
@@ -143,6 +143,105 @@ func (c *Client) Connect(ctx context.Context, customTransport sdk.Transport) err
 	)
 
 	return nil
+}
+
+func maxMessageBytes(cfg *config.MCPServer) int64 {
+	if cfg != nil && cfg.MaxMessageSize > 0 {
+		return int64(cfg.MaxMessageSize)
+	}
+	return 1 << 20
+}
+
+func (c *Client) streamableTransport(ctx context.Context) (sdk.Transport, error) {
+	if strings.TrimSpace(c.cfg.URL) == "" {
+		return nil, Errorf(ErrConfigInvalid, "url is required for streamable transport")
+	}
+	if c.endpointPolicy != nil {
+		if err := c.endpointPolicy.ValidateEndpoint(ctx, c.cfg.URL); err != nil {
+			return nil, Wrap(ErrEgressDenied, err, "server endpoint rejected")
+		}
+	}
+	if c.httpClient == nil {
+		return nil, Errorf(ErrEgressDenied, "server %q has no http client configured", c.cfg.Name)
+	}
+	allowRedirects := c.cfg.AllowRedirects != nil && *c.cfg.AllowRedirects
+	baseCheck := c.httpClient.CheckRedirect
+	roundTripper := c.httpClient.Transport
+	if roundTripper == nil {
+		roundTripper = http.DefaultTransport
+	}
+	capped := &cappedTransport{next: roundTripper, limit: maxMessageBytes(c.cfg)}
+	apiClient := &http.Client{
+		Transport: capped,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return checkRedirectPolicy(req, via, allowRedirects, baseCheck)
+		},
+	}
+	var handler *sdkauth.AuthorizationCodeHandler
+	if c.cfg.Auth != nil {
+		if c.cfg.Auth.Static != nil && c.cfg.Auth.OAuth != nil {
+			return nil, Errorf(ErrConfigInvalid, "server %q declares both static and oauth auth", c.cfg.Name)
+		}
+		if c.cfg.Auth.Static != nil {
+			if c.secretResolver == nil {
+				return nil, Errorf(ErrAuthRequired, "server %q has no credential resolver", c.cfg.Name)
+			}
+			if _, err := c.secretResolver.ResolveSecret(ctx, c.cfg.Auth.Static.CredentialRef); err != nil {
+				return nil, Errorf(ErrAuthRequired, "server %q credential is unavailable", c.cfg.Name)
+			}
+			capped.next = &staticAuthTransport{
+				next:       roundTripper,
+				header:     c.cfg.Auth.Static.Header,
+				ref:        c.cfg.Auth.Static.CredentialRef,
+				serverName: c.cfg.Name,
+				resolver:   c.secretResolver,
+			}
+		}
+		if c.cfg.Auth.OAuth != nil {
+			oauthClient := &http.Client{
+				Transport: capped,
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					return checkRedirectPolicy(req, via, false, baseCheck)
+				},
+			}
+			provider, err := c.oauthProvider(oauthClient)
+			if err != nil {
+				return nil, err
+			}
+			handler, err = provider.Handler(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	transport := &sdk.StreamableClientTransport{
+		Endpoint:   c.cfg.URL,
+		HTTPClient: apiClient,
+		MaxRetries: -1,
+	}
+	c.apiClient = apiClient
+	if handler != nil {
+		transport.OAuthHandler = handler
+	}
+	return transport, nil
+}
+
+func (c *Client) oauthProvider(oauthClient *http.Client) (*OAuthProvider, error) {
+	oauth := c.cfg.Auth.OAuth
+	clientID := strings.TrimSpace(os.Getenv(oauth.ClientIDEnv))
+	clientSecret := strings.TrimSpace(os.Getenv(oauth.ClientSecretEnv))
+	if clientID == "" || clientSecret == "" {
+		return nil, Errorf(ErrAuthRequired, "server %q oauth client credentials are not configured", c.cfg.Name)
+	}
+	var tokens OAuthTokenStore = NewMemoryTokenStore()
+	if strings.TrimSpace(oauth.TokenStore) != "" {
+		fileStore, err := NewFileTokenStore(oauth.TokenStore)
+		if err != nil {
+			return nil, err
+		}
+		tokens = fileStore
+	}
+	return NewOAuthProvider(c.cfg.Name, c.cfg.URL, clientID, clientSecret, oauthClient, tokens, c.oauthFetch)
 }
 
 func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
@@ -264,10 +363,18 @@ func (c *Client) Close() error {
 		return nil
 	}
 	c.closed = true
+	var sessionErr error
 	if c.session != nil {
-		return c.session.Close()
+		sessionErr = c.session.Close()
 	}
-	return nil
+	if c.apiClient != nil {
+		c.apiClient.CloseIdleConnections()
+	}
+	if c.cmd != nil && c.cmd.Process != nil && c.cmd.ProcessState == nil {
+		_ = c.cmd.Process.Kill()
+		_ = c.cmd.Wait()
+	}
+	return sessionErr
 }
 
 func (c *Client) ServerName() string {
