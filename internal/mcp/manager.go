@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"slices"
 	"sync"
 	"time"
@@ -19,6 +20,10 @@ type ManagerOptions struct {
 	Config            *config.MCP
 	Broker            *toolbroker.Broker
 	TrustRegistry     TrustRegistry
+	TrustRegistryPath string
+	HTTPClient        *http.Client
+	EndpointPolicy    EndpointPolicy
+	SecretResolver    SecretResolver
 	Logger            *slog.Logger
 	CapabilityChecker func([]string) error
 }
@@ -27,6 +32,9 @@ type Manager struct {
 	cfg               *config.MCP
 	broker            *toolbroker.Broker
 	trustRegistry     TrustRegistry
+	httpClient        *http.Client
+	endpointPolicy    EndpointPolicy
+	secretResolver    SecretResolver
 	logger            *slog.Logger
 	capabilityChecker func([]string) error
 	clients           map[string]*Client
@@ -36,15 +44,27 @@ type Manager struct {
 	closed            bool
 }
 
-func NewManager(opts ManagerOptions) (*Manager, error) {
+func NewManager(opts *ManagerOptions) (*Manager, error) {
+	if opts == nil {
+		return nil, Errorf(ErrConfigInvalid, "manager options are required")
+	}
 	if opts.Config == nil {
 		return nil, Errorf(ErrConfigInvalid, "mcp configuration is required")
 	}
 	if opts.Broker == nil {
 		return nil, Errorf(ErrConfigInvalid, "tool broker is required")
 	}
-	if opts.TrustRegistry == nil {
-		opts.TrustRegistry = NewMemoryTrustRegistry()
+	registry := opts.TrustRegistry
+	if registry == nil {
+		if opts.TrustRegistryPath != "" {
+			fileRegistry, err := NewFileTrustRegistry(opts.TrustRegistryPath)
+			if err != nil {
+				return nil, err
+			}
+			registry = fileRegistry
+		} else {
+			registry = NewMemoryTrustRegistry()
+		}
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -53,7 +73,10 @@ func NewManager(opts ManagerOptions) (*Manager, error) {
 	return &Manager{
 		cfg:               opts.Config,
 		broker:            opts.Broker,
-		trustRegistry:     opts.TrustRegistry,
+		trustRegistry:     registry,
+		httpClient:        opts.HTTPClient,
+		endpointPolicy:    opts.EndpointPolicy,
+		secretResolver:    opts.SecretResolver,
 		logger:            opts.Logger,
 		capabilityChecker: opts.CapabilityChecker,
 		clients:           make(map[string]*Client),
@@ -107,6 +130,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	broker := m.broker
 	registry := m.trustRegistry
 	logger := m.logger
+	httpClient := m.httpClient
+	endpointPolicy := m.endpointPolicy
+	secretResolver := m.secretResolver
 	m.mu.Unlock()
 
 	for i := range servers {
@@ -126,13 +152,18 @@ func (m *Manager) Start(ctx context.Context) error {
 			}
 		}
 
-		client, err := NewClient(serverCfg, logger)
+		client, err := NewClient(serverCfg, logger,
+			WithHTTPClient(httpClient),
+			WithEndpointPolicy(endpointPolicy),
+			WithSecretResolver(secretResolver),
+		)
 		if err != nil {
 			return err
 		}
 
 		transport := transports[serverCfg.Name]
 		if err := client.Connect(ctx, transport); err != nil {
+			_ = client.Close()
 			return err
 		}
 

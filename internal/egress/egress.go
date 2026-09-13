@@ -180,6 +180,12 @@ func (t *validatingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return t.next.RoundTrip(req.WithContext(withDestination(req.Context(), destination)))
 }
 
+func (t *validatingTransport) CloseIdleConnections() {
+	if closer, ok := t.next.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
 func NewClient(resolver Resolver) *http.Client {
 	if resolver == nil {
 		resolver = systemResolver{}

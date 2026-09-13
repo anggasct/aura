@@ -56,7 +56,7 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 
 	trustRegistry := NewMemoryTrustRegistry()
 
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config:        mcpCfg,
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -180,7 +180,7 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 
 	trustRegistry := NewMemoryTrustRegistry()
 
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config:        mcpCfg,
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -282,7 +282,7 @@ func TestManagerRejectsUnapprovedStdioCommandBeforeSpawn(t *testing.T) {
 	mcpCfg := &config.MCP{Servers: []config.MCPServer{serverCfg}}
 
 	trustRegistry := NewMemoryTrustRegistry()
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config:        mcpCfg,
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -337,7 +337,7 @@ func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 	}
 
 	trustRegistry := NewMemoryTrustRegistry()
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config:        &config.MCP{Servers: []config.MCPServer{serverCfg}},
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -369,7 +369,7 @@ func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 
 	mutated := serverCfg
 	mutated.Command = cmdB
-	mgr2, err := NewManager(ManagerOptions{
+	mgr2, err := NewManager(&ManagerOptions{
 		Config:        &config.MCP{Servers: []config.MCPServer{mutated}},
 		Broker:        broker,
 		TrustRegistry: trustRegistry,
@@ -430,7 +430,7 @@ func TestManagerCapabilityCheckFailure(t *testing.T) {
 		Servers: []config.MCPServer{serverCfg},
 	}
 
-	mgr, err := NewManager(ManagerOptions{
+	mgr, err := NewManager(&ManagerOptions{
 		Config: mcpCfg,
 		Broker: broker,
 		CapabilityChecker: func(caps []string) error {
@@ -485,7 +485,7 @@ func TestManagerCloseDoesNotBlockOnSlowServer(t *testing.T) {
 			StartupTimeout: config.Duration(5 * time.Second),
 		}},
 	}
-	mgr, err := NewManager(ManagerOptions{Config: mcpCfg, Broker: broker, TrustRegistry: NewMemoryTrustRegistry()})
+	mgr, err := NewManager(&ManagerOptions{Config: mcpCfg, Broker: broker, TrustRegistry: NewMemoryTrustRegistry()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,4 +507,57 @@ func TestManagerCloseDoesNotBlockOnSlowServer(t *testing.T) {
 	case <-time.After(7 * time.Second):
 		t.Fatal("Start did not return after slow server settled")
 	}
+}
+
+func TestManagerFailedConnectClosesClient(t *testing.T) {
+	ctx := t.Context()
+	lockPath := filepath.Join(t.TempDir(), "grandchild.lock")
+	serverCfg := config.MCPServer{
+		Name:           "leaky-connect",
+		Transport:      config.MCPTransportStdio,
+		Command:        os.Args[0],
+		Args:           []string{"-test.run=TestHelperProcessWithGrandchild", "--"},
+		Environment:    map[string]string{"GO_WANT_HELPER_PROCESS": "fail-after-grandchild", "MCP_TEST_GRANDCHILD_LOCK_FILE": lockPath},
+		StartupTimeout: config.Duration(10 * time.Second),
+		RequestTimeout: config.Duration(10 * time.Second),
+		MaxMessageSize: 1024 * 1024,
+	}
+	broker, err := toolbroker.New(&toolbroker.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustRegistry := NewMemoryTrustRegistry()
+	mgr, err := NewManager(&ManagerOptions{
+		Config:        &config.MCP{Servers: []config.MCPServer{serverCfg}},
+		Broker:        broker,
+		TrustRegistry: trustRegistry,
+	})
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	defer func() { _ = mgr.Close() }()
+
+	if err := mgr.Start(ctx); err == nil {
+		t.Fatal("expected first start to require spawn approval")
+	}
+	rec, err := trustRegistry.GetTrust(ctx, serverCfg.Name)
+	if err != nil || rec == nil {
+		t.Fatalf("expected trust record after first start: %v", err)
+	}
+	if err := trustRegistry.ApproveSpawn(ctx, serverCfg.Name, rec.SpawnDigest); err != nil {
+		t.Fatalf("ApproveSpawn failed: %v", err)
+	}
+	err = mgr.Start(ctx)
+	if err == nil {
+		t.Fatal("expected Start to fail when the server exits during connect")
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+		t.Fatalf("expected %s, got %s (%v)", ErrServerUnavailable, code, err)
+	}
+	pollCondition(t, 10*time.Second, func() bool {
+		if _, err := os.Stat(lockPath); err != nil {
+			return false
+		}
+		return grandchildLockReleased(t, lockPath)
+	}, "failed connect leaked the spawned process group")
 }
