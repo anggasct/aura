@@ -82,7 +82,7 @@ func startHostileManager(ctx context.Context, t *testing.T, broker *toolbroker.B
 	if err := mgr.Start(ctx); err != nil {
 		t.Fatalf("Start(): %v", err)
 	}
-	t.Cleanup(func() { _ = mgr.Close() })
+	t.Cleanup(func() { _ = mgr.Close(ctx) })
 	return mgr, serverName
 }
 

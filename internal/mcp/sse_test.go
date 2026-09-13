@@ -47,7 +47,7 @@ func TestLegacySSEConnectAndDiscover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err != nil {
 		t.Fatalf("Connect(): %v", err)
 	}
@@ -82,7 +82,7 @@ func TestLegacySSEOAuthFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("oauth over legacy SSE accepted")
 	} else if code, ok := CodeOf(err); !ok || code != ErrCapabilityUnavailable {
@@ -138,7 +138,7 @@ func TestLegacyHandshakeCancelCarriesStableCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(100 * time.Millisecond)

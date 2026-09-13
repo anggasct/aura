@@ -125,7 +125,7 @@ func TestAdapterOversizedResultFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, clientTransport); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}

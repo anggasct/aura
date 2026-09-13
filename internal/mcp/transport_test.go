@@ -59,7 +59,7 @@ func TestStaticAuthEndToEndWithRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err != nil {
 		t.Fatalf("Connect(): %v", err)
 	}
@@ -94,7 +94,7 @@ func TestEndpointPolicyDenyBlocksConnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("denied endpoint accepted")
 	} else if code, ok := CodeOf(err); !ok || code != ErrEgressDenied {
@@ -126,7 +126,7 @@ func TestCrossOriginRedirectDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("cross-origin redirect accepted")
 	}
@@ -166,7 +166,7 @@ func TestSameOriginRedirectAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err != nil {
 		t.Fatalf("Connect(): %v", err)
 	}
@@ -203,7 +203,7 @@ func TestOversizeToolResultFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err != nil {
 		t.Fatalf("Connect(): %v", err)
 	}

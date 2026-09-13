@@ -8,12 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -23,23 +20,24 @@ import (
 )
 
 type Client struct {
-	cfg             *config.MCPServer
-	logger          *slog.Logger
-	session         *sdk.ClientSession
-	transport       sdk.Transport
-	httpClient      *http.Client
-	apiClient       *http.Client
-	endpointPolicy  EndpointPolicy
-	secretResolver  SecretResolver
-	oauthFetch      sdkauth.AuthorizationCodeFetcher
-	observer        Observer
-	cmd             *exec.Cmd
-	streamCancel    context.CancelFunc
-	protocolVersion string
-	restarts        []time.Time
-	customTransport bool
-	mu              sync.Mutex
-	closed          bool
+	cfg              *config.MCPServer
+	logger           *slog.Logger
+	session          *sdk.ClientSession
+	transport        sdk.Transport
+	httpClient       *http.Client
+	apiClient        *http.Client
+	endpointPolicy   EndpointPolicy
+	secretResolver   SecretResolver
+	oauthFetch       sdkauth.AuthorizationCodeFetcher
+	observer         Observer
+	sessionStarter   SessionStarter
+	containedSession ContainedSession
+	streamCancel     context.CancelFunc
+	protocolVersion  string
+	restarts         []time.Time
+	customTransport  bool
+	mu               sync.Mutex
+	closed           bool
 }
 
 func NewClient(cfg *config.MCPServer, logger *slog.Logger, opts ...ClientOption) (*Client, error) {
@@ -81,13 +79,12 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	if transport == nil {
 		switch c.cfg.Transport {
 		case config.MCPTransportStdio:
-			cmd := exec.CommandContext(ctx, c.cfg.Command, c.cfg.Args...)
-			cmd.Env = buildEnvironment(c.cfg.Environment)
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			c.cmd = cmd
-			transport = &sdk.CommandTransport{
-				Command: cmd,
+			contained, err := c.containedTransport(ctx)
+			if err != nil {
+				c.observeFailure(ctx, start, c.protocolVersion, "", err)
+				return err
 			}
+			transport = contained
 		case config.MCPTransportStreamableHTTP:
 			streamable, err := c.streamableTransport(ctx)
 			if err != nil {
@@ -129,6 +126,7 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 
 	session, streamCancel, err := c.dialSession(ctx, sdkClient, transport, time.Duration(connectTimeout))
 	if err != nil {
+		c.closeContainedLocked(ctx)
 		c.observeFailure(ctx, start, c.protocolVersion, "", err)
 		return err
 	}
@@ -144,6 +142,7 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	if initResult == nil {
 		_ = session.Close()
 		c.session = nil
+		c.closeContainedLocked(ctx)
 		err := Errorf(ErrServerUnavailable, "no initialize result from server")
 		c.observeFailure(ctx, start, c.protocolVersion, "", err)
 		return err
@@ -152,6 +151,7 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	if !IsSupportedProtocolVersion(initResult.ProtocolVersion) {
 		_ = session.Close()
 		c.session = nil
+		c.closeContainedLocked(ctx)
 		err := Errorf(ErrProtocolUnsupported, "unsupported protocol version: %s", initResult.ProtocolVersion)
 		c.observeFailure(ctx, start, c.protocolVersion, "", err)
 		return err
@@ -160,6 +160,7 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	if initResult.Capabilities == nil || initResult.Capabilities.Tools == nil {
 		_ = session.Close()
 		c.session = nil
+		c.closeContainedLocked(ctx)
 		err := Errorf(ErrCapabilityUnavailable, "server does not advertise tool capabilities")
 		c.observeFailure(ctx, start, c.protocolVersion, "", err)
 		return err
@@ -375,7 +376,7 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 	toolsResult, err := session.ListTools(listCtx, nil)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			c.noteDead()
+			c.noteDead(ctx)
 			err := Errorf(ErrRequestTimeout, "list tools request timed out")
 			c.observeFailure(ctx, start, version, "", err)
 			return nil, err
@@ -385,7 +386,7 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 			c.observeFailure(ctx, start, version, "", err)
 			return nil, err
 		}
-		c.noteDead()
+		c.noteDead(ctx)
 		err := Wrap(ErrServerUnavailable, err, "failed to list tools")
 		c.observeFailure(ctx, start, version, "", err)
 		return nil, err
@@ -497,7 +498,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 	res, err := session.CallTool(callCtx, params)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			c.noteDead()
+			c.noteDead(ctx)
 			err := Errorf(ErrRequestTimeout, "tool call timed out")
 			c.observeFailure(ctx, start, version, toolName, err)
 			return nil, err
@@ -507,7 +508,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 			c.observeFailure(ctx, start, version, toolName, err)
 			return nil, err
 		}
-		c.noteDead()
+		c.noteDead(ctx)
 		err := Wrap(ErrServerUnavailable, err, "tool call failed")
 		c.observeFailure(ctx, start, version, toolName, err)
 		return nil, err
@@ -532,7 +533,10 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 	return res, nil
 }
 
-func (c *Client) Close() error {
+func (c *Client) Close(ctx context.Context) error {
+	if ctx == nil {
+		return Errorf(ErrConfigInvalid, "context must not be nil")
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -549,12 +553,7 @@ func (c *Client) Close() error {
 	if c.apiClient != nil {
 		c.apiClient.CloseIdleConnections()
 	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
-		if c.cmd.ProcessState == nil {
-			_ = c.cmd.Wait()
-		}
-	}
+	c.closeContainedLocked(ctx)
 	return sessionErr
 }
 
@@ -563,15 +562,6 @@ func (c *Client) ServerName() string {
 		return ""
 	}
 	return c.cfg.Name
-}
-
-func buildEnvironment(env map[string]string) []string {
-	result := make([]string, 0, len(env))
-	for k, v := range env {
-		result = append(result, k+"="+v)
-	}
-	slices.Sort(result)
-	return result
 }
 
 var discoveredToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)

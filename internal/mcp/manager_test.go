@@ -144,7 +144,7 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 		t.Fatal("expected execution to fail closed when required capabilities are missing")
 	}
 
-	if err := mgr.Close(); err != nil {
+	if err := mgr.Close(ctx); err != nil {
 		t.Fatalf("Close failed: %v", err)
 	}
 	for _, def := range broker.Definitions() {
@@ -166,9 +166,8 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 	serverCfg := config.MCPServer{
 		Name:           serverName,
 		Transport:      config.MCPTransportStdio,
-		Command:        os.Args[0],
-		Args:           []string{"-test.run=TestHelperProcess", "--"},
-		Environment:    map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+		Command:        "/bin/stdio-e2e",
+		Environment:    map[string]string{"SERVER_MODE": "test"},
 		StartupTimeout: config.Duration(10 * time.Second),
 		RequestTimeout: config.Duration(10 * time.Second),
 		MaxMessageSize: 1024 * 1024,
@@ -179,16 +178,18 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 	}
 
 	trustRegistry := NewMemoryTrustRegistry()
+	starter := &stubSessionStarter{session: &scriptedSession{toolNames: []string{"ping"}}}
 
 	mgr, err := NewManager(&ManagerOptions{
-		Config:        mcpCfg,
-		Broker:        broker,
-		TrustRegistry: trustRegistry,
+		Config:         mcpCfg,
+		Broker:         broker,
+		TrustRegistry:  trustRegistry,
+		SessionStarter: starter,
 	})
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
-	defer func() { _ = mgr.Close() }()
+	defer func() { _ = mgr.Close(t.Context()) }()
 
 	err = mgr.Start(ctx)
 	if err == nil {
@@ -290,7 +291,7 @@ func TestManagerRejectsUnapprovedStdioCommandBeforeSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
-	defer func() { _ = mgr.Close() }()
+	defer func() { _ = mgr.Close(t.Context()) }()
 
 	err = mgr.Start(ctx)
 	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
@@ -345,7 +346,7 @@ func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
-	defer func() { _ = mgr.Close() }()
+	defer func() { _ = mgr.Close(t.Context()) }()
 
 	if err := mgr.Start(ctx); err == nil {
 		t.Fatal("expected first start to require spawn approval")
@@ -377,7 +378,7 @@ func TestManagerDigestChangeForcesSpawnReapproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager (mutated) failed: %v", err)
 	}
-	defer func() { _ = mgr2.Close() }()
+	defer func() { _ = mgr2.Close(t.Context()) }()
 
 	err = mgr2.Start(ctx)
 	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
@@ -496,7 +497,7 @@ func TestManagerCloseDoesNotBlockOnSlowServer(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	closeStart := time.Now()
-	if err := mgr.Close(); err != nil {
+	if err := mgr.Close(ctx); err != nil {
 		t.Fatalf("Close failed: %v", err)
 	}
 	if elapsed := time.Since(closeStart); elapsed > 2*time.Second {
@@ -511,13 +512,10 @@ func TestManagerCloseDoesNotBlockOnSlowServer(t *testing.T) {
 
 func TestManagerFailedConnectClosesClient(t *testing.T) {
 	ctx := t.Context()
-	lockPath := filepath.Join(t.TempDir(), "grandchild.lock")
 	serverCfg := config.MCPServer{
 		Name:           "leaky-connect",
 		Transport:      config.MCPTransportStdio,
-		Command:        os.Args[0],
-		Args:           []string{"-test.run=TestHelperProcessWithGrandchild", "--"},
-		Environment:    map[string]string{"GO_WANT_HELPER_PROCESS": "fail-after-grandchild", "MCP_TEST_GRANDCHILD_LOCK_FILE": lockPath},
+		Command:        "/bin/leaky-server",
 		StartupTimeout: config.Duration(10 * time.Second),
 		RequestTimeout: config.Duration(10 * time.Second),
 		MaxMessageSize: 1024 * 1024,
@@ -526,16 +524,19 @@ func TestManagerFailedConnectClosesClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	failing := &failingSession{err: errors.New("child failed during handshake")}
+	starter := &stubSessionStarter{session: failing}
 	trustRegistry := NewMemoryTrustRegistry()
 	mgr, err := NewManager(&ManagerOptions{
-		Config:        &config.MCP{Servers: []config.MCPServer{serverCfg}},
-		Broker:        broker,
-		TrustRegistry: trustRegistry,
+		Config:         &config.MCP{Servers: []config.MCPServer{serverCfg}},
+		Broker:         broker,
+		TrustRegistry:  trustRegistry,
+		SessionStarter: starter,
 	})
 	if err != nil {
 		t.Fatalf("NewManager failed: %v", err)
 	}
-	defer func() { _ = mgr.Close() }()
+	defer func() { _ = mgr.Close(t.Context()) }()
 
 	if err := mgr.Start(ctx); err == nil {
 		t.Fatal("expected first start to require spawn approval")
@@ -549,15 +550,14 @@ func TestManagerFailedConnectClosesClient(t *testing.T) {
 	}
 	err = mgr.Start(ctx)
 	if err == nil {
-		t.Fatal("expected Start to fail when the server exits during connect")
+		t.Fatal("expected Start to fail when the session breaks during connect")
 	}
 	if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("expected %s, got %s (%v)", ErrServerUnavailable, code, err)
 	}
-	pollCondition(t, 10*time.Second, func() bool {
-		if _, err := os.Stat(lockPath); err != nil {
-			return false
-		}
-		return grandchildLockReleased(t, lockPath)
-	}, "failed connect leaked the spawned process group")
+	starter.mu.Lock()
+	defer starter.mu.Unlock()
+	if failing.closed != 1 {
+		t.Error("failed connect leaked the contained session")
+	}
 }

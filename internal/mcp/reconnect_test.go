@@ -83,7 +83,7 @@ func TestReconnectHealsWithoutDuplicating(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err != nil {
 		t.Fatalf("Connect(): %v", err)
 	}
@@ -123,7 +123,7 @@ func TestReconnectBudgetExhausts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err != nil {
 		t.Fatalf("Connect(): %v", err)
 	}
@@ -163,7 +163,7 @@ func TestReconnectWindowPrunes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	now := time.Now()
 	client.mu.Lock()
 	if !client.reconnectAllowedLocked(now) {
@@ -188,7 +188,7 @@ func TestReconnectDisabledWithoutPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if client.reconnectAllowedLocked(time.Now()) {

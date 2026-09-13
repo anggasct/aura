@@ -199,7 +199,7 @@ func TestOAuthProvisionedConnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err != nil {
 		t.Fatalf("Connect(): %v", err)
 	}
@@ -244,7 +244,7 @@ func TestOAuthAutoFlowOnChallenge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err != nil {
 		t.Fatalf("Connect(): %v", err)
 	}
@@ -278,7 +278,7 @@ func TestOAuthNoTokenFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("tokenless connect accepted")
 	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
