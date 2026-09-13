@@ -230,6 +230,10 @@ func newRunnerFixture(scripts []sendScript) *runnerFixture {
 	return newRunnerFixtureWithPolicy(testRunPolicy(), scripts)
 }
 
+func freshFixtureTime() time.Time {
+	return time.Now().UTC().Truncate(time.Second)
+}
+
 func newRunnerFixtureWithPolicy(policy RunPolicy, scripts []sendScript) *runnerFixture {
 	start := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	clock := durable.NewManualClock(start)
@@ -285,7 +289,7 @@ func waitBroadcastState(t *testing.T, fixture *runnerFixture, id, want string) {
 
 func TestRunner_DeliversImmediately(t *testing.T) {
 	fixture := newRunnerFixture([]sendScript{successOutcome("intent-1")})
-	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := freshFixtureTime()
 	seedRunItem(fixture, "bcst-1", StateScheduled, now)
 	startBroadcastRun(t, fixture, "bcst-1")
 	waitBroadcastState(t, fixture, "bcst-1", StateSucceeded)
@@ -313,7 +317,7 @@ func TestRunner_DeliversImmediately(t *testing.T) {
 
 func TestRunner_AmbiguousStopsWithoutRetry(t *testing.T) {
 	fixture := newRunnerFixture([]sendScript{{outcome: SendOutcome{Ambiguous: true, IntentID: "intent-x"}}})
-	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := freshFixtureTime()
 	seedRunItem(fixture, "bcst-1", StateScheduled, now)
 	startBroadcastRun(t, fixture, "bcst-1")
 	waitBroadcastState(t, fixture, "bcst-1", StateUnknown)
@@ -331,7 +335,7 @@ func TestRunner_TransportErrorRetriesThenSucceeds(t *testing.T) {
 		{err: errors.New("connection reset")},
 		successOutcome("intent-3"),
 	})
-	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := freshFixtureTime()
 	seedRunItem(fixture, "bcst-1", StateScheduled, now)
 	startBroadcastRun(t, fixture, "bcst-1")
 	waitBroadcastState(t, fixture, "bcst-1", StateSucceeded)
@@ -435,7 +439,7 @@ func TestRunner_DefinitiveFailureFallsBack(t *testing.T) {
 		primary:  fixture.sender,
 		fallback: fallbackSender,
 	}
-	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := freshFixtureTime()
 	seedRunItem(fixture, "bcst-1", StateScheduled, now)
 	startBroadcastRun(t, fixture, "bcst-1")
 	waitBroadcastState(t, fixture, "bcst-1", StateSucceeded)
@@ -464,7 +468,7 @@ func (s *routeSwitchSender) Send(ctx context.Context, req *SendRequest) (SendOut
 
 func TestRunner_DefinitiveFailureWithoutFallbackFails(t *testing.T) {
 	fixture := newRunnerFixture([]sendScript{{outcome: SendOutcome{IntentID: "intent-bad"}}})
-	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := freshFixtureTime()
 	seedRunItem(fixture, "bcst-1", StateScheduled, now)
 	startBroadcastRun(t, fixture, "bcst-1")
 	waitBroadcastState(t, fixture, "bcst-1", StateFailed)
@@ -541,7 +545,7 @@ func TestRunner_HeldItemsDigestOnce(t *testing.T) {
 
 func TestRunner_SkipsTerminalAndMissing(t *testing.T) {
 	fixture := newRunnerFixture(nil)
-	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := freshFixtureTime()
 	seedRunItem(fixture, "bcst-done", StateSucceeded, now)
 	startBroadcastRun(t, fixture, "bcst-done")
 	startBroadcastRun(t, fixture, "bcst-ghost")
@@ -559,7 +563,7 @@ func TestRunner_PacedSlotSleeps(t *testing.T) {
 	policy := testRunPolicy()
 	policy.DispatchGap = time.Minute
 	fixture := newRunnerFixtureWithPolicy(policy, []sendScript{successOutcome("intent-1")})
-	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := freshFixtureTime()
 	seedRunItem(fixture, "bcst-1", StateScheduled, now)
 	startBroadcastRun(t, fixture, "bcst-1")
 	waitBroadcastState(t, fixture, "bcst-1", StateSucceeded)
