@@ -74,7 +74,14 @@ func ScanDir(ctx context.Context, dir, scope string) ScanResult {
 		return ScanResult{Err: err}
 	}
 	if len(walker.findings) > 0 {
-		return ScanResult{Findings: walker.findings}
+		scanned := &ScannedDir{
+			Scope:     scope,
+			Name:      dirBase(dir),
+			Files:     walker.files,
+			SizeBytes: walker.total,
+		}
+		scanned.Digest = digestPackage(walker.files, walker.contents)
+		return ScanResult{Scanned: scanned, Findings: walker.findings}
 	}
 	scanned := &ScannedDir{
 		Scope:     scope,

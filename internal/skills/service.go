@@ -2,6 +2,8 @@ package skills
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 )
 
@@ -46,6 +48,19 @@ func RegisterScan(ctx context.Context, registry Registry, dir, scope string) (Sc
 		return ScanSummary{}, nil, result.Err
 	}
 	scanned := result.Scanned
+	if scanned == nil {
+		digest := quarantineDigest(scope, dirBase(dir), result.Findings)
+		scanned = &ScannedDir{Scope: scope, Name: dirBase(dir), Digest: digest}
+	}
+	if scanned.Name == "" {
+		scanned.Name = dirBase(dir)
+	}
+	if len(scanned.Digest) < 12 {
+		scanned.Digest = quarantineDigest(scope, scanned.Name, result.Findings)
+	}
+	if scanned.Scope == "" {
+		scanned.Scope = scope
+	}
 	record := &Record{
 		ID:      scope + "/" + scanned.Name + "@" + scanned.Digest[:12],
 		Name:    scanned.Name,
@@ -67,7 +82,10 @@ func RegisterScan(ctx context.Context, registry Registry, dir, scope string) (Sc
 		record.Requested = "[]"
 	} else {
 		record.Validation = "[]"
-		requested := scanned.Manifest.AllowedTools
+		var requested []string
+		if scanned.Manifest != nil {
+			requested = scanned.Manifest.AllowedTools
+		}
 		if requested == nil {
 			requested = []string{}
 		}
@@ -82,4 +100,18 @@ func RegisterScan(ctx context.Context, registry Registry, dir, scope string) (Sc
 		return ScanSummary{}, nil, err
 	}
 	return ScanSummary{ID: record.ID, Inserted: inserted, Valid: len(result.Findings) == 0}, result.Findings, nil
+}
+
+func quarantineDigest(scope, name string, findings []string) string {
+	writer := sha256.New()
+	_, _ = writer.Write([]byte("skills-quarantine/v1\n"))
+	_, _ = writer.Write([]byte(scope))
+	_, _ = writer.Write([]byte{0})
+	_, _ = writer.Write([]byte(name))
+	_, _ = writer.Write([]byte{0})
+	for _, finding := range findings {
+		_, _ = writer.Write([]byte(finding))
+		_, _ = writer.Write([]byte{0})
+	}
+	return hex.EncodeToString(writer.Sum(nil))
 }

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -121,4 +124,66 @@ func TestRegisterScanErrors(t *testing.T) {
 	if _, _, err := RegisterScan(t.Context(), &fakeRegistry{err: boom}, dir, "local"); !errors.Is(err, boom) {
 		t.Errorf("registry error should propagate, got %v", err)
 	}
+}
+
+func TestRegisterScanHostileQuarantines(t *testing.T) {
+	setup := func(t *testing.T, prepare func(dir string)) string {
+		t.Helper()
+		dir := t.TempDir()
+		writePackageFile(t, dir, "SKILL.md", validSkillDocument)
+		prepare(dir)
+		return dir
+	}
+	assertQuarantined := func(t *testing.T, dir, want string) {
+		t.Helper()
+		registry := &fakeRegistry{}
+		summary, findings, err := RegisterScan(t.Context(), registry, dir, "local")
+		if err != nil {
+			t.Fatalf("register: %v", err)
+		}
+		if summary.Valid {
+			t.Errorf("summary should not be valid: %+v", summary)
+		}
+		if !containsFinding(findings, want) {
+			t.Fatalf("findings = %v, want %s", findings, want)
+		}
+		if len(registry.records) != 1 {
+			t.Fatalf("hostile package should leave one quarantined record, got %d", len(registry.records))
+		}
+		record := registry.records[summary.ID]
+		if record == nil {
+			t.Fatalf("record %s not stored", summary.ID)
+		}
+		if record.State != StateQuarantined {
+			t.Errorf("state = %q, want %q", record.State, StateQuarantined)
+		}
+		var codes []string
+		if err := json.Unmarshal([]byte(record.Validation), &codes); err != nil || !containsFinding(codes, want) {
+			t.Errorf("validation = %q, want %s", record.Validation, want)
+		}
+	}
+	t.Run("symlink escape", func(t *testing.T) {
+		dir := setup(t, func(dir string) {
+			if err := os.Symlink("/etc/hostname", filepath.Join(dir, "evil")); err != nil {
+				t.Skipf("symlink unsupported: %v", err)
+			}
+		})
+		assertQuarantined(t, dir, FindingSymlinkEscape)
+	})
+	t.Run("too many files", func(t *testing.T) {
+		dir := setup(t, func(dir string) {
+			for index := range maxPackageFiles {
+				writePackageFile(t, dir, fmt.Sprintf("extra-%03d.txt", index), "x")
+			}
+		})
+		assertQuarantined(t, dir, FindingTooManyFiles)
+	})
+	t.Run("unresolvable link", func(t *testing.T) {
+		dir := setup(t, func(dir string) {
+			if err := os.Symlink("no-such-target", filepath.Join(dir, "dangling")); err != nil {
+				t.Skipf("symlink unsupported: %v", err)
+			}
+		})
+		assertQuarantined(t, dir, FindingSymlinkUnresolvable)
+	})
 }

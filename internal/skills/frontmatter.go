@@ -3,7 +3,9 @@ package skills
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -219,7 +221,7 @@ func (m *Manifest) bind(fields map[string]any) []string {
 	switch {
 	case !namePresent:
 		findings = append(findings, FindingNameMissing)
-	case !nameText || len([]rune(name)) > maxNameRunes || !validNamePattern.MatchString(name):
+	case !nameText || len([]rune(name)) > maxNameRunes || !validNamePattern.MatchString(name) || strings.Contains(name, "--"):
 		findings = append(findings, FindingNameInvalid)
 	default:
 		m.Name = name
@@ -400,9 +402,70 @@ func renderBounded(raw any) (string, bool) {
 		}
 		return scalar.text, true
 	}
-	encoded, err := json.Marshal(raw)
+	encoded, err := json.Marshal(normalizeBounded(raw))
 	if err != nil || len(encoded) > maxUnknownFieldBytes {
 		return "", false
 	}
 	return string(encoded), true
+}
+
+func normalizeBounded(value any) any {
+	switch typed := value.(type) {
+	case nonStringScalar:
+		return normalizeScalar(typed)
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = normalizeBounded(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = normalizeBounded(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func normalizeScalar(scalar nonStringScalar) any {
+	switch scalar.tag {
+	case "!!int":
+		if parsed, err := strconv.ParseInt(scalar.text, 10, 64); err == nil {
+			return parsed
+		}
+		if parsed, err := strconv.ParseInt(scalar.text, 0, 64); err == nil {
+			return parsed
+		}
+		if parsed, err := strconv.ParseFloat(scalar.text, 64); err == nil {
+			if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+				return scalar.text
+			}
+			return parsed
+		}
+		return scalar.text
+	case "!!float":
+		if parsed, err := strconv.ParseFloat(scalar.text, 64); err == nil {
+			if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+				return scalar.text
+			}
+			return parsed
+		}
+		return scalar.text
+	case "!!bool":
+		switch strings.ToLower(scalar.text) {
+		case "true":
+			return true
+		case "false":
+			return false
+		default:
+			return scalar.text
+		}
+	case "!!null":
+		return nil
+	default:
+		return scalar.text
+	}
 }

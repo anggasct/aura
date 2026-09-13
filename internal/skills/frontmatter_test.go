@@ -119,6 +119,7 @@ func TestParseSkillFileInvalid(t *testing.T) {
 		"missing description":     {document: "---\nname: x\n---\n", finding: FindingDescriptionMissing},
 		"uppercase name":          {document: "---\nname: Bad-Name\ndescription: y\n---\n", finding: FindingNameInvalid},
 		"spaced name":             {document: "---\nname: bad name\ndescription: y\n---\n", finding: FindingNameInvalid},
+		"consecutive hyphens":     {document: "---\nname: a--b\ndescription: y\n---\n", finding: FindingNameInvalid},
 		"long name":               {document: "---\nname: " + strings.Repeat("a", 65) + "\ndescription: y\n---\n", finding: FindingNameInvalid},
 		"empty description":       {document: "---\nname: x\ndescription: ''\n---\n", finding: FindingDescriptionInvalid},
 		"long description":        {document: "---\nname: x\ndescription: " + strings.Repeat("a", 1025) + "\n---\n", finding: FindingDescriptionInvalid},
@@ -151,6 +152,44 @@ func TestParseSkillFileInvalid(t *testing.T) {
 			}
 			if !containsFinding(findings, tc.finding) {
 				t.Errorf("findings = %v, want %s", findings, tc.finding)
+			}
+		})
+	}
+}
+
+func TestParseUnknownNumericPreservation(t *testing.T) {
+	cases := map[string]struct {
+		document string
+		field    string
+		want     string
+	}{
+		"numeric list": {
+			document: "---\nname: x\ndescription: y\ntools: [1, 2]\n---\nBody\n",
+			field:    "tools",
+			want:     "[1,2]",
+		},
+		"numeric mapping": {
+			document: "---\nname: x\ndescription: y\nnested:\n  a: 1\n---\nBody\n",
+			field:    "nested",
+			want:     `{"a":1}`,
+		},
+		"mixed collection": {
+			document: "---\nname: x\ndescription: y\ntools: [1, hello, true, null]\n---\nBody\n",
+			field:    "tools",
+			want:     `[1,"hello",true,null]`,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			manifest, findings := ParseSkillFile([]byte(tc.document))
+			if len(findings) != 0 {
+				t.Fatalf("findings = %v", findings)
+			}
+			if manifest == nil {
+				t.Fatal("manifest is nil")
+			}
+			if got := manifest.UnknownFields[tc.field]; got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.field, got, tc.want)
 			}
 		})
 	}

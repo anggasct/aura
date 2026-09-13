@@ -216,7 +216,4 @@ func TestScanDigestChangesWithBytes(t *testing.T) {
 	if first.Digest == second.Digest {
 		t.Errorf("digest did not change after edit")
 	}
-	if first.Digest == second.Digest {
-		t.Errorf("digest did not change after edit")
-	}
 }
