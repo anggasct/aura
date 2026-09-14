@@ -143,6 +143,18 @@ context:
     max_source_tokens: 32768
     max_output_tokens: 2048
     prompt_version: v1
+sync:
+  enabled: false
+  remote: ""
+  branch: main
+  interval: 15m0s
+  transport_secret_ref: env://AURA_SYNC_TRANSPORT_SECRET
+  known_hosts_ref: env://AURA_SYNC_KNOWN_HOSTS
+  git_binary: /usr/bin/git
+  ssh_binary: /usr/bin/ssh
+  include:
+    - skills/**
+    - config-templates/**
 channels:
   discord:
     enabled: false

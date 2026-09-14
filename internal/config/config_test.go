@@ -197,6 +197,32 @@ func TestLoad_UnknownKey(t *testing.T) {
 	}
 }
 
+func TestLoad_SyncRemovedKeysMigrationGuidance(t *testing.T) {
+	contents := map[string]string{
+		"profiles":          "version: 1\nsync:\n  profiles: foo\n",
+		"conflict_strategy": "version: 1\nsync:\n  conflict_strategy: theirs\n",
+		"include_db_snapshot": "version: 1\nsync:\n" +
+			"  include_db_snapshot: true\n",
+	}
+	wants := map[string]string{
+		"profiles":            "profile map",
+		"conflict_strategy":   "fast-forward-only",
+		"include_db_snapshot": "database snapshots are not stored in Git",
+	}
+	for key, content := range contents {
+		_, err := Load(writeTempConfig(t, content))
+		if err == nil {
+			t.Fatalf("Load with sync.%s = nil, want migration guidance", key)
+		}
+		if !strings.Contains(err.Error(), "sync."+key+" was removed") {
+			t.Errorf("Load with sync.%s error %q does not name the removed key", key, err)
+		}
+		if !strings.Contains(err.Error(), wants[key]) {
+			t.Errorf("Load with sync.%s error %q missing guidance %q", key, err, wants[key])
+		}
+	}
+}
+
 func TestLoad_ExplicitPathMissing(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err == nil {

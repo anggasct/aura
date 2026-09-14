@@ -40,6 +40,7 @@ type Config struct {
 	Memory       Memory                `koanf:"memory" yaml:"memory"`
 	Skills       *Skills               `koanf:"skills" yaml:"skills,omitempty"`
 	Context      *Context              `koanf:"context" yaml:"context,omitempty"`
+	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
 
@@ -123,6 +124,18 @@ type ContextSummary struct {
 	MaxSourceTokens int    `koanf:"max_source_tokens" yaml:"max_source_tokens"`
 	MaxOutputTokens int    `koanf:"max_output_tokens" yaml:"max_output_tokens"`
 	PromptVersion   string `koanf:"prompt_version" yaml:"prompt_version"`
+}
+
+type Sync struct {
+	Enabled            bool     `koanf:"enabled" yaml:"enabled"`
+	Remote             string   `koanf:"remote" yaml:"remote"`
+	Branch             string   `koanf:"branch" yaml:"branch"`
+	Interval           Duration `koanf:"interval" yaml:"interval"`
+	TransportSecretRef string   `koanf:"transport_secret_ref" yaml:"transport_secret_ref"`
+	KnownHostsRef      string   `koanf:"known_hosts_ref" yaml:"known_hosts_ref"`
+	GitBinary          string   `koanf:"git_binary" yaml:"git_binary"`
+	SSHBinary          string   `koanf:"ssh_binary" yaml:"ssh_binary"`
+	Include            []string `koanf:"include" yaml:"include"`
 }
 
 type Discord struct {
@@ -442,6 +455,7 @@ var (
 	modelDefinitionNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 	envNamePattern             = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	mcpServerNamePattern       = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	syncBranchPattern          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
 
 func validProtocol(p string) bool {
@@ -611,6 +625,16 @@ func Default() Config {
 			MaxResourceBytes:     8388608,
 			QuarantineRetention:  Duration(720 * time.Hour),
 		},
+		Sync: &Sync{
+			Enabled:            false,
+			Branch:             "main",
+			Interval:           Duration(15 * time.Minute),
+			TransportSecretRef: defaultSyncTransportSecretRef(),
+			KnownHostsRef:      defaultSyncKnownHostsRef(),
+			GitBinary:          "/usr/bin/git",
+			SSHBinary:          "/usr/bin/ssh",
+			Include:            []string{"skills/**", "config-templates/**"},
+		},
 		Context: &Context{
 			Enabled:                    true,
 			RecentCompleteTurns:        10,
@@ -634,6 +658,14 @@ func defaultDiscordBotTokenRef() string {
 
 func defaultWebSearchCredentialRef() string {
 	return fmt.Sprintf("env://%s_%s_%s_%s", "AURA", "BRAVE", "API", "KEY")
+}
+
+func defaultSyncTransportSecretRef() string {
+	return fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "TRANSPORT_SECRET")
+}
+
+func defaultSyncKnownHostsRef() string {
+	return fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "KNOWN_HOSTS")
 }
 
 func defaultModelsRouting() map[string]string {

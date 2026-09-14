@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"maps"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -178,6 +179,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	if err := validateContext(cfg.Context, options.Build.Profile()); err != nil {
+		return LoadResult{}, err
+	}
+	if err := validateSync(cfg.Sync); err != nil {
 		return LoadResult{}, err
 	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
@@ -398,6 +402,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateContextShapes(doc); err != nil {
+		return err
+	}
+	if err := validateSyncShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -1877,6 +1884,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyMemoryDefaults(cfg, doc, &defaults.Memory)
 	applySkillsDefaults(cfg, doc)
 	applyContextDefaults(cfg, doc)
+	applySyncDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
 }
@@ -2067,6 +2075,159 @@ func applyContextDefaults(cfg *Config, doc *yamlv3.Node) {
 	if cfg.Context.Summary.PromptVersion == "" && !configValuePresent(doc, "context", "summary", "prompt_version") && !envValuePresent("context.summary.prompt_version") {
 		cfg.Context.Summary.PromptVersion = defaults.Summary.PromptVersion
 	}
+}
+
+func applySyncDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Sync == nil {
+		return
+	}
+	defaults := Default().Sync
+	if cfg.Sync.Branch == "" && !configValuePresent(doc, "sync", "branch") && !envValuePresent("sync.branch") {
+		cfg.Sync.Branch = defaults.Branch
+	}
+	if cfg.Sync.Interval == 0 && !configValuePresent(doc, "sync", "interval") && !envValuePresent("sync.interval") {
+		cfg.Sync.Interval = defaults.Interval
+	}
+	if cfg.Sync.TransportSecretRef == "" && !configValuePresent(doc, "sync", "transport_secret_ref") && !envValuePresent("sync.transport_secret_ref") {
+		cfg.Sync.TransportSecretRef = defaults.TransportSecretRef
+	}
+	if cfg.Sync.KnownHostsRef == "" && !configValuePresent(doc, "sync", "known_hosts_ref") && !envValuePresent("sync.known_hosts_ref") {
+		cfg.Sync.KnownHostsRef = defaults.KnownHostsRef
+	}
+	if cfg.Sync.GitBinary == "" && !configValuePresent(doc, "sync", "git_binary") && !envValuePresent("sync.git_binary") {
+		cfg.Sync.GitBinary = defaults.GitBinary
+	}
+	if cfg.Sync.SSHBinary == "" && !configValuePresent(doc, "sync", "ssh_binary") && !envValuePresent("sync.ssh_binary") {
+		cfg.Sync.SSHBinary = defaults.SSHBinary
+	}
+	if cfg.Sync.Include == nil && !configValuePresent(doc, "sync", "include") && !envValuePresent("sync.include") {
+		cfg.Sync.Include = defaults.Include
+	}
+}
+
+func validateSyncShapes(doc *yamlv3.Node) error {
+	syncNode := mappingValue(doc, "sync")
+	if syncNode == nil {
+		return nil
+	}
+	if syncNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("sync must be a mapping at line %d", syncNode.Line)
+	}
+	for i := 0; i+1 < len(syncNode.Content); i += 2 {
+		keyNode := syncNode.Content[i]
+		valueNode := syncNode.Content[i+1]
+		switch keyNode.Value {
+		case "profiles":
+			return fmt.Errorf("sync.profiles was removed: configure a single sync remote and branch instead of a profile map at line %d", keyNode.Line)
+		case "conflict_strategy":
+			return fmt.Errorf("sync.conflict_strategy was removed: sync is fast-forward-only without winner selection at line %d", keyNode.Line)
+		case "include_db_snapshot":
+			return fmt.Errorf("sync.include_db_snapshot was removed: database snapshots are not stored in Git at line %d", keyNode.Line)
+		case "enabled":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("sync.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "remote", "branch", "interval", "transport_secret_ref", "known_hosts_ref", "git_binary", "ssh_binary":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("sync.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "include":
+			if valueNode.Kind != yamlv3.SequenceNode {
+				return fmt.Errorf("sync.include must be a sequence at line %d", valueNode.Line)
+			}
+			for _, item := range valueNode.Content {
+				if item.Kind != yamlv3.ScalarNode || item.Tag != "!!str" {
+					return fmt.Errorf("sync.include entries must be strings at line %d", item.Line)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateSync(syncConfig *Sync) error {
+	if syncConfig == nil {
+		return nil
+	}
+	var problems []error
+	switch {
+	case strings.TrimSpace(syncConfig.Remote) == "" && syncConfig.Enabled:
+		problems = append(problems, errors.New("sync.enabled requires sync.remote"))
+	case strings.TrimSpace(syncConfig.Remote) != "":
+		if err := validateSyncRemote(syncConfig.Remote); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	if !syncBranchPattern.MatchString(syncConfig.Branch) {
+		problems = append(problems, fmt.Errorf("sync.branch %q must match [A-Za-z0-9][A-Za-z0-9._/-]*", syncConfig.Branch))
+	}
+	if syncConfig.Interval <= 0 || time.Duration(syncConfig.Interval) > 24*time.Hour {
+		problems = append(problems, errors.New("sync.interval must be positive and at most 24h"))
+	}
+	for _, ref := range []struct {
+		name  string
+		value string
+	}{
+		{"transport_secret_ref", syncConfig.TransportSecretRef},
+		{"known_hosts_ref", syncConfig.KnownHostsRef},
+	} {
+		if !strings.HasPrefix(ref.value, "env://") && !strings.HasPrefix(ref.value, "file://") {
+			problems = append(problems, fmt.Errorf("sync.%s must use env:// or file://", ref.name))
+		}
+	}
+	for _, binary := range []struct {
+		name  string
+		value string
+	}{
+		{"git_binary", syncConfig.GitBinary},
+		{"ssh_binary", syncConfig.SSHBinary},
+	} {
+		switch {
+		case strings.TrimSpace(binary.value) == "":
+			problems = append(problems, fmt.Errorf("sync.%s must not be empty", binary.name))
+		case !filepath.IsAbs(binary.value):
+			problems = append(problems, fmt.Errorf("sync.%s must be an absolute path", binary.name))
+		case filepath.Clean(binary.value) != binary.value:
+			problems = append(problems, fmt.Errorf("sync.%s must be clean", binary.name))
+		}
+	}
+	if len(syncConfig.Include) == 0 {
+		problems = append(problems, errors.New("sync.include must list at least one pattern"))
+	}
+	for _, pattern := range syncConfig.Include {
+		if pattern != "skills/**" && pattern != "config-templates/**" {
+			problems = append(problems, fmt.Errorf("sync.include pattern %q is not supported", pattern))
+		}
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateSyncRemote(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.New("sync.remote is not a valid URL")
+	}
+	if u.Scheme != "ssh" && u.Scheme != "https" {
+		return fmt.Errorf("sync.remote scheme %q must be ssh or https", u.Scheme)
+	}
+	if u.Host == "" {
+		return errors.New("sync.remote has no host")
+	}
+	if u.User != nil {
+		if u.Scheme != "ssh" {
+			return errors.New("sync.remote must not embed credentials")
+		}
+		if _, hasPassword := u.User.Password(); hasPassword {
+			return errors.New("sync.remote must not embed a password")
+		}
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("sync.remote must not carry query or fragment")
+	}
+	return nil
 }
 
 func applyDiscordDefaults(cfg *Config, doc *yamlv3.Node, defaults *Discord) {
