@@ -2117,6 +2117,12 @@ func validateSyncShapes(doc *yamlv3.Node) error {
 		keyNode := syncNode.Content[i]
 		valueNode := syncNode.Content[i+1]
 		switch keyNode.Value {
+		case "profiles":
+			return fmt.Errorf("sync.profiles was removed: configure a single sync remote and branch instead of a profile map at line %d", keyNode.Line)
+		case "conflict_strategy":
+			return fmt.Errorf("sync.conflict_strategy was removed: sync is fast-forward-only without winner selection at line %d", keyNode.Line)
+		case "include_db_snapshot":
+			return fmt.Errorf("sync.include_db_snapshot was removed: database snapshots are not stored in Git at line %d", keyNode.Line)
 		case "enabled":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
 				return fmt.Errorf("sync.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)

@@ -49,8 +49,14 @@ func NormalizeManifest(include []string) ([]string, error) {
 }
 
 func DeniedPath(rel string) bool {
+	if rel == "" || path.IsAbs(rel) {
+		return true
+	}
+	if raw := path.Clean(rel); raw == "." || raw == ".." || strings.HasPrefix(raw, "../") {
+		return true
+	}
 	cleaned := path.Clean("/" + rel)[1:]
-	if cleaned == "." || cleaned == "" || strings.HasPrefix(cleaned, "../") || path.IsAbs(rel) {
+	if cleaned == "." || cleaned == "" {
 		return true
 	}
 	lower := strings.ToLower(cleaned)

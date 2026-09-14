@@ -90,6 +90,15 @@ func TestFilterExportableSizeBound(t *testing.T) {
 	}
 }
 
+func TestDeniedPathRejectsTraversal(t *testing.T) {
+	t.Parallel()
+	for _, rel := range []string{"../escape.md", "", ".", "/abs/path.md"} {
+		if !DeniedPath(rel) {
+			t.Fatalf("DeniedPath(%q) = false, want true", rel)
+		}
+	}
+}
+
 func TestDeniedPathNeverLeaksContent(t *testing.T) {
 	t.Parallel()
 	err := FilterExportable([]string{"skills"}, "skills/secret-key-material.key", 16)
