@@ -279,6 +279,7 @@ func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadO
 		"storage:\n  path: " + dataRoot + "\n" +
 		"tools:\n  workspace: " + t.TempDir() + "\n" +
 		"skills:\n  roots: [" + t.TempDir() + "]\n" +
+		"context:\n  recent_complete_turns: 5\n" +
 		"models:\n  definitions:\n    primary:\n" +
 		"      protocol: anthropic_messages\n" +
 		"      api_key_env: AURA_TEST_ANTHROPIC_KEY\n" +

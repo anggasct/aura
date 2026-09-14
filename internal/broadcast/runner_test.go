@@ -488,7 +488,7 @@ func TestRunner_ExpiredItemFailsWithoutSend(t *testing.T) {
 
 func TestRunner_HeldItemsDigestOnce(t *testing.T) {
 	fixture := newRunnerFixture([]sendScript{successOutcome("intent-digest")})
-	release := time.Date(2026, 9, 13, 7, 0, 0, 0, time.UTC)
+	release := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
 	fixture.store.seed(&ItemRecord{
 		ID: "bcst-1", Producer: "cron", IdempotencyKey: "key-1", ContentDigest: "d1",
 		Priority: PriorityInfo, DestinationAlias: "default", ContentJSON: `{"text":"one"}`,
