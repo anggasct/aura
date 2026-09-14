@@ -18,7 +18,18 @@ type Event struct {
 	InvocationID  string
 	Kind          string
 	CorrelationID string
+	ToolResult    bool
+	MediaType     string
 	Text          string
+	Projected     *Projection
+}
+
+type Projection struct {
+	Digest      string
+	Bytes       int
+	Excerpt     string
+	RefSequence uint64
+	MediaType   string
 }
 
 type Group struct {
