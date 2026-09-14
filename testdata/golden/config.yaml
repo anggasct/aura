@@ -139,7 +139,7 @@ context:
   high_water_ratio: 0.9
   max_tool_excerpt_bytes: 2048
   summary:
-    task: compress
+    task: compression
     max_source_tokens: 32768
     max_output_tokens: 2048
     prompt_version: v1

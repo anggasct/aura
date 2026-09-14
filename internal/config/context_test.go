@@ -34,7 +34,7 @@ func TestLoad_ContextDefaults(t *testing.T) {
 		t.Errorf("context = %+v", got)
 	}
 	summary := got.Summary
-	if summary.Task != "compress" || summary.MaxSourceTokens != 32768 || summary.MaxOutputTokens != 2048 || summary.PromptVersion != "v1" {
+	if summary.Task != "compression" || summary.MaxSourceTokens != 32768 || summary.MaxOutputTokens != 2048 || summary.PromptVersion != "v1" {
 		t.Errorf("summary = %+v", summary)
 	}
 }
