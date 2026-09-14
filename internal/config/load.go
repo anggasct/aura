@@ -177,6 +177,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateSkills(cfg.Skills, options.Build.Profile()); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateContext(cfg.Context, options.Build.Profile()); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
 		return LoadResult{}, err
 	}
@@ -392,6 +395,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateSkillsShapes(doc); err != nil {
+		return err
+	}
+	if err := validateContextShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -853,6 +859,53 @@ func validateSkillsShapes(doc *yamlv3.Node) error {
 			for _, item := range valueNode.Content {
 				if item.Kind != yamlv3.ScalarNode || item.Tag != "!!str" {
 					return fmt.Errorf("skills.roots entries must be strings at line %d", item.Line)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateContextShapes(doc *yamlv3.Node) error {
+	contextNode := mappingValue(doc, "context")
+	if contextNode == nil {
+		return nil
+	}
+	if contextNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("context must be a mapping at line %d", contextNode.Line)
+	}
+	for i := 0; i+1 < len(contextNode.Content); i += 2 {
+		keyNode := contextNode.Content[i]
+		valueNode := contextNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("context.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "recent_complete_turns", "safety_margin_tokens", "max_tool_excerpt_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("context.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "conservative_estimator_ratio", "high_water_ratio":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!float" {
+				return fmt.Errorf("context.%s must be a float at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "summary":
+			if valueNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("context.summary must be a mapping at line %d", valueNode.Line)
+			}
+			for j := 0; j+1 < len(valueNode.Content); j += 2 {
+				summaryKey := valueNode.Content[j]
+				summaryValue := valueNode.Content[j+1]
+				switch summaryKey.Value {
+				case "max_source_tokens", "max_output_tokens":
+					if summaryValue.Kind != yamlv3.ScalarNode || summaryValue.Tag != "!!int" {
+						return fmt.Errorf("context.summary.%s must be an integer at line %d", summaryKey.Value, summaryValue.Line)
+					}
+				case "task", "prompt_version":
+					if summaryValue.Kind != yamlv3.ScalarNode || summaryValue.Tag != "!!str" {
+						return fmt.Errorf("context.summary.%s must be a string at line %d", summaryKey.Value, summaryValue.Line)
+					}
 				}
 			}
 		}
@@ -1823,6 +1876,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applySchedulerDefaults(cfg, doc, &defaults.Scheduler)
 	applyMemoryDefaults(cfg, doc, &defaults.Memory)
 	applySkillsDefaults(cfg, doc)
+	applyContextDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
 }
@@ -1975,6 +2029,43 @@ func applySkillsDefaults(cfg *Config, doc *yamlv3.Node) {
 	}
 	if cfg.Skills.QuarantineRetention == 0 && !configValuePresent(doc, "skills", "quarantine_retention") && !envValuePresent("skills.quarantine_retention") {
 		cfg.Skills.QuarantineRetention = defaults.QuarantineRetention
+	}
+}
+
+func applyContextDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Context == nil {
+		return
+	}
+	defaults := Default().Context
+	if !cfg.Context.Enabled && !configValuePresent(doc, "context", "enabled") && !envValuePresent("context.enabled") {
+		cfg.Context.Enabled = defaults.Enabled
+	}
+	if cfg.Context.RecentCompleteTurns == 0 && !configValuePresent(doc, "context", "recent_complete_turns") && !envValuePresent("context.recent_complete_turns") {
+		cfg.Context.RecentCompleteTurns = defaults.RecentCompleteTurns
+	}
+	if cfg.Context.SafetyMarginTokens == 0 && !configValuePresent(doc, "context", "safety_margin_tokens") && !envValuePresent("context.safety_margin_tokens") {
+		cfg.Context.SafetyMarginTokens = defaults.SafetyMarginTokens
+	}
+	if cfg.Context.ConservativeEstimatorRatio == 0 && !configValuePresent(doc, "context", "conservative_estimator_ratio") && !envValuePresent("context.conservative_estimator_ratio") {
+		cfg.Context.ConservativeEstimatorRatio = defaults.ConservativeEstimatorRatio
+	}
+	if cfg.Context.HighWaterRatio == 0 && !configValuePresent(doc, "context", "high_water_ratio") && !envValuePresent("context.high_water_ratio") {
+		cfg.Context.HighWaterRatio = defaults.HighWaterRatio
+	}
+	if cfg.Context.MaxToolExcerptBytes == 0 && !configValuePresent(doc, "context", "max_tool_excerpt_bytes") && !envValuePresent("context.max_tool_excerpt_bytes") {
+		cfg.Context.MaxToolExcerptBytes = defaults.MaxToolExcerptBytes
+	}
+	if cfg.Context.Summary.Task == "" && !configValuePresent(doc, "context", "summary", "task") && !envValuePresent("context.summary.task") {
+		cfg.Context.Summary.Task = defaults.Summary.Task
+	}
+	if cfg.Context.Summary.MaxSourceTokens == 0 && !configValuePresent(doc, "context", "summary", "max_source_tokens") && !envValuePresent("context.summary.max_source_tokens") {
+		cfg.Context.Summary.MaxSourceTokens = defaults.Summary.MaxSourceTokens
+	}
+	if cfg.Context.Summary.MaxOutputTokens == 0 && !configValuePresent(doc, "context", "summary", "max_output_tokens") && !envValuePresent("context.summary.max_output_tokens") {
+		cfg.Context.Summary.MaxOutputTokens = defaults.Summary.MaxOutputTokens
+	}
+	if cfg.Context.Summary.PromptVersion == "" && !configValuePresent(doc, "context", "summary", "prompt_version") && !envValuePresent("context.summary.prompt_version") {
+		cfg.Context.Summary.PromptVersion = defaults.Summary.PromptVersion
 	}
 }
 
@@ -2734,6 +2825,50 @@ func validateSkills(skillsConfig *Skills, profile capability.Profile) error {
 	}
 	if skillsConfig.QuarantineRetention <= 0 {
 		problems = append(problems, errors.New("skills.quarantine_retention must be positive"))
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateContext(contextConfig *Context, profile capability.Profile) error {
+	if contextConfig == nil {
+		if profile != capability.ProfileCore {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("context section is required for build profile %q", profile)}
+		}
+		return nil
+	}
+	var problems []error
+	if contextConfig.RecentCompleteTurns <= 0 {
+		problems = append(problems, errors.New("context.recent_complete_turns must be positive"))
+	}
+	if contextConfig.SafetyMarginTokens <= 0 {
+		problems = append(problems, errors.New("context.safety_margin_tokens must be positive"))
+	}
+	if contextConfig.ConservativeEstimatorRatio <= 0 || contextConfig.ConservativeEstimatorRatio >= 1 {
+		problems = append(problems, errors.New("context.conservative_estimator_ratio must be in (0,1)"))
+	}
+	if contextConfig.HighWaterRatio <= 0 || contextConfig.HighWaterRatio >= 1 {
+		problems = append(problems, errors.New("context.high_water_ratio must be in (0,1)"))
+	}
+	if contextConfig.ConservativeEstimatorRatio > contextConfig.HighWaterRatio {
+		problems = append(problems, errors.New("context.conservative_estimator_ratio must not exceed context.high_water_ratio"))
+	}
+	if contextConfig.MaxToolExcerptBytes <= 0 {
+		problems = append(problems, errors.New("context.max_tool_excerpt_bytes must be positive"))
+	}
+	if strings.TrimSpace(contextConfig.Summary.Task) == "" {
+		problems = append(problems, errors.New("context.summary.task must not be empty"))
+	}
+	if contextConfig.Summary.MaxSourceTokens <= 0 {
+		problems = append(problems, errors.New("context.summary.max_source_tokens must be positive"))
+	}
+	if contextConfig.Summary.MaxOutputTokens <= 0 {
+		problems = append(problems, errors.New("context.summary.max_output_tokens must be positive"))
+	}
+	if strings.TrimSpace(contextConfig.Summary.PromptVersion) == "" {
+		problems = append(problems, errors.New("context.summary.prompt_version must not be empty"))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

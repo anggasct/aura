@@ -30,6 +30,8 @@ models:
         tokenizer: anthropic
 storage:
   path: ` + dataRoot + `
+context:
+  recent_complete_turns: 5
 ` + skillsSection
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)

@@ -1012,7 +1012,7 @@ func TestLoad_MissingDependencyState(t *testing.T) {
 	}
 	options := LoadOptions{Build: build, Registry: registry}
 
-	disabledPath := writeTempConfig(t, "version: 1\ntools:\n  workspace: /tmp/aura\nskills:\n  roots: [/tmp/aura/skills]\ncapabilities:\n  enabled: []\n")
+	disabledPath := writeTempConfig(t, "version: 1\ntools:\n  workspace: /tmp/aura\nskills:\n  roots: [/tmp/aura/skills]\ncontext:\n  recent_complete_turns: 5\ncapabilities:\n  enabled: []\n")
 	result, err := LoadWithOptions(disabledPath, options)
 	if err != nil {
 		t.Fatalf("LoadWithOptions disabled missing dependency: %v", err)
@@ -1022,7 +1022,7 @@ func TestLoad_MissingDependencyState(t *testing.T) {
 		t.Fatalf("missing dependency status = %+v, %v", status, ok)
 	}
 
-	enabledPath := writeTempConfig(t, "version: 1\ntools:\n  workspace: /tmp/aura\nskills:\n  roots: [/tmp/aura/skills]\ncapabilities:\n  enabled: [sample-runtime]\n")
+	enabledPath := writeTempConfig(t, "version: 1\ntools:\n  workspace: /tmp/aura\nskills:\n  roots: [/tmp/aura/skills]\ncontext:\n  recent_complete_turns: 5\ncapabilities:\n  enabled: [sample-runtime]\n")
 	result, err = LoadWithOptions(enabledPath, options)
 	if err != nil {
 		t.Fatalf("missing dependency state must load, not fail: %v", err)
