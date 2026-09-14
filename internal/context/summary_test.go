@@ -2,12 +2,14 @@ package context
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 
 	stdcontext "context"
 )
 
 type fakeSummarizer struct {
+	mu       sync.Mutex
 	text     string
 	producer Producer
 	err      error
@@ -16,6 +18,8 @@ type fakeSummarizer struct {
 }
 
 func (f *fakeSummarizer) Summarize(ctx stdcontext.Context, req *SummarizeRequest) (*SummarizeResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	f.last = req
 	if f.err != nil {
@@ -27,7 +31,14 @@ func (f *fakeSummarizer) Summarize(ctx stdcontext.Context, req *SummarizeRequest
 	return &SummarizeResult{Text: f.text, Producer: f.producer}, nil
 }
 
+func (f *fakeSummarizer) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
 type fakeSummaryStore struct {
+	mu      sync.Mutex
 	records map[string]SummaryRecord
 	upserts int
 }
@@ -37,6 +48,8 @@ func newFakeSummaryStore() *fakeSummaryStore {
 }
 
 func (f *fakeSummaryStore) ListSummaries(_ stdcontext.Context, sessionID string) ([]SummaryRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var out []SummaryRecord
 	for _, record := range f.records {
 		if record.SessionID == sessionID {
@@ -50,6 +63,8 @@ func (f *fakeSummaryStore) UpsertSummary(_ stdcontext.Context, record *SummaryRe
 	if record == nil {
 		return Errorf(ErrorCodeInvalidArgument, "record must not be nil")
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.records[record.ID] = *record
 	f.upserts++
 	return nil
@@ -154,8 +169,11 @@ func TestResolveRangeProducesValidatedSummary(t *testing.T) {
 	if summary.SourceDigest == "" || summary.GeneratedAt.IsZero() {
 		t.Errorf("summary = %+v", summary)
 	}
-	if summarizer.calls != 1 || store.upserts != 1 {
-		t.Errorf("calls=%d upserts=%d", summarizer.calls, store.upserts)
+	if summarizer.callCount() != 1 || store.upserts != 1 {
+		t.Errorf("calls=%d upserts=%d", summarizer.callCount(), store.upserts)
+	}
+	if stored := store.records[summary.ID]; stored.TurnID != "t1" {
+		t.Errorf("anchor turn = %q", stored.TurnID)
 	}
 	if summarizer.last.Task != "compression" || len(summarizer.last.Sources) != 2 || summarizer.last.MaxOutputTokens != 2048 {
 		t.Errorf("request = %+v", summarizer.last)
@@ -180,8 +198,8 @@ func TestResolveRangeProducesValidatedSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveRange: %v", err)
 	}
-	if summarizer.calls != 1 || again.ID != summary.ID {
-		t.Errorf("cache miss: calls=%d", summarizer.calls)
+	if summarizer.callCount() != 1 || again.ID != summary.ID {
+		t.Errorf("cache miss: calls=%d", summarizer.callCount())
 	}
 }
 
@@ -213,8 +231,8 @@ func TestResolveRangeRebuildsOnSourceChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
-	if summarizer.calls != 2 {
-		t.Errorf("stale source did not rebuild: calls=%d", summarizer.calls)
+	if summarizer.callCount() != 2 {
+		t.Errorf("stale source did not rebuild: calls=%d", summarizer.callCount())
 	}
 	if again.SourceDigest == "" {
 		t.Errorf("summary = %+v", again)
@@ -247,15 +265,15 @@ func TestResolveRangeSkipsCorruptCache(t *testing.T) {
 	summarizer := &fakeSummarizer{text: validSummaryJSON(), producer: testProducer()}
 	store := newFakeSummaryStore()
 	groups := summaryGroups()
-	digest := sourceDigest(rangeEvents(summaryRange(), groups))
-	corruptID := summaryID("sess-1", 1, 2, digest)
+	digest := sourceDigest(RangeEvents(summaryRange(), groups))
+	corruptID := summaryID("sess-1", 1, 2, digest, testProducer(), "v1", "digest")
 	store.records[corruptID] = SummaryRecord{ID: corruptID, SessionID: "sess-1", StartSequence: 1, EndSequence: 2, Payload: []byte("{broken")}
 	service := testService(t, summarizer, store)
 	if _, err := service.ResolveRange(stdcontext.Background(), "sess-1", summaryRange(), groups); err != nil {
 		t.Fatalf("ResolveRange: %v", err)
 	}
-	if summarizer.calls != 1 {
-		t.Errorf("corrupt cache blocked production: calls=%d", summarizer.calls)
+	if summarizer.callCount() != 1 {
+		t.Errorf("corrupt cache blocked production: calls=%d", summarizer.callCount())
 	}
 }
 

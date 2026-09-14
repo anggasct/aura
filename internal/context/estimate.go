@@ -2,6 +2,7 @@ package context
 
 import (
 	"math"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -19,6 +20,13 @@ type TokenCounter interface {
 }
 
 type ConservativeEstimator struct{}
+
+func CounterForTokenizer(tokenizer string, pinned TokenCounter) TokenCounter {
+	if strings.TrimSpace(tokenizer) != "" && pinned != nil {
+		return pinned
+	}
+	return ConservativeEstimator{}
+}
 
 func (ConservativeEstimator) Name() string { return "utf8-conservative-v1" }
 
