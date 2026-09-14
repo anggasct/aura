@@ -13,6 +13,7 @@ const (
 )
 
 type Event struct {
+	ID            string
 	Sequence      uint64
 	TurnID        string
 	InvocationID  string
@@ -63,7 +64,8 @@ func GroupEvents(events []Event, counter TokenCounter, currentInvocationID strin
 	}
 	index := make(map[string]int)
 	var groups []Group
-	for _, event := range events {
+	for i := range events {
+		event := &events[i]
 		kind, id := GroupTurn, event.TurnID
 		switch {
 		case currentInvocationID != "" && event.InvocationID == currentInvocationID:
@@ -79,20 +81,21 @@ func GroupEvents(events []Event, counter TokenCounter, currentInvocationID strin
 			groups = append(groups, Group{Kind: kind, ID: id, Protected: kind == GroupCurrent})
 		}
 		group := &groups[at]
-		group.Events = append(group.Events, event)
+		group.Events = append(group.Events, *event)
 	}
 	ordered := make([]Group, 0, len(groups))
-	for _, group := range groups {
+	for i := range groups {
+		group := &groups[i]
 		texts := make([]string, 0, len(group.Events))
-		for _, event := range group.Events {
-			texts = append(texts, event.Text)
+		for j := range group.Events {
+			texts = append(texts, group.Events[j].Text)
 		}
 		tokens, err := sumCounts(counter, texts)
 		if err != nil {
 			return nil, err
 		}
 		group.Tokens = tokens
-		ordered = append(ordered, group)
+		ordered = append(ordered, *group)
 	}
 	return ordered, nil
 }

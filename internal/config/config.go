@@ -619,7 +619,7 @@ func Default() Config {
 			HighWaterRatio:             0.90,
 			MaxToolExcerptBytes:        2048,
 			Summary: ContextSummary{
-				Task:            "compress",
+				Task:            "compression",
 				MaxSourceTokens: 32768,
 				MaxOutputTokens: 2048,
 				PromptVersion:   "v1",
