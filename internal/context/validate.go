@@ -8,6 +8,10 @@ import (
 
 var summaryKeys = []string{"goals", "decisions", "constraints", "open_work", "facts"}
 
+func OutputByteBound(maxOutputTokens int) int {
+	return maxOutputTokens * outputBytesPerToken
+}
+
 func ValidateContent(text string, maxOutputTokens int) (*SummaryContent, error) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -49,7 +53,7 @@ func ValidateContent(text string, maxOutputTokens int) (*SummaryContent, error) 
 	if entries == 0 {
 		return nil, Errorf(ErrorCodeSummaryInvalid, "summary carries no entries")
 	}
-	if len(trimmed) > maxOutputTokens*outputBytesPerToken {
+	if len(trimmed) > OutputByteBound(maxOutputTokens) {
 		return nil, Errorf(ErrorCodeSummaryInvalid, "summary exceeds the output bound")
 	}
 	return content, nil

@@ -80,6 +80,7 @@ type SummaryRecord struct {
 	SessionID     string
 	StartSequence uint64
 	EndSequence   uint64
+	TurnID        string
 	Payload       []byte
 	CreatedAt     time.Time
 }
@@ -100,6 +101,7 @@ type Service struct {
 	maxOutputTokens int
 	counter         TokenCounter
 	logger          *slog.Logger
+	observer        Observer
 }
 
 func NewService(summarizer Summarizer, store SummaryStore, task, promptVersion string, maxSourceTokens, maxOutputTokens int, counter TokenCounter, logger *slog.Logger) (*Service, error) {
@@ -140,6 +142,11 @@ func NewService(summarizer Summarizer, store SummaryStore, task, promptVersion s
 	}, nil
 }
 
+func (s *Service) WithObserver(observer Observer) *Service {
+	s.observer = observer
+	return s
+}
+
 func PromptText(promptVersion string, maxOutputTokens int) (string, error) {
 	if promptVersion != summaryPromptV1 {
 		return "", Errorf(ErrorCodeSummaryStale, "unsupported summary prompt version")
@@ -161,7 +168,7 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, Errorf(ErrorCodeInvalidArgument, "session must not be empty")
 	}
-	events := rangeEvents(target, groups)
+	events := RangeEvents(target, groups)
 	if len(events) == 0 {
 		return nil, Errorf(ErrorCodeInvalidArgument, "summary range matches no events")
 	}
@@ -179,8 +186,22 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 	}
 	if found {
 		s.logger.DebugContext(ctx, "context summary cache hit", "component", "context")
+		s.observe(ctx, &Observation{
+			Outcome:       OutcomeCacheHit,
+			SessionID:     sessionID,
+			StartSequence: target.StartSequence,
+			EndSequence:   target.EndSequence,
+			EventCount:    len(events),
+			SourceTokens:  sourceTokens,
+			SummaryTokens: cached.SummaryTokens,
+			Accounting:    cached.Accounting,
+			CacheHit:      true,
+			ModelName:     cached.Producer.Model,
+			PromptVersion: cached.PromptVersion,
+		})
 		return cached, nil
 	}
+	started := time.Now()
 	result, err := s.summarizer.Summarize(ctx, &SummarizeRequest{
 		Task:            s.task,
 		Prompt:          s.prompt,
@@ -199,6 +220,16 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 	content, err := ValidateContent(result.Text, s.maxOutputTokens)
 	if err != nil {
 		s.logger.WarnContext(ctx, "context summary rejected", "component", "context")
+		s.observe(ctx, &Observation{
+			Outcome:       OutcomeRejected,
+			SessionID:     sessionID,
+			StartSequence: target.StartSequence,
+			EndSequence:   target.EndSequence,
+			EventCount:    len(events),
+			SourceTokens:  sourceTokens,
+			PromptVersion: s.promptVersion,
+			Duration:      time.Since(started),
+		})
 		return nil, err
 	}
 	summaryTokens, err := countedContent(s.counter, content)
@@ -207,7 +238,7 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 	}
 	now := time.Now().UTC()
 	summary := &Summary{
-		ID:            summaryID(sessionID, target.StartSequence, target.EndSequence, digest),
+		ID:            summaryID(sessionID, target.StartSequence, target.EndSequence, digest, result.Producer, s.promptVersion, s.promptDigest),
 		SessionID:     sessionID,
 		StartSequence: target.StartSequence,
 		EndSequence:   target.EndSequence,
@@ -232,12 +263,26 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 		SessionID:     sessionID,
 		StartSequence: summary.StartSequence,
 		EndSequence:   summary.EndSequence,
+		TurnID:        events[len(events)-1].TurnID,
 		Payload:       payload,
 		CreatedAt:     now,
 	}); err != nil {
 		return nil, err
 	}
 	s.logger.InfoContext(ctx, "context summary produced", "component", "context")
+	s.observe(ctx, &Observation{
+		Outcome:       OutcomeProduced,
+		SessionID:     sessionID,
+		StartSequence: summary.StartSequence,
+		EndSequence:   summary.EndSequence,
+		EventCount:    len(events),
+		SourceTokens:  sourceTokens,
+		SummaryTokens: summaryTokens,
+		Accounting:    summary.Accounting,
+		ModelName:     summary.Producer.Model,
+		PromptVersion: summary.PromptVersion,
+		Duration:      time.Since(started),
+	})
 	return summary, nil
 }
 
@@ -272,7 +317,7 @@ func (s *Service) cached(ctx stdcontext.Context, sessionID string, target Summar
 	return nil, false, nil
 }
 
-func rangeEvents(target SummaryRange, groups []Group) []Event {
+func RangeEvents(target SummaryRange, groups []Group) []Event {
 	wanted := make(map[string]bool, len(target.Groups))
 	for _, ref := range target.Groups {
 		wanted[string(ref.Kind)+"\x00"+ref.ID] = true
@@ -330,8 +375,8 @@ func sourceDigest(events []Event) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func summaryID(sessionID string, start, end uint64, digest string) string {
-	raw := sessionID + "\x00" + strconv.FormatUint(start, 10) + "\x00" + strconv.FormatUint(end, 10) + "\x00" + digest
+func summaryID(sessionID string, start, end uint64, digest string, producer Producer, promptVersion, promptDigest string) string {
+	raw := strings.Join([]string{sessionID, strconv.FormatUint(start, 10), strconv.FormatUint(end, 10), digest, producer.Provider, producer.Model, producer.ModelVersion, promptVersion, promptDigest}, "\x00")
 	sum := sha256.Sum256([]byte(raw))
 	return summaryIDPrefix + hex.EncodeToString(sum[:])[:16]
 }
