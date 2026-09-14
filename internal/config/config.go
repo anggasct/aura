@@ -39,6 +39,7 @@ type Config struct {
 	Scheduler    Scheduler             `koanf:"scheduler" yaml:"scheduler"`
 	Memory       Memory                `koanf:"memory" yaml:"memory"`
 	Skills       *Skills               `koanf:"skills" yaml:"skills,omitempty"`
+	Context      *Context              `koanf:"context" yaml:"context,omitempty"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
 
@@ -105,6 +106,23 @@ type Skills struct {
 	MaxInstructionTokens int      `koanf:"max_instruction_tokens" yaml:"max_instruction_tokens"`
 	MaxResourceBytes     int64    `koanf:"max_resource_bytes" yaml:"max_resource_bytes"`
 	QuarantineRetention  Duration `koanf:"quarantine_retention" yaml:"quarantine_retention"`
+}
+
+type Context struct {
+	Enabled                    bool           `koanf:"enabled" yaml:"enabled"`
+	RecentCompleteTurns        int            `koanf:"recent_complete_turns" yaml:"recent_complete_turns"`
+	SafetyMarginTokens         int            `koanf:"safety_margin_tokens" yaml:"safety_margin_tokens"`
+	ConservativeEstimatorRatio float64        `koanf:"conservative_estimator_ratio" yaml:"conservative_estimator_ratio"`
+	HighWaterRatio             float64        `koanf:"high_water_ratio" yaml:"high_water_ratio"`
+	MaxToolExcerptBytes        int            `koanf:"max_tool_excerpt_bytes" yaml:"max_tool_excerpt_bytes"`
+	Summary                    ContextSummary `koanf:"summary" yaml:"summary"`
+}
+
+type ContextSummary struct {
+	Task            string `koanf:"task" yaml:"task"`
+	MaxSourceTokens int    `koanf:"max_source_tokens" yaml:"max_source_tokens"`
+	MaxOutputTokens int    `koanf:"max_output_tokens" yaml:"max_output_tokens"`
+	PromptVersion   string `koanf:"prompt_version" yaml:"prompt_version"`
 }
 
 type Discord struct {
@@ -592,6 +610,20 @@ func Default() Config {
 			MaxInstructionTokens: 5000,
 			MaxResourceBytes:     8388608,
 			QuarantineRetention:  Duration(720 * time.Hour),
+		},
+		Context: &Context{
+			Enabled:                    true,
+			RecentCompleteTurns:        10,
+			SafetyMarginTokens:         1024,
+			ConservativeEstimatorRatio: 0.80,
+			HighWaterRatio:             0.90,
+			MaxToolExcerptBytes:        2048,
+			Summary: ContextSummary{
+				Task:            "compress",
+				MaxSourceTokens: 32768,
+				MaxOutputTokens: 2048,
+				PromptVersion:   "v1",
+			},
 		},
 	}
 }

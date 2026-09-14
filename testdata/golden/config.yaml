@@ -131,6 +131,18 @@ skills:
   max_instruction_tokens: 5000
   max_resource_bytes: 8388608
   quarantine_retention: 720h0m0s
+context:
+  enabled: true
+  recent_complete_turns: 10
+  safety_margin_tokens: 1024
+  conservative_estimator_ratio: 0.8
+  high_water_ratio: 0.9
+  max_tool_excerpt_bytes: 2048
+  summary:
+    task: compress
+    max_source_tokens: 32768
+    max_output_tokens: 2048
+    prompt_version: v1
 channels:
   discord:
     enabled: false

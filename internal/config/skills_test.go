@@ -12,7 +12,7 @@ func writeSkillsConfig(t *testing.T, content string) string {
 }
 
 func TestLoad_SkillsDefaults(t *testing.T) {
-	path := writeSkillsConfig(t, "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\n")
+	path := writeSkillsConfig(t, "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n  recent_complete_turns: 5\n")
 	result, err := LoadWithOptions(path, execLinuxOptions(t))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -44,6 +44,8 @@ skills:
   max_instruction_tokens: 1000
   max_resource_bytes: 1024
   quarantine_retention: 48h
+context:
+  recent_complete_turns: 5
 `)
 	result, err := LoadWithOptions(path, execLinuxOptions(t))
 	if err != nil {
@@ -57,7 +59,7 @@ skills:
 
 func TestLoad_SkillsEnvOverride(t *testing.T) {
 	t.Setenv("AURA_SKILLS_MAX_INDEXED_SKILLS", "32")
-	path := writeSkillsConfig(t, "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\n")
+	path := writeSkillsConfig(t, "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n  recent_complete_turns: 5\n")
 	result, err := LoadWithOptions(path, execLinuxOptions(t))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
