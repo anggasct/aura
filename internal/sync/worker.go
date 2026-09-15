@@ -35,9 +35,10 @@ type WorkerConfig struct {
 }
 
 type Worker struct {
-	config WorkerConfig
-	state  *StateStore
-	pass   PassFunc
+	config  WorkerConfig
+	state   *StateStore
+	pass    PassFunc
+	metrics *Metrics
 
 	mu       sync.Mutex
 	lease    bool
@@ -73,6 +74,7 @@ func NewWorker(config WorkerConfig, state *StateStore, pass PassFunc) (*Worker, 
 		config:   config,
 		state:    state,
 		pass:     pass,
+		metrics:  &Metrics{},
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
 		notified: make(chan struct{}, 1),
@@ -104,11 +106,17 @@ func (w *Worker) Start(ctx context.Context) context.Context {
 	if started {
 		return runCtx
 	}
-	go w.loop(runCtx)
+	go w.loop(ctx)
 	return runCtx
 }
 
 func (w *Worker) Stop() {
+	w.mu.Lock()
+	started := w.started
+	w.mu.Unlock()
+	if !started {
+		return
+	}
 	select {
 	case <-w.stop:
 	default:
@@ -129,6 +137,14 @@ func (w *Worker) loop(ctx context.Context) {
 	w.mu.Lock()
 	w.timer = time.NewTimer(w.jitteredIntervalLocked())
 	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		if w.timer != nil {
+			w.timer.Stop()
+			w.timer = nil
+		}
+		w.mu.Unlock()
+	}()
 	for {
 		w.mu.Lock()
 		timer := w.timer
@@ -147,7 +163,7 @@ func (w *Worker) loop(ctx context.Context) {
 			w.reschedule()
 			w.drainNotified(ctx)
 		case <-timer.C:
-			w.runPass(ctx)
+			w.runPass(context.WithoutCancel(ctx))
 			w.reschedule()
 		}
 	}
@@ -166,7 +182,7 @@ func (w *Worker) drainNotified(ctx context.Context) {
 	for {
 		select {
 		case <-w.notified:
-			w.runPass(ctx)
+			w.runPass(context.WithoutCancel(ctx))
 			w.reschedule()
 		default:
 			return
@@ -217,11 +233,6 @@ func (w *Worker) runPass(parent context.Context) {
 		defer func() {
 			w.mu.Lock()
 			w.lease = false
-			pending := w.queue
-			w.queue = 0
-			if w.backoff > 0 && pending == 0 {
-				w.backoff = 0
-			}
 			w.mu.Unlock()
 		}()
 		ctx, cancel := context.WithTimeout(parent, maxPassDuration)
@@ -242,23 +253,63 @@ func (w *Worker) runPass(parent context.Context) {
 	}
 }
 
+//nolint:contextcheck // detached pass context outlives parent cancel so shutdown does not abort a bounded pass mid-write.
+func (w *Worker) RunOnce(ctx context.Context) PassOutcome {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	detached := context.WithoutCancel(ctx)
+	passCtx, cancel := context.WithTimeout(detached, maxPassDuration)
+	defer cancel()
+	w.state.MarkRunning()
+	start := w.config.Clock()
+	outcome := w.pass(passCtx)
+	elapsed := w.config.Clock().Sub(start)
+	w.recordOutcome(passCtx, &outcome, elapsed)
+	return outcome
+}
+
+func (w *Worker) MetricsSnapshot() Metrics {
+	if w.metrics == nil {
+		return Metrics{}
+	}
+	return w.metrics.Snapshot()
+}
+
+func (w *Worker) Backoff() time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.backoff
+}
+
 func (w *Worker) recordOutcome(ctx context.Context, outcome *PassOutcome, elapsed time.Duration) {
 	now := w.config.Clock()
+	normalized := normalizeSyncResult(outcome.Result)
 	switch {
 	case outcome.State == WorkerUnknown || outcome.UnknownID != "":
 		w.state.MarkUnknown(outcome.UnknownID, now)
 		w.noteRetryable(outcome.Retryable)
 	case outcome.Conflict || outcome.State == WorkerConflict:
 		w.state.MarkConflict(outcome.LocalRef, outcome.RemoteRef, now)
+		w.noteRetryable(outcome.Retryable)
 	case outcome.State == WorkerDisabled:
 		w.state.MarkDisabled()
+		w.noteRetryable(false)
 	default:
-		w.state.MarkIdle(outcome.LocalRef, outcome.RemoteRef, now, elapsed, outcome.Result)
+		w.state.MarkIdle(outcome.LocalRef, outcome.RemoteRef, now, elapsed, normalized)
 		w.noteRetryable(outcome.Retryable)
+	}
+	if w.metrics != nil {
+		w.metrics.Record(Observation{
+			Result:   normalized,
+			Conflict: outcome.Conflict || outcome.State == WorkerConflict,
+			Unknown:  outcome.State == WorkerUnknown || outcome.UnknownID != "",
+			Latency:  elapsed,
+		})
 	}
 	w.config.Logger.InfoContext(ctx, "sync pass completed",
 		"component", "sync",
-		"result", outcome.Result,
+		"result", normalized,
 		"latency_ms", elapsed.Milliseconds())
 }
 

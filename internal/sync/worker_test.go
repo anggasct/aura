@@ -95,6 +95,67 @@ func TestWorkerBackoffResets(t *testing.T) {
 	}
 }
 
+func TestWorkerBackoffGrowsAcrossPasses(t *testing.T) {
+	t.Parallel()
+	worker, _ := testWorker(func(_ context.Context) PassOutcome {
+		return PassOutcome{State: WorkerUnknown, UnknownID: "intent-1", Result: string(WorkerUnknown), Retryable: true}
+	})
+	worker.runPass(context.Background())
+	first := worker.Backoff()
+	if first != baseBackoff {
+		t.Fatalf("first backoff = %v, want %v", first, baseBackoff)
+	}
+	worker.runPass(context.Background())
+	second := worker.Backoff()
+	if second != 2*baseBackoff {
+		t.Fatalf("second backoff = %v, want %v", second, 2*baseBackoff)
+	}
+	worker.mu.Lock()
+	interval := worker.jitteredIntervalLocked()
+	worker.mu.Unlock()
+	base := time.Hour
+	if interval <= base {
+		t.Fatalf("jittered interval = %v, want larger than base %v", interval, base)
+	}
+}
+
+func TestWorkerParentCancelStopsLoop(t *testing.T) {
+	t.Parallel()
+	worker, _ := testWorker(func(ctx context.Context) PassOutcome {
+		select {
+		case <-ctx.Done():
+			return PassOutcome{State: WorkerUnknown, UnknownID: "cancelled", Result: string(WorkerUnknown), Retryable: true}
+		default:
+			return PassOutcome{State: WorkerIdle, Result: string(AdvanceUpToDate)}
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = worker.Start(ctx)
+	cancel()
+	select {
+	case <-worker.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("parent cancel did not terminate loop")
+	}
+	worker.Stop()
+}
+
+func TestWorkerStopWithoutStart(t *testing.T) {
+	t.Parallel()
+	worker, _ := testWorker(func(_ context.Context) PassOutcome { return PassOutcome{} })
+	done := make(chan struct{})
+	go func() {
+		worker.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop without Start blocked")
+	}
+	worker.Stop()
+}
+
 func TestWorkerQueueBounded(t *testing.T) {
 	t.Parallel()
 	worker, _ := testWorker(func(_ context.Context) PassOutcome { return PassOutcome{} })
