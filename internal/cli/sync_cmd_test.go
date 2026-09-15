@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -98,7 +99,8 @@ func TestSyncReconcileWithoutUnknown(t *testing.T) {
 	if err == nil {
 		t.Fatal("reconcile without gate must fail")
 	}
-	enabled := writeSyncCLIConfig(t, `sync:
+	if runtime.GOOS == "linux" {
+		enabled := writeSyncCLIConfig(t, `sync:
   enabled: true
   remote: "ssh://git@example.com/owner/aura-assets.git"
   branch: "main"
@@ -110,12 +112,15 @@ func TestSyncReconcileWithoutUnknown(t *testing.T) {
   include:
     - "skills/**"
 `)
-	_, err = runSyncCommand(t, enabled, "reconcile")
-	if err == nil {
-		t.Fatal("reconcile without unknown must fail")
-	}
-	if code, ok := sync.CodeOf(err); !ok || code != sync.ErrorCodeNoUnknownState {
-		t.Fatalf("reconcile code = %v,%v want sync_no_unknown_state", code, ok)
+		_, err = runSyncCommand(t, enabled, "reconcile")
+		if err == nil {
+			t.Fatal("reconcile without unknown must fail")
+		}
+		if code, ok := sync.CodeOf(err); !ok || code != sync.ErrorCodeNoUnknownState {
+			t.Fatalf("reconcile code = %v,%v want sync_no_unknown_state", code, ok)
+		}
+	} else {
+		t.Logf("linux-only gate assertion skipped on %s", runtime.GOOS)
 	}
 }
 
@@ -173,6 +178,9 @@ sync:
 }
 
 func TestSyncRunEnabledPrintsPassResult(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("sync gate requires Linux")
+	}
 	gitBin := writeSyncExecutable(t)
 	sshBin := writeSyncExecutable(t)
 	cfg, _ := enabledSyncConfigWithBinaries(t, gitBin, sshBin, "    - \"skills/**\"\n")
@@ -201,6 +209,9 @@ func TestSyncRunEnabledPrintsPassResult(t *testing.T) {
 }
 
 func TestSyncStatusSeesDurableCheckpoint(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("sync gate requires Linux")
+	}
 	gitBin := writeSyncExecutable(t)
 	sshBin := writeSyncExecutable(t)
 	cfg, dataRoot := enabledSyncConfigWithBinaries(t, gitBin, sshBin, "    - \"skills/**\"\n")
@@ -221,6 +232,9 @@ func TestSyncStatusSeesDurableCheckpoint(t *testing.T) {
 }
 
 func TestSyncReconcileFindsDurableUnknown(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("sync gate requires Linux")
+	}
 	gitBin := writeSyncExecutable(t)
 	sshBin := writeSyncExecutable(t)
 	cfg, dataRoot := enabledSyncConfigWithBinaries(t, gitBin, sshBin, "    - \"skills/**\"\n")
