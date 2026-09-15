@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -175,7 +176,7 @@ func TestApplyPromotionMidFailureRestoresPrior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read restored: %v", err)
 	}
-	if string(raw) != string(old) {
+	if !bytes.Equal(raw, old) {
 		t.Fatalf("restored = %q, want %q", raw, old)
 	}
 }
@@ -256,7 +257,7 @@ func TestRollbackManifestRestores(t *testing.T) {
 		t.Fatalf("rollback digest = %q, want prior digest %q", rollback.Digest, wantPrior)
 	}
 	raw, err := os.ReadFile(filepath.Join(target, "config-templates", "aura.yaml"))
-	if err != nil || string(raw) != string(next) {
+	if err != nil || !bytes.Equal(raw, next) {
 		t.Fatalf("promoted = %q, want new content", raw)
 	}
 	if got := digestContent(old); got != recorded.Digest {

@@ -119,7 +119,7 @@ func TestValidateFetchNilValidatorQuarantinesSkills(t *testing.T) {
 	contents := map[string][]byte{"skills/unreviewed/evil/SKILL.md": body}
 	snapshot, findings, err := ValidateFetch("ref-abc", "main", entries, contents, []string{"skills"}, nil)
 	if err != nil {
-		return
+		t.Fatalf("ValidateFetch: %v", err)
 	}
 	if len(findings) == 0 || len(snapshot.Entries) != 0 {
 		t.Fatalf("nil validator must quarantine skills: snapshot=%+v findings=%v", snapshot, findings)

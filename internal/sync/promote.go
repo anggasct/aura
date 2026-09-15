@@ -27,8 +27,8 @@ type RollbackEntry struct {
 	Digest  string
 }
 
-func isPromotedSkill(path string) bool {
-	return strings.HasPrefix(path, "skills/")
+func isPromotedSkill(rel string) bool {
+	return strings.HasPrefix(rel, "skills/")
 }
 
 func PlanPromotion(snapshot FetchSnapshot, decision AdvanceDecision, skillReview func(path string) bool) (PromotePlan, RollbackManifest, error) {
@@ -137,7 +137,7 @@ type stagedFile struct {
 	staged string
 }
 
-func capturePrior(handle *os.Root, rel string) (RollbackEntry, []byte) {
+func capturePrior(handle *os.Root, rel string) (recorded RollbackEntry, prior []byte) {
 	record := RollbackEntry{Path: rel}
 	info, err := handle.Stat(rel)
 	if err != nil || !info.Mode().IsRegular() {
