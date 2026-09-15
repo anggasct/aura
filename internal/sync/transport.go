@@ -37,6 +37,52 @@ func parseSecretRef(raw string) (secret.Reference, error) {
 	}
 }
 
+func ValidateTransportShape(cfg *config.Sync) error {
+	if cfg == nil {
+		return errNilArgument("cfg")
+	}
+	u, err := url.Parse(cfg.Remote)
+	if err != nil {
+		return Errorf(ErrorCodeTransportUnsafe, "remote is not a valid URL")
+	}
+	if u.User != nil {
+		if u.Scheme != "ssh" {
+			return Errorf(ErrorCodeTransportUnsafe, "remote must not embed credentials")
+		}
+		if _, hasPassword := u.User.Password(); hasPassword {
+			return Errorf(ErrorCodeTransportUnsafe, "remote must not embed a password")
+		}
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return Errorf(ErrorCodeTransportUnsafe, "remote must not carry query or fragment")
+	}
+	if _, err := parseSecretRef(cfg.TransportSecretRef); err != nil {
+		return err
+	}
+	if _, err := parseSecretRef(cfg.KnownHostsRef); err != nil {
+		return err
+	}
+	switch u.Scheme {
+	case "https":
+		if err := egress.ValidateDestinationShape("https://" + u.Host); err != nil {
+			return Errorf(ErrorCodeEgressDenied, "remote destination is not permitted")
+		}
+	case "ssh":
+		if u.Port() != "" {
+			if err := egress.ValidateDestinationShape("https://" + u.Host); err != nil {
+				return Errorf(ErrorCodeEgressDenied, "remote destination is not permitted")
+			}
+		} else {
+			if err := egress.ValidateDestinationShape("https://" + u.Hostname()); err != nil {
+				return Errorf(ErrorCodeEgressDenied, "remote destination is not permitted")
+			}
+		}
+	default:
+		return Errorf(ErrorCodeTransportUnsafe, "remote scheme must be ssh or https")
+	}
+	return nil
+}
+
 func ResolveTransport(ctx context.Context, cfg *config.Sync, resolver egress.Resolver) (Transport, error) {
 	if ctx == nil {
 		return Transport{}, errNilArgument("ctx")

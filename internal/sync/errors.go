@@ -10,6 +10,8 @@ type ErrorCode string
 const (
 	ErrorCodeInvalidArgument   ErrorCode = "invalid_argument"
 	ErrorCodeGateRefused       ErrorCode = "sync_unavailable"
+	ErrorCodeNotConfigured     ErrorCode = "sync_not_configured"
+	ErrorCodeNoUnknownState    ErrorCode = "sync_no_unknown_state"
 	ErrorCodeManifestInvalid   ErrorCode = "sync_manifest_invalid"
 	ErrorCodeTransportUnsafe   ErrorCode = "sync_transport_unsafe"
 	ErrorCodeCredentialInvalid ErrorCode = "sync_secret_invalid"

@@ -361,6 +361,12 @@ linters:
         text: G404
         path: internal/channel/discord/gateway\.go
 
+      # Same retry-jitter rationale: sync interval jitter only.
+      - linters:
+          - gosec
+        text: G404
+        path: internal/sync/worker\.go
+
       # The signal-derived context does reach every command, but it travels
       # through cobra's command tree (ExecuteContext then cmd.Context()) and
       # the analyser cannot trace it across that indirection.

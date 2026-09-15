@@ -25,6 +25,16 @@ func CheckGate(_ context.Context, cfg *config.Sync) GateResult {
 	if runtime.GOOS != "linux" {
 		return GateResult{Reason: "sync requires Linux"}
 	}
+	if profile := CheckProfile(cfg); !profile.Available {
+		return GateResult{Reason: profile.Reason}
+	}
+	return GateResult{Available: true}
+}
+
+func CheckProfile(cfg *config.Sync) GateResult {
+	if cfg == nil {
+		return GateResult{Reason: "sync section is not configured"}
+	}
 	for _, binary := range []struct {
 		name  string
 		value string
