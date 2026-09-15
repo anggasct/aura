@@ -97,6 +97,7 @@ func ExportRoots(ctx context.Context, source Source, roots map[string]string, in
 	}
 	snapshot := Export{Roots: ordered}
 	var total int64
+	var fileCount int
 	for _, root := range ordered {
 		dir, ok := roots[root]
 		if !ok || strings.TrimSpace(dir) == "" {
@@ -105,7 +106,7 @@ func ExportRoots(ctx context.Context, source Source, roots map[string]string, in
 		if err := ctx.Err(); err != nil {
 			return Export{}, err
 		}
-		entries, err := collectRoot(source, root, dir, ordered, &total)
+		entries, err := collectRoot(source, root, dir, ordered, &total, &fileCount)
 		if err != nil {
 			return Export{}, err
 		}
@@ -117,7 +118,7 @@ func ExportRoots(ctx context.Context, source Source, roots map[string]string, in
 	return snapshot, nil
 }
 
-func collectRoot(source Source, root, dir string, ordered []string, total *int64) ([]ExportEntry, error) {
+func collectRoot(source Source, root, dir string, ordered []string, total *int64, fileCount *int) ([]ExportEntry, error) {
 	var entries []ExportEntry
 	queue := []string{"."}
 	for len(queue) > 0 {
@@ -156,7 +157,10 @@ func collectRoot(source Source, root, dir string, ordered []string, total *int64
 			if err := FilterExportable(ordered, exportRel, info.Size()); err != nil {
 				return nil, err
 			}
-			digest, err := digestFile(source, dir, rel, info.Size())
+			if *fileCount >= maxExportFiles {
+				return nil, Errorf(ErrorCodePathDenied, "export exceeds the file bound")
+			}
+			digest, err := digestFile(source, dir, rel, info)
 			if err != nil {
 				return nil, err
 			}
@@ -165,15 +169,14 @@ func collectRoot(source Source, root, dir string, ordered []string, total *int64
 				return nil, Errorf(ErrorCodePathDenied, "export exceeds the total bound")
 			}
 			entries = append(entries, ExportEntry{Path: exportRel, Size: info.Size(), Digest: digest})
-			if len(entries) > maxExportFiles {
-				return nil, Errorf(ErrorCodePathDenied, "export exceeds the file bound")
-			}
+			*fileCount++
 		}
 	}
 	return entries, nil
 }
 
-func digestFile(source Source, dir, rel string, size int64) (string, error) {
+func digestFile(source Source, dir, rel string, expected fs.FileInfo) (string, error) {
+	size := expected.Size()
 	if size < 0 || size > maxManifestBytes {
 		return "", Errorf(ErrorCodePathDenied, "entry exceeds the export bound")
 	}
@@ -182,11 +185,31 @@ func digestFile(source Source, dir, rel string, size int64) (string, error) {
 		return "", Errorf(ErrorCodePathDenied, "entry is not readable")
 	}
 	defer func() { _ = file.Close() }()
+	opened, err := file.Stat()
+	if err != nil {
+		return "", Errorf(ErrorCodePathDenied, "entry is not readable")
+	}
+	if !opened.Mode().IsRegular() {
+		return "", Errorf(ErrorCodePathDenied, "entry is not exportable")
+	}
+	if opened.Size() != size || !opened.ModTime().Equal(expected.ModTime()) {
+		return "", Errorf(ErrorCodePathDenied, "entry changed during export")
+	}
 	raw, err := io.ReadAll(io.LimitReader(file, size+1))
 	if err != nil {
 		return "", Errorf(ErrorCodePathDenied, "entry is not readable")
 	}
 	if int64(len(raw)) != size {
+		return "", Errorf(ErrorCodePathDenied, "entry changed during export")
+	}
+	verified, err := file.Stat()
+	if err != nil {
+		return "", Errorf(ErrorCodePathDenied, "entry is not readable")
+	}
+	if !verified.Mode().IsRegular() {
+		return "", Errorf(ErrorCodePathDenied, "entry is not exportable")
+	}
+	if verified.Size() != size || !verified.ModTime().Equal(expected.ModTime()) {
 		return "", Errorf(ErrorCodePathDenied, "entry changed during export")
 	}
 	sum := sha256.Sum256(normalizeContent(raw))

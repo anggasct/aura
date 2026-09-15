@@ -16,9 +16,10 @@ const (
 )
 
 type PushRequest struct {
-	Remote string `json:"remote"`
-	Branch string `json:"branch"`
-	Digest string `json:"digest"`
+	Remote      string `json:"remote"`
+	Branch      string `json:"branch"`
+	Digest      string `json:"digest"`
+	IntendedRef string `json:"intended_ref,omitempty"`
 }
 
 type PushReceipt struct {
@@ -33,8 +34,10 @@ type Runner interface {
 	Reconcile(ctx context.Context, id string, provider effect.Provider, reconciler effect.Reconciler) (*effect.Intent, error)
 }
 
+type ObserveFunc func(ctx context.Context, remote, branch string) (string, error)
+
 type PushProviderAdapter struct {
-	Observe func(ctx context.Context, remote, branch string) (string, error)
+	Observe ObserveFunc
 }
 
 func (p *PushProviderAdapter) SupportsIdempotency() bool {
@@ -52,6 +55,9 @@ func (p *PushProviderAdapter) Invoke(ctx context.Context, inv *effect.Invocation
 	if strings.TrimSpace(request.Remote) == "" || strings.TrimSpace(request.Branch) == "" || strings.TrimSpace(request.Digest) == "" {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "push request is incomplete")
 	}
+	if strings.TrimSpace(request.IntendedRef) == "" {
+		return effect.Outcome{Ambiguous: true}, nil
+	}
 	if p.Observe == nil {
 		return effect.Outcome{Ambiguous: true}, nil
 	}
@@ -59,7 +65,7 @@ func (p *PushProviderAdapter) Invoke(ctx context.Context, inv *effect.Invocation
 	if err != nil {
 		return effect.Outcome{}, err
 	}
-	if ref == "" {
+	if ref == "" || ref != request.IntendedRef {
 		return effect.Outcome{Ambiguous: true}, nil
 	}
 	receipt, err := json.Marshal(PushReceipt{Remote: request.Remote, Branch: request.Branch, Digest: request.Digest, Ref: ref})
@@ -70,7 +76,7 @@ func (p *PushProviderAdapter) Invoke(ctx context.Context, inv *effect.Invocation
 }
 
 type PushReconciler struct {
-	Observe func(ctx context.Context, remote, branch string) (string, error)
+	Observe ObserveFunc
 }
 
 func (r *PushReconciler) Reconcile(ctx context.Context, intent *effect.Intent) (effect.Evidence, error) {
@@ -81,6 +87,9 @@ func (r *PushReconciler) Reconcile(ctx context.Context, intent *effect.Intent) (
 	if err := json.Unmarshal(intent.RequestJSON, &request); err != nil {
 		return effect.Evidence{}, Errorf(ErrorCodeInvalidArgument, "push request is not decodable")
 	}
+	if strings.TrimSpace(request.IntendedRef) == "" {
+		return effect.Evidence{}, nil
+	}
 	if r.Observe == nil {
 		return effect.Evidence{}, nil
 	}
@@ -88,7 +97,7 @@ func (r *PushReconciler) Reconcile(ctx context.Context, intent *effect.Intent) (
 	if err != nil {
 		return effect.Evidence{}, err
 	}
-	if ref == "" {
+	if ref == "" || ref != request.IntendedRef {
 		return effect.Evidence{}, nil
 	}
 	var prior PushReceipt
@@ -104,20 +113,21 @@ func (r *PushReconciler) Reconcile(ctx context.Context, intent *effect.Intent) (
 	return effect.Evidence{Definitive: true, Succeeded: true, Receipt: receipt}, nil
 }
 
-func PushIntentsKey(digest, branch string) string {
-	sum := sha256.Sum256([]byte("sync-push/v1\n" + digest + "\x00" + branch))
-	return "sync-push:" + branch + ":" + hex.EncodeToString(sum[:])[:16]
+func PushIntentsKey(remote, digest, branch string) string {
+	normalized := strings.TrimSpace(remote)
+	sum := sha256.Sum256([]byte("sync-push/v1\n" + normalized + "\x00" + digest + "\x00" + branch))
+	return "sync-push:" + branch + ":" + hex.EncodeToString(sum[:])[:32]
 }
 
-func PushRequestJSON(remote, branch, digest string) ([]byte, error) {
-	raw, err := json.Marshal(PushRequest{Remote: remote, Branch: branch, Digest: digest})
+func PushRequestJSON(remote, branch, digest, intendedRef string) ([]byte, error) {
+	raw, err := json.Marshal(PushRequest{Remote: remote, Branch: branch, Digest: digest, IntendedRef: intendedRef})
 	if err != nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "push request is not serializable")
 	}
 	return raw, nil
 }
 
-func StartPush(ctx context.Context, runner Runner, sessionID, remote, branch, digest, turnID, toolCallID string, sequence uint64) (*effect.Intent, error) {
+func StartPush(ctx context.Context, runner Runner, sessionID, remote, branch, digest, intendedRef, turnID, toolCallID string, sequence uint64, observe ObserveFunc) (*effect.Intent, error) {
 	if ctx == nil {
 		return nil, errNilArgument("ctx")
 	}
@@ -127,7 +137,7 @@ func StartPush(ctx context.Context, runner Runner, sessionID, remote, branch, di
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(remote) == "" || strings.TrimSpace(branch) == "" || strings.TrimSpace(digest) == "" {
 		return nil, Errorf(ErrorCodeInvalidArgument, "push identity must not be empty")
 	}
-	request, err := PushRequestJSON(remote, branch, digest)
+	request, err := PushRequestJSON(remote, branch, digest, intendedRef)
 	if err != nil {
 		return nil, err
 	}
@@ -135,17 +145,17 @@ func StartPush(ctx context.Context, runner Runner, sessionID, remote, branch, di
 		SessionID:      sessionID,
 		TurnID:         turnID,
 		ToolCallID:     toolCallID,
-		IdempotencyKey: PushIntentsKey(digest, branch),
+		IdempotencyKey: PushIntentsKey(remote, digest, branch),
 		Provider:       PushProvider,
 		Operation:      PushOperation,
 		Classification: effect.ClassificationIdempotent,
 		Request:        request,
 		EventKind:      effect.EventKindToolRequested,
 		EventSequence:  sequence,
-	}, &PushProviderAdapter{})
+	}, &PushProviderAdapter{Observe: observe})
 }
 
-func ReconcilePush(ctx context.Context, runner Runner, id, remote, branch string) (*effect.Intent, error) {
+func ReconcilePush(ctx context.Context, runner Runner, id string, observe ObserveFunc) (*effect.Intent, error) {
 	if ctx == nil {
 		return nil, errNilArgument("ctx")
 	}
@@ -155,7 +165,5 @@ func ReconcilePush(ctx context.Context, runner Runner, id, remote, branch string
 	if strings.TrimSpace(id) == "" {
 		return nil, Errorf(ErrorCodeInvalidArgument, "intent id must not be empty")
 	}
-	_ = remote
-	_ = branch
-	return runner.Reconcile(ctx, id, &PushProviderAdapter{}, &PushReconciler{})
+	return runner.Reconcile(ctx, id, &PushProviderAdapter{Observe: observe}, &PushReconciler{Observe: observe})
 }

@@ -14,8 +14,10 @@ func errTestNotFound() error {
 }
 
 type memFile struct {
-	name string
-	data []byte
+	name    string
+	data    []byte
+	size    int64
+	modTime time.Time
 }
 
 func (f *memFile) Stat() (fs.FileInfo, error) { return f, nil }
@@ -29,9 +31,9 @@ func (f *memFile) Read(b []byte) (int, error) {
 }
 func (f *memFile) Close() error       { return nil }
 func (f *memFile) Name() string       { return f.name }
-func (f *memFile) Size() int64        { return int64(len(f.data)) }
+func (f *memFile) Size() int64        { return f.size }
 func (f *memFile) Mode() fs.FileMode  { return 0o644 }
-func (f *memFile) ModTime() time.Time { return time.Time{} }
+func (f *memFile) ModTime() time.Time { return f.modTime }
 func (f *memFile) IsDir() bool        { return false }
 func (f *memFile) Sys() any           { return nil }
 
@@ -100,7 +102,8 @@ func (m *memSource) Open(root, rel string) (fs.File, error) {
 	if !ok {
 		return nil, errTestNotFound()
 	}
-	return &memFile{name: rel, data: slices.Clone(data)}, nil
+	clone := slices.Clone(data)
+	return &memFile{name: rel, data: clone, size: int64(len(clone))}, nil
 }
 
 func (m *memSource) Lstat(root, rel string) (fs.FileInfo, error) {
@@ -116,7 +119,8 @@ func (m *memSource) Lstat(root, rel string) (fs.FileInfo, error) {
 		return &memSpecialInfo{name: rel}, nil
 	}
 	if data, ok := m.files[key]; ok {
-		return &memFile{name: rel, data: slices.Clone(data)}, nil
+		clone := slices.Clone(data)
+		return &memFile{name: rel, data: clone, size: int64(len(clone))}, nil
 	}
 	if _, ok := m.children[key]; ok {
 		return &memDirInfo{name: rel}, nil

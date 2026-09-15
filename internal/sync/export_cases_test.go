@@ -1,8 +1,12 @@
 package sync
 
 import (
+	"fmt"
+	"io/fs"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func exportRootsFor(source *memSource) map[string]string {
@@ -122,5 +126,84 @@ func TestExportDenialHidesPath(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "super-secret-backup") {
 		t.Fatalf("denial must not echo the path: %v", err)
+	}
+}
+
+type flipSource struct {
+	lstatData []byte
+	lstatMod  time.Time
+	openData  []byte
+	openMod   time.Time
+}
+
+func (f *flipSource) ReadDir(_, _ string) ([]string, error) {
+	return []string{"file.txt"}, nil
+}
+
+func (f *flipSource) Lstat(_, _ string) (fs.FileInfo, error) {
+	clone := slices.Clone(f.lstatData)
+	return &memFile{name: "file.txt", data: clone, size: int64(len(clone)), modTime: f.lstatMod}, nil
+}
+
+func (f *flipSource) Open(_, _ string) (fs.File, error) {
+	clone := slices.Clone(f.openData)
+	return &memFile{name: "file.txt", data: clone, size: int64(len(clone)), modTime: f.openMod}, nil
+}
+
+func TestExportSameSizeFlipFails(t *testing.T) {
+	t.Parallel()
+	source := &flipSource{
+		lstatData: []byte("AAA"),
+		lstatMod:  time.Unix(1000, 0).UTC(),
+		openData:  []byte("BBB"),
+		openMod:   time.Unix(2000, 0).UTC(),
+	}
+	roots := map[string]string{"skills": "/skills"}
+	_, err := ExportRoots(t.Context(), source, roots, []string{"skills/**"})
+	if err == nil {
+		t.Fatal("same-length concurrent write must fail export")
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+		t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
+	}
+}
+
+func TestExportFileCountBound(t *testing.T) {
+	t.Parallel()
+	source := newMemSource()
+	children := make([]string, 0, maxExportFiles+1)
+	for i := range maxExportFiles + 1 {
+		name := fmt.Sprintf("file-%04d.txt", i)
+		children = append(children, name)
+		source.addFile("/skills", name, "x")
+	}
+	source.addDir("/skills", ".", children)
+	_, err := ExportRoots(t.Context(), source, exportRootsFor(nil), []string{"skills/**"})
+	if err == nil {
+		t.Fatal("one file over the bound must fail")
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+		t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
+	}
+}
+
+func TestExportFileCountBoundTotalAcrossRoots(t *testing.T) {
+	t.Parallel()
+	source := newMemSource()
+	skillsChildren := make([]string, 0, maxExportFiles)
+	for i := range maxExportFiles {
+		name := fmt.Sprintf("file-%04d.txt", i)
+		skillsChildren = append(skillsChildren, name)
+		source.addFile("/skills", name, "x")
+	}
+	source.addDir("/skills", ".", skillsChildren)
+	source.addDir("/templates", ".", []string{"extra.txt"})
+	source.addFile("/templates", "extra.txt", "x")
+	_, err := ExportRoots(t.Context(), source, exportRootsFor(nil), []string{"skills/**", "config-templates/**"})
+	if err == nil {
+		t.Fatal("total one file over the bound must fail")
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+		t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
 	}
 }
