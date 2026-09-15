@@ -23,7 +23,14 @@ type FetchValidator interface {
 	ProvenanceOK(path, digest string) bool
 }
 
-func ValidateFetch(entries []FetchEntry, contents map[string][]byte, roots []string, validator FetchValidator) (FetchSnapshot, []string, error) {
+func isSkillFile(path string) bool {
+	return strings.HasPrefix(path, "skills/") && strings.HasSuffix(path, "/SKILL.md")
+}
+
+func ValidateFetch(ref, branch string, entries []FetchEntry, contents map[string][]byte, roots []string, validator FetchValidator) (FetchSnapshot, []string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return FetchSnapshot{}, nil, Errorf(ErrorCodeInvalidArgument, "fetch ref must not be empty")
+	}
 	ordered := slices.Clone(entries)
 	slices.SortFunc(ordered, func(a, b FetchEntry) int { return strings.Compare(a.Path, b.Path) })
 	seen := make(map[string]struct{}, len(ordered))
@@ -43,12 +50,21 @@ func ValidateFetch(entries []FetchEntry, contents map[string][]byte, roots []str
 		if int64(len(content)) != entry.Size {
 			return FetchSnapshot{}, nil, Errorf(ErrorCodeConflict, "fetch content does not match its manifest")
 		}
+		if actual := digestContent(content); actual != entry.Digest {
+			return FetchSnapshot{}, nil, Errorf(ErrorCodeConflict, "fetch content does not match its manifest")
+		}
 		exportEntries = append(exportEntries, ExportEntry(entry))
 	}
 	var findings []string
-	if validator != nil {
+	if validator == nil {
 		for _, entry := range ordered {
-			if !strings.HasPrefix(entry.Path, "skills/") || !strings.HasSuffix(entry.Path, "/SKILL.md") {
+			if isSkillFile(entry.Path) {
+				findings = append(findings, entry.Path+": skill review requires a validator")
+			}
+		}
+	} else {
+		for _, entry := range ordered {
+			if !isSkillFile(entry.Path) {
 				continue
 			}
 			if fileFindings := validator.ValidateSkillFile(entry.Path, contents[entry.Path]); len(fileFindings) > 0 {
@@ -64,5 +80,5 @@ func ValidateFetch(entries []FetchEntry, contents map[string][]byte, roots []str
 		slices.Sort(findings)
 		return FetchSnapshot{}, findings, nil
 	}
-	return FetchSnapshot{Entries: ordered, Digest: digestSnapshot(exportEntries)}, nil, nil
+	return FetchSnapshot{Ref: ref, Branch: branch, Entries: ordered, Digest: digestSnapshot(exportEntries)}, nil, nil
 }

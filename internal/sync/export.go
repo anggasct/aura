@@ -228,6 +228,11 @@ func digestSnapshot(entries []ExportEntry) string {
 	return hex.EncodeToString(writer.Sum(nil))
 }
 
+func digestContent(raw []byte) string {
+	sum := sha256.Sum256(normalizeContent(raw))
+	return hex.EncodeToString(sum[:])
+}
+
 func normalizeContent(raw []byte) []byte {
 	return bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 }
