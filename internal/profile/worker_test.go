@@ -96,6 +96,61 @@ func TestExtractorEndToEnd(t *testing.T) {
 	}
 	if caller.last.Task != "profiling" || len(caller.last.Sources) != 2 {
 		t.Errorf("request = %+v", caller.last)
+	} else {
+		first, second := caller.last.Sources[0], caller.last.Sources[1]
+		if first.Sequence != 1 || first.EventID != "evt-1" || first.Text != "hello" {
+			t.Errorf("first source = %+v", first)
+		}
+		if second.Sequence != 3 || second.EventID != "evt-2" || second.Text != "i write all backends in Go" {
+			t.Errorf("second source = %+v", second)
+		}
+	}
+}
+
+func TestExtractRequestCarriesSourceIdentity(t *testing.T) {
+	caller := &fakeCaller{results: []*ExtractResult{{
+		Text:     `[{"category":"language","key":"backend","value":"Go","sources":[2]}]`,
+		Producer: ModelProducer{Provider: "p", Model: "m"},
+	}}}
+	extractor, registry := testExtractor(t, caller, 64)
+	runExtractor(t, extractor, registry, Job{
+		OwnerID: "owner-1", SessionID: "sess-1",
+		Events: []JobEvent{
+			{ID: "evt-1", Sequence: 1, Text: "hello"},
+			{ID: "evt-2", Sequence: 2, Text: "i write all backends in Go"},
+		},
+	})
+	if caller.last == nil || len(caller.last.Sources) != 2 {
+		t.Fatalf("request = %+v", caller.last)
+	}
+	got := map[uint64]ExtractSource{}
+	for _, source := range caller.last.Sources {
+		got[source.Sequence] = source
+	}
+	if got[1].EventID != "evt-1" || got[1].Text != "hello" {
+		t.Errorf("sequence 1 = %+v", got[1])
+	}
+	if got[2].EventID != "evt-2" || got[2].Text != "i write all backends in Go" {
+		t.Errorf("sequence 2 = %+v", got[2])
+	}
+}
+
+func TestExtractorDropsHallucinatedCitation(t *testing.T) {
+	caller := &fakeCaller{results: []*ExtractResult{{
+		Text:     `[{"category":"language","key":"backend","value":"Go","sources":[1,99]}]`,
+		Producer: ModelProducer{Provider: "p", Model: "m"},
+	}}}
+	extractor, registry := testExtractor(t, caller, 64)
+	runExtractor(t, extractor, registry, Job{
+		OwnerID: "owner-1", SessionID: "sess-1",
+		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "i write all backends in Go"}},
+	})
+	evidence, err := registry.Evidence(stdcontext.Background(), FactID("owner-1", "language", "backend", ValueDigest("Go")))
+	if err != nil {
+		t.Fatalf("Evidence: %v", err)
+	}
+	if len(evidence) != 1 || evidence[0].SourceEventID != "evt-1" {
+		t.Errorf("evidence = %+v", evidence)
 	}
 }
 

@@ -24,6 +24,8 @@ var sensitiveKeywords = []string{
 	"private key", "privatekey", "seed phrase", "credential",
 	"ssn", "social security", "credit card", "card number",
 	"bank account", "iban", "payment",
+	"address", "location", "whereabouts", "residence",
+	"gps", "coordinate", "latitude", "longitude",
 }
 
 type SecretScanner interface {
@@ -31,13 +33,13 @@ type SecretScanner interface {
 }
 
 func SensitiveReason(category, key, value string, scanner SecretScanner) string {
-	lowered := strings.ToLower(key + "\n" + value)
+	lowered := strings.ToLower(category + "\n" + key + "\n" + value)
 	for _, keyword := range sensitiveKeywords {
 		if strings.Contains(lowered, keyword) {
 			return "sensitive trait"
 		}
 	}
-	if scanner != nil && (scanner.Contains(key) || scanner.Contains(value)) {
+	if scanner != nil && (scanner.Contains(category) || scanner.Contains(key) || scanner.Contains(value)) {
 		return "secret-like value"
 	}
 	return ""
@@ -47,7 +49,8 @@ type RawCandidate struct {
 	Category string
 	Key      string
 	Value    string
-	Sources  []uint64
+	// Sources are originating event sequence numbers matching the request identity.
+	Sources []uint64
 }
 
 func ParseCandidates(text string) ([]RawCandidate, error) {

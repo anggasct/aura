@@ -24,15 +24,19 @@ func TestSensitiveReasonCorpus(t *testing.T) {
 		category, key, value string
 		want                 string
 	}{
-		"clean preference": {"preference", "backend", "Go", ""},
-		"clean tool":       {"tool", "editor", "neovim", ""},
-		"health trait":     {"preference", "doctor", "prefers drumchapel health centre", "sensitive trait"},
-		"religion trait":   {"habit", "sunday", "goes to church weekly", "sensitive trait"},
-		"politics trait":   {"preference", "news", "votes in every election", "sensitive trait"},
-		"password key":     {"tool", "db password", "rotated", "sensitive trait"},
-		"token value":      {"project", "deploy", "uses token abc for deploys", "sensitive trait"},
-		"secret value":     {"preference", "backend", "key is sk-live-abc123", "secret-like value"},
-		"case folded":      {"habit", "morning", "PASSWORD reset daily", "sensitive trait"},
+		"clean preference":  {"preference", "backend", "Go", ""},
+		"clean tool":        {"tool", "editor", "neovim", ""},
+		"health trait":      {"preference", "doctor", "prefers drumchapel health centre", "sensitive trait"},
+		"religion trait":    {"habit", "sunday", "goes to church weekly", "sensitive trait"},
+		"politics trait":    {"preference", "news", "votes in every election", "sensitive trait"},
+		"password key":      {"tool", "db password", "rotated", "sensitive trait"},
+		"token value":       {"project", "deploy", "uses token abc for deploys", "sensitive trait"},
+		"home address":      {"habit", "evening", "home address is 12 Rose Street", "sensitive trait"},
+		"coordinates":       {"preference", "running", "gps coordinates 55.8612,-4.2502", "sensitive trait"},
+		"whereabouts":       {"habit", "noon", "current whereabouts are the Glasgow office", "sensitive trait"},
+		"location category": {"location", "base", "works downtown", "sensitive trait"},
+		"secret value":      {"preference", "backend", "key is sk-live-abc123", "secret-like value"},
+		"case folded":       {"habit", "morning", "PASSWORD reset daily", "sensitive trait"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

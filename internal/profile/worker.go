@@ -15,10 +15,16 @@ type ModelProducer struct {
 	ModelVersion string
 }
 
+type ExtractSource struct {
+	Sequence uint64
+	EventID  string
+	Text     string
+}
+
 type ExtractRequest struct {
 	Task            string
 	Prompt          string
-	Sources         []string
+	Sources         []ExtractSource
 	MaxOutputTokens int
 }
 
@@ -217,7 +223,7 @@ func (e *Extractor) handle(ctx stdcontext.Context, job Job) {
 	e.finish(ctx, outcome)
 }
 
-func (e *Extractor) callWithRetry(ctx stdcontext.Context, sources []string) (*ExtractResult, int, error) {
+func (e *Extractor) callWithRetry(ctx stdcontext.Context, sources []ExtractSource) (*ExtractResult, int, error) {
 	var err error
 	var result *ExtractResult
 	attempts := 0
@@ -251,18 +257,18 @@ func (e *Extractor) callWithRetry(ctx stdcontext.Context, sources []string) (*Ex
 	return nil, attempts, err
 }
 
-func boundSources(events []JobEvent) (sources []string, bySequence map[uint64]JobEvent) {
+func boundSources(events []JobEvent) (sources []ExtractSource, bySequence map[uint64]JobEvent) {
 	bySequence = make(map[uint64]JobEvent, len(events))
-	sources = make([]string, 0, len(events))
+	sources = make([]ExtractSource, 0, len(events))
 	total := 0
 	for _, event := range events {
-		bySequence[event.Sequence] = event
 		text := truncateSource(event.Text, maxSourceEventChars)
 		if total+len(text) > maxSourceTotalChars {
 			continue
 		}
 		total += len(text)
-		sources = append(sources, text)
+		bySequence[event.Sequence] = event
+		sources = append(sources, ExtractSource{Sequence: event.Sequence, EventID: event.ID, Text: text})
 	}
 	return sources, bySequence
 }
