@@ -45,6 +45,9 @@ const (
 	ErrorCodeSkillNotFound             ErrorCode = "skill_not_found"
 	ErrorCodeSkillInvalid              ErrorCode = "skill_invalid"
 	ErrorCodeSkillDigestChanged        ErrorCode = "skill_digest_changed"
+	ErrorCodeProfileConflict           ErrorCode = "profile_conflict"
+	ErrorCodeProfileNotFound           ErrorCode = "profile_not_found"
+	ErrorCodeProfileInvalid            ErrorCode = "profile_invalid"
 )
 
 type Error struct {
