@@ -249,8 +249,8 @@ func (r *profileRegistry) Expire(ctx context.Context, now time.Time) (int, error
 	return int(affected), nil
 }
 
-func (r *profileRegistry) Search(ctx context.Context, ownerID, category, query string, limit int) ([]profile.SearchHit, error) {
-	rows, err := store.NewProfileStore(r.db).SearchFacts(ctx, ownerID, category, query, limit)
+func (r *profileRegistry) Search(ctx context.Context, ownerID, category, query string, limit int, now time.Time) ([]profile.SearchHit, error) {
+	rows, err := store.NewProfileStore(r.db).SearchFacts(ctx, ownerID, category, query, limit, now)
 	if err != nil {
 		return nil, err
 	}

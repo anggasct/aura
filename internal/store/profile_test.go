@@ -190,3 +190,69 @@ func TestProfileStore_ConcurrentInsertConverges(t *testing.T) {
 		t.Errorf("evidence = %+v, %v", evidence, err)
 	}
 }
+
+func TestProfileStore_SearchUsesCallerClock(t *testing.T) {
+	db := newTestDB(t)
+	s := NewProfileStore(db)
+	ctx := t.Context()
+	wall := time.Now().UTC().Truncate(time.Second)
+	expiry := wall.Add(time.Hour)
+	futureFact := testProfileFact("pf-future")
+	futureFact.Status = "active"
+	futureFact.Value = "wall-future-value"
+	futureFact.ExpiresAt = &expiry
+	if err := s.InsertFact(ctx, futureFact); err != nil {
+		t.Fatalf("InsertFact future: %v", err)
+	}
+	pastExpiry := wall.Add(-time.Hour)
+	pastFact := testProfileFact("pf-past")
+	pastFact.Status = "active"
+	pastFact.Value = "wall-past-value"
+	pastFact.Key = "backend-past"
+	pastFact.ExpiresAt = &pastExpiry
+	if err := s.InsertFact(ctx, pastFact); err != nil {
+		t.Fatalf("InsertFact past: %v", err)
+	}
+	callerBeforeExpiry := expiry.Add(-time.Minute)
+	for _, query := range []string{"", "wall-future-value"} {
+		hits, err := s.SearchFacts(ctx, "owner-1", "", query, 10, callerBeforeExpiry)
+		if err != nil {
+			t.Fatalf("SearchFacts(%q) before expiry: %v", query, err)
+		}
+		found := false
+		for _, hit := range hits {
+			if hit.ID == "pf-future" {
+				found = true
+			}
+		}
+		if query == "" && !found {
+			t.Errorf("future fact missing before caller expiry (query %q)", query)
+		}
+	}
+	callerAfterExpiry := expiry.Add(time.Minute)
+	for _, query := range []string{"", "wall-future-value"} {
+		hits, err := s.SearchFacts(ctx, "owner-1", "", query, 10, callerAfterExpiry)
+		if err != nil {
+			t.Fatalf("SearchFacts(%q) after expiry: %v", query, err)
+		}
+		for _, hit := range hits {
+			if hit.ID == "pf-future" {
+				t.Errorf("expired fact returned with caller clock (query %q)", query)
+			}
+		}
+	}
+	callerBeforePastExpiry := pastExpiry.Add(-time.Minute)
+	hits, err := s.SearchFacts(ctx, "owner-1", "", "", 10, callerBeforePastExpiry)
+	if err != nil {
+		t.Fatalf("SearchFacts before past expiry: %v", err)
+	}
+	found := false
+	for _, hit := range hits {
+		if hit.ID == "pf-past" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("fact valid per caller clock missing; wall clock must not decide expiry")
+	}
+}

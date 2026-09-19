@@ -46,7 +46,7 @@ func (s *Service) Retrieve(ctx stdcontext.Context, query *RetrieveQuery, now tim
 	if now.IsZero() {
 		return nil, Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
 	}
-	hits, err := s.registry.Search(ctx, query.OwnerID, query.Category, strings.TrimSpace(query.Query), query.MaxFacts*4)
+	hits, err := s.registry.Search(ctx, query.OwnerID, query.Category, strings.TrimSpace(query.Query), query.MaxFacts*4, now)
 	if err != nil {
 		return nil, err
 	}

@@ -71,6 +71,14 @@ func (s *Service) AcceptFact(ctx stdcontext.Context, ownerID, factID string, now
 			return Fact{}, Errorf(ErrorCodeProfileConflict, "an owner-verified fact already holds this slot")
 		}
 	}
+	for i := range actives {
+		if actives[i].ID == factID {
+			continue
+		}
+		if err := s.registry.SetState(ctx, actives[i].ID, StatusRejected, factID, actives[i].Confidence, actives[i].OwnerVerified, now); err != nil {
+			return Fact{}, err
+		}
+	}
 	if err := s.registry.SetState(ctx, factID, StatusActive, "", fact.Confidence, true, now); err != nil {
 		return Fact{}, err
 	}

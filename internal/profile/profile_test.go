@@ -231,7 +231,7 @@ func TestConflictingValuesCoexist(t *testing.T) {
 	if rustFact.Status != StatusCandidate || rustFact.Confidence != 0.90 {
 		t.Errorf("blocked candidate activated: %+v", rustFact)
 	}
-	active, err := service.GetFact(t.Context(), goFact.ID)
+	active, err := service.GetFact(t.Context(), "owner-1", goFact.ID)
 	if err != nil || active.Status != StatusActive {
 		t.Errorf("winner displaced: %+v, %v", active, err)
 	}
@@ -267,7 +267,7 @@ func TestResurrectionGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProposeFact: %v", err)
 	}
-	if err := service.DeleteFact(t.Context(), fact.ID, now); err != nil {
+	if err := service.DeleteFact(t.Context(), "owner-1", fact.ID, now); err != nil {
 		t.Fatalf("DeleteFact: %v", err)
 	}
 	if _, err := service.ProposeFact(t.Context(), "owner-1", "habit", "standup", "async", testEvidence("d1"), now); err == nil {
@@ -291,13 +291,13 @@ func TestDeleteTombstoneIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProposeFact: %v", err)
 	}
-	if err := service.DeleteFact(t.Context(), fact.ID, now); err != nil {
+	if err := service.DeleteFact(t.Context(), "owner-1", fact.ID, now); err != nil {
 		t.Fatalf("DeleteFact: %v", err)
 	}
-	if err := service.DeleteFact(t.Context(), fact.ID, now); err != nil {
+	if err := service.DeleteFact(t.Context(), "owner-1", fact.ID, now); err != nil {
 		t.Fatalf("second DeleteFact: %v", err)
 	}
-	if err := service.DeleteFact(t.Context(), "pf-missing", now); err == nil {
+	if err := service.DeleteFact(t.Context(), "owner-1", "pf-missing", now); err == nil {
 		t.Errorf("expected not-found")
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileNotFound {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
@@ -328,7 +328,7 @@ func TestExpireFacts(t *testing.T) {
 	if err != nil || count != 1 {
 		t.Fatalf("ExpireFacts: %d, %v", count, err)
 	}
-	expired, err := service.GetFact(t.Context(), fact.ID)
+	expired, err := service.GetFact(t.Context(), "owner-1", fact.ID)
 	if err != nil || expired.Status != StatusExpired {
 		t.Errorf("fact = %+v, %v", expired, err)
 	}
@@ -386,7 +386,7 @@ func TestConcurrentProposeConverges(t *testing.T) {
 		t.Fatalf("ids = %v", ids)
 	}
 	for id := range seen {
-		fact, err := service.GetFact(stdcontext.Background(), id)
+		fact, err := service.GetFact(stdcontext.Background(), "owner-1", id)
 		if err != nil {
 			t.Fatalf("GetFact: %v", err)
 		}
@@ -426,7 +426,7 @@ func TestConcurrentConflictsSingleActive(t *testing.T) {
 	}
 }
 
-func (f *fakeRegistry) Search(_ stdcontext.Context, ownerID, category, _ string, limit int) ([]SearchHit, error) {
+func (f *fakeRegistry) Search(_ stdcontext.Context, ownerID, category, _ string, limit int, _ time.Time) ([]SearchHit, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []SearchHit

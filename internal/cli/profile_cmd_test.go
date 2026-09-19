@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -106,8 +107,13 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 		t.Errorf("reject = %q, %v", out, err)
 	}
 	out, err = runProfileCommand(t, cfg, "delete", id)
-	if err != nil || strings.TrimSpace(out) != "pass --force to delete a fact" {
-		t.Errorf("delete guard = %q, %v", out, err)
+	if err == nil {
+		t.Errorf("delete guard = %q, want usage error", out)
+	} else {
+		var ue *usageError
+		if !errors.As(err, &ue) {
+			t.Errorf("delete guard err = %v (%q), want usage error", err, out)
+		}
 	}
 	out, err = runProfileCommand(t, cfg, "delete", id, "--force")
 	if err != nil || strings.TrimSpace(out) != "deleted: "+id {

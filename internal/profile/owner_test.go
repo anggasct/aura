@@ -260,3 +260,112 @@ func TestContextPartRenderEmpty(t *testing.T) {
 		t.Errorf("empty part rendered text")
 	}
 }
+
+func TestCheckAcceptDualActive(t *testing.T) {
+	service, registry, _ := recordingService()
+	now := time.Now().UTC()
+	goFact, err := service.ProposeFact(t.Context(), "owner-1", "language", "backend", "Go", testEvidence("d1"), now)
+	if err != nil {
+		t.Fatalf("ProposeFact: %v", err)
+	}
+	if _, err := service.ProposeFact(t.Context(), "owner-1", "language", "backend", "Go", testEvidence("d2"), now); err != nil {
+		t.Fatalf("ProposeFact reinforce: %v", err)
+	}
+	rustFact, err := service.ProposeFact(t.Context(), "owner-1", "language", "backend", "Rust", testEvidence("d3"), now)
+	if err != nil {
+		t.Fatalf("ProposeFact rival: %v", err)
+	}
+	if _, err := service.AcceptFact(t.Context(), "owner-1", rustFact.ID, now); err != nil {
+		t.Fatalf("AcceptFact: %v", err)
+	}
+	actives, err := registry.Active(t.Context(), "owner-1", "language", "backend")
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if len(actives) != 1 || actives[0].ID != rustFact.ID {
+		t.Fatalf("actives = %+v, want single %s", actives, rustFact.ID)
+	}
+	prior, _, _ := registry.Get(t.Context(), goFact.ID)
+	if prior.Status != StatusRejected || prior.ConflictsWithID != rustFact.ID {
+		t.Errorf("prior = %+v, want rejected with conflict %s", prior, rustFact.ID)
+	}
+}
+
+func TestDeleteEmitsOwnerAction(t *testing.T) {
+	service, registry, actions := recordingService()
+	now := time.Now().UTC()
+	fact, err := service.SetFact(t.Context(), "owner-1", "tool", "editor", "neovim", nil, now)
+	if err != nil {
+		t.Fatalf("SetFact: %v", err)
+	}
+	if len(*actions) != 1 {
+		t.Fatalf("actions = %d, want 1 after set", len(*actions))
+	}
+	if err := service.DeleteFact(t.Context(), "owner-1", fact.ID, now); err != nil {
+		t.Fatalf("DeleteFact: %v", err)
+	}
+	if len(*actions) != 2 {
+		t.Fatalf("actions = %d, want 2 after delete", len(*actions))
+	}
+	recorded := (*actions)[1]
+	if recorded.Action != "delete" || recorded.FactID != fact.ID || recorded.OwnerID != "owner-1" || recorded.Category != fact.Category || recorded.Key != fact.Key || !recorded.At.Equal(now) {
+		t.Errorf("delete action = %+v, want owner/fact/category/key/at", recorded)
+	}
+	stored, _, _ := registry.Get(t.Context(), fact.ID)
+	if stored.Status != StatusDeleted {
+		t.Errorf("status = %s, want deleted", stored.Status)
+	}
+	if err := service.DeleteFact(t.Context(), "owner-2", fact.ID, now); err == nil {
+		t.Errorf("expected cross-owner delete denial")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileNotFound {
+		t.Errorf("code = %v, %v (%v)", code, ok, err)
+	}
+}
+
+func TestGetFactEnforcesOwner(t *testing.T) {
+	service, _, _ := recordingService()
+	now := time.Now().UTC()
+	fact, err := service.SetFact(t.Context(), "owner-1", "tool", "editor", "neovim", nil, now)
+	if err != nil {
+		t.Fatalf("SetFact: %v", err)
+	}
+	if _, err := service.GetFact(t.Context(), "owner-1", fact.ID); err != nil {
+		t.Fatalf("GetFact owner: %v", err)
+	}
+	if _, err := service.GetFact(t.Context(), "owner-2", fact.ID); err == nil {
+		t.Fatalf("expected cross-owner read denial")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileNotFound {
+		t.Fatalf("code = %v, %v (%v)", code, ok, err)
+	}
+}
+
+func TestRetrieveUsesCallerClock(t *testing.T) {
+	service, _, _ := recordingService()
+	base := time.Now().UTC().Truncate(time.Second)
+	expiry := base.Add(time.Hour)
+	if _, err := service.SetFact(t.Context(), "owner-1", "language", "backend-exp", "Java", &expiry, base); err != nil {
+		t.Fatalf("SetFact: %v", err)
+	}
+	before, err := service.Retrieve(t.Context(), &RetrieveQuery{OwnerID: "owner-1", MaxFacts: 10, MaxTokens: 10000}, base)
+	if err != nil {
+		t.Fatalf("Retrieve before expiry: %v", err)
+	}
+	found := false
+	for _, fact := range before.Facts {
+		if fact.Key == "backend-exp" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("valid fact missing before expiry")
+	}
+	after, err := service.Retrieve(t.Context(), &RetrieveQuery{OwnerID: "owner-1", MaxFacts: 10, MaxTokens: 10000}, expiry.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("Retrieve after expiry: %v", err)
+	}
+	for _, fact := range after.Facts {
+		if fact.Key == "backend-exp" {
+			t.Errorf("expired fact retrieved with caller clock")
+		}
+	}
+}

@@ -108,7 +108,7 @@ func newProfileShowCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer closer()
-			fact, err := service.GetFact(cmd.Context(), args[0])
+			fact, err := service.GetFact(cmd.Context(), profileLocalOwner, args[0])
 			if err != nil {
 				return err
 			}
@@ -263,14 +263,14 @@ func newProfileDeleteCmd(gf *globalFlags) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !force {
-				return writeProfileLines(cmd, []string{"pass --force to delete a fact"})
+				return &usageError{err: errors.New("pass --force to delete a fact")}
 			}
 			service, closer, err := openProfileService(cmd, gf)
 			if err != nil {
 				return err
 			}
 			defer closer()
-			if err := service.DeleteFact(cmd.Context(), args[0], time.Now().UTC()); err != nil {
+			if err := service.DeleteFact(cmd.Context(), profileLocalOwner, args[0], time.Now().UTC()); err != nil {
 				return err
 			}
 			return writeProfileLines(cmd, []string{"deleted: " + args[0]})

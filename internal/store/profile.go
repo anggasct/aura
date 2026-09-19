@@ -46,7 +46,7 @@ type ProfileStore interface {
 	ListEvidence(ctx context.Context, factID string) ([]ProfileEvidence, error)
 	ListActive(ctx context.Context, ownerID, category, key string) ([]ProfileFact, error)
 	ListFacts(ctx context.Context, ownerID, status, category string, limit int) ([]ProfileFact, error)
-	SearchFacts(ctx context.Context, ownerID, category, query string, limit int) ([]ProfileFact, error)
+	SearchFacts(ctx context.Context, ownerID, category, query string, limit int, now time.Time) ([]ProfileFact, error)
 }
 
 type sqliteProfileStore struct {
@@ -423,7 +423,7 @@ func (s *sqliteProfileStore) ListFacts(ctx context.Context, ownerID, status, cat
 	return out, nil
 }
 
-func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category, query string, limit int) ([]ProfileFact, error) {
+func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category, query string, limit int, now time.Time) ([]ProfileFact, error) {
 	if s.db == nil {
 		return nil, errNilArgument("db")
 	}
@@ -433,10 +433,13 @@ func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category,
 	if limit <= 0 || limit > 10000 {
 		return nil, Errorf(ErrorCodeInvalidArgument, "fact search limit is out of range")
 	}
+	if now.IsZero() {
+		return nil, Errorf(ErrorCodeInvalidArgument, "profile search timestamp must not be zero")
+	}
 	match := strings.TrimSpace(query)
 	sqlQuery := `SELECT ` + selectProfileFactColumns + ` FROM profile_fact WHERE owner_id = ? AND status = 'active'
 		AND (expires_at IS NULL OR expires_at > ?)`
-	args := []any{ownerID, formatTime(time.Now().UTC())}
+	args := []any{ownerID, formatTime(now.UTC())}
 	if category != "" {
 		if !profileCategories[category] {
 			return nil, Errorf(ErrorCodeProfileInvalid, "profile fact category is not valid")
@@ -452,11 +455,13 @@ func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category,
 		if err != nil {
 			return nil, Errorf(ErrorCodeInvalidArgument, "profile search carries no searchable terms")
 		}
-		sqlQuery = `SELECT ` + selectProfileFactColumns + ` FROM profile_fact_fts
+		sqlQuery = `SELECT f.id, f.owner_id, f.category, f.fact_key, f.fact_value, f.value_digest, f.status, f.origin,
+			f.owner_verified, f.confidence, f.confidence_policy_version, f.conflicts_with_id,
+			f.expires_at, f.created_at, f.updated_at FROM profile_fact_fts
 			JOIN profile_fact f ON f.rowid = profile_fact_fts.rowid
 			WHERE profile_fact_fts MATCH ? AND f.owner_id = ? AND f.status = 'active'
 			AND (f.expires_at IS NULL OR f.expires_at > ?)`
-		args = []any{sanitized, ownerID, formatTime(time.Now().UTC())}
+		args = []any{sanitized, ownerID, formatTime(now.UTC())}
 		if category != "" {
 			sqlQuery += ` AND f.category = ?`
 			args = append(args, category)
