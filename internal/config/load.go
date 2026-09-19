@@ -181,6 +181,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateContext(cfg.Context, options.Build.Profile()); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateProfile(cfg.Profile, options.Build.Profile()); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateSync(cfg.Sync); err != nil {
 		return LoadResult{}, err
 	}
@@ -402,6 +405,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateContextShapes(doc); err != nil {
+		return err
+	}
+	if err := validateProfileShapes(doc); err != nil {
 		return err
 	}
 	if err := validateSyncShapes(doc); err != nil {
@@ -1884,6 +1890,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyMemoryDefaults(cfg, doc, &defaults.Memory)
 	applySkillsDefaults(cfg, doc)
 	applyContextDefaults(cfg, doc)
+	applyProfileDefaults(cfg, doc)
 	applySyncDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
@@ -3050,6 +3057,93 @@ func validHourMinute(value string) bool {
 		return false
 	}
 	return hour >= 0 && hour < 24 && minute >= 0 && minute < 60
+}
+
+func validateProfile(profileConfig *Profile, buildProfile capability.Profile) error {
+	if profileConfig == nil {
+		if buildProfile != capability.ProfileCore {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("profile section is required for build profile %q", buildProfile)}
+		}
+		return nil
+	}
+	var problems []error
+	if profileConfig.MaxContextFacts <= 0 || profileConfig.MaxContextFacts > 1000 {
+		problems = append(problems, errors.New("profile.max_context_facts must be between 1 and 1000"))
+	}
+	if profileConfig.MaxContextTokens <= 0 || profileConfig.MaxContextTokens > 128000 {
+		problems = append(problems, errors.New("profile.max_context_tokens must be between 1 and 128000"))
+	}
+	if profileConfig.ExtractionQueueCapacity <= 0 || profileConfig.ExtractionQueueCapacity > 10000 {
+		problems = append(problems, errors.New("profile.extraction_queue_capacity must be between 1 and 10000"))
+	}
+	if profileConfig.CandidateMinConfidence < 0 || profileConfig.CandidateMinConfidence > 1 {
+		problems = append(problems, errors.New("profile.candidate_min_confidence must be in [0,1]"))
+	}
+	if strings.TrimSpace(profileConfig.PromptVersion) == "" {
+		problems = append(problems, errors.New("profile.prompt_version must not be empty"))
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateProfileShapes(doc *yamlv3.Node) error {
+	profileNode := mappingValue(doc, "profile")
+	if profileNode == nil {
+		return nil
+	}
+	if profileNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("profile must be a mapping at line %d", profileNode.Line)
+	}
+	for i := 0; i+1 < len(profileNode.Content); i += 2 {
+		keyNode := profileNode.Content[i]
+		valueNode := profileNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("profile.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "max_context_facts", "max_context_tokens", "extraction_queue_capacity":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("profile.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "candidate_min_confidence":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!float" {
+				return fmt.Errorf("profile.%s must be a float at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "prompt_version":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("profile.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func applyProfileDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Profile == nil {
+		return
+	}
+	defaults := Default().Profile
+	if !cfg.Profile.Enabled && !configValuePresent(doc, "profile", "enabled") && !envValuePresent("profile.enabled") {
+		cfg.Profile.Enabled = defaults.Enabled
+	}
+	if cfg.Profile.MaxContextFacts == 0 && !configValuePresent(doc, "profile", "max_context_facts") && !envValuePresent("profile.max_context_facts") {
+		cfg.Profile.MaxContextFacts = defaults.MaxContextFacts
+	}
+	if cfg.Profile.MaxContextTokens == 0 && !configValuePresent(doc, "profile", "max_context_tokens") && !envValuePresent("profile.max_context_tokens") {
+		cfg.Profile.MaxContextTokens = defaults.MaxContextTokens
+	}
+	if cfg.Profile.ExtractionQueueCapacity == 0 && !configValuePresent(doc, "profile", "extraction_queue_capacity") && !envValuePresent("profile.extraction_queue_capacity") {
+		cfg.Profile.ExtractionQueueCapacity = defaults.ExtractionQueueCapacity
+	}
+	if cfg.Profile.CandidateMinConfidence == 0 && !configValuePresent(doc, "profile", "candidate_min_confidence") && !envValuePresent("profile.candidate_min_confidence") {
+		cfg.Profile.CandidateMinConfidence = defaults.CandidateMinConfidence
+	}
+	if cfg.Profile.PromptVersion == "" && !configValuePresent(doc, "profile", "prompt_version") && !envValuePresent("profile.prompt_version") {
+		cfg.Profile.PromptVersion = defaults.PromptVersion
+	}
 }
 
 func validBroadcastAlias(alias string) bool {

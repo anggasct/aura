@@ -143,6 +143,13 @@ context:
     max_source_tokens: 32768
     max_output_tokens: 2048
     prompt_version: v1
+profile:
+  enabled: true
+  max_context_facts: 20
+  max_context_tokens: 1024
+  extraction_queue_capacity: 64
+  candidate_min_confidence: 0.7
+  prompt_version: v1
 sync:
   enabled: false
   remote: ""

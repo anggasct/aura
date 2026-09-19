@@ -65,15 +65,21 @@ type Registry interface {
 	Active(ctx stdcontext.Context, ownerID, category, key string) ([]Fact, error)
 	Evidence(ctx stdcontext.Context, factID string) ([]Evidence, error)
 	Expire(ctx stdcontext.Context, now time.Time) (int, error)
+	Search(ctx stdcontext.Context, ownerID, category, query string, limit int, now time.Time) ([]SearchHit, error)
+	List(ctx stdcontext.Context, ownerID, status, category string, limit int) ([]Fact, error)
 }
 
 type Config struct {
 	MinConfidence float64
+	Scanner       SecretScanner
+	Actions       ActionSink
 }
 
 type Service struct {
 	registry      Registry
 	minConfidence float64
+	scanner       SecretScanner
+	actions       ActionSink
 }
 
 func NewService(registry Registry, config Config) (*Service, error) {
@@ -83,7 +89,11 @@ func NewService(registry Registry, config Config) (*Service, error) {
 	if config.MinConfidence < 0 || config.MinConfidence > 1 {
 		return nil, Errorf(ErrorCodeInvalidArgument, "minimum confidence must be in [0,1]")
 	}
-	return &Service{registry: registry, minConfidence: config.MinConfidence}, nil
+	scanner := config.Scanner
+	if scanner == nil {
+		scanner = rejectAllScanner{}
+	}
+	return &Service{registry: registry, minConfidence: config.MinConfidence, scanner: scanner, actions: config.Actions}, nil
 }
 
 func ConfidenceV1(evidence int) float64 {
@@ -206,27 +216,24 @@ func (s *Service) ReinforceFact(ctx stdcontext.Context, factID string, evidence 
 	return s.registry.Reinforce(ctx, factID, evidence, s.minConfidence)
 }
 
-func (s *Service) DeleteFact(ctx stdcontext.Context, factID string, now time.Time) error {
-	if ctx == nil {
-		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
-	}
-	if strings.TrimSpace(factID) == "" {
-		return Errorf(ErrorCodeInvalidArgument, "fact id must not be empty")
-	}
-	if now.IsZero() {
-		return Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
+func (s *Service) DeleteFact(ctx stdcontext.Context, ownerID, factID string, now time.Time) error {
+	if err := s.ownerArgs(ctx, ownerID, factID, now); err != nil {
+		return err
 	}
 	fact, found, err := s.registry.Get(ctx, factID)
 	if err != nil {
 		return err
 	}
-	if !found {
+	if !found || fact.OwnerID != ownerID {
 		return Errorf(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	if fact.Status == StatusDeleted {
 		return nil
 	}
-	return s.registry.SetState(ctx, factID, StatusDeleted, fact.ConflictsWithID, fact.Confidence, fact.OwnerVerified, now)
+	if err := s.registry.SetState(ctx, factID, StatusDeleted, fact.ConflictsWithID, fact.Confidence, fact.OwnerVerified, now); err != nil {
+		return err
+	}
+	return s.recordAction(ctx, ownerID, factID, "delete", &fact, now)
 }
 
 func (s *Service) ExpireFacts(ctx stdcontext.Context, now time.Time) (int, error) {
@@ -239,16 +246,43 @@ func (s *Service) ExpireFacts(ctx stdcontext.Context, now time.Time) (int, error
 	return s.registry.Expire(ctx, now)
 }
 
-func (s *Service) GetFact(ctx stdcontext.Context, factID string) (Fact, error) {
+func (s *Service) GetFact(ctx stdcontext.Context, ownerID, factID string) (Fact, error) {
 	if ctx == nil {
 		return Fact{}, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return Fact{}, err
+	}
+	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(factID) == "" {
+		return Fact{}, Errorf(ErrorCodeInvalidArgument, "owner and fact id must not be empty")
 	}
 	fact, found, err := s.registry.Get(ctx, factID)
 	if err != nil {
 		return Fact{}, err
 	}
-	if !found {
+	if !found || fact.OwnerID != ownerID {
 		return Fact{}, Errorf(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	return fact, nil
+}
+
+type rejectAllScanner struct{}
+
+func (rejectAllScanner) Contains(string) bool { return false }
+
+func (s *Service) ListFacts(ctx stdcontext.Context, ownerID, status, category string, limit int) ([]Fact, error) {
+	if ctx == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if limit <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "fact list limit must be positive")
+	}
+	return s.registry.List(ctx, ownerID, status, category, limit)
+}
+
+func (s *Service) EvidenceFor(ctx stdcontext.Context, factID string) ([]Evidence, error) {
+	if ctx == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	return s.registry.Evidence(ctx, factID)
 }

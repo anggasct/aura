@@ -14,8 +14,12 @@ func contextBase() string {
 	return "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n"
 }
 
+func profileSection() string {
+	return "profile:\n  prompt_version: v1\n"
+}
+
 func TestLoad_ContextDefaults(t *testing.T) {
-	path := writeContextConfig(t, contextBase()+"  recent_complete_turns: 5\n")
+	path := writeContextConfig(t, profileSection()+contextBase()+"  recent_complete_turns: 5\n")
 	result, err := LoadWithOptions(path, execLinuxOptions(t))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -40,7 +44,7 @@ func TestLoad_ContextDefaults(t *testing.T) {
 }
 
 func TestLoad_ContextValid(t *testing.T) {
-	path := writeContextConfig(t, contextBase()+`  enabled: false
+	path := writeContextConfig(t, profileSection()+contextBase()+`  enabled: false
   recent_complete_turns: 3
   safety_margin_tokens: 512
   conservative_estimator_ratio: 0.5
@@ -70,7 +74,7 @@ func TestLoad_ContextValid(t *testing.T) {
 
 func TestLoad_ContextEnvOverride(t *testing.T) {
 	t.Setenv("AURA_CONTEXT_SAFETY_MARGIN_TOKENS", "77")
-	path := writeContextConfig(t, contextBase()+"  recent_complete_turns: 5\n")
+	path := writeContextConfig(t, profileSection()+contextBase()+"  recent_complete_turns: 5\n")
 	result, err := LoadWithOptions(path, execLinuxOptions(t))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
