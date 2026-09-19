@@ -44,6 +44,9 @@ func (f *fakeRegistry) InsertCandidate(ctx stdcontext.Context, fact *Fact, evide
 }
 
 func (f *fakeRegistry) addEvidenceLocked(factID string, evidence *Evidence) {
+	if evidence == nil {
+		return
+	}
 	for i := range f.evidence[factID] {
 		prior := &f.evidence[factID][i]
 		if prior.SourceEventID == evidence.SourceEventID && prior.SourceDigest == evidence.SourceDigest {
@@ -421,4 +424,36 @@ func TestConcurrentConflictsSingleActive(t *testing.T) {
 	if len(actives) > 1 {
 		t.Fatalf("dual active facts: %+v", actives)
 	}
+}
+
+func (f *fakeRegistry) Search(_ stdcontext.Context, ownerID, category, _ string, limit int) ([]SearchHit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []SearchHit
+	for _, stored := range f.facts {
+		if stored.OwnerID != ownerID || (category != "" && stored.Category != category) {
+			continue
+		}
+		out = append(out, SearchHit{Fact: *stored})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRegistry) List(_ stdcontext.Context, ownerID, status, category string, limit int) ([]Fact, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []Fact
+	for _, stored := range f.facts {
+		if stored.OwnerID != ownerID || (status != "" && stored.Status != status) || (category != "" && stored.Category != category) {
+			continue
+		}
+		out = append(out, *stored)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }

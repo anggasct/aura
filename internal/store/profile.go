@@ -45,6 +45,8 @@ type ProfileStore interface {
 	AddEvidence(ctx context.Context, evidence *ProfileEvidence) (bool, error)
 	ListEvidence(ctx context.Context, factID string) ([]ProfileEvidence, error)
 	ListActive(ctx context.Context, ownerID, category, key string) ([]ProfileFact, error)
+	ListFacts(ctx context.Context, ownerID, status, category string, limit int) ([]ProfileFact, error)
+	SearchFacts(ctx context.Context, ownerID, category, query string, limit int) ([]ProfileFact, error)
 }
 
 type sqliteProfileStore struct {
@@ -372,4 +374,132 @@ func (s *sqliteProfileStore) ListActive(ctx context.Context, ownerID, category, 
 		return nil, classifyBusy(fmt.Errorf("list active profile facts: %w", err))
 	}
 	return out, nil
+}
+
+func (s *sqliteProfileStore) ListFacts(ctx context.Context, ownerID, status, category string, limit int) ([]ProfileFact, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if strings.TrimSpace(ownerID) == "" {
+		return nil, Errorf(ErrorCodeInvalidArgument, "owner must not be empty")
+	}
+	if limit <= 0 || limit > 10000 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "fact list limit is out of range")
+	}
+	sqlQuery := `SELECT ` + selectProfileFactColumns + ` FROM profile_fact WHERE owner_id = ?`
+	args := []any{ownerID}
+	if status != "" {
+		if !profileStatuses[status] {
+			return nil, Errorf(ErrorCodeProfileInvalid, "profile fact status is not valid")
+		}
+		sqlQuery += ` AND status = ?`
+		args = append(args, status)
+	}
+	if category != "" {
+		if !profileCategories[category] {
+			return nil, Errorf(ErrorCodeProfileInvalid, "profile fact category is not valid")
+		}
+		sqlQuery += ` AND category = ?`
+		args = append(args, category)
+	}
+	sqlQuery += ` ORDER BY category ASC, fact_key ASC, id ASC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("list profile facts: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ProfileFact
+	for rows.Next() {
+		fact, err := scanProfileFact(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fact)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list profile facts: %w", err))
+	}
+	return out, nil
+}
+
+func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category, query string, limit int) ([]ProfileFact, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if strings.TrimSpace(ownerID) == "" {
+		return nil, Errorf(ErrorCodeInvalidArgument, "owner must not be empty")
+	}
+	if limit <= 0 || limit > 10000 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "fact search limit is out of range")
+	}
+	match := strings.TrimSpace(query)
+	sqlQuery := `SELECT ` + selectProfileFactColumns + ` FROM profile_fact WHERE owner_id = ? AND status = 'active'
+		AND (expires_at IS NULL OR expires_at > ?)`
+	args := []any{ownerID, formatTime(time.Now().UTC())}
+	if category != "" {
+		if !profileCategories[category] {
+			return nil, Errorf(ErrorCodeProfileInvalid, "profile fact category is not valid")
+		}
+		sqlQuery += ` AND category = ?`
+		args = append(args, category)
+	}
+	if match == "" {
+		sqlQuery += ` ORDER BY confidence DESC, id ASC LIMIT ?`
+		args = append(args, limit)
+	} else {
+		sanitized, err := sanitizeFTSQuery(match)
+		if err != nil {
+			return nil, Errorf(ErrorCodeInvalidArgument, "profile search carries no searchable terms")
+		}
+		sqlQuery = `SELECT ` + selectProfileFactColumns + ` FROM profile_fact_fts
+			JOIN profile_fact f ON f.rowid = profile_fact_fts.rowid
+			WHERE profile_fact_fts MATCH ? AND f.owner_id = ? AND f.status = 'active'
+			AND (f.expires_at IS NULL OR f.expires_at > ?)`
+		args = []any{sanitized, ownerID, formatTime(time.Now().UTC())}
+		if category != "" {
+			sqlQuery += ` AND f.category = ?`
+			args = append(args, category)
+		}
+		sqlQuery += ` ORDER BY bm25(profile_fact_fts), f.confidence DESC, f.id ASC LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("search profile facts: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ProfileFact
+	for rows.Next() {
+		fact, err := scanProfileFact(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fact)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("search profile facts: %w", err))
+	}
+	return out, nil
+}
+
+func ProfileVerifiedFlag(verified bool) int64 {
+	if verified {
+		return 1
+	}
+	return 0
+}
+
+func ProfileExpiresAt(expiresAt *time.Time) any {
+	if expiresAt == nil || expiresAt.IsZero() {
+		return nil
+	}
+	return formatTime(expiresAt.UTC())
+}
+
+func ProfileConflictsWith(conflictsWith string) any {
+	if conflictsWith == "" {
+		return nil
+	}
+	return conflictsWith
 }

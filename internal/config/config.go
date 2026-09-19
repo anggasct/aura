@@ -40,6 +40,7 @@ type Config struct {
 	Memory       Memory                `koanf:"memory" yaml:"memory"`
 	Skills       *Skills               `koanf:"skills" yaml:"skills,omitempty"`
 	Context      *Context              `koanf:"context" yaml:"context,omitempty"`
+	Profile      *Profile              `koanf:"profile" yaml:"profile,omitempty"`
 	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
@@ -136,6 +137,15 @@ type Sync struct {
 	GitBinary          string   `koanf:"git_binary" yaml:"git_binary"`
 	SSHBinary          string   `koanf:"ssh_binary" yaml:"ssh_binary"`
 	Include            []string `koanf:"include" yaml:"include"`
+}
+
+type Profile struct {
+	Enabled                 bool    `koanf:"enabled" yaml:"enabled"`
+	MaxContextFacts         int     `koanf:"max_context_facts" yaml:"max_context_facts"`
+	MaxContextTokens        int     `koanf:"max_context_tokens" yaml:"max_context_tokens"`
+	ExtractionQueueCapacity int     `koanf:"extraction_queue_capacity" yaml:"extraction_queue_capacity"`
+	CandidateMinConfidence  float64 `koanf:"candidate_min_confidence" yaml:"candidate_min_confidence"`
+	PromptVersion           string  `koanf:"prompt_version" yaml:"prompt_version"`
 }
 
 type Discord struct {
@@ -648,6 +658,14 @@ func Default() Config {
 				MaxOutputTokens: 2048,
 				PromptVersion:   "v1",
 			},
+		},
+		Profile: &Profile{
+			Enabled:                 true,
+			MaxContextFacts:         20,
+			MaxContextTokens:        1024,
+			ExtractionQueueCapacity: 64,
+			CandidateMinConfidence:  0.70,
+			PromptVersion:           "v1",
 		},
 	}
 }

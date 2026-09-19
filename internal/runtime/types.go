@@ -71,6 +71,9 @@ const (
 const (
 	RecallEvidenceStart = "[untrusted recall evidence"
 	RecallEvidenceEnd   = "[/untrusted recall evidence]"
+
+	ProfileEvidenceStart = "[untrusted profile context"
+	ProfileEvidenceEnd   = "[/untrusted profile context]"
 )
 
 type AgentRuntime interface {
