@@ -49,6 +49,11 @@ type Job struct {
 	Events    []JobEvent
 }
 
+type queuedJob struct {
+	job        Job
+	enqueuedAt time.Time
+}
+
 type JobOutcome struct {
 	Accepted int
 	Screened int
@@ -67,12 +72,21 @@ type Extractor struct {
 	promptVersion   string
 	promptDigest    string
 	maxOutputTokens int
-	queue           chan Job
+	queue           chan queuedJob
 	logger          *slog.Logger
 	dropped         atomic.Int64
+	observer        Observer
 }
 
-func NewExtractor(service *Service, caller ModelCaller, scanner SecretScanner, task, promptVersion string, maxOutputTokens, queueCapacity int, logger *slog.Logger) (*Extractor, error) {
+type ExtractorOption func(*Extractor)
+
+func WithObserver(observer Observer) ExtractorOption {
+	return func(e *Extractor) {
+		e.observer = observer
+	}
+}
+
+func NewExtractor(service *Service, caller ModelCaller, scanner SecretScanner, task, promptVersion string, maxOutputTokens, queueCapacity int, logger *slog.Logger, opts ...ExtractorOption) (*Extractor, error) {
 	if service == nil {
 		return nil, errNilArgument("service")
 	}
@@ -98,7 +112,7 @@ func NewExtractor(service *Service, caller ModelCaller, scanner SecretScanner, t
 	if err != nil {
 		return nil, err
 	}
-	return &Extractor{
+	extractor := &Extractor{
 		service:         service,
 		caller:          caller,
 		scanner:         scanner,
@@ -107,9 +121,21 @@ func NewExtractor(service *Service, caller ModelCaller, scanner SecretScanner, t
 		promptVersion:   promptVersion,
 		promptDigest:    ValueDigest(prompt),
 		maxOutputTokens: maxOutputTokens,
-		queue:           make(chan Job, queueCapacity),
+		queue:           make(chan queuedJob, queueCapacity),
 		logger:          logger,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(extractor)
+	}
+	return extractor, nil
+}
+
+func (e *Extractor) QueueDepth() int {
+	return len(e.queue)
+}
+
+func (e *Extractor) DroppedJobs() int64 {
+	return e.dropped.Load()
 }
 
 func (e *Extractor) Enqueue(job Job) error {
@@ -126,11 +152,16 @@ func (e *Extractor) Enqueue(job Job) error {
 		}
 		seen[event.Sequence] = true
 	}
+	ticket := queuedJob{job: job, enqueuedAt: time.Now().UTC()}
 	select {
-	case e.queue <- job:
+	case e.queue <- ticket:
 		return nil
 	default:
 		e.dropped.Add(1)
+		observeWith(stdcontext.Background(), e.observer, &Observation{
+			Kind:   ObserveExtraction,
+			Result: ResultDropped,
+		})
 		e.logger.WarnContext(stdcontext.Background(), "profile extraction queue is full", "component", "profile")
 		return Errorf(ErrorCodeProfileUnavailable, "extraction queue is full")
 	}
@@ -152,13 +183,17 @@ func (e *Extractor) run(ctx stdcontext.Context) {
 				e.logger.WarnContext(ctx, "profile extraction stops with pending jobs", "component", "profile", "pending", pending)
 			}
 			return
-		case job := <-e.queue:
-			e.handle(ctx, job)
+		case ticket := <-e.queue:
+			queueAge := time.Since(ticket.enqueuedAt)
+			if queueAge < 0 {
+				queueAge = 0
+			}
+			e.handle(ctx, ticket.job, queueAge)
 		}
 	}
 }
 
-func (e *Extractor) handle(ctx stdcontext.Context, job Job) {
+func (e *Extractor) handle(ctx stdcontext.Context, job Job, queueAge time.Duration) {
 	outcome := JobOutcome{}
 	sources, bySequence := boundSources(job.Events)
 	result, attempts, err := e.callWithRetry(ctx, sources)
@@ -166,18 +201,18 @@ func (e *Extractor) handle(ctx stdcontext.Context, job Job) {
 	if err != nil {
 		outcome.Failed = true
 		e.logger.WarnContext(ctx, "profile extraction failed", "component", "profile")
-		e.finish(ctx, outcome)
+		e.finish(ctx, outcome, ResultFailed, queueAge)
 		return
 	}
 	if strings.TrimSpace(result.Producer.Model) == "" {
 		outcome.Failed = true
-		e.finish(ctx, outcome)
+		e.finish(ctx, outcome, ResultFailed, queueAge)
 		return
 	}
 	candidates, err := ParseCandidates(result.Text)
 	if err != nil {
 		outcome.Failed = true
-		e.finish(ctx, outcome)
+		e.finish(ctx, outcome, ResultParseFailed, queueAge)
 		return
 	}
 	now := time.Now().UTC()
@@ -220,7 +255,7 @@ func (e *Extractor) handle(ctx stdcontext.Context, job Job) {
 			outcome.Skipped++
 		}
 	}
-	e.finish(ctx, outcome)
+	e.finish(ctx, outcome, ResultCompleted, queueAge)
 }
 
 func (e *Extractor) callWithRetry(ctx stdcontext.Context, sources []ExtractSource) (*ExtractResult, int, error) {
@@ -273,7 +308,7 @@ func boundSources(events []JobEvent) (sources []ExtractSource, bySequence map[ui
 	return sources, bySequence
 }
 
-func (e *Extractor) finish(ctx stdcontext.Context, outcome JobOutcome) {
+func (e *Extractor) finish(ctx stdcontext.Context, outcome JobOutcome, result string, queueAge time.Duration) {
 	e.logger.DebugContext(ctx, "profile extraction job done",
 		"component", "profile",
 		"accepted", outcome.Accepted,
@@ -282,4 +317,12 @@ func (e *Extractor) finish(ctx stdcontext.Context, outcome JobOutcome) {
 		"attempt", outcome.Attempt,
 		"failed", outcome.Failed,
 	)
+	observeWith(ctx, e.observer, &Observation{
+		Kind:     ObserveExtraction,
+		Result:   result,
+		QueueAge: queueAge,
+		Accepted: outcome.Accepted,
+		Screened: outcome.Screened,
+		Skipped:  outcome.Skipped,
+	})
 }

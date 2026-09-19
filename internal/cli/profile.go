@@ -6,10 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+	adkmodel "google.golang.org/adk/v2/model"
+	"google.golang.org/genai"
+
+	"github.com/anggasct/aura/internal/config"
+	contextpkg "github.com/anggasct/aura/internal/context"
 	"github.com/anggasct/aura/internal/profile"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/telemetry"
 )
 
 const profileOwnerSessionPrefix = "profile-"
@@ -233,20 +241,42 @@ func (r *profileRegistry) Evidence(ctx context.Context, factID string) ([]profil
 	return out, nil
 }
 
-func (r *profileRegistry) Expire(ctx context.Context, now time.Time) (int, error) {
-	result, err := r.db.ExecContext(ctx,
+func (r *profileRegistry) Expire(ctx context.Context, now time.Time) ([]profile.Fact, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cli: expire profile facts: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	ids, err := expireCandidateIDs(ctx, tx, now)
+	if err != nil {
+		return nil, err
+	}
+	expired := make([]profile.Fact, 0, len(ids))
+	for _, id := range ids {
+		stored, ok, err := getProfileFactTx(ctx, tx, id)
+		if err != nil {
+			return nil, fmt.Errorf("cli: expire profile facts: %w", err)
+		}
+		if !ok {
+			continue
+		}
+		expired = append(expired, profileFactFromStore(&stored))
+	}
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE profile_fact SET status = 'expired', updated_at = ?
 		 WHERE status IN ('candidate','active') AND expires_at IS NOT NULL AND expires_at <= ?`,
 		now.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano),
-	)
-	if err != nil {
-		return 0, fmt.Errorf("cli: expire profile facts: %w", err)
+	); err != nil {
+		return nil, fmt.Errorf("cli: expire profile facts: %w", err)
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("cli: expire profile facts: %w", err)
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("cli: expire profile facts: %w", err)
 	}
-	return int(affected), nil
+	for i := range expired {
+		expired[i].Status = profile.StatusExpired
+		expired[i].UpdatedAt = now
+	}
+	return expired, nil
 }
 
 func (r *profileRegistry) Search(ctx context.Context, ownerID, category, query string, limit int, now time.Time) ([]profile.SearchHit, error) {
@@ -418,4 +448,211 @@ func (s *profileActionSink) RecordOwnerAction(ctx context.Context, action *profi
 		CreatedAt:     action.At.UTC(),
 	})
 	return err
+}
+
+func profilingProducer(cfg *config.Config) (profile.ModelProducer, error) {
+	if cfg == nil {
+		return profile.ModelProducer{}, errors.New("cli: config must not be nil")
+	}
+	role := cfg.Models.Routing["profiling"]
+	if strings.TrimSpace(role) == "" {
+		role = "auxiliary"
+	}
+	route, ok := cfg.ModelRoutes[role]
+	if !ok {
+		return profile.ModelProducer{}, fmt.Errorf("cli: profiling route %q is not configured", role)
+	}
+	if len(route.Candidates) == 0 {
+		return profile.ModelProducer{}, fmt.Errorf("cli: profiling route %q names no candidate", role)
+	}
+	definition, ok := cfg.Models.Definitions[route.Candidates[0]]
+	if !ok {
+		return profile.ModelProducer{}, fmt.Errorf("cli: profiling candidate %q is not defined", route.Candidates[0])
+	}
+	if strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "" {
+		return profile.ModelProducer{}, fmt.Errorf("cli: profiling candidate %q carries no identity", route.Candidates[0])
+	}
+	return profile.ModelProducer{Provider: definition.Protocol, Model: definition.Model}, nil
+}
+
+type profileModelCaller struct {
+	llm      adkmodel.LLM
+	producer profile.ModelProducer
+	bound    int
+}
+
+func newProfileModelCaller(llm adkmodel.LLM, producer profile.ModelProducer, maxOutputTokens int) *profileModelCaller {
+	return &profileModelCaller{llm: llm, producer: producer, bound: contextpkg.OutputByteBound(maxOutputTokens) + 1}
+}
+
+func (c *profileModelCaller) Extract(ctx context.Context, req *profile.ExtractRequest) (*profile.ExtractResult, error) {
+	if ctx == nil {
+		return nil, errors.New("cli: context must not be nil")
+	}
+	if req == nil {
+		return nil, errors.New("cli: extraction request must not be nil")
+	}
+	if c.llm == nil {
+		return nil, errors.New("cli: extractor has no model")
+	}
+	if req.MaxOutputTokens <= 0 || req.MaxOutputTokens > 1<<20 {
+		return nil, errors.New("cli: extraction request carries an invalid output bound")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var message strings.Builder
+	message.WriteString(req.Prompt)
+	for _, source := range req.Sources {
+		message.WriteString("\n---\n")
+		message.WriteString(source.Text)
+	}
+	var collected strings.Builder
+	oversized := false
+	for response, err := range c.llm.GenerateContent(ctx, &adkmodel.LLMRequest{
+		Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: message.String()}}}},
+		Config:   &genai.GenerateContentConfig{MaxOutputTokens: int32(req.MaxOutputTokens)},
+	}, false) {
+		if err != nil {
+			return nil, err
+		}
+		if response == nil || response.Content == nil {
+			continue
+		}
+		for _, part := range response.Content.Parts {
+			if part == nil || strings.TrimSpace(part.Text) == "" {
+				continue
+			}
+			if collected.Len()+len(part.Text) > c.bound {
+				oversized = true
+				break
+			}
+			collected.WriteString(part.Text)
+		}
+		if oversized {
+			break
+		}
+	}
+	if oversized {
+		return nil, errors.New("cli: profiling output exceeds the configured bound")
+	}
+	producer := c.producer
+	if producer.Model == "" {
+		producer.Model = "unknown"
+	}
+	return &profile.ExtractResult{Text: collected.String(), Producer: producer}, nil
+}
+
+func profileRecorderObserver(recorder *telemetry.ProfileRecorder) profile.Observer {
+	return func(ctx context.Context, observation *profile.Observation) {
+		if observation == nil {
+			return
+		}
+		recorder.Record(ctx, &telemetry.ProfileObservation{
+			Kind:     observation.Kind,
+			Result:   observation.Result,
+			QueueAge: observation.QueueAge,
+			Lag:      observation.Lag,
+			Accepted: observation.Accepted,
+			Screened: observation.Screened,
+			Skipped:  observation.Skipped,
+			Facts:    observation.Facts,
+			Tokens:   observation.Tokens,
+		})
+	}
+}
+
+func profileTelemetryCallbacks(db *sql.DB, queueDepth func() int64) telemetry.ProfileCallbacks {
+	callbacks := telemetry.ProfileCallbacks{QueueDepth: queueDepth}
+	if db != nil {
+		callbacks.FactCounts = func() []telemetry.ProfileFactCount {
+			rows, err := db.QueryContext(context.Background(), `SELECT status, category, COUNT(*) FROM profile_fact GROUP BY status, category`)
+			if err != nil {
+				return nil
+			}
+			defer func() { _ = rows.Close() }()
+			counts := []telemetry.ProfileFactCount{}
+			for rows.Next() {
+				count := telemetry.ProfileFactCount{Count: 0}
+				if err := rows.Scan(&count.Status, &count.Category, &count.Count); err != nil {
+					return nil
+				}
+				counts = append(counts, count)
+			}
+			if err := rows.Err(); err != nil {
+				return nil
+			}
+			return counts
+		}
+	}
+	return callbacks
+}
+
+func RebuildProfileFTS(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `INSERT INTO profile_fact_fts(profile_fact_fts) VALUES ('rebuild')`); err != nil {
+		return fmt.Errorf("cli: rebuild profile index: %w", err)
+	}
+	return nil
+}
+
+func expireCandidateIDs(ctx context.Context, tx *sql.Tx, now time.Time) ([]string, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM profile_fact
+		 WHERE status IN ('candidate','active') AND expires_at IS NOT NULL AND expires_at <= ?
+		 ORDER BY id`, now.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("cli: expire profile facts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("cli: expire profile facts: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("cli: expire profile facts: %w", err)
+	}
+	return ids, nil
+}
+
+func newProfileExtractor(cfg *config.Config, db *sql.DB, llm adkmodel.LLM, mp metric.MeterProvider, scanner profile.SecretScanner, maxOutputTokens int) (*profile.Extractor, *telemetry.ProfileRecorder, error) {
+	if db == nil {
+		return nil, nil, errors.New("cli: profile database must not be nil")
+	}
+	if scanner == nil {
+		return nil, nil, errors.New("cli: profile scanner must not be nil")
+	}
+	producer, err := profilingProducer(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	var extractor *profile.Extractor
+	recorder, err := telemetry.NewProfileRecorder(mp, profileTelemetryCallbacks(db, func() int64 {
+		if extractor == nil {
+			return 0
+		}
+		return int64(extractor.QueueDepth())
+	}))
+	if err != nil {
+		return nil, nil, err
+	}
+	service, err := profile.NewService(newProfileRegistry(db), profile.Config{
+		MinConfidence: cfg.Profile.CandidateMinConfidence,
+		Scanner:       scanner,
+		Observer:      profileRecorderObserver(recorder),
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	extractor, err = profile.NewExtractor(service, newProfileModelCaller(llm, producer, maxOutputTokens), scanner,
+		"profiling", cfg.Profile.PromptVersion, maxOutputTokens, cfg.Profile.ExtractionQueueCapacity, nil,
+		profile.WithObserver(profileRecorderObserver(recorder)))
+	if err != nil {
+		return nil, nil, err
+	}
+	return extractor, recorder, nil
 }
