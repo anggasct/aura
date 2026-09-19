@@ -64,7 +64,7 @@ type Registry interface {
 	Get(ctx stdcontext.Context, id string) (Fact, bool, error)
 	Active(ctx stdcontext.Context, ownerID, category, key string) ([]Fact, error)
 	Evidence(ctx stdcontext.Context, factID string) ([]Evidence, error)
-	Expire(ctx stdcontext.Context, now time.Time) (int, error)
+	Expire(ctx stdcontext.Context, now time.Time) ([]Fact, error)
 	Search(ctx stdcontext.Context, ownerID, category, query string, limit int, now time.Time) ([]SearchHit, error)
 	List(ctx stdcontext.Context, ownerID, status, category string, limit int) ([]Fact, error)
 }
@@ -73,6 +73,7 @@ type Config struct {
 	MinConfidence float64
 	Scanner       SecretScanner
 	Actions       ActionSink
+	Observer      Observer
 }
 
 type Service struct {
@@ -80,6 +81,7 @@ type Service struct {
 	minConfidence float64
 	scanner       SecretScanner
 	actions       ActionSink
+	observer      Observer
 }
 
 func NewService(registry Registry, config Config) (*Service, error) {
@@ -93,7 +95,7 @@ func NewService(registry Registry, config Config) (*Service, error) {
 	if scanner == nil {
 		scanner = rejectAllScanner{}
 	}
-	return &Service{registry: registry, minConfidence: config.MinConfidence, scanner: scanner, actions: config.Actions}, nil
+	return &Service{registry: registry, minConfidence: config.MinConfidence, scanner: scanner, actions: config.Actions, observer: config.Observer}, nil
 }
 
 func ConfidenceV1(evidence int) float64 {
@@ -236,14 +238,28 @@ func (s *Service) DeleteFact(ctx stdcontext.Context, ownerID, factID string, now
 	return s.recordAction(ctx, ownerID, factID, "delete", &fact, now)
 }
 
-func (s *Service) ExpireFacts(ctx stdcontext.Context, now time.Time) (int, error) {
+func (s *Service) ExpireFacts(ctx stdcontext.Context, now time.Time) ([]Fact, error) {
 	if ctx == nil {
-		return 0, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if now.IsZero() {
-		return 0, Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
+		return nil, Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
 	}
-	return s.registry.Expire(ctx, now)
+	expired, err := s.registry.Expire(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	for i := range expired {
+		lag := time.Duration(0)
+		if expired[i].ExpiresAt != nil {
+			lag = now.Sub(*expired[i].ExpiresAt)
+			if lag < 0 {
+				lag = 0
+			}
+		}
+		observeWith(ctx, s.observer, &Observation{Kind: ObserveExpiry, Lag: lag})
+	}
+	return expired, nil
 }
 
 func (s *Service) GetFact(ctx stdcontext.Context, ownerID, factID string) (Fact, error) {

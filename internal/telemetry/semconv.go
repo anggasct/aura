@@ -21,14 +21,25 @@ const (
 	MetricMCPCallsTotal         = "mcp.calls.total"
 	MetricMCPCallDuration       = "mcp.call.duration"
 	MetricMCPResponseSize       = "mcp.response.size"
+
+	MetricProfileExtractionsTotal     = "profile.extractions.total"
+	MetricProfileExtractionQueueAge   = "profile.extraction.queue_age"
+	MetricProfileExtractionQueueDepth = "profile.extraction.queue_depth"
+	MetricProfileFactsCount           = "profile.facts.count"
+	MetricProfileExpiryLag            = "profile.expiry.lag"
+	MetricProfileContextFacts         = "profile.context.facts"
+	MetricProfileContextTokens        = "profile.context.tokens"
 )
 
 const (
-	AttrSessionID    = "session.id"
-	AttrTurnID       = "turn.id"
-	AttrOrigin       = "turn.origin"
-	AttrTerminalKind = "turn.terminal_kind"
-	AttrAgentID      = "agent.id"
+	AttrSessionID       = "session.id"
+	AttrTurnID          = "turn.id"
+	AttrProfileResult   = "profile.result"
+	AttrProfileStatus   = "profile.status"
+	AttrProfileCategory = "profile.category"
+	AttrOrigin          = "turn.origin"
+	AttrTerminalKind    = "turn.terminal_kind"
+	AttrAgentID         = "agent.id"
 
 	AttrGenAISystem           = "gen_ai.system"
 	AttrGenAIRequestModel     = "gen_ai.request.model"
@@ -116,17 +127,20 @@ var memoryRecallSpanAttrs = []string{
 }
 
 var metricLabelAttrs = map[string][]string{
-	MetricTurnsTotal:            {AttrOrigin, AttrTerminalKind},
-	MetricTurnDuration:          {AttrOrigin, AttrTerminalKind},
-	MetricModelDuration:         {AttrGenAISystem, AttrGenAIOperationName},
-	MetricToolCallsTotal:        {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
-	MetricToolCallDuration:      {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
-	MetricMemoryRecallsTotal:    {AttrRecallOutcome, AttrRecallModelSystem},
-	MetricMemoryRecallDuration:  {AttrRecallOutcome},
-	MetricMemoryRecallDocuments: {AttrRecallOutcome},
-	MetricMCPCallsTotal:         {AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode},
-	MetricMCPCallDuration:       {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
-	MetricMCPResponseSize:       {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
+	MetricTurnsTotal:                {AttrOrigin, AttrTerminalKind},
+	MetricTurnDuration:              {AttrOrigin, AttrTerminalKind},
+	MetricModelDuration:             {AttrGenAISystem, AttrGenAIOperationName},
+	MetricToolCallsTotal:            {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
+	MetricToolCallDuration:          {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
+	MetricMemoryRecallsTotal:        {AttrRecallOutcome, AttrRecallModelSystem},
+	MetricMemoryRecallDuration:      {AttrRecallOutcome},
+	MetricMemoryRecallDocuments:     {AttrRecallOutcome},
+	MetricMCPCallsTotal:             {AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode},
+	MetricMCPCallDuration:           {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
+	MetricMCPResponseSize:           {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
+	MetricProfileExtractionsTotal:   {AttrProfileResult},
+	MetricProfileExtractionQueueAge: {AttrProfileResult},
+	MetricProfileFactsCount:         {AttrProfileStatus, AttrProfileCategory},
 }
 
 func AllowedSpanAttrs(spanName string) []string {

@@ -50,6 +50,14 @@ func TestMetricNamesPinned(t *testing.T) {
 		"MetricMemoryRecallsTotal":    MetricMemoryRecallsTotal,
 		"MetricMemoryRecallDuration":  MetricMemoryRecallDuration,
 		"MetricMemoryRecallDocuments": MetricMemoryRecallDocuments,
+
+		"MetricProfileExtractionsTotal":     MetricProfileExtractionsTotal,
+		"MetricProfileExtractionQueueAge":   MetricProfileExtractionQueueAge,
+		"MetricProfileExtractionQueueDepth": MetricProfileExtractionQueueDepth,
+		"MetricProfileFactsCount":           MetricProfileFactsCount,
+		"MetricProfileExpiryLag":            MetricProfileExpiryLag,
+		"MetricProfileContextFacts":         MetricProfileContextFacts,
+		"MetricProfileContextTokens":        MetricProfileContextTokens,
 	}
 	want := map[string]string{
 		"MetricTurnsTotal":            "runtime.turns.total",
@@ -63,6 +71,14 @@ func TestMetricNamesPinned(t *testing.T) {
 		"MetricMCPCallsTotal":         "mcp.calls.total",
 		"MetricMCPCallDuration":       "mcp.call.duration",
 		"MetricMCPResponseSize":       "mcp.response.size",
+
+		"MetricProfileExtractionsTotal":     "profile.extractions.total",
+		"MetricProfileExtractionQueueAge":   "profile.extraction.queue_age",
+		"MetricProfileExtractionQueueDepth": "profile.extraction.queue_depth",
+		"MetricProfileFactsCount":           "profile.facts.count",
+		"MetricProfileExpiryLag":            "profile.expiry.lag",
+		"MetricProfileContextFacts":         "profile.context.facts",
+		"MetricProfileContextTokens":        "profile.context.tokens",
 	}
 	for name, got := range metrics {
 		if got != want[name] {

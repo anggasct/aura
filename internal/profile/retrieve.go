@@ -73,5 +73,6 @@ func (s *Service) Retrieve(ctx stdcontext.Context, query *RetrieveQuery, now tim
 			Confidence: hit.Confidence, Origin: hit.Origin, Verified: hit.OwnerVerified,
 		})
 	}
+	observeWith(ctx, s.observer, &Observation{Kind: ObserveContext, Facts: len(part.Facts), Tokens: used})
 	return part, nil
 }

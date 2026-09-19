@@ -147,10 +147,10 @@ func (f *fakeRegistry) Evidence(_ stdcontext.Context, factID string) ([]Evidence
 	return append([]Evidence(nil), f.evidence[factID]...), nil
 }
 
-func (f *fakeRegistry) Expire(_ stdcontext.Context, now time.Time) (int, error) {
+func (f *fakeRegistry) Expire(_ stdcontext.Context, now time.Time) ([]Fact, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	count := 0
+	expired := []Fact{}
 	for _, stored := range f.facts {
 		if stored.ExpiresAt == nil || stored.ExpiresAt.After(now) {
 			continue
@@ -160,9 +160,9 @@ func (f *fakeRegistry) Expire(_ stdcontext.Context, now time.Time) (int, error) 
 		}
 		stored.Status = StatusExpired
 		stored.UpdatedAt = now
-		count++
+		expired = append(expired, *stored)
 	}
-	return count, nil
+	return expired, nil
 }
 
 func testService() *Service {
@@ -324,9 +324,9 @@ func TestExpireFacts(t *testing.T) {
 	registry.mu.Lock()
 	registry.facts[fact.ID] = &stored
 	registry.mu.Unlock()
-	count, err := service.ExpireFacts(t.Context(), now)
-	if err != nil || count != 1 {
-		t.Fatalf("ExpireFacts: %d, %v", count, err)
+	expiredFacts, err := service.ExpireFacts(t.Context(), now)
+	if err != nil || len(expiredFacts) != 1 {
+		t.Fatalf("ExpireFacts: %d, %v", len(expiredFacts), err)
 	}
 	expired, err := service.GetFact(t.Context(), "owner-1", fact.ID)
 	if err != nil || expired.Status != StatusExpired {
