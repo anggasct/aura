@@ -31,6 +31,7 @@ var migrations = []migration{
 	{version: 13, sql: memoryDocumentSchemaSQL},
 	{version: 14, sql: skillPackageSchemaSQL},
 	{version: 15, sql: profileSchemaSQL},
+	{version: 16, sql: childRunSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -468,6 +469,28 @@ CREATE TRIGGER profile_fact_fts_update AFTER UPDATE OF fact_key, fact_value ON p
     INSERT INTO profile_fact_fts(profile_fact_fts, rowid, fact_key, fact_value) VALUES ('delete', old.rowid, old.fact_key, old.fact_value);
     INSERT INTO profile_fact_fts(rowid, fact_key, fact_value) VALUES (new.rowid, new.fact_key, new.fact_value);
 END;
+`
+
+const childRunSchemaSQL = `
+CREATE TABLE child_run (
+    id TEXT PRIMARY KEY,
+    idempotency_key TEXT NOT NULL,
+    parent_session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+    parent_turn_id TEXT NOT NULL,
+    parent_invocation_id TEXT NOT NULL,
+    child_session_id TEXT NOT NULL UNIQUE REFERENCES session(id) ON DELETE CASCADE,
+    depth INTEGER NOT NULL,
+    durable_key TEXT NOT NULL,
+    context_digest TEXT NOT NULL,
+    grants_json TEXT NOT NULL,
+    budget_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('queued','running','succeeded','failed','cancelled','deadline_exceeded','interrupted')),
+    deadline TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(parent_invocation_id, idempotency_key)
+);
+CREATE INDEX child_parent_state_idx ON child_run(parent_session_id, state, created_at, id);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {
