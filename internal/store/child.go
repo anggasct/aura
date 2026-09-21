@@ -16,6 +16,7 @@ type ChildRun struct {
 	ParentTurnID     string
 	ParentInvocation string
 	ChildSessionID   string
+	Depth            int
 	DurableKey       string
 	ContextDigest    string
 	GrantsJSON       string
@@ -55,6 +56,12 @@ func checkChildRun(run *ChildRun) error {
 	if strings.TrimSpace(run.ChildSessionID) == "" || strings.TrimSpace(run.DurableKey) == "" {
 		return Errorf(ErrorCodeInvalidArgument, "child session and durable key must not be empty")
 	}
+	if strings.TrimSpace(run.ContextDigest) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "child context digest must not be empty")
+	}
+	if run.Depth != 1 {
+		return Errorf(ErrorCodeInvalidArgument, "child run depth must be one")
+	}
 	if !json.Valid([]byte(run.GrantsJSON)) || !json.Valid([]byte(run.BudgetJSON)) {
 		return Errorf(ErrorCodeInvalidArgument, "child grants and budget must be valid JSON")
 	}
@@ -79,11 +86,11 @@ func (s *sqliteChildStore) InsertRun(ctx context.Context, run *ChildRun) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO child_run (
 			id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
-			child_session_id, durable_key, context_digest, grants_json, budget_json,
+			child_session_id, depth, durable_key, context_digest, grants_json, budget_json,
 			state, deadline, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID, run.IdempotencyKey, run.ParentSessionID, run.ParentTurnID, run.ParentInvocation,
-		run.ChildSessionID, run.DurableKey, run.ContextDigest, run.GrantsJSON, run.BudgetJSON,
+		run.ChildSessionID, run.Depth, run.DurableKey, run.ContextDigest, run.GrantsJSON, run.BudgetJSON,
 		run.State, formatTime(run.Deadline.UTC()), formatTime(run.CreatedAt.UTC()), formatTime(run.UpdatedAt.UTC()),
 	)
 	if err != nil {
@@ -100,7 +107,7 @@ func scanChildRun(rows *sql.Rows) (ChildRun, error) {
 	var deadline, created, updated string
 	if err := rows.Scan(
 		&run.ID, &run.IdempotencyKey, &run.ParentSessionID, &run.ParentTurnID, &run.ParentInvocation,
-		&run.ChildSessionID, &run.DurableKey, &run.ContextDigest, &run.GrantsJSON, &run.BudgetJSON,
+		&run.ChildSessionID, &run.Depth, &run.DurableKey, &run.ContextDigest, &run.GrantsJSON, &run.BudgetJSON,
 		&run.State, &deadline, &created, &updated,
 	); err != nil {
 		return ChildRun{}, fmt.Errorf("scan child run: %w", err)
@@ -121,7 +128,7 @@ func (s *sqliteChildStore) GetRun(ctx context.Context, id string) (ChildRun, boo
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
-			child_session_id, durable_key, context_digest, grants_json, budget_json,
+			child_session_id, depth, durable_key, context_digest, grants_json, budget_json,
 			state, deadline, created_at, updated_at FROM child_run WHERE id = ?`, id,
 	)
 	if err != nil {
@@ -144,7 +151,7 @@ func (s *sqliteChildStore) GetRunByInvocation(ctx context.Context, parentInvocat
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
-			child_session_id, durable_key, context_digest, grants_json, budget_json,
+			child_session_id, depth, durable_key, context_digest, grants_json, budget_json,
 			state, deadline, created_at, updated_at FROM child_run
 		 WHERE parent_invocation_id = ? AND idempotency_key = ?`, parentInvocation, idempotencyKey,
 	)
@@ -194,7 +201,7 @@ func (s *sqliteChildStore) ActiveForParent(ctx context.Context, parentSessionID 
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
-			child_session_id, durable_key, context_digest, grants_json, budget_json,
+			child_session_id, depth, durable_key, context_digest, grants_json, budget_json,
 			state, deadline, created_at, updated_at FROM child_run
 		 WHERE parent_session_id = ? AND state IN ('queued','running')
 		 ORDER BY created_at, id`, parentSessionID,

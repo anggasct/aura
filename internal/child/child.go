@@ -177,9 +177,8 @@ func (s *Service) SpawnChild(ctx stdcontext.Context, spec *Spec, now time.Time) 
 		return Spawn{}, false, err
 	}
 	spawned := *spec
-	if strings.TrimSpace(spawned.ContextDigest) == "" {
-		spawned.ContextDigest = ContextDigest(spawned.Task, spawned.References)
-	}
+	spawned.ContextDigest = ContextDigest(spawned.Task, spawned.References)
+	spawned.RequestedGrants = childGrants
 	spawn, created, err := s.registry.Spawn(ctx, &spawned, now)
 	if err != nil {
 		return Spawn{}, false, err

@@ -11,7 +11,7 @@ func testChildRun(id string) *ChildRun {
 	return &ChildRun{
 		ID: id, IdempotencyKey: "key-" + id,
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
-		ChildSessionID: "sess-child-" + id, DurableKey: "child/" + id,
+		ChildSessionID: "sess-child-" + id, Depth: 1, DurableKey: "child/" + id,
 		ContextDigest: "digest-" + id, GrantsJSON: `[{"capability":"search"}]`,
 		BudgetJSON: `{"max_tokens":1000}`, State: "queued",
 		Deadline: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
@@ -38,6 +38,9 @@ func TestChildStore_RoundTrip(t *testing.T) {
 	}
 	if got.DurableKey != "child/ch-1" || got.State != "queued" {
 		t.Errorf("run = %+v", got)
+	}
+	if got.Depth != 1 || got.ContextDigest != "digest-ch-1" {
+		t.Errorf("run depth/digest = %+v", got)
 	}
 	byKey, found, err := s.GetRunByInvocation(ctx, "inv-1", "key-ch-1")
 	if err != nil || !found || byKey.ID != "ch-1" {
@@ -99,6 +102,33 @@ func TestChildStore_Conflicts(t *testing.T) {
 	invalidGrants.GrantsJSON = "{nope"
 	if err := s.InsertRun(ctx, invalidGrants); err == nil {
 		t.Fatal("invalid grants JSON must fail")
+	}
+	emptyDigest := testChildRun("ch-11")
+	emptyDigest.ChildSessionID = "sess-child-ch-11"
+	seedMemorySession(t, db, "sess-child-ch-11", "owner-1")
+	emptyDigest.ContextDigest = ""
+	if err := s.InsertRun(ctx, emptyDigest); err == nil {
+		t.Fatal("empty digest must fail")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		t.Fatalf("code = %v, %v (%v)", code, ok, err)
+	}
+	blankDigest := testChildRun("ch-12")
+	blankDigest.ChildSessionID = "sess-child-ch-12"
+	seedMemorySession(t, db, "sess-child-ch-12", "owner-1")
+	blankDigest.ContextDigest = "   "
+	if err := s.InsertRun(ctx, blankDigest); err == nil {
+		t.Fatal("whitespace digest must fail")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		t.Fatalf("code = %v, %v (%v)", code, ok, err)
+	}
+	badDepth := testChildRun("ch-13")
+	badDepth.ChildSessionID = "sess-child-ch-13"
+	seedMemorySession(t, db, "sess-child-ch-13", "owner-1")
+	badDepth.Depth = 0
+	if err := s.InsertRun(ctx, badDepth); err == nil {
+		t.Fatal("zero depth must fail")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }
 

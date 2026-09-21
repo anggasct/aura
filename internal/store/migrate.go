@@ -479,6 +479,7 @@ CREATE TABLE child_run (
     parent_turn_id TEXT NOT NULL,
     parent_invocation_id TEXT NOT NULL,
     child_session_id TEXT NOT NULL UNIQUE REFERENCES session(id) ON DELETE CASCADE,
+    depth INTEGER NOT NULL,
     durable_key TEXT NOT NULL,
     context_digest TEXT NOT NULL,
     grants_json TEXT NOT NULL,

@@ -95,6 +95,43 @@ func TestSpawnChildRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSpawnChildIgnoresCallerDigest(t *testing.T) {
+	service, err := NewService(newFakeRegistry())
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	now := time.Now().UTC()
+	first := testSpec()
+	first.ContextDigest = "forged-digest"
+	spawned, created, err := service.SpawnChild(t.Context(), first, now)
+	if err != nil || !created {
+		t.Fatalf("SpawnChild: %+v, %v, %v", spawned, created, err)
+	}
+	if spawned.ContextDigest == "forged-digest" {
+		t.Fatal("caller digest must be recomputed")
+	}
+	if want := ContextDigest(first.Task, first.References); spawned.ContextDigest != want {
+		t.Fatalf("digest = %q, want %q", spawned.ContextDigest, want)
+	}
+	altered := testSpec()
+	altered.Task = "different work"
+	altered.ContextDigest = "forged-digest"
+	if _, _, err := service.SpawnChild(t.Context(), altered, now); err == nil {
+		t.Fatal("altered task with shared explicit digest must conflict")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildConflict {
+		t.Fatalf("code = %v, %v (%v)", code, ok, err)
+	}
+	same := testSpec()
+	same.ContextDigest = "another-forged-value"
+	replay, created, err := service.SpawnChild(t.Context(), same, now)
+	if err != nil || created || replay.ID != "ch-1" {
+		t.Fatalf("identical task with different caller digest must replay: %+v, %v, %v", replay, created, err)
+	}
+	if replay.ContextDigest != spawned.ContextDigest {
+		t.Fatalf("replay digest = %q, want %q", replay.ContextDigest, spawned.ContextDigest)
+	}
+}
+
 func TestSpawnChildValidation(t *testing.T) {
 	service, err := NewService(newFakeRegistry())
 	if err != nil {
