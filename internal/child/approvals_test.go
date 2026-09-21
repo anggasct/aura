@@ -22,7 +22,7 @@ func (f *fakeGate) Authorize(_ stdcontext.Context, request *ToolRequest, binding
 
 func testSpawn() Spawn {
 	return Spawn{
-		ID: "ch-1", SessionID: "sess-child", Depth: 1,
+		ID: "ch-1", SessionID: "sess-child",
 		Grants:     []Grant{{Capability: "search"}},
 		DurableKey: "child/ch-1", Deadline: time.Now().UTC().Add(time.Minute),
 		CreatedAt:       time.Now().UTC(),

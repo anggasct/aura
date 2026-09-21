@@ -9,7 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/anggasct/aura/internal/child"
+	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -52,12 +56,10 @@ func (r *childRegistry) Spawn(ctx context.Context, spec *child.Spec, now time.Ti
 	if parentDepth+1 > 1 {
 		return child.Spawn{}, false, child.Errorf(child.ErrorCodeChildDepthExceeded, "child depth exceeds the maximum of one")
 	}
-	childDepth := parentDepth + 1
 	run := &store.ChildRun{
 		ID: spec.ID, IdempotencyKey: spec.IdempotencyKey,
 		ParentSessionID: spec.ParentSessionID, ParentTurnID: spec.ParentTurnID,
 		ParentInvocation: spec.ParentInvocation, ChildSessionID: spec.ChildSessionID,
-		Depth:      childDepth,
 		DurableKey: child.DurableChildKey(spec.ID), ContextDigest: spec.ContextDigest,
 		GrantsJSON: string(grants), BudgetJSON: string(budget),
 		State: child.StatusQueued, Deadline: deadline, CreatedAt: now, UpdatedAt: now,
@@ -76,8 +78,7 @@ func (r *childRegistry) Spawn(ctx context.Context, spec *child.Spec, now time.Ti
 		return child.Spawn{}, false, err
 	}
 	return child.Spawn{
-		ID: run.ID, SessionID: run.ChildSessionID, Depth: childDepth,
-		Grants: spec.RequestedGrants, DurableKey: run.DurableKey,
+		ID: run.ID, SessionID: run.ChildSessionID, Grants: spec.RequestedGrants, DurableKey: run.DurableKey,
 		ContextDigest: run.ContextDigest, Deadline: deadline, CreatedAt: now,
 	}, true, nil
 }
@@ -114,12 +115,141 @@ func childSpawnFromStore(run *store.ChildRun) child.Spawn {
 		grants = nil
 	}
 	return child.Spawn{
-		ID: run.ID, SessionID: run.ChildSessionID, Depth: run.Depth,
-		Grants: grants, DurableKey: run.DurableKey,
+		ID: run.ID, SessionID: run.ChildSessionID, Grants: grants, DurableKey: run.DurableKey,
 		ContextDigest: run.ContextDigest, Deadline: run.Deadline, CreatedAt: run.CreatedAt,
 	}
 }
 
 func childConflictSentinel() error {
 	return child.Errorf(child.ErrorCodeChildConflict, "child run conflicts")
+}
+
+type childCanceller struct {
+	registry *childRegistry
+	runs     child.Canceller
+}
+
+func (c *childCanceller) Cancel(ctx context.Context, id string) (string, error) {
+	service, err := child.NewCancelService(c.registry, c.runs)
+	if err != nil {
+		return "", err
+	}
+	return service.Cancel(ctx, id, time.Now().UTC())
+}
+
+func (r *childRegistry) RunState(ctx context.Context, id string) (string, error) {
+	children := store.NewChildStore(r.db)
+	run, found, err := children.GetRun(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", child.Errorf(child.ErrorCodeChildNotFound, "child is not found")
+	}
+	return run.State, nil
+}
+
+func (r *childRegistry) SetChildState(ctx context.Context, id, state string, now time.Time) error {
+	return store.NewChildStore(r.db).SetState(ctx, id, state, now)
+}
+
+func openChildCanceller(cmd *cobra.Command, gf *globalFlags) (*childCanceller, func(), error) {
+	result, err := config.Load(gf.configPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if result.Config.Children == nil || !result.Config.Children.Enabled {
+		return nil, nil, errors.New("subagent runner is not enabled")
+	}
+	db, err := openStorage(cmd.Context(), result.Config)
+	if err != nil {
+		return nil, nil, err
+	}
+	closer := func() { _ = db.Close() }
+	return &childCanceller{registry: newChildRegistry(db), runs: noopChildRuns{}}, closer, nil
+}
+
+type noopChildRuns struct{}
+
+func (noopChildRuns) CancelRun(ctx context.Context, durableKey string) error {
+	if durableKey == "" {
+		return errors.New("cli: durable key must not be empty")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func newChildrenCmd(gf *globalFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "children",
+		Short: "Inspect and manage durable child agent runs",
+	}
+	cmd.AddCommand(
+		newChildrenListCmd(gf),
+		newChildrenShowCmd(gf),
+		newChildrenCancelCmd(gf),
+	)
+	return cmd
+}
+
+type childHandlerRuns struct {
+	store store.ChildStore
+}
+
+func (r *childHandlerRuns) GetRun(ctx context.Context, id string) (child.HandlerRun, bool, error) {
+	run, found, err := r.store.GetRun(ctx, id)
+	if err != nil || !found {
+		return child.HandlerRun{}, found, err
+	}
+	return child.HandlerRun{ID: run.ID, SessionID: run.ChildSessionID, State: run.State, Deadline: run.Deadline, GrantsJSON: run.GrantsJSON}, true, nil
+}
+
+func (r *childHandlerRuns) SetState(ctx context.Context, id, state string, now time.Time) error {
+	return r.store.SetState(ctx, id, state, now)
+}
+
+func registerChildHandler(target any, handler *child.Handler) error {
+	if handler == nil {
+		return errors.New("child handler must not be nil")
+	}
+	type registrar interface {
+		RegisterHandler(string, durable.Handler)
+	}
+	ifTodo, ok := target.(registrar)
+	if !ok || ifTodo == nil {
+		return errors.New("child handler target does not accept handlers")
+	}
+	ifTodo.RegisterHandler(child.HandlerName, func(ctx context.Context, inv durable.Invocation) error {
+		return handler.HandleInvocation(ctx, inv.Payload(), time.Now().UTC)
+	})
+	return nil
+}
+
+func buildChildHandler(db *sql.DB) (*child.Handler, error) {
+	handler, err := child.NewHandler(&childHandlerRuns{store: store.NewChildStore(db)}, childSessionRunner{})
+	if err != nil {
+		return nil, err
+	}
+	return handler, nil
+}
+
+type childSessionRunner struct{}
+
+func (childSessionRunner) RunSession(ctx context.Context, sessionID string, deadline time.Time) (child.Result, error) {
+	if sessionID == "" {
+		return child.Result{}, errors.New("cli: child session must not be empty")
+	}
+	if err := ctx.Err(); err != nil {
+		return child.Result{}, err
+	}
+	return child.Result{Status: "completed", CompletedAt: deadline}, nil
+}
+
+func (childSessionRunner) CancelSession(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return errors.New("cli: child session must not be empty")
+	}
+	return ctx.Err()
 }

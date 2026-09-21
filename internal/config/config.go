@@ -41,6 +41,7 @@ type Config struct {
 	Skills       *Skills               `koanf:"skills" yaml:"skills,omitempty"`
 	Context      *Context              `koanf:"context" yaml:"context,omitempty"`
 	Profile      *Profile              `koanf:"profile" yaml:"profile,omitempty"`
+	Children     *Children             `koanf:"children" yaml:"children,omitempty"`
 	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
@@ -146,6 +147,16 @@ type Profile struct {
 	ExtractionQueueCapacity int     `koanf:"extraction_queue_capacity" yaml:"extraction_queue_capacity"`
 	CandidateMinConfidence  float64 `koanf:"candidate_min_confidence" yaml:"candidate_min_confidence"`
 	PromptVersion           string  `koanf:"prompt_version" yaml:"prompt_version"`
+}
+
+type Children struct {
+	Enabled            bool     `koanf:"enabled" yaml:"enabled"`
+	MaxDepth           int      `koanf:"max_depth" yaml:"max_depth"`
+	MaxActivePerParent int      `koanf:"max_active_per_parent" yaml:"max_active_per_parent"`
+	MaxActiveGlobal    int      `koanf:"max_active_global" yaml:"max_active_global"`
+	DefaultTimeout     Duration `koanf:"default_timeout" yaml:"default_timeout"`
+	MaxTimeout         Duration `koanf:"max_timeout" yaml:"max_timeout"`
+	Recovery           string   `koanf:"recovery" yaml:"recovery"`
 }
 
 type Discord struct {
@@ -666,6 +677,15 @@ func Default() Config {
 			ExtractionQueueCapacity: 64,
 			CandidateMinConfidence:  0.70,
 			PromptVersion:           "v1",
+		},
+		Children: &Children{
+			Enabled:            true,
+			MaxDepth:           1,
+			MaxActivePerParent: 2,
+			MaxActiveGlobal:    4,
+			DefaultTimeout:     Duration(5 * time.Minute),
+			MaxTimeout:         Duration(30 * time.Minute),
+			Recovery:           "interrupt",
 		},
 	}
 }

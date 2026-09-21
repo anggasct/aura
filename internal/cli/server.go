@@ -202,6 +202,17 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 			}
+			if cfg.Children != nil && cfg.Children.Enabled {
+				childHandler, err := buildChildHandler(db)
+				if err != nil {
+					return err
+				}
+				if durableConfig == nil {
+					if err := registerChildHandler(broadcastRuntime, childHandler); err != nil {
+						return err
+					}
+				}
+			}
 			if resumedJobs, err := resumeScheduleRuns(ctx, broadcastRuntime, db); err != nil {
 				return err
 			} else if resumedJobs > 0 {
@@ -231,6 +242,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				}
 				if err := registerScheduleHandler(durableListener, scheduleRunner); err != nil {
 					return err
+				}
+				if cfg.Children != nil && cfg.Children.Enabled {
+					childHandler, err := buildChildHandler(db)
+					if err != nil {
+						return err
+					}
+					if err := registerChildHandler(durableListener, childHandler); err != nil {
+						return err
+					}
 				}
 				if err := srv.Add(durableListener); err != nil {
 					return err

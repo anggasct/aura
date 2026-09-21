@@ -184,6 +184,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateProfile(cfg.Profile, options.Build.Profile()); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateChildren(cfg.Children, options.Build.Profile()); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateSync(cfg.Sync); err != nil {
 		return LoadResult{}, err
 	}
@@ -408,6 +411,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateProfileShapes(doc); err != nil {
+		return err
+	}
+	if err := validateChildrenShapes(doc); err != nil {
 		return err
 	}
 	if err := validateSyncShapes(doc); err != nil {
@@ -1891,6 +1897,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applySkillsDefaults(cfg, doc)
 	applyContextDefaults(cfg, doc)
 	applyProfileDefaults(cfg, doc)
+	applyChildrenDefaults(cfg, doc)
 	applySyncDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
@@ -3244,4 +3251,100 @@ func checkVersion(v int) error {
 		}
 	}
 	return nil
+}
+
+func validateChildren(childrenConfig *Children, buildProfile capability.Profile) error {
+	if childrenConfig == nil {
+		if buildProfile != capability.ProfileCore {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("children section is required for build profile %q", buildProfile)}
+		}
+		return nil
+	}
+	var problems []error
+	if childrenConfig.MaxDepth != 1 {
+		problems = append(problems, errors.New("children.max_depth must be 1"))
+	}
+	if childrenConfig.MaxActivePerParent <= 0 || childrenConfig.MaxActivePerParent > 64 {
+		problems = append(problems, errors.New("children.max_active_per_parent must be between 1 and 64"))
+	}
+	if childrenConfig.MaxActiveGlobal <= 0 || childrenConfig.MaxActiveGlobal > 256 {
+		problems = append(problems, errors.New("children.max_active_global must be between 1 and 256"))
+	}
+	if time.Duration(childrenConfig.DefaultTimeout) <= 0 || time.Duration(childrenConfig.DefaultTimeout) > 24*time.Hour {
+		problems = append(problems, errors.New("children.default_timeout must be positive and at most 24h"))
+	}
+	if time.Duration(childrenConfig.MaxTimeout) <= 0 || time.Duration(childrenConfig.MaxTimeout) > 24*time.Hour {
+		problems = append(problems, errors.New("children.max_timeout must be positive and at most 24h"))
+	}
+	if time.Duration(childrenConfig.DefaultTimeout) > time.Duration(childrenConfig.MaxTimeout) {
+		problems = append(problems, errors.New("children.default_timeout must not exceed children.max_timeout"))
+	}
+	if childrenConfig.Recovery != "interrupt" {
+		problems = append(problems, errors.New("children.recovery must be \"interrupt\""))
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateChildrenShapes(doc *yamlv3.Node) error {
+	childrenNode := mappingValue(doc, "children")
+	if childrenNode == nil {
+		return nil
+	}
+	if childrenNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("children must be a mapping at line %d", childrenNode.Line)
+	}
+	for i := 0; i+1 < len(childrenNode.Content); i += 2 {
+		keyNode := childrenNode.Content[i]
+		valueNode := childrenNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("children.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "max_depth", "max_active_per_parent", "max_active_global":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("children.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "default_timeout", "max_timeout":
+			if valueNode.Kind != yamlv3.ScalarNode || (valueNode.Tag != "!!str" && valueNode.Tag != "!!int") {
+				return fmt.Errorf("children.%s must be a duration at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "recovery":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("children.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func applyChildrenDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Children == nil {
+		return
+	}
+	defaults := Default().Children
+	if !cfg.Children.Enabled && !configValuePresent(doc, "children", "enabled") && !envValuePresent("children.enabled") {
+		cfg.Children.Enabled = defaults.Enabled
+	}
+	if cfg.Children.MaxDepth == 0 && !configValuePresent(doc, "children", "max_depth") && !envValuePresent("children.max_depth") {
+		cfg.Children.MaxDepth = defaults.MaxDepth
+	}
+	if cfg.Children.MaxActivePerParent == 0 && !configValuePresent(doc, "children", "max_active_per_parent") && !envValuePresent("children.max_active_per_parent") {
+		cfg.Children.MaxActivePerParent = defaults.MaxActivePerParent
+	}
+	if cfg.Children.MaxActiveGlobal == 0 && !configValuePresent(doc, "children", "max_active_global") && !envValuePresent("children.max_active_global") {
+		cfg.Children.MaxActiveGlobal = defaults.MaxActiveGlobal
+	}
+	if time.Duration(cfg.Children.DefaultTimeout) == 0 && !configValuePresent(doc, "children", "default_timeout") && !envValuePresent("children.default_timeout") {
+		cfg.Children.DefaultTimeout = defaults.DefaultTimeout
+	}
+	if time.Duration(cfg.Children.MaxTimeout) == 0 && !configValuePresent(doc, "children", "max_timeout") && !envValuePresent("children.max_timeout") {
+		cfg.Children.MaxTimeout = defaults.MaxTimeout
+	}
+	if cfg.Children.Recovery == "" && !configValuePresent(doc, "children", "recovery") && !envValuePresent("children.recovery") {
+		cfg.Children.Recovery = defaults.Recovery
+	}
 }

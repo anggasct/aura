@@ -22,6 +22,12 @@ const (
 	MetricMCPCallDuration       = "mcp.call.duration"
 	MetricMCPResponseSize       = "mcp.response.size"
 
+	MetricChildSpawnsTotal  = "child.spawns.total"
+	MetricChildSettlesTotal = "child.settles.total"
+	MetricChildActive       = "child.active"
+	MetricChildBudgetTokens = "child.budget.tokens"
+	MetricChildBudgetCost   = "child.budget.cost"
+
 	MetricProfileExtractionsTotal     = "profile.extractions.total"
 	MetricProfileExtractionQueueAge   = "profile.extraction.queue_age"
 	MetricProfileExtractionQueueDepth = "profile.extraction.queue_depth"
@@ -32,6 +38,9 @@ const (
 )
 
 const (
+	AttrChildState  = "child.state"
+	AttrChildResult = "child.result"
+
 	AttrSessionID       = "session.id"
 	AttrTurnID          = "turn.id"
 	AttrProfileResult   = "profile.result"
@@ -138,6 +147,11 @@ var metricLabelAttrs = map[string][]string{
 	MetricMCPCallsTotal:             {AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode},
 	MetricMCPCallDuration:           {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
 	MetricMCPResponseSize:           {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
+	MetricChildSpawnsTotal:          {AttrChildResult},
+	MetricChildSettlesTotal:         {AttrChildState, AttrChildResult},
+	MetricChildActive:               {AttrChildState},
+	MetricChildBudgetTokens:         nil,
+	MetricChildBudgetCost:           nil,
 	MetricProfileExtractionsTotal:   {AttrProfileResult},
 	MetricProfileExtractionQueueAge: {AttrProfileResult},
 	MetricProfileFactsCount:         {AttrProfileStatus, AttrProfileCategory},

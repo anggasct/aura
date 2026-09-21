@@ -7,6 +7,7 @@ import (
 
 	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -46,15 +47,12 @@ func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("SpawnChild: %+v, %v, %v", first, created, err)
 	}
-	if first.DurableKey != "child/ch-1" || first.Depth != 1 {
+	if first.DurableKey != "child/ch-1" {
 		t.Errorf("spawn = %+v", first)
 	}
 	second, created, err := service.SpawnChild(t.Context(), spec, now)
 	if err != nil || created || second.ID != "ch-1" {
 		t.Fatalf("idempotent replay: %+v, %v, %v", second, created, err)
-	}
-	if second.Depth != first.Depth {
-		t.Fatalf("replay depth = %d, want %d", second.Depth, first.Depth)
 	}
 	if len(second.Grants) != len(first.Grants) {
 		t.Fatalf("replay grants = %+v, want %+v", second.Grants, first.Grants)
@@ -233,11 +231,11 @@ func TestChildRegistryDepthEnforcedFromDurableState(t *testing.T) {
 		Budget:          child.Budget{MaxTokens: 1000, Timeout: time.Minute},
 	}
 	spawned, created, err := service.SpawnChild(t.Context(), first, now)
-	if err != nil || !created || spawned.Depth != 1 {
+	if err != nil || !created {
 		t.Fatalf("SpawnChild: %+v, %v, %v", spawned, created, err)
 	}
 	replay, created, err := service.SpawnChild(t.Context(), first, now)
-	if err != nil || created || replay.Depth != spawned.Depth {
+	if err != nil || created {
 		t.Fatalf("replay depth: %+v, %v, %v", replay, created, err)
 	}
 	leaf := &child.Spec{
@@ -340,5 +338,32 @@ func TestChildRegistryReplayReturnsPersistedGrants(t *testing.T) {
 	}
 	if _, _, err := newChildRegistry(db).Get(t.Context(), "ch-1"); err != nil {
 		t.Fatalf("Get: %v", err)
+	}
+}
+
+func TestBuildChildHandlerRegisters(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	handler, err := buildChildHandler(db)
+	if err != nil {
+		t.Fatalf("buildChildHandler: %v", err)
+	}
+	runtime := durable.NewFake()
+	if err := registerChildHandler(runtime, handler); err != nil {
+		t.Fatalf("registerChildHandler: %v", err)
+	}
+	if err := registerChildHandler(runtime, nil); err == nil {
+		t.Error("expected nil handler rejection")
+	}
+	if err := registerChildHandler(struct{}{}, handler); err == nil {
+		t.Error("expected non-registrar rejection")
 	}
 }
