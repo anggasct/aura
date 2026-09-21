@@ -283,3 +283,55 @@ func TestChildRegistryGrantsCanonicalAcrossReplay(t *testing.T) {
 		}
 	}
 }
+
+func TestChildRegistryReplayReturnsPersistedGrants(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC()
+	sessions := store.NewSessionService(db)
+	for _, id := range []string{"sess-parent", "sess-child-1"} {
+		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+			t.Fatalf("Create session %s: %v", id, err)
+		}
+	}
+	service, err := child.NewService(newChildRegistry(db))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	spec := &child.Spec{
+		ID: "ch-1", IdempotencyKey: "key-1",
+		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		ChildSessionID: "sess-child-1", ParentDepth: 0,
+		ParentGrants:    []child.Grant{{Capability: "search"}, {Capability: "read"}},
+		Task:            "summarize the logs",
+		RequestedGrants: []child.Grant{{Capability: "search"}, {Capability: "read"}},
+		Budget:          child.Budget{MaxTokens: 1000, Timeout: time.Minute},
+	}
+	first, created, err := service.SpawnChild(t.Context(), spec, now)
+	if err != nil || !created || len(first.Grants) != 2 {
+		t.Fatalf("SpawnChild: %+v, %v, %v", first, created, err)
+	}
+	narrow := *spec
+	narrow.RequestedGrants = []child.Grant{{Capability: "search"}}
+	replayed, created, err := service.SpawnChild(t.Context(), &narrow, now)
+	if err != nil || created {
+		t.Fatalf("replay: %+v, %v, %v", replayed, created, err)
+	}
+	if len(replayed.Grants) != 2 {
+		t.Fatalf("replay must return persisted grants: %+v", replayed.Grants)
+	}
+	if _, found, err := newChildRegistry(db).Get(t.Context(), "missing"); err != nil || found {
+		t.Fatalf("Get missing: %v, %v", found, err)
+	}
+	if _, _, err := newChildRegistry(db).Get(t.Context(), "ch-1"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+}
