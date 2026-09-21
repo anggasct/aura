@@ -132,6 +132,47 @@ func TestSpawnChildIgnoresCallerDigest(t *testing.T) {
 	}
 }
 
+func TestSpawnChildReplayReturnsPersistedGrants(t *testing.T) {
+	registry := newFakeRegistry()
+	service, err := NewService(registry)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	now := time.Now().UTC()
+	first := testSpec()
+	first.RequestedGrants = []Grant{{Capability: "read"}, {Capability: "search"}}
+	spawned, created, err := service.SpawnChild(t.Context(), first, now)
+	if err != nil || !created {
+		t.Fatalf("SpawnChild: %+v, %v, %v", spawned, created, err)
+	}
+	replaySpec := testSpec()
+	replaySpec.RequestedGrants = []Grant{{Capability: "search"}}
+	replay, created, err := service.SpawnChild(t.Context(), replaySpec, now)
+	if err != nil || created {
+		t.Fatalf("replay: %+v, %v, %v", replay, created, err)
+	}
+	if len(replay.Grants) != len(spawned.Grants) {
+		t.Fatalf("replay grants = %+v, want %+v", replay.Grants, spawned.Grants)
+	}
+	for i := range spawned.Grants {
+		if replay.Grants[i] != spawned.Grants[i] {
+			t.Fatalf("replay grants = %+v, want %+v", replay.Grants, spawned.Grants)
+		}
+	}
+	stored, found, err := registry.Get(t.Context(), spawned.ID)
+	if err != nil || !found {
+		t.Fatalf("Get: %+v, %v, %v", stored, found, err)
+	}
+	if len(stored.Grants) != len(spawned.Grants) {
+		t.Fatalf("stored grants = %+v, want %+v", stored.Grants, spawned.Grants)
+	}
+	for i := range spawned.Grants {
+		if stored.Grants[i] != spawned.Grants[i] {
+			t.Fatalf("stored grants = %+v, want %+v", stored.Grants, spawned.Grants)
+		}
+	}
+}
+
 func TestSpawnChildValidation(t *testing.T) {
 	service, err := NewService(newFakeRegistry())
 	if err != nil {

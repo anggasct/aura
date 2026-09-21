@@ -183,6 +183,8 @@ func (s *Service) SpawnChild(ctx stdcontext.Context, spec *Spec, now time.Time) 
 	if err != nil {
 		return Spawn{}, false, err
 	}
-	spawn.Grants = childGrants
+	if created {
+		spawn.Grants = childGrants
+	}
 	return spawn, created, nil
 }
