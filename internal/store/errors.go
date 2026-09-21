@@ -48,6 +48,9 @@ const (
 	ErrorCodeProfileConflict           ErrorCode = "profile_conflict"
 	ErrorCodeProfileNotFound           ErrorCode = "profile_not_found"
 	ErrorCodeProfileInvalid            ErrorCode = "profile_invalid"
+	ErrorCodeChildConflict             ErrorCode = "child_conflict"
+	ErrorCodeChildNotFound             ErrorCode = "child_not_found"
+	ErrorCodeChildInvalid              ErrorCode = "child_invalid"
 )
 
 type Error struct {
