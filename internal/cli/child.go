@@ -153,6 +153,18 @@ func (r *childRegistry) SetChildState(ctx context.Context, id, state string, now
 	return store.NewChildStore(r.db).SetState(ctx, id, state, now)
 }
 
+func (r *childRegistry) ActiveForParent(ctx context.Context, parentSessionID string) ([]child.Spawn, error) {
+	runs, err := store.NewChildStore(r.db).ActiveForParent(ctx, parentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	spawns := make([]child.Spawn, 0, len(runs))
+	for i := range runs {
+		spawns = append(spawns, childSpawnFromStore(&runs[i]))
+	}
+	return spawns, nil
+}
+
 func openChildCanceller(cmd *cobra.Command, gf *globalFlags) (*childCanceller, func(), error) {
 	result, err := config.Load(gf.configPath)
 	if err != nil {
@@ -166,19 +178,29 @@ func openChildCanceller(cmd *cobra.Command, gf *globalFlags) (*childCanceller, f
 		return nil, nil, err
 	}
 	closer := func() { _ = db.Close() }
-	return &childCanceller{registry: newChildRegistry(db), runs: noopChildRuns{}}, closer, nil
+	runtime, err := durableRuntimeForConfig(result.Config, nil)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, err
+	}
+	return &childCanceller{registry: newChildRegistry(db), runs: &durableChildRuns{runtime: runtime}}, closer, nil
 }
 
-type noopChildRuns struct{}
+type durableChildRuns struct {
+	runtime durable.Runtime
+}
 
-func (noopChildRuns) CancelRun(ctx context.Context, durableKey string) error {
+func (d *durableChildRuns) CancelRun(ctx context.Context, durableKey string) error {
+	if d == nil || d.runtime == nil {
+		return errors.New("cli: durable runtime must not be nil")
+	}
 	if durableKey == "" {
 		return errors.New("cli: durable key must not be empty")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return nil
+	return d.runtime.Cancel(ctx, durable.RunRef{Key: durableKey})
 }
 
 func newChildrenCmd(gf *globalFlags) *cobra.Command {
@@ -203,11 +225,15 @@ func (r *childHandlerRuns) GetRun(ctx context.Context, id string) (child.Handler
 	if err != nil || !found {
 		return child.HandlerRun{}, found, err
 	}
-	return child.HandlerRun{ID: run.ID, SessionID: run.ChildSessionID, State: run.State, Deadline: run.Deadline, GrantsJSON: run.GrantsJSON}, true, nil
+	return child.HandlerRun{ID: run.ID, SessionID: run.ChildSessionID, State: run.State, Deadline: run.Deadline, GrantsJSON: run.GrantsJSON, ContextDigest: run.ContextDigest}, true, nil
 }
 
 func (r *childHandlerRuns) SetState(ctx context.Context, id, state string, now time.Time) error {
 	return r.store.SetState(ctx, id, state, now)
+}
+
+func (r *childHandlerRuns) SetResult(_ context.Context, _ string, _ child.Result, _ time.Time) error {
+	return nil
 }
 
 func registerChildHandler(target any, handler *child.Handler) error {
@@ -222,13 +248,13 @@ func registerChildHandler(target any, handler *child.Handler) error {
 		return errors.New("child handler target does not accept handlers")
 	}
 	ifTodo.RegisterHandler(child.HandlerName, func(ctx context.Context, inv durable.Invocation) error {
-		return handler.HandleInvocation(ctx, inv.Payload(), time.Now().UTC)
+		return handler.HandleDurable(ctx, inv, time.Now().UTC)
 	})
 	return nil
 }
 
 func buildChildHandler(db *sql.DB) (*child.Handler, error) {
-	handler, err := child.NewHandler(&childHandlerRuns{store: store.NewChildStore(db)}, childSessionRunner{})
+	handler, err := child.NewHandlerWithLedger(&childHandlerRuns{store: store.NewChildStore(db)}, childSessionRunner{}, child.NewLedger(nil, 0))
 	if err != nil {
 		return nil, err
 	}

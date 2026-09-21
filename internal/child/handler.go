@@ -3,9 +3,12 @@ package child
 import (
 	stdcontext "context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/durable"
 )
 
 type StartPayload struct {
@@ -30,8 +33,9 @@ type Result struct {
 }
 
 type Handler struct {
-	runs HandlerRuns
-	exec Executor
+	runs   HandlerRuns
+	exec   Executor
+	ledger BudgetLedger
 }
 
 type HandlerRuns interface {
@@ -39,12 +43,17 @@ type HandlerRuns interface {
 	GetRun(ctx stdcontext.Context, id string) (HandlerRun, bool, error)
 }
 
+type HandlerResultStore interface {
+	SetResult(ctx stdcontext.Context, id string, result Result, now time.Time) error
+}
+
 type HandlerRun struct {
-	ID         string
-	SessionID  string
-	State      string
-	Deadline   time.Time
-	GrantsJSON string
+	ID            string
+	SessionID     string
+	State         string
+	Deadline      time.Time
+	GrantsJSON    string
+	ContextDigest string
 }
 
 func NewHandler(runs HandlerRuns, exec Executor) (*Handler, error) {
@@ -56,6 +65,17 @@ func NewHandler(runs HandlerRuns, exec Executor) (*Handler, error) {
 	}
 	return &Handler{runs: runs, exec: exec}, nil
 }
+
+func NewHandlerWithLedger(runs HandlerRuns, exec Executor, ledger BudgetLedger) (*Handler, error) {
+	h, err := NewHandler(runs, exec)
+	if err != nil {
+		return nil, err
+	}
+	h.ledger = ledger
+	return h, nil
+}
+
+var ErrNonResumable = errors.New("child: non-resumable attempt")
 
 func parseStartPayload(raw []byte) (StartPayload, error) {
 	var payload StartPayload
@@ -70,6 +90,12 @@ func parseStartPayload(raw []byte) (StartPayload, error) {
 
 func terminalFor(result *Result, err error) string {
 	if err != nil {
+		if errors.Is(err, stdcontext.Canceled) || errors.Is(err, stdcontext.DeadlineExceeded) {
+			return StatusCancelled
+		}
+		if errors.Is(err, ErrNonResumable) {
+			return StatusInterrupted
+		}
 		return StatusFailed
 	}
 	switch result.Status {
@@ -79,12 +105,47 @@ func terminalFor(result *Result, err error) string {
 		return StatusCancelled
 	case "deadline":
 		return StatusDeadline
+	case "interrupted":
+		return StatusInterrupted
 	default:
 		return StatusFailed
 	}
 }
 
+func isTerminalState(state string) bool {
+	switch state {
+	case StatusSucceeded, StatusFailed, StatusCancelled, StatusDeadline, StatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
+func checkResult(result *Result, deadline time.Time) error {
+	if result.TokensUsed < 0 || result.CostMicros < 0 {
+		return Errorf(ErrorCodeChildInvalid, "child result usage must not be negative")
+	}
+	if len(result.Output) > 8192 {
+		return Errorf(ErrorCodeChildInvalid, "child result output exceeds the bound")
+	}
+	if len(result.Artifacts) > 32 {
+		return Errorf(ErrorCodeChildInvalid, "child result artifacts exceed the bound")
+	}
+	return nil
+}
+
 func (h *Handler) HandleInvocation(ctx stdcontext.Context, payload []byte, now func() time.Time) error {
+	return h.handle(ctx, nil, payload, now)
+}
+
+func (h *Handler) HandleDurable(ctx stdcontext.Context, inv durable.Invocation, now func() time.Time) error {
+	if inv == nil {
+		return Errorf(ErrorCodeInvalidArgument, "invocation must not be nil")
+	}
+	return h.handle(ctx, inv, inv.Payload(), now)
+}
+
+func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload []byte, now func() time.Time) error {
 	if ctx == nil {
 		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
 	}
@@ -102,13 +163,89 @@ func (h *Handler) HandleInvocation(ctx stdcontext.Context, payload []byte, now f
 	if !found {
 		return Errorf(ErrorCodeChildNotFound, "child is not found")
 	}
-	if err := h.runs.SetState(ctx, start.ChildID, StatusRunning, now()); err != nil {
+	if isTerminalState(run.State) {
+		return nil
+	}
+	current := now().UTC()
+	if !run.Deadline.IsZero() && !current.Before(run.Deadline.UTC()) {
+		if setErr := h.runs.SetState(ctx, start.ChildID, StatusDeadline, current); setErr != nil {
+			return setErr
+		}
+		h.releaseLedger(ctx, start.ReservationID)
+		return Errorf(ErrorCodeChildInvalid, "child deadline has passed")
+	}
+	if err := h.runs.SetState(ctx, start.ChildID, StatusRunning, current); err != nil {
 		return err
 	}
-	result, err := h.exec.RunSession(ctx, run.SessionID, run.Deadline)
-	state := terminalFor(&result, err)
-	if setErr := h.runs.SetState(ctx, start.ChildID, state, now()); setErr != nil {
+	result, execErr := h.runJournaled(ctx, inv, run.SessionID, run.Deadline)
+	if execErr == nil {
+		if checkErr := checkResult(&result, run.Deadline); checkErr != nil {
+			execErr = checkErr
+		}
+	}
+	state := terminalFor(&result, execErr)
+	if execErr == nil && !run.Deadline.IsZero() && !now().UTC().Before(run.Deadline.UTC()) && state == StatusSucceeded {
+		state = StatusDeadline
+	}
+	settled := now().UTC()
+	if result.CompletedAt.IsZero() {
+		result.CompletedAt = settled
+	}
+	if execErr == nil {
+		h.chargeLedger(ctx, start.ReservationID, result.TokensUsed, result.CostMicros)
+	}
+	h.releaseLedger(ctx, start.ReservationID)
+	if store, ok := h.runs.(HandlerResultStore); ok && execErr == nil {
+		persisted := result
+		if setErr := store.SetResult(ctx, start.ChildID, persisted, settled); setErr != nil {
+			if stateErr := h.runs.SetState(ctx, start.ChildID, StatusFailed, settled); stateErr != nil {
+				return stateErr
+			}
+			return setErr
+		}
+	}
+	if setErr := h.runs.SetState(ctx, start.ChildID, state, settled); setErr != nil {
 		return setErr
 	}
-	return err
+	return execErr
+}
+
+func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, sessionID string, deadline time.Time) (Result, error) {
+	if inv == nil {
+		return h.exec.RunSession(ctx, sessionID, deadline)
+	}
+	key := "child-exec/" + sessionID
+	raw, err := inv.RunAction(ctx, key, func(ctx stdcontext.Context) ([]byte, error) {
+		res, runErr := h.exec.RunSession(ctx, sessionID, deadline)
+		if runErr != nil {
+			return nil, runErr
+		}
+		encoded, encErr := json.Marshal(res)
+		if encErr != nil {
+			return nil, encErr
+		}
+		return encoded, nil
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	var result Result
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return Result{}, err
+	}
+	return result, nil
+}
+
+func (h *Handler) chargeLedger(ctx stdcontext.Context, reservationID string, tokens, cost int64) {
+	if h.ledger == nil || reservationID == "" {
+		return
+	}
+	_ = h.ledger.Charge(ctx, reservationID, tokens, cost)
+}
+
+func (h *Handler) releaseLedger(ctx stdcontext.Context, reservationID string) {
+	if h.ledger == nil || reservationID == "" {
+		return
+	}
+	_ = h.ledger.Release(ctx, reservationID)
 }

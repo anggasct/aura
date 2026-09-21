@@ -101,6 +101,10 @@ func newChildrenShowCmd(gf *globalFlags) *cobra.Command {
 				"parent_turn: " + run.ParentTurnID,
 				"parent_invocation: " + run.ParentInvocation,
 				"context_digest: " + run.ContextDigest,
+				"grants: " + run.GrantsJSON,
+				"budget: " + run.BudgetJSON,
+				"result_status: " + run.State,
+				"result_provenance: child=" + run.ID + " session=" + run.ChildSessionID + " digest=" + run.ContextDigest + " durable=" + run.DurableKey,
 			})
 		},
 	}

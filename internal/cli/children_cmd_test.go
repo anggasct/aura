@@ -139,10 +139,28 @@ func TestChildrenCLIListShowCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show: %v", err)
 	}
-	for _, want := range []string{"id: " + id, "durable_key: child/ch-1", "parent_invocation: inv-1"} {
+	for _, want := range []string{
+		"id: " + id,
+		"durable_key: child/ch-1",
+		"parent_invocation: inv-1",
+		"grants: ",
+		"budget: ",
+		"result_status: ",
+		"result_provenance: ",
+		"context_digest: digest-1",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("show out = %q, want %q", out, want)
 		}
+	}
+	if !strings.Contains(out, `"capability":"search"`) {
+		t.Errorf("show must carry attenuated grants, out = %q", out)
+	}
+	if !strings.Contains(out, "max_tokens") {
+		t.Errorf("show must carry budget allocation, out = %q", out)
+	}
+	if strings.Contains(out, "summarize the logs") || strings.Contains(out, "tool_payload") {
+		t.Errorf("show must never print task content or tool payloads, out = %q", out)
 	}
 	if _, err := runChildrenCommand(t, cfg, "show", "missing"); err == nil {
 		t.Error("expected missing rejection")

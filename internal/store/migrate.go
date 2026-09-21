@@ -32,6 +32,7 @@ var migrations = []migration{
 	{version: 14, sql: skillPackageSchemaSQL},
 	{version: 15, sql: profileSchemaSQL},
 	{version: 16, sql: childRunSchemaSQL},
+	{version: 17, sql: childRunDepthRemovalSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -479,6 +480,7 @@ CREATE TABLE child_run (
     parent_turn_id TEXT NOT NULL,
     parent_invocation_id TEXT NOT NULL,
     child_session_id TEXT NOT NULL UNIQUE REFERENCES session(id) ON DELETE CASCADE,
+    depth INTEGER NOT NULL,
     durable_key TEXT NOT NULL,
     context_digest TEXT NOT NULL,
     grants_json TEXT NOT NULL,
@@ -490,6 +492,10 @@ CREATE TABLE child_run (
     UNIQUE(parent_invocation_id, idempotency_key)
 );
 CREATE INDEX child_parent_state_idx ON child_run(parent_session_id, state, created_at, id);
+`
+
+const childRunDepthRemovalSQL = `
+ALTER TABLE child_run DROP COLUMN depth;
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

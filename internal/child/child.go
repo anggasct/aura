@@ -77,6 +77,7 @@ type Spawn struct {
 	ParentTurnID     string
 	ParentInvocation string
 	OwnerID          string
+	Background       bool
 }
 
 type Registry interface {

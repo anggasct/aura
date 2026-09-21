@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -366,4 +368,119 @@ func TestBuildChildHandlerRegisters(t *testing.T) {
 	if err := registerChildHandler(struct{}{}, handler); err == nil {
 		t.Error("expected non-registrar rejection")
 	}
+}
+
+func TestChildCancellerDrivesDurableCancel(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC()
+	sessions := store.NewSessionService(db)
+	for _, id := range []string{"sess-parent", "sess-child-1"} {
+		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+			t.Fatalf("Create session %s: %v", id, err)
+		}
+	}
+	children := store.NewChildStore(db)
+	run := &store.ChildRun{
+		ID: "ch-1", IdempotencyKey: "key-1",
+		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
+		ContextDigest: "digest-1", GrantsJSON: `[]`,
+		BudgetJSON: `{}`, State: "running",
+		Deadline: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}
+	if err := children.InsertRun(t.Context(), run); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	runtime := durable.NewFake()
+	started := make(chan struct{}, 1)
+	runtime.RegisterHandler("child.run", func(ctx context.Context, inv durable.Invocation) error {
+		close(started)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+			return nil
+		}
+	})
+	if _, err := runtime.Start(t.Context(), durable.StartRequest{Handler: "child.run", Key: "child/ch-1", Payload: []byte(`{}`)}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("durable run never started")
+	}
+	canceller := &childCanceller{registry: newChildRegistry(db), runs: &durableChildRuns{runtime: runtime}}
+	state, err := canceller.Cancel(t.Context(), "ch-1")
+	if err != nil || state != "cancelled" {
+		t.Fatalf("Cancel: %s, %v", state, err)
+	}
+	status, err := runtime.Status(t.Context(), durable.RunRef{Key: "child/ch-1"})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.State != durable.RunCancelled {
+		t.Fatalf("durable state = %q, want cancelled", status.State)
+	}
+	got, _, err := children.GetRun(t.Context(), "ch-1")
+	if err != nil || got.State != "cancelled" {
+		t.Fatalf("projection = %+v, %v", got, err)
+	}
+}
+
+func TestChildCancellerDurableFailureLeavesStateUnchanged(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC()
+	sessions := store.NewSessionService(db)
+	for _, id := range []string{"sess-parent", "sess-child-1"} {
+		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+			t.Fatalf("Create session %s: %v", id, err)
+		}
+	}
+	children := store.NewChildStore(db)
+	run := &store.ChildRun{
+		ID: "ch-1", IdempotencyKey: "key-1",
+		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
+		ContextDigest: "digest-1", GrantsJSON: `[]`,
+		BudgetJSON: `{}`, State: "running",
+		Deadline: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}
+	if err := children.InsertRun(t.Context(), run); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	canceller := &childCanceller{registry: newChildRegistry(db), runs: &failingChildRuns{err: errors.New("durable down")}}
+	if _, err := canceller.Cancel(t.Context(), "ch-1"); err == nil {
+		t.Fatal("expected durable failure")
+	}
+	got, _, err := children.GetRun(t.Context(), "ch-1")
+	if err != nil || got.State != "running" {
+		t.Fatalf("durable failure must leave state unchanged, got %+v, %v", got, err)
+	}
+}
+
+type failingChildRuns struct {
+	err error
+}
+
+func (f *failingChildRuns) CancelRun(_ context.Context, _ string) error {
+	return f.err
 }

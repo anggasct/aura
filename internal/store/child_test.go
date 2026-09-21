@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -130,5 +131,64 @@ func TestChildMigrationHasTable(t *testing.T) {
 		if err := db.QueryRowContext(t.Context(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
 			t.Fatalf("table %s: %v", table, err)
 		}
+	}
+}
+
+func TestChildDepthRemovalUpgrade(t *testing.T) {
+	ctx := t.Context()
+	dsn := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := OpenDB(ctx, dsn)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for _, m := range migrations[:16] {
+		if err := applyMigration(ctx, db, m); err != nil {
+			t.Fatalf("apply v%d: %v", m.version, err)
+		}
+	}
+	var depthCol string
+	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err != nil {
+		t.Fatalf("legacy depth column missing: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	seedMemorySession(t, db, "sess-parent", "owner-1")
+	seedMemorySession(t, db, "sess-child-legacy", "owner-1")
+	format := func(v time.Time) string { return v.UTC().Format(time.RFC3339Nano) }
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO child_run (id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id, child_session_id, depth, durable_key, context_digest, grants_json, budget_json, state, deadline, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"ch-legacy", "key-legacy", "sess-parent", "turn-1", "inv-legacy", "sess-child-legacy", 1, "child/ch-legacy", "digest-legacy", `[]`, `{}`, "queued", format(now.Add(time.Hour)), format(now), format(now),
+	); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate upgrade: %v", err)
+	}
+	applied, latest, err := SchemaVersions(ctx, db)
+	if err != nil {
+		t.Fatalf("SchemaVersions: %v", err)
+	}
+	if latest != 17 || applied != 17 {
+		t.Fatalf("schema = applied %d latest %d, want 17", applied, latest)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err == nil {
+		t.Fatal("depth column must be removed by v17")
+	}
+	s := NewChildStore(db)
+	got, found, err := s.GetRun(ctx, "ch-legacy")
+	if err != nil || !found {
+		t.Fatalf("GetRun legacy: %+v, %v, %v", got, found, err)
+	}
+	if got.DurableKey != "child/ch-legacy" {
+		t.Fatalf("legacy row = %+v", got)
+	}
+	seedMemorySession(t, db, "sess-child-new", "owner-1")
+	fresh := testChildRun("ch-new")
+	fresh.ChildSessionID = "sess-child-new"
+	if err := s.InsertRun(ctx, fresh); err != nil {
+		t.Fatalf("InsertRun after upgrade: %v", err)
 	}
 }
