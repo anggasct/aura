@@ -51,6 +51,7 @@ type Spec struct {
 	ParentSessionID  string
 	ParentTurnID     string
 	ParentInvocation string
+	OwnerID          string
 	ChildSessionID   string
 	ParentDepth      int
 	ParentGrants     []Grant
@@ -65,14 +66,18 @@ type Spec struct {
 }
 
 type Spawn struct {
-	ID            string
-	SessionID     string
-	Depth         int
-	Grants        []Grant
-	DurableKey    string
-	ContextDigest string
-	Deadline      time.Time
-	CreatedAt     time.Time
+	ID               string
+	SessionID        string
+	Depth            int
+	Grants           []Grant
+	DurableKey       string
+	ContextDigest    string
+	Deadline         time.Time
+	CreatedAt        time.Time
+	ParentSessionID  string
+	ParentTurnID     string
+	ParentInvocation string
+	OwnerID          string
 }
 
 type Registry interface {
@@ -117,6 +122,9 @@ func checkSpec(spec *Spec) error {
 	}
 	if strings.TrimSpace(spec.ParentSessionID) == "" || strings.TrimSpace(spec.ParentTurnID) == "" || strings.TrimSpace(spec.ParentInvocation) == "" {
 		return Errorf(ErrorCodeInvalidArgument, "parent lineage must not be empty")
+	}
+	if strings.TrimSpace(spec.OwnerID) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "owner must not be empty")
 	}
 	if strings.TrimSpace(spec.ChildSessionID) == "" {
 		return Errorf(ErrorCodeInvalidArgument, "child session must not be empty")
@@ -186,5 +194,32 @@ func (s *Service) SpawnChild(ctx stdcontext.Context, spec *Spec, now time.Time) 
 	if created {
 		spawn.Grants = childGrants
 	}
+	if err := bindSpawnLineage(&spawn, spec); err != nil {
+		return Spawn{}, false, err
+	}
 	return spawn, created, nil
+}
+
+func bindSpawnLineage(spawn *Spawn, spec *Spec) error {
+	if spawn.ParentSessionID == "" {
+		spawn.ParentSessionID = spec.ParentSessionID
+	} else if spawn.ParentSessionID != spec.ParentSessionID {
+		return Errorf(ErrorCodeChildConflict, "child run conflicts")
+	}
+	if spawn.ParentTurnID == "" {
+		spawn.ParentTurnID = spec.ParentTurnID
+	} else if spawn.ParentTurnID != spec.ParentTurnID {
+		return Errorf(ErrorCodeChildConflict, "child run conflicts")
+	}
+	if spawn.ParentInvocation == "" {
+		spawn.ParentInvocation = spec.ParentInvocation
+	} else if spawn.ParentInvocation != spec.ParentInvocation {
+		return Errorf(ErrorCodeChildConflict, "child run conflicts")
+	}
+	if spawn.OwnerID == "" {
+		spawn.OwnerID = spec.OwnerID
+	} else if spawn.OwnerID != spec.OwnerID {
+		return Errorf(ErrorCodeChildConflict, "child run conflicts")
+	}
+	return nil
 }

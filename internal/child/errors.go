@@ -15,6 +15,8 @@ const (
 	ErrorCodeChildUnavailable   ErrorCode = "child_unavailable"
 	ErrorCodeChildDepthExceeded ErrorCode = "child_depth_exceeded"
 	ErrorCodeChildSpawnDenied   ErrorCode = "child_spawn_forbidden"
+	ErrorCodeChildForbidden     ErrorCode = "child_forbidden"
+	ErrorCodeBudgetExceeded     ErrorCode = "child_budget_exceeded"
 )
 
 type Error struct {

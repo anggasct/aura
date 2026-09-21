@@ -35,6 +35,7 @@ func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	spec := &child.Spec{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-child-1", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}},
 		Task:            "summarize the logs",
@@ -128,6 +129,7 @@ func TestChildRegistryConcurrentIdenticalSpawn(t *testing.T) {
 	base := &child.Spec{
 		ID: "ch-conc", IdempotencyKey: "key-conc",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-conc",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-child-conc", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}},
 		Task:            "concurrent work",
@@ -188,6 +190,7 @@ func TestChildRegistryConcurrentAlteredSpawnConflicts(t *testing.T) {
 			spec := &child.Spec{
 				ID: "ch-alt-" + string(rune('0'+i)), IdempotencyKey: "key-alt",
 				ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-alt",
+				OwnerID:        "owner-1",
 				ChildSessionID: "sess-child-alt-" + string(rune('0'+i)), ParentDepth: 0,
 				ParentGrants:    []child.Grant{{Capability: "search"}},
 				Task:            "task-variant-" + string(rune('0'+i)),
@@ -222,6 +225,7 @@ func TestChildRegistryDepthEnforcedFromDurableState(t *testing.T) {
 	first := &child.Spec{
 		ID: "ch-mid", IdempotencyKey: "key-mid",
 		ParentSessionID: "sess-top", ParentTurnID: "turn-1", ParentInvocation: "inv-mid",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-mid", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}},
 		Task:            "mid work",
@@ -239,6 +243,7 @@ func TestChildRegistryDepthEnforcedFromDurableState(t *testing.T) {
 	leaf := &child.Spec{
 		ID: "ch-leaf", IdempotencyKey: "key-leaf",
 		ParentSessionID: "sess-mid", ParentTurnID: "turn-2", ParentInvocation: "inv-leaf",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-leaf", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}},
 		Task:            "leaf work",
@@ -257,6 +262,7 @@ func TestChildRegistryGrantsCanonicalAcrossReplay(t *testing.T) {
 	spec := &child.Spec{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-child-1", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}, {Capability: "read"}},
 		Task:            "summarize the logs",
@@ -281,5 +287,58 @@ func TestChildRegistryGrantsCanonicalAcrossReplay(t *testing.T) {
 		if second.Grants[i] != first.Grants[i] {
 			t.Fatalf("replay grants = %+v, want %+v", second.Grants, first.Grants)
 		}
+	}
+}
+
+func TestChildRegistryReplayReturnsPersistedGrants(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC()
+	sessions := store.NewSessionService(db)
+	for _, id := range []string{"sess-parent", "sess-child-1"} {
+		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+			t.Fatalf("Create session %s: %v", id, err)
+		}
+	}
+	service, err := child.NewService(newChildRegistry(db))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	spec := &child.Spec{
+		ID: "ch-1", IdempotencyKey: "key-1",
+		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		OwnerID:        "owner-1",
+		ChildSessionID: "sess-child-1", ParentDepth: 0,
+		ParentGrants:    []child.Grant{{Capability: "search"}, {Capability: "read"}},
+		Task:            "summarize the logs",
+		RequestedGrants: []child.Grant{{Capability: "search"}, {Capability: "read"}},
+		Budget:          child.Budget{MaxTokens: 1000, Timeout: time.Minute},
+	}
+	first, created, err := service.SpawnChild(t.Context(), spec, now)
+	if err != nil || !created || len(first.Grants) != 2 {
+		t.Fatalf("SpawnChild: %+v, %v, %v", first, created, err)
+	}
+	narrow := *spec
+	narrow.RequestedGrants = []child.Grant{{Capability: "search"}}
+	replayed, created, err := service.SpawnChild(t.Context(), &narrow, now)
+	if err != nil || created {
+		t.Fatalf("replay: %+v, %v, %v", replayed, created, err)
+	}
+	if len(replayed.Grants) != 2 {
+		t.Fatalf("replay must return persisted grants: %+v", replayed.Grants)
+	}
+	if _, found, err := newChildRegistry(db).Get(t.Context(), "missing"); err != nil || found {
+		t.Fatalf("Get missing: %v, %v", found, err)
+	}
+	if _, _, err := newChildRegistry(db).Get(t.Context(), "ch-1"); err != nil {
+		t.Fatalf("Get: %v", err)
 	}
 }
