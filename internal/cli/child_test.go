@@ -35,6 +35,7 @@ func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	spec := &child.Spec{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-child-1", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}},
 		Task:            "summarize the logs",
@@ -128,6 +129,7 @@ func TestChildRegistryConcurrentIdenticalSpawn(t *testing.T) {
 	base := &child.Spec{
 		ID: "ch-conc", IdempotencyKey: "key-conc",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-conc",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-child-conc", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}},
 		Task:            "concurrent work",
@@ -188,6 +190,7 @@ func TestChildRegistryConcurrentAlteredSpawnConflicts(t *testing.T) {
 			spec := &child.Spec{
 				ID: "ch-alt-" + string(rune('0'+i)), IdempotencyKey: "key-alt",
 				ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-alt",
+				OwnerID:        "owner-1",
 				ChildSessionID: "sess-child-alt-" + string(rune('0'+i)), ParentDepth: 0,
 				ParentGrants:    []child.Grant{{Capability: "search"}},
 				Task:            "task-variant-" + string(rune('0'+i)),
@@ -222,6 +225,7 @@ func TestChildRegistryDepthEnforcedFromDurableState(t *testing.T) {
 	first := &child.Spec{
 		ID: "ch-mid", IdempotencyKey: "key-mid",
 		ParentSessionID: "sess-top", ParentTurnID: "turn-1", ParentInvocation: "inv-mid",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-mid", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}},
 		Task:            "mid work",
@@ -239,6 +243,7 @@ func TestChildRegistryDepthEnforcedFromDurableState(t *testing.T) {
 	leaf := &child.Spec{
 		ID: "ch-leaf", IdempotencyKey: "key-leaf",
 		ParentSessionID: "sess-mid", ParentTurnID: "turn-2", ParentInvocation: "inv-leaf",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-leaf", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}},
 		Task:            "leaf work",
@@ -257,6 +262,7 @@ func TestChildRegistryGrantsCanonicalAcrossReplay(t *testing.T) {
 	spec := &child.Spec{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-child-1", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}, {Capability: "read"}},
 		Task:            "summarize the logs",
@@ -309,6 +315,7 @@ func TestChildRegistryReplayReturnsPersistedGrants(t *testing.T) {
 	spec := &child.Spec{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-child-1", ParentDepth: 0,
 		ParentGrants:    []child.Grant{{Capability: "search"}, {Capability: "read"}},
 		Task:            "summarize the logs",

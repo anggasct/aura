@@ -31,18 +31,28 @@ func (f *fakeLauncher) Start(_ stdcontext.Context, req StartRequest) (string, er
 type fakeLedger struct {
 	mu       sync.Mutex
 	reserved []string
+	owners   []string
 	released []string
+	charged  []string
 	fail     error
 }
 
-func (f *fakeLedger) Reserve(_ stdcontext.Context, invocationID string, maxTokens, maxCost int64) (BudgetReservation, error) {
+func (f *fakeLedger) Reserve(_ stdcontext.Context, invocationID, ownerID string, maxTokens, maxCost int64) (BudgetReservation, error) {
 	if f.fail != nil {
 		return BudgetReservation{}, f.fail
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reserved = append(f.reserved, invocationID)
+	f.owners = append(f.owners, ownerID)
 	return BudgetReservation{ID: "res-" + invocationID, ExpiresAt: time.Now().UTC().Add(time.Hour)}, nil
+}
+
+func (f *fakeLedger) Charge(_ stdcontext.Context, reservationID string, tokens, cost int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.charged = append(f.charged, reservationID)
+	return nil
 }
 
 func (f *fakeLedger) Release(_ stdcontext.Context, reservationID string) error {

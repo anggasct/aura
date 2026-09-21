@@ -39,6 +39,8 @@ func (f *fakeRegistry) Spawn(_ stdcontext.Context, spec *Spec, now time.Time) (S
 		ID: spec.ID, SessionID: spec.ChildSessionID, Depth: spec.ParentDepth + 1,
 		Grants: spec.RequestedGrants, DurableKey: DurableChildKey(spec.ID),
 		ContextDigest: spec.ContextDigest, Deadline: now.Add(spec.Budget.Timeout), CreatedAt: now,
+		ParentSessionID: spec.ParentSessionID, ParentTurnID: spec.ParentTurnID,
+		ParentInvocation: spec.ParentInvocation, OwnerID: spec.OwnerID,
 	}
 	f.spawns[spec.ID] = spawn
 	f.byKey[key] = spec.ID
@@ -56,6 +58,7 @@ func testSpec() *Spec {
 	return &Spec{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		OwnerID:        "owner-1",
 		ChildSessionID: "sess-child", ParentDepth: 0,
 		ParentGrants:    []Grant{{Capability: "search"}, {Capability: "read"}},
 		Task:            "summarize the logs",

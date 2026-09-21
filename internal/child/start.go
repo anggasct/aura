@@ -21,7 +21,8 @@ type BudgetReservation struct {
 }
 
 type BudgetLedger interface {
-	Reserve(ctx stdcontext.Context, invocationID string, maxTokens, maxCost int64) (BudgetReservation, error)
+	Reserve(ctx stdcontext.Context, invocationID, ownerID string, maxTokens, maxCost int64) (BudgetReservation, error)
+	Charge(ctx stdcontext.Context, reservationID string, tokens, cost int64) error
 	Release(ctx stdcontext.Context, reservationID string) error
 }
 
@@ -52,7 +53,19 @@ func (s *Starter) StartChild(ctx stdcontext.Context, spec *Spec, now time.Time) 
 	if ctx == nil {
 		return Spawn{}, false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
 	}
-	reservation, err := s.ledger.Reserve(ctx, spec.ParentInvocation, spec.Budget.MaxTokens, spec.Budget.MaxCost)
+	if err := ctx.Err(); err != nil {
+		return Spawn{}, false, err
+	}
+	if spec == nil {
+		return Spawn{}, false, errNilArgument("spec")
+	}
+	if now.IsZero() {
+		return Spawn{}, false, Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
+	}
+	if err := checkSpec(spec); err != nil {
+		return Spawn{}, false, err
+	}
+	reservation, err := s.ledger.Reserve(ctx, spec.ParentInvocation, spec.OwnerID, spec.Budget.MaxTokens, spec.Budget.MaxCost)
 	if err != nil {
 		return Spawn{}, false, fmt.Errorf("child: reserve budget: %w", err)
 	}
@@ -71,13 +84,22 @@ func (s *Starter) StartChild(ctx stdcontext.Context, spec *Spec, now time.Time) 
 	}
 	payload, err := encodeStartPayload(&spawn, reservation)
 	if err != nil {
+		if releaseErr := s.ledger.Release(ctx, reservation.ID); releaseErr != nil {
+			return Spawn{}, false, errors.Join(err, fmt.Errorf("child: release budget: %w", releaseErr))
+		}
 		return Spawn{}, false, err
 	}
-	key, err := s.launcher.Start(ctx, StartRequest{DurableKey: spawn.DurableKey, Payload: payload})
+	key, err := s.launcher.Start(ctx, StartRequest{Handler: HandlerName, DurableKey: spawn.DurableKey, Payload: payload})
 	if err != nil {
+		if releaseErr := s.ledger.Release(ctx, reservation.ID); releaseErr != nil {
+			return Spawn{}, false, errors.Join(fmt.Errorf("child: start durable invocation: %w", err), fmt.Errorf("child: release budget: %w", releaseErr))
+		}
 		return Spawn{}, false, fmt.Errorf("child: start durable invocation: %w", err)
 	}
-	if key != spawn.DurableKey {
+	if key == "" || key != spawn.DurableKey {
+		if releaseErr := s.ledger.Release(ctx, reservation.ID); releaseErr != nil {
+			return Spawn{}, false, errors.Join(Errorf(ErrorCodeChildInvalid, "child durable key mismatch"), fmt.Errorf("child: release budget: %w", releaseErr))
+		}
 		return Spawn{}, false, Errorf(ErrorCodeChildInvalid, "child durable key mismatch")
 	}
 	return spawn, true, nil
