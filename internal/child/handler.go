@@ -24,20 +24,20 @@ type Executor interface {
 }
 
 type Result struct {
-	Status         string    `json:"status"`
-	Output         string    `json:"output"`
-	Artifacts      []string  `json:"artifacts"`
-	TokensUsed     int64     `json:"tokens_used"`
-	CostMicros     int64     `json:"cost_micros"`
-	CompletedAt    time.Time `json:"completed_at"`
-	ChildID        string    `json:"child_id"`
-	SessionID      string    `json:"session_id"`
-	ContextDigest  string    `json:"context_digest"`
-	DurableKey     string    `json:"durable_key"`
-	SourceRange    string    `json:"source_range"`
-	Model          string    `json:"model"`
-	PromptVersion  string    `json:"prompt_version"`
-	Trust          string    `json:"trust"`
+	Status        string    `json:"status"`
+	Output        string    `json:"output"`
+	Artifacts     []string  `json:"artifacts"`
+	TokensUsed    int64     `json:"tokens_used"`
+	CostMicros    int64     `json:"cost_micros"`
+	CompletedAt   time.Time `json:"completed_at"`
+	ChildID       string    `json:"child_id"`
+	SessionID     string    `json:"session_id"`
+	ContextDigest string    `json:"context_digest"`
+	DurableKey    string    `json:"durable_key"`
+	SourceRange   string    `json:"source_range"`
+	Model         string    `json:"model"`
+	PromptVersion string    `json:"prompt_version"`
+	Trust         string    `json:"trust"`
 }
 
 type Handler struct {
@@ -158,7 +158,7 @@ func checkResult(result *Result) error {
 	return nil
 }
 
-func enrichResult(result *Result, childID string, run HandlerRun) {
+func enrichResult(result *Result, childID string, run *HandlerRun) {
 	if strings.TrimSpace(result.ChildID) == "" {
 		result.ChildID = childID
 	}
@@ -236,7 +236,7 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 	}
 	result, execErr := h.runJournaled(ctx, inv, run.SessionID, run.Deadline)
 	if execErr == nil {
-		enrichResult(&result, start.ChildID, run)
+		enrichResult(&result, start.ChildID, &run)
 		if checkErr := checkResult(&result); checkErr != nil {
 			execErr = checkErr
 		}

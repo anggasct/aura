@@ -107,7 +107,7 @@ func seedChildRow(t *testing.T, cfg string) string {
 		Status: "completed", Output: "summary", ArtifactsJSON: `[]`,
 		TokensUsed: 12, CostMicros: 34, CompletedAt: completed,
 		Provenance: "child=ch-1 session=sess-child-1 digest=digest-1 durable=child/ch-1",
-		ChildID: "ch-1", SessionID: "sess-child-1", ContextDigest: "digest-1", DurableKey: "child/ch-1",
+		ChildID:    "ch-1", SessionID: "sess-child-1", ContextDigest: "digest-1", DurableKey: "child/ch-1",
 		SourceRange: "inv-1", Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted",
 	}, completed); err != nil {
 		t.Fatalf("SetResult: %v", err)

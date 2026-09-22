@@ -582,22 +582,6 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 	}
 }
 
-type stubChildExecutor struct {
-	result child.Result
-	err    error
-}
-
-func (s *stubChildExecutor) RunSession(_ context.Context, sessionID string, _ time.Time) (child.Result, error) {
-	if sessionID == "" {
-		return child.Result{}, errors.New("empty session")
-	}
-	return s.result, s.err
-}
-
-func (s *stubChildExecutor) CancelSession(_ context.Context, _ string) error {
-	return nil
-}
-
 func TestProductionHandlerDurablePerStep(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
 	loaded, err := config.Load(cfgPath)

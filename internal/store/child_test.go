@@ -206,7 +206,7 @@ func TestChildStore_SetResultRoundTrip(t *testing.T) {
 		Status: "completed", Output: "summary", ArtifactsJSON: `["a"]`,
 		TokensUsed: 3, CostMicros: 1, CompletedAt: completed,
 		Provenance: "child=ch-1 session=sess-child-ch-1 digest=digest-ch-1 durable=child/ch-1",
-		ChildID: "ch-1", SessionID: "sess-child-ch-1", ContextDigest: "digest-ch-1", DurableKey: "child/ch-1",
+		ChildID:    "ch-1", SessionID: "sess-child-ch-1", ContextDigest: "digest-ch-1", DurableKey: "child/ch-1",
 		SourceRange: "inv-1", Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted",
 	}, completed); err != nil {
 		t.Fatalf("SetResult: %v", err)
