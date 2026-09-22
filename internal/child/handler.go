@@ -24,12 +24,12 @@ type Executor interface {
 }
 
 type Result struct {
-	Status      string
-	Output      string
-	Artifacts   []string
-	TokensUsed  int64
-	CostMicros  int64
-	CompletedAt time.Time
+	Status      string    `json:"status"`
+	Output      string    `json:"output"`
+	Artifacts   []string  `json:"artifacts"`
+	TokensUsed  int64     `json:"tokens_used"`
+	CostMicros  int64     `json:"cost_micros"`
+	CompletedAt time.Time `json:"completed_at"`
 }
 
 type Handler struct {
@@ -44,7 +44,7 @@ type HandlerRuns interface {
 }
 
 type HandlerResultStore interface {
-	SetResult(ctx stdcontext.Context, id string, result Result, now time.Time) error
+	SetResult(ctx stdcontext.Context, id string, result *Result, now time.Time) error
 }
 
 type HandlerRun struct {
@@ -121,7 +121,7 @@ func isTerminalState(state string) bool {
 	}
 }
 
-func checkResult(result *Result, deadline time.Time) error {
+func checkResult(result *Result) error {
 	if result.TokensUsed < 0 || result.CostMicros < 0 {
 		return Errorf(ErrorCodeChildInvalid, "child result usage must not be negative")
 	}
@@ -179,7 +179,7 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 	}
 	result, execErr := h.runJournaled(ctx, inv, run.SessionID, run.Deadline)
 	if execErr == nil {
-		if checkErr := checkResult(&result, run.Deadline); checkErr != nil {
+		if checkErr := checkResult(&result); checkErr != nil {
 			execErr = checkErr
 		}
 	}
@@ -196,8 +196,7 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 	}
 	h.releaseLedger(ctx, start.ReservationID)
 	if store, ok := h.runs.(HandlerResultStore); ok && execErr == nil {
-		persisted := result
-		if setErr := store.SetResult(ctx, start.ChildID, persisted, settled); setErr != nil {
+		if setErr := store.SetResult(ctx, start.ChildID, &result, settled); setErr != nil {
 			if stateErr := h.runs.SetState(ctx, start.ChildID, StatusFailed, settled); stateErr != nil {
 				return stateErr
 			}

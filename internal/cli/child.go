@@ -232,7 +232,7 @@ func (r *childHandlerRuns) SetState(ctx context.Context, id, state string, now t
 	return r.store.SetState(ctx, id, state, now)
 }
 
-func (r *childHandlerRuns) SetResult(_ context.Context, _ string, _ child.Result, _ time.Time) error {
+func (r *childHandlerRuns) SetResult(_ context.Context, _ string, _ *child.Result, _ time.Time) error {
 	return nil
 }
 

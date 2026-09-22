@@ -42,7 +42,8 @@ func (f *fakeCancelRegistry) ActiveForParent(_ stdcontext.Context, parentSession
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []Spawn
-	for _, spawn := range f.spawns {
+	for id := range f.spawns {
+		spawn := f.spawns[id]
 		if spawn.ParentSessionID != "" && spawn.ParentSessionID != parentSessionID {
 			continue
 		}
@@ -217,7 +218,7 @@ func TestCancelTreeLeavesBackgroundRunning(t *testing.T) {
 	runs := &fakeRuns{}
 	registry := &fakeCancelRegistry{
 		spawns: map[string]Spawn{
-			"ch-1": {ID: "ch-1", SessionID: "sess-1", DurableKey: "child/ch-1", ParentSessionID: "sess-parent"},
+			"ch-1":  {ID: "ch-1", SessionID: "sess-1", DurableKey: "child/ch-1", ParentSessionID: "sess-parent"},
 			"ch-bg": {ID: "ch-bg", SessionID: "sess-bg", DurableKey: "child/ch-bg", ParentSessionID: "sess-parent", Background: true},
 		},
 		states: map[string]string{"ch-1": StatusRunning, "ch-bg": StatusRunning},
@@ -268,7 +269,7 @@ func TestCancelTreeOverloadIsDeterministic(t *testing.T) {
 	runs := &fakeRuns{}
 	spawns := map[string]Spawn{}
 	states := map[string]string{}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		id := "ch-" + string(rune('0'+i))
 		spawns[id] = Spawn{ID: id, SessionID: "sess-" + id, DurableKey: "child/" + id, ParentSessionID: "sess-parent"}
 		states[id] = StatusRunning

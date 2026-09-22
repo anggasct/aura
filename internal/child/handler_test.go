@@ -31,11 +31,11 @@ func (f *fakeHandlerRuns) SetState(_ stdcontext.Context, id, state string, _ tim
 	return nil
 }
 
-func (f *fakeHandlerRuns) SetResult(_ stdcontext.Context, id string, result Result, _ time.Time) error {
+func (f *fakeHandlerRuns) SetResult(_ stdcontext.Context, id string, result *Result, _ time.Time) error {
 	if f.results == nil {
 		f.results = map[string]Result{}
 	}
-	f.results[id] = result
+	f.results[id] = *result
 	return nil
 }
 
@@ -113,10 +113,10 @@ func (f *fakeJournalInvocation) Timer(d time.Duration) <-chan time.Time {
 	close(ch)
 	return ch
 }
-func (f *fakeJournalInvocation) Wait(_ stdcontext.Context, _ string, _ time.Duration) ([]byte, bool, bool) {
+func (f *fakeJournalInvocation) Wait(_ stdcontext.Context, _ string, _ time.Duration) (payload []byte, timedOut, ok bool) {
 	return nil, false, false
 }
-func (f *fakeJournalInvocation) RunAction(_ stdcontext.Context, key string, fn func(stdcontext.Context) ([]byte, error)) ([]byte, error) {
+func (f *fakeJournalInvocation) RunAction(ctx stdcontext.Context, key string, fn func(stdcontext.Context) ([]byte, error)) ([]byte, error) {
 	f.mu.Lock()
 	if cached, ok := f.journal[key]; ok {
 		out := append([]byte(nil), cached...)
@@ -124,7 +124,8 @@ func (f *fakeJournalInvocation) RunAction(_ stdcontext.Context, key string, fn f
 		return out, nil
 	}
 	f.mu.Unlock()
-	out, err := fn(stdcontext.Background())
+	runCtx := stdcontext.WithoutCancel(ctx)
+	out, err := fn(runCtx)
 	if err != nil {
 		return nil, err
 	}

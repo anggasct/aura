@@ -111,7 +111,8 @@ func (s *CancelService) CancelTree(ctx stdcontext.Context, parentSessionID strin
 	}
 	results := make(map[string]string, len(active))
 	var firstErr error
-	for _, spawn := range active {
+	for i := range active {
+		spawn := &active[i]
 		if leaveBackground && spawn.Background {
 			results[spawn.ID] = StatusRunning
 			continue
