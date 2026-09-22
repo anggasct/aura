@@ -95,6 +95,10 @@ type fakeJournalInvocation struct {
 	mu      sync.Mutex
 	payload []byte
 	journal map[string][]byte
+	keys    []string
+	sleeps  int
+	timers  int
+	waits   int
 }
 
 func newFakeJournal(payload []byte) *fakeJournalInvocation {
@@ -106,14 +110,26 @@ func (f *fakeJournalInvocation) Payload() []byte     { return f.payload }
 func (f *fakeJournalInvocation) Signal(_ stdcontext.Context, _ string) ([]byte, bool) {
 	return nil, false
 }
-func (f *fakeJournalInvocation) Sleep(_ time.Duration) error { return nil }
+func (f *fakeJournalInvocation) Sleep(_ time.Duration) error {
+	f.mu.Lock()
+	f.sleeps++
+	f.mu.Unlock()
+	return nil
+}
 func (f *fakeJournalInvocation) Timer(d time.Duration) <-chan time.Time {
+	f.mu.Lock()
+	f.timers++
+	f.mu.Unlock()
+	_ = d
 	ch := make(chan time.Time, 1)
 	ch <- time.Now().UTC()
 	close(ch)
 	return ch
 }
 func (f *fakeJournalInvocation) Wait(_ stdcontext.Context, _ string, _ time.Duration) (payload []byte, timedOut, ok bool) {
+	f.mu.Lock()
+	f.waits++
+	f.mu.Unlock()
 	return nil, false, false
 }
 func (f *fakeJournalInvocation) RunAction(ctx stdcontext.Context, key string, fn func(stdcontext.Context) ([]byte, error)) ([]byte, error) {
@@ -131,8 +147,15 @@ func (f *fakeJournalInvocation) RunAction(ctx stdcontext.Context, key string, fn
 	}
 	f.mu.Lock()
 	f.journal[key] = append([]byte(nil), out...)
+	f.keys = append(f.keys, key)
 	f.mu.Unlock()
 	return out, nil
+}
+
+func (f *fakeJournalInvocation) actionKeys() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.keys...)
 }
 
 func testHandler() (*Handler, *fakeHandlerRuns, *fakeSessionExecutor) {
@@ -375,5 +398,39 @@ func TestHandlerNonResumableBecomesInterrupted(t *testing.T) {
 	}
 	if got := runs.runs["ch-1"].State; got != StatusInterrupted {
 		t.Fatalf("non-resumable state = %s, want interrupted", got)
+	}
+}
+
+func TestHandlerDurableUsesJournaledBoundaries(t *testing.T) {
+	runs := &fakeHandlerRuns{runs: map[string]HandlerRun{
+		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
+	}}
+	exec := &fakeSessionExecutor{result: Result{Status: "completed", Output: "done", CompletedAt: time.Now().UTC()}}
+	handler, err := NewHandler(runs, exec)
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	inv := newFakeJournal(startPayload(t))
+	if err := handler.HandleDurable(t.Context(), inv, time.Now().UTC); err != nil {
+		t.Fatalf("HandleDurable: %v", err)
+	}
+	keys := inv.actionKeys()
+	if len(keys) < 2 {
+		t.Fatalf("journaled actions = %v, want at least deadline plus exec boundaries", keys)
+	}
+	seenExec := false
+	for _, key := range keys {
+		if key == "child-exec/sess-child" {
+			seenExec = true
+		}
+	}
+	if !seenExec {
+		t.Fatalf("journaled actions = %v, want child-exec/sess-child", keys)
+	}
+	inv.mu.Lock()
+	sleeps, timers, waits := inv.sleeps, inv.timers, inv.waits
+	inv.mu.Unlock()
+	if sleeps == 0 && timers == 0 && waits == 0 {
+		t.Fatal("durable path must use sleep, timer, or wait for deadline and settlement")
 	}
 }

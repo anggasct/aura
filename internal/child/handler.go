@@ -213,6 +213,28 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, s
 	if inv == nil {
 		return h.exec.RunSession(ctx, sessionID, deadline)
 	}
+	deadlineValue := ""
+	if !deadline.IsZero() {
+		deadlineValue = deadline.UTC().Format(time.RFC3339Nano)
+	}
+	if _, err := inv.RunAction(ctx, "child-deadline/"+sessionID, func(stdcontext.Context) ([]byte, error) {
+		return []byte(deadlineValue), nil
+	}); err != nil {
+		return Result{}, err
+	}
+	if !deadline.IsZero() {
+		if d := time.Until(deadline.UTC()); d > 0 {
+			select {
+			case <-inv.Timer(0):
+			case <-ctx.Done():
+				return Result{}, ctx.Err()
+			}
+			if err := inv.Sleep(0); err != nil {
+				return Result{}, err
+			}
+		}
+	}
+	_, _, _ = inv.Wait(ctx, "child-settle/"+sessionID, 0)
 	key := "child-exec/" + sessionID
 	raw, err := inv.RunAction(ctx, key, func(ctx stdcontext.Context) ([]byte, error) {
 		res, runErr := h.exec.RunSession(ctx, sessionID, deadline)
@@ -230,6 +252,11 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, s
 	}
 	var result Result
 	if err := json.Unmarshal(raw, &result); err != nil {
+		return Result{}, err
+	}
+	if _, err := inv.RunAction(ctx, "child-settle/"+sessionID, func(stdcontext.Context) ([]byte, error) {
+		return []byte(result.Status), nil
+	}); err != nil {
 		return Result{}, err
 	}
 	return result, nil

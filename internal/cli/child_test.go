@@ -484,3 +484,94 @@ type failingChildRuns struct {
 func (f *failingChildRuns) CancelRun(_ context.Context, _ string) error {
 	return f.err
 }
+
+func TestProductionSessionRunnerEnforcesBounds(t *testing.T) {
+	runner := childSessionRunner{}
+	if _, err := runner.RunSession(t.Context(), "", time.Now().UTC().Add(time.Minute)); err == nil {
+		t.Fatal("empty session must fail")
+	}
+	past := time.Now().UTC().Add(-time.Minute)
+	res, err := runner.RunSession(t.Context(), "sess-child-1", past)
+	if err != nil {
+		t.Fatalf("past deadline: %v", err)
+	}
+	if res.Status != "deadline" {
+		t.Fatalf("past deadline status = %q, want deadline", res.Status)
+	}
+	if res.CompletedAt.IsZero() || !res.CompletedAt.After(past) {
+		t.Fatalf("deadline completion must carry now, got %+v", res)
+	}
+	if _, err := runner.RunSession(t.Context(), "sess-child-1", time.Now().UTC().Add(time.Minute)); err == nil {
+		t.Fatal("placeholder must not report success without bounded work")
+	}
+}
+
+func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC()
+	sessions := store.NewSessionService(db)
+	for _, id := range []string{"sess-parent", "sess-child-1"} {
+		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+			t.Fatalf("Create session %s: %v", id, err)
+		}
+	}
+	children := store.NewChildStore(db)
+	run := &store.ChildRun{
+		ID: "ch-1", IdempotencyKey: "key-1",
+		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
+		ContextDigest: "digest-1", GrantsJSON: `[{"capability":"search"}]`,
+		BudgetJSON: `{"max_tokens":1000}`, State: "queued",
+		Deadline: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}
+	if err := children.InsertRun(t.Context(), run); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	runs := &childHandlerRuns{store: children}
+	handler, err := child.NewHandlerWithLedger(runs, stubChildExecutor{result: child.Result{Status: "completed", Output: "summary", TokensUsed: 5, CostMicros: 2, CompletedAt: now}}, child.NewLedger(nil, 0))
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-1"}`)
+	if err := handler.HandleInvocation(t.Context(), payload, func() time.Time { return now }); err != nil {
+		t.Fatalf("HandleInvocation: %v", err)
+	}
+	got, found, err := children.GetRun(t.Context(), "ch-1")
+	if err != nil || !found {
+		t.Fatalf("GetRun: %+v, %v, %v", got, found, err)
+	}
+	if got.State != "succeeded" {
+		t.Fatalf("state = %q, want succeeded", got.State)
+	}
+	if got.ResultStatus != "completed" || got.TokensUsed != 5 || got.CostMicros != 2 {
+		t.Fatalf("persisted result = %+v", got)
+	}
+	if got.ResultProvenance == "" {
+		t.Fatal("result provenance must persist through the real runs adapter")
+	}
+}
+
+type stubChildExecutor struct {
+	result child.Result
+	err    error
+}
+
+func (s stubChildExecutor) RunSession(_ context.Context, sessionID string, _ time.Time) (child.Result, error) {
+	if sessionID == "" {
+		return child.Result{}, errors.New("empty session")
+	}
+	return s.result, s.err
+}
+
+func (s stubChildExecutor) CancelSession(_ context.Context, _ string) error {
+	return nil
+}

@@ -102,6 +102,14 @@ func seedChildRow(t *testing.T, cfg string) string {
 	if err := children.InsertRun(t.Context(), run); err != nil {
 		t.Fatalf("InsertRun: %v", err)
 	}
+	completed := now.Add(time.Minute)
+	if err := children.SetResult(t.Context(), "ch-1", &store.ChildResult{
+		Status: "completed", Output: "summary", ArtifactsJSON: `[]`,
+		TokensUsed: 12, CostMicros: 34, CompletedAt: completed,
+		Provenance: "child=ch-1 session=sess-child-1 digest=digest-1 durable=child/ch-1",
+	}, completed); err != nil {
+		t.Fatalf("SetResult: %v", err)
+	}
 	return "ch-1"
 }
 
@@ -145,8 +153,9 @@ func TestChildrenCLIListShowCancel(t *testing.T) {
 		"parent_invocation: inv-1",
 		"grants: ",
 		"budget: ",
-		"result_status: ",
-		"result_provenance: ",
+		"budget_usage: tokens=12 cost=34",
+		"result_status: completed",
+		"result_provenance: child=ch-1 session=sess-child-1 digest=digest-1 durable=child/ch-1",
 		"context_digest: digest-1",
 	} {
 		if !strings.Contains(out, want) {
@@ -158,6 +167,9 @@ func TestChildrenCLIListShowCancel(t *testing.T) {
 	}
 	if !strings.Contains(out, "max_tokens") {
 		t.Errorf("show must carry budget allocation, out = %q", out)
+	}
+	if !strings.Contains(out, "state: queued") {
+		t.Errorf("show must carry terminal status, out = %q", out)
 	}
 	if strings.Contains(out, "summarize the logs") || strings.Contains(out, "tool_payload") {
 		t.Errorf("show must never print task content or tool payloads, out = %q", out)

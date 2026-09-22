@@ -232,8 +232,38 @@ func (r *childHandlerRuns) SetState(ctx context.Context, id, state string, now t
 	return r.store.SetState(ctx, id, state, now)
 }
 
-func (r *childHandlerRuns) SetResult(_ context.Context, _ string, _ *child.Result, _ time.Time) error {
-	return nil
+func (r *childHandlerRuns) SetResult(ctx context.Context, id string, result *child.Result, now time.Time) error {
+	if r.store == nil {
+		return errors.New("cli: child store must not be nil")
+	}
+	if result == nil {
+		return errors.New("cli: child result must not be nil")
+	}
+	run, found, err := r.store.GetRun(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return child.Errorf(child.ErrorCodeChildNotFound, "child is not found")
+	}
+	artifactsJSON := "[]"
+	if len(result.Artifacts) > 0 {
+		encoded, err := json.Marshal(result.Artifacts)
+		if err != nil {
+			return fmt.Errorf("cli: encode child result artifacts: %w", err)
+		}
+		artifactsJSON = string(encoded)
+	}
+	completedAt := result.CompletedAt
+	if completedAt.IsZero() {
+		completedAt = now.UTC()
+	}
+	provenance := "child=" + run.ID + " session=" + run.ChildSessionID + " digest=" + run.ContextDigest + " durable=" + run.DurableKey
+	return r.store.SetResult(ctx, id, &store.ChildResult{
+		Status: result.Status, Output: result.Output, ArtifactsJSON: artifactsJSON,
+		TokensUsed: result.TokensUsed, CostMicros: result.CostMicros,
+		CompletedAt: completedAt, Provenance: provenance,
+	}, now)
 }
 
 func registerChildHandler(target any, handler *child.Handler) error {
@@ -264,13 +294,17 @@ func buildChildHandler(db *sql.DB) (*child.Handler, error) {
 type childSessionRunner struct{}
 
 func (childSessionRunner) RunSession(ctx context.Context, sessionID string, deadline time.Time) (child.Result, error) {
-	if sessionID == "" {
+	if strings.TrimSpace(sessionID) == "" {
 		return child.Result{}, errors.New("cli: child session must not be empty")
 	}
 	if err := ctx.Err(); err != nil {
 		return child.Result{}, err
 	}
-	return child.Result{Status: "completed", CompletedAt: deadline}, nil
+	now := time.Now().UTC()
+	if !deadline.IsZero() && !now.Before(deadline.UTC()) {
+		return child.Result{Status: "deadline", CompletedAt: now}, nil
+	}
+	return child.Result{}, child.ErrNonResumable
 }
 
 func (childSessionRunner) CancelSession(ctx context.Context, sessionID string) error {

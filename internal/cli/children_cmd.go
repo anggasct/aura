@@ -38,6 +38,10 @@ func writeChildLines(cmd *cobra.Command, lines []string) error {
 	return nil
 }
 
+func formatChildInt(v int64) string {
+	return fmt.Sprintf("%d", v)
+}
+
 func newChildrenListCmd(gf *globalFlags) *cobra.Command {
 	var state string
 	cmd := &cobra.Command{
@@ -91,6 +95,18 @@ func newChildrenShowCmd(gf *globalFlags) *cobra.Command {
 			if !found {
 				return &exitCodeError{code: 1, err: errors.New("child_not_found: child is not found")}
 			}
+			resultStatus := run.ResultStatus
+			if resultStatus == "" {
+				resultStatus = run.State
+			}
+			provenance := run.ResultProvenance
+			if provenance == "" {
+				provenance = "child=" + run.ID + " session=" + run.ChildSessionID + " digest=" + run.ContextDigest + " durable=" + run.DurableKey
+			}
+			completedAt := ""
+			if !run.CompletedAt.IsZero() {
+				completedAt = run.CompletedAt.UTC().Format("2006-01-02T15:04:05Z")
+			}
 			return writeChildLines(cmd, []string{
 				"id: " + run.ID,
 				"child_session: " + run.ChildSessionID,
@@ -103,8 +119,10 @@ func newChildrenShowCmd(gf *globalFlags) *cobra.Command {
 				"context_digest: " + run.ContextDigest,
 				"grants: " + run.GrantsJSON,
 				"budget: " + run.BudgetJSON,
-				"result_status: " + run.State,
-				"result_provenance: child=" + run.ID + " session=" + run.ChildSessionID + " digest=" + run.ContextDigest + " durable=" + run.DurableKey,
+				"budget_usage: tokens=" + formatChildInt(run.TokensUsed) + " cost=" + formatChildInt(run.CostMicros),
+				"result_status: " + resultStatus,
+				"result_completed_at: " + completedAt,
+				"result_provenance: " + provenance,
 			})
 		},
 	}

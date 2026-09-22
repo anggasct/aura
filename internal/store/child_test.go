@@ -171,8 +171,8 @@ func TestChildDepthRemovalUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersions: %v", err)
 	}
-	if latest != 17 || applied != 17 {
-		t.Fatalf("schema = applied %d latest %d, want 17", applied, latest)
+	if latest != 18 || applied != 18 {
+		t.Fatalf("schema = applied %d latest %d, want 18", applied, latest)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err == nil {
 		t.Fatal("depth column must be removed by v17")
@@ -190,5 +190,85 @@ func TestChildDepthRemovalUpgrade(t *testing.T) {
 	fresh.ChildSessionID = "sess-child-new"
 	if err := s.InsertRun(ctx, fresh); err != nil {
 		t.Fatalf("InsertRun after upgrade: %v", err)
+	}
+}
+
+func TestChildStore_SetResultRoundTrip(t *testing.T) {
+	db := newTestDB(t)
+	s := NewChildStore(db)
+	ctx := t.Context()
+	seedChildSessions(t, db, "sess-parent", "sess-child-ch-1")
+	if err := s.InsertRun(ctx, testChildRun("ch-1")); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	completed := time.Now().UTC().Truncate(time.Second)
+	if err := s.SetResult(ctx, "ch-1", &ChildResult{
+		Status: "completed", Output: "summary", ArtifactsJSON: `["a"]`,
+		TokensUsed: 3, CostMicros: 1, CompletedAt: completed,
+		Provenance: "child=ch-1 session=sess-child-ch-1 digest=digest-ch-1 durable=child/ch-1",
+	}, completed); err != nil {
+		t.Fatalf("SetResult: %v", err)
+	}
+	got, found, err := s.GetRun(ctx, "ch-1")
+	if err != nil || !found {
+		t.Fatalf("GetRun: %+v, %v, %v", got, found, err)
+	}
+	if got.ResultStatus != "completed" || got.ResultOutput != "summary" || got.TokensUsed != 3 || got.CostMicros != 1 {
+		t.Fatalf("persisted result = %+v", got)
+	}
+	if got.ResultProvenance == "" || got.CompletedAt.IsZero() {
+		t.Fatalf("provenance and completion must persist: %+v", got)
+	}
+	if err := s.SetResult(ctx, "missing", &ChildResult{Status: "completed", CompletedAt: completed}, completed); err == nil {
+		t.Fatal("missing run must fail")
+	}
+	if err := s.SetResult(ctx, "ch-1", &ChildResult{Status: "completed", TokensUsed: -1, CompletedAt: completed}, completed); err == nil {
+		t.Fatal("negative usage must fail")
+	}
+	if err := s.SetResult(ctx, "ch-1", nil, completed); err == nil {
+		t.Fatal("nil result must fail")
+	}
+}
+
+func TestChildResultUpgradePreservesRows(t *testing.T) {
+	ctx := t.Context()
+	dsn := filepath.Join(t.TempDir(), "result-legacy.db")
+	db, err := OpenDB(ctx, dsn)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for _, m := range migrations[:17] {
+		if err := applyMigration(ctx, db, m); err != nil {
+			t.Fatalf("apply v%d: %v", m.version, err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	seedMemorySession(t, db, "sess-parent", "owner-1")
+	seedMemorySession(t, db, "sess-child-legacy", "owner-1")
+	format := func(v time.Time) string { return v.UTC().Format(time.RFC3339Nano) }
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO child_run (id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id, child_session_id, durable_key, context_digest, grants_json, budget_json, state, deadline, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"ch-legacy", "key-legacy", "sess-parent", "turn-1", "inv-legacy", "sess-child-legacy", "child/ch-legacy", "digest-legacy", `[]`, `{}`, "queued", format(now.Add(time.Hour)), format(now), format(now),
+	); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate upgrade: %v", err)
+	}
+	s := NewChildStore(db)
+	got, found, err := s.GetRun(ctx, "ch-legacy")
+	if err != nil || !found {
+		t.Fatalf("GetRun legacy: %+v, %v, %v", got, found, err)
+	}
+	if got.ResultStatus != "" || got.TokensUsed != 0 {
+		t.Fatalf("legacy result defaults = %+v", got)
+	}
+	completed := now.Add(time.Minute)
+	if err := s.SetResult(ctx, "ch-legacy", &ChildResult{Status: "completed", Output: "ok", CompletedAt: completed, Provenance: "child=ch-legacy session=sess-child-legacy digest=digest-legacy durable=child/ch-legacy"}, completed); err != nil {
+		t.Fatalf("SetResult after upgrade: %v", err)
 	}
 }
