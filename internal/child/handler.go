@@ -100,7 +100,10 @@ func parseStartPayload(raw []byte) (StartPayload, error) {
 
 func terminalFor(result *Result, err error) string {
 	if err != nil {
-		if errors.Is(err, stdcontext.Canceled) || errors.Is(err, stdcontext.DeadlineExceeded) {
+		if errors.Is(err, stdcontext.DeadlineExceeded) {
+			return StatusDeadline
+		}
+		if errors.Is(err, stdcontext.Canceled) {
 			return StatusCancelled
 		}
 		if errors.Is(err, ErrNonResumable) {

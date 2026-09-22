@@ -201,6 +201,10 @@ func TestHandlerTerminalMapping(t *testing.T) {
 		{Result{Status: "deadline"}, nil, StatusDeadline},
 		{Result{Status: "completed"}, errors.New("boom"), StatusFailed},
 		{Result{Status: "weird"}, nil, StatusFailed},
+		{Result{}, stdcontext.Canceled, StatusCancelled},
+		{Result{}, stdcontext.DeadlineExceeded, StatusDeadline},
+		{Result{}, ErrNonResumable, StatusInterrupted},
+		{Result{}, errors.Join(stdcontext.DeadlineExceeded, errors.New("deadline")), StatusDeadline},
 	} {
 		runs := &fakeHandlerRuns{runs: map[string]HandlerRun{
 			"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
