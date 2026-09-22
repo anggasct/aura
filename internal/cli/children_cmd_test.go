@@ -107,6 +107,8 @@ func seedChildRow(t *testing.T, cfg string) string {
 		Status: "completed", Output: "summary", ArtifactsJSON: `[]`,
 		TokensUsed: 12, CostMicros: 34, CompletedAt: completed,
 		Provenance: "child=ch-1 session=sess-child-1 digest=digest-1 durable=child/ch-1",
+		ChildID: "ch-1", SessionID: "sess-child-1", ContextDigest: "digest-1", DurableKey: "child/ch-1",
+		SourceRange: "inv-1", Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted",
 	}, completed); err != nil {
 		t.Fatalf("SetResult: %v", err)
 	}
@@ -156,6 +158,8 @@ func TestChildrenCLIListShowCancel(t *testing.T) {
 		"budget_usage: tokens=12 cost=34",
 		"result_status: completed",
 		"result_provenance: child=ch-1 session=sess-child-1 digest=digest-1 durable=child/ch-1",
+		"result_model: child-default",
+		"result_trust: derived_untrusted",
 		"context_digest: digest-1",
 	} {
 		if !strings.Contains(out, want) {

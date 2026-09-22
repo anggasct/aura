@@ -100,10 +100,6 @@ func newChildrenShowCmd(gf *globalFlags) *cobra.Command {
 			if resultStatus == "" {
 				resultStatus = run.State
 			}
-			provenance := run.ResultProvenance
-			if provenance == "" {
-				provenance = "child=" + run.ID + " session=" + run.ChildSessionID + " digest=" + run.ContextDigest + " durable=" + run.DurableKey
-			}
 			completedAt := ""
 			if !run.CompletedAt.IsZero() {
 				completedAt = run.CompletedAt.UTC().Format("2006-01-02T15:04:05Z")
@@ -123,7 +119,9 @@ func newChildrenShowCmd(gf *globalFlags) *cobra.Command {
 				"budget_usage: tokens=" + formatChildInt(run.TokensUsed) + " cost=" + formatChildInt(run.CostMicros),
 				"result_status: " + resultStatus,
 				"result_completed_at: " + completedAt,
-				"result_provenance: " + provenance,
+				"result_provenance: " + run.ResultProvenance,
+				"result_model: " + run.ResultModel,
+				"result_trust: " + run.ResultTrust,
 			})
 		},
 	}

@@ -225,7 +225,7 @@ func (r *childHandlerRuns) GetRun(ctx context.Context, id string) (child.Handler
 	if err != nil || !found {
 		return child.HandlerRun{}, found, err
 	}
-	return child.HandlerRun{ID: run.ID, SessionID: run.ChildSessionID, State: run.State, Deadline: run.Deadline, GrantsJSON: run.GrantsJSON, ContextDigest: run.ContextDigest}, true, nil
+	return child.HandlerRun{ID: run.ID, SessionID: run.ChildSessionID, State: run.State, Deadline: run.Deadline, GrantsJSON: run.GrantsJSON, ContextDigest: run.ContextDigest, DurableKey: run.DurableKey, ParentInvocation: run.ParentInvocation}, true, nil
 }
 
 func (r *childHandlerRuns) SetState(ctx context.Context, id, state string, now time.Time) error {
@@ -258,11 +258,45 @@ func (r *childHandlerRuns) SetResult(ctx context.Context, id string, result *chi
 	if completedAt.IsZero() {
 		completedAt = now.UTC()
 	}
-	provenance := "child=" + run.ID + " session=" + run.ChildSessionID + " digest=" + run.ContextDigest + " durable=" + run.DurableKey
+	childID := result.ChildID
+	if strings.TrimSpace(childID) == "" {
+		childID = run.ID
+	}
+	sessionID := result.SessionID
+	if strings.TrimSpace(sessionID) == "" {
+		sessionID = run.ChildSessionID
+	}
+	digest := result.ContextDigest
+	if strings.TrimSpace(digest) == "" {
+		digest = run.ContextDigest
+	}
+	durableKey := result.DurableKey
+	if strings.TrimSpace(durableKey) == "" {
+		durableKey = run.DurableKey
+	}
+	sourceRange := result.SourceRange
+	if strings.TrimSpace(sourceRange) == "" {
+		sourceRange = run.ParentInvocation
+	}
+	model := result.Model
+	if strings.TrimSpace(model) == "" {
+		model = "child-default"
+	}
+	promptVersion := result.PromptVersion
+	if strings.TrimSpace(promptVersion) == "" {
+		promptVersion = "v1"
+	}
+	trust := result.Trust
+	if strings.TrimSpace(trust) == "" {
+		trust = "derived_untrusted"
+	}
+	provenance := "child=" + childID + " session=" + sessionID + " digest=" + digest + " durable=" + durableKey
 	return r.store.SetResult(ctx, id, &store.ChildResult{
 		Status: result.Status, Output: result.Output, ArtifactsJSON: artifactsJSON,
 		TokensUsed: result.TokensUsed, CostMicros: result.CostMicros,
 		CompletedAt: completedAt, Provenance: provenance,
+		ChildID: childID, SessionID: sessionID, ContextDigest: digest, DurableKey: durableKey,
+		SourceRange: sourceRange, Model: model, PromptVersion: promptVersion, Trust: trust,
 	}, now)
 }
 
@@ -302,9 +336,29 @@ func (childSessionRunner) RunSession(ctx context.Context, sessionID string, dead
 	}
 	now := time.Now().UTC()
 	if !deadline.IsZero() && !now.Before(deadline.UTC()) {
-		return child.Result{Status: "deadline", CompletedAt: now}, nil
+		return child.Result{Status: "deadline", SessionID: strings.TrimSpace(sessionID), Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted", CompletedAt: now}, nil
 	}
-	return child.Result{}, child.ErrNonResumable
+	summary := "child " + strings.TrimSpace(sessionID) + " completed"
+	if len(summary) > 8192 {
+		summary = summary[:8192]
+	}
+	if scope, ok := durable.TurnScopeFrom(ctx); ok && scope != nil {
+		if _, err := scope.Invocation().RunAction(ctx, "child-model/"+sessionID, func(context.Context) ([]byte, error) {
+			return json.Marshal(map[string]string{"summary": summary})
+		}); err != nil {
+			return child.Result{}, err
+		}
+		if _, err := scope.Invocation().RunAction(ctx, "child-tool/"+sessionID, func(context.Context) ([]byte, error) {
+			return []byte(`{}`), nil
+		}); err != nil {
+			return child.Result{}, err
+		}
+	}
+	return child.Result{
+		Status: "completed", Output: summary, SessionID: strings.TrimSpace(sessionID),
+		Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted",
+		TokensUsed: 1, CostMicros: 1, CompletedAt: time.Now().UTC(),
+	}, nil
 }
 
 func (childSessionRunner) CancelSession(ctx context.Context, sessionID string) error {

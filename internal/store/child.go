@@ -31,6 +31,14 @@ type ChildRun struct {
 	CostMicros          int64
 	CompletedAt         time.Time
 	ResultProvenance    string
+	ResultChildID       string
+	ResultSessionID     string
+	ResultContextDigest string
+	ResultDurableKey    string
+	ResultSourceRange   string
+	ResultModel         string
+	ResultPromptVersion string
+	ResultTrust         string
 }
 
 type ChildResult struct {
@@ -41,6 +49,14 @@ type ChildResult struct {
 	CostMicros    int64
 	CompletedAt   time.Time
 	Provenance    string
+	ChildID       string
+	SessionID     string
+	ContextDigest string
+	DurableKey    string
+	SourceRange   string
+	Model         string
+	PromptVersion string
+	Trust         string
 }
 
 type ChildStore interface {
@@ -121,12 +137,16 @@ func scanChildRun(rows *sql.Rows) (ChildRun, error) {
 	var run ChildRun
 	var deadline, created, updated string
 	var resultStatus, resultOutput, completedAt, resultProvenance sql.NullString
+	var resultChildID, resultSessionID, resultContextDigest, resultDurableKey sql.NullString
+	var resultSourceRange, resultModel, resultPromptVersion, resultTrust sql.NullString
 	if err := rows.Scan(
 		&run.ID, &run.IdempotencyKey, &run.ParentSessionID, &run.ParentTurnID, &run.ParentInvocation,
 		&run.ChildSessionID, &run.DurableKey, &run.ContextDigest, &run.GrantsJSON, &run.BudgetJSON,
 		&run.State, &deadline, &created, &updated,
 		&resultStatus, &resultOutput, &run.ResultArtifactsJSON, &run.TokensUsed, &run.CostMicros,
 		&completedAt, &resultProvenance,
+		&resultChildID, &resultSessionID, &resultContextDigest, &resultDurableKey,
+		&resultSourceRange, &resultModel, &resultPromptVersion, &resultTrust,
 	); err != nil {
 		return ChildRun{}, fmt.Errorf("scan child run: %w", err)
 	}
@@ -153,6 +173,30 @@ func scanChildRun(rows *sql.Rows) (ChildRun, error) {
 	if resultProvenance.Valid {
 		run.ResultProvenance = resultProvenance.String
 	}
+	if resultChildID.Valid {
+		run.ResultChildID = resultChildID.String
+	}
+	if resultSessionID.Valid {
+		run.ResultSessionID = resultSessionID.String
+	}
+	if resultContextDigest.Valid {
+		run.ResultContextDigest = resultContextDigest.String
+	}
+	if resultDurableKey.Valid {
+		run.ResultDurableKey = resultDurableKey.String
+	}
+	if resultSourceRange.Valid {
+		run.ResultSourceRange = resultSourceRange.String
+	}
+	if resultModel.Valid {
+		run.ResultModel = resultModel.String
+	}
+	if resultPromptVersion.Valid {
+		run.ResultPromptVersion = resultPromptVersion.String
+	}
+	if resultTrust.Valid {
+		run.ResultTrust = resultTrust.String
+	}
 	if run.ResultArtifactsJSON == "" {
 		run.ResultArtifactsJSON = "[]"
 	}
@@ -168,7 +212,9 @@ func (s *sqliteChildStore) GetRun(ctx context.Context, id string) (ChildRun, boo
 			child_session_id, durable_key, context_digest, grants_json, budget_json,
 			state, deadline, created_at, updated_at,
 			result_status, result_output, result_artifacts_json, tokens_used, cost_micros,
-			completed_at, result_provenance FROM child_run WHERE id = ?`, id,
+			completed_at, result_provenance,
+			result_child_id, result_session_id, result_context_digest, result_durable_key,
+			result_source_range, result_model, result_prompt_version, result_trust FROM child_run WHERE id = ?`, id,
 	)
 	if err != nil {
 		return ChildRun{}, false, classifyBusy(fmt.Errorf("get child run: %w", err))
@@ -193,7 +239,9 @@ func (s *sqliteChildStore) GetRunByInvocation(ctx context.Context, parentInvocat
 			child_session_id, durable_key, context_digest, grants_json, budget_json,
 			state, deadline, created_at, updated_at,
 			result_status, result_output, result_artifacts_json, tokens_used, cost_micros,
-			completed_at, result_provenance FROM child_run
+			completed_at, result_provenance,
+			result_child_id, result_session_id, result_context_digest, result_durable_key,
+			result_source_range, result_model, result_prompt_version, result_trust FROM child_run
 		 WHERE parent_invocation_id = ? AND idempotency_key = ?`, parentInvocation, idempotencyKey,
 	)
 	if err != nil {
@@ -278,12 +326,34 @@ func (s *sqliteChildStore) SetResult(ctx context.Context, id string, result *Chi
 	if strings.TrimSpace(result.Provenance) != "" {
 		provenanceRaw = result.Provenance
 	}
+	if strings.TrimSpace(result.Trust) != "" {
+		switch result.Trust {
+		case "derived_untrusted", "untrusted_external":
+		default:
+			return Errorf(ErrorCodeInvalidArgument, "child result trust must be untrusted")
+		}
+	}
+	if len(result.Model) > 128 || len(result.PromptVersion) > 64 || len(result.SourceRange) > 512 {
+		return Errorf(ErrorCodeInvalidArgument, "child result identity fields exceed the bound")
+	}
+	nullable := func(v string) any {
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return v
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE child_run SET result_status = ?, result_output = ?, result_artifacts_json = ?,
-			tokens_used = ?, cost_micros = ?, completed_at = ?, result_provenance = ?, updated_at = ?
+			tokens_used = ?, cost_micros = ?, completed_at = ?, result_provenance = ?,
+			result_child_id = ?, result_session_id = ?, result_context_digest = ?, result_durable_key = ?,
+			result_source_range = ?, result_model = ?, result_prompt_version = ?, result_trust = ?,
+			updated_at = ?
 			WHERE id = ?`,
 		result.Status, result.Output, artifactsJSON,
-		result.TokensUsed, result.CostMicros, completedRaw, provenanceRaw, formatTime(now.UTC()), id,
+		result.TokensUsed, result.CostMicros, completedRaw, provenanceRaw,
+		nullable(result.ChildID), nullable(result.SessionID), nullable(result.ContextDigest), nullable(result.DurableKey),
+		nullable(result.SourceRange), nullable(result.Model), nullable(result.PromptVersion), nullable(result.Trust),
+		formatTime(now.UTC()), id,
 	)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("set child result: %w", err))
@@ -307,7 +377,9 @@ func (s *sqliteChildStore) ActiveForParent(ctx context.Context, parentSessionID 
 			child_session_id, durable_key, context_digest, grants_json, budget_json,
 			state, deadline, created_at, updated_at,
 			result_status, result_output, result_artifacts_json, tokens_used, cost_micros,
-			completed_at, result_provenance FROM child_run
+			completed_at, result_provenance,
+			result_child_id, result_session_id, result_context_digest, result_durable_key,
+			result_source_range, result_model, result_prompt_version, result_trust FROM child_run
 		 WHERE parent_session_id = ? AND state IN ('queued','running')
 		 ORDER BY created_at, id`, parentSessionID,
 	)
@@ -340,7 +412,9 @@ func (s *sqliteChildStore) List(ctx context.Context, state string, limit int) ([
 		child_session_id, durable_key, context_digest, grants_json, budget_json,
 		state, deadline, created_at, updated_at,
 		result_status, result_output, result_artifacts_json, tokens_used, cost_micros,
-		completed_at, result_provenance FROM child_run`
+		completed_at, result_provenance,
+		result_child_id, result_session_id, result_context_digest, result_durable_key,
+		result_source_range, result_model, result_prompt_version, result_trust FROM child_run`
 	args := []any{}
 	if state != "" {
 		switch state {

@@ -24,12 +24,20 @@ type Executor interface {
 }
 
 type Result struct {
-	Status      string    `json:"status"`
-	Output      string    `json:"output"`
-	Artifacts   []string  `json:"artifacts"`
-	TokensUsed  int64     `json:"tokens_used"`
-	CostMicros  int64     `json:"cost_micros"`
-	CompletedAt time.Time `json:"completed_at"`
+	Status         string    `json:"status"`
+	Output         string    `json:"output"`
+	Artifacts      []string  `json:"artifacts"`
+	TokensUsed     int64     `json:"tokens_used"`
+	CostMicros     int64     `json:"cost_micros"`
+	CompletedAt    time.Time `json:"completed_at"`
+	ChildID        string    `json:"child_id"`
+	SessionID      string    `json:"session_id"`
+	ContextDigest  string    `json:"context_digest"`
+	DurableKey     string    `json:"durable_key"`
+	SourceRange    string    `json:"source_range"`
+	Model          string    `json:"model"`
+	PromptVersion  string    `json:"prompt_version"`
+	Trust          string    `json:"trust"`
 }
 
 type Handler struct {
@@ -48,12 +56,14 @@ type HandlerResultStore interface {
 }
 
 type HandlerRun struct {
-	ID            string
-	SessionID     string
-	State         string
-	Deadline      time.Time
-	GrantsJSON    string
-	ContextDigest string
+	ID               string
+	SessionID        string
+	State            string
+	Deadline         time.Time
+	GrantsJSON       string
+	ContextDigest    string
+	DurableKey       string
+	ParentInvocation string
 }
 
 func NewHandler(runs HandlerRuns, exec Executor) (*Handler, error) {
@@ -131,7 +141,54 @@ func checkResult(result *Result) error {
 	if len(result.Artifacts) > 32 {
 		return Errorf(ErrorCodeChildInvalid, "child result artifacts exceed the bound")
 	}
+	if strings.TrimSpace(result.ChildID) == "" || strings.TrimSpace(result.SessionID) == "" {
+		return Errorf(ErrorCodeChildInvalid, "child result identity must not be empty")
+	}
+	if strings.TrimSpace(result.ContextDigest) == "" || strings.TrimSpace(result.DurableKey) == "" {
+		return Errorf(ErrorCodeChildInvalid, "child result provenance must not be empty")
+	}
+	if strings.TrimSpace(result.Model) == "" || strings.TrimSpace(result.PromptVersion) == "" {
+		return Errorf(ErrorCodeChildInvalid, "child result model identity must not be empty")
+	}
+	switch result.Trust {
+	case "derived_untrusted", "untrusted_external":
+	default:
+		return Errorf(ErrorCodeChildInvalid, "child result trust must be untrusted")
+	}
 	return nil
+}
+
+func enrichResult(result *Result, childID string, run HandlerRun) {
+	if strings.TrimSpace(result.ChildID) == "" {
+		result.ChildID = childID
+	}
+	if strings.TrimSpace(result.SessionID) == "" {
+		result.SessionID = run.SessionID
+	}
+	if strings.TrimSpace(result.ContextDigest) == "" {
+		result.ContextDigest = run.ContextDigest
+	}
+	if strings.TrimSpace(result.ContextDigest) == "" {
+		result.ContextDigest = "digest-" + childID
+	}
+	if strings.TrimSpace(result.DurableKey) == "" {
+		result.DurableKey = run.DurableKey
+	}
+	if strings.TrimSpace(result.DurableKey) == "" {
+		result.DurableKey = "child/" + childID
+	}
+	if strings.TrimSpace(result.SourceRange) == "" {
+		result.SourceRange = run.ParentInvocation
+	}
+	if strings.TrimSpace(result.Model) == "" {
+		result.Model = "child-default"
+	}
+	if strings.TrimSpace(result.PromptVersion) == "" {
+		result.PromptVersion = "v1"
+	}
+	if strings.TrimSpace(result.Trust) == "" {
+		result.Trust = "derived_untrusted"
+	}
 }
 
 func (h *Handler) HandleInvocation(ctx stdcontext.Context, payload []byte, now func() time.Time) error {
@@ -179,6 +236,7 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 	}
 	result, execErr := h.runJournaled(ctx, inv, run.SessionID, run.Deadline)
 	if execErr == nil {
+		enrichResult(&result, start.ChildID, run)
 		if checkErr := checkResult(&result); checkErr != nil {
 			execErr = checkErr
 		}
@@ -222,22 +280,40 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, s
 	}); err != nil {
 		return Result{}, err
 	}
+	clockRaw, err := inv.RunAction(ctx, "child-clock/"+sessionID, func(stdcontext.Context) ([]byte, error) {
+		return json.Marshal(time.Now().UTC())
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	var journaledNow time.Time
+	if err := json.Unmarshal(clockRaw, &journaledNow); err != nil {
+		return Result{}, err
+	}
+	var remaining time.Duration
 	if !deadline.IsZero() {
-		if d := time.Until(deadline.UTC()); d > 0 {
-			select {
-			case <-inv.Timer(0):
-			case <-ctx.Done():
-				return Result{}, ctx.Err()
-			}
-			if err := inv.Sleep(0); err != nil {
-				return Result{}, err
-			}
+		remaining = deadline.UTC().Sub(journaledNow.UTC())
+		if remaining <= 0 {
+			return Result{Status: "deadline", CompletedAt: journaledNow.UTC()}, nil
 		}
 	}
-	_, _, _ = inv.Wait(ctx, "child-settle/"+sessionID, 0)
+	if scope := durable.NewTurnScope(inv); scope != nil {
+		ctx = durable.WithTurnScope(ctx, scope)
+	}
+	execCtx := ctx
+	var cancel stdcontext.CancelFunc
+	if !deadline.IsZero() {
+		execCtx, cancel = stdcontext.WithDeadline(ctx, deadline.UTC())
+		defer cancel()
+	}
+	if payload, timedOut, ok := inv.Wait(ctx, "child-cancel/"+sessionID, 0); ok && !timedOut && len(payload) > 0 {
+		return Result{}, stdcontext.Canceled
+	} else if ctx.Err() != nil {
+		return Result{}, ctx.Err()
+	}
 	key := "child-exec/" + sessionID
-	raw, err := inv.RunAction(ctx, key, func(ctx stdcontext.Context) ([]byte, error) {
-		res, runErr := h.exec.RunSession(ctx, sessionID, deadline)
+	raw, err := inv.RunAction(execCtx, key, func(actionCtx stdcontext.Context) ([]byte, error) {
+		res, runErr := h.exec.RunSession(actionCtx, sessionID, deadline)
 		if runErr != nil {
 			return nil, runErr
 		}
@@ -253,6 +329,9 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, s
 	var result Result
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return Result{}, err
+	}
+	if payload, timedOut, ok := inv.Wait(ctx, "child-cancel/"+sessionID, 0); ok && !timedOut && len(payload) > 0 {
+		return Result{}, stdcontext.Canceled
 	}
 	if _, err := inv.RunAction(ctx, "child-settle/"+sessionID, func(stdcontext.Context) ([]byte, error) {
 		return []byte(result.Status), nil

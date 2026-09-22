@@ -160,7 +160,7 @@ func (f *fakeJournalInvocation) actionKeys() []string {
 
 func testHandler() (*Handler, *fakeHandlerRuns, *fakeSessionExecutor) {
 	runs := &fakeHandlerRuns{runs: map[string]HandlerRun{
-		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
+		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute), ContextDigest: "digest-ch-1", DurableKey: "child/ch-1", ParentInvocation: "inv-1"},
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", Output: "done"}}
 	handler, err := NewHandler(runs, exec)
@@ -354,7 +354,7 @@ func TestHandlerBudgetChargeAndRelease(t *testing.T) {
 
 func TestHandlerPersistsTypedResult(t *testing.T) {
 	runs := &fakeHandlerRuns{runs: map[string]HandlerRun{
-		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
+		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute), ContextDigest: "digest-ch-1", DurableKey: "child/ch-1", ParentInvocation: "inv-1"},
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", Output: "summary", TokensUsed: 3, CostMicros: 1, CompletedAt: time.Now().UTC()}}
 	handler, err := NewHandler(runs, exec)
@@ -370,6 +370,15 @@ func TestHandlerPersistsTypedResult(t *testing.T) {
 	}
 	if got.Output != "summary" || got.TokensUsed != 3 {
 		t.Fatalf("persisted result = %+v", got)
+	}
+	if got.ChildID != "ch-1" || got.SessionID != "sess-child" {
+		t.Fatalf("typed identity must persist, got %+v", got)
+	}
+	if got.ContextDigest != "digest-ch-1" || got.DurableKey != "child/ch-1" {
+		t.Fatalf("typed provenance must persist, got %+v", got)
+	}
+	if got.Model == "" || got.Trust != "derived_untrusted" {
+		t.Fatalf("typed model and trust must persist, got %+v", got)
 	}
 	badRuns := &fakeHandlerRuns{runs: map[string]HandlerRun{
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
@@ -403,7 +412,7 @@ func TestHandlerNonResumableBecomesInterrupted(t *testing.T) {
 
 func TestHandlerDurableUsesJournaledBoundaries(t *testing.T) {
 	runs := &fakeHandlerRuns{runs: map[string]HandlerRun{
-		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
+		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute), ContextDigest: "digest-ch-1", DurableKey: "child/ch-1", ParentInvocation: "inv-1"},
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", Output: "done", CompletedAt: time.Now().UTC()}}
 	handler, err := NewHandler(runs, exec)
@@ -415,22 +424,32 @@ func TestHandlerDurableUsesJournaledBoundaries(t *testing.T) {
 		t.Fatalf("HandleDurable: %v", err)
 	}
 	keys := inv.actionKeys()
-	if len(keys) < 2 {
-		t.Fatalf("journaled actions = %v, want at least deadline plus exec boundaries", keys)
+	if len(keys) < 3 {
+		t.Fatalf("journaled actions = %v, want deadline, clock, exec, and settle boundaries", keys)
 	}
-	seenExec := false
+	seen := map[string]bool{}
 	for _, key := range keys {
-		if key == "child-exec/sess-child" {
-			seenExec = true
+		seen[key] = true
+	}
+	for _, want := range []string{"child-deadline/sess-child", "child-clock/sess-child", "child-exec/sess-child", "child-settle/sess-child"} {
+		if !seen[want] {
+			t.Fatalf("journaled actions = %v, want %s", keys, want)
 		}
 	}
-	if !seenExec {
-		t.Fatalf("journaled actions = %v, want child-exec/sess-child", keys)
-	}
 	inv.mu.Lock()
-	sleeps, timers, waits := inv.sleeps, inv.timers, inv.waits
+	timers, waits := inv.timers, inv.waits
 	inv.mu.Unlock()
-	if sleeps == 0 && timers == 0 && waits == 0 {
-		t.Fatal("durable path must use sleep, timer, or wait for deadline and settlement")
+	if timers != 0 {
+		t.Fatalf("durable path must not use Timer (Restate panics), timers = %d", timers)
+	}
+	if waits == 0 {
+		t.Fatal("durable path must observe cancel settlement via Wait")
+	}
+	got, ok := runs.results["ch-1"]
+	if !ok {
+		t.Fatal("durable path must persist typed result")
+	}
+	if got.ChildID != "ch-1" || got.Trust != "derived_untrusted" {
+		t.Fatalf("durable typed result = %+v", got)
 	}
 }

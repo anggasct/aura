@@ -501,8 +501,18 @@ func TestProductionSessionRunnerEnforcesBounds(t *testing.T) {
 	if res.CompletedAt.IsZero() || !res.CompletedAt.After(past) {
 		t.Fatalf("deadline completion must carry now, got %+v", res)
 	}
-	if _, err := runner.RunSession(t.Context(), "sess-child-1", time.Now().UTC().Add(time.Minute)); err == nil {
-		t.Fatal("placeholder must not report success without bounded work")
+	live, err := runner.RunSession(t.Context(), "sess-child-1", time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("bounded live execution: %v", err)
+	}
+	if live.Status != "completed" || live.Output == "" {
+		t.Fatalf("live result = %+v, want completed with bounded output", live)
+	}
+	if live.SessionID != "sess-child-1" || live.Model == "" || live.Trust != "derived_untrusted" {
+		t.Fatalf("live result must carry typed provenance and trust, got %+v", live)
+	}
+	if len(live.Output) > 8192 {
+		t.Fatalf("live output exceeds bound: %d", len(live.Output))
 	}
 }
 
@@ -537,7 +547,7 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 		t.Fatalf("InsertRun: %v", err)
 	}
 	runs := &childHandlerRuns{store: children}
-	handler, err := child.NewHandlerWithLedger(runs, &stubChildExecutor{result: child.Result{Status: "completed", Output: "summary", TokensUsed: 5, CostMicros: 2, CompletedAt: now}}, child.NewLedger(nil, 0))
+	handler, err := child.NewHandlerWithLedger(runs, childSessionRunner{}, child.NewLedger(nil, 0))
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -552,11 +562,23 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 	if got.State != "succeeded" {
 		t.Fatalf("state = %q, want succeeded", got.State)
 	}
-	if got.ResultStatus != "completed" || got.TokensUsed != 5 || got.CostMicros != 2 {
+	if got.ResultStatus != "completed" || got.TokensUsed != 1 || got.CostMicros != 1 {
 		t.Fatalf("persisted result = %+v", got)
 	}
 	if got.ResultProvenance == "" {
 		t.Fatal("result provenance must persist through the real runs adapter")
+	}
+	if got.ResultChildID != "ch-1" || got.ResultSessionID != "sess-child-1" {
+		t.Fatalf("typed identity must persist, got %+v", got)
+	}
+	if got.ResultContextDigest != "digest-1" || got.ResultDurableKey != "child/ch-1" {
+		t.Fatalf("typed provenance must persist, got %+v", got)
+	}
+	if got.ResultModel == "" || got.ResultTrust != "derived_untrusted" {
+		t.Fatalf("typed model and trust must persist, got %+v", got)
+	}
+	if got.ResultSourceRange != "inv-1" {
+		t.Fatalf("typed source range must persist, got %+v", got)
 	}
 }
 
@@ -574,4 +596,79 @@ func (s *stubChildExecutor) RunSession(_ context.Context, sessionID string, _ ti
 
 func (s *stubChildExecutor) CancelSession(_ context.Context, _ string) error {
 	return nil
+}
+
+func TestProductionHandlerDurablePerStep(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC()
+	sessions := store.NewSessionService(db)
+	for _, id := range []string{"sess-parent", "sess-child-1"} {
+		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+			t.Fatalf("Create session %s: %v", id, err)
+		}
+	}
+	children := store.NewChildStore(db)
+	run := &store.ChildRun{
+		ID: "ch-1", IdempotencyKey: "key-1",
+		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
+		ContextDigest: "digest-1", GrantsJSON: `[{"capability":"search"}]`,
+		BudgetJSON: `{"max_tokens":1000}`, State: "queued",
+		Deadline: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}
+	if err := children.InsertRun(t.Context(), run); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	handler, err := buildChildHandler(db)
+	if err != nil {
+		t.Fatalf("buildChildHandler: %v", err)
+	}
+	runtime := durable.NewFake()
+	if err := registerChildHandler(runtime, handler); err != nil {
+		t.Fatalf("registerChildHandler: %v", err)
+	}
+	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-1"}`)
+	ref, err := runtime.Start(t.Context(), durable.StartRequest{Handler: "child.run", Key: "child/ch-1", Payload: payload})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		status, err := runtime.Status(t.Context(), ref)
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		if status.State == durable.RunSucceeded {
+			break
+		}
+		if status.State == durable.RunFailed || status.State == durable.RunCancelled {
+			t.Fatalf("durable run ended as %s: %s", status.State, status.Detail)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("durable run did not settle, state = %s", status.State)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	got, found, err := children.GetRun(t.Context(), "ch-1")
+	if err != nil || !found {
+		t.Fatalf("GetRun: %+v, %v, %v", got, found, err)
+	}
+	if got.State != "succeeded" {
+		t.Fatalf("durable per-step state = %q, want succeeded", got.State)
+	}
+	if got.ResultStatus != "completed" || got.ResultProvenance == "" {
+		t.Fatalf("durable per-step result = %+v", got)
+	}
+	if got.ResultChildID != "ch-1" || got.ResultTrust != "derived_untrusted" || got.ResultModel == "" {
+		t.Fatalf("durable per-step typed fields = %+v", got)
+	}
 }

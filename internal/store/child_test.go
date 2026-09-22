@@ -171,8 +171,8 @@ func TestChildDepthRemovalUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersions: %v", err)
 	}
-	if latest != 18 || applied != 18 {
-		t.Fatalf("schema = applied %d latest %d, want 18", applied, latest)
+	if latest != 19 || applied != 19 {
+		t.Fatalf("schema = applied %d latest %d, want 19", applied, latest)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err == nil {
 		t.Fatal("depth column must be removed by v17")
@@ -206,6 +206,8 @@ func TestChildStore_SetResultRoundTrip(t *testing.T) {
 		Status: "completed", Output: "summary", ArtifactsJSON: `["a"]`,
 		TokensUsed: 3, CostMicros: 1, CompletedAt: completed,
 		Provenance: "child=ch-1 session=sess-child-ch-1 digest=digest-ch-1 durable=child/ch-1",
+		ChildID: "ch-1", SessionID: "sess-child-ch-1", ContextDigest: "digest-ch-1", DurableKey: "child/ch-1",
+		SourceRange: "inv-1", Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted",
 	}, completed); err != nil {
 		t.Fatalf("SetResult: %v", err)
 	}
@@ -219,11 +221,17 @@ func TestChildStore_SetResultRoundTrip(t *testing.T) {
 	if got.ResultProvenance == "" || got.CompletedAt.IsZero() {
 		t.Fatalf("provenance and completion must persist: %+v", got)
 	}
+	if got.ResultChildID != "ch-1" || got.ResultTrust != "derived_untrusted" || got.ResultModel != "child-default" {
+		t.Fatalf("typed provenance and trust must persist: %+v", got)
+	}
 	if err := s.SetResult(ctx, "missing", &ChildResult{Status: "completed", CompletedAt: completed}, completed); err == nil {
 		t.Fatal("missing run must fail")
 	}
 	if err := s.SetResult(ctx, "ch-1", &ChildResult{Status: "completed", TokensUsed: -1, CompletedAt: completed}, completed); err == nil {
 		t.Fatal("negative usage must fail")
+	}
+	if err := s.SetResult(ctx, "ch-1", &ChildResult{Status: "completed", Trust: "owner_input", CompletedAt: completed}, completed); err == nil {
+		t.Fatal("trusted label must fail for untrusted child result")
 	}
 	if err := s.SetResult(ctx, "ch-1", nil, completed); err == nil {
 		t.Fatal("nil result must fail")
@@ -268,7 +276,14 @@ func TestChildResultUpgradePreservesRows(t *testing.T) {
 		t.Fatalf("legacy result defaults = %+v", got)
 	}
 	completed := now.Add(time.Minute)
-	if err := s.SetResult(ctx, "ch-legacy", &ChildResult{Status: "completed", Output: "ok", CompletedAt: completed, Provenance: "child=ch-legacy session=sess-child-legacy digest=digest-legacy durable=child/ch-legacy"}, completed); err != nil {
+	if err := s.SetResult(ctx, "ch-legacy", &ChildResult{Status: "completed", Output: "ok", CompletedAt: completed, Provenance: "child=ch-legacy session=sess-child-legacy digest=digest-legacy durable=child/ch-legacy", ChildID: "ch-legacy", SessionID: "sess-child-legacy", ContextDigest: "digest-legacy", DurableKey: "child/ch-legacy", SourceRange: "inv-legacy", Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted"}, completed); err != nil {
 		t.Fatalf("SetResult after upgrade: %v", err)
+	}
+	after, found, err := s.GetRun(ctx, "ch-legacy")
+	if err != nil || !found {
+		t.Fatalf("GetRun after upgrade: %+v, %v, %v", after, found, err)
+	}
+	if after.ResultTrust != "derived_untrusted" || after.ResultModel != "child-default" {
+		t.Fatalf("typed upgrade must persist: %+v", after)
 	}
 }
