@@ -32,6 +32,9 @@ var migrations = []migration{
 	{version: 14, sql: skillPackageSchemaSQL},
 	{version: 15, sql: profileSchemaSQL},
 	{version: 16, sql: childRunSchemaSQL},
+	{version: 17, sql: childRunDepthRemovalSQL},
+	{version: 18, sql: childRunResultSchemaSQL},
+	{version: 19, sql: childRunTypedResultSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -491,6 +494,31 @@ CREATE TABLE child_run (
     UNIQUE(parent_invocation_id, idempotency_key)
 );
 CREATE INDEX child_parent_state_idx ON child_run(parent_session_id, state, created_at, id);
+`
+
+const childRunDepthRemovalSQL = `
+ALTER TABLE child_run DROP COLUMN depth;
+`
+
+const childRunResultSchemaSQL = `
+ALTER TABLE child_run ADD COLUMN result_status TEXT;
+ALTER TABLE child_run ADD COLUMN result_output TEXT;
+ALTER TABLE child_run ADD COLUMN result_artifacts_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE child_run ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE child_run ADD COLUMN cost_micros INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE child_run ADD COLUMN completed_at TEXT;
+ALTER TABLE child_run ADD COLUMN result_provenance TEXT;
+`
+
+const childRunTypedResultSchemaSQL = `
+ALTER TABLE child_run ADD COLUMN result_child_id TEXT;
+ALTER TABLE child_run ADD COLUMN result_session_id TEXT;
+ALTER TABLE child_run ADD COLUMN result_context_digest TEXT;
+ALTER TABLE child_run ADD COLUMN result_durable_key TEXT;
+ALTER TABLE child_run ADD COLUMN result_source_range TEXT;
+ALTER TABLE child_run ADD COLUMN result_model TEXT;
+ALTER TABLE child_run ADD COLUMN result_prompt_version TEXT;
+ALTER TABLE child_run ADD COLUMN result_trust TEXT;
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

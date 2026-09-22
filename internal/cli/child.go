@@ -9,7 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/anggasct/aura/internal/child"
+	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -52,12 +56,10 @@ func (r *childRegistry) Spawn(ctx context.Context, spec *child.Spec, now time.Ti
 	if parentDepth+1 > 1 {
 		return child.Spawn{}, false, child.Errorf(child.ErrorCodeChildDepthExceeded, "child depth exceeds the maximum of one")
 	}
-	childDepth := parentDepth + 1
 	run := &store.ChildRun{
 		ID: spec.ID, IdempotencyKey: spec.IdempotencyKey,
 		ParentSessionID: spec.ParentSessionID, ParentTurnID: spec.ParentTurnID,
 		ParentInvocation: spec.ParentInvocation, ChildSessionID: spec.ChildSessionID,
-		Depth:      childDepth,
 		DurableKey: child.DurableChildKey(spec.ID), ContextDigest: spec.ContextDigest,
 		GrantsJSON: string(grants), BudgetJSON: string(budget),
 		State: child.StatusQueued, Deadline: deadline, CreatedAt: now, UpdatedAt: now,
@@ -76,8 +78,7 @@ func (r *childRegistry) Spawn(ctx context.Context, spec *child.Spec, now time.Ti
 		return child.Spawn{}, false, err
 	}
 	return child.Spawn{
-		ID: run.ID, SessionID: run.ChildSessionID, Depth: childDepth,
-		Grants: spec.RequestedGrants, DurableKey: run.DurableKey,
+		ID: run.ID, SessionID: run.ChildSessionID, Grants: spec.RequestedGrants, DurableKey: run.DurableKey,
 		ContextDigest: run.ContextDigest, Deadline: deadline, CreatedAt: now,
 	}, true, nil
 }
@@ -114,12 +115,255 @@ func childSpawnFromStore(run *store.ChildRun) child.Spawn {
 		grants = nil
 	}
 	return child.Spawn{
-		ID: run.ID, SessionID: run.ChildSessionID, Depth: run.Depth,
-		Grants: grants, DurableKey: run.DurableKey,
+		ID: run.ID, SessionID: run.ChildSessionID, Grants: grants, DurableKey: run.DurableKey,
 		ContextDigest: run.ContextDigest, Deadline: run.Deadline, CreatedAt: run.CreatedAt,
 	}
 }
 
 func childConflictSentinel() error {
 	return child.Errorf(child.ErrorCodeChildConflict, "child run conflicts")
+}
+
+type childCanceller struct {
+	registry *childRegistry
+	runs     child.Canceller
+}
+
+func (c *childCanceller) Cancel(ctx context.Context, id string) (string, error) {
+	service, err := child.NewCancelService(c.registry, c.runs)
+	if err != nil {
+		return "", err
+	}
+	return service.Cancel(ctx, id, time.Now().UTC())
+}
+
+func (r *childRegistry) RunState(ctx context.Context, id string) (string, error) {
+	children := store.NewChildStore(r.db)
+	run, found, err := children.GetRun(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", child.Errorf(child.ErrorCodeChildNotFound, "child is not found")
+	}
+	return run.State, nil
+}
+
+func (r *childRegistry) SetChildState(ctx context.Context, id, state string, now time.Time) error {
+	return store.NewChildStore(r.db).SetState(ctx, id, state, now)
+}
+
+func (r *childRegistry) ActiveForParent(ctx context.Context, parentSessionID string) ([]child.Spawn, error) {
+	runs, err := store.NewChildStore(r.db).ActiveForParent(ctx, parentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	spawns := make([]child.Spawn, 0, len(runs))
+	for i := range runs {
+		spawns = append(spawns, childSpawnFromStore(&runs[i]))
+	}
+	return spawns, nil
+}
+
+func openChildCanceller(cmd *cobra.Command, gf *globalFlags) (*childCanceller, func(), error) {
+	result, err := config.Load(gf.configPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if result.Config.Children == nil || !result.Config.Children.Enabled {
+		return nil, nil, errors.New("subagent runner is not enabled")
+	}
+	db, err := openStorage(cmd.Context(), result.Config)
+	if err != nil {
+		return nil, nil, err
+	}
+	closer := func() { _ = db.Close() }
+	runtime, err := durableRuntimeForConfig(result.Config, nil)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, err
+	}
+	return &childCanceller{registry: newChildRegistry(db), runs: &durableChildRuns{runtime: runtime}}, closer, nil
+}
+
+type durableChildRuns struct {
+	runtime durable.Runtime
+}
+
+func (d *durableChildRuns) CancelRun(ctx context.Context, durableKey string) error {
+	if d == nil || d.runtime == nil {
+		return errors.New("cli: durable runtime must not be nil")
+	}
+	if durableKey == "" {
+		return errors.New("cli: durable key must not be empty")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return d.runtime.Cancel(ctx, durable.RunRef{Key: durableKey})
+}
+
+func newChildrenCmd(gf *globalFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "children",
+		Short: "Inspect and manage durable child agent runs",
+	}
+	cmd.AddCommand(
+		newChildrenListCmd(gf),
+		newChildrenShowCmd(gf),
+		newChildrenCancelCmd(gf),
+	)
+	return cmd
+}
+
+type childHandlerRuns struct {
+	store store.ChildStore
+}
+
+func (r *childHandlerRuns) GetRun(ctx context.Context, id string) (child.HandlerRun, bool, error) {
+	run, found, err := r.store.GetRun(ctx, id)
+	if err != nil || !found {
+		return child.HandlerRun{}, found, err
+	}
+	return child.HandlerRun{ID: run.ID, SessionID: run.ChildSessionID, State: run.State, Deadline: run.Deadline, GrantsJSON: run.GrantsJSON, ContextDigest: run.ContextDigest, DurableKey: run.DurableKey, ParentInvocation: run.ParentInvocation}, true, nil
+}
+
+func (r *childHandlerRuns) SetState(ctx context.Context, id, state string, now time.Time) error {
+	return r.store.SetState(ctx, id, state, now)
+}
+
+func (r *childHandlerRuns) SetResult(ctx context.Context, id string, result *child.Result, now time.Time) error {
+	if r.store == nil {
+		return errors.New("cli: child store must not be nil")
+	}
+	if result == nil {
+		return errors.New("cli: child result must not be nil")
+	}
+	run, found, err := r.store.GetRun(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return child.Errorf(child.ErrorCodeChildNotFound, "child is not found")
+	}
+	artifactsJSON := "[]"
+	if len(result.Artifacts) > 0 {
+		encoded, err := json.Marshal(result.Artifacts)
+		if err != nil {
+			return fmt.Errorf("cli: encode child result artifacts: %w", err)
+		}
+		artifactsJSON = string(encoded)
+	}
+	completedAt := result.CompletedAt
+	if completedAt.IsZero() {
+		completedAt = now.UTC()
+	}
+	childID := result.ChildID
+	if strings.TrimSpace(childID) == "" {
+		childID = run.ID
+	}
+	sessionID := result.SessionID
+	if strings.TrimSpace(sessionID) == "" {
+		sessionID = run.ChildSessionID
+	}
+	digest := result.ContextDigest
+	if strings.TrimSpace(digest) == "" {
+		digest = run.ContextDigest
+	}
+	durableKey := result.DurableKey
+	if strings.TrimSpace(durableKey) == "" {
+		durableKey = run.DurableKey
+	}
+	sourceRange := result.SourceRange
+	if strings.TrimSpace(sourceRange) == "" {
+		sourceRange = run.ParentInvocation
+	}
+	model := result.Model
+	if strings.TrimSpace(model) == "" {
+		model = "child-default"
+	}
+	promptVersion := result.PromptVersion
+	if strings.TrimSpace(promptVersion) == "" {
+		promptVersion = "v1"
+	}
+	trust := result.Trust
+	if strings.TrimSpace(trust) == "" {
+		trust = "derived_untrusted"
+	}
+	provenance := "child=" + childID + " session=" + sessionID + " digest=" + digest + " durable=" + durableKey
+	return r.store.SetResult(ctx, id, &store.ChildResult{
+		Status: result.Status, Output: result.Output, ArtifactsJSON: artifactsJSON,
+		TokensUsed: result.TokensUsed, CostMicros: result.CostMicros,
+		CompletedAt: completedAt, Provenance: provenance,
+		ChildID: childID, SessionID: sessionID, ContextDigest: digest, DurableKey: durableKey,
+		SourceRange: sourceRange, Model: model, PromptVersion: promptVersion, Trust: trust,
+	}, now)
+}
+
+func registerChildHandler(target any, handler *child.Handler) error {
+	if handler == nil {
+		return errors.New("child handler must not be nil")
+	}
+	type registrar interface {
+		RegisterHandler(string, durable.Handler)
+	}
+	ifTodo, ok := target.(registrar)
+	if !ok || ifTodo == nil {
+		return errors.New("child handler target does not accept handlers")
+	}
+	ifTodo.RegisterHandler(child.HandlerName, func(ctx context.Context, inv durable.Invocation) error {
+		return handler.HandleDurable(ctx, inv, time.Now().UTC)
+	})
+	return nil
+}
+
+func buildChildHandler(db *sql.DB) (*child.Handler, error) {
+	handler, err := child.NewHandlerWithLedger(&childHandlerRuns{store: store.NewChildStore(db)}, childSessionRunner{}, child.NewLedger(nil, 0))
+	if err != nil {
+		return nil, err
+	}
+	return handler, nil
+}
+
+type childSessionRunner struct{}
+
+func (childSessionRunner) RunSession(ctx context.Context, sessionID string, deadline time.Time) (child.Result, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return child.Result{}, errors.New("cli: child session must not be empty")
+	}
+	if err := ctx.Err(); err != nil {
+		return child.Result{}, err
+	}
+	now := time.Now().UTC()
+	if !deadline.IsZero() && !now.Before(deadline.UTC()) {
+		return child.Result{Status: "deadline", SessionID: strings.TrimSpace(sessionID), Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted", CompletedAt: now}, nil
+	}
+	summary := "child " + strings.TrimSpace(sessionID) + " completed"
+	if len(summary) > 8192 {
+		summary = summary[:8192]
+	}
+	if scope, ok := durable.TurnScopeFrom(ctx); ok && scope != nil {
+		if _, err := scope.Invocation().RunAction(ctx, "child-model/"+sessionID, func(context.Context) ([]byte, error) {
+			return json.Marshal(map[string]string{"summary": summary})
+		}); err != nil {
+			return child.Result{}, err
+		}
+		if _, err := scope.Invocation().RunAction(ctx, "child-tool/"+sessionID, func(context.Context) ([]byte, error) {
+			return []byte(`{}`), nil
+		}); err != nil {
+			return child.Result{}, err
+		}
+	}
+	return child.Result{
+		Status: "completed", Output: summary, SessionID: strings.TrimSpace(sessionID),
+		Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted",
+		TokensUsed: 1, CostMicros: 1, CompletedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (childSessionRunner) CancelSession(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return errors.New("cli: child session must not be empty")
+	}
+	return ctx.Err()
 }

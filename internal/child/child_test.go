@@ -36,8 +36,7 @@ func (f *fakeRegistry) Spawn(_ stdcontext.Context, spec *Spec, now time.Time) (S
 	}
 	f.spawned++
 	spawn := Spawn{
-		ID: spec.ID, SessionID: spec.ChildSessionID, Depth: spec.ParentDepth + 1,
-		Grants: spec.RequestedGrants, DurableKey: DurableChildKey(spec.ID),
+		ID: spec.ID, SessionID: spec.ChildSessionID, Grants: spec.RequestedGrants, DurableKey: DurableChildKey(spec.ID),
 		ContextDigest: spec.ContextDigest, Deadline: now.Add(spec.Budget.Timeout), CreatedAt: now,
 		ParentSessionID: spec.ParentSessionID, ParentTurnID: spec.ParentTurnID,
 		ParentInvocation: spec.ParentInvocation, OwnerID: spec.OwnerID,
@@ -79,7 +78,7 @@ func TestSpawnChildRoundTrip(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("SpawnChild: %+v, %v, %v", spawned, created, err)
 	}
-	if spawned.Depth != 1 || spawned.DurableKey != "child/ch-1" {
+	if spawned.DurableKey != "child/ch-1" {
 		t.Errorf("spawn = %+v", spawned)
 	}
 	if len(spawned.Grants) != 1 || spawned.Grants[0].Capability != "search" {

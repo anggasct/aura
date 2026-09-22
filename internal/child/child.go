@@ -68,7 +68,6 @@ type Spec struct {
 type Spawn struct {
 	ID               string
 	SessionID        string
-	Depth            int
 	Grants           []Grant
 	DurableKey       string
 	ContextDigest    string
@@ -78,6 +77,7 @@ type Spawn struct {
 	ParentTurnID     string
 	ParentInvocation string
 	OwnerID          string
+	Background       bool
 }
 
 type Registry interface {
@@ -222,4 +222,13 @@ func bindSpawnLineage(spawn *Spawn, spec *Spec) error {
 		return Errorf(ErrorCodeChildConflict, "child run conflicts")
 	}
 	return nil
+}
+
+func ValidState(state string) bool {
+	switch state {
+	case StatusQueued, StatusRunning, StatusSucceeded, StatusFailed, StatusCancelled, StatusDeadline, StatusInterrupted:
+		return true
+	default:
+		return false
+	}
 }
