@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -39,7 +40,7 @@ func writeChildLines(cmd *cobra.Command, lines []string) error {
 }
 
 func formatChildInt(v int64) string {
-	return fmt.Sprintf("%d", v)
+	return strconv.FormatInt(v, 10)
 }
 
 func newChildrenListCmd(gf *globalFlags) *cobra.Command {

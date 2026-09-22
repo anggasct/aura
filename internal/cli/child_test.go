@@ -537,7 +537,7 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 		t.Fatalf("InsertRun: %v", err)
 	}
 	runs := &childHandlerRuns{store: children}
-	handler, err := child.NewHandlerWithLedger(runs, stubChildExecutor{result: child.Result{Status: "completed", Output: "summary", TokensUsed: 5, CostMicros: 2, CompletedAt: now}}, child.NewLedger(nil, 0))
+	handler, err := child.NewHandlerWithLedger(runs, &stubChildExecutor{result: child.Result{Status: "completed", Output: "summary", TokensUsed: 5, CostMicros: 2, CompletedAt: now}}, child.NewLedger(nil, 0))
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -565,13 +565,13 @@ type stubChildExecutor struct {
 	err    error
 }
 
-func (s stubChildExecutor) RunSession(_ context.Context, sessionID string, _ time.Time) (child.Result, error) {
+func (s *stubChildExecutor) RunSession(_ context.Context, sessionID string, _ time.Time) (child.Result, error) {
 	if sessionID == "" {
 		return child.Result{}, errors.New("empty session")
 	}
 	return s.result, s.err
 }
 
-func (s stubChildExecutor) CancelSession(_ context.Context, _ string) error {
+func (s *stubChildExecutor) CancelSession(_ context.Context, _ string) error {
 	return nil
 }
