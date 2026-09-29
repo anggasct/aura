@@ -200,6 +200,7 @@ func (d *durableChildRuns) CancelRun(ctx context.Context, durableKey string) err
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	_ = d.runtime.Signal(ctx, durable.RunRef{Key: durableKey}, "child-cancel/"+durableKey, []byte("cancel"))
 	return d.runtime.Cancel(ctx, durable.RunRef{Key: durableKey})
 }
 
@@ -318,17 +319,20 @@ func registerChildHandler(target any, handler *child.Handler) error {
 }
 
 func buildChildHandler(db *sql.DB) (*child.Handler, error) {
-	handler, err := child.NewHandlerWithLedger(&childHandlerRuns{store: store.NewChildStore(db)}, childSessionRunner{}, child.NewLedger(nil, 0))
+	handler, err := child.NewHandlerWithLedger(&childHandlerRuns{store: store.NewChildStore(db)}, childSessionRunner{db: db}, child.NewLedger(nil, 0))
 	if err != nil {
 		return nil, err
 	}
 	return handler, nil
 }
 
-type childSessionRunner struct{}
+type childSessionRunner struct {
+	db *sql.DB
+}
 
-func (childSessionRunner) RunSession(ctx context.Context, sessionID string, deadline time.Time) (child.Result, error) {
-	if strings.TrimSpace(sessionID) == "" {
+func (r childSessionRunner) RunSession(ctx context.Context, sessionID string, deadline time.Time) (child.Result, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
 		return child.Result{}, errors.New("cli: child session must not be empty")
 	}
 	if err := ctx.Err(); err != nil {
@@ -336,9 +340,10 @@ func (childSessionRunner) RunSession(ctx context.Context, sessionID string, dead
 	}
 	now := time.Now().UTC()
 	if !deadline.IsZero() && !now.Before(deadline.UTC()) {
-		return child.Result{Status: "deadline", SessionID: strings.TrimSpace(sessionID), Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted", CompletedAt: now}, nil
+		return child.Result{Status: "deadline", SessionID: sessionID, Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted", CompletedAt: now}, nil
 	}
-	summary := "child " + strings.TrimSpace(sessionID) + " completed"
+	projection := r.loadProjection(ctx, sessionID)
+	summary := buildChildSummary(sessionID, projection)
 	if len(summary) > 8192 {
 		summary = summary[:8192]
 	}
@@ -349,16 +354,132 @@ func (childSessionRunner) RunSession(ctx context.Context, sessionID string, dead
 			return child.Result{}, err
 		}
 		if _, err := scope.Invocation().RunAction(ctx, "child-tool/"+sessionID, func(context.Context) ([]byte, error) {
-			return []byte(`{}`), nil
+			return json.Marshal(map[string]any{"grants": projection.grantNames()})
+		}); err != nil {
+			return child.Result{}, err
+		}
+		if _, err := scope.Invocation().RunAction(ctx, "child-effect/"+sessionID, func(context.Context) ([]byte, error) {
+			return json.Marshal(map[string]int64{"tokens": childTokensFor(summary), "cost": childCostFor(summary)})
 		}); err != nil {
 			return child.Result{}, err
 		}
 	}
-	return child.Result{
-		Status: "completed", Output: summary, SessionID: strings.TrimSpace(sessionID),
+	tokens := childTokensFor(summary)
+	cost := childCostFor(summary)
+	if projection.hasBudget {
+		if projection.maxTokens > 0 && tokens > projection.maxTokens {
+			return child.Result{}, child.Errorf(child.ErrorCodeBudgetExceeded, "child budget is exceeded")
+		}
+		if projection.maxCost > 0 && cost > projection.maxCost {
+			return child.Result{}, child.Errorf(child.ErrorCodeBudgetExceeded, "child budget is exceeded")
+		}
+	}
+	result := child.Result{
+		Status: "completed", Output: summary, SessionID: sessionID,
 		Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted",
-		TokensUsed: 1, CostMicros: 1, CompletedAt: time.Now().UTC(),
-	}, nil
+		TokensUsed: tokens, CostMicros: cost, CompletedAt: time.Now().UTC(),
+	}
+	projection.applyTo(&result)
+	return result, nil
+}
+
+type childProjection struct {
+	childID     string
+	digest      string
+	durableKey  string
+	sourceRange string
+	grants      []child.Grant
+	hasBudget   bool
+	maxTokens   int64
+	maxCost     int64
+}
+
+func (p *childProjection) grantNames() []string {
+	names := make([]string, 0, len(p.grants))
+	for _, grant := range p.grants {
+		name := strings.TrimSpace(grant.Capability)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func (p *childProjection) applyTo(result *child.Result) {
+	if result == nil {
+		return
+	}
+	if strings.TrimSpace(result.ChildID) == "" && strings.TrimSpace(p.childID) != "" {
+		result.ChildID = p.childID
+	}
+	if strings.TrimSpace(result.ContextDigest) == "" && strings.TrimSpace(p.digest) != "" {
+		result.ContextDigest = p.digest
+	}
+	if strings.TrimSpace(result.DurableKey) == "" && strings.TrimSpace(p.durableKey) != "" {
+		result.DurableKey = p.durableKey
+	}
+	if strings.TrimSpace(result.SourceRange) == "" && strings.TrimSpace(p.sourceRange) != "" {
+		result.SourceRange = p.sourceRange
+	}
+}
+
+func (r childSessionRunner) loadProjection(ctx context.Context, sessionID string) *childProjection {
+	projection := &childProjection{}
+	if r.db == nil {
+		return projection
+	}
+	var id, parentInvocation, durableKey, digest, grantsJSON, budgetJSON string
+	err := r.db.QueryRowContext(ctx, `SELECT id, parent_invocation_id, durable_key, context_digest, grants_json, budget_json FROM child_run WHERE child_session_id = ? LIMIT 1`, sessionID).Scan(&id, &parentInvocation, &durableKey, &digest, &grantsJSON, &budgetJSON)
+	if err != nil {
+		return projection
+	}
+	projection.childID = id
+	projection.digest = digest
+	projection.durableKey = durableKey
+	projection.sourceRange = parentInvocation
+	if json.Valid([]byte(grantsJSON)) {
+		var grants []child.Grant
+		if err := json.Unmarshal([]byte(grantsJSON), &grants); err == nil {
+			valid := grants[:0]
+			for _, grant := range grants {
+				if strings.EqualFold(strings.TrimSpace(grant.Capability), "spawn_child") {
+					continue
+				}
+				valid = append(valid, grant)
+			}
+			projection.grants = valid
+		}
+	}
+	if json.Valid([]byte(budgetJSON)) {
+		var budget child.Budget
+		if err := json.Unmarshal([]byte(budgetJSON), &budget); err == nil {
+			projection.hasBudget = true
+			projection.maxTokens = budget.MaxTokens
+			projection.maxCost = budget.MaxCost
+		}
+	}
+	return projection
+}
+
+func buildChildSummary(sessionID string, projection *childProjection) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if projection == nil || strings.TrimSpace(projection.digest) == "" {
+		return "child " + sessionID + " completed"
+	}
+	digest := strings.TrimSpace(projection.digest)
+	if len(digest) > 12 {
+		digest = digest[:12]
+	}
+	return "child " + sessionID + " digest " + digest + " grants " + strings.Join(projection.grantNames(), ",") + " completed"
+}
+
+func childTokensFor(summary string) int64 {
+	return int64(len(summary)+3)/4 + 1
+}
+
+func childCostFor(summary string) int64 {
+	return childTokensFor(summary) * 7
 }
 
 func (childSessionRunner) CancelSession(ctx context.Context, sessionID string) error {

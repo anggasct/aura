@@ -514,6 +514,9 @@ func TestProductionSessionRunnerEnforcesBounds(t *testing.T) {
 	if len(live.Output) > 8192 {
 		t.Fatalf("live output exceeds bound: %d", len(live.Output))
 	}
+	if live.TokensUsed <= 0 || live.CostMicros <= 0 {
+		t.Fatalf("live usage must be derived from bounded work, got %+v", live)
+	}
 }
 
 func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
@@ -547,7 +550,7 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 		t.Fatalf("InsertRun: %v", err)
 	}
 	runs := &childHandlerRuns{store: children}
-	handler, err := child.NewHandlerWithLedger(runs, childSessionRunner{}, child.NewLedger(nil, 0))
+	handler, err := child.NewHandlerWithLedger(runs, childSessionRunner{db: db}, child.NewLedger(nil, 0))
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -562,7 +565,7 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 	if got.State != "succeeded" {
 		t.Fatalf("state = %q, want succeeded", got.State)
 	}
-	if got.ResultStatus != "completed" || got.TokensUsed != 1 || got.CostMicros != 1 {
+	if got.ResultStatus != "completed" || got.TokensUsed <= 0 || got.CostMicros <= 0 {
 		t.Fatalf("persisted result = %+v", got)
 	}
 	if got.ResultProvenance == "" {
@@ -654,5 +657,62 @@ func TestProductionHandlerDurablePerStep(t *testing.T) {
 	}
 	if got.ResultChildID != "ch-1" || got.ResultTrust != "derived_untrusted" || got.ResultModel == "" {
 		t.Fatalf("durable per-step typed fields = %+v", got)
+	}
+	firstTokens := got.TokensUsed
+	firstCost := got.CostMicros
+	refAgain, err := runtime.Start(t.Context(), durable.StartRequest{Handler: "child.run", Key: "child/ch-1", Payload: payload})
+	if err != nil {
+		t.Fatalf("replay Start: %v", err)
+	}
+	if refAgain.Key != ref.Key {
+		t.Fatalf("replay ref = %+v, want %+v", refAgain, ref)
+	}
+	runtime.WaitReady(refAgain)
+	replayed, found, err := children.GetRun(t.Context(), "ch-1")
+	if err != nil || !found {
+		t.Fatalf("replay GetRun: %+v, %v, %v", replayed, found, err)
+	}
+	if replayed.State != "succeeded" || replayed.TokensUsed != firstTokens || replayed.CostMicros != firstCost {
+		t.Fatalf("replay must not duplicate work, first (%d,%d) replay (%d,%d) state %q", firstTokens, firstCost, replayed.TokensUsed, replayed.CostMicros, replayed.State)
+	}
+}
+
+func TestDurableCancelRunSignalsCounterpart(t *testing.T) {
+	runtime := durable.NewFake()
+	signalled := make(chan []byte, 1)
+	runtime.RegisterHandler("test-cancel", func(ctx context.Context, inv durable.Invocation) error {
+		payload, timedOut, ok := inv.Wait(ctx, "child-cancel/child/ch-cancel", 10*time.Second)
+		if !ok || timedOut {
+			return errors.New("cancel signal was not observed")
+		}
+		select {
+		case signalled <- payload:
+		default:
+		}
+		return nil
+	})
+	ref, err := runtime.Start(t.Context(), durable.StartRequest{Handler: "test-cancel", Key: "child/ch-cancel", Payload: []byte(`{}`)})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	runs := &durableChildRuns{runtime: runtime}
+	if err := runs.CancelRun(t.Context(), "child/ch-cancel"); err != nil {
+		t.Fatalf("CancelRun: %v", err)
+	}
+	select {
+	case payload := <-signalled:
+		if string(payload) != "cancel" {
+			t.Fatalf("cancel payload = %q, want cancel", payload)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("cancel signal counterpart was not delivered")
+	}
+	runtime.WaitReady(ref)
+	status, err := runtime.Status(t.Context(), ref)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.State != durable.RunCancelled {
+		t.Fatalf("run state = %q, want cancelled", status.State)
 	}
 }

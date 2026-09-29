@@ -237,7 +237,7 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 	if err := h.runs.SetState(ctx, start.ChildID, StatusRunning, current); err != nil {
 		return err
 	}
-	result, execErr := h.runJournaled(ctx, inv, run.SessionID, run.Deadline)
+	result, execErr := h.runJournaled(ctx, inv, &run)
 	if execErr == nil {
 		enrichResult(&result, start.ChildID, &run)
 		if checkErr := checkResult(&result); checkErr != nil {
@@ -270,7 +270,23 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 	return execErr
 }
 
-func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, sessionID string, deadline time.Time) (Result, error) {
+func cancelSignalName(run *HandlerRun) string {
+	if run != nil && strings.TrimSpace(run.DurableKey) != "" {
+		return "child-cancel/" + strings.TrimSpace(run.DurableKey)
+	}
+	if run != nil {
+		return "child-cancel/" + strings.TrimSpace(run.SessionID)
+	}
+	return "child-cancel/"
+}
+
+func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, run *HandlerRun) (Result, error) {
+	if run == nil {
+		return Result{}, Errorf(ErrorCodeInvalidArgument, "child run must not be nil")
+	}
+	sessionID := strings.TrimSpace(run.SessionID)
+	deadline := run.Deadline
+	cancelSignal := cancelSignalName(run)
 	if inv == nil {
 		return h.exec.RunSession(ctx, sessionID, deadline)
 	}
@@ -309,7 +325,7 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, s
 		execCtx, cancel = stdcontext.WithDeadline(ctx, deadline.UTC())
 		defer cancel()
 	}
-	if payload, timedOut, ok := inv.Wait(ctx, "child-cancel/"+sessionID, 0); ok && !timedOut && len(payload) > 0 {
+	if payload, timedOut, ok := inv.Wait(ctx, cancelSignal, 0); ok && !timedOut && len(payload) > 0 {
 		return Result{}, stdcontext.Canceled
 	} else if ctx.Err() != nil {
 		return Result{}, ctx.Err()
@@ -333,7 +349,7 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, s
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return Result{}, err
 	}
-	if payload, timedOut, ok := inv.Wait(ctx, "child-cancel/"+sessionID, 0); ok && !timedOut && len(payload) > 0 {
+	if payload, timedOut, ok := inv.Wait(ctx, cancelSignal, 0); ok && !timedOut && len(payload) > 0 {
 		return Result{}, stdcontext.Canceled
 	}
 	if _, err := inv.RunAction(ctx, "child-settle/"+sessionID, func(stdcontext.Context) ([]byte, error) {
