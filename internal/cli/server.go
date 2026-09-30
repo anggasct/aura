@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/logging"
@@ -202,8 +203,9 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 			}
+			var childLedger child.BudgetLedger = child.NewLedger(nil, 0)
 			if cfg.Children != nil && cfg.Children.Enabled {
-				childHandler, err := buildChildHandler(db)
+				childHandler, err := buildChildHandler(db, childLedger, &runtimeSignaler{runtime: broadcastRuntime}, adkExecutor, modelDefinition.Model)
 				if err != nil {
 					return err
 				}
@@ -244,7 +246,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				if cfg.Children != nil && cfg.Children.Enabled {
-					childHandler, err := buildChildHandler(db)
+					childHandler, err := buildChildHandler(db, childLedger, nil, adkExecutor, modelDefinition.Model)
 					if err != nil {
 						return err
 					}

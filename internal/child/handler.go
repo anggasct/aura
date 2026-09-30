@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/durable"
 )
@@ -16,10 +17,18 @@ type StartPayload struct {
 	SessionID     string `json:"session_id"`
 	DurableKey    string `json:"durable_key"`
 	ReservationID string `json:"reservation_id"`
+	Task          string `json:"task"`
+}
+
+type RunRequest struct {
+	ChildID   string
+	SessionID string
+	Deadline  time.Time
+	Task      string
 }
 
 type Executor interface {
-	RunSession(ctx stdcontext.Context, sessionID string, deadline time.Time) (Result, error)
+	RunSession(ctx stdcontext.Context, req RunRequest) (Result, error)
 	CancelSession(ctx stdcontext.Context, sessionID string) error
 }
 
@@ -41,9 +50,14 @@ type Result struct {
 }
 
 type Handler struct {
-	runs   HandlerRuns
-	exec   Executor
-	ledger BudgetLedger
+	runs     HandlerRuns
+	exec     Executor
+	ledger   BudgetLedger
+	signaler Signaler
+}
+
+type Signaler interface {
+	SignalChild(ctx stdcontext.Context, durableKey, signal string, payload []byte) error
 }
 
 type HandlerRuns interface {
@@ -85,6 +99,13 @@ func NewHandlerWithLedger(runs HandlerRuns, exec Executor, ledger BudgetLedger) 
 	return h, nil
 }
 
+func (h *Handler) SetSignaler(signaler Signaler) {
+	if h == nil {
+		return
+	}
+	h.signaler = signaler
+}
+
 var ErrNonResumable = errors.New("child: non-resumable attempt")
 
 func parseStartPayload(raw []byte) (StartPayload, error) {
@@ -94,6 +115,9 @@ func parseStartPayload(raw []byte) (StartPayload, error) {
 	}
 	if strings.TrimSpace(payload.ChildID) == "" || strings.TrimSpace(payload.SessionID) == "" {
 		return StartPayload{}, Errorf(ErrorCodeChildInvalid, "child start payload is incomplete")
+	}
+	if utf8.RuneCountInString(payload.Task) > maxTaskChars {
+		return StartPayload{}, Errorf(ErrorCodeChildInvalid, "child task length is out of range")
 	}
 	return payload, nil
 }
@@ -237,7 +261,7 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 	if err := h.runs.SetState(ctx, start.ChildID, StatusRunning, current); err != nil {
 		return err
 	}
-	result, execErr := h.runJournaled(ctx, inv, &run)
+	result, execErr := h.runJournaled(ctx, inv, &run, start.Task)
 	if execErr == nil {
 		enrichResult(&result, start.ChildID, &run)
 		if checkErr := checkResult(&result); checkErr != nil {
@@ -253,7 +277,10 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 		result.CompletedAt = settled
 	}
 	if execErr == nil {
-		h.chargeLedger(ctx, start.ReservationID, result.TokensUsed, result.CostMicros)
+		if chargeErr := h.chargeLedger(ctx, start.ReservationID, result.TokensUsed, result.CostMicros); chargeErr != nil {
+			execErr = chargeErr
+			state = StatusFailed
+		}
 	}
 	h.releaseLedger(ctx, start.ReservationID)
 	if store, ok := h.runs.(HandlerResultStore); ok && execErr == nil {
@@ -267,7 +294,15 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 	if setErr := h.runs.SetState(ctx, start.ChildID, state, settled); setErr != nil {
 		return setErr
 	}
+	h.signalSettlement(ctx, run.DurableKey, state)
 	return execErr
+}
+
+func (h *Handler) signalSettlement(ctx stdcontext.Context, durableKey, state string) {
+	if h == nil || h.signaler == nil || strings.TrimSpace(durableKey) == "" {
+		return
+	}
+	_ = h.signaler.SignalChild(ctx, strings.TrimSpace(durableKey), "child-settle/"+strings.TrimSpace(durableKey), []byte(state))
 }
 
 func cancelSignalName(run *HandlerRun) string {
@@ -280,15 +315,16 @@ func cancelSignalName(run *HandlerRun) string {
 	return "child-cancel/"
 }
 
-func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, run *HandlerRun) (Result, error) {
+func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, run *HandlerRun, task string) (Result, error) {
 	if run == nil {
 		return Result{}, Errorf(ErrorCodeInvalidArgument, "child run must not be nil")
 	}
 	sessionID := strings.TrimSpace(run.SessionID)
 	deadline := run.Deadline
 	cancelSignal := cancelSignalName(run)
+	req := RunRequest{ChildID: strings.TrimSpace(run.ID), SessionID: sessionID, Deadline: deadline, Task: task}
 	if inv == nil {
-		return h.exec.RunSession(ctx, sessionID, deadline)
+		return h.exec.RunSession(ctx, req)
 	}
 	deadlineValue := ""
 	if !deadline.IsZero() {
@@ -332,7 +368,7 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, r
 	}
 	key := "child-exec/" + sessionID
 	raw, err := inv.RunAction(execCtx, key, func(actionCtx stdcontext.Context) ([]byte, error) {
-		res, runErr := h.exec.RunSession(actionCtx, sessionID, deadline)
+		res, runErr := h.exec.RunSession(actionCtx, req)
 		if runErr != nil {
 			return nil, runErr
 		}
@@ -360,11 +396,11 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, r
 	return result, nil
 }
 
-func (h *Handler) chargeLedger(ctx stdcontext.Context, reservationID string, tokens, cost int64) {
+func (h *Handler) chargeLedger(ctx stdcontext.Context, reservationID string, tokens, cost int64) error {
 	if h.ledger == nil || reservationID == "" {
-		return
+		return nil
 	}
-	_ = h.ledger.Charge(ctx, reservationID, tokens, cost)
+	return h.ledger.Charge(ctx, reservationID, tokens, cost)
 }
 
 func (h *Handler) releaseLedger(ctx stdcontext.Context, reservationID string) {

@@ -4,6 +4,7 @@ import (
 	stdcontext "context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -47,11 +48,11 @@ type fakeSessionExecutor struct {
 	cancel error
 }
 
-func (f *fakeSessionExecutor) RunSession(_ stdcontext.Context, sessionID string, _ time.Time) (Result, error) {
+func (f *fakeSessionExecutor) RunSession(_ stdcontext.Context, req RunRequest) (Result, error) {
 	f.mu.Lock()
 	f.calls++
 	f.mu.Unlock()
-	if sessionID == "" {
+	if strings.TrimSpace(req.SessionID) == "" {
 		return Result{}, errors.New("empty session")
 	}
 	return f.result, f.err

@@ -2,16 +2,73 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
+	"iter"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/store"
+
+	adkmodel "google.golang.org/adk/v2/model"
+	"google.golang.org/genai"
 )
+
+type stubChildBroker struct{}
+
+func (stubChildBroker) Evaluate(_ context.Context, _ *approval.ToolRequest) (approval.PolicyDecision, error) {
+	return approval.PolicyDecision{Outcome: "allow"}, nil
+}
+
+type fakeChildModel struct {
+	answer string
+	tokens int32
+}
+
+func (f *fakeChildModel) Name() string { return "fake-child-model" }
+
+func (f *fakeChildModel) GenerateContent(_ context.Context, _ *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		yield(&adkmodel.LLMResponse{
+			Content:      &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{{Text: f.answer}}},
+			TurnComplete: true,
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:     f.tokens,
+				CandidatesTokenCount: f.tokens,
+				TotalTokenCount:      f.tokens * 2,
+			},
+		}, nil)
+	}
+}
+
+var testChildModelSeq atomic.Uint64
+
+func newTestChildExec(t *testing.T, db *sql.DB, answer string) (exec *runtimeadk.ADKExecutor, modelName string) {
+	t.Helper()
+	model := &fakeChildModel{answer: answer, tokens: 5}
+	name := fmt.Sprintf("fake-child-model-%d", testChildModelSeq.Add(1))
+	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) {
+		return model, nil
+	})
+	exec, err := runtimeadk.NewADKExecutor(
+		"aura-test", name,
+		store.NewSessionService(db), store.NewEventStore(db),
+		stubChildBroker{}, nil, slog.New(slog.DiscardHandler),
+	)
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	return exec, name
+}
 
 func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
@@ -354,7 +411,7 @@ func TestBuildChildHandlerRegisters(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	handler, err := buildChildHandler(db)
+	handler, err := buildChildHandler(db, nil, nil, nil, "")
 	if err != nil {
 		t.Fatalf("buildChildHandler: %v", err)
 	}
@@ -487,11 +544,19 @@ func (f *failingChildRuns) CancelRun(_ context.Context, _ string) error {
 
 func TestProductionSessionRunnerEnforcesBounds(t *testing.T) {
 	runner := childSessionRunner{}
-	if _, err := runner.RunSession(t.Context(), "", time.Now().UTC().Add(time.Minute)); err == nil {
+	if _, err := runner.RunSession(t.Context(), child.RunRequest{Deadline: time.Now().UTC().Add(time.Minute)}); err == nil {
 		t.Fatal("empty session must fail")
 	}
+	if _, err := runner.RunSession(t.Context(), child.RunRequest{SessionID: "sess-child-1", Deadline: time.Now().UTC().Add(time.Minute)}); err == nil {
+		t.Fatal("empty task must fail")
+	}
+	exec, _ := newTestChildExec(t, nil, "done")
+	bare := childSessionRunner{exec: exec}
+	if _, err := bare.RunSession(t.Context(), child.RunRequest{SessionID: "sess-child-1", Deadline: time.Now().UTC().Add(time.Minute), Task: "work"}); err == nil {
+		t.Fatal("unresolved owner must fail")
+	}
 	past := time.Now().UTC().Add(-time.Minute)
-	res, err := runner.RunSession(t.Context(), "sess-child-1", past)
+	res, err := runner.RunSession(t.Context(), child.RunRequest{SessionID: "sess-child-1", Deadline: past, Task: "work"})
 	if err != nil {
 		t.Fatalf("past deadline: %v", err)
 	}
@@ -500,22 +565,6 @@ func TestProductionSessionRunnerEnforcesBounds(t *testing.T) {
 	}
 	if res.CompletedAt.IsZero() || !res.CompletedAt.After(past) {
 		t.Fatalf("deadline completion must carry now, got %+v", res)
-	}
-	live, err := runner.RunSession(t.Context(), "sess-child-1", time.Now().UTC().Add(time.Minute))
-	if err != nil {
-		t.Fatalf("bounded live execution: %v", err)
-	}
-	if live.Status != "completed" || live.Output == "" {
-		t.Fatalf("live result = %+v, want completed with bounded output", live)
-	}
-	if live.SessionID != "sess-child-1" || live.Model == "" || live.Trust != "derived_untrusted" {
-		t.Fatalf("live result must carry typed provenance and trust, got %+v", live)
-	}
-	if len(live.Output) > 8192 {
-		t.Fatalf("live output exceeds bound: %d", len(live.Output))
-	}
-	if live.TokensUsed <= 0 || live.CostMicros <= 0 {
-		t.Fatalf("live usage must be derived from bounded work, got %+v", live)
 	}
 }
 
@@ -550,11 +599,12 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 		t.Fatalf("InsertRun: %v", err)
 	}
 	runs := &childHandlerRuns{store: children}
-	handler, err := child.NewHandlerWithLedger(runs, childSessionRunner{db: db}, child.NewLedger(nil, 0))
+	exec, modelName := newTestChildExec(t, db, "summary of the logs")
+	handler, err := child.NewHandlerWithLedger(runs, childSessionRunner{db: db, exec: exec, modelName: modelName}, newRecordingChildLedger())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
-	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-1"}`)
+	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-1","task":"summarize the logs"}`)
 	if err := handler.HandleInvocation(t.Context(), payload, func() time.Time { return now }); err != nil {
 		t.Fatalf("HandleInvocation: %v", err)
 	}
@@ -567,6 +617,9 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 	}
 	if got.ResultStatus != "completed" || got.TokensUsed <= 0 || got.CostMicros <= 0 {
 		t.Fatalf("persisted result = %+v", got)
+	}
+	if got.ResultOutput != "summary of the logs" {
+		t.Fatalf("model output = %q, want the executor answer", got.ResultOutput)
 	}
 	if got.ResultProvenance == "" {
 		t.Fatal("result provenance must persist through the real runs adapter")
@@ -615,7 +668,8 @@ func TestProductionHandlerDurablePerStep(t *testing.T) {
 	if err := children.InsertRun(t.Context(), run); err != nil {
 		t.Fatalf("InsertRun: %v", err)
 	}
-	handler, err := buildChildHandler(db)
+	exec, modelName := newTestChildExec(t, db, "per-step answer")
+	handler, err := buildChildHandler(db, newRecordingChildLedger(), nil, exec, modelName)
 	if err != nil {
 		t.Fatalf("buildChildHandler: %v", err)
 	}
@@ -623,7 +677,7 @@ func TestProductionHandlerDurablePerStep(t *testing.T) {
 	if err := registerChildHandler(runtime, handler); err != nil {
 		t.Fatalf("registerChildHandler: %v", err)
 	}
-	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-1"}`)
+	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-1","task":"run the steps"}`)
 	ref, err := runtime.Start(t.Context(), durable.StartRequest{Handler: "child.run", Key: "child/ch-1", Payload: payload})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -657,6 +711,9 @@ func TestProductionHandlerDurablePerStep(t *testing.T) {
 	}
 	if got.ResultChildID != "ch-1" || got.ResultTrust != "derived_untrusted" || got.ResultModel == "" {
 		t.Fatalf("durable per-step typed fields = %+v", got)
+	}
+	if got.ResultOutput != "per-step answer" {
+		t.Fatalf("model output = %q, want the executor answer", got.ResultOutput)
 	}
 	firstTokens := got.TokensUsed
 	firstCost := got.CostMicros
@@ -714,5 +771,159 @@ func TestDurableCancelRunSignalsCounterpart(t *testing.T) {
 	}
 	if status.State != durable.RunCancelled {
 		t.Fatalf("run state = %q, want cancelled", status.State)
+	}
+}
+
+type recordingChildLedger struct {
+	mu       sync.Mutex
+	charged  []string
+	released []string
+}
+
+func newRecordingChildLedger() *recordingChildLedger {
+	return &recordingChildLedger{}
+}
+
+func (l *recordingChildLedger) Reserve(_ context.Context, invocationID, ownerID string, maxTokens, maxCost int64) (child.BudgetReservation, error) {
+	return child.BudgetReservation{ID: "res-" + invocationID}, nil
+}
+
+func (l *recordingChildLedger) Charge(_ context.Context, reservationID string, _, _ int64) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.charged = append(l.charged, reservationID)
+	return nil
+}
+
+func (l *recordingChildLedger) Release(_ context.Context, reservationID string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.released = append(l.released, reservationID)
+	return nil
+}
+
+type recordingChildSignaler struct {
+	mu      sync.Mutex
+	signals []string
+}
+
+func (s *recordingChildSignaler) SignalChild(_ context.Context, durableKey, signal string, payload []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.signals = append(s.signals, durableKey+"/"+signal+"="+string(payload))
+	return nil
+}
+
+func TestProductionHandlerSignalsSettlement(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC()
+	sessions := store.NewSessionService(db)
+	for _, id := range []string{"sess-parent", "sess-child-1"} {
+		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+			t.Fatalf("Create session %s: %v", id, err)
+		}
+	}
+	children := store.NewChildStore(db)
+	run := &store.ChildRun{
+		ID: "ch-1", IdempotencyKey: "key-1",
+		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
+		ContextDigest: "digest-1", GrantsJSON: `[{"capability":"search"}]`,
+		BudgetJSON: `{"max_tokens":1000}`, State: "queued",
+		Deadline: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}
+	if err := children.InsertRun(t.Context(), run); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	signaler := &recordingChildSignaler{}
+	exec, modelName := newTestChildExec(t, db, "settlement answer")
+	handler, err := buildChildHandler(db, newRecordingChildLedger(), signaler, exec, modelName)
+	if err != nil {
+		t.Fatalf("buildChildHandler: %v", err)
+	}
+	runtime := durable.NewFake()
+	if err := registerChildHandler(runtime, handler); err != nil {
+		t.Fatalf("registerChildHandler: %v", err)
+	}
+	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-1","task":"summarize the logs"}`)
+	ref, err := runtime.Start(t.Context(), durable.StartRequest{Handler: "child.run", Key: "child/ch-1", Payload: payload})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	runtime.WaitReady(ref)
+	status, err := runtime.Status(t.Context(), ref)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.State != durable.RunSucceeded {
+		t.Fatalf("run state = %q, want succeeded", status.State)
+	}
+	signaler.mu.Lock()
+	defer signaler.mu.Unlock()
+	found := false
+	for _, signal := range signaler.signals {
+		if signal == "child/ch-1/child-settle/child/ch-1=succeeded" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("settlement signal was not sent, got %v", signaler.signals)
+	}
+}
+
+func TestProductionHandlerChargeFailsClosed(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC()
+	sessions := store.NewSessionService(db)
+	for _, id := range []string{"sess-parent", "sess-child-1"} {
+		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+			t.Fatalf("Create session %s: %v", id, err)
+		}
+	}
+	children := store.NewChildStore(db)
+	run := &store.ChildRun{
+		ID: "ch-1", IdempotencyKey: "key-1",
+		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
+		ContextDigest: "digest-1", GrantsJSON: `[{"capability":"search"}]`,
+		BudgetJSON: `{"max_tokens":1000}`, State: "queued",
+		Deadline: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}
+	if err := children.InsertRun(t.Context(), run); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	exec, modelName := newTestChildExec(t, db, "charge me")
+	handler, err := buildChildHandler(db, child.NewLedger(nil, 0), nil, exec, modelName)
+	if err != nil {
+		t.Fatalf("buildChildHandler: %v", err)
+	}
+	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-unknown","task":"charge me"}`)
+	if err := handler.HandleInvocation(t.Context(), payload, func() time.Time { return now }); err == nil {
+		t.Fatal("charge against an unknown reservation must fail closed")
+	}
+	got, found, err := children.GetRun(t.Context(), "ch-1")
+	if err != nil || !found {
+		t.Fatalf("GetRun: %+v, %v, %v", got, found, err)
+	}
+	if got.State != "failed" {
+		t.Fatalf("unreserved charge state = %q, want failed", got.State)
 	}
 }

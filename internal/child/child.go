@@ -78,6 +78,7 @@ type Spawn struct {
 	ParentInvocation string
 	OwnerID          string
 	Background       bool
+	Task             string
 }
 
 type Registry interface {
@@ -194,6 +195,7 @@ func (s *Service) SpawnChild(ctx stdcontext.Context, spec *Spec, now time.Time) 
 	if created {
 		spawn.Grants = childGrants
 	}
+	spawn.Task = spec.Task
 	if err := bindSpawnLineage(&spawn, spec); err != nil {
 		return Spawn{}, false, err
 	}

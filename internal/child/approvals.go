@@ -205,10 +205,12 @@ func encodeStartPayload(spawn *Spawn, reservation BudgetReservation) ([]byte, er
 		DurableKey    string `json:"durable_key"`
 		ReservationID string `json:"reservation_id"`
 		Deadline      string `json:"deadline"`
+		Task          string `json:"task"`
 	}{
 		ChildID: spawn.ID, SessionID: spawn.SessionID,
 		DurableKey: spawn.DurableKey, ReservationID: reservation.ID,
 		Deadline: spawn.Deadline.UTC().Format(time.RFC3339Nano),
+		Task:     spawn.Task,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("child: encode start payload: %w", err)
