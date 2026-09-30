@@ -190,6 +190,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateSync(cfg.Sync); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateVision(cfg.Vision); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
 		return LoadResult{}, err
 	}
@@ -417,6 +420,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateSyncShapes(doc); err != nil {
+		return err
+	}
+	if err := validateVisionShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -1899,6 +1905,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyProfileDefaults(cfg, doc)
 	applyChildrenDefaults(cfg, doc)
 	applySyncDefaults(cfg, doc)
+	applyVisionDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	return nil
 }
@@ -2244,6 +2251,58 @@ func validateSyncRemote(raw string) error {
 	return nil
 }
 
+func applyVisionDefaults(cfg *Config, doc *yamlv3.Node) {
+	if cfg.Vision == nil {
+		cfg.Vision = &Vision{}
+	}
+	defaults := Default().Vision
+	if !cfg.Vision.Enabled && !configValuePresent(doc, "vision", "enabled") && !envValuePresent("vision.enabled") {
+		cfg.Vision.Enabled = defaults.Enabled
+	}
+	if cfg.Vision.MaxEncodedBytes == 0 && !configValuePresent(doc, "vision", "max_encoded_bytes") && !envValuePresent("vision.max_encoded_bytes") {
+		cfg.Vision.MaxEncodedBytes = defaults.MaxEncodedBytes
+	}
+	if cfg.Vision.MaxPixels == 0 && !configValuePresent(doc, "vision", "max_pixels") && !envValuePresent("vision.max_pixels") {
+		cfg.Vision.MaxPixels = defaults.MaxPixels
+	}
+	if cfg.Vision.MaxDimension == 0 && !configValuePresent(doc, "vision", "max_dimension") && !envValuePresent("vision.max_dimension") {
+		cfg.Vision.MaxDimension = defaults.MaxDimension
+	}
+	if cfg.Vision.MaxImages == 0 && !configValuePresent(doc, "vision", "max_images") && !envValuePresent("vision.max_images") {
+		cfg.Vision.MaxImages = defaults.MaxImages
+	}
+	if cfg.Vision.MaxFrames == 0 && !configValuePresent(doc, "vision", "max_frames") && !envValuePresent("vision.max_frames") {
+		cfg.Vision.MaxFrames = defaults.MaxFrames
+	}
+	if cfg.Vision.DecodeTimeout == 0 && !configValuePresent(doc, "vision", "decode_timeout") && !envValuePresent("vision.decode_timeout") {
+		cfg.Vision.DecodeTimeout = defaults.DecodeTimeout
+	}
+	if cfg.Vision.MaxDecodeConcurrency == 0 && !configValuePresent(doc, "vision", "max_decode_concurrency") && !envValuePresent("vision.max_decode_concurrency") {
+		cfg.Vision.MaxDecodeConcurrency = defaults.MaxDecodeConcurrency
+	}
+	if cfg.Vision.MaxRequestBytes == 0 && !configValuePresent(doc, "vision", "max_request_bytes") && !envValuePresent("vision.max_request_bytes") {
+		cfg.Vision.MaxRequestBytes = defaults.MaxRequestBytes
+	}
+	if !cfg.Vision.StripMetadata && !configValuePresent(doc, "vision", "strip_metadata") && !envValuePresent("vision.strip_metadata") {
+		cfg.Vision.StripMetadata = defaults.StripMetadata
+	}
+	if !cfg.Vision.OrientNormalize && !configValuePresent(doc, "vision", "orient_normalize") && !envValuePresent("vision.orient_normalize") {
+		cfg.Vision.OrientNormalize = defaults.OrientNormalize
+	}
+	if cfg.Vision.Detail == "" && !configValuePresent(doc, "vision", "detail") && !envValuePresent("vision.detail") {
+		cfg.Vision.Detail = defaults.Detail
+	}
+	if cfg.Vision.TransformVersion == "" && !configValuePresent(doc, "vision", "transform_version") && !envValuePresent("vision.transform_version") {
+		cfg.Vision.TransformVersion = defaults.TransformVersion
+	}
+	if cfg.Vision.MaxTransformMemory == 0 && !configValuePresent(doc, "vision", "max_transform_memory_bytes") && !envValuePresent("vision.max_transform_memory_bytes") {
+		cfg.Vision.MaxTransformMemory = defaults.MaxTransformMemory
+	}
+	if cfg.Vision.Providers == nil {
+		cfg.Vision.Providers = map[string]VisionProviderLimits{}
+	}
+}
+
 func applyDiscordDefaults(cfg *Config, doc *yamlv3.Node, defaults *Discord) {
 	discord := &cfg.Channels.Discord
 	if discord.Instance == "" && !configValuePresent(doc, "channels", "discord", "instance") && !envValuePresent("channels.discord.instance") {
@@ -2387,6 +2446,67 @@ func applyToolDefaults(cfg *Config, doc *yamlv3.Node) {
 	if cfg.Tools.WebSearch.MaxResults == 0 && !configValuePresent(doc, "tools", "web_search", "max_results") && !envValuePresent("tools.web_search.max_results") {
 		cfg.Tools.WebSearch.MaxResults = defaults.WebSearch.MaxResults
 	}
+}
+
+func validateVisionShapes(doc *yamlv3.Node) error {
+	visionNode := mappingValue(doc, "vision")
+	if visionNode == nil {
+		return nil
+	}
+	if visionNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("vision must be a mapping at line %d", visionNode.Line)
+	}
+	for i := 0; i+1 < len(visionNode.Content); i += 2 {
+		keyNode := visionNode.Content[i]
+		valueNode := visionNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled", "strip_metadata", "orient_normalize":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("vision.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "max_encoded_bytes", "max_pixels", "max_dimension", "max_images", "max_frames", "max_decode_concurrency", "max_request_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("vision.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "max_transform_memory_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || (valueNode.Tag != "!!int" && valueNode.Tag != "!!str") {
+				return fmt.Errorf("vision.max_transform_memory_bytes must be a byte size at line %d", valueNode.Line)
+			}
+		case "decode_timeout":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("vision.decode_timeout must be a duration string at line %d", valueNode.Line)
+			}
+		case "detail", "transform_version":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("vision.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "providers":
+			if valueNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("vision.providers must be a mapping at line %d", valueNode.Line)
+			}
+			for j := 0; j+1 < len(valueNode.Content); j += 2 {
+				providerNode := valueNode.Content[j+1]
+				if providerNode.Kind != yamlv3.MappingNode {
+					return fmt.Errorf("vision.providers.%s must be a mapping at line %d", valueNode.Content[j].Value, providerNode.Line)
+				}
+				for k := 0; k+1 < len(providerNode.Content); k += 2 {
+					fieldKey := providerNode.Content[k].Value
+					fieldValue := providerNode.Content[k+1]
+					switch fieldKey {
+					case "max_images", "max_request_bytes":
+						if fieldValue.Kind != yamlv3.ScalarNode || fieldValue.Tag != "!!int" {
+							return fmt.Errorf("vision.providers.%s.%s must be an integer at line %d", valueNode.Content[j].Value, fieldKey, fieldValue.Line)
+						}
+					case "detail":
+						if fieldValue.Kind != yamlv3.ScalarNode || fieldValue.Tag != "!!str" {
+							return fmt.Errorf("vision.providers.%s.detail must be a string at line %d", valueNode.Content[j].Value, fieldValue.Line)
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func configValuePresent(node *yamlv3.Node, path ...string) bool {
@@ -3172,6 +3292,74 @@ func isSnowflake(id string) bool {
 		}
 	}
 	return true
+}
+
+func validateVision(vision *Vision) error {
+	if vision == nil {
+		return nil
+	}
+	var problems []error
+	if vision.MaxEncodedBytes <= 0 {
+		problems = append(problems, errors.New("vision.max_encoded_bytes must be positive"))
+	}
+	if vision.MaxPixels <= 0 {
+		problems = append(problems, errors.New("vision.max_pixels must be positive"))
+	}
+	if vision.MaxDimension <= 0 {
+		problems = append(problems, errors.New("vision.max_dimension must be positive"))
+	}
+	if vision.MaxImages <= 0 {
+		problems = append(problems, errors.New("vision.max_images must be positive"))
+	}
+	if vision.MaxFrames != 1 {
+		problems = append(problems, errors.New("vision.max_frames must be 1"))
+	}
+	if time.Duration(vision.DecodeTimeout) <= 0 || time.Duration(vision.DecodeTimeout) > 30*time.Second {
+		problems = append(problems, errors.New("vision.decode_timeout must be positive and at most 30s"))
+	}
+	if vision.MaxDecodeConcurrency <= 0 {
+		problems = append(problems, errors.New("vision.max_decode_concurrency must be positive"))
+	}
+	if vision.MaxRequestBytes <= 0 {
+		problems = append(problems, errors.New("vision.max_request_bytes must be positive"))
+	}
+	if vision.MaxTransformMemory <= 0 {
+		problems = append(problems, errors.New("vision.max_transform_memory_bytes must be positive"))
+	}
+	if !validVisionDetail(vision.Detail) {
+		problems = append(problems, errors.New("vision.detail must be auto, low, or high"))
+	}
+	if strings.TrimSpace(vision.TransformVersion) == "" {
+		problems = append(problems, errors.New("vision.transform_version must not be empty"))
+	}
+	for _, name := range slices.Sorted(maps.Keys(vision.Providers)) {
+		limits := vision.Providers[name]
+		if !validProtocolName(name) {
+			problems = append(problems, fmt.Errorf("vision.providers.%s is not a known provider protocol", name))
+			continue
+		}
+		if limits.MaxImages < 0 || limits.MaxImages > vision.MaxImages {
+			problems = append(problems, fmt.Errorf("vision.providers.%s.max_images must be between 0 and vision.max_images", name))
+		}
+		if limits.MaxRequestBytes < 0 || limits.MaxRequestBytes > vision.MaxRequestBytes {
+			problems = append(problems, fmt.Errorf("vision.providers.%s.max_request_bytes must be between 0 and vision.max_request_bytes", name))
+		}
+		if limits.Detail != "" && !validVisionDetail(limits.Detail) {
+			problems = append(problems, fmt.Errorf("vision.providers.%s.detail must be auto, low, or high", name))
+		}
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validVisionDetail(detail string) bool {
+	return detail == "auto" || detail == "low" || detail == "high"
+}
+
+func validProtocolName(name string) bool {
+	return name == ProtocolOpenAIResponses || name == ProtocolOpenAIChatCompat || name == ProtocolAnthropicMessages || name == ProtocolGeminiNative
 }
 
 func validateTools(toolsConfig *Tools, profile capability.Profile) error {

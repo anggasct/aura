@@ -43,6 +43,7 @@ type Config struct {
 	Profile      *Profile              `koanf:"profile" yaml:"profile,omitempty"`
 	Children     *Children             `koanf:"children" yaml:"children,omitempty"`
 	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
+	Vision       *Vision               `koanf:"vision" yaml:"vision,omitempty"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 }
 
@@ -157,6 +158,30 @@ type Children struct {
 	DefaultTimeout     Duration `koanf:"default_timeout" yaml:"default_timeout"`
 	MaxTimeout         Duration `koanf:"max_timeout" yaml:"max_timeout"`
 	Recovery           string   `koanf:"recovery" yaml:"recovery"`
+}
+
+type VisionProviderLimits struct {
+	MaxImages       int    `koanf:"max_images" yaml:"max_images,omitempty"`
+	MaxRequestBytes int64  `koanf:"max_request_bytes" yaml:"max_request_bytes,omitempty"`
+	Detail          string `koanf:"detail" yaml:"detail,omitempty"`
+}
+
+type Vision struct {
+	Enabled              bool                            `koanf:"enabled" yaml:"enabled"`
+	MaxEncodedBytes      int64                           `koanf:"max_encoded_bytes" yaml:"max_encoded_bytes"`
+	MaxPixels            int64                           `koanf:"max_pixels" yaml:"max_pixels"`
+	MaxDimension         int                             `koanf:"max_dimension" yaml:"max_dimension"`
+	MaxImages            int                             `koanf:"max_images" yaml:"max_images"`
+	MaxFrames            int                             `koanf:"max_frames" yaml:"max_frames"`
+	DecodeTimeout        Duration                        `koanf:"decode_timeout" yaml:"decode_timeout"`
+	MaxDecodeConcurrency int                             `koanf:"max_decode_concurrency" yaml:"max_decode_concurrency"`
+	MaxRequestBytes      int64                           `koanf:"max_request_bytes" yaml:"max_request_bytes"`
+	StripMetadata        bool                            `koanf:"strip_metadata" yaml:"strip_metadata"`
+	OrientNormalize      bool                            `koanf:"orient_normalize" yaml:"orient_normalize"`
+	Detail               string                          `koanf:"detail" yaml:"detail"`
+	TransformVersion     string                          `koanf:"transform_version" yaml:"transform_version"`
+	MaxTransformMemory   ByteSize                        `koanf:"max_transform_memory_bytes" yaml:"max_transform_memory_bytes"`
+	Providers            map[string]VisionProviderLimits `koanf:"providers" yaml:"providers,omitempty"`
 }
 
 type Discord struct {
@@ -655,6 +680,23 @@ func Default() Config {
 			GitBinary:          "/usr/bin/git",
 			SSHBinary:          "/usr/bin/ssh",
 			Include:            []string{"skills/**", "config-templates/**"},
+		},
+		Vision: &Vision{
+			Enabled:              true,
+			MaxEncodedBytes:      20971520,
+			MaxPixels:            40000000,
+			MaxDimension:         8192,
+			MaxImages:            4,
+			MaxFrames:            1,
+			DecodeTimeout:        Duration(5 * time.Second),
+			MaxDecodeConcurrency: 2,
+			MaxRequestBytes:      33554432,
+			StripMetadata:        true,
+			OrientNormalize:      true,
+			Detail:               "auto",
+			TransformVersion:     "v1",
+			MaxTransformMemory:   ByteSize(268435456),
+			Providers:            map[string]VisionProviderLimits{},
 		},
 		Context: &Context{
 			Enabled:                    true,
