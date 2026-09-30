@@ -28,6 +28,8 @@ context:
   recent_complete_turns: 5
 profile:
   prompt_version: v1
+children:
+  recovery: interrupt
 `
 	if err := writeFileForTest(path, content); err != nil {
 		t.Fatal(err)

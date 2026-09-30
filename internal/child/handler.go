@@ -1,0 +1,411 @@
+package child
+
+import (
+	stdcontext "context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/durable"
+)
+
+type StartPayload struct {
+	ChildID       string `json:"child_id"`
+	SessionID     string `json:"session_id"`
+	DurableKey    string `json:"durable_key"`
+	ReservationID string `json:"reservation_id"`
+	Task          string `json:"task"`
+}
+
+type RunRequest struct {
+	ChildID   string
+	SessionID string
+	Deadline  time.Time
+	Task      string
+}
+
+type Executor interface {
+	RunSession(ctx stdcontext.Context, req RunRequest) (Result, error)
+	CancelSession(ctx stdcontext.Context, sessionID string) error
+}
+
+type Result struct {
+	Status        string    `json:"status"`
+	Output        string    `json:"output"`
+	Artifacts     []string  `json:"artifacts"`
+	TokensUsed    int64     `json:"tokens_used"`
+	CostMicros    int64     `json:"cost_micros"`
+	CompletedAt   time.Time `json:"completed_at"`
+	ChildID       string    `json:"child_id"`
+	SessionID     string    `json:"session_id"`
+	ContextDigest string    `json:"context_digest"`
+	DurableKey    string    `json:"durable_key"`
+	SourceRange   string    `json:"source_range"`
+	Model         string    `json:"model"`
+	PromptVersion string    `json:"prompt_version"`
+	Trust         string    `json:"trust"`
+}
+
+type Handler struct {
+	runs     HandlerRuns
+	exec     Executor
+	ledger   BudgetLedger
+	signaler Signaler
+}
+
+type Signaler interface {
+	SignalChild(ctx stdcontext.Context, durableKey, signal string, payload []byte) error
+}
+
+type HandlerRuns interface {
+	SetState(ctx stdcontext.Context, id, state string, now time.Time) error
+	GetRun(ctx stdcontext.Context, id string) (HandlerRun, bool, error)
+}
+
+type HandlerResultStore interface {
+	SetResult(ctx stdcontext.Context, id string, result *Result, now time.Time) error
+}
+
+type HandlerRun struct {
+	ID               string
+	SessionID        string
+	State            string
+	Deadline         time.Time
+	GrantsJSON       string
+	ContextDigest    string
+	DurableKey       string
+	ParentInvocation string
+}
+
+func NewHandler(runs HandlerRuns, exec Executor) (*Handler, error) {
+	if runs == nil {
+		return nil, errNilArgument("runs")
+	}
+	if exec == nil {
+		return nil, errNilArgument("executor")
+	}
+	return &Handler{runs: runs, exec: exec}, nil
+}
+
+func NewHandlerWithLedger(runs HandlerRuns, exec Executor, ledger BudgetLedger) (*Handler, error) {
+	h, err := NewHandler(runs, exec)
+	if err != nil {
+		return nil, err
+	}
+	h.ledger = ledger
+	return h, nil
+}
+
+func (h *Handler) SetSignaler(signaler Signaler) {
+	if h == nil {
+		return
+	}
+	h.signaler = signaler
+}
+
+var ErrNonResumable = errors.New("child: non-resumable attempt")
+
+func parseStartPayload(raw []byte) (StartPayload, error) {
+	var payload StartPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return StartPayload{}, fmt.Errorf("child: decode start payload: %w", err)
+	}
+	if strings.TrimSpace(payload.ChildID) == "" || strings.TrimSpace(payload.SessionID) == "" {
+		return StartPayload{}, Errorf(ErrorCodeChildInvalid, "child start payload is incomplete")
+	}
+	if utf8.RuneCountInString(payload.Task) > maxTaskChars {
+		return StartPayload{}, Errorf(ErrorCodeChildInvalid, "child task length is out of range")
+	}
+	return payload, nil
+}
+
+func terminalFor(result *Result, err error) string {
+	if err != nil {
+		if errors.Is(err, stdcontext.DeadlineExceeded) {
+			return StatusDeadline
+		}
+		if errors.Is(err, stdcontext.Canceled) {
+			return StatusCancelled
+		}
+		if errors.Is(err, ErrNonResumable) {
+			return StatusInterrupted
+		}
+		return StatusFailed
+	}
+	switch result.Status {
+	case "completed":
+		return StatusSucceeded
+	case "cancelled":
+		return StatusCancelled
+	case "deadline":
+		return StatusDeadline
+	case "interrupted":
+		return StatusInterrupted
+	default:
+		return StatusFailed
+	}
+}
+
+func isTerminalState(state string) bool {
+	switch state {
+	case StatusSucceeded, StatusFailed, StatusCancelled, StatusDeadline, StatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
+func checkResult(result *Result) error {
+	if result.TokensUsed < 0 || result.CostMicros < 0 {
+		return Errorf(ErrorCodeChildInvalid, "child result usage must not be negative")
+	}
+	if len(result.Output) > 8192 {
+		return Errorf(ErrorCodeChildInvalid, "child result output exceeds the bound")
+	}
+	if len(result.Artifacts) > 32 {
+		return Errorf(ErrorCodeChildInvalid, "child result artifacts exceed the bound")
+	}
+	if strings.TrimSpace(result.ChildID) == "" || strings.TrimSpace(result.SessionID) == "" {
+		return Errorf(ErrorCodeChildInvalid, "child result identity must not be empty")
+	}
+	if strings.TrimSpace(result.ContextDigest) == "" || strings.TrimSpace(result.DurableKey) == "" {
+		return Errorf(ErrorCodeChildInvalid, "child result provenance must not be empty")
+	}
+	if strings.TrimSpace(result.Model) == "" || strings.TrimSpace(result.PromptVersion) == "" {
+		return Errorf(ErrorCodeChildInvalid, "child result model identity must not be empty")
+	}
+	switch result.Trust {
+	case "derived_untrusted", "untrusted_external":
+	default:
+		return Errorf(ErrorCodeChildInvalid, "child result trust must be untrusted")
+	}
+	return nil
+}
+
+func enrichResult(result *Result, childID string, run *HandlerRun) {
+	if strings.TrimSpace(result.ChildID) == "" {
+		result.ChildID = childID
+	}
+	if strings.TrimSpace(result.SessionID) == "" {
+		result.SessionID = run.SessionID
+	}
+	if strings.TrimSpace(result.ContextDigest) == "" {
+		result.ContextDigest = run.ContextDigest
+	}
+	if strings.TrimSpace(result.ContextDigest) == "" {
+		result.ContextDigest = "digest-" + childID
+	}
+	if strings.TrimSpace(result.DurableKey) == "" {
+		result.DurableKey = run.DurableKey
+	}
+	if strings.TrimSpace(result.DurableKey) == "" {
+		result.DurableKey = "child/" + childID
+	}
+	if strings.TrimSpace(result.SourceRange) == "" {
+		result.SourceRange = run.ParentInvocation
+	}
+	if strings.TrimSpace(result.Model) == "" {
+		result.Model = "child-default"
+	}
+	if strings.TrimSpace(result.PromptVersion) == "" {
+		result.PromptVersion = "v1"
+	}
+	if strings.TrimSpace(result.Trust) == "" {
+		result.Trust = "derived_untrusted"
+	}
+}
+
+func (h *Handler) HandleInvocation(ctx stdcontext.Context, payload []byte, now func() time.Time) error {
+	return h.handle(ctx, nil, payload, now)
+}
+
+func (h *Handler) HandleDurable(ctx stdcontext.Context, inv durable.Invocation, now func() time.Time) error {
+	if inv == nil {
+		return Errorf(ErrorCodeInvalidArgument, "invocation must not be nil")
+	}
+	return h.handle(ctx, inv, inv.Payload(), now)
+}
+
+func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload []byte, now func() time.Time) error {
+	if ctx == nil {
+		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if now == nil {
+		return Errorf(ErrorCodeInvalidArgument, "clock must not be nil")
+	}
+	start, err := parseStartPayload(payload)
+	if err != nil {
+		return err
+	}
+	run, found, err := h.runs.GetRun(ctx, start.ChildID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return Errorf(ErrorCodeChildNotFound, "child is not found")
+	}
+	if isTerminalState(run.State) {
+		return nil
+	}
+	current := now().UTC()
+	if !run.Deadline.IsZero() && !current.Before(run.Deadline.UTC()) {
+		if setErr := h.runs.SetState(ctx, start.ChildID, StatusDeadline, current); setErr != nil {
+			return setErr
+		}
+		h.releaseLedger(ctx, start.ReservationID)
+		return Errorf(ErrorCodeChildInvalid, "child deadline has passed")
+	}
+	if err := h.runs.SetState(ctx, start.ChildID, StatusRunning, current); err != nil {
+		return err
+	}
+	result, execErr := h.runJournaled(ctx, inv, &run, start.Task)
+	if execErr == nil {
+		enrichResult(&result, start.ChildID, &run)
+		if checkErr := checkResult(&result); checkErr != nil {
+			execErr = checkErr
+		}
+	}
+	state := terminalFor(&result, execErr)
+	if execErr == nil && !run.Deadline.IsZero() && !now().UTC().Before(run.Deadline.UTC()) && state == StatusSucceeded {
+		state = StatusDeadline
+	}
+	settled := now().UTC()
+	if result.CompletedAt.IsZero() {
+		result.CompletedAt = settled
+	}
+	if execErr == nil {
+		if chargeErr := h.chargeLedger(ctx, start.ReservationID, result.TokensUsed, result.CostMicros); chargeErr != nil {
+			execErr = chargeErr
+			state = StatusFailed
+		}
+	}
+	h.releaseLedger(ctx, start.ReservationID)
+	if store, ok := h.runs.(HandlerResultStore); ok && execErr == nil {
+		if setErr := store.SetResult(ctx, start.ChildID, &result, settled); setErr != nil {
+			if stateErr := h.runs.SetState(ctx, start.ChildID, StatusFailed, settled); stateErr != nil {
+				return stateErr
+			}
+			return setErr
+		}
+	}
+	if setErr := h.runs.SetState(ctx, start.ChildID, state, settled); setErr != nil {
+		return setErr
+	}
+	h.signalSettlement(ctx, run.DurableKey, state)
+	return execErr
+}
+
+func (h *Handler) signalSettlement(ctx stdcontext.Context, durableKey, state string) {
+	if h == nil || h.signaler == nil || strings.TrimSpace(durableKey) == "" {
+		return
+	}
+	_ = h.signaler.SignalChild(ctx, strings.TrimSpace(durableKey), "child-settle/"+strings.TrimSpace(durableKey), []byte(state))
+}
+
+func cancelSignalName(run *HandlerRun) string {
+	if run != nil && strings.TrimSpace(run.DurableKey) != "" {
+		return "child-cancel/" + strings.TrimSpace(run.DurableKey)
+	}
+	if run != nil {
+		return "child-cancel/" + strings.TrimSpace(run.SessionID)
+	}
+	return "child-cancel/"
+}
+
+func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, run *HandlerRun, task string) (Result, error) {
+	if run == nil {
+		return Result{}, Errorf(ErrorCodeInvalidArgument, "child run must not be nil")
+	}
+	sessionID := strings.TrimSpace(run.SessionID)
+	deadline := run.Deadline
+	cancelSignal := cancelSignalName(run)
+	req := RunRequest{ChildID: strings.TrimSpace(run.ID), SessionID: sessionID, Deadline: deadline, Task: task}
+	if inv == nil {
+		return h.exec.RunSession(ctx, req)
+	}
+	deadlineValue := ""
+	if !deadline.IsZero() {
+		deadlineValue = deadline.UTC().Format(time.RFC3339Nano)
+	}
+	if _, err := inv.RunAction(ctx, "child-deadline/"+sessionID, func(stdcontext.Context) ([]byte, error) {
+		return []byte(deadlineValue), nil
+	}); err != nil {
+		return Result{}, err
+	}
+	clockRaw, err := inv.RunAction(ctx, "child-clock/"+sessionID, func(stdcontext.Context) ([]byte, error) {
+		return json.Marshal(time.Now().UTC())
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	var journaledNow time.Time
+	if err := json.Unmarshal(clockRaw, &journaledNow); err != nil {
+		return Result{}, err
+	}
+	var remaining time.Duration
+	if !deadline.IsZero() {
+		remaining = deadline.UTC().Sub(journaledNow.UTC())
+		if remaining <= 0 {
+			return Result{Status: "deadline", CompletedAt: journaledNow.UTC()}, nil
+		}
+	}
+	if scope := durable.NewTurnScope(inv); scope != nil {
+		ctx = durable.WithTurnScope(ctx, scope)
+	}
+	execCtx := ctx
+	var cancel stdcontext.CancelFunc
+	if !deadline.IsZero() {
+		execCtx, cancel = stdcontext.WithDeadline(ctx, deadline.UTC())
+		defer cancel()
+	}
+	if payload, timedOut, ok := inv.Wait(ctx, cancelSignal, 0); ok && !timedOut && len(payload) > 0 {
+		return Result{}, stdcontext.Canceled
+	} else if ctx.Err() != nil {
+		return Result{}, ctx.Err()
+	}
+	key := "child-exec/" + sessionID
+	raw, err := inv.RunAction(execCtx, key, func(actionCtx stdcontext.Context) ([]byte, error) {
+		res, runErr := h.exec.RunSession(actionCtx, req)
+		if runErr != nil {
+			return nil, runErr
+		}
+		encoded, encErr := json.Marshal(res)
+		if encErr != nil {
+			return nil, encErr
+		}
+		return encoded, nil
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	var result Result
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return Result{}, err
+	}
+	if payload, timedOut, ok := inv.Wait(ctx, cancelSignal, 0); ok && !timedOut && len(payload) > 0 {
+		return Result{}, stdcontext.Canceled
+	}
+	if _, err := inv.RunAction(ctx, "child-settle/"+sessionID, func(stdcontext.Context) ([]byte, error) {
+		return []byte(result.Status), nil
+	}); err != nil {
+		return Result{}, err
+	}
+	return result, nil
+}
+
+func (h *Handler) chargeLedger(ctx stdcontext.Context, reservationID string, tokens, cost int64) error {
+	if h.ledger == nil || reservationID == "" {
+		return nil
+	}
+	return h.ledger.Charge(ctx, reservationID, tokens, cost)
+}
+
+func (h *Handler) releaseLedger(ctx stdcontext.Context, reservationID string) {
+	if h.ledger == nil || reservationID == "" {
+		return
+	}
+	_ = h.ledger.Release(ctx, reservationID)
+}

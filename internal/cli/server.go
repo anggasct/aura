@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/logging"
@@ -202,6 +203,18 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 			}
+			var childLedger child.BudgetLedger = child.NewLedger(nil, 0)
+			if cfg.Children != nil && cfg.Children.Enabled {
+				childHandler, err := buildChildHandler(db, childLedger, &runtimeSignaler{runtime: broadcastRuntime}, adkExecutor, modelDefinition.Model)
+				if err != nil {
+					return err
+				}
+				if durableConfig == nil {
+					if err := registerChildHandler(broadcastRuntime, childHandler); err != nil {
+						return err
+					}
+				}
+			}
 			if resumedJobs, err := resumeScheduleRuns(ctx, broadcastRuntime, db); err != nil {
 				return err
 			} else if resumedJobs > 0 {
@@ -231,6 +244,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				}
 				if err := registerScheduleHandler(durableListener, scheduleRunner); err != nil {
 					return err
+				}
+				if cfg.Children != nil && cfg.Children.Enabled {
+					childHandler, err := buildChildHandler(db, childLedger, nil, adkExecutor, modelDefinition.Model)
+					if err != nil {
+						return err
+					}
+					if err := registerChildHandler(durableListener, childHandler); err != nil {
+						return err
+					}
 				}
 				if err := srv.Add(durableListener); err != nil {
 					return err

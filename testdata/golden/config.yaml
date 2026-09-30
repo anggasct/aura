@@ -150,6 +150,14 @@ profile:
   extraction_queue_capacity: 64
   candidate_min_confidence: 0.7
   prompt_version: v1
+children:
+  enabled: true
+  max_depth: 1
+  max_active_per_parent: 2
+  max_active_global: 4
+  default_timeout: 5m0s
+  max_timeout: 30m0s
+  recovery: interrupt
 sync:
   enabled: false
   remote: ""

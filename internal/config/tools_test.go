@@ -26,7 +26,7 @@ func TestToolEnabledProfileRequiresToolsSection(t *testing.T) {
 func TestToolConfigAppliesDefaultsAndEnvironmentOverrides(t *testing.T) {
 	t.Setenv("AURA_TOOLS_MAX_INLINE_RESULT_BYTES", "8192")
 	t.Setenv("AURA_TOOLS_WEB_SEARCH_MAX_RESULTS", "3")
-	result, err := LoadWithOptions(writeTempConfig(t, "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n  recent_complete_turns: 5\nprofile:\n  prompt_version: v1\n"), execLinuxOptions(t))
+	result, err := LoadWithOptions(writeTempConfig(t, "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n  recent_complete_turns: 5\nprofile:\n  prompt_version: v1\nchildren:\n  recovery: interrupt\n"), execLinuxOptions(t))
 	if err != nil {
 		t.Fatalf("LoadWithOptions: %v", err)
 	}
