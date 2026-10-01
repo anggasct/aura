@@ -53,7 +53,7 @@ func FuzzPartRoundTrip(f *testing.F) {
 		EncodedBytes:     128,
 		TransformVersion: "v1",
 		Transform:        TransformGeometry{Width: 8, Height: 8, Kernel: "lanczos3"},
-		Provenance:       Provenance{Source: "terminal", SessionID: "sess-1", TurnID: "turn-1", IngestedAt: "2026-01-01T00:00:00Z"},
+		Provenance:       Provenance{Source: "terminal", ExternalID: "line:1", SessionID: "sess-1", TurnID: "turn-1", IngestedAt: "2026-01-01T00:00:00Z"},
 		Trust:            TrustUntrustedExternal,
 	}
 	raw, err := MarshalPart(&part)

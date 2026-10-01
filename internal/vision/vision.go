@@ -515,6 +515,9 @@ func ValidatePart(part *ImagePart) error {
 	if strings.TrimSpace(part.Provenance.Source) == "" {
 		return Errorf(ErrorCodeInvalidArgument, "image part provenance source must not be empty")
 	}
+	if strings.TrimSpace(part.Provenance.ExternalID) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "image part provenance external id must not be empty")
+	}
 	if strings.TrimSpace(part.Provenance.SessionID) == "" {
 		return Errorf(ErrorCodeInvalidArgument, "image part provenance session must not be empty")
 	}

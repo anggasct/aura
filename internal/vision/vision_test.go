@@ -167,7 +167,7 @@ func TestIngestJPEGAndGIF(t *testing.T) {
 		Content:      bytes.NewReader(jpegBytes(t, 10, 8)),
 		DeclaredMIME: MIMEJPEG,
 		SessionID:    "sess-1",
-		Provenance:   Provenance{Source: "terminal", TurnID: "turn-1"},
+		Provenance:   Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
 	if err != nil {
 		t.Fatalf("jpeg Ingest: %v", err)
@@ -179,7 +179,7 @@ func TestIngestJPEGAndGIF(t *testing.T) {
 		Content:      bytes.NewReader(gifBytes(t, 1)),
 		DeclaredMIME: MIMEgif,
 		SessionID:    "sess-1",
-		Provenance:   Provenance{Source: "terminal", TurnID: "turn-1"},
+		Provenance:   Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
 	if err != nil {
 		t.Fatalf("gif Ingest: %v", err)
@@ -219,7 +219,7 @@ func TestHostileCorpus(t *testing.T) {
 				Content:      bytes.NewReader(tc.raw),
 				DeclaredMIME: tc.declared,
 				SessionID:    "sess-1",
-				Provenance:   Provenance{Source: "terminal", TurnID: "turn-1"},
+				Provenance:   Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 			})
 			if err == nil {
 				t.Fatal("expected error")
@@ -246,7 +246,7 @@ func TestLimitsEnforced(t *testing.T) {
 	if _, err := svc.Ingest(t.Context(), &IngestRequest{
 		Content:    bytes.NewReader(pngBytes(t, 16, 16)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", TurnID: "turn-1"},
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	}); err == nil {
 		t.Error("expected limit error")
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
@@ -290,7 +290,7 @@ func TestMetadataStripped(t *testing.T) {
 	part, err := svc.Ingest(t.Context(), &IngestRequest{
 		Content:    bytes.NewReader(pngBytes(t, 8, 8)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", TurnID: "turn-1"},
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +318,7 @@ func TestPartValidation(t *testing.T) {
 		EncodedBytes:     100,
 		TransformVersion: "v1",
 		Transform:        TransformGeometry{Width: 4, Height: 4, Kernel: "lanczos3"},
-		Provenance:       Provenance{Source: "terminal", SessionID: "sess-1", TurnID: "turn-1", IngestedAt: "2026-01-01T00:00:00Z"},
+		Provenance:       Provenance{Source: "terminal", ExternalID: "line:1", SessionID: "sess-1", TurnID: "turn-1", IngestedAt: "2026-01-01T00:00:00Z"},
 		Trust:            TrustUntrustedExternal,
 	}
 	if err := ValidatePart(&part); err != nil {
@@ -339,6 +339,41 @@ func TestPartValidation(t *testing.T) {
 	if err := ValidatePart(&bad); err == nil {
 		t.Error("expected upscale rejection")
 	}
+	for _, field := range []struct {
+		name  string
+		mutate func(*ImagePart)
+	}{
+		{"empty source", func(p *ImagePart) { p.Provenance.Source = "" }},
+		{"empty external_id", func(p *ImagePart) { p.Provenance.ExternalID = "" }},
+		{"whitespace external_id", func(p *ImagePart) { p.Provenance.ExternalID = "  " }},
+		{"empty session", func(p *ImagePart) { p.Provenance.SessionID = "" }},
+		{"empty turn", func(p *ImagePart) { p.Provenance.TurnID = "" }},
+		{"empty ingested_at", func(p *ImagePart) { p.Provenance.IngestedAt = "" }},
+	} {
+		bad = part
+		field.mutate(&bad)
+		if err := ValidatePart(&bad); err == nil {
+			t.Errorf("expected %s rejection", field.name)
+		} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			t.Errorf("%s code = %v (%v), want invalid_argument", field.name, code, err)
+		}
+		raw, mErr := MarshalPart(&part)
+		if mErr != nil {
+			t.Fatalf("MarshalPart: %v", mErr)
+		}
+		var decoded ImagePart
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("json.Unmarshal: %v", err)
+		}
+		field.mutate(&decoded)
+		mutated, mErr := json.Marshal(decoded)
+		if mErr != nil {
+			t.Fatalf("json.Marshal: %v", mErr)
+		}
+		if _, err := UnmarshalPart(mutated); err == nil {
+			t.Errorf("expected UnmarshalPart %s rejection", field.name)
+		}
+	}
 	if _, err := UnmarshalPart([]byte(`{"kind":"image_ref.v1","unknown_field":1}`)); err == nil {
 		t.Error("expected unknown field rejection")
 	}
@@ -356,7 +391,7 @@ func TestAltTextBounds(t *testing.T) {
 		Content:    bytes.NewReader(pngBytes(t, 4, 4)),
 		AltText:    strings.Repeat("a", 513),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", TurnID: "turn-1"},
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
 	if err == nil {
 		t.Error("expected alt text rejection")
@@ -398,7 +433,7 @@ func TestDecodeConcurrencyBound(t *testing.T) {
 	_, err = svc.Ingest(t.Context(), &IngestRequest{
 		Content:    bytes.NewReader(pngBytes(t, 4, 4)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", TurnID: "turn-1"},
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
 		t.Errorf("code = %v (%v), want vision_limit_exceeded", code, err)
@@ -414,7 +449,7 @@ func TestObserverRedaction(t *testing.T) {
 	if _, err := svc.Ingest(t.Context(), &IngestRequest{
 		Content:    bytes.NewReader(pngBytes(t, 8, 8)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", TurnID: "turn-1"},
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
