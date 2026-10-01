@@ -50,10 +50,10 @@ func newMemoryStore() *memoryStore {
 
 func (m *memoryStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
 	if ctx == nil {
-		return ArtifactRef{}, errNilArgument("context must not be nil")
+		return ArtifactRef{}, errNilArgument("context")
 	}
 	if meta == nil {
-		return ArtifactRef{}, errNilArgument("artifact metadata must not be nil")
+		return ArtifactRef{}, errNilArgument("artifact metadata")
 	}
 	raw, err := io.ReadAll(r)
 	if err != nil {
@@ -317,8 +317,8 @@ func TestPartValidation(t *testing.T) {
 		Height:           4,
 		EncodedBytes:     100,
 		TransformVersion: "v1",
-		Transform:        TransformGeometry{Width: 4, Height: 4, Kernel: "nearest"},
-		Provenance:       Provenance{Source: "terminal", TurnID: "turn-1"},
+		Transform:        TransformGeometry{Width: 4, Height: 4, Kernel: "lanczos3"},
+		Provenance:       Provenance{Source: "terminal", SessionID: "sess-1", TurnID: "turn-1", IngestedAt: "2026-01-01T00:00:00Z"},
 		Trust:            TrustUntrustedExternal,
 	}
 	if err := ValidatePart(&part); err != nil {

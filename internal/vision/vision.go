@@ -126,27 +126,27 @@ func WithObserver(observer Observer) Option {
 
 func NewService(limits *Limits, opts ...Option) (*Service, error) {
 	if limits == nil {
-		return nil, errNilArgument("vision limits must not be nil")
+		return nil, errNilArgument("limits")
 	}
 	if limits.MaxEncodedBytes <= 0 || limits.MaxPixels <= 0 || limits.MaxDimension <= 0 {
-		return nil, errNilArgument("vision limits must be positive")
+		return nil, Errorf(ErrorCodeInvalidArgument, "vision limits must be positive")
 	}
 	if limits.DecodeTimeout <= 0 || limits.DecodeTimeout > 30*time.Second {
-		return nil, errNilArgument("vision decode timeout is out of range")
+		return nil, Errorf(ErrorCodeInvalidArgument, "vision decode timeout is out of range")
 	}
 	if limits.MaxDecodeConcurrency <= 0 {
-		return nil, errNilArgument("vision decode concurrency must be positive")
+		return nil, Errorf(ErrorCodeInvalidArgument, "vision decode concurrency must be positive")
 	}
 	if limits.MaxTransformMemory <= 0 {
-		return nil, errNilArgument("vision transform memory must be positive")
+		return nil, Errorf(ErrorCodeInvalidArgument, "vision transform memory must be positive")
 	}
 	if strings.TrimSpace(limits.TransformVersion) == "" {
-		return nil, errNilArgument("vision transform version must not be empty")
+		return nil, Errorf(ErrorCodeInvalidArgument, "vision transform version must not be empty")
 	}
 	s := &Service{limits: *limits, sem: make(chan struct{}, limits.MaxDecodeConcurrency)}
 	for _, opt := range opts {
 		if opt == nil {
-			return nil, errNilArgument("vision option must not be nil")
+			return nil, errNilArgument("option")
 		}
 		opt(s)
 	}
@@ -200,10 +200,10 @@ func boolToImages(ok bool) int {
 
 func (s *Service) ingest(ctx context.Context, req *IngestRequest) (ImagePart, error) {
 	if ctx == nil {
-		return ImagePart{}, errNilArgument("context must not be nil")
+		return ImagePart{}, errNilArgument("context")
 	}
 	if req == nil {
-		return ImagePart{}, errNilArgument("ingest request must not be nil")
+		return ImagePart{}, errNilArgument("ingest request")
 	}
 	if req.Content == nil {
 		return ImagePart{}, Errorf(ErrorCodeInvalidArgument, "image content must not be nil")
@@ -216,10 +216,15 @@ func (s *Service) ingest(ctx context.Context, req *IngestRequest) (ImagePart, er
 	}
 	select {
 	case s.sem <- struct{}{}:
-		defer func() { <-s.sem }()
 	default:
 		return ImagePart{}, Errorf(ErrorCodeVisionLimitExceeded, "decode concurrency is exhausted")
 	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			<-s.sem
+		}
+	}()
 
 	raw, err := io.ReadAll(io.LimitReader(req.Content, s.limits.MaxEncodedBytes+1))
 	if err != nil {
@@ -250,7 +255,8 @@ func (s *Service) ingest(ctx context.Context, req *IngestRequest) (ImagePart, er
 		return ImagePart{}, err
 	}
 
-	decoded, err := decodeBounded(ctx, mime, raw, &s.limits)
+	decoded, trans, err := s.decodeBounded(ctx, mime, raw)
+	transferred = trans
 	if err != nil {
 		return ImagePart{}, err
 	}
@@ -296,28 +302,37 @@ func (s *Service) ingest(ctx context.Context, req *IngestRequest) (ImagePart, er
 		Trust:            TrustUntrustedExternal,
 	}
 
+	sourceMeta, err := partMetadata(&part, "source")
+	if err != nil {
+		return ImagePart{}, err
+	}
+	derivedMeta, err := partMetadata(&part, "derived")
+	if err != nil {
+		return ImagePart{}, err
+	}
 	sourceRef, err := s.store.Put(ctx, bytes.NewReader(raw), &ArtifactMetadata{
 		SessionID: req.SessionID,
 		Filename:  req.Filename,
 		MediaType: mime,
-		Metadata:  partMetadata(&part, "source"),
+		Metadata:  sourceMeta,
 	})
 	if err != nil {
 		return ImagePart{}, Errorf(ErrorCodeVisionArtifactUnavailable, "source artifact write did not complete")
 	}
+	_ = sourceRef
 	derivedRef, err := s.store.Put(ctx, bytes.NewReader(encoded), &ArtifactMetadata{
 		SessionID: req.SessionID,
 		Filename:  req.Filename,
-		MediaType: mime,
-		Metadata:  partMetadata(&part, "derived"),
+		MediaType: derivedMediaType(mime),
+		Metadata:  derivedMeta,
 	})
 	if err != nil {
 		return ImagePart{}, Errorf(ErrorCodeVisionArtifactUnavailable, "derived artifact write did not complete")
 	}
-	part.ArtifactID = derivedRef.ID
-	if part.ArtifactID == "" {
-		part.ArtifactID = sourceRef.ID
+	if derivedRef.ID == "" {
+		return ImagePart{}, Errorf(ErrorCodeVisionArtifactUnavailable, "derived artifact write did not complete")
 	}
+	part.ArtifactID = derivedRef.ID
 	if err := ValidatePart(&part); err != nil {
 		return ImagePart{}, err
 	}
@@ -341,7 +356,7 @@ func checkGeometry(width, height int, limits *Limits) error {
 	return nil
 }
 
-func decodeBounded(ctx context.Context, mime string, raw []byte, limits *Limits) (decodedImage, error) {
+func (s *Service) decodeBounded(ctx context.Context, mime string, raw []byte) (decodedImage, bool, error) {
 	type result struct {
 		img image.Image
 		err error
@@ -372,7 +387,7 @@ func decodeBounded(ctx context.Context, mime string, raw []byte, limits *Limits)
 		}
 		done <- result{img: img, err: err}
 	}()
-	timeout := limits.DecodeTimeout
+	timeout := s.limits.DecodeTimeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
@@ -380,18 +395,26 @@ func decodeBounded(ctx context.Context, mime string, raw []byte, limits *Limits)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return decodedImage{}, Errorf(ErrorCodeVisionDecodeFailed, "image decode was cancelled")
+		go func() {
+			<-done
+			<-s.sem
+		}()
+		return decodedImage{}, true, Errorf(ErrorCodeVisionDecodeFailed, "image decode was cancelled")
 	case <-timer.C:
-		return decodedImage{}, Errorf(ErrorCodeVisionDecodeFailed, "image decode exceeded the deadline")
+		go func() {
+			<-done
+			<-s.sem
+		}()
+		return decodedImage{}, true, Errorf(ErrorCodeVisionDecodeFailed, "image decode exceeded the deadline")
 	case res := <-done:
 		if res.err != nil {
-			return decodedImage{}, Errorf(ErrorCodeVisionDecodeFailed, "image decode did not complete")
+			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode did not complete")
 		}
 		if res.img == nil {
-			return decodedImage{}, Errorf(ErrorCodeVisionDecodeFailed, "image decode produced no pixels")
+			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode produced no pixels")
 		}
 		bounds := res.img.Bounds()
-		return decodedImage{mime: mime, width: bounds.Dx(), height: bounds.Dy(), pixels: res.img}, nil
+		return decodedImage{mime: mime, width: bounds.Dx(), height: bounds.Dy(), pixels: res.img}, false, nil
 	}
 }
 
@@ -414,7 +437,7 @@ func normalizeAltText(alt string) (string, error) {
 	return strings.TrimSpace(alt), nil
 }
 
-func partMetadata(part *ImagePart, role string) json.RawMessage {
+func partMetadata(part *ImagePart, role string) (json.RawMessage, error) {
 	raw, err := json.Marshal(map[string]any{
 		"role":              role,
 		"kind":              part.Kind,
@@ -426,13 +449,20 @@ func partMetadata(part *ImagePart, role string) json.RawMessage {
 		"transform_version": part.TransformVersion,
 	})
 	if err != nil {
-		return json.RawMessage(`{}`)
+		return nil, Errorf(ErrorCodeVisionArtifactUnavailable, "artifact metadata did not encode")
 	}
-	return raw
+	return raw, nil
 }
 
 func transformKernel() string {
-	return "nearest"
+	return "lanczos3"
+}
+
+func derivedMediaType(mime string) string {
+	if mime == MIMEJPEG {
+		return MIMEJPEG
+	}
+	return MIMEPNG
 }
 
 func clampPrefix(length, bound int) int {
@@ -444,10 +474,13 @@ func clampPrefix(length, bound int) int {
 
 func ValidatePart(part *ImagePart) error {
 	if part == nil {
-		return errNilArgument("image part must not be nil")
+		return errNilArgument("image part")
 	}
 	if part.Kind != PartKindImageRef {
 		return Errorf(ErrorCodeInvalidArgument, "image part kind is not supported")
+	}
+	if strings.TrimSpace(part.ArtifactID) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "image part artifact id must not be empty")
 	}
 	if !strings.HasPrefix(part.SourceDigest, "sha256:") || !strings.HasPrefix(part.DerivedDigest, "sha256:") {
 		return Errorf(ErrorCodeInvalidArgument, "image part digests must use sha256")
@@ -471,6 +504,25 @@ func ValidatePart(part *ImagePart) error {
 	}
 	if part.Transform.Upscaled {
 		return Errorf(ErrorCodeInvalidArgument, "image part must not upscale")
+	}
+	if part.TransformVersion == "v1" {
+		if part.Transform.Kernel != "lanczos3" {
+			return Errorf(ErrorCodeInvalidArgument, "image part transform kernel is not supported")
+		}
+	} else if strings.TrimSpace(part.Transform.Kernel) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "image part transform kernel must not be empty")
+	}
+	if strings.TrimSpace(part.Provenance.Source) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "image part provenance source must not be empty")
+	}
+	if strings.TrimSpace(part.Provenance.SessionID) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "image part provenance session must not be empty")
+	}
+	if strings.TrimSpace(part.Provenance.TurnID) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "image part provenance turn must not be empty")
+	}
+	if strings.TrimSpace(part.Provenance.IngestedAt) == "" {
+		return Errorf(ErrorCodeInvalidArgument, "image part provenance timestamp must not be empty")
 	}
 	if part.Trust != TrustUntrustedExternal {
 		return Errorf(ErrorCodeInvalidArgument, "image part trust must be untrusted_external")

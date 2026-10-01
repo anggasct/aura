@@ -162,11 +162,11 @@ func webpDimensions(raw []byte) (headerGeometry, error) {
 		return headerGeometry{width: width, height: height, animated: animated, frames: 1, color: "rgb"}, nil
 	}
 	if bytes.Equal(raw[12:16], []byte("VP8 ")) {
-		if len(raw) < 26 {
+		if len(raw) < 30 {
 			return headerGeometry{}, Errorf(ErrorCodeVisionDecodeFailed, "webp frame is truncated")
 		}
-		width := int(binary.LittleEndian.Uint16(raw[24:26])) & 0x3FFF
-		height := int(binary.LittleEndian.Uint16(raw[26:28])) & 0x3FFF
+		width := int(binary.LittleEndian.Uint16(raw[26:28])) & 0x3FFF
+		height := int(binary.LittleEndian.Uint16(raw[28:30])) & 0x3FFF
 		if width <= 0 || height <= 0 {
 			return headerGeometry{}, Errorf(ErrorCodeVisionDecodeFailed, "webp dimensions are invalid")
 		}
