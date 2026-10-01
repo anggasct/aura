@@ -355,7 +355,7 @@ func TestPartValidation(t *testing.T) {
 		t.Error("expected upscale rejection")
 	}
 	for _, field := range []struct {
-		name  string
+		name   string
 		mutate func(*ImagePart)
 	}{
 		{"empty source", func(p *ImagePart) { p.Provenance.Source = "" }},
