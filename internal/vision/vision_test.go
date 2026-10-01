@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"image"
@@ -283,7 +285,8 @@ func TestDeterminism(t *testing.T) {
 }
 
 func TestMetadataStripped(t *testing.T) {
-	svc, err := NewService(ptrLimits(), WithStore(newMemoryStore()))
+	store := &recordingStore{}
+	svc, err := NewService(ptrLimits(), WithStore(store))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,6 +306,18 @@ func TestMetadataStripped(t *testing.T) {
 		if strings.Contains(string(raw), leak) {
 			t.Errorf("part metadata leaks %q", leak)
 		}
+	}
+	if len(store.blobs) != 2 {
+		t.Fatalf("blobs = %d, want 2", len(store.blobs))
+	}
+	derived := store.blobs[1]
+	for _, leak := range [][]byte{[]byte("Exif"), []byte("GPS"), []byte("XMP"), []byte("iCCP")} {
+		if bytes.Contains(derived, leak) {
+			t.Errorf("derived bytes retain %q", leak)
+		}
+	}
+	if _, err := png.Decode(bytes.NewReader(derived)); err != nil {
+		t.Errorf("derived is not re-encoded PNG: %v", err)
 	}
 }
 
@@ -459,4 +474,455 @@ func TestObserverRedaction(t *testing.T) {
 	if got.Width != 0 || got.Height != 0 {
 		t.Errorf("observation carries raw dimensions: %+v", got)
 	}
+}
+
+func webpLossyBytes(t *testing.T) []byte {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func webpLosslessBytes(t *testing.T) []byte {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString("UklGRrIBAABXRUJQVlA4TKUBAAAvSsAYAA8w//M///MfeJAkbXvaSG7m8Q3GfYSBJekwQztm/IcZlgwnmWImn2BK7aFmBtnVir6q//8VOkFE/xm4baTIu8c48ArEo6+B3zFKYln3pqClSCKX0begFTAXFOLXHSyF8cCNcZEG4OywuA4KVVfJCiArU7GAgJI8+lJP/OKMT/fBAjevg1cYB7YVkFuWga2lyPi5I0HFy5YTpWIHg0RZpkniRVW9odHAKOwosWuOGdxIyn2OvaCDvhg/we6TwadPBPbqBV58MsLmMJ8yZnOWk8SRz4N+QoyPL+MnamzMvcE1rHNEr91F9GKZPVUcS9w7PhhH36suB9qPeYb/oLk6cuTiJ0wOK3m5h1cKjW6EVZCYMK7dxcKCBdgP9HkKr9gkAO2P8GKZGWVdIAatQa+1IDpt6qyorVwdy01xdW8Jkfk6xjEXmVQQ+HQdFr6OKhIN34dXWq0+0qr6EJSCeeVLH9+gvGTLyqM65PQ44ihzlTXxQKjKbAvshXgir7Lil9w4L2bvMycmjQcqXaMCO6BlY28i+FOLzbfI1vEqxAhotocAAA==")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+type recordingStore struct {
+	mu    sync.Mutex
+	blobs [][]byte
+	metas []*ArtifactMetadata
+}
+
+func (m *recordingStore) Put(_ context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return ArtifactRef{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := "art-" + string(rune('0'+len(m.blobs)))
+	sum := sha256.Sum256(raw)
+	m.blobs = append(m.blobs, raw)
+	m.metas = append(m.metas, meta)
+	return ArtifactRef{ID: id, BlobDigest: hex.EncodeToString(sum[:]), SizeBytes: int64(len(raw))}, nil
+}
+
+func TestIngestWebPFormats(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  func(*testing.T) []byte
+	}{
+		{"lossy", webpLossyBytes},
+		{"lossless", webpLosslessBytes},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := tc.raw(t)
+			mime, ok := sniffFormat(raw[:clampPrefix(len(raw), sniffPrefixLen)])
+			if !ok || mime != MIMEWebP {
+				t.Fatalf("sniff = %q, %v", mime, ok)
+			}
+			sniffed, err := sniffDimensions(mime, raw)
+			if err != nil {
+				t.Fatalf("sniffDimensions: %v", err)
+			}
+			store := &recordingStore{}
+			svc, err := NewService(ptrLimits(), WithStore(store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			part, err := svc.Ingest(t.Context(), &IngestRequest{
+				Content:    bytes.NewReader(raw),
+				SessionID:  "sess-1",
+				Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+			})
+			if err != nil {
+				t.Fatalf("Ingest: %v", err)
+			}
+			if part.MIME != MIMEWebP {
+				t.Errorf("mime = %q", part.MIME)
+			}
+			if part.Width != sniffed.width || part.Height != sniffed.height {
+				t.Errorf("part dims = %dx%d, sniffed = %dx%d", part.Width, part.Height, sniffed.width, sniffed.height)
+			}
+			if part.Width <= 0 || part.Height <= 0 {
+				t.Errorf("dims = %dx%d", part.Width, part.Height)
+			}
+			if part.Transform.Kernel != "lanczos3" {
+				t.Errorf("kernel = %q", part.Transform.Kernel)
+			}
+			if len(store.blobs) != 2 {
+				t.Fatalf("blobs = %d, want 2", len(store.blobs))
+			}
+			if store.metas[1].MediaType != MIMEPNG {
+				t.Errorf("derived media type = %q, want image/png", store.metas[1].MediaType)
+			}
+			derived := store.blobs[1]
+			if _, err := png.Decode(bytes.NewReader(derived)); err != nil {
+				t.Errorf("derived is not PNG: %v", err)
+			}
+		})
+	}
+}
+
+func TestSniffVsDecodeWebP(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  func(*testing.T) []byte
+	}{
+		{"lossy", webpLossyBytes},
+		{"lossless", webpLosslessBytes},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := tc.raw(t)
+			geometry, err := sniffDimensions(MIMEWebP, raw)
+			if err != nil {
+				t.Fatalf("sniffDimensions: %v", err)
+			}
+			img, err := decodeWebP(raw)
+			if err != nil {
+				t.Fatalf("decodeWebP: %v", err)
+			}
+			if got := img.Bounds().Dx(); got != geometry.width {
+				t.Errorf("width sniffed %d, decoded %d", geometry.width, got)
+			}
+			if got := img.Bounds().Dy(); got != geometry.height {
+				t.Errorf("height sniffed %d, decoded %d", geometry.height, got)
+			}
+		})
+	}
+}
+
+func TestWebPOverDimensionRejectedPreDecode(t *testing.T) {
+	raw := webpLossyBytes(t)
+	oversized := bytes.Clone(raw)
+	binary.LittleEndian.PutUint16(oversized[26:28], 9000)
+	binary.LittleEndian.PutUint16(oversized[28:30], 9000)
+	geometry, err := sniffDimensions(MIMEWebP, oversized)
+	if err != nil {
+		t.Fatalf("sniffDimensions: %v", err)
+	}
+	if geometry.width != 9000 || geometry.height != 9000 {
+		t.Fatalf("patched geometry = %dx%d, want 9000x9000", geometry.width, geometry.height)
+	}
+	store := &recordingStore{}
+	limits := testLimits()
+	limits.MaxDimension = 8192
+	svc, err := NewService(&limits, WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(oversized),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
+		t.Fatalf("code = %v (%v), want vision_limit_exceeded", code, err)
+	}
+	if len(store.blobs) != 0 {
+		t.Errorf("over-dimension input wrote %d artifacts", len(store.blobs))
+	}
+}
+
+func TestDecodeDeadlineHoldsSlot(t *testing.T) {
+	limits := testLimits()
+	limits.MaxDecodeConcurrency = 1
+	limits.DecodeTimeout = time.Nanosecond
+	svc, err := NewService(&limits, WithStore(&recordingStore{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(pngBytes(t, 8, 8)),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if code, ok := CodeOf(err); !ok || (code != ErrorCodeVisionDecodeFailed && code != ErrorCodeVisionLimitExceeded) {
+		t.Fatalf("first ingest code = %v (%v), want decode failure or limit", code, err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got := len(svc.sem); got != 0 {
+		t.Fatalf("semaphore not drained after abandoned decode, len = %d", got)
+	}
+	store := &recordingStore{}
+	limits2 := testLimits()
+	limits2.MaxDecodeConcurrency = 1
+	svc2, err := NewService(&limits2, WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc2.sem <- struct{}{}
+	_, err = svc2.Ingest(context.Background(), &IngestRequest{
+		Content:    bytes.NewReader(pngBytes(t, 4, 4)),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
+		t.Fatalf("concurrency code = %v (%v), want vision_limit_exceeded", code, err)
+	}
+	<-svc2.sem
+	if _, err := svc2.Ingest(context.Background(), &IngestRequest{
+		Content:    bytes.NewReader(pngBytes(t, 4, 4)),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	}); err != nil {
+		t.Fatalf("ingest after drain: %v", err)
+	}
+}
+
+func TestDecodeCancelHoldsSlot(t *testing.T) {
+	limits := testLimits()
+	limits.MaxDecodeConcurrency = 1
+	svc, err := NewService(&limits, WithStore(&recordingStore{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = svc.Ingest(ctx, &IngestRequest{
+		Content:    bytes.NewReader(pngBytes(t, 8, 8)),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionDecodeFailed {
+		t.Fatalf("code = %v (%v), want vision_decode_failed", code, err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got := len(svc.sem); got != 0 {
+		t.Fatalf("semaphore not drained after cancel, len = %d", got)
+	}
+}
+
+func exifJPEGBytes(t *testing.T, width, height, orientation int) []byte {
+	t.Helper()
+	base := jpegBytes(t, width, height)
+	if len(base) < 2 || base[0] != 0xFF || base[1] != 0xD8 {
+		t.Fatal("base jpeg missing SOI")
+	}
+	exif := []byte{'E', 'x', 'i', 'f', 0, 0, 'I', 'I', 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0}
+	orient := make([]byte, 2)
+	binary.LittleEndian.PutUint16(orient, uint16(orientation))
+	exif = append(exif, orient...)
+	exif = append(exif, []byte{0, 0, 0, 0, 0, 0}...)
+	segmentLen := len(exif) + 2
+	segment := []byte{0xFF, 0xE1, byte(segmentLen >> 8), byte(segmentLen)}
+	segment = append(segment, exif...)
+	out := append([]byte{0xFF, 0xD8}, segment...)
+	out = append(out, base[2:]...)
+	return out
+}
+
+func TestEXIFOrientationAppliedAndStripped(t *testing.T) {
+	raw := exifJPEGBytes(t, 10, 8, 6)
+	if got := orientationOf(MIMEJPEG, raw); got != 6 {
+		t.Fatalf("orientation = %d, want 6", got)
+	}
+	store := &recordingStore{}
+	svc, err := NewService(ptrLimits(), WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, err := svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(raw),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if part.Width != 8 || part.Height != 10 {
+		t.Errorf("oriented dims = %dx%d, want 8x10", part.Width, part.Height)
+	}
+	if len(store.blobs) != 2 {
+		t.Fatalf("blobs = %d, want 2", len(store.blobs))
+	}
+	derived := store.blobs[1]
+	if bytes.Contains(derived, []byte("Exif")) || bytes.Contains(derived, []byte("GPS")) {
+		t.Error("derived bytes retain EXIF/GPS segments")
+	}
+	if _, err := jpeg.Decode(bytes.NewReader(derived)); err != nil {
+		t.Errorf("derived is not JPEG: %v", err)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(derived))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Bounds().Dx() != 8 || img.Bounds().Dy() != 10 {
+		t.Errorf("derived pixels = %dx%d, want 8x10", img.Bounds().Dx(), img.Bounds().Dy())
+	}
+}
+
+func TestOrientationUnit(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 2))
+	for y := range 2 {
+		for x := range 4 {
+			img.Set(x, y, color.NRGBA{R: uint8(x * 10), G: uint8(y * 10), B: 1, A: 255})
+		}
+	}
+	for _, orientation := range []int{1, 2, 3, 4, 5, 6, 7, 8} {
+		got := applyOrientation(img, orientation, true)
+		wantW, wantH := 4, 2
+		if orientation >= 5 {
+			wantW, wantH = 2, 4
+		}
+		if got.Bounds().Dx() != wantW || got.Bounds().Dy() != wantH {
+			t.Errorf("orientation %d dims = %dx%d, want %dx%d", orientation, got.Bounds().Dx(), got.Bounds().Dy(), wantW, wantH)
+		}
+		if got := applyOrientation(img, orientation, false); got.Bounds() != img.Bounds() {
+			t.Errorf("orientation %d disabled should not resize", orientation)
+		}
+	}
+	le := exifJPEGBytes(t, 10, 8, 3)
+	if got := orientationOf(MIMEJPEG, le); got != 3 {
+		t.Errorf("LE orientation = %d, want 3", got)
+	}
+	if got := orientationOf(MIMEPNG, le); got != 1 {
+		t.Errorf("non-jpeg orientation = %d, want 1", got)
+	}
+	if got := orientationOf(MIMEJPEG, jpegBytes(t, 10, 8)); got != 1 {
+		t.Errorf("plain jpeg orientation = %d, want 1", got)
+	}
+}
+
+func TestPixelBombRejectedPreDecode(t *testing.T) {
+	raw := pngBytes(t, 8, 8)
+	bomb := bytes.Clone(raw)
+	binary.BigEndian.PutUint32(bomb[16:20], 8000)
+	binary.BigEndian.PutUint32(bomb[20:24], 8000)
+	store := &recordingStore{}
+	limits := testLimits()
+	limits.MaxDimension = 8192
+	limits.MaxPixels = 40000000
+	svc, err := NewService(&limits, WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(bomb),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
+		t.Fatalf("code = %v (%v), want vision_limit_exceeded", code, err)
+	}
+	if len(store.blobs) != 0 {
+		t.Errorf("bomb wrote %d artifacts", len(store.blobs))
+	}
+}
+
+func TestBadColorModelRejected(t *testing.T) {
+	raw := pngBytes(t, 8, 8)
+	bad := bytes.Clone(raw)
+	bad[25] = 7
+	store := &recordingStore{}
+	svc, err := NewService(ptrLimits(), WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(bad),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionDecodeFailed {
+		t.Fatalf("code = %v (%v), want vision_decode_failed", code, err)
+	}
+	if len(store.blobs) != 0 {
+		t.Errorf("bad color wrote %d artifacts", len(store.blobs))
+	}
+}
+
+func TestPolyglotRejected(t *testing.T) {
+	raw := pngBytes(t, 8, 8)
+	polyglot := append(bytes.Clone(raw[:8]), []byte("<html><script>alert(1)</script>")...)
+	store := &recordingStore{}
+	svc, err := NewService(ptrLimits(), WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(polyglot),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if err == nil {
+		t.Fatal("expected polyglot rejection")
+	}
+	if len(store.blobs) != 0 {
+		t.Errorf("polyglot wrote %d artifacts", len(store.blobs))
+	}
+	gifPolyglot := append([]byte("GIF89a"), []byte("<script>")...)
+	_, err = svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(gifPolyglot),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if err == nil {
+		t.Fatal("expected gif polyglot rejection")
+	}
+}
+
+type quotaStore struct {
+	recordingStore
+	failOn int
+	calls  int
+}
+
+func (m *quotaStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
+	m.calls++
+	if m.calls == m.failOn {
+		return ArtifactRef{}, Errorf(ErrorCodeVisionArtifactUnavailable, "artifact quota exceeded")
+	}
+	return m.recordingStore.Put(ctx, r, meta)
+}
+
+func TestQuotaThroughStore(t *testing.T) {
+	for _, failOn := range []int{1, 2} {
+		store := &quotaStore{failOn: failOn}
+		svc, err := NewService(ptrLimits(), WithStore(store))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = svc.Ingest(t.Context(), &IngestRequest{
+			Content:    bytes.NewReader(pngBytes(t, 8, 8)),
+			SessionID:  "sess-1",
+			Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+		})
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionArtifactUnavailable {
+			t.Errorf("failOn %d code = %v (%v), want vision_artifact_unavailable", failOn, code, err)
+		}
+	}
+}
+
+func TestDerivedBytesEXIFFree(t *testing.T) {
+	store := &recordingStore{}
+	svc, err := NewService(ptrLimits(), WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := exifJPEGBytes(t, 12, 10, 8)
+	part, err := svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(raw),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if len(store.blobs) != 2 {
+		t.Fatalf("blobs = %d", len(store.blobs))
+	}
+	for i, blob := range store.blobs {
+		if i == 1 && (bytes.Contains(blob, []byte("Exif")) || bytes.Contains(blob, []byte("GPS")) || bytes.Contains(blob, []byte("XMP"))) {
+			t.Errorf("derived blob %d retains metadata", i)
+		}
+	}
+	_ = part
 }

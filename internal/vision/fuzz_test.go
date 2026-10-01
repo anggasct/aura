@@ -15,6 +15,18 @@ func FuzzSniffFormat(f *testing.F) {
 		[]byte("II*\x00"),
 		[]byte("not an image at all"),
 		{},
+		{
+			'R', 'I', 'F', 'F', 0x22, 0, 0, 0, 'W', 'E', 'B', 'P', 'V', 'P', '8', ' ',
+			0x16, 0, 0, 0, 0x30, 0x01, 0, 0x9D, 0x01, 0x2A, 0x01, 0, 0x01, 0,
+		},
+		{
+			'R', 'I', 'F', 'F', 0x2A, 0, 0, 0, 'W', 'E', 'B', 'P', 'V', 'P', '8', 'L',
+			0x1E, 0, 0, 0, 0x2F, 0x3B, 0x6D, 0x2D, 0x99, 0x2A, 0xAA, 0xB5, 0x86, 0,
+		},
+		{
+			'R', 'I', 'F', 'F', 0x16, 0, 0, 0, 'W', 'E', 'B', 'P', 'V', 'P', '8', 'X',
+			0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		},
 	}
 	for _, seed := range seeds {
 		f.Add(seed)
