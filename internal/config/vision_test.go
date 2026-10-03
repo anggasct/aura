@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoad_VisionDefaults(t *testing.T) {
-	res, err := Load(writeTempConfig(t, "version: 1\n"))
+	res, err := Load(writeTempConfig(t, "version: 1\nvision: {}\n"))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -28,6 +28,33 @@ func TestLoad_VisionDefaults(t *testing.T) {
 	}
 	if vision.Detail != "auto" || vision.TransformVersion != "v1" {
 		t.Errorf("vision detail/version = %+v", vision)
+	}
+}
+
+func TestLoad_VisionOptionalForCoreProfile(t *testing.T) {
+	res, err := Load(writeTempConfig(t, "version: 1\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if res.Config.Vision != nil {
+		t.Errorf("Vision = %+v, want nil for absent section under core profile", res.Config.Vision)
+	}
+}
+
+func TestVisionRequiredForNonCoreProfile(t *testing.T) {
+	base := "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n  recent_complete_turns: 5\nprofile:\n  prompt_version: v1\nchildren:\n  recovery: interrupt\n"
+	_, err := LoadWithOptions(writeTempConfig(t, base), execLinuxOptions(t))
+	if err == nil || !strings.Contains(err.Error(), `vision section is required for build profile "exec-linux"`) {
+		t.Fatalf("LoadWithOptions error = %v", err)
+	}
+	wantCode(t, err, ErrorCodeConfigInvalid)
+
+	res, err := LoadWithOptions(writeTempConfig(t, base+"vision: {}\n"), execLinuxOptions(t))
+	if err != nil {
+		t.Fatalf("LoadWithOptions with vision section: %v", err)
+	}
+	if res.Config.Vision == nil {
+		t.Fatal("Vision is nil")
 	}
 }
 

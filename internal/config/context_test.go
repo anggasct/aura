@@ -11,7 +11,7 @@ func writeContextConfig(t *testing.T, content string) string {
 }
 
 func contextBase() string {
-	return "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n"
+	return "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n"
 }
 
 func profileSection() string {

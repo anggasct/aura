@@ -12,7 +12,7 @@ func writeSkillsConfig(t *testing.T, content string) string {
 }
 
 func TestLoad_SkillsDefaults(t *testing.T) {
-	path := writeSkillsConfig(t, "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\nprofile:\n  prompt_version: v1\nchildren:\n  recovery: interrupt\ncontext:\n  recent_complete_turns: 5\n")
+	path := writeSkillsConfig(t, "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\nprofile:\n  prompt_version: v1\nchildren:\n  recovery: interrupt\ncontext:\n  recent_complete_turns: 5\n")
 	result, err := LoadWithOptions(path, execLinuxOptions(t))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -34,6 +34,7 @@ func TestLoad_SkillsDefaults(t *testing.T) {
 
 func TestLoad_SkillsValid(t *testing.T) {
 	path := writeSkillsConfig(t, `version: 1
+vision: {}
 tools:
   workspace: /srv/aura/workspace
 skills:
@@ -63,7 +64,7 @@ children:
 
 func TestLoad_SkillsEnvOverride(t *testing.T) {
 	t.Setenv("AURA_SKILLS_MAX_INDEXED_SKILLS", "32")
-	path := writeSkillsConfig(t, "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\nprofile:\n  prompt_version: v1\nchildren:\n  recovery: interrupt\ncontext:\n  recent_complete_turns: 5\n")
+	path := writeSkillsConfig(t, "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\nprofile:\n  prompt_version: v1\nchildren:\n  recovery: interrupt\ncontext:\n  recent_complete_turns: 5\n")
 	result, err := LoadWithOptions(path, execLinuxOptions(t))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -75,18 +76,18 @@ func TestLoad_SkillsEnvOverride(t *testing.T) {
 
 func TestLoad_SkillsInvalid(t *testing.T) {
 	cases := map[string]string{
-		"missing section":     "version: 1\ntools:\n  workspace: /srv/aura/workspace\n",
-		"empty roots":         "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: []\n",
-		"relative root":       "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [skills]\n",
-		"unclean root":        "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills/]\n",
-		"zero indexed":        "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  max_indexed_skills: 0\n",
-		"huge indexed":        "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  max_indexed_skills: 5000\n",
-		"zero tokens":         "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  max_instruction_tokens: 0\n",
-		"zero resource bytes": "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  max_resource_bytes: 0\n",
-		"zero retention":      "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  quarantine_retention: 0s\n",
-		"bool as string":      "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  enabled: \"yes\"\n",
-		"roots as string":     "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: /s\n",
-		"unknown key":         "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  teleport: true\n",
+		"missing section":     "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\n",
+		"empty roots":         "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: []\n",
+		"relative root":       "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [skills]\n",
+		"unclean root":        "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills/]\n",
+		"zero indexed":        "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  max_indexed_skills: 0\n",
+		"huge indexed":        "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  max_indexed_skills: 5000\n",
+		"zero tokens":         "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  max_instruction_tokens: 0\n",
+		"zero resource bytes": "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  max_resource_bytes: 0\n",
+		"zero retention":      "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  quarantine_retention: 0s\n",
+		"bool as string":      "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  enabled: \"yes\"\n",
+		"roots as string":     "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: /s\n",
+		"unknown key":         "version: 1\nvision: {}\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/s]\n  teleport: true\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {

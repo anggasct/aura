@@ -190,7 +190,7 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateSync(cfg.Sync); err != nil {
 		return LoadResult{}, err
 	}
-	if err := validateVision(cfg.Vision); err != nil {
+	if err := validateVision(cfg.Vision, options.Build.Profile()); err != nil {
 		return LoadResult{}, err
 	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
@@ -2253,7 +2253,7 @@ func validateSyncRemote(raw string) error {
 
 func applyVisionDefaults(cfg *Config, doc *yamlv3.Node) {
 	if cfg.Vision == nil {
-		cfg.Vision = &Vision{}
+		return
 	}
 	defaults := Default().Vision
 	if !cfg.Vision.Enabled && !configValuePresent(doc, "vision", "enabled") && !envValuePresent("vision.enabled") {
@@ -3294,8 +3294,11 @@ func isSnowflake(id string) bool {
 	return true
 }
 
-func validateVision(vision *Vision) error {
+func validateVision(vision *Vision, buildProfile capability.Profile) error {
 	if vision == nil {
+		if buildProfile != capability.ProfileCore {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("vision section is required for build profile %q", buildProfile)}
+		}
 		return nil
 	}
 	var problems []error
