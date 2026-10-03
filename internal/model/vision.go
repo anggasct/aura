@@ -534,7 +534,7 @@ func mapVisionTransformError(err error) error {
 			return codedError(ErrorCodeVisionBudgetExceeded, err, "stored image exceeds the configured maximum")
 		case vision.ErrorCodeVisionDecodeFailed, vision.ErrorCodeVisionArtifactUnavailable, vision.ErrorCodeVisionInvalid:
 			return codedError(ErrorCodeVisionArtifactUnavailable, err, "stored image is not available")
-		case vision.ErrorCodeInvalidArgument, vision.ErrorCodeVisionFormatUnsupported:
+		default:
 			return codedError(ErrorCodeProtocolInvalid, err, "stored image transform did not complete")
 		}
 	}
