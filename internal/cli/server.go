@@ -51,7 +51,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, prices); err != nil {
+			_, visionArtifactRoot, _, err := storagePaths(cfg)
+			if err != nil {
+				return err
+			}
+			if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, prices, visionWiringForConfig(cfg, db, visionArtifactRoot)); err != nil {
 				return err
 			}
 			pipeline, err := telemetry.NewPipeline(cfg.Telemetry, logger)

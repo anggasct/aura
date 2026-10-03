@@ -42,6 +42,7 @@ type FallbackAdapter struct {
 	resolver    AdapterResolver
 	logger      *slog.Logger
 	prices      *usage.PriceRegistry
+	vision      *VisionPolicy
 }
 
 func NewFallbackAdapter(name string, route config.ModelRoute, definitions map[string]config.ModelDefinition, circuits *CircuitManager, resolver AdapterResolver) *FallbackAdapter {
@@ -61,6 +62,11 @@ func (f *FallbackAdapter) WithPrices(prices *usage.PriceRegistry) *FallbackAdapt
 
 func (f *FallbackAdapter) WithLogger(logger *slog.Logger) *FallbackAdapter {
 	f.logger = logger
+	return f
+}
+
+func (f *FallbackAdapter) WithVisionPolicy(policy *VisionPolicy) *FallbackAdapter {
+	f.vision = policy
 	return f
 }
 
@@ -137,6 +143,24 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 
 		reqPredicate := PredicateForRequest(req)
 		var candidateErrors []candidateAttemptError
+
+		var reqImages []VisionImage
+		if PredicateVisionImages(req) {
+			var err error
+			reqImages, err = collectVisionImages(req.Contents)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			if f.vision == nil {
+				yield(nil, newError(ErrorCodeProtocolInvalid, "", "", "image input is not enabled"))
+				return
+			}
+			if err := f.vision.CheckGlobalPreStore(reqImages); err != nil {
+				yield(nil, err)
+				return
+			}
+		}
 
 		for _, candidate := range f.route.Candidates {
 			if err := budget.CheckActive(reqCtx); err != nil {
@@ -251,7 +275,7 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 						Class:     class,
 						Err:       attemptErr,
 					})
-					if class.FallbackEligible() {
+					if class.FallbackEligible() || isVisionBudgetError(attemptErr) {
 						continue
 					}
 					_ = f.recordCost(reqCtx, budget, candidate, response)
@@ -331,7 +355,7 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 					Class:     class,
 					Err:       streamErr,
 				})
-				if class.FallbackEligible() {
+				if class.FallbackEligible() || isVisionBudgetError(streamErr) {
 					continue
 				}
 				yield(nil, streamErr)
@@ -348,6 +372,22 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 			return
 		}
 
+		if len(reqImages) > 0 {
+			if err := mapVisionExhaustion(f.name, candidateErrors); err != nil {
+				decision := "capability_unsupported"
+				if code, ok := CodeOf(err); ok {
+					decision = string(code)
+				}
+				if f.logger != nil {
+					f.logger.ErrorContext(reqCtx, "model vision candidate chain exhausted",
+						"route", f.name,
+						"decision", decision,
+					)
+				}
+				yield(nil, err)
+				return
+			}
+		}
 		var parts []string
 		for _, ce := range candidateErrors {
 			parts = append(parts, fmt.Sprintf("%s (%s)", ce.Candidate, ce.Class))

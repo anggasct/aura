@@ -97,6 +97,9 @@ func PredicateForRequest(req *adkmodel.LLMRequest) CapabilityPredicate {
 					pred.Audio = true
 				}
 			}
+			if part.FileData != nil && strings.HasPrefix(part.FileData.FileURI, visionArtifactScheme) {
+				pred.Vision = true
+			}
 		}
 	}
 	if req.Config != nil {

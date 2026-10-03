@@ -2,12 +2,14 @@ package model
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"iter"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
@@ -18,9 +20,11 @@ import (
 
 const geminiDefaultBaseURL = "https://generativelanguage.googleapis.com"
 
-type geminiCodec struct{}
+type geminiCodec struct {
+	detail string
+}
 
-func (geminiCodec) protocol() string { return "gemini_native" }
+func (c geminiCodec) protocol() string { return "gemini_native" }
 
 func (geminiCodec) endpoint(baseURL string, req *adkmodel.LLMRequest, stream bool) string {
 	action := "generateContent"
@@ -99,11 +103,15 @@ func NewGeminiAdapter(name, baseURL, apiKey string, timeout time.Duration) (*Gem
 	return newGeminiAdapter(nil, name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
 }
 
-func newGeminiAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *GeminiAdapter {
+func newGeminiAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration, wire ...visionWiring) *GeminiAdapter {
 	if baseURL == "" {
 		baseURL = geminiDefaultBaseURL
 	}
-	return &GeminiAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, geminiCodec{})}
+	var vw visionWiring
+	if len(wire) > 0 {
+		vw = wire[0]
+	}
+	return &GeminiAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, geminiCodec{detail: vw.detail}).withVision(vw)}
 }
 
 func (a *GeminiAdapter) Name() string { return a.core.name }
@@ -126,8 +134,14 @@ type geminiContent struct {
 
 type geminiPart struct {
 	Text             string                  `json:"text,omitempty"`
+	InlineData       *geminiInlineData       `json:"inlineData,omitempty"`
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
+}
+
+type geminiInlineData struct {
+	MIMEType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 type geminiFunctionCall struct {
@@ -194,7 +208,10 @@ func buildGeminiRequest(req *adkmodel.LLMRequest) ([]byte, error) {
 		}
 	}
 	for _, content := range req.Contents {
-		converted := contentToGeminiContent(content)
+		converted, err := contentToGeminiContent(content)
+		if err != nil {
+			return nil, err
+		}
 		if converted.Parts != nil {
 			body.Contents = append(body.Contents, converted)
 		}
@@ -202,9 +219,9 @@ func buildGeminiRequest(req *adkmodel.LLMRequest) ([]byte, error) {
 	return json.Marshal(body)
 }
 
-func contentToGeminiContent(content *genai.Content) geminiContent {
+func contentToGeminiContent(content *genai.Content) (geminiContent, error) {
 	if content == nil {
-		return geminiContent{}
+		return geminiContent{}, nil
 	}
 	role := "user"
 	if content.Role == "model" {
@@ -215,13 +232,23 @@ func contentToGeminiContent(content *genai.Content) geminiContent {
 		switch {
 		case part.Text != "":
 			converted.Parts = append(converted.Parts, geminiPart{Text: part.Text})
+		case part.InlineData != nil && isSupportedVisionMIME(strings.ToLower(part.InlineData.MIMEType)):
+			if len(part.InlineData.Data) == 0 {
+				return geminiContent{}, newError(ErrorCodeProtocolInvalid, "", "", "image content has no bytes")
+			}
+			converted.Parts = append(converted.Parts, geminiPart{InlineData: &geminiInlineData{
+				MIMEType: strings.ToLower(part.InlineData.MIMEType),
+				Data:     base64.StdEncoding.EncodeToString(part.InlineData.Data),
+			}})
+		case part.FileData != nil:
+			return geminiContent{}, newError(ErrorCodeProtocolInvalid, "", "", "file content reference is not supported")
 		case part.FunctionCall != nil:
 			converted.Parts = append(converted.Parts, geminiPart{FunctionCall: &geminiFunctionCall{Name: part.FunctionCall.Name, Args: part.FunctionCall.Args}})
 		case part.FunctionResponse != nil:
 			converted.Parts = append(converted.Parts, geminiPart{FunctionResponse: &geminiFunctionResponse{Name: part.FunctionResponse.Name, Response: part.FunctionResponse.Response}})
 		}
 	}
-	return converted
+	return converted, nil
 }
 
 type geminiResponse struct {

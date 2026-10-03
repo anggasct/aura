@@ -20,16 +20,18 @@ import (
 
 const openaiDefaultBaseURL = "https://api.openai.com"
 
-type openaiCodec struct{}
+type openaiCodec struct {
+	detail string
+}
 
-func (openaiCodec) protocol() string { return "openai_chat_compat" }
+func (c openaiCodec) protocol() string { return "openai_chat_compat" }
 
 func (openaiCodec) endpoint(baseURL string, req *adkmodel.LLMRequest, stream bool) string {
 	return baseURL + "/v1/chat/completions"
 }
 
-func (openaiCodec) buildRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
-	return buildOpenAIRequest(req, stream)
+func (c openaiCodec) buildRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
+	return buildOpenAIRequest(req, stream, normalizeVisionDetail(c.detail))
 }
 
 func (openaiCodec) decodeResponse(body []byte) (*adkmodel.LLMResponse, error) {
@@ -90,11 +92,15 @@ func NewOpenAIAdapter(name, baseURL, apiKey string, timeout time.Duration) (*Ope
 	return newOpenAIAdapter(nil, name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
 }
 
-func newOpenAIAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *OpenAIAdapter {
+func newOpenAIAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration, wire ...visionWiring) *OpenAIAdapter {
 	if baseURL == "" {
 		baseURL = openaiDefaultBaseURL
 	}
-	return &OpenAIAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, openaiCodec{})}
+	var vw visionWiring
+	if len(wire) > 0 {
+		vw = wire[0]
+	}
+	return &OpenAIAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, openaiCodec{detail: vw.detail}).withVision(vw)}
 }
 
 func (a *OpenAIAdapter) Name() string { return a.core.name }
@@ -104,14 +110,14 @@ func (a *OpenAIAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRe
 }
 
 type openaiRequestBody struct {
-	Model       string          `json:"model"`
-	Messages    []openaiMessage `json:"messages"`
-	Stream      bool            `json:"stream,omitempty"`
-	Tools       []openaiTool    `json:"tools,omitempty"`
-	MaxTokens   int32           `json:"max_tokens,omitempty"`
-	Temperature *float32        `json:"temperature,omitempty"`
-	TopP        *float32        `json:"top_p,omitempty"`
-	Stop        []string        `json:"stop,omitempty"`
+	Model       string                 `json:"model"`
+	Messages    []openaiRequestMessage `json:"messages"`
+	Stream      bool                   `json:"stream,omitempty"`
+	Tools       []openaiTool           `json:"tools,omitempty"`
+	MaxTokens   int32                  `json:"max_tokens,omitempty"`
+	Temperature *float32               `json:"temperature,omitempty"`
+	TopP        *float32               `json:"top_p,omitempty"`
+	Stop        []string               `json:"stop,omitempty"`
 }
 
 type openaiMessage struct {
@@ -119,6 +125,24 @@ type openaiMessage struct {
 	Content    string           `json:"content,omitempty"`
 	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string           `json:"tool_call_id,omitempty"`
+}
+
+type openaiRequestMessage struct {
+	Role       string           `json:"role"`
+	Content    any              `json:"content,omitempty"`
+	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+}
+
+type openaiContentPart struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	ImageURL *openaiImageURL `json:"image_url,omitempty"`
+}
+
+type openaiImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type openaiToolCall struct {
@@ -183,7 +207,11 @@ type openaiStreamToolCall struct {
 	Function openaiToolFunc `json:"function"`
 }
 
-func buildOpenAIRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
+func buildOpenAIRequest(req *adkmodel.LLMRequest, stream bool, detail ...string) ([]byte, error) {
+	imageDetail := "auto"
+	if len(detail) > 0 {
+		imageDetail = normalizeVisionDetail(detail[0])
+	}
 	body := openaiRequestBody{Model: req.Model, Stream: stream}
 	if req.Config != nil {
 		body.MaxTokens = req.Config.MaxOutputTokens
@@ -191,7 +219,7 @@ func buildOpenAIRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
 		body.TopP = req.Config.TopP
 		body.Stop = req.Config.StopSequences
 		if req.Config.SystemInstruction != nil {
-			body.Messages = append(body.Messages, openaiMessage{Role: "system", Content: contentText(req.Config.SystemInstruction)})
+			body.Messages = append(body.Messages, openaiRequestMessage{Role: "system", Content: contentText(req.Config.SystemInstruction)})
 		}
 		for _, t := range req.Config.Tools {
 			if t == nil {
@@ -217,7 +245,7 @@ func buildOpenAIRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
 		}
 	}
 	for _, c := range req.Contents {
-		msgs, err := contentToOpenAIMessages(c)
+		msgs, err := contentToOpenAIMessages(c, imageDetail)
 		if err != nil {
 			return nil, err
 		}
@@ -226,7 +254,7 @@ func buildOpenAIRequest(req *adkmodel.LLMRequest, stream bool) ([]byte, error) {
 	return json.Marshal(body)
 }
 
-func contentToOpenAIMessages(c *genai.Content) ([]openaiMessage, error) {
+func contentToOpenAIMessages(c *genai.Content, detail string) ([]openaiRequestMessage, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -235,12 +263,14 @@ func contentToOpenAIMessages(c *genai.Content) ([]openaiMessage, error) {
 		role = "assistant"
 	}
 	var texts []string
+	var segments []openaiContentPart
 	var toolCalls []openaiToolCall
-	var toolResults []openaiMessage
+	var toolResults []openaiRequestMessage
 	for _, p := range c.Parts {
 		switch {
 		case p.Text != "":
 			texts = append(texts, p.Text)
+			segments = append(segments, openaiContentPart{Type: "text", Text: p.Text})
 		case p.FunctionCall != nil:
 			tc, err := toCanonicalToolCall(p.FunctionCall)
 			if err != nil {
@@ -253,35 +283,60 @@ func contentToOpenAIMessages(c *genai.Content) ([]openaiMessage, error) {
 				return nil, err
 			}
 			toolResults = append(toolResults, m)
+		case p.InlineData != nil && isSupportedVisionMIME(strings.ToLower(p.InlineData.MIMEType)):
+			if len(p.InlineData.Data) == 0 {
+				return nil, newError(ErrorCodeProtocolInvalid, "", "", "image content has no bytes")
+			}
+			segments = append(segments, openaiContentPart{
+				Type:     "image_url",
+				ImageURL: &openaiImageURL{URL: visionDataURI(strings.ToLower(p.InlineData.MIMEType), p.InlineData.Data), Detail: detail},
+			})
+		case p.FileData != nil:
+			return nil, newError(ErrorCodeProtocolInvalid, "", "", "file content reference is not supported")
 		}
 	}
-	msgs := append([]openaiMessage{}, toolResults...)
+	msgs := append([]openaiRequestMessage{}, toolResults...)
 	content := strings.Join(texts, "")
-	if role == "assistant" {
+	if role == "assistant" && hasImageSegment(segments) {
+		return nil, newError(ErrorCodeProtocolInvalid, "", "", "image content is not supported in assistant messages")
+	}
+	switch {
+	case role == "assistant":
 		if content != "" || len(toolCalls) > 0 {
-			m := openaiMessage{Role: "assistant"}
+			m := openaiRequestMessage{Role: "assistant"}
 			if content != "" {
 				m.Content = content
 			}
 			m.ToolCalls = toolCalls
 			msgs = append(msgs, m)
 		}
-	} else if content != "" {
-		msgs = append(msgs, openaiMessage{Role: role, Content: content})
+	case hasImageSegment(segments):
+		msgs = append(msgs, openaiRequestMessage{Role: role, Content: segments})
+	case content != "":
+		msgs = append(msgs, openaiRequestMessage{Role: role, Content: content})
 	}
 	return msgs, nil
 }
 
-func functionResponseToToolMessage(fr *genai.FunctionResponse) (openaiMessage, error) {
+func hasImageSegment(segments []openaiContentPart) bool {
+	for _, s := range segments {
+		if s.Type == "image_url" {
+			return true
+		}
+	}
+	return false
+}
+
+func functionResponseToToolMessage(fr *genai.FunctionResponse) (openaiRequestMessage, error) {
 	resp := []byte("{}")
 	if len(fr.Response) > 0 {
 		b, err := json.Marshal(fr.Response)
 		if err != nil {
-			return openaiMessage{}, fmt.Errorf("model: failed to marshal tool result: %w", err)
+			return openaiRequestMessage{}, fmt.Errorf("model: failed to marshal tool result: %w", err)
 		}
 		resp = b
 	}
-	return openaiMessage{Role: "tool", ToolCallID: fr.ID, Content: string(resp)}, nil
+	return openaiRequestMessage{Role: "tool", ToolCallID: fr.ID, Content: string(resp)}, nil
 }
 
 func parseOpenAIResponse(body []byte) (*adkmodel.LLMResponse, error) {

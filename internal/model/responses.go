@@ -8,6 +8,7 @@ import (
 	"iter"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
@@ -18,9 +19,11 @@ import (
 
 const openAIResponsesDefaultBaseURL = "https://api.openai.com"
 
-type openAIResponsesCodec struct{}
+type openAIResponsesCodec struct {
+	detail string
+}
 
-func (openAIResponsesCodec) protocol() string { return "openai_responses" }
+func (c openAIResponsesCodec) protocol() string { return "openai_responses" }
 
 func (openAIResponsesCodec) endpoint(baseURL string, req *adkmodel.LLMRequest, stream bool) string {
 	return baseURL + "/v1/responses"
@@ -75,11 +78,15 @@ func NewOpenAIResponsesAdapter(name, baseURL, apiKey string, timeout time.Durati
 	return newOpenAIResponsesAdapter(nil, name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
 }
 
-func newOpenAIResponsesAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *OpenAIResponsesAdapter {
+func newOpenAIResponsesAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration, wire ...visionWiring) *OpenAIResponsesAdapter {
 	if baseURL == "" {
 		baseURL = openAIResponsesDefaultBaseURL
 	}
-	return &OpenAIResponsesAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, openAIResponsesCodec{})}
+	var vw visionWiring
+	if len(wire) > 0 {
+		vw = wire[0]
+	}
+	return &OpenAIResponsesAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, openAIResponsesCodec{detail: vw.detail}).withVision(vw)}
 }
 
 func (a *OpenAIResponsesAdapter) Name() string { return a.core.name }
@@ -111,8 +118,9 @@ type openAIResponsesInput struct {
 }
 
 type openAIResponsesContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 type openAIResponsesTool struct {
@@ -181,6 +189,16 @@ func contentToOpenAIResponsesInput(content *genai.Content) ([]openAIResponsesInp
 				contentType = "output_text"
 			}
 			text = append(text, openAIResponsesContent{Type: contentType, Text: part.Text})
+		case part.InlineData != nil && isSupportedVisionMIME(strings.ToLower(part.InlineData.MIMEType)):
+			if len(part.InlineData.Data) == 0 {
+				return nil, newError(ErrorCodeProtocolInvalid, "", "", "image content has no bytes")
+			}
+			text = append(text, openAIResponsesContent{
+				Type:     "input_image",
+				ImageURL: visionDataURI(strings.ToLower(part.InlineData.MIMEType), part.InlineData.Data),
+			})
+		case part.FileData != nil:
+			return nil, newError(ErrorCodeProtocolInvalid, "", "", "file content reference is not supported")
 		case part.FunctionCall != nil:
 			tc, err := toCanonicalToolCall(part.FunctionCall)
 			if err != nil {

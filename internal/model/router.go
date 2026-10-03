@@ -91,7 +91,19 @@ func BuildRouterWithConfig(logger *slog.Logger, cfg *config.Config, store Circui
 	return BuildRouterWithRoutes(logger, cfg.Models, cfg.ModelRoutes, store)
 }
 
-func BuildComponents(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry) (adapters map[string]adkmodel.LLM, circuits *CircuitManager, err error) {
+type VisionWiring struct {
+	Policy *VisionPolicy
+	Blobs  VisionBlobReader
+}
+
+func firstVisionWiring(wiring []VisionWiring) VisionWiring {
+	if len(wiring) == 0 {
+		return VisionWiring{}
+	}
+	return wiring[0]
+}
+
+func BuildComponents(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry, wiring ...VisionWiring) (adapters map[string]adkmodel.LLM, circuits *CircuitManager, err error) {
 	if err := validateRoutingCapabilities(models); err != nil {
 		return nil, nil, err
 	}
@@ -104,10 +116,11 @@ func BuildComponents(logger *slog.Logger, models config.Models, routes map[strin
 		idleTimeout = defaultStreamingIdleTimeout
 	}
 
+	vw := firstVisionWiring(wiring)
 	adapters = make(map[string]adkmodel.LLM, len(models.Definitions))
 	for name := range models.Definitions {
 		spec := models.Definitions[name]
-		adapter, configured, err := newAdapter(logger, name, &spec, timeout, idleTimeout)
+		adapter, configured, err := newAdapter(logger, name, &spec, timeout, idleTimeout, vw)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -143,15 +156,16 @@ func BuildComponents(logger *slog.Logger, models config.Models, routes map[strin
 	return adapters, circuits, nil
 }
 
-func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, store CircuitCheckpointStore) (*Router, error) {
-	adapters, circuits, err := BuildComponents(logger, models, routes, store, nil)
+func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, store CircuitCheckpointStore, wiring ...VisionWiring) (*Router, error) {
+	vw := firstVisionWiring(wiring)
+	adapters, circuits, err := BuildComponents(logger, models, routes, store, nil, vw)
 	if err != nil {
 		return nil, err
 	}
 
 	routeAdapters := make(map[string]adkmodel.LLM, len(routes))
 	for name, route := range routes {
-		fb := NewFallbackAdapter(name, route, models.Definitions, circuits, MapAdapterResolver(adapters)).WithLogger(logger)
+		fb := NewFallbackAdapter(name, route, models.Definitions, circuits, MapAdapterResolver(adapters)).WithLogger(logger).WithVisionPolicy(vw.Policy)
 		routeAdapters[name] = fb
 	}
 
@@ -321,7 +335,7 @@ func (r *Router) Circuits() *CircuitManager {
 func (r *Router) Definitions() map[string]config.ModelDefinition {
 	return r.definitions
 }
-func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration) (adapter adkmodel.LLM, configured bool, err error) {
+func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration, wiring ...VisionWiring) (adapter adkmodel.LLM, configured bool, err error) {
 	if spec.Protocol == "" || spec.Model == "" {
 		return nil, false, nil
 	}
@@ -339,15 +353,20 @@ func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, 
 	if err != nil {
 		return nil, false, err
 	}
+	vw := firstVisionWiring(wiring)
+	wire := visionWiring{policy: vw.Policy, blobs: vw.Blobs}
+	if wire.policy != nil {
+		wire.detail = wire.policy.DetailFor(spec.Protocol)
+	}
 	switch spec.Protocol {
 	case config.ProtocolAnthropicMessages:
-		return newAnthropicAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
+		return newAnthropicAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout, wire), true, nil
 	case config.ProtocolOpenAIChatCompat:
-		return newOpenAIAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
+		return newOpenAIAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout, wire), true, nil
 	case config.ProtocolOpenAIResponses:
-		return newOpenAIResponsesAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
+		return newOpenAIResponsesAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout, wire), true, nil
 	case config.ProtocolGeminiNative:
-		return newGeminiAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout), true, nil
+		return newGeminiAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout, wire), true, nil
 	}
 	return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
 }

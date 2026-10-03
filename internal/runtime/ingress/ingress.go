@@ -7,7 +7,8 @@ import (
 )
 
 type InputPart struct {
-	Text string
+	Text  string
+	Image json.RawMessage `json:"image,omitempty"`
 }
 
 type IngressEnvelope struct {

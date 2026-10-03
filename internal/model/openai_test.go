@@ -366,7 +366,7 @@ func TestOpenAI_RequestSerializesToolCall(t *testing.T) {
 		t.Fatalf("GenerateContent: %v", err)
 	}
 
-	var assistantMsg, toolMsg *openaiMessage
+	var assistantMsg, toolMsg *openaiRequestMessage
 	for i := range captured.Messages {
 		m := &captured.Messages[i]
 		if m.Role == "assistant" && len(m.ToolCalls) > 0 {

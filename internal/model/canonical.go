@@ -105,6 +105,12 @@ func clonePart(p *genai.Part) *genai.Part {
 			MIMEType: p.FileData.MIMEType,
 		}
 	}
+	if len(p.PartMetadata) > 0 {
+		cloned.PartMetadata = make(map[string]any, len(p.PartMetadata))
+		for k, v := range p.PartMetadata {
+			cloned.PartMetadata[k] = v
+		}
+	}
 	return cloned
 }
 

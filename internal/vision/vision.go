@@ -21,6 +21,8 @@ import (
 const (
 	PartKindImageRef = "image_ref.v1"
 
+	PartMetadataKey = "image_ref"
+
 	TrustUntrustedExternal = "untrusted_external"
 
 	maxSniffBytes   = 64 << 10
