@@ -10,6 +10,11 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/telemetry"
+	"github.com/anggasct/aura/internal/vision"
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 type fakeArtifactStore struct {
@@ -134,5 +139,56 @@ func TestVisionStoreAdapterFailsClosed(t *testing.T) {
 	var nilCtx context.Context
 	if _, err := adapter.Put(nilCtx, bytes.NewReader([]byte("x")), nil); err == nil {
 		t.Fatal("nil context must fail")
+	}
+}
+
+func TestVisionRecorderObserverForwardsBuckets(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	recorder, err := telemetry.NewVisionRecorder(mp)
+	if err != nil {
+		t.Fatalf("NewVisionRecorder: %v", err)
+	}
+	observer := visionRecorderObserver(recorder)
+	if observer == nil {
+		t.Fatal("observer is nil")
+	}
+	observer(context.Background(), &vision.Observation{
+		Operation:    "ingest",
+		Result:       "ok",
+		MIME:         "image/png",
+		Images:       1,
+		Version:      "v1",
+		EncodedBytes: 1 << 16,
+		Pixels:       1 << 18,
+	})
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	found := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != telemetry.MetricVisionOperationsTotal {
+				continue
+			}
+			sum, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				continue
+			}
+			for _, dp := range sum.DataPoints {
+				if v, ok := dp.Attributes.Value(attribute.Key(telemetry.AttrVisionImages)); ok && v.AsInt64() == 1 {
+					if _, ok := dp.Attributes.Value(attribute.Key(telemetry.AttrVisionSizeBucket)); ok {
+						if _, ok := dp.Attributes.Value(attribute.Key(telemetry.AttrVisionPixelsBucket)); ok {
+							found = true
+						}
+					}
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("observer did not forward images/size/pixels bucket labels")
 	}
 }

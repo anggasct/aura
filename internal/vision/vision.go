@@ -334,7 +334,10 @@ func (s *Service) ingest(ctx context.Context, req *IngestRequest) (ImagePart, er
 		MediaType: mime,
 		Metadata:  sourceMeta,
 	}); err != nil {
-		return ImagePart{}, Errorf(ErrorCodeVisionArtifactUnavailable, "source artifact write did not complete")
+		if isQuotaExceeded(err) {
+			return ImagePart{}, wrapWithCode(ErrorCodeArtifactQuotaExceeded, "source artifact quota exceeded", err)
+		}
+		return ImagePart{}, wrapWithCode(ErrorCodeVisionArtifactUnavailable, "source artifact write did not complete", err)
 	}
 	derivedRef, err := s.store.Put(ctx, bytes.NewReader(encoded), &ArtifactMetadata{
 		ID:        derivedID,
@@ -345,7 +348,10 @@ func (s *Service) ingest(ctx context.Context, req *IngestRequest) (ImagePart, er
 	})
 	if err != nil {
 		_ = s.store.Unlink(ctx, sourceID)
-		return ImagePart{}, Errorf(ErrorCodeVisionArtifactUnavailable, "derived artifact write did not complete")
+		if isQuotaExceeded(err) {
+			return ImagePart{}, wrapWithCode(ErrorCodeArtifactQuotaExceeded, "derived artifact quota exceeded", err)
+		}
+		return ImagePart{}, wrapWithCode(ErrorCodeVisionArtifactUnavailable, "derived artifact write did not complete", err)
 	}
 	if derivedRef.ID == "" {
 		_ = s.store.Unlink(ctx, sourceID)

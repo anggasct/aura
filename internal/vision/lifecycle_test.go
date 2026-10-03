@@ -140,8 +140,8 @@ func TestLifecycleQuotaEnforcedDuringCopy(t *testing.T) {
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	}); err == nil {
 		t.Fatal("expected quota failure")
-	} else if code, ok := CodeOf(err); !ok || (code != ErrorCodeVisionArtifactUnavailable && code != ErrorCodeVisionLimitExceeded) {
-		t.Fatalf("quota error code = %v, %v", code, ok)
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeArtifactQuotaExceeded {
+		t.Fatalf("quota error code = %v, %v; want artifact_quota_exceeded", code, ok)
 	}
 }
 
