@@ -21,6 +21,7 @@ import (
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/vision"
 )
 
 const (
@@ -75,6 +76,7 @@ type Adapter struct {
 	effects      EffectRunner
 	media        MediaStore
 	sessions     SessionEnsurer
+	images       atomic.Pointer[vision.Service]
 	gate         *editGate
 	postedMu     sync.Mutex
 	posted       map[string][]string
@@ -91,6 +93,20 @@ type Adapter struct {
 	hasSeq       atomic.Bool
 	state        atomic.Int32
 	gap          atomic.Bool
+}
+
+func (a *Adapter) SetVisionService(svc *vision.Service) {
+	if a == nil {
+		return
+	}
+	a.images.Store(svc)
+}
+
+func (a *Adapter) visionService() *vision.Service {
+	if a == nil {
+		return nil
+	}
+	return a.images.Load()
 }
 
 func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {

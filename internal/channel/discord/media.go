@@ -12,6 +12,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/vision"
 )
 
 const (
@@ -166,12 +168,12 @@ func (a *Adapter) downloadAttachment(ctx context.Context, attachment *attachment
 	return tmp, nil
 }
 
-func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachmentPayload, sessionID, principal, messageID string) ([]artifactSummary, error) {
+func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachmentPayload, sessionID, principal, messageID string) ([]artifactSummary, []json.RawMessage, error) {
 	if len(attachments) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if len(attachments) > maxAttachmentsPerMessage {
-		return nil, Errorf(ErrorCodeAttachmentRejected, "message carries more attachments than supported")
+		return nil, nil, Errorf(ErrorCodeAttachmentRejected, "message carries more attachments than supported")
 	}
 	stash := a.cfg.MaxAttachmentBytes
 	staged := make([]*os.File, 0, len(attachments))
@@ -184,18 +186,29 @@ func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachment
 	for index := range attachments {
 		tmp, err := a.downloadAttachment(ctx, &attachments[index], stash)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		staged = append(staged, tmp)
 	}
 	if err := a.sessions.EnsureSession(ctx, sessionID, principal); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	summaries := make([]artifactSummary, 0, len(attachments))
+	var images []json.RawMessage
+	visionSvc := a.visionService()
 	for index := range attachments {
+		if visionSvc != nil && isVisionImageMIME(attachments[index].ContentType) {
+			summary, raw, err := a.putVisionImage(ctx, &attachments[index], staged[index], sessionID, messageID)
+			if err != nil {
+				return nil, nil, err
+			}
+			summaries = append(summaries, summary)
+			images = append(images, raw)
+			continue
+		}
 		receipt, err := a.putAttachment(ctx, &attachments[index], staged[index], sessionID, messageID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		summaries = append(summaries, artifactSummary{
 			RefID:     receipt.RefID,
@@ -204,7 +217,49 @@ func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachment
 			Filename:  attachments[index].Filename,
 		})
 	}
-	return summaries, nil
+	return summaries, images, nil
+}
+
+func (a *Adapter) putVisionImage(ctx context.Context, attachment *attachmentPayload, content *os.File, sessionID, messageID string) (artifactSummary, json.RawMessage, error) {
+	visionSvc := a.visionService()
+	if visionSvc == nil {
+		return artifactSummary{}, nil, Errorf(ErrorCodeAttachmentRejected, "image intake is not configured")
+	}
+	if _, err := content.Seek(0, io.SeekStart); err != nil {
+		return artifactSummary{}, nil, Errorf(ErrorCodeAttachmentRejected, "attachment download did not complete")
+	}
+	instance := ""
+	if a.cfg != nil {
+		instance = a.cfg.Instance
+	}
+	source := "discord"
+	if instance != "" {
+		source = "discord:" + instance
+	}
+	part, err := visionSvc.Ingest(ctx, &vision.IngestRequest{
+		Content:      content,
+		DeclaredMIME: attachment.ContentType,
+		Filename:     sanitizeFilename(attachment.Filename),
+		SessionID:    sessionID,
+		Provenance: vision.Provenance{
+			Source:     source,
+			ExternalID: "message:" + messageID,
+			TurnID:     messageID,
+		},
+	})
+	if err != nil {
+		return artifactSummary{}, nil, err
+	}
+	raw, err := vision.MarshalPart(&part)
+	if err != nil {
+		return artifactSummary{}, nil, err
+	}
+	return artifactSummary{
+		RefID:     part.ArtifactID,
+		Digest:    part.DerivedDigest,
+		SizeBytes: part.EncodedBytes,
+		Filename:  sanitizeFilename(attachment.Filename),
+	}, raw, nil
 }
 
 func (a *Adapter) putAttachment(ctx context.Context, attachment *attachmentPayload, content io.Reader, sessionID, messageID string) (ArtifactReceipt, error) {

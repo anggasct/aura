@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/gif"
@@ -57,20 +58,29 @@ func (m *memoryStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetada
 	if meta == nil {
 		return ArtifactRef{}, errNilArgument("artifact metadata")
 	}
+	if meta.ID == "" {
+		return ArtifactRef{}, errNilArgument("artifact id")
+	}
 	raw, err := io.ReadAll(r)
 	if err != nil {
 		return ArtifactRef{}, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	id := meta.ID
-	if id == "" {
-		id = "art-test"
-	}
 	sum := sha256.Sum256(raw)
-	m.refs[id] = raw
+	m.refs[meta.ID] = raw
 	m.puts++
-	return ArtifactRef{ID: id, BlobDigest: hex.EncodeToString(sum[:]), SizeBytes: int64(len(raw))}, nil
+	return ArtifactRef{ID: meta.ID, BlobDigest: hex.EncodeToString(sum[:]), SizeBytes: int64(len(raw))}, nil
+}
+
+func (m *memoryStore) Unlink(ctx context.Context, refID string) error {
+	if ctx == nil {
+		return errNilArgument("context")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.refs, refID)
+	return nil
 }
 
 func pngBytes(t *testing.T, width, height int) []byte {
@@ -507,11 +517,18 @@ func (m *recordingStore) Put(_ context.Context, r io.Reader, meta *ArtifactMetad
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	id := "art-" + string(rune('0'+len(m.blobs)))
+	id := meta.ID
+	if id == "" {
+		id = "art-" + string(rune('0'+len(m.blobs)))
+	}
 	sum := sha256.Sum256(raw)
 	m.blobs = append(m.blobs, raw)
 	m.metas = append(m.metas, meta)
 	return ArtifactRef{ID: id, BlobDigest: hex.EncodeToString(sum[:]), SizeBytes: int64(len(raw))}, nil
+}
+
+func (m *recordingStore) Unlink(_ context.Context, refID string) error {
+	return nil
 }
 
 func TestIngestWebPFormats(t *testing.T) {
@@ -875,10 +892,19 @@ type quotaStore struct {
 	calls  int
 }
 
+type causeStore struct {
+	recordingStore
+	cause error
+}
+
+func (m *causeStore) Put(_ context.Context, _ io.Reader, _ *ArtifactMetadata) (ArtifactRef, error) {
+	return ArtifactRef{}, m.cause
+}
+
 func (m *quotaStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
 	m.calls++
 	if m.calls == m.failOn {
-		return ArtifactRef{}, Errorf(ErrorCodeVisionArtifactUnavailable, "artifact quota exceeded")
+		return ArtifactRef{}, Errorf(ErrorCodeArtifactQuotaExceeded, "artifact_quota_exceeded: backend quota is exhausted")
 	}
 	return m.recordingStore.Put(ctx, r, meta)
 }
@@ -895,9 +921,58 @@ func TestQuotaThroughStore(t *testing.T) {
 			SessionID:  "sess-1",
 			Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 		})
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionArtifactUnavailable {
-			t.Errorf("failOn %d code = %v (%v), want vision_artifact_unavailable", failOn, code, err)
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeArtifactQuotaExceeded {
+			t.Errorf("failOn %d code = %v (%v), want artifact_quota_exceeded", failOn, code, err)
 		}
+		if err != nil && !strings.Contains(err.Error(), "artifact_quota_exceeded") {
+			t.Errorf("failOn %d error does not preserve quota cause: %v", failOn, err)
+		}
+	}
+}
+
+func TestQuotaExhaustionPreservesCauseAndLeavesNoPartialLink(t *testing.T) {
+	sentinel := io.ErrUnexpectedEOF
+	stores := &causeStore{cause: wrapWithCode(ErrorCodeArtifactQuotaExceeded, "backend quota is exhausted", sentinel)}
+	svc, err := NewService(ptrLimits(), WithStore(stores))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(pngBytes(t, 8, 8)),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeArtifactQuotaExceeded {
+		t.Fatalf("code = %v (%v), want artifact_quota_exceeded", code, err)
+	}
+	if !strings.Contains(err.Error(), "artifact_quota_exceeded") {
+		t.Fatalf("quota cause missing from error chain: %v", err)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("quota cause is not reachable in chain: %v", err)
+	}
+	if len(stores.blobs) != 0 {
+		t.Fatalf("blobs = %d, want 0 (no partial link on quota failure)", len(stores.blobs))
+	}
+}
+
+func TestNonQuotaWriteFailureKeepsUnavailableWithCause(t *testing.T) {
+	sentinel := io.ErrUnexpectedEOF
+	stores := &causeStore{cause: sentinel}
+	svc, err := NewService(ptrLimits(), WithStore(stores))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Ingest(t.Context(), &IngestRequest{
+		Content:    bytes.NewReader(pngBytes(t, 8, 8)),
+		SessionID:  "sess-1",
+		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+	})
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionArtifactUnavailable {
+		t.Fatalf("code = %v (%v), want vision_artifact_unavailable", code, err)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("store cause is not reachable in chain: %v", err)
 	}
 }
 

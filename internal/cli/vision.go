@@ -11,6 +11,8 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/model"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/telemetry"
+	"github.com/anggasct/aura/internal/vision"
 )
 
 type visionBlobReader struct {
@@ -61,5 +63,82 @@ func visionWiringForConfig(cfg *config.Config, db *sql.DB, artifactRoot string) 
 	return model.VisionWiring{
 		Policy: policy,
 		Blobs:  &visionBlobReader{blobs: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))},
+	}
+}
+
+type visionStoreAdapter struct {
+	inner store.ArtifactStore
+}
+
+func (a *visionStoreAdapter) Put(ctx context.Context, r io.Reader, meta *vision.ArtifactMetadata) (vision.ArtifactRef, error) {
+	if a == nil || a.inner == nil {
+		return vision.ArtifactRef{}, errors.New("vision store is not configured")
+	}
+	if ctx == nil {
+		return vision.ArtifactRef{}, errors.New("vision store write requires a context")
+	}
+	if meta == nil {
+		return vision.ArtifactRef{}, errors.New("vision store metadata must not be nil")
+	}
+	ref, err := a.inner.Put(ctx, r, &store.ArtifactMetadata{
+		ID:        meta.ID,
+		SessionID: meta.SessionID,
+		EventID:   meta.EventID,
+		Filename:  meta.Filename,
+		MediaType: meta.MediaType,
+		Metadata:  meta.Metadata,
+	})
+	if err != nil {
+		return vision.ArtifactRef{}, err
+	}
+	return vision.ArtifactRef{ID: ref.ID, BlobDigest: ref.BlobDigest, SizeBytes: ref.SizeBytes}, nil
+}
+
+func (a *visionStoreAdapter) Unlink(ctx context.Context, refID string) error {
+	if a == nil || a.inner == nil {
+		return errors.New("vision store is not configured")
+	}
+	return a.inner.Unlink(ctx, refID)
+}
+
+func newVisionService(cfg *config.Config, db *sql.DB, artifactRoot string) *vision.Service {
+	if cfg == nil || cfg.Vision == nil || !cfg.Vision.Enabled {
+		return nil
+	}
+	if db == nil || strings.TrimSpace(artifactRoot) == "" {
+		return nil
+	}
+	limits := vision.LimitsFromConfig(cfg.Vision)
+	stores := &visionStoreAdapter{inner: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))}
+	opts := []vision.Option{vision.WithStore(stores)}
+	if recorder, err := telemetry.NewVisionRecorder(nil); err == nil && recorder != nil {
+		opts = append(opts, vision.WithObserver(visionRecorderObserver(recorder)))
+	}
+	svc, err := vision.NewService(&limits, opts...)
+	if err != nil {
+		return nil
+	}
+	return svc
+}
+
+func visionRecorderObserver(recorder *telemetry.VisionRecorder) vision.Observer {
+	if recorder == nil {
+		return nil
+	}
+	return func(ctx context.Context, observation *vision.Observation) {
+		if observation == nil {
+			return
+		}
+		recorder.Record(ctx, &telemetry.VisionObservation{
+			Operation:    observation.Operation,
+			Result:       observation.Result,
+			MIME:         observation.MIME,
+			Images:       observation.Images,
+			Version:      observation.Version,
+			Protocol:     observation.Protocol,
+			SizeBucket:   observation.EncodedBytes,
+			PixelsBucket: observation.Pixels,
+			Duration:     observation.Duration,
+		})
 	}
 }
