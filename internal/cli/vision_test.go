@@ -104,3 +104,35 @@ func TestVisionWiringForConfig(t *testing.T) {
 		t.Fatal("enabled vision must yield policy and blob reader")
 	}
 }
+
+func TestNewVisionServiceDisabledYieldsNil(t *testing.T) {
+	if svc := newVisionService(nil, &sql.DB{}, t.TempDir()); svc != nil {
+		t.Fatal("nil config must yield nil service")
+	}
+	disabled := &config.Config{Vision: &config.Vision{Enabled: false}}
+	if svc := newVisionService(disabled, &sql.DB{}, t.TempDir()); svc != nil {
+		t.Fatal("disabled vision must yield nil service")
+	}
+	enabled := &config.Config{Vision: &config.Vision{Enabled: true}}
+	if svc := newVisionService(enabled, nil, t.TempDir()); svc != nil {
+		t.Fatal("nil database must yield nil service")
+	}
+	if svc := newVisionService(enabled, &sql.DB{}, ""); svc != nil {
+		t.Fatal("empty root must yield nil service")
+	}
+}
+
+func TestVisionStoreAdapterFailsClosed(t *testing.T) {
+	var nilAdapter *visionStoreAdapter
+	if _, err := nilAdapter.Put(t.Context(), bytes.NewReader([]byte("x")), nil); err == nil {
+		t.Fatal("nil adapter Put must fail")
+	}
+	if err := nilAdapter.Unlink(t.Context(), "art-1"); err == nil {
+		t.Fatal("nil adapter Unlink must fail")
+	}
+	adapter := &visionStoreAdapter{}
+	var nilCtx context.Context
+	if _, err := adapter.Put(nilCtx, bytes.NewReader([]byte("x")), nil); err == nil {
+		t.Fatal("nil context must fail")
+	}
+}

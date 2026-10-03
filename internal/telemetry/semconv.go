@@ -35,6 +35,9 @@ const (
 	MetricProfileExpiryLag            = "profile.expiry.lag"
 	MetricProfileContextFacts         = "profile.context.facts"
 	MetricProfileContextTokens        = "profile.context.tokens"
+
+	MetricVisionOperationsTotal   = "vision.operations.total"
+	MetricVisionOperationDuration = "vision.operation.duration"
 )
 
 const (
@@ -92,6 +95,12 @@ const (
 	AttrMCPTool      = "mcp.tool"
 	AttrMCPOutcome   = "mcp.outcome"
 	AttrMCPCode      = "mcp.code"
+
+	AttrVisionOperation = "vision.operation"
+	AttrVisionResult    = "vision.result"
+	AttrVisionMIME      = "vision.mime"
+	AttrVisionVersion   = "vision.transform_version"
+	AttrVisionProtocol  = "vision.protocol"
 )
 
 var turnSpanAttrs = []string{
@@ -155,6 +164,8 @@ var metricLabelAttrs = map[string][]string{
 	MetricProfileExtractionsTotal:   {AttrProfileResult},
 	MetricProfileExtractionQueueAge: {AttrProfileResult},
 	MetricProfileFactsCount:         {AttrProfileStatus, AttrProfileCategory},
+	MetricVisionOperationsTotal:     {AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol},
+	MetricVisionOperationDuration:   {AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol},
 }
 
 func AllowedSpanAttrs(spanName string) []string {

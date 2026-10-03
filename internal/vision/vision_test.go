@@ -57,20 +57,29 @@ func (m *memoryStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetada
 	if meta == nil {
 		return ArtifactRef{}, errNilArgument("artifact metadata")
 	}
+	if meta.ID == "" {
+		return ArtifactRef{}, errNilArgument("artifact id")
+	}
 	raw, err := io.ReadAll(r)
 	if err != nil {
 		return ArtifactRef{}, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	id := meta.ID
-	if id == "" {
-		id = "art-test"
-	}
 	sum := sha256.Sum256(raw)
-	m.refs[id] = raw
+	m.refs[meta.ID] = raw
 	m.puts++
-	return ArtifactRef{ID: id, BlobDigest: hex.EncodeToString(sum[:]), SizeBytes: int64(len(raw))}, nil
+	return ArtifactRef{ID: meta.ID, BlobDigest: hex.EncodeToString(sum[:]), SizeBytes: int64(len(raw))}, nil
+}
+
+func (m *memoryStore) Unlink(ctx context.Context, refID string) error {
+	if ctx == nil {
+		return errNilArgument("context")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.refs, refID)
+	return nil
 }
 
 func pngBytes(t *testing.T, width, height int) []byte {
@@ -507,11 +516,18 @@ func (m *recordingStore) Put(_ context.Context, r io.Reader, meta *ArtifactMetad
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	id := "art-" + string(rune('0'+len(m.blobs)))
+	id := meta.ID
+	if id == "" {
+		id = "art-" + string(rune('0'+len(m.blobs)))
+	}
 	sum := sha256.Sum256(raw)
 	m.blobs = append(m.blobs, raw)
 	m.metas = append(m.metas, meta)
 	return ArtifactRef{ID: id, BlobDigest: hex.EncodeToString(sum[:]), SizeBytes: int64(len(raw))}, nil
+}
+
+func (m *recordingStore) Unlink(_ context.Context, refID string) error {
+	return nil
 }
 
 func TestIngestWebPFormats(t *testing.T) {

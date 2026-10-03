@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/net/websocket"
@@ -398,7 +399,7 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 }
 
 func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope) bool {
-	summaries, err := a.storeAttachments(ctx, msg.Attachments, envelope.ConversationID, envelope.PrincipalID, msg.ID)
+	summaries, images, err := a.storeAttachments(ctx, msg.Attachments, envelope.ConversationID, envelope.PrincipalID, msg.ID)
 	if err != nil {
 		a.logger.WarnContext(ctx, "attachment intake failed", "component", "discord")
 		return false
@@ -407,7 +408,20 @@ func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, en
 		a.logger.WarnContext(ctx, "attachment reference failed", "component", "discord")
 		return false
 	}
+	for _, raw := range images {
+		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{Image: raw})
+	}
 	return true
+}
+
+func isVisionImageMIME(contentType string) bool {
+	media := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	switch media {
+	case "image/png", "image/jpeg", "image/webp", "image/gif":
+		return true
+	default:
+		return false
+	}
 }
 
 func attachArtifacts(envelope *runtimeingress.IngressEnvelope, summaries []artifactSummary) error {
