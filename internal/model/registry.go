@@ -26,7 +26,7 @@ func RegisterAdapters(logger *slog.Logger, models config.Models) error {
 	return RegisterAdaptersWithRoutes(context.Background(), logger, models, nil, nil, nil)
 }
 
-func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry) error {
+func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry, wiring ...VisionWiring) error {
 	if prices == nil {
 		prices = usage.NewPriceRegistry()
 	}
@@ -47,7 +47,8 @@ func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models
 		}
 	}
 
-	adapters, circuits, err := BuildComponents(logger, models, routes, checkpoint, prices)
+	vw := firstVisionWiring(wiring)
+	adapters, circuits, err := BuildComponents(logger, models, routes, checkpoint, prices, vw)
 	if err != nil {
 		return err
 	}
@@ -59,7 +60,7 @@ func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models
 
 	routeAdapters := make(map[string]adkmodel.LLM, len(routes))
 	for name, route := range routes {
-		fb := NewFallbackAdapter(name, route, models.Definitions, circuits, MapAdapterResolver(adapters)).WithLogger(logger).WithPrices(prices)
+		fb := NewFallbackAdapter(name, route, models.Definitions, circuits, MapAdapterResolver(adapters)).WithLogger(logger).WithPrices(prices).WithVisionPolicy(vw.Policy)
 		routeAdapters[name] = fb
 	}
 
@@ -81,7 +82,7 @@ func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models
 	registrations := make([]registration, 0, len(models.Definitions)+len(routeAdapters))
 	for _, role := range slices.Sorted(maps.Keys(models.Definitions)) {
 		spec := models.Definitions[role]
-		_, configured, err := newAdapter(logger, role, &spec, timeout, idleTimeout)
+		_, configured, err := newAdapter(logger, role, &spec, timeout, idleTimeout, vw)
 		if err != nil {
 			return err
 		}
@@ -95,7 +96,7 @@ func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models
 			pattern: "^" + regexp.QuoteMeta(spec.Model) + "$",
 			spec:    spec,
 			factory: func() (adkmodel.LLM, error) {
-				adapter, _, err := newAdapter(logger, definitionID, &def, timeout, idleTimeout)
+				adapter, _, err := newAdapter(logger, definitionID, &def, timeout, idleTimeout, vw)
 				return adapter, err
 			},
 		})

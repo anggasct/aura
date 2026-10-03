@@ -12,8 +12,11 @@ const SchemaVersion uint16 = 1
 
 const MaxDedupeEntries = 256
 
+const MaxImageEnvelopeBytes = 1 << 20
+
 type Part struct {
-	Text string `json:"text"`
+	Text  string          `json:"text"`
+	Image json.RawMessage `json:"image,omitempty"`
 }
 
 type Descriptor struct {
@@ -107,6 +110,27 @@ func (d *Descriptor) Validate() error {
 	}
 	if d.Origin == "" {
 		return invalidArgument("origin must not be empty")
+	}
+	for i := range d.Parts {
+		if err := d.Parts[i].Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Part) Validate() error {
+	if p == nil {
+		return invalidArgument("turn part must not be nil")
+	}
+	if len(p.Image) == 0 {
+		return nil
+	}
+	if len(p.Image) > MaxImageEnvelopeBytes {
+		return invalidArgument("image reference exceeds the size bound")
+	}
+	if !json.Valid(p.Image) {
+		return invalidArgument("image reference is not valid json")
 	}
 	return nil
 }

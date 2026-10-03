@@ -69,6 +69,20 @@ type coreClient struct {
 	idleTimeout  time.Duration
 	codec        providerCodec
 	logger       *slog.Logger
+	vision       *VisionPolicy
+	visionBlobs  VisionBlobReader
+}
+
+type visionWiring struct {
+	policy *VisionPolicy
+	blobs  VisionBlobReader
+	detail string
+}
+
+func (c *coreClient) withVision(w visionWiring) *coreClient {
+	c.vision = w.policy
+	c.visionBlobs = w.blobs
+	return c
 }
 
 func newCoreClient(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration, codec providerCodec) *coreClient {
@@ -149,6 +163,12 @@ func (c *coreClient) GenerateContent(ctx context.Context, req *adkmodel.LLMReque
 
 func (c *coreClient) do(ctx context.Context, req *adkmodel.LLMRequest, stream bool) (*http.Response, int, error) {
 	retryCount := 0
+	if req != nil && hasVisionInput(req.Contents) {
+		req = CloneCanonicalRequest(req)
+		if err := c.resolveVisionImages(ctx, req); err != nil {
+			return nil, retryCount, err
+		}
+	}
 	body, err := c.codec.buildRequest(req, stream)
 	if err != nil {
 		return nil, retryCount, err

@@ -11,22 +11,24 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeProtocolInvalid       ErrorCode = "model_protocol_invalid"
-	ErrorCodeCapabilityUnsupported ErrorCode = "model_capability_unsupported"
-	ErrorCodeSecretInvalid         ErrorCode = "model_secret_invalid"
-	ErrorCodeAuthFailed            ErrorCode = "model_auth_failed"
-	ErrorCodeNotFound              ErrorCode = "model_not_found"
-	ErrorCodeRateLimited           ErrorCode = "model_rate_limited"
-	ErrorCodeOverloaded            ErrorCode = "model_overloaded"
-	ErrorCodeContextTooLong        ErrorCode = "model_context_too_long"
-	ErrorCodeContentFiltered       ErrorCode = "model_content_filtered"
-	ErrorCodeStreamInvalid         ErrorCode = "model_stream_invalid"
-	ErrorCodeConnectionFailed      ErrorCode = "model_connection_failed"
-	ErrorCodeRouteInvalid          ErrorCode = "model_route_invalid"
-	ErrorCodeBudgetExceeded        ErrorCode = "model_budget_exceeded"
-	ErrorCodeDeadlineExceeded      ErrorCode = "model_deadline_exceeded"
-	ErrorCodeFallbackExhausted     ErrorCode = "model_fallback_exhausted"
-	ErrorCodeFallbackBoundary      ErrorCode = "model_fallback_boundary"
+	ErrorCodeProtocolInvalid           ErrorCode = "model_protocol_invalid"
+	ErrorCodeCapabilityUnsupported     ErrorCode = "model_capability_unsupported"
+	ErrorCodeSecretInvalid             ErrorCode = "model_secret_invalid"
+	ErrorCodeAuthFailed                ErrorCode = "model_auth_failed"
+	ErrorCodeNotFound                  ErrorCode = "model_not_found"
+	ErrorCodeRateLimited               ErrorCode = "model_rate_limited"
+	ErrorCodeOverloaded                ErrorCode = "model_overloaded"
+	ErrorCodeContextTooLong            ErrorCode = "model_context_too_long"
+	ErrorCodeContentFiltered           ErrorCode = "model_content_filtered"
+	ErrorCodeStreamInvalid             ErrorCode = "model_stream_invalid"
+	ErrorCodeConnectionFailed          ErrorCode = "model_connection_failed"
+	ErrorCodeRouteInvalid              ErrorCode = "model_route_invalid"
+	ErrorCodeBudgetExceeded            ErrorCode = "model_budget_exceeded"
+	ErrorCodeDeadlineExceeded          ErrorCode = "model_deadline_exceeded"
+	ErrorCodeFallbackExhausted         ErrorCode = "model_fallback_exhausted"
+	ErrorCodeFallbackBoundary          ErrorCode = "model_fallback_boundary"
+	ErrorCodeVisionBudgetExceeded      ErrorCode = "vision_budget_exceeded"
+	ErrorCodeVisionArtifactUnavailable ErrorCode = "vision_artifact_unavailable"
 )
 
 type ErrorClass string
@@ -115,6 +117,8 @@ func ClassifyError(err error) ErrorClass {
 			return ErrorClassDeadline
 		case ErrorCodeFallbackExhausted:
 			return ErrorClassOverloaded
+		case ErrorCodeVisionBudgetExceeded, ErrorCodeVisionArtifactUnavailable:
+			return ErrorClassInvalidRequest
 		}
 	}
 

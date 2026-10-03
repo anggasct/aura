@@ -3,11 +3,13 @@ package model
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"iter"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
@@ -19,9 +21,11 @@ import (
 const anthropicDefaultBaseURL = "https://api.anthropic.com"
 const anthropicVersion = "2023-06-01"
 
-type anthropicCodec struct{}
+type anthropicCodec struct {
+	detail string
+}
 
-func (anthropicCodec) protocol() string { return "anthropic_messages" }
+func (c anthropicCodec) protocol() string { return "anthropic_messages" }
 
 func (anthropicCodec) endpoint(baseURL string, req *adkmodel.LLMRequest, stream bool) string {
 	return baseURL + "/v1/messages"
@@ -97,11 +101,15 @@ func NewAnthropicAdapter(name, baseURL, apiKey string, timeout time.Duration) (*
 	return newAnthropicAdapter(nil, name, baseURL, apiKey, timeout, defaultStreamingIdleTimeout), nil
 }
 
-func newAnthropicAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration) *AnthropicAdapter {
+func newAnthropicAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration, wire ...visionWiring) *AnthropicAdapter {
 	if baseURL == "" {
 		baseURL = anthropicDefaultBaseURL
 	}
-	return &AnthropicAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, anthropicCodec{})}
+	var vw visionWiring
+	if len(wire) > 0 {
+		vw = wire[0]
+	}
+	return &AnthropicAdapter{core: newCoreClient(logger, name, baseURL, apiKey, timeout, idleTimeout, anthropicCodec{detail: vw.detail}).withVision(vw)}
 }
 
 func (a *AnthropicAdapter) Name() string { return a.core.name }
@@ -128,13 +136,20 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     json.RawMessage       `json:"input,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	Content   string                `json:"content,omitempty"`
+	Source    *anthropicImageSource `json:"source,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 type anthropicTool struct {
@@ -236,6 +251,20 @@ func contentToAnthropicMessages(c *genai.Content) ([]anthropicMessage, error) {
 		switch {
 		case p.Text != "":
 			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: p.Text})
+		case p.InlineData != nil && isSupportedVisionMIME(strings.ToLower(p.InlineData.MIMEType)):
+			if len(p.InlineData.Data) == 0 {
+				return nil, newError(ErrorCodeProtocolInvalid, "", "", "image content has no bytes")
+			}
+			blocks = append(blocks, anthropicContentBlock{
+				Type: "image",
+				Source: &anthropicImageSource{
+					Type:      "base64",
+					MediaType: strings.ToLower(p.InlineData.MIMEType),
+					Data:      base64.StdEncoding.EncodeToString(p.InlineData.Data),
+				},
+			})
+		case p.FileData != nil:
+			return nil, newError(ErrorCodeProtocolInvalid, "", "", "file content reference is not supported")
 		case p.FunctionCall != nil:
 			tc, err := toCanonicalToolCall(p.FunctionCall)
 			if err != nil {
@@ -293,7 +322,8 @@ func parseAnthropicResponse(body []byte) (*adkmodel.LLMResponse, error) {
 
 func anthropicContentToGenai(blocks []anthropicContentBlock) (*genai.Content, error) {
 	c := &genai.Content{Role: "model"}
-	for _, b := range blocks {
+	for i := range blocks {
+		b := &blocks[i]
 		switch b.Type {
 		case "text":
 			c.Parts = append(c.Parts, &genai.Part{Text: b.Text})

@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/usage"
+	"github.com/anggasct/aura/internal/vision"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -367,6 +368,14 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 func contentFromParts(req *runtime.TurnRequest) (*genai.Content, error) {
 	var parts []*genai.Part
 	for _, p := range req.Parts {
+		if len(p.Image) > 0 {
+			imageParts, err := imageContentParts(p.Image)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, imageParts...)
+			continue
+		}
 		if strings.TrimSpace(p.Text) == "" {
 			continue
 		}
@@ -379,6 +388,24 @@ func contentFromParts(req *runtime.TurnRequest) (*genai.Content, error) {
 		return nil, invalidArgument("turn has no input parts")
 	}
 	return &genai.Content{Parts: parts, Role: genai.RoleUser}, nil
+}
+
+func imageContentParts(envelope json.RawMessage) ([]*genai.Part, error) {
+	part, err := vision.UnmarshalPart(envelope)
+	if err != nil {
+		return nil, invalidArgument("turn image reference is invalid")
+	}
+	out := []*genai.Part{{
+		FileData: &genai.FileData{
+			FileURI:  "artifact://" + part.ArtifactID,
+			MIMEType: part.MIME,
+		},
+		PartMetadata: map[string]any{vision.PartMetadataKey: string(envelope)},
+	}}
+	if alt := strings.TrimSpace(part.AltText); alt != "" {
+		out = append(out, &genai.Part{Text: alt})
+	}
+	return out, nil
 }
 
 type usageTracker struct {

@@ -24,7 +24,7 @@ type SessionStore interface {
 func turnDescriptorFromRequest(req *runtime.TurnRequest) runtimesessions.Descriptor {
 	parts := make([]runtimesessions.Part, 0, len(req.Parts))
 	for _, part := range req.Parts {
-		parts = append(parts, runtimesessions.Part{Text: part.Text})
+		parts = append(parts, runtimesessions.Part{Text: part.Text, Image: part.Image})
 	}
 	return runtimesessions.Descriptor{
 		TurnID:         req.TurnID,
@@ -44,7 +44,7 @@ func turnDescriptorFromRequest(req *runtime.TurnRequest) runtimesessions.Descrip
 func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRequest {
 	parts := make([]runtimeingress.InputPart, 0, len(desc.Parts))
 	for _, part := range desc.Parts {
-		parts = append(parts, runtimeingress.InputPart{Text: part.Text})
+		parts = append(parts, runtimeingress.InputPart{Text: part.Text, Image: part.Image})
 	}
 	return &runtime.TurnRequest{
 		TurnID:         desc.TurnID,
