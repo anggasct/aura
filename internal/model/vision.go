@@ -16,9 +16,9 @@ import (
 	"image/png"
 	"strings"
 
+	"golang.org/x/image/webp"
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
-	"golang.org/x/image/webp"
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/vision"
@@ -33,7 +33,7 @@ const (
 )
 
 var (
-	errNoGifFrames          = errors.New("model: gif has no frames")
+	errNoGifFrames            = errors.New("model: gif has no frames")
 	errUnsupportedVisionMedia = errors.New("model: unsupported image media type")
 )
 
@@ -316,7 +316,7 @@ func checkVisionBudgetPreStore(limits VisionRequestLimits, images []VisionImage)
 	for i := range images {
 		img := &images[i]
 		if img.EncodedBytes <= 0 {
-			return newError(ErrorCodeProtocolInvalid, "", "", "image reference dimensions are invalid")
+			return newError(ErrorCodeProtocolInvalid, "", "", "image reference encoded size is invalid")
 		}
 		if img.EncodedBytes > limits.MaxEncodedBytes {
 			return newError(ErrorCodeVisionBudgetExceeded, "", "", fmt.Sprintf("image size %d exceeds the per-image maximum of %d", img.EncodedBytes, limits.MaxEncodedBytes))

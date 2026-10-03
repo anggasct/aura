@@ -74,6 +74,14 @@ func ResizeLanczos3(ctx context.Context, src image.Image, dstW, dstH int, maxMem
 		exceedsTransformMem(dstW, dstH, 4, maxMemoryBytes) {
 		return nil, Errorf(ErrorCodeVisionLimitExceeded, "resized image exceeds the transform memory bound")
 	}
+	flatSize := int64(srcW) * int64(srcH) * 32
+	tmpSize := int64(dstW) * int64(srcH) * 32
+	outSize := int64(dstW) * int64(dstH) * 32
+	nrgbaSize := int64(dstW) * int64(dstH) * 4
+	if exceedsTransformSum(maxMemoryBytes, flatSize, tmpSize) ||
+		exceedsTransformSum(maxMemoryBytes, tmpSize, outSize, nrgbaSize) {
+		return nil, Errorf(ErrorCodeVisionLimitExceeded, "resized image exceeds the transform memory bound")
+	}
 	if dstW > srcW || dstH > srcH {
 		return nil, Errorf(ErrorCodeInvalidArgument, "transform must not upscale")
 	}
@@ -215,9 +223,9 @@ func gridToNRGBA(grid *floatGrid, width, height int) *image.NRGBA {
 			if alpha*255 < 0.5 {
 				alpha = 0
 			} else {
-				red = clamp01(grid.pixels[base]/0xffff/alpha)
-				green = clamp01(grid.pixels[base+1]/0xffff/alpha)
-				blue = clamp01(grid.pixels[base+2]/0xffff/alpha)
+				red = clamp01(grid.pixels[base] / 0xffff / alpha)
+				green = clamp01(grid.pixels[base+1] / 0xffff / alpha)
+				blue = clamp01(grid.pixels[base+2] / 0xffff / alpha)
 			}
 			out.Pix[(y*out.Stride)+x*4] = uint8(math.Round(red * 255))
 			out.Pix[(y*out.Stride)+x*4+1] = uint8(math.Round(green * 255))
@@ -233,6 +241,20 @@ func exceedsTransformMem(w, h int, perPixel, maxBytes int64) bool {
 		return true
 	}
 	return int64(h) > maxBytes/perPixel/int64(w)
+}
+
+func exceedsTransformSum(maxBytes int64, sizes ...int64) bool {
+	var sum int64
+	for _, size := range sizes {
+		if size < 0 || size > maxBytes {
+			return true
+		}
+		if sum > maxBytes-size {
+			return true
+		}
+		sum += size
+	}
+	return false
 }
 
 func clamp01(v float64) float64 {

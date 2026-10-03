@@ -638,6 +638,20 @@ func TestOpenAIAssistantImageIsTypedError(t *testing.T) {
 	}
 }
 
+func TestCheckVisionBudgetPreStoreRejectsEmptyEncodedBytes(t *testing.T) {
+	policy := NewVisionPolicy(testVisionConfig())
+	err := policy.CheckGlobalPreStore([]VisionImage{{MIME: "image/png", Width: 8, Height: 8, EncodedBytes: 0}})
+	if err == nil {
+		t.Fatal("expected encoded-size rejection")
+	}
+	if code, _ := CodeOf(err); code != ErrorCodeProtocolInvalid {
+		t.Fatalf("code = %q, want model_protocol_invalid", code)
+	}
+	if !strings.Contains(err.Error(), "encoded size") {
+		t.Fatalf("detail = %q, want encoded-size failure", err.Error())
+	}
+}
+
 func TestResolveVisionImagesPreservesBlobCause(t *testing.T) {
 	sentinel := errors.New("sentinel store failure")
 	blobs := &fakeBlobReader{err: sentinel}
