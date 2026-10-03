@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -33,12 +34,12 @@ func (r *visionBlobReader) ReadBlob(ctx context.Context, refID string, maxBytes 
 	}
 	stream, _, err := r.blobs.Open(ctx, refID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("vision blob open did not complete: %w", err)
 	}
 	defer func() { _ = stream.Close() }()
 	data, err := io.ReadAll(io.LimitReader(stream, maxBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("vision blob read did not complete: %w", err)
 	}
 	if int64(len(data)) > maxBytes {
 		return nil, errors.New("vision blob exceeds the read bound")

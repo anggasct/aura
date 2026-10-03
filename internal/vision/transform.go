@@ -63,13 +63,16 @@ func ResizeLanczos3(ctx context.Context, src image.Image, dstW, dstH int, maxMem
 	if maxMemoryBytes <= 0 {
 		return nil, Errorf(ErrorCodeInvalidArgument, "transform memory bound must be positive")
 	}
-	if int64(dstW)*int64(dstH)*4 > maxMemoryBytes {
-		return nil, Errorf(ErrorCodeVisionLimitExceeded, "resized image exceeds the transform memory bound")
-	}
 	bounds := src.Bounds()
 	srcW, srcH := bounds.Dx(), bounds.Dy()
 	if srcW <= 0 || srcH <= 0 {
 		return nil, Errorf(ErrorCodeVisionDecodeFailed, "source image is empty")
+	}
+	if exceedsTransformMem(srcW, srcH, 32, maxMemoryBytes) ||
+		exceedsTransformMem(dstW, srcH, 32, maxMemoryBytes) ||
+		exceedsTransformMem(dstW, dstH, 32, maxMemoryBytes) ||
+		exceedsTransformMem(dstW, dstH, 4, maxMemoryBytes) {
+		return nil, Errorf(ErrorCodeVisionLimitExceeded, "resized image exceeds the transform memory bound")
 	}
 	if dstW > srcW || dstH > srcH {
 		return nil, Errorf(ErrorCodeInvalidArgument, "transform must not upscale")
@@ -207,13 +210,29 @@ func gridToNRGBA(grid *floatGrid, width, height int) *image.NRGBA {
 	for y := range height {
 		for x := range width {
 			base := (y*width + x) * 4
-			out.Pix[(y*out.Stride)+x*4] = uint8(math.Round(clamp01(grid.pixels[base]/0xffff) * 255))
-			out.Pix[(y*out.Stride)+x*4+1] = uint8(math.Round(clamp01(grid.pixels[base+1]/0xffff) * 255))
-			out.Pix[(y*out.Stride)+x*4+2] = uint8(math.Round(clamp01(grid.pixels[base+2]/0xffff) * 255))
-			out.Pix[(y*out.Stride)+x*4+3] = uint8(math.Round(clamp01(grid.pixels[base+3]/0xffff) * 255))
+			alpha := clamp01(grid.pixels[base+3] / 0xffff)
+			var red, green, blue float64
+			if alpha*255 < 0.5 {
+				alpha = 0
+			} else {
+				red = clamp01(grid.pixels[base]/0xffff/alpha)
+				green = clamp01(grid.pixels[base+1]/0xffff/alpha)
+				blue = clamp01(grid.pixels[base+2]/0xffff/alpha)
+			}
+			out.Pix[(y*out.Stride)+x*4] = uint8(math.Round(red * 255))
+			out.Pix[(y*out.Stride)+x*4+1] = uint8(math.Round(green * 255))
+			out.Pix[(y*out.Stride)+x*4+2] = uint8(math.Round(blue * 255))
+			out.Pix[(y*out.Stride)+x*4+3] = uint8(math.Round(alpha * 255))
 		}
 	}
 	return out
+}
+
+func exceedsTransformMem(w, h int, perPixel, maxBytes int64) bool {
+	if w <= 0 || h <= 0 || perPixel <= 0 {
+		return true
+	}
+	return int64(h) > maxBytes/perPixel/int64(w)
 }
 
 func clamp01(v float64) float64 {

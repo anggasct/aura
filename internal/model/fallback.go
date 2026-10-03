@@ -156,7 +156,7 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 				yield(nil, newError(ErrorCodeProtocolInvalid, "", "", "image input is not enabled"))
 				return
 			}
-			if err := f.vision.CheckGlobal(reqImages); err != nil {
+			if err := f.vision.CheckGlobalPreStore(reqImages); err != nil {
 				yield(nil, err)
 				return
 			}

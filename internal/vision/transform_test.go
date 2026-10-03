@@ -179,3 +179,61 @@ func TestResizeLanczos3RejectsBadInput(t *testing.T) {
 		t.Fatal("expected invalid target rejection")
 	}
 }
+
+type boundStubImage struct{ w, h int }
+
+func (b boundStubImage) ColorModel() color.Model { return color.NRGBAModel }
+func (b boundStubImage) Bounds() image.Rectangle { return image.Rect(0, 0, b.w, b.h) }
+func (b boundStubImage) At(x, y int) color.Color { return color.NRGBA{R: 1, G: 2, B: 3, A: 255} }
+
+func TestResizeLanczos3RejectsPeakAllocationOverBound(t *testing.T) {
+	ctx := context.Background()
+	src := gradientImage(64, 64)
+	if _, err := ResizeLanczos3(ctx, src, 32, 32, int64(32*64*64)-1); err == nil {
+		t.Fatal("expected source-grid bound rejection")
+	} else if code, _ := CodeOf(err); code != ErrorCodeVisionLimitExceeded {
+		t.Fatalf("code = %q, want vision_limit_exceeded", code)
+	}
+	stub := boundStubImage{w: 8000, h: 5000}
+	if _, err := ResizeLanczos3(ctx, stub, 4000, 2500, 268435456); err == nil {
+		t.Fatal("expected max-pixels source rejection under default bounds")
+	} else if code, _ := CodeOf(err); code != ErrorCodeVisionLimitExceeded {
+		t.Fatalf("code = %q, want vision_limit_exceeded", code)
+	}
+}
+
+func TestResizeLanczos3PreservesSemiTransparentColor(t *testing.T) {
+	ctx := context.Background()
+	src := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for y := range 16 {
+		for x := range 16 {
+			src.Set(x, y, color.NRGBA{R: 200, G: 100, B: 50, A: 128})
+		}
+	}
+	out, err := ResizeLanczos3(ctx, src, 8, 8, 1<<26)
+	if err != nil {
+		t.Fatalf("ResizeLanczos3: %v", err)
+	}
+	nrgba, ok := out.(*image.NRGBA)
+	if !ok {
+		t.Fatalf("output type = %T, want *image.NRGBA", out)
+	}
+	for y := range 8 {
+		for x := range 8 {
+			got := nrgba.NRGBAAt(x, y)
+			if abs(int(got.R)-200) > 3 || abs(int(got.G)-100) > 3 || abs(int(got.B)-50) > 3 {
+				t.Fatalf("pixel (%d,%d) = %+v, want ~(200,100,50,128)", x, y, got)
+			}
+			if abs(int(got.A)-128) > 3 {
+				t.Fatalf("alpha (%d,%d) = %d, want ~128", x, y, got.A)
+			}
+		}
+	}
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}

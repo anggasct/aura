@@ -297,6 +297,9 @@ func contentToOpenAIMessages(c *genai.Content, detail string) ([]openaiRequestMe
 	}
 	msgs := append([]openaiRequestMessage{}, toolResults...)
 	content := strings.Join(texts, "")
+	if role == "assistant" && hasImageSegment(segments) {
+		return nil, newError(ErrorCodeProtocolInvalid, "", "", "image content is not supported in assistant messages")
+	}
 	switch {
 	case role == "assistant":
 		if content != "" || len(toolCalls) > 0 {

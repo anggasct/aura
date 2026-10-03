@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"testing"
 
@@ -68,6 +69,18 @@ func TestVisionBlobReaderFailsClosed(t *testing.T) {
 	var nilReader *visionBlobReader
 	if _, err := nilReader.ReadBlob(context.Background(), "art-1", 1024); err == nil {
 		t.Fatal("expected nil store rejection")
+	}
+}
+
+func TestVisionBlobReaderPreservesStoreCause(t *testing.T) {
+	sentinel := sql.ErrNoRows
+	reader := &visionBlobReader{blobs: &fakeArtifactStore{blobs: map[string][]byte{}}}
+	_, err := reader.ReadBlob(context.Background(), "missing", 1024)
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("store cause is not reachable: %v", err)
 	}
 }
 

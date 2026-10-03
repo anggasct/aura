@@ -1,19 +1,27 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"image"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
 	"strings"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
+	"golang.org/x/image/webp"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/vision"
 )
 
 const (
@@ -24,14 +32,20 @@ const (
 	maxVisionRefIDLength   = 128
 )
 
+var (
+	errNoGifFrames          = errors.New("model: gif has no frames")
+	errUnsupportedVisionMedia = errors.New("model: unsupported image media type")
+)
+
 type VisionImage struct {
-	RefID        string
-	Digest       string
-	MIME         string
-	Width        int
-	Height       int
-	EncodedBytes int64
-	Data         []byte
+	RefID            string
+	Digest           string
+	MIME             string
+	Width            int
+	Height           int
+	EncodedBytes     int64
+	TransformVersion string
+	Data             []byte
 }
 
 type visionEnvelope struct {
@@ -151,12 +165,13 @@ func visionImageFromFileData(part *genai.Part) (VisionImage, error) {
 		return VisionImage{}, newError(ErrorCodeProtocolInvalid, "", "", "image reference media type does not match the envelope")
 	}
 	return VisionImage{
-		RefID:        refID,
-		Digest:       env.DerivedDigest,
-		MIME:         env.MIME,
-		Width:        env.Width,
-		Height:       env.Height,
-		EncodedBytes: env.EncodedBytes,
+		RefID:            refID,
+		Digest:           env.DerivedDigest,
+		MIME:             env.MIME,
+		Width:            env.Width,
+		Height:           env.Height,
+		EncodedBytes:     env.EncodedBytes,
+		TransformVersion: env.TransformVersion,
 	}, nil
 }
 
@@ -190,8 +205,10 @@ type VisionRequestLimits struct {
 }
 
 type VisionPolicy struct {
-	global    VisionRequestLimits
-	providers map[string]VisionRequestLimits
+	global             VisionRequestLimits
+	providers          map[string]VisionRequestLimits
+	transformVersion   string
+	maxTransformMemory int64
 }
 
 func NewVisionPolicy(cfg *config.Vision) *VisionPolicy {
@@ -207,7 +224,9 @@ func NewVisionPolicy(cfg *config.Vision) *VisionPolicy {
 			MaxDimension:    cfg.MaxDimension,
 			Detail:          cfg.Detail,
 		},
-		providers: make(map[string]VisionRequestLimits, len(cfg.Providers)),
+		providers:          make(map[string]VisionRequestLimits, len(cfg.Providers)),
+		transformVersion:   cfg.TransformVersion,
+		maxTransformMemory: int64(cfg.MaxTransformMemory),
 	}
 	for protocol, limits := range cfg.Providers {
 		policy.providers[protocol] = VisionRequestLimits{
@@ -244,6 +263,20 @@ func (p *VisionPolicy) DetailFor(protocol string) string {
 	return p.effective(protocol).Detail
 }
 
+func (p *VisionPolicy) TransformVersion() string {
+	if p == nil {
+		return ""
+	}
+	return p.transformVersion
+}
+
+func (p *VisionPolicy) MaxTransformMemory() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.maxTransformMemory
+}
+
 func (p *VisionPolicy) CheckGlobal(images []VisionImage) error {
 	if p == nil {
 		return newError(ErrorCodeProtocolInvalid, "", "", "image input is not enabled")
@@ -256,6 +289,49 @@ func (p *VisionPolicy) CheckCandidate(protocol string, images []VisionImage) err
 		return newError(ErrorCodeProtocolInvalid, "", "", "image input is not enabled")
 	}
 	return checkVisionBudget(p.effective(protocol), images)
+}
+
+func (p *VisionPolicy) CheckGlobalPreStore(images []VisionImage) error {
+	if p == nil {
+		return newError(ErrorCodeProtocolInvalid, "", "", "image input is not enabled")
+	}
+	return checkVisionBudgetPreStore(p.global, images)
+}
+
+func (p *VisionPolicy) CheckCandidatePreStore(protocol string, images []VisionImage) error {
+	if p == nil {
+		return newError(ErrorCodeProtocolInvalid, "", "", "image input is not enabled")
+	}
+	return checkVisionBudgetPreStore(p.effective(protocol), images)
+}
+
+func checkVisionBudgetPreStore(limits VisionRequestLimits, images []VisionImage) error {
+	if limits.MaxImages <= 0 || limits.MaxRequestBytes <= 0 || limits.MaxEncodedBytes <= 0 {
+		return newError(ErrorCodeVisionBudgetExceeded, "", "", "image budget is not configured")
+	}
+	if len(images) > limits.MaxImages {
+		return newError(ErrorCodeVisionBudgetExceeded, "", "", fmt.Sprintf("image count %d exceeds the maximum of %d", len(images), limits.MaxImages))
+	}
+	var total int64
+	for i := range images {
+		img := &images[i]
+		if img.EncodedBytes <= 0 {
+			return newError(ErrorCodeProtocolInvalid, "", "", "image reference dimensions are invalid")
+		}
+		if img.EncodedBytes > limits.MaxEncodedBytes {
+			return newError(ErrorCodeVisionBudgetExceeded, "", "", fmt.Sprintf("image size %d exceeds the per-image maximum of %d", img.EncodedBytes, limits.MaxEncodedBytes))
+		}
+		if total > limits.MaxRequestBytes-img.EncodedBytes {
+			return newError(ErrorCodeVisionBudgetExceeded, "", "", fmt.Sprintf("image request size exceeds the maximum of %d", limits.MaxRequestBytes))
+		}
+		total += img.EncodedBytes
+	}
+	switch limits.Detail {
+	case "auto", "low", "high":
+	default:
+		return newError(ErrorCodeVisionBudgetExceeded, "", "", "image detail level is not supported")
+	}
+	return nil
 }
 
 func checkVisionBudget(limits VisionRequestLimits, images []VisionImage) error {
@@ -345,10 +421,12 @@ func (c *coreClient) resolveVisionImages(ctx context.Context, req *adkmodel.LLMR
 	if c.codec != nil {
 		protocol = c.codec.protocol()
 	}
-	if err := c.vision.CheckCandidate(protocol, images); err != nil {
+	if err := c.vision.CheckCandidatePreStore(protocol, images); err != nil {
 		return err
 	}
 	limits := c.vision.effective(protocol)
+	wantVersion := c.vision.TransformVersion()
+	maxMemory := c.vision.MaxTransformMemory()
 	var total int64
 	for i := range images {
 		if err := ctx.Err(); err != nil {
@@ -367,7 +445,7 @@ func (c *coreClient) resolveVisionImages(ctx context.Context, req *adkmodel.LLMR
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			return newError(ErrorCodeVisionArtifactUnavailable, "", "", "stored image is not available")
+			return codedError(ErrorCodeVisionArtifactUnavailable, err, "stored image is not available")
 		}
 		if len(data) == 0 || int64(len(data)) != img.EncodedBytes {
 			return newError(ErrorCodeVisionArtifactUnavailable, "", "", "stored bytes do not match the declared reference")
@@ -375,17 +453,125 @@ func (c *coreClient) resolveVisionImages(ctx context.Context, req *adkmodel.LLMR
 		if err := verifyDerivedDigest(data, img.Digest); err != nil {
 			return err
 		}
-		if total > limits.MaxRequestBytes-int64(len(data)) {
+		if wantVersion != "" && vision.TransformSatisfies(img.Width, img.Height, limits.MaxPixels, limits.MaxDimension, img.TransformVersion, wantVersion) {
+			if total > limits.MaxRequestBytes-int64(len(data)) {
+				return newError(ErrorCodeVisionBudgetExceeded, "", "", "image request size exceeds the request maximum")
+			}
+			total += int64(len(data))
+			img.Data = data
+			continue
+		}
+		rederived, newW, newH, newDigest, err := rederiveVisionBytes(ctx, data, img.MIME, limits, maxMemory)
+		if err != nil {
+			return err
+		}
+		if total > limits.MaxRequestBytes-int64(len(rederived)) {
 			return newError(ErrorCodeVisionBudgetExceeded, "", "", "image request size exceeds the request maximum")
 		}
-		total += int64(len(data))
-		img.Data = data
+		total += int64(len(rederived))
+		img.Data = rederived
+		img.Width = newW
+		img.Height = newH
+		img.EncodedBytes = int64(len(rederived))
+		img.Digest = newDigest
+		img.TransformVersion = wantVersion
+	}
+	if err := checkVisionBudget(limits, images); err != nil {
+		return err
 	}
 	if err := visionWireSizeOK(total, int64(len(images)), limits.MaxRequestBytes); err != nil {
 		return err
 	}
 	applyResolvedImages(req, images)
 	return nil
+}
+
+func decodeVisionBytes(data []byte, mime string) (image.Image, error) {
+	switch strings.ToLower(mime) {
+	case "image/png":
+		return png.Decode(bytes.NewReader(data))
+	case "image/jpeg":
+		return jpeg.Decode(bytes.NewReader(data))
+	case "image/gif":
+		all, err := gif.DecodeAll(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		if len(all.Image) == 0 {
+			return nil, errNoGifFrames
+		}
+		return all.Image[0], nil
+	case "image/webp":
+		return webp.Decode(bytes.NewReader(data))
+	default:
+		return nil, errUnsupportedVisionMedia
+	}
+}
+
+func encodeVisionBytes(img image.Image, mime string) ([]byte, error) {
+	var buf bytes.Buffer
+	switch strings.ToLower(mime) {
+	case "image/jpeg":
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 92}); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	default:
+		if err := png.Encode(&buf, img); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	}
+}
+
+func mapVisionTransformError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if code, ok := vision.CodeOf(err); ok {
+		switch code {
+		case vision.ErrorCodeVisionLimitExceeded, vision.ErrorCodeVisionBudgetExceeded:
+			return codedError(ErrorCodeVisionBudgetExceeded, err, "stored image exceeds the configured maximum")
+		case vision.ErrorCodeVisionDecodeFailed, vision.ErrorCodeVisionArtifactUnavailable, vision.ErrorCodeVisionInvalid:
+			return codedError(ErrorCodeVisionArtifactUnavailable, err, "stored image is not available")
+		case vision.ErrorCodeInvalidArgument, vision.ErrorCodeVisionFormatUnsupported:
+			return codedError(ErrorCodeProtocolInvalid, err, "stored image transform did not complete")
+		}
+	}
+	return codedError(ErrorCodeProtocolInvalid, err, "stored image transform did not complete")
+}
+
+func rederiveVisionBytes(ctx context.Context, data []byte, mime string, limits VisionRequestLimits, maxMemory int64) (redrived []byte, newW, newH int, newDigest string, err error) {
+	decoded, err := decodeVisionBytes(data, mime)
+	if err != nil {
+		return nil, 0, 0, "", codedError(ErrorCodeVisionArtifactUnavailable, err, "stored image is not available")
+	}
+	bounds := decoded.Bounds()
+	srcW, srcH := bounds.Dx(), bounds.Dy()
+	if srcW <= 0 || srcH <= 0 {
+		return nil, 0, 0, "", newError(ErrorCodeVisionArtifactUnavailable, "", "", "stored bytes do not match the declared reference")
+	}
+	dstW, dstH, resized, err := vision.PlanGeometry(srcW, srcH, limits.MaxPixels, limits.MaxDimension)
+	if err != nil {
+		return nil, 0, 0, "", mapVisionTransformError(err)
+	}
+	out := decoded
+	if resized {
+		if maxMemory <= 0 {
+			return nil, 0, 0, "", newError(ErrorCodeVisionBudgetExceeded, "", "", "image transform budget is not configured")
+		}
+		resampled, err := vision.ResizeLanczos3(ctx, decoded, dstW, dstH, maxMemory)
+		if err != nil {
+			return nil, 0, 0, "", mapVisionTransformError(err)
+		}
+		out = resampled
+	}
+	encoded, err := encodeVisionBytes(out, mime)
+	if err != nil {
+		return nil, 0, 0, "", codedError(ErrorCodeVisionArtifactUnavailable, err, "stored image is not available")
+	}
+	sum := sha256.Sum256(encoded)
+	return encoded, dstW, dstH, "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func applyResolvedImages(req *adkmodel.LLMRequest, images []VisionImage) {

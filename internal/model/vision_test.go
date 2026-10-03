@@ -8,6 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -536,5 +539,119 @@ func TestMapVisionExhaustion(t *testing.T) {
 	}
 	if err := mapVisionExhaustion("route", nil); err != nil {
 		t.Fatalf("empty chain must fall through, got %v", err)
+	}
+}
+
+func pngTestBytes(t *testing.T, width, height int) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		for x := range width {
+			img.Set(x, y, color.NRGBA{R: uint8((x * 255) / max(width-1, 1)), G: uint8((y * 255) / max(height-1, 1)), B: 128, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestResolveVisionImagesRederivesWhenCapsTighten(t *testing.T) {
+	data := pngTestBytes(t, 16, 16)
+	blobs := &fakeBlobReader{blobs: map[string][]byte{"art-1": data}}
+	cfg := testVisionConfig()
+	cfg.MaxDimension = 8
+	cfg.MaxPixels = 64
+	client := resolveTestClient(NewVisionPolicy(cfg), blobs, "openai_chat_compat")
+	req := visionRequest(visionFilePart("art-1", data, "image/png", 16, 16))
+	if err := client.resolveVisionImages(context.Background(), req); err != nil {
+		t.Fatalf("resolveVisionImages: %v", err)
+	}
+	got := req.Contents[0].Parts[0].InlineData
+	if got == nil {
+		t.Fatal("re-derived inline data is missing")
+	}
+	decoded, err := png.Decode(bytes.NewReader(got.Data))
+	if err != nil {
+		t.Fatalf("decode re-derived: %v", err)
+	}
+	if w, h := decoded.Bounds().Dx(), decoded.Bounds().Dy(); w > 8 || h > 8 || int64(w)*int64(h) > 64 {
+		t.Fatalf("re-derived dims = %dx%d, want within 8x8/64px", w, h)
+	}
+	if visionDigest(got.Data) == visionDigest(data) {
+		t.Fatal("re-derived digest must differ from the stored artifact")
+	}
+}
+
+func TestResolveVisionImagesReusesWhenSatisfied(t *testing.T) {
+	data := pngTestBytes(t, 8, 8)
+	blobs := &fakeBlobReader{blobs: map[string][]byte{"art-1": data}}
+	client := resolveTestClient(NewVisionPolicy(testVisionConfig()), blobs, "openai_chat_compat")
+	req := visionRequest(visionFilePart("art-1", data, "image/png", 8, 8))
+	if err := client.resolveVisionImages(context.Background(), req); err != nil {
+		t.Fatalf("resolveVisionImages: %v", err)
+	}
+	got := req.Contents[0].Parts[0].InlineData
+	if got == nil {
+		t.Fatal("resolved inline data is missing")
+	}
+	if !bytes.Equal(got.Data, data) {
+		t.Fatal("satisfied artifact must be reused without re-derivation")
+	}
+}
+
+func TestResolveVisionImagesRederivesOnVersionBump(t *testing.T) {
+	data := pngTestBytes(t, 8, 8)
+	blobs := &fakeBlobReader{blobs: map[string][]byte{"art-1": data}}
+	cfg := testVisionConfig()
+	cfg.TransformVersion = "v2"
+	client := resolveTestClient(NewVisionPolicy(cfg), blobs, "openai_chat_compat")
+	req := visionRequest(visionFilePart("art-1", data, "image/png", 8, 8))
+	if err := client.resolveVisionImages(context.Background(), req); err != nil {
+		t.Fatalf("resolveVisionImages: %v", err)
+	}
+	got := req.Contents[0].Parts[0].InlineData
+	if got == nil {
+		t.Fatal("re-derived inline data is missing")
+	}
+	decoded, err := png.Decode(bytes.NewReader(got.Data))
+	if err != nil {
+		t.Fatalf("decode re-derived: %v", err)
+	}
+	if w, h := decoded.Bounds().Dx(), decoded.Bounds().Dy(); w != 8 || h != 8 {
+		t.Fatalf("re-derived dims = %dx%d, want 8x8", w, h)
+	}
+}
+
+func TestOpenAIAssistantImageIsTypedError(t *testing.T) {
+	content := &genai.Content{
+		Role: "model",
+		Parts: []*genai.Part{
+			{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("bytes")}},
+		},
+	}
+	if _, err := contentToOpenAIMessages(content, "auto"); err == nil {
+		t.Fatal("expected typed error for assistant image")
+	} else if code, _ := CodeOf(err); code != ErrorCodeProtocolInvalid {
+		t.Fatalf("code = %q, want model_protocol_invalid", code)
+	}
+}
+
+func TestResolveVisionImagesPreservesBlobCause(t *testing.T) {
+	sentinel := errors.New("sentinel store failure")
+	blobs := &fakeBlobReader{err: sentinel}
+	client := resolveTestClient(NewVisionPolicy(testVisionConfig()), blobs, "openai_chat_compat")
+	data := []byte("resolved-image-bytes")
+	req := visionRequest(visionFilePart("art-1", data, "image/png", 8, 8))
+	err := client.resolveVisionImages(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if code, _ := CodeOf(err); code != ErrorCodeVisionArtifactUnavailable {
+		t.Fatalf("code = %q, want vision_artifact_unavailable", code)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("underlying store error is not reachable: %v", err)
 	}
 }
