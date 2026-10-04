@@ -86,16 +86,16 @@ func ResizeLanczos3(ctx context.Context, src image.Image, dstW, dstH int, maxMem
 		return nil, Errorf(ErrorCodeInvalidArgument, "transform must not upscale")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, Errorf(ErrorCodeVisionDecodeFailed, "transform was cancelled")
+		return nil, wrapWithCode(ErrorCodeVisionDecodeFailed, "transform was cancelled", err)
 	}
 	flat := imageToGray16Grid(src, bounds)
 	tmp := resampleHorizontal(ctx, flat, srcW, srcH, dstW)
 	if tmp == nil {
-		return nil, Errorf(ErrorCodeVisionDecodeFailed, "transform was cancelled")
+		return nil, wrapWithCode(ErrorCodeVisionDecodeFailed, "transform was cancelled", ctx.Err())
 	}
 	out := resampleVertical(ctx, tmp, dstW, srcH, dstH)
 	if out == nil {
-		return nil, Errorf(ErrorCodeVisionDecodeFailed, "transform was cancelled")
+		return nil, wrapWithCode(ErrorCodeVisionDecodeFailed, "transform was cancelled", ctx.Err())
 	}
 	return gridToNRGBA(out, dstW, dstH), nil
 }

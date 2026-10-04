@@ -133,15 +133,16 @@ func visionRecorderObserver(recorder *telemetry.VisionRecorder) vision.Observer 
 			return
 		}
 		recorder.Record(ctx, &telemetry.VisionObservation{
-			Operation:    observation.Operation,
-			Result:       observation.Result,
-			MIME:         observation.MIME,
-			Images:       observation.Images,
-			Version:      observation.Version,
-			Protocol:     observation.Protocol,
-			SizeBucket:   observation.EncodedBytes,
-			PixelsBucket: observation.Pixels,
-			Duration:     observation.Duration,
+			Operation:       observation.Operation,
+			Result:          observation.Result,
+			MIME:            observation.MIME,
+			Images:          observation.Images,
+			Version:         observation.Version,
+			Protocol:        observation.Protocol,
+			SizeBucket:      observation.EncodedBytes,
+			PixelsBucket:    observation.Pixels,
+			DimensionBucket: observation.DimensionBucket,
+			Duration:        observation.Duration,
 		})
 	}
 }

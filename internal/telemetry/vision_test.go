@@ -16,21 +16,22 @@ func TestVisionRecorderUsesBoundedLabels(t *testing.T) {
 		t.Fatalf("NewVisionRecorder: %v", err)
 	}
 	recorder.Record(context.Background(), &VisionObservation{
-		Operation:    "ingest",
-		Result:       "ok",
-		MIME:         "image/png",
-		Images:       1,
-		Version:      "v1",
-		Protocol:     "",
-		SizeBucket:   1 << 16,
-		PixelsBucket: 1 << 18,
-		Duration:     10 * time.Millisecond,
+		Operation:       "ingest",
+		Result:          "ok",
+		MIME:            "image/png",
+		Images:          1,
+		Version:         "v1",
+		Protocol:        "",
+		SizeBucket:      1 << 16,
+		PixelsBucket:    1 << 18,
+		DimensionBucket: 512,
+		Duration:        10 * time.Millisecond,
 	})
 	recorder.Record(context.Background(), nil)
 	var nilRecorder *VisionRecorder
 	nilRecorder.Record(context.Background(), &VisionObservation{Operation: "ingest"})
 	labels := AllowedMetricLabels(MetricVisionOperationsTotal)
-	for _, want := range []string{AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol, AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket} {
+	for _, want := range []string{AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol, AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket, AttrVisionDimensionBucket} {
 		found := false
 		for _, got := range labels {
 			if got == want {
@@ -53,7 +54,7 @@ func TestVisionRecorderUsesBoundedLabels(t *testing.T) {
 	if len(durationLabels) == 0 {
 		t.Fatal("vision duration labels missing")
 	}
-	for _, want := range []string{AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket} {
+	for _, want := range []string{AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket, AttrVisionDimensionBucket} {
 		found := false
 		for _, got := range durationLabels {
 			if got == want {

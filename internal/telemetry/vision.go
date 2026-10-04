@@ -11,15 +11,16 @@ import (
 )
 
 type VisionObservation struct {
-	Operation    string
-	Result       string
-	MIME         string
-	Images       int
-	Version      string
-	Protocol     string
-	SizeBucket   int64
-	PixelsBucket int64
-	Duration     time.Duration
+	Operation       string
+	Result          string
+	MIME            string
+	Images          int
+	Version         string
+	Protocol        string
+	SizeBucket      int64
+	PixelsBucket    int64
+	DimensionBucket int64
+	Duration        time.Duration
 }
 
 type VisionRecorder struct {
@@ -58,6 +59,7 @@ func (r *VisionRecorder) Record(ctx context.Context, observation *VisionObservat
 		attribute.Int(AttrVisionImages, observation.Images),
 		attribute.Int64(AttrVisionSizeBucket, observation.SizeBucket),
 		attribute.Int64(AttrVisionPixelsBucket, observation.PixelsBucket),
+		attribute.Int64(AttrVisionDimensionBucket, observation.DimensionBucket),
 	)
 	r.operations.Add(ctx, 1, attrs)
 	r.duration.Record(ctx, observation.Duration.Seconds(), attrs)

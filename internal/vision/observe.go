@@ -6,16 +6,17 @@ import (
 )
 
 type Observation struct {
-	Operation    string
-	MIME         string
-	Images       int
-	EncodedBytes int64
-	Pixels       int64
-	Version      string
-	Protocol     string
-	Result       string
-	Duration     time.Duration
-	Err          error
+	Operation       string
+	MIME            string
+	Images          int
+	EncodedBytes    int64
+	Pixels          int64
+	DimensionBucket int64
+	Version         string
+	Protocol        string
+	Result          string
+	Duration        time.Duration
+	Err             error
 }
 
 type Observer func(ctx stdcontext.Context, observation *Observation)
@@ -41,6 +42,7 @@ func (s *Service) observe(ctx stdcontext.Context, observation *Observation) {
 	observation.Protocol = sanitizeProtocol(observation.Protocol)
 	observation.EncodedBytes = bucketBytes(observation.EncodedBytes)
 	observation.Pixels = bucketPixels(observation.Pixels)
+	observation.DimensionBucket = bucketDimensionFromPixels(observation.Pixels)
 	s.observer(ctx, observation)
 }
 
@@ -96,5 +98,18 @@ func bucketPixels(n int64) int64 {
 		return 1 << 22
 	default:
 		return 1 << 24
+	}
+}
+
+func bucketDimensionFromPixels(pixelsBucket int64) int64 {
+	switch {
+	case pixelsBucket <= 1<<18:
+		return 512
+	case pixelsBucket <= 1<<20:
+		return 1024
+	case pixelsBucket <= 1<<22:
+		return 2048
+	default:
+		return 4096
 	}
 }
