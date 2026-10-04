@@ -138,12 +138,19 @@ func newDiscordAdapter(cfg *config.Config, db *sql.DB, artifactRoot string, logg
 	if err != nil {
 		return nil, err
 	}
-	return discord.New(&cfg.Channels.Discord, &discordResumeStore{
+	adapter, err := discord.New(&cfg.Channels.Discord, &discordResumeStore{
 		store:    store.NewChannelResumeStore(db),
 		instance: cfg.Channels.Discord.Instance,
 	}, executor, &discordMediaStore{
 		store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
 	}, &discordSessionEnsurer{sessions: store.NewSessionService(db)}, logger)
+	if err != nil {
+		return nil, err
+	}
+	if svc := newVisionService(cfg, db, artifactRoot); svc != nil {
+		adapter.SetVisionService(svc)
+	}
+	return adapter, nil
 }
 
 func discordApprovalDecider(adapter *discord.Adapter) toolbroker.ApprovalDecider {

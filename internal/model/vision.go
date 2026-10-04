@@ -528,13 +528,16 @@ func mapVisionTransformError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
 	if code, ok := vision.CodeOf(err); ok {
 		switch code {
 		case vision.ErrorCodeVisionLimitExceeded, vision.ErrorCodeVisionBudgetExceeded:
 			return codedError(ErrorCodeVisionBudgetExceeded, err, "stored image exceeds the configured maximum")
 		case vision.ErrorCodeVisionDecodeFailed, vision.ErrorCodeVisionArtifactUnavailable, vision.ErrorCodeVisionInvalid:
 			return codedError(ErrorCodeVisionArtifactUnavailable, err, "stored image is not available")
-		case vision.ErrorCodeInvalidArgument, vision.ErrorCodeVisionFormatUnsupported:
+		default:
 			return codedError(ErrorCodeProtocolInvalid, err, "stored image transform did not complete")
 		}
 	}
@@ -562,6 +565,9 @@ func rederiveVisionBytes(ctx context.Context, data []byte, mime string, limits V
 		}
 		resampled, err := vision.ResizeLanczos3(ctx, decoded, dstW, dstH, maxMemory)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, 0, 0, "", ctx.Err()
+			}
 			return nil, 0, 0, "", mapVisionTransformError(err)
 		}
 		out = resampled

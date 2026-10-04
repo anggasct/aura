@@ -6,17 +6,17 @@ import (
 )
 
 type Observation struct {
-	Operation    string
-	MIME         string
-	Images       int
-	EncodedBytes int64
-	Pixels       int64
-	Width        int
-	Height       int
-	Version      string
-	Result       string
-	Duration     time.Duration
-	Err          error
+	Operation       string
+	MIME            string
+	Images          int
+	EncodedBytes    int64
+	Pixels          int64
+	DimensionBucket int64
+	Version         string
+	Protocol        string
+	Result          string
+	Duration        time.Duration
+	Err             error
 }
 
 type Observer func(ctx stdcontext.Context, observation *Observation)
@@ -37,11 +37,40 @@ func (s *Service) observe(ctx stdcontext.Context, observation *Observation) {
 	} else {
 		observation.Result = "ok"
 	}
+	observation.Operation = sanitizeOperation(observation.Operation)
+	observation.MIME = sanitizeMIME(observation.MIME)
+	observation.Protocol = sanitizeProtocol(observation.Protocol)
 	observation.EncodedBytes = bucketBytes(observation.EncodedBytes)
 	observation.Pixels = bucketPixels(observation.Pixels)
-	observation.Width = 0
-	observation.Height = 0
+	observation.DimensionBucket = bucketDimensionFromPixels(observation.Pixels)
 	s.observer(ctx, observation)
+}
+
+func sanitizeOperation(op string) string {
+	switch op {
+	case "ingest", "transform", "route", "deliver":
+		return op
+	default:
+		return "ingest"
+	}
+}
+
+func sanitizeMIME(mime string) string {
+	switch mime {
+	case MIMEPNG, MIMEJPEG, MIMEWebP, MIMEgif:
+		return mime
+	default:
+		return ""
+	}
+}
+
+func sanitizeProtocol(protocol string) string {
+	switch protocol {
+	case "openai_responses", "openai_chat_compat", "anthropic_messages", "gemini_native", "":
+		return protocol
+	default:
+		return ""
+	}
 }
 
 func bucketBytes(n int64) int64 {
@@ -69,5 +98,18 @@ func bucketPixels(n int64) int64 {
 		return 1 << 22
 	default:
 		return 1 << 24
+	}
+}
+
+func bucketDimensionFromPixels(pixelsBucket int64) int64 {
+	switch {
+	case pixelsBucket <= 1<<18:
+		return 512
+	case pixelsBucket <= 1<<20:
+		return 1024
+	case pixelsBucket <= 1<<22:
+		return 2048
+	default:
+		return 4096
 	}
 }

@@ -3,6 +3,7 @@ package vision
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -72,6 +73,15 @@ type IngestRequest struct {
 
 type ArtifactWriter interface {
 	Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error)
+	Unlink(ctx context.Context, refID string) error
+}
+
+func newArtifactID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return ""
+	}
+	return "art-" + hex.EncodeToString(raw[:])
 }
 
 type ArtifactMetadata struct {
@@ -184,8 +194,6 @@ func (s *Service) Ingest(ctx context.Context, req *IngestRequest) (ImagePart, er
 		Images:       boolToImages(err == nil),
 		EncodedBytes: part.EncodedBytes,
 		Pixels:       int64(part.Width) * int64(part.Height),
-		Width:        part.Width,
-		Height:       part.Height,
 		Version:      s.limits.TransformVersion,
 		Duration:     time.Since(started),
 		Err:          err,
@@ -304,6 +312,11 @@ func (s *Service) ingest(ctx context.Context, req *IngestRequest) (ImagePart, er
 		Trust:            TrustUntrustedExternal,
 	}
 
+	sourceID := newArtifactID()
+	derivedID := newArtifactID()
+	if sourceID == "" || derivedID == "" {
+		return ImagePart{}, Errorf(ErrorCodeVisionArtifactUnavailable, "artifact identifier did not complete")
+	}
 	sourceMeta, err := partMetadata(&part, "source")
 	if err != nil {
 		return ImagePart{}, err
@@ -312,30 +325,40 @@ func (s *Service) ingest(ctx context.Context, req *IngestRequest) (ImagePart, er
 	if err != nil {
 		return ImagePart{}, err
 	}
-	sourceRef, err := s.store.Put(ctx, bytes.NewReader(raw), &ArtifactMetadata{
+	if _, err := s.store.Put(ctx, bytes.NewReader(raw), &ArtifactMetadata{
+		ID:        sourceID,
 		SessionID: req.SessionID,
 		Filename:  req.Filename,
 		MediaType: mime,
 		Metadata:  sourceMeta,
-	})
-	if err != nil {
-		return ImagePart{}, Errorf(ErrorCodeVisionArtifactUnavailable, "source artifact write did not complete")
+	}); err != nil {
+		if isQuotaExceeded(err) {
+			return ImagePart{}, wrapWithCode(ErrorCodeArtifactQuotaExceeded, "source artifact quota exceeded", err)
+		}
+		return ImagePart{}, wrapWithCode(ErrorCodeVisionArtifactUnavailable, "source artifact write did not complete", err)
 	}
-	_ = sourceRef
 	derivedRef, err := s.store.Put(ctx, bytes.NewReader(encoded), &ArtifactMetadata{
+		ID:        derivedID,
 		SessionID: req.SessionID,
 		Filename:  req.Filename,
 		MediaType: derivedMediaType(mime),
 		Metadata:  derivedMeta,
 	})
 	if err != nil {
-		return ImagePart{}, Errorf(ErrorCodeVisionArtifactUnavailable, "derived artifact write did not complete")
+		_ = s.store.Unlink(ctx, sourceID)
+		if isQuotaExceeded(err) {
+			return ImagePart{}, wrapWithCode(ErrorCodeArtifactQuotaExceeded, "derived artifact quota exceeded", err)
+		}
+		return ImagePart{}, wrapWithCode(ErrorCodeVisionArtifactUnavailable, "derived artifact write did not complete", err)
 	}
 	if derivedRef.ID == "" {
+		_ = s.store.Unlink(ctx, sourceID)
 		return ImagePart{}, Errorf(ErrorCodeVisionArtifactUnavailable, "derived artifact write did not complete")
 	}
 	part.ArtifactID = derivedRef.ID
 	if err := ValidatePart(&part); err != nil {
+		_ = s.store.Unlink(ctx, sourceID)
+		_ = s.store.Unlink(ctx, derivedRef.ID)
 		return ImagePart{}, err
 	}
 	return part, nil
@@ -409,6 +432,14 @@ func (s *Service) decodeBounded(ctx context.Context, mime string, raw []byte) (d
 		}()
 		return decodedImage{}, true, Errorf(ErrorCodeVisionDecodeFailed, "image decode exceeded the deadline")
 	case res := <-done:
+		select {
+		case <-ctx.Done():
+			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode was cancelled")
+		default:
+		}
+		if !timer.Stop() {
+			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode exceeded the deadline")
+		}
 		if res.err != nil {
 			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode did not complete")
 		}

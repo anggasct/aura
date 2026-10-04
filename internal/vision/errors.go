@@ -15,6 +15,7 @@ const (
 	ErrorCodeVisionFormatUnsupported   ErrorCode = "vision_format_unsupported"
 	ErrorCodeVisionBudgetExceeded      ErrorCode = "vision_budget_exceeded"
 	ErrorCodeVisionArtifactUnavailable ErrorCode = "vision_artifact_unavailable"
+	ErrorCodeArtifactQuotaExceeded     ErrorCode = "artifact_quota_exceeded"
 )
 
 type Error struct {
@@ -36,6 +37,21 @@ func CodeOf(err error) (ErrorCode, bool) {
 
 func Errorf(code ErrorCode, format string, args ...any) error {
 	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
+}
+
+func wrapWithCode(code ErrorCode, detail string, cause error) error {
+	if cause == nil {
+		return &Error{Code: code, Detail: detail}
+	}
+	return fmt.Errorf("%w: %w", &Error{Code: code, Detail: detail}, cause)
+}
+
+func isQuotaExceeded(err error) bool {
+	if err == nil {
+		return false
+	}
+	code, ok := CodeOf(err)
+	return ok && code == ErrorCodeArtifactQuotaExceeded
 }
 
 func errNilArgument(name string) error {

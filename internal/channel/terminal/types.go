@@ -8,7 +8,8 @@ import (
 )
 
 type Input struct {
-	Text string
+	Text  string
+	Image json.RawMessage `json:"image,omitempty"`
 }
 
 type Event struct {

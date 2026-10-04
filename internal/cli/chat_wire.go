@@ -46,7 +46,7 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 		}
 		parts := make([]runtimeingress.InputPart, len(req.Parts))
 		for i := range req.Parts {
-			parts[i] = runtimeingress.InputPart{Text: req.Parts[i].Text}
+			parts[i] = runtimeingress.InputPart{Text: req.Parts[i].Text, Image: req.Parts[i].Image}
 		}
 		runtimeReq := &runtime.TurnRequest{
 			SessionID:      req.SessionID,
