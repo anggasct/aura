@@ -481,9 +481,6 @@ func TestObserverRedaction(t *testing.T) {
 	if got == nil || got.Result != "ok" || got.Operation != "ingest" {
 		t.Fatalf("observation = %+v", got)
 	}
-	if got.Width != 0 || got.Height != 0 {
-		t.Errorf("observation carries raw dimensions: %+v", got)
-	}
 }
 
 func webpLossyBytes(t *testing.T) []byte {
@@ -904,7 +901,7 @@ func (m *causeStore) Put(_ context.Context, _ io.Reader, _ *ArtifactMetadata) (A
 func (m *quotaStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
 	m.calls++
 	if m.calls == m.failOn {
-		return ArtifactRef{}, Errorf(ErrorCodeArtifactQuotaExceeded, "artifact_quota_exceeded: backend quota is exhausted")
+		return ArtifactRef{}, Errorf(ErrorCodeArtifactQuotaExceeded, "backend quota is exhausted")
 	}
 	return m.recordingStore.Put(ctx, r, meta)
 }

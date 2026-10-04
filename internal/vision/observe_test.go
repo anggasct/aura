@@ -29,9 +29,6 @@ func TestObserveBucketsAndZeroesDimensions(t *testing.T) {
 	if got.MIME != MIMEPNG {
 		t.Errorf("mime = %q", got.MIME)
 	}
-	if got.Width != 0 || got.Height != 0 {
-		t.Errorf("dimensions leaked: %dx%d", got.Width, got.Height)
-	}
 	if got.EncodedBytes != 1<<16 && got.EncodedBytes != 1<<18 && got.EncodedBytes != 1<<20 {
 		t.Errorf("bytes not bucketed: %d", got.EncodedBytes)
 	}
@@ -81,9 +78,6 @@ func TestObserveFailureRedacts(t *testing.T) {
 	}
 	if failed.MIME != "" {
 		t.Errorf("failure mime = %q, want empty", failed.MIME)
-	}
-	if failed.Width != 0 || failed.Height != 0 {
-		t.Errorf("failure dimensions leaked")
 	}
 	if failed.Result == "" || failed.Result == "ok" {
 		t.Errorf("failure result = %q", failed.Result)

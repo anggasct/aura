@@ -3,7 +3,6 @@ package vision
 import (
 	"errors"
 	"fmt"
-	"strings"
 )
 
 type ErrorCode string
@@ -51,7 +50,8 @@ func isQuotaExceeded(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), string(ErrorCodeArtifactQuotaExceeded))
+	code, ok := CodeOf(err)
+	return ok && code == ErrorCodeArtifactQuotaExceeded
 }
 
 func errNilArgument(name string) error {

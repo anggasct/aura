@@ -194,8 +194,6 @@ func (s *Service) Ingest(ctx context.Context, req *IngestRequest) (ImagePart, er
 		Images:       boolToImages(err == nil),
 		EncodedBytes: part.EncodedBytes,
 		Pixels:       int64(part.Width) * int64(part.Height),
-		Width:        part.Width,
-		Height:       part.Height,
 		Version:      s.limits.TransformVersion,
 		Duration:     time.Since(started),
 		Err:          err,

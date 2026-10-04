@@ -11,8 +11,6 @@ type Observation struct {
 	Images       int
 	EncodedBytes int64
 	Pixels       int64
-	Width        int
-	Height       int
 	Version      string
 	Protocol     string
 	Result       string
@@ -43,8 +41,6 @@ func (s *Service) observe(ctx stdcontext.Context, observation *Observation) {
 	observation.Protocol = sanitizeProtocol(observation.Protocol)
 	observation.EncodedBytes = bucketBytes(observation.EncodedBytes)
 	observation.Pixels = bucketPixels(observation.Pixels)
-	observation.Width = 0
-	observation.Height = 0
 	s.observer(ctx, observation)
 }
 

@@ -89,6 +89,9 @@ func (a *visionStoreAdapter) Put(ctx context.Context, r io.Reader, meta *vision.
 		Metadata:  meta.Metadata,
 	})
 	if err != nil {
+		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+			return vision.ArtifactRef{}, fmt.Errorf("%w: %w", vision.Errorf(vision.ErrorCodeArtifactQuotaExceeded, "artifact quota is exhausted"), err)
+		}
 		return vision.ArtifactRef{}, err
 	}
 	return vision.ArtifactRef{ID: ref.ID, BlobDigest: ref.BlobDigest, SizeBytes: ref.SizeBytes}, nil
