@@ -432,6 +432,14 @@ func (s *Service) decodeBounded(ctx context.Context, mime string, raw []byte) (d
 		}()
 		return decodedImage{}, true, Errorf(ErrorCodeVisionDecodeFailed, "image decode exceeded the deadline")
 	case res := <-done:
+		select {
+		case <-ctx.Done():
+			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode was cancelled")
+		default:
+		}
+		if !timer.Stop() {
+			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode exceeded the deadline")
+		}
 		if res.err != nil {
 			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode did not complete")
 		}
