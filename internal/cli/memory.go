@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/memory"
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
 )
@@ -84,18 +86,58 @@ func (s *memoryDocumentStore) DeleteExpiredSummaries(ctx context.Context, now ti
 	return s.store.DeleteExpiredSummaries(ctx, now, limit)
 }
 
-func buildMemoryProvider(cfg *config.Config, db *sql.DB, observer memory.Observer) (*memory.Provider, error) {
-	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, memory.Config{
+func buildMemoryService(cfg *config.Config, db *sql.DB, observer memory.Observer) (*memory.Service, error) {
+	return memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, memory.Config{
 		MaxDocuments:         cfg.Memory.MaxDocuments,
 		TokenBudget:          cfg.Memory.RecallTokenBudget,
 		SummaryPromptVersion: cfg.Memory.SummaryPromptVersion,
 		SummaryTTL:           time.Duration(cfg.Memory.SummaryTTL),
 		Observer:             observer,
 	})
+}
+
+func buildMemoryProvider(cfg *config.Config, db *sql.DB, observer memory.Observer) (*memory.Provider, *memory.Service, error) {
+	service, err := buildMemoryService(cfg, db, observer)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return memory.NewProvider(service, memory.ProviderConfig{})
+	provider, err := memory.NewProvider(service, memory.ProviderConfig{})
+	if err != nil {
+		return nil, nil, err
+	}
+	return provider, service, nil
+}
+
+func buildMemoryHook(service *memory.Service, logger *slog.Logger) func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error {
+	return func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error {
+		if service == nil {
+			return memory.Errorf(memory.ErrorCodeInvalidArgument, "memory service must not be nil")
+		}
+		if req == nil {
+			return memory.Errorf(memory.ErrorCodeInvalidArgument, "turn request must not be nil")
+		}
+		converted := make([]*memory.Event, 0, len(events))
+		for i := range events {
+			converted = append(converted, &memory.Event{
+				ID:        events[i].ID,
+				SessionID: events[i].SessionID,
+				Sequence:  events[i].Sequence,
+				TurnID:    events[i].TurnID,
+				Author:    events[i].Author,
+				Kind:      events[i].Kind,
+				Payload:   events[i].Payload,
+				CreatedAt: events[i].CreatedAt,
+			})
+		}
+		result, err := service.ProjectBatch(ctx, req.PrincipalID, converted)
+		if result.Dropped > 0 && logger != nil {
+			logger.DebugContext(ctx, "memory projection dropped secrets", "dropped", result.Dropped, "turn_id", req.TurnID)
+		}
+		if _, purgeErr := service.PurgeExpired(ctx, time.Now().UTC(), 100); purgeErr != nil && logger != nil {
+			logger.WarnContext(ctx, "memory expiry failed", "error", purgeErr, "turn_id", req.TurnID)
+		}
+		return err
+	}
 }
 
 func memoryRecorderObserver(recorder *telemetry.MemoryRecorder) memory.Observer {

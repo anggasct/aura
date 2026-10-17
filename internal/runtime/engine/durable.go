@@ -501,6 +501,12 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 			}
 		}
 	}
+	if e.cfg.MemoryHook != nil {
+		hookCtx := context.WithoutCancel(ctx)
+		if hookErr := e.cfg.MemoryHook(hookCtx, req, executed); hookErr != nil {
+			e.logger.ErrorContext(hookCtx, "memory projection failed", "error", hookErr, "turn_id", req.TurnID)
+		}
+	}
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		return err
 	}

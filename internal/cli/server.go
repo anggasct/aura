@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/logging"
 	"github.com/anggasct/aura/internal/model"
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/server"
@@ -114,16 +115,18 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				runtimeadk.WithBuiltinToolExecutor(builtin),
 				runtimeadk.WithAgentResolver(agentRegistry, routeModel),
 			}
+			var memoryHook func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
 			if cfg.Memory.Enabled {
 				memoryRecorder, err := telemetry.NewMemoryRecorder(pipeline.MeterProvider())
 				if err != nil {
 					return err
 				}
-				memoryProvider, err := buildMemoryProvider(cfg, db, memoryRecorderObserver(memoryRecorder))
+				memoryProvider, memoryService, err := buildMemoryProvider(cfg, db, memoryRecorderObserver(memoryRecorder))
 				if err != nil {
 					return err
 				}
 				executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryProvider))
+				memoryHook = buildMemoryHook(memoryService, logger)
 			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
@@ -150,6 +153,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 				DefaultAgentID:  auraagent.DefaultID,
 				Durable:         durableConfig,
+				MemoryHook:      memoryHook,
 			}, events, store.NewDedupeStore(db), adkExecutor, logger)
 			if err != nil {
 				return err

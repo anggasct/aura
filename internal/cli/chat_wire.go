@@ -178,6 +178,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 	var broker runtime.ToolBroker = terminalBroker{}
 	var executorOpts []runtimeadk.ExecutorOption
 	executorOpts = append(executorOpts, runtimeadk.WithAgentResolver(registry, routeModel))
+	var memoryHook func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
 	var approvals *terminal.ApprovalBridge
 	if cfg.Tools != nil {
 		if useTTY {
@@ -195,11 +196,12 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
 	}
 	if cfg.Memory.Enabled {
-		memoryProvider, err := buildMemoryProvider(cfg, db, nil)
+		memoryProvider, memoryService, err := buildMemoryProvider(cfg, db, nil)
 		if err != nil {
 			return err
 		}
 		executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryProvider))
+		memoryHook = buildMemoryHook(memoryService, logger)
 	}
 	executor, err := runtimeadk.NewADKExecutor(
 		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,
@@ -213,6 +215,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
 		ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 		DefaultAgentID:  auraagent.DefaultID,
+		MemoryHook:      memoryHook,
 	}, events, store.NewDedupeStore(db), executor, logger)
 	if err != nil {
 		return err
