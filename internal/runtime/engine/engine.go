@@ -643,14 +643,14 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 			}
 		}
 	}
-	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
-		e.logger.ErrorContext(ctx, "runtime failed to persist terminal event", "error", err, "turn_id", t.turnID)
-	}
 	if e.cfg.MemoryHook != nil {
 		hookCtx := context.WithoutCancel(ctx)
 		if hookErr := e.cfg.MemoryHook(hookCtx, &t.req, executed); hookErr != nil {
 			e.logger.ErrorContext(hookCtx, "memory projection failed", "error", hookErr, "turn_id", t.turnID)
 		}
+	}
+	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
+		e.logger.ErrorContext(ctx, "runtime failed to persist terminal event", "error", err, "turn_id", t.turnID)
 	}
 	if e.sessionStore != nil {
 		e.releaseTurn(ctx, t)
