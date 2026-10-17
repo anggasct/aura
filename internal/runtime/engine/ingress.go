@@ -56,6 +56,7 @@ func turnRequestFromEnvelope(env *runtimeingress.IngressEnvelope) (*runtime.Turn
 		PrincipalID:    env.PrincipalID,
 		Origin:         runtime.Origin(env.Source),
 		Parts:          env.Parts,
+		ReplyContext:   env.ReplyContext,
 		IdempotencyKey: env.ExternalID,
 		TraceParent:    env.TraceParent,
 	}, nil

@@ -17,6 +17,8 @@ const (
 	ErrorCodeBudgetExhausted            ErrorCode = "budget_exhausted"
 	ErrorCodeRuntimeInternal            ErrorCode = "runtime_internal"
 	ErrorCodeInvalidArgument            ErrorCode = "invalid_argument"
+	ErrorCodeDeliveryFailed             ErrorCode = "delivery_failed"
+	ErrorCodeDeliverySkipped            ErrorCode = "delivery_skipped"
 	ErrorCodeCheckpointInvalid          ErrorCode = "checkpoint_invalid"
 	ErrorCodeCheckpointNotFound         ErrorCode = "checkpoint_not_found"
 	ErrorCodeCheckpointStale            ErrorCode = "checkpoint_stale"

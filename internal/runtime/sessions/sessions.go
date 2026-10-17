@@ -20,17 +20,18 @@ type Part struct {
 }
 
 type Descriptor struct {
-	TurnID         string    `json:"turn_id"`
-	SessionID      string    `json:"session_id"`
-	PrincipalID    string    `json:"principal_id"`
-	Origin         string    `json:"origin"`
-	Parts          []Part    `json:"parts"`
-	IdempotencyKey string    `json:"idempotency_key"`
-	Deadline       time.Time `json:"deadline,omitempty"`
-	MaxTokens      int64     `json:"max_tokens"`
-	MaxCost        float64   `json:"max_cost"`
-	TraceParent    string    `json:"trace_parent"`
-	AgentID        string    `json:"agent_id"`
+	TurnID         string          `json:"turn_id"`
+	SessionID      string          `json:"session_id"`
+	PrincipalID    string          `json:"principal_id"`
+	Origin         string          `json:"origin"`
+	Parts          []Part          `json:"parts"`
+	ReplyContext   json.RawMessage `json:"reply_context,omitempty"`
+	IdempotencyKey string          `json:"idempotency_key"`
+	Deadline       time.Time       `json:"deadline,omitempty"`
+	MaxTokens      int64           `json:"max_tokens"`
+	MaxCost        float64         `json:"max_cost"`
+	TraceParent    string          `json:"trace_parent"`
+	AgentID        string          `json:"agent_id"`
 }
 
 type QueuedTurn struct {

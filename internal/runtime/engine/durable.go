@@ -32,6 +32,7 @@ func turnDescriptorFromRequest(req *runtime.TurnRequest) runtimesessions.Descrip
 		PrincipalID:    req.PrincipalID,
 		Origin:         string(req.Origin),
 		Parts:          parts,
+		ReplyContext:   req.ReplyContext,
 		IdempotencyKey: req.IdempotencyKey,
 		Deadline:       req.Deadline,
 		MaxTokens:      req.Budget.MaxTokens,
@@ -52,6 +53,7 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRe
 		PrincipalID:    desc.PrincipalID,
 		Origin:         runtime.Origin(desc.Origin),
 		Parts:          parts,
+		ReplyContext:   desc.ReplyContext,
 		IdempotencyKey: desc.IdempotencyKey,
 		Deadline:       desc.Deadline,
 		Budget:         runtime.Budget{MaxTokens: desc.MaxTokens, MaxCost: desc.MaxCost},
@@ -471,6 +473,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	}
 
 	var execErr error
+	var executed []store.RuntimeEvent
 	for ev, err := range e.executor.Execute(ctx, req) {
 		if err != nil {
 			execErr = err
@@ -480,11 +483,24 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 			execErr = emitErr
 			break
 		}
+		executed = append(executed, ev)
 	}
 	if ctx.Err() == context.Canceled {
 		return ctx.Err()
 	}
 	terminalKind, terminalPayload := e.terminalOutcome(ctx, execErr, req)
+	if terminalKind == runtime.EventKindTurnCompleted {
+		deliveryCtx := context.WithoutCancel(ctx)
+		if deliveryErr := e.deliverCompletedTurn(deliveryCtx, req, executed); deliveryErr != nil {
+			if code, ok := runtime.CodeOf(deliveryErr); ok && code == runtime.ErrorCodeDeliverySkipped {
+				e.logger.DebugContext(deliveryCtx, "turn delivery skipped", "error", deliveryErr, "turn_id", req.TurnID)
+			} else {
+				e.logger.ErrorContext(deliveryCtx, "turn delivery failed", "error", deliveryErr, "turn_id", req.TurnID)
+				terminalKind = runtime.EventKindTurnFailed
+				terminalPayload = failedPayload(runtime.ErrorCodeDeliveryFailed, "channel delivery failed", deliveryErr, e.agentID(req))
+			}
+		}
+	}
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		return err
 	}
