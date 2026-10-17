@@ -73,7 +73,7 @@ func startMediaSession(t *testing.T, gateway *fakeGateway) (*websocket.Conn, *me
 	sink := newMemorySink()
 	tc := startTestAdapter(t, gateway, sink, &memoryResumeStore{}, &logCapture{})
 	ws := gateway.nextConn(5 * time.Second)
-	gateway.send(ws, opHello, helloData(30), nil, "")
+	gateway.send(ws, opHello, helloData(30000), nil, "")
 	gateway.nextFrame(5 * time.Second)
 	gateway.send(ws, opDispatch, readyData("session-a", "999"), seqPtr(0), eventReady)
 	return ws, sink, tc
