@@ -59,17 +59,26 @@ func FormatCircuitKey(definitionID, endpoint string) string {
 	return definitionID + "|" + cleaned
 }
 
-func ComputeConfigDigest(def *config.ModelDefinition) string {
+func ComputeConfigDigest(def *config.ModelDefinition, resolved config.ResolvedDefinition) string {
 	if def == nil {
 		return ""
 	}
+	protocol := resolved.Protocol
+	if protocol == "" {
+		protocol = def.Protocol
+	}
+	baseURL := strings.TrimRight(resolved.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = strings.TrimRight(def.BaseURL, "/")
+	}
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s:%s:%s:%d:%s",
-		def.Protocol,
+	_, _ = fmt.Fprintf(h, "%s:%s:%s:%d:%s:%s",
+		protocol,
 		def.Model,
-		strings.TrimRight(def.BaseURL, "/"),
+		baseURL,
 		def.Capabilities.ContextTokens,
 		def.Capabilities.Tokenizer,
+		resolved.ProviderName,
 	)
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }

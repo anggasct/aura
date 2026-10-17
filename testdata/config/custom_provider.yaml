@@ -1,0 +1,25 @@
+version: 1
+server:
+  host: 127.0.0.1
+models:
+  definitions:
+    primary:
+      model: custom-model-v1
+      api_key_env: CUSTOM_API_KEY
+      custom:
+        protocol: openai_chat_compat
+        base_url: https://models.example.com/v1
+        auth_scheme: bearer
+        headers:
+          x-tenant: tenant-42
+        session_behavior: none
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: false
+        audio: false
+        reasoning: false
+        context_tokens: 32000
+        tokenizer: custom
+        usage_reporting: true

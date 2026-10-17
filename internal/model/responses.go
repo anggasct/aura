@@ -91,6 +91,11 @@ func newOpenAIResponsesAdapter(logger *slog.Logger, name, baseURL, apiKey string
 
 func (a *OpenAIResponsesAdapter) Name() string { return a.core.name }
 
+func (a *OpenAIResponsesAdapter) withProvider(resolved config.ResolvedDefinition) *OpenAIResponsesAdapter {
+	a.core.withProvider(resolved)
+	return a
+}
+
 func (a *OpenAIResponsesAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return a.core.GenerateContent(ctx, req, stream)
 }

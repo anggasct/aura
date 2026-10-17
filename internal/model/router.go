@@ -120,7 +120,7 @@ func BuildComponents(logger *slog.Logger, models config.Models, routes map[strin
 	adapters = make(map[string]adkmodel.LLM, len(models.Definitions))
 	for name := range models.Definitions {
 		spec := models.Definitions[name]
-		adapter, configured, err := newAdapter(logger, name, &spec, timeout, idleTimeout, vw)
+		adapter, configured, err := newAdapter(logger, name, &spec, models.Providers, timeout, idleTimeout, vw)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -132,7 +132,11 @@ func BuildComponents(logger *slog.Logger, models config.Models, routes map[strin
 	circuits = NewCircuitManager(time.Now, checkpoint).WithLogger(logger)
 	for name := range models.Definitions {
 		spec := models.Definitions[name]
-		digest := ComputeConfigDigest(&spec)
+		resolved, err := models.ResolveDefinition(&spec)
+		if err != nil {
+			return nil, nil, newError(ErrorCodeProviderInvalid, name, "", resolveDetail(err))
+		}
+		digest := ComputeConfigDigest(&spec, resolved)
 		policy := DefaultCircuitPolicy()
 		for _, r := range routes {
 			for _, c := range r.Candidates {
@@ -145,7 +149,7 @@ func BuildComponents(logger *slog.Logger, models config.Models, routes map[strin
 				}
 			}
 		}
-		circuits.Register(name, spec.BaseURL, digest, policy)
+		circuits.Register(name, resolved.BaseURL, digest, policy)
 	}
 
 	for name, route := range routes {
@@ -165,7 +169,7 @@ func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map
 
 	routeAdapters := make(map[string]adkmodel.LLM, len(routes))
 	for name, route := range routes {
-		fb := NewFallbackAdapter(name, route, models.Definitions, circuits, MapAdapterResolver(adapters)).WithLogger(logger).WithVisionPolicy(vw.Policy)
+		fb := NewFallbackAdapter(name, route, models.Definitions, circuits, MapAdapterResolver(adapters)).WithLogger(logger).WithVisionPolicy(vw.Policy).WithProviders(models.Providers)
 		routeAdapters[name] = fb
 	}
 
@@ -335,40 +339,56 @@ func (r *Router) Circuits() *CircuitManager {
 func (r *Router) Definitions() map[string]config.ModelDefinition {
 	return r.definitions
 }
-func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, timeout, idleTimeout time.Duration, wiring ...VisionWiring) (adapter adkmodel.LLM, configured bool, err error) {
-	if spec.Protocol == "" || spec.Model == "" {
+func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, providers map[string]config.ProviderPreset, timeout, idleTimeout time.Duration, wiring ...VisionWiring) (adapter adkmodel.LLM, configured bool, err error) {
+	if spec == nil {
+		return nil, false, newError(ErrorCodeProtocolInvalid, name, "", "model: definition is missing")
+	}
+	resolved, err := config.Models{Providers: providers}.ResolveDefinition(spec)
+	if err != nil {
+		return nil, false, newError(ErrorCodeProviderInvalid, name, "", resolveDetail(err))
+	}
+	if resolved.Protocol == "" || spec.Model == "" {
 		return nil, false, nil
 	}
-	if spec.BaseURL != "" {
-		if err := config.ValidateBaseURL(spec.BaseURL); err != nil {
-			return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("invalid base_url: %v", err))
-		}
+	if err := config.ValidateBaseURL(resolved.BaseURL); err != nil {
+		return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("invalid base_url: %v", err))
 	}
-	switch spec.Protocol {
+	switch resolved.Protocol {
 	case config.ProtocolAnthropicMessages, config.ProtocolOpenAIChatCompat, config.ProtocolOpenAIResponses, config.ProtocolGeminiNative:
 	default:
-		return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
+		return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", resolved.Protocol))
 	}
-	apiKey, err := resolveSecret(name, spec)
+	effective := *spec
+	effective.Protocol = resolved.Protocol
+	effective.BaseURL = resolved.BaseURL
+	apiKey, err := resolveSecret(name, &effective)
 	if err != nil {
 		return nil, false, err
 	}
 	vw := firstVisionWiring(wiring)
 	wire := visionWiring{policy: vw.Policy, blobs: vw.Blobs}
 	if wire.policy != nil {
-		wire.detail = wire.policy.DetailFor(spec.Protocol)
+		wire.detail = wire.policy.DetailFor(resolved.Protocol)
 	}
-	switch spec.Protocol {
+	switch resolved.Protocol {
 	case config.ProtocolAnthropicMessages:
-		return newAnthropicAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout, wire), true, nil
+		return newAnthropicAdapter(logger, spec.Model, resolved.BaseURL, apiKey, timeout, idleTimeout, wire).withProvider(resolved), true, nil
 	case config.ProtocolOpenAIChatCompat:
-		return newOpenAIAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout, wire), true, nil
+		return newOpenAIAdapter(logger, spec.Model, resolved.BaseURL, apiKey, timeout, idleTimeout, wire).withProvider(resolved), true, nil
 	case config.ProtocolOpenAIResponses:
-		return newOpenAIResponsesAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout, wire), true, nil
+		return newOpenAIResponsesAdapter(logger, spec.Model, resolved.BaseURL, apiKey, timeout, idleTimeout, wire).withProvider(resolved), true, nil
 	case config.ProtocolGeminiNative:
-		return newGeminiAdapter(logger, spec.Model, spec.BaseURL, apiKey, timeout, idleTimeout, wire), true, nil
+		return newGeminiAdapter(logger, spec.Model, resolved.BaseURL, apiKey, timeout, idleTimeout, wire).withProvider(resolved), true, nil
 	}
-	return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", spec.Protocol))
+	return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", resolved.Protocol))
+}
+
+func resolveDetail(err error) string {
+	var cfgErr *config.Error
+	if errors.As(err, &cfgErr) {
+		return cfgErr.Detail
+	}
+	return err.Error()
 }
 
 func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {

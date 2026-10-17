@@ -105,6 +105,11 @@ func newOpenAIAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout
 
 func (a *OpenAIAdapter) Name() string { return a.core.name }
 
+func (a *OpenAIAdapter) withProvider(resolved config.ResolvedDefinition) *OpenAIAdapter {
+	a.core.withProvider(resolved)
+	return a
+}
+
 func (a *OpenAIAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return a.core.GenerateContent(ctx, req, stream)
 }

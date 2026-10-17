@@ -38,6 +38,7 @@ type FallbackAdapter struct {
 	name        string
 	route       config.ModelRoute
 	definitions map[string]config.ModelDefinition
+	providers   map[string]config.ProviderPreset
 	circuits    *CircuitManager
 	resolver    AdapterResolver
 	logger      *slog.Logger
@@ -68,6 +69,20 @@ func (f *FallbackAdapter) WithLogger(logger *slog.Logger) *FallbackAdapter {
 func (f *FallbackAdapter) WithVisionPolicy(policy *VisionPolicy) *FallbackAdapter {
 	f.vision = policy
 	return f
+}
+
+func (f *FallbackAdapter) WithProviders(providers map[string]config.ProviderPreset) *FallbackAdapter {
+	f.providers = providers
+	return f
+}
+
+func (f *FallbackAdapter) circuitKeyFor(candidate string, def *config.ModelDefinition) string {
+	baseURL := def.BaseURL
+	models := config.Models{Providers: f.providers}
+	if resolved, err := models.ResolveDefinition(def); err == nil {
+		baseURL = resolved.BaseURL
+	}
+	return FormatCircuitKey(candidate, baseURL)
 }
 
 func (f *FallbackAdapter) costMicrosFor(definitionID string, u usage.Usage) int64 {
@@ -205,7 +220,7 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 				continue
 			}
 
-			circuitKey := FormatCircuitKey(candidate, def.BaseURL)
+			circuitKey := f.circuitKeyFor(candidate, &def)
 			if f.circuits != nil {
 				allowed, _ := f.circuits.Allow(circuitKey)
 				if !allowed {

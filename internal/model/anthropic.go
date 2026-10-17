@@ -114,6 +114,11 @@ func newAnthropicAdapter(logger *slog.Logger, name, baseURL, apiKey string, time
 
 func (a *AnthropicAdapter) Name() string { return a.core.name }
 
+func (a *AnthropicAdapter) withProvider(resolved config.ResolvedDefinition) *AnthropicAdapter {
+	a.core.withProvider(resolved)
+	return a
+}
+
 func (a *AnthropicAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return a.core.GenerateContent(ctx, req, stream)
 }

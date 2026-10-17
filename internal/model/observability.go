@@ -15,20 +15,37 @@ func WithTask(ctx context.Context, task string) context.Context {
 	return context.WithValue(ctx, taskContextKey{}, task)
 }
 
+type sessionContextKey struct{}
+
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionContextKey{}, sessionID)
+}
+
+func SessionIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if sessionID, ok := ctx.Value(sessionContextKey{}).(string); ok {
+		return sessionID
+	}
+	return ""
+}
+
 type modelTelemetry struct {
 	logger   *slog.Logger
 	protocol string
 	model    string
+	provider string
 	started  time.Time
 	retries  int
 	logged   bool
 }
 
-func newModelTelemetry(logger *slog.Logger, protocol, model string) *modelTelemetry {
+func newModelTelemetry(logger *slog.Logger, protocol, model, provider string) *modelTelemetry {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &modelTelemetry{logger: logger, protocol: protocol, model: model, started: time.Now()}
+	return &modelTelemetry{logger: logger, protocol: protocol, model: model, provider: provider, started: time.Now()}
 }
 
 func (t *modelTelemetry) finish(ctx context.Context, response *adkmodel.LLMResponse, err error) {
@@ -59,6 +76,7 @@ func (t *modelTelemetry) finish(ctx context.Context, response *adkmodel.LLMRespo
 	t.logger.InfoContext(ctx, "model request",
 		"protocol", t.protocol,
 		"model", t.model,
+		"provider", t.provider,
 		"task", task,
 		"latency_ms", time.Since(t.started).Milliseconds(),
 		"status", status,

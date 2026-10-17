@@ -416,6 +416,7 @@ func (s *Service) decodeBounded(ctx context.Context, mime string, raw []byte) (d
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
+	start := time.Now()
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
@@ -438,6 +439,9 @@ func (s *Service) decodeBounded(ctx context.Context, mime string, raw []byte) (d
 		default:
 		}
 		if !timer.Stop() {
+			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode exceeded the deadline")
+		}
+		if time.Since(start) >= timeout {
 			return decodedImage{}, false, Errorf(ErrorCodeVisionDecodeFailed, "image decode exceeded the deadline")
 		}
 		if res.err != nil {

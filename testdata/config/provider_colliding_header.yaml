@@ -1,0 +1,27 @@
+version: 1
+server:
+  host: 127.0.0.1
+models:
+  definitions:
+    primary:
+      provider: openai
+      model: gpt-4o-mini
+      api_key_env: OPENAI_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: true
+        vision: false
+        audio: false
+        reasoning: false
+        context_tokens: 128000
+        tokenizer: o200k
+        usage_reporting: true
+  providers:
+    openai:
+      protocol: openai_responses
+      base_url: https://api.openai.com/v1
+      auth_scheme: bearer
+      headers:
+        Authorization: Bearer override-attempt
+      session_behavior: none
