@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/channelhost"
@@ -15,7 +16,7 @@ func (e *Engine) SetChannelAdapters(adapters []runtimechannelhost.ChannelPort) {
 	defer e.mu.Unlock()
 	e.adapters = adapters
 	if e.delivered == nil {
-		e.delivered = map[string]struct{}{}
+		e.delivered = map[string]time.Time{}
 	}
 }
 
@@ -39,27 +40,58 @@ func (e *Engine) channelAdapterFor(req *runtime.TurnRequest) (runtimechannelhost
 	return adapters[0], true
 }
 
+func (e *Engine) pruneDeliveredLocked(now time.Time) {
+	for id, at := range e.delivered {
+		if now.Sub(at) >= dedupeWindow {
+			delete(e.delivered, id)
+		}
+	}
+}
+
 func (e *Engine) markDelivered(turnID string) bool {
+	if turnID == "" {
+		return false
+	}
+	now := time.Now().UTC()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.delivered == nil {
+		e.delivered = map[string]time.Time{}
+	}
+	e.pruneDeliveredLocked(now)
+	if at, ok := e.delivered[turnID]; ok {
+		if now.Sub(at) < dedupeWindow {
+			return false
+		}
+	}
+	e.delivered[turnID] = now
+	return true
+}
+
+func (e *Engine) unmarkDelivered(turnID string) {
+	if turnID == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.delivered, turnID)
+}
+
+func (e *Engine) hasDelivered(turnID string) bool {
 	if turnID == "" {
 		return false
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.delivered == nil {
-		e.delivered = map[string]struct{}{}
-	}
-	if _, ok := e.delivered[turnID]; ok {
+	at, ok := e.delivered[turnID]
+	if !ok {
 		return false
 	}
-	e.delivered[turnID] = struct{}{}
+	if time.Now().UTC().Sub(at) >= dedupeWindow {
+		delete(e.delivered, turnID)
+		return false
+	}
 	return true
-}
-
-func (e *Engine) hasDelivered(turnID string) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	_, ok := e.delivered[turnID]
-	return ok
 }
 
 func extractDeliveryTexts(events []store.RuntimeEvent) []string {
@@ -183,7 +215,6 @@ func (e *Engine) deliverCompletedTurn(ctx context.Context, req *runtime.TurnRequ
 			e.markDelivered(req.TurnID)
 			return codedError(runtime.ErrorCodeDeliverySkipped, "turn has no channel destination", nil)
 		}
-		e.markDelivered(req.TurnID)
 		return codedError(runtime.ErrorCodeDeliveryFailed, "owning channel adapter is not configured", nil)
 	}
 	texts := extractDeliveryTexts(events)
@@ -204,6 +235,7 @@ func (e *Engine) deliverCompletedTurn(ctx context.Context, req *runtime.TurnRequ
 		Deadline:       req.Deadline,
 	}
 	if _, err := adapter.Deliver(ctx, delivery); err != nil {
+		e.unmarkDelivered(req.TurnID)
 		return codedError(runtime.ErrorCodeDeliveryFailed, "channel delivery failed", err)
 	}
 	return nil

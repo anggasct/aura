@@ -348,3 +348,99 @@ func TestDeliveryExtractsADKModelText(t *testing.T) {
 		}
 	})
 }
+
+func TestDeliveryRetryAfterFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor(nil)
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, "channel:333")
+		capture := &capturingAdapter{deliverErr: errDeliveryBoom}
+		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+
+		req := channelTurnRequest("channel:333", "turn-retry-failure")
+		events := []store.RuntimeEvent{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"needs reply"}`)}}
+
+		firstErr := engine.deliverCompletedTurn(context.Background(), req, events)
+		if code, ok := runtime.CodeOf(firstErr); !ok || code != runtime.ErrorCodeDeliveryFailed {
+			t.Fatalf("first code = %q (ok=%v), want delivery_failed", code, ok)
+		}
+		if got := capture.count(); got != 1 {
+			t.Fatalf("first Deliver calls = %d, want 1", got)
+		}
+		secondErr := engine.deliverCompletedTurn(context.Background(), req, events)
+		if code, ok := runtime.CodeOf(secondErr); !ok || code != runtime.ErrorCodeDeliveryFailed {
+			t.Fatalf("second code = %q (ok=%v), want delivery_failed retry, never nil-success without delivery", code, ok)
+		}
+		if got := capture.count(); got != 2 {
+			t.Fatalf("second Deliver calls = %d, want 2 (retry must re-attempt)", got)
+		}
+		capture.deliverErr = nil
+		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+			t.Fatalf("third deliver: %v", err)
+		}
+		if got := capture.count(); got != 3 {
+			t.Fatalf("third Deliver calls = %d, want 3", got)
+		}
+	})
+}
+
+func TestMissingAdapterFailureIsRetryable(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor(nil)
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, "channel:333")
+
+		req := channelTurnRequest("channel:333", "turn-no-adapter-retry")
+		events := []store.RuntimeEvent{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hello"}`)}}
+		if err := engine.deliverCompletedTurn(context.Background(), req, events); err == nil {
+			t.Fatal("missing adapter must return delivery_failed, got nil")
+		} else if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeDeliveryFailed {
+			t.Fatalf("code = %q (ok=%v), want delivery_failed", code, ok)
+		}
+		capture := &capturingAdapter{}
+		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+			t.Fatalf("retry after adapter configured: %v", err)
+		}
+		if got := capture.count(); got != 1 {
+			t.Fatalf("Deliver calls = %d, want 1 after retry", got)
+		}
+	})
+}
+
+func TestDeliveredEntriesExpireAfterDedupeWindow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor(nil)
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, "channel:333")
+		capture := &capturingAdapter{}
+		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+
+		req := channelTurnRequest("channel:333", "turn-expire")
+		events := []store.RuntimeEvent{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hello"}`)}}
+		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+			t.Fatalf("first deliver: %v", err)
+		}
+		if got := capture.count(); got != 1 {
+			t.Fatalf("first Deliver calls = %d, want 1", got)
+		}
+		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+			t.Fatalf("deduped redeliver: %v", err)
+		}
+		if got := capture.count(); got != 1 {
+			t.Fatalf("Deliver calls after dedupe = %d, want 1", got)
+		}
+		engine.mu.Lock()
+		engine.delivered[req.TurnID] = time.Now().UTC().Add(-dedupeWindow - time.Minute)
+		engine.mu.Unlock()
+		if engine.hasDelivered(req.TurnID) {
+			t.Fatal("hasDelivered = true for expired entry, want false")
+		}
+		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+			t.Fatalf("deliver after expiry: %v", err)
+		}
+		if got := capture.count(); got != 2 {
+			t.Fatalf("Deliver calls after expiry = %d, want 2", got)
+		}
+	})
+}

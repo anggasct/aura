@@ -76,7 +76,7 @@ type Engine struct {
 	sessionStore   SessionStore
 	durableRuntime durable.Runtime
 	adapters       []runtimechannelhost.ChannelPort
-	delivered      map[string]struct{}
+	delivered      map[string]time.Time
 
 	mu       sync.Mutex
 	sessions map[string]*sessionQueue
