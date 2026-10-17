@@ -1,0 +1,19 @@
+version: 1
+server:
+  host: 127.0.0.1
+models:
+  definitions:
+    primary:
+      provider: opencode-go
+      model: muse-spark-1.3-contributor
+      api_key_env: OPENCODE_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: false
+        audio: false
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: opencode
+        usage_reporting: true

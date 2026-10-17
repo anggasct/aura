@@ -145,8 +145,12 @@ func newModelsCircuitsCmd(gf *globalFlags) *cobra.Command {
 
 			for name := range cfg.Models.Definitions {
 				def := cfg.Models.Definitions[name]
-				digest := model.ComputeConfigDigest(&def)
-				cm.Register(name, def.BaseURL, digest, model.DefaultCircuitPolicy())
+				resolved, err := cfg.Models.ResolveDefinition(&def)
+				if err != nil {
+					return err
+				}
+				digest := model.ComputeConfigDigest(&def, resolved)
+				cm.Register(name, resolved.BaseURL, digest, model.DefaultCircuitPolicy())
 			}
 
 			if err := cm.LoadCheckpoints(cmd.Context()); err != nil {
@@ -208,8 +212,12 @@ func newModelsCircuitResetCmd(gf *globalFlags) *cobra.Command {
 
 			for name := range cfg.Models.Definitions {
 				def := cfg.Models.Definitions[name]
-				digest := model.ComputeConfigDigest(&def)
-				cm.Register(name, def.BaseURL, digest, model.DefaultCircuitPolicy())
+				resolved, err := cfg.Models.ResolveDefinition(&def)
+				if err != nil {
+					return err
+				}
+				digest := model.ComputeConfigDigest(&def, resolved)
+				cm.Register(name, resolved.BaseURL, digest, model.DefaultCircuitPolicy())
 			}
 
 			if err := cm.LoadCheckpoints(cmd.Context()); err != nil {

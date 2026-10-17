@@ -1,0 +1,19 @@
+version: 1
+server:
+  host: 127.0.0.1
+models:
+  definitions:
+    primary:
+      provider: no-such-provider
+      model: some-model
+      api_key_env: SOME_API_KEY
+      capabilities:
+        streaming: true
+        tools: false
+        structured_output: false
+        vision: false
+        audio: false
+        reasoning: false
+        context_tokens: 8000
+        tokenizer: some
+        usage_reporting: true

@@ -29,6 +29,7 @@ const (
 	ErrorCodeFallbackBoundary          ErrorCode = "model_fallback_boundary"
 	ErrorCodeVisionBudgetExceeded      ErrorCode = "vision_budget_exceeded"
 	ErrorCodeVisionArtifactUnavailable ErrorCode = "vision_artifact_unavailable"
+	ErrorCodeProviderInvalid           ErrorCode = "model_provider_invalid"
 )
 
 type ErrorClass string
@@ -118,6 +119,8 @@ func ClassifyError(err error) ErrorClass {
 		case ErrorCodeFallbackExhausted:
 			return ErrorClassOverloaded
 		case ErrorCodeVisionBudgetExceeded, ErrorCodeVisionArtifactUnavailable:
+			return ErrorClassInvalidRequest
+		case ErrorCodeProviderInvalid:
 			return ErrorClassInvalidRequest
 		}
 	}

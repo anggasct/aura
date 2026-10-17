@@ -17,6 +17,8 @@ import (
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
+
+	"github.com/anggasct/aura/internal/config"
 )
 
 var errStopYield = errors.New("model: stream iterator stopped")
@@ -59,19 +61,24 @@ type streamOp struct {
 }
 
 type coreClient struct {
-	name         string
-	baseURL      string
-	apiKey       string
-	httpClient   *http.Client
-	streamClient *http.Client
-	timeout      time.Duration
-	retry        RetryConfig
-	idleTimeout  time.Duration
-	codec        providerCodec
-	logger       *slog.Logger
-	vision       *VisionPolicy
-	visionBlobs  VisionBlobReader
+	name            string
+	baseURL         string
+	apiKey          string
+	httpClient      *http.Client
+	streamClient    *http.Client
+	timeout         time.Duration
+	retry           RetryConfig
+	idleTimeout     time.Duration
+	codec           providerCodec
+	logger          *slog.Logger
+	vision          *VisionPolicy
+	visionBlobs     VisionBlobReader
+	extraHeaders    map[string]string
+	sessionBehavior string
+	providerName    string
 }
+
+const auraUserAgent = "aura"
 
 type visionWiring struct {
 	policy *VisionPolicy
@@ -83,6 +90,12 @@ func (c *coreClient) withVision(w visionWiring) *coreClient {
 	c.vision = w.policy
 	c.visionBlobs = w.blobs
 	return c
+}
+
+func (c *coreClient) withProvider(resolved config.ResolvedDefinition) {
+	c.extraHeaders = resolved.Headers
+	c.sessionBehavior = resolved.SessionBehavior
+	c.providerName = resolved.ProviderName
 }
 
 func newCoreClient(logger *slog.Logger, name, baseURL, apiKey string, timeout, idleTimeout time.Duration, codec providerCodec) *coreClient {
@@ -112,7 +125,7 @@ func newCoreClient(logger *slog.Logger, name, baseURL, apiKey string, timeout, i
 
 func (c *coreClient) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		telemetry := newModelTelemetry(c.logger, c.codec.protocol(), c.name)
+		telemetry := newModelTelemetry(c.logger, c.codec.protocol(), c.name, c.providerName)
 		resp, retries, err := c.do(ctx, req, stream)
 		telemetry.retries = retries
 		if err != nil {
@@ -197,6 +210,17 @@ func (c *coreClient) do(ctx context.Context, req *adkmodel.LLMRequest, stream bo
 		httpReq.Header.Set("Content-Type", "application/json")
 		if c.apiKey != "" {
 			c.codec.setAuthHeaders(httpReq, c.apiKey)
+		}
+		for name, value := range c.extraHeaders {
+			httpReq.Header.Set(name, value)
+		}
+		if c.sessionBehavior == config.ProviderSessionOpencode {
+			sessionID := SessionIDFromContext(ctx)
+			if sessionID == "" {
+				return nil, newError(ErrorCodeProtocolInvalid, c.name, "", "model: session-routed request is missing its conversation identity")
+			}
+			httpReq.Header.Set(config.SessionHeaderName, sessionID)
+			httpReq.Header.Set("User-Agent", auraUserAgent)
 		}
 		resp, err := client.Do(httpReq)
 		if err != nil {

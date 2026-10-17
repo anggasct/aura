@@ -13,6 +13,7 @@ const (
 	ErrorCodeModelProtocolInvalid       ErrorCode = "model_protocol_invalid"
 	ErrorCodeModelCapabilityUnsupported ErrorCode = "model_capability_unsupported"
 	ErrorCodeModelSecretInvalid         ErrorCode = "model_secret_invalid"
+	ErrorCodeModelProviderInvalid       ErrorCode = "model_provider_invalid"
 )
 
 type Error struct {

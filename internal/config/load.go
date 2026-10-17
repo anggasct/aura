@@ -81,10 +81,15 @@ func envKeyMapper(s string) string {
 			{suffix: "_capabilities_context_tokens", path: "capabilities.context_tokens"},
 			{suffix: "_capabilities_tokenizer", path: "capabilities.tokenizer"},
 			{suffix: "_capabilities_usage_reporting", path: "capabilities.usage_reporting"},
+			{suffix: "_custom_protocol", path: "custom.protocol"},
+			{suffix: "_custom_base_url", path: "custom.base_url"},
+			{suffix: "_custom_auth_scheme", path: "custom.auth_scheme"},
+			{suffix: "_custom_session_behavior", path: "custom.session_behavior"},
 			{suffix: "_api_key_env", path: "api_key_env"},
 			{suffix: "_api_key_file", path: "api_key_file"},
 			{suffix: "_base_url", path: "base_url"},
 			{suffix: "_protocol", path: "protocol"},
+			{suffix: "_provider", path: "provider"},
 			{suffix: "_model", path: "model"},
 		}
 		for _, field := range fields {
@@ -1057,6 +1062,21 @@ func validateModelShapes(doc *yamlv3.Node) error {
 			return err
 		}
 	}
+	if providersNode := mappingValue(modelsNode, "providers"); providersNode != nil {
+		if providersNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("models.providers must be a mapping at line %d", providersNode.Line)
+		}
+		for i := 0; i+1 < len(providersNode.Content); i += 2 {
+			nameNode := providersNode.Content[i]
+			presetNode := providersNode.Content[i+1]
+			if presetNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("models.providers.%s must be a mapping at line %d", nameNode.Value, presetNode.Line)
+			}
+			if err := validateProviderPresetShape("models.providers."+nameNode.Value, presetNode); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -1454,9 +1474,16 @@ func validateModelDefinition(name string, node *yamlv3.Node) error {
 		keyNode := node.Content[i]
 		valueNode := node.Content[i+1]
 		switch keyNode.Value {
-		case "protocol", "model", "base_url", "api_key_env", "api_key_file":
+		case "protocol", "model", "base_url", "api_key_env", "api_key_file", "provider":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 				return fmt.Errorf("models.definitions.%s.%s must be a string at line %d", name, keyNode.Value, valueNode.Line)
+			}
+		case "custom":
+			if valueNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("models.definitions.%s.custom must be a mapping at line %d", name, valueNode.Line)
+			}
+			if err := validateProviderPresetShape("models.definitions."+name+".custom", valueNode); err != nil {
+				return err
 			}
 		case "capabilities":
 			if valueNode.Kind != yamlv3.MappingNode {
@@ -1489,18 +1516,55 @@ func validateModelDefinition(name string, node *yamlv3.Node) error {
 	return nil
 }
 
+func validateProviderPresetShape(prefix string, node *yamlv3.Node) error {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		switch keyNode.Value {
+		case "protocol", "base_url", "auth_scheme", "session_behavior":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("%s.%s must be a string at line %d", prefix, keyNode.Value, valueNode.Line)
+			}
+		case "headers":
+			if valueNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("%s.headers must be a mapping at line %d", prefix, valueNode.Line)
+			}
+			for j := 0; j+1 < len(valueNode.Content); j += 2 {
+				headerValue := valueNode.Content[j+1]
+				if headerValue.Kind != yamlv3.ScalarNode || headerValue.Tag != "!!str" {
+					return fmt.Errorf("%s.headers.%s must be a string at line %d", prefix, valueNode.Content[j].Value, headerValue.Line)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func validateLoadedModels(models Models, routingExplicit bool) error {
-	problems := make([]error, 0, len(models.Definitions)+1)
+	problems := make([]error, 0, len(models.Definitions)+len(models.Providers)+1)
+	for _, name := range slices.Sorted(maps.Keys(models.Providers)) {
+		preset := models.Providers[name]
+		if !modelDefinitionNamePattern.MatchString(name) {
+			problems = append(problems, &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("invalid models.providers name %q", name)})
+			continue
+		}
+		if err := validateProviderShape("models.providers."+name, preset); err != nil {
+			problems = append(problems, err)
+		}
+	}
 	for _, name := range slices.Sorted(maps.Keys(models.Definitions)) {
 		definition := models.Definitions[name]
-		problems = append(problems, modelDefinitionProblems(name, &definition)...)
+		problems = append(problems, modelDefinitionProblems(models, name, &definition)...)
 	}
 	problems = append(problems, validateRouting(models, routingExplicit))
 	return errors.Join(problems...)
 }
 
-func modelDefinitionProblems(name string, definition *ModelDefinition) []error {
+func modelDefinitionProblems(models Models, name string, definition *ModelDefinition) []error {
 	var problems []error
+	if definition.Provider != "" || definition.Custom != nil {
+		return append(problems, providerDefinitionProblems(models, name, definition)...)
+	}
 	switch {
 	case strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "":
 		problems = append(problems, &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s requires non-empty protocol and model", name)})
@@ -1510,15 +1574,42 @@ func modelDefinitionProblems(name string, definition *ModelDefinition) []error {
 	if err := ValidateBaseURL(definition.BaseURL); err != nil {
 		problems = append(problems, &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s.base_url: %v", name, err)})
 	}
+	problems = append(problems, modelSecretProblems(name, definition, definition.BaseURL)...)
+	problems = append(problems, modelCapabilityProblems(name, definition)...)
+	return problems
+}
+
+func providerDefinitionProblems(models Models, name string, definition *ModelDefinition) []error {
+	var problems []error
+	if strings.TrimSpace(definition.Model) == "" {
+		problems = append(problems, &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("models.definitions.%s requires non-empty model", name)})
+	}
+	resolved, err := models.ResolveDefinition(definition)
+	if err != nil {
+		problems = append(problems, err)
+		return append(problems, modelCapabilityProblems(name, definition)...)
+	}
+	problems = append(problems, modelSecretProblems(name, definition, resolved.BaseURL)...)
+	problems = append(problems, modelCapabilityProblems(name, definition)...)
+	return problems
+}
+
+func modelSecretProblems(name string, definition *ModelDefinition, baseURL string) []error {
+	var problems []error
 	if definition.APIKeyEnv != "" && definition.APIKeyFile != "" {
 		problems = append(problems, &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s must set only one of api_key_env or api_key_file", name)})
 	}
 	if definition.APIKeyEnv != "" && !envNamePattern.MatchString(definition.APIKeyEnv) {
 		problems = append(problems, &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s.api_key_env is not a valid environment variable name", name)})
 	}
-	if definition.APIKeyEnv == "" && definition.APIKeyFile == "" && !IsLoopbackBaseURL(definition.BaseURL) {
+	if definition.APIKeyEnv == "" && definition.APIKeyFile == "" && !IsLoopbackBaseURL(baseURL) {
 		problems = append(problems, &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s requires api_key_env or api_key_file for a non-loopback endpoint", name)})
 	}
+	return problems
+}
+
+func modelCapabilityProblems(name string, definition *ModelDefinition) []error {
+	var problems []error
 	if definition.Capabilities.ContextTokens <= 0 || strings.TrimSpace(definition.Capabilities.Tokenizer) == "" {
 		problems = append(problems, &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires positive context_tokens and a tokenizer", name)})
 	}
@@ -1637,7 +1728,7 @@ func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structM
 				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
 					return err
 				}
-			} else if !mapPaths[path] {
+			} else if !mapPaths[path] && !wildcardScalarMapPath(path, mapPaths) {
 				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
 					return err
 				}
@@ -1645,6 +1736,30 @@ func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structM
 		}
 	}
 	return nil
+}
+
+func wildcardScalarMapPath(path string, mapPaths map[string]bool) bool {
+	for pattern := range mapPaths {
+		patternSegments := strings.Split(pattern, ".")
+		pathSegments := strings.Split(path, ".")
+		if len(patternSegments) != len(pathSegments) {
+			continue
+		}
+		matched := true
+		for i := range patternSegments {
+			if patternSegments[i] == "*" {
+				continue
+			}
+			if patternSegments[i] != pathSegments[i] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 func validConfigPath(path string, valid, structMapPaths map[string]bool) bool {
@@ -1844,6 +1959,9 @@ func applyDefaults(cfg *Config, data []byte) error {
 	}
 	if cfg.Models.Definitions == nil {
 		cfg.Models.Definitions = defaults.Models.Definitions
+	}
+	if cfg.Models.Providers == nil {
+		cfg.Models.Providers = map[string]ProviderPreset{}
 	}
 	if cfg.Models.RequestTimeout == 0 && !configValuePresent(doc, "models", "request_timeout") && !envValuePresent("models.request_timeout") {
 		cfg.Models.RequestTimeout = defaults.Models.RequestTimeout

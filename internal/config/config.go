@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net"
 	"net/url"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -353,18 +355,184 @@ func parseByteSize(raw string) (ByteSize, error) {
 
 type Models struct {
 	Definitions          map[string]ModelDefinition `koanf:"definitions" yaml:"definitions"`
+	Providers            map[string]ProviderPreset  `koanf:"providers" yaml:"providers,omitempty"`
 	RequestTimeout       Duration                   `koanf:"request_timeout" yaml:"request_timeout"`
 	StreamingIdleTimeout Duration                   `koanf:"streaming_idle_timeout" yaml:"streaming_idle_timeout"`
 	Routing              map[string]string          `koanf:"routing" yaml:"routing"`
 }
 
 type ModelDefinition struct {
-	Protocol     string            `koanf:"protocol" yaml:"protocol"`
+	Protocol     string            `koanf:"protocol" yaml:"protocol,omitempty"`
 	Model        string            `koanf:"model" yaml:"model"`
-	BaseURL      string            `koanf:"base_url" yaml:"base_url"`
+	BaseURL      string            `koanf:"base_url" yaml:"base_url,omitempty"`
+	Provider     string            `koanf:"provider" yaml:"provider,omitempty"`
+	Custom       *CustomProvider   `koanf:"custom" yaml:"custom,omitempty"`
 	APIKeyEnv    string            `koanf:"api_key_env" yaml:"api_key_env"`
 	APIKeyFile   string            `koanf:"api_key_file" yaml:"api_key_file"`
 	Capabilities ModelCapabilities `koanf:"capabilities" yaml:"capabilities"`
+}
+
+const (
+	ProviderAuthBearer      = "bearer"
+	ProviderSessionNone     = "none"
+	ProviderSessionOpencode = "opencode-session"
+	SessionHeaderName       = "x-opencode-session"
+)
+
+type ProviderPreset struct {
+	Protocol        string            `koanf:"protocol" yaml:"protocol"`
+	BaseURL         string            `koanf:"base_url" yaml:"base_url"`
+	AuthScheme      string            `koanf:"auth_scheme" yaml:"auth_scheme"`
+	Headers         map[string]string `koanf:"headers" yaml:"headers,omitempty"`
+	SessionBehavior string            `koanf:"session_behavior" yaml:"session_behavior"`
+}
+
+type CustomProvider = ProviderPreset
+
+type ResolvedDefinition struct {
+	Protocol        string
+	BaseURL         string
+	Headers         map[string]string
+	SessionBehavior string
+	ProviderName    string
+}
+
+func BuiltinProviders() map[string]ProviderPreset {
+	return map[string]ProviderPreset{
+		"openai": {
+			Protocol:        ProtocolOpenAIResponses,
+			BaseURL:         "https://api.openai.com/v1",
+			AuthScheme:      ProviderAuthBearer,
+			SessionBehavior: ProviderSessionNone,
+		},
+		"anthropic": {
+			Protocol:        ProtocolAnthropicMessages,
+			BaseURL:         "https://api.anthropic.com",
+			AuthScheme:      ProviderAuthBearer,
+			SessionBehavior: ProviderSessionNone,
+		},
+		"gemini": {
+			Protocol:        ProtocolGeminiNative,
+			BaseURL:         "https://generativelanguage.googleapis.com",
+			AuthScheme:      ProviderAuthBearer,
+			SessionBehavior: ProviderSessionNone,
+		},
+		"openrouter": {
+			Protocol:        ProtocolOpenAIChatCompat,
+			BaseURL:         "https://openrouter.ai/api/v1",
+			AuthScheme:      ProviderAuthBearer,
+			SessionBehavior: ProviderSessionNone,
+		},
+		"opencode-go": {
+			Protocol:        ProtocolOpenAIResponses,
+			BaseURL:         "https://opencode.ai/zen/go/v1",
+			AuthScheme:      ProviderAuthBearer,
+			SessionBehavior: ProviderSessionOpencode,
+		},
+	}
+}
+
+func (m Models) ResolveDefinition(def *ModelDefinition) (ResolvedDefinition, error) {
+	registry := BuiltinProviders()
+	for name, preset := range m.Providers {
+		registry[name] = preset
+	}
+	if def.Provider != "" && def.Custom != nil {
+		return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: "models.definitions entry sets both provider and custom"}
+	}
+	if def.Custom != nil {
+		if strings.TrimSpace(def.Protocol) != "" || strings.TrimSpace(def.BaseURL) != "" {
+			return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: "models.definitions entry with custom must not set protocol or base_url"}
+		}
+		if err := validateProviderShape("custom", *def.Custom); err != nil {
+			return ResolvedDefinition{}, err
+		}
+		return ResolvedDefinition{
+			Protocol:        def.Custom.Protocol,
+			BaseURL:         strings.TrimRight(def.Custom.BaseURL, "/"),
+			Headers:         copyProviderHeaders(def.Custom.Headers),
+			SessionBehavior: def.Custom.SessionBehavior,
+			ProviderName:    "custom",
+		}, nil
+	}
+	if def.Provider != "" {
+		if strings.TrimSpace(def.Protocol) != "" {
+			return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: "models.definitions entry with provider must not set protocol"}
+		}
+		preset, ok := registry[def.Provider]
+		if !ok {
+			return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("models.definitions entry references unknown provider %q", def.Provider)}
+		}
+		if err := validateProviderShape("provider "+strconv.Quote(def.Provider), preset); err != nil {
+			return ResolvedDefinition{}, err
+		}
+		baseURL := preset.BaseURL
+		if strings.TrimSpace(def.BaseURL) != "" {
+			baseURL = def.BaseURL
+		}
+		if err := ValidateBaseURL(baseURL); err != nil {
+			return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("models.definitions entry with provider %q has invalid base_url: %v", def.Provider, err)}
+		}
+		return ResolvedDefinition{
+			Protocol:        preset.Protocol,
+			BaseURL:         strings.TrimRight(baseURL, "/"),
+			Headers:         copyProviderHeaders(preset.Headers),
+			SessionBehavior: preset.SessionBehavior,
+			ProviderName:    def.Provider,
+		}, nil
+	}
+	return ResolvedDefinition{
+		Protocol:        def.Protocol,
+		BaseURL:         strings.TrimRight(def.BaseURL, "/"),
+		SessionBehavior: ProviderSessionNone,
+	}, nil
+}
+
+func validateProviderShape(where string, preset ProviderPreset) error {
+	if !validProtocol(preset.Protocol) {
+		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s uses unsupported protocol %q", where, preset.Protocol)}
+	}
+	if strings.TrimSpace(preset.BaseURL) == "" {
+		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: where + " requires a non-empty base_url"}
+	}
+	if err := ValidateBaseURL(preset.BaseURL); err != nil {
+		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s has invalid base_url: %v", where, err)}
+	}
+	if preset.AuthScheme != ProviderAuthBearer {
+		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s uses unsupported auth scheme %q", where, preset.AuthScheme)}
+	}
+	if preset.SessionBehavior != ProviderSessionNone && preset.SessionBehavior != ProviderSessionOpencode {
+		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s uses unsupported session behavior %q", where, preset.SessionBehavior)}
+	}
+	return validateProviderHeaders(where, preset.Headers)
+}
+
+func validateProviderHeaders(where string, headers map[string]string) error {
+	for _, name := range slices.Sorted(maps.Keys(headers)) {
+		value := headers[name]
+		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, " \t:") {
+			return &Error{Code: ErrorCodeModelProviderInvalid, Detail: where + " sets invalid header name"}
+		}
+		if strings.EqualFold(name, "authorization") || strings.EqualFold(name, "content-type") || strings.EqualFold(name, SessionHeaderName) {
+			return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s header %q collides with a managed header", where, name)}
+		}
+		trimmed := strings.TrimSpace(value)
+		if strings.HasPrefix(trimmed, "env://") || strings.HasPrefix(trimmed, "file://") || strings.Contains(trimmed, "${") {
+			return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s header %q must not carry a secret reference", where, name)}
+		}
+	}
+	return nil
+}
+
+func copyProviderHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for name, value := range headers {
+		out[name] = value
+	}
+	return out
 }
 
 const (

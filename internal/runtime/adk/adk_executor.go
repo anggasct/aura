@@ -12,6 +12,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/durable"
+	auramodel "github.com/anggasct/aura/internal/model"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/store"
@@ -169,6 +170,9 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 			return
 		}
 		runCtx := withTurnID(ctx, req.TurnID)
+		if req.SessionID != "" {
+			runCtx = auramodel.WithSessionID(runCtx, req.SessionID)
+		}
 		if _, ok := durable.TurnScopeFrom(runCtx); ok {
 			runCtx = platform.WithTaskRunner(runCtx, runTasksSequential)
 		}

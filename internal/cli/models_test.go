@@ -107,9 +107,13 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 	checkpointStore := store.NewCircuitCheckpointStore(db)
 	openUntil := time.Now().Add(5 * time.Minute)
 	candDef := loadRes.Config.Models.Definitions["cand1"]
+	candResolved, err := loadRes.Config.Models.ResolveDefinition(&candDef)
+	if err != nil {
+		t.Fatalf("resolve cand1: %v", err)
+	}
 	err = checkpointStore.Save(ctx, &store.CircuitCheckpoint{
 		CircuitKey:          "cand1",
-		ConfigDigest:        model.ComputeConfigDigest(&candDef),
+		ConfigDigest:        model.ComputeConfigDigest(&candDef, candResolved),
 		State:               string(model.CircuitStateOpen),
 		ConsecutiveFailures: 3,
 		OpenUntil:           &openUntil,

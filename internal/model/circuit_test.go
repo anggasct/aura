@@ -252,8 +252,8 @@ func TestComputeConfigDigest(t *testing.T) {
 	def2 := def1
 	def2.Model = "gpt-4o-mini"
 
-	d1 := ComputeConfigDigest(&def1)
-	d2 := ComputeConfigDigest(&def2)
+	d1 := ComputeConfigDigest(&def1, config.ResolvedDefinition{Protocol: def1.Protocol, BaseURL: def1.BaseURL})
+	d2 := ComputeConfigDigest(&def2, config.ResolvedDefinition{Protocol: def2.Protocol, BaseURL: def2.BaseURL})
 	if d1 == "" || d2 == "" {
 		t.Fatalf("empty config digest")
 	}
