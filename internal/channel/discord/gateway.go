@@ -212,7 +212,7 @@ func (a *Adapter) dispatchIntake(ctx context.Context, cancel context.CancelFunc,
 	for item := range queue {
 		admitted, err := a.admit(ctx, item.msg)
 		if err != nil {
-			a.logger.WarnContext(ctx, "intake dispatch failed", "component", "discord")
+			a.logger.WarnContext(ctx, "intake dispatch failed", "component", "discord", "error", err)
 			cancel()
 			done <- err
 			return
@@ -389,6 +389,9 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 		return false, nil
 	}
 	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, guildID: msg.GuildID, channelID: msg.ChannelID})
+	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID); err != nil {
+		return false, fmt.Errorf("ensure session: %w", err)
+	}
 	if len(msg.Attachments) > 0 && !a.intakeAttachments(ctx, msg, envelope) {
 		return false, nil
 	}

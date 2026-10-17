@@ -394,6 +394,9 @@ func TestAdapter_IntakeErrorReconnectsInsteadOfStalling(t *testing.T) {
 	if body := logs.String(); !strings.Contains(body, "intake dispatch failed") {
 		t.Error("dispatcher error was not logged")
 	}
+	if body := logs.String(); !strings.Contains(body, "ingress unavailable") {
+		t.Error("dispatcher log carries no admit error value")
+	}
 	select {
 	case err := <-done:
 		t.Fatalf("Start() returned early: %v", err)
