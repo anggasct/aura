@@ -27,6 +27,7 @@ func NewHost(runtime *Engine, adapters []runtimechannelhost.ChannelPort, logger 
 	if logger == nil {
 		logger = slog.Default()
 	}
+	runtime.SetChannelAdapters(adapters)
 	return &Host{runtime: runtime, adapters: adapters, logger: logger}, nil
 }
 

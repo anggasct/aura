@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"iter"
 	"time"
 
@@ -29,6 +30,7 @@ type TurnRequest struct {
 	PrincipalID      string
 	Origin           Origin
 	Parts            []runtimeingress.InputPart
+	ReplyContext     json.RawMessage
 	UntrustedContext *UntrustedRecall
 	RequireRecall    bool
 	IdempotencyKey   string

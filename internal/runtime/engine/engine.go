@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -74,6 +75,8 @@ type Engine struct {
 	logger         *slog.Logger
 	sessionStore   SessionStore
 	durableRuntime durable.Runtime
+	adapters       []runtimechannelhost.ChannelPort
+	delivered      map[string]time.Time
 
 	mu       sync.Mutex
 	sessions map[string]*sessionQueue
@@ -613,6 +616,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	var terminalKind string
 	var terminalPayload []byte
 	var execErr error
+	var executed []store.RuntimeEvent
 	for ev, err := range e.executor.Execute(ctx, &t.req) {
 		if err != nil {
 			execErr = err
@@ -622,9 +626,22 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 			execErr = emitErr
 			break
 		}
+		executed = append(executed, ev)
 	}
 
 	terminalKind, terminalPayload = e.terminalOutcome(ctx, execErr, &t.req)
+	if terminalKind == runtime.EventKindTurnCompleted {
+		deliveryCtx := context.WithoutCancel(ctx)
+		if deliveryErr := e.deliverCompletedTurn(deliveryCtx, &t.req, executed); deliveryErr != nil {
+			if code, ok := runtime.CodeOf(deliveryErr); ok && code == runtime.ErrorCodeDeliverySkipped {
+				e.logger.DebugContext(deliveryCtx, "turn delivery skipped", "error", deliveryErr, "turn_id", t.turnID)
+			} else {
+				e.logger.ErrorContext(deliveryCtx, "turn delivery failed", "error", deliveryErr, "turn_id", t.turnID)
+				terminalKind = runtime.EventKindTurnFailed
+				terminalPayload = failedPayload(runtime.ErrorCodeDeliveryFailed, "channel delivery failed", deliveryErr, e.agentID(&t.req))
+			}
+		}
+	}
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to persist terminal event", "error", err, "turn_id", t.turnID)
 	}
