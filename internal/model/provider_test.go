@@ -200,3 +200,86 @@ func TestProviderLegacyHeaders_Unchanged(t *testing.T) {
 		t.Errorf("User-Agent = %q, want unchanged default on the legacy path", got.userAgent)
 	}
 }
+
+func TestOpencodeGoPreset_EndpointSingleV1(t *testing.T) {
+	resolved, err := config.Models{}.ResolveDefinition(&config.ModelDefinition{
+		Provider: "opencode-go",
+		Model:    "muse-spark-1.3-contributor",
+	})
+	if err != nil {
+		t.Fatalf("ResolveDefinition: %v", err)
+	}
+	if resolved.BaseURL != "https://opencode.ai/zen/go" {
+		t.Fatalf("BaseURL = %q, want %q", resolved.BaseURL, "https://opencode.ai/zen/go")
+	}
+	endpoint := openAIResponsesCodec{}.endpoint(resolved.BaseURL, sampleRequest("hi"), false)
+	if endpoint != "https://opencode.ai/zen/go/v1/responses" {
+		t.Fatalf("endpoint = %q, want %q", endpoint, "https://opencode.ai/zen/go/v1/responses")
+	}
+	if strings.Contains(endpoint, "/v1/v1/") {
+		t.Fatalf("endpoint %q contains a doubled /v1 path segment", endpoint)
+	}
+
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		writeFixture(t, w, fixtureBytes(t, "openai_responses.json"))
+	}))
+	defer srv.Close()
+
+	providers := map[string]config.ProviderPreset{
+		"opencode-go": {
+			Protocol:        config.ProtocolOpenAIResponses,
+			BaseURL:         srv.URL,
+			AuthScheme:      config.ProviderAuthBearer,
+			SessionBehavior: config.ProviderSessionOpencode,
+		},
+	}
+	adapter := mustProviderAdapter(t, "primary", &config.ModelDefinition{
+		Provider: "opencode-go",
+		Model:    "muse-spark-1.3-contributor",
+	}, nil, providers)
+	if _, err := collect(adapter.GenerateContent(WithSessionID(t.Context(), "sess-regression"), sampleRequest("hi"), false)); err != nil {
+		t.Fatalf("GenerateContent: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 1 {
+		t.Fatalf("captured %d requests, want 1", len(paths))
+	}
+	if paths[0] != "/v1/responses" {
+		t.Errorf("path = %q, want %q (no doubled /v1 segment)", paths[0], "/v1/responses")
+	}
+}
+
+func TestOpencodeGoPreset_BaseURLOverrideStillWins(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		writeFixture(t, w, fixtureBytes(t, "openai_responses.json"))
+	}))
+	defer srv.Close()
+
+	adapter := mustProviderAdapter(t, "primary", &config.ModelDefinition{
+		Provider: "opencode-go",
+		Model:    "muse-spark-1.3-contributor",
+		BaseURL:  srv.URL,
+	}, nil, nil)
+	if _, err := collect(adapter.GenerateContent(WithSessionID(t.Context(), "sess-override"), sampleRequest("hi"), false)); err != nil {
+		t.Fatalf("GenerateContent: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 1 {
+		t.Fatalf("captured %d requests, want 1", len(paths))
+	}
+	if paths[0] != "/v1/responses" {
+		t.Errorf("path = %q, want %q", paths[0], "/v1/responses")
+	}
+}

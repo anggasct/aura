@@ -18,7 +18,7 @@ func TestBuiltinProviders_PinnedValues(t *testing.T) {
 		"anthropic":   {Protocol: ProtocolAnthropicMessages, BaseURL: "https://api.anthropic.com", AuthScheme: ProviderAuthBearer, SessionBehavior: ProviderSessionNone},
 		"gemini":      {Protocol: ProtocolGeminiNative, BaseURL: "https://generativelanguage.googleapis.com", AuthScheme: ProviderAuthBearer, SessionBehavior: ProviderSessionNone},
 		"openrouter":  {Protocol: ProtocolOpenAIChatCompat, BaseURL: "https://openrouter.ai/api/v1", AuthScheme: ProviderAuthBearer, SessionBehavior: ProviderSessionNone},
-		"opencode-go": {Protocol: ProtocolOpenAIResponses, BaseURL: "https://opencode.ai/zen/go/v1", AuthScheme: ProviderAuthBearer, SessionBehavior: ProviderSessionOpencode},
+		"opencode-go": {Protocol: ProtocolOpenAIResponses, BaseURL: "https://opencode.ai/zen/go", AuthScheme: ProviderAuthBearer, SessionBehavior: ProviderSessionOpencode},
 	}
 	for name, preset := range want {
 		got, ok := builtins[name]
@@ -48,7 +48,7 @@ func TestLoad_ProviderReferenceFixture(t *testing.T) {
 	if resolved.Protocol != ProtocolOpenAIResponses {
 		t.Errorf("Protocol = %q, want %q", resolved.Protocol, ProtocolOpenAIResponses)
 	}
-	if resolved.BaseURL != "https://opencode.ai/zen/go/v1" {
+	if resolved.BaseURL != "https://opencode.ai/zen/go" {
 		t.Errorf("BaseURL = %q", resolved.BaseURL)
 	}
 	if resolved.SessionBehavior != ProviderSessionOpencode {
@@ -382,5 +382,24 @@ func TestResolveDefinition_LegacyUnchanged(t *testing.T) {
 	}
 	if resolved.ProviderName != "" || resolved.SessionBehavior != ProviderSessionNone || len(resolved.Headers) != 0 {
 		t.Errorf("resolved = %+v, want empty provider fields", resolved)
+	}
+}
+
+func TestResolveDefinition_OpencodeGoDefaultSingleV1Endpoint(t *testing.T) {
+	models := Models{}
+	def := ModelDefinition{Provider: "opencode-go", Model: "muse-spark-1.3-contributor"}
+	resolved, err := models.ResolveDefinition(&def)
+	if err != nil {
+		t.Fatalf("ResolveDefinition: %v", err)
+	}
+	if resolved.BaseURL != "https://opencode.ai/zen/go" {
+		t.Fatalf("BaseURL = %q, want %q", resolved.BaseURL, "https://opencode.ai/zen/go")
+	}
+	endpoint := resolved.BaseURL + "/v1/responses"
+	if endpoint != "https://opencode.ai/zen/go/v1/responses" {
+		t.Errorf("endpoint = %q, want %q", endpoint, "https://opencode.ai/zen/go/v1/responses")
+	}
+	if strings.Contains(endpoint, "/v1/v1/") {
+		t.Errorf("endpoint %q contains a doubled /v1 path segment", endpoint)
 	}
 }
