@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"sync"
 	"time"
 
 	"github.com/anggasct/aura/internal/runtime/engine"
@@ -38,6 +39,9 @@ type adkSession struct {
 	userID   string
 	metadata json.RawMessage
 	events   func() ([]*session.Event, error)
+
+	mu       sync.Mutex
+	appended []*session.Event
 }
 
 func (s *adkSession) ID() string                { return s.id }
@@ -54,7 +58,56 @@ func (s *adkSession) State() session.State {
 }
 
 func (s *adkSession) Events() session.Events {
-	return &adkEvents{load: s.events}
+	base := s.events
+	return &adkEvents{load: func() ([]*session.Event, error) {
+		stored, err := base()
+		if err != nil {
+			return nil, err
+		}
+		extra := s.appendedSnapshot()
+		if len(extra) == 0 {
+			return stored, nil
+		}
+		seen := make(map[string]struct{}, len(stored)+len(extra))
+		for _, ev := range stored {
+			if ev != nil {
+				seen[ev.ID] = struct{}{}
+			}
+		}
+		out := make([]*session.Event, 0, len(stored)+len(extra))
+		out = append(out, stored...)
+		for _, ev := range extra {
+			if ev == nil {
+				continue
+			}
+			if _, ok := seen[ev.ID]; ok {
+				continue
+			}
+			seen[ev.ID] = struct{}{}
+			out = append(out, ev)
+		}
+		return out, nil
+	}}
+}
+
+func (s *adkSession) appendInMemory(ev *session.Event) {
+	if s == nil || ev == nil || ev.Partial {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appended = append(s.appended, ev)
+}
+
+func (s *adkSession) appendedSnapshot() []*session.Event {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*session.Event, len(s.appended))
+	copy(out, s.appended)
+	return out
 }
 
 type adkState struct {
@@ -195,15 +248,18 @@ func (s *ADKSessionService) Delete(ctx context.Context, req *session.DeleteReque
 	return invalidArgument("adk session deletion is not supported by the aura store")
 }
 
-func (s *ADKSessionService) AppendEvent(ctx context.Context, adkSession session.Session, ev *session.Event) error {
-	if adkSession == nil {
+func (s *ADKSessionService) AppendEvent(ctx context.Context, cur session.Session, ev *session.Event) error {
+	if cur == nil {
 		return invalidArgument("session must not be nil")
 	}
 	if ev == nil {
 		return invalidArgument("event must not be nil")
 	}
-	if _, err := store.RuntimeEventFromADK(adkSession.ID(), "", ev); err != nil {
+	if _, err := store.RuntimeEventFromADK(cur.ID(), "", ev); err != nil {
 		return err
+	}
+	if inner, ok := cur.(*adkSession); ok {
+		inner.appendInMemory(ev)
 	}
 	return nil
 }
@@ -215,6 +271,9 @@ func (s *ADKSessionService) loadEvents(ctx context.Context, sessionID string) ([
 	}
 	events := make([]*session.Event, 0, len(stored))
 	for i := range stored {
+		if stored[i].Kind != store.EventKindADK {
+			continue
+		}
 		ev, err := store.RuntimeEventToADK(&stored[i])
 		if err != nil {
 			return nil, err
