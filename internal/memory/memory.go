@@ -223,6 +223,9 @@ func NewService(documents DocumentStore, secrets Secrets, config Config) (*Servi
 	if fallbackTokens == 0 {
 		fallbackTokens = defaultFallbackTokenBudget
 	}
+	if fallbackDocs <= 0 || fallbackDocs > hardMaxDocuments || fallbackTokens <= 0 || fallbackTokens > hardMaxTokenBudget {
+		return nil, Errorf(ErrorCodeBudgetInvalid, "fallback budget is not within bounds")
+	}
 	return &Service{
 		documents:      documents,
 		secrets:        secrets,
@@ -536,7 +539,6 @@ func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDoc
 		Limit:   maxDocs + s.fallbackDocs,
 	})
 	if err != nil {
-		s.projectionFailures.Add(1)
 		return nil
 	}
 	extra := make([]RecallDocument, 0, s.fallbackDocs)

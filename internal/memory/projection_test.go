@@ -291,3 +291,56 @@ func TestProjectBatchValidation(t *testing.T) {
 		t.Errorf("indexed = %d, want 1 (nil and lifecycle skipped)", result.Indexed)
 	}
 }
+
+func TestNewServiceRejectsOutOfRangeFallbackBudgets(t *testing.T) {
+	cases := []Config{
+		{FallbackMaxDocuments: -1},
+		{FallbackMaxDocuments: hardMaxDocuments + 1},
+		{FallbackTokenBudget: -1},
+		{FallbackTokenBudget: hardMaxTokenBudget + 1},
+	}
+	for i, config := range cases {
+		if _, err := NewService(newFakeDocumentStore(), nil, config); err == nil {
+			t.Errorf("case %d accepted: %+v", i, config)
+		} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetInvalid {
+			t.Errorf("case %d code = %v, %v; want memory_budget_invalid", i, code, ok)
+		}
+	}
+	if _, err := NewService(newFakeDocumentStore(), nil, Config{}); err != nil {
+		t.Errorf("zero fallback budgets rejected: %v", err)
+	}
+}
+
+type fallbackFailingStore struct {
+	*fakeDocumentStore
+}
+
+func (s *fallbackFailingStore) Search(ctx context.Context, query *StoredQuery) ([]StoredHit, error) {
+	if query.SessionID == "" {
+		return nil, errors.New("fallback unavailable")
+	}
+	return s.fakeDocumentStore.Search(ctx, query)
+}
+
+func TestRecallFallbackSearchFailureLeavesProjectionCounter(t *testing.T) {
+	inner := newFakeDocumentStore()
+	service, err := NewService(&fallbackFailingStore{fakeDocumentStore: inner}, nil, Config{})
+	if err != nil {
+		t.Fatalf("NewService(): %v", err)
+	}
+	event := batchEvent(t, "sess-1", 1, "user", "adk_event", "the nightly backup finished cleanly")
+	if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	before := service.ProjectionFailureCount()
+	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
+	if err != nil {
+		t.Fatalf("Recall(): %v", err)
+	}
+	if len(recalled) != 1 || recalled[0].SessionID != "sess-1" {
+		t.Fatalf("recall = %+v, want primary document only", recalled)
+	}
+	if got := service.ProjectionFailureCount(); got != before {
+		t.Errorf("projection failures = %d, want %d", got, before)
+	}
+}
