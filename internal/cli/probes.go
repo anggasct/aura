@@ -131,7 +131,11 @@ func (p *probeListener) startObserver(ctx context.Context) <-chan struct{} {
 				evalCtx, evalCancel := context.WithTimeout(context.WithoutCancel(ctx), p.interval)
 				findings := p.evaluate(evalCtx)
 				evalCancel()
-				persistCtx, persistCancel := context.WithTimeout(ctx, p.interval)
+				persistBudget := p.interval
+				if persistBudget < 5*time.Second {
+					persistBudget = 5 * time.Second
+				}
+				persistCtx, persistCancel := context.WithTimeout(ctx, persistBudget)
 				_, err := p.tracker.Observe(persistCtx, findings)
 				persistCancel()
 				if err != nil {
