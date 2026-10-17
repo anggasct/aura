@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"math"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -32,6 +34,11 @@ const (
 const (
 	defaultSummaryPromptVersion = "memory-summary-v1"
 	defaultSummaryTTL           = 720 * time.Hour
+)
+
+const (
+	defaultFallbackMaxDocuments = 5
+	defaultFallbackTokenBudget  = 1000
 )
 
 type Event struct {
@@ -163,18 +170,25 @@ type Config struct {
 	MaxContentBytes      int
 	SummaryPromptVersion string
 	SummaryTTL           time.Duration
+	FallbackMaxDocuments int
+	FallbackTokenBudget  int
 	Observer             Observer
 }
 
 type Service struct {
-	documents     DocumentStore
-	secrets       Secrets
-	observer      Observer
-	maxDocs       int
-	tokens        int
-	maxBytes      int
-	summaryPrompt string
-	summaryTTL    time.Duration
+	documents          DocumentStore
+	secrets            Secrets
+	observer           Observer
+	maxDocs            int
+	tokens             int
+	maxBytes           int
+	summaryPrompt      string
+	summaryTTL         time.Duration
+	fallbackDocs       int
+	fallbackTokens     int
+	secretDrops        atomic.Int64
+	projectionFailures atomic.Int64
+	projectMu          sync.Mutex
 }
 
 func NewService(documents DocumentStore, secrets Secrets, config Config) (*Service, error) {
@@ -201,16 +215,40 @@ func NewService(documents DocumentStore, secrets Secrets, config Config) (*Servi
 	if summaryTTL == 0 {
 		summaryTTL = defaultSummaryTTL
 	}
+	fallbackDocs := config.FallbackMaxDocuments
+	if fallbackDocs == 0 {
+		fallbackDocs = defaultFallbackMaxDocuments
+	}
+	fallbackTokens := config.FallbackTokenBudget
+	if fallbackTokens == 0 {
+		fallbackTokens = defaultFallbackTokenBudget
+	}
 	return &Service{
-		documents:     documents,
-		secrets:       secrets,
-		observer:      config.Observer,
-		maxDocs:       maxDocs,
-		tokens:        tokens,
-		maxBytes:      maxBytes,
-		summaryPrompt: summaryPrompt,
-		summaryTTL:    summaryTTL,
+		documents:      documents,
+		secrets:        secrets,
+		observer:       config.Observer,
+		maxDocs:        maxDocs,
+		tokens:         tokens,
+		maxBytes:       maxBytes,
+		summaryPrompt:  summaryPrompt,
+		summaryTTL:     summaryTTL,
+		fallbackDocs:   fallbackDocs,
+		fallbackTokens: fallbackTokens,
 	}, nil
+}
+
+func (s *Service) SecretDropCount() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.secretDrops.Load()
+}
+
+func (s *Service) ProjectionFailureCount() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.projectionFailures.Load()
 }
 
 func trustFor(author, kind string) (approval.TrustLabel, bool) {
@@ -362,6 +400,7 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 		return Document{}, false, nil
 	}
 	if s.secrets != nil && s.secrets.Contains(content) {
+		s.secretDrops.Add(1)
 		return Document{}, false, nil
 	}
 	createdAt := event.CreatedAt.UTC()
@@ -448,30 +487,86 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 			break
 		}
 		used += estimate
-		from, err := sequenceFromDB(hits[i].FromSequence)
+		document, err := recallDocumentFromHit(&hits[i])
 		if err != nil {
-			return nil, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+			return nil, err
 		}
-		to, err := sequenceFromDB(hits[i].ToSequence)
-		if err != nil {
-			return nil, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
-		}
-		documents = append(documents, RecallDocument{
-			ID:            hits[i].ID,
-			SessionID:     hits[i].SessionID,
-			FromSequence:  from,
-			ToSequence:    to,
-			Content:       hits[i].Content,
-			Trust:         approval.TrustLabel(hits[i].TrustLabel),
-			PromptVersion: hits[i].PromptVersion,
-			ModelProtocol: hits[i].ModelProtocol,
-			ModelName:     hits[i].ModelName,
-			Score:         hits[i].Rank,
-			CreatedAt:     hits[i].CreatedAt,
-			ExpiresAt:     hits[i].ExpiresAt,
-		})
+		documents = append(documents, document)
+	}
+	if len(documents) < maxDocs && s.fallbackDocs > 0 && s.fallbackDocs <= hardMaxDocuments && s.fallbackTokens > 0 && s.fallbackTokens <= hardMaxTokenBudget {
+		documents = append(documents, s.recallFallback(ctx, req, maxDocs, documents)...)
 	}
 	return documents, nil
+}
+
+func recallDocumentFromHit(hit *StoredHit) (RecallDocument, error) {
+	from, err := sequenceFromDB(hit.FromSequence)
+	if err != nil {
+		return RecallDocument{}, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+	}
+	to, err := sequenceFromDB(hit.ToSequence)
+	if err != nil {
+		return RecallDocument{}, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+	}
+	return RecallDocument{
+		ID:            hit.ID,
+		SessionID:     hit.SessionID,
+		FromSequence:  from,
+		ToSequence:    to,
+		Content:       hit.Content,
+		Trust:         approval.TrustLabel(hit.TrustLabel),
+		PromptVersion: hit.PromptVersion,
+		ModelProtocol: hit.ModelProtocol,
+		ModelName:     hit.ModelName,
+		Score:         hit.Rank,
+		CreatedAt:     hit.CreatedAt,
+		ExpiresAt:     hit.ExpiresAt,
+	}, nil
+}
+
+func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDocs int, primary []RecallDocument) []RecallDocument {
+	seen := make(map[string]struct{}, len(primary))
+	for i := range primary {
+		seen[primary[i].ID] = struct{}{}
+	}
+	hits, err := s.documents.Search(ctx, &StoredQuery{
+		OwnerID: req.OwnerID,
+		Terms:   req.Query,
+		Before:  req.Before,
+		Limit:   maxDocs + s.fallbackDocs,
+	})
+	if err != nil {
+		s.projectionFailures.Add(1)
+		return nil
+	}
+	extra := make([]RecallDocument, 0, s.fallbackDocs)
+	used := 0
+	for i := range hits {
+		if len(primary)+len(extra) >= hardMaxDocuments {
+			break
+		}
+		if hits[i].SessionID == req.SessionID {
+			continue
+		}
+		if _, ok := seen[hits[i].ID]; ok {
+			continue
+		}
+		estimate := estimateTokens(hits[i].Content)
+		if used+estimate > s.fallbackTokens {
+			break
+		}
+		document, err := recallDocumentFromHit(&hits[i])
+		if err != nil {
+			continue
+		}
+		used += estimate
+		seen[document.ID] = struct{}{}
+		extra = append(extra, document)
+		if len(extra) >= s.fallbackDocs {
+			break
+		}
+	}
+	return extra
 }
 
 func (s *Service) Watermark(ctx context.Context, sessionID string) (mark uint64, found bool, err error) {

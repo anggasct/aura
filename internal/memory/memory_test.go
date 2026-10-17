@@ -60,7 +60,10 @@ func (s *fakeDocumentStore) Search(_ context.Context, query *StoredQuery) ([]Sto
 	var hits []StoredHit
 	for id := range s.records {
 		record := s.records[id]
-		if record.OwnerID != query.OwnerID || record.SessionID != query.SessionID {
+		if record.OwnerID != query.OwnerID {
+			continue
+		}
+		if query.SessionID != "" && record.SessionID != query.SessionID {
 			continue
 		}
 		if !query.Before.IsZero() && record.CreatedAt.After(query.Before) {

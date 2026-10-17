@@ -65,12 +65,15 @@ func TestMemoryDocumentStoreRoundTrip(t *testing.T) {
 func TestBuildMemoryProvider(t *testing.T) {
 	db := newMemoryTestDB(t)
 	cfg := config.Default()
-	provider, err := buildMemoryProvider(&cfg, db, nil)
+	provider, service, err := buildMemoryProvider(&cfg, db, nil)
 	if err != nil {
 		t.Fatalf("buildMemoryProvider(): %v", err)
 	}
 	if provider == nil {
 		t.Fatal("provider missing")
+	}
+	if service == nil {
+		t.Fatal("service missing")
 	}
 	if observer := memoryRecorderObserver(nil); observer != nil {
 		t.Error("nil recorder produced an observer")
