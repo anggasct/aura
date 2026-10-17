@@ -425,7 +425,7 @@ func BuiltinProviders() map[string]ProviderPreset {
 		},
 		"opencode-go": {
 			Protocol:        ProtocolOpenAIResponses,
-			BaseURL:         "https://opencode.ai/zen/go/v1",
+			BaseURL:         "https://opencode.ai/zen/go",
 			AuthScheme:      ProviderAuthBearer,
 			SessionBehavior: ProviderSessionOpencode,
 		},
