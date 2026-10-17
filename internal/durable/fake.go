@@ -129,20 +129,32 @@ func (i *invocation) Signal(ctx context.Context, name string) ([]byte, bool) {
 	i.mu.Unlock()
 	select {
 	case delivery := <-reply:
-		if ctx.Err() != nil {
-			i.detachWaiter(name, reply, &delivery)
-			return nil, false
+		i.mu.Lock()
+		if queue := i.signals[name]; queue != nil && queue.waiter == reply {
+			queue.waiter = nil
 		}
+		i.mu.Unlock()
 		return delivery.payload, true
 	case <-ctx.Done():
-		i.detachWaiter(name, reply, nil)
+		i.detachWaiter(name, reply)
 		return nil, false
 	case <-i.done:
+		select {
+		case delivery := <-reply:
+			i.mu.Lock()
+			if queue := i.signals[name]; queue != nil && queue.waiter == reply {
+				queue.waiter = nil
+			}
+			i.mu.Unlock()
+			return delivery.payload, true
+		default:
+		}
+		i.detachWaiter(name, reply)
 		return nil, false
 	}
 }
 
-func (i *invocation) detachWaiter(name string, reply chan signalDelivery, raced *signalDelivery) {
+func (i *invocation) detachWaiter(name string, reply chan signalDelivery) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	queue := i.signals[name]
@@ -152,19 +164,16 @@ func (i *invocation) detachWaiter(name string, reply chan signalDelivery, raced 
 	if queue.waiter == reply {
 		queue.waiter = nil
 	}
-	if raced == nil {
-		select {
-		case delivery := <-reply:
-			raced = &delivery
-		default:
+	select {
+	case delivery := <-reply:
+		if waiter := queue.waiter; waiter != nil {
+			waiter <- delivery
 			return
 		}
-	}
-	if waiter := queue.waiter; waiter != nil {
-		waiter <- *raced
+		queue.delivered = append([]signalDelivery{delivery}, queue.delivered...)
+	default:
 		return
 	}
-	queue.delivered = append([]signalDelivery{*raced}, queue.delivered...)
 }
 
 func (i *invocation) Sleep(d time.Duration) error {
@@ -210,11 +219,10 @@ func (i *invocation) Wait(ctx context.Context, name string, timeout time.Duratio
 	timer := i.clock.Timer(timeout)
 	select {
 	case delivery := <-reply:
-		if ctx.Err() != nil {
-			i.detachWaiter(name, reply, &delivery)
-			return nil, false, false
-		}
 		i.mu.Lock()
+		if queue := i.signals[name]; queue != nil && queue.waiter == reply {
+			queue.waiter = nil
+		}
 		if i.waits == nil {
 			i.waits = map[string]waitResult{}
 		}
@@ -222,7 +230,7 @@ func (i *invocation) Wait(ctx context.Context, name string, timeout time.Duratio
 		i.mu.Unlock()
 		return delivery.payload, false, true
 	case <-timer:
-		i.detachWaiter(name, reply, nil)
+		i.detachWaiter(name, reply)
 		i.mu.Lock()
 		if i.waits == nil {
 			i.waits = map[string]waitResult{}
@@ -231,9 +239,38 @@ func (i *invocation) Wait(ctx context.Context, name string, timeout time.Duratio
 		i.mu.Unlock()
 		return nil, true, true
 	case <-ctx.Done():
-		i.detachWaiter(name, reply, nil)
+		select {
+		case delivery := <-reply:
+			i.mu.Lock()
+			if queue := i.signals[name]; queue != nil && queue.waiter == reply {
+				queue.waiter = nil
+			}
+			if i.waits == nil {
+				i.waits = map[string]waitResult{}
+			}
+			i.waits[name] = waitResult{payload: append([]byte(nil), delivery.payload...), timedOut: false, ok: true}
+			i.mu.Unlock()
+			return delivery.payload, false, true
+		default:
+		}
+		i.detachWaiter(name, reply)
 		return nil, false, false
 	case <-i.done:
+		select {
+		case delivery := <-reply:
+			i.mu.Lock()
+			if queue := i.signals[name]; queue != nil && queue.waiter == reply {
+				queue.waiter = nil
+			}
+			if i.waits == nil {
+				i.waits = map[string]waitResult{}
+			}
+			i.waits[name] = waitResult{payload: append([]byte(nil), delivery.payload...), timedOut: false, ok: true}
+			i.mu.Unlock()
+			return delivery.payload, false, true
+		default:
+		}
+		i.detachWaiter(name, reply)
 		return nil, false, false
 	}
 }
