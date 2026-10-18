@@ -3,8 +3,13 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+
+	adkmodel "google.golang.org/adk/v2/model"
+	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/memory"
@@ -130,19 +135,113 @@ func buildMemoryService(cfg *config.Config, db *sql.DB, observer memory.Observer
 	})
 }
 
-func buildMemoryProvider(cfg *config.Config, db *sql.DB, observer memory.Observer) (*memory.Provider, *memory.Service, error) {
-	service, err := buildMemoryService(cfg, db, observer)
-	if err != nil {
-		return nil, nil, err
-	}
-	provider, err := memory.NewProvider(service, memory.ProviderConfig{})
-	if err != nil {
-		return nil, nil, err
-	}
-	return provider, service, nil
+const (
+	memorySummaryOutputBound = 1 << 16
+	memorySummaryMaxTokens   = 1 << 14
+)
+
+type memoryRuntime struct {
+	provider   *memory.Provider
+	service    *memory.Service
+	model      *memory.SummaryModel
+	summarizer memory.Summarizer
 }
 
-func buildMemoryHook(service *memory.Service, logger *slog.Logger) func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error {
+func buildMemoryRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger, observer memory.Observer) (*memoryRuntime, error) {
+	service, err := buildMemoryService(cfg, db, observer)
+	if err != nil {
+		return nil, err
+	}
+	model, summarizer := buildMemorySummary(ctx, cfg, logger)
+	provider, err := memory.NewProvider(service, memory.ProviderConfig{Model: model, Summarizer: summarizer})
+	if err != nil {
+		return nil, err
+	}
+	return &memoryRuntime{provider: provider, service: service, model: model, summarizer: summarizer}, nil
+}
+
+func buildMemorySummary(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*memory.SummaryModel, memory.Summarizer) {
+	if cfg == nil {
+		return nil, nil
+	}
+	definition, ok := cfg.Models.Definitions["primary"]
+	if !ok || strings.TrimSpace(definition.Model) == "" {
+		return nil, nil
+	}
+	llm, err := adkmodel.NewLLM(ctx, definition.Model)
+	if err != nil {
+		if logger != nil {
+			logger.WarnContext(ctx, "memory range summarizer unavailable", "component", "memory", "model", definition.Model, "error", err)
+		}
+		return nil, nil
+	}
+	model := &memory.SummaryModel{
+		Protocol:         definition.Protocol,
+		Name:             definition.Model,
+		Tokenizer:        definition.Capabilities.Tokenizer,
+		ContextTokens:    definition.Capabilities.ContextTokens,
+		StructuredOutput: definition.Capabilities.StructuredOutput,
+	}
+	return model, &llmSummarizer{llm: llm, bound: memorySummaryOutputBound}
+}
+
+type llmSummarizer struct {
+	llm   adkmodel.LLM
+	bound int
+}
+
+func (s *llmSummarizer) Summarize(ctx context.Context, prompt *memory.SummaryPrompt) (string, error) {
+	if ctx == nil {
+		return "", memory.Errorf(memory.ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if s == nil || s.llm == nil {
+		return "", memory.Errorf(memory.ErrorCodeInvalidArgument, "memory summarizer has no model")
+	}
+	if prompt == nil {
+		return "", memory.Errorf(memory.ErrorCodeInvalidArgument, "summary prompt must not be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	maxTokens := prompt.MaxTokens
+	if maxTokens <= 0 || maxTokens > memorySummaryMaxTokens {
+		maxTokens = memorySummaryMaxTokens
+	}
+	var request strings.Builder
+	request.WriteString("Summarize the closed session range below into a compact factual digest. Do not invent details.\n\n")
+	for i := range prompt.Documents {
+		fmt.Fprintf(&request, "[seq %d-%d trust=%s]\n%s\n\n",
+			prompt.Documents[i].FromSequence, prompt.Documents[i].ToSequence,
+			prompt.Documents[i].Trust, prompt.Documents[i].Content)
+	}
+	var collected strings.Builder
+	for response, err := range s.llm.GenerateContent(ctx, &adkmodel.LLMRequest{
+		Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: request.String()}}}},
+		Config:   &genai.GenerateContentConfig{MaxOutputTokens: int32(maxTokens)},
+	}, false) {
+		if err != nil {
+			return "", err
+		}
+		if response == nil || response.Content == nil {
+			continue
+		}
+		for _, part := range response.Content.Parts {
+			if part == nil || strings.TrimSpace(part.Text) == "" {
+				continue
+			}
+			if collected.Len()+len(part.Text) > s.bound {
+				return collected.String(), nil
+			}
+			collected.WriteString(part.Text)
+		}
+	}
+	if strings.TrimSpace(collected.String()) == "" {
+		return "", memory.Errorf(memory.ErrorCodeUnavailable, "summarizer returned no usable content")
+	}
+	return collected.String(), nil
+}
+
+func buildMemoryHook(service *memory.Service, model *memory.SummaryModel, summarizer memory.Summarizer, logger *slog.Logger) func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error {
 	return func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error {
 		if service == nil {
 			return memory.Errorf(memory.ErrorCodeInvalidArgument, "memory service must not be nil")
@@ -169,6 +268,11 @@ func buildMemoryHook(service *memory.Service, logger *slog.Logger) func(ctx cont
 		}
 		if _, purgeErr := service.PurgeExpired(ctx, time.Now().UTC(), 100); purgeErr != nil && logger != nil {
 			logger.WarnContext(ctx, "memory expiry failed", "error", purgeErr, "turn_id", req.TurnID)
+		}
+		if model != nil && summarizer != nil {
+			if _, _, summaryErr := service.SummarizeClosedRange(ctx, req.PrincipalID, req.SessionID, model, summarizer); summaryErr != nil && logger != nil {
+				logger.WarnContext(ctx, "memory range summary failed", "error", summaryErr, "turn_id", req.TurnID)
+			}
 		}
 		return err
 	}

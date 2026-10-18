@@ -62,18 +62,21 @@ func TestMemoryDocumentStoreRoundTrip(t *testing.T) {
 	}
 }
 
-func TestBuildMemoryProvider(t *testing.T) {
+func TestBuildMemoryRuntime(t *testing.T) {
 	db := newMemoryTestDB(t)
 	cfg := config.Default()
-	provider, service, err := buildMemoryProvider(&cfg, db, nil)
+	runtime, err := buildMemoryRuntime(context.Background(), &cfg, db, nil, nil)
 	if err != nil {
-		t.Fatalf("buildMemoryProvider(): %v", err)
+		t.Fatalf("buildMemoryRuntime(): %v", err)
 	}
-	if provider == nil {
+	if runtime.provider == nil {
 		t.Fatal("provider missing")
 	}
-	if service == nil {
+	if runtime.service == nil {
 		t.Fatal("service missing")
+	}
+	if runtime.model != nil || runtime.summarizer != nil {
+		t.Errorf("summary model/summarizer = %+v, %+v; want none without a primary model definition", runtime.model, runtime.summarizer)
 	}
 	if observer := memoryRecorderObserver(nil); observer != nil {
 		t.Error("nil recorder produced an observer")

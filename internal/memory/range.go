@@ -130,6 +130,15 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 	}
 	result, err := s.Summarize(ctx, ownerID, sessionID, "", filtered, model, summarizer)
 	if err != nil {
+		if code, ok := CodeOf(err); ok && code == ErrorCodeModelCapabilityUnsupported {
+			s.observe(ctx, &Observation{
+				Outcome:       string(ErrorCodeModelCapabilityUnsupported),
+				Documents:     len(filtered),
+				ModelProtocol: model.Protocol,
+				ModelName:     model.Name,
+			})
+			return RecallContext{}, false, nil
+		}
 		return RecallContext{}, false, err
 	}
 	keepID := documentID(sessionID, KindSummary, from, to, s.summaryPrompt)

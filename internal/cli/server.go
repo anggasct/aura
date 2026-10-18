@@ -121,12 +121,12 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				memoryProvider, memoryService, err := buildMemoryProvider(cfg, db, memoryRecorderObserver(memoryRecorder))
+				memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, logger, memoryRecorderObserver(memoryRecorder))
 				if err != nil {
 					return err
 				}
-				executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryProvider))
-				memoryHook = buildMemoryHook(memoryService, logger)
+				executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryRuntime.provider))
+				memoryHook = buildMemoryHook(memoryRuntime.service, memoryRuntime.model, memoryRuntime.summarizer, logger)
 			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,

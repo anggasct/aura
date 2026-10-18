@@ -196,12 +196,12 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
 	}
 	if cfg.Memory.Enabled {
-		memoryProvider, memoryService, err := buildMemoryProvider(cfg, db, nil)
+		memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, logger, nil)
 		if err != nil {
 			return err
 		}
-		executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryProvider))
-		memoryHook = buildMemoryHook(memoryService, logger)
+		executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryRuntime.provider))
+		memoryHook = buildMemoryHook(memoryRuntime.service, memoryRuntime.model, memoryRuntime.summarizer, logger)
 	}
 	executor, err := runtimeadk.NewADKExecutor(
 		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,

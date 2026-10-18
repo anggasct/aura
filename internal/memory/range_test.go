@@ -187,18 +187,35 @@ func TestRangeReopenMarksStaleUntilRebuild(t *testing.T) {
 
 func TestRangeCapabilitySkipLeavesZeroDocs(t *testing.T) {
 	store := newFakeDocumentStore()
-	service := rangeServiceWithStore(store)
+	sink := &observationSink{}
+	service, err := NewService(store, &fakeSecrets{known: map[string]bool{}}, &Config{
+		RangeThreshold:  6,
+		RangeLiveWindow: 2,
+		Observer:        sink.observe,
+	})
+	if err != nil {
+		t.Fatalf("NewService(): %v", err)
+	}
 	seedRangeSession(t, service, "sess-range", 6)
 	incapable := capableModel()
 	incapable.StructuredOutput = false
 	summarizer := &fakeSummarizer{text: "unused"}
-	if _, _, err := service.SummarizeClosedRange(t.Context(), "owner-1", "sess-range", incapable, summarizer); err == nil {
-		t.Fatal("incapable model accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeModelCapabilityUnsupported {
-		t.Fatalf("code = %v, %v", code, ok)
+	_, summarized, err := service.SummarizeClosedRange(t.Context(), "owner-1", "sess-range", incapable, summarizer)
+	if err != nil {
+		t.Fatalf("SummarizeClosedRange(): %v", err)
+	}
+	if summarized {
+		t.Error("incapable model summarized")
 	}
 	if summarizer.calls != 0 {
 		t.Errorf("model called %d times, want 0", summarizer.calls)
+	}
+	if len(sink.observations) != 1 {
+		t.Fatalf("observations = %d, want 1", len(sink.observations))
+	}
+	observation := sink.observations[0]
+	if observation.Outcome != string(ErrorCodeModelCapabilityUnsupported) || observation.Summarized {
+		t.Errorf("observation = %+v, want capability skip", observation)
 	}
 	summaries, err := store.ListSessionDocuments(t.Context(), "owner-1", "sess-range", KindSummary, 10)
 	if err != nil || len(summaries) != 0 {

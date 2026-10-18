@@ -203,7 +203,7 @@ func TestMemoryHookProjectsAndPurges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
-	hook := buildMemoryHook(service, nil)
+	hook := buildMemoryHook(service, nil, nil, nil)
 	hookEvents := []store.RuntimeEvent{{
 		ID: "ev-hook-1", SessionID: "sess-1", Sequence: 1, TurnID: "turn-1", Author: "user",
 		Kind: store.EventKindADK, SchemaVersion: 1,
@@ -219,5 +219,117 @@ func TestMemoryHookProjectsAndPurges(t *testing.T) {
 	}
 	if err := hook(ctx, nil, hookEvents); err == nil {
 		t.Error("nil request accepted")
+	}
+}
+
+type stubRangeSummarizer struct {
+	text  string
+	calls int
+}
+
+func (s *stubRangeSummarizer) Summarize(_ context.Context, _ *memory.SummaryPrompt) (string, error) {
+	s.calls++
+	return s.text, nil
+}
+
+func capableMemorySummaryModel() *memory.SummaryModel {
+	return &memory.SummaryModel{
+		Protocol:         "anthropic_messages",
+		Name:             "claude-sonnet-4-20250514",
+		Tokenizer:        "claude",
+		ContextTokens:    200000,
+		StructuredOutput: true,
+	}
+}
+
+func TestMemoryHookSummarizesClosedRange(t *testing.T) {
+	ctx := context.Background()
+	db := newMemoryTestDB(t)
+	sessions := store.NewSessionService(db)
+	if err := sessions.Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner-1", Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{RangeThreshold: 3, RangeLiveWindow: 1})
+	if err != nil {
+		t.Fatalf("NewService(): %v", err)
+	}
+	summarizer := &stubRangeSummarizer{text: "archive backup digest"}
+	hook := buildMemoryHook(service, capableMemorySummaryModel(), summarizer, nil)
+	events := make([]store.RuntimeEvent, 0, 4)
+	for i := 1; i <= 4; i++ {
+		content := "archive backup old note " + string(rune('a'+i))
+		if i > 2 {
+			content = "live backup recent note " + string(rune('a'+i))
+		}
+		events = append(events, store.RuntimeEvent{
+			ID: fmt.Sprintf("ev-hook-%d", i), SessionID: "sess-1", Sequence: uint64(i), TurnID: "turn-1", Author: "user",
+			Kind: store.EventKindADK, SchemaVersion: 1,
+			Payload:   journalPayload(t, "user", content),
+			CreatedAt: time.Now().UTC(),
+		})
+	}
+	if err := hook(ctx, hookTurnRequest(), events); err != nil {
+		t.Fatalf("hook(): %v", err)
+	}
+	if summarizer.calls != 1 {
+		t.Fatalf("summarizer calls = %d, want 1", summarizer.calls)
+	}
+	hits, err := store.NewMemoryStore(db).Search(ctx, &store.MemoryQuery{OwnerID: "owner-1", SessionID: "sess-1", Terms: "digest", Limit: 10})
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("summary hits = %d, %v; want 1", len(hits), err)
+	}
+	if hits[0].Kind != memory.KindSummary || hits[0].PromptVersion == "" {
+		t.Fatalf("summary doc = %+v, want provenance-bearing summary", hits[0])
+	}
+	if hits[0].FromSequence != 1 || hits[0].ToSequence != 3 {
+		t.Errorf("summary range = %d-%d, want 1-3", hits[0].FromSequence, hits[0].ToSequence)
+	}
+	recalled, err := service.Recall(ctx, &memory.RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "archive"})
+	if err != nil {
+		t.Fatalf("Recall(): %v", err)
+	}
+	if len(recalled) == 0 || recalled[0].PromptVersion == "" {
+		t.Fatalf("old-range recall first = %+v, want summary first", recalled)
+	}
+	if recalled[0].FromSequence != 1 || recalled[0].ToSequence != 3 {
+		t.Errorf("recalled summary range = %d-%d, want 1-3", recalled[0].FromSequence, recalled[0].ToSequence)
+	}
+	for _, document := range recalled[1:] {
+		if document.PromptVersion != "" {
+			t.Errorf("old-range tail holds summary: %+v", recalled)
+			break
+		}
+		if document.FromSequence > 3 {
+			t.Errorf("old-range tail holds live doc: %+v", document)
+		}
+	}
+}
+
+func TestMemoryHookSkipsRangeSummaryWithoutSummarizer(t *testing.T) {
+	ctx := context.Background()
+	db := newMemoryTestDB(t)
+	sessions := store.NewSessionService(db)
+	if err := sessions.Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner-1", Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{RangeThreshold: 1, RangeLiveWindow: 1})
+	if err != nil {
+		t.Fatalf("NewService(): %v", err)
+	}
+	hook := buildMemoryHook(service, nil, nil, nil)
+	if err := hook(ctx, hookTurnRequest(), []store.RuntimeEvent{{
+		ID: "ev-hook-1", SessionID: "sess-1", Sequence: 1, TurnID: "turn-1", Author: "user",
+		Kind: store.EventKindADK, SchemaVersion: 1,
+		Payload:   journalPayload(t, "user", "the nightly backup finished cleanly"),
+		CreatedAt: time.Now().UTC(),
+	}}); err != nil {
+		t.Fatalf("hook(): %v", err)
+	}
+	hits, err := store.NewMemoryStore(db).Search(ctx, &store.MemoryQuery{OwnerID: "owner-1", SessionID: "sess-1", Terms: "backup", Limit: 10})
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("hits = %d, %v; want 1 raw doc and no summary", len(hits), err)
+	}
+	if hits[0].Kind == memory.KindSummary {
+		t.Errorf("summary created without a summarizer: %+v", hits[0])
 	}
 }
