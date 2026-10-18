@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -381,14 +382,78 @@ func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope,
 }
 
 func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) {
+	if parent, ok := a.lookupThreadParent(msg.ChannelID); ok {
+		return a.admitThreadMessage(ctx, msg, msg.ChannelID, parent)
+	}
 	envelope, admitted, err := normalizeMessage(a.cfg, a.selfID, a.cfg.Instance, msg)
 	if err != nil {
 		return false, err
 	}
 	if !admitted {
+		return a.admitUnknownThread(ctx, msg)
+	}
+	if msg.GuildID != "" && !skipThreadCreate(msg.ChannelType) {
+		if threadID, threadErr := a.createThreadForTrigger(ctx, msg, msg.ChannelID); threadErr == nil {
+			if rewriteErr := rewriteEnvelopeForThread(envelope, msg, threadID, msg.ChannelID); rewriteErr == nil {
+				return a.acceptEnvelope(ctx, msg, envelope, threadID)
+			}
+		} else {
+			a.logger.WarnContext(ctx, "thread create fallback", "component", "discord", "error", threadErr)
+		}
+	}
+	return a.acceptEnvelope(ctx, msg, envelope, msg.ChannelID)
+}
+
+func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, threadID, parent string) (bool, error) {
+	if msg.GuildID == "" || !validThreadAuthor(a.cfg, a.selfID, msg) {
 		return false, nil
 	}
-	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, guildID: msg.GuildID, channelID: msg.ChannelID})
+	if len(a.cfg.AllowedGuildIDs) > 0 && !slices.Contains(a.cfg.AllowedGuildIDs, msg.GuildID) {
+		return false, nil
+	}
+	if len(a.cfg.AllowedChannelIDs) > 0 && !slices.Contains(a.cfg.AllowedChannelIDs, parent) {
+		return false, nil
+	}
+	envelope, err := buildThreadEnvelope(a.cfg.Instance, msg, threadID, parent)
+	if err != nil {
+		return false, err
+	}
+	return a.acceptEnvelope(ctx, msg, envelope, threadID)
+}
+
+func (a *Adapter) admitUnknownThread(ctx context.Context, msg *messagePayload) (bool, error) {
+	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.cfg, a.selfID, msg) {
+		return false, nil
+	}
+	if a.selfID == "" {
+		return false, nil
+	}
+	if len(a.cfg.AllowedGuildIDs) > 0 && !slices.Contains(a.cfg.AllowedGuildIDs, msg.GuildID) {
+		return false, nil
+	}
+	if parent, ok := a.lookupThreadParent(msg.ChannelID); ok {
+		return a.admitThreadMessage(ctx, msg, msg.ChannelID, parent)
+	}
+	token, _ := a.tokenRef.Resolve()
+	if token == "" {
+		return false, nil
+	}
+	info, _ := a.fetchThreadParent(ctx, token, msg.ChannelID)
+	if info.ID == "" {
+		return false, nil
+	}
+	if !isThreadChannelType(info.Type) || info.OwnerID != a.selfID || info.ParentID == "" {
+		return false, nil
+	}
+	if len(a.cfg.AllowedChannelIDs) > 0 && !slices.Contains(a.cfg.AllowedChannelIDs, info.ParentID) {
+		return false, nil
+	}
+	a.rememberThread("", info.ID, info.ParentID)
+	return a.admitThreadMessage(ctx, msg, info.ID, info.ParentID)
+}
+
+func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope, bindingChannel string) (bool, error) {
+	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, guildID: msg.GuildID, channelID: bindingChannel})
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)
 	}
