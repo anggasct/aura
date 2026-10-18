@@ -54,7 +54,6 @@ type MemoryStore interface {
 	ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]MemoryDocument, error)
 	ListOwnerDocuments(ctx context.Context, ownerID string, limit int) ([]MemoryDocument, error)
 	CountSessionDocuments(ctx context.Context, sessionID string) (int, error)
-	DeleteSessionDocumentsOwned(ctx context.Context, ownerID, sessionID string) (int, error)
 	DeleteDocumentsByIDsOwned(ctx context.Context, ownerID string, ids []string) (int, error)
 }
 
@@ -310,11 +309,7 @@ const selectMemoryDocumentColumns = `
 	d.created_at, d.expires_at
 `
 
-type memoryRowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanMemoryDocument(rows memoryRowScanner) (MemoryDocument, error) {
+func scanMemoryDocument(rows rowScanner) (MemoryDocument, error) {
 	var document MemoryDocument
 	var createdAtRaw string
 	var expiresAtRaw sql.NullString
@@ -453,27 +448,6 @@ func (s *sqliteMemoryStore) CountSessionDocuments(ctx context.Context, sessionID
 	return int(total), nil
 }
 
-func (s *sqliteMemoryStore) DeleteSessionDocumentsOwned(ctx context.Context, ownerID, sessionID string) (int, error) {
-	if s.db == nil {
-		return 0, errNilArgument("db")
-	}
-	if ownerID == "" || sessionID == "" {
-		return 0, Errorf(ErrorCodeInvalidArgument, "memory owner and session must not be empty")
-	}
-	result, err := s.db.ExecContext(ctx,
-		`DELETE FROM memory_document WHERE owner_id = ? AND session_id = ?`, ownerID, sessionID)
-	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete owned session documents: %w", err))
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete owned session documents: %w", err))
-	}
-	if affected > math.MaxInt {
-		return 0, Errorf(ErrorCodeMemoryInvalid, "delete count is out of bounds")
-	}
-	return int(affected), nil
-}
 
 func (s *sqliteMemoryStore) DeleteDocumentsByIDsOwned(ctx context.Context, ownerID string, ids []string) (int, error) {
 	if s.db == nil {

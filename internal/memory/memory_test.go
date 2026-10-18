@@ -183,20 +183,7 @@ func (s *fakeDocumentStore) CountSessionDocuments(_ context.Context, sessionID s
 	return total, nil
 }
 
-func (s *fakeDocumentStore) DeleteSessionDocumentsOwned(_ context.Context, ownerID, sessionID string) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	deleted := 0
-	for id := range s.records {
-		record := s.records[id]
-		if record.OwnerID == ownerID && record.SessionID == sessionID {
-			delete(s.records, id)
-			delete(s.byKey, fakeDocKey(record.SessionID, record.Kind, record.PromptVersion, record.FromSequence, record.ToSequence))
-			deleted++
-		}
-	}
-	return deleted, nil
-}
+
 
 func (s *fakeDocumentStore) DeleteDocumentsByIDsOwned(_ context.Context, ownerID string, ids []string) (int, error) {
 	s.mu.Lock()

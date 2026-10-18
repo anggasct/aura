@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/memory"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
 )
@@ -164,16 +165,12 @@ func (s *memoryDocumentStore) CountSessionDocuments(ctx context.Context, session
 	return s.store.CountSessionDocuments(ctx, sessionID)
 }
 
-func (s *memoryDocumentStore) DeleteSessionDocumentsOwned(ctx context.Context, ownerID, sessionID string) (int, error) {
-	return s.store.DeleteSessionDocumentsOwned(ctx, ownerID, sessionID)
-}
-
 func (s *memoryDocumentStore) DeleteDocumentsByIDsOwned(ctx context.Context, ownerID string, ids []string) (int, error) {
 	return s.store.DeleteDocumentsByIDsOwned(ctx, ownerID, ids)
 }
 
 func buildMemoryService(cfg *config.Config, db *sql.DB, observer memory.Observer) (*memory.Service, error) {
-	return memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, memory.Config{
+	return memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, secret.New(), memory.Config{
 		MaxDocuments:         cfg.Memory.MaxDocuments,
 		TokenBudget:          cfg.Memory.RecallTokenBudget,
 		SummaryPromptVersion: cfg.Memory.SummaryPromptVersion,
