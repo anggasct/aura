@@ -448,7 +448,6 @@ func (s *sqliteMemoryStore) CountSessionDocuments(ctx context.Context, sessionID
 	return int(total), nil
 }
 
-
 func (s *sqliteMemoryStore) DeleteDocumentsByIDsOwned(ctx context.Context, ownerID string, ids []string) (int, error) {
 	if s.db == nil {
 		return 0, errNilArgument("db")

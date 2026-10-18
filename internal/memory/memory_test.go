@@ -183,8 +183,6 @@ func (s *fakeDocumentStore) CountSessionDocuments(_ context.Context, sessionID s
 	return total, nil
 }
 
-
-
 func (s *fakeDocumentStore) DeleteDocumentsByIDsOwned(_ context.Context, ownerID string, ids []string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
