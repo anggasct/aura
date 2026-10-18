@@ -455,6 +455,57 @@ func (s *fakeThreadDocStore) DeleteExpiredSummaries(_ context.Context, now time.
 	return 0, nil
 }
 
+func (s *fakeThreadDocStore) DeleteSessionSummaries(_ context.Context, ownerID, sessionID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.docs[:0]
+	deleted := 0
+	for i := range s.docs {
+		d := s.docs[i]
+		if d.OwnerID == ownerID && d.SessionID == sessionID && d.Kind == memory.KindSummary {
+			deleted++
+			continue
+		}
+		kept = append(kept, d)
+	}
+	s.docs = kept
+	return deleted, nil
+}
+
+func (s *fakeThreadDocStore) DeleteOtherSummaries(_ context.Context, ownerID, sessionID, keepID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.docs[:0]
+	deleted := 0
+	for i := range s.docs {
+		d := s.docs[i]
+		if d.OwnerID == ownerID && d.SessionID == sessionID && d.Kind == memory.KindSummary && d.ID != keepID {
+			deleted++
+			continue
+		}
+		kept = append(kept, d)
+	}
+	s.docs = kept
+	return deleted, nil
+}
+
+func (s *fakeThreadDocStore) ListSessionDocumentsByKind(_ context.Context, ownerID, sessionID, kind string, limit int) ([]memory.StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []memory.StoredDocument
+	for i := range s.docs {
+		d := s.docs[i]
+		if d.OwnerID != ownerID || d.SessionID != sessionID || d.Kind != kind {
+			continue
+		}
+		out = append(out, d)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (s *fakeThreadDocStore) GetDocument(_ context.Context, id string) (memory.StoredDocument, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -562,7 +613,7 @@ func TestThreads_TwoThreadsCrossThreadRecallIsolation(t *testing.T) {
 	}
 
 	store := &fakeThreadDocStore{}
-	svc, err := memory.NewService(store, nil, memory.Config{MaxDocuments: 2})
+	svc, err := memory.NewService(store, nil, &memory.Config{MaxDocuments: 2})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
