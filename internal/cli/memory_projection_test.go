@@ -63,7 +63,7 @@ func TestMemoryProjectionJournalSeeded(t *testing.T) {
 	if len(listed) != 2 {
 		t.Fatalf("journal events = %d, want 2", len(listed))
 	}
-	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, memory.Config{})
+	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
@@ -117,7 +117,7 @@ func TestMemoryProjectionCrossSessionFallbackRealStore(t *testing.T) {
 			t.Fatalf("create %s: %v", seed.session, err)
 		}
 	}
-	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, memory.Config{})
+	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
@@ -164,7 +164,7 @@ func TestMemoryProjectionSecretDropRealStore(t *testing.T) {
 	}
 	vault := secret.New()
 	vault.Set("canary", "sk-live-canary")
-	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, vault, memory.Config{})
+	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, vault, &memory.Config{})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
@@ -199,7 +199,7 @@ func TestMemoryHookProjectsAndPurges(t *testing.T) {
 	if err := sessions.Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner-1", Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, memory.Config{})
+	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}

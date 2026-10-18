@@ -48,7 +48,12 @@ type MemoryStore interface {
 	Search(ctx context.Context, query *MemoryQuery) ([]MemoryHit, error)
 	DeleteSessionDocuments(ctx context.Context, sessionID string) error
 	DeleteExpiredSummaries(ctx context.Context, now time.Time, limit int) (int, error)
+	ListSessionDocuments(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]MemoryDocument, error)
+	DeleteSessionSummaries(ctx context.Context, ownerID, sessionID string) (int, error)
+	DeleteOtherSummaries(ctx context.Context, ownerID, sessionID, keepID string) (int, error)
 }
+
+const maxSessionListLimit = 500
 
 type sqliteMemoryStore struct {
 	db *sql.DB
@@ -290,6 +295,119 @@ func (s *sqliteMemoryStore) DeleteExpiredSummaries(ctx context.Context, now time
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return 0, classifyBusy(fmt.Errorf("delete expired summaries: %w", err))
+	}
+	return int(affected), nil
+}
+
+func (s *sqliteMemoryStore) ListSessionDocuments(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]MemoryDocument, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if ownerID == "" || sessionID == "" {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list owner and session must not be empty")
+	}
+	if !validMemoryKind(kind) {
+		return nil, Errorf(ErrorCodeMemoryInvalid, "memory document kind is not valid")
+	}
+	if limit <= 0 || limit > maxSessionListLimit {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list limit is not within bounds")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
+			content, trust_label, prompt_version, model_protocol, model_name,
+			created_at, expires_at
+		FROM memory_document
+		WHERE owner_id = ? AND session_id = ? AND kind = ?
+			AND (expires_at IS NULL OR expires_at > ?)
+		ORDER BY source_from_sequence ASC, source_to_sequence ASC, id ASC
+		LIMIT ?`,
+		ownerID, sessionID, kind, formatTime(time.Now().UTC()), limit)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("list session documents: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	documents := []MemoryDocument{}
+	for rows.Next() {
+		document, err := scanMemoryDocument(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		documents = append(documents, document)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list session documents: %w", err))
+	}
+	return documents, nil
+}
+
+func scanMemoryDocument(rows *sql.Rows) (MemoryDocument, error) {
+	var document MemoryDocument
+	var createdAtRaw string
+	var expiresAtRaw sql.NullString
+	var promptVersion, modelProtocol, modelName sql.NullString
+	if err := rows.Scan(
+		&document.ID, &document.OwnerID, &document.SessionID, &document.Kind,
+		&document.FromSequence, &document.ToSequence, &document.Content, &document.TrustLabel,
+		&promptVersion, &modelProtocol, &modelName,
+		&createdAtRaw, &expiresAtRaw,
+	); err != nil {
+		return MemoryDocument{}, classifyBusy(fmt.Errorf("scan memory document: %w", err))
+	}
+	createdAt, err := parseTime(createdAtRaw)
+	if err != nil {
+		return MemoryDocument{}, Errorf(ErrorCodeMemoryInvalid, "memory created_at is not valid")
+	}
+	document.CreatedAt = createdAt
+	document.PromptVersion = promptVersion.String
+	document.ModelProtocol = modelProtocol.String
+	document.ModelName = modelName.String
+	if expiresAtRaw.Valid {
+		expiresAt, err := parseTime(expiresAtRaw.String)
+		if err != nil {
+			return MemoryDocument{}, Errorf(ErrorCodeMemoryInvalid, "memory expires_at is not valid")
+		}
+		document.ExpiresAt = &expiresAt
+	}
+	return document, nil
+}
+
+func (s *sqliteMemoryStore) DeleteSessionSummaries(ctx context.Context, ownerID, sessionID string) (int, error) {
+	if s.db == nil {
+		return 0, errNilArgument("db")
+	}
+	if ownerID == "" || sessionID == "" {
+		return 0, Errorf(ErrorCodeInvalidArgument, "delete owner and session must not be empty")
+	}
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM memory_document WHERE owner_id = ? AND session_id = ? AND kind = ?`,
+		ownerID, sessionID, MemoryKindSummary)
+	if err != nil {
+		return 0, classifyBusy(fmt.Errorf("delete session summaries: %w", err))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, classifyBusy(fmt.Errorf("delete session summaries: %w", err))
+	}
+	return int(affected), nil
+}
+
+func (s *sqliteMemoryStore) DeleteOtherSummaries(ctx context.Context, ownerID, sessionID, keepID string) (int, error) {
+	if s.db == nil {
+		return 0, errNilArgument("db")
+	}
+	if ownerID == "" || sessionID == "" || keepID == "" {
+		return 0, Errorf(ErrorCodeInvalidArgument, "delete owner, session and keep id must not be empty")
+	}
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM memory_document WHERE owner_id = ? AND session_id = ? AND kind = ? AND id != ?`,
+		ownerID, sessionID, MemoryKindSummary, keepID)
+	if err != nil {
+		return 0, classifyBusy(fmt.Errorf("delete other summaries: %w", err))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, classifyBusy(fmt.Errorf("delete other summaries: %w", err))
 	}
 	return int(affected), nil
 }

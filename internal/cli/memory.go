@@ -86,8 +86,42 @@ func (s *memoryDocumentStore) DeleteExpiredSummaries(ctx context.Context, now ti
 	return s.store.DeleteExpiredSummaries(ctx, now, limit)
 }
 
+func (s *memoryDocumentStore) ListSessionDocuments(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]memory.StoredDocument, error) {
+	documents, err := s.store.ListSessionDocuments(ctx, ownerID, sessionID, kind, limit)
+	if err != nil {
+		return nil, err
+	}
+	converted := make([]memory.StoredDocument, 0, len(documents))
+	for i := range documents {
+		converted = append(converted, memory.StoredDocument{
+			ID:            documents[i].ID,
+			OwnerID:       documents[i].OwnerID,
+			SessionID:     documents[i].SessionID,
+			Kind:          documents[i].Kind,
+			FromSequence:  documents[i].FromSequence,
+			ToSequence:    documents[i].ToSequence,
+			Content:       documents[i].Content,
+			TrustLabel:    documents[i].TrustLabel,
+			PromptVersion: documents[i].PromptVersion,
+			ModelProtocol: documents[i].ModelProtocol,
+			ModelName:     documents[i].ModelName,
+			CreatedAt:     documents[i].CreatedAt,
+			ExpiresAt:     documents[i].ExpiresAt,
+		})
+	}
+	return converted, nil
+}
+
+func (s *memoryDocumentStore) DeleteSessionSummaries(ctx context.Context, ownerID, sessionID string) (int, error) {
+	return s.store.DeleteSessionSummaries(ctx, ownerID, sessionID)
+}
+
+func (s *memoryDocumentStore) DeleteOtherSummaries(ctx context.Context, ownerID, sessionID, keepID string) (int, error) {
+	return s.store.DeleteOtherSummaries(ctx, ownerID, sessionID, keepID)
+}
+
 func buildMemoryService(cfg *config.Config, db *sql.DB, observer memory.Observer) (*memory.Service, error) {
-	return memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, memory.Config{
+	return memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{
 		MaxDocuments:         cfg.Memory.MaxDocuments,
 		TokenBudget:          cfg.Memory.RecallTokenBudget,
 		SummaryPromptVersion: cfg.Memory.SummaryPromptVersion,

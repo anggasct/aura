@@ -41,6 +41,14 @@ const (
 	defaultFallbackTokenBudget  = 1000
 )
 
+const (
+	defaultRangeThreshold  = 20
+	defaultRangeLiveWindow = 5
+	maxRangeThreshold      = 200
+	maxRangeLiveWindow     = 50
+	maxRangeFetch          = 200
+)
+
 type Event struct {
 	ID        string
 	SessionID string
@@ -75,6 +83,9 @@ type DocumentStore interface {
 	Search(ctx context.Context, query *StoredQuery) ([]StoredHit, error)
 	DeleteSessionDocuments(ctx context.Context, sessionID string) error
 	DeleteExpiredSummaries(ctx context.Context, now time.Time, limit int) (int, error)
+	ListSessionDocuments(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]StoredDocument, error)
+	DeleteSessionSummaries(ctx context.Context, ownerID, sessionID string) (int, error)
+	DeleteOtherSummaries(ctx context.Context, ownerID, sessionID, keepID string) (int, error)
 }
 
 type StoredDocument struct {
@@ -172,6 +183,8 @@ type Config struct {
 	SummaryTTL           time.Duration
 	FallbackMaxDocuments int
 	FallbackTokenBudget  int
+	RangeThreshold       int
+	RangeLiveWindow      int
 	Observer             Observer
 }
 
@@ -186,14 +199,19 @@ type Service struct {
 	summaryTTL         time.Duration
 	fallbackDocs       int
 	fallbackTokens     int
+	rangeThreshold     int
+	rangeLiveWindow    int
 	secretDrops        atomic.Int64
 	projectionFailures atomic.Int64
 	projectMu          sync.Mutex
 }
 
-func NewService(documents DocumentStore, secrets Secrets, config Config) (*Service, error) {
+func NewService(documents DocumentStore, secrets Secrets, config *Config) (*Service, error) {
 	if documents == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "document store must not be nil")
+	}
+	if config == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "config must not be nil")
 	}
 	maxDocs := config.MaxDocuments
 	if maxDocs == 0 {
@@ -226,17 +244,30 @@ func NewService(documents DocumentStore, secrets Secrets, config Config) (*Servi
 	if fallbackDocs <= 0 || fallbackDocs > hardMaxDocuments || fallbackTokens <= 0 || fallbackTokens > hardMaxTokenBudget {
 		return nil, Errorf(ErrorCodeBudgetInvalid, "fallback budget is not within bounds")
 	}
+	rangeThreshold := config.RangeThreshold
+	if rangeThreshold == 0 {
+		rangeThreshold = defaultRangeThreshold
+	}
+	rangeLiveWindow := config.RangeLiveWindow
+	if rangeLiveWindow == 0 {
+		rangeLiveWindow = defaultRangeLiveWindow
+	}
+	if rangeThreshold <= 0 || rangeThreshold > maxRangeThreshold || rangeLiveWindow <= 0 || rangeLiveWindow > maxRangeLiveWindow {
+		return nil, Errorf(ErrorCodeBudgetInvalid, "range budget is not within bounds")
+	}
 	return &Service{
-		documents:      documents,
-		secrets:        secrets,
-		observer:       config.Observer,
-		maxDocs:        maxDocs,
-		tokens:         tokens,
-		maxBytes:       maxBytes,
-		summaryPrompt:  summaryPrompt,
-		summaryTTL:     summaryTTL,
-		fallbackDocs:   fallbackDocs,
-		fallbackTokens: fallbackTokens,
+		documents:       documents,
+		secrets:         secrets,
+		observer:        config.Observer,
+		maxDocs:         maxDocs,
+		tokens:          tokens,
+		maxBytes:        maxBytes,
+		summaryPrompt:   summaryPrompt,
+		summaryTTL:      summaryTTL,
+		fallbackDocs:    fallbackDocs,
+		fallbackTokens:  fallbackTokens,
+		rangeThreshold:  rangeThreshold,
+		rangeLiveWindow: rangeLiveWindow,
 	}, nil
 }
 
@@ -421,7 +452,7 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 		Trust:        trust,
 		CreatedAt:    createdAt,
 	}
-	_, err = s.documents.UpsertDocument(ctx, &StoredDocument{
+	inserted, err := s.documents.UpsertDocument(ctx, &StoredDocument{
 		ID:           document.ID,
 		OwnerID:      document.OwnerID,
 		SessionID:    document.SessionID,
@@ -434,6 +465,11 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	})
 	if err != nil {
 		return Document{}, false, err
+	}
+	if inserted {
+		if _, err := s.documents.DeleteSessionSummaries(ctx, ownerID, event.SessionID); err != nil {
+			return Document{}, false, err
+		}
 	}
 	return document, true, nil
 }
@@ -482,24 +518,67 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 	if err != nil {
 		return nil, err
 	}
-	documents := make([]RecallDocument, 0, len(hits))
-	used := 0
+	primary := make([]RecallDocument, 0, len(hits))
 	for i := range hits {
-		estimate := estimateTokens(hits[i].Content)
-		if used+estimate > tokens {
-			break
-		}
-		used += estimate
 		document, err := recallDocumentFromHit(&hits[i])
 		if err != nil {
 			return nil, err
 		}
-		documents = append(documents, document)
+		primary = append(primary, document)
+	}
+	primary = s.orderPrimary(ctx, req.SessionID, primary)
+	documents := make([]RecallDocument, 0, len(primary))
+	used := 0
+	for i := range primary {
+		estimate := estimateTokens(primary[i].Content)
+		if used+estimate > tokens {
+			break
+		}
+		used += estimate
+		documents = append(documents, primary[i])
 	}
 	if len(documents) < maxDocs && s.fallbackDocs > 0 && s.fallbackDocs <= hardMaxDocuments && s.fallbackTokens > 0 && s.fallbackTokens <= hardMaxTokenBudget {
 		documents = append(documents, s.recallFallback(ctx, req, maxDocs, documents)...)
 	}
 	return documents, nil
+}
+
+func (s *Service) orderPrimary(ctx context.Context, sessionID string, primary []RecallDocument) []RecallDocument {
+	if len(primary) < 2 || s == nil || s.rangeLiveWindow <= 0 {
+		return primary
+	}
+	mark, found, err := s.documents.ProjectionWatermark(ctx, sessionID)
+	if err != nil || !found {
+		return primary
+	}
+	cutoff := mark - int64(s.rangeLiveWindow)
+	live := make([]RecallDocument, 0, len(primary))
+	summaries := make([]RecallDocument, 0, len(primary))
+	old := make([]RecallDocument, 0, len(primary))
+	for i := range primary {
+		if primary[i].PromptVersion != "" {
+			summaries = append(summaries, primary[i])
+			continue
+		}
+		from, err := sequenceToDB(primary[i].FromSequence)
+		if err != nil {
+			old = append(old, primary[i])
+			continue
+		}
+		if from > cutoff {
+			live = append(live, primary[i])
+			continue
+		}
+		old = append(old, primary[i])
+	}
+	if len(summaries) == 0 {
+		return primary
+	}
+	ordered := make([]RecallDocument, 0, len(primary))
+	ordered = append(ordered, live...)
+	ordered = append(ordered, summaries...)
+	ordered = append(ordered, old...)
+	return ordered
 }
 
 func recallDocumentFromHit(hit *StoredHit) (RecallDocument, error) {

@@ -124,6 +124,73 @@ func (s *fakeDocumentStore) DeleteExpiredSummaries(_ context.Context, now time.T
 	return pruned, nil
 }
 
+func (s *fakeDocumentStore) ListSessionDocuments(_ context.Context, ownerID, sessionID, kind string, limit int) ([]StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	documents := []StoredDocument{}
+	for id := range s.records {
+		record := s.records[id]
+		if record.OwnerID != ownerID || record.SessionID != sessionID || record.Kind != kind {
+			continue
+		}
+		if record.ExpiresAt != nil && !record.ExpiresAt.After(time.Now().UTC()) {
+			continue
+		}
+		documents = append(documents, record)
+	}
+	slices.SortFunc(documents, func(a, b StoredDocument) int {
+		if a.FromSequence != b.FromSequence {
+			if a.FromSequence < b.FromSequence {
+				return -1
+			}
+			return 1
+		}
+		if a.ToSequence != b.ToSequence {
+			if a.ToSequence < b.ToSequence {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if len(documents) > limit {
+		documents = documents[:limit]
+	}
+	return documents, nil
+}
+
+func (s *fakeDocumentStore) DeleteSessionSummaries(_ context.Context, ownerID, sessionID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for id := range s.records {
+		record := s.records[id]
+		if record.OwnerID != ownerID || record.SessionID != sessionID || record.Kind != KindSummary {
+			continue
+		}
+		delete(s.records, id)
+		delete(s.byKey, fakeDocKey(record.SessionID, record.Kind, record.PromptVersion, record.FromSequence, record.ToSequence))
+		removed++
+	}
+	return removed, nil
+}
+
+func (s *fakeDocumentStore) DeleteOtherSummaries(_ context.Context, ownerID, sessionID, keepID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for id := range s.records {
+		record := s.records[id]
+		if record.OwnerID != ownerID || record.SessionID != sessionID || record.Kind != KindSummary || id == keepID {
+			continue
+		}
+		delete(s.records, id)
+		delete(s.byKey, fakeDocKey(record.SessionID, record.Kind, record.PromptVersion, record.FromSequence, record.ToSequence))
+		removed++
+	}
+	return removed, nil
+}
+
 type fakeSecrets struct {
 	known map[string]bool
 }
@@ -142,7 +209,7 @@ func testService() *Service {
 }
 
 func testServiceWithStore(store *fakeDocumentStore) *Service {
-	service, err := NewService(store, &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, Config{})
+	service, err := NewService(store, &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, &Config{})
 	if err != nil {
 		panic(err)
 	}
@@ -158,7 +225,7 @@ func (s *failingDocumentStore) Search(_ context.Context, _ *StoredQuery) ([]Stor
 }
 
 func NewServiceWithStoreError() *Service {
-	service, err := NewService(&failingDocumentStore{fakeDocumentStore: newFakeDocumentStore()}, nil, Config{})
+	service, err := NewService(&failingDocumentStore{fakeDocumentStore: newFakeDocumentStore()}, nil, &Config{})
 	if err != nil {
 		panic(err)
 	}
