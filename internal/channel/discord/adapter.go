@@ -57,6 +57,8 @@ const (
 
 var _ runtimechannelhost.ChannelPort = (*Adapter)(nil)
 
+var _ runtimechannelhost.PresencePort = (*Adapter)(nil)
+
 type Adapter struct {
 	cfg            *config.Discord
 	tokenRef       secret.Reference
@@ -80,15 +82,20 @@ type Adapter struct {
 	gate           *editGate
 	postedMu       sync.Mutex
 	posted         map[string][]string
+	threadsMu      sync.Mutex
+	triggerThreads map[string]string
+	threadParents  map[string]string
+	presenceMu     sync.Mutex
+	presence       map[string]*presenceSession
+	secretVault    *secret.Vault
+	typingRefresh  time.Duration
+	statusAfter    time.Duration
 	approvalsMu    sync.Mutex
 	approvals      map[string]*pendingApproval
 	seen           map[string]struct{}
 	approvalKey    [32]byte
 	targetsMu      sync.Mutex
 	targets        map[string]approvalBinding
-	threadsMu      sync.Mutex
-	triggerThreads map[string]string
-	threadParents  map[string]string
 	deliverSem     chan struct{}
 	selfID         string
 	sessionID      string

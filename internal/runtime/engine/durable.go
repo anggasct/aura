@@ -474,6 +474,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 
 	var execErr error
 	var executed []store.RuntimeEvent
+	e.notifyPresenceStarted(ctx, req)
 	for ev, err := range e.executor.Execute(ctx, req) {
 		if err != nil {
 			execErr = err
@@ -484,6 +485,13 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 			break
 		}
 		executed = append(executed, ev)
+		if isPresenceFailureEvent(&ev) {
+			e.notifyPresenceFailed(ctx, req)
+			continue
+		}
+		if text, ok := extractPresenceText(&ev); ok {
+			e.notifyPresenceText(ctx, req, text)
+		}
 	}
 	if ctx.Err() == context.Canceled {
 		return ctx.Err()
@@ -507,6 +515,10 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 			e.logger.ErrorContext(hookCtx, "memory projection failed", "error", hookErr, "turn_id", req.TurnID)
 		}
 	}
+	if terminalKind != runtime.EventKindTurnCompleted {
+		e.notifyPresenceFailed(context.WithoutCancel(ctx), req)
+	}
+	e.notifyPresenceEnded(ctx, req)
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		return err
 	}

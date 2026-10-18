@@ -9,12 +9,15 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
@@ -147,10 +150,69 @@ func newDiscordAdapter(cfg *config.Config, db *sql.DB, artifactRoot string, logg
 	if err != nil {
 		return nil, err
 	}
+	adapter.SetSecretVault(buildSecretVault(cfg))
 	if svc := newVisionService(cfg, db, artifactRoot); svc != nil {
 		adapter.SetVisionService(svc)
 	}
 	return adapter, nil
+}
+
+func buildSecretVault(cfg *config.Config) *secret.Vault {
+	vault := secret.New()
+	if ref := parseSecretRef(cfg.Channels.Discord.BotTokenRef); ref.Env != "" {
+		if val, err := ref.Resolve(); err == nil {
+			vault.Set("discord_bot_token", val)
+		}
+	}
+	if cfg.Sync != nil {
+		if ref := parseSecretRef(cfg.Sync.TransportSecretRef); ref.Env != "" {
+			if val, err := ref.Resolve(); err == nil {
+				vault.Set("sync_transport_secret", val)
+			}
+		}
+	}
+	for _, key := range cfg.Webhook.Keys {
+		if key.SecretEnv != "" {
+			if val, ok := os.LookupEnv(key.SecretEnv); ok {
+				vault.Set("webhook_"+key.ID, val)
+			}
+		}
+	}
+	for name := range cfg.Models.Definitions {
+		def := cfg.Models.Definitions[name]
+		if def.APIKeyEnv != "" {
+			if val, ok := os.LookupEnv(def.APIKeyEnv); ok {
+				vault.Set("model_"+def.Provider, val)
+			}
+		}
+		if def.APIKeyFile != "" {
+			if data, err := os.ReadFile(def.APIKeyFile); err == nil {
+				vault.Set("model_"+def.Provider, strings.TrimSpace(string(data)))
+			}
+		}
+	}
+	for name, preset := range cfg.Models.Providers {
+		for hname, hval := range preset.Headers {
+			if strings.Contains(strings.ToLower(hname), "authorization") ||
+				strings.Contains(strings.ToLower(hname), "api") ||
+				strings.Contains(strings.ToLower(hname), "token") ||
+				strings.Contains(strings.ToLower(hname), "secret") {
+				vault.Set("provider_header_"+name+"_"+hname, hval)
+			}
+		}
+	}
+	return vault
+}
+
+func parseSecretRef(raw string) secret.Reference {
+	switch {
+	case strings.HasPrefix(raw, "env://"):
+		return secret.Reference{Env: strings.TrimPrefix(raw, "env://")}
+	case strings.HasPrefix(raw, "file://"):
+		return secret.Reference{File: strings.TrimPrefix(raw, "file://")}
+	default:
+		return secret.Reference{}
+	}
 }
 
 func discordApprovalDecider(adapter *discord.Adapter) toolbroker.ApprovalDecider {
