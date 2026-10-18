@@ -398,6 +398,14 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if _, err := a.sink.Accept(ctx, envelope); err != nil {
 		return false, fmt.Errorf("accept ingress: %w", err)
 	}
+	channelID := msg.ChannelID
+	go func() {
+		call, cancel := context.WithTimeout(context.WithoutCancel(ctx), restTimeout)
+		defer cancel()
+		if err := a.triggerTyping(call, channelID); err != nil {
+			a.logger.WarnContext(call, "typing trigger failed", "component", "discord")
+		}
+	}()
 	return true, nil
 }
 

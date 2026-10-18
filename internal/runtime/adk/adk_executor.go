@@ -466,6 +466,7 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 	if recallAttached {
 		instruction = strings.TrimSpace(instruction) + "\n\n" + recallEvidenceCaveat
 	}
+	instruction = appendStatusProtocol(instruction)
 	return llmagent.New(llmagent.Config{
 		Name:        name,
 		Description: definition.Description,

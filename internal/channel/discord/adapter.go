@@ -57,42 +57,49 @@ const (
 
 var _ runtimechannelhost.ChannelPort = (*Adapter)(nil)
 
+var _ runtimechannelhost.PresencePort = (*Adapter)(nil)
+
 type Adapter struct {
-	cfg          *config.Discord
-	tokenRef     secret.Reference
-	digest       string
-	resumes      ResumeStore
-	logger       *slog.Logger
-	sink         runtimeingress.IngressSink
-	dial         func(ctx context.Context, url string) (*websocket.Conn, error)
-	gatewayURL   string
-	restBase     string
-	httpClient   *http.Client
-	resumeURL    atomic.Value
-	retryBase    time.Duration
-	retryCap     time.Duration
-	invalidDelay time.Duration
-	rateCap      time.Duration
-	effects      EffectRunner
-	media        MediaStore
-	sessions     SessionEnsurer
-	images       atomic.Pointer[vision.Service]
-	gate         *editGate
-	postedMu     sync.Mutex
-	posted       map[string][]string
-	approvalsMu  sync.Mutex
-	approvals    map[string]*pendingApproval
-	seen         map[string]struct{}
-	approvalKey  [32]byte
-	targetsMu    sync.Mutex
-	targets      map[string]approvalBinding
-	deliverSem   chan struct{}
-	selfID       string
-	sessionID    string
-	sequence     atomic.Int64
-	hasSeq       atomic.Bool
-	state        atomic.Int32
-	gap          atomic.Bool
+	cfg           *config.Discord
+	tokenRef      secret.Reference
+	digest        string
+	resumes       ResumeStore
+	logger        *slog.Logger
+	sink          runtimeingress.IngressSink
+	dial          func(ctx context.Context, url string) (*websocket.Conn, error)
+	gatewayURL    string
+	restBase      string
+	httpClient    *http.Client
+	resumeURL     atomic.Value
+	retryBase     time.Duration
+	retryCap      time.Duration
+	invalidDelay  time.Duration
+	rateCap       time.Duration
+	effects       EffectRunner
+	media         MediaStore
+	sessions      SessionEnsurer
+	images        atomic.Pointer[vision.Service]
+	gate          *editGate
+	postedMu      sync.Mutex
+	posted        map[string][]string
+	presenceMu    sync.Mutex
+	presence      map[string]*presenceSession
+	secretVault   *secret.Vault
+	typingRefresh time.Duration
+	statusAfter   time.Duration
+	approvalsMu   sync.Mutex
+	approvals     map[string]*pendingApproval
+	seen          map[string]struct{}
+	approvalKey   [32]byte
+	targetsMu     sync.Mutex
+	targets       map[string]approvalBinding
+	deliverSem    chan struct{}
+	selfID        string
+	sessionID     string
+	sequence      atomic.Int64
+	hasSeq        atomic.Bool
+	state         atomic.Int32
+	gap           atomic.Bool
 }
 
 func (a *Adapter) SetVisionService(svc *vision.Service) {
