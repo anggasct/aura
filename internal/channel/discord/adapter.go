@@ -58,41 +58,44 @@ const (
 var _ runtimechannelhost.ChannelPort = (*Adapter)(nil)
 
 type Adapter struct {
-	cfg          *config.Discord
-	tokenRef     secret.Reference
-	digest       string
-	resumes      ResumeStore
-	logger       *slog.Logger
-	sink         runtimeingress.IngressSink
-	dial         func(ctx context.Context, url string) (*websocket.Conn, error)
-	gatewayURL   string
-	restBase     string
-	httpClient   *http.Client
-	resumeURL    atomic.Value
-	retryBase    time.Duration
-	retryCap     time.Duration
-	invalidDelay time.Duration
-	rateCap      time.Duration
-	effects      EffectRunner
-	media        MediaStore
-	sessions     SessionEnsurer
-	images       atomic.Pointer[vision.Service]
-	gate         *editGate
-	postedMu     sync.Mutex
-	posted       map[string][]string
-	approvalsMu  sync.Mutex
-	approvals    map[string]*pendingApproval
-	seen         map[string]struct{}
-	approvalKey  [32]byte
-	targetsMu    sync.Mutex
-	targets      map[string]approvalBinding
-	deliverSem   chan struct{}
-	selfID       string
-	sessionID    string
-	sequence     atomic.Int64
-	hasSeq       atomic.Bool
-	state        atomic.Int32
-	gap          atomic.Bool
+	cfg            *config.Discord
+	tokenRef       secret.Reference
+	digest         string
+	resumes        ResumeStore
+	logger         *slog.Logger
+	sink           runtimeingress.IngressSink
+	dial           func(ctx context.Context, url string) (*websocket.Conn, error)
+	gatewayURL     string
+	restBase       string
+	httpClient     *http.Client
+	resumeURL      atomic.Value
+	retryBase      time.Duration
+	retryCap       time.Duration
+	invalidDelay   time.Duration
+	rateCap        time.Duration
+	effects        EffectRunner
+	media          MediaStore
+	sessions       SessionEnsurer
+	images         atomic.Pointer[vision.Service]
+	gate           *editGate
+	postedMu       sync.Mutex
+	posted         map[string][]string
+	approvalsMu    sync.Mutex
+	approvals      map[string]*pendingApproval
+	seen           map[string]struct{}
+	approvalKey    [32]byte
+	targetsMu      sync.Mutex
+	targets        map[string]approvalBinding
+	threadsMu      sync.Mutex
+	triggerThreads map[string]string
+	threadParents  map[string]string
+	deliverSem     chan struct{}
+	selfID         string
+	sessionID      string
+	sequence       atomic.Int64
+	hasSeq         atomic.Bool
+	state          atomic.Int32
+	gap            atomic.Bool
 }
 
 func (a *Adapter) SetVisionService(svc *vision.Service) {
@@ -137,28 +140,30 @@ func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media M
 		return nil, Errorf(ErrorCodeConnectionFailed, "approval token key is unavailable")
 	}
 	adapter := &Adapter{
-		cfg:          cfg,
-		tokenRef:     tokenRef,
-		digest:       digestDiscordConfig(cfg),
-		resumes:      resumes,
-		effects:      effects,
-		media:        media,
-		sessions:     sessions,
-		logger:       logger,
-		gatewayURL:   gatewayURL,
-		restBase:     discordRestBase,
-		httpClient:   &http.Client{Timeout: mediaTimeout},
-		gate:         newEditGate(time.Duration(cfg.MinEditInterval)),
-		posted:       map[string][]string{},
-		approvals:    map[string]*pendingApproval{},
-		seen:         map[string]struct{}{},
-		approvalKey:  approvalKey,
-		targets:      map[string]approvalBinding{},
-		deliverSem:   make(chan struct{}, maxDeliverInflight),
-		retryBase:    backoffBase,
-		retryCap:     backoffMax,
-		invalidDelay: invalidWait,
-		rateCap:      rateLimitCap,
+		cfg:            cfg,
+		tokenRef:       tokenRef,
+		digest:         digestDiscordConfig(cfg),
+		resumes:        resumes,
+		effects:        effects,
+		media:          media,
+		sessions:       sessions,
+		logger:         logger,
+		gatewayURL:     gatewayURL,
+		restBase:       discordRestBase,
+		httpClient:     &http.Client{Timeout: mediaTimeout},
+		gate:           newEditGate(time.Duration(cfg.MinEditInterval)),
+		posted:         map[string][]string{},
+		approvals:      map[string]*pendingApproval{},
+		seen:           map[string]struct{}{},
+		approvalKey:    approvalKey,
+		targets:        map[string]approvalBinding{},
+		triggerThreads: map[string]string{},
+		threadParents:  map[string]string{},
+		deliverSem:     make(chan struct{}, maxDeliverInflight),
+		retryBase:      backoffBase,
+		retryCap:       backoffMax,
+		invalidDelay:   invalidWait,
+		rateCap:        rateLimitCap,
 	}
 	adapter.state.Store(int32(stateDown))
 	return adapter, nil

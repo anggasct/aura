@@ -746,6 +746,10 @@ func validateDiscordShapes(doc *yamlv3.Node) error {
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
 				return fmt.Errorf("channels.discord.max_attachment_bytes must be an integer at line %d", valueNode.Line)
 			}
+		case "thread_auto_archive_minutes":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("channels.discord.thread_auto_archive_minutes must be an integer at line %d", valueNode.Line)
+			}
 		}
 	}
 	return nil
@@ -2448,6 +2452,9 @@ func applyDiscordDefaults(cfg *Config, doc *yamlv3.Node, defaults *Discord) {
 	if discord.MaxAttachmentBytes == 0 && !configValuePresent(doc, "channels", "discord", "max_attachment_bytes") && !envValuePresent("channels.discord.max_attachment_bytes") {
 		discord.MaxAttachmentBytes = defaults.MaxAttachmentBytes
 	}
+	if discord.ThreadAutoArchiveMinutes == 0 && !configValuePresent(doc, "channels", "discord", "thread_auto_archive_minutes") && !envValuePresent("channels.discord.thread_auto_archive_minutes") {
+		discord.ThreadAutoArchiveMinutes = defaults.ThreadAutoArchiveMinutes
+	}
 }
 
 func applyTerminalDefaults(cfg *Config, doc *yamlv3.Node, defaults Terminal) {
@@ -3093,6 +3100,9 @@ func validateDiscord(discord *Discord) error {
 	}
 	if discord.MaxAttachmentBytes <= 0 {
 		problems = append(problems, errors.New("channels.discord.max_attachment_bytes must be positive"))
+	}
+	if discord.ThreadAutoArchiveMinutes <= 0 {
+		problems = append(problems, errors.New("channels.discord.thread_auto_archive_minutes must be positive"))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

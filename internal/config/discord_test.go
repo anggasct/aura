@@ -41,6 +41,9 @@ func TestLoad_DiscordDefaults(t *testing.T) {
 	if discord.MaxAttachmentBytes != 20971520 {
 		t.Errorf("max_attachment_bytes = %d", discord.MaxAttachmentBytes)
 	}
+	if discord.ThreadAutoArchiveMinutes != 1440 {
+		t.Errorf("thread_auto_archive_minutes = %d", discord.ThreadAutoArchiveMinutes)
+	}
 }
 
 func TestLoad_DiscordEnabledValid(t *testing.T) {
@@ -136,6 +139,11 @@ channels:
 channels:
   discord:
     max_attachment_bytes: 0
+`,
+		"non-positive auto-archive": `version: 1
+channels:
+  discord:
+    thread_auto_archive_minutes: 0
 `,
 		"wrong enabled type": `version: 1
 channels:
