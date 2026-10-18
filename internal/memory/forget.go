@@ -121,13 +121,14 @@ func (s *Service) ForgetBySession(ctx context.Context, ownerID, sessionID string
 	if err != nil {
 		return nil, 0, err
 	}
-	if !apply {
+	if !apply || len(preview) == 0 {
 		return preview, 0, nil
 	}
-	if len(preview) == 0 {
-		return preview, 0, nil
+	ids := make([]string, 0, len(preview))
+	for i := range preview {
+		ids = append(ids, preview[i].ID)
 	}
-	deleted, err := s.documents.DeleteSessionDocumentsOwned(ctx, ownerID, sessionID)
+	deleted, err := s.documents.DeleteDocumentsByIDsOwned(ctx, ownerID, ids)
 	if err != nil {
 		return nil, 0, err
 	}

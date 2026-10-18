@@ -310,7 +310,11 @@ const selectMemoryDocumentColumns = `
 	d.created_at, d.expires_at
 `
 
-func scanMemoryDocument(rows *sql.Rows) (MemoryDocument, error) {
+type memoryRowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanMemoryDocument(rows memoryRowScanner) (MemoryDocument, error) {
 	var document MemoryDocument
 	var createdAtRaw string
 	var expiresAtRaw sql.NullString
@@ -349,39 +353,16 @@ func (s *sqliteMemoryStore) GetDocument(ctx context.Context, id string) (MemoryD
 	if id == "" {
 		return MemoryDocument{}, false, Errorf(ErrorCodeInvalidArgument, "document id must not be empty")
 	}
-	var document MemoryDocument
-	var createdAtRaw string
-	var expiresAtRaw sql.NullString
-	var promptVersion, modelProtocol, modelName sql.NullString
-	err := s.db.QueryRowContext(ctx,
+	row := s.db.QueryRowContext(ctx,
 		`SELECT id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
 			content, trust_label, prompt_version, model_protocol, model_name,
-			created_at, expires_at FROM memory_document WHERE id = ?`, id).Scan(
-		&document.ID, &document.OwnerID, &document.SessionID, &document.Kind,
-		&document.FromSequence, &document.ToSequence, &document.Content, &document.TrustLabel,
-		&promptVersion, &modelProtocol, &modelName,
-		&createdAtRaw, &expiresAtRaw,
-	)
+			created_at, expires_at FROM memory_document WHERE id = ?`, id)
+	document, err := scanMemoryDocument(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return MemoryDocument{}, false, nil
 		}
-		return MemoryDocument{}, false, classifyBusy(fmt.Errorf("load memory document: %w", err))
-	}
-	createdAt, err := parseTime(createdAtRaw)
-	if err != nil {
-		return MemoryDocument{}, false, Errorf(ErrorCodeMemoryInvalid, "memory created_at is not valid")
-	}
-	document.CreatedAt = createdAt
-	document.PromptVersion = promptVersion.String
-	document.ModelProtocol = modelProtocol.String
-	document.ModelName = modelName.String
-	if expiresAtRaw.Valid {
-		expiresAt, err := parseTime(expiresAtRaw.String)
-		if err != nil {
-			return MemoryDocument{}, false, Errorf(ErrorCodeMemoryInvalid, "memory expires_at is not valid")
-		}
-		document.ExpiresAt = &expiresAt
+		return MemoryDocument{}, false, err
 	}
 	return document, true, nil
 }

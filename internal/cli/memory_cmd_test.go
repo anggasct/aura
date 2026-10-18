@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,36 @@ func TestMemoryCLIForgetSessionDryRunThenApply(t *testing.T) {
 	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-b")
 	if err != nil || !strings.Contains(out, "mem-b1") {
 		t.Errorf("sess-b untouched: %q, %v", out, err)
+	}
+}
+
+func TestMemoryCLIForgetSessionApplyMatchesPreview(t *testing.T) {
+	cfg := writeMemoryCLIConfig(t)
+	for seq := int64(1); seq <= 12; seq++ {
+		seedMemoryDoc(t, cfg, fmt.Sprintf("mem-a%02d", seq), profileLocalOwner, "sess-a", "alpha recording", seq)
+	}
+
+	out, err := runMemoryCommand(t, cfg, "forget", "--session", "sess-a", "--limit", "10")
+	if err != nil || !strings.Contains(out, "dry-run: 10 would be deleted") {
+		t.Fatalf("dry-run = %q, %v", out, err)
+	}
+	out, err = runMemoryCommand(t, cfg, "forget", "--session", "sess-a", "--limit", "10", "--apply")
+	if err != nil || strings.TrimSpace(out) != "deleted: 10" {
+		t.Fatalf("apply = %q, %v", out, err)
+	}
+	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-a")
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	for _, gone := range []string{"mem-a01", "mem-a05", "mem-a10"} {
+		if strings.Contains(out, gone+" ") {
+			t.Errorf("prepared doc %s still present: %q", gone, out)
+		}
+	}
+	for _, kept := range []string{"mem-a11", "mem-a12"} {
+		if !strings.Contains(out, kept+" ") {
+			t.Errorf("unpreviewed doc %s missing: %q", kept, out)
+		}
 	}
 }
 

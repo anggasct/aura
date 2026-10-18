@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +53,35 @@ func TestForgetBySessionDeletesRowsAndFTS(t *testing.T) {
 	foreign, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-2", SessionID: "sess-c", Query: "alpha"})
 	if err != nil || len(foreign) != 1 {
 		t.Errorf("foreign untouched = %d, %v", len(foreign), err)
+	}
+}
+
+func TestForgetBySessionApplyMatchesPreviewedSet(t *testing.T) {
+	service := testService()
+	for seq := int64(1); seq <= 12; seq++ {
+		seedStoredDocument(t, service, fmt.Sprintf("mem-a%02d", seq), "owner-1", "sess-a", "alpha recording", seq)
+	}
+	preview, deleted, err := service.ForgetBySession(t.Context(), "owner-1", "sess-a", 10, true)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(preview) != 10 {
+		t.Fatalf("preview = %d, want 10", len(preview))
+	}
+	if deleted != len(preview) {
+		t.Fatalf("deleted = %d, want %d (previewed set)", deleted, len(preview))
+	}
+	remaining, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("remaining = %d, want 2", len(remaining))
+	}
+	for _, doc := range remaining {
+		if doc.ID != "mem-a11" && doc.ID != "mem-a12" {
+			t.Errorf("unexpected survivor %q", doc.ID)
+		}
 	}
 }
 
