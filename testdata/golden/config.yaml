@@ -122,7 +122,7 @@ memory:
   english_stemming: false
   summary_prompt_version: memory-summary-v1
   summary_ttl: 720h0m0s
-range_threshold: 20
+  range_threshold: 20
   range_live_window: 5
   purge_interval: 1h0m0s
   purge_limit: 100
