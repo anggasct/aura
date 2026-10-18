@@ -455,6 +455,84 @@ func (s *fakeThreadDocStore) DeleteExpiredSummaries(_ context.Context, now time.
 	return 0, nil
 }
 
+func (s *fakeThreadDocStore) GetDocument(_ context.Context, id string) (memory.StoredDocument, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.docs {
+		if s.docs[i].ID == id {
+			return s.docs[i], true, nil
+		}
+	}
+	return memory.StoredDocument{}, false, nil
+}
+
+func (s *fakeThreadDocStore) ListSessionDocuments(_ context.Context, ownerID, sessionID string, limit int) ([]memory.StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []memory.StoredDocument
+	for i := range s.docs {
+		d := s.docs[i]
+		if d.OwnerID != ownerID || d.SessionID != sessionID {
+			continue
+		}
+		out = append(out, d)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeThreadDocStore) ListOwnerDocuments(_ context.Context, ownerID string, limit int) ([]memory.StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []memory.StoredDocument
+	for i := range s.docs {
+		d := s.docs[i]
+		if d.OwnerID != ownerID {
+			continue
+		}
+		out = append(out, d)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeThreadDocStore) CountSessionDocuments(_ context.Context, sessionID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for i := range s.docs {
+		if s.docs[i].SessionID == sessionID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeThreadDocStore) DeleteDocumentsByIDsOwned(_ context.Context, ownerID string, ids []string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	wanted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		wanted[id] = true
+	}
+	kept := s.docs[:0]
+	deleted := 0
+	for i := range s.docs {
+		d := s.docs[i]
+		if d.OwnerID == ownerID && wanted[d.ID] {
+			deleted++
+			continue
+		}
+		kept = append(kept, d)
+	}
+	s.docs = kept
+	return deleted, nil
+}
+
 func TestThreads_TwoThreadsCrossThreadRecallIsolation(t *testing.T) {
 	sink := newMemorySink()
 	sessions := &fakeSessionEnsurer{}
