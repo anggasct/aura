@@ -122,18 +122,32 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	}
 	text := neutralizeMentions(strings.Join(texts, "\n"))
 	chunks := splitMessage(text)
-	channelID, messageID, err := parseReplyContext(req.ReplyContext, req.Channel)
+	target, parent, _, err := parseDeliveryContext(req.ReplyContext, req.Channel)
 	if err != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
-	_ = messageID
 	key := req.Channel + "|" + req.EffectID
 	tracked := req.EffectID != ""
 	posted, ok := a.postedMessages(key)
 	if tracked && ok {
-		return a.deliverEdit(ctx, req, key, channelID, posted, chunks)
+		return a.deliverEdit(ctx, req, key, target, posted, chunks)
 	}
-	return a.deliverPost(ctx, req, key, tracked, channelID, req.ReplyContext, chunks)
+	receipt, err := a.deliverPost(ctx, req, key, tracked, target, req.ReplyContext, chunks)
+	if err == nil {
+		return receipt, nil
+	}
+	if parent == "" || ctx.Err() != nil {
+		return runtimechannelhost.ProviderReceipt{}, err
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryFailed {
+		return runtimechannelhost.ProviderReceipt{}, err
+	}
+	a.logger.WarnContext(ctx, "thread delivery fallback", "component", "discord", "error", err)
+	fallback, fallbackErr := a.deliverPost(ctx, req, key, tracked, parent, req.ReplyContext, chunks)
+	if fallbackErr != nil {
+		return runtimechannelhost.ProviderReceipt{}, fallbackErr
+	}
+	return fallback, nil
 }
 
 func keyBase(req *runtimechannelhost.DeliveryRequest) string {
@@ -210,9 +224,12 @@ func (a *Adapter) reconcileMessages(ctx context.Context, req *runtimechannelhost
 
 func (a *Adapter) postChunks(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, replyContext []byte, texts []string, uploads []uploadChunk) ([]string, error) {
 	var ids []string
-	_, inboundMessage, err := parseReplyContext(replyContext, channelID)
+	_, parent, inboundMessage, err := parseDeliveryContext(replyContext, channelID)
 	if err != nil {
 		return nil, err
+	}
+	if parent != "" {
+		inboundMessage = ""
 	}
 	for index, text := range texts {
 		var replyTo *string
@@ -252,7 +269,7 @@ func (a *Adapter) executePost(ctx context.Context, req *runtimechannelhost.Deliv
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      req.ConversationID,
-		IdempotencyKey: idempotencyKey(keyBase(req), label, text),
+		IdempotencyKey: idempotencyKey(keyBase(req), channelID, label, text),
 		Provider:       "discord",
 		Operation:      OpSendMessage,
 		Classification: effect.ClassificationEffectful,
@@ -272,7 +289,7 @@ func (a *Adapter) executeEdit(ctx context.Context, req *runtimechannelhost.Deliv
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      req.ConversationID,
-		IdempotencyKey: idempotencyKey(keyBase(req), "e"+strconv.Itoa(index), text),
+		IdempotencyKey: idempotencyKey(keyBase(req), channelID, "e"+strconv.Itoa(index), text),
 		Provider:       "discord",
 		Operation:      opEditMessage,
 		Classification: effect.ClassificationEffectful,

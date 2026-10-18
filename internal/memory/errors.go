@@ -15,6 +15,7 @@ const (
 	ErrorCodeProjectionCorrupt          ErrorCode = "memory_projection_corrupt"
 	ErrorCodeModelCapabilityUnsupported ErrorCode = "memory_model_capability_unsupported"
 	ErrorCodeRebuildRequired            ErrorCode = "memory_rebuild_required"
+	ErrorCodeForbidden                  ErrorCode = "memory_forbidden"
 	ErrorCodeUnavailable                ErrorCode = "unavailable"
 )
 

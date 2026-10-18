@@ -43,6 +43,7 @@ type Config struct {
 	Skills       *Skills               `koanf:"skills" yaml:"skills,omitempty"`
 	Context      *Context              `koanf:"context" yaml:"context,omitempty"`
 	Profile      *Profile              `koanf:"profile" yaml:"profile,omitempty"`
+	Owner        *Owner                `koanf:"owner" yaml:"owner,omitempty"`
 	Children     *Children             `koanf:"children" yaml:"children,omitempty"`
 	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
 	Vision       *Vision               `koanf:"vision" yaml:"vision,omitempty"`
@@ -96,6 +97,8 @@ type Memory struct {
 	EnglishStemming      bool     `koanf:"english_stemming" yaml:"english_stemming"`
 	SummaryPromptVersion string   `koanf:"summary_prompt_version" yaml:"summary_prompt_version"`
 	SummaryTTL           Duration `koanf:"summary_ttl" yaml:"summary_ttl"`
+	PurgeInterval        Duration `koanf:"purge_interval" yaml:"purge_interval"`
+	PurgeLimit           int      `koanf:"purge_limit" yaml:"purge_limit"`
 }
 
 type QuietHours struct {
@@ -152,6 +155,13 @@ type Profile struct {
 	PromptVersion           string  `koanf:"prompt_version" yaml:"prompt_version"`
 }
 
+type Owner struct {
+	Name        string            `koanf:"name" yaml:"name,omitempty"`
+	Language    string            `koanf:"language" yaml:"language,omitempty"`
+	Timezone    string            `koanf:"timezone" yaml:"timezone,omitempty"`
+	Preferences map[string]string `koanf:"preferences" yaml:"preferences,omitempty"`
+}
+
 type Children struct {
 	Enabled            bool     `koanf:"enabled" yaml:"enabled"`
 	MaxDepth           int      `koanf:"max_depth" yaml:"max_depth"`
@@ -187,15 +197,16 @@ type Vision struct {
 }
 
 type Discord struct {
-	Enabled            bool     `koanf:"enabled" yaml:"enabled"`
-	Instance           string   `koanf:"instance" yaml:"instance"`
-	BotTokenRef        string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
-	AllowedUserIDs     []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
-	AllowedGuildIDs    []string `koanf:"allowed_guild_ids" yaml:"allowed_guild_ids"`
-	AllowedChannelIDs  []string `koanf:"allowed_channel_ids" yaml:"allowed_channel_ids"`
-	AcceptDMs          bool     `koanf:"accept_dms" yaml:"accept_dms"`
-	MinEditInterval    Duration `koanf:"min_edit_interval" yaml:"min_edit_interval"`
-	MaxAttachmentBytes int64    `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
+	Enabled                  bool     `koanf:"enabled" yaml:"enabled"`
+	Instance                 string   `koanf:"instance" yaml:"instance"`
+	BotTokenRef              string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
+	AllowedUserIDs           []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
+	AllowedGuildIDs          []string `koanf:"allowed_guild_ids" yaml:"allowed_guild_ids"`
+	AllowedChannelIDs        []string `koanf:"allowed_channel_ids" yaml:"allowed_channel_ids"`
+	AcceptDMs                bool     `koanf:"accept_dms" yaml:"accept_dms"`
+	MinEditInterval          Duration `koanf:"min_edit_interval" yaml:"min_edit_interval"`
+	MaxAttachmentBytes       int64    `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
+	ThreadAutoArchiveMinutes int      `koanf:"thread_auto_archive_minutes" yaml:"thread_auto_archive_minutes"`
 }
 
 type Terminal struct {
@@ -799,11 +810,12 @@ func Default() Config {
 		},
 		Channels: Channels{
 			Discord: Discord{
-				Instance:           "owner",
-				BotTokenRef:        defaultDiscordBotTokenRef(),
-				AcceptDMs:          true,
-				MinEditInterval:    Duration(2 * time.Second),
-				MaxAttachmentBytes: 20971520,
+				Instance:                 "owner",
+				BotTokenRef:              defaultDiscordBotTokenRef(),
+				AcceptDMs:                true,
+				MinEditInterval:          Duration(2 * time.Second),
+				MaxAttachmentBytes:       20971520,
+				ThreadAutoArchiveMinutes: 1440,
 			},
 		},
 		Broadcast: Broadcast{
@@ -829,6 +841,8 @@ func Default() Config {
 			RecallTokenBudget:    2000,
 			SummaryPromptVersion: "memory-summary-v1",
 			SummaryTTL:           Duration(720 * time.Hour),
+			PurgeInterval:        Duration(1 * time.Hour),
+			PurgeLimit:           100,
 		},
 		Skills: &Skills{
 			Enabled:              true,

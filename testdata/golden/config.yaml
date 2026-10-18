@@ -122,6 +122,8 @@ memory:
   english_stemming: false
   summary_prompt_version: memory-summary-v1
   summary_ttl: 720h0m0s
+  purge_interval: 1h0m0s
+  purge_limit: 100
 skills:
   enabled: true
   roots:
@@ -196,3 +198,4 @@ channels:
     accept_dms: true
     min_edit_interval: 2s
     max_attachment_bytes: 20971520
+    thread_auto_archive_minutes: 1440

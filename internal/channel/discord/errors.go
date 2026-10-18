@@ -16,6 +16,8 @@ const (
 	ErrorCodeDeliveryFailed      ErrorCode = "delivery_failed"
 	ErrorCodeMessageTooLarge     ErrorCode = "message_too_large"
 	ErrorCodeAttachmentRejected  ErrorCode = "attachment_rejected"
+	ErrorCodeThreadCreateFailed  ErrorCode = "thread_create_failed"
+	ErrorCodeThreadUnavailable   ErrorCode = "thread_unavailable"
 )
 
 type Error struct {

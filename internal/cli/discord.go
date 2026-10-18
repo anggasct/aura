@@ -178,7 +178,8 @@ func buildSecretVault(cfg *config.Config) *secret.Vault {
 			}
 		}
 	}
-	for _, def := range cfg.Models.Definitions {
+	for name := range cfg.Models.Definitions {
+		def := cfg.Models.Definitions[name]
 		if def.APIKeyEnv != "" {
 			if val, ok := os.LookupEnv(def.APIKeyEnv); ok {
 				vault.Set("model_"+def.Provider, val)

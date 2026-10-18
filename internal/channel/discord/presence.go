@@ -210,9 +210,13 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 	if req.EffectID == "" {
 		return nil, "", Errorf(ErrorCodeInvalidArgument, "presence request carries no turn id")
 	}
-	channelID, _, err := parseReplyContext(req.ReplyContext, req.Channel)
-	if err != nil {
-		return nil, "", err
+	channelID := req.Channel
+	if len(req.ReplyContext) > 0 {
+		var reference replyReference
+		if err := json.Unmarshal(req.ReplyContext, &reference); err != nil {
+			return nil, "", Errorf(ErrorCodeProtocolInvalid, "reply context is not decodable")
+		}
+		channelID, _, _ = deliveryTarget(&reference)
 	}
 	a.presenceMu.Lock()
 	defer a.presenceMu.Unlock()
@@ -393,7 +397,7 @@ func (a *Adapter) postPresenceMessage(ctx context.Context, req *runtimechannelho
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      req.ConversationID,
-		IdempotencyKey: idempotencyKey(req.EffectID, "s0", text),
+		IdempotencyKey: idempotencyKey(req.EffectID, channelID, "s0", text),
 		Provider:       "discord",
 		Operation:      OpSendMessage,
 		Classification: effect.ClassificationEffectful,
@@ -413,7 +417,7 @@ func (a *Adapter) patchPresenceMessage(ctx context.Context, req *runtimechannelh
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      req.ConversationID,
-		IdempotencyKey: idempotencyKey(req.EffectID, "se0", text),
+		IdempotencyKey: idempotencyKey(req.EffectID, channelID, "se0", text),
 		Provider:       "discord",
 		Operation:      opEditMessage,
 		Classification: effect.ClassificationEffectful,
