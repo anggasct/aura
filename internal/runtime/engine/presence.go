@@ -57,11 +57,40 @@ func extractPresenceText(ev *store.RuntimeEvent) (string, bool) {
 	if ev.Kind != store.EventKindADK {
 		return "", false
 	}
+	if !hasToolActivity(ev.Payload) {
+		return "", false
+	}
 	text := adkModelText(ev.Payload, false)
 	if strings.TrimSpace(text) == "" {
 		return "", false
 	}
 	return text, true
+}
+
+func hasToolActivity(payload json.RawMessage) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	var decoded struct {
+		Content *struct {
+			Parts []struct {
+				FunctionCall     *struct{} `json:"functionCall"`
+				FunctionResponse *struct{} `json:"functionResponse"`
+			} `json:"parts"`
+		} `json:"content"`
+		Partial bool `json:"partial"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return false
+	}
+	if decoded.Content != nil {
+		for _, part := range decoded.Content.Parts {
+			if part.FunctionCall != nil || part.FunctionResponse != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isPresenceFailureEvent(ev *store.RuntimeEvent) bool {

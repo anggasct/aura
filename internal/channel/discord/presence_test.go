@@ -218,6 +218,46 @@ func TestPresenceFailureLine(t *testing.T) {
 	}
 }
 
+func TestPresenceRepeatedFailureCoalesced(t *testing.T) {
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		writeMessage(t, w, "status-id")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = 0
+	})
+	adapter.statusAfter = time.Nanosecond
+	req := presenceTestRequest("turn-fail-coalesce")
+	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+		t.Fatalf("PresenceStarted(): %v", err)
+	}
+	if err := adapter.PresenceUpdated(t.Context(), req, "Checking tasks", false); err != nil {
+		t.Fatalf("activity update: %v", err)
+	}
+	if err := adapter.PresenceUpdated(t.Context(), req, "", true); err != nil {
+		t.Fatalf("first failure update: %v", err)
+	}
+	if err := adapter.PresenceUpdated(t.Context(), req, "", true); err != nil {
+		t.Fatalf("second failure update: %v", err)
+	}
+	if err := adapter.PresenceUpdated(t.Context(), req, "", true); err != nil {
+		t.Fatalf("third failure update: %v", err)
+	}
+	patches := stub.patchBodies()
+	if len(patches) != 1 {
+		t.Fatalf("patches = %d, want 1 (single failure edit, repeated failures coalesced)", len(patches))
+	}
+	var payload map[string]any
+	_ = json.Unmarshal(patches[len(patches)-1], &payload)
+	content, _ := payload["content"].(string)
+	if !strings.Contains(content, "Checking tasks") {
+		t.Errorf("failure line = %q, want activity named", content)
+	}
+	count := strings.Count(strings.ToLower(content), "couldn't finish")
+	if count != 1 {
+		t.Errorf("failure line wrapped multiple times: %q", content)
+	}
+}
+
 func TestPresenceThrottleCoalesces(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "status-id")

@@ -24,16 +24,17 @@ const (
 var fallbackStatuses = [3]string{"Working…", "Still working…", "Wrapping up…"}
 
 type presenceSession struct {
-	channelID    string
-	conversation string
-	replyContext []byte
-	channelKey   string
-	started      time.Time
-	lastTyping   time.Time
-	statusID     string
-	lastText     string
-	lastEdit     time.Time
-	updates      int
+	channelID      string
+	conversation   string
+	replyContext   []byte
+	channelKey     string
+	started        time.Time
+	lastTyping     time.Time
+	statusID       string
+	lastText       string
+	lastEdit       time.Time
+	updates        int
+	failedNotified bool
 }
 
 func (a *Adapter) SetSecretVault(vault *secret.Vault) {
@@ -269,45 +270,69 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 	lastEdit := session.lastEdit
 	started := session.started
 	lastTyping := session.lastTyping
+	failedNotified := session.failedNotified
 	a.presenceMu.Unlock()
 
-	var display string
 	if failed {
+		if failedNotified {
+			return nil
+		}
 		activity := strings.TrimSpace(text)
 		if activity == "" {
 			activity = lastText
 		}
-		display = failureLine(truncateWords(activity, maxStatusWords))
-	} else {
-		if strings.TrimSpace(text) == "" {
-			text = lastText
+		display := failureLine(truncateWords(activity, maxStatusWords))
+		a.presenceMu.Lock()
+		session.failedNotified = true
+		a.presenceMu.Unlock()
+		if err := a.postOrPatchStatus(ctx, req, channelID, session, display, updates, statusID, lastEdit, started, lastTyping, failed); err != nil {
+			return err
 		}
-		display = renderStatusText(text, "", updates, a.vaultOrNil())
+		a.presenceMu.Lock()
+		session.lastText = display
+		a.presenceMu.Unlock()
+		return nil
 	}
+	if strings.TrimSpace(text) == "" {
+		text = lastText
+	}
+	display := renderStatusText(text, "", updates, a.vaultOrNil())
 	if display == "" {
 		return nil
 	}
 	now := time.Now()
-	if !failed {
-		if statusID == "" && now.Sub(started) < a.statusDelay() {
-			if now.Sub(lastTyping) >= a.typingInterval() {
-				a.presenceMu.Lock()
-				session.lastTyping = now
-				a.presenceMu.Unlock()
-				if err := a.triggerTyping(context.WithoutCancel(ctx), channelID); err != nil {
-					a.logger.WarnContext(ctx, "typing refresh failed", "component", "discord")
-				}
-			}
-			return nil
-		}
-		if statusID != "" && now.Sub(lastEdit) < time.Duration(a.cfg.MinEditInterval) {
+	if statusID == "" && now.Sub(started) < a.statusDelay() {
+		if now.Sub(lastTyping) >= a.typingInterval() {
 			a.presenceMu.Lock()
-			session.lastText = display
-			session.updates = updates + 1
+			session.lastTyping = now
 			a.presenceMu.Unlock()
-			return nil
+			if err := a.triggerTyping(context.WithoutCancel(ctx), channelID); err != nil {
+				a.logger.WarnContext(ctx, "typing refresh failed", "component", "discord")
+			}
 		}
+		return nil
 	}
+	if statusID != "" && now.Sub(lastEdit) < time.Duration(a.cfg.MinEditInterval) {
+		a.presenceMu.Lock()
+		session.lastText = display
+		session.updates = updates + 1
+		session.failedNotified = false
+		a.presenceMu.Unlock()
+		return nil
+	}
+	a.presenceMu.Lock()
+	session.failedNotified = false
+	a.presenceMu.Unlock()
+	if err := a.postOrPatchStatus(ctx, req, channelID, session, display, updates, statusID, lastEdit, started, lastTyping, failed); err != nil {
+		return err
+	}
+	a.presenceMu.Lock()
+	session.lastText = display
+	a.presenceMu.Unlock()
+	return nil
+}
+
+func (a *Adapter) postOrPatchStatus(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, session *presenceSession, display string, updates int, statusID string, lastEdit time.Time, started time.Time, lastTyping time.Time, failed bool) error {
 	if statusID == "" {
 		id, postErr := a.postPresenceMessage(ctx, req, channelID, display)
 		if postErr != nil {
@@ -315,21 +340,19 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 		}
 		a.presenceMu.Lock()
 		session.statusID = id
-		session.lastText = display
 		session.lastEdit = time.Now()
 		session.updates = updates + 1
 		a.presenceMu.Unlock()
 		a.rememberPosted(session.channelKey, []string{id})
 		return nil
 	}
-	if display == lastText {
+	if display == session.lastText {
 		return nil
 	}
 	if patchErr := a.patchPresenceMessage(ctx, req, channelID, statusID, display); patchErr != nil {
 		a.logger.WarnContext(ctx, "status edit failed", "component", "discord")
 	}
 	a.presenceMu.Lock()
-	session.lastText = display
 	session.lastEdit = time.Now()
 	session.updates = updates + 1
 	a.presenceMu.Unlock()

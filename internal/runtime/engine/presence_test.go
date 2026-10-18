@@ -66,7 +66,7 @@ func adkTextStep(text string) runtime.FakeStep {
 	raw, err := json.Marshal(map[string]any{
 		"content": map[string]any{
 			"role":  "model",
-			"parts": []any{map[string]any{"text": text}},
+			"parts": []any{map[string]any{"text": text}, map[string]any{"functionCall": map[string]any{"name": "read_file", "args": map[string]any{}}}},
 		},
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestEnginePresenceFailure(t *testing.T) {
 
 func TestExtractPresenceHelpers(t *testing.T) {
 	raw, err := json.Marshal(map[string]any{
-		"content": map[string]any{"role": "model", "parts": []any{map[string]any{"text": "Checking tasks"}}},
+		"content": map[string]any{"role": "model", "parts": []any{map[string]any{"text": "Checking tasks"}, map[string]any{"functionCall": map[string]any{"name": "read_file"}}}},
 	})
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
