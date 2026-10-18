@@ -285,7 +285,7 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 		a.presenceMu.Lock()
 		session.failedNotified = true
 		a.presenceMu.Unlock()
-		if err := a.postOrPatchStatus(ctx, req, channelID, session, display, updates, statusID, lastEdit, started, lastTyping, failed); err != nil {
+		if err := a.postOrPatchStatus(ctx, req, channelID, session, display, updates, statusID); err != nil {
 			return err
 		}
 		a.presenceMu.Lock()
@@ -323,7 +323,7 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 	a.presenceMu.Lock()
 	session.failedNotified = false
 	a.presenceMu.Unlock()
-	if err := a.postOrPatchStatus(ctx, req, channelID, session, display, updates, statusID, lastEdit, started, lastTyping, failed); err != nil {
+	if err := a.postOrPatchStatus(ctx, req, channelID, session, display, updates, statusID); err != nil {
 		return err
 	}
 	a.presenceMu.Lock()
@@ -332,7 +332,7 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 	return nil
 }
 
-func (a *Adapter) postOrPatchStatus(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, session *presenceSession, display string, updates int, statusID string, lastEdit time.Time, started time.Time, lastTyping time.Time, failed bool) error {
+func (a *Adapter) postOrPatchStatus(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, session *presenceSession, display string, updates int, statusID string) error {
 	if statusID == "" {
 		id, postErr := a.postPresenceMessage(ctx, req, channelID, display)
 		if postErr != nil {

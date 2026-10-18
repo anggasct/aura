@@ -15,8 +15,8 @@ import (
 
 	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/config"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/health"
+	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
