@@ -97,6 +97,8 @@ type Memory struct {
 	EnglishStemming      bool     `koanf:"english_stemming" yaml:"english_stemming"`
 	SummaryPromptVersion string   `koanf:"summary_prompt_version" yaml:"summary_prompt_version"`
 	SummaryTTL           Duration `koanf:"summary_ttl" yaml:"summary_ttl"`
+	PurgeInterval        Duration `koanf:"purge_interval" yaml:"purge_interval"`
+	PurgeLimit           int      `koanf:"purge_limit" yaml:"purge_limit"`
 }
 
 type QuietHours struct {
@@ -839,6 +841,8 @@ func Default() Config {
 			RecallTokenBudget:    2000,
 			SummaryPromptVersion: "memory-summary-v1",
 			SummaryTTL:           Duration(720 * time.Hour),
+			PurgeInterval:        Duration(1 * time.Hour),
+			PurgeLimit:           100,
 		},
 		Skills: &Skills{
 			Enabled:              true,

@@ -75,6 +75,11 @@ type DocumentStore interface {
 	Search(ctx context.Context, query *StoredQuery) ([]StoredHit, error)
 	DeleteSessionDocuments(ctx context.Context, sessionID string) error
 	DeleteExpiredSummaries(ctx context.Context, now time.Time, limit int) (int, error)
+	GetDocument(ctx context.Context, id string) (StoredDocument, bool, error)
+	ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]StoredDocument, error)
+	ListOwnerDocuments(ctx context.Context, ownerID string, limit int) ([]StoredDocument, error)
+	CountSessionDocuments(ctx context.Context, sessionID string) (int, error)
+	DeleteDocumentsByIDsOwned(ctx context.Context, ownerID string, ids []string) (int, error)
 }
 
 type StoredDocument struct {
@@ -252,6 +257,26 @@ func (s *Service) ProjectionFailureCount() int64 {
 		return 0
 	}
 	return s.projectionFailures.Load()
+}
+
+func (s *Service) StartPurgeLoop(ctx context.Context, interval time.Duration, limit int) {
+	if s == nil || interval <= 0 || limit <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := s.PurgeExpired(ctx, time.Now().UTC(), limit); err != nil {
+					s.observe(ctx, &Observation{Outcome: "purge_error"})
+				}
+			}
+		}
+	}()
 }
 
 func trustFor(author, kind string) (approval.TrustLabel, bool) {
@@ -622,8 +647,8 @@ func (s *Service) PurgeExpired(ctx context.Context, now time.Time, limit int) (i
 	if ctx == nil {
 		return 0, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
 	}
-	if limit <= 0 {
-		return 0, Errorf(ErrorCodeInvalidArgument, "purge limit must be positive")
+	if limit <= 0 || limit > maxPurgeLimit {
+		return 0, Errorf(ErrorCodeInvalidArgument, "purge limit is out of bounds")
 	}
 	return s.documents.DeleteExpiredSummaries(ctx, now.UTC(), limit)
 }
