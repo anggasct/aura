@@ -198,3 +198,4 @@ channels:
     accept_dms: true
     min_edit_interval: 2s
     max_attachment_bytes: 20971520
+    thread_auto_archive_minutes: 1440

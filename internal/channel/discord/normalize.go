@@ -13,6 +13,7 @@ type replyReference struct {
 	ChannelID string            `json:"channel_id"`
 	MessageID string            `json:"message_id"`
 	GuildID   string            `json:"guild_id,omitempty"`
+	ThreadID  string            `json:"thread_id,omitempty"`
 	Artifacts []artifactSummary `json:"artifacts,omitempty"`
 }
 
@@ -24,6 +25,9 @@ func normalizeMessage(cfg *config.Discord, selfID, instance string, msg *message
 		return nil, false, Errorf(ErrorCodeProtocolInvalid, "message is missing id, channel, or author")
 	}
 	if msg.Author.Bot || msg.Author.ID == selfID {
+		return nil, false, nil
+	}
+	if msg.Type != 0 && msg.Type != 19 {
 		return nil, false, nil
 	}
 	if msg.Content == "" {

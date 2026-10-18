@@ -114,6 +114,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			executorOpts := []runtimeadk.ExecutorOption{
 				runtimeadk.WithBuiltinToolExecutor(builtin),
 				runtimeadk.WithAgentResolver(agentRegistry, routeModel),
+				ownerContextOption(ctx, cfg.Owner, logger),
 			}
 			var memoryHook func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
 			if cfg.Memory.Enabled {

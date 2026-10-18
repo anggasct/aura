@@ -45,6 +45,7 @@ type ADKExecutor struct {
 	ledger            *usage.Ledger
 	modelDefinitionID string
 	recall            RecallProvider
+	ownerContext      string
 }
 
 type RecallProvider interface {
@@ -162,6 +163,13 @@ func WithRecallProvider(provider RecallProvider) ExecutorOption {
 	}
 }
 
+func WithOwnerContext(block string) ExecutorOption {
+	return func(e *ADKExecutor) error {
+		e.ownerContext = strings.TrimSpace(block)
+		return nil
+	}
+}
+
 func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		definition, err := x.resolveDefinition(req)
@@ -270,7 +278,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool, recallAttached)
+	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool, recallAttached, x.ownerContext)
 	if err != nil {
 		return nil, err
 	}
@@ -461,8 +469,14 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition) []tool.Tool {
 	return filtered
 }
 
-func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool) (agent.Agent, error) {
+func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string) (agent.Agent, error) {
 	instruction := definition.Instructions
+	if ownerContext != "" {
+		instruction = ownerContext
+		if soul := strings.TrimSpace(definition.Instructions); soul != "" {
+			instruction += "\n\n" + soul
+		}
+	}
 	if recallAttached {
 		instruction = strings.TrimSpace(instruction) + "\n\n" + recallEvidenceCaveat
 	}

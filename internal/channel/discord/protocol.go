@@ -53,14 +53,23 @@ type userPayload struct {
 	Bot bool   `json:"bot"`
 }
 
+type messageReferencePayload struct {
+	MessageID string `json:"message_id"`
+	ChannelID string `json:"channel_id,omitempty"`
+	GuildID   string `json:"guild_id,omitempty"`
+}
+
 type messagePayload struct {
-	ID          string              `json:"id"`
-	ChannelID   string              `json:"channel_id"`
-	GuildID     string              `json:"guild_id"`
-	Author      userPayload         `json:"author"`
-	Content     string              `json:"content"`
-	Mentions    []userPayload       `json:"mentions"`
-	Attachments []attachmentPayload `json:"attachments"`
+	ID               string                   `json:"id"`
+	ChannelID        string                   `json:"channel_id"`
+	GuildID          string                   `json:"guild_id"`
+	Author           userPayload              `json:"author"`
+	Content          string                   `json:"content"`
+	Mentions         []userPayload            `json:"mentions"`
+	Attachments      []attachmentPayload      `json:"attachments"`
+	Type             int                      `json:"type"`
+	MessageReference *messageReferencePayload `json:"message_reference,omitempty"`
+	ChannelType      *int                     `json:"channel_type,omitempty"`
 }
 
 type identifyPayload struct {

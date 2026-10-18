@@ -95,8 +95,8 @@ func splitMessage(text string) []string {
 	return chunks
 }
 
-func idempotencyKey(effectID, chunk, text string) string {
-	sum := sha256.Sum256([]byte(effectID + "|" + chunk + "|" + text))
+func idempotencyKey(effectID, channelID, chunk, text string) string {
+	sum := sha256.Sum256([]byte(effectID + "|" + channelID + "|" + chunk + "|" + text))
 	return "discord:" + effectID + ":" + chunk + ":" + hex.EncodeToString(sum[:])[:16]
 }
 
@@ -113,6 +113,8 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 		return a.invokeSend(ctx, invocation)
 	case opEditMessage:
 		return a.invokeEdit(ctx, invocation)
+	case OpCreateThread:
+		return a.invokeCreateThread(ctx, invocation)
 	default:
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "unsupported effect operation")
 	}
@@ -170,6 +172,35 @@ func (a *Adapter) invokeEdit(ctx context.Context, invocation *effect.Invocation)
 	}
 	outcome.Receipt = receipt
 	return outcome, nil
+}
+
+func (a *Adapter) invokeCreateThread(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
+	var operation createThreadOperation
+	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
+		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "thread request is not decodable")
+	}
+	if operation.ParentID == "" || operation.MessageID == "" || operation.Name == "" {
+		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "thread request is missing parent, message, or name")
+	}
+	if !isChannelID(operation.ParentID) || !isChannelID(operation.MessageID) {
+		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "thread request carries no channel id")
+	}
+	token, err := a.tokenRef.Resolve()
+	if err != nil {
+		return effect.Outcome{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+	}
+	threadID, err := a.createThreadREST(ctx, token, operation.ParentID, operation.MessageID, operation.Name)
+	if err != nil {
+		if code, ok := CodeOf(err); ok && (code == ErrorCodeThreadCreateFailed) {
+			return effect.Outcome{Succeeded: false, SafeErrorCode: "discord_thread_rejected"}, nil
+		}
+		return effect.Outcome{}, err
+	}
+	receipt, err := json.Marshal(threadReceipt{ThreadID: threadID, ParentID: operation.ParentID})
+	if err != nil {
+		return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "receipt is not serializable")
+	}
+	return effect.Outcome{Succeeded: true, Receipt: receipt}, nil
 }
 
 func restDeadline(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
@@ -343,21 +374,25 @@ func splitUploads(chunks []string, fileCap int64) ([]string, []uploadChunk, erro
 	return texts, []uploadChunk{{name: "message.txt", text: remainder}}, nil
 }
 
-func parseReplyContext(raw json.RawMessage, channel string) (channelID, messageID string, err error) {
+func parseDeliveryContext(raw json.RawMessage, channel string) (target, parent, messageID string, err error) {
 	if len(raw) == 0 {
 		if !isChannelID(channel) {
-			return "", "", Errorf(ErrorCodeInvalidArgument, "delivery channel is not a discord channel id")
+			return "", "", "", Errorf(ErrorCodeInvalidArgument, "delivery channel is not a discord channel id")
 		}
-		return channel, "", nil
+		return channel, "", "", nil
 	}
 	var reference replyReference
 	if err := json.Unmarshal(raw, &reference); err != nil {
-		return "", "", Errorf(ErrorCodeInvalidArgument, "reply context is not decodable")
+		return "", "", "", Errorf(ErrorCodeInvalidArgument, "reply context is not decodable")
 	}
 	if !isChannelID(reference.ChannelID) {
-		return "", "", Errorf(ErrorCodeInvalidArgument, "reply context carries no channel id")
+		return "", "", "", Errorf(ErrorCodeInvalidArgument, "reply context carries no channel id")
 	}
-	return reference.ChannelID, reference.MessageID, nil
+	if reference.ThreadID != "" && !isChannelID(reference.ThreadID) {
+		return "", "", "", Errorf(ErrorCodeInvalidArgument, "reply context carries no thread id")
+	}
+	target, parent, message := deliveryTarget(&reference)
+	return target, parent, message, nil
 }
 
 func isChannelID(id string) bool {
