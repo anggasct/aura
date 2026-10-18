@@ -43,6 +43,7 @@ type Config struct {
 	Skills       *Skills               `koanf:"skills" yaml:"skills,omitempty"`
 	Context      *Context              `koanf:"context" yaml:"context,omitempty"`
 	Profile      *Profile              `koanf:"profile" yaml:"profile,omitempty"`
+	Owner        *Owner                `koanf:"owner" yaml:"owner,omitempty"`
 	Children     *Children             `koanf:"children" yaml:"children,omitempty"`
 	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
 	Vision       *Vision               `koanf:"vision" yaml:"vision,omitempty"`
@@ -150,6 +151,13 @@ type Profile struct {
 	ExtractionQueueCapacity int     `koanf:"extraction_queue_capacity" yaml:"extraction_queue_capacity"`
 	CandidateMinConfidence  float64 `koanf:"candidate_min_confidence" yaml:"candidate_min_confidence"`
 	PromptVersion           string  `koanf:"prompt_version" yaml:"prompt_version"`
+}
+
+type Owner struct {
+	Name        string            `koanf:"name" yaml:"name,omitempty"`
+	Language    string            `koanf:"language" yaml:"language,omitempty"`
+	Timezone    string            `koanf:"timezone" yaml:"timezone,omitempty"`
+	Preferences map[string]string `koanf:"preferences" yaml:"preferences,omitempty"`
 }
 
 type Children struct {
