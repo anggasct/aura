@@ -438,7 +438,8 @@ func (a *Adapter) admitUnknownThread(ctx context.Context, msg *messagePayload) (
 	if token == "" {
 		return false, nil
 	}
-	info, _ := a.fetchThreadParent(ctx, token, msg.ChannelID)
+	info, fetchErr := a.fetchThreadParent(ctx, token, msg.ChannelID)
+	_ = fetchErr
 	if info.ID == "" {
 		return false, nil
 	}

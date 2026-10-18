@@ -19,8 +19,8 @@ const (
 )
 
 const (
-	threadAutoArchiveMinutes = 1440
-	threadNameMaxRunes       = 100
+	defaultThreadAutoArchiveMinutes = 1440
+	threadNameMaxRunes              = 100
 )
 
 const (
@@ -103,12 +103,19 @@ func (a *Adapter) rememberThread(triggerID, threadID, parentID string) {
 	}
 }
 
+func (a *Adapter) threadAutoArchiveMinutes() int {
+	if a.cfg != nil && a.cfg.ThreadAutoArchiveMinutes > 0 {
+		return a.cfg.ThreadAutoArchiveMinutes
+	}
+	return defaultThreadAutoArchiveMinutes
+}
+
 func (a *Adapter) createThreadREST(ctx context.Context, token, parentID, messageID, name string) (string, error) {
 	operation := createThreadOperation{
 		ParentID:           parentID,
 		MessageID:          messageID,
 		Name:               name,
-		AutoArchiveMinutes: threadAutoArchiveMinutes,
+		AutoArchiveMinutes: a.threadAutoArchiveMinutes(),
 	}
 	payload, err := json.Marshal(map[string]any{
 		"name":                  operation.Name,
@@ -205,20 +212,12 @@ func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayloa
 	if id, ok := a.lookupTriggerThread(msg.ID); ok {
 		return id, nil
 	}
-	a.threadsMu.Lock()
-	defer a.threadsMu.Unlock()
-	if id, ok := a.triggerThreads[msg.ID]; ok {
-		return id, nil
-	}
-	operation := createThreadOperation{
-		ParentID:           parentID,
-		MessageID:          msg.ID,
-		Name:               threadName(msg.Content),
-		AutoArchiveMinutes: threadAutoArchiveMinutes,
-	}
-	request, err := marshalOperation(operation)
+	request, existing, err := a.buildThreadCreateRequest(msg, parentID)
 	if err != nil {
 		return "", err
+	}
+	if existing != "" {
+		return existing, nil
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      "channel:" + parentID,
@@ -241,14 +240,42 @@ func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayloa
 		if err := json.Unmarshal(intent.ProviderReceipt, &receipt); err != nil || receipt.ThreadID == "" {
 			return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
 		}
-		a.triggerThreads[msg.ID] = receipt.ThreadID
-		a.threadParents[receipt.ThreadID] = parentID
-		return receipt.ThreadID, nil
+		return a.commitThreadReceipt(msg.ID, receipt.ThreadID, parentID)
 	case effect.StateUnknown:
 		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
 	default:
 		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
 	}
+}
+
+func (a *Adapter) buildThreadCreateRequest(msg *messagePayload, parentID string) (request []byte, existing string, err error) {
+	a.threadsMu.Lock()
+	defer a.threadsMu.Unlock()
+	if id, ok := a.triggerThreads[msg.ID]; ok {
+		return nil, id, nil
+	}
+	operation := createThreadOperation{
+		ParentID:           parentID,
+		MessageID:          msg.ID,
+		Name:               threadName(msg.Content),
+		AutoArchiveMinutes: a.threadAutoArchiveMinutes(),
+	}
+	request, err = marshalOperation(operation)
+	if err != nil {
+		return nil, "", err
+	}
+	return request, "", nil
+}
+
+func (a *Adapter) commitThreadReceipt(triggerID, threadID, parentID string) (string, error) {
+	a.threadsMu.Lock()
+	defer a.threadsMu.Unlock()
+	if id, ok := a.triggerThreads[triggerID]; ok {
+		return id, nil
+	}
+	a.triggerThreads[triggerID] = threadID
+	a.threadParents[threadID] = parentID
+	return threadID, nil
 }
 
 func rewriteEnvelopeForThread(envelope *runtimeingress.IngressEnvelope, msg *messagePayload, threadID, parentID string) error {

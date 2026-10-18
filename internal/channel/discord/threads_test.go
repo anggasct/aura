@@ -1,14 +1,17 @@
 package discord
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/memory"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
@@ -145,8 +148,8 @@ func TestThreads_MentionCreatesThreadAndDeliversInside(t *testing.T) {
 		if body["name"] == "" {
 			t.Error("thread create carries no name")
 		}
-		if duration, _ := body["auto_archive_duration"].(float64); int(duration) != threadAutoArchiveMinutes {
-			t.Errorf("auto_archive_duration = %v, want %d", duration, threadAutoArchiveMinutes)
+		if duration, _ := body["auto_archive_duration"].(float64); int(duration) != defaultThreadAutoArchiveMinutes {
+			t.Errorf("auto_archive_duration = %v, want %d", duration, defaultThreadAutoArchiveMinutes)
 		}
 	}
 	stub.mu.Unlock()
@@ -389,6 +392,157 @@ func TestThreads_TwoThreadsScopeMemorySessions(t *testing.T) {
 	}
 	if firstRef.ThreadID == "" || secondRef.ThreadID == "" || firstRef.ThreadID == secondRef.ThreadID {
 		t.Fatalf("thread ids = %q, %q; want distinct", firstRef.ThreadID, secondRef.ThreadID)
+	}
+}
+
+type fakeThreadDocStore struct {
+	mu   sync.Mutex
+	docs []memory.StoredDocument
+}
+
+func (s *fakeThreadDocStore) UpsertDocument(_ context.Context, doc *memory.StoredDocument) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.docs = append(s.docs, *doc)
+	return true, nil
+}
+
+func (s *fakeThreadDocStore) ProjectionWatermark(_ context.Context, sessionID string) (mark int64, found bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.docs {
+		d := s.docs[i]
+		if d.SessionID == sessionID {
+			if !found || d.ToSequence > mark {
+				mark = d.ToSequence
+				found = true
+			}
+		}
+	}
+	return mark, found, nil
+}
+
+func (s *fakeThreadDocStore) Search(_ context.Context, query *memory.StoredQuery) (hits []memory.StoredHit, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.docs {
+		d := s.docs[i]
+		if d.OwnerID != query.OwnerID {
+			continue
+		}
+		if query.SessionID != "" && d.SessionID != query.SessionID {
+			continue
+		}
+		matched := true
+		for _, term := range strings.Fields(query.Terms) {
+			if !strings.Contains(strings.ToLower(d.Content), strings.ToLower(term)) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			hits = append(hits, memory.StoredHit{StoredDocument: d})
+		}
+	}
+	return hits, nil
+}
+
+func (s *fakeThreadDocStore) DeleteSessionDocuments(_ context.Context, sessionID string) error {
+	return nil
+}
+
+func (s *fakeThreadDocStore) DeleteExpiredSummaries(_ context.Context, now time.Time, limit int) (int, error) {
+	return 0, nil
+}
+
+func TestThreads_TwoThreadsCrossThreadRecallIsolation(t *testing.T) {
+	sink := newMemorySink()
+	sessions := &fakeSessionEnsurer{}
+	var seq atomic.Int64
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/threads") {
+			n := seq.Add(1)
+			id := "77701" + string(rune('0'+n))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"` + id + `","parent_id":"333","owner_id":"999","type":11}`))
+			return
+		}
+		writeMessage(t, w, "m")
+	})
+	adapter := newThreadAdapter(t, sink, sessions, stub)
+
+	if _, err := adapter.admit(t.Context(), threadTrigger("9101", "alpha topic", []string{"999"})); err != nil {
+		t.Fatalf("first admit(): %v", err)
+	}
+	if _, err := adapter.admit(t.Context(), threadTrigger("9102", "beta topic", []string{"999"})); err != nil {
+		t.Fatalf("second admit(): %v", err)
+	}
+	firstConv, _ := envelopeThreadID(t, sink, "message:9101")
+	secondConv, _ := envelopeThreadID(t, sink, "message:9102")
+	if firstConv == secondConv {
+		t.Fatalf("thread sessions collide: %q", firstConv)
+	}
+
+	store := &fakeThreadDocStore{}
+	svc, err := memory.NewService(store, nil, memory.Config{MaxDocuments: 2})
+	if err != nil {
+		t.Fatalf("NewService(): %v", err)
+	}
+
+	firstDocs := []memory.StoredDocument{
+		{ID: "doc-a1", OwnerID: "111", SessionID: firstConv, Kind: "event.text", FromSequence: 1, ToSequence: 1, Content: "alpha project secret", CreatedAt: time.Now().UTC()},
+		{ID: "doc-a2", OwnerID: "111", SessionID: firstConv, Kind: "event.text", FromSequence: 2, ToSequence: 2, Content: "alpha project notes", CreatedAt: time.Now().UTC()},
+	}
+	secondDocs := []memory.StoredDocument{
+		{ID: "doc-b1", OwnerID: "111", SessionID: secondConv, Kind: "event.text", FromSequence: 1, ToSequence: 1, Content: "beta project secret", CreatedAt: time.Now().UTC()},
+		{ID: "doc-b2", OwnerID: "111", SessionID: secondConv, Kind: "event.text", FromSequence: 2, ToSequence: 2, Content: "beta project notes", CreatedAt: time.Now().UTC()},
+	}
+	for i := range firstDocs {
+		if _, err := store.UpsertDocument(t.Context(), &firstDocs[i]); err != nil {
+			t.Fatalf("seed first doc: %v", err)
+		}
+	}
+	for i := range secondDocs {
+		if _, err := store.UpsertDocument(t.Context(), &secondDocs[i]); err != nil {
+			t.Fatalf("seed second doc: %v", err)
+		}
+	}
+
+	firstResults, err := svc.Recall(t.Context(), &memory.RecallRequest{OwnerID: "111", SessionID: firstConv, Query: "project"})
+	if err != nil {
+		t.Fatalf("first recall: %v", err)
+	}
+	if len(firstResults) != 2 {
+		t.Fatalf("first recall = %d docs, want 2", len(firstResults))
+	}
+	for _, doc := range firstResults {
+		if doc.SessionID != firstConv {
+			t.Errorf("first recall returned doc from session %q, want %q", doc.SessionID, firstConv)
+		}
+	}
+
+	secondResults, err := svc.Recall(t.Context(), &memory.RecallRequest{OwnerID: "111", SessionID: secondConv, Query: "project"})
+	if err != nil {
+		t.Fatalf("second recall: %v", err)
+	}
+	if len(secondResults) != 2 {
+		t.Fatalf("second recall = %d docs, want 2", len(secondResults))
+	}
+	for _, doc := range secondResults {
+		if doc.SessionID != secondConv {
+			t.Errorf("second recall returned doc from session %q, want %q", doc.SessionID, secondConv)
+		}
+	}
+
+	for _, doc := range firstResults {
+		if doc.ID == "doc-b1" || doc.ID == "doc-b2" {
+			t.Errorf("first recall leaked beta doc %q", doc.ID)
+		}
+	}
+	for _, doc := range secondResults {
+		if doc.ID == "doc-a1" || doc.ID == "doc-a2" {
+			t.Errorf("second recall leaked alpha doc %q", doc.ID)
+		}
 	}
 }
 

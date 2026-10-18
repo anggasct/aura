@@ -187,15 +187,16 @@ type Vision struct {
 }
 
 type Discord struct {
-	Enabled            bool     `koanf:"enabled" yaml:"enabled"`
-	Instance           string   `koanf:"instance" yaml:"instance"`
-	BotTokenRef        string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
-	AllowedUserIDs     []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
-	AllowedGuildIDs    []string `koanf:"allowed_guild_ids" yaml:"allowed_guild_ids"`
-	AllowedChannelIDs  []string `koanf:"allowed_channel_ids" yaml:"allowed_channel_ids"`
-	AcceptDMs          bool     `koanf:"accept_dms" yaml:"accept_dms"`
-	MinEditInterval    Duration `koanf:"min_edit_interval" yaml:"min_edit_interval"`
-	MaxAttachmentBytes int64    `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
+	Enabled                  bool     `koanf:"enabled" yaml:"enabled"`
+	Instance                 string   `koanf:"instance" yaml:"instance"`
+	BotTokenRef              string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
+	AllowedUserIDs           []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
+	AllowedGuildIDs          []string `koanf:"allowed_guild_ids" yaml:"allowed_guild_ids"`
+	AllowedChannelIDs        []string `koanf:"allowed_channel_ids" yaml:"allowed_channel_ids"`
+	AcceptDMs                bool     `koanf:"accept_dms" yaml:"accept_dms"`
+	MinEditInterval          Duration `koanf:"min_edit_interval" yaml:"min_edit_interval"`
+	MaxAttachmentBytes       int64    `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
+	ThreadAutoArchiveMinutes int      `koanf:"thread_auto_archive_minutes" yaml:"thread_auto_archive_minutes"`
 }
 
 type Terminal struct {
@@ -799,11 +800,12 @@ func Default() Config {
 		},
 		Channels: Channels{
 			Discord: Discord{
-				Instance:           "owner",
-				BotTokenRef:        defaultDiscordBotTokenRef(),
-				AcceptDMs:          true,
-				MinEditInterval:    Duration(2 * time.Second),
-				MaxAttachmentBytes: 20971520,
+				Instance:                 "owner",
+				BotTokenRef:              defaultDiscordBotTokenRef(),
+				AcceptDMs:                true,
+				MinEditInterval:          Duration(2 * time.Second),
+				MaxAttachmentBytes:       20971520,
+				ThreadAutoArchiveMinutes: 1440,
 			},
 		},
 		Broadcast: Broadcast{
