@@ -466,12 +466,33 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	if err != nil {
 		return Document{}, false, err
 	}
-	if inserted {
+	if inserted && s.eventReopenedSummary(ctx, ownerID, event.SessionID, event.Sequence) {
 		if _, err := s.documents.DeleteSessionSummaries(ctx, ownerID, event.SessionID); err != nil {
 			return Document{}, false, err
 		}
 	}
 	return document, true, nil
+}
+
+func (s *Service) eventReopenedSummary(ctx context.Context, ownerID, sessionID string, sequence uint64) bool {
+	summaries, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, KindSummary, 10)
+	if err != nil {
+		return false
+	}
+	for i := range summaries {
+		from, err := sequenceFromDB(summaries[i].FromSequence)
+		if err != nil {
+			continue
+		}
+		to, err := sequenceFromDB(summaries[i].ToSequence)
+		if err != nil {
+			continue
+		}
+		if sequence >= from && sequence <= to {
+			return true
+		}
+	}
+	return false
 }
 
 func estimateTokens(content string) int {

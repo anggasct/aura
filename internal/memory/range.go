@@ -54,35 +54,42 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "document store must not be nil")
 	}
 	s.projectMu.Lock()
-	defer s.projectMu.Unlock()
 	probe, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, KindEventText, s.rangeThreshold+1)
 	if err != nil {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, err
 	}
 	if len(probe) < s.rangeThreshold {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, nil
 	}
 	mark, found, err := s.documents.ProjectionWatermark(ctx, sessionID)
 	if err != nil {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, err
 	}
 	if !found {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, nil
 	}
 	minRaw, err := sequenceFromDB(probe[0].FromSequence)
 	if err != nil {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 	}
 	closedTo := mark - int64(s.rangeLiveWindow)
 	minDB, err := sequenceToDB(minRaw)
 	if err != nil {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, err
 	}
 	if closedTo < minDB {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, nil
 	}
 	candidates, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, KindEventText, maxRangeFetch)
 	if err != nil {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, err
 	}
 	filtered := make([]RecallDocument, 0, len(candidates))
@@ -92,11 +99,13 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 		}
 		document, err := storedToRecall(&candidates[i])
 		if err != nil {
+			s.projectMu.Unlock()
 			return RecallContext{}, false, err
 		}
 		filtered = append(filtered, document)
 	}
 	if len(filtered) == 0 {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, nil
 	}
 	from, to := filtered[0].FromSequence, filtered[0].ToSequence
@@ -110,24 +119,30 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 	}
 	existing, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, KindSummary, 10)
 	if err != nil {
+		s.projectMu.Unlock()
 		return RecallContext{}, false, err
 	}
 	for i := range existing {
 		existingFrom, err := sequenceFromDB(existing[i].FromSequence)
 		if err != nil {
-			continue
+			s.projectMu.Unlock()
+			return RecallContext{}, false, err
 		}
 		existingTo, err := sequenceFromDB(existing[i].ToSequence)
 		if err != nil {
-			continue
+			s.projectMu.Unlock()
+			return RecallContext{}, false, err
 		}
-		if existingFrom == from && existingTo == to && existing[i].PromptVersion == s.summaryPrompt {
+		if existingFrom == from && existingTo <= to && existing[i].PromptVersion == s.summaryPrompt {
 			if _, err := s.documents.DeleteOtherSummaries(ctx, ownerID, sessionID, existing[i].ID); err != nil {
+				s.projectMu.Unlock()
 				return RecallContext{}, false, err
 			}
+			s.projectMu.Unlock()
 			return RecallContext{}, false, nil
 		}
 	}
+	s.projectMu.Unlock()
 	result, err := s.Summarize(ctx, ownerID, sessionID, "", filtered, model, summarizer)
 	if err != nil {
 		if code, ok := CodeOf(err); ok && code == ErrorCodeModelCapabilityUnsupported {
@@ -141,7 +156,23 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 		}
 		return RecallContext{}, false, err
 	}
+	s.projectMu.Lock()
+	defer s.projectMu.Unlock()
 	keepID := documentID(sessionID, KindSummary, from, to, s.summaryPrompt)
+	summaries, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, KindSummary, 10)
+	if err != nil {
+		return result, true, err
+	}
+	present := false
+	for i := range summaries {
+		if summaries[i].ID == keepID {
+			present = true
+			break
+		}
+	}
+	if !present {
+		return RecallContext{}, false, nil
+	}
 	if _, err := s.documents.DeleteOtherSummaries(ctx, ownerID, sessionID, keepID); err != nil {
 		return result, true, err
 	}

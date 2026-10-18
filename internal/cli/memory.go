@@ -131,6 +131,8 @@ func buildMemoryService(cfg *config.Config, db *sql.DB, observer memory.Observer
 		TokenBudget:          cfg.Memory.RecallTokenBudget,
 		SummaryPromptVersion: cfg.Memory.SummaryPromptVersion,
 		SummaryTTL:           time.Duration(cfg.Memory.SummaryTTL),
+		RangeThreshold:       cfg.Memory.RangeThreshold,
+		RangeLiveWindow:      cfg.Memory.RangeLiveWindow,
 		Observer:             observer,
 	})
 }

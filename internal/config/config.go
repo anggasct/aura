@@ -96,6 +96,8 @@ type Memory struct {
 	EnglishStemming      bool     `koanf:"english_stemming" yaml:"english_stemming"`
 	SummaryPromptVersion string   `koanf:"summary_prompt_version" yaml:"summary_prompt_version"`
 	SummaryTTL           Duration `koanf:"summary_ttl" yaml:"summary_ttl"`
+	RangeThreshold       int      `koanf:"range_threshold" yaml:"range_threshold"`
+	RangeLiveWindow      int      `koanf:"range_live_window" yaml:"range_live_window"`
 }
 
 type QuietHours struct {
@@ -829,6 +831,8 @@ func Default() Config {
 			RecallTokenBudget:    2000,
 			SummaryPromptVersion: "memory-summary-v1",
 			SummaryTTL:           Duration(720 * time.Hour),
+			RangeThreshold:       20,
+			RangeLiveWindow:      5,
 		},
 		Skills: &Skills{
 			Enabled:              true,

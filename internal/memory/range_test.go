@@ -149,12 +149,12 @@ func TestRangeRecallOrdersSummaryFirstForOldLiveRawFirst(t *testing.T) {
 func TestRangeReopenMarksStaleUntilRebuild(t *testing.T) {
 	store := newFakeDocumentStore()
 	service := rangeServiceWithStore(store)
-	seedRangeSession(t, service, "sess-range", 6)
+	seedRangeSessionWithGap(t, service, "sess-range", 6, 3)
 	summarizer := &fakeSummarizer{text: "archive backup digest"}
 	if _, _, err := service.SummarizeClosedRange(t.Context(), "owner-1", "sess-range", capableModel(), summarizer); err != nil {
 		t.Fatalf("summarize: %v", err)
 	}
-	event := batchEvent(t, "sess-range", 7, "user", "adk_event", "live backup recent note g")
+	event := batchEvent(t, "sess-range", 3, "user", "adk_event", "gap fill note c")
 	if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -182,6 +182,66 @@ func TestRangeReopenMarksStaleUntilRebuild(t *testing.T) {
 	}
 	if summaries[0].FromSequence != 1 || summaries[0].ToSequence != 5 {
 		t.Errorf("rebuilt range = %d-%d, want 1-5", summaries[0].FromSequence, summaries[0].ToSequence)
+	}
+}
+
+func TestRangeLiveWindowTurnsKeepSummaryWithoutReSummarizing(t *testing.T) {
+	store := newFakeDocumentStore()
+	service := rangeServiceWithStore(store)
+	seedRangeSession(t, service, "sess-range", 6)
+	summarizer := &fakeSummarizer{text: "archive backup digest"}
+	if _, _, err := service.SummarizeClosedRange(t.Context(), "owner-1", "sess-range", capableModel(), summarizer); err != nil {
+		t.Fatalf("summarize: %v", err)
+	}
+	if summarizer.calls != 1 {
+		t.Fatalf("calls = %d, want 1", summarizer.calls)
+	}
+	for i := 7; i <= 9; i++ {
+		event := batchEvent(t, "sess-range", uint64(i), "user", "adk_event", "live backup recent note "+string(rune('a'+i)))
+		if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+			t.Fatalf("project %d: %v", i, err)
+		}
+		if _, _, err := service.SummarizeClosedRange(t.Context(), "owner-1", "sess-range", capableModel(), summarizer); err != nil {
+			t.Fatalf("pass %d: %v", i, err)
+		}
+	}
+	if summarizer.calls != 1 {
+		t.Errorf("calls = %d, want still 1 after live-window turns", summarizer.calls)
+	}
+	summaries, err := store.ListSessionDocuments(t.Context(), "owner-1", "sess-range", KindSummary, 10)
+	if err != nil || len(summaries) != 1 {
+		t.Fatalf("summaries = %d, %v; want 1", len(summaries), err)
+	}
+	if summaries[0].FromSequence != 1 || summaries[0].ToSequence != 4 {
+		t.Errorf("summary range = %d-%d, want 1-4", summaries[0].FromSequence, summaries[0].ToSequence)
+	}
+	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
+	if err != nil {
+		t.Fatalf("Recall(): %v", err)
+	}
+	if len(recalled) == 0 || recalled[0].PromptVersion == "" {
+		t.Fatalf("old-range recall first = %+v, want summary first", recalled)
+	}
+}
+
+func seedRangeSessionWithGap(t *testing.T, service *Service, session string, count int, gap uint64) {
+	t.Helper()
+	now := time.Now().UTC()
+	seeded := 0
+	for i := uint64(1); seeded < count; i++ {
+		if i == gap {
+			continue
+		}
+		content := "archive backup old note"
+		if i > 4 {
+			content = "live backup recent note"
+		}
+		event := batchEvent(t, session, i, "user", "adk_event", content+" "+string(rune('a'+i)))
+		event.CreatedAt = now
+		if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+		seeded++
 	}
 }
 
