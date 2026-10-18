@@ -26,6 +26,7 @@ import (
 	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/logging"
 	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/secret"
 )
 
 const (
@@ -246,6 +247,12 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateMemory(&cfg.Memory); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateOwner(cfg.Owner); err != nil {
+		return LoadResult{}, err
+	}
+	if err := screenOwnerSecrets(cfg.Owner, cfg); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -419,6 +426,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateProfileShapes(doc); err != nil {
+		return err
+	}
+	if err := validateOwnerShapes(doc); err != nil {
 		return err
 	}
 	if err := validateChildrenShapes(doc); err != nil {
@@ -3389,6 +3399,199 @@ func applyProfileDefaults(cfg *Config, doc *yamlv3.Node) {
 	if cfg.Profile.PromptVersion == "" && !configValuePresent(doc, "profile", "prompt_version") && !envValuePresent("profile.prompt_version") {
 		cfg.Profile.PromptVersion = defaults.PromptVersion
 	}
+}
+
+var ownerFixedKeys = []string{"name", "language", "timezone"}
+
+func validateOwner(owner *Owner) error {
+	if owner == nil {
+		return nil
+	}
+	var problems []error
+	for _, field := range []struct {
+		path  string
+		value string
+	}{
+		{"owner.name", owner.Name},
+		{"owner.language", owner.Language},
+		{"owner.timezone", owner.Timezone},
+	} {
+		if err := validateOwnerValue(field.path, field.value); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	if owner.Timezone != "" {
+		if _, err := time.LoadLocation(owner.Timezone); err != nil {
+			problems = append(problems, fmt.Errorf("owner.timezone %q is not a valid IANA timezone", owner.Timezone))
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(owner.Preferences)) {
+		switch {
+		case key == "":
+			problems = append(problems, errors.New("owner.preferences keys must not be empty"))
+			continue
+		case key != strings.TrimSpace(key):
+			problems = append(problems, fmt.Errorf("owner.preferences key %q must not carry surrounding whitespace", key))
+			continue
+		case strings.Contains(key, ":"):
+			problems = append(problems, fmt.Errorf("owner.preferences key %q must not contain a colon", key))
+			continue
+		case slices.Contains(ownerFixedKeys, key):
+			problems = append(problems, fmt.Errorf("owner.preferences key %q collides with owner.%s", key, key))
+			continue
+		}
+		if err := validateOwnerValue("owner.preferences."+key, owner.Preferences[key]); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateOwnerValue(path, value string) error {
+	if value == "" {
+		return nil
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return fmt.Errorf("%s must be a single line", path)
+	}
+	if value != strings.TrimSpace(value) {
+		return fmt.Errorf("%s must not carry surrounding whitespace", path)
+	}
+	return nil
+}
+
+func screenOwnerSecrets(owner *Owner, cfg *Config) error {
+	if owner == nil {
+		return nil
+	}
+	vault := secret.New()
+	for i, value := range configuredSecretValues(cfg) {
+		vault.Set(fmt.Sprintf("configured-secret-%d", i), value)
+	}
+	var problems []error
+	for _, field := range []struct {
+		path  string
+		value string
+	}{
+		{"owner.name", owner.Name},
+		{"owner.language", owner.Language},
+		{"owner.timezone", owner.Timezone},
+	} {
+		if field.value != "" && vault.Contains(field.value) {
+			problems = append(problems, fmt.Errorf("%s must not repeat a configured secret value", field.path))
+		}
+	}
+	for key, value := range owner.Preferences {
+		if (key != "" && vault.Contains(key)) || (value != "" && vault.Contains(value)) {
+			problems = append(problems, errors.New("owner.preferences must not repeat a configured secret value"))
+			break
+		}
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeOwnerSecret, Detail: err.Error()}
+	}
+	return nil
+}
+
+func configuredSecretValues(cfg *Config) []string {
+	var values []string
+	add := func(value string) {
+		if value = strings.TrimRight(value, "\r\n"); value != "" {
+			values = append(values, value)
+		}
+	}
+	for name := range cfg.Models.Definitions {
+		definition := cfg.Models.Definitions[name]
+		if definition.APIKeyEnv != "" {
+			add(os.Getenv(definition.APIKeyEnv))
+		}
+		if definition.APIKeyFile != "" {
+			if data, err := os.ReadFile(definition.APIKeyFile); err == nil {
+				add(string(data))
+			}
+		}
+	}
+	if cfg.Tools != nil {
+		add(resolveSecretRef(cfg.Tools.WebSearch.CredentialRef))
+	}
+	add(resolveSecretRef(cfg.Channels.Discord.BotTokenRef))
+	for _, key := range cfg.Webhook.Keys {
+		if key.SecretEnv != "" {
+			add(os.Getenv(key.SecretEnv))
+		}
+	}
+	add(resolveSecretRef(cfg.Telemetry.CredentialRef))
+	if cfg.Sync != nil {
+		add(resolveSecretRef(cfg.Sync.TransportSecretRef))
+	}
+	if cfg.MCP != nil {
+		for i := range cfg.MCP.Servers {
+			auth := cfg.MCP.Servers[i].Auth
+			if auth == nil {
+				continue
+			}
+			if oauth := auth.OAuth; oauth != nil {
+				if oauth.ClientIDEnv != "" {
+					add(os.Getenv(oauth.ClientIDEnv))
+				}
+				if oauth.ClientSecretEnv != "" {
+					add(os.Getenv(oauth.ClientSecretEnv))
+				}
+			}
+			if static := auth.Static; static != nil {
+				add(resolveSecretRef(static.CredentialRef))
+			}
+		}
+	}
+	return values
+}
+
+func resolveSecretRef(raw string) string {
+	raw = strings.TrimSpace(raw)
+	switch {
+	case strings.HasPrefix(raw, "env://"):
+		value, _ := secret.Reference{Env: strings.TrimPrefix(raw, "env://")}.Resolve()
+		return value
+	case strings.HasPrefix(raw, "file://"):
+		value, _ := secret.Reference{File: strings.TrimPrefix(raw, "file://")}.Resolve()
+		return value
+	default:
+		return ""
+	}
+}
+
+func validateOwnerShapes(doc *yamlv3.Node) error {
+	ownerNode := mappingValue(doc, "owner")
+	if ownerNode == nil {
+		return nil
+	}
+	if ownerNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("owner must be a mapping at line %d", ownerNode.Line)
+	}
+	for i := 0; i+1 < len(ownerNode.Content); i += 2 {
+		keyNode := ownerNode.Content[i]
+		valueNode := ownerNode.Content[i+1]
+		switch keyNode.Value {
+		case "name", "language", "timezone":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("owner.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "preferences":
+			if valueNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("owner.preferences must be a mapping at line %d", valueNode.Line)
+			}
+			for j := 0; j+1 < len(valueNode.Content); j += 2 {
+				prefValue := valueNode.Content[j+1]
+				if prefValue.Kind != yamlv3.ScalarNode || prefValue.Tag != "!!str" {
+					return fmt.Errorf("owner.preferences values must be strings at line %d", prefValue.Line)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func validBroadcastAlias(alias string) bool {
