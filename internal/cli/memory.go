@@ -86,6 +86,92 @@ func (s *memoryDocumentStore) DeleteExpiredSummaries(ctx context.Context, now ti
 	return s.store.DeleteExpiredSummaries(ctx, now, limit)
 }
 
+func (s *memoryDocumentStore) GetDocument(ctx context.Context, id string) (memory.StoredDocument, bool, error) {
+	document, found, err := s.store.GetDocument(ctx, id)
+	if err != nil || !found {
+		return memory.StoredDocument{}, found, err
+	}
+	return memory.StoredDocument{
+		ID:            document.ID,
+		OwnerID:       document.OwnerID,
+		SessionID:     document.SessionID,
+		Kind:          document.Kind,
+		FromSequence:  document.FromSequence,
+		ToSequence:    document.ToSequence,
+		Content:       document.Content,
+		TrustLabel:    document.TrustLabel,
+		PromptVersion: document.PromptVersion,
+		ModelProtocol: document.ModelProtocol,
+		ModelName:     document.ModelName,
+		CreatedAt:     document.CreatedAt,
+		ExpiresAt:     document.ExpiresAt,
+	}, true, nil
+}
+
+func (s *memoryDocumentStore) ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]memory.StoredDocument, error) {
+	documents, err := s.store.ListSessionDocuments(ctx, ownerID, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]memory.StoredDocument, 0, len(documents))
+	for i := range documents {
+		out = append(out, memory.StoredDocument{
+			ID:            documents[i].ID,
+			OwnerID:       documents[i].OwnerID,
+			SessionID:     documents[i].SessionID,
+			Kind:          documents[i].Kind,
+			FromSequence:  documents[i].FromSequence,
+			ToSequence:    documents[i].ToSequence,
+			Content:       documents[i].Content,
+			TrustLabel:    documents[i].TrustLabel,
+			PromptVersion: documents[i].PromptVersion,
+			ModelProtocol: documents[i].ModelProtocol,
+			ModelName:     documents[i].ModelName,
+			CreatedAt:     documents[i].CreatedAt,
+			ExpiresAt:     documents[i].ExpiresAt,
+		})
+	}
+	return out, nil
+}
+
+func (s *memoryDocumentStore) ListOwnerDocuments(ctx context.Context, ownerID string, limit int) ([]memory.StoredDocument, error) {
+	documents, err := s.store.ListOwnerDocuments(ctx, ownerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]memory.StoredDocument, 0, len(documents))
+	for i := range documents {
+		out = append(out, memory.StoredDocument{
+			ID:            documents[i].ID,
+			OwnerID:       documents[i].OwnerID,
+			SessionID:     documents[i].SessionID,
+			Kind:          documents[i].Kind,
+			FromSequence:  documents[i].FromSequence,
+			ToSequence:    documents[i].ToSequence,
+			Content:       documents[i].Content,
+			TrustLabel:    documents[i].TrustLabel,
+			PromptVersion: documents[i].PromptVersion,
+			ModelProtocol: documents[i].ModelProtocol,
+			ModelName:     documents[i].ModelName,
+			CreatedAt:     documents[i].CreatedAt,
+			ExpiresAt:     documents[i].ExpiresAt,
+		})
+	}
+	return out, nil
+}
+
+func (s *memoryDocumentStore) CountSessionDocuments(ctx context.Context, sessionID string) (int, error) {
+	return s.store.CountSessionDocuments(ctx, sessionID)
+}
+
+func (s *memoryDocumentStore) DeleteSessionDocumentsOwned(ctx context.Context, ownerID, sessionID string) (int, error) {
+	return s.store.DeleteSessionDocumentsOwned(ctx, ownerID, sessionID)
+}
+
+func (s *memoryDocumentStore) DeleteDocumentsByIDsOwned(ctx context.Context, ownerID string, ids []string) (int, error) {
+	return s.store.DeleteDocumentsByIDsOwned(ctx, ownerID, ids)
+}
+
 func buildMemoryService(cfg *config.Config, db *sql.DB, observer memory.Observer) (*memory.Service, error) {
 	return memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, memory.Config{
 		MaxDocuments:         cfg.Memory.MaxDocuments,
