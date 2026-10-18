@@ -54,7 +54,7 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "document store must not be nil")
 	}
 	s.projectMu.Lock()
-	probe, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, KindEventText, s.rangeThreshold+1)
+	probe, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindEventText, s.rangeThreshold+1)
 	if err != nil {
 		s.projectMu.Unlock()
 		return RecallContext{}, false, err
@@ -87,7 +87,7 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 		s.projectMu.Unlock()
 		return RecallContext{}, false, nil
 	}
-	candidates, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, KindEventText, maxRangeFetch)
+	candidates, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindEventText, maxRangeFetch)
 	if err != nil {
 		s.projectMu.Unlock()
 		return RecallContext{}, false, err
@@ -117,7 +117,7 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 			to = filtered[1+i].ToSequence
 		}
 	}
-	existing, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, KindSummary, 10)
+	existing, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindSummary, 10)
 	if err != nil {
 		s.projectMu.Unlock()
 		return RecallContext{}, false, err
@@ -159,7 +159,7 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
 	keepID := documentID(sessionID, KindSummary, from, to, s.summaryPrompt)
-	summaries, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, KindSummary, 10)
+	summaries, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindSummary, 10)
 	if err != nil {
 		return result, true, err
 	}

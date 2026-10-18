@@ -33,32 +33,32 @@ func TestMemoryStore_ListSessionDocumentsOrdersAndFilters(t *testing.T) {
 	if _, err := s.UpsertDocument(ctx, expired); err != nil {
 		t.Fatalf("seed expired: %v", err)
 	}
-	raw, err := s.ListSessionDocuments(ctx, "owner-1", "sess-1", MemoryKindEventText, 10)
+	raw, err := s.ListSessionDocumentsByKind(ctx, "owner-1", "sess-1", MemoryKindEventText, 10)
 	if err != nil {
 		t.Fatalf("ListSessionDocuments(): %v", err)
 	}
 	if len(raw) != 3 || raw[0].FromSequence != 1 || raw[1].FromSequence != 2 || raw[2].FromSequence != 3 {
 		t.Fatalf("raw order = %+v, want 1,2,3", raw)
 	}
-	summaries, err := s.ListSessionDocuments(ctx, "owner-1", "sess-1", MemoryKindSummary, 10)
+	summaries, err := s.ListSessionDocumentsByKind(ctx, "owner-1", "sess-1", MemoryKindSummary, 10)
 	if err != nil || len(summaries) != 1 || summaries[0].ID != "mem-sum" {
 		t.Fatalf("summaries = %+v, %v; want only non-expired mem-sum", summaries, err)
 	}
-	limited, err := s.ListSessionDocuments(ctx, "owner-1", "sess-1", MemoryKindEventText, 2)
+	limited, err := s.ListSessionDocumentsByKind(ctx, "owner-1", "sess-1", MemoryKindEventText, 2)
 	if err != nil || len(limited) != 2 {
 		t.Fatalf("limited = %d, %v; want 2", len(limited), err)
 	}
-	foreign, err := s.ListSessionDocuments(ctx, "owner-2", "sess-1", MemoryKindEventText, 10)
+	foreign, err := s.ListSessionDocumentsByKind(ctx, "owner-2", "sess-1", MemoryKindEventText, 10)
 	if err != nil || len(foreign) != 0 {
 		t.Fatalf("foreign = %d, %v; want none", len(foreign), err)
 	}
-	if _, err := s.ListSessionDocuments(ctx, "", "sess-1", MemoryKindEventText, 10); err == nil {
+	if _, err := s.ListSessionDocumentsByKind(ctx, "", "sess-1", MemoryKindEventText, 10); err == nil {
 		t.Error("empty owner accepted")
 	}
-	if _, err := s.ListSessionDocuments(ctx, "owner-1", "sess-1", "note", 10); err == nil {
+	if _, err := s.ListSessionDocumentsByKind(ctx, "owner-1", "sess-1", "note", 10); err == nil {
 		t.Error("bad kind accepted")
 	}
-	if _, err := s.ListSessionDocuments(ctx, "owner-1", "sess-1", MemoryKindEventText, 0); err == nil {
+	if _, err := s.ListSessionDocumentsByKind(ctx, "owner-1", "sess-1", MemoryKindEventText, 0); err == nil {
 		t.Error("non-positive limit accepted")
 	}
 }
@@ -83,7 +83,7 @@ func TestMemoryStore_DeleteSessionSummariesKeepsRaw(t *testing.T) {
 	if err != nil || removed != 2 {
 		t.Fatalf("removed = %d, %v; want 2", removed, err)
 	}
-	remaining, err := s.ListSessionDocuments(ctx, "owner-1", "sess-1", MemoryKindEventText, 10)
+	remaining, err := s.ListSessionDocumentsByKind(ctx, "owner-1", "sess-1", MemoryKindEventText, 10)
 	if err != nil || len(remaining) != 1 {
 		t.Fatalf("raw after delete = %d, %v; want 1", len(remaining), err)
 	}
@@ -108,7 +108,7 @@ func TestMemoryStore_DeleteOtherSummariesKeepsOne(t *testing.T) {
 	if err != nil || removed != 1 {
 		t.Fatalf("removed = %d, %v; want 1", removed, err)
 	}
-	remaining, err := s.ListSessionDocuments(ctx, "owner-1", "sess-1", MemoryKindSummary, 10)
+	remaining, err := s.ListSessionDocumentsByKind(ctx, "owner-1", "sess-1", MemoryKindSummary, 10)
 	if err != nil || len(remaining) != 1 || remaining[0].ID != "mem-keep" {
 		t.Fatalf("remaining = %+v, %v; want mem-keep", remaining, err)
 	}

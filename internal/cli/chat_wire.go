@@ -177,7 +177,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 	}
 	var broker runtime.ToolBroker = terminalBroker{}
 	var executorOpts []runtimeadk.ExecutorOption
-	executorOpts = append(executorOpts, runtimeadk.WithAgentResolver(registry, routeModel))
+	executorOpts = append(executorOpts, runtimeadk.WithAgentResolver(registry, routeModel), ownerContextOption(ctx, cfg.Owner, logger))
 	var memoryHook func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
 	var approvals *terminal.ApprovalBridge
 	if cfg.Tools != nil {

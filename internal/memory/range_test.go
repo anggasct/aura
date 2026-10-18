@@ -50,7 +50,7 @@ func TestRangeSummaryCreatesOneLinkedDoc(t *testing.T) {
 			t.Errorf("summary input includes derived doc %+v, want raw only", document)
 		}
 	}
-	summaries, err := store.ListSessionDocuments(t.Context(), "owner-1", "sess-range", KindSummary, 10)
+	summaries, err := store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, 10)
 	if err != nil {
 		t.Fatalf("list summaries: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestRangeSummaryCreatesOneLinkedDoc(t *testing.T) {
 	if summarizer.calls != 1 {
 		t.Errorf("calls = %d, want still 1", summarizer.calls)
 	}
-	summaries, err = store.ListSessionDocuments(t.Context(), "owner-1", "sess-range", KindSummary, 10)
+	summaries, err = store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, 10)
 	if err != nil || len(summaries) != 1 {
 		t.Errorf("summaries after replay = %d, %v; want still 1", len(summaries), err)
 	}
@@ -92,7 +92,7 @@ func TestRangeSummaryBelowThresholdStaysRaw(t *testing.T) {
 	if summarized || summarizer.calls != 0 {
 		t.Errorf("summarized = %v, calls = %d; want raw-only", summarized, summarizer.calls)
 	}
-	summaries, err := store.ListSessionDocuments(t.Context(), "owner-1", "sess-tiny", KindSummary, 10)
+	summaries, err := store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-tiny", KindSummary, 10)
 	if err != nil || len(summaries) != 0 {
 		t.Errorf("summaries = %d, %v; want none", len(summaries), err)
 	}
@@ -158,7 +158,7 @@ func TestRangeReopenMarksStaleUntilRebuild(t *testing.T) {
 	if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	summaries, err := store.ListSessionDocuments(t.Context(), "owner-1", "sess-range", KindSummary, 10)
+	summaries, err := store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, 10)
 	if err != nil || len(summaries) != 0 {
 		t.Fatalf("summaries after reopen = %d, %v; want stale-removed", len(summaries), err)
 	}
@@ -176,7 +176,7 @@ func TestRangeReopenMarksStaleUntilRebuild(t *testing.T) {
 	} else if !resummarized {
 		t.Fatal("rebuild skipped")
 	}
-	summaries, err = store.ListSessionDocuments(t.Context(), "owner-1", "sess-range", KindSummary, 10)
+	summaries, err = store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, 10)
 	if err != nil || len(summaries) != 1 {
 		t.Fatalf("summaries after rebuild = %d, %v; want 1", len(summaries), err)
 	}
@@ -208,7 +208,7 @@ func TestRangeLiveWindowTurnsKeepSummaryWithoutReSummarizing(t *testing.T) {
 	if summarizer.calls != 1 {
 		t.Errorf("calls = %d, want still 1 after live-window turns", summarizer.calls)
 	}
-	summaries, err := store.ListSessionDocuments(t.Context(), "owner-1", "sess-range", KindSummary, 10)
+	summaries, err := store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, 10)
 	if err != nil || len(summaries) != 1 {
 		t.Fatalf("summaries = %d, %v; want 1", len(summaries), err)
 	}
@@ -277,7 +277,7 @@ func TestRangeCapabilitySkipLeavesZeroDocs(t *testing.T) {
 	if observation.Outcome != string(ErrorCodeModelCapabilityUnsupported) || observation.Summarized {
 		t.Errorf("observation = %+v, want capability skip", observation)
 	}
-	summaries, err := store.ListSessionDocuments(t.Context(), "owner-1", "sess-range", KindSummary, 10)
+	summaries, err := store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, 10)
 	if err != nil || len(summaries) != 0 {
 		t.Errorf("summaries = %d, %v; want zero", len(summaries), err)
 	}

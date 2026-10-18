@@ -106,6 +106,102 @@ func (s *fakeDocumentStore) DeleteSessionDocuments(_ context.Context, sessionID 
 	return nil
 }
 
+func (s *fakeDocumentStore) GetDocument(_ context.Context, id string) (StoredDocument, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.records[id]
+	if !ok {
+		return StoredDocument{}, false, nil
+	}
+	return record, true, nil
+}
+
+func (s *fakeDocumentStore) ListSessionDocuments(_ context.Context, ownerID, sessionID string, limit int) ([]StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []StoredDocument
+	for id := range s.records {
+		record := s.records[id]
+		if record.OwnerID != ownerID || record.SessionID != sessionID {
+			continue
+		}
+		out = append(out, record)
+	}
+	slices.SortFunc(out, func(a, b StoredDocument) int {
+		if a.FromSequence != b.FromSequence {
+			if a.FromSequence < b.FromSequence {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *fakeDocumentStore) ListOwnerDocuments(_ context.Context, ownerID string, limit int) ([]StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []StoredDocument
+	for id := range s.records {
+		record := s.records[id]
+		if record.OwnerID != ownerID {
+			continue
+		}
+		out = append(out, record)
+	}
+	slices.SortFunc(out, func(a, b StoredDocument) int {
+		if a.SessionID != b.SessionID {
+			return strings.Compare(a.SessionID, b.SessionID)
+		}
+		if a.FromSequence != b.FromSequence {
+			if a.FromSequence < b.FromSequence {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *fakeDocumentStore) CountSessionDocuments(_ context.Context, sessionID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	total := 0
+	for id := range s.records {
+		if s.records[id].SessionID == sessionID {
+			total++
+		}
+	}
+	return total, nil
+}
+
+func (s *fakeDocumentStore) DeleteDocumentsByIDsOwned(_ context.Context, ownerID string, ids []string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	deleted := 0
+	for _, id := range ids {
+		record, ok := s.records[id]
+		if !ok {
+			continue
+		}
+		if record.OwnerID != ownerID {
+			continue
+		}
+		delete(s.records, id)
+		delete(s.byKey, fakeDocKey(record.SessionID, record.Kind, record.PromptVersion, record.FromSequence, record.ToSequence))
+		deleted++
+	}
+	return deleted, nil
+}
+
 func (s *fakeDocumentStore) DeleteExpiredSummaries(_ context.Context, now time.Time, limit int) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -124,7 +220,7 @@ func (s *fakeDocumentStore) DeleteExpiredSummaries(_ context.Context, now time.T
 	return pruned, nil
 }
 
-func (s *fakeDocumentStore) ListSessionDocuments(_ context.Context, ownerID, sessionID, kind string, limit int) ([]StoredDocument, error) {
+func (s *fakeDocumentStore) ListSessionDocumentsByKind(_ context.Context, ownerID, sessionID, kind string, limit int) ([]StoredDocument, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	documents := []StoredDocument{}

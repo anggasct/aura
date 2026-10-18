@@ -114,6 +114,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			executorOpts := []runtimeadk.ExecutorOption{
 				runtimeadk.WithBuiltinToolExecutor(builtin),
 				runtimeadk.WithAgentResolver(agentRegistry, routeModel),
+				ownerContextOption(ctx, cfg.Owner, logger),
 			}
 			var memoryHook func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
 			if cfg.Memory.Enabled {
@@ -127,6 +128,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				}
 				executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryRuntime.provider))
 				memoryHook = buildMemoryHook(memoryRuntime.service, memoryRuntime.model, memoryRuntime.summarizer, logger)
+				memoryRuntime.service.StartPurgeLoop(ctx, time.Duration(cfg.Memory.PurgeInterval), cfg.Memory.PurgeLimit)
 			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,

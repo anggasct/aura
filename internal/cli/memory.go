@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/memory"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
 )
@@ -91,8 +92,30 @@ func (s *memoryDocumentStore) DeleteExpiredSummaries(ctx context.Context, now ti
 	return s.store.DeleteExpiredSummaries(ctx, now, limit)
 }
 
-func (s *memoryDocumentStore) ListSessionDocuments(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]memory.StoredDocument, error) {
-	documents, err := s.store.ListSessionDocuments(ctx, ownerID, sessionID, kind, limit)
+func (s *memoryDocumentStore) GetDocument(ctx context.Context, id string) (memory.StoredDocument, bool, error) {
+	document, found, err := s.store.GetDocument(ctx, id)
+	if err != nil || !found {
+		return memory.StoredDocument{}, found, err
+	}
+	return memory.StoredDocument{
+		ID:            document.ID,
+		OwnerID:       document.OwnerID,
+		SessionID:     document.SessionID,
+		Kind:          document.Kind,
+		FromSequence:  document.FromSequence,
+		ToSequence:    document.ToSequence,
+		Content:       document.Content,
+		TrustLabel:    document.TrustLabel,
+		PromptVersion: document.PromptVersion,
+		ModelProtocol: document.ModelProtocol,
+		ModelName:     document.ModelName,
+		CreatedAt:     document.CreatedAt,
+		ExpiresAt:     document.ExpiresAt,
+	}, true, nil
+}
+
+func (s *memoryDocumentStore) ListSessionDocumentsByKind(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]memory.StoredDocument, error) {
+	documents, err := s.store.ListSessionDocumentsByKind(ctx, ownerID, sessionID, kind, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +140,66 @@ func (s *memoryDocumentStore) ListSessionDocuments(ctx context.Context, ownerID,
 	return converted, nil
 }
 
+func (s *memoryDocumentStore) ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]memory.StoredDocument, error) {
+	documents, err := s.store.ListSessionDocuments(ctx, ownerID, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	converted := make([]memory.StoredDocument, 0, len(documents))
+	for i := range documents {
+		converted = append(converted, memory.StoredDocument{
+			ID:            documents[i].ID,
+			OwnerID:       documents[i].OwnerID,
+			SessionID:     documents[i].SessionID,
+			Kind:          documents[i].Kind,
+			FromSequence:  documents[i].FromSequence,
+			ToSequence:    documents[i].ToSequence,
+			Content:       documents[i].Content,
+			TrustLabel:    documents[i].TrustLabel,
+			PromptVersion: documents[i].PromptVersion,
+			ModelProtocol: documents[i].ModelProtocol,
+			ModelName:     documents[i].ModelName,
+			CreatedAt:     documents[i].CreatedAt,
+			ExpiresAt:     documents[i].ExpiresAt,
+		})
+	}
+	return converted, nil
+}
+
+func (s *memoryDocumentStore) ListOwnerDocuments(ctx context.Context, ownerID string, limit int) ([]memory.StoredDocument, error) {
+	documents, err := s.store.ListOwnerDocuments(ctx, ownerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]memory.StoredDocument, 0, len(documents))
+	for i := range documents {
+		out = append(out, memory.StoredDocument{
+			ID:            documents[i].ID,
+			OwnerID:       documents[i].OwnerID,
+			SessionID:     documents[i].SessionID,
+			Kind:          documents[i].Kind,
+			FromSequence:  documents[i].FromSequence,
+			ToSequence:    documents[i].ToSequence,
+			Content:       documents[i].Content,
+			TrustLabel:    documents[i].TrustLabel,
+			PromptVersion: documents[i].PromptVersion,
+			ModelProtocol: documents[i].ModelProtocol,
+			ModelName:     documents[i].ModelName,
+			CreatedAt:     documents[i].CreatedAt,
+			ExpiresAt:     documents[i].ExpiresAt,
+		})
+	}
+	return out, nil
+}
+
+func (s *memoryDocumentStore) CountSessionDocuments(ctx context.Context, sessionID string) (int, error) {
+	return s.store.CountSessionDocuments(ctx, sessionID)
+}
+
+func (s *memoryDocumentStore) DeleteDocumentsByIDsOwned(ctx context.Context, ownerID string, ids []string) (int, error) {
+	return s.store.DeleteDocumentsByIDsOwned(ctx, ownerID, ids)
+}
+
 func (s *memoryDocumentStore) DeleteSessionSummaries(ctx context.Context, ownerID, sessionID string) (int, error) {
 	return s.store.DeleteSessionSummaries(ctx, ownerID, sessionID)
 }
@@ -126,13 +209,15 @@ func (s *memoryDocumentStore) DeleteOtherSummaries(ctx context.Context, ownerID,
 }
 
 func buildMemoryService(cfg *config.Config, db *sql.DB, observer memory.Observer) (*memory.Service, error) {
-	return memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{
+	return memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, secret.New(), &memory.Config{
 		MaxDocuments:         cfg.Memory.MaxDocuments,
 		TokenBudget:          cfg.Memory.RecallTokenBudget,
 		SummaryPromptVersion: cfg.Memory.SummaryPromptVersion,
 		SummaryTTL:           time.Duration(cfg.Memory.SummaryTTL),
 		RangeThreshold:       cfg.Memory.RangeThreshold,
 		RangeLiveWindow:      cfg.Memory.RangeLiveWindow,
+		PurgeInterval:        time.Duration(cfg.Memory.PurgeInterval),
+		PurgeLimit:           cfg.Memory.PurgeLimit,
 		Observer:             observer,
 	})
 }
