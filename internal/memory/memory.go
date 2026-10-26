@@ -501,7 +501,7 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 }
 
 func (s *Service) eventReopenedSummary(ctx context.Context, ownerID, sessionID string, sequence uint64) bool {
-	summaries, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindSummary, 10)
+	summaries, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindSummary, maxRangeSummaries)
 	if err != nil {
 		return false
 	}

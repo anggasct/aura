@@ -185,6 +185,93 @@ func TestRangeReopenMarksStaleUntilRebuild(t *testing.T) {
 	}
 }
 
+func TestRangeReopenMarksStaleBeyondTenChunks(t *testing.T) {
+	store := newFakeDocumentStore()
+	service := rangeServiceWithStore(store)
+	summarizer := &fakeSummarizer{text: "archive backup digest"}
+	project := func(sequence uint64) {
+		t.Helper()
+		event := batchEvent(t, "sess-range", sequence, "user", "adk_event", "archive backup old note")
+		event.CreatedAt = time.Now().UTC()
+		if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+			t.Fatalf("project %d: %v", sequence, err)
+		}
+	}
+	summarize := func() {
+		t.Helper()
+		if _, _, err := service.SummarizeClosedRange(t.Context(), "owner-1", "sess-range", capableModel(), summarizer); err != nil {
+			t.Fatalf("summarize: %v", err)
+		}
+	}
+
+	for sequence := uint64(1); sequence <= 6; sequence++ {
+		project(sequence)
+	}
+	summarize()
+	for sequence := uint64(7); sequence <= 24; sequence++ {
+		project(sequence)
+		if sequence%2 == 0 {
+			summarize()
+		}
+	}
+
+	project(25)
+	project(27)
+	project(28)
+	project(29)
+	summarize()
+
+	summaries, err := store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, maxRangeSummaries)
+	if err != nil {
+		t.Fatalf("list summaries: %v", err)
+	}
+	if len(summaries) != 11 {
+		t.Fatalf("summaries = %d, want 11 before reopen", len(summaries))
+	}
+	newest := summaries[len(summaries)-1]
+	if newest.FromSequence > 26 || newest.ToSequence < 26 {
+		t.Fatalf("newest summary = %d-%d, want it to span the skipped sequence 26", newest.FromSequence, newest.ToSequence)
+	}
+
+	project(26)
+
+	summaries, err = store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, maxRangeSummaries)
+	if err != nil {
+		t.Fatalf("list summaries after reopen: %v", err)
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("summaries after reopen = %d, want stale-removed", len(summaries))
+	}
+	fallback, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
+	if err != nil {
+		t.Fatalf("Recall(): %v", err)
+	}
+	for _, document := range fallback {
+		if document.PromptVersion != "" {
+			t.Fatalf("stale summary served after reopen: %+v", document)
+		}
+	}
+
+	if _, resummarized, err := service.SummarizeClosedRange(t.Context(), "owner-1", "sess-range", capableModel(), summarizer); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	} else if !resummarized {
+		t.Fatal("rebuild skipped")
+	}
+	summaries, err = store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, maxRangeSummaries)
+	if err != nil || len(summaries) == 0 {
+		t.Fatalf("summaries after rebuild = %d, %v; want rebuilt", len(summaries), err)
+	}
+	covered := false
+	for _, summary := range summaries {
+		if summary.FromSequence <= 26 && summary.ToSequence >= 26 {
+			covered = true
+		}
+	}
+	if !covered {
+		t.Fatalf("rebuilt summaries %+v do not cover reopened sequence 26", summaries)
+	}
+}
+
 func TestRangeSummaryCoversNewlyClosedTurnsWithoutPerTurnReSummarizing(t *testing.T) {
 	store := newFakeDocumentStore()
 	service := rangeServiceWithStore(store)
