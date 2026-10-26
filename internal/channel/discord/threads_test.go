@@ -506,6 +506,26 @@ func (s *fakeThreadDocStore) ListSessionDocumentsByKind(_ context.Context, owner
 	return out, nil
 }
 
+func (s *fakeThreadDocStore) ListSessionDocumentsByKindInRange(_ context.Context, ownerID, sessionID, kind string, from, to int64, limit int) ([]memory.StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []memory.StoredDocument
+	for i := range s.docs {
+		d := s.docs[i]
+		if d.OwnerID != ownerID || d.SessionID != sessionID || d.Kind != kind {
+			continue
+		}
+		if d.FromSequence < from || d.ToSequence > to {
+			continue
+		}
+		out = append(out, d)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (s *fakeThreadDocStore) GetDocument(_ context.Context, id string) (memory.StoredDocument, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

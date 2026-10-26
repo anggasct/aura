@@ -31,6 +31,11 @@ func storedToRecall(document *StoredDocument) (RecallDocument, error) {
 	}, nil
 }
 
+const (
+	maxRangeSummaries     = 500
+	maxRangeChunksPerPass = 4
+)
+
 func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID string, model *SummaryModel, summarizer Summarizer) (RecallContext, bool, error) {
 	if ctx == nil {
 		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
@@ -53,128 +58,162 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 	if s.documents == nil {
 		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "document store must not be nil")
 	}
+	var result RecallContext
+	summarized := false
+	for chunkCount := 0; chunkCount < maxRangeChunksPerPass; chunkCount++ {
+		chunk, ok, err := s.nextClosedRangeChunk(ctx, ownerID, sessionID)
+		if err != nil {
+			return RecallContext{}, summarized, err
+		}
+		if !ok {
+			return result, summarized, nil
+		}
+		from, to := chunk[0].FromSequence, chunk[0].ToSequence
+		for i := range chunk[1:] {
+			if chunk[1+i].FromSequence < from {
+				from = chunk[1+i].FromSequence
+			}
+			if chunk[1+i].ToSequence > to {
+				to = chunk[1+i].ToSequence
+			}
+		}
+		next, err := s.Summarize(ctx, ownerID, sessionID, "", chunk, model, summarizer)
+		if err != nil {
+			if code, ok := CodeOf(err); ok && code == ErrorCodeModelCapabilityUnsupported {
+				s.observe(ctx, &Observation{
+					Outcome:       string(ErrorCodeModelCapabilityUnsupported),
+					Documents:     len(chunk),
+					ModelProtocol: model.Protocol,
+					ModelName:     model.Name,
+				})
+				return RecallContext{}, summarized, nil
+			}
+			return RecallContext{}, summarized, err
+		}
+		keepID := documentID(sessionID, KindSummary, from, to, s.summaryPrompt)
+		present, err := s.summaryPresent(ctx, ownerID, sessionID, keepID)
+		if err != nil {
+			return next, summarized, err
+		}
+		if !present {
+			return result, summarized, nil
+		}
+		result = next
+		summarized = true
+	}
+	return result, summarized, nil
+}
+
+func (s *Service) nextClosedRangeChunk(ctx context.Context, ownerID, sessionID string) ([]RecallDocument, bool, error) {
 	s.projectMu.Lock()
+	defer s.projectMu.Unlock()
 	probe, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindEventText, s.rangeThreshold+1)
 	if err != nil {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, err
+		return nil, false, err
 	}
 	if len(probe) < s.rangeThreshold {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, nil
+		return nil, false, nil
 	}
 	mark, found, err := s.documents.ProjectionWatermark(ctx, sessionID)
-	if err != nil {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, err
-	}
-	if !found {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, nil
+	if err != nil || !found {
+		return nil, false, err
 	}
 	minRaw, err := sequenceFromDB(probe[0].FromSequence)
 	if err != nil {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+		return nil, false, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 	}
-	closedTo := mark - int64(s.rangeLiveWindow)
 	minDB, err := sequenceToDB(minRaw)
 	if err != nil {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, err
+		return nil, false, err
 	}
+	closedTo := mark - int64(s.rangeLiveWindow)
 	if closedTo < minDB {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, nil
+		return nil, false, nil
 	}
-	candidates, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindEventText, maxRangeFetch)
+	coveredTo, err := s.coveredRange(ctx, ownerID, sessionID, minRaw)
 	if err != nil {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, err
+		return nil, false, err
+	}
+	fromRaw := coveredTo + 1
+	if fromRaw < minRaw {
+		fromRaw = minRaw
+	}
+	fromDB, err := sequenceToDB(fromRaw)
+	if err != nil {
+		return nil, false, err
+	}
+	if closedTo-fromDB+1 < s.rangeSummaryGrowth() {
+		return nil, false, nil
+	}
+	candidates, err := s.documents.ListSessionDocumentsByKindInRange(ctx, ownerID, sessionID, KindEventText, fromDB, closedTo, maxRangeFetch)
+	if err != nil {
+		return nil, false, err
 	}
 	filtered := make([]RecallDocument, 0, len(candidates))
 	for i := range candidates {
-		if candidates[i].FromSequence < minDB || candidates[i].ToSequence > closedTo {
-			continue
-		}
 		document, err := storedToRecall(&candidates[i])
 		if err != nil {
-			s.projectMu.Unlock()
-			return RecallContext{}, false, err
+			return nil, false, err
 		}
 		filtered = append(filtered, document)
 	}
 	if len(filtered) == 0 {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, nil
+		return nil, false, nil
 	}
-	from, to := filtered[0].FromSequence, filtered[0].ToSequence
-	for i := range filtered[1:] {
-		if filtered[1+i].FromSequence < from {
-			from = filtered[1+i].FromSequence
-		}
-		if filtered[1+i].ToSequence > to {
-			to = filtered[1+i].ToSequence
-		}
-	}
-	existing, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindSummary, 10)
+	return filtered, true, nil
+}
+
+func (s *Service) coveredRange(ctx context.Context, ownerID, sessionID string, minRaw uint64) (uint64, error) {
+	summaries, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindSummary, maxRangeSummaries)
 	if err != nil {
-		s.projectMu.Unlock()
-		return RecallContext{}, false, err
+		return 0, err
 	}
-	for i := range existing {
-		existingFrom, err := sequenceFromDB(existing[i].FromSequence)
+	covered := minRaw - 1
+	anchored := false
+	for i := range summaries {
+		if summaries[i].PromptVersion != s.summaryPrompt {
+			continue
+		}
+		from, err := sequenceFromDB(summaries[i].FromSequence)
 		if err != nil {
-			s.projectMu.Unlock()
-			return RecallContext{}, false, err
+			return 0, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 		}
-		existingTo, err := sequenceFromDB(existing[i].ToSequence)
+		to, err := sequenceFromDB(summaries[i].ToSequence)
 		if err != nil {
-			s.projectMu.Unlock()
-			return RecallContext{}, false, err
+			return 0, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 		}
-		if existingFrom == from && existingTo <= to && existing[i].PromptVersion == s.summaryPrompt {
-			if _, err := s.documents.DeleteOtherSummaries(ctx, ownerID, sessionID, existing[i].ID); err != nil {
-				s.projectMu.Unlock()
-				return RecallContext{}, false, err
-			}
-			s.projectMu.Unlock()
-			return RecallContext{}, false, nil
+		if from == minRaw {
+			anchored = true
+		}
+		if to > covered {
+			covered = to
 		}
 	}
-	s.projectMu.Unlock()
-	result, err := s.Summarize(ctx, ownerID, sessionID, "", filtered, model, summarizer)
-	if err != nil {
-		if code, ok := CodeOf(err); ok && code == ErrorCodeModelCapabilityUnsupported {
-			s.observe(ctx, &Observation{
-				Outcome:       string(ErrorCodeModelCapabilityUnsupported),
-				Documents:     len(filtered),
-				ModelProtocol: model.Protocol,
-				ModelName:     model.Name,
-			})
-			return RecallContext{}, false, nil
-		}
-		return RecallContext{}, false, err
+	if !anchored {
+		return minRaw - 1, nil
 	}
+	return covered, nil
+}
+
+func (s *Service) rangeSummaryGrowth() int64 {
+	step := int64(s.rangeLiveWindow)
+	if step < 1 {
+		step = 1
+	}
+	return step
+}
+
+func (s *Service) summaryPresent(ctx context.Context, ownerID, sessionID, keepID string) (bool, error) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
-	keepID := documentID(sessionID, KindSummary, from, to, s.summaryPrompt)
-	summaries, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindSummary, 10)
+	summaries, err := s.documents.ListSessionDocumentsByKind(ctx, ownerID, sessionID, KindSummary, maxRangeSummaries)
 	if err != nil {
-		return result, true, err
+		return false, err
 	}
-	present := false
 	for i := range summaries {
 		if summaries[i].ID == keepID {
-			present = true
-			break
+			return true, nil
 		}
 	}
-	if !present {
-		return RecallContext{}, false, nil
-	}
-	if _, err := s.documents.DeleteOtherSummaries(ctx, ownerID, sessionID, keepID); err != nil {
-		return result, true, err
-	}
-	return result, true, nil
+	return false, nil
 }

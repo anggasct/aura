@@ -63,6 +63,39 @@ func TestMemoryStore_ListSessionDocumentsOrdersAndFilters(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_ListSessionDocumentsByKindInRange(t *testing.T) {
+	db := newTestDB(t)
+	s := NewMemoryStore(db)
+	ctx := t.Context()
+	seedMemorySession(t, db, "sess-1", "owner-1")
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	for i := 1; i <= 5; i++ {
+		document := testMemoryDocument("mem-"+string(rune('a'+i)), "sess-1", MemoryKindEventText)
+		document.FromSequence, document.ToSequence = int64(i), int64(i)
+		document.CreatedAt = now
+		if _, err := s.UpsertDocument(ctx, document); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	documents, err := s.ListSessionDocumentsByKindInRange(ctx, "owner-1", "sess-1", MemoryKindEventText, 2, 4, 10)
+	if err != nil {
+		t.Fatalf("ListSessionDocumentsByKindInRange(): %v", err)
+	}
+	if len(documents) != 3 || documents[0].FromSequence != 2 || documents[2].ToSequence != 4 {
+		t.Fatalf("documents = %+v, want sequences 2-4", documents)
+	}
+	limited, err := s.ListSessionDocumentsByKindInRange(ctx, "owner-1", "sess-1", MemoryKindEventText, 2, 4, 2)
+	if err != nil || len(limited) != 2 {
+		t.Fatalf("limited = %d, %v; want 2", len(limited), err)
+	}
+	if _, err := s.ListSessionDocumentsByKindInRange(ctx, "owner-1", "sess-1", MemoryKindEventText, 4, 2, 10); err == nil {
+		t.Error("inverted range accepted")
+	}
+	if _, err := s.ListSessionDocumentsByKindInRange(ctx, "owner-1", "sess-1", "note", 1, 2, 10); err == nil {
+		t.Error("bad kind accepted")
+	}
+}
+
 func TestMemoryStore_DeleteSessionSummariesKeepsRaw(t *testing.T) {
 	db := newTestDB(t)
 	s := NewMemoryStore(db)

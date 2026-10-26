@@ -119,6 +119,18 @@ func (s *memoryDocumentStore) ListSessionDocumentsByKind(ctx context.Context, ow
 	if err != nil {
 		return nil, err
 	}
+	return convertMemoryDocuments(documents), nil
+}
+
+func (s *memoryDocumentStore) ListSessionDocumentsByKindInRange(ctx context.Context, ownerID, sessionID, kind string, from, to int64, limit int) ([]memory.StoredDocument, error) {
+	documents, err := s.store.ListSessionDocumentsByKindInRange(ctx, ownerID, sessionID, kind, from, to, limit)
+	if err != nil {
+		return nil, err
+	}
+	return convertMemoryDocuments(documents), nil
+}
+
+func convertMemoryDocuments(documents []store.MemoryDocument) []memory.StoredDocument {
 	converted := make([]memory.StoredDocument, 0, len(documents))
 	for i := range documents {
 		converted = append(converted, memory.StoredDocument{
@@ -137,7 +149,7 @@ func (s *memoryDocumentStore) ListSessionDocumentsByKind(ctx context.Context, ow
 			ExpiresAt:     documents[i].ExpiresAt,
 		})
 	}
-	return converted, nil
+	return converted
 }
 
 func (s *memoryDocumentStore) ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]memory.StoredDocument, error) {
@@ -216,8 +228,6 @@ func buildMemoryService(cfg *config.Config, db *sql.DB, observer memory.Observer
 		SummaryTTL:           time.Duration(cfg.Memory.SummaryTTL),
 		RangeThreshold:       cfg.Memory.RangeThreshold,
 		RangeLiveWindow:      cfg.Memory.RangeLiveWindow,
-		PurgeInterval:        time.Duration(cfg.Memory.PurgeInterval),
-		PurgeLimit:           cfg.Memory.PurgeLimit,
 		Observer:             observer,
 	})
 }
@@ -239,27 +249,41 @@ func buildMemoryRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, log
 	if err != nil {
 		return nil, err
 	}
-	model, summarizer := buildMemorySummary(ctx, cfg, logger)
-	provider, err := memory.NewProvider(service, memory.ProviderConfig{Model: model, Summarizer: summarizer})
+	model, summarizer := buildMemorySummary(ctx, cfg, logger, observer)
+	provider, err := memory.NewProvider(service, memory.ProviderConfig{})
 	if err != nil {
 		return nil, err
 	}
 	return &memoryRuntime{provider: provider, service: service, model: model, summarizer: summarizer}, nil
 }
 
-func buildMemorySummary(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*memory.SummaryModel, memory.Summarizer) {
+func buildMemorySummary(ctx context.Context, cfg *config.Config, logger *slog.Logger, observer memory.Observer) (*memory.SummaryModel, memory.Summarizer) {
 	if cfg == nil {
 		return nil, nil
 	}
-	definition, ok := cfg.Models.Definitions["primary"]
+	role := strings.TrimSpace(cfg.Models.Routing["summarize"])
+	if role == "" {
+		role = "auxiliary"
+	}
+	candidate := role
+	if route, ok := cfg.ModelRoutes[role]; ok && len(route.Candidates) > 0 {
+		candidate = route.Candidates[0]
+	}
+	definition, ok := cfg.Models.Definitions[candidate]
 	if !ok || strings.TrimSpace(definition.Model) == "" {
+		observeUnavailableSummary(ctx, observer)
 		return nil, nil
 	}
-	llm, err := adkmodel.NewLLM(ctx, definition.Model)
+	modelName := definition.Model
+	if _, routed := cfg.ModelRoutes[role]; routed {
+		modelName = role
+	}
+	llm, err := adkmodel.NewLLM(ctx, modelName)
 	if err != nil {
 		if logger != nil {
-			logger.WarnContext(ctx, "memory range summarizer unavailable", "component", "memory", "model", definition.Model, "error", err)
+			logger.WarnContext(ctx, "memory range summarizer unavailable", "component", "memory", "route", role, "model", definition.Model, "error", err)
 		}
+		observeUnavailableSummary(ctx, observer)
 		return nil, nil
 	}
 	model := &memory.SummaryModel{
@@ -270,6 +294,13 @@ func buildMemorySummary(ctx context.Context, cfg *config.Config, logger *slog.Lo
 		StructuredOutput: definition.Capabilities.StructuredOutput,
 	}
 	return model, &llmSummarizer{llm: llm, bound: memorySummaryOutputBound}
+}
+
+func observeUnavailableSummary(ctx context.Context, observer memory.Observer) {
+	if observer == nil {
+		return
+	}
+	observer(ctx, &memory.Observation{Outcome: string(memory.ErrorCodeUnavailable)})
 }
 
 type llmSummarizer struct {

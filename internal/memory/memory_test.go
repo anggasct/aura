@@ -255,6 +255,44 @@ func (s *fakeDocumentStore) ListSessionDocumentsByKind(_ context.Context, ownerI
 	return documents, nil
 }
 
+func (s *fakeDocumentStore) ListSessionDocumentsByKindInRange(_ context.Context, ownerID, sessionID, kind string, from, to int64, limit int) ([]StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	documents := []StoredDocument{}
+	for id := range s.records {
+		record := s.records[id]
+		if record.OwnerID != ownerID || record.SessionID != sessionID || record.Kind != kind {
+			continue
+		}
+		if record.FromSequence < from || record.ToSequence > to {
+			continue
+		}
+		if record.ExpiresAt != nil && !record.ExpiresAt.After(time.Now().UTC()) {
+			continue
+		}
+		documents = append(documents, record)
+	}
+	slices.SortFunc(documents, func(a, b StoredDocument) int {
+		if a.FromSequence != b.FromSequence {
+			if a.FromSequence < b.FromSequence {
+				return -1
+			}
+			return 1
+		}
+		if a.ToSequence != b.ToSequence {
+			if a.ToSequence < b.ToSequence {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if len(documents) > limit {
+		documents = documents[:limit]
+	}
+	return documents, nil
+}
+
 func (s *fakeDocumentStore) DeleteSessionSummaries(_ context.Context, ownerID, sessionID string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

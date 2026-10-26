@@ -52,6 +52,7 @@ type MemoryStore interface {
 	DeleteExpiredSummaries(ctx context.Context, now time.Time, limit int) (int, error)
 	ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]MemoryDocument, error)
 	ListSessionDocumentsByKind(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]MemoryDocument, error)
+	ListSessionDocumentsByKindInRange(ctx context.Context, ownerID, sessionID, kind string, from, to int64, limit int) ([]MemoryDocument, error)
 	DeleteSessionSummaries(ctx context.Context, ownerID, sessionID string) (int, error)
 	DeleteOtherSummaries(ctx context.Context, ownerID, sessionID, keepID string) (int, error)
 	GetDocument(ctx context.Context, id string) (MemoryDocument, bool, error)
@@ -385,6 +386,52 @@ func (s *sqliteMemoryStore) ListSessionDocumentsByKind(ctx context.Context, owne
 	}
 	if err := rows.Err(); err != nil {
 		return nil, classifyBusy(fmt.Errorf("list session documents by kind: %w", err))
+	}
+	return documents, nil
+}
+
+func (s *sqliteMemoryStore) ListSessionDocumentsByKindInRange(ctx context.Context, ownerID, sessionID, kind string, from, to int64, limit int) ([]MemoryDocument, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if ownerID == "" || sessionID == "" {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list owner and session must not be empty")
+	}
+	if !validMemoryKind(kind) {
+		return nil, Errorf(ErrorCodeMemoryInvalid, "memory document kind is not valid")
+	}
+	if from > to {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list sequence range is not within bounds")
+	}
+	if limit <= 0 || limit > maxSessionListLimit {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list limit is not within bounds")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
+			content, trust_label, prompt_version, model_protocol, model_name,
+			created_at, expires_at
+		FROM memory_document
+		WHERE owner_id = ? AND session_id = ? AND kind = ?
+			AND source_from_sequence >= ? AND source_to_sequence <= ?
+			AND (expires_at IS NULL OR expires_at > ?)
+		ORDER BY source_from_sequence ASC, source_to_sequence ASC, id ASC
+		LIMIT ?`,
+		ownerID, sessionID, kind, from, to, formatTime(time.Now().UTC()), limit)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("list session documents in range: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	documents := []MemoryDocument{}
+	for rows.Next() {
+		document, err := scanMemoryDocument(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		documents = append(documents, document)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list session documents in range: %w", err))
 	}
 	return documents, nil
 }

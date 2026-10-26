@@ -85,6 +85,7 @@ type DocumentStore interface {
 	DeleteExpiredSummaries(ctx context.Context, now time.Time, limit int) (int, error)
 	ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]StoredDocument, error)
 	ListSessionDocumentsByKind(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]StoredDocument, error)
+	ListSessionDocumentsByKindInRange(ctx context.Context, ownerID, sessionID, kind string, from, to int64, limit int) ([]StoredDocument, error)
 	DeleteSessionSummaries(ctx context.Context, ownerID, sessionID string) (int, error)
 	DeleteOtherSummaries(ctx context.Context, ownerID, sessionID, keepID string) (int, error)
 	GetDocument(ctx context.Context, id string) (StoredDocument, bool, error)
@@ -190,8 +191,6 @@ type Config struct {
 	FallbackTokenBudget  int
 	RangeThreshold       int
 	RangeLiveWindow      int
-	PurgeInterval        time.Duration
-	PurgeLimit           int
 	Observer             Observer
 }
 
@@ -210,8 +209,6 @@ type Service struct {
 	rangeLiveWindow    int
 	secretDrops        atomic.Int64
 	projectionFailures atomic.Int64
-	purgeInterval      time.Duration
-	purgeLimit         int
 	projectMu          sync.Mutex
 }
 
@@ -264,14 +261,6 @@ func NewService(documents DocumentStore, secrets Secrets, config *Config) (*Serv
 	if rangeThreshold <= 0 || rangeThreshold > maxRangeThreshold || rangeLiveWindow <= 0 || rangeLiveWindow > maxRangeLiveWindow {
 		return nil, Errorf(ErrorCodeBudgetInvalid, "range budget is not within bounds")
 	}
-	purgeInterval := config.PurgeInterval
-	if purgeInterval == 0 {
-		purgeInterval = 1 * time.Hour
-	}
-	purgeLimit := config.PurgeLimit
-	if purgeLimit == 0 {
-		purgeLimit = 100
-	}
 	return &Service{
 		documents:       documents,
 		secrets:         secrets,
@@ -285,8 +274,6 @@ func NewService(documents DocumentStore, secrets Secrets, config *Config) (*Serv
 		fallbackTokens:  fallbackTokens,
 		rangeThreshold:  rangeThreshold,
 		rangeLiveWindow: rangeLiveWindow,
-		purgeInterval:   purgeInterval,
-		purgeLimit:      purgeLimit,
 	}, nil
 }
 

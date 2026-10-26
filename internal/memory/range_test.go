@@ -185,7 +185,7 @@ func TestRangeReopenMarksStaleUntilRebuild(t *testing.T) {
 	}
 }
 
-func TestRangeLiveWindowTurnsKeepSummaryWithoutReSummarizing(t *testing.T) {
+func TestRangeSummaryCoversNewlyClosedTurnsWithoutPerTurnReSummarizing(t *testing.T) {
 	store := newFakeDocumentStore()
 	service := rangeServiceWithStore(store)
 	seedRangeSession(t, service, "sess-range", 6)
@@ -196,7 +196,7 @@ func TestRangeLiveWindowTurnsKeepSummaryWithoutReSummarizing(t *testing.T) {
 	if summarizer.calls != 1 {
 		t.Fatalf("calls = %d, want 1", summarizer.calls)
 	}
-	for i := 7; i <= 9; i++ {
+	for i := 7; i <= 10; i++ {
 		event := batchEvent(t, "sess-range", uint64(i), "user", "adk_event", "live backup recent note "+string(rune('a'+i)))
 		if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
 			t.Fatalf("project %d: %v", i, err)
@@ -205,15 +205,24 @@ func TestRangeLiveWindowTurnsKeepSummaryWithoutReSummarizing(t *testing.T) {
 			t.Fatalf("pass %d: %v", i, err)
 		}
 	}
-	if summarizer.calls != 1 {
-		t.Errorf("calls = %d, want still 1 after live-window turns", summarizer.calls)
+	if summarizer.calls != 3 {
+		t.Errorf("calls = %d, want 3 bounded growth passes across ten turns", summarizer.calls)
 	}
 	summaries, err := store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, 10)
-	if err != nil || len(summaries) != 1 {
-		t.Fatalf("summaries = %d, %v; want 1", len(summaries), err)
+	if err != nil {
+		t.Fatalf("list summaries: %v", err)
+	}
+	if len(summaries) != 3 {
+		t.Fatalf("summaries = %d, want 3 contiguous chunks", len(summaries))
 	}
 	if summaries[0].FromSequence != 1 || summaries[0].ToSequence != 4 {
-		t.Errorf("summary range = %d-%d, want 1-4", summaries[0].FromSequence, summaries[0].ToSequence)
+		t.Errorf("first summary = %d-%d, want 1-4", summaries[0].FromSequence, summaries[0].ToSequence)
+	}
+	if summaries[1].FromSequence != 5 || summaries[1].ToSequence != 6 {
+		t.Errorf("second summary = %d-%d, want 5-6", summaries[1].FromSequence, summaries[1].ToSequence)
+	}
+	if summaries[2].FromSequence != 7 || summaries[2].ToSequence != 8 {
+		t.Errorf("third summary = %d-%d, want 7-8", summaries[2].FromSequence, summaries[2].ToSequence)
 	}
 	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
 	if err != nil {
@@ -221,6 +230,41 @@ func TestRangeLiveWindowTurnsKeepSummaryWithoutReSummarizing(t *testing.T) {
 	}
 	if len(recalled) == 0 || recalled[0].PromptVersion == "" {
 		t.Fatalf("old-range recall first = %+v, want summary first", recalled)
+	}
+}
+
+func TestRangeSummaryCoversClosedRangeBeyondFetchLimit(t *testing.T) {
+	store := newFakeDocumentStore()
+	service := rangeServiceWithStore(store)
+	seedRangeSession(t, service, "sess-range", 260)
+	summarizer := &fakeSummarizer{text: "archive backup digest"}
+	if _, _, err := service.SummarizeClosedRange(t.Context(), "owner-1", "sess-range", capableModel(), summarizer); err != nil {
+		t.Fatalf("summarize: %v", err)
+	}
+	summaries, err := store.ListSessionDocumentsByKind(t.Context(), "owner-1", "sess-range", KindSummary, 10)
+	if err != nil {
+		t.Fatalf("list summaries: %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("summaries = %d, want 2 chunks beyond the fetch limit", len(summaries))
+	}
+	if summaries[0].FromSequence != 1 || summaries[0].ToSequence != 200 {
+		t.Errorf("first summary = %d-%d, want 1-200", summaries[0].FromSequence, summaries[0].ToSequence)
+	}
+	if summaries[1].FromSequence != 201 || summaries[1].ToSequence != 258 {
+		t.Errorf("second summary = %d-%d, want 201-258", summaries[1].FromSequence, summaries[1].ToSequence)
+	}
+	covered := summaries[0].FromSequence
+	for i := range summaries {
+		if summaries[i].FromSequence > covered+1 {
+			t.Fatalf("gap before summary %d-%d, covered through %d", summaries[i].FromSequence, summaries[i].ToSequence, covered)
+		}
+		if summaries[i].ToSequence > covered {
+			covered = summaries[i].ToSequence
+		}
+	}
+	if covered != 258 {
+		t.Errorf("covered through %d, want the full closed range through 258", covered)
 	}
 }
 
