@@ -60,7 +60,7 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 	}
 	var result RecallContext
 	summarized := false
-	for chunkCount := 0; chunkCount < maxRangeChunksPerPass; chunkCount++ {
+	for range maxRangeChunksPerPass {
 		chunk, ok, err := s.nextClosedRangeChunk(ctx, ownerID, sessionID)
 		if err != nil {
 			return RecallContext{}, summarized, err

@@ -74,18 +74,18 @@ func TestMemoryDocumentStoreRoundTrip(t *testing.T) {
 func TestBuildMemoryRuntime(t *testing.T) {
 	db := newMemoryTestDB(t)
 	cfg := config.Default()
-	runtime, err := buildMemoryRuntime(context.Background(), &cfg, db, nil, nil)
+	memoryRuntime, err := buildMemoryRuntime(context.Background(), &cfg, db, nil, nil)
 	if err != nil {
 		t.Fatalf("buildMemoryRuntime(): %v", err)
 	}
-	if runtime.provider == nil {
+	if memoryRuntime.provider == nil {
 		t.Fatal("provider missing")
 	}
-	if runtime.service == nil {
+	if memoryRuntime.service == nil {
 		t.Fatal("service missing")
 	}
-	if runtime.model != nil || runtime.summarizer != nil {
-		t.Errorf("summary model/summarizer = %+v, %+v; want none without a summarize model definition", runtime.model, runtime.summarizer)
+	if memoryRuntime.model != nil || memoryRuntime.summarizer != nil {
+		t.Errorf("summary model/summarizer = %+v, %+v; want none without a summarize model definition", memoryRuntime.model, memoryRuntime.summarizer)
 	}
 	if observer := memoryRecorderObserver(nil); observer != nil {
 		t.Error("nil recorder produced an observer")
@@ -269,18 +269,18 @@ func TestMemoryRuntimeRecallStaysRaw(t *testing.T) {
 		route: {Candidates: []string{"aux"}},
 	}
 	db := newMemoryTestDB(t)
-	runtime, err := buildMemoryRuntime(ctx, &cfg, db, nil, nil)
+	memoryRuntime, err := buildMemoryRuntime(ctx, &cfg, db, nil, nil)
 	if err != nil {
 		t.Fatalf("buildMemoryRuntime(): %v", err)
 	}
-	if runtime.model == nil || runtime.summarizer == nil {
+	if memoryRuntime.model == nil || memoryRuntime.summarizer == nil {
 		t.Fatal("summary route not built for the background pass")
 	}
 	adapter := &memoryDocumentStore{store: store.NewMemoryStore(db)}
 	seedMemorySession(t, db, "sess-below")
 	seedRawMemoryDocs(t, adapter, "sess-below", 2)
 
-	evidence, err := runtime.provider.RecallTurn(ctx, recallTurnRequest("sess-below", "backup"))
+	evidence, err := memoryRuntime.provider.RecallTurn(ctx, recallTurnRequest("sess-below", "backup"))
 	if err != nil {
 		t.Fatalf("RecallTurn(): %v", err)
 	}
@@ -305,13 +305,13 @@ func TestMemoryRuntimeRecallStaysRaw(t *testing.T) {
 		ContextTokens:    200000,
 		StructuredOutput: true,
 	}
-	if _, summarized, err := runtime.service.SummarizeClosedRange(ctx, "owner-1", "sess-closed", backgroundModel, recorder); err != nil {
+	if _, summarized, err := memoryRuntime.service.SummarizeClosedRange(ctx, "owner-1", "sess-closed", backgroundModel, recorder); err != nil {
 		t.Fatalf("SummarizeClosedRange(): %v", err)
 	} else if !summarized {
 		t.Fatal("closed range not summarized")
 	}
 	before := llm.calls
-	evidence, err = runtime.provider.RecallTurn(ctx, recallTurnRequest("sess-closed", "backup"))
+	evidence, err = memoryRuntime.provider.RecallTurn(ctx, recallTurnRequest("sess-closed", "backup"))
 	if err != nil {
 		t.Fatalf("RecallTurn(): %v", err)
 	}
