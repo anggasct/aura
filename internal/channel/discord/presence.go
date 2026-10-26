@@ -40,6 +40,7 @@ type presenceSession struct {
 	failedNotified bool
 	statusMu       sync.Mutex
 	stop           chan struct{}
+	done           chan struct{}
 	stopped        bool
 }
 
@@ -270,6 +271,7 @@ func (a *Adapter) PresenceStarted(ctx context.Context, req *runtimechannelhost.D
 	startClock := false
 	if session.stop == nil && !session.stopped {
 		session.stop = make(chan struct{})
+		session.done = make(chan struct{})
 		startClock = true
 	}
 	a.presenceMu.Unlock()
@@ -285,12 +287,18 @@ func (a *Adapter) PresenceStarted(ctx context.Context, req *runtimechannelhost.D
 func (a *Adapter) runPresenceClock(ctx context.Context, session *presenceSession) {
 	a.presenceMu.Lock()
 	stop := session.stop
+	done := session.done
 	delay := a.statusDelay() - time.Since(session.started)
 	if delay < 0 {
 		delay = 0
 	}
 	interval := a.typingInterval()
 	a.presenceMu.Unlock()
+	defer func() {
+		if done != nil {
+			close(done)
+		}
+	}()
 
 	statusTimer := time.NewTimer(delay)
 	defer statusTimer.Stop()
@@ -407,21 +415,30 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 		}
 		return nil
 	}
-	if statusID != "" {
-		a.presenceMu.Lock()
-		lastEdit := session.lastEdit
-		a.presenceMu.Unlock()
-		if now.Sub(lastEdit) < time.Duration(a.cfg.MinEditInterval) {
-			return nil
-		}
-	}
-	_ = a.postOrPatchStatus(ctx, session, display)
+	_ = a.throttledStatusUpdate(ctx, session, display)
 	return nil
+}
+
+func (a *Adapter) throttledStatusUpdate(ctx context.Context, session *presenceSession, display string) error {
+	session.statusMu.Lock()
+	defer session.statusMu.Unlock()
+	a.presenceMu.Lock()
+	statusID := session.statusID
+	lastEdit := session.lastEdit
+	a.presenceMu.Unlock()
+	if statusID != "" && time.Since(lastEdit) < time.Duration(a.cfg.MinEditInterval) {
+		return nil
+	}
+	return a.postOrPatchStatusLocked(ctx, session, display)
 }
 
 func (a *Adapter) postOrPatchStatus(ctx context.Context, session *presenceSession, display string) error {
 	session.statusMu.Lock()
 	defer session.statusMu.Unlock()
+	return a.postOrPatchStatusLocked(ctx, session, display)
+}
+
+func (a *Adapter) postOrPatchStatusLocked(ctx context.Context, session *presenceSession, display string) error {
 	a.presenceMu.Lock()
 	statusID := session.statusID
 	shownText := session.shownText
@@ -462,19 +479,30 @@ func (a *Adapter) postOrPatchStatus(ctx context.Context, session *presenceSessio
 	return nil
 }
 
-func (a *Adapter) PresenceEnded(ctx context.Context, turnID string) error {
-	if turnID == "" {
-		return Errorf(ErrorCodeInvalidArgument, "presence turn id must not be empty")
-	}
+func (a *Adapter) stopPresence(turnID string) {
 	a.presenceMu.Lock()
 	session := a.presence[turnID]
+	var done chan struct{}
 	if session != nil {
 		if session.stop != nil && !session.stopped {
 			close(session.stop)
 			session.stopped = true
 		}
-		delete(a.presence, turnID)
+		done = session.done
 	}
+	a.presenceMu.Unlock()
+	if done != nil {
+		<-done
+	}
+}
+
+func (a *Adapter) PresenceEnded(ctx context.Context, turnID string) error {
+	if turnID == "" {
+		return Errorf(ErrorCodeInvalidArgument, "presence turn id must not be empty")
+	}
+	a.stopPresence(turnID)
+	a.presenceMu.Lock()
+	delete(a.presence, turnID)
 	a.presenceMu.Unlock()
 	return nil
 }

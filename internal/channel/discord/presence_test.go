@@ -329,6 +329,133 @@ func TestPresenceThrottleCoalesces(t *testing.T) {
 	}
 }
 
+func TestPresenceThrottleCoalescesInFlightPost(t *testing.T) {
+	postStarted := make(chan struct{})
+	releasePost := make(chan struct{})
+	var messagePosts atomic.Int32
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/typing") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/messages") {
+			if messagePosts.Add(1) == 1 {
+				close(postStarted)
+			}
+			<-releasePost
+		}
+		writeMessage(t, w, "status-id")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = config.Duration(time.Hour)
+	})
+	adapter.statusAfter = 10 * time.Millisecond
+	adapter.typingRefresh = time.Hour
+	turnID := "turn-throttle-inflight"
+	req := presenceTestRequest(turnID)
+	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+		t.Fatalf("PresenceStarted(): %v", err)
+	}
+	select {
+	case <-postStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial status post did not start")
+	}
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- adapter.PresenceUpdated(t.Context(), req, "Second activity here", "", false)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(releasePost)
+	select {
+	case err := <-updateDone:
+		if err != nil {
+			t.Fatalf("throttled update: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("throttled update did not return")
+	}
+	if patches := stub.patchBodies(); len(patches) != 0 {
+		t.Fatalf("patches = %d, want 0 while throttled", len(patches))
+	}
+	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
+}
+
+func TestPresenceDeliveryStopsClockBeforeAnswer(t *testing.T) {
+	postStarted := make(chan struct{})
+	releasePost := make(chan struct{})
+	var messagePosts atomic.Int32
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/typing") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/messages") {
+			if messagePosts.Add(1) == 1 {
+				close(postStarted)
+			}
+			<-releasePost
+		}
+		writeMessage(t, w, "status-id")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = 0
+	})
+	adapter.statusAfter = 10 * time.Millisecond
+	adapter.typingRefresh = time.Hour
+	turnID := "turn-deliver-inflight"
+	req := presenceTestRequest(turnID)
+	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+		t.Fatalf("PresenceStarted(): %v", err)
+	}
+	select {
+	case <-postStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial status post did not start")
+	}
+	deliverReq := &runtimechannelhost.DeliveryRequest{
+		EffectID:       turnID,
+		Channel:        "discord:owner",
+		ConversationID: "channel:333",
+		ReplyContext:   json.RawMessage(`{"channel_id":"333","message_id":"999"}`),
+		Parts:          []runtimechannelhost.OutputPart{{Text: "final answer"}},
+		IdempotencyKey: turnID,
+	}
+	deliverDone := make(chan error, 1)
+	go func() {
+		_, err := adapter.Deliver(t.Context(), deliverReq)
+		deliverDone <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	close(releasePost)
+	select {
+	case err := <-deliverDone:
+		if err != nil {
+			t.Fatalf("Deliver(): %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Deliver did not finish")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := messagePostCount(stub); got != 1 {
+		t.Fatalf("message posts = %d, want 1 (status edited into answer)", got)
+	}
+	patches := stub.patchBodies()
+	if len(patches) == 0 {
+		t.Fatal("final delivery produced no edit")
+	}
+	var payload map[string]any
+	_ = json.Unmarshal(patches[len(patches)-1], &payload)
+	if content, _ := payload["content"].(string); !strings.Contains(content, "final answer") {
+		t.Fatalf("final edit = %q, want answer replacing status", content)
+	}
+	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
+}
+
 func TestPresenceStatusReplacedByFinalDelivery(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/typing") {
