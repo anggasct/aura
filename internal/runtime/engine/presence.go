@@ -74,7 +74,7 @@ func (e *Engine) currentPresence(req *runtime.TurnRequest) (runtimechannelhost.P
 	return presenceAdapterFor(req, adapters)
 }
 
-func extractPresenceActivity(ev *store.RuntimeEvent) (string, string, bool) {
+func extractPresenceActivity(ev *store.RuntimeEvent) (text, args string, ok bool) {
 	if ev == nil {
 		return "", "", false
 	}
@@ -84,7 +84,7 @@ func extractPresenceActivity(ev *store.RuntimeEvent) (string, string, bool) {
 	if !hasToolActivity(ev.Payload) {
 		return "", "", false
 	}
-	text := adkModelText(ev.Payload, false)
+	text = adkModelText(ev.Payload, false)
 	if strings.TrimSpace(text) == "" {
 		return "", "", false
 	}
@@ -118,7 +118,10 @@ func adkToolArgs(payload json.RawMessage) string {
 		}
 		parts = append(parts, raw)
 	}
-	return strings.Join(parts, " ")
+	if len(parts) != 1 {
+		return ""
+	}
+	return parts[0]
 }
 
 func hasToolActivity(payload json.RawMessage) bool {

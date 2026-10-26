@@ -81,10 +81,11 @@ func fallbackStatus(count int) string {
 func failureLine(activity string) string {
 	activity = strings.TrimSpace(activity)
 	activity = strings.TrimSuffix(activity, ".")
+	activity = strings.TrimSpace(activity)
 	if activity == "" {
-		return "Couldn't finish that step, continuing."
+		return "…"
 	}
-	return "Couldn't finish " + activity + ", continuing."
+	return activity + " …"
 }
 
 func containsSecretKeyword(s string) bool {
@@ -104,7 +105,7 @@ func humanizeArgs(raw string) string {
 	}
 	var decoded any
 	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
-		return truncateRunes(trimmed, maxArgRunes)
+		return ""
 	}
 	var parts []string
 	var collect func(v any)
@@ -384,7 +385,14 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 		if activity == "" {
 			activity = lastText
 		}
-		display := failureLine(truncateWords(activity, maxStatusWords))
+		activity = truncateWords(activity, maxStatusWords)
+		if vault := a.vaultOrNil(); vault != nil {
+			activity = vault.Redact(activity)
+		}
+		if containsSecretKeyword(activity) {
+			activity = ""
+		}
+		display := failureLine(activity)
 		a.presenceMu.Lock()
 		session.failedNotified = true
 		session.lastText = display

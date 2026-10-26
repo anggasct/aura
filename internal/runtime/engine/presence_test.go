@@ -175,6 +175,27 @@ func TestExtractPresenceHelpers(t *testing.T) {
 	}
 }
 
+func TestExtractPresenceActivityOmitsParallelToolArgs(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"content": map[string]any{"role": "model", "parts": []any{
+			map[string]any{"text": "Mencari catatan"},
+			map[string]any{"functionCall": map[string]any{"name": "read_file", "args": map[string]any{"pwd": "hunter2"}}},
+			map[string]any{"functionCall": map[string]any{"name": "read_file", "args": map[string]any{"path": "notes.md"}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	ev := &store.RuntimeEvent{Kind: store.EventKindADK, Payload: raw}
+	text, args, ok := extractPresenceActivity(ev)
+	if !ok || text != "Mencari catatan" {
+		t.Fatalf("extract = %q,%q,%v", text, args, ok)
+	}
+	if args != "" {
+		t.Fatalf("args = %q, want omitted for parallel tool calls", args)
+	}
+}
+
 func adkStepWithArgs(text string, args map[string]any) runtime.FakeStep {
 	raw, err := json.Marshal(map[string]any{
 		"content": map[string]any{

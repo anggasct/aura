@@ -293,11 +293,47 @@ func TestPresenceRepeatedFailureCoalesced(t *testing.T) {
 	if !strings.Contains(content, "Checking tasks") {
 		t.Errorf("failure line = %q, want activity named", content)
 	}
-	count := strings.Count(strings.ToLower(content), "couldn't finish")
-	if count != 1 {
+	if count := strings.Count(content, "Checking tasks"); count != 1 {
 		t.Errorf("failure line wrapped multiple times: %q", content)
 	}
 	if err := adapter.PresenceEnded(t.Context(), "turn-fail-coalesce"); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
+}
+
+func TestPresenceFailureUsesActivityLanguage(t *testing.T) {
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		writeMessage(t, w, "status-id")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = 0
+	})
+	adapter.statusAfter = 30 * time.Millisecond
+	req := presenceTestRequest("turn-fail-language")
+	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+		t.Fatalf("PresenceStarted(): %v", err)
+	}
+	if err := adapter.PresenceUpdated(t.Context(), req, "Mencari catatan", "", false); err != nil {
+		t.Fatalf("activity update: %v", err)
+	}
+	waitForStatusPost(t, stub)
+	if err := adapter.PresenceUpdated(t.Context(), req, "", "", true); err != nil {
+		t.Fatalf("failure update: %v", err)
+	}
+	patches := stub.patchBodies()
+	if len(patches) == 0 {
+		t.Fatal("failure produced no edit")
+	}
+	var payload map[string]any
+	_ = json.Unmarshal(patches[len(patches)-1], &payload)
+	content, _ := payload["content"].(string)
+	if !strings.Contains(content, "Mencari catatan") {
+		t.Errorf("failure line = %q, want the model activity text", content)
+	}
+	if strings.Contains(content, "Couldn't finish") || strings.Contains(strings.ToLower(content), "continuing") {
+		t.Errorf("failure line used a hardcoded English template: %q", content)
+	}
+	if err := adapter.PresenceEnded(t.Context(), "turn-fail-language"); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -518,8 +554,8 @@ func TestRenderStatusHelpers(t *testing.T) {
 	if got := fallbackStatus(0); got == "" {
 		t.Error("empty fallback")
 	}
-	if failureLine("") == "" || !strings.Contains(failureLine(""), "continuing") {
-		t.Error("empty failure line misses continuation")
+	if failureLine("") == "" {
+		t.Error("empty failure line is blank")
 	}
 	rendered := renderStatusText("Looking through notes", `{"path":"secret-token abc123"}`, 0, nil)
 	if strings.Contains(strings.ToLower(rendered), "secret-token") && strings.Contains(rendered, "abc123") {
@@ -571,6 +607,50 @@ func TestPresenceScreensSecretStatusAndArgs(t *testing.T) {
 		t.Errorf("outbound bodies = %q, leaked secret args", joined)
 	}
 	if err := adapter.PresenceEnded(t.Context(), "turn-secret-screened"); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
+}
+
+func TestPresenceOmitsUnparseableParallelArgs(t *testing.T) {
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		writeMessage(t, w, "status-id")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = 0
+	})
+	adapter.statusAfter = 30 * time.Millisecond
+	req := presenceTestRequest("turn-parallel-args")
+	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+		t.Fatalf("PresenceStarted(): %v", err)
+	}
+	if err := adapter.PresenceUpdated(t.Context(), req, "Mencari catatan", `{"pwd":"hunter2"} {"path":"notes.md"}`, false); err != nil {
+		t.Fatalf("PresenceUpdated(): %v", err)
+	}
+	waitForStatusPost(t, stub)
+	var contents []string
+	for _, body := range outboundBodies(stub) {
+		if strings.TrimSpace(body) == "" {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			t.Fatalf("outbound body: %v", err)
+		}
+		if content, _ := payload["content"].(string); content != "" {
+			contents = append(contents, content)
+		}
+	}
+	joined := strings.Join(contents, "\n")
+	if strings.Contains(joined, "hunter2") {
+		t.Fatalf("outbound content leaked a parallel tool argument: %s", joined)
+	}
+	if strings.Contains(joined, "{") || strings.Contains(joined, `"`) {
+		t.Fatalf("outbound content leaked raw JSON arguments: %s", joined)
+	}
+	if !strings.Contains(joined, "Mencari catatan") {
+		t.Errorf("outbound content = %q, want the activity text", joined)
+	}
+	if err := adapter.PresenceEnded(t.Context(), "turn-parallel-args"); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
