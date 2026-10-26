@@ -97,7 +97,7 @@ type Memory struct {
 	EnglishStemming      bool     `koanf:"english_stemming" yaml:"english_stemming"`
 	SummaryPromptVersion string   `koanf:"summary_prompt_version" yaml:"summary_prompt_version"`
 	SummaryTTL           Duration `koanf:"summary_ttl" yaml:"summary_ttl"`
-RangeThreshold       int      `koanf:"range_threshold" yaml:"range_threshold"`
+	RangeThreshold       int      `koanf:"range_threshold" yaml:"range_threshold"`
 	RangeLiveWindow      int      `koanf:"range_live_window" yaml:"range_live_window"`
 	PurgeInterval        Duration `koanf:"purge_interval" yaml:"purge_interval"`
 	PurgeLimit           int      `koanf:"purge_limit" yaml:"purge_limit"`
