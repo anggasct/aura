@@ -28,6 +28,13 @@ func presenceAdapterFor(req *runtime.TurnRequest, adapters []runtimechannelhost.
 	if req == nil || req.TurnID == "" {
 		return nil, nil, false
 	}
+	switch req.Origin {
+	case runtime.OriginTerminal, runtime.OriginInternal, runtime.OriginWebhook:
+		return nil, nil, false
+	}
+	if len(req.ReplyContext) == 0 {
+		return nil, nil, false
+	}
 	if len(adapters) == 0 {
 		return nil, nil, false
 	}
@@ -35,10 +42,27 @@ func presenceAdapterFor(req *runtime.TurnRequest, adapters []runtimechannelhost.
 	if delivery == nil {
 		return nil, nil, false
 	}
+	var fallback runtimechannelhost.PresencePort
 	for _, adapter := range adapters {
-		if presence, ok := adapter.(runtimechannelhost.PresencePort); ok {
-			return presence, delivery, true
+		presence, ok := adapter.(runtimechannelhost.PresencePort)
+		if !ok {
+			continue
 		}
+		identity, named := adapter.(runtimechannelhost.ChannelIdentity)
+		if named && identity.ChannelName() != "" {
+			name := identity.ChannelName()
+			origin := string(req.Origin)
+			if origin == name || strings.HasPrefix(origin, name+":") {
+				return presence, delivery, true
+			}
+			continue
+		}
+		if fallback == nil {
+			fallback = presence
+		}
+	}
+	if fallback != nil {
+		return fallback, delivery, true
 	}
 	return nil, nil, false
 }
@@ -50,21 +74,51 @@ func (e *Engine) currentPresence(req *runtime.TurnRequest) (runtimechannelhost.P
 	return presenceAdapterFor(req, adapters)
 }
 
-func extractPresenceText(ev *store.RuntimeEvent) (string, bool) {
+func extractPresenceActivity(ev *store.RuntimeEvent) (string, string, bool) {
 	if ev == nil {
-		return "", false
+		return "", "", false
 	}
 	if ev.Kind != store.EventKindADK {
-		return "", false
+		return "", "", false
 	}
 	if !hasToolActivity(ev.Payload) {
-		return "", false
+		return "", "", false
 	}
 	text := adkModelText(ev.Payload, false)
 	if strings.TrimSpace(text) == "" {
-		return "", false
+		return "", "", false
 	}
-	return text, true
+	return text, adkToolArgs(ev.Payload), true
+}
+
+func adkToolArgs(payload json.RawMessage) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var decoded struct {
+		Content *struct {
+			Parts []struct {
+				FunctionCall *struct {
+					Args json.RawMessage `json:"args"`
+				} `json:"functionCall"`
+			} `json:"parts"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil || decoded.Content == nil {
+		return ""
+	}
+	var parts []string
+	for _, part := range decoded.Content.Parts {
+		if part.FunctionCall == nil {
+			continue
+		}
+		raw := strings.TrimSpace(string(part.FunctionCall.Args))
+		if raw == "" || raw == "null" {
+			continue
+		}
+		parts = append(parts, raw)
+	}
+	return strings.Join(parts, " ")
 }
 
 func hasToolActivity(payload json.RawMessage) bool {
@@ -142,12 +196,12 @@ func (e *Engine) notifyPresenceStarted(ctx context.Context, req *runtime.TurnReq
 	}
 }
 
-func (e *Engine) notifyPresenceText(ctx context.Context, req *runtime.TurnRequest, text string) {
+func (e *Engine) notifyPresenceText(ctx context.Context, req *runtime.TurnRequest, text, args string) {
 	presence, delivery, ok := e.currentPresence(req)
 	if !ok {
 		return
 	}
-	if err := presence.PresenceUpdated(ctx, delivery, text, false); err != nil {
+	if err := presence.PresenceUpdated(ctx, delivery, text, args, false); err != nil {
 		e.logger.DebugContext(ctx, "presence update failed", "error", err, "turn_id", req.TurnID)
 	}
 }
@@ -157,7 +211,7 @@ func (e *Engine) notifyPresenceFailed(ctx context.Context, req *runtime.TurnRequ
 	if !ok {
 		return
 	}
-	if err := presence.PresenceUpdated(ctx, delivery, "", true); err != nil {
+	if err := presence.PresenceUpdated(ctx, delivery, "", "", true); err != nil {
 		e.logger.DebugContext(ctx, "presence failure update failed", "error", err, "turn_id", req.TurnID)
 	}
 }

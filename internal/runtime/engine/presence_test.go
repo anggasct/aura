@@ -3,6 +3,7 @@ package runtimeengine
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -23,6 +24,7 @@ type presenceCapture struct {
 
 type presenceUpdate struct {
 	text   string
+	args   string
 	failed bool
 }
 
@@ -48,10 +50,10 @@ func (a *presenceCapture) PresenceStarted(_ context.Context, _ *runtimechannelho
 	return nil
 }
 
-func (a *presenceCapture) PresenceUpdated(_ context.Context, _ *runtimechannelhost.DeliveryRequest, text string, failed bool) error {
+func (a *presenceCapture) PresenceUpdated(_ context.Context, _ *runtimechannelhost.DeliveryRequest, text, args string, failed bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.updates = append(a.updates, presenceUpdate{text: text, failed: failed})
+	a.updates = append(a.updates, presenceUpdate{text: text, args: args, failed: failed})
 	return nil
 }
 
@@ -155,16 +157,124 @@ func TestEnginePresenceFailure(t *testing.T) {
 
 func TestExtractPresenceHelpers(t *testing.T) {
 	raw, err := json.Marshal(map[string]any{
-		"content": map[string]any{"role": "model", "parts": []any{map[string]any{"text": "Checking tasks"}, map[string]any{"functionCall": map[string]any{"name": "read_file"}}}},
+		"content": map[string]any{"role": "model", "parts": []any{
+			map[string]any{"text": "Checking tasks"},
+			map[string]any{"functionCall": map[string]any{"name": "read_file", "args": map[string]any{"path": "notes.md"}}},
+		}},
 	})
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}
 	ev := &store.RuntimeEvent{Kind: store.EventKindADK, Payload: raw}
-	if text, ok := extractPresenceText(ev); !ok || text != "Checking tasks" {
-		t.Fatalf("extract = %q,%v", text, ok)
+	text, args, ok := extractPresenceActivity(ev)
+	if !ok || text != "Checking tasks" || !strings.Contains(args, "notes.md") {
+		t.Fatalf("extract = %q,%q,%v", text, args, ok)
 	}
 	if isPresenceFailureEvent(ev) {
 		t.Fatal("plain text misclassified as failure")
 	}
+}
+
+func adkStepWithArgs(text string, args map[string]any) runtime.FakeStep {
+	raw, err := json.Marshal(map[string]any{
+		"content": map[string]any{
+			"role":  "model",
+			"parts": []any{map[string]any{"text": text}, map[string]any{"functionCall": map[string]any{"name": "read_file", "args": args}}},
+		},
+	})
+	if err != nil {
+		panic("test payload is not serializable")
+	}
+	return runtime.FakeStep{Kind: "adk_event", Payload: raw}
+}
+
+func TestEngineForwardsToolArgsToPresence(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			adkStepWithArgs("Looking at secret-token abc123", map[string]any{"path": "notes.md", "query": "secret hunter2"}),
+			textStep("final answer"),
+		})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, "channel:333")
+		capture := &presenceCapture{}
+		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+		req := channelTurnRequest("channel:333", "turn-presence-args")
+		if _, err := collect(t, engine, req); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		found := false
+		for _, update := range capture.updates {
+			if update.failed {
+				continue
+			}
+			if strings.Contains(update.args, "secret hunter2") && strings.Contains(update.args, "notes.md") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("updates = %+v, want tool args forwarded", capture.updates)
+		}
+	})
+}
+
+type namedPresenceCapture struct {
+	*presenceCapture
+	name string
+}
+
+func (n *namedPresenceCapture) ChannelName() string {
+	return n.name
+}
+
+func TestEngineSkipsPresenceForNonChannelOrigin(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			adkTextStep("Looking through notes"),
+			textStep("final answer"),
+		})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, "channel:333")
+		capture := &presenceCapture{}
+		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+		req := channelTurnRequest("channel:333", "turn-presence-terminal")
+		req.Origin = runtime.OriginTerminal
+		if _, err := collect(t, engine, req); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		if capture.started != 0 || len(capture.updates) != 0 || len(capture.ended) != 0 {
+			t.Fatalf("presence ran for terminal origin: %+v", capture)
+		}
+	})
+}
+
+func TestEngineRoutesPresenceToOwningAdapter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			adkTextStep("Looking through notes"),
+			textStep("final answer"),
+		})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, "channel:333")
+		discordCapture := &namedPresenceCapture{presenceCapture: &presenceCapture{}, name: "discord"}
+		slackCapture := &namedPresenceCapture{presenceCapture: &presenceCapture{}, name: "slack"}
+		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{slackCapture, discordCapture})
+		req := channelTurnRequest("channel:333", "turn-presence-owner")
+		if _, err := collect(t, engine, req); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		discordCapture.mu.Lock()
+		defer discordCapture.mu.Unlock()
+		slackCapture.mu.Lock()
+		defer slackCapture.mu.Unlock()
+		if discordCapture.started != 1 || len(discordCapture.updates) == 0 {
+			t.Fatalf("discord capture = %+v, want presence", discordCapture)
+		}
+		if slackCapture.started != 0 || len(slackCapture.updates) != 0 || len(slackCapture.ended) != 0 {
+			t.Fatalf("slack capture = %+v, want none", slackCapture)
+		}
+	})
 }

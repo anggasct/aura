@@ -489,8 +489,8 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 			e.notifyPresenceFailed(ctx, req)
 			continue
 		}
-		if text, ok := extractPresenceText(&ev); ok {
-			e.notifyPresenceText(ctx, req, text)
+		if text, args, ok := extractPresenceActivity(&ev); ok {
+			e.notifyPresenceText(ctx, req, text, args)
 		}
 	}
 	if ctx.Err() == context.Canceled {

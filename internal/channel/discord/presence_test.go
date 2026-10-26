@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +33,35 @@ func messagePostCount(stub *restStub) int {
 		}
 	}
 	return n
+}
+
+func typingCallCount(stub *restStub) int {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	n := 0
+	for _, call := range stub.calls {
+		if call.method == http.MethodPost && strings.HasSuffix(call.path, "/typing") {
+			n++
+		}
+	}
+	return n
+}
+
+func outboundBodies(stub *restStub) []string {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	bodies := make([]string, 0, len(stub.calls))
+	for _, call := range stub.calls {
+		if call.method == http.MethodPost || call.method == http.MethodPatch {
+			bodies = append(bodies, string(call.body))
+		}
+	}
+	return bodies
+}
+
+func waitForStatusPost(t *testing.T, stub *restStub) {
+	t.Helper()
+	waitFor(t, 2*time.Second, func() bool { return messagePostCount(stub) == 1 }, "status post")
 }
 
 func TestTriggerTypingPostsTypingCall(t *testing.T) {
@@ -92,16 +122,17 @@ func TestPresencePostOnceEditInPlace(t *testing.T) {
 	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
 		cfg.MinEditInterval = 0
 	})
-	adapter.statusAfter = time.Nanosecond
-	adapter.typingRefresh = time.Nanosecond
+	adapter.statusAfter = 50 * time.Millisecond
+	adapter.typingRefresh = 20 * time.Millisecond
 	req := presenceTestRequest("turn-slow-1")
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted(): %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "Looking through notes", false); err != nil {
+	if err := adapter.PresenceUpdated(t.Context(), req, "Looking through notes", "", false); err != nil {
 		t.Fatalf("first PresenceUpdated(): %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "Checking open tasks", false); err != nil {
+	waitForStatusPost(t, stub)
+	if err := adapter.PresenceUpdated(t.Context(), req, "Checking open tasks", "", false); err != nil {
 		t.Fatalf("second PresenceUpdated(): %v", err)
 	}
 	if messagePostCount(stub) != 1 {
@@ -119,6 +150,9 @@ func TestPresencePostOnceEditInPlace(t *testing.T) {
 	if !strings.Contains(content, "Checking open tasks") {
 		t.Errorf("edited content = %q, want latest activity", content)
 	}
+	if err := adapter.PresenceEnded(t.Context(), "turn-slow-1"); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
 }
 
 func TestPresenceSilentFallback(t *testing.T) {
@@ -128,17 +162,12 @@ func TestPresenceSilentFallback(t *testing.T) {
 	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
 		cfg.MinEditInterval = 0
 	})
-	adapter.statusAfter = time.Nanosecond
+	adapter.statusAfter = 30 * time.Millisecond
 	req := presenceTestRequest("turn-silent-1")
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted(): %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "", false); err != nil {
-		t.Fatalf("PresenceUpdated(): %v", err)
-	}
-	if messagePostCount(stub) != 1 {
-		t.Fatalf("posts = %d, want 1 fallback post", messagePostCount(stub))
-	}
+	waitForStatusPost(t, stub)
 	stub.mu.Lock()
 	body := ""
 	for _, call := range stub.calls {
@@ -156,6 +185,9 @@ func TestPresenceSilentFallback(t *testing.T) {
 	if !matched {
 		t.Errorf("fallback body = %q, want one of the generic statuses", body)
 	}
+	if err := adapter.PresenceEnded(t.Context(), "turn-silent-1"); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
 }
 
 func TestPresenceRedactsSecrets(t *testing.T) {
@@ -165,7 +197,7 @@ func TestPresenceRedactsSecrets(t *testing.T) {
 	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
 		cfg.MinEditInterval = 0
 	})
-	adapter.statusAfter = time.Nanosecond
+	adapter.statusAfter = 30 * time.Millisecond
 	vault := secret.New()
 	vault.Set("probe", "hunter2-secret-value")
 	adapter.SetSecretVault(vault)
@@ -173,15 +205,19 @@ func TestPresenceRedactsSecrets(t *testing.T) {
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted(): %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "Checking hunter2-secret-value", false); err != nil {
+	if err := adapter.PresenceUpdated(t.Context(), req, "Checking hunter2-secret-value", "", false); err != nil {
 		t.Fatalf("PresenceUpdated(): %v", err)
 	}
+	waitForStatusPost(t, stub)
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
 	for _, call := range stub.calls {
 		if strings.Contains(string(call.body), "hunter2-secret-value") {
 			t.Fatal("secret value leaked into outbound body")
 		}
+	}
+	if err := adapter.PresenceEnded(t.Context(), "turn-secret-1"); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
 
@@ -192,15 +228,16 @@ func TestPresenceFailureLine(t *testing.T) {
 	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
 		cfg.MinEditInterval = 0
 	})
-	adapter.statusAfter = time.Nanosecond
+	adapter.statusAfter = 30 * time.Millisecond
 	req := presenceTestRequest("turn-fail-1")
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted(): %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "Looking through notes", false); err != nil {
+	if err := adapter.PresenceUpdated(t.Context(), req, "Looking through notes", "", false); err != nil {
 		t.Fatalf("activity update: %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "", true); err != nil {
+	waitForStatusPost(t, stub)
+	if err := adapter.PresenceUpdated(t.Context(), req, "", "", true); err != nil {
 		t.Fatalf("failure update: %v", err)
 	}
 	patches := stub.patchBodies()
@@ -216,6 +253,9 @@ func TestPresenceFailureLine(t *testing.T) {
 	if strings.Contains(strings.ToLower(content), "read_file") || strings.Contains(content, "trace") {
 		t.Errorf("failure line leaks internals: %q", content)
 	}
+	if err := adapter.PresenceEnded(t.Context(), "turn-fail-1"); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
 }
 
 func TestPresenceRepeatedFailureCoalesced(t *testing.T) {
@@ -225,21 +265,22 @@ func TestPresenceRepeatedFailureCoalesced(t *testing.T) {
 	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
 		cfg.MinEditInterval = 0
 	})
-	adapter.statusAfter = time.Nanosecond
+	adapter.statusAfter = 30 * time.Millisecond
 	req := presenceTestRequest("turn-fail-coalesce")
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted(): %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "Checking tasks", false); err != nil {
+	if err := adapter.PresenceUpdated(t.Context(), req, "Checking tasks", "", false); err != nil {
 		t.Fatalf("activity update: %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "", true); err != nil {
+	waitForStatusPost(t, stub)
+	if err := adapter.PresenceUpdated(t.Context(), req, "", "", true); err != nil {
 		t.Fatalf("first failure update: %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "", true); err != nil {
+	if err := adapter.PresenceUpdated(t.Context(), req, "", "", true); err != nil {
 		t.Fatalf("second failure update: %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "", true); err != nil {
+	if err := adapter.PresenceUpdated(t.Context(), req, "", "", true); err != nil {
 		t.Fatalf("third failure update: %v", err)
 	}
 	patches := stub.patchBodies()
@@ -256,6 +297,9 @@ func TestPresenceRepeatedFailureCoalesced(t *testing.T) {
 	if count != 1 {
 		t.Errorf("failure line wrapped multiple times: %q", content)
 	}
+	if err := adapter.PresenceEnded(t.Context(), "turn-fail-coalesce"); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
 }
 
 func TestPresenceThrottleCoalesces(t *testing.T) {
@@ -265,19 +309,23 @@ func TestPresenceThrottleCoalesces(t *testing.T) {
 	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
 		cfg.MinEditInterval = 3600000000000
 	})
-	adapter.statusAfter = time.Nanosecond
+	adapter.statusAfter = 30 * time.Millisecond
 	req := presenceTestRequest("turn-throttle-1")
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted(): %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "First activity here", false); err != nil {
+	if err := adapter.PresenceUpdated(t.Context(), req, "First activity here", "", false); err != nil {
 		t.Fatalf("first update: %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "Second activity here", false); err != nil {
+	waitForStatusPost(t, stub)
+	if err := adapter.PresenceUpdated(t.Context(), req, "Second activity here", "", false); err != nil {
 		t.Fatalf("coalesced update returned error")
 	}
 	if patches := stub.patchBodies(); len(patches) != 0 {
 		t.Fatalf("patches = %d, want 0 while throttled", len(patches))
+	}
+	if err := adapter.PresenceEnded(t.Context(), "turn-throttle-1"); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
 
@@ -296,19 +344,17 @@ func TestPresenceStatusReplacedByFinalDelivery(t *testing.T) {
 	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
 		cfg.MinEditInterval = 0
 	})
-	adapter.statusAfter = time.Nanosecond
-	adapter.typingRefresh = time.Nanosecond
+	adapter.statusAfter = 30 * time.Millisecond
+	adapter.typingRefresh = 20 * time.Millisecond
 	turnID := "turn-replace-1"
 	req := presenceTestRequest(turnID)
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted(): %v", err)
 	}
-	if err := adapter.PresenceUpdated(t.Context(), req, "Looking through notes", false); err != nil {
+	if err := adapter.PresenceUpdated(t.Context(), req, "Looking through notes", "", false); err != nil {
 		t.Fatalf("PresenceUpdated(): %v", err)
 	}
-	if messagePostCount(stub) != 1 {
-		t.Fatalf("status posts = %d, want 1", messagePostCount(stub))
-	}
+	waitForStatusPost(t, stub)
 	deliverReq := &runtimechannelhost.DeliveryRequest{
 		EffectID:       turnID,
 		Channel:        "discord:owner",
@@ -333,6 +379,9 @@ func TestPresenceStatusReplacedByFinalDelivery(t *testing.T) {
 	if !strings.Contains(content, "final answer") {
 		t.Errorf("final content = %q, want answer replacing status", content)
 	}
+	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
 }
 
 func TestRenderStatusHelpers(t *testing.T) {
@@ -355,5 +404,160 @@ func TestRenderStatusHelpers(t *testing.T) {
 	}
 	if !strings.Contains(human, "src/main.go") {
 		t.Errorf("humanized args = %q, want values preserved", human)
+	}
+}
+
+func TestPresenceScreensSecretStatusAndArgs(t *testing.T) {
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/typing") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeMessage(t, w, "status-id")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = 0
+	})
+	adapter.statusAfter = time.Nanosecond
+	req := presenceTestRequest("turn-secret-screened")
+	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+		t.Fatalf("PresenceStarted(): %v", err)
+	}
+	if err := adapter.PresenceUpdated(t.Context(), req, "Looking at secret-token abc123", `{"query":"secret hunter2"}`, false); err != nil {
+		t.Fatalf("secret status update: %v", err)
+	}
+	for _, body := range outboundBodies(stub) {
+		for _, leaked := range []string{"abc123", "hunter2", "secret-token"} {
+			if strings.Contains(body, leaked) {
+				t.Fatalf("outbound body leaked %q: %s", leaked, body)
+			}
+		}
+	}
+	if err := adapter.PresenceUpdated(t.Context(), req, "Looking through notes", `{"path":"notes.md","token":"sk-live-hunter2"}`, false); err != nil {
+		t.Fatalf("clean status update: %v", err)
+	}
+	joined := strings.Join(outboundBodies(stub), "\n")
+	if !strings.Contains(joined, "Looking through notes") {
+		t.Errorf("outbound bodies = %q, want the clean activity text", joined)
+	}
+	if strings.Contains(joined, "sk-live-hunter2") {
+		t.Errorf("outbound bodies = %q, leaked secret args", joined)
+	}
+	if err := adapter.PresenceEnded(t.Context(), "turn-secret-screened"); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
+}
+
+func TestPresenceSingleSlowToolStaysAlive(t *testing.T) {
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/typing") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeMessage(t, w, "status-id")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = 0
+	})
+	adapter.statusAfter = 60 * time.Millisecond
+	adapter.typingRefresh = 20 * time.Millisecond
+	turnID := "turn-slow-tool-single"
+	req := presenceTestRequest(turnID)
+	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+		t.Fatalf("PresenceStarted(): %v", err)
+	}
+	time.Sleep(25 * time.Millisecond)
+	if err := adapter.PresenceUpdated(t.Context(), req, "Looking through notes", "", false); err != nil {
+		t.Fatalf("single tool update: %v", err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return messagePostCount(stub) == 1 }, "timed status post")
+	if got := typingCallCount(stub); got < 2 {
+		t.Fatalf("typing calls = %d, want refresh before the status post", got)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if got := messagePostCount(stub); got != 1 {
+		t.Fatalf("message posts = %d, want exactly one status message", got)
+	}
+	if err := adapter.PresenceUpdated(t.Context(), req, "Checking open tasks", "", false); err != nil {
+		t.Fatalf("later activity update: %v", err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return len(stub.patchBodies()) >= 1 }, "status edit")
+	patches := stub.patchBodies()
+	var payload map[string]any
+	_ = json.Unmarshal(patches[len(patches)-1], &payload)
+	if content, _ := payload["content"].(string); !strings.Contains(content, "Checking open tasks") {
+		t.Fatalf("edited status = %q, want later activity", content)
+	}
+	deliverReq := &runtimechannelhost.DeliveryRequest{
+		EffectID:       turnID,
+		Channel:        "discord:owner",
+		ConversationID: "channel:333",
+		ReplyContext:   json.RawMessage(`{"channel_id":"333","message_id":"999"}`),
+		Parts:          []runtimechannelhost.OutputPart{{Text: "final answer"}},
+		IdempotencyKey: turnID,
+	}
+	if _, err := adapter.Deliver(t.Context(), deliverReq); err != nil {
+		t.Fatalf("Deliver(): %v", err)
+	}
+	patches = stub.patchBodies()
+	_ = json.Unmarshal(patches[len(patches)-1], &payload)
+	if content, _ := payload["content"].(string); !strings.Contains(content, "final answer") {
+		t.Fatalf("final edit = %q, want answer replacing status", content)
+	}
+	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
+	}
+}
+
+func TestPresenceFailedStatusPostDoesNotBreakDelivery(t *testing.T) {
+	var messagePosts atomic.Int32
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/typing") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/messages") {
+			if messagePosts.Add(1) == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			writeMessage(t, w, "answer-id")
+		}
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = 0
+	})
+	adapter.statusAfter = time.Nanosecond
+	adapter.typingRefresh = time.Hour
+	turnID := "turn-status-post-failed"
+	req := presenceTestRequest(turnID)
+	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+		t.Fatalf("PresenceStarted(): %v", err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return messagePostCount(stub) == 1 }, "failed status post")
+	deliverReq := &runtimechannelhost.DeliveryRequest{
+		EffectID:       turnID,
+		Channel:        "discord:owner",
+		ConversationID: "channel:333",
+		ReplyContext:   json.RawMessage(`{"channel_id":"333","message_id":"999"}`),
+		Parts:          []runtimechannelhost.OutputPart{{Text: "final answer"}},
+		IdempotencyKey: turnID,
+	}
+	receipt, err := adapter.Deliver(t.Context(), deliverReq)
+	if err != nil {
+		t.Fatalf("Deliver() after failed status post: %v", err)
+	}
+	if receipt.ExternalID != "answer-id" {
+		t.Fatalf("receipt = %+v, want the answer message", receipt)
+	}
+	if patches := stub.patchBodies(); len(patches) != 0 {
+		t.Fatalf("patches = %d, want none after an untracked status failure", len(patches))
+	}
+	joined := strings.Join(outboundBodies(stub), "\n")
+	if !strings.Contains(joined, "final answer") {
+		t.Fatalf("outbound bodies = %q, want the delivered answer", joined)
+	}
+	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }

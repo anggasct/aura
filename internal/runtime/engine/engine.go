@@ -633,8 +633,8 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 			e.notifyPresenceFailed(ctx, &t.req)
 			continue
 		}
-		if text, ok := extractPresenceText(&ev); ok {
-			e.notifyPresenceText(ctx, &t.req, text)
+		if text, args, ok := extractPresenceActivity(&ev); ok {
+			e.notifyPresenceText(ctx, &t.req, text, args)
 		}
 	}
 

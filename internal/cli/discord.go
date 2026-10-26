@@ -160,20 +160,20 @@ func newDiscordAdapter(cfg *config.Config, db *sql.DB, artifactRoot string, logg
 func buildSecretVault(cfg *config.Config) *secret.Vault {
 	vault := secret.New()
 	if ref := parseSecretRef(cfg.Channels.Discord.BotTokenRef); ref.Env != "" {
-		if val, err := ref.Resolve(); err == nil {
+		if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
 			vault.Set("discord_bot_token", val)
 		}
 	}
 	if cfg.Sync != nil {
 		if ref := parseSecretRef(cfg.Sync.TransportSecretRef); ref.Env != "" {
-			if val, err := ref.Resolve(); err == nil {
+			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
 				vault.Set("sync_transport_secret", val)
 			}
 		}
 	}
 	for _, key := range cfg.Webhook.Keys {
 		if key.SecretEnv != "" {
-			if val, ok := os.LookupEnv(key.SecretEnv); ok {
+			if val, ok := os.LookupEnv(key.SecretEnv); ok && strings.TrimSpace(val) != "" {
 				vault.Set("webhook_"+key.ID, val)
 			}
 		}
@@ -181,18 +181,23 @@ func buildSecretVault(cfg *config.Config) *secret.Vault {
 	for name := range cfg.Models.Definitions {
 		def := cfg.Models.Definitions[name]
 		if def.APIKeyEnv != "" {
-			if val, ok := os.LookupEnv(def.APIKeyEnv); ok {
+			if val, ok := os.LookupEnv(def.APIKeyEnv); ok && strings.TrimSpace(val) != "" {
 				vault.Set("model_"+def.Provider, val)
 			}
 		}
 		if def.APIKeyFile != "" {
 			if data, err := os.ReadFile(def.APIKeyFile); err == nil {
-				vault.Set("model_"+def.Provider, strings.TrimSpace(string(data)))
+				if val := strings.TrimSpace(string(data)); val != "" {
+					vault.Set("model_"+def.Provider, val)
+				}
 			}
 		}
 	}
 	for name, preset := range cfg.Models.Providers {
 		for hname, hval := range preset.Headers {
+			if strings.TrimSpace(hval) == "" {
+				continue
+			}
 			if strings.Contains(strings.ToLower(hname), "authorization") ||
 				strings.Contains(strings.ToLower(hname), "api") ||
 				strings.Contains(strings.ToLower(hname), "token") ||

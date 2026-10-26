@@ -49,6 +49,10 @@ type ChannelPort interface {
 
 type PresencePort interface {
 	PresenceStarted(ctx context.Context, req *DeliveryRequest) error
-	PresenceUpdated(ctx context.Context, req *DeliveryRequest, text string, failed bool) error
+	PresenceUpdated(ctx context.Context, req *DeliveryRequest, text, args string, failed bool) error
 	PresenceEnded(ctx context.Context, turnID string) error
+}
+
+type ChannelIdentity interface {
+	ChannelName() string
 }

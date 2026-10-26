@@ -212,11 +212,24 @@ func (a *Adapter) Start(ctx context.Context, sink runtimeingress.IngressSink) er
 	return a.connectLoop(ctx)
 }
 
+func (a *Adapter) ChannelName() string {
+	return "discord"
+}
+
 func (a *Adapter) postedMessages(key string) ([]string, bool) {
 	a.postedMu.Lock()
 	defer a.postedMu.Unlock()
 	ids, ok := a.posted[key]
-	return ids, ok && len(ids) > 0
+	if !ok {
+		return nil, false
+	}
+	kept := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			kept = append(kept, id)
+		}
+	}
+	return kept, len(kept) > 0
 }
 
 func (a *Adapter) rememberPosted(key string, ids []string) {
