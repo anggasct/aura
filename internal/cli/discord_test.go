@@ -2,11 +2,13 @@ package cli
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -33,7 +35,7 @@ func enabledDiscordConfig() config.Config {
 func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 	db := discordTestDB(t)
 	defaults := config.Default()
-	adapters, checks, _, err := buildChannelAdapters(&defaults, db, t.TempDir(), nil)
+	adapters, checks, _, err := buildChannelAdapters(&defaults, db, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -45,7 +47,7 @@ func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 func TestBuildChannelAdapters_EnabledBuildsAdapterAndCheck(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
-	adapters, checks, decider, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil)
+	adapters, checks, decider, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -55,11 +57,43 @@ func TestBuildChannelAdapters_EnabledBuildsAdapterAndCheck(t *testing.T) {
 	if len(adapters) != 1 {
 		t.Fatalf("adapters = %d, want 1", len(adapters))
 	}
-	if len(checks) != 1 || checks[0].ID != "discord" || checks[0].Checker == nil {
-		t.Fatalf("checks = %+v, want one discord check", checks)
+	if len(checks) != 2 || checks[0].ID != "discord" || checks[0].Checker == nil || checks[1].ID != "principal" {
+		t.Fatalf("checks = %+v, want discord and principal checks", checks)
 	}
 	if findings := checks[0].Checker.Check(t.Context()); len(findings) != 0 {
 		t.Errorf("fresh adapter findings = %+v, want none", findings)
+	}
+}
+
+func TestBuildChannelAdapters_ReportsUnmappedOwnerIdentity(t *testing.T) {
+	cases := map[string]struct {
+		identities []string
+		finding    bool
+	}{
+		"no identities":        {finding: true},
+		"discord identity set": {identities: []string{"discord:123456789012345678"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			db := discordTestDB(t)
+			cfg := enabledDiscordConfig()
+			cfg.Owner = &config.Owner{Identities: tc.identities}
+			_, checks, _, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil, nil)
+			if err != nil {
+				t.Fatalf("buildChannelAdapters(): %v", err)
+			}
+			findings := checks[1].Checker.Check(t.Context())
+			if got := len(findings) == 1 && findings[0].Code == "principal_identities_unmapped" && findings[0].Severity == health.SeverityWarning; got != tc.finding {
+				t.Fatalf("findings = %+v, want unmapped finding = %v", findings, tc.finding)
+			}
+			for _, finding := range findings {
+				for _, id := range tc.identities {
+					if strings.Contains(finding.Detail+finding.Remediation, id) {
+						t.Errorf("finding leaks identity: %+v", finding)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -85,7 +119,7 @@ func TestBuildChannelAdapters_RejectsBadTokenRef(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
 	cfg.Channels.Discord.BotTokenRef = "not-a-reference"
-	if _, _, _, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil); err == nil {
+	if _, _, _, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil, nil); err == nil {
 		t.Fatal("bad token reference accepted")
 	}
 }

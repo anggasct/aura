@@ -162,6 +162,7 @@ type Owner struct {
 	Language    string            `koanf:"language" yaml:"language,omitempty"`
 	Timezone    string            `koanf:"timezone" yaml:"timezone,omitempty"`
 	Preferences map[string]string `koanf:"preferences" yaml:"preferences,omitempty"`
+	Identities  []string          `koanf:"identities" yaml:"identities,omitempty"`
 }
 
 type Children struct {

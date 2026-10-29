@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 
 	"github.com/anggasct/aura/internal/profile"
 	"github.com/anggasct/aura/internal/store"
@@ -31,14 +32,14 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-bk", OwnerID: profileLocalOwner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-bk", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	events := store.NewEventStore(db)
 	for i, text := range []string{"i write backends in Go", "also rust sometimes", "my editor is neovim"} {
 		if _, err := events.AppendSequenced(t.Context(), "sess-bk", &store.RuntimeEvent{
 			ID: fmt.Sprintf("evt-bk-%d", i+1), SessionID: "sess-bk", TurnID: "t1", InvocationID: "inv-1",
-			Author: profileLocalOwner, Kind: "message.completed", SchemaVersion: 1,
+			Author: principal.OwnerID, Kind: "message.completed", SchemaVersion: 1,
 			Payload: []byte(`{"text":"` + text + `"}`), CreatedAt: now,
 		}); err != nil {
 			t.Fatalf("AppendSequenced: %v", err)
@@ -54,25 +55,25 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 			Provider: "test", Model: "m1", PromptVersion: "v1", ObservedAt: now,
 		}
 	}
-	accepted, err := service.ProposeFact(t.Context(), profileLocalOwner, "language", "backend", "Go", evidence("evt-bk-1", "i write backends in Go"), now)
+	accepted, err := service.ProposeFact(t.Context(), principal.OwnerID, "language", "backend", "Go", evidence("evt-bk-1", "i write backends in Go"), now)
 	if err != nil {
 		t.Fatalf("ProposeFact go: %v", err)
 	}
-	if _, err := service.AcceptFact(t.Context(), profileLocalOwner, accepted.ID, now); err != nil {
+	if _, err := service.AcceptFact(t.Context(), principal.OwnerID, accepted.ID, now); err != nil {
 		t.Fatalf("AcceptFact: %v", err)
 	}
-	rival, err := service.ProposeFact(t.Context(), profileLocalOwner, "language", "backend", "Rust", evidence("evt-bk-2", "also rust sometimes"), now)
+	rival, err := service.ProposeFact(t.Context(), principal.OwnerID, "language", "backend", "Rust", evidence("evt-bk-2", "also rust sometimes"), now)
 	if err != nil {
 		t.Fatalf("ProposeFact rust: %v", err)
 	}
-	if err := service.RejectFact(t.Context(), profileLocalOwner, rival.ID, now); err != nil {
+	if err := service.RejectFact(t.Context(), principal.OwnerID, rival.ID, now); err != nil {
 		t.Fatalf("RejectFact: %v", err)
 	}
-	tool, err := service.SetFact(t.Context(), profileLocalOwner, "tool", "editor", "neovim", nil, now)
+	tool, err := service.SetFact(t.Context(), principal.OwnerID, "tool", "editor", "neovim", nil, now)
 	if err != nil {
 		t.Fatalf("SetFact: %v", err)
 	}
-	expiring, err := service.SetFact(t.Context(), profileLocalOwner, "timezone", "home", "WIB", ptrTime(now.Add(time.Minute)), now)
+	expiring, err := service.SetFact(t.Context(), principal.OwnerID, "timezone", "home", "WIB", ptrTime(now.Add(time.Minute)), now)
 	if err != nil {
 		t.Fatalf("SetFact expiring: %v", err)
 	}
@@ -82,10 +83,10 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 	if _, err := service.ExpireFacts(t.Context(), now); err != nil {
 		t.Fatalf("ExpireFacts: %v", err)
 	}
-	if err := service.DeleteFact(t.Context(), profileLocalOwner, tool.ID, now); err != nil {
+	if err := service.DeleteFact(t.Context(), principal.OwnerID, tool.ID, now); err != nil {
 		t.Fatalf("DeleteFact: %v", err)
 	}
-	retrieved, err := service.Retrieve(t.Context(), &profile.RetrieveQuery{OwnerID: profileLocalOwner, MaxFacts: 10, MaxTokens: 1024}, now)
+	retrieved, err := service.Retrieve(t.Context(), &profile.RetrieveQuery{OwnerID: principal.OwnerID, MaxFacts: 10, MaxTokens: 1024}, now)
 	if err != nil {
 		t.Fatalf("Retrieve before backup: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 		t.Fatalf("seeded statuses = %v", statuses)
 	}
 
-	goBefore, err := service.GetFact(t.Context(), profileLocalOwner, accepted.ID)
+	goBefore, err := service.GetFact(t.Context(), principal.OwnerID, accepted.ID)
 	if err != nil {
 		t.Fatalf("GetFact before backup: %v", err)
 	}
@@ -145,14 +146,14 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 			t.Errorf("fact %q restored status = %q, want %q", fact.Value, fact.Status, statuses[fact.Value])
 		}
 	}
-	retrievedAfter, err := service2.Retrieve(t.Context(), &profile.RetrieveQuery{OwnerID: profileLocalOwner, MaxFacts: 10, MaxTokens: 1024}, now)
+	retrievedAfter, err := service2.Retrieve(t.Context(), &profile.RetrieveQuery{OwnerID: principal.OwnerID, MaxFacts: 10, MaxTokens: 1024}, now)
 	if err != nil {
 		t.Fatalf("Retrieve after restore: %v", err)
 	}
 	if len(retrievedAfter.Facts) != 1 || retrievedAfter.Facts[0].Value != "Go" {
 		t.Fatalf("retrieved after restore = %+v", retrievedAfter.Facts)
 	}
-	goFact, err := service2.GetFact(t.Context(), profileLocalOwner, accepted.ID)
+	goFact, err := service2.GetFact(t.Context(), principal.OwnerID, accepted.ID)
 	if err != nil {
 		t.Fatalf("GetFact restored: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 	if goFact.Confidence != goBefore.Confidence || len(goEvidence) != len(goEvidenceBefore) {
 		t.Errorf("restored go fact = %+v (want confidence %v), evidence = %+v (want %d)", goFact, goBefore.Confidence, goEvidence, len(goEvidenceBefore))
 	}
-	if _, err := service2.ProposeFact(t.Context(), profileLocalOwner, "language", "backend", "Go", evidence("evt-bk-1", "i write backends in Go"), now); err != nil {
+	if _, err := service2.ProposeFact(t.Context(), principal.OwnerID, "language", "backend", "Go", evidence("evt-bk-1", "i write backends in Go"), now); err != nil {
 		t.Fatalf("re-extraction after restore must stay idempotent: %v", err)
 	}
 	reListed := mustListFacts(t, service2)
@@ -174,7 +175,7 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 
 func mustListFacts(t *testing.T, service *profile.Service) []profile.Fact {
 	t.Helper()
-	facts, err := service.ListFacts(t.Context(), profileLocalOwner, "", "", 100)
+	facts, err := service.ListFacts(t.Context(), principal.OwnerID, "", "", 100)
 	if err != nil {
 		t.Fatalf("ListFacts: %v", err)
 	}
@@ -188,7 +189,7 @@ func ptrTime(at time.Time) *time.Time {
 func retrieveProfileValues(t *testing.T, service *profile.Service, query string, now time.Time) []string {
 	t.Helper()
 	part, err := service.Retrieve(t.Context(), &profile.RetrieveQuery{
-		OwnerID: profileLocalOwner, Query: query, MaxFacts: 10, MaxTokens: 1024,
+		OwnerID: principal.OwnerID, Query: query, MaxFacts: 10, MaxTokens: 1024,
 	}, now)
 	if err != nil {
 		t.Fatalf("Retrieve(%q): %v", query, err)
@@ -217,7 +218,7 @@ func TestProfileFTSRebuild(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 	for i, value := range []string{"neovim", "zoxide", "fzf"} {
-		if _, err := service.SetFact(t.Context(), profileLocalOwner, "tool", "cli-"+strconv.Itoa(i), value, nil, now); err != nil {
+		if _, err := service.SetFact(t.Context(), principal.OwnerID, "tool", "cli-"+strconv.Itoa(i), value, nil, now); err != nil {
 			t.Fatalf("SetFact %s: %v", value, err)
 		}
 	}
@@ -419,7 +420,7 @@ children:
 		t.Fatalf("extractor = %v, recorder = %v", extractor, recorder)
 	}
 	if err := extractor.Enqueue(profile.Job{
-		OwnerID: profileLocalOwner, SessionID: "sess-wire",
+		OwnerID: principal.OwnerID, SessionID: "sess-wire",
 		Events: []profile.JobEvent{{ID: "evt-wire-1", Sequence: 1, Text: "hello"}},
 	}); err != nil {
 		t.Fatalf("Enqueue: %v", err)

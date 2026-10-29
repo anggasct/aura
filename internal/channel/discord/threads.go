@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
+	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
@@ -174,7 +174,7 @@ func deliveryTarget(ref *replyReference) (target, parent, messageID string) {
 	return ref.ChannelID, "", ref.MessageID
 }
 
-func buildThreadEnvelope(instance string, msg *messagePayload, threadID, parentID string) (*runtimeingress.IngressEnvelope, error) {
+func buildThreadEnvelope(instance, principalID string, class principal.Class, msg *messagePayload, threadID, parentID string) (*runtimeingress.IngressEnvelope, error) {
 	reference, err := json.Marshal(replyReference{
 		ChannelID: parentID,
 		MessageID: msg.ID,
@@ -187,7 +187,8 @@ func buildThreadEnvelope(instance string, msg *messagePayload, threadID, parentI
 	return &runtimeingress.IngressEnvelope{
 		Source:         "discord:" + instance,
 		ExternalID:     "message:" + msg.ID,
-		PrincipalID:    msg.Author.ID,
+		PrincipalID:    principalID,
+		PrincipalClass: string(class),
 		ConversationID: "thread:" + threadID,
 		ReplyContext:   reference,
 		Parts:          []runtimeingress.InputPart{{Text: msg.Content}},
@@ -195,7 +196,7 @@ func buildThreadEnvelope(instance string, msg *messagePayload, threadID, parentI
 	}, nil
 }
 
-func validThreadAuthor(cfg *config.Discord, selfID string, msg *messagePayload) bool {
+func validThreadAuthor(cfg *config.Discord, owners *principal.Resolver, selfID string, msg *messagePayload) bool {
 	if msg.Author.Bot || msg.Author.ID == selfID {
 		return false
 	}
@@ -205,7 +206,8 @@ func validThreadAuthor(cfg *config.Discord, selfID string, msg *messagePayload) 
 	if msg.Type != 0 && msg.Type != 19 {
 		return false
 	}
-	return slices.Contains(cfg.AllowedUserIDs, msg.Author.ID)
+	_, _, admitted := resolveAuthor(cfg, owners, msg.Author.ID)
+	return admitted
 }
 
 func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayload, parentID string) (string, error) {

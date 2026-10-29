@@ -19,8 +19,9 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	gatewaywebhook "github.com/anggasct/aura/internal/gateway/webhook"
 	"github.com/anggasct/aura/internal/integration/github"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
-	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/workflow"
 )
@@ -316,6 +317,7 @@ func webhookTurnRequest(sessionID, turnID string, event *gatewaywebhook.Accepted
 		TurnID:         turnID,
 		SessionID:      sessionID,
 		PrincipalID:    "webhook:" + event.KeyID,
+		PrincipalClass: principal.ClassTrusted,
 		Origin:         runtime.OriginWebhook,
 		Parts:          webhookTurnParts(event),
 		IdempotencyKey: "webhook:" + event.KeyID + ":" + event.Envelope.EventID,

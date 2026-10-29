@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
@@ -17,7 +18,7 @@ type replyReference struct {
 	Artifacts []artifactSummary `json:"artifacts,omitempty"`
 }
 
-func normalizeMessage(cfg *config.Discord, selfID, instance string, msg *messagePayload) (*runtimeingress.IngressEnvelope, bool, error) {
+func normalizeMessage(cfg *config.Discord, owners *principal.Resolver, selfID, instance string, msg *messagePayload) (*runtimeingress.IngressEnvelope, bool, error) {
 	if cfg == nil || msg == nil {
 		return nil, false, Errorf(ErrorCodeInvalidArgument, "config and message must not be nil")
 	}
@@ -33,7 +34,8 @@ func normalizeMessage(cfg *config.Discord, selfID, instance string, msg *message
 	if msg.Content == "" {
 		return nil, false, nil
 	}
-	if !slices.Contains(cfg.AllowedUserIDs, msg.Author.ID) {
+	principalID, class, admitted := resolveAuthor(cfg, owners, msg.Author.ID)
+	if !admitted {
 		return nil, false, nil
 	}
 	var conversationID string
@@ -66,10 +68,15 @@ func normalizeMessage(cfg *config.Discord, selfID, instance string, msg *message
 	return &runtimeingress.IngressEnvelope{
 		Source:         "discord:" + instance,
 		ExternalID:     "message:" + msg.ID,
-		PrincipalID:    msg.Author.ID,
+		PrincipalID:    principalID,
+		PrincipalClass: string(class),
 		ConversationID: conversationID,
 		ReplyContext:   reference,
 		Parts:          []runtimeingress.InputPart{{Text: msg.Content}},
 		ReceivedAt:     time.Now().UTC(),
 	}, true, nil
+}
+
+func resolveAuthor(cfg *config.Discord, owners *principal.Resolver, authorID string) (string, principal.Class, bool) {
+	return owners.Resolve(principal.ChannelDiscord, authorID, slices.Contains(cfg.AllowedUserIDs, authorID))
 }

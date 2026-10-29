@@ -407,20 +407,9 @@ func (s *profileActionSink) RecordOwnerAction(ctx context.Context, action *profi
 	if action == nil {
 		return errors.New("cli: owner action must not be nil")
 	}
-	sessionID := profileOwnerSessionPrefix + action.OwnerID
-	sessions := store.NewSessionService(s.db)
-	if _, err := sessions.Get(ctx, sessionID); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		now := time.Now().UTC()
-		if err := sessions.Create(ctx, &store.Session{
-			ID: sessionID, OwnerID: action.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: json.RawMessage(`{}`),
-		}); err != nil {
-			if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeSessionIDConflict {
-				return err
-			}
-		}
+	sessionID, err := ensureOwnerActionSession(ctx, s.db, action.OwnerID)
+	if err != nil {
+		return err
 	}
 	payload, err := json.Marshal(struct {
 		Action   string `json:"action"`
@@ -448,6 +437,25 @@ func (s *profileActionSink) RecordOwnerAction(ctx context.Context, action *profi
 		CreatedAt:     action.At.UTC(),
 	})
 	return err
+}
+
+func ensureOwnerActionSession(ctx context.Context, db *sql.DB, ownerID string) (string, error) {
+	sessionID := profileOwnerSessionPrefix + ownerID
+	sessions := store.NewSessionService(db)
+	if _, err := sessions.Get(ctx, sessionID); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+		now := time.Now().UTC()
+		if err := sessions.Create(ctx, &store.Session{
+			ID: sessionID, OwnerID: ownerID, CreatedAt: now, UpdatedAt: now, Metadata: json.RawMessage(`{}`),
+		}); err != nil {
+			if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeSessionIDConflict {
+				return "", err
+			}
+		}
+	}
+	return sessionID, nil
 }
 
 func profilingProducer(cfg *config.Config) (profile.ModelProducer, error) {

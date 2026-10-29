@@ -59,8 +59,8 @@ func TestAdapter_AdmitTextEnsuresSessionOnFreshConversation(t *testing.T) {
 	if !ok {
 		t.Fatal("no session row for channel:333 after text intake")
 	}
-	if owner != "111" {
-		t.Errorf("session owner = %q, want author 111", owner)
+	if owner != "discord:111" {
+		t.Errorf("session owner = %q, want author discord:111", owner)
 	}
 	if calls, _ := sink.stats("message:9001"); calls != 1 {
 		t.Errorf("sink calls = %d, want 1", calls)
@@ -71,8 +71,8 @@ func TestAdapter_AdmitTextEnsuresSessionOnFreshConversation(t *testing.T) {
 	if env == nil {
 		t.Fatal("no admitted envelope for message:9001")
 	}
-	if env.ConversationID != "channel:333" || env.PrincipalID != "111" {
-		t.Errorf("envelope = %+v, want conversation channel:333 principal 111", env)
+	if env.ConversationID != "channel:333" || env.PrincipalID != "discord:111" {
+		t.Errorf("envelope = %+v, want conversation channel:333 principal discord:111", env)
 	}
 }
 
@@ -92,8 +92,8 @@ func TestAdapter_AdmitDMEnsuresSessionOnFirstContact(t *testing.T) {
 	if !ok {
 		t.Fatal("no session row for dm:111 after DM intake")
 	}
-	if owner != "111" {
-		t.Errorf("session owner = %q, want author 111", owner)
+	if owner != "discord:111" {
+		t.Errorf("session owner = %q, want author discord:111", owner)
 	}
 }
 
@@ -175,8 +175,8 @@ func TestAdapter_AdmitAttachmentEnsuresSessionWithArtifacts(t *testing.T) {
 		t.Fatal("admit() = false, want admission for attachment message")
 	}
 	owner, ok := ensuredOwner(sessions, "channel:333")
-	if !ok || owner != "111" {
-		t.Errorf("session owner = %q, ok = %v; want owner 111", owner, ok)
+	if !ok || owner != "discord:111" {
+		t.Errorf("session owner = %q, ok = %v; want owner discord:111", owner, ok)
 	}
 	sink.mu.Lock()
 	env := sink.envelopes["message:9004"]

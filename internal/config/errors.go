@@ -14,6 +14,7 @@ const (
 	ErrorCodeModelCapabilityUnsupported ErrorCode = "model_capability_unsupported"
 	ErrorCodeModelSecretInvalid         ErrorCode = "model_secret_invalid"
 	ErrorCodeOwnerSecret                ErrorCode = "owner_secret_invalid"
+	ErrorCodeOwnerIdentityInvalid       ErrorCode = "owner_identity_invalid"
 	ErrorCodeModelProviderInvalid       ErrorCode = "model_provider_invalid"
 )
 

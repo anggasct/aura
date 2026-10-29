@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/profile"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -136,13 +137,13 @@ func seedProfileCandidate(t *testing.T, cfg string) string {
 	defer func() { _ = db.Close() }()
 	sessions := store.NewSessionService(db)
 	now := time.Now().UTC()
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-prof", OwnerID: profileLocalOwner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-prof", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	events := store.NewEventStore(db)
 	if _, err := events.AppendSequenced(t.Context(), "sess-prof", &store.RuntimeEvent{
 		ID: "evt-prof-1", SessionID: "sess-prof", TurnID: "t1", InvocationID: "inv-1",
-		Author: profileLocalOwner, Kind: "message.completed", SchemaVersion: 1,
+		Author: principal.OwnerID, Kind: "message.completed", SchemaVersion: 1,
 		Payload: []byte(`{"text":"i use neovim"}`), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("AppendSequenced: %v", err)
@@ -151,7 +152,7 @@ func seedProfileCandidate(t *testing.T, cfg string) string {
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
-	fact, err := service.ProposeFact(t.Context(), profileLocalOwner, "tool", "editor", "neovim", &profile.Evidence{
+	fact, err := service.ProposeFact(t.Context(), principal.OwnerID, "tool", "editor", "neovim", &profile.Evidence{
 		SourceEventID: "evt-prof-1", SourceDigest: profile.ValueDigest("i use neovim"),
 		Provider: "p", Model: "m", PromptVersion: "v1", ObservedAt: now,
 	}, now)
@@ -174,13 +175,13 @@ func seedProfileConflictingCandidate(t *testing.T, cfg string) string {
 	defer func() { _ = db.Close() }()
 	sessions := store.NewSessionService(db)
 	now := time.Now().UTC()
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-conf", OwnerID: profileLocalOwner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-conf", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	events := store.NewEventStore(db)
 	if _, err := events.AppendSequenced(t.Context(), "sess-conf", &store.RuntimeEvent{
 		ID: "evt-conf-1", SessionID: "sess-conf", TurnID: "t1", InvocationID: "inv-1",
-		Author: profileLocalOwner, Kind: "message.completed", SchemaVersion: 1,
+		Author: principal.OwnerID, Kind: "message.completed", SchemaVersion: 1,
 		Payload: []byte(`{"text":"switching to rust"}`), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("AppendSequenced: %v", err)
@@ -189,7 +190,7 @@ func seedProfileConflictingCandidate(t *testing.T, cfg string) string {
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
-	fact, err := service.ProposeFact(t.Context(), profileLocalOwner, "language", "backend", "Rust", &profile.Evidence{
+	fact, err := service.ProposeFact(t.Context(), principal.OwnerID, "language", "backend", "Rust", &profile.Evidence{
 		SourceEventID: "evt-conf-1", SourceDigest: profile.ValueDigest("switching to rust"),
 		Provider: "p", Model: "m", PromptVersion: "v1", ObservedAt: now,
 	}, now)
@@ -257,8 +258,8 @@ func TestProfileActionSinkRecordsEvents(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sink := newProfileActionSink(db, profileLocalOwner)
-	action := &profile.OwnerAction{OwnerID: profileLocalOwner, FactID: "pf-1", Action: "accept", Category: "tool", Key: "editor", At: time.Now().UTC()}
+	sink := newProfileActionSink(db, principal.OwnerID)
+	action := &profile.OwnerAction{OwnerID: principal.OwnerID, FactID: "pf-1", Action: "accept", Category: "tool", Key: "editor", At: time.Now().UTC()}
 	if err := sink.RecordOwnerAction(t.Context(), action); err != nil {
 		t.Fatalf("RecordOwnerAction: %v", err)
 	}

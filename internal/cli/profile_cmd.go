@@ -8,10 +8,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/profile"
 )
-
-const profileLocalOwner = "local-owner"
 
 func newProfileCmd(gf *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
@@ -45,7 +44,7 @@ func openProfileService(cmd *cobra.Command, gf *globalFlags) (*profile.Service, 
 	closer := func() { _ = db.Close() }
 	service, err := profile.NewService(newProfileRegistry(db), profile.Config{
 		MinConfidence: result.Config.Profile.CandidateMinConfidence,
-		Actions:       newProfileActionSink(db, profileLocalOwner),
+		Actions:       newProfileActionSink(db, principal.OwnerID),
 	})
 	if err != nil {
 		closer()
@@ -75,7 +74,7 @@ func newProfileListCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer closer()
-			facts, err := service.ListFacts(cmd.Context(), profileLocalOwner, status, category, 1000)
+			facts, err := service.ListFacts(cmd.Context(), principal.OwnerID, status, category, 1000)
 			if err != nil {
 				return err
 			}
@@ -108,7 +107,7 @@ func newProfileShowCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer closer()
-			fact, err := service.GetFact(cmd.Context(), profileLocalOwner, args[0])
+			fact, err := service.GetFact(cmd.Context(), principal.OwnerID, args[0])
 			if err != nil {
 				return err
 			}
@@ -151,7 +150,7 @@ func newProfileReviewCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer closer()
-			candidates, err := service.ListFacts(cmd.Context(), profileLocalOwner, profile.StatusCandidate, "", 1000)
+			candidates, err := service.ListFacts(cmd.Context(), principal.OwnerID, profile.StatusCandidate, "", 1000)
 			if err != nil {
 				return err
 			}
@@ -188,7 +187,7 @@ func newProfileAcceptCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer closer()
-			fact, err := service.AcceptFact(cmd.Context(), profileLocalOwner, args[0], time.Now().UTC())
+			fact, err := service.AcceptFact(cmd.Context(), principal.OwnerID, args[0], time.Now().UTC())
 			if err != nil {
 				return err
 			}
@@ -208,7 +207,7 @@ func newProfileRejectCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer closer()
-			if err := service.RejectFact(cmd.Context(), profileLocalOwner, args[0], time.Now().UTC()); err != nil {
+			if err := service.RejectFact(cmd.Context(), principal.OwnerID, args[0], time.Now().UTC()); err != nil {
 				return err
 			}
 			return writeProfileLines(cmd, []string{"rejected: " + args[0]})
@@ -241,7 +240,7 @@ func newProfileSetCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer closer()
-			fact, err := service.SetFact(cmd.Context(), profileLocalOwner, category, key, value, expires, time.Now().UTC())
+			fact, err := service.SetFact(cmd.Context(), principal.OwnerID, category, key, value, expires, time.Now().UTC())
 			if err != nil {
 				return err
 			}
@@ -270,7 +269,7 @@ func newProfileDeleteCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer closer()
-			if err := service.DeleteFact(cmd.Context(), profileLocalOwner, args[0], time.Now().UTC()); err != nil {
+			if err := service.DeleteFact(cmd.Context(), principal.OwnerID, args[0], time.Now().UTC()); err != nil {
 				return err
 			}
 			return writeProfileLines(cmd, []string{"deleted: " + args[0]})

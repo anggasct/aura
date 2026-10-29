@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -101,9 +102,9 @@ func seedMemorySummary(t *testing.T, cfgPath, id, owner, session string, expires
 
 func TestMemoryCLIForgetSessionDryRunThenApply(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
-	seedMemoryDoc(t, cfg, "mem-a1", profileLocalOwner, "sess-a", "alpha recording one", 1)
-	seedMemoryDoc(t, cfg, "mem-a2", profileLocalOwner, "sess-a", "alpha recording two", 2)
-	seedMemoryDoc(t, cfg, "mem-b1", profileLocalOwner, "sess-b", "beta recording one", 1)
+	seedMemoryDoc(t, cfg, "mem-a1", principal.OwnerID, "sess-a", "alpha recording one", 1)
+	seedMemoryDoc(t, cfg, "mem-a2", principal.OwnerID, "sess-a", "alpha recording two", 2)
+	seedMemoryDoc(t, cfg, "mem-b1", principal.OwnerID, "sess-b", "beta recording one", 1)
 
 	out, err := runMemoryCommand(t, cfg, "forget", "--session", "sess-a")
 	if err != nil {
@@ -133,7 +134,7 @@ func TestMemoryCLIForgetSessionDryRunThenApply(t *testing.T) {
 func TestMemoryCLIForgetSessionApplyMatchesPreview(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
 	for seq := int64(1); seq <= 12; seq++ {
-		seedMemoryDoc(t, cfg, fmt.Sprintf("mem-a%02d", seq), profileLocalOwner, "sess-a", "alpha recording", seq)
+		seedMemoryDoc(t, cfg, fmt.Sprintf("mem-a%02d", seq), principal.OwnerID, "sess-a", "alpha recording", seq)
 	}
 
 	out, err := runMemoryCommand(t, cfg, "forget", "--session", "sess-a", "--limit", "10")
@@ -179,8 +180,8 @@ func TestMemoryCLIForgetCrossOwnerRejected(t *testing.T) {
 
 func TestMemoryCLIForgetByIDAndQuery(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
-	seedMemoryDoc(t, cfg, "mem-a1", profileLocalOwner, "sess-a", "alpha recording one", 1)
-	seedMemoryDoc(t, cfg, "mem-a2", profileLocalOwner, "sess-a", "alpha recording two", 2)
+	seedMemoryDoc(t, cfg, "mem-a1", principal.OwnerID, "sess-a", "alpha recording one", 1)
+	seedMemoryDoc(t, cfg, "mem-a2", principal.OwnerID, "sess-a", "alpha recording two", 2)
 
 	out, err := runMemoryCommand(t, cfg, "forget", "--id", "mem-a1")
 	if err != nil || !strings.Contains(out, "dry-run: 1 would be deleted") {
@@ -202,7 +203,7 @@ func TestMemoryCLIForgetByIDAndQuery(t *testing.T) {
 
 func TestMemoryCLIInspectProvenance(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
-	seedMemoryDoc(t, cfg, "mem-a1", profileLocalOwner, "sess-a", "alpha recording one", 1)
+	seedMemoryDoc(t, cfg, "mem-a1", principal.OwnerID, "sess-a", "alpha recording one", 1)
 
 	out, err := runMemoryCommand(t, cfg, "inspect", "--session", "sess-a")
 	if err != nil {
@@ -222,8 +223,8 @@ func TestMemoryCLIInspectProvenance(t *testing.T) {
 func TestMemoryCLIPurgeBounded(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
 	past := time.Now().UTC().Add(-time.Hour)
-	seedMemorySummary(t, cfg, "mem-s1", profileLocalOwner, "sess-a", past, 1)
-	seedMemorySummary(t, cfg, "mem-s2", profileLocalOwner, "sess-a", past, 2)
+	seedMemorySummary(t, cfg, "mem-s1", principal.OwnerID, "sess-a", past, 1)
+	seedMemorySummary(t, cfg, "mem-s2", principal.OwnerID, "sess-a", past, 2)
 
 	out, err := runMemoryCommand(t, cfg, "purge", "--limit", "1")
 	if err != nil || strings.TrimSpace(out) != "purged: 1" {

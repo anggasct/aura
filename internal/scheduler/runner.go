@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/principal"
 )
 
 const HandlerName = "schedule"
@@ -93,7 +94,7 @@ func NewRunner(jobs RunStore, turns TurnRunner, notify Notifier, logger *slog.Lo
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Runner{jobs: jobs, turns: turns, notify: notify, overlap: overlapPollInterval, retention: retention, logger: logger, principal: "cron", observer: observer, now: func() time.Time {
+	return &Runner{jobs: jobs, turns: turns, notify: notify, overlap: overlapPollInterval, retention: retention, logger: logger, principal: principal.OwnerID, observer: observer, now: func() time.Time {
 		return time.Now().UTC()
 	}}, nil
 }

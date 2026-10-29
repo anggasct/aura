@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/durable"
 	auramodel "github.com/anggasct/aura/internal/model"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/store"
@@ -209,7 +210,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 				recallAttached = true
 			}
 		}
-		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, recallAttached)
+		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, recallAttached, x.ownerContextFor(req))
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
@@ -263,7 +264,14 @@ func (x *ADKExecutor) resolveDefinition(req *runtime.TurnRequest) (auraagent.Def
 	return definition, nil
 }
 
-func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, recallAttached bool) (*runner.Runner, error) {
+func (x *ADKExecutor) ownerContextFor(req *runtime.TurnRequest) string {
+	if req.PrincipalClass != principal.ClassOwner {
+		return ""
+	}
+	return x.ownerContext
+}
+
+func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, recallAttached bool, ownerContext string) (*runner.Runner, error) {
 	model, err := x.resolveModel(ctx, definition)
 	if err != nil {
 		return nil, err
@@ -278,7 +286,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool, recallAttached, x.ownerContext)
+	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool, recallAttached, ownerContext)
 	if err != nil {
 		return nil, err
 	}

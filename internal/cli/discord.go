@@ -13,12 +13,16 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
+	"github.com/anggasct/aura/internal/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/telemetry"
 	"github.com/anggasct/aura/internal/toolbroker"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
@@ -119,7 +123,7 @@ func (s *discordMediaStore) Put(ctx context.Context, content io.Reader, meta *di
 	return discord.ArtifactReceipt{RefID: ref.ID, Digest: ref.BlobDigest, SizeBytes: ref.SizeBytes}, nil
 }
 
-func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, toolbroker.ApprovalDecider, error) {
+func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, mp metric.MeterProvider, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, toolbroker.ApprovalDecider, error) {
 	if cfg == nil || !cfg.Channels.Discord.Enabled {
 		return nil, nil, nil, nil
 	}
@@ -127,11 +131,28 @@ func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, l
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	owners, err := ownerResolver(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	recorder, err := telemetry.NewPrincipalRecorder(mp)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	adapter.SetPrincipalResolver(owners)
+	adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
+		recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
+	})
 	checks := []health.RegisteredCheck{{
 		ID:          "discord",
 		Checker:     adapter,
 		Timeout:     time.Duration(cfg.Health.CheckTimeout),
 		Remediation: discord.RemediationReviewGateway,
+	}, {
+		ID:          "principal",
+		Checker:     identityMappingCheck{owners: owners},
+		Timeout:     time.Duration(cfg.Health.CheckTimeout),
+		Remediation: remediationMapOwnerIdentity,
 	}}
 	return []runtimechannelhost.ChannelPort{adapter}, checks, discordApprovalDecider(adapter), nil
 }

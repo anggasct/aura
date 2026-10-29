@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/memory"
+	"github.com/anggasct/aura/internal/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
@@ -133,8 +134,8 @@ func TestThreads_MentionCreatesThreadAndDeliversInside(t *testing.T) {
 	if ref.ThreadID != "777001" || ref.ChannelID != "333" || ref.MessageID != "9001" {
 		t.Fatalf("reply reference = %+v, want parent 333 thread 777001 message 9001", ref)
 	}
-	if owner, ok := ensuredOwner(sessions, "thread:777001"); !ok || owner != "111" {
-		t.Fatalf("thread session owner = %q, ok = %v; want 111", owner, ok)
+	if owner, ok := ensuredOwner(sessions, "thread:777001"); !ok || owner != "discord:111" {
+		t.Fatalf("thread session owner = %q, ok = %v; want discord:111", owner, ok)
 	}
 	creates := 0
 	stub.mu.Lock()
@@ -766,5 +767,40 @@ func TestThreadName_TruncatesAndDefaults(t *testing.T) {
 	}
 	if got := threadName("   "); got == "" {
 		t.Fatal("empty trigger produced empty thread name")
+	}
+}
+
+func TestThreadAuthor_ResolvesOwnerAndTrusted(t *testing.T) {
+	cfg := testDiscordConfig()
+	owners := testOwners(t, "discord:777")
+	cases := map[string]struct {
+		author    string
+		admit     bool
+		principal string
+		class     principal.Class
+	}{
+		"owner identity outside allowlist": {author: "777", admit: true, principal: principal.OwnerID, class: principal.ClassOwner},
+		"allowlisted user":                 {author: "111", admit: true, principal: "discord:111", class: principal.ClassTrusted},
+		"unknown user":                     {author: "666"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			msg := testMessage()
+			msg.Author.ID = tc.author
+			if got := validThreadAuthor(cfg, owners, "999", msg); got != tc.admit {
+				t.Fatalf("validThreadAuthor() = %v, want %v", got, tc.admit)
+			}
+			if !tc.admit {
+				return
+			}
+			id, class, _ := resolveAuthor(cfg, owners, tc.author)
+			env, err := buildThreadEnvelope(cfg.Instance, id, class, msg, "777001", "333")
+			if err != nil {
+				t.Fatalf("buildThreadEnvelope(): %v", err)
+			}
+			if env.PrincipalID != tc.principal || env.PrincipalClass != string(tc.class) {
+				t.Errorf("envelope principal = %q/%q, want %q/%q", env.PrincipalID, env.PrincipalClass, tc.principal, tc.class)
+			}
+		})
 	}
 }

@@ -25,6 +25,7 @@ import (
 	broadcastpkg "github.com/anggasct/aura/internal/broadcast"
 	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/logging"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/secret"
 )
@@ -248,6 +249,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	if err := validateOwner(cfg.Owner); err != nil {
+		return LoadResult{}, err
+	}
+	if err := validateOwnerIdentities(cfg.Owner); err != nil {
 		return LoadResult{}, err
 	}
 	if err := screenOwnerSecrets(cfg.Owner, cfg); err != nil {
@@ -3460,6 +3464,16 @@ func validateOwner(owner *Owner) error {
 	return nil
 }
 
+func validateOwnerIdentities(owner *Owner) error {
+	if owner == nil || len(owner.Identities) == 0 {
+		return nil
+	}
+	if _, err := principal.NewResolver(owner.Identities); err != nil {
+		return &Error{Code: ErrorCodeOwnerIdentityInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
 func validateOwnerValue(path, value string) error {
 	if value == "" {
 		return nil
@@ -3588,6 +3602,15 @@ func validateOwnerShapes(doc *yamlv3.Node) error {
 		case "name", "language", "timezone":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 				return fmt.Errorf("owner.%s must be a string at line %d", keyNode.Value, valueNode.Line)
+			}
+		case "identities":
+			if valueNode.Kind != yamlv3.SequenceNode {
+				return fmt.Errorf("owner.identities must be a list at line %d", valueNode.Line)
+			}
+			for _, item := range valueNode.Content {
+				if item.Kind != yamlv3.ScalarNode || item.Tag != "!!str" {
+					return fmt.Errorf("owner.identities entries must be strings at line %d", item.Line)
+				}
 			}
 		case "preferences":
 			if valueNode.Kind != yamlv3.MappingNode {

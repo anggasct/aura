@@ -89,7 +89,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			channelAdapters, discordChecks, approvalDecider, err := buildChannelAdapters(cfg, db, artifactRoot, logger)
+			channelAdapters, discordChecks, approvalDecider, err := buildChannelAdapters(cfg, db, artifactRoot, pipeline.MeterProvider(), logger)
 			if err != nil {
 				return err
 			}

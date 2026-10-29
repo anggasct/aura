@@ -18,6 +18,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
+	"github.com/anggasct/aura/internal/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/secret"
@@ -78,6 +79,8 @@ type Adapter struct {
 	effects        EffectRunner
 	media          MediaStore
 	sessions       SessionEnsurer
+	owners         *principal.Resolver
+	admitted       func(ctx context.Context, class principal.Class)
 	images         atomic.Pointer[vision.Service]
 	gate           *editGate
 	postedMu       sync.Mutex
@@ -110,6 +113,20 @@ func (a *Adapter) SetVisionService(svc *vision.Service) {
 		return
 	}
 	a.images.Store(svc)
+}
+
+func (a *Adapter) SetPrincipalResolver(owners *principal.Resolver) {
+	if a == nil {
+		return
+	}
+	a.owners = owners
+}
+
+func (a *Adapter) SetAdmissionObserver(observe func(ctx context.Context, class principal.Class)) {
+	if a == nil {
+		return
+	}
+	a.admitted = observe
 }
 
 func (a *Adapter) visionService() *vision.Service {

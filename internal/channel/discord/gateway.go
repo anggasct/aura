@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
@@ -385,7 +386,7 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if parent, ok := a.lookupThreadParent(msg.ChannelID); ok {
 		return a.admitThreadMessage(ctx, msg, msg.ChannelID, parent)
 	}
-	envelope, admitted, err := normalizeMessage(a.cfg, a.selfID, a.cfg.Instance, msg)
+	envelope, admitted, err := normalizeMessage(a.cfg, a.owners, a.selfID, a.cfg.Instance, msg)
 	if err != nil {
 		return false, err
 	}
@@ -405,7 +406,7 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 }
 
 func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, threadID, parent string) (bool, error) {
-	if msg.GuildID == "" || !validThreadAuthor(a.cfg, a.selfID, msg) {
+	if msg.GuildID == "" || !validThreadAuthor(a.cfg, a.owners, a.selfID, msg) {
 		return false, nil
 	}
 	if len(a.cfg.AllowedGuildIDs) > 0 && !slices.Contains(a.cfg.AllowedGuildIDs, msg.GuildID) {
@@ -414,7 +415,8 @@ func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, t
 	if len(a.cfg.AllowedChannelIDs) > 0 && !slices.Contains(a.cfg.AllowedChannelIDs, parent) {
 		return false, nil
 	}
-	envelope, err := buildThreadEnvelope(a.cfg.Instance, msg, threadID, parent)
+	principalID, class, _ := resolveAuthor(a.cfg, a.owners, msg.Author.ID)
+	envelope, err := buildThreadEnvelope(a.cfg.Instance, principalID, class, msg, threadID, parent)
 	if err != nil {
 		return false, err
 	}
@@ -422,7 +424,7 @@ func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, t
 }
 
 func (a *Adapter) admitUnknownThread(ctx context.Context, msg *messagePayload) (bool, error) {
-	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.cfg, a.selfID, msg) {
+	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.cfg, a.owners, a.selfID, msg) {
 		return false, nil
 	}
 	if a.selfID == "" {
@@ -454,7 +456,7 @@ func (a *Adapter) admitUnknownThread(ctx context.Context, msg *messagePayload) (
 }
 
 func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope, bindingChannel string) (bool, error) {
-	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, guildID: msg.GuildID, channelID: bindingChannel})
+	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, actor: msg.Author.ID, guildID: msg.GuildID, channelID: bindingChannel})
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)
 	}
@@ -463,6 +465,9 @@ func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envel
 	}
 	if _, err := a.sink.Accept(ctx, envelope); err != nil {
 		return false, fmt.Errorf("accept ingress: %w", err)
+	}
+	if a.admitted != nil {
+		a.admitted(ctx, principal.ParseClass(envelope.PrincipalClass))
 	}
 	channelID := msg.ChannelID
 	go func() {

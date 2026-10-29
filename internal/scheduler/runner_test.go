@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/principal"
 )
 
 func (s *fakeJobStore) ActiveOccurrence(_ context.Context, jobID string) (Occurrence, bool, error) {
@@ -236,7 +237,7 @@ func TestRunner_FiresTurnAndNotifies(t *testing.T) {
 		t.Fatalf("turn calls = %d, want 1", fixture.turns.callCount())
 	}
 	call := fixture.turns.calls[0]
-	if call.SessionID != "cron:"+fixture.job.ID || call.PrincipalID != "cron" || call.Prompt != "summarize" {
+	if call.SessionID != "cron:"+fixture.job.ID || call.PrincipalID != principal.OwnerID || call.Prompt != "summarize" {
 		t.Errorf("turn request = %+v", call)
 	}
 	if call.IdempotencyKey == "" {

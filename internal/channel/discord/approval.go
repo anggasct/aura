@@ -49,6 +49,7 @@ type ApprovalPrompt struct {
 
 type approvalBinding struct {
 	principal string
+	actor     string
 	guildID   string
 	channelID string
 }
@@ -87,7 +88,7 @@ func (a *Adapter) lookupTarget(conversationID string) (approvalBinding, bool) {
 
 func (a *Adapter) approvalMAC(tokenID, action string, binding approvalBinding, expiryUnix int64) string {
 	mac := hmac.New(sha256.New, a.approvalKey[:])
-	_, _ = mac.Write([]byte(tokenID + "|" + action + "|" + binding.principal + "|" + binding.guildID + "|" + binding.channelID + "|" + strconv.FormatInt(expiryUnix, 10)))
+	_, _ = mac.Write([]byte(tokenID + "|" + action + "|" + binding.actor + "|" + binding.guildID + "|" + binding.channelID + "|" + strconv.FormatInt(expiryUnix, 10)))
 	return hex.EncodeToString(mac.Sum(nil)[:approvalMacBytes])
 }
 
@@ -389,7 +390,7 @@ func (a *Adapter) resolveComponentClick(ctx context.Context, interaction *intera
 	if subtle.ConstantTimeCompare([]byte(mac), []byte(expected)) != 1 {
 		return
 	}
-	if interaction.actorID() != binding.principal || interaction.ChannelID != binding.channelID || (binding.guildID != "" && interaction.GuildID != binding.guildID) {
+	if interaction.actorID() != binding.actor || interaction.ChannelID != binding.channelID || (binding.guildID != "" && interaction.GuildID != binding.guildID) {
 		return
 	}
 	a.approvalsMu.Lock()

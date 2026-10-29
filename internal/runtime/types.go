@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -28,6 +29,7 @@ type TurnRequest struct {
 	TurnID           string
 	SessionID        string
 	PrincipalID      string
+	PrincipalClass   principal.Class
 	Origin           Origin
 	Parts            []runtimeingress.InputPart
 	ReplyContext     json.RawMessage
