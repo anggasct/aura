@@ -88,6 +88,9 @@ func New() *Vault {
 }
 
 func (v *Vault) Set(name, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if _, ok := v.values[name]; !ok {
@@ -106,7 +109,11 @@ func (v *Vault) Redact(text string) string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	for _, name := range v.ordered {
-		text = strings.ReplaceAll(text, v.values[name], placeholder)
+		value := v.values[name]
+		if value == "" {
+			continue
+		}
+		text = strings.ReplaceAll(text, value, placeholder)
 	}
 	return text
 }
@@ -115,7 +122,11 @@ func (v *Vault) Contains(text string) bool {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	for _, name := range v.ordered {
-		if strings.Contains(text, v.values[name]) {
+		value := v.values[name]
+		if value == "" {
+			continue
+		}
+		if strings.Contains(text, value) {
 			return true
 		}
 	}

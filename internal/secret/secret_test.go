@@ -97,3 +97,16 @@ func TestVaultRawOnlyForAdapter(t *testing.T) {
 		t.Fatalf("Redact did not replace the secret: %q", got)
 	}
 }
+
+func TestVaultIgnoresEmptyValues(t *testing.T) {
+	vault := New()
+	vault.Set("empty", "")
+	vault.Set("blank", "   ")
+	rendered := "Looking through notes"
+	if got := vault.Redact(rendered); got != rendered {
+		t.Fatalf("Redact with empty values = %q, want unchanged", got)
+	}
+	if vault.Contains("") {
+		t.Fatal("vault reports a match for an empty value")
+	}
+}

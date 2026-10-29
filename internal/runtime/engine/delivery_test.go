@@ -106,6 +106,31 @@ func textStep(text string) runtime.FakeStep {
 	return runtime.FakeStep{Kind: runtime.EventKindMessageCompleted, Payload: raw}
 }
 
+func TestDeliveryExcludesToolEventText(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			adkTextStep("Looking through notes"),
+			textStep("final answer"),
+		})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, "channel:333")
+		capture := &capturingAdapter{}
+		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+
+		req := channelTurnRequest("channel:333", "turn-deliver-tool-text")
+		if _, err := collect(t, engine, req); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if capture.count() != 1 {
+			t.Fatalf("deliveries = %d, want 1", capture.count())
+		}
+		parts := capture.first().Parts
+		if len(parts) != 1 || parts[0].Text != "final answer" {
+			t.Fatalf("parts = %+v, want only the final answer", parts)
+		}
+	})
+}
+
 func TestDeliverCompletedTextTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := runtime.NewFakeExecutor([]runtime.FakeStep{textStep("hello from model")})
