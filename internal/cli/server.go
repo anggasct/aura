@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -130,6 +131,18 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				memoryHook = buildMemoryHook(memoryRuntime.service, memoryRuntime.model, memoryRuntime.summarizer, logger)
 				memoryRuntime.service.StartPurgeLoop(ctx, time.Duration(cfg.Memory.PurgeInterval), cfg.Memory.PurgeLimit)
 			}
+			var profileHook postTurnHook
+			healthChecks := discordChecks
+			if cfg.Profile != nil && cfg.Profile.Enabled {
+				profileRuntime, err := buildProfileRuntime(ctx, cfg, db, pipeline.MeterProvider(), logger)
+				if err != nil {
+					return err
+				}
+				executorOpts = append(executorOpts, runtimeadk.WithProfileContext(profileRuntime))
+				profileHook = profileRuntime.hook
+				profileRuntime.start(ctx)
+				healthChecks = append(slices.Clone(discordChecks), profileRuntime.check(cfg))
+			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
 				executorOpts...,
@@ -155,7 +168,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 				DefaultAgentID:  auraagent.DefaultID,
 				Durable:         durableConfig,
-				MemoryHook:      memoryHook,
+				PostTurnHook:    composePostTurnHooks(memoryHook, profileHook),
 			}, events, store.NewDedupeStore(db), adkExecutor, logger)
 			if err != nil {
 				return err
@@ -233,7 +246,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err := host.Start(ctx); err != nil {
 				return err
 			}
-			probeListener, err := buildProbeListener(cfg, mapCapabilityStatuses(result.CapabilityReport), store.NewEventStore(db), store.NewSessionService(db), discordChecks...)
+			probeListener, err := buildProbeListener(cfg, mapCapabilityStatuses(result.CapabilityReport), store.NewEventStore(db), store.NewSessionService(db), healthChecks...)
 			if err != nil {
 				return err
 			}

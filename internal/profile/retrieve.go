@@ -3,6 +3,7 @@ package profile
 import (
 	"strings"
 	"time"
+	"unicode"
 
 	stdcontext "context"
 )
@@ -13,11 +14,21 @@ type SearchHit struct {
 }
 
 type RetrieveQuery struct {
-	OwnerID   string
-	Category  string
-	Query     string
-	MaxFacts  int
-	MaxTokens int
+	OwnerID      string
+	Category     string
+	Query        string
+	MaxFacts     int
+	MaxTokens    int
+	VerifiedOnly bool
+	// StatedKeys are keys the owner states elsewhere; a matching learned fact is withheld, never served over them.
+	StatedKeys []string
+}
+
+// NormalizeKey makes "Preferred_Editor" and "preferred  editor" the same key.
+func NormalizeKey(key string) string {
+	return strings.Join(strings.FieldsFunc(strings.ToLower(key), func(r rune) bool {
+		return r == '_' || r == '-' || unicode.IsSpace(r)
+	}), " ")
 }
 
 func estimateTokens(text string) int {
@@ -46,18 +57,34 @@ func (s *Service) Retrieve(ctx stdcontext.Context, query *RetrieveQuery, now tim
 	if now.IsZero() {
 		return nil, Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
 	}
-	hits, err := s.registry.Search(ctx, query.OwnerID, query.Category, strings.TrimSpace(query.Query), query.MaxFacts*4, now)
+	hits, err := s.registry.Search(ctx, query.OwnerID, query.Category, strings.TrimSpace(query.Query), query.VerifiedOnly, query.MaxFacts*4, now)
 	if err != nil {
 		return nil, err
 	}
+	stated := make(map[string]bool, len(query.StatedKeys))
+	for _, key := range query.StatedKeys {
+		if normalized := NormalizeKey(key); normalized != "" {
+			stated[normalized] = true
+		}
+	}
 	part := &ContextPart{OwnerID: query.OwnerID}
-	used := 0
+	used, overridden := 0, 0
 	for i := range hits {
 		hit := &hits[i]
 		if hit.Status != StatusActive || hit.OwnerID != query.OwnerID {
 			continue
 		}
+		if query.VerifiedOnly && !hit.OwnerVerified {
+			continue
+		}
 		if hit.ExpiresAt != nil && !hit.ExpiresAt.After(now) {
+			continue
+		}
+		if s.scanner.Contains(hit.Key) || s.scanner.Contains(hit.Value) {
+			continue
+		}
+		if stated[NormalizeKey(hit.Key)] {
+			overridden++
 			continue
 		}
 		if len(part.Facts) >= query.MaxFacts {
@@ -73,6 +100,6 @@ func (s *Service) Retrieve(ctx stdcontext.Context, query *RetrieveQuery, now tim
 			Confidence: hit.Confidence, Origin: hit.Origin, Verified: hit.OwnerVerified,
 		})
 	}
-	observeWith(ctx, s.observer, &Observation{Kind: ObserveContext, Facts: len(part.Facts), Tokens: used})
+	observeWith(ctx, s.observer, &Observation{Kind: ObserveContext, Facts: len(part.Facts), Tokens: used, Overridden: overridden})
 	return part, nil
 }

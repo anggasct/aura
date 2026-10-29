@@ -369,3 +369,64 @@ func TestRetrieveUsesCallerClock(t *testing.T) {
 		}
 	}
 }
+
+func TestRetrieveVerifiedOnlyStatedKeysAndServeScreen(t *testing.T) {
+	registry := newFakeRegistry()
+	var observed []Observation
+	service, err := NewService(registry, Config{
+		MinConfidence: 0.70,
+		Scanner:       &stubScanner{secrets: []string{"sk-live-abc123"}},
+		Observer: func(_ stdcontext.Context, observation *Observation) {
+			observed = append(observed, *observation)
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, fact := range []Fact{
+		{ID: "pf-verified", Key: "editor", Value: "neovim", OwnerVerified: true},
+		{ID: "pf-derived", Key: "shell", Value: "zsh"},
+		{ID: "pf-stated", Key: "Preferred_Editor", Value: "emacs", OwnerVerified: true},
+		{ID: "pf-secret", Key: "deploy", Value: "uses sk-live-abc123", OwnerVerified: true},
+	} {
+		stored := fact
+		stored.OwnerID, stored.Category, stored.Status, stored.Confidence = "owner-1", "tool", StatusActive, 0.9
+		registry.facts[stored.ID] = &stored
+	}
+	part, err := service.Retrieve(t.Context(), &RetrieveQuery{
+		OwnerID: "owner-1", MaxFacts: 10, MaxTokens: 10000,
+		VerifiedOnly: true, StatedKeys: []string{"preferred  editor"},
+	}, now)
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	if len(part.Facts) != 1 || part.Facts[0].ID != "pf-verified" {
+		t.Fatalf("facts = %+v, want only the verified, unstated, secret-free fact", part.Facts)
+	}
+	last := observed[len(observed)-1]
+	if last.Kind != ObserveContext || last.Overridden != 1 || last.Facts != 1 {
+		t.Errorf("observation = %+v, want one served and one overridden", last)
+	}
+	all, err := service.Retrieve(t.Context(), &RetrieveQuery{OwnerID: "owner-1", MaxFacts: 10, MaxTokens: 10000}, now)
+	if err != nil {
+		t.Fatalf("Retrieve all: %v", err)
+	}
+	if len(all.Facts) != 3 {
+		t.Errorf("unfiltered facts = %d, want 3 (secret value is never served)", len(all.Facts))
+	}
+}
+
+func TestNormalizeKey(t *testing.T) {
+	for in, want := range map[string]string{
+		"Preferred_Editor":   "preferred editor",
+		" preferred-editor ": "preferred editor",
+		"preferred  editor":  "preferred editor",
+		"timezone":           "timezone",
+		"__":                 "",
+	} {
+		if got := NormalizeKey(in); got != want {
+			t.Errorf("NormalizeKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

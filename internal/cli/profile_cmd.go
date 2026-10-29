@@ -143,7 +143,7 @@ func newProfileShowCmd(gf *globalFlags) *cobra.Command {
 func newProfileReviewCmd(gf *globalFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "review",
-		Short: "List candidates needing review, conflicts first",
+		Short: "List candidates and unverified active facts needing review, conflicts first",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			service, closer, err := openProfileService(cmd, gf)
 			if err != nil {
@@ -154,10 +154,11 @@ func newProfileReviewCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(candidates) == 0 {
-				return writeProfileLines(cmd, []string{"no candidates"})
+			actives, err := service.ListFacts(cmd.Context(), principal.OwnerID, profile.StatusActive, "", 1000)
+			if err != nil {
+				return err
 			}
-			var conflicted, plain []string
+			var conflicted, plain, unverified []string
 			for i := range candidates {
 				fact := &candidates[i]
 				line := fmt.Sprintf("%s %s/%s=%s conf=%.2f%s",
@@ -168,9 +169,22 @@ func newProfileReviewCmd(gf *globalFlags) *cobra.Command {
 					plain = append(plain, line)
 				}
 			}
-			lines := make([]string, 0, len(conflicted)+len(plain))
+			// Derived facts auto-promote to active on repeated evidence, yet only owner-verified facts are served.
+			for i := range actives {
+				fact := &actives[i]
+				if fact.OwnerVerified {
+					continue
+				}
+				unverified = append(unverified, fmt.Sprintf("%s %s/%s=%s conf=%.2f unverified%s",
+					fact.ID, fact.Category, fact.Key, truncateProfileText(fact.Value, 40), fact.Confidence, conflictMark(fact.ConflictsWithID)))
+			}
+			if len(conflicted)+len(plain)+len(unverified) == 0 {
+				return writeProfileLines(cmd, []string{"no candidates"})
+			}
+			lines := make([]string, 0, len(conflicted)+len(plain)+len(unverified))
 			lines = append(lines, conflicted...)
 			lines = append(lines, plain...)
+			lines = append(lines, unverified...)
 			return writeProfileLines(cmd, lines)
 		},
 	}

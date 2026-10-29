@@ -35,6 +35,7 @@ const (
 	MetricProfileExpiryLag            = "profile.expiry.lag"
 	MetricProfileContextFacts         = "profile.context.facts"
 	MetricProfileContextTokens        = "profile.context.tokens"
+	MetricProfileContextOverridden    = "profile.context.overridden"
 
 	MetricVisionOperationsTotal   = "vision.operations.total"
 	MetricVisionOperationDuration = "vision.operation.duration"

@@ -24,7 +24,7 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	DefaultAgentID  string
 	Durable         *DurableConfig
-	MemoryHook      func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
+	PostTurnHook    func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
 }
 
 type DurableConfig struct {
@@ -651,10 +651,10 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 			}
 		}
 	}
-	if e.cfg.MemoryHook != nil {
+	if e.cfg.PostTurnHook != nil {
 		hookCtx := context.WithoutCancel(ctx)
-		if hookErr := e.cfg.MemoryHook(hookCtx, &t.req, executed); hookErr != nil {
-			e.logger.ErrorContext(hookCtx, "memory projection failed", "error", hookErr, "turn_id", t.turnID)
+		if hookErr := e.cfg.PostTurnHook(hookCtx, &t.req, executed); hookErr != nil {
+			e.logger.ErrorContext(hookCtx, "post-turn hook failed", "error", hookErr, "turn_id", t.turnID)
 		}
 	}
 	if terminalKind != runtime.EventKindTurnCompleted {

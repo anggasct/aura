@@ -38,10 +38,10 @@ func hookMessageStep(text string) runtime.FakeStep {
 	return runtime.FakeStep{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":` + strconv.Quote(text) + `}`)}
 }
 
-func TestMemoryHookRunsAfterCommit(t *testing.T) {
+func TestPostTurnHookRunsAfterCommit(t *testing.T) {
 	executor := runtime.NewFakeExecutor([]runtime.FakeStep{hookMessageStep("hello from model")})
 	hook := &recordingHook{}
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, MemoryHook: hook.fn}, executor)
+	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn}, executor)
 	mustCreateSession(t, db, "session-a")
 	req := &runtime.TurnRequest{
 		TurnID: "turn-hook-1", SessionID: "session-a", PrincipalID: "user-1",
@@ -68,10 +68,10 @@ func TestMemoryHookRunsAfterCommit(t *testing.T) {
 	}
 }
 
-func TestMemoryHookFailureDoesNotFailTurn(t *testing.T) {
+func TestPostTurnHookFailureDoesNotFailTurn(t *testing.T) {
 	executor := runtime.NewFakeExecutor([]runtime.FakeStep{hookMessageStep("hello from model")})
 	hook := &recordingHook{err: errors.New("projection boom")}
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, MemoryHook: hook.fn}, executor)
+	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn}, executor)
 	mustCreateSession(t, db, "session-a")
 	req := &runtime.TurnRequest{
 		TurnID: "turn-hook-2", SessionID: "session-a", PrincipalID: "user-1",

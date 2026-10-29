@@ -215,7 +215,7 @@ func TestProfileStore_SearchUsesCallerClock(t *testing.T) {
 	}
 	callerBeforeExpiry := expiry.Add(-time.Minute)
 	for _, query := range []string{"", "wall-future-value"} {
-		hits, err := s.SearchFacts(ctx, "owner-1", "", query, 10, callerBeforeExpiry)
+		hits, err := s.SearchFacts(ctx, "owner-1", "", query, false, 10, callerBeforeExpiry)
 		if err != nil {
 			t.Fatalf("SearchFacts(%q) before expiry: %v", query, err)
 		}
@@ -231,7 +231,7 @@ func TestProfileStore_SearchUsesCallerClock(t *testing.T) {
 	}
 	callerAfterExpiry := expiry.Add(time.Minute)
 	for _, query := range []string{"", "wall-future-value"} {
-		hits, err := s.SearchFacts(ctx, "owner-1", "", query, 10, callerAfterExpiry)
+		hits, err := s.SearchFacts(ctx, "owner-1", "", query, false, 10, callerAfterExpiry)
 		if err != nil {
 			t.Fatalf("SearchFacts(%q) after expiry: %v", query, err)
 		}
@@ -242,7 +242,7 @@ func TestProfileStore_SearchUsesCallerClock(t *testing.T) {
 		}
 	}
 	callerBeforePastExpiry := pastExpiry.Add(-time.Minute)
-	hits, err := s.SearchFacts(ctx, "owner-1", "", "", 10, callerBeforePastExpiry)
+	hits, err := s.SearchFacts(ctx, "owner-1", "", "", false, 10, callerBeforePastExpiry)
 	if err != nil {
 		t.Fatalf("SearchFacts before past expiry: %v", err)
 	}
@@ -254,5 +254,40 @@ func TestProfileStore_SearchUsesCallerClock(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("fact valid per caller clock missing; wall clock must not decide expiry")
+	}
+}
+
+func TestProfileStore_SearchVerifiedOnly(t *testing.T) {
+	db := newTestDB(t)
+	s := NewProfileStore(db)
+	ctx := t.Context()
+	derived := testProfileFact("pf-derived")
+	derived.Status = "active"
+	derived.Confidence = 0.95
+	if err := s.InsertFact(ctx, derived); err != nil {
+		t.Fatalf("InsertFact derived: %v", err)
+	}
+	verified := testProfileFact("pf-verified")
+	verified.Status = "active"
+	verified.Key = "frontend"
+	verified.Value = "Go templates"
+	verified.ValueDigest = "digest-templates"
+	verified.OwnerVerified = true
+	if err := s.InsertFact(ctx, verified); err != nil {
+		t.Fatalf("InsertFact verified: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, query := range []string{"", "go"} {
+		hits, err := s.SearchFacts(ctx, "owner-1", "", query, true, 1, now)
+		if err != nil {
+			t.Fatalf("SearchFacts(%q, verified): %v", query, err)
+		}
+		if len(hits) != 1 || hits[0].ID != "pf-verified" {
+			t.Errorf("SearchFacts(%q, verified) = %+v, want only the verified fact despite lower confidence", query, hits)
+		}
+		all, err := s.SearchFacts(ctx, "owner-1", "", query, false, 10, now)
+		if err != nil || len(all) != 2 {
+			t.Errorf("SearchFacts(%q, all) = %d, %v; want both", query, len(all), err)
+		}
 	}
 }

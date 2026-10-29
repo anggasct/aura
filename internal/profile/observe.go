@@ -19,15 +19,16 @@ const (
 )
 
 type Observation struct {
-	Kind     string
-	Result   string
-	QueueAge time.Duration
-	Lag      time.Duration
-	Accepted int
-	Screened int
-	Skipped  int
-	Facts    int
-	Tokens   int
+	Kind       string
+	Result     string
+	QueueAge   time.Duration
+	Lag        time.Duration
+	Accepted   int
+	Screened   int
+	Skipped    int
+	Facts      int
+	Tokens     int
+	Overridden int
 }
 
 type Observer func(ctx stdcontext.Context, observation *Observation)

@@ -68,7 +68,7 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("trusted search after rekey = %+v, %v", hits, err)
 	}
-	facts, err := profiles.SearchFacts(ctx, "local-owner", "", "backend", 10, time.Now().UTC())
+	facts, err := profiles.SearchFacts(ctx, "local-owner", "", "backend", false, 10, time.Now().UTC())
 	if err != nil || len(facts) != 1 || facts[0].ID != "pf-moving" {
 		t.Fatalf("profile search after rekey = %+v, %v", facts, err)
 	}

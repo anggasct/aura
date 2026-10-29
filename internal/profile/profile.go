@@ -65,7 +65,7 @@ type Registry interface {
 	Active(ctx stdcontext.Context, ownerID, category, key string) ([]Fact, error)
 	Evidence(ctx stdcontext.Context, factID string) ([]Evidence, error)
 	Expire(ctx stdcontext.Context, now time.Time) ([]Fact, error)
-	Search(ctx stdcontext.Context, ownerID, category, query string, limit int, now time.Time) ([]SearchHit, error)
+	Search(ctx stdcontext.Context, ownerID, category, query string, verifiedOnly bool, limit int, now time.Time) ([]SearchHit, error)
 	List(ctx stdcontext.Context, ownerID, status, category string, limit int) ([]Fact, error)
 }
 

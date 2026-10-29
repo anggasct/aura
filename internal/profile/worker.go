@@ -138,7 +138,7 @@ func (e *Extractor) DroppedJobs() int64 {
 	return e.dropped.Load()
 }
 
-func (e *Extractor) Enqueue(job Job) error {
+func (e *Extractor) Enqueue(ctx stdcontext.Context, job Job) error {
 	if strings.TrimSpace(job.OwnerID) == "" || strings.TrimSpace(job.SessionID) == "" || len(job.Events) == 0 {
 		return Errorf(ErrorCodeInvalidArgument, "extraction job is not complete")
 	}
@@ -153,16 +153,19 @@ func (e *Extractor) Enqueue(job Job) error {
 		seen[event.Sequence] = true
 	}
 	ticket := queuedJob{job: job, enqueuedAt: time.Now().UTC()}
+	if ctx == nil {
+		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
 	select {
 	case e.queue <- ticket:
 		return nil
 	default:
 		e.dropped.Add(1)
-		observeWith(stdcontext.Background(), e.observer, &Observation{
+		observeWith(ctx, e.observer, &Observation{
 			Kind:   ObserveExtraction,
 			Result: ResultDropped,
 		})
-		e.logger.WarnContext(stdcontext.Background(), "profile extraction queue is full", "component", "profile")
+		e.logger.WarnContext(ctx, "profile extraction queue is full", "component", "profile")
 		return Errorf(ErrorCodeProfileUnavailable, "extraction queue is full")
 	}
 }

@@ -58,7 +58,7 @@ func TestExtractorObservesResults(t *testing.T) {
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	defer cancel()
 	extractor.Start(ctx)
-	if err := extractor.Enqueue(Job{
+	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "i edit with neovim"}},
 	}); err != nil {
@@ -90,7 +90,7 @@ func TestExtractorObservesDeadLetter(t *testing.T) {
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	defer cancel()
 	extractor.Start(ctx)
-	if err := extractor.Enqueue(Job{
+	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "hello"}},
 	}); err != nil {
@@ -114,13 +114,13 @@ func TestExtractorObservesDroppedJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExtractor: %v", err)
 	}
-	if err := extractor.Enqueue(Job{
+	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "one"}},
 	}); err != nil {
 		t.Fatalf("Enqueue first: %v", err)
 	}
-	if err := extractor.Enqueue(Job{
+	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-2", Sequence: 1, Text: "two"}},
 	}); err == nil {

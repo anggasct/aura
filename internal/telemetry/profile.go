@@ -11,15 +11,16 @@ import (
 )
 
 type ProfileObservation struct {
-	Kind     string
-	Result   string
-	QueueAge time.Duration
-	Lag      time.Duration
-	Accepted int
-	Screened int
-	Skipped  int
-	Facts    int
-	Tokens   int
+	Kind       string
+	Result     string
+	QueueAge   time.Duration
+	Lag        time.Duration
+	Accepted   int
+	Screened   int
+	Skipped    int
+	Facts      int
+	Tokens     int
+	Overridden int
 }
 
 type ProfileFactCount struct {
@@ -30,7 +31,7 @@ type ProfileFactCount struct {
 
 type ProfileCallbacks struct {
 	QueueDepth func() int64
-	FactCounts func() []ProfileFactCount
+	FactCounts func(ctx context.Context) []ProfileFactCount
 }
 
 type ProfileRecorder struct {
@@ -39,6 +40,7 @@ type ProfileRecorder struct {
 	expiryLag    metric.Float64Histogram
 	contextFacts metric.Float64Histogram
 	contextToken metric.Float64Histogram
+	overridden   metric.Int64Counter
 }
 
 func NewProfileRecorder(mp metric.MeterProvider, callbacks ProfileCallbacks) (*ProfileRecorder, error) {
@@ -72,6 +74,11 @@ func NewProfileRecorder(mp metric.MeterProvider, callbacks ProfileCallbacks) (*P
 		metric.WithDescription("profile context token usage per retrieval")); err != nil {
 		return nil, fmt.Errorf("telemetry: create profile context tokens histogram: %w", err)
 	}
+	if recorder.overridden, err = meter.Int64Counter(MetricProfileContextOverridden,
+		metric.WithUnit("{fact}"),
+		metric.WithDescription("learned profile facts withheld because the static owner profile states the same key")); err != nil {
+		return nil, fmt.Errorf("telemetry: create profile context overridden counter: %w", err)
+	}
 	if callbacks.QueueDepth != nil {
 		if _, err = meter.Int64ObservableGauge(MetricProfileExtractionQueueDepth,
 			metric.WithUnit("{job}"),
@@ -87,8 +94,8 @@ func NewProfileRecorder(mp metric.MeterProvider, callbacks ProfileCallbacks) (*P
 		if _, err = meter.Int64ObservableGauge(MetricProfileFactsCount,
 			metric.WithUnit("{fact}"),
 			metric.WithDescription("profile facts by lifecycle status and category"),
-			metric.WithInt64Callback(func(_ context.Context, observer metric.Int64Observer) error {
-				for _, count := range callbacks.FactCounts() {
+			metric.WithInt64Callback(func(ctx context.Context, observer metric.Int64Observer) error {
+				for _, count := range callbacks.FactCounts(ctx) {
 					observer.Observe(count.Count, metric.WithAttributes(
 						attribute.String(AttrProfileStatus, count.Status),
 						attribute.String(AttrProfileCategory, count.Category),
@@ -116,5 +123,8 @@ func (r *ProfileRecorder) Record(ctx context.Context, observation *ProfileObserv
 	case "context":
 		r.contextFacts.Record(ctx, float64(observation.Facts))
 		r.contextToken.Record(ctx, float64(observation.Tokens))
+		if observation.Overridden > 0 {
+			r.overridden.Add(ctx, int64(observation.Overridden))
+		}
 	}
 }

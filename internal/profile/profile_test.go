@@ -426,7 +426,7 @@ func TestConcurrentConflictsSingleActive(t *testing.T) {
 	}
 }
 
-func (f *fakeRegistry) Search(_ stdcontext.Context, ownerID, category, _ string, limit int, _ time.Time) ([]SearchHit, error) {
+func (f *fakeRegistry) Search(_ stdcontext.Context, ownerID, category, _ string, _ bool, limit int, _ time.Time) ([]SearchHit, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []SearchHit
