@@ -5,12 +5,14 @@ package cli
 import (
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/anggasct/aura/internal/health"
+	"github.com/anggasct/aura/internal/sandbox"
 )
 
 func processProbe() (health.ProcessStatus, bool) {
@@ -47,25 +49,12 @@ func fdDirectory() string {
 	return "/dev/fd"
 }
 
-func cgroupV2Path() string {
-	data, err := os.ReadFile("/proc/self/cgroup")
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if rel, ok := strings.CutPrefix(line, "0::"); ok {
-			return "/sys/fs/cgroup" + rel
-		}
-	}
-	return ""
-}
-
 func readCgroupFile(name string) (int64, bool) {
-	path := cgroupV2Path()
-	if path == "" {
+	dir, ok := sandbox.AccountingCgroup()
+	if !ok {
 		return 0, false
 	}
-	data, err := os.ReadFile(path + "/" + name)
+	data, err := os.ReadFile(filepath.Join(dir, name))
 	if err != nil {
 		return 0, false
 	}

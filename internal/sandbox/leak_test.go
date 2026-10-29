@@ -19,9 +19,9 @@ func countOpenFDs(t *testing.T) int {
 
 func countAuraCgroups(t *testing.T) int {
 	t.Helper()
-	parent, err := ownCgroupPath()
-	if err != nil {
-		t.Skipf("cannot resolve own cgroup: %v", err)
+	parent, ok := accountingCgroup()
+	if !ok {
+		t.Skip("cannot resolve the accounting cgroup")
 	}
 	entries, err := os.ReadDir(parent)
 	if err != nil {

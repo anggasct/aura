@@ -11,3 +11,11 @@ func negotiate() (Primitives, error) {
 func run(_ context.Context, _ *Spec, _ Primitives, _ string, _ ...string) (Result, error) {
 	return Result{}, Errorf(ErrorCodeSandboxUnavailable, "sandbox requires Linux")
 }
+
+func prepareHost() (HostPreparation, error) {
+	return HostPreparation{}, Errorf(ErrorCodeSandboxUnavailable, "sandbox requires Linux")
+}
+
+func accountingCgroup() (string, bool) {
+	return "", false
+}

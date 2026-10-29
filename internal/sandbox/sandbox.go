@@ -117,10 +117,24 @@ type Primitives struct {
 	CgroupV2      bool
 	Landlock      bool
 	ProcessGroups bool
+	CgroupDetail  string
 }
 
 func Negotiate() (Primitives, error) {
 	return negotiate()
+}
+
+type HostPreparation struct {
+	CgroupRoot string
+	Mode       string
+}
+
+func PrepareHost() (HostPreparation, error) {
+	return prepareHost()
+}
+
+func AccountingCgroup() (string, bool) {
+	return accountingCgroup()
 }
 
 func MissingMandatory(have Primitives) []string {
