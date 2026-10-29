@@ -330,6 +330,9 @@ func TestPresenceFailureUsesActivityLanguage(t *testing.T) {
 	if !strings.Contains(content, "Mencari catatan") {
 		t.Errorf("failure line = %q, want the model activity text", content)
 	}
+	if !strings.HasPrefix(content, failureMarker) {
+		t.Errorf("failure line = %q, want it marked as a failure", content)
+	}
 	if strings.Contains(content, "Couldn't finish") || strings.Contains(strings.ToLower(content), "continuing") {
 		t.Errorf("failure line used a hardcoded English template: %q", content)
 	}
@@ -556,6 +559,9 @@ func TestRenderStatusHelpers(t *testing.T) {
 	}
 	if failureLine("") == "" {
 		t.Error("empty failure line is blank")
+	}
+	if got := failureLine("Reading notes"); got == "Reading notes" || !strings.Contains(got, "Reading notes") {
+		t.Errorf("failureLine = %q, want the activity marked as failed", got)
 	}
 	rendered := renderStatusText("Looking through notes", `{"path":"secret-token abc123"}`, 0, nil)
 	if strings.Contains(strings.ToLower(rendered), "secret-token") && strings.Contains(rendered, "abc123") {

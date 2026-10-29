@@ -78,14 +78,19 @@ func fallbackStatus(count int) string {
 	return fallbackStatuses[count%len(fallbackStatuses)]
 }
 
+// failureMarker flags a failed step without committing to any language, so the
+// line stays distinguishable from a normal status while the wording remains the
+// model's own.
+const failureMarker = "⚠️"
+
 func failureLine(activity string) string {
 	activity = strings.TrimSpace(activity)
 	activity = strings.TrimSuffix(activity, ".")
 	activity = strings.TrimSpace(activity)
 	if activity == "" {
-		return "…"
+		return failureMarker
 	}
-	return activity + " …"
+	return failureMarker + " " + activity
 }
 
 func containsSecretKeyword(s string) bool {
