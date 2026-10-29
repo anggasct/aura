@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/runtime/ingress"
@@ -389,20 +390,7 @@ func (r childSessionRunner) RunSession(ctx context.Context, req child.RunRequest
 	if err := r.enforceApprovalBinding(ctx, sessionID, deadline, projection); err != nil {
 		return child.Result{}, err
 	}
-	turnReq := &runtime.TurnRequest{
-		TurnID:         strings.TrimSpace(req.ChildID),
-		SessionID:      sessionID,
-		PrincipalID:    projection.ownerID,
-		Origin:         runtime.OriginInternal,
-		Parts:          []runtimeingress.InputPart{{Text: task}},
-		IdempotencyKey: strings.TrimSpace(req.ChildID),
-		Deadline:       deadline,
-		Budget:         runtime.Budget{MaxTokens: projection.maxTokens},
-	}
-	if strings.TrimSpace(turnReq.TurnID) == "" {
-		turnReq.TurnID = sessionID
-		turnReq.IdempotencyKey = sessionID
-	}
+	turnReq := childTurnRequest(sessionID, strings.TrimSpace(req.ChildID), task, deadline, projection)
 	var texts []string
 	var tokens int64
 	var steps int
@@ -511,6 +499,25 @@ type childProjection struct {
 	hasBudget   bool
 	maxTokens   int64
 	maxCost     int64
+}
+
+func childTurnRequest(sessionID, childID, task string, deadline time.Time, projection *childProjection) *runtime.TurnRequest {
+	turnReq := &runtime.TurnRequest{
+		TurnID:         childID,
+		SessionID:      sessionID,
+		PrincipalID:    projection.ownerID,
+		PrincipalClass: principal.ClassForPrincipal(projection.ownerID),
+		Origin:         runtime.OriginInternal,
+		Parts:          []runtimeingress.InputPart{{Text: task}},
+		IdempotencyKey: childID,
+		Deadline:       deadline,
+		Budget:         runtime.Budget{MaxTokens: projection.maxTokens},
+	}
+	if turnReq.TurnID == "" {
+		turnReq.TurnID = sessionID
+		turnReq.IdempotencyKey = sessionID
+	}
+	return turnReq
 }
 
 func (r childSessionRunner) parentOwner(ctx context.Context, parentSessionID string) (string, error) {

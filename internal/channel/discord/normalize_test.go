@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 )
 
 func testDiscordConfig() *config.Discord {
@@ -32,6 +33,15 @@ func testMessage() *messagePayload {
 	}
 }
 
+func testOwners(t *testing.T, identities ...string) *principal.Resolver {
+	t.Helper()
+	owners, err := principal.NewResolver(identities)
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	return owners
+}
+
 func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 	selfID := "999"
 	cases := map[string]struct {
@@ -40,13 +50,15 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 		conv      string
 		extID     string
 		principal string
+		class     principal.Class
 	}{
 		"guild mention admitted": {
 			mutate:    func(*config.Discord, *messagePayload) {},
 			admit:     true,
 			conv:      "channel:333",
 			extID:     "message:1001",
-			principal: "111",
+			principal: "discord:111",
+			class:     principal.ClassTrusted,
 		},
 		"dm admitted": {
 			mutate: func(cfg *config.Discord, msg *messagePayload) {
@@ -56,7 +68,51 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			admit:     true,
 			conv:      "dm:111",
 			extID:     "message:1001",
-			principal: "111",
+			principal: "discord:111",
+			class:     principal.ClassTrusted,
+		},
+		"owner identity admitted without allowlist entry": {
+			mutate:    func(_ *config.Discord, msg *messagePayload) { msg.Author.ID = "777" },
+			admit:     true,
+			conv:      "channel:333",
+			extID:     "message:1001",
+			principal: principal.OwnerID,
+			class:     principal.ClassOwner,
+		},
+		"owner identity dm keeps raw conversation key": {
+			mutate: func(_ *config.Discord, msg *messagePayload) {
+				msg.Author.ID = "777"
+				msg.GuildID = ""
+				msg.Mentions = nil
+			},
+			admit:     true,
+			conv:      "dm:777",
+			extID:     "message:1001",
+			principal: principal.OwnerID,
+			class:     principal.ClassOwner,
+		},
+		"owner identity also allowlisted resolves as owner": {
+			mutate: func(cfg *config.Discord, msg *messagePayload) {
+				cfg.AllowedUserIDs = append(cfg.AllowedUserIDs, "777")
+				msg.Author.ID = "777"
+			},
+			admit:     true,
+			conv:      "channel:333",
+			extID:     "message:1001",
+			principal: principal.OwnerID,
+			class:     principal.ClassOwner,
+		},
+		"owner identity still needs a mention in guilds": {
+			mutate: func(_ *config.Discord, msg *messagePayload) {
+				msg.Author.ID = "777"
+				msg.Mentions = nil
+			},
+		},
+		"owner identity still bound by channel scope": {
+			mutate: func(_ *config.Discord, msg *messagePayload) {
+				msg.Author.ID = "777"
+				msg.ChannelID = "444"
+			},
 		},
 		"non-allowlisted author denied": {
 			mutate: func(_ *config.Discord, msg *messagePayload) { msg.Author.ID = "666" },
@@ -92,7 +148,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			cfg := testDiscordConfig()
 			msg := testMessage()
 			tc.mutate(cfg, msg)
-			env, admitted, err := normalizeMessage(cfg, selfID, cfg.Instance, msg)
+			env, admitted, err := normalizeMessage(cfg, testOwners(t, "discord:777"), selfID, cfg.Instance, msg)
 			if err != nil {
 				t.Fatalf("normalizeMessage: %v", err)
 			}
@@ -113,6 +169,9 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			}
 			if env.PrincipalID != tc.principal {
 				t.Errorf("principal = %q, want %q", env.PrincipalID, tc.principal)
+			}
+			if env.PrincipalClass != string(tc.class) {
+				t.Errorf("class = %q, want %q", env.PrincipalClass, tc.class)
 			}
 			if len(env.Parts) != 1 || env.Parts[0].Text != "hello aura" {
 				t.Errorf("parts = %+v", env.Parts)
@@ -139,13 +198,13 @@ func TestNormalizeMessage_RejectsMalformed(t *testing.T) {
 		"missing author":  {ID: "1001", ChannelID: "333", Content: "hi"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := normalizeMessage(cfg, "999", "owner", msg)
+			_, _, err := normalizeMessage(cfg, nil, "999", "owner", msg)
 			if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
 				t.Errorf("code = %v, %v; want protocol_invalid", code, ok)
 			}
 		})
 	}
-	if _, _, err := normalizeMessage(nil, "999", "owner", testMessage()); err == nil {
+	if _, _, err := normalizeMessage(nil, nil, "999", "owner", testMessage()); err == nil {
 		t.Error("nil config accepted")
 	}
 }

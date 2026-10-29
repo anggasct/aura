@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 )
@@ -54,6 +55,7 @@ func turnRequestFromEnvelope(env *runtimeingress.IngressEnvelope) (*runtime.Turn
 	return &runtime.TurnRequest{
 		SessionID:      env.ConversationID,
 		PrincipalID:    env.PrincipalID,
+		PrincipalClass: principal.ParseClass(env.PrincipalClass),
 		Origin:         runtime.Origin(env.Source),
 		Parts:          env.Parts,
 		ReplyContext:   env.ReplyContext,

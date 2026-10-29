@@ -23,6 +23,7 @@ type Descriptor struct {
 	TurnID         string          `json:"turn_id"`
 	SessionID      string          `json:"session_id"`
 	PrincipalID    string          `json:"principal_id"`
+	PrincipalClass string          `json:"principal_class,omitempty"`
 	Origin         string          `json:"origin"`
 	Parts          []Part          `json:"parts"`
 	ReplyContext   json.RawMessage `json:"reply_context,omitempty"`

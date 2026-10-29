@@ -235,3 +235,82 @@ owner:
 		t.Fatalf("owner = %+v", res.Config.Owner)
 	}
 }
+
+func TestLoad_OwnerIdentities(t *testing.T) {
+	path := writeOwnerConfig(t, "version: 1\nowner:\n  name: Angga\n  identities:\n    - discord:123456789012345678\n")
+	res, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := res.Config.Owner.Identities; len(got) != 1 || got[0] != "discord:123456789012345678" {
+		t.Errorf("identities = %v", got)
+	}
+}
+
+func TestLoad_OwnerIdentitiesRejected(t *testing.T) {
+	cases := map[string]struct {
+		body  string
+		index string
+		value string
+	}{
+		"unknown channel prefix": {body: "    - telegram:5550001\n", index: "owner.identities[0]", value: "5550001"},
+		"empty discord id":       {body: "    - \"discord:\"\n", index: "owner.identities[0]"},
+		"non-numeric discord id": {body: "    - discord:5550001\n    - discord:owner5550002\n", index: "owner.identities[1]", value: "owner5550002"},
+		"duplicate identity":     {body: "    - discord:5550003\n    - discord:5550003\n", index: "owner.identities[1]", value: "5550003"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := writeOwnerConfig(t, "version: 1\nowner:\n  identities:\n"+tc.body)
+			_, err := Load(path)
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeOwnerIdentityInvalid {
+				t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, ErrorCodeOwnerIdentityInvalid, err)
+			}
+			if !strings.Contains(err.Error(), tc.index) {
+				t.Errorf("error %q does not name %s", err, tc.index)
+			}
+			if tc.value != "" && strings.Contains(err.Error(), tc.value) {
+				t.Errorf("error %q leaks the identity value", err)
+			}
+		})
+	}
+}
+
+func TestLoad_OwnerIdentitiesRenderSingleCode(t *testing.T) {
+	path := writeOwnerConfig(t, "version: 1\nowner:\n  identities:\n    - telegram:5550001\n    - discord:owner5550002\n")
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("invalid identities accepted")
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeOwnerIdentityInvalid {
+		t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, ErrorCodeOwnerIdentityInvalid, err)
+	}
+	if got := strings.Count(err.Error(), string(ErrorCodeOwnerIdentityInvalid)+":"); got != 1 {
+		t.Errorf("error %q carries %d code prefixes; want 1", err, got)
+	}
+	if !strings.Contains(err.Error(), string(ErrorCodeOwnerIdentityInvalid)+": owner.identities[0]:") {
+		t.Errorf("error %q does not render the code once before the first index", err)
+	}
+	for _, index := range []string{"owner.identities[0]", "owner.identities[1]"} {
+		if !strings.Contains(err.Error(), index) {
+			t.Errorf("error %q does not name %s", err, index)
+		}
+	}
+	for _, value := range []string{"5550001", "owner5550002"} {
+		if strings.Contains(err.Error(), value) {
+			t.Errorf("error %q leaks the identity value %s", err, value)
+		}
+	}
+}
+
+func TestLoad_OwnerIdentitiesRejectBadShapes(t *testing.T) {
+	for name, body := range map[string]string{
+		"not a list":         "  identities: discord:5550001\n",
+		"entry not a string": "  identities:\n    - 5550001\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeOwnerConfig(t, "version: 1\nowner:\n"+body)); err == nil {
+				t.Errorf("invalid identities accepted:\n%s", body)
+			}
+		})
+	}
+}

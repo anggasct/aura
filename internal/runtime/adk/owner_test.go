@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 )
 
@@ -77,7 +78,7 @@ func TestOwnerContextAttachOrder(t *testing.T) {
 				t.Fatalf("NewADKExecutor: %v", err)
 			}
 			mustCreateSession(t, db, "session-1")
-			req := evalTurnRequest()
+			req := ownerTurnRequest()
 			req.Origin = origin
 			drainTurn(t, executor, req)
 
@@ -140,7 +141,7 @@ func TestOwnerContextWithoutRecall(t *testing.T) {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	mustCreateSession(t, db, "session-1")
-	drainTurn(t, executor, evalTurnRequest())
+	drainTurn(t, executor, ownerTurnRequest())
 
 	system := strings.Join(model.systems, "\n")
 	if want := block + "\n\nSOUL"; !strings.HasPrefix(system, want) {
@@ -148,5 +149,53 @@ func TestOwnerContextWithoutRecall(t *testing.T) {
 	}
 	if strings.Contains(system, recallEvidenceCaveat) {
 		t.Fatal("recall caveat present without recall evidence")
+	}
+}
+
+func ownerTurnRequest() *runtime.TurnRequest {
+	req := evalTurnRequest()
+	req.PrincipalID = principal.OwnerID
+	req.PrincipalClass = principal.ClassOwner
+	return req
+}
+
+func TestOwnerContextOnlyReachesOwnerTurns(t *testing.T) {
+	cases := map[string]struct {
+		principalID string
+		class       principal.Class
+		attached    bool
+	}{
+		"owner":         {principalID: principal.OwnerID, class: principal.ClassOwner, attached: true},
+		"trusted":       {principalID: "discord:111", class: principal.ClassTrusted},
+		"public":        {principalID: "discord:222", class: principal.ClassPublic},
+		"missing class": {principalID: principal.OwnerID},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			model := &capturingModel{answer: "done", tokens: 1}
+			db, sessions, events := newSessionTestDB(t)
+			t.Cleanup(func() { _ = db.Close() })
+			resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL"}}
+			executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, &fakeBroker{}, nil, nil,
+				WithAgentResolver(resolver, nil),
+				WithOwnerContext(RenderOwnerContext(&OwnerContext{Name: "Angga", Timezone: "Asia/Jakarta"})),
+			)
+			if err != nil {
+				t.Fatalf("NewADKExecutor: %v", err)
+			}
+			mustCreateSession(t, db, "session-1")
+			req := evalTurnRequest()
+			req.Origin = "discord"
+			req.PrincipalID = tc.principalID
+			req.PrincipalClass = tc.class
+			req.Parts[0].Text = "who is the owner and where do they live?"
+			drainTurn(t, executor, req)
+
+			system := strings.Join(model.systems, "\n")
+			leaked := strings.Contains(system, ownerContextHeader) || strings.Contains(system, "Angga") || strings.Contains(system, "Asia/Jakarta")
+			if leaked != tc.attached {
+				t.Fatalf("owner context attached = %v, want %v:\n%s", leaked, tc.attached, system)
+			}
+		})
 	}
 }

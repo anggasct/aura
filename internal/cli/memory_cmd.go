@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/memory"
+	"github.com/anggasct/aura/internal/principal"
 )
 
 func newMemoryCmd(gf *globalFlags) *cobra.Command {
@@ -83,7 +84,7 @@ func newMemoryInspectCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				documents, err := service.Inspect(ctx, profileLocalOwner, session, query, limit)
+				documents, err := service.Inspect(ctx, principal.OwnerID, session, query, limit)
 				if err != nil {
 					return err
 				}
@@ -135,13 +136,13 @@ func newMemoryForgetCmd(gf *globalFlags) *cobra.Command {
 				switch {
 				case session != "":
 					scope = "session=" + session
-					preview, deleted, err = service.ForgetBySession(ctx, profileLocalOwner, session, limit, apply)
+					preview, deleted, err = service.ForgetBySession(ctx, principal.OwnerID, session, limit, apply)
 				case docID != "":
 					scope = "id=" + docID
-					preview, deleted, err = service.ForgetByID(ctx, profileLocalOwner, docID, apply)
+					preview, deleted, err = service.ForgetByID(ctx, principal.OwnerID, docID, apply)
 				default:
 					scope = "query=" + query
-					preview, deleted, err = service.ForgetByQuery(ctx, profileLocalOwner, "", query, limit, apply)
+					preview, deleted, err = service.ForgetByQuery(ctx, principal.OwnerID, "", query, limit, apply)
 				}
 				if err != nil {
 					return err

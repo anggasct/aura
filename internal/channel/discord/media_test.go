@@ -101,7 +101,7 @@ func TestAdapter_AdmitsMessageWithStoredAttachment(t *testing.T) {
 	tc.doubles.sessions.mu.Lock()
 	owner := tc.doubles.sessions.sessions["channel:333"]
 	tc.doubles.sessions.mu.Unlock()
-	if owner != "111" {
+	if owner != "discord:111" {
 		t.Errorf("ensured session owner = %q, want principal", owner)
 	}
 	if tc.doubles.media.puts != 1 {

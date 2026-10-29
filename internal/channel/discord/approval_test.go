@@ -1,6 +1,8 @@
 package discord
 
 import (
+	"github.com/anggasct/aura/internal/principal"
+
 	"context"
 	"encoding/json"
 	"io"
@@ -93,8 +95,8 @@ func newApprovalAdapter(t *testing.T, stub *approvalStub, logs *logCapture) *Ada
 		t.Fatalf("New(): %v", err)
 	}
 	adapter.restBase = stub.srv.URL
-	adapter.rememberTarget("dm:111", approvalBinding{principal: "111", channelID: "333"})
-	adapter.rememberTarget("channel:333", approvalBinding{principal: "111", guildID: "222", channelID: "333"})
+	adapter.rememberTarget("dm:111", approvalBinding{principal: "discord:111", actor: "111", channelID: "333"})
+	adapter.rememberTarget("channel:333", approvalBinding{principal: "discord:111", actor: "111", guildID: "222", channelID: "333"})
 	return adapter
 }
 
@@ -104,7 +106,7 @@ func testPrompt(session string, expiresAt time.Time) *ApprovalPrompt {
 		ToolVersion:   "1",
 		SessionID:     session,
 		TurnID:        "turn-1",
-		PrincipalID:   "111",
+		PrincipalID:   "discord:111",
 		Arguments:     `{"command":"ls"}`,
 		PolicyVersion: "v3",
 		ReasonCode:    "approval_required",
@@ -527,7 +529,7 @@ func TestDecide_ClickDuringCardPostStillDisables(t *testing.T) {
 		t.Fatalf("New(): %v", err)
 	}
 	adapter.restBase = srv.URL
-	adapter.rememberTarget("dm:111", approvalBinding{principal: "111", channelID: "333"})
+	adapter.rememberTarget("dm:111", approvalBinding{principal: "discord:111", actor: "111", channelID: "333"})
 
 	result := decideAsync(t.Context(), adapter, testPrompt("dm:111", time.Now().Add(time.Minute)))
 	var approve string
@@ -552,5 +554,41 @@ func TestDecide_ClickDuringCardPostStillDisables(t *testing.T) {
 	}
 	if patches[0].message != "card-race" {
 		t.Errorf("disabled message = %q, want card-race", patches[0].message)
+	}
+}
+
+func TestApproval_OwnerPrincipalAuthorizesOnlyTheSender(t *testing.T) {
+	stub := newApprovalStub(t)
+	adapter := newApprovalAdapter(t, stub, nil)
+	adapter.rememberTarget("dm:777", approvalBinding{principal: principal.OwnerID, actor: "777", channelID: "333"})
+	prompt := testPrompt("dm:777", time.Now().Add(time.Minute))
+	prompt.PrincipalID = principal.OwnerID
+	result := decideAsync(t.Context(), adapter, prompt)
+	approve, _ := cardCustomIDs(t, stub.waitPost(t, 5*time.Second))
+	for _, stranger := range []string{"111", principal.OwnerID} {
+		adapter.resolveComponentClick(t.Context(), clickPayload("ix-"+stranger, stranger, "", "333", approve))
+	}
+	select {
+	case outcome := <-result:
+		t.Fatalf("click by a non-sender decided: %+v", outcome)
+	case <-time.After(100 * time.Millisecond):
+	}
+	adapter.resolveComponentClick(t.Context(), clickPayload("ix-owner", "777", "", "333", approve))
+	if outcome := awaitDecide(t, result, 5*time.Second); outcome.err != nil || !outcome.accepted {
+		t.Errorf("sender click = %v, %v; want accepted", outcome.accepted, outcome.err)
+	}
+}
+
+func TestDecide_PrincipalMismatchDeclinesWithoutCard(t *testing.T) {
+	stub := newApprovalStub(t)
+	adapter := newApprovalAdapter(t, stub, nil)
+	prompt := testPrompt("dm:111", time.Now().Add(time.Minute))
+	prompt.PrincipalID = "111"
+	accepted, err := adapter.Decide(t.Context(), prompt)
+	if err != nil || accepted {
+		t.Fatalf("Decide() = %v, %v; want declined", accepted, err)
+	}
+	if posts, _, _ := stub.counts(); posts != 0 {
+		t.Errorf("posts = %d, want no card for a raw-id prompt", posts)
 	}
 }

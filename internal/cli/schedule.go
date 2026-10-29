@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/scheduler"
@@ -215,6 +216,7 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *scheduler.TurnReque
 	for event, err := range r.engine.Run(ctx, &runtime.TurnRequest{
 		SessionID:      req.SessionID,
 		PrincipalID:    req.PrincipalID,
+		PrincipalClass: principal.ClassForPrincipal(req.PrincipalID),
 		Origin:         runtime.Origin(req.Origin),
 		Parts:          []runtimeingress.InputPart{{Text: req.Prompt}},
 		IdempotencyKey: req.IdempotencyKey,
@@ -260,7 +262,7 @@ func ensureCronSession(ctx context.Context, sessions store.SessionService, sessi
 	}
 	now := time.Now().UTC()
 	err := sessions.Create(ctx, &store.Session{
-		ID: sessionID, OwnerID: "cron",
+		ID: sessionID, OwnerID: principal.OwnerID,
 		Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	})
 	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionIDConflict {

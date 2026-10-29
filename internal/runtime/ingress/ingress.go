@@ -15,6 +15,7 @@ type IngressEnvelope struct {
 	Source         string
 	ExternalID     string
 	PrincipalID    string
+	PrincipalClass string
 	ConversationID string
 	ReplyContext   json.RawMessage
 	Parts          []InputPart

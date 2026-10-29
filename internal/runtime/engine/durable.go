@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
@@ -30,6 +31,7 @@ func turnDescriptorFromRequest(req *runtime.TurnRequest) runtimesessions.Descrip
 		TurnID:         req.TurnID,
 		SessionID:      req.SessionID,
 		PrincipalID:    req.PrincipalID,
+		PrincipalClass: string(req.PrincipalClass),
 		Origin:         string(req.Origin),
 		Parts:          parts,
 		ReplyContext:   req.ReplyContext,
@@ -51,6 +53,7 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRe
 		TurnID:         desc.TurnID,
 		SessionID:      desc.SessionID,
 		PrincipalID:    desc.PrincipalID,
+		PrincipalClass: principal.ParseClass(desc.PrincipalClass),
 		Origin:         runtime.Origin(desc.Origin),
 		Parts:          parts,
 		ReplyContext:   desc.ReplyContext,

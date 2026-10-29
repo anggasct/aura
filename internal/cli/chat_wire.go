@@ -11,7 +11,6 @@ import (
 	"iter"
 	"log/slog"
 	"os"
-	"os/user"
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
@@ -19,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/model"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/runtime/engine"
@@ -51,6 +51,7 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 		runtimeReq := &runtime.TurnRequest{
 			SessionID:      req.SessionID,
 			PrincipalID:    req.PrincipalID,
+			PrincipalClass: principal.ClassOwner,
 			Origin:         runtime.OriginTerminal,
 			Parts:          parts,
 			IdempotencyKey: req.IdempotencyKey,
@@ -221,10 +222,6 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		return err
 	}
 	executor.SetEventPublisher(engine)
-	principal, err := localPrincipal()
-	if err != nil {
-		return err
-	}
 	console := terminal.NewConsole(
 		&terminalRunner{engine: engine},
 		&terminalSessions{sessions: sessions},
@@ -235,7 +232,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 			InMemoryHistory:     cfg.Terminal.InMemoryHistory,
 			SecondInterruptTime: time.Duration(cfg.Terminal.SecondInterruptTime),
 		},
-		principal,
+		principal.OwnerID,
 	)
 	if cfg.Skills != nil && cfg.Skills.Enabled {
 		skillEngine, err := buildSkillsEngine(ctx, cfg.Skills, db, logger)
@@ -339,12 +336,4 @@ func forwardInterrupts(ctx context.Context, signals <-chan os.Signal) (events <-
 		<-done
 	}
 	return out, stop
-}
-
-func localPrincipal() (string, error) {
-	u, err := user.Current()
-	if err != nil {
-		return "", err
-	}
-	return u.Username, nil
 }

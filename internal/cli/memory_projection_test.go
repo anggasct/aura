@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/memory"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -331,5 +333,57 @@ func TestMemoryHookSkipsRangeSummaryWithoutSummarizer(t *testing.T) {
 	}
 	if hits[0].Kind == memory.KindSummary {
 		t.Errorf("summary created without a summarizer: %+v", hits[0])
+	}
+}
+
+func TestOwnerDiscordMemoryIsOwnerKeyedAndHiddenFromTrusted(t *testing.T) {
+	ctx := context.Background()
+	db := newMemoryTestDB(t)
+	sessions := store.NewSessionService(db)
+	for id, owner := range map[string]string{"dm:777": principal.OwnerID, "dm:111": "discord:111", "terminal-1": principal.OwnerID} {
+		if err := sessions.Create(ctx, &store.Session{ID: id, OwnerID: owner, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+			t.Fatalf("create session %s: %v", id, err)
+		}
+	}
+	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{})
+	if err != nil {
+		t.Fatalf("NewService(): %v", err)
+	}
+	ownerTurn := &runtime.TurnRequest{TurnID: "turn-1", SessionID: "dm:777", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, Origin: "discord:owner"}
+	if err := buildMemoryHook(service, nil, nil, nil)(ctx, ownerTurn, []store.RuntimeEvent{{
+		ID: "ev-owner-1", SessionID: "dm:777", Sequence: 1, TurnID: "turn-1", Author: principal.OwnerID,
+		Kind: store.EventKindADK, SchemaVersion: 1,
+		Payload:   journalPayload(t, "user", "the nightly backup finished cleanly"),
+		CreatedAt: time.Now().UTC(),
+	}}); err != nil {
+		t.Fatalf("hook(): %v", err)
+	}
+	inspected, err := service.Inspect(ctx, principal.OwnerID, "", "nightly backup", 10)
+	if err != nil || len(inspected) != 1 {
+		t.Fatalf("owner inspect = %d docs, %v; want the discord-derived doc", len(inspected), err)
+	}
+	provider, err := memory.NewProvider(service, memory.ProviderConfig{})
+	if err != nil {
+		t.Fatalf("NewProvider(): %v", err)
+	}
+	recall := func(sessionID, principalID string, class principal.Class) int {
+		t.Helper()
+		evidence, err := provider.RecallTurn(ctx, &runtime.TurnRequest{
+			TurnID: "turn-2", SessionID: sessionID, PrincipalID: principalID, PrincipalClass: class, Origin: "discord:owner",
+			Parts: []runtimeingress.InputPart{{Text: "nightly backup"}},
+		})
+		if err != nil {
+			t.Fatalf("RecallTurn(%s): %v", principalID, err)
+		}
+		if evidence == nil {
+			return 0
+		}
+		return len(evidence.Documents)
+	}
+	if got := recall("dm:111", "discord:111", principal.ClassTrusted); got != 0 {
+		t.Errorf("trusted recall returned %d owner docs, want none", got)
+	}
+	if got := recall("terminal-1", principal.OwnerID, principal.ClassOwner); got == 0 {
+		t.Error("owner recall from the terminal missed the discord-derived doc")
 	}
 }
