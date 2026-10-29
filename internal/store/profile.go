@@ -46,7 +46,7 @@ type ProfileStore interface {
 	ListEvidence(ctx context.Context, factID string) ([]ProfileEvidence, error)
 	ListActive(ctx context.Context, ownerID, category, key string) ([]ProfileFact, error)
 	ListFacts(ctx context.Context, ownerID, status, category string, limit int) ([]ProfileFact, error)
-	SearchFacts(ctx context.Context, ownerID, category, query string, limit int, now time.Time) ([]ProfileFact, error)
+	SearchFacts(ctx context.Context, ownerID, category, query string, verifiedOnly bool, limit int, now time.Time) ([]ProfileFact, error)
 }
 
 type sqliteProfileStore struct {
@@ -423,7 +423,7 @@ func (s *sqliteProfileStore) ListFacts(ctx context.Context, ownerID, status, cat
 	return out, nil
 }
 
-func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category, query string, limit int, now time.Time) ([]ProfileFact, error) {
+func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category, query string, verifiedOnly bool, limit int, now time.Time) ([]ProfileFact, error) {
 	if s.db == nil {
 		return nil, errNilArgument("db")
 	}
@@ -440,6 +440,9 @@ func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category,
 	sqlQuery := `SELECT ` + selectProfileFactColumns + ` FROM profile_fact WHERE owner_id = ? AND status = 'active'
 		AND (expires_at IS NULL OR expires_at > ?)`
 	args := []any{ownerID, formatTime(now.UTC())}
+	if verifiedOnly {
+		sqlQuery += ` AND owner_verified = 1`
+	}
 	if category != "" {
 		if !profileCategories[category] {
 			return nil, Errorf(ErrorCodeProfileInvalid, "profile fact category is not valid")
@@ -462,6 +465,9 @@ func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category,
 			WHERE profile_fact_fts MATCH ? AND f.owner_id = ? AND f.status = 'active'
 			AND (f.expires_at IS NULL OR f.expires_at > ?)`
 		args = []any{sanitized, ownerID, formatTime(now.UTC())}
+		if verifiedOnly {
+			sqlQuery += ` AND f.owner_verified = 1`
+		}
 		if category != "" {
 			sqlQuery += ` AND f.category = ?`
 			args = append(args, category)

@@ -204,6 +204,16 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryRuntime.provider))
 		memoryHook = buildMemoryHook(memoryRuntime.service, memoryRuntime.model, memoryRuntime.summarizer, logger)
 	}
+	var profileHook postTurnHook
+	if cfg.Profile != nil && cfg.Profile.Enabled {
+		profileRuntime, err := buildProfileRuntime(ctx, cfg, db, nil, logger)
+		if err != nil {
+			return err
+		}
+		executorOpts = append(executorOpts, runtimeadk.WithProfileContext(profileRuntime))
+		profileHook = profileRuntime.hook
+		profileRuntime.start(ctx)
+	}
 	executor, err := runtimeadk.NewADKExecutor(
 		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,
 	)
@@ -216,7 +226,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
 		ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 		DefaultAgentID:  auraagent.DefaultID,
-		MemoryHook:      memoryHook,
+		PostTurnHook:    composePostTurnHooks(memoryHook, profileHook),
 	}, events, store.NewDedupeStore(db), executor, logger)
 	if err != nil {
 		return err

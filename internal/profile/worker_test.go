@@ -54,7 +54,7 @@ func runExtractor(t *testing.T, extractor *Extractor, registry *fakeRegistry, jo
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	defer cancel()
 	extractor.Start(ctx)
-	if err := extractor.Enqueue(job); err != nil {
+	if err := extractor.Enqueue(t.Context(), job); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -181,7 +181,7 @@ func TestExtractorRejectsUnknownSources(t *testing.T) {
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	defer cancel()
 	extractor.Start(ctx)
-	if err := extractor.Enqueue(Job{
+	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "hello"}},
 	}); err != nil {
@@ -212,7 +212,7 @@ func TestExtractorRetriesThenDeadLetters(t *testing.T) {
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	defer cancel()
 	extractor.Start(ctx)
-	if err := extractor.Enqueue(Job{
+	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "hello"}},
 	}); err != nil {
@@ -269,7 +269,7 @@ func TestExtractorReprocessingIdempotent(t *testing.T) {
 	defer cancel()
 	extractor.Start(ctx)
 	for range 2 {
-		if err := extractor.Enqueue(job); err != nil {
+		if err := extractor.Enqueue(t.Context(), job); err != nil {
 			t.Fatalf("Enqueue: %v", err)
 		}
 	}
@@ -292,10 +292,10 @@ func TestExtractorReprocessingIdempotent(t *testing.T) {
 func TestEnqueueBackpressure(t *testing.T) {
 	caller := &fakeCaller{}
 	extractor, _ := testExtractor(t, caller, 1)
-	if err := extractor.Enqueue(Job{OwnerID: "o", SessionID: "s", Events: []JobEvent{{ID: "e1", Sequence: 1, Text: "a"}}}); err != nil {
+	if err := extractor.Enqueue(t.Context(), Job{OwnerID: "o", SessionID: "s", Events: []JobEvent{{ID: "e1", Sequence: 1, Text: "a"}}}); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	err := extractor.Enqueue(Job{OwnerID: "o", SessionID: "s", Events: []JobEvent{{ID: "e2", Sequence: 2, Text: "b"}}})
+	err := extractor.Enqueue(t.Context(), Job{OwnerID: "o", SessionID: "s", Events: []JobEvent{{ID: "e2", Sequence: 2, Text: "b"}}})
 	if err == nil {
 		t.Fatalf("expected queue-full rejection")
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileUnavailable {
@@ -319,7 +319,7 @@ func TestEnqueueValidation(t *testing.T) {
 	}
 	for name, job := range cases {
 		t.Run(name, func(t *testing.T) {
-			if err := extractor.Enqueue(job); err == nil {
+			if err := extractor.Enqueue(t.Context(), job); err == nil {
 				t.Errorf("expected rejection")
 			}
 		})
@@ -360,7 +360,7 @@ func TestExtractorStopsOnCancel(t *testing.T) {
 	extractor, registry := testExtractor(t, blocking, 64)
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	extractor.Start(ctx)
-	if err := extractor.Enqueue(Job{
+	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "hello"}},
 	}); err != nil {

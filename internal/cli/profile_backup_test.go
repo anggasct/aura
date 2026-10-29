@@ -344,7 +344,7 @@ type profileTestScanner struct{}
 
 func (profileTestScanner) Contains(string) bool { return false }
 
-func TestNewProfileExtractorWiresTelemetry(t *testing.T) {
+func TestNewProfileRuntimeWiresTelemetry(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
 	loaded, err := config.Load(cfgPath)
 	if err != nil {
@@ -355,17 +355,24 @@ func TestNewProfileExtractorWiresTelemetry(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, _, err := newProfileExtractor(nil, db, nil, nil, nil, 64); err == nil {
+	if _, err := newProfileRuntime(nil, db, nil, profile.ModelProducer{}, nil, profileTestScanner{}, nil); err == nil {
 		t.Errorf("expected nil config rejection")
 	}
-	if _, _, err := newProfileExtractor(loaded.Config, nil, nil, nil, nil, 64); err == nil {
+	if _, err := newProfileRuntime(loaded.Config, nil, nil, profile.ModelProducer{}, nil, profileTestScanner{}, nil); err == nil {
 		t.Errorf("expected nil db rejection")
 	}
-	if _, _, err := newProfileExtractor(loaded.Config, db, nil, nil, nil, 64); err == nil {
+	if _, err := newProfileRuntime(loaded.Config, db, nil, profile.ModelProducer{}, nil, nil, nil); err == nil {
 		t.Errorf("expected nil scanner rejection")
 	}
-	if _, _, err := newProfileExtractor(loaded.Config, db, &fakeContextLLM{}, nil, profileTestScanner{}, 64); err == nil {
-		t.Errorf("expected missing route rejection")
+	unrouted, err := newProfileRuntime(loaded.Config, db, nil, profile.ModelProducer{}, nil, profileTestScanner{}, nil)
+	if err != nil {
+		t.Fatalf("missing model must degrade, not fail: %v", err)
+	}
+	if unrouted.extractor != nil {
+		t.Errorf("extractor built without a profiling model")
+	}
+	if findings := unrouted.health.Check(t.Context()); len(findings) != 1 || findings[0].Code != "profile_extractor_unavailable" {
+		t.Errorf("findings = %+v, want profile_extractor_unavailable", findings)
 	}
 	routedDir := t.TempDir()
 	routed := routedDir + "/routed.yaml"
@@ -412,14 +419,21 @@ children:
 	}
 	defer func() { _ = routedDB.Close() }()
 	reader := sdkmetric.NewManualReader()
-	extractor, recorder, err := newProfileExtractor(loadedRouted.Config, routedDB, &fakeContextLLM{}, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), profileTestScanner{}, 512)
+	producer, err := profilingProducer(loadedRouted.Config)
 	if err != nil {
-		t.Fatalf("newProfileExtractor: %v", err)
+		t.Fatalf("profilingProducer: %v", err)
 	}
-	if extractor == nil || recorder == nil {
-		t.Fatalf("extractor = %v, recorder = %v", extractor, recorder)
+	rt, err := newProfileRuntime(loadedRouted.Config, routedDB, &fakeContextLLM{}, producer, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), profileTestScanner{}, nil)
+	if err != nil {
+		t.Fatalf("newProfileRuntime: %v", err)
 	}
-	if err := extractor.Enqueue(profile.Job{
+	if rt.extractor == nil {
+		t.Fatal("extractor missing for a routed configuration")
+	}
+	if findings := rt.health.Check(t.Context()); len(findings) != 0 {
+		t.Errorf("routed runtime findings = %+v, want none", findings)
+	}
+	if err := rt.extractor.Enqueue(t.Context(), profile.Job{
 		OwnerID: principal.OwnerID, SessionID: "sess-wire",
 		Events: []profile.JobEvent{{ID: "evt-wire-1", Sequence: 1, Text: "hello"}},
 	}); err != nil {

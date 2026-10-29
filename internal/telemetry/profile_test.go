@@ -39,7 +39,7 @@ func TestProfileRecorderObservableGauges(t *testing.T) {
 	depth := int64(3)
 	recorder, err := NewProfileRecorder(newTestMeterProvider(reader), ProfileCallbacks{
 		QueueDepth: func() int64 { return depth },
-		FactCounts: func() []ProfileFactCount {
+		FactCounts: func(context.Context) []ProfileFactCount {
 			return []ProfileFactCount{
 				{Status: "active", Category: "tool", Count: 2},
 				{Status: "candidate", Category: "language", Count: 5},

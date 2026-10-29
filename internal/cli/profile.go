@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/otel/metric"
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
@@ -279,8 +278,8 @@ func (r *profileRegistry) Expire(ctx context.Context, now time.Time) ([]profile.
 	return expired, nil
 }
 
-func (r *profileRegistry) Search(ctx context.Context, ownerID, category, query string, limit int, now time.Time) ([]profile.SearchHit, error) {
-	rows, err := store.NewProfileStore(r.db).SearchFacts(ctx, ownerID, category, query, limit, now)
+func (r *profileRegistry) Search(ctx context.Context, ownerID, category, query string, verifiedOnly bool, limit int, now time.Time) ([]profile.SearchHit, error) {
+	rows, err := store.NewProfileStore(r.db).SearchFacts(ctx, ownerID, category, query, verifiedOnly, limit, now)
 	if err != nil {
 		return nil, err
 	}
@@ -462,10 +461,7 @@ func profilingProducer(cfg *config.Config) (profile.ModelProducer, error) {
 	if cfg == nil {
 		return profile.ModelProducer{}, errors.New("cli: config must not be nil")
 	}
-	role := cfg.Models.Routing["profiling"]
-	if strings.TrimSpace(role) == "" {
-		role = "auxiliary"
-	}
+	role := profilingRole(cfg)
 	route, ok := cfg.ModelRoutes[role]
 	if !ok {
 		return profile.ModelProducer{}, fmt.Errorf("cli: profiling route %q is not configured", role)
@@ -481,6 +477,13 @@ func profilingProducer(cfg *config.Config) (profile.ModelProducer, error) {
 		return profile.ModelProducer{}, fmt.Errorf("cli: profiling candidate %q carries no identity", route.Candidates[0])
 	}
 	return profile.ModelProducer{Provider: definition.Protocol, Model: definition.Model}, nil
+}
+
+func profilingRole(cfg *config.Config) string {
+	if role := strings.TrimSpace(cfg.Models.Routing["profiling"]); role != "" {
+		return role
+	}
+	return "auxiliary"
 }
 
 type profileModelCaller struct {
@@ -557,15 +560,16 @@ func profileRecorderObserver(recorder *telemetry.ProfileRecorder) profile.Observ
 			return
 		}
 		recorder.Record(ctx, &telemetry.ProfileObservation{
-			Kind:     observation.Kind,
-			Result:   observation.Result,
-			QueueAge: observation.QueueAge,
-			Lag:      observation.Lag,
-			Accepted: observation.Accepted,
-			Screened: observation.Screened,
-			Skipped:  observation.Skipped,
-			Facts:    observation.Facts,
-			Tokens:   observation.Tokens,
+			Kind:       observation.Kind,
+			Result:     observation.Result,
+			QueueAge:   observation.QueueAge,
+			Lag:        observation.Lag,
+			Accepted:   observation.Accepted,
+			Screened:   observation.Screened,
+			Skipped:    observation.Skipped,
+			Facts:      observation.Facts,
+			Tokens:     observation.Tokens,
+			Overridden: observation.Overridden,
 		})
 	}
 }
@@ -573,8 +577,8 @@ func profileRecorderObserver(recorder *telemetry.ProfileRecorder) profile.Observ
 func profileTelemetryCallbacks(db *sql.DB, queueDepth func() int64) telemetry.ProfileCallbacks {
 	callbacks := telemetry.ProfileCallbacks{QueueDepth: queueDepth}
 	if db != nil {
-		callbacks.FactCounts = func() []telemetry.ProfileFactCount {
-			rows, err := db.QueryContext(context.Background(), `SELECT status, category, COUNT(*) FROM profile_fact GROUP BY status, category`)
+		callbacks.FactCounts = func(ctx context.Context) []telemetry.ProfileFactCount {
+			rows, err := db.QueryContext(ctx, `SELECT status, category, COUNT(*) FROM profile_fact GROUP BY status, category`)
 			if err != nil {
 				return nil
 			}
@@ -625,42 +629,4 @@ func expireCandidateIDs(ctx context.Context, tx *sql.Tx, now time.Time) ([]strin
 		return nil, fmt.Errorf("cli: expire profile facts: %w", err)
 	}
 	return ids, nil
-}
-
-func newProfileExtractor(cfg *config.Config, db *sql.DB, llm adkmodel.LLM, mp metric.MeterProvider, scanner profile.SecretScanner, maxOutputTokens int) (*profile.Extractor, *telemetry.ProfileRecorder, error) {
-	if db == nil {
-		return nil, nil, errors.New("cli: profile database must not be nil")
-	}
-	if scanner == nil {
-		return nil, nil, errors.New("cli: profile scanner must not be nil")
-	}
-	producer, err := profilingProducer(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	var extractor *profile.Extractor
-	recorder, err := telemetry.NewProfileRecorder(mp, profileTelemetryCallbacks(db, func() int64 {
-		if extractor == nil {
-			return 0
-		}
-		return int64(extractor.QueueDepth())
-	}))
-	if err != nil {
-		return nil, nil, err
-	}
-	service, err := profile.NewService(newProfileRegistry(db), profile.Config{
-		MinConfidence: cfg.Profile.CandidateMinConfidence,
-		Scanner:       scanner,
-		Observer:      profileRecorderObserver(recorder),
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	extractor, err = profile.NewExtractor(service, newProfileModelCaller(llm, producer, maxOutputTokens), scanner,
-		"profiling", cfg.Profile.PromptVersion, maxOutputTokens, cfg.Profile.ExtractionQueueCapacity, nil,
-		profile.WithObserver(profileRecorderObserver(recorder)))
-	if err != nil {
-		return nil, nil, err
-	}
-	return extractor, recorder, nil
 }
