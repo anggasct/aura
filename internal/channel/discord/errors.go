@@ -27,7 +27,10 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
+	if e.Cause == nil {
+		return fmt.Sprintf("%s: %s", e.Code, e.Detail)
+	}
+	return fmt.Sprintf("%s: %s: %v", e.Code, e.Detail, e.Cause)
 }
 
 func (e *Error) Unwrap() error {

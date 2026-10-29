@@ -350,6 +350,9 @@ func TestThreads_CreateEnsureFailurePreservesCause(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Errorf("error = %v, want the session cause preserved", err)
 	}
+	if !strings.Contains(err.Error(), sentinel.Error()) {
+		t.Errorf("error = %v, want the session cause rendered in the message", err)
+	}
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeThreadCreateFailed {
 		t.Errorf("error = %v, want thread_create_failed", err)
 	}
