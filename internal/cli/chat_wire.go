@@ -49,6 +49,10 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 		for i := range req.Parts {
 			parts[i] = runtimeingress.InputPart{Text: req.Parts[i].Text, Image: req.Parts[i].Image}
 		}
+		agentID := req.AgentID
+		if agentID == "" {
+			agentID = r.agentID
+		}
 		runtimeReq := &runtime.TurnRequest{
 			SessionID:      req.SessionID,
 			PrincipalID:    req.PrincipalID,
@@ -56,7 +60,7 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 			Origin:         runtime.OriginTerminal,
 			Parts:          parts,
 			IdempotencyKey: req.IdempotencyKey,
-			AgentID:        r.agentID,
+			AgentID:        agentID,
 		}
 		for ev, err := range r.engine.Run(ctx, runtimeReq) {
 			if err != nil {
@@ -83,7 +87,7 @@ type terminalSessions struct {
 
 var _ terminal.Sessions = (*terminalSessions)(nil)
 
-func (s *terminalSessions) Create(ctx context.Context, owner string) (terminal.Session, error) {
+func (s *terminalSessions) Create(ctx context.Context, owner, agentID string) (terminal.Session, error) {
 	newID := s.newID
 	if newID == nil {
 		newID = newTerminalSessionID
@@ -92,10 +96,13 @@ func (s *terminalSessions) Create(ctx context.Context, owner string) (terminal.S
 	if err != nil {
 		return terminal.Session{}, fmt.Errorf("terminal: create session id: %w", err)
 	}
+	if agentID == "" {
+		agentID = s.agentID
+	}
 	internal := &store.Session{
 		ID:        id,
 		OwnerID:   owner,
-		AgentID:   s.agentID,
+		AgentID:   agentID,
 		Metadata:  json.RawMessage(`{}`),
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
@@ -103,7 +110,7 @@ func (s *terminalSessions) Create(ctx context.Context, owner string) (terminal.S
 	if err := s.sessions.Create(ctx, internal); err != nil {
 		return terminal.Session{}, err
 	}
-	return terminal.Session{ID: internal.ID, OwnerID: internal.OwnerID}, nil
+	return terminal.Session{ID: internal.ID, OwnerID: internal.OwnerID, AgentID: internal.AgentID}, nil
 }
 
 func (s *terminalSessions) Get(ctx context.Context, id string) (terminal.Session, error) {
@@ -111,7 +118,7 @@ func (s *terminalSessions) Get(ctx context.Context, id string) (terminal.Session
 	if err != nil {
 		return terminal.Session{}, err
 	}
-	return terminal.Session{ID: internal.ID, OwnerID: internal.OwnerID}, nil
+	return terminal.Session{ID: internal.ID, OwnerID: internal.OwnerID, AgentID: internal.AgentID}, nil
 }
 
 func (s *terminalSessions) ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]terminal.Event, error) {
@@ -262,6 +269,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 	}
 	console.SetInputCloser(func() { _ = os.Stdin.Close() })
 	console.SetSessionID(sessionID)
+	console.SetAgentID(agentID)
 	if useTTY {
 		outFD := int(outFile.Fd())
 		console.SetTTY(terminal.NewTTYRenderer(terminal.TTYOptions{

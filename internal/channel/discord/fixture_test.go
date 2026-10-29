@@ -403,11 +403,15 @@ func (s *fakeMediaStore) Put(ctx context.Context, content io.Reader, meta *Artif
 type fakeSessionEnsurer struct {
 	mu       sync.Mutex
 	sessions map[string]string
+	err      error
 }
 
 func (s *fakeSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
 	if s.sessions == nil {
 		s.sessions = map[string]string{}
 	}

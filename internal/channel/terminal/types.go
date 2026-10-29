@@ -26,6 +26,7 @@ type Renderer interface {
 type Session struct {
 	ID      string
 	OwnerID string
+	AgentID string
 }
 
 type Runner interface {
@@ -35,13 +36,14 @@ type Runner interface {
 type Request struct {
 	SessionID      string
 	PrincipalID    string
+	AgentID        string
 	Origin         string
 	Parts          []Input
 	IdempotencyKey string
 }
 
 type Sessions interface {
-	Create(ctx context.Context, owner string) (Session, error)
+	Create(ctx context.Context, owner, agentID string) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
 	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]Event, error)
 }

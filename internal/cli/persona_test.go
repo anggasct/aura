@@ -128,23 +128,26 @@ func TestResolveChatPersona(t *testing.T) {
 
 func TestTerminalRunsAndRecordsChosenPersona(t *testing.T) {
 	engine := &captureEngine{}
-	runner := &terminalRunner{engine: engine, agentID: "engineer"}
-	for range runner.Run(t.Context(), &terminal.Request{SessionID: "sess-1", PrincipalID: "local-owner", Parts: []terminal.Input{{Text: "hi"}}}) {
+	runner := &terminalRunner{engine: engine, agentID: "main"}
+	for range runner.Run(t.Context(), &terminal.Request{SessionID: "sess-1", PrincipalID: "local-owner", AgentID: "engineer", Parts: []terminal.Input{{Text: "hi"}}}) {
 	}
 	if engine.got == nil || engine.got.AgentID != "engineer" {
-		t.Fatalf("terminal turn = %+v, want persona engineer", engine.got)
+		t.Fatalf("terminal turn = %+v, want request persona engineer", engine.got)
 	}
 
 	db := discordTestDB(t)
 	svc := store.NewSessionService(db)
 	sessions := &terminalSessions{sessions: svc, agentID: "engineer"}
-	created, err := sessions.Create(t.Context(), "local-owner")
+	created, err := sessions.Create(t.Context(), "local-owner", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	stored, err := svc.Get(t.Context(), created.ID)
 	if err != nil || stored.AgentID != "engineer" {
 		t.Fatalf("stored session persona = %q, %v; want engineer", stored.AgentID, err)
+	}
+	if created.AgentID != "engineer" {
+		t.Fatalf("created session persona = %q, want engineer", created.AgentID)
 	}
 }
 

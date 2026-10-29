@@ -3,6 +3,7 @@ package discord
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -333,6 +334,27 @@ func TestThreads_CreateFailureFallsBackToChannel(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no parent channel send on create failure")
+	}
+}
+
+func TestThreads_CreateEnsureFailurePreservesCause(t *testing.T) {
+	sentinel := errors.New("session store offline")
+	sessions := &fakeSessionEnsurer{err: sentinel}
+	stub := newRestStub(t, func(int, http.ResponseWriter, *http.Request) {})
+	adapter := newThreadAdapter(t, newMemorySink(), sessions, stub)
+
+	_, err := adapter.createThreadForTrigger(t.Context(), threadTrigger("9040", "ensure failure", []string{"999"}), "333")
+	if err == nil {
+		t.Fatal("createThreadForTrigger() error = nil, want session failure")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("error = %v, want the session cause preserved", err)
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeThreadCreateFailed {
+		t.Errorf("error = %v, want thread_create_failed", err)
+	}
+	if strings.Contains(err.Error(), "has no parent session") {
+		t.Errorf("error = %v, must not claim a missing parent session", err)
 	}
 }
 

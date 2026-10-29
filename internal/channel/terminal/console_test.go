@@ -90,12 +90,12 @@ func newFakeSessions() *fakeSessions {
 	return &fakeSessions{sessions: map[string]Session{}, events: map[string][]Event{}}
 }
 
-func (s *fakeSessions) Create(ctx context.Context, owner string) (Session, error) {
+func (s *fakeSessions) Create(ctx context.Context, owner, agentID string) (Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.next++
 	id := "sess_" + string(rune('0'+s.next))
-	s.sessions[id] = Session{ID: id, OwnerID: owner}
+	s.sessions[id] = Session{ID: id, OwnerID: owner, AgentID: agentID}
 	return s.sessions[id], nil
 }
 
@@ -300,6 +300,46 @@ func TestSessionSwitchToOwnedSession(t *testing.T) {
 	}
 	if len(runner.calls) != 1 || runner.calls[0].SessionID != "sess_mine" {
 		t.Errorf("turn session = %+v, want sess_mine", runner.calls)
+	}
+}
+
+func TestSessionSwitchAdoptsSessionPersona(t *testing.T) {
+	sessions := newFakeSessions()
+	sessions.sessions["sess_eng"] = Session{ID: "sess_eng", OwnerID: "owner", AgentID: "engineer"}
+	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
+	console, _, _, cancel := newConsoleForTest(runner, sessions, "/session sess_eng\nprompt\n/new\nafter-new\n")
+	defer cancel()
+	console.SetAgentID("main")
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("runs = %d, want 2", len(runner.calls))
+	}
+	if runner.calls[0].SessionID != "sess_eng" || runner.calls[0].AgentID != "engineer" {
+		t.Errorf("turn after switch = %+v, want sess_eng as engineer", runner.calls[0])
+	}
+	if runner.calls[1].SessionID == "sess_eng" {
+		t.Errorf("turn after /new reused session %q", runner.calls[1].SessionID)
+	}
+	if runner.calls[1].AgentID != "engineer" {
+		t.Errorf("turn after /new agent = %q, want engineer", runner.calls[1].AgentID)
+	}
+}
+
+func TestConfiguredSessionAdoptsSessionPersona(t *testing.T) {
+	sessions := newFakeSessions()
+	sessions.sessions["sess_eng"] = Session{ID: "sess_eng", OwnerID: "owner", AgentID: "engineer"}
+	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
+	console, _, _, cancel := newConsoleForTest(runner, sessions, "prompt\n")
+	defer cancel()
+	console.SetSessionID("sess_eng")
+	console.SetAgentID("main")
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(runner.calls) != 1 || runner.calls[0].AgentID != "engineer" {
+		t.Errorf("turn = %+v, want the resumed session persona engineer", runner.calls)
 	}
 }
 

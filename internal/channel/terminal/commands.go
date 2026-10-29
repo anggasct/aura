@@ -55,11 +55,14 @@ func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
 }
 
 func (c *Console) newSession(ctx context.Context) error {
-	sess, err := c.sessions.Create(ctx, c.principal)
+	sess, err := c.sessions.Create(ctx, c.principal, c.agentID)
 	if err != nil {
 		return fmt.Errorf("terminal: create session: %w", err)
 	}
 	c.sessionID = sess.ID
+	if sess.AgentID != "" {
+		c.agentID = sess.AgentID
+	}
 	return writeLinef(c.diag, "new session %s", sess.ID)
 }
 
@@ -76,6 +79,9 @@ func (c *Console) sessionCommand(ctx context.Context, args []string) error {
 		return fmt.Errorf("terminal: session %s is not owned by %s", id, c.principal)
 	}
 	c.sessionID = sess.ID
+	if sess.AgentID != "" {
+		c.agentID = sess.AgentID
+	}
 	return writeLinef(c.diag, "switched to session %s", sess.ID)
 }
 

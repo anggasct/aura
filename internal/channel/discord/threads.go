@@ -224,7 +224,7 @@ func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayloa
 	sessionID := a.sessionKey("channel:" + parentID)
 	principalID, _, _ := resolveAuthor(a.cfg, a.owners, msg.Author.ID)
 	if err := a.sessions.EnsureSession(ctx, sessionID, principalID, a.persona); err != nil {
-		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s has no parent session", msg.ID)
+		return "", ErrorWrapf(ErrorCodeThreadCreateFailed, err, "thread create for message %s: parent session could not be ensured", msg.ID)
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      sessionID,

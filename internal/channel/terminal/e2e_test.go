@@ -57,8 +57,8 @@ type e2eSessions struct {
 	sessions store.SessionService
 }
 
-func (s e2eSessions) Create(ctx context.Context, owner string) (terminal.Session, error) {
-	internal := &store.Session{ID: "e2e-session", OwnerID: owner, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+func (s e2eSessions) Create(ctx context.Context, owner, agentID string) (terminal.Session, error) {
+	internal := &store.Session{ID: "e2e-session", OwnerID: owner, AgentID: agentID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := s.sessions.Create(ctx, internal); err != nil {
 		return terminal.Session{}, err
 	}
@@ -67,7 +67,7 @@ func (s e2eSessions) Create(ctx context.Context, owner string) (terminal.Session
 
 func (s e2eSessions) Get(ctx context.Context, id string) (terminal.Session, error) {
 	internal, err := s.sessions.Get(ctx, id)
-	return terminal.Session{ID: internal.ID, OwnerID: internal.OwnerID}, err
+	return terminal.Session{ID: internal.ID, OwnerID: internal.OwnerID, AgentID: internal.AgentID}, err
 }
 
 func (s e2eSessions) ListEvents(ctx context.Context, sessionID string, after uint64, limit int) ([]terminal.Event, error) {
