@@ -16,6 +16,8 @@ const (
 	ErrorCodeOwnerSecret                ErrorCode = "owner_secret_invalid"
 	ErrorCodeOwnerIdentityInvalid       ErrorCode = "owner_identity_invalid"
 	ErrorCodeModelProviderInvalid       ErrorCode = "model_provider_invalid"
+	ErrorCodePersonaInvalid             ErrorCode = "persona_invalid"
+	ErrorCodePersonaSecret              ErrorCode = "persona_secret_invalid"
 )
 
 type Error struct {

@@ -12,10 +12,11 @@ import (
 func newChatCmd(gf *globalFlags) *cobra.Command {
 	var plain bool
 	cmd := &cobra.Command{
-		Use:   "chat [--plain] [--session <id>]",
+		Use:   "chat [--plain] [--session <id>] [--persona <id>]",
 		Short: "Interactive terminal console",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID, _ := cmd.Flags().GetString("session")
+			persona, _ := cmd.Flags().GetString("persona")
 			ctx := cmd.Context()
 			result, err := config.Load(gf.configPath)
 			if err != nil {
@@ -31,7 +32,7 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 			if result.CapabilityStateError != nil {
 				return result.CapabilityStateError
 			}
-			return runChat(ctx, cfg, result.Path, logger, os.Stdin, os.Stdout, os.Stderr, sessionID, chatPresentation{
+			return runChat(ctx, cfg, result.Path, logger, os.Stdin, os.Stdout, os.Stderr, sessionID, persona, chatPresentation{
 				plain:   plain,
 				noColor: os.Getenv("NO_COLOR") != "",
 			})
@@ -39,5 +40,6 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&plain, "plain", false, "force non-TTY plain output")
 	cmd.Flags().String("session", "", "resume an existing session")
+	cmd.Flags().String("persona", "", "run turns as this persona (default main; a resumed session keeps its own)")
 	return cmd
 }

@@ -128,13 +128,13 @@ func TestThreads_MentionCreatesThreadAndDeliversInside(t *testing.T) {
 		t.Fatal("admit() = false, want thread admission")
 	}
 	conv, ref := envelopeThreadID(t, sink, "message:9001")
-	if conv != "thread:777001" {
+	if conv != testSessionKey("thread:777001") {
 		t.Fatalf("conversation = %q, want thread:777001", conv)
 	}
 	if ref.ThreadID != "777001" || ref.ChannelID != "333" || ref.MessageID != "9001" {
 		t.Fatalf("reply reference = %+v, want parent 333 thread 777001 message 9001", ref)
 	}
-	if owner, ok := ensuredOwner(sessions, "thread:777001"); !ok || owner != "discord:111" {
+	if owner, ok := ensuredOwner(sessions, testSessionKey("thread:777001")); !ok || owner != "discord:111" {
 		t.Fatalf("thread session owner = %q, ok = %v; want discord:111", owner, ok)
 	}
 	creates := 0
@@ -188,6 +188,37 @@ func TestThreads_MentionCreatesThreadAndDeliversInside(t *testing.T) {
 	}
 }
 
+func TestThreads_CreateJournalsUnderEnsuredPersonaChannelSession(t *testing.T) {
+	sink := newMemorySink()
+	sessions := &fakeSessionEnsurer{}
+	stub := threadCreateStub(t, "777010")
+	adapter := newThreadAdapter(t, sink, sessions, stub)
+	effects := newFakeEffectRunner()
+	effects.sessionExists = func(sessionID string) bool {
+		_, ok := ensuredOwner(sessions, sessionID)
+		return ok
+	}
+	adapter.effects = effects
+
+	admitted, err := adapter.admit(t.Context(), threadTrigger("9010", "hello aura", []string{"999"}))
+	if err != nil || !admitted {
+		t.Fatalf("admit() = %v, %v; want thread admission", admitted, err)
+	}
+	conv, ref := envelopeThreadID(t, sink, "message:9010")
+	if conv != testSessionKey("thread:777010") || ref.ThreadID != "777010" {
+		t.Fatalf("conversation = %q thread %q, want the created thread, not the channel fallback", conv, ref.ThreadID)
+	}
+	if owner, ok := ensuredOwner(sessions, testSessionKey("channel:333")); !ok || owner != "discord:111" {
+		t.Fatalf("parent channel session owner = %q, ok = %v; want discord:111 before the intent", owner, ok)
+	}
+	sink.mu.Lock()
+	agentID := sink.envelopes["message:9010"].AgentID
+	sink.mu.Unlock()
+	if agentID != "main" {
+		t.Fatalf("envelope persona = %q, want main", agentID)
+	}
+}
+
 func TestThreads_InThreadNeedsNoMention(t *testing.T) {
 	sink := newMemorySink()
 	sessions := &fakeSessionEnsurer{}
@@ -206,7 +237,7 @@ func TestThreads_InThreadNeedsNoMention(t *testing.T) {
 		t.Fatal("in-thread admit() = false, want admission without mention")
 	}
 	conv, ref := envelopeThreadID(t, sink, "message:9012")
-	if conv != "thread:777002" {
+	if conv != testSessionKey("thread:777002") {
 		t.Fatalf("conversation = %q, want thread:777002", conv)
 	}
 	if ref.ThreadID != "777002" {
@@ -280,7 +311,7 @@ func TestThreads_CreateFailureFallsBackToChannel(t *testing.T) {
 		t.Fatal("admit() = false, want channel fallback admission")
 	}
 	conv, ref := envelopeThreadID(t, sink, "message:9031")
-	if conv != "channel:333" {
+	if conv != testSessionKey("channel:333") {
 		t.Fatalf("conversation = %q, want channel:333 fallback", conv)
 	}
 	if ref.ThreadID != "" {
@@ -385,7 +416,7 @@ func TestThreads_TwoThreadsScopeMemorySessions(t *testing.T) {
 	if firstConv == secondConv {
 		t.Fatalf("thread sessions collide: %q", firstConv)
 	}
-	if !strings.HasPrefix(firstConv, "thread:") || !strings.HasPrefix(secondConv, "thread:") {
+	if !strings.HasPrefix(firstConv, testSessionKey("thread:")) || !strings.HasPrefix(secondConv, testSessionKey("thread:")) {
 		t.Fatalf("conversations = %q, %q; want thread: sessions", firstConv, secondConv)
 	}
 	if firstRef.ChannelID != "333" || secondRef.ChannelID != "333" {
@@ -742,7 +773,7 @@ func TestThreads_ForumMentionSkipsThreadCreate(t *testing.T) {
 		t.Fatal("admit() = false, want channel admission for forum")
 	}
 	conv, ref := envelopeThreadID(t, sink, "message:9071")
-	if conv != "channel:333" {
+	if conv != testSessionKey("channel:333") {
 		t.Fatalf("conversation = %q, want channel:333 for forum", conv)
 	}
 	if ref.ThreadID != "" {

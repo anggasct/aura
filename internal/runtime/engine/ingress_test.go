@@ -40,12 +40,17 @@ func jsonStep(kind string) runtime.FakeStep {
 	return runtime.FakeStep{Kind: kind, Payload: json.RawMessage(`{}`)}
 }
 
+func sampleSession(conversation string) string {
+	return runtimeingress.SessionKey("main", "telegram", conversation)
+}
+
 func sampleEnvelope(conversation, externalID string) *runtimeingress.IngressEnvelope {
 	return &runtimeingress.IngressEnvelope{
 		Source:         "telegram",
+		AgentID:        "main",
 		ExternalID:     externalID,
 		PrincipalID:    "user-1",
-		ConversationID: conversation,
+		ConversationID: sampleSession(conversation),
 		Parts:          []runtimeingress.InputPart{{Text: "hello"}},
 		ReceivedAt:     time.Now().UTC(),
 	}
@@ -55,7 +60,7 @@ func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindModelStarted), jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, "conv-1")
+		mustCreateSession(t, db, sampleSession("conv-1"))
 
 		ref, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-1"))
 		if err != nil {
@@ -64,7 +69,7 @@ func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
 		if ref.Replayed {
 			t.Error("first delivery must not be a replay")
 		}
-		if ref.SessionID != "conv-1" || ref.TurnID == "" {
+		if ref.SessionID != sampleSession("conv-1") || ref.TurnID == "" {
 			t.Errorf("unexpected turn ref: %+v", ref)
 		}
 
@@ -82,7 +87,7 @@ func TestAcceptDuplicateReturnsOriginal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, "conv-1")
+		mustCreateSession(t, db, sampleSession("conv-1"))
 
 		first, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-dup"))
 		if err != nil {
@@ -115,7 +120,7 @@ func TestAcceptAfterShutdownIsRejected(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, "conv-1")
+		mustCreateSession(t, db, sampleSession("conv-1"))
 
 		if err := engine.Shutdown(context.Background()); err != nil {
 			t.Fatalf("Shutdown: %v", err)
@@ -131,14 +136,17 @@ func TestAcceptAfterShutdownIsRejected(t *testing.T) {
 func TestAcceptValidatesIdentity(t *testing.T) {
 	executor := runtime.NewFakeExecutor(nil)
 	engine, db, _ := newTestRuntime(t, Config{}, executor)
-	mustCreateSession(t, db, "conv-1")
+	mustCreateSession(t, db, sampleSession("conv-1"))
 
 	cases := map[string]*runtimeingress.IngressEnvelope{
-		"nil envelope":         nil,
-		"missing source":       {ExternalID: "x", PrincipalID: "u", ConversationID: "conv-1"},
-		"missing external":     {Source: "telegram", PrincipalID: "u", ConversationID: "conv-1"},
-		"missing principal":    {Source: "telegram", ExternalID: "x", ConversationID: "conv-1"},
-		"missing conversation": {Source: "telegram", ExternalID: "x", PrincipalID: "u"},
+		"nil envelope":          nil,
+		"missing source":        {AgentID: "main", ExternalID: "x", PrincipalID: "u", ConversationID: sampleSession("conv-1")},
+		"missing external":      {Source: "telegram", AgentID: "main", PrincipalID: "u", ConversationID: sampleSession("conv-1")},
+		"missing principal":     {Source: "telegram", AgentID: "main", ExternalID: "x", ConversationID: sampleSession("conv-1")},
+		"missing conversation":  {Source: "telegram", AgentID: "main", ExternalID: "x", PrincipalID: "u"},
+		"missing persona":       {Source: "telegram", ExternalID: "x", PrincipalID: "u", ConversationID: sampleSession("conv-1")},
+		"unscoped conversation": {Source: "telegram", AgentID: "main", ExternalID: "x", PrincipalID: "u", ConversationID: "conv-1"},
+		"other persona scope":   {Source: "telegram", AgentID: "kuma", ExternalID: "x", PrincipalID: "u", ConversationID: sampleSession("conv-1")},
 	}
 	for name, env := range cases {
 		t.Run(name, func(t *testing.T) {

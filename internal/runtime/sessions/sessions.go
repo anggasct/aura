@@ -33,6 +33,8 @@ type Descriptor struct {
 	MaxCost        float64         `json:"max_cost"`
 	TraceParent    string          `json:"trace_parent"`
 	AgentID        string          `json:"agent_id"`
+	// Recorded at admit so a resumed or replayed turn keeps the persona version that accepted it.
+	Persona *runtime.PersonaFingerprint `json:"persona_fingerprint,omitempty"`
 }
 
 type QueuedTurn struct {

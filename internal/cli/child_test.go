@@ -927,3 +927,46 @@ func TestProductionHandlerChargeFailsClosed(t *testing.T) {
 		t.Fatalf("unreserved charge state = %q, want failed", got.State)
 	}
 }
+
+func TestChildInheritsParentPersona(t *testing.T) {
+	cfgPath := writeProfileCLIConfig(t)
+	loaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := openStorage(t.Context(), loaded.Config)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	now := time.Now().UTC()
+	sessions := store.NewSessionService(db)
+	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-parent", OwnerID: "owner-1", AgentID: "engineer", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		t.Fatalf("Create parent session: %v", err)
+	}
+	service, err := child.NewService(newChildRegistry(db))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	spec := &child.Spec{
+		ID: "ch-persona", IdempotencyKey: "key-persona",
+		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
+		OwnerID: "owner-1", ChildSessionID: "sess-child-persona",
+		Task:   "inspect the repo",
+		Budget: child.Budget{MaxTokens: 1000, Timeout: time.Minute},
+	}
+	if _, created, err := service.SpawnChild(t.Context(), spec, now); err != nil || !created {
+		t.Fatalf("SpawnChild: %v, %v", created, err)
+	}
+	childSession, err := sessions.Get(t.Context(), "sess-child-persona")
+	if err != nil {
+		t.Fatalf("Get child session: %v", err)
+	}
+	if childSession.AgentID != "engineer" {
+		t.Fatalf("child session persona = %q, want the parent's engineer", childSession.AgentID)
+	}
+	projection := childSessionRunner{db: db}.loadProjection(t.Context(), "sess-child-persona")
+	if req := childTurnRequest("sess-child-persona", "ch-persona", "inspect the repo", time.Time{}, projection); req.AgentID != "engineer" {
+		t.Fatalf("child turn persona = %q, want engineer", req.AgentID)
+	}
+}

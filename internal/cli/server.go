@@ -108,6 +108,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			logPersonas(ctx, logger, agentRegistry)
+			personaRecorder, err := telemetry.NewPersonaRecorder(pipeline.MeterProvider())
+			if err != nil {
+				return err
+			}
 			routeModel, err := model.RouteModelName(cfg, modelDefinition.Model)
 			if err != nil {
 				return err
@@ -161,14 +166,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					Runtime:  sessionRuntime,
 				}
 			}
-			runtimeEngine, err := runtimeengine.NewEngine(runtimeengine.Config{
+			runtimeEngine, err := runtimeengine.NewEngine(&runtimeengine.Config{
 				MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
 				MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
 				TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
 				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 				DefaultAgentID:  auraagent.DefaultID,
+				Personas:        registryPersonas{registry: agentRegistry},
 				Durable:         durableConfig,
-				PostTurnHook:    composePostTurnHooks(memoryHook, profileHook),
+				PostTurnHook:    composePostTurnHooks(memoryHook, profileHook, personaTurnHook(personaRecorder)),
 			}, events, store.NewDedupeStore(db), adkExecutor, logger)
 			if err != nil {
 				return err

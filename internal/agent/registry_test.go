@@ -316,3 +316,45 @@ func TestResolveTiesBreakByRegistryOrder(t *testing.T) {
 		t.Fatalf("resolved %q, want the earlier-registered equal-specificity definition", definition.ID)
 	}
 }
+
+func TestSoulBecomesPersonaInstructions(t *testing.T) {
+	registry, err := Build([]config.AgentDefinition{
+		{ID: "kuma", Description: "Casual assistant", SoulFile: "personas/kuma.md", Soul: "You are Kuma."},
+		{ID: DefaultID, SoulFile: "personas/main.md", Soul: "You are the owner's main bot."},
+	}, validTools, []string{"primary"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	for id, want := range map[string]string{"kuma": "You are Kuma.", DefaultID: "You are the owner's main bot."} {
+		definition, ok := registry.Lookup(id)
+		if !ok {
+			t.Fatalf("%s not registered", id)
+		}
+		if definition.Instructions != want || definition.SoulFile == "" {
+			t.Errorf("%s instructions = %q from %q, want the soul", id, definition.Instructions, definition.SoulFile)
+		}
+	}
+}
+
+func TestFingerprintTracksSoulToolsAndRoute(t *testing.T) {
+	base := Definition{ID: "kuma", Instructions: "You are Kuma.", Tools: []string{"web_search", "read_file"}, ModelRoute: "primary"}
+	reordered := base
+	reordered.Tools = []string{"read_file", "web_search"}
+	if base.Fingerprint() != reordered.Fingerprint() {
+		t.Fatal("tool order changed the fingerprint")
+	}
+	got := base.Fingerprint()
+	if got.AgentID != "kuma" || got.ModelRoute != "primary" || len(got.SoulSHA256) != 64 || len(got.ToolsSHA256) != 64 {
+		t.Fatalf("fingerprint = %+v", got)
+	}
+	newSoul := base
+	newSoul.Instructions = "You are Kuma, now formal."
+	if newSoul.Fingerprint().SoulSHA256 == got.SoulSHA256 {
+		t.Fatal("soul change kept the soul digest")
+	}
+	newTools := base
+	newTools.Tools = []string{"read_file"}
+	if newTools.Fingerprint().ToolsSHA256 == got.ToolsSHA256 {
+		t.Fatal("tool change kept the tools digest")
+	}
+}

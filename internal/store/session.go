@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// Matches the migration default: a session created without a persona is served by the default agent.
+const defaultSessionAgentID = "main"
+
 type sqliteSessionService struct {
 	db *sql.DB
 }
@@ -24,9 +27,13 @@ func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error 
 	if metadata == nil {
 		metadata = json.RawMessage(`{}`)
 	}
+	agentID := sess.AgentID
+	if agentID == "" {
+		agentID = defaultSessionAgentID
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		sess.ID, sess.OwnerID, string(metadata), formatTime(sess.CreatedAt), formatTime(sess.UpdatedAt),
+		`INSERT INTO session (id, owner_id, agent_id, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		sess.ID, sess.OwnerID, agentID, string(metadata), formatTime(sess.CreatedAt), formatTime(sess.UpdatedAt),
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
@@ -44,8 +51,8 @@ func (s *sqliteSessionService) Get(ctx context.Context, id string) (Session, err
 	var sess Session
 	var metadata, createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, owner_id, metadata_json, created_at, updated_at FROM session WHERE id = ?`, id,
-	).Scan(&sess.ID, &sess.OwnerID, &metadata, &createdAt, &updatedAt)
+		`SELECT id, owner_id, agent_id, metadata_json, created_at, updated_at FROM session WHERE id = ?`, id,
+	).Scan(&sess.ID, &sess.OwnerID, &sess.AgentID, &metadata, &createdAt, &updatedAt)
 	if err != nil {
 		return Session{}, fmt.Errorf("get session %s: %w", id, err)
 	}

@@ -405,6 +405,11 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	return a.acceptEnvelope(ctx, msg, envelope, msg.ChannelID)
 }
 
+// The engine hands this key back as the delivery and approval conversation, so every adapter-side lookup must use it, never the bare Discord conversation.
+func (a *Adapter) sessionKey(conversationID string) string {
+	return runtimeingress.SessionKey(a.persona, "discord:"+a.cfg.Instance, conversationID)
+}
+
 func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, threadID, parent string) (bool, error) {
 	if msg.GuildID == "" || !validThreadAuthor(a.cfg, a.owners, a.selfID, msg) {
 		return false, nil
@@ -456,8 +461,10 @@ func (a *Adapter) admitUnknownThread(ctx context.Context, msg *messagePayload) (
 }
 
 func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope, bindingChannel string) (bool, error) {
+	envelope.AgentID = a.persona
+	envelope.ConversationID = a.sessionKey(envelope.ConversationID)
 	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, actor: msg.Author.ID, guildID: msg.GuildID, channelID: bindingChannel})
-	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID); err != nil {
+	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, a.persona); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)
 	}
 	if len(msg.Attachments) > 0 && !a.intakeAttachments(ctx, msg, envelope) {

@@ -35,7 +35,8 @@ func (terminalBroker) Evaluate(ctx context.Context, request *approval.ToolReques
 }
 
 type terminalRunner struct {
-	engine runtime.AgentRuntime
+	engine  runtime.AgentRuntime
+	agentID string
 }
 
 func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Seq2[terminal.Event, error] {
@@ -55,6 +56,7 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 			Origin:         runtime.OriginTerminal,
 			Parts:          parts,
 			IdempotencyKey: req.IdempotencyKey,
+			AgentID:        r.agentID,
 		}
 		for ev, err := range r.engine.Run(ctx, runtimeReq) {
 			if err != nil {
@@ -76,6 +78,7 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 type terminalSessions struct {
 	sessions store.SessionService
 	newID    func() (string, error)
+	agentID  string
 }
 
 var _ terminal.Sessions = (*terminalSessions)(nil)
@@ -92,6 +95,7 @@ func (s *terminalSessions) Create(ctx context.Context, owner string) (terminal.S
 	internal := &store.Session{
 		ID:        id,
 		OwnerID:   owner,
+		AgentID:   s.agentID,
 		Metadata:  json.RawMessage(`{}`),
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
@@ -139,7 +143,7 @@ func shouldUseTTY(present chatPresentation, inTTY, outTTY bool) bool {
 	return inTTY && outTTY
 }
 
-func runChat(ctx context.Context, cfg *config.Config, configPath string, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID string, present chatPresentation) error {
+func runChat(ctx context.Context, cfg *config.Config, configPath string, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID, persona string, present chatPresentation) error {
 	db, err := openStorage(ctx, cfg)
 	if err != nil {
 		return err
@@ -169,6 +173,10 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
 	registry, err := buildAgentRegistry(cfg)
+	if err != nil {
+		return err
+	}
+	agentID, err := resolveChatPersona(ctx, registry, sessions, sessionID, persona)
 	if err != nil {
 		return err
 	}
@@ -220,12 +228,13 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 	if err != nil {
 		return err
 	}
-	engine, err := runtimeengine.NewEngine(runtimeengine.Config{
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
 		MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
 		MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
 		TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
 		ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 		DefaultAgentID:  auraagent.DefaultID,
+		Personas:        registryPersonas{registry: registry},
 		PostTurnHook:    composePostTurnHooks(memoryHook, profileHook),
 	}, events, store.NewDedupeStore(db), executor, logger)
 	if err != nil {
@@ -233,8 +242,8 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 	}
 	executor.SetEventPublisher(engine)
 	console := terminal.NewConsole(
-		&terminalRunner{engine: engine},
-		&terminalSessions{sessions: sessions},
+		&terminalRunner{engine: engine, agentID: agentID},
+		&terminalSessions{sessions: sessions, agentID: agentID},
 		terminal.PlainRenderer{},
 		in, out, diag,
 		terminal.Config{

@@ -40,7 +40,7 @@ func TestComposedEntryVerifiesExternalWorldEvidence(t *testing.T) {
 		t.Fatalf("Create session: %v", err)
 	}
 	events := store.NewEventStore(db)
-	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, events, store.NewDedupeStore(db), runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}}), nil)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}}), nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}

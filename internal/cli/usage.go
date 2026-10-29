@@ -153,12 +153,19 @@ func noPositionalArgs(cmd *cobra.Command, args []string) error {
 }
 
 func newUsageStatusCmd(gf *globalFlags) *cobra.Command {
-	return &cobra.Command{
+	var by string
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Report current day/month spend against budget caps",
 		Args:  noPositionalArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if by != "" && by != usageGroupPersona {
+				return &usageError{fmt.Errorf("%s: --by %q is not supported; use %q", cmd.CommandPath(), by, usageGroupPersona)}
+			}
 			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *config.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
+				if by == usageGroupPersona {
+					return printUsageByPersona(ctx, cmd.OutOrStdout(), ledger)
+				}
 				st, err := ledger.Status(ctx)
 				if err != nil {
 					return err
@@ -179,6 +186,30 @@ func newUsageStatusCmd(gf *globalFlags) *cobra.Command {
 			})
 		},
 	}
+	cmd.Flags().StringVar(&by, "by", "", `group spend; only "persona" is supported`)
+	return cmd
+}
+
+const (
+	usageGroupPersona   = "persona"
+	usageUnattributedID = "(unattributed)"
+)
+
+func printUsageByPersona(ctx context.Context, out io.Writer, ledger *usage.Ledger) error {
+	spends, err := ledger.StatusByAgent(ctx)
+	if err != nil {
+		return err
+	}
+	tbl := newTable(out)
+	tbl.printf("persona\tday used (micros)\tmonth used (micros)\n")
+	for i := range spends {
+		persona := spends[i].AgentID
+		if persona == "" {
+			persona = usageUnattributedID
+		}
+		tbl.printf("%s\t%d\t%d\n", persona, spends[i].DayUsedMicros(), spends[i].MonthUsedMicros())
+	}
+	return tbl.flush()
 }
 
 func newUsageEntriesCmd(gf *globalFlags) *cobra.Command {

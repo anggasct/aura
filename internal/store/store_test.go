@@ -344,6 +344,30 @@ func TestSessionCreateGetRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionRecordsPersona(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	sessions := NewSessionService(db)
+
+	kuma := newSession("kuma/discord:home/channel:1")
+	kuma.AgentID = "kuma"
+	legacy := newSession("channel:1")
+	for _, sess := range []*Session{&kuma, &legacy} {
+		if err := sessions.Create(ctx, sess); err != nil {
+			t.Fatalf("Create %s: %v", sess.ID, err)
+		}
+	}
+	for id, want := range map[string]string{kuma.ID: "kuma", legacy.ID: "main"} {
+		got, err := sessions.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get %s: %v", id, err)
+		}
+		if got.AgentID != want {
+			t.Errorf("session %s agent = %q, want %q", id, got.AgentID, want)
+		}
+	}
+}
+
 func TestSessionGetMissing(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

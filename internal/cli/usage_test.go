@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func seedUsage(t *testing.T, dataRoot string) {
 		t.Fatal(err)
 	}
 	reservation, err := ledger.Reserve(ctx, usage.ReserveRequest{
-		InvocationID: "inv-1", Attempt: 0, ModelDefinitionID: "primary",
+		InvocationID: "inv-1", Attempt: 0, ModelDefinitionID: "primary", AgentID: "kuma",
 		KnownInputTokens: 100, RequestedMaxOutputTokens: 200,
 	})
 	if err != nil {
@@ -83,6 +84,30 @@ func TestUsageStatus(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("status output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestUsageStatusByPersona(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeUsageConfig(t, dataRoot)
+	seedUsage(t, dataRoot)
+
+	out, err := execute(t, "usage", "status", "--by", "persona", "--config", cfg)
+	if err != nil {
+		t.Fatalf("usage status --by persona: %v", err)
+	}
+	if !strings.Contains(out, "persona") || !regexp.MustCompile(`(?m)^kuma\s+[1-9]\d*\s+[1-9]\d*\s*$`).MatchString(out) {
+		t.Fatalf("by-persona output does not attribute spend to kuma:\n%s", out)
+	}
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"usage", "status", "--by", "model", "--config", cfg})
+	var ue *usageError
+	if err := root.Execute(); !errors.As(err, &ue) {
+		t.Fatalf("--by model error = %v, want a usage error", err)
 	}
 }
 

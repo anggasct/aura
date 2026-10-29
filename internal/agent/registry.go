@@ -37,8 +37,8 @@ func (r *Registry) Lookup(id string) (Definition, bool) {
 
 func (r *Registry) Definitions() []Definition {
 	result := make([]Definition, 0, len(r.definitions))
-	for _, definition := range r.definitions {
-		result = append(result, definition.clone())
+	for i := range r.definitions {
+		result = append(result, r.definitions[i].clone())
 	}
 	return result
 }
@@ -110,6 +110,10 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 	}
 	if strings.TrimSpace(override.Instructions) != "" {
 		definition.Instructions = override.Instructions
+	}
+	if override.Soul != "" {
+		definition.Instructions = override.Soul
+		definition.SoulFile = override.SoulFile
 	}
 	if len(override.Tools) > 0 {
 		definition.Tools = append([]string(nil), override.Tools...)

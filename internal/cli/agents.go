@@ -44,7 +44,9 @@ func newAgentsListCmd(gf *globalFlags) *cobra.Command {
 			if err := write("ID\tCAPABILITIES\tTOOLS\tMODEL ROUTE\n"); err != nil {
 				return err
 			}
-			for _, definition := range registry.Definitions() {
+			definitions := registry.Definitions()
+			for i := range definitions {
+				definition := &definitions[i]
 				if err := write("%s\t%s\t%s\t%s\n",
 					definition.ID,
 					strings.Join(definition.Capabilities, ","),

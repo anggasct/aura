@@ -68,6 +68,52 @@ func (l *Ledger) windowBreakdown(ctx context.Context, where string, args []any, 
 	return nil
 }
 
+type AgentSpend struct {
+	AgentID             string
+	DayReservedMicros   int64
+	DaySettledMicros    int64
+	MonthReservedMicros int64
+	MonthSettledMicros  int64
+}
+
+func (a *AgentSpend) DayUsedMicros() int64 { return a.DayReservedMicros + a.DaySettledMicros }
+
+func (a *AgentSpend) MonthUsedMicros() int64 { return a.MonthReservedMicros + a.MonthSettledMicros }
+
+// StatusByAgent splits the current month by persona; an empty AgentID collects spend no persona turn made.
+func (l *Ledger) StatusByAgent(ctx context.Context) ([]AgentSpend, error) {
+	day, month := windowKeys(l.now())
+	rows, err := l.db.QueryContext(ctx, `
+		SELECT
+			COALESCE(r.agent_id, ''),
+			COALESCE(SUM(CASE WHEN r.window_day = ? AND r.state IN (?, ?) THEN r.reserved_cost_micros ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN r.window_day = ? AND e.id IS NOT NULL THEN e.cost_micros ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN r.state IN (?, ?) THEN r.reserved_cost_micros ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN e.id IS NOT NULL THEN e.cost_micros ELSE 0 END), 0)
+		FROM usage_reservation r
+		LEFT JOIN usage_entry e ON e.reservation_id = r.id
+		WHERE r.window_month = ? AND r.state IN (?, ?, ?)
+		GROUP BY COALESCE(r.agent_id, '')
+		ORDER BY COALESCE(r.agent_id, '')`,
+		day, stateActive, stateExpired, day, stateActive, stateExpired, month, stateActive, stateExpired, stateSettled)
+	if err != nil {
+		return nil, fmt.Errorf("usage: read spend by agent: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var spends []AgentSpend
+	for rows.Next() {
+		var spend AgentSpend
+		if err := rows.Scan(&spend.AgentID, &spend.DayReservedMicros, &spend.DaySettledMicros, &spend.MonthReservedMicros, &spend.MonthSettledMicros); err != nil {
+			return nil, fmt.Errorf("usage: scan spend by agent: %w", err)
+		}
+		spends = append(spends, spend)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("usage: read spend by agent: %w", err)
+	}
+	return spends, nil
+}
+
 type Entry struct {
 	ID                string
 	ReservationID     string

@@ -30,7 +30,7 @@ func newTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *
 	}
 	events := store.NewEventStore(db)
 	dedupe := store.NewDedupeStore(db)
-	engine, err := NewEngine(cfg, events, dedupe, executor, nil)
+	engine, err := NewEngine(&cfg, events, dedupe, executor, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}

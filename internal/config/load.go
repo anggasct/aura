@@ -257,6 +257,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := screenOwnerSecrets(cfg.Owner, cfg); err != nil {
 		return LoadResult{}, err
 	}
+	if err := loadPersonaSouls(cfg, resolved); err != nil {
+		return LoadResult{}, err
+	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
@@ -1344,7 +1347,7 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 	if definitionsNode.Kind != yamlv3.SequenceNode {
 		return fmt.Errorf("agents.definitions must be a list at line %d", definitionsNode.Line)
 	}
-	stringFields := []string{"id", "description", "instructions", "model_route"}
+	stringFields := []string{"id", "description", "instructions", "soul_file", "model_route"}
 	listFields := []string{"tools", "capabilities"}
 	for _, item := range definitionsNode.Content {
 		if item.Kind != yamlv3.MappingNode {
@@ -3510,10 +3513,7 @@ func screenOwnerSecrets(owner *Owner, cfg *Config) error {
 	if owner == nil {
 		return nil
 	}
-	vault := secret.New()
-	for i, value := range configuredSecretValues(cfg) {
-		vault.Set(fmt.Sprintf("configured-secret-%d", i), value)
-	}
+	vault := configuredSecretVault(cfg)
 	var problems []error
 	for _, field := range []struct {
 		path  string
@@ -3537,6 +3537,14 @@ func screenOwnerSecrets(owner *Owner, cfg *Config) error {
 		return &Error{Code: ErrorCodeOwnerSecret, Detail: err.Error()}
 	}
 	return nil
+}
+
+func configuredSecretVault(cfg *Config) *secret.Vault {
+	vault := secret.New()
+	for i, value := range configuredSecretValues(cfg) {
+		vault.Set(fmt.Sprintf("configured-secret-%d", i), value)
+	}
+	return vault
 }
 
 func configuredSecretValues(cfg *Config) []string {

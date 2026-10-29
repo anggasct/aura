@@ -249,7 +249,7 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 		t.Fatalf("NewAdapter: %v", err)
 	}
 	sessionCalls := &liveSessionCalls{runtime: adapter}
-	engine, err := runtimeengine.NewEngine(runtimeengine.Config{
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
 		MaxActiveTurns:  4,
 		MaxPendingTurns: 16,
 		TurnTimeout:     5 * time.Minute,

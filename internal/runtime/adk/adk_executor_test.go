@@ -383,7 +383,7 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := runtimeengine.NewEngine(runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("runtimeengine.NewEngine: %v", err)
 	}
