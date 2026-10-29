@@ -203,7 +203,7 @@ func TestDoctorFiltersByCheck(t *testing.T) {
 	negotiate := func() (sandbox.Primitives, error) {
 		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
 	}
-	registry, err := buildHealthRegistry(&cfg, nil, negotiate, pinnedProcessProbe)
+	registry, err := buildHealthRegistry(&cfg, nil, sandboxSupport(negotiate), pinnedProcessProbe)
 	if err != nil {
 		t.Fatalf("buildHealthRegistry: %v", err)
 	}

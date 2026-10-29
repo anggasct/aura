@@ -27,7 +27,7 @@ func buildProbeListener(cfg *config.Config, capabilities []health.CapabilityStat
 	if cfg == nil {
 		return nil, errors.New("probe listener requires configuration")
 	}
-	registry, err := buildHealthRegistry(cfg, capabilities, sandbox.Negotiate, processProbe, extra...)
+	registry, err := buildHealthRegistry(cfg, capabilities, sandboxSupport(sandbox.Negotiate), processProbe, extra...)
 	if err != nil {
 		return nil, err
 	}

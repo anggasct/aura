@@ -52,12 +52,13 @@ func newStatusCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 
 func runStatus(cmd *cobra.Command, cfg *config.Config, report capability.Report, negotiate func() (sandbox.Primitives, error), offline, asJSON bool, processProbe func() (health.ProcessStatus, bool)) error {
 	ctx := cmd.Context()
-	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), negotiate, processProbe)
+	live, liveReachable := liveReadiness(ctx, offline, cfg.Health.Listen)
+	daemon := daemonSandboxState(live, liveReachable)
+	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), statusSandboxSupport(daemon, negotiate), processProbe)
 	if err != nil {
 		return &exitCodeError{code: exitCommand, err: err}
 	}
 	findings := registry.Evaluate(ctx)
-	live, liveReachable := liveReadiness(ctx, offline, cfg.Health.Listen)
 	primitives, negotiateErr := negotiate()
 	if asJSON {
 		return writeStatusJSON(cmd, primitives, negotiateErr, findings, live, liveReachable)
@@ -87,7 +88,7 @@ func liveReadiness(ctx context.Context, offline bool, listen string) (live healt
 	return body, true
 }
 
-func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilityStatus, negotiate func() (sandbox.Primitives, error), processProbe func() (health.ProcessStatus, bool), extra ...health.RegisteredCheck) (*health.Registry, error) {
+func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilityStatus, sandboxCheck func() (supported bool, detail string), processProbe func() (health.ProcessStatus, bool), extra ...health.RegisteredCheck) (*health.Registry, error) {
 	dbPath, artifactRoot, backupDir, err := storagePaths(cfg)
 	if err != nil {
 		return nil, err
@@ -144,7 +145,7 @@ func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilitySta
 		},
 		health.RegisteredCheck{
 			ID:          "sandbox",
-			Checker:     health.SandboxChecker{Support: sandboxSupport(negotiate)},
+			Checker:     health.SandboxChecker{Support: sandboxCheck},
 			Timeout:     checkTimeout,
 			Remediation: health.RemediationReviewSandbox,
 		},
@@ -284,10 +285,69 @@ func sandboxSupport(negotiate func() (sandbox.Primitives, error)) func() (bool, 
 			return false, err.Error()
 		}
 		if missing := sandbox.MissingMandatory(primitives); len(missing) > 0 {
-			return false, "missing: " + strings.Join(missing, ", ")
+			return false, withCgroupDetail("missing: "+strings.Join(missing, ", "), primitives.CgroupDetail)
 		}
-		return true, "all containment primitives available"
+		return true, withCgroupDetail("all containment primitives available", primitives.CgroupDetail)
 	}
+}
+
+func withCgroupDetail(detail, cgroupDetail string) string {
+	if cgroupDetail == "" {
+		return detail
+	}
+	return detail + " (" + cgroupDetail + ")"
+}
+
+func localSandboxSupport(negotiate func() (sandbox.Primitives, error)) func() (bool, string) {
+	support := sandboxSupport(negotiate)
+	return func() (bool, string) {
+		supported, detail := support()
+		return supported, "scope=cli: " + detail
+	}
+}
+
+type daemonSandbox int
+
+const (
+	daemonSandboxUnknown daemonSandbox = iota
+	daemonSandboxUp
+	daemonSandboxDown
+)
+
+const daemonSandboxUnavailableCode = health.ComponentSandbox + ".sandbox_unavailable"
+
+func daemonSandboxState(live health.ProbeBody, reachable bool) daemonSandbox {
+	switch {
+	case !reachable:
+		return daemonSandboxUnknown
+	case live.Status == health.ProbeStatusReady:
+		return daemonSandboxUp
+	case live.Code == daemonSandboxUnavailableCode:
+		return daemonSandboxDown
+	default:
+		return daemonSandboxUnknown
+	}
+}
+
+func statusSandboxSupport(daemon daemonSandbox, negotiate func() (sandbox.Primitives, error)) func() (bool, string) {
+	local := localSandboxSupport(negotiate)
+	return func() (bool, string) {
+		switch daemon {
+		case daemonSandboxUp:
+			return true, "verified by running daemon"
+		case daemonSandboxDown:
+			return false, "reported by running daemon"
+		default:
+			return local()
+		}
+	}
+}
+
+func statusSandboxLine(have sandbox.Primitives, negotiateErr error, daemon daemonSandbox) (string, bool) {
+	if daemon == daemonSandboxUp {
+		return "sandbox: available", true
+	}
+	return formatSandboxStatus(have, negotiateErr)
 }
 
 func providerConfigured(cfg *config.Config) error {
@@ -300,7 +360,7 @@ func providerConfigured(cfg *config.Config) error {
 
 func writeStatusText(cmd *cobra.Command, primitives sandbox.Primitives, negotiateErr error, findings []health.Finding, live health.ProbeBody, liveReachable bool) error {
 	out := cmd.OutOrStdout()
-	sandboxText, sandboxAvailable := formatSandboxStatus(primitives, negotiateErr)
+	sandboxText, sandboxAvailable := statusSandboxLine(primitives, negotiateErr, daemonSandboxState(live, liveReachable))
 	if _, err := fmt.Fprintln(out, sandboxText); err != nil {
 		return err
 	}
@@ -324,7 +384,7 @@ func writeStatusText(cmd *cobra.Command, primitives sandbox.Primitives, negotiat
 }
 
 func writeStatusJSON(cmd *cobra.Command, primitives sandbox.Primitives, negotiateErr error, findings []health.Finding, live health.ProbeBody, liveReachable bool) error {
-	_, sandboxAvailable := formatSandboxStatus(primitives, negotiateErr)
+	_, sandboxAvailable := statusSandboxLine(primitives, negotiateErr, daemonSandboxState(live, liveReachable))
 	payload := statusJSON{
 		Status:   string(health.WorstStatus(findings)),
 		Severity: string(health.WorstSeverity(findings)),
