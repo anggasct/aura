@@ -24,7 +24,7 @@ func (s *observationSink) observe(_ context.Context, observation *Observation) {
 
 func providerService(t *testing.T, store *fakeDocumentStore, sink *observationSink) *Service {
 	t.Helper()
-	service, err := NewService(store, &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, Config{Observer: sink.observe})
+	service, err := NewService(store, &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, &Config{Observer: sink.observe})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
