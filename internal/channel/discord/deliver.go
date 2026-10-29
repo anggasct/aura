@@ -128,6 +128,9 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	}
 	key := req.Channel + "|" + req.EffectID
 	tracked := req.EffectID != ""
+	if tracked {
+		a.stopPresence(req.EffectID)
+	}
 	posted, ok := a.postedMessages(key)
 	if tracked && ok {
 		return a.deliverEdit(ctx, req, key, target, posted, chunks)

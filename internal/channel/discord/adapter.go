@@ -57,6 +57,8 @@ const (
 
 var _ runtimechannelhost.ChannelPort = (*Adapter)(nil)
 
+var _ runtimechannelhost.PresencePort = (*Adapter)(nil)
+
 type Adapter struct {
 	cfg            *config.Discord
 	tokenRef       secret.Reference
@@ -80,15 +82,20 @@ type Adapter struct {
 	gate           *editGate
 	postedMu       sync.Mutex
 	posted         map[string][]string
+	threadsMu      sync.Mutex
+	triggerThreads map[string]string
+	threadParents  map[string]string
+	presenceMu     sync.Mutex
+	presence       map[string]*presenceSession
+	secretVault    *secret.Vault
+	typingRefresh  time.Duration
+	statusAfter    time.Duration
 	approvalsMu    sync.Mutex
 	approvals      map[string]*pendingApproval
 	seen           map[string]struct{}
 	approvalKey    [32]byte
 	targetsMu      sync.Mutex
 	targets        map[string]approvalBinding
-	threadsMu      sync.Mutex
-	triggerThreads map[string]string
-	threadParents  map[string]string
 	deliverSem     chan struct{}
 	selfID         string
 	sessionID      string
@@ -205,11 +212,24 @@ func (a *Adapter) Start(ctx context.Context, sink runtimeingress.IngressSink) er
 	return a.connectLoop(ctx)
 }
 
+func (a *Adapter) ChannelName() string {
+	return "discord"
+}
+
 func (a *Adapter) postedMessages(key string) ([]string, bool) {
 	a.postedMu.Lock()
 	defer a.postedMu.Unlock()
 	ids, ok := a.posted[key]
-	return ids, ok && len(ids) > 0
+	if !ok {
+		return nil, false
+	}
+	kept := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			kept = append(kept, id)
+		}
+	}
+	return kept, len(kept) > 0
 }
 
 func (a *Adapter) rememberPosted(key string, ids []string) {

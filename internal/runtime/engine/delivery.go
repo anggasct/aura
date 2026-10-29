@@ -100,7 +100,7 @@ func extractDeliveryTexts(events []store.RuntimeEvent) []string {
 		ev := &events[i]
 		switch ev.Kind {
 		case store.EventKindADK:
-			if text := adkModelText(ev.Payload, false); strings.TrimSpace(text) != "" {
+			if text := adkAnswerText(ev.Payload, false); strings.TrimSpace(text) != "" {
 				texts = append(texts, text)
 			}
 		case runtime.EventKindMessageCompleted:
@@ -117,12 +117,19 @@ func extractDeliveryTexts(events []store.RuntimeEvent) []string {
 			if ev.Kind != store.EventKindADK {
 				continue
 			}
-			if text := adkModelText(ev.Payload, true); strings.TrimSpace(text) != "" {
+			if text := adkAnswerText(ev.Payload, true); strings.TrimSpace(text) != "" {
 				texts = append(texts, text)
 			}
 		}
 	}
 	return texts
+}
+
+func adkAnswerText(payload json.RawMessage, includePartial bool) string {
+	if hasToolActivity(payload) {
+		return ""
+	}
+	return adkModelText(payload, includePartial)
 }
 
 func adkModelText(payload json.RawMessage, includePartial bool) string {

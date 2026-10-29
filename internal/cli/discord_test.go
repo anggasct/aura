@@ -63,6 +63,24 @@ func TestBuildChannelAdapters_EnabledBuildsAdapterAndCheck(t *testing.T) {
 	}
 }
 
+func TestBuildSecretVaultSkipsEmptyValues(t *testing.T) {
+	t.Setenv("AURA_TEST_EMPTY_WEBHOOK_SECRET", "")
+	t.Setenv("AURA_TEST_EMPTY_MODEL_KEY", "")
+	cfg := config.Default()
+	cfg.Webhook.Keys = []config.WebhookKey{{ID: "probe", SecretEnv: "AURA_TEST_EMPTY_WEBHOOK_SECRET"}}
+	cfg.Models.Definitions = map[string]config.ModelDefinition{
+		"probe": {Model: "probe", Provider: "probe", APIKeyEnv: "AURA_TEST_EMPTY_MODEL_KEY"},
+	}
+	vault := buildSecretVault(&cfg)
+	rendered := "Looking through notes"
+	if got := vault.Redact(rendered); got != rendered {
+		t.Fatalf("Redact() = %q, want unchanged status text", got)
+	}
+	if vault.Contains("") {
+		t.Fatal("vault treats an empty value as a secret match")
+	}
+}
+
 func TestBuildChannelAdapters_RejectsBadTokenRef(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()

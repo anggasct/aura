@@ -613,6 +613,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	}
 
 	e.broadcast(t, &t.accepted)
+	e.notifyPresenceStarted(ctx, &t.req)
 
 	var terminalKind string
 	var terminalPayload []byte
@@ -628,6 +629,13 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 			break
 		}
 		executed = append(executed, ev)
+		if isPresenceFailureEvent(&ev) {
+			e.notifyPresenceFailed(ctx, &t.req)
+			continue
+		}
+		if text, args, ok := extractPresenceActivity(&ev); ok {
+			e.notifyPresenceText(ctx, &t.req, text, args)
+		}
 	}
 
 	terminalKind, terminalPayload = e.terminalOutcome(ctx, execErr, &t.req)
@@ -649,6 +657,10 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 			e.logger.ErrorContext(hookCtx, "memory projection failed", "error", hookErr, "turn_id", t.turnID)
 		}
 	}
+	if terminalKind != runtime.EventKindTurnCompleted {
+		e.notifyPresenceFailed(context.WithoutCancel(ctx), &t.req)
+	}
+	e.notifyPresenceEnded(ctx, &t.req)
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to persist terminal event", "error", err, "turn_id", t.turnID)
 	}

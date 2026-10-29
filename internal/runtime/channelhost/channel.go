@@ -46,3 +46,13 @@ type ChannelPort interface {
 	Deliver(ctx context.Context, req *DeliveryRequest) (ProviderReceipt, error)
 	Health(ctx context.Context) ChannelHealth
 }
+
+type PresencePort interface {
+	PresenceStarted(ctx context.Context, req *DeliveryRequest) error
+	PresenceUpdated(ctx context.Context, req *DeliveryRequest, text, args string, failed bool) error
+	PresenceEnded(ctx context.Context, turnID string) error
+}
+
+type ChannelIdentity interface {
+	ChannelName() string
+}
