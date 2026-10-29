@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"slices"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/runtime/engine"
+	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/server"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
@@ -44,6 +46,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if result.CapabilityStateError != nil {
 				return result.CapabilityStateError
 			}
+			prepareSandboxHost(ctx, logger, sandbox.PrepareHost)
 			db, err := openStorage(ctx, cfg)
 			if err != nil {
 				return err
@@ -304,4 +307,13 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			return runErr
 		},
 	}
+}
+
+func prepareSandboxHost(ctx context.Context, logger *slog.Logger, prepare func() (sandbox.HostPreparation, error)) {
+	prepared, err := prepare()
+	if err != nil {
+		logger.WarnContext(ctx, "sandbox host not prepared", "component", "sandbox", "error", err)
+		return
+	}
+	logger.InfoContext(ctx, "sandbox host prepared", "component", "sandbox", "cgroup_root", prepared.CgroupRoot, "mode", prepared.Mode)
 }

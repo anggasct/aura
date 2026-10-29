@@ -28,6 +28,10 @@ const sessionDefaultOutputLimit = 1 << 20
 const sessionIODeadline = 5 * time.Second
 
 func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Session, error) {
+	return startSessionWithCgroups(ctx, hostCgroups(), req, spec)
+}
+
+func startSessionWithCgroups(ctx context.Context, cgroups *cgroupHost, req *SessionRequest, spec *Spec) (*Session, error) {
 	resolved, err := resolveExecutable(req.Executable)
 	if err != nil {
 		return nil, err
@@ -80,15 +84,12 @@ func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Sessio
 		return nil, Errorf(ErrorCodeSandboxInitFailed, "stderr pipe: %v", err)
 	}
 
-	var cg *cgroup
-	if cgroupControllersWritable() {
-		c, cerr := newCgroup(spec.Limits)
-		if cerr != nil {
-			closeAll(configR, configW, errR, errW, stdinR, stdinW, stdoutR, stdoutW, stderrR, stderrW)
-			return nil, cerr
-		}
-		cg = &c
+	created, err := cgroups.newCgroup(spec.Limits)
+	if err != nil {
+		closeAll(configR, configW, errR, errW, stdinR, stdinW, stdoutR, stdoutW, stderrR, stderrW)
+		return nil, err
 	}
+	cg := &created
 
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), "/proc/self/exe", ChildSentinel)
 	cmd.Dir = spec.WorkingDir
@@ -117,9 +118,7 @@ func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Sessio
 			<-ls.reapDone
 		}
 		closeAll(configR, configW, errR, errW, stdinR, stdinW, stdoutR, stdoutW, stderrR, stderrW)
-		if cg != nil {
-			_ = cg.destroy()
-		}
+		_ = cg.destroy()
 		return nil, setupErr
 	}
 	if err := cmd.Start(); err != nil {
@@ -138,12 +137,8 @@ func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Sessio
 	_ = stdoutW.Close()
 	_ = stderrW.Close()
 
-	if cg != nil {
-		if err := cg.attach(ls.pid); err != nil {
-			// A child that escapes its cgroup runs without memory/PID
-			// enforcement; kill the group and refuse rather than fail open.
-			return abort(Errorf(ErrorCodeSandboxInitFailed, "attach child to cgroup: %v", err))
-		}
+	if err := cg.attach(ls.pid); err != nil {
+		return abort(Errorf(ErrorCodeSandboxInitFailed, "attach child to cgroup: %v", pathlessCause(err)))
 	}
 
 	if err := awaitChildSetup(errR, min(req.Limits.Timeout, sessionSetupWait)); err != nil {
@@ -243,9 +238,7 @@ func (ls *linuxSession) close(_ context.Context) error {
 	}
 	closeAll(ls.stdin, ls.stdout, ls.stderr)
 	ls.markBroken()
-	if ls.cg != nil {
-		_ = ls.cg.destroy()
-	}
+	_ = ls.cg.destroy()
 	return nil
 }
 

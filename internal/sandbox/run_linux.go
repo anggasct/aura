@@ -15,12 +15,14 @@ import (
 )
 
 func negotiate() (Primitives, error) {
+	cgroupV2, cgroupDetail := cgroupV2Available()
 	return Primitives{
 		UserNamespace: usernsAvailable(),
 		Seccomp:       seccompAvailable(),
-		CgroupV2:      cgroupV2Available(),
+		CgroupV2:      cgroupV2,
 		Landlock:      landlockAvailable(),
 		ProcessGroups: true,
+		CgroupDetail:  cgroupDetail,
 	}, nil
 }
 
@@ -41,18 +43,30 @@ func usernsAvailable() bool {
 	return true
 }
 
-func cgroupV2Available() bool {
+func cgroupV2Available() (available bool, detail string) {
 	var mountInfo [64 << 10]byte
 	fd, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
-		return false
+		return false, "cgroup v2 mount table unreadable"
 	}
 	defer func() { _ = fd.Close() }()
 	n, _ := fd.Read(mountInfo[:])
 	if !strings.Contains(string(mountInfo[:n]), "cgroup2 ") {
-		return false
+		return false, "cgroup v2 is not mounted"
 	}
-	return cgroupControllersWritable()
+	root, err := hostCgroups().available()
+	if err != nil {
+		return false, errorDetail(err)
+	}
+	return true, "cgroup_root=" + displayName(root.name) + " mode=" + string(root.mode)
+}
+
+func errorDetail(err error) string {
+	var coded *Error
+	if errors.As(err, &coded) {
+		return coded.Detail
+	}
+	return err.Error()
 }
 
 func landlockAvailable() bool {
@@ -84,6 +98,10 @@ func childSysProcAttr() *syscall.SysProcAttr {
 }
 
 func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...string) (Result, error) {
+	return runWithCgroups(ctx, hostCgroups(), spec, command, args...)
+}
+
+func runWithCgroups(ctx context.Context, cgroups *cgroupHost, spec *Spec, command string, args ...string) (Result, error) {
 	if spec.AllowNetwork {
 		return Result{}, Errorf(ErrorCodeSandboxUnavailable, "network access is not available in this sandbox")
 	}
@@ -109,17 +127,13 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 		return Result{}, Errorf(ErrorCodeSandboxInitFailed, "error pipe: %v", err)
 	}
 
-	var cg *cgroup
-	if cgroupControllersWritable() {
-		c, cerr := newCgroup(spec.Limits)
-		if cerr != nil {
-			_ = configR.Close()
-			_ = configW.Close()
-			_ = errR.Close()
-			_ = errW.Close()
-			return Result{}, cerr
-		}
-		cg = &c
+	cg, err := cgroups.newCgroup(spec.Limits)
+	if err != nil {
+		_ = configR.Close()
+		_ = configW.Close()
+		_ = errR.Close()
+		_ = errW.Close()
+		return Result{}, err
 	}
 
 	cmd := exec.CommandContext(ctx, "/proc/self/exe", ChildSentinel)
@@ -140,24 +154,18 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 		_ = configW.Close()
 		_ = errW.Close()
 		_ = errR.Close()
-		if cg != nil {
-			_ = cg.destroy()
-		}
+		_ = cg.destroy()
 		return Result{}, Errorf(ErrorCodeSandboxUnavailable, "start child: %v", err)
 	}
 	_ = configR.Close() // the child owns its dup; the parent's copy is no longer needed
 	_, _ = configW.Write(payload)
 	_ = configW.Close()
 	_ = errW.Close() // the child is the sole writer of the init-error pipe
-	if cg != nil {
-		if err := cg.attach(cmd.Process.Pid); err != nil {
-			// A child that escapes its cgroup runs without memory/PID
-			// enforcement; kill it and refuse rather than fail open.
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			_ = cmd.Wait()
-			_ = cg.destroy()
-			return Result{}, Errorf(ErrorCodeSandboxInitFailed, "attach child to cgroup: %v", err)
-		}
+	if err := cg.attach(cmd.Process.Pid); err != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+		_ = cg.destroy()
+		return Result{}, Errorf(ErrorCodeSandboxInitFailed, "attach child to cgroup: %v", pathlessCause(err))
 	}
 
 	timeout := time.NewTimer(spec.Limits.Timeout)
@@ -189,9 +197,7 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 	select {
 	case waitErr := <-waitDone:
 		initErr := <-initErrCh // child exit closed the err pipe, so the reader has finished
-		if cg != nil {
-			_ = cg.destroy()
-		}
+		_ = cg.destroy()
 		if initErr != nil {
 			return Result{}, initErr
 		}
@@ -203,9 +209,7 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-waitDone
 		initErr := <-initErrCh
-		if cg != nil {
-			_ = cg.destroy()
-		}
+		_ = cg.destroy()
 		if initErr != nil {
 			return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, initErr
 		}
@@ -214,9 +218,7 @@ func run(ctx context.Context, spec *Spec, _ Primitives, command string, args ...
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-waitDone
 		initErr := <-initErrCh
-		if cg != nil {
-			_ = cg.destroy()
-		}
+		_ = cg.destroy()
 		if initErr != nil {
 			return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, initErr
 		}

@@ -209,8 +209,8 @@ func TestIntegrationRlimitCPUTime(t *testing.T) {
 }
 
 func TestIntegrationCgroupMemory(t *testing.T) {
-	if !cgroupControllersWritable() {
-		t.Skip("cgroup controllers not delegated on this host")
+	if _, err := hostCgroups().available(); err != nil {
+		t.Skipf("cgroup controllers not delegated on this host: %v", err)
 	}
 	spec := baseSpec(t)
 	spec.Limits.MemoryBytes = 4 << 20
@@ -247,8 +247,8 @@ func TestIntegrationRlimitOpenFiles(t *testing.T) {
 }
 
 func TestIntegrationCgroupPids(t *testing.T) {
-	if !cgroupControllersWritable() {
-		t.Skip("cgroup controllers not delegated on this host")
+	if _, err := hostCgroups().available(); err != nil {
+		t.Skipf("cgroup controllers not delegated on this host: %v", err)
 	}
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available for the PID-exhaustion fixture")
