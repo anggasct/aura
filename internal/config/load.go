@@ -3469,9 +3469,28 @@ func validateOwnerIdentities(owner *Owner) error {
 		return nil
 	}
 	if _, err := principal.NewResolver(owner.Identities); err != nil {
-		return &Error{Code: ErrorCodeOwnerIdentityInvalid, Detail: err.Error()}
+		return &Error{Code: ErrorCodeOwnerIdentityInvalid, Detail: identityProblemDetail(err)}
 	}
 	return nil
+}
+
+// identityProblemDetail renders resolver problems without the machine code the
+// enclosing config error already carries, so every failing index appears once.
+func identityProblemDetail(err error) string {
+	problems := []error{err}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		problems = joined.Unwrap()
+	}
+	lines := make([]string, 0, len(problems))
+	for _, problem := range problems {
+		var typed *principal.Error
+		if errors.As(problem, &typed) {
+			lines = append(lines, strings.Replace(problem.Error(), typed.Error(), typed.Detail, 1))
+			continue
+		}
+		lines = append(lines, problem.Error())
+	}
+	return strings.Join(lines, "\n")
 }
 
 func validateOwnerValue(path, value string) error {

@@ -275,6 +275,33 @@ func TestLoad_OwnerIdentitiesRejected(t *testing.T) {
 	}
 }
 
+func TestLoad_OwnerIdentitiesRenderSingleCode(t *testing.T) {
+	path := writeOwnerConfig(t, "version: 1\nowner:\n  identities:\n    - telegram:5550001\n    - discord:owner5550002\n")
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("invalid identities accepted")
+	}
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeOwnerIdentityInvalid {
+		t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, ErrorCodeOwnerIdentityInvalid, err)
+	}
+	if got := strings.Count(err.Error(), string(ErrorCodeOwnerIdentityInvalid)+":"); got != 1 {
+		t.Errorf("error %q carries %d code prefixes; want 1", err, got)
+	}
+	if !strings.Contains(err.Error(), string(ErrorCodeOwnerIdentityInvalid)+": owner.identities[0]:") {
+		t.Errorf("error %q does not render the code once before the first index", err)
+	}
+	for _, index := range []string{"owner.identities[0]", "owner.identities[1]"} {
+		if !strings.Contains(err.Error(), index) {
+			t.Errorf("error %q does not name %s", err, index)
+		}
+	}
+	for _, value := range []string{"5550001", "owner5550002"} {
+		if strings.Contains(err.Error(), value) {
+			t.Errorf("error %q leaks the identity value %s", err, value)
+		}
+	}
+}
+
 func TestLoad_OwnerIdentitiesRejectBadShapes(t *testing.T) {
 	for name, body := range map[string]string{
 		"not a list":         "  identities: discord:5550001\n",
