@@ -20,21 +20,20 @@ type Part struct {
 }
 
 type Descriptor struct {
-	TurnID         string          `json:"turn_id"`
-	SessionID      string          `json:"session_id"`
-	PrincipalID    string          `json:"principal_id"`
-	PrincipalClass string          `json:"principal_class,omitempty"`
-	Origin         string          `json:"origin"`
-	Parts          []Part          `json:"parts"`
-	ReplyContext   json.RawMessage `json:"reply_context,omitempty"`
-	IdempotencyKey string          `json:"idempotency_key"`
-	Deadline       time.Time       `json:"deadline,omitempty"`
-	MaxTokens      int64           `json:"max_tokens"`
-	MaxCost        float64         `json:"max_cost"`
-	TraceParent    string          `json:"trace_parent"`
-	AgentID        string          `json:"agent_id"`
-	// Recorded at admit so a resumed or replayed turn keeps the persona version that accepted it.
-	Persona *runtime.PersonaFingerprint `json:"persona_fingerprint,omitempty"`
+	TurnID         string                      `json:"turn_id"`
+	SessionID      string                      `json:"session_id"`
+	PrincipalID    string                      `json:"principal_id"`
+	PrincipalClass string                      `json:"principal_class,omitempty"`
+	Origin         string                      `json:"origin"`
+	Parts          []Part                      `json:"parts"`
+	ReplyContext   json.RawMessage             `json:"reply_context,omitempty"`
+	IdempotencyKey string                      `json:"idempotency_key"`
+	Deadline       time.Time                   `json:"deadline,omitempty"`
+	MaxTokens      int64                       `json:"max_tokens"`
+	MaxCost        float64                     `json:"max_cost"`
+	TraceParent    string                      `json:"trace_parent"`
+	AgentID        string                      `json:"agent_id"`
+	Persona        *runtime.PersonaFingerprint `json:"persona_fingerprint,omitempty"`
 }
 
 type QueuedTurn struct {

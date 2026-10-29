@@ -233,7 +233,6 @@ func settlementAfterConflict(lookupInTx, lookupOutside func() (*Settlement, erro
 	return nil, errSettlementNotFound
 }
 
-// Spend from callers outside a persona turn (profiling, compaction) stays unattributed instead of being charged to a persona.
 func nullableAgent(agentID string) any {
 	if agentID == "" {
 		return nil

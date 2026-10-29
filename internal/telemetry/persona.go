@@ -11,7 +11,6 @@ import (
 
 const MetricPersonaTurnsTotal = "persona.turns.total"
 
-// PersonaRecorder labels by agent.id; persona IDs come from operator config, so the label set stays bounded.
 type PersonaRecorder struct {
 	turns metric.Int64Counter
 }

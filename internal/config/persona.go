@@ -35,7 +35,6 @@ func loadPersonaSouls(cfg *Config, configPath string) error {
 		if vault == nil {
 			vault = configuredSecretVault(cfg)
 		}
-		// The detail names the persona only: the soul text and its path may echo the secret.
 		if vault.Contains(soul) {
 			return &Error{Code: ErrorCodePersonaSecret, Detail: fmt.Sprintf("persona %q soul must not repeat a configured secret value", definition.ID)}
 		}

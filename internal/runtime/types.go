@@ -61,7 +61,6 @@ type acceptedPayload struct {
 	Persona   *PersonaFingerprint `json:"persona_fingerprint,omitempty"`
 }
 
-// AcceptedPayload is the one encoding of turn.accepted; the in-memory and durable admit paths must journal identical bytes for the same turn.
 func AcceptedPayload(origin, principalID, agentID string, persona *PersonaFingerprint) ([]byte, error) {
 	return json.Marshal(acceptedPayload{Origin: origin, Principal: principalID, AgentID: agentID, Persona: persona})
 }

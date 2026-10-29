@@ -51,6 +51,18 @@ func TestBuildRejectsInvalidOverrides(t *testing.T) {
 			wantField: ".id",
 		},
 		{
+			name:      "id that would split a session key",
+			overrides: []config.AgentDefinition{{ID: "kuma/discord:home", Instructions: "x", Description: "d"}},
+			wantCode:  ErrorCodeDefinitionInvalid,
+			wantField: ".id",
+		},
+		{
+			name:      "uppercase id",
+			overrides: []config.AgentDefinition{{ID: "Kuma", Instructions: "x", Description: "d"}},
+			wantCode:  ErrorCodeDefinitionInvalid,
+			wantField: ".id",
+		},
+		{
 			name:      "unknown tool",
 			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Tools: []string{"git_push"}}},
 			wantCode:  ErrorCodeUnknownTool,

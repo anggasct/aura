@@ -522,7 +522,6 @@ ALTER TABLE child_run ADD COLUMN result_prompt_version TEXT;
 ALTER TABLE child_run ADD COLUMN result_trust TEXT;
 `
 
-// Rows written before personas existed were all served by the default agent, so the default backfills them truthfully.
 const personaAttributionSchemaSQL = `
 ALTER TABLE session ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'main';
 ALTER TABLE usage_reservation ADD COLUMN agent_id TEXT;

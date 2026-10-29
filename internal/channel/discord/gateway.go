@@ -405,7 +405,6 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	return a.acceptEnvelope(ctx, msg, envelope, msg.ChannelID)
 }
 
-// The engine hands this key back as the delivery and approval conversation, so every adapter-side lookup must use it, never the bare Discord conversation.
 func (a *Adapter) sessionKey(conversationID string) string {
 	return runtimeingress.SessionKey(a.persona, "discord:"+a.cfg.Instance, conversationID)
 }

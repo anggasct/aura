@@ -80,7 +80,6 @@ func (a *AgentSpend) DayUsedMicros() int64 { return a.DayReservedMicros + a.DayS
 
 func (a *AgentSpend) MonthUsedMicros() int64 { return a.MonthReservedMicros + a.MonthSettledMicros }
 
-// StatusByAgent splits the current month by persona; an empty AgentID collects spend no persona turn made.
 func (l *Ledger) StatusByAgent(ctx context.Context) ([]AgentSpend, error) {
 	day, month := windowKeys(l.now())
 	rows, err := l.db.QueryContext(ctx, `

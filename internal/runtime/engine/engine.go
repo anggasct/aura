@@ -525,7 +525,6 @@ func (e *Engine) agentID(req *runtime.TurnRequest) string {
 	return e.cfg.DefaultAgentID
 }
 
-// A turn resumed from its durable descriptor already carries the persona it was accepted with; only fresh turns are fingerprinted.
 func (e *Engine) stampPersona(req *runtime.TurnRequest) error {
 	req.AgentID = e.agentID(req)
 	if e.cfg.Personas == nil || req.AgentID == "" || req.Persona != nil {

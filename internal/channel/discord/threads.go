@@ -221,7 +221,6 @@ func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayloa
 	if existing != "" {
 		return existing, nil
 	}
-	// The thread-create intent is journaled under the parent channel session, which must exist before the intent row references it.
 	sessionID := a.sessionKey("channel:" + parentID)
 	principalID, _, _ := resolveAuthor(a.cfg, a.owners, msg.Author.ID)
 	if err := a.sessions.EnsureSession(ctx, sessionID, principalID, a.persona); err != nil {

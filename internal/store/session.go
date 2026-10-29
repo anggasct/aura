@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// Matches the migration default: a session created without a persona is served by the default agent.
 const defaultSessionAgentID = "main"
 
 type sqliteSessionService struct {

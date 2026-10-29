@@ -2,12 +2,15 @@ package agent
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
 )
+
+var validID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 type Registry struct {
 	definitions []Definition
@@ -94,6 +97,9 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 	field := fmt.Sprintf("agents.definitions[%d]", index)
 	if strings.TrimSpace(override.ID) == "" {
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".id must not be empty")
+	}
+	if !validID.MatchString(override.ID) {
+		return nil, codedError(ErrorCodeDefinitionInvalid, field+".id must be lowercase letters, digits, '-' or '_', start with a letter, and be at most 64 characters")
 	}
 	definition := Definition{
 		ID:          override.ID,

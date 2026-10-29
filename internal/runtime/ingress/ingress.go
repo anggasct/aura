@@ -24,7 +24,6 @@ type IngressEnvelope struct {
 	TraceParent    string
 }
 
-// SessionKey scopes a channel conversation to one persona and one account, so two personas serving the same chat never share a session.
 func SessionKey(agentID, source, conversationID string) string {
 	return agentID + "/" + source + "/" + conversationID
 }

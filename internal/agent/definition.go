@@ -23,7 +23,6 @@ type Limits struct {
 	TurnTimeout time.Duration
 }
 
-// Fingerprint identifies the persona version that answered a turn, so a reply can be traced after the soul, tools, or route change.
 type Fingerprint struct {
 	AgentID     string
 	SoulSHA256  string

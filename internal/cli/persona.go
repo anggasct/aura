@@ -53,7 +53,6 @@ func logPersonas(ctx context.Context, logger *slog.Logger, registry *auraagent.R
 	}
 }
 
-// A resumed session keeps the persona it was created with; switching personas mid-conversation would mix two personalities in one history.
 func resolveChatPersona(ctx context.Context, registry *auraagent.Registry, sessions store.SessionService, sessionID, requested string) (string, error) {
 	if requested != "" {
 		if _, ok := registry.Lookup(requested); !ok {
