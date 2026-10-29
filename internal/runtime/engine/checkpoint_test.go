@@ -100,7 +100,7 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 	if latest.ResumeGeneration != 2 || latest.EventSequence != currentSequence {
 		t.Fatalf("latest checkpoint = %+v, want generation 2 at boundary %d", latest, currentSequence)
 	}
-	restarted, err := NewEngine(Config{}, store.NewEventStore(db), store.NewDedupeStore(db), runtime.NewFakeExecutor(nil), nil)
+	restarted, err := NewEngine(&Config{}, store.NewEventStore(db), store.NewDedupeStore(db), runtime.NewFakeExecutor(nil), nil)
 	if err != nil {
 		t.Fatalf("NewEngine after restart: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestSaveCheckpointRejectsMutatedRetry(t *testing.T) {
 
 func TestConcurrentCheckpointMutationHasOneAuthoritativePayload(t *testing.T) {
 	engine, db, _, last := checkpointRuntime(t)
-	other, err := NewEngine(Config{}, store.NewEventStore(db), store.NewDedupeStore(db), runtime.NewFakeExecutor(nil), nil)
+	other, err := NewEngine(&Config{}, store.NewEventStore(db), store.NewDedupeStore(db), runtime.NewFakeExecutor(nil), nil)
 	if err != nil {
 		t.Fatalf("NewEngine second writer: %v", err)
 	}

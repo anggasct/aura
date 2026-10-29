@@ -23,6 +23,8 @@ const (
 	ErrorCodeCheckpointNotFound         ErrorCode = "checkpoint_not_found"
 	ErrorCodeCheckpointStale            ErrorCode = "checkpoint_stale"
 	ErrorCodeCheckpointUnsupported      ErrorCode = "checkpoint_unsupported"
+	ErrorCodePersonaNotFound            ErrorCode = "persona_not_found"
+	ErrorCodePersonaMismatch            ErrorCode = "persona_mismatch"
 )
 
 func (c ErrorCode) Retryable() bool {

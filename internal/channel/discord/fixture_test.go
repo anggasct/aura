@@ -316,6 +316,7 @@ type fakeEffectRunner struct {
 	invocations      int
 	crashAfterInvoke bool
 	invokeErr        error
+	sessionExists    func(sessionID string) bool
 }
 
 func newFakeEffectRunner() *fakeEffectRunner {
@@ -323,6 +324,9 @@ func newFakeEffectRunner() *fakeEffectRunner {
 }
 
 func (f *fakeEffectRunner) Execute(ctx context.Context, req *effect.PrepareRequest, provider effect.Provider) (*effect.Intent, error) {
+	if f.sessionExists != nil && !f.sessionExists(req.SessionID) {
+		return nil, errors.New("intent session does not exist")
+	}
 	digest := sha256.Sum256(req.Request)
 	key := req.Provider + "|" + req.Operation + "|" + req.IdempotencyKey
 	f.mu.Lock()
@@ -399,11 +403,15 @@ func (s *fakeMediaStore) Put(ctx context.Context, content io.Reader, meta *Artif
 type fakeSessionEnsurer struct {
 	mu       sync.Mutex
 	sessions map[string]string
+	err      error
 }
 
-func (s *fakeSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID string) error {
+func (s *fakeSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
 	if s.sessions == nil {
 		s.sessions = map[string]string{}
 	}
@@ -461,4 +469,8 @@ func frameOp(t *testing.T, frame map[string]any) int {
 		t.Fatalf("client frame has no op: %v", frame)
 	}
 	return int(op)
+}
+
+func testSessionKey(conversation string) string {
+	return runtimeingress.SessionKey("main", "discord:owner", conversation)
 }

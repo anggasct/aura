@@ -3,6 +3,7 @@ package runtimeengine
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
@@ -46,8 +47,13 @@ func turnRequestFromEnvelope(env *runtimeingress.IngressEnvelope) (*runtime.Turn
 	if env.PrincipalID == "" {
 		problems = append(problems, invalidArgument("ingress principal must not be empty"))
 	}
+	if env.AgentID == "" {
+		problems = append(problems, invalidArgument("ingress persona must not be empty"))
+	}
 	if env.ConversationID == "" {
 		problems = append(problems, invalidArgument("ingress conversation must not be empty"))
+	} else if env.AgentID != "" && env.Source != "" && !strings.HasPrefix(env.ConversationID, runtimeingress.SessionKey(env.AgentID, env.Source, "")) {
+		problems = append(problems, invalidArgument("ingress conversation must be scoped to its persona and source"))
 	}
 	if len(problems) > 0 {
 		return nil, errors.Join(problems...)
@@ -61,5 +67,6 @@ func turnRequestFromEnvelope(env *runtimeingress.IngressEnvelope) (*runtime.Turn
 		ReplyContext:   env.ReplyContext,
 		IdempotencyKey: env.ExternalID,
 		TraceParent:    env.TraceParent,
+		AgentID:        env.AgentID,
 	}, nil
 }

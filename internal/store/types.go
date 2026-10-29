@@ -9,6 +9,7 @@ import (
 type Session struct {
 	ID        string
 	OwnerID   string
+	AgentID   string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	Metadata  json.RawMessage

@@ -158,17 +158,17 @@ func TestDiscordSessionEnsurer_CreatesOnce(t *testing.T) {
 	ensurer := &discordSessionEnsurer{sessions: store.NewSessionService(db)}
 	ctx := t.Context()
 
-	if err := ensurer.EnsureSession(ctx, "dm:111", "111"); err != nil {
+	if err := ensurer.EnsureSession(ctx, "kuma/discord:home/dm:111", "111", "kuma"); err != nil {
 		t.Fatalf("EnsureSession(): %v", err)
 	}
-	session, err := store.NewSessionService(db).Get(ctx, "dm:111")
+	session, err := store.NewSessionService(db).Get(ctx, "kuma/discord:home/dm:111")
 	if err != nil {
 		t.Fatalf("Get(): %v", err)
 	}
-	if session.OwnerID != "111" {
-		t.Errorf("owner = %q, want principal", session.OwnerID)
+	if session.OwnerID != "111" || session.AgentID != "kuma" {
+		t.Errorf("owner, persona = %q, %q; want principal and kuma", session.OwnerID, session.AgentID)
 	}
-	if err := ensurer.EnsureSession(ctx, "dm:111", "111"); err != nil {
+	if err := ensurer.EnsureSession(ctx, "kuma/discord:home/dm:111", "111", "kuma"); err != nil {
 		t.Fatalf("second EnsureSession(): %v", err)
 	}
 }

@@ -99,7 +99,7 @@ func TestAdapter_AdmitsMessageWithStoredAttachment(t *testing.T) {
 		t.Errorf("artifact = %+v", got)
 	}
 	tc.doubles.sessions.mu.Lock()
-	owner := tc.doubles.sessions.sessions["channel:333"]
+	owner := tc.doubles.sessions.sessions[testSessionKey("channel:333")]
 	tc.doubles.sessions.mu.Unlock()
 	if owner != "discord:111" {
 		t.Errorf("ensured session owner = %q, want principal", owner)

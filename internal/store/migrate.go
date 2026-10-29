@@ -35,6 +35,7 @@ var migrations = []migration{
 	{version: 17, sql: childRunDepthRemovalSQL},
 	{version: 18, sql: childRunResultSchemaSQL},
 	{version: 19, sql: childRunTypedResultSchemaSQL},
+	{version: 20, sql: personaAttributionSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -519,6 +520,12 @@ ALTER TABLE child_run ADD COLUMN result_source_range TEXT;
 ALTER TABLE child_run ADD COLUMN result_model TEXT;
 ALTER TABLE child_run ADD COLUMN result_prompt_version TEXT;
 ALTER TABLE child_run ADD COLUMN result_trust TEXT;
+`
+
+const personaAttributionSchemaSQL = `
+ALTER TABLE session ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'main';
+ALTER TABLE usage_reservation ADD COLUMN agent_id TEXT;
+CREATE INDEX usage_reservation_agent_window_idx ON usage_reservation(agent_id, window_month, window_day);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

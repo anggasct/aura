@@ -2,12 +2,15 @@ package agent
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
 )
+
+var validID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 type Registry struct {
 	definitions []Definition
@@ -37,8 +40,8 @@ func (r *Registry) Lookup(id string) (Definition, bool) {
 
 func (r *Registry) Definitions() []Definition {
 	result := make([]Definition, 0, len(r.definitions))
-	for _, definition := range r.definitions {
-		result = append(result, definition.clone())
+	for i := range r.definitions {
+		result = append(result, r.definitions[i].clone())
 	}
 	return result
 }
@@ -95,6 +98,9 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 	if strings.TrimSpace(override.ID) == "" {
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".id must not be empty")
 	}
+	if !validID.MatchString(override.ID) {
+		return nil, codedError(ErrorCodeDefinitionInvalid, field+".id must be lowercase letters, digits, '-' or '_', start with a letter, and be at most 64 characters")
+	}
 	definition := Definition{
 		ID:          override.ID,
 		Description: override.Description,
@@ -110,6 +116,10 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 	}
 	if strings.TrimSpace(override.Instructions) != "" {
 		definition.Instructions = override.Instructions
+	}
+	if override.Soul != "" {
+		definition.Instructions = override.Soul
+		definition.SoulFile = override.SoulFile
 	}
 	if len(override.Tools) > 0 {
 		definition.Tools = append([]string(nil), override.Tools...)

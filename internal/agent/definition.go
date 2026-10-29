@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -9,6 +12,7 @@ type Definition struct {
 	ID           string
 	Description  string
 	Instructions string
+	SoulFile     string
 	Tools        []string
 	Capabilities []string
 	ModelRoute   string
@@ -17,6 +21,29 @@ type Definition struct {
 
 type Limits struct {
 	TurnTimeout time.Duration
+}
+
+type Fingerprint struct {
+	AgentID     string
+	SoulSHA256  string
+	ToolsSHA256 string
+	ModelRoute  string
+}
+
+func (d *Definition) Fingerprint() Fingerprint {
+	tools := slices.Clone(d.Tools)
+	slices.Sort(tools)
+	return Fingerprint{
+		AgentID:     d.ID,
+		SoulSHA256:  sha256Hex(d.Instructions),
+		ToolsSHA256: sha256Hex(strings.Join(tools, "\n")),
+		ModelRoute:  d.ModelRoute,
+	}
+}
+
+func sha256Hex(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }
 
 func (d *Definition) key() string {
@@ -28,6 +55,7 @@ func (d *Definition) clone() Definition {
 		ID:           d.ID,
 		Description:  d.Description,
 		Instructions: d.Instructions,
+		SoulFile:     d.SoulFile,
 		Tools:        append([]string(nil), d.Tools...),
 		Capabilities: append([]string(nil), d.Capabilities...),
 		ModelRoute:   d.ModelRoute,

@@ -55,7 +55,7 @@ func TestAdapter_AdmitTextEnsuresSessionOnFreshConversation(t *testing.T) {
 	if !admitted {
 		t.Fatal("admit() = false, want admission for allowlisted text")
 	}
-	owner, ok := ensuredOwner(sessions, "channel:333")
+	owner, ok := ensuredOwner(sessions, testSessionKey("channel:333"))
 	if !ok {
 		t.Fatal("no session row for channel:333 after text intake")
 	}
@@ -71,7 +71,7 @@ func TestAdapter_AdmitTextEnsuresSessionOnFreshConversation(t *testing.T) {
 	if env == nil {
 		t.Fatal("no admitted envelope for message:9001")
 	}
-	if env.ConversationID != "channel:333" || env.PrincipalID != "discord:111" {
+	if env.ConversationID != testSessionKey("channel:333") || env.PrincipalID != "discord:111" {
 		t.Errorf("envelope = %+v, want conversation channel:333 principal discord:111", env)
 	}
 }
@@ -88,7 +88,7 @@ func TestAdapter_AdmitDMEnsuresSessionOnFirstContact(t *testing.T) {
 	if !admitted {
 		t.Fatal("admit() = false, want admission for allowlisted DM")
 	}
-	owner, ok := ensuredOwner(sessions, "dm:111")
+	owner, ok := ensuredOwner(sessions, testSessionKey("dm:111"))
 	if !ok {
 		t.Fatal("no session row for dm:111 after DM intake")
 	}
@@ -98,7 +98,7 @@ func TestAdapter_AdmitDMEnsuresSessionOnFirstContact(t *testing.T) {
 }
 
 func TestAdapter_AdmitTextExistingSessionKeepsOwner(t *testing.T) {
-	sessions := &fakeSessionEnsurer{sessions: map[string]string{"channel:333": "111"}}
+	sessions := &fakeSessionEnsurer{sessions: map[string]string{testSessionKey("channel:333"): "111"}}
 	sink := newMemorySink()
 	adapter := newAdmitAdapter(t, sink, sessions)
 
@@ -109,7 +109,7 @@ func TestAdapter_AdmitTextExistingSessionKeepsOwner(t *testing.T) {
 	if !admitted {
 		t.Fatal("admit() = false, want admission on existing session")
 	}
-	owner, ok := ensuredOwner(sessions, "channel:333")
+	owner, ok := ensuredOwner(sessions, testSessionKey("channel:333"))
 	if !ok || owner != "111" {
 		t.Errorf("session owner = %q, ok = %v; want owner 111 untouched", owner, ok)
 	}
@@ -174,7 +174,7 @@ func TestAdapter_AdmitAttachmentEnsuresSessionWithArtifacts(t *testing.T) {
 	if !admitted {
 		t.Fatal("admit() = false, want admission for attachment message")
 	}
-	owner, ok := ensuredOwner(sessions, "channel:333")
+	owner, ok := ensuredOwner(sessions, testSessionKey("channel:333"))
 	if !ok || owner != "discord:111" {
 		t.Errorf("session owner = %q, ok = %v; want owner discord:111", owner, ok)
 	}
@@ -213,7 +213,7 @@ func TestAdapter_AdmitDuplicateReplaysSingleTurn(t *testing.T) {
 	if calls, turns := sink.stats("message:9003"); calls != 2 || turns != 1 {
 		t.Errorf("calls = %d, turns = %d; want 2 calls and 1 turn", calls, turns)
 	}
-	if _, ok := ensuredOwner(sessions, "channel:333"); !ok {
+	if _, ok := ensuredOwner(sessions, testSessionKey("channel:333")); !ok {
 		t.Error("no session row after duplicate delivery")
 	}
 }
@@ -222,7 +222,7 @@ type errSessionEnsurer struct {
 	err error
 }
 
-func (s *errSessionEnsurer) EnsureSession(_ context.Context, _, _ string) error {
+func (s *errSessionEnsurer) EnsureSession(_ context.Context, _, _, _ string) error {
 	return s.err
 }
 

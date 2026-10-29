@@ -79,6 +79,7 @@ type ReserveRequest struct {
 	InvocationID             string
 	Attempt                  int
 	ModelDefinitionID        string
+	AgentID                  string
 	KnownInputTokens         int64
 	RequestedMaxOutputTokens int64
 }
@@ -88,6 +89,7 @@ type Reservation struct {
 	InvocationID       string
 	Attempt            int
 	ModelDefinitionID  string
+	AgentID            string
 	WindowDay          string
 	WindowMonth        string
 	ReservedCostMicros int64
@@ -153,10 +155,10 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 	attempt := req.Attempt
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO usage_reservation
-			(id, invocation_id, attempt, model_definition_id, window_day, window_month,
+			(id, invocation_id, attempt, model_definition_id, agent_id, window_day, window_month,
 			 reserved_cost_micros, state, expires_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, invocationID, attempt, req.ModelDefinitionID, day, month,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, invocationID, attempt, req.ModelDefinitionID, nullableAgent(req.AgentID), day, month,
 		reserved, stateActive, fmtTime(expiresAt), fmtTime(now), fmtTime(now),
 	)
 	if err != nil {
@@ -193,6 +195,7 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 		InvocationID:       invocationID,
 		Attempt:            attempt,
 		ModelDefinitionID:  req.ModelDefinitionID,
+		AgentID:            req.AgentID,
 		WindowDay:          day,
 		WindowMonth:        month,
 		ReservedCostMicros: reserved,
@@ -230,6 +233,13 @@ func settlementAfterConflict(lookupInTx, lookupOutside func() (*Settlement, erro
 	return nil, errSettlementNotFound
 }
 
+func nullableAgent(agentID string) any {
+	if agentID == "" {
+		return nil
+	}
+	return agentID
+}
+
 func (l *Ledger) reservationByKey(ctx context.Context, q queryer, invocationID string, attempt int) (r *Reservation, ok bool, err error) {
 	var (
 		row       Reservation
@@ -237,10 +247,10 @@ func (l *Ledger) reservationByKey(ctx context.Context, q queryer, invocationID s
 		createdAt string
 	)
 	err = q.QueryRowContext(ctx, `
-		SELECT id, invocation_id, attempt, model_definition_id, window_day, window_month,
+		SELECT id, invocation_id, attempt, model_definition_id, COALESCE(agent_id, ''), window_day, window_month,
 			reserved_cost_micros, state, expires_at, created_at
 		FROM usage_reservation WHERE invocation_id = ? AND attempt = ?`, invocationID, attempt).
-		Scan(&row.ID, &row.InvocationID, &row.Attempt, &row.ModelDefinitionID, &row.WindowDay, &row.WindowMonth,
+		Scan(&row.ID, &row.InvocationID, &row.Attempt, &row.ModelDefinitionID, &row.AgentID, &row.WindowDay, &row.WindowMonth,
 			&row.ReservedCostMicros, &row.State, &expiresAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil

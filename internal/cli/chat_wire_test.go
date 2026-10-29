@@ -31,7 +31,7 @@ func TestTerminalSessionIDFailureIsReturned(t *testing.T) {
 	svc := &fakeTerminalSessionService{}
 	want := errors.New("random source unavailable")
 	sessions := &terminalSessions{sessions: svc, newID: func() (string, error) { return "", want }}
-	if _, err := sessions.Create(context.Background(), "owner"); !errors.Is(err, want) {
+	if _, err := sessions.Create(context.Background(), "owner", "main"); !errors.Is(err, want) {
 		t.Fatalf("Create error = %v, want %v", err, want)
 	}
 	if svc.created != nil {

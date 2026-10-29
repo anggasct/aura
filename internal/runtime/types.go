@@ -40,6 +40,29 @@ type TurnRequest struct {
 	Budget           Budget
 	TraceParent      string
 	AgentID          string
+	Persona          *PersonaFingerprint
+}
+
+type PersonaFingerprint struct {
+	AgentID     string `json:"agent_id"`
+	SoulSHA256  string `json:"soul_sha256"`
+	ToolsSHA256 string `json:"tools_sha256"`
+	ModelRoute  string `json:"model_route"`
+}
+
+type Personas interface {
+	Fingerprint(agentID string) (PersonaFingerprint, bool)
+}
+
+type acceptedPayload struct {
+	Origin    string              `json:"origin"`
+	Principal string              `json:"principal"`
+	AgentID   string              `json:"agent_id,omitempty"`
+	Persona   *PersonaFingerprint `json:"persona_fingerprint,omitempty"`
+}
+
+func AcceptedPayload(origin, principalID, agentID string, persona *PersonaFingerprint) ([]byte, error) {
+	return json.Marshal(acceptedPayload{Origin: origin, Principal: principalID, AgentID: agentID, Persona: persona})
 }
 
 type UntrustedDocument struct {

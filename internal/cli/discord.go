@@ -73,7 +73,7 @@ type discordSessionEnsurer struct {
 	sessions store.SessionService
 }
 
-func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID string) error {
+func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error {
 	if s.sessions == nil {
 		return nil
 	}
@@ -88,6 +88,7 @@ func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ow
 	err := s.sessions.Create(ctx, &store.Session{
 		ID:        sessionID,
 		OwnerID:   ownerID,
+		AgentID:   agentID,
 		Metadata:  json.RawMessage(`{}`),
 		CreatedAt: now,
 		UpdatedAt: now,

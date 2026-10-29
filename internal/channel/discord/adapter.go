@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/principal"
@@ -79,6 +80,7 @@ type Adapter struct {
 	effects        EffectRunner
 	media          MediaStore
 	sessions       SessionEnsurer
+	persona        string
 	owners         *principal.Resolver
 	admitted       func(ctx context.Context, class principal.Class)
 	images         atomic.Pointer[vision.Service]
@@ -171,6 +173,7 @@ func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media M
 		effects:        effects,
 		media:          media,
 		sessions:       sessions,
+		persona:        auraagent.DefaultID,
 		logger:         logger,
 		gatewayURL:     gatewayURL,
 		restBase:       discordRestBase,

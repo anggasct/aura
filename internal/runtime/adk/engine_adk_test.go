@@ -20,7 +20,7 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	dedupe := store.NewDedupeStore(db)
-	engine, err := runtimeengine.NewEngine(runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
 	if err != nil {
 		t.Fatalf("runtimeengine.NewEngine: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	dedupe := store.NewDedupeStore(db)
-	engine, err := runtimeengine.NewEngine(runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
 	if err != nil {
 		t.Fatalf("runtimeengine.NewEngine: %v", err)
 	}

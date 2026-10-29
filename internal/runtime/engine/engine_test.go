@@ -30,7 +30,7 @@ func newTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *
 	}
 	events := store.NewEventStore(db)
 	dedupe := store.NewDedupeStore(db)
-	engine, err := NewEngine(cfg, events, dedupe, executor, nil)
+	engine, err := NewEngine(&cfg, events, dedupe, executor, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestQueueOverflowIsTyped(t *testing.T) {
 			_, err := collect(t, engine, sampleRequest("session-a", turnID(0)))
 			errs <- err
 		}()
-		waitFor(t, func() bool { return acceptedCount(t, db, "session-a") >= 1 })
+		waitFor(t, func() bool { return acceptedCount(t, db, "session-a") >= 1 && executor.StartCount() == 1 })
 		go func() {
 			_, err := collect(t, engine, sampleRequest("session-b", turnID(1)))
 			errs <- err

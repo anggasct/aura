@@ -391,7 +391,7 @@ func TestDurableResumeNeedsNoScan(t *testing.T) {
 			t.Fatalf("preload admit %s: %v", turn, err)
 		}
 	}
-	restarted, err := NewEngine(Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, events, store.NewDedupeStore(db), executor, nil)
+	restarted, err := NewEngine(&Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("restarted engine: %v", err)
 	}

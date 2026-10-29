@@ -41,6 +41,7 @@ func turnDescriptorFromRequest(req *runtime.TurnRequest) runtimesessions.Descrip
 		MaxCost:        req.Budget.MaxCost,
 		TraceParent:    req.TraceParent,
 		AgentID:        req.AgentID,
+		Persona:        req.Persona,
 	}
 }
 
@@ -62,6 +63,7 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRe
 		Budget:         runtime.Budget{MaxTokens: desc.MaxTokens, MaxCost: desc.MaxCost},
 		TraceParent:    desc.TraceParent,
 		AgentID:        desc.AgentID,
+		Persona:        desc.Persona,
 	}
 }
 

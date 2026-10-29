@@ -23,6 +23,7 @@ type Config struct {
 	TurnTimeout     time.Duration
 	ShutdownTimeout time.Duration
 	DefaultAgentID  string
+	Personas        runtime.Personas
 	Durable         *DurableConfig
 	PostTurnHook    func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
 }
@@ -103,7 +104,10 @@ type DedupeStore interface {
 	ListTurnEvents(ctx context.Context, turnID string) ([]store.RuntimeEvent, error)
 }
 
-func NewEngine(cfg Config, events EventStore, dedupe DedupeStore, executor TurnExecutor, logger *slog.Logger) (*Engine, error) {
+func NewEngine(config *Config, events EventStore, dedupe DedupeStore, executor TurnExecutor, logger *slog.Logger) (*Engine, error) {
+	if config == nil {
+		return nil, invalidArgument("engine config must not be nil")
+	}
 	if events == nil {
 		return nil, invalidArgument("event store must not be nil")
 	}
@@ -116,6 +120,7 @@ func NewEngine(cfg Config, events EventStore, dedupe DedupeStore, executor TurnE
 	if logger == nil {
 		logger = slog.Default()
 	}
+	cfg := *config
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -372,6 +377,9 @@ func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted 
 	if req.TurnID == "" {
 		req.TurnID = NewTurnID()
 	}
+	if err := e.stampPersona(req); err != nil {
+		return store.RuntimeEvent{}, "", false, false, err
+	}
 
 	e.mu.Lock()
 	if e.shutdown {
@@ -397,7 +405,11 @@ func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted 
 	}
 	e.mu.Unlock()
 
-	accepted = acceptedEvent(req, 0, e.agentID(req))
+	accepted, err = acceptedEvent(req, 0)
+	if err != nil {
+		e.releasePending()
+		return store.RuntimeEvent{}, "", false, false, err
+	}
 	if req.IdempotencyKey != "" {
 		err = sq.lock(func() error {
 			seq, seqErr := e.nextSequence(ctx, req.SessionID)
@@ -488,10 +500,10 @@ func (e *Engine) releasePending() {
 	e.mu.Unlock()
 }
 
-func acceptedEvent(req *runtime.TurnRequest, seq uint64, agentID string) store.RuntimeEvent {
-	payload := fmt.Sprintf(`{"origin":%q,"principal":%q}`, req.Origin, req.PrincipalID)
-	if agentID != "" {
-		payload = fmt.Sprintf(`{"origin":%q,"principal":%q,"agent_id":%q}`, req.Origin, req.PrincipalID, agentID)
+func acceptedEvent(req *runtime.TurnRequest, seq uint64) (store.RuntimeEvent, error) {
+	payload, err := runtime.AcceptedPayload(string(req.Origin), req.PrincipalID, req.AgentID, req.Persona)
+	if err != nil {
+		return store.RuntimeEvent{}, invalidArgument("turn accepted payload is not encodable")
 	}
 	return store.RuntimeEvent{
 		ID:            NewTurnID(),
@@ -501,9 +513,9 @@ func acceptedEvent(req *runtime.TurnRequest, seq uint64, agentID string) store.R
 		Author:        req.PrincipalID,
 		Kind:          runtime.EventKindTurnAccepted,
 		SchemaVersion: 1,
-		Payload:       []byte(payload),
+		Payload:       payload,
 		CreatedAt:     time.Now().UTC(),
-	}
+	}, nil
 }
 
 func (e *Engine) agentID(req *runtime.TurnRequest) string {
@@ -511,6 +523,19 @@ func (e *Engine) agentID(req *runtime.TurnRequest) string {
 		return req.AgentID
 	}
 	return e.cfg.DefaultAgentID
+}
+
+func (e *Engine) stampPersona(req *runtime.TurnRequest) error {
+	req.AgentID = e.agentID(req)
+	if e.cfg.Personas == nil || req.AgentID == "" || req.Persona != nil {
+		return nil
+	}
+	fingerprint, ok := e.cfg.Personas.Fingerprint(req.AgentID)
+	if !ok {
+		return codedError(runtime.ErrorCodePersonaNotFound, fmt.Sprintf("persona %q is not registered", req.AgentID), nil)
+	}
+	req.Persona = &fingerprint
+	return nil
 }
 
 func (e *Engine) nextSequence(ctx context.Context, sessionID string) (uint64, error) {

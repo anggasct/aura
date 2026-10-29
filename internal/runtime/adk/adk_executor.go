@@ -304,7 +304,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 		return nil, err
 	}
 	if x.ledger != nil {
-		wrapped, werr := usage.NewBudgeted(model, x.ledger, x.modelDefinitionID, x.logger)
+		wrapped, werr := usage.NewBudgeted(model, x.ledger, x.modelDefinitionID, definition.ID, x.logger)
 		if werr != nil {
 			return nil, fmt.Errorf("wrap model with budget: %w", werr)
 		}

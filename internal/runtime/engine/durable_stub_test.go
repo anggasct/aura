@@ -93,10 +93,11 @@ func (s *stubSessionStore) Admit(ctx context.Context, req *runtimesessions.Admit
 }
 
 func acceptedPayloadFor(desc *runtimesessions.Descriptor) []byte {
-	if desc.AgentID != "" {
-		return []byte(`{"origin":"` + desc.Origin + `","principal":"` + desc.PrincipalID + `","agent_id":"` + desc.AgentID + `"}`)
+	payload, err := runtime.AcceptedPayload(desc.Origin, desc.PrincipalID, desc.AgentID, desc.Persona)
+	if err != nil {
+		panic(err)
 	}
-	return []byte(`{"origin":"` + desc.Origin + `","principal":"` + desc.PrincipalID + `"}`)
+	return payload
 }
 
 func (s *stubSessionStore) Release(_ context.Context, sessionID, turnID string) (runtimesessions.ReleaseResult, error) {

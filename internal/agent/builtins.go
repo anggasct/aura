@@ -40,9 +40,9 @@ var builtins = []Definition{
 }
 
 func builtinByID(id string) (Definition, bool) {
-	for _, definition := range builtins {
-		if definition.ID == id {
-			return definition, true
+	for i := range builtins {
+		if builtins[i].ID == id {
+			return builtins[i], true
 		}
 	}
 	return Definition{}, false

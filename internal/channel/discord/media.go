@@ -51,7 +51,7 @@ type MediaStore interface {
 }
 
 type SessionEnsurer interface {
-	EnsureSession(ctx context.Context, sessionID, ownerID string) error
+	EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error
 }
 
 type artifactSummary struct {
@@ -190,7 +190,7 @@ func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachment
 		}
 		staged = append(staged, tmp)
 	}
-	if err := a.sessions.EnsureSession(ctx, sessionID, principal); err != nil {
+	if err := a.sessions.EnsureSession(ctx, sessionID, principal, a.persona); err != nil {
 		return nil, nil, err
 	}
 	summaries := make([]artifactSummary, 0, len(attachments))

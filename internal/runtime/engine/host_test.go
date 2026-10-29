@@ -65,7 +65,7 @@ func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, "conv-gw")
+		mustCreateSession(t, db, sampleSession("conv-gw"))
 
 		adapter := newFakeChannelAdapter("telegram")
 		adapter.acceptEnv = sampleEnvelope("conv-gw", "gw-msg-1")
@@ -123,7 +123,7 @@ func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := runtime.NewFakeExecutor([]runtime.FakeStep{jsonStep(runtime.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
-		mustCreateSession(t, db, "conv-drain")
+		mustCreateSession(t, db, sampleSession("conv-drain"))
 
 		adapter := newFakeChannelAdapter("telegram")
 		adapter.acceptEnv = sampleEnvelope("conv-drain", "drain-1")

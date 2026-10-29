@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/usage"
@@ -97,5 +98,36 @@ func TestADKExecutorBudgetSettlesTurn(t *testing.T) {
 	}
 	if entries[0].ModelDefinitionID != "primary" {
 		t.Errorf("entry model = %q, want primary", entries[0].ModelDefinitionID)
+	}
+}
+
+func TestADKExecutorBudgetAttributesPersona(t *testing.T) {
+	model := &fakeADKModel{answer: "final answer", tokens: 7}
+	modelName := registerFakeModel(t, model)
+	db, sessions, events := newSessionTestDB(t)
+	ledger := newBudgetTestLedger(t, db, 1_000_000_000)
+	resolver := &stubResolver{definition: auraagent.Definition{ID: "kuma", Instructions: "You are Kuma."}}
+	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil,
+		WithBudgetLedger(ledger, "primary"), WithAgentResolver(resolver, nil))
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	mustCreateSession(t, db, "session-1")
+
+	req := &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: runtime.OriginTerminal,
+		Parts: []runtimeingress.InputPart{{Text: "hello"}}, AgentID: "kuma",
+	}
+	for _, err := range executor.Execute(context.Background(), req) {
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	}
+	spends, err := ledger.StatusByAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spends) != 1 || spends[0].AgentID != "kuma" || spends[0].MonthUsedMicros() == 0 {
+		t.Fatalf("spend by persona = %+v, want the turn charged to kuma", spends)
 	}
 }

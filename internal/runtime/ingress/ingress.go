@@ -13,6 +13,7 @@ type InputPart struct {
 
 type IngressEnvelope struct {
 	Source         string
+	AgentID        string
 	ExternalID     string
 	PrincipalID    string
 	PrincipalClass string
@@ -21,6 +22,10 @@ type IngressEnvelope struct {
 	Parts          []InputPart
 	ReceivedAt     time.Time
 	TraceParent    string
+}
+
+func SessionKey(agentID, source, conversationID string) string {
+	return agentID + "/" + source + "/" + conversationID
 }
 
 type TurnRef struct {

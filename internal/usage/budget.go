@@ -18,11 +18,12 @@ type Budgeted struct {
 	inner             adkmodel.LLM
 	ledger            *Ledger
 	modelDefinitionID string
+	agentID           string
 	logger            *slog.Logger
 	attempts          atomic.Int64
 }
 
-func NewBudgeted(inner adkmodel.LLM, ledger *Ledger, modelDefinitionID string, logger *slog.Logger) (adkmodel.LLM, error) {
+func NewBudgeted(inner adkmodel.LLM, ledger *Ledger, modelDefinitionID, agentID string, logger *slog.Logger) (adkmodel.LLM, error) {
 	if inner == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "usage: inner model must not be nil", nil)
 	}
@@ -35,7 +36,7 @@ func NewBudgeted(inner adkmodel.LLM, ledger *Ledger, modelDefinitionID string, l
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Budgeted{inner: inner, ledger: ledger, modelDefinitionID: modelDefinitionID, logger: logger}, nil
+	return &Budgeted{inner: inner, ledger: ledger, modelDefinitionID: modelDefinitionID, agentID: agentID, logger: logger}, nil
 }
 
 func (b *Budgeted) Name() string {
@@ -58,6 +59,7 @@ func (b *Budgeted) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest
 			InvocationID:             invocationID,
 			Attempt:                  attempt,
 			ModelDefinitionID:        b.modelDefinitionID,
+			AgentID:                  b.agentID,
 			KnownInputTokens:         inputTokens,
 			RequestedMaxOutputTokens: requestedMaxOutput(req),
 		})

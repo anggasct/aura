@@ -179,7 +179,7 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	if err != nil {
 		t.Fatalf("executor: %v", err)
 	}
-	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtime.NewEngine(&runtime.Config{}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 		}
 	}
 	blocker := &blockingExecutor{started: make(chan struct{}), release: make(chan struct{})}
-	engine, err := runtime.NewEngine(runtime.Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, events, store.NewDedupeStore(db), blocker, nil)
+	engine, err := runtime.NewEngine(&runtime.Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, events, store.NewDedupeStore(db), blocker, nil)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -443,7 +443,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	executor1 := runtime.NewFakeExecutor([]runtime.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"first durable answer"}]},"partial":false}`)},
 	})
-	engine1, err := runtime.NewEngine(runtime.Config{}, events1, store.NewDedupeStore(db1), executor1, nil)
+	engine1, err := runtime.NewEngine(&runtime.Config{}, events1, store.NewDedupeStore(db1), executor1, nil)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	executor2 := runtime.NewFakeExecutor([]runtime.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"second durable answer"}]},"partial":false}`)},
 	})
-	engine2, err := runtime.NewEngine(runtime.Config{}, events2, store.NewDedupeStore(db2), executor2, nil)
+	engine2, err := runtime.NewEngine(&runtime.Config{}, events2, store.NewDedupeStore(db2), executor2, nil)
 	if err != nil {
 		t.Fatalf("second engine: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 	})
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(logBuf, nil))
-	engine, err := runtime.NewEngine(runtime.Config{}, events, store.NewDedupeStore(db), executor, logger)
+	engine, err := runtime.NewEngine(&runtime.Config{}, events, store.NewDedupeStore(db), executor, logger)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}

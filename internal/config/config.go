@@ -576,6 +576,8 @@ type AgentDefinition struct {
 	ID           string      `koanf:"id" yaml:"id"`
 	Description  string      `koanf:"description" yaml:"description"`
 	Instructions string      `koanf:"instructions" yaml:"instructions"`
+	SoulFile     string      `koanf:"soul_file" yaml:"soul_file"`
+	Soul         string      `koanf:"-" yaml:"-"`
 	Tools        []string    `koanf:"tools" yaml:"tools"`
 	Capabilities []string    `koanf:"capabilities" yaml:"capabilities"`
 	ModelRoute   string      `koanf:"model_route" yaml:"model_route"`

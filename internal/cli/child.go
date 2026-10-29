@@ -69,7 +69,11 @@ func (r *childRegistry) Spawn(ctx context.Context, spec *child.Spec, now time.Ti
 		State: child.StatusQueued, Deadline: deadline, CreatedAt: now, UpdatedAt: now,
 	}
 	sessions := store.NewSessionService(r.db)
-	if err := sessions.Create(ctx, &store.Session{ID: spec.ChildSessionID, OwnerID: spec.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	parent, err := sessions.Get(ctx, spec.ParentSessionID)
+	if err != nil {
+		return child.Spawn{}, false, err
+	}
+	if err := sessions.Create(ctx, &store.Session{ID: spec.ChildSessionID, OwnerID: spec.OwnerID, AgentID: parent.AgentID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeSessionIDConflict {
 			return child.Spawn{}, false, err
 		}
@@ -495,6 +499,7 @@ type childProjection struct {
 	durableKey  string
 	sourceRange string
 	ownerID     string
+	agentID     string
 	grants      []child.Grant
 	hasBudget   bool
 	maxTokens   int64
@@ -512,6 +517,7 @@ func childTurnRequest(sessionID, childID, task string, deadline time.Time, proje
 		IdempotencyKey: childID,
 		Deadline:       deadline,
 		Budget:         runtime.Budget{MaxTokens: projection.maxTokens},
+		AgentID:        projection.agentID,
 	}
 	if turnReq.TurnID == "" {
 		turnReq.TurnID = sessionID
@@ -520,19 +526,18 @@ func childTurnRequest(sessionID, childID, task string, deadline time.Time, proje
 	return turnReq
 }
 
-func (r childSessionRunner) parentOwner(ctx context.Context, parentSessionID string) (string, error) {
+func (r childSessionRunner) parentSession(ctx context.Context, parentSessionID string) (store.Session, error) {
 	if r.db == nil || strings.TrimSpace(parentSessionID) == "" {
-		return "", errors.New("cli: parent session must not be empty")
+		return store.Session{}, errors.New("cli: parent session must not be empty")
 	}
-	sessions := store.NewSessionService(r.db)
-	sess, err := sessions.Get(ctx, strings.TrimSpace(parentSessionID))
+	sess, err := store.NewSessionService(r.db).Get(ctx, strings.TrimSpace(parentSessionID))
 	if err != nil {
-		return "", err
+		return store.Session{}, err
 	}
 	if strings.TrimSpace(sess.OwnerID) == "" {
-		return "", errors.New("cli: parent owner must not be empty")
+		return store.Session{}, errors.New("cli: parent owner must not be empty")
 	}
-	return sess.OwnerID, nil
+	return sess, nil
 }
 
 func (p *childProjection) grantNames() []string {
@@ -579,8 +584,9 @@ func (r childSessionRunner) loadProjection(ctx context.Context, sessionID string
 	projection.digest = digest
 	projection.durableKey = durableKey
 	projection.sourceRange = parentInvocation
-	if owner, ownerErr := r.parentOwner(ctx, parentSession); ownerErr == nil {
-		projection.ownerID = owner
+	if parent, parentErr := r.parentSession(ctx, parentSession); parentErr == nil {
+		projection.ownerID = parent.OwnerID
+		projection.agentID = parent.AgentID
 	}
 	if json.Valid([]byte(grantsJSON)) {
 		var grants []child.Grant

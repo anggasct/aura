@@ -26,6 +26,7 @@ type Console struct {
 
 	principal           string
 	sessionID           string
+	agentID             string
 	skills              Skills
 	pendingSkill        string
 	closeInput          func()
@@ -63,6 +64,8 @@ func (c *Console) SetInterrupts(ch <-chan struct{}) { c.interrupts = ch }
 
 func (c *Console) SetSessionID(id string) { c.sessionID = id }
 
+func (c *Console) SetAgentID(id string) { c.agentID = id }
+
 func (c *Console) SetSkills(skills Skills) { c.skills = skills }
 
 func (c *Console) SetInputCloser(closeInput func()) { c.closeInput = closeInput }
@@ -83,7 +86,7 @@ func (c *Console) Run(ctx context.Context) error {
 		err  error
 	)
 	if c.sessionID == "" {
-		sess, err = c.sessions.Create(ctx, c.principal)
+		sess, err = c.sessions.Create(ctx, c.principal, c.agentID)
 	} else {
 		sess, err = c.sessions.Get(ctx, c.sessionID)
 		if err == nil && (c.principal == "" || sess.OwnerID != c.principal) {
@@ -94,6 +97,9 @@ func (c *Console) Run(ctx context.Context) error {
 		return fmt.Errorf("terminal: open session: %w", err)
 	}
 	c.sessionID = sess.ID
+	if sess.AgentID != "" {
+		c.agentID = sess.AgentID
+	}
 
 	c.escalated = make(chan struct{})
 	watchCtx, stopWatch := context.WithCancel(ctx)
@@ -203,6 +209,7 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 	req := &Request{
 		SessionID:   c.sessionID,
 		PrincipalID: c.principal,
+		AgentID:     c.agentID,
 		Origin:      "terminal",
 		Parts:       []Input{{Text: line}},
 	}

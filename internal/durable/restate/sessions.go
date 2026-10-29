@@ -119,6 +119,10 @@ func (s *sessionServer) admit(ctx restate.ObjectContext, req *runtimesessions.Ad
 	if held >= req.MaxPending {
 		return runtimesessions.AdmitResult{Overloaded: true}, nil
 	}
+	payload, err := runtime.AcceptedPayload(descriptor.Origin, descriptor.PrincipalID, descriptor.AgentID, descriptor.Persona)
+	if err != nil {
+		return runtimesessions.AdmitResult{}, sessionTerminal(err)
+	}
 	accepted := &store.RuntimeEvent{
 		ID:            req.AcceptedEventID,
 		SessionID:     sessionID,
@@ -126,7 +130,7 @@ func (s *sessionServer) admit(ctx restate.ObjectContext, req *runtimesessions.Ad
 		Author:        descriptor.PrincipalID,
 		Kind:          "turn.accepted",
 		SchemaVersion: 1,
-		Payload:       []byte(sessionAcceptedPayload(&descriptor)),
+		Payload:       payload,
 	}
 	claimed, err := restate.Run(ctx, func(_ restate.RunContext) (sessionClaim, error) {
 		return s.claim(ctx, &descriptor, accepted)
@@ -181,13 +185,6 @@ func (s *sessionServer) claim(ctx context.Context, descriptor *runtimesessions.D
 		return sessionClaim{replay: true, original: original}, nil
 	}
 	return sessionClaim{}, nil
-}
-
-func sessionAcceptedPayload(descriptor *runtimesessions.Descriptor) string {
-	if descriptor.AgentID != "" {
-		return fmt.Sprintf(`{"origin":%q,"principal":%q,"agent_id":%q}`, descriptor.Origin, descriptor.PrincipalID, descriptor.AgentID)
-	}
-	return fmt.Sprintf(`{"origin":%q,"principal":%q}`, descriptor.Origin, descriptor.PrincipalID)
 }
 
 func (s *sessionServer) release(ctx restate.ObjectContext, req runtimesessions.ReleaseRequest) (runtimesessions.ReleaseResult, error) {
