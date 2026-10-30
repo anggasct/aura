@@ -233,7 +233,7 @@ func TestLiveSupervisorSpawnsRegistersRestartsAndDrains(t *testing.T) {
 	binary := liveRestateBinary(t)
 	endpoint, _ := startTestEndpoint(t)
 	handlerURL := "http://" + endpoint.BoundAddr().String()
-	dataDir := filepath.Join(t.TempDir(), "restate-data")
+	dataDir := filepath.Join(t.TempDir(), "restate-data-directory-long-enough-that-unix-socket-paths-would-exceed-sun-len")
 	ingressAddr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
 	adminAddr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
 	nodeAddr := fmt.Sprintf("127.0.0.1:%d", freePort(t))

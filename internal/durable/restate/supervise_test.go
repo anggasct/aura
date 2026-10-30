@@ -239,14 +239,14 @@ func TestWriteChildConfigCarriesEndpointPorts(t *testing.T) {
 			t.Errorf("child config misses %q:\n%s", want, content)
 		}
 	}
-	if !strings.HasPrefix(string(content), "bind-address = \"127.0.0.1:15122\"\n") {
+	if !strings.HasPrefix(string(content), "listen-mode = \"tcp\"\nbind-address = \"127.0.0.1:15122\"\n") {
 		t.Errorf("child config does not open with the node bind address:\n%s", content)
 	}
 	defaulted, err := writeChildConfig(t.TempDir(), "", "http://127.0.0.1:18080", "http://127.0.0.1:19070")
 	if err != nil {
 		t.Fatalf("writeChildConfig without node addr: %v", err)
 	}
-	if content, err := os.ReadFile(defaulted); err != nil || !strings.HasPrefix(string(content), "bind-address = \"127.0.0.1:5122\"\n") {
+	if content, err := os.ReadFile(defaulted); err != nil || !strings.HasPrefix(string(content), "listen-mode = \"tcp\"\nbind-address = \"127.0.0.1:5122\"\n") {
 		t.Errorf("default node bind address missing (err %v):\n%s", err, content)
 	}
 	info, err := os.Stat(path)

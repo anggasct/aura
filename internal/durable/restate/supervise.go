@@ -373,7 +373,7 @@ func writeChildConfig(dataDir, nodeAddr, ingressURL, adminURL string) (string, e
 	if err != nil {
 		return "", err
 	}
-	content := "bind-address = \"" + nodeAddr + "\"\n\n[ingress]\nbind-address = \"" + ingressAddr + "\"\n\n[admin]\nbind-address = \"" + adminAddr + "\"\n"
+	content := "listen-mode = \"tcp\"\nbind-address = \"" + nodeAddr + "\"\n\n[ingress]\nbind-address = \"" + ingressAddr + "\"\n\n[admin]\nbind-address = \"" + adminAddr + "\"\n"
 	path := filepath.Join(dataDir, "restate.toml")
 	tmp, err := os.CreateTemp(dataDir, "restate-*.toml")
 	if err != nil {
