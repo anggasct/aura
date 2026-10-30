@@ -18,6 +18,8 @@ const (
 	ErrorCodeModelProviderInvalid       ErrorCode = "model_provider_invalid"
 	ErrorCodePersonaInvalid             ErrorCode = "persona_invalid"
 	ErrorCodePersonaSecret              ErrorCode = "persona_secret_invalid"
+	ErrorCodeBindingInvalid             ErrorCode = "binding_invalid"
+	ErrorCodeConfigShapeChanged         ErrorCode = "config_shape_changed"
 )
 
 type Error struct {

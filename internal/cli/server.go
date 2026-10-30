@@ -93,7 +93,16 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			channelAdapters, discordChecks, approvalDecider, err := buildChannelAdapters(cfg, db, artifactRoot, pipeline.MeterProvider(), logger)
+			agentRegistry, err := buildAgentRegistry(cfg)
+			if err != nil {
+				return err
+			}
+			logPersonas(ctx, logger, agentRegistry)
+			personaRouter, err := auraagent.NewRouter(agentRegistry, &cfg.Channels.Discord, cfg.Bindings)
+			if err != nil {
+				return err
+			}
+			channelAdapters, discordChecks, approvalDecider, err := buildChannelAdapters(cfg, personaRouter, db, artifactRoot, pipeline.MeterProvider(), logger)
 			if err != nil {
 				return err
 			}
@@ -107,11 +116,6 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			sessions := store.NewSessionService(db)
 			events := store.NewEventStore(db)
-			agentRegistry, err := buildAgentRegistry(cfg)
-			if err != nil {
-				return err
-			}
-			logPersonas(ctx, logger, agentRegistry)
 			personaRecorder, err := telemetry.NewPersonaRecorder(pipeline.MeterProvider())
 			if err != nil {
 				return err

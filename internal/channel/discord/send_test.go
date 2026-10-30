@@ -90,7 +90,7 @@ func newSendTestAdapter(t *testing.T, stub *restStub, configure func(*config.Dis
 		configure(&cfg)
 	}
 	doubles := &testDoubles{effects: newFakeEffectRunner(), media: &fakeMediaStore{}, sessions: &fakeSessionEnsurer{}}
-	adapter, err := New(&cfg, &memoryResumeStore{}, doubles.effects, doubles.media, doubles.sessions, nil)
+	adapter, err := newRoutedTestAdapter(t, &cfg, &memoryResumeStore{}, doubles.effects, doubles.media, doubles.sessions, nil)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
@@ -342,7 +342,7 @@ func TestDeliver_RestartReplaysWithoutRepost(t *testing.T) {
 		t.Fatalf("first Deliver(): %v", err)
 	}
 	restartedCfg := testAdapterConfig()
-	restarted, err := New(&restartedCfg, &memoryResumeStore{}, doubles.effects, doubles.media, doubles.sessions, nil)
+	restarted, err := newRoutedTestAdapter(t, &restartedCfg, &memoryResumeStore{}, doubles.effects, doubles.media, doubles.sessions, nil)
 	if err != nil {
 		t.Fatalf("restart New(): %v", err)
 	}

@@ -8,18 +8,9 @@ import (
 	"github.com/anggasct/aura/internal/principal"
 )
 
-func testDiscordConfig() *config.Discord {
-	return &config.Discord{
-		Enabled:            true,
-		Instance:           "owner",
-		BotTokenRef:        "env://AURA_DISCORD_BOT_TOKEN",
-		AllowedUserIDs:     []string{"111"},
-		AllowedGuildIDs:    []string{"222"},
-		AllowedChannelIDs:  []string{"333"},
-		AcceptDMs:          true,
-		MinEditInterval:    2000000000,
-		MaxAttachmentBytes: 20971520,
-	}
+func testDiscordConfig() *config.DiscordAccount {
+	account := testAdapterAccount()
+	return &account
 }
 
 func testMessage() *messagePayload {
@@ -45,7 +36,7 @@ func testOwners(t *testing.T, identities ...string) *principal.Resolver {
 func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 	selfID := "999"
 	cases := map[string]struct {
-		mutate    func(*config.Discord, *messagePayload)
+		mutate    func(*config.DiscordAccount, *messagePayload)
 		admit     bool
 		conv      string
 		extID     string
@@ -53,7 +44,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 		class     principal.Class
 	}{
 		"guild mention admitted": {
-			mutate:    func(*config.Discord, *messagePayload) {},
+			mutate:    func(*config.DiscordAccount, *messagePayload) {},
 			admit:     true,
 			conv:      "channel:333",
 			extID:     "message:1001",
@@ -61,7 +52,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassTrusted,
 		},
 		"dm admitted": {
-			mutate: func(cfg *config.Discord, msg *messagePayload) {
+			mutate: func(cfg *config.DiscordAccount, msg *messagePayload) {
 				msg.GuildID = ""
 				msg.Mentions = nil
 			},
@@ -72,7 +63,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassTrusted,
 		},
 		"owner identity admitted without allowlist entry": {
-			mutate:    func(_ *config.Discord, msg *messagePayload) { msg.Author.ID = "777" },
+			mutate:    func(_ *config.DiscordAccount, msg *messagePayload) { msg.Author.ID = "777" },
 			admit:     true,
 			conv:      "channel:333",
 			extID:     "message:1001",
@@ -80,7 +71,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassOwner,
 		},
 		"owner identity dm keeps raw conversation key": {
-			mutate: func(_ *config.Discord, msg *messagePayload) {
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) {
 				msg.Author.ID = "777"
 				msg.GuildID = ""
 				msg.Mentions = nil
@@ -92,7 +83,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassOwner,
 		},
 		"owner identity also allowlisted resolves as owner": {
-			mutate: func(cfg *config.Discord, msg *messagePayload) {
+			mutate: func(cfg *config.DiscordAccount, msg *messagePayload) {
 				cfg.AllowedUserIDs = append(cfg.AllowedUserIDs, "777")
 				msg.Author.ID = "777"
 			},
@@ -103,40 +94,40 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassOwner,
 		},
 		"owner identity still needs a mention in guilds": {
-			mutate: func(_ *config.Discord, msg *messagePayload) {
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) {
 				msg.Author.ID = "777"
 				msg.Mentions = nil
 			},
 		},
 		"owner identity still bound by channel scope": {
-			mutate: func(_ *config.Discord, msg *messagePayload) {
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) {
 				msg.Author.ID = "777"
 				msg.ChannelID = "444"
 			},
 		},
 		"non-allowlisted author denied": {
-			mutate: func(_ *config.Discord, msg *messagePayload) { msg.Author.ID = "666" },
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Author.ID = "666" },
 		},
 		"bot author denied": {
-			mutate: func(_ *config.Discord, msg *messagePayload) { msg.Author.Bot = true },
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Author.Bot = true },
 		},
 		"own message denied": {
-			mutate: func(_ *config.Discord, msg *messagePayload) { msg.Author.ID = selfID },
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Author.ID = selfID },
 		},
 		"empty content ignored": {
-			mutate: func(_ *config.Discord, msg *messagePayload) { msg.Content = "" },
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Content = "" },
 		},
 		"guild message without mention denied": {
-			mutate: func(_ *config.Discord, msg *messagePayload) { msg.Mentions = nil },
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Mentions = nil },
 		},
 		"guild message outside channel scope denied": {
-			mutate: func(_ *config.Discord, msg *messagePayload) { msg.ChannelID = "444" },
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.ChannelID = "444" },
 		},
 		"guild message outside guild scope denied": {
-			mutate: func(_ *config.Discord, msg *messagePayload) { msg.GuildID = "555" },
+			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.GuildID = "555" },
 		},
 		"dm refused when dms closed": {
-			mutate: func(cfg *config.Discord, msg *messagePayload) {
+			mutate: func(cfg *config.DiscordAccount, msg *messagePayload) {
 				cfg.AcceptDMs = false
 				msg.GuildID = ""
 				msg.Mentions = nil
@@ -148,7 +139,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			cfg := testDiscordConfig()
 			msg := testMessage()
 			tc.mutate(cfg, msg)
-			env, admitted, err := normalizeMessage(cfg, testOwners(t, "discord:777"), selfID, cfg.Instance, msg)
+			env, admitted, err := normalizeMessage(cfg, testOwners(t, "discord:777"), selfID, msg)
 			if err != nil {
 				t.Fatalf("normalizeMessage: %v", err)
 			}
@@ -198,13 +189,13 @@ func TestNormalizeMessage_RejectsMalformed(t *testing.T) {
 		"missing author":  {ID: "1001", ChannelID: "333", Content: "hi"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := normalizeMessage(cfg, nil, "999", "owner", msg)
+			_, _, err := normalizeMessage(cfg, nil, "999", msg)
 			if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
 				t.Errorf("code = %v, %v; want protocol_invalid", code, ok)
 			}
 		})
 	}
-	if _, _, err := normalizeMessage(nil, nil, "999", "owner", testMessage()); err == nil {
+	if _, _, err := normalizeMessage(nil, nil, "999", testMessage()); err == nil {
 		t.Error("nil config accepted")
 	}
 }

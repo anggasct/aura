@@ -34,10 +34,7 @@ func (e *Engine) channelAdapterFor(req *runtime.TurnRequest) (runtimechannelhost
 	e.mu.Lock()
 	adapters := e.adapters
 	e.mu.Unlock()
-	if len(adapters) == 0 {
-		return nil, false
-	}
-	return adapters[0], true
+	return adapterForOrigin(req.Origin, adapters)
 }
 
 func (e *Engine) pruneDeliveredLocked(now time.Time) {

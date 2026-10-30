@@ -153,7 +153,9 @@ func TestLoad_OwnerRejectsSecretInPreferences(t *testing.T) {
 	path := writeOwnerConfig(t, `version: 1
 channels:
   discord:
-    bot_token_ref: env://TEST_OWNER_SECRET
+    accounts:
+      - name: owner
+        bot_token_ref: env://TEST_OWNER_SECRET
 owner:
   preferences:
     reminder: "send `+ownerSecretFixture+`"
@@ -179,7 +181,9 @@ func TestLoad_OwnerRejectsSecretPreferenceKey(t *testing.T) {
 	path := writeOwnerConfig(t, `version: 1
 channels:
   discord:
-    bot_token_ref: env://TEST_OWNER_SECRET
+    accounts:
+      - name: owner
+        bot_token_ref: env://TEST_OWNER_SECRET
 owner:
   preferences:
     "`+ownerSecretFixture+`": concise
@@ -202,7 +206,9 @@ func TestLoad_OwnerPassesWhenValuesDoNotMatchSecrets(t *testing.T) {
 	path := writeOwnerConfig(t, `version: 1
 channels:
   discord:
-    bot_token_ref: env://TEST_OWNER_SECRET
+    accounts:
+      - name: owner
+        bot_token_ref: env://TEST_OWNER_SECRET
 owner:
   name: Angga
   preferences:
@@ -221,7 +227,9 @@ func TestLoad_OwnerPassesWhenReferencedSecretUnset(t *testing.T) {
 	path := writeOwnerConfig(t, `version: 1
 channels:
   discord:
-    bot_token_ref: env://TEST_OWNER_SECRET_UNSET
+    accounts:
+      - name: owner
+        bot_token_ref: env://TEST_OWNER_SECRET_UNSET
 owner:
   name: Angga
   preferences:

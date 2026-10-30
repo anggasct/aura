@@ -48,6 +48,7 @@ type Config struct {
 	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
 	Vision       *Vision               `koanf:"vision" yaml:"vision,omitempty"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
+	Bindings     []Binding             `koanf:"bindings" yaml:"bindings,omitempty"`
 }
 
 type Webhook struct {
@@ -200,16 +201,33 @@ type Vision struct {
 }
 
 type Discord struct {
-	Enabled                  bool     `koanf:"enabled" yaml:"enabled"`
-	Instance                 string   `koanf:"instance" yaml:"instance"`
-	BotTokenRef              string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
-	AllowedUserIDs           []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
-	AllowedGuildIDs          []string `koanf:"allowed_guild_ids" yaml:"allowed_guild_ids"`
-	AllowedChannelIDs        []string `koanf:"allowed_channel_ids" yaml:"allowed_channel_ids"`
-	AcceptDMs                bool     `koanf:"accept_dms" yaml:"accept_dms"`
-	MinEditInterval          Duration `koanf:"min_edit_interval" yaml:"min_edit_interval"`
-	MaxAttachmentBytes       int64    `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
-	ThreadAutoArchiveMinutes int      `koanf:"thread_auto_archive_minutes" yaml:"thread_auto_archive_minutes"`
+	Enabled                  bool             `koanf:"enabled" yaml:"enabled"`
+	Accounts                 []DiscordAccount `koanf:"accounts" yaml:"accounts"`
+	MinEditInterval          Duration         `koanf:"min_edit_interval" yaml:"min_edit_interval"`
+	MaxAttachmentBytes       int64            `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
+	ThreadAutoArchiveMinutes int              `koanf:"thread_auto_archive_minutes" yaml:"thread_auto_archive_minutes"`
+}
+
+type DiscordAccount struct {
+	Name              string   `koanf:"name" yaml:"name"`
+	BotTokenRef       string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
+	Persona           string   `koanf:"persona" yaml:"persona,omitempty"`
+	AllowedUserIDs    []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
+	AllowedGuildIDs   []string `koanf:"allowed_guild_ids" yaml:"allowed_guild_ids"`
+	AllowedChannelIDs []string `koanf:"allowed_channel_ids" yaml:"allowed_channel_ids"`
+	AcceptDMs         bool     `koanf:"accept_dms" yaml:"accept_dms"`
+}
+
+const BindingChannelDiscord = "discord"
+
+type Binding struct {
+	Persona   string `koanf:"persona" yaml:"persona"`
+	Channel   string `koanf:"channel" yaml:"channel"`
+	Account   string `koanf:"account" yaml:"account"`
+	GuildID   string `koanf:"guild_id" yaml:"guild_id,omitempty"`
+	ChannelID string `koanf:"channel_id" yaml:"channel_id,omitempty"`
+	ThreadID  string `koanf:"thread_id" yaml:"thread_id,omitempty"`
+	UserID    string `koanf:"user_id" yaml:"user_id,omitempty"`
 }
 
 type Terminal struct {
@@ -815,9 +833,6 @@ func Default() Config {
 		},
 		Channels: Channels{
 			Discord: Discord{
-				Instance:                 "owner",
-				BotTokenRef:              defaultDiscordBotTokenRef(),
-				AcceptDMs:                true,
 				MinEditInterval:          Duration(2 * time.Second),
 				MaxAttachmentBytes:       20971520,
 				ThreadAutoArchiveMinutes: 1440,
@@ -919,10 +934,6 @@ func Default() Config {
 			Recovery:           "interrupt",
 		},
 	}
-}
-
-func defaultDiscordBotTokenRef() string {
-	return fmt.Sprintf("env://%s_%s_%s_%s", "AURA", "DISCORD", "BOT", "TOKEN")
 }
 
 func defaultWebSearchCredentialRef() string {
