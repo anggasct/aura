@@ -275,6 +275,62 @@ func TestUnownedThreadFollowsBindingsWhenNoSessionExists(t *testing.T) {
 	}
 }
 
+func TestMentionInKnownThreadKeepsThreadPersona(t *testing.T) {
+	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/channels/777400" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"777400","parent_id":"333","owner_id":"999","type":11}`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	})
+	cfg := testAdapterConfig()
+	cfg.Accounts[0].AllowedChannelIDs = nil
+	adapter := newAccountAdapter(t, &cfg, 0, nil, stub, "999")
+	if err := adapter.sessions.EnsureSession(t.Context(), "engineer/discord:owner/thread:777400", "discord:111", "engineer"); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	admitted, err := adapter.adapter.admit(t.Context(), textMessage("8801", "777400", "222", "111", "hello thread", []string{"999"}))
+	if err != nil || !admitted {
+		t.Fatalf("admit() = %v, %v; want admission", admitted, err)
+	}
+	env := routedEnvelope(t, adapter.sink, "message:8801")
+	if env.AgentID != "engineer" || env.ConversationID != "engineer/discord:owner/thread:777400" {
+		t.Fatalf("thread mention routed to %q/%q, want the thread persona", env.AgentID, env.ConversationID)
+	}
+}
+
+func TestMentionInUnownedThreadFollowsParentBinding(t *testing.T) {
+	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/channels/777401" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"777401","parent_id":"333","owner_id":"999","type":11}`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	})
+	cfg := testAdapterConfig()
+	cfg.Accounts[0].AllowedChannelIDs = nil
+	bindings := []config.Binding{{Persona: "reviewer", Channel: config.BindingChannelDiscord, Account: "owner", ChannelID: "333"}}
+	adapter := newAccountAdapter(t, &cfg, 0, bindings, stub, "999")
+
+	threadType := channelTypePublicThread
+	msg := textMessage("8802", "777401", "222", "111", "hello thread", []string{"999"})
+	msg.ChannelType = &threadType
+
+	admitted, err := adapter.adapter.admit(t.Context(), msg)
+	if err != nil || !admitted {
+		t.Fatalf("admit() = %v, %v; want admission", admitted, err)
+	}
+	env := routedEnvelope(t, adapter.sink, "message:8802")
+	if env.AgentID != "reviewer" || env.ConversationID != "reviewer/discord:owner/thread:777401" {
+		t.Fatalf("thread mention routed to %q/%q, want the parent-channel binding", env.AgentID, env.ConversationID)
+	}
+}
+
 func TestTriggerThreadInheritsTriggerPersona(t *testing.T) {
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {

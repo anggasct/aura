@@ -385,6 +385,9 @@ func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope,
 }
 
 func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) {
+	if msg == nil {
+		return false, Errorf(ErrorCodeInvalidArgument, "account and message must not be nil")
+	}
 	if route, ok := a.lookupThread(msg.ChannelID); ok {
 		return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
 	}
@@ -392,8 +395,24 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if err != nil {
 		return false, err
 	}
+	if a.threadClassificationNeeded(ctx, msg, admitted) {
+		probe, probeErr := a.probeChannel(ctx, msg.ChannelID)
+		if probeErr != nil {
+			a.logger.DebugContext(ctx, "thread classification failed", "component", "discord", "error", probeErr)
+			return false, nil
+		}
+		if probe.isThread {
+			if !probe.owned {
+				return false, nil
+			}
+			return a.admitThreadRoute(ctx, msg, threadRoute{parent: probe.parent})
+		}
+		if msg.ChannelType != nil && isThreadChannelType(*msg.ChannelType) {
+			return false, nil
+		}
+	}
 	if !admitted {
-		return a.admitUnknownThread(ctx, msg)
+		return false, nil
 	}
 	persona, routed := a.routePersona(ctx, &auraagent.RouteScope{GuildID: msg.GuildID, ChannelID: msg.ChannelID, UserID: msg.Author.ID})
 	if !routed {
@@ -485,37 +504,56 @@ func (a *Adapter) existingThreadPersona(ctx context.Context, threadID string) (p
 	return "", false, nil
 }
 
-func (a *Adapter) admitUnknownThread(ctx context.Context, msg *messagePayload) (bool, error) {
+type channelProbe struct {
+	parent   string
+	isThread bool
+	owned    bool
+}
+
+// threadClassificationNeeded reports whether the message's channel must be
+// inspected before admission: thread messages always resolve against their
+// parent channel, and a mention must never downgrade one to a channel message.
+// A payload channel type is authoritative. Otherwise unknown channels and the
+// open-allowlist case are probed, as is any channel that already owns a thread
+// session.
+func (a *Adapter) threadClassificationNeeded(ctx context.Context, msg *messagePayload, admitted bool) bool {
 	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, msg) {
-		return false, nil
+		return false
 	}
-	if a.selfID == "" {
-		return false, nil
+	if msg.ChannelType != nil {
+		return isThreadChannelType(*msg.ChannelType)
 	}
-	if len(a.account.AllowedGuildIDs) > 0 && !slices.Contains(a.account.AllowedGuildIDs, msg.GuildID) {
-		return false, nil
+	if !admitted || len(a.account.AllowedChannelIDs) == 0 {
+		return true
 	}
-	if route, ok := a.lookupThread(msg.ChannelID); ok {
-		return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
+	_, found, err := a.existingThreadPersona(ctx, msg.ChannelID)
+	return err == nil && found
+}
+
+func (a *Adapter) probeChannel(ctx context.Context, channelID string) (channelProbe, error) {
+	if a.selfID == "" || channelID == "" {
+		return channelProbe{}, nil
 	}
 	token, _ := a.tokenRef.Resolve()
 	if token == "" {
+		return channelProbe{}, nil
+	}
+	info, err := a.fetchThreadParent(ctx, token, channelID)
+	if err != nil {
+		return channelProbe{}, err
+	}
+	if info.ID != channelID || !isThreadChannelType(info.Type) || info.ParentID == "" {
+		return channelProbe{}, nil
+	}
+	return channelProbe{parent: info.ParentID, isThread: true, owned: info.OwnerID == a.selfID}, nil
+}
+
+func (a *Adapter) admitThreadRoute(ctx context.Context, msg *messagePayload, route threadRoute) (bool, error) {
+	if len(a.account.AllowedChannelIDs) > 0 && !slices.Contains(a.account.AllowedChannelIDs, route.parent) {
 		return false, nil
 	}
-	info, fetchErr := a.fetchThreadParent(ctx, token, msg.ChannelID)
-	_ = fetchErr
-	if info.ID == "" {
-		return false, nil
-	}
-	if !isThreadChannelType(info.Type) || info.OwnerID != a.selfID || info.ParentID == "" {
-		return false, nil
-	}
-	if len(a.account.AllowedChannelIDs) > 0 && !slices.Contains(a.account.AllowedChannelIDs, info.ParentID) {
-		return false, nil
-	}
-	route := threadRoute{parent: info.ParentID}
-	a.rememberThread("", info.ID, route)
-	return a.admitThreadMessage(ctx, msg, info.ID, route)
+	a.rememberThread("", msg.ChannelID, route)
+	return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
 }
 
 func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope, bindingChannel string) (bool, error) {
