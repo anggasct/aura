@@ -39,6 +39,7 @@ func (s *memoryDocumentStore) UpsertDocument(ctx context.Context, document *memo
 		PromptVersion: document.PromptVersion,
 		ModelProtocol: document.ModelProtocol,
 		ModelName:     document.ModelName,
+		AgentID:       document.AgentID,
 		CreatedAt:     document.CreatedAt,
 		ExpiresAt:     document.ExpiresAt,
 	}
@@ -52,6 +53,7 @@ func (s *memoryDocumentStore) ProjectionWatermark(ctx context.Context, sessionID
 func (s *memoryDocumentStore) Search(ctx context.Context, query *memory.StoredQuery) ([]memory.StoredHit, error) {
 	hits, err := s.store.Search(ctx, &store.MemoryQuery{
 		OwnerID:   query.OwnerID,
+		AgentIDs:  query.AgentIDs,
 		SessionID: query.SessionID,
 		Terms:     query.Terms,
 		Before:    query.Before,
@@ -75,6 +77,7 @@ func (s *memoryDocumentStore) Search(ctx context.Context, query *memory.StoredQu
 				PromptVersion: hits[i].PromptVersion,
 				ModelProtocol: hits[i].ModelProtocol,
 				ModelName:     hits[i].ModelName,
+				AgentID:       hits[i].AgentID,
 				CreatedAt:     hits[i].CreatedAt,
 				ExpiresAt:     hits[i].ExpiresAt,
 			},
@@ -109,6 +112,7 @@ func (s *memoryDocumentStore) GetDocument(ctx context.Context, id string) (memor
 		PromptVersion: document.PromptVersion,
 		ModelProtocol: document.ModelProtocol,
 		ModelName:     document.ModelName,
+		AgentID:       document.AgentID,
 		CreatedAt:     document.CreatedAt,
 		ExpiresAt:     document.ExpiresAt,
 	}, true, nil
@@ -145,6 +149,7 @@ func convertMemoryDocuments(documents []store.MemoryDocument) []memory.StoredDoc
 			PromptVersion: documents[i].PromptVersion,
 			ModelProtocol: documents[i].ModelProtocol,
 			ModelName:     documents[i].ModelName,
+			AgentID:       documents[i].AgentID,
 			CreatedAt:     documents[i].CreatedAt,
 			ExpiresAt:     documents[i].ExpiresAt,
 		})
@@ -171,6 +176,7 @@ func (s *memoryDocumentStore) ListSessionDocuments(ctx context.Context, ownerID,
 			PromptVersion: documents[i].PromptVersion,
 			ModelProtocol: documents[i].ModelProtocol,
 			ModelName:     documents[i].ModelName,
+			AgentID:       documents[i].AgentID,
 			CreatedAt:     documents[i].CreatedAt,
 			ExpiresAt:     documents[i].ExpiresAt,
 		})
@@ -197,6 +203,7 @@ func (s *memoryDocumentStore) ListOwnerDocuments(ctx context.Context, ownerID st
 			PromptVersion: documents[i].PromptVersion,
 			ModelProtocol: documents[i].ModelProtocol,
 			ModelName:     documents[i].ModelName,
+			AgentID:       documents[i].AgentID,
 			CreatedAt:     documents[i].CreatedAt,
 			ExpiresAt:     documents[i].ExpiresAt,
 		})
@@ -244,13 +251,13 @@ type memoryRuntime struct {
 	summarizer memory.Summarizer
 }
 
-func buildMemoryRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger, observer memory.Observer) (*memoryRuntime, error) {
+func buildMemoryRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, scopes memory.RecallScopes, logger *slog.Logger, observer memory.Observer) (*memoryRuntime, error) {
 	service, err := buildMemoryService(cfg, db, observer)
 	if err != nil {
 		return nil, err
 	}
 	model, summarizer := buildMemorySummary(ctx, cfg, logger, observer)
-	provider, err := memory.NewProvider(service, memory.ProviderConfig{})
+	provider, err := memory.NewProvider(service, memory.ProviderConfig{Scopes: scopes})
 	if err != nil {
 		return nil, err
 	}

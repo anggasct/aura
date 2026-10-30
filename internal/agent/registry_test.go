@@ -370,3 +370,44 @@ func TestFingerprintTracksSoulToolsAndRoute(t *testing.T) {
 		t.Fatal("tool change kept the tools digest")
 	}
 }
+
+func TestRecallScopeFollowsMemoryScope(t *testing.T) {
+	registry, err := Build([]config.AgentDefinition{
+		{ID: "kuma", Description: "Casual", Instructions: "Be casual.", MemoryScope: MemoryScopeShared},
+		{ID: "nara", Description: "Formal", Instructions: "Be formal.", MemoryScope: MemoryScopeShared},
+		{ID: "solo", Description: "Private", Instructions: "Keep to yourself."},
+	}, validTools, []string{"primary"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	cases := map[string][]string{
+		"kuma":    {"kuma", "nara"},
+		"nara":    {"kuma", "nara"},
+		"solo":    {"solo"},
+		DefaultID: {DefaultID},
+	}
+	for id, want := range cases {
+		t.Run(id, func(t *testing.T) {
+			got, ok := registry.RecallScope(id)
+			if !ok || !slices.Equal(got, want) {
+				t.Fatalf("RecallScope(%q) = %v, %v; want %v", id, got, ok, want)
+			}
+		})
+	}
+	if _, ok := registry.RecallScope("ghost"); ok {
+		t.Fatal("unregistered persona has a recall scope")
+	}
+	solo, _ := registry.Lookup("solo")
+	if solo.MemoryScope != MemoryScopePersona {
+		t.Fatalf("default memory scope = %q, want %q", solo.MemoryScope, MemoryScopePersona)
+	}
+}
+
+func TestBuildRejectsUnknownMemoryScope(t *testing.T) {
+	_, err := Build([]config.AgentDefinition{
+		{ID: "kuma", Description: "Casual", Instructions: "Be casual.", MemoryScope: "global"},
+	}, validTools, []string{"primary"})
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeDefinitionInvalid {
+		t.Fatalf("Build error = %v, want %s", err, ErrorCodeDefinitionInvalid)
+	}
+}

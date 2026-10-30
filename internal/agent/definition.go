@@ -16,8 +16,14 @@ type Definition struct {
 	Tools        []string
 	Capabilities []string
 	ModelRoute   string
+	MemoryScope  string
 	Limits       Limits
 }
+
+const (
+	MemoryScopePersona = "persona"
+	MemoryScopeShared  = "shared"
+)
 
 type Limits struct {
 	TurnTimeout time.Duration
@@ -59,6 +65,7 @@ func (d *Definition) clone() Definition {
 		Tools:        append([]string(nil), d.Tools...),
 		Capabilities: append([]string(nil), d.Capabilities...),
 		ModelRoute:   d.ModelRoute,
+		MemoryScope:  d.MemoryScope,
 		Limits:       d.Limits,
 	}
 }

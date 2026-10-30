@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -106,12 +107,14 @@ type StoredDocument struct {
 	PromptVersion string
 	ModelProtocol string
 	ModelName     string
+	AgentID       string
 	CreatedAt     time.Time
 	ExpiresAt     *time.Time
 }
 
 type StoredQuery struct {
 	OwnerID   string
+	AgentIDs  []string
 	SessionID string
 	Terms     string
 	Before    time.Time
@@ -125,6 +128,7 @@ type StoredHit struct {
 
 type RecallRequest struct {
 	OwnerID      string
+	AgentIDs     []string
 	SessionID    string
 	Query        string
 	MaxDocuments int
@@ -541,6 +545,9 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 	if strings.TrimSpace(req.OwnerID) == "" || strings.TrimSpace(req.SessionID) == "" {
 		return nil, Errorf(ErrorCodeQueryInvalid, "recall owner and session must not be empty")
 	}
+	if len(req.AgentIDs) == 0 || slices.Contains(req.AgentIDs, "") {
+		return nil, Errorf(ErrorCodeQueryInvalid, "recall readable personas must not be empty")
+	}
 	if len([]rune(req.Query)) == 0 || len([]rune(req.Query)) > maxQueryRunes {
 		return nil, Errorf(ErrorCodeQueryInvalid, "recall query is not within bounds")
 	}
@@ -557,6 +564,7 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 	}
 	hits, err := s.documents.Search(ctx, &StoredQuery{
 		OwnerID:   req.OwnerID,
+		AgentIDs:  req.AgentIDs,
 		SessionID: req.SessionID,
 		Terms:     req.Query,
 		Before:    req.Before,
@@ -659,10 +667,11 @@ func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDoc
 		seen[primary[i].ID] = struct{}{}
 	}
 	hits, err := s.documents.Search(ctx, &StoredQuery{
-		OwnerID: req.OwnerID,
-		Terms:   req.Query,
-		Before:  req.Before,
-		Limit:   maxDocs + s.fallbackDocs,
+		OwnerID:  req.OwnerID,
+		AgentIDs: req.AgentIDs,
+		Terms:    req.Query,
+		Before:   req.Before,
+		Limit:    maxDocs + s.fallbackDocs,
 	})
 	if err != nil {
 		return nil

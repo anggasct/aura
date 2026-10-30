@@ -64,7 +64,7 @@ func TestProjectBatchSingleDocAndIdempotentReplay(t *testing.T) {
 	if result.Indexed != 1 || result.Dropped != 0 {
 		t.Fatalf("result = %+v, want indexed 1 dropped 0", result)
 	}
-	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -85,7 +85,7 @@ func TestProjectBatchSingleDocAndIdempotentReplay(t *testing.T) {
 	if again.Indexed != 1 {
 		t.Errorf("replay indexed = %d, want 1 (convergent re-projection)", again.Indexed)
 	}
-	recalled, err = service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
+	recalled, err = service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
 	if err != nil || len(recalled) != 1 {
 		t.Fatalf("replay recall = %d, %v; want still one doc", len(recalled), err)
 	}
@@ -113,7 +113,7 @@ func TestProjectBatchCrossSessionFallbackAndCrossOwnerNegative(t *testing.T) {
 	seed("owner-1", "sess-2", 1, "the nightly backup failed with errors")
 	seed("owner-2", "sess-9", 1, "the nightly backup finished cleanly")
 
-	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -135,7 +135,7 @@ func TestProjectBatchCrossSessionFallbackAndCrossOwnerNegative(t *testing.T) {
 		}
 	}
 
-	foreign, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-2", SessionID: "sess-9", Query: "nightly backup"})
+	foreign, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-2", SessionID: "sess-9", Query: "nightly backup"})
 	if err != nil {
 		t.Fatalf("foreign Recall(): %v", err)
 	}
@@ -172,7 +172,7 @@ func TestProjectBatchFallbackBudgetSeparation(t *testing.T) {
 			t.Fatalf("seed fallback %d: %v", i, err)
 		}
 	}
-	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -206,7 +206,7 @@ func TestProjectBatchSecretDropIncrementsCounter(t *testing.T) {
 	if got := service.SecretDropCount(); got != before+1 {
 		t.Errorf("secret drops = %d, want %d", got, before+1)
 	}
-	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "key"})
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "key"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -249,7 +249,7 @@ func TestProjectBatchStripsEvidenceWithoutSelfIngestion(t *testing.T) {
 	if result.Indexed != 1 {
 		t.Fatalf("result = %+v, want indexed 1", result)
 	}
-	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "summarize"})
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "summarize"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -333,7 +333,7 @@ func TestRecallFallbackSearchFailureLeavesProjectionCounter(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	before := service.ProjectionFailureCount()
-	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}

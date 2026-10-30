@@ -49,8 +49,8 @@ func memoryInspectLines(documents []memory.StoredDocument) []string {
 		if prompt == "" {
 			prompt = "-"
 		}
-		lines = append(lines, fmt.Sprintf("%s session=%s kind=%s range=%d-%d trust=%s prompt=%s expires=%s content=%s",
-			documents[i].ID, documents[i].SessionID, documents[i].Kind,
+		lines = append(lines, fmt.Sprintf("%s agent=%s session=%s kind=%s range=%d-%d trust=%s prompt=%s expires=%s content=%s",
+			documents[i].ID, documents[i].AgentID, documents[i].SessionID, documents[i].Kind,
 			documents[i].FromSequence, documents[i].ToSequence,
 			documents[i].TrustLabel, prompt, expires,
 			truncateMemoryText(documents[i].Content, 120)))

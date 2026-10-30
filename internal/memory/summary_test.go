@@ -48,7 +48,7 @@ func seedRecallDocuments(t *testing.T, service *Service, owner, session string, 
 			t.Fatalf("ProjectEvent(): %v", err)
 		}
 	}
-	documents, err := service.Recall(t.Context(), &RecallRequest{
+	documents, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: owner, SessionID: session, Query: "backup",
 	})
 	if err != nil {
@@ -204,7 +204,7 @@ func TestRecallWithSummaryDegradesToNoRecall(t *testing.T) {
 	service := testService()
 	seedRecallDocuments(t, service, "owner-1", "sess-1", "nightly backup finished")
 
-	plain, err := service.RecallWithSummary(t.Context(), &RecallRequest{
+	plain, err := service.RecallWithSummary(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup finished",
 	}, nil, nil)
 	if err != nil {
@@ -215,7 +215,7 @@ func TestRecallWithSummaryDegradesToNoRecall(t *testing.T) {
 	}
 
 	failing := &fakeSummarizer{err: errors.New("model exploded")}
-	degraded, err := service.RecallWithSummary(t.Context(), &RecallRequest{
+	degraded, err := service.RecallWithSummary(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup finished",
 	}, capableModel(), failing)
 	if err == nil {
@@ -226,12 +226,12 @@ func TestRecallWithSummaryDegradesToNoRecall(t *testing.T) {
 	}
 
 	broken := NewServiceWithStoreError()
-	if _, err := broken.RecallWithSummary(t.Context(), &RecallRequest{
+	if _, err := broken.RecallWithSummary(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup finished",
 	}, capableModel(), &fakeSummarizer{text: "x"}); err == nil {
 		t.Fatal("projection failure swallowed")
 	} else {
-		empty, _ := broken.RecallWithSummary(t.Context(), &RecallRequest{
+		empty, _ := broken.RecallWithSummary(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 			OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup finished",
 		}, nil, nil)
 		if len(empty.Documents) != 0 {
@@ -243,12 +243,12 @@ func TestRecallWithSummaryDegradesToNoRecall(t *testing.T) {
 func TestRecallSurfacesCorruptProjection(t *testing.T) {
 	store := newFakeDocumentStore()
 	store.records["mem_bad"] = StoredDocument{
-		ID: "mem_bad", OwnerID: "owner-1", SessionID: "sess-1", Kind: KindEventText,
+		ID: "mem_bad", OwnerID: "owner-1", AgentID: "main", SessionID: "sess-1", Kind: KindEventText,
 		FromSequence: -4, ToSequence: -4, Content: "nightly backup finished",
 		TrustLabel: string(approval.TrustOwnerInput), CreatedAt: time.Now().UTC(),
 	}
 	service := testServiceWithStore(store)
-	if _, err := service.Recall(t.Context(), &RecallRequest{
+	if _, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup finished",
 	}); err == nil {
 		t.Fatal("corrupt row accepted")
@@ -264,7 +264,7 @@ func TestSummaryRoundTripCarriesModelProvenance(t *testing.T) {
 	if _, err := service.Summarize(t.Context(), "owner-1", "sess-1", "nightly backup finished", documents, capableModel(), &fakeSummarizer{text: "backup digest"}); err != nil {
 		t.Fatalf("Summarize(): %v", err)
 	}
-	found, err := service.Recall(t.Context(), &RecallRequest{
+	found, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "backup digest",
 	})
 	if err != nil {

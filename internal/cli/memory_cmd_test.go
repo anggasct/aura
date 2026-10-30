@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/memory"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -245,5 +246,15 @@ func TestMemoryCLIForgetRequiresScope(t *testing.T) {
 	_, err = runMemoryCommand(t, cfg, "forget", "--session", "sess-a", "--id", "mem-a1")
 	if err == nil {
 		t.Error("dual-scope forget accepted")
+	}
+}
+
+func TestMemoryInspectLinesNameThePersona(t *testing.T) {
+	lines := memoryInspectLines([]memory.StoredDocument{{
+		ID: "mem-1", AgentID: "kuma", SessionID: "kuma/discord:home/dm:1", Kind: memory.KindEventText,
+		FromSequence: 1, ToSequence: 1, TrustLabel: "owner_input", Content: "hello",
+	}})
+	if len(lines) != 1 || !strings.Contains(lines[0], "mem-1 agent=kuma session=kuma/discord:home/dm:1 ") {
+		t.Fatalf("lines = %q, want the persona after the document id", lines)
 	}
 }

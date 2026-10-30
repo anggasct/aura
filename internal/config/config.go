@@ -599,6 +599,7 @@ type AgentDefinition struct {
 	Tools        []string    `koanf:"tools" yaml:"tools"`
 	Capabilities []string    `koanf:"capabilities" yaml:"capabilities"`
 	ModelRoute   string      `koanf:"model_route" yaml:"model_route"`
+	MemoryScope  string      `koanf:"memory_scope" yaml:"memory_scope,omitempty"`
 	Limits       AgentLimits `koanf:"limits" yaml:"limits"`
 }
 

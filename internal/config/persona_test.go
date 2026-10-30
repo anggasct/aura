@@ -112,3 +112,25 @@ func TestLoad_SoulFileRejectsConfiguredSecret(t *testing.T) {
 		t.Errorf("error leaks soul material: %v", err)
 	}
 }
+
+func TestLoad_MemoryScopeShape(t *testing.T) {
+	cases := map[string]struct {
+		value string
+		ok    bool
+	}{
+		"shared string": {value: "shared", ok: true},
+		"not a string":  {value: "[shared]", ok: false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := writeDiscordConfig(t, "version: 1\nagents:\n  definitions:\n    - id: kuma\n      description: Casual\n      instructions: Be casual.\n      memory_scope: "+tc.value+"\n")
+			res, err := Load(path)
+			if (err == nil) != tc.ok {
+				t.Fatalf("Load error = %v, want ok=%t", err, tc.ok)
+			}
+			if tc.ok && res.Config.Agents.Definitions[0].MemoryScope != "shared" {
+				t.Fatalf("memory_scope = %q", res.Config.Agents.Definitions[0].MemoryScope)
+			}
+		})
+	}
+}

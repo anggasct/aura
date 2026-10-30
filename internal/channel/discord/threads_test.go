@@ -715,7 +715,7 @@ func TestThreads_TwoThreadsCrossThreadRecallIsolation(t *testing.T) {
 		}
 	}
 
-	firstResults, err := svc.Recall(t.Context(), &memory.RecallRequest{OwnerID: "111", SessionID: firstConv, Query: "project"})
+	firstResults, err := svc.Recall(t.Context(), &memory.RecallRequest{OwnerID: "111", AgentIDs: []string{"main"}, SessionID: firstConv, Query: "project"})
 	if err != nil {
 		t.Fatalf("first recall: %v", err)
 	}
@@ -728,7 +728,7 @@ func TestThreads_TwoThreadsCrossThreadRecallIsolation(t *testing.T) {
 		}
 	}
 
-	secondResults, err := svc.Recall(t.Context(), &memory.RecallRequest{OwnerID: "111", SessionID: secondConv, Query: "project"})
+	secondResults, err := svc.Recall(t.Context(), &memory.RecallRequest{OwnerID: "111", AgentIDs: []string{"main"}, SessionID: secondConv, Query: "project"})
 	if err != nil {
 		t.Fatalf("second recall: %v", err)
 	}
