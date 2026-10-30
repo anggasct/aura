@@ -31,10 +31,6 @@ case "$version/$target" in
 	;;
 esac
 
-if [ -n "${RESTATE_SHA256_OVERRIDE:-}" ]; then
-	want="$RESTATE_SHA256_OVERRIDE"
-fi
-
 archive="restate-server-$target.tar.xz"
 url="https://github.com/restatedev/restate/releases/download/v$version/$archive"
 

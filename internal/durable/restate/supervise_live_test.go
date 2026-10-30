@@ -66,10 +66,10 @@ func processAlive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
 }
 
-func dataDirHolders(dataDir string) []string {
+func dataDirHolders(dataDir string) ([]string, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var holders []string
 	for _, entry := range entries {
@@ -83,14 +83,18 @@ func dataDirHolders(dataDir string) []string {
 		}
 		holders = append(holders, name+": "+strings.ReplaceAll(string(bytes.TrimRight(raw, "\x00")), "\x00", " "))
 	}
-	return holders
+	return holders, nil
 }
 
 func requireNoDataDirHolders(t *testing.T, dataDir string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
-		holders := dataDirHolders(dataDir)
+		holders, err := dataDirHolders(dataDir)
+		if err != nil {
+			t.Logf("process holder inspection unavailable: %v", err)
+			return
+		}
 		if len(holders) == 0 {
 			return
 		}

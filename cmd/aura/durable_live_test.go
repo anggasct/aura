@@ -74,10 +74,10 @@ func buildAuraBinary(t *testing.T) string {
 	return out
 }
 
-func dataDirHolders(dataDir string) []string {
+func dataDirHolders(dataDir string) ([]string, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var holders []string
 	for _, entry := range entries {
@@ -91,11 +91,15 @@ func dataDirHolders(dataDir string) []string {
 		}
 		holders = append(holders, name+": "+strings.ReplaceAll(string(bytes.TrimRight(raw, "\x00")), "\x00", " "))
 	}
-	return holders
+	return holders, nil
 }
 
 func killDataDirHolders(dataDir string) {
-	for _, holder := range dataDirHolders(dataDir) {
+	holders, err := dataDirHolders(dataDir)
+	if err != nil {
+		return
+	}
+	for _, holder := range holders {
 		var pid int
 		if _, err := fmt.Sscanf(holder, "%d:", &pid); err == nil {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
@@ -207,7 +211,9 @@ func TestServerSupervisedDurableRuntimeRegistersAndDrains(t *testing.T) {
 			t.Errorf("durable status missing %q:\n%s", want, status)
 		}
 	}
-	if len(dataDirHolders(restateDataDir)) == 0 {
+	if holders, err := dataDirHolders(restateDataDir); err != nil {
+		t.Logf("process holder inspection unavailable: %v", err)
+	} else if len(holders) == 0 {
 		t.Fatalf("no restate-server child holds %s while registered", restateDataDir)
 	}
 
@@ -225,7 +231,11 @@ func TestServerSupervisedDurableRuntimeRegistersAndDrains(t *testing.T) {
 	}
 	deadline = time.Now().Add(15 * time.Second)
 	for {
-		holders := dataDirHolders(restateDataDir)
+		holders, err := dataDirHolders(restateDataDir)
+		if err != nil {
+			t.Logf("process holder inspection unavailable after shutdown: %v", err)
+			break
+		}
 		if len(holders) == 0 {
 			break
 		}
