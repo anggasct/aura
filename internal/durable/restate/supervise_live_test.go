@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -248,6 +249,7 @@ func TestLiveSupervisorSpawnsRegistersRestartsAndDrains(t *testing.T) {
 		ShutdownGrace:  10 * time.Second,
 		RestartInitial: 100 * time.Millisecond,
 		RestartMax:     time.Second,
+		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	})
 	if err != nil {
 		t.Fatalf("NewSupervisor: %v", err)
