@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -36,6 +37,23 @@ func (r *Registry) Lookup(id string) (Definition, bool) {
 		return Definition{}, false
 	}
 	return r.definitions[index].clone(), true
+}
+
+func (r *Registry) RecallScope(id string) ([]string, bool) {
+	index, ok := r.byID[id]
+	if !ok {
+		return nil, false
+	}
+	if r.definitions[index].MemoryScope != MemoryScopeShared {
+		return []string{id}, true
+	}
+	readable := make([]string, 0, len(r.definitions))
+	for i := range r.definitions {
+		if r.definitions[i].MemoryScope == MemoryScopeShared {
+			readable = append(readable, r.definitions[i].ID)
+		}
+	}
+	return readable, true
 }
 
 func (r *Registry) Definitions() []Definition {
@@ -76,6 +94,7 @@ func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string)
 	registry := newRegistry()
 	for index := range builtins {
 		definition := builtins[index].clone()
+		definition.MemoryScope = MemoryScopePersona
 		registry.upsert(&definition)
 	}
 	seen := make(map[string]struct{}, len(overrides))
@@ -105,7 +124,11 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 		ID:          override.ID,
 		Description: override.Description,
 		ModelRoute:  override.ModelRoute,
+		MemoryScope: cmp.Or(override.MemoryScope, MemoryScopePersona),
 		Limits:      Limits{TurnTimeout: time.Duration(override.Limits.TurnTimeout)},
+	}
+	if definition.MemoryScope != MemoryScopePersona && definition.MemoryScope != MemoryScopeShared {
+		return nil, codedError(ErrorCodeDefinitionInvalid, fmt.Sprintf("%s.memory_scope must be %q or %q", field, MemoryScopePersona, MemoryScopeShared))
 	}
 	builtin, isBuiltin := builtinByID(override.ID)
 	if isBuiltin {

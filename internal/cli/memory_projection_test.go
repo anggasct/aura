@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/memory"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
@@ -137,7 +138,7 @@ func TestMemoryProjectionCrossSessionFallbackRealStore(t *testing.T) {
 	project("owner-1", "sess-2", 1, "the nightly backup failed with errors")
 	project("owner-2", "sess-9", 1, "the nightly backup finished cleanly")
 
-	recalled, err := service.Recall(ctx, &memory.RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup"})
+	recalled, err := service.Recall(ctx, &memory.RecallRequest{OwnerID: "owner-1", AgentIDs: []string{"main"}, SessionID: "sess-1", Query: "nightly backup"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -286,7 +287,7 @@ func TestMemoryHookSummarizesClosedRange(t *testing.T) {
 	if hits[0].FromSequence != 1 || hits[0].ToSequence != 3 {
 		t.Errorf("summary range = %d-%d, want 1-3", hits[0].FromSequence, hits[0].ToSequence)
 	}
-	recalled, err := service.Recall(ctx, &memory.RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "archive"})
+	recalled, err := service.Recall(ctx, &memory.RecallRequest{OwnerID: "owner-1", AgentIDs: []string{"main"}, SessionID: "sess-1", Query: "archive"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -362,14 +363,14 @@ func TestOwnerDiscordMemoryIsOwnerKeyedAndHiddenFromTrusted(t *testing.T) {
 	if err != nil || len(inspected) != 1 {
 		t.Fatalf("owner inspect = %d docs, %v; want the discord-derived doc", len(inspected), err)
 	}
-	provider, err := memory.NewProvider(service, memory.ProviderConfig{})
+	provider, err := memory.NewProvider(service, memory.ProviderConfig{Scopes: defaultRecallScopes(t)})
 	if err != nil {
 		t.Fatalf("NewProvider(): %v", err)
 	}
 	recall := func(sessionID, principalID string, class principal.Class) int {
 		t.Helper()
 		evidence, err := provider.RecallTurn(ctx, &runtime.TurnRequest{
-			TurnID: "turn-2", SessionID: sessionID, PrincipalID: principalID, PrincipalClass: class, Origin: "discord:owner",
+			TurnID: "turn-2", SessionID: sessionID, PrincipalID: principalID, PrincipalClass: class, Origin: "discord:owner", AgentID: "main",
 			Parts: []runtimeingress.InputPart{{Text: "nightly backup"}},
 		})
 		if err != nil {
@@ -386,4 +387,10 @@ func TestOwnerDiscordMemoryIsOwnerKeyedAndHiddenFromTrusted(t *testing.T) {
 	if got := recall("terminal-1", principal.OwnerID, principal.ClassOwner); got == 0 {
 		t.Error("owner recall from the terminal missed the discord-derived doc")
 	}
+}
+
+func defaultRecallScopes(t *testing.T) memory.RecallScopes {
+	t.Helper()
+	cfg := config.Default()
+	return testRecallScopes(t, &cfg)
 }

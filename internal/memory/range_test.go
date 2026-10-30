@@ -106,7 +106,7 @@ func TestRangeRecallOrdersSummaryFirstForOldLiveRawFirst(t *testing.T) {
 	if _, _, err := service.SummarizeClosedRange(t.Context(), "owner-1", "sess-range", capableModel(), summarizer); err != nil {
 		t.Fatalf("summarize: %v", err)
 	}
-	old, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
+	old, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -119,7 +119,7 @@ func TestRangeRecallOrdersSummaryFirstForOldLiveRawFirst(t *testing.T) {
 			break
 		}
 	}
-	all, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-range", Query: "backup"})
+	all, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-range", Query: "backup"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -162,7 +162,7 @@ func TestRangeReopenMarksStaleUntilRebuild(t *testing.T) {
 	if err != nil || len(summaries) != 0 {
 		t.Fatalf("summaries after reopen = %d, %v; want stale-removed", len(summaries), err)
 	}
-	fallback, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
+	fallback, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRangeReopenMarksStaleBeyondTenChunks(t *testing.T) {
 	if len(summaries) != 0 {
 		t.Fatalf("summaries after reopen = %d, want stale-removed", len(summaries))
 	}
-	fallback, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
+	fallback, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -311,7 +311,7 @@ func TestRangeSummaryCoversNewlyClosedTurnsWithoutPerTurnReSummarizing(t *testin
 	if summaries[2].FromSequence != 7 || summaries[2].ToSequence != 8 {
 		t.Errorf("third summary = %d-%d, want 7-8", summaries[2].FromSequence, summaries[2].ToSequence)
 	}
-	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-range", Query: "backup archive"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}

@@ -17,13 +17,22 @@ import (
 )
 
 type fakeDocumentStore struct {
-	mu      sync.Mutex
-	records map[string]StoredDocument
-	byKey   map[string]string
+	mu            sync.Mutex
+	records       map[string]StoredDocument
+	byKey         map[string]string
+	sessionAgents map[string]string
 }
 
+var mainPersona = []string{"main"}
+
 func newFakeDocumentStore() *fakeDocumentStore {
-	return &fakeDocumentStore{records: map[string]StoredDocument{}, byKey: map[string]string{}}
+	return &fakeDocumentStore{records: map[string]StoredDocument{}, byKey: map[string]string{}, sessionAgents: map[string]string{}}
+}
+
+func (s *fakeDocumentStore) setSessionAgent(sessionID, agentID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessionAgents[sessionID] = agentID
 }
 
 func (s *fakeDocumentStore) UpsertDocument(_ context.Context, document *StoredDocument) (bool, error) {
@@ -33,7 +42,12 @@ func (s *fakeDocumentStore) UpsertDocument(_ context.Context, document *StoredDo
 	if _, ok := s.byKey[key]; ok {
 		return false, nil
 	}
-	s.records[document.ID] = *document
+	stored := *document
+	stored.AgentID = "main"
+	if agent, ok := s.sessionAgents[document.SessionID]; ok {
+		stored.AgentID = agent
+	}
+	s.records[document.ID] = stored
 	s.byKey[key] = document.ID
 	return true, nil
 }
@@ -64,6 +78,9 @@ func (s *fakeDocumentStore) Search(_ context.Context, query *StoredQuery) ([]Sto
 			continue
 		}
 		if query.SessionID != "" && record.SessionID != query.SessionID {
+			continue
+		}
+		if len(query.AgentIDs) > 0 && !slices.Contains(query.AgentIDs, record.AgentID) {
 			continue
 		}
 		if !query.Before.IsZero() && record.CreatedAt.After(query.Before) {
@@ -540,7 +557,7 @@ func TestProjectEventStripsRecallEvidence(t *testing.T) {
 	if rebuilt != 1 {
 		t.Fatalf("rebuilt = %d, want 1", rebuilt)
 	}
-	recalled, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "summarize"})
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "summarize"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -588,7 +605,7 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 	seed("ev-2", 2, "the nightly backup failed with errors")
 	seed("ev-3", 3, "unrelated weather discussion")
 
-	first, err := service.Recall(t.Context(), &RecallRequest{
+	first, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup",
 	})
 	if err != nil {
@@ -605,7 +622,7 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 			t.Error("provenance missing")
 		}
 	}
-	second, err := service.Recall(t.Context(), &RecallRequest{
+	second, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup",
 	})
 	if err != nil {
@@ -614,13 +631,13 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 	if len(second) != len(first) || second[0].ID != first[0].ID || second[1].ID != first[1].ID {
 		t.Error("recall is not deterministic")
 	}
-	paged, err := service.Recall(t.Context(), &RecallRequest{
+	paged, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup", MaxDocuments: 1,
 	})
 	if err != nil || len(paged) != 1 || paged[0].ID != first[0].ID {
 		t.Errorf("paged recall = %+v, %v", paged, err)
 	}
-	tiny, err := service.Recall(t.Context(), &RecallRequest{
+	tiny, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup", TokenBudget: 4,
 	})
 	if err != nil {
@@ -629,19 +646,19 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 	if len(tiny) != 0 {
 		t.Errorf("tiny budget returned %d documents, want strict fit", len(tiny))
 	}
-	if _, err := service.Recall(t.Context(), &RecallRequest{
+	if _, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup", MaxDocuments: 51,
 	}); err == nil {
 		t.Error("over-max documents accepted")
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetInvalid {
 		t.Errorf("code = %v, %v", code, ok)
 	}
-	if _, err := service.Recall(t.Context(), &RecallRequest{
+	if _, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "",
 	}); err == nil {
 		t.Error("empty query accepted")
 	}
-	foreign, err := service.Recall(t.Context(), &RecallRequest{
+	foreign, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 		OwnerID: "owner-2", SessionID: "sess-1", Query: "nightly backup",
 	})
 	if err != nil || len(foreign) != 0 {
@@ -664,7 +681,7 @@ func TestRebuildSessionIsEquivalent(t *testing.T) {
 	if count != 2 {
 		t.Fatalf("rebuilt = %d, want 2", count)
 	}
-	before, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "fact"})
+	before, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "fact"})
 	if err != nil || len(before) != 2 {
 		t.Fatalf("recall = %d, %v", len(before), err)
 	}
@@ -672,7 +689,7 @@ func TestRebuildSessionIsEquivalent(t *testing.T) {
 	if err != nil || again != 2 {
 		t.Fatalf("second rebuild = %d, %v", again, err)
 	}
-	after, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-1", Query: "fact"})
+	after, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "fact"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -727,7 +744,7 @@ func TestRecallMultilingualContent(t *testing.T) {
 		}
 	}
 	for _, tc := range documents {
-		recalled, err := service.Recall(t.Context(), &RecallRequest{
+		recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
 			OwnerID: "owner-1", SessionID: "sess-1", Query: tc.query,
 		})
 		if err != nil {

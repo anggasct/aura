@@ -36,6 +36,7 @@ var migrations = []migration{
 	{version: 18, sql: childRunResultSchemaSQL},
 	{version: 19, sql: childRunTypedResultSchemaSQL},
 	{version: 20, sql: personaAttributionSchemaSQL},
+	{version: 21, sql: memoryPersonaSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -526,6 +527,13 @@ const personaAttributionSchemaSQL = `
 ALTER TABLE session ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'main';
 ALTER TABLE usage_reservation ADD COLUMN agent_id TEXT;
 CREATE INDEX usage_reservation_agent_window_idx ON usage_reservation(agent_id, window_month, window_day);
+`
+
+const memoryPersonaSchemaSQL = `
+ALTER TABLE memory_document ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'main';
+UPDATE memory_document SET agent_id = (SELECT session.agent_id FROM session WHERE session.id = memory_document.session_id)
+    WHERE EXISTS (SELECT 1 FROM session WHERE session.id = memory_document.session_id);
+CREATE INDEX memory_document_owner_agent_idx ON memory_document(owner_id, agent_id, created_at);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

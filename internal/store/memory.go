@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -27,6 +28,7 @@ type MemoryDocument struct {
 	PromptVersion string
 	ModelProtocol string
 	ModelName     string
+	AgentID       string
 	CreatedAt     time.Time
 	ExpiresAt     *time.Time
 }
@@ -38,6 +40,7 @@ type MemoryHit struct {
 
 type MemoryQuery struct {
 	OwnerID   string
+	AgentIDs  []string
 	SessionID string
 	Terms     string
 	Before    time.Time
@@ -67,13 +70,13 @@ const maxMemoryListLimit = 500
 const selectMemoryHitColumns = `
 	d.id, d.owner_id, d.session_id, d.kind, d.source_from_sequence, d.source_to_sequence,
 	d.content, d.trust_label, d.prompt_version, d.model_protocol, d.model_name,
-	d.created_at, d.expires_at, bm25(memory_document_fts)
+	d.created_at, d.expires_at, d.agent_id, bm25(memory_document_fts)
 `
 
 const selectMemoryDocumentColumns = `
 	d.id, d.owner_id, d.session_id, d.kind, d.source_from_sequence, d.source_to_sequence,
 	d.content, d.trust_label, d.prompt_version, d.model_protocol, d.model_name,
-	d.created_at, d.expires_at
+	d.created_at, d.expires_at, d.agent_id
 `
 
 type sqliteMemoryStore struct {
@@ -154,13 +157,13 @@ func (s *sqliteMemoryStore) UpsertDocument(ctx context.Context, document *Memory
 		`INSERT INTO memory_document (
 			id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
 			content, trust_label, prompt_version, model_protocol, model_name,
-			created_at, expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			created_at, expires_at, agent_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT agent_id FROM session WHERE id = ?))
 		ON CONFLICT(session_id, kind, source_from_sequence, source_to_sequence, prompt_version) DO NOTHING`,
 		document.ID, document.OwnerID, document.SessionID, document.Kind,
 		document.FromSequence, document.ToSequence, document.Content, document.TrustLabel,
 		document.PromptVersion, nullMemoryText(document.ModelProtocol), nullMemoryText(document.ModelName),
-		formatTime(document.CreatedAt.UTC()), nullMemoryTime(document.ExpiresAt),
+		formatTime(document.CreatedAt.UTC()), nullMemoryTime(document.ExpiresAt), document.SessionID,
 	)
 	if err != nil {
 		return false, classifyBusy(fmt.Errorf("upsert memory document: %w", err))
@@ -213,6 +216,14 @@ func (s *sqliteMemoryStore) Search(ctx context.Context, query *MemoryQuery) ([]M
 		JOIN memory_document d ON d.rowid = memory_document_fts.rowid
 		WHERE memory_document_fts MATCH ? AND d.owner_id = ?`
 	args := []any{match, query.OwnerID}
+	if len(query.AgentIDs) > 0 {
+		readable, err := json.Marshal(query.AgentIDs)
+		if err != nil {
+			return nil, Errorf(ErrorCodeInvalidArgument, "search personas are not encodable")
+		}
+		sqlQuery += ` AND d.agent_id IN (SELECT value FROM json_each(?))`
+		args = append(args, string(readable))
+	}
 	if query.SessionID != "" {
 		sqlQuery += ` AND d.session_id = ?`
 		args = append(args, query.SessionID)
@@ -255,7 +266,7 @@ func scanMemoryHit(rows *sql.Rows) (MemoryHit, error) {
 		&hit.ID, &hit.OwnerID, &hit.SessionID, &hit.Kind,
 		&hit.FromSequence, &hit.ToSequence, &hit.Content, &hit.TrustLabel,
 		&promptVersion, &modelProtocol, &modelName,
-		&createdAtRaw, &expiresAtRaw, &hit.Rank,
+		&createdAtRaw, &expiresAtRaw, &hit.AgentID, &hit.Rank,
 	)
 	if err != nil {
 		return MemoryHit{}, classifyBusy(fmt.Errorf("scan memory hit: %w", err))
@@ -364,7 +375,7 @@ func (s *sqliteMemoryStore) ListSessionDocumentsByKind(ctx context.Context, owne
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
 			content, trust_label, prompt_version, model_protocol, model_name,
-			created_at, expires_at
+			created_at, expires_at, agent_id
 		FROM memory_document
 		WHERE owner_id = ? AND session_id = ? AND kind = ?
 			AND (expires_at IS NULL OR expires_at > ?)
@@ -409,7 +420,7 @@ func (s *sqliteMemoryStore) ListSessionDocumentsByKindInRange(ctx context.Contex
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
 			content, trust_label, prompt_version, model_protocol, model_name,
-			created_at, expires_at
+			created_at, expires_at, agent_id
 		FROM memory_document
 		WHERE owner_id = ? AND session_id = ? AND kind = ?
 			AND source_from_sequence >= ? AND source_to_sequence <= ?
@@ -445,7 +456,7 @@ func scanMemoryDocument(rows rowScanner) (MemoryDocument, error) {
 		&document.ID, &document.OwnerID, &document.SessionID, &document.Kind,
 		&document.FromSequence, &document.ToSequence, &document.Content, &document.TrustLabel,
 		&promptVersion, &modelProtocol, &modelName,
-		&createdAtRaw, &expiresAtRaw,
+		&createdAtRaw, &expiresAtRaw, &document.AgentID,
 	)
 	if err != nil {
 		return MemoryDocument{}, classifyBusy(fmt.Errorf("scan memory document: %w", err))
@@ -518,7 +529,7 @@ func (s *sqliteMemoryStore) GetDocument(ctx context.Context, id string) (MemoryD
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
 			content, trust_label, prompt_version, model_protocol, model_name,
-			created_at, expires_at FROM memory_document WHERE id = ?`, id)
+			created_at, expires_at, agent_id FROM memory_document WHERE id = ?`, id)
 	document, err := scanMemoryDocument(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

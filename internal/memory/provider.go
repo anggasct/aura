@@ -29,7 +29,12 @@ const (
 	AttrRecallSummaryVersion = "aura.recall.summary_version"
 )
 
+type RecallScopes interface {
+	RecallScope(agentID string) ([]string, bool)
+}
+
 type ProviderConfig struct {
+	Scopes         RecallScopes
 	Model          *SummaryModel
 	Summarizer     Summarizer
 	TracerProvider trace.TracerProvider
@@ -38,6 +43,7 @@ type ProviderConfig struct {
 
 type Provider struct {
 	service    *Service
+	scopes     RecallScopes
 	model      *SummaryModel
 	summarizer Summarizer
 	tracer     trace.Tracer
@@ -47,6 +53,9 @@ type Provider struct {
 func NewProvider(service *Service, config ProviderConfig) (*Provider, error) {
 	if service == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "memory service must not be nil")
+	}
+	if config.Scopes == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "memory recall scopes must not be nil")
 	}
 	tp := config.TracerProvider
 	if tp == nil {
@@ -58,6 +67,7 @@ func NewProvider(service *Service, config ProviderConfig) (*Provider, error) {
 	}
 	return &Provider{
 		service:    service,
+		scopes:     config.Scopes,
 		model:      config.Model,
 		summarizer: config.Summarizer,
 		tracer:     tp.Tracer(SpanMemoryRecall),
@@ -109,8 +119,14 @@ func (p *Provider) recall(ctx context.Context, req *runtime.TurnRequest) (*runti
 		observation.Outcome = OutcomeEmpty
 		return nil, observation, nil
 	}
+	readable, known := p.scopes.RecallScope(req.AgentID)
+	if !known {
+		observation.Outcome = string(ErrorCodeQueryInvalid)
+		return nil, observation, Errorf(ErrorCodeQueryInvalid, "recall persona is not registered")
+	}
 	result, err := p.service.RecallWithSummary(ctx, &RecallRequest{
 		OwnerID:   req.PrincipalID,
+		AgentIDs:  readable,
 		SessionID: req.SessionID,
 		Query:     query,
 		Before:    p.now().UTC(),

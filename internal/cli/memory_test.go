@@ -74,7 +74,7 @@ func TestMemoryDocumentStoreRoundTrip(t *testing.T) {
 func TestBuildMemoryRuntime(t *testing.T) {
 	db := newMemoryTestDB(t)
 	cfg := config.Default()
-	memoryRuntime, err := buildMemoryRuntime(context.Background(), &cfg, db, nil, nil)
+	memoryRuntime, err := buildMemoryRuntime(context.Background(), &cfg, db, testRecallScopes(t, &cfg), nil, nil)
 	if err != nil {
 		t.Fatalf("buildMemoryRuntime(): %v", err)
 	}
@@ -180,6 +180,7 @@ func recallTurnRequest(sessionID, text string) *runtime.TurnRequest {
 		TurnID:      "turn-1",
 		SessionID:   sessionID,
 		PrincipalID: "owner-1",
+		AgentID:     "main",
 		Parts:       []runtimeingress.InputPart{{Text: text}},
 	}
 }
@@ -269,7 +270,7 @@ func TestMemoryRuntimeRecallStaysRaw(t *testing.T) {
 		route: {Candidates: []string{"aux"}},
 	}
 	db := newMemoryTestDB(t)
-	memoryRuntime, err := buildMemoryRuntime(ctx, &cfg, db, nil, nil)
+	memoryRuntime, err := buildMemoryRuntime(ctx, &cfg, db, testRecallScopes(t, &cfg), nil, nil)
 	if err != nil {
 		t.Fatalf("buildMemoryRuntime(): %v", err)
 	}
@@ -335,4 +336,13 @@ func TestMemoryRuntimeRecallStaysRaw(t *testing.T) {
 	if !derived {
 		t.Errorf("recall evidence = %+v, want the existing summary document", evidence)
 	}
+}
+
+func testRecallScopes(t *testing.T, cfg *config.Config) memory.RecallScopes {
+	t.Helper()
+	registry, err := buildAgentRegistry(cfg)
+	if err != nil {
+		t.Fatalf("buildAgentRegistry(): %v", err)
+	}
+	return registry
 }

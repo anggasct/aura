@@ -34,7 +34,7 @@ func TestForgetBySessionDeletesRowsAndFTS(t *testing.T) {
 	if deleted != 0 || len(preview) != 2 {
 		t.Fatalf("dry-run = %d deleted, %d preview; want 0, 2", deleted, len(preview))
 	}
-	afterDry, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
+	afterDry, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
 	if err != nil || len(afterDry) != 2 {
 		t.Fatalf("dry-run wrote: %d, %v", len(afterDry), err)
 	}
@@ -42,15 +42,15 @@ func TestForgetBySessionDeletesRowsAndFTS(t *testing.T) {
 	if err != nil || deleted != 2 || len(preview) != 2 {
 		t.Fatalf("apply = %d, %d, %v; want 2, 2", deleted, len(preview), err)
 	}
-	after, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
+	after, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
 	if err != nil || len(after) != 0 {
 		t.Errorf("sess-a survives: %+v, %v", after, err)
 	}
-	kept, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-b", Query: "beta"})
+	kept, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-b", Query: "beta"})
 	if err != nil || len(kept) != 1 {
 		t.Errorf("sess-b untouched = %d, %v", len(kept), err)
 	}
-	foreign, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-2", SessionID: "sess-c", Query: "alpha"})
+	foreign, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-2", SessionID: "sess-c", Query: "alpha"})
 	if err != nil || len(foreign) != 1 {
 		t.Errorf("foreign untouched = %d, %v", len(foreign), err)
 	}
@@ -71,7 +71,7 @@ func TestForgetBySessionApplyMatchesPreviewedSet(t *testing.T) {
 	if deleted != len(preview) {
 		t.Fatalf("deleted = %d, want %d (previewed set)", deleted, len(preview))
 	}
-	remaining, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
+	remaining, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestForgetByIDAndQueryScoped(t *testing.T) {
 	if err != nil || deleted != 1 {
 		t.Fatalf("id apply = %d, %v", deleted, err)
 	}
-	remaining, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
+	remaining, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
 	if err != nil || len(remaining) != 1 || remaining[0].ID != "mem-a2" {
 		t.Errorf("remaining = %+v, %v; want mem-a2", remaining, err)
 	}
@@ -110,7 +110,7 @@ func TestForgetByIDAndQueryScoped(t *testing.T) {
 	if err != nil || deleted != 1 {
 		t.Fatalf("query apply = %d, %v", deleted, err)
 	}
-	after, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
+	after, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
 	if err != nil || len(after) != 0 {
 		t.Errorf("query forget left %+v, %v", after, err)
 	}
@@ -136,7 +136,7 @@ func TestForgetCrossOwnerRejectedWithZeroWrites(t *testing.T) {
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("id code = %v, %v", code, ok)
 	}
-	kept, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
+	kept, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})
 	if err != nil || len(kept) != 1 {
 		t.Errorf("zero-write violated: %d, %v", len(kept), err)
 	}

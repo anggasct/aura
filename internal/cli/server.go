@@ -135,7 +135,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, logger, memoryRecorderObserver(memoryRecorder))
+				memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, agentRegistry, logger, memoryRecorderObserver(memoryRecorder))
 				if err != nil {
 					return err
 				}

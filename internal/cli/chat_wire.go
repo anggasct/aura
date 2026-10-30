@@ -212,7 +212,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
 	}
 	if cfg.Memory.Enabled {
-		memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, logger, nil)
+		memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, registry, logger, nil)
 		if err != nil {
 			return err
 		}
