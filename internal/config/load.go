@@ -1286,7 +1286,7 @@ func validateDurableShapes(doc *yamlv3.Node) error {
 			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!bool" {
 				return fmt.Errorf("durable.enabled must be a boolean at line %d", value.Line)
 			}
-		case "mode", "binary_path", "endpoint", "admin_endpoint", "handler_addr", "data_dir":
+		case "mode", "binary_path", "endpoint", "admin_endpoint", "handler_addr", "node_addr", "data_dir":
 			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
 				return fmt.Errorf("durable.%s must be a string at line %d", key, value.Line)
 			}
@@ -2619,6 +2619,9 @@ func applyDurableDefaults(cfg *Config, doc *yamlv3.Node) {
 	if cfg.Durable.HandlerAddr == "" && !configValuePresent(doc, "durable", "handler_addr") && !envValuePresent("durable.handler_addr") {
 		cfg.Durable.HandlerAddr = defaults.HandlerAddr
 	}
+	if cfg.Durable.NodeAddr == "" && !configValuePresent(doc, "durable", "node_addr") && !envValuePresent("durable.node_addr") {
+		cfg.Durable.NodeAddr = defaults.NodeAddr
+	}
 	if cfg.Durable.RestartBackoffInitial == 0 && !configValuePresent(doc, "durable", "restart_backoff_initial") && !envValuePresent("durable.restart_backoff_initial") {
 		cfg.Durable.RestartBackoffInitial = defaults.RestartBackoffInitial
 	}
@@ -2804,6 +2807,9 @@ func validateDurable(durable *Durable) error {
 	} else if port, convErr := strconv.Atoi(portRaw); convErr != nil || port < 1 || port > 65535 {
 		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.handler_addr port %q is out of range (1-65535)", portRaw)})
 	}
+	if !loopbackHostPort(durable.NodeAddr) {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.node_addr %q must be a loopback host:port", durable.NodeAddr)})
+	}
 	if durable.RestartBackoffInitial <= 0 {
 		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.restart_backoff_initial must be positive"})
 	}
@@ -2811,6 +2817,21 @@ func validateDurable(durable *Durable) error {
 		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.restart_backoff_max must cover restart_backoff_initial"})
 	}
 	return errors.Join(problems...)
+}
+
+func loopbackHostPort(addr string) bool {
+	host, portRaw, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if port, convErr := strconv.Atoi(portRaw); convErr != nil || port < 1 || port > 65535 {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func validateMCP(m *MCP) error {

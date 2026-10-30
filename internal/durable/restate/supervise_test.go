@@ -226,7 +226,7 @@ func TestResolveServerDataDirDefaults(t *testing.T) {
 
 func TestWriteChildConfigCarriesEndpointPorts(t *testing.T) {
 	dataDir := t.TempDir()
-	path, err := writeChildConfig(dataDir, "http://127.0.0.1:18080", "http://127.0.0.1:19070")
+	path, err := writeChildConfig(dataDir, "127.0.0.1:15122", "http://127.0.0.1:18080", "http://127.0.0.1:19070")
 	if err != nil {
 		t.Fatalf("writeChildConfig: %v", err)
 	}
@@ -239,6 +239,16 @@ func TestWriteChildConfigCarriesEndpointPorts(t *testing.T) {
 			t.Errorf("child config misses %q:\n%s", want, content)
 		}
 	}
+	if !strings.HasPrefix(string(content), "bind-address = \"127.0.0.1:15122\"\n") {
+		t.Errorf("child config does not open with the node bind address:\n%s", content)
+	}
+	defaulted, err := writeChildConfig(t.TempDir(), "", "http://127.0.0.1:18080", "http://127.0.0.1:19070")
+	if err != nil {
+		t.Fatalf("writeChildConfig without node addr: %v", err)
+	}
+	if content, err := os.ReadFile(defaulted); err != nil || !strings.HasPrefix(string(content), "bind-address = \"127.0.0.1:5122\"\n") {
+		t.Errorf("default node bind address missing (err %v):\n%s", err, content)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat child config: %v", err)
@@ -246,10 +256,10 @@ func TestWriteChildConfigCarriesEndpointPorts(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("child config mode = %o, want 600", info.Mode().Perm())
 	}
-	if _, err := writeChildConfig(dataDir, "://bad", "http://127.0.0.1:19070"); err == nil {
+	if _, err := writeChildConfig(dataDir, "", "://bad", "http://127.0.0.1:19070"); err == nil {
 		t.Error("expected unparseable ingress URL to fail, got nil")
 	}
-	if _, err := writeChildConfig(dataDir, "http://127.0.0.1:18080", "http://127.0.0.1"); err == nil {
+	if _, err := writeChildConfig(dataDir, "", "http://127.0.0.1:18080", "http://127.0.0.1"); err == nil {
 		t.Error("expected admin URL without port to fail, got nil")
 	}
 }

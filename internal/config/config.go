@@ -625,6 +625,7 @@ type Durable struct {
 	Endpoint              string   `koanf:"endpoint" yaml:"endpoint"`
 	AdminEndpoint         string   `koanf:"admin_endpoint" yaml:"admin_endpoint"`
 	HandlerAddr           string   `koanf:"handler_addr" yaml:"handler_addr"`
+	NodeAddr              string   `koanf:"node_addr" yaml:"node_addr"`
 	DataDir               string   `koanf:"data_dir" yaml:"data_dir,omitempty"`
 	RestartBackoffInitial Duration `koanf:"restart_backoff_initial" yaml:"restart_backoff_initial"`
 	RestartBackoffMax     Duration `koanf:"restart_backoff_max" yaml:"restart_backoff_max"`
@@ -752,6 +753,7 @@ func Default() Config {
 			Endpoint:              "http://127.0.0.1:8080",
 			AdminEndpoint:         "http://127.0.0.1:9070",
 			HandlerAddr:           "127.0.0.1:9080",
+			NodeAddr:              "127.0.0.1:5122",
 			RestartBackoffInitial: Duration(time.Second),
 			RestartBackoffMax:     Duration(30 * time.Second),
 		},

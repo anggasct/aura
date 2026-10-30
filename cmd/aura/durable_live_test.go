@@ -145,8 +145,9 @@ durable:
   endpoint: http://%s
   admin_endpoint: http://%s
   handler_addr: %s
+  node_addr: %s
 `, filepath.Join(root, "data"), freeLoopbackAddr(t), freeLoopbackAddr(t), workspace, restateBinary, restateDataDir,
-		freeLoopbackAddr(t), freeLoopbackAddr(t), freeLoopbackAddr(t))
+		freeLoopbackAddr(t), freeLoopbackAddr(t), freeLoopbackAddr(t), freeLoopbackAddr(t))
 	configPath = filepath.Join(root, "aura.yaml")
 	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)

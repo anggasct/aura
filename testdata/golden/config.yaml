@@ -34,6 +34,7 @@ durable:
   endpoint: http://127.0.0.1:8080
   admin_endpoint: http://127.0.0.1:9070
   handler_addr: 127.0.0.1:9080
+  node_addr: 127.0.0.1:5122
   restart_backoff_initial: 1s
   restart_backoff_max: 30s
 server:

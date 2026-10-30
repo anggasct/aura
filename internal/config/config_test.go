@@ -1338,6 +1338,9 @@ func TestLoad_DurableDefaultsApplied(t *testing.T) {
 	if durable.HandlerAddr != "127.0.0.1:9080" {
 		t.Errorf("durable.handler_addr = %q", durable.HandlerAddr)
 	}
+	if durable.NodeAddr != "127.0.0.1:5122" {
+		t.Errorf("durable.node_addr = %q", durable.NodeAddr)
+	}
 	if time.Duration(durable.RestartBackoffInitial) != time.Second {
 		t.Errorf("durable.restart_backoff_initial = %s, want 1s", time.Duration(durable.RestartBackoffInitial))
 	}
@@ -1355,6 +1358,10 @@ func TestLoad_DurableValidation(t *testing.T) {
 		{"bad mode", "version: 1\ndurable:\n  enabled: true\n  mode: managed\n", "durable.mode"},
 		{"bad endpoint", "version: 1\ndurable:\n  enabled: true\n  endpoint: \"http://example.com:abc\"\n", "durable.endpoint"},
 		{"bad handler addr", "version: 1\ndurable:\n  enabled: true\n  handler_addr: not-an-addr\n", "durable.handler_addr"},
+		{"public node addr", "version: 1\ndurable:\n  enabled: true\n  node_addr: 0.0.0.0:5122\n", "durable.node_addr \"0.0.0.0:5122\" must be a loopback host:port"},
+		{"routable node addr", "version: 1\ndurable:\n  enabled: true\n  node_addr: 10.0.0.5:5122\n", "durable.node_addr"},
+		{"node addr without port", "version: 1\ndurable:\n  enabled: true\n  node_addr: 127.0.0.1\n", "durable.node_addr"},
+		{"non-string node addr", "version: 1\ndurable:\n  enabled: true\n  node_addr: 5122\n", "durable.node_addr must be a string"},
 		{"inverted backoff", "version: 1\ndurable:\n  enabled: true\n  restart_backoff_initial: 30s\n  restart_backoff_max: 1s\n", "durable.restart_backoff_max"},
 		{"non-bool enabled", "version: 1\ndurable:\n  enabled: \"yes\"\n", "durable.enabled must be a boolean"},
 	}

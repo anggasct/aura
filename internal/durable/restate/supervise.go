@@ -22,6 +22,8 @@ import (
 const (
 	restateServerBinary = "restate-server"
 
+	defaultNodeAddr = "127.0.0.1:5122"
+
 	defaultReadyTimeout  = 60 * time.Second
 	defaultShutdownGrace = 10 * time.Second
 	defaultStableReset   = 5 * time.Minute
@@ -40,6 +42,7 @@ type SuperviseConfig struct {
 	IngressURL string
 	AdminURL   string
 	HandlerURL string
+	NodeAddr   string
 
 	ReadyTimeout   time.Duration
 	ShutdownGrace  time.Duration
@@ -195,7 +198,7 @@ func cappedBackoff(initial, ceiling time.Duration, restarts int) time.Duration {
 
 func (s *Supervisor) runGeneration(ctx context.Context, binary, dataDir string) error {
 	s.setState(SupervisionStarting, 0, false, "")
-	childConfig, err := writeChildConfig(dataDir, s.config.IngressURL, s.config.AdminURL)
+	childConfig, err := writeChildConfig(dataDir, s.config.NodeAddr, s.config.IngressURL, s.config.AdminURL)
 	if err != nil {
 		return err
 	}
@@ -358,7 +361,10 @@ func resolveServerBinary(configured string) (string, error) {
 	return configured, nil
 }
 
-func writeChildConfig(dataDir, ingressURL, adminURL string) (string, error) {
+func writeChildConfig(dataDir, nodeAddr, ingressURL, adminURL string) (string, error) {
+	if nodeAddr == "" {
+		nodeAddr = defaultNodeAddr
+	}
 	ingressAddr, err := serverBindAddress(ingressURL)
 	if err != nil {
 		return "", err
@@ -367,7 +373,7 @@ func writeChildConfig(dataDir, ingressURL, adminURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	content := "[ingress]\nbind-address = \"" + ingressAddr + "\"\n\n[admin]\nbind-address = \"" + adminAddr + "\"\n"
+	content := "bind-address = \"" + nodeAddr + "\"\n\n[ingress]\nbind-address = \"" + ingressAddr + "\"\n\n[admin]\nbind-address = \"" + adminAddr + "\"\n"
 	path := filepath.Join(dataDir, "restate.toml")
 	tmp, err := os.CreateTemp(dataDir, "restate-*.toml")
 	if err != nil {
