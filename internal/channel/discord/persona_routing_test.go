@@ -114,14 +114,13 @@ func TestAccountsAdmitAndReplyThroughTheirOwnBot(t *testing.T) {
 			if _, err := tc.account.adapter.Deliver(t.Context(), deliveryForEnvelope(t, "turn-"+tc.message, env, "reply")); err != nil {
 				t.Fatalf("Deliver(): %v", err)
 			}
-			stub.mu.Lock()
-			defer stub.mu.Unlock()
-			if len(stub.calls) <= before {
-				t.Fatal("no outbound call captured")
+			sends := stub.messageSends(before)
+			if len(sends) == 0 {
+				t.Fatal("no outbound message send captured")
 			}
-			for _, call := range stub.calls[before:] {
+			for _, call := range sends {
 				if call.auth != "Bot "+tc.wantToken {
-					t.Fatalf("outbound call authorized as another bot (other token used: %t)", call.auth == "Bot "+tc.otherToken)
+					t.Fatalf("outbound message send authorized as another bot (other token used: %t)", call.auth == "Bot "+tc.otherToken)
 				}
 			}
 		})

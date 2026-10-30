@@ -82,6 +82,18 @@ func (s *restStub) patchBodies() [][]byte {
 	return bodies
 }
 
+func (s *restStub) messageSends(after int) []restCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var sends []restCall
+	for _, call := range s.calls[after:] {
+		if call.method == http.MethodPost && strings.HasSuffix(call.path, "/messages") {
+			sends = append(sends, call)
+		}
+	}
+	return sends
+}
+
 func newSendTestAdapter(t *testing.T, stub *restStub, configure func(*config.Discord)) (*Adapter, *testDoubles) {
 	t.Helper()
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
