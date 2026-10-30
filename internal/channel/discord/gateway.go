@@ -510,12 +510,6 @@ type channelProbe struct {
 	owned    bool
 }
 
-// threadClassificationNeeded reports whether the message's channel must be
-// inspected before admission: thread messages always resolve against their
-// parent channel, and a mention must never downgrade one to a channel message.
-// A payload channel type is authoritative. Otherwise unknown channels and the
-// open-allowlist case are probed, as is any channel that already owns a thread
-// session.
 func (a *Adapter) threadClassificationNeeded(ctx context.Context, msg *messagePayload, admitted bool) bool {
 	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, msg) {
 		return false
