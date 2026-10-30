@@ -52,6 +52,7 @@ type MediaStore interface {
 
 type SessionEnsurer interface {
 	EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error
+	SessionExists(ctx context.Context, sessionID string) (bool, error)
 }
 
 type artifactSummary struct {
@@ -168,7 +169,7 @@ func (a *Adapter) downloadAttachment(ctx context.Context, attachment *attachment
 	return tmp, nil
 }
 
-func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachmentPayload, sessionID, principal, messageID string) ([]artifactSummary, []json.RawMessage, error) {
+func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachmentPayload, sessionID, principal, agentID, messageID string) ([]artifactSummary, []json.RawMessage, error) {
 	if len(attachments) == 0 {
 		return nil, nil, nil
 	}
@@ -190,7 +191,7 @@ func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachment
 		}
 		staged = append(staged, tmp)
 	}
-	if err := a.sessions.EnsureSession(ctx, sessionID, principal, a.persona); err != nil {
+	if err := a.sessions.EnsureSession(ctx, sessionID, principal, agentID); err != nil {
 		return nil, nil, err
 	}
 	summaries := make([]artifactSummary, 0, len(attachments))
@@ -228,14 +229,7 @@ func (a *Adapter) putVisionImage(ctx context.Context, attachment *attachmentPayl
 	if _, err := content.Seek(0, io.SeekStart); err != nil {
 		return artifactSummary{}, nil, Errorf(ErrorCodeAttachmentRejected, "attachment download did not complete")
 	}
-	instance := ""
-	if a.cfg != nil {
-		instance = a.cfg.Instance
-	}
-	source := "discord"
-	if instance != "" {
-		source = "discord:" + instance
-	}
+	source := a.source()
 	part, err := visionSvc.Ingest(ctx, &vision.IngestRequest{
 		Content:      content,
 		DeclaredMIME: attachment.ContentType,

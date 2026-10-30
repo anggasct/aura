@@ -12,7 +12,7 @@ func newAdmitAdapter(t *testing.T, sink *memorySink, sessions SessionEnsurer) *A
 	t.Helper()
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	cfg := testAdapterConfig()
-	adapter, err := New(&cfg, &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, sessions, nil)
+	adapter, err := newRoutedTestAdapter(t, &cfg, &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, sessions, nil)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
@@ -224,6 +224,10 @@ type errSessionEnsurer struct {
 
 func (s *errSessionEnsurer) EnsureSession(_ context.Context, _, _, _ string) error {
 	return s.err
+}
+
+func (s *errSessionEnsurer) SessionExists(_ context.Context, _ string) (bool, error) {
+	return false, s.err
 }
 
 func TestAdapter_AdmitEnsureFailureSurfacesError(t *testing.T) {

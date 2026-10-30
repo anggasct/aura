@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
@@ -28,14 +29,33 @@ func discordTestDB(t *testing.T) *sql.DB {
 func enabledDiscordConfig() config.Config {
 	defaults := config.Default()
 	defaults.Channels.Discord.Enabled = true
-	defaults.Channels.Discord.AllowedUserIDs = []string{"111"}
+	defaults.Channels.Discord.Accounts = []config.DiscordAccount{{
+		Name:           "owner",
+		BotTokenRef:    "env://AURA_DISCORD_BOT_TOKEN",
+		Persona:        auraagent.DefaultID,
+		AllowedUserIDs: []string{"111"},
+		AcceptDMs:      true,
+	}}
 	return defaults
+}
+
+func testRouter(t *testing.T, cfg *config.Config) *auraagent.Router {
+	t.Helper()
+	registry, err := buildAgentRegistry(cfg)
+	if err != nil {
+		t.Fatalf("buildAgentRegistry(): %v", err)
+	}
+	router, err := auraagent.NewRouter(registry, &cfg.Channels.Discord, cfg.Bindings)
+	if err != nil {
+		t.Fatalf("NewRouter(): %v", err)
+	}
+	return router
 }
 
 func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 	db := discordTestDB(t)
 	defaults := config.Default()
-	adapters, checks, _, err := buildChannelAdapters(&defaults, db, t.TempDir(), nil, nil)
+	adapters, checks, _, err := buildChannelAdapters(&defaults, testRouter(t, &defaults), db, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -47,7 +67,7 @@ func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 func TestBuildChannelAdapters_EnabledBuildsAdapterAndCheck(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
-	adapters, checks, decider, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil, nil)
+	adapters, checks, decider, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -78,7 +98,7 @@ func TestBuildChannelAdapters_ReportsUnmappedOwnerIdentity(t *testing.T) {
 			db := discordTestDB(t)
 			cfg := enabledDiscordConfig()
 			cfg.Owner = &config.Owner{Identities: tc.identities}
-			_, checks, _, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil, nil)
+			_, checks, _, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
 			if err != nil {
 				t.Fatalf("buildChannelAdapters(): %v", err)
 			}
@@ -118,8 +138,8 @@ func TestBuildSecretVaultSkipsEmptyValues(t *testing.T) {
 func TestBuildChannelAdapters_RejectsBadTokenRef(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
-	cfg.Channels.Discord.BotTokenRef = "not-a-reference"
-	if _, _, _, err := buildChannelAdapters(&cfg, db, t.TempDir(), nil, nil); err == nil {
+	cfg.Channels.Discord.Accounts[0].BotTokenRef = "not-a-reference"
+	if _, _, _, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil); err == nil {
 		t.Fatal("bad token reference accepted")
 	}
 }
@@ -170,5 +190,78 @@ func TestDiscordSessionEnsurer_CreatesOnce(t *testing.T) {
 	}
 	if err := ensurer.EnsureSession(ctx, "kuma/discord:home/dm:111", "111", "kuma"); err != nil {
 		t.Fatalf("second EnsureSession(): %v", err)
+	}
+}
+
+func TestBuildChannelAdapters_OneAdapterPerAccount(t *testing.T) {
+	db := discordTestDB(t)
+	cfg := enabledDiscordConfig()
+	cfg.Channels.Discord.Accounts = append(cfg.Channels.Discord.Accounts, config.DiscordAccount{
+		Name:           "kuma",
+		BotTokenRef:    "env://AURA_DISCORD_KUMA_TOKEN",
+		Persona:        "engineer",
+		AllowedUserIDs: []string{"111"},
+	})
+	ports, checks, decider, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+	if err != nil {
+		t.Fatalf("buildChannelAdapters(): %v", err)
+	}
+	if len(ports) != 2 || decider == nil {
+		t.Fatalf("ports = %d, decider nil = %v; want two adapters and a decider", len(ports), decider == nil)
+	}
+	names := make([]string, 0, len(ports))
+	for _, port := range ports {
+		adapter, ok := port.(*discord.Adapter)
+		if !ok {
+			t.Fatalf("port %T is not a discord adapter", port)
+		}
+		names = append(names, adapter.ChannelName())
+	}
+	if names[0] != "discord:owner" || names[1] != "discord:kuma" {
+		t.Errorf("adapter names = %v, want one per account in config order", names)
+	}
+	if len(checks) != 2 || checks[0].ID != "discord" {
+		t.Fatalf("checks = %+v, want one aggregated discord check", checks)
+	}
+}
+
+func TestBuildChannelAdapters_RequiresRouter(t *testing.T) {
+	db := discordTestDB(t)
+	cfg := enabledDiscordConfig()
+	if _, _, _, err := buildChannelAdapters(&cfg, nil, db, t.TempDir(), nil, nil); err == nil {
+		t.Fatal("enabled discord without a persona router accepted")
+	}
+}
+
+func TestDiscordSessionEnsurer_ReportsExistence(t *testing.T) {
+	db := discordTestDB(t)
+	ensurer := &discordSessionEnsurer{sessions: store.NewSessionService(db)}
+	ctx := t.Context()
+	exists, err := ensurer.SessionExists(ctx, "kuma/discord:home/thread:9")
+	if err != nil || exists {
+		t.Fatalf("SessionExists() before create = %v, %v; want false", exists, err)
+	}
+	if err := ensurer.EnsureSession(ctx, "kuma/discord:home/thread:9", "111", "kuma"); err != nil {
+		t.Fatalf("EnsureSession(): %v", err)
+	}
+	exists, err = ensurer.SessionExists(ctx, "kuma/discord:home/thread:9")
+	if err != nil || !exists {
+		t.Fatalf("SessionExists() after create = %v, %v; want true", exists, err)
+	}
+}
+
+func TestBuildSecretVaultRedactsEveryAccountToken(t *testing.T) {
+	t.Setenv("AURA_TEST_HOME_TOKEN", "home-token-value-123")
+	t.Setenv("AURA_TEST_KUMA_TOKEN", "kuma-token-value-456")
+	cfg := config.Default()
+	cfg.Channels.Discord.Accounts = []config.DiscordAccount{
+		{Name: "home", BotTokenRef: "env://AURA_TEST_HOME_TOKEN"},
+		{Name: "kuma", BotTokenRef: "env://AURA_TEST_KUMA_TOKEN"},
+	}
+	vault := buildSecretVault(&cfg)
+	for _, token := range []string{"home-token-value-123", "kuma-token-value-456"} {
+		if strings.Contains(vault.Redact("leak "+token), token) {
+			t.Errorf("token for an account is not redacted")
+		}
 	}
 }

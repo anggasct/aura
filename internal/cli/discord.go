@@ -15,6 +15,7 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
@@ -73,6 +74,23 @@ type discordSessionEnsurer struct {
 	sessions store.SessionService
 }
 
+func (s *discordSessionEnsurer) SessionExists(ctx context.Context, sessionID string) (bool, error) {
+	if s.sessions == nil {
+		return false, nil
+	}
+	_, err := s.sessions.Get(ctx, sessionID)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionNotFound {
+		return false, nil
+	}
+	return false, err
+}
+
 func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error {
 	if s.sessions == nil {
 		return nil
@@ -124,13 +142,22 @@ func (s *discordMediaStore) Put(ctx context.Context, content io.Reader, meta *di
 	return discord.ArtifactReceipt{RefID: ref.ID, Digest: ref.BlobDigest, SizeBytes: ref.SizeBytes}, nil
 }
 
-func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, mp metric.MeterProvider, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, toolbroker.ApprovalDecider, error) {
+type discordAdapters []*discord.Adapter
+
+func (adapters discordAdapters) Check(ctx context.Context) []health.Finding {
+	findings := make([]health.Finding, 0, len(adapters))
+	for _, adapter := range adapters {
+		findings = append(findings, adapter.Check(ctx)...)
+	}
+	return findings
+}
+
+func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, toolbroker.ApprovalDecider, error) {
 	if cfg == nil || !cfg.Channels.Discord.Enabled {
 		return nil, nil, nil, nil
 	}
-	adapter, err := newDiscordAdapter(cfg, db, artifactRoot, logger)
-	if err != nil {
-		return nil, nil, nil, err
+	if router == nil {
+		return nil, nil, nil, errors.New("persona router must not be nil")
 	}
 	owners, err := ownerResolver(cfg)
 	if err != nil {
@@ -140,13 +167,24 @@ func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, m
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	adapter.SetPrincipalResolver(owners)
-	adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-		recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
-	})
+	adapters := make(discordAdapters, 0, len(cfg.Channels.Discord.Accounts))
+	ports := make([]runtimechannelhost.ChannelPort, 0, len(cfg.Channels.Discord.Accounts))
+	for i := range cfg.Channels.Discord.Accounts {
+		adapter, err := newDiscordAdapter(cfg, &cfg.Channels.Discord.Accounts[i], db, artifactRoot, logger)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		adapter.SetPrincipalResolver(owners)
+		adapter.SetPersonaRouter(router)
+		adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
+			recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
+		})
+		adapters = append(adapters, adapter)
+		ports = append(ports, adapter)
+	}
 	checks := []health.RegisteredCheck{{
 		ID:          "discord",
-		Checker:     adapter,
+		Checker:     adapters,
 		Timeout:     time.Duration(cfg.Health.CheckTimeout),
 		Remediation: discord.RemediationReviewGateway,
 	}, {
@@ -155,17 +193,17 @@ func buildChannelAdapters(cfg *config.Config, db *sql.DB, artifactRoot string, m
 		Timeout:     time.Duration(cfg.Health.CheckTimeout),
 		Remediation: remediationMapOwnerIdentity,
 	}}
-	return []runtimechannelhost.ChannelPort{adapter}, checks, discordApprovalDecider(adapter), nil
+	return ports, checks, discordApprovalDecider(adapters), nil
 }
 
-func newDiscordAdapter(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger) (*discord.Adapter, error) {
+func newDiscordAdapter(cfg *config.Config, account *config.DiscordAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*discord.Adapter, error) {
 	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := discord.New(&cfg.Channels.Discord, &discordResumeStore{
+	adapter, err := discord.New(&cfg.Channels.Discord, account, &discordResumeStore{
 		store:    store.NewChannelResumeStore(db),
-		instance: cfg.Channels.Discord.Instance,
+		instance: account.Name,
 	}, executor, &discordMediaStore{
 		store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
 	}, &discordSessionEnsurer{sessions: store.NewSessionService(db)}, logger)
@@ -181,9 +219,12 @@ func newDiscordAdapter(cfg *config.Config, db *sql.DB, artifactRoot string, logg
 
 func buildSecretVault(cfg *config.Config) *secret.Vault {
 	vault := secret.New()
-	if ref := parseSecretRef(cfg.Channels.Discord.BotTokenRef); ref.Env != "" {
-		if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
-			vault.Set("discord_bot_token", val)
+	for i := range cfg.Channels.Discord.Accounts {
+		account := &cfg.Channels.Discord.Accounts[i]
+		if ref := parseSecretRef(account.BotTokenRef); ref.Env != "" {
+			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
+				vault.Set("discord_bot_token_"+account.Name, val)
+			}
 		}
 	}
 	if cfg.Sync != nil {
@@ -242,13 +283,20 @@ func parseSecretRef(raw string) secret.Reference {
 	}
 }
 
-func discordApprovalDecider(adapter *discord.Adapter) toolbroker.ApprovalDecider {
-	if adapter == nil {
+func discordApprovalDecider(adapters discordAdapters) toolbroker.ApprovalDecider {
+	if len(adapters) == 0 {
 		return nil
 	}
 	return func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 		if prompt == nil {
 			return false, errors.New("approval prompt must not be nil")
+		}
+		adapter := adapters[0]
+		for _, candidate := range adapters {
+			if candidate.HoldsApprovalTarget(prompt.SessionID) {
+				adapter = candidate
+				break
+			}
 		}
 		return adapter.Decide(ctx, &discord.ApprovalPrompt{
 			ToolName:       prompt.ToolName,

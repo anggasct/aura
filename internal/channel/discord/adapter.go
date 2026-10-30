@@ -61,8 +61,19 @@ var _ runtimechannelhost.ChannelPort = (*Adapter)(nil)
 
 var _ runtimechannelhost.PresencePort = (*Adapter)(nil)
 
+type PersonaRouter interface {
+	Resolve(scope *auraagent.RouteScope) (auraagent.RouteMatch, bool)
+	Personas() []string
+}
+
+type threadRoute struct {
+	parent  string
+	persona string
+}
+
 type Adapter struct {
 	cfg            *config.Discord
+	account        *config.DiscordAccount
 	tokenRef       secret.Reference
 	digest         string
 	resumes        ResumeStore
@@ -80,7 +91,7 @@ type Adapter struct {
 	effects        EffectRunner
 	media          MediaStore
 	sessions       SessionEnsurer
-	persona        string
+	router         PersonaRouter
 	owners         *principal.Resolver
 	admitted       func(ctx context.Context, class principal.Class)
 	images         atomic.Pointer[vision.Service]
@@ -89,7 +100,7 @@ type Adapter struct {
 	posted         map[string][]string
 	threadsMu      sync.Mutex
 	triggerThreads map[string]string
-	threadParents  map[string]string
+	threadParents  map[string]threadRoute
 	presenceMu     sync.Mutex
 	presence       map[string]*presenceSession
 	secretVault    *secret.Vault
@@ -124,6 +135,24 @@ func (a *Adapter) SetPrincipalResolver(owners *principal.Resolver) {
 	a.owners = owners
 }
 
+func (a *Adapter) SetPersonaRouter(router PersonaRouter) {
+	if a == nil {
+		return
+	}
+	a.router = router
+}
+
+func (a *Adapter) Account() string {
+	if a == nil || a.account == nil {
+		return ""
+	}
+	return a.account.Name
+}
+
+func (a *Adapter) source() string {
+	return "discord:" + a.account.Name
+}
+
 func (a *Adapter) SetAdmissionObserver(observe func(ctx context.Context, class principal.Class)) {
 	if a == nil {
 		return
@@ -138,9 +167,12 @@ func (a *Adapter) visionService() *vision.Service {
 	return a.images.Load()
 }
 
-func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
+func New(cfg *config.Discord, account *config.DiscordAccount, resumes ResumeStore, effects EffectRunner, media MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
 	if cfg == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "discord config must not be nil")
+	}
+	if account == nil || account.Name == "" {
+		return nil, Errorf(ErrorCodeInvalidArgument, "discord account must not be nil or unnamed")
 	}
 	if resumes == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "resume store must not be nil")
@@ -157,7 +189,7 @@ func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media M
 	if logger == nil {
 		logger = slog.Default()
 	}
-	tokenRef, err := parseTokenRef(cfg.BotTokenRef)
+	tokenRef, err := parseTokenRef(account.BotTokenRef)
 	if err != nil {
 		return nil, err
 	}
@@ -167,13 +199,13 @@ func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media M
 	}
 	adapter := &Adapter{
 		cfg:            cfg,
+		account:        account,
 		tokenRef:       tokenRef,
-		digest:         digestDiscordConfig(cfg),
+		digest:         digestDiscordConfig(cfg, account),
 		resumes:        resumes,
 		effects:        effects,
 		media:          media,
 		sessions:       sessions,
-		persona:        auraagent.DefaultID,
 		logger:         logger,
 		gatewayURL:     gatewayURL,
 		restBase:       discordRestBase,
@@ -185,7 +217,7 @@ func New(cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media M
 		approvalKey:    approvalKey,
 		targets:        map[string]approvalBinding{},
 		triggerThreads: map[string]string{},
-		threadParents:  map[string]string{},
+		threadParents:  map[string]threadRoute{},
 		deliverSem:     make(chan struct{}, maxDeliverInflight),
 		retryBase:      backoffBase,
 		retryCap:       backoffMax,
@@ -207,14 +239,14 @@ func parseTokenRef(raw string) (secret.Reference, error) {
 	}
 }
 
-func digestDiscordConfig(cfg *config.Discord) string {
-	ids := make([]string, 0, len(cfg.AllowedUserIDs)+len(cfg.AllowedGuildIDs)+len(cfg.AllowedChannelIDs))
-	ids = append(ids, cfg.AllowedUserIDs...)
-	ids = append(ids, cfg.AllowedGuildIDs...)
-	ids = append(ids, cfg.AllowedChannelIDs...)
+func digestDiscordConfig(cfg *config.Discord, account *config.DiscordAccount) string {
+	ids := make([]string, 0, len(account.AllowedUserIDs)+len(account.AllowedGuildIDs)+len(account.AllowedChannelIDs))
+	ids = append(ids, account.AllowedUserIDs...)
+	ids = append(ids, account.AllowedGuildIDs...)
+	ids = append(ids, account.AllowedChannelIDs...)
 	slices.Sort(ids)
 	digest := sha256.New()
-	_, _ = fmt.Fprintf(digest, "%s|%d|%t|%d|%d|", cfg.Instance, requiredIntents, cfg.AcceptDMs, int64(cfg.MinEditInterval), cfg.MaxAttachmentBytes)
+	_, _ = fmt.Fprintf(digest, "%s|%d|%t|%d|%d|", account.Name, requiredIntents, account.AcceptDMs, int64(cfg.MinEditInterval), cfg.MaxAttachmentBytes)
 	for _, id := range ids {
 		_, _ = fmt.Fprintf(digest, "%s|", id)
 	}
@@ -233,7 +265,7 @@ func (a *Adapter) Start(ctx context.Context, sink runtimeingress.IngressSink) er
 }
 
 func (a *Adapter) ChannelName() string {
-	return "discord"
+	return a.source()
 }
 
 func (a *Adapter) postedMessages(key string) ([]string, bool) {
@@ -284,7 +316,7 @@ func (a *Adapter) Check(ctx context.Context) []health.Finding {
 		Code:        "possible_ingress_gap",
 		Status:      health.StatusDegraded,
 		Severity:    health.SeverityWarning,
-		Detail:      "discord gateway resumed without continuity; some events may be missing",
+		Detail:      "discord gateway for account " + a.account.Name + " resumed without continuity; some events may be missing",
 		Remediation: RemediationReviewGateway,
 	}}
 }

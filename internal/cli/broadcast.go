@@ -286,6 +286,7 @@ func buildBroadcastSenders(adapters []runtimechannelhost.ChannelPort, effects *e
 		}
 		out.providers["discord"] = concrete
 		out.senders["discord"] = &discordBroadcastSender{adapter: concrete, effects: effects, sessions: sessions}
+		break
 	}
 	return out
 }
@@ -347,14 +348,14 @@ func (s *broadcastResumeStore) ListActive(ctx context.Context, limit int) ([]bro
 
 func broadcastEffectProviders(cfg *config.Config, db *sql.DB, logger *slog.Logger) (map[string]effect.Provider, error) {
 	providers := map[string]effect.Provider{}
-	if cfg == nil || !cfg.Channels.Discord.Enabled {
+	if cfg == nil || !cfg.Channels.Discord.Enabled || len(cfg.Channels.Discord.Accounts) == 0 {
 		return providers, nil
 	}
 	_, artifactRoot, _, err := storagePaths(cfg)
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := newDiscordAdapter(cfg, db, artifactRoot, logger)
+	adapter, err := newDiscordAdapter(cfg, &cfg.Channels.Discord.Accounts[0], db, artifactRoot, logger)
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,8 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
@@ -383,18 +385,42 @@ func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope,
 }
 
 func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) {
-	if parent, ok := a.lookupThreadParent(msg.ChannelID); ok {
-		return a.admitThreadMessage(ctx, msg, msg.ChannelID, parent)
+	if msg == nil {
+		return false, Errorf(ErrorCodeInvalidArgument, "account and message must not be nil")
 	}
-	envelope, admitted, err := normalizeMessage(a.cfg, a.owners, a.selfID, a.cfg.Instance, msg)
+	if route, ok := a.lookupThread(msg.ChannelID); ok {
+		return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
+	}
+	envelope, admitted, err := normalizeMessage(a.account, a.owners, a.selfID, msg)
 	if err != nil {
 		return false, err
 	}
-	if !admitted {
-		return a.admitUnknownThread(ctx, msg)
+	if a.threadClassificationNeeded(ctx, msg, admitted) {
+		probe, probeErr := a.probeChannel(ctx, msg.ChannelID)
+		if probeErr != nil {
+			a.logger.DebugContext(ctx, "thread classification failed", "component", "discord", "error", probeErr)
+			return false, nil
+		}
+		if probe.isThread {
+			if !probe.owned {
+				return false, nil
+			}
+			return a.admitThreadRoute(ctx, msg, threadRoute{parent: probe.parent})
+		}
+		if msg.ChannelType != nil && isThreadChannelType(*msg.ChannelType) {
+			return false, nil
+		}
 	}
+	if !admitted {
+		return false, nil
+	}
+	persona, routed := a.routePersona(ctx, &auraagent.RouteScope{GuildID: msg.GuildID, ChannelID: msg.ChannelID, UserID: msg.Author.ID})
+	if !routed {
+		return false, nil
+	}
+	envelope.AgentID = persona
 	if msg.GuildID != "" && !skipThreadCreate(msg.ChannelType) {
-		if threadID, threadErr := a.createThreadForTrigger(ctx, msg, msg.ChannelID); threadErr == nil {
+		if threadID, threadErr := a.createThreadForTrigger(ctx, msg, msg.ChannelID, persona); threadErr == nil {
 			if rewriteErr := rewriteEnvelopeForThread(envelope, msg, threadID, msg.ChannelID); rewriteErr == nil {
 				return a.acceptEnvelope(ctx, msg, envelope, threadID)
 			}
@@ -405,65 +431,129 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	return a.acceptEnvelope(ctx, msg, envelope, msg.ChannelID)
 }
 
-func (a *Adapter) sessionKey(conversationID string) string {
-	return runtimeingress.SessionKey(a.persona, "discord:"+a.cfg.Instance, conversationID)
+func (a *Adapter) routePersona(ctx context.Context, scope *auraagent.RouteScope) (string, bool) {
+	if a.router != nil {
+		scope.Channel = config.BindingChannelDiscord
+		scope.Account = a.account.Name
+		if match, ok := a.router.Resolve(scope); ok {
+			return match.Persona, true
+		}
+	}
+	a.logger.DebugContext(ctx, "persona unresolved", "component", "discord", "account", a.account.Name)
+	return "", false
 }
 
-func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, threadID, parent string) (bool, error) {
-	if msg.GuildID == "" || !validThreadAuthor(a.cfg, a.owners, a.selfID, msg) {
+func (a *Adapter) sessionKey(persona, conversationID string) string {
+	return runtimeingress.SessionKey(persona, a.source(), conversationID)
+}
+
+func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, threadID string, route threadRoute) (bool, error) {
+	if msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, msg) {
 		return false, nil
 	}
-	if len(a.cfg.AllowedGuildIDs) > 0 && !slices.Contains(a.cfg.AllowedGuildIDs, msg.GuildID) {
+	if len(a.account.AllowedGuildIDs) > 0 && !slices.Contains(a.account.AllowedGuildIDs, msg.GuildID) {
 		return false, nil
 	}
-	if len(a.cfg.AllowedChannelIDs) > 0 && !slices.Contains(a.cfg.AllowedChannelIDs, parent) {
+	if len(a.account.AllowedChannelIDs) > 0 && !slices.Contains(a.account.AllowedChannelIDs, route.parent) {
 		return false, nil
 	}
-	principalID, class, _ := resolveAuthor(a.cfg, a.owners, msg.Author.ID)
-	envelope, err := buildThreadEnvelope(a.cfg.Instance, principalID, class, msg, threadID, parent)
+	persona, routed, err := a.threadPersona(ctx, msg, threadID, route)
+	if err != nil || !routed {
+		return false, err
+	}
+	principalID, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID)
+	envelope, err := buildThreadEnvelope(a.account.Name, principalID, class, msg, threadID, route.parent)
 	if err != nil {
 		return false, err
 	}
+	envelope.AgentID = persona
 	return a.acceptEnvelope(ctx, msg, envelope, threadID)
 }
 
-func (a *Adapter) admitUnknownThread(ctx context.Context, msg *messagePayload) (bool, error) {
-	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.cfg, a.owners, a.selfID, msg) {
-		return false, nil
+func (a *Adapter) threadPersona(ctx context.Context, msg *messagePayload, threadID string, route threadRoute) (persona string, routed bool, err error) {
+	if route.persona != "" {
+		return route.persona, true, nil
 	}
-	if a.selfID == "" {
-		return false, nil
+	persona, routed, err = a.existingThreadPersona(ctx, threadID)
+	if err != nil {
+		return "", false, fmt.Errorf("thread persona lookup: %w", err)
 	}
-	if len(a.cfg.AllowedGuildIDs) > 0 && !slices.Contains(a.cfg.AllowedGuildIDs, msg.GuildID) {
-		return false, nil
+	if !routed {
+		persona, routed = a.routePersona(ctx, &auraagent.RouteScope{GuildID: msg.GuildID, ChannelID: route.parent, ThreadID: threadID, UserID: msg.Author.ID})
+		if !routed {
+			return "", false, nil
+		}
 	}
-	if parent, ok := a.lookupThreadParent(msg.ChannelID); ok {
-		return a.admitThreadMessage(ctx, msg, msg.ChannelID, parent)
+	a.rememberThread("", threadID, threadRoute{parent: route.parent, persona: persona})
+	return persona, true, nil
+}
+
+func (a *Adapter) existingThreadPersona(ctx context.Context, threadID string) (persona string, found bool, err error) {
+	if a.router == nil {
+		return "", false, nil
+	}
+	for _, candidate := range a.router.Personas() {
+		exists, lookupErr := a.sessions.SessionExists(ctx, a.sessionKey(candidate, "thread:"+threadID))
+		if lookupErr != nil {
+			return "", false, lookupErr
+		}
+		if exists {
+			return candidate, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+type channelProbe struct {
+	parent   string
+	isThread bool
+	owned    bool
+}
+
+func (a *Adapter) threadClassificationNeeded(ctx context.Context, msg *messagePayload, admitted bool) bool {
+	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, msg) {
+		return false
+	}
+	if msg.ChannelType != nil {
+		return isThreadChannelType(*msg.ChannelType)
+	}
+	if !admitted || len(a.account.AllowedChannelIDs) == 0 {
+		return true
+	}
+	_, found, err := a.existingThreadPersona(ctx, msg.ChannelID)
+	return err == nil && found
+}
+
+func (a *Adapter) probeChannel(ctx context.Context, channelID string) (channelProbe, error) {
+	if a.selfID == "" || channelID == "" {
+		return channelProbe{}, nil
 	}
 	token, _ := a.tokenRef.Resolve()
 	if token == "" {
+		return channelProbe{}, nil
+	}
+	info, err := a.fetchThreadParent(ctx, token, channelID)
+	if err != nil {
+		return channelProbe{}, err
+	}
+	if info.ID != channelID || !isThreadChannelType(info.Type) || info.ParentID == "" {
+		return channelProbe{}, nil
+	}
+	return channelProbe{parent: info.ParentID, isThread: true, owned: info.OwnerID == a.selfID}, nil
+}
+
+func (a *Adapter) admitThreadRoute(ctx context.Context, msg *messagePayload, route threadRoute) (bool, error) {
+	if len(a.account.AllowedChannelIDs) > 0 && !slices.Contains(a.account.AllowedChannelIDs, route.parent) {
 		return false, nil
 	}
-	info, fetchErr := a.fetchThreadParent(ctx, token, msg.ChannelID)
-	_ = fetchErr
-	if info.ID == "" {
-		return false, nil
-	}
-	if !isThreadChannelType(info.Type) || info.OwnerID != a.selfID || info.ParentID == "" {
-		return false, nil
-	}
-	if len(a.cfg.AllowedChannelIDs) > 0 && !slices.Contains(a.cfg.AllowedChannelIDs, info.ParentID) {
-		return false, nil
-	}
-	a.rememberThread("", info.ID, info.ParentID)
-	return a.admitThreadMessage(ctx, msg, info.ID, info.ParentID)
+	a.rememberThread("", msg.ChannelID, route)
+	return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
 }
 
 func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope, bindingChannel string) (bool, error) {
-	envelope.AgentID = a.persona
-	envelope.ConversationID = a.sessionKey(envelope.ConversationID)
+	envelope.ConversationID = a.sessionKey(envelope.AgentID, envelope.ConversationID)
 	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, actor: msg.Author.ID, guildID: msg.GuildID, channelID: bindingChannel})
-	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, a.persona); err != nil {
+	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)
 	}
 	if len(msg.Attachments) > 0 && !a.intakeAttachments(ctx, msg, envelope) {
@@ -487,7 +577,7 @@ func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envel
 }
 
 func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope) bool {
-	summaries, images, err := a.storeAttachments(ctx, msg.Attachments, envelope.ConversationID, envelope.PrincipalID, msg.ID)
+	summaries, images, err := a.storeAttachments(ctx, msg.Attachments, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID, msg.ID)
 	if err != nil {
 		a.logger.WarnContext(ctx, "attachment intake failed", "component", "discord")
 		return false

@@ -73,7 +73,7 @@ func TestAdapter_IntakeOrderPreserved(t *testing.T) {
 
 func TestAdapter_RetryDelayBounded(t *testing.T) {
 	cfg := testAdapterConfig()
-	adapter, err := New(&cfg, &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, nil)
+	adapter, err := newRoutedTestAdapter(t, &cfg, &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, nil)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}

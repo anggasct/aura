@@ -90,7 +90,7 @@ func newApprovalAdapter(t *testing.T, stub *approvalStub, logs *logCapture) *Ada
 	}
 	logger := slog.New(slog.NewTextHandler(logs, nil))
 	cfg := testAdapterConfig()
-	adapter, err := New(&cfg, &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, logger)
+	adapter, err := newRoutedTestAdapter(t, &cfg, &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, logger)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
@@ -524,7 +524,7 @@ func TestDecide_ClickDuringCardPostStillDisables(t *testing.T) {
 	logs := &logCapture{}
 	logger := slog.New(slog.NewTextHandler(logs, nil))
 	cfg := testAdapterConfig()
-	adapter, err := New(&cfg, &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, logger)
+	adapter, err := newRoutedTestAdapter(t, &cfg, &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, logger)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}

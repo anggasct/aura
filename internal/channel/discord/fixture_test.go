@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
@@ -226,15 +227,45 @@ func (g *fakeGateway) send(ws *websocket.Conn, op int, data any, seq *int64, typ
 func testAdapterConfig() config.Discord {
 	return config.Discord{
 		Enabled:            true,
-		Instance:           "owner",
-		BotTokenRef:        "env://AURA_DISCORD_BOT_TOKEN",
-		AllowedUserIDs:     []string{"111"},
-		AllowedGuildIDs:    []string{"222"},
-		AllowedChannelIDs:  []string{"333"},
-		AcceptDMs:          true,
+		Accounts:           []config.DiscordAccount{testAdapterAccount()},
 		MinEditInterval:    2000000000,
 		MaxAttachmentBytes: 20971520,
 	}
+}
+
+func testAdapterAccount() config.DiscordAccount {
+	return config.DiscordAccount{
+		Name:              "owner",
+		BotTokenRef:       "env://AURA_DISCORD_BOT_TOKEN",
+		Persona:           auraagent.DefaultID,
+		AllowedUserIDs:    []string{"111"},
+		AllowedGuildIDs:   []string{"222"},
+		AllowedChannelIDs: []string{"333"},
+		AcceptDMs:         true,
+	}
+}
+
+func testPersonaRouter(t *testing.T, cfg *config.Discord, bindings []config.Binding) *auraagent.Router {
+	t.Helper()
+	registry, err := auraagent.Build(nil, nil, nil)
+	if err != nil {
+		t.Fatalf("agent registry: %v", err)
+	}
+	router, err := auraagent.NewRouter(registry, cfg, bindings)
+	if err != nil {
+		t.Fatalf("persona router: %v", err)
+	}
+	return router
+}
+
+func newRoutedTestAdapter(t *testing.T, cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
+	t.Helper()
+	adapter, err := New(cfg, &cfg.Accounts[0], resumes, effects, media, sessions, logger)
+	if err != nil {
+		return nil, err
+	}
+	adapter.SetPersonaRouter(testPersonaRouter(t, cfg, nil))
+	return adapter, nil
 }
 
 func startTestAdapter(t *testing.T, gateway *fakeGateway, sink *memorySink, resumes *memoryResumeStore, logs *logCapture) *testContext {
@@ -243,7 +274,7 @@ func startTestAdapter(t *testing.T, gateway *fakeGateway, sink *memorySink, resu
 	logger := slog.New(slog.NewTextHandler(logs, nil))
 	deps := &testDoubles{effects: newFakeEffectRunner(), media: &fakeMediaStore{}, sessions: &fakeSessionEnsurer{}}
 	discordCfg := testAdapterConfig()
-	adapter, err := New(&discordCfg, resumes, deps.effects, deps.media, deps.sessions, logger)
+	adapter, err := newRoutedTestAdapter(t, &discordCfg, resumes, deps.effects, deps.media, deps.sessions, logger)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
@@ -403,10 +434,11 @@ func (s *fakeMediaStore) Put(ctx context.Context, content io.Reader, meta *Artif
 type fakeSessionEnsurer struct {
 	mu       sync.Mutex
 	sessions map[string]string
+	agents   map[string]string
 	err      error
 }
 
-func (s *fakeSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID, _ string) error {
+func (s *fakeSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil {
@@ -414,11 +446,23 @@ func (s *fakeSessionEnsurer) EnsureSession(ctx context.Context, sessionID, owner
 	}
 	if s.sessions == nil {
 		s.sessions = map[string]string{}
+		s.agents = map[string]string{}
 	}
 	if _, ok := s.sessions[sessionID]; !ok {
 		s.sessions[sessionID] = ownerID
+		s.agents[sessionID] = agentID
 	}
 	return nil
+}
+
+func (s *fakeSessionEnsurer) SessionExists(ctx context.Context, sessionID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return false, s.err
+	}
+	_, ok := s.sessions[sessionID]
+	return ok, nil
 }
 
 func waitFor(t *testing.T, timeout time.Duration, condition func() bool, what string) {

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/memory"
 	"github.com/anggasct/aura/internal/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
@@ -23,7 +24,7 @@ func newThreadAdapter(t *testing.T, sink *memorySink, sessions *fakeSessionEnsur
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	cfg := testAdapterConfig()
 	doubles := &testDoubles{effects: newFakeEffectRunner(), media: &fakeMediaStore{}, sessions: sessions}
-	adapter, err := New(&cfg, &memoryResumeStore{}, doubles.effects, doubles.media, doubles.sessions, nil)
+	adapter, err := newRoutedTestAdapter(t, &cfg, &memoryResumeStore{}, doubles.effects, doubles.media, doubles.sessions, nil)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
@@ -343,7 +344,7 @@ func TestThreads_CreateEnsureFailurePreservesCause(t *testing.T) {
 	stub := newRestStub(t, func(int, http.ResponseWriter, *http.Request) {})
 	adapter := newThreadAdapter(t, newMemorySink(), sessions, stub)
 
-	_, err := adapter.createThreadForTrigger(t.Context(), threadTrigger("9040", "ensure failure", []string{"999"}), "333")
+	_, err := adapter.createThreadForTrigger(t.Context(), threadTrigger("9040", "ensure failure", []string{"999"}), "333", auraagent.DefaultID)
 	if err == nil {
 		t.Fatal("createThreadForTrigger() error = nil, want session failure")
 	}
@@ -850,7 +851,7 @@ func TestThreadAuthor_ResolvesOwnerAndTrusted(t *testing.T) {
 				return
 			}
 			id, class, _ := resolveAuthor(cfg, owners, tc.author)
-			env, err := buildThreadEnvelope(cfg.Instance, id, class, msg, "777001", "333")
+			env, err := buildThreadEnvelope(cfg.Name, id, class, msg, "777001", "333")
 			if err != nil {
 				t.Fatalf("buildThreadEnvelope(): %v", err)
 			}

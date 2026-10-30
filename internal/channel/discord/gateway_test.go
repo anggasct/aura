@@ -283,8 +283,8 @@ func TestAdapter_TokenUnavailableNeverDials(t *testing.T) {
 	sink := newMemorySink()
 	resumes := &memoryResumeStore{}
 	cfg := testAdapterConfig()
-	cfg.BotTokenRef = "file:///nonexistent-token-file"
-	adapter, err := New(&cfg, resumes, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, nil)
+	cfg.Accounts[0].BotTokenRef = "file:///nonexistent-token-file"
+	adapter, err := newRoutedTestAdapter(t, &cfg, resumes, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, nil)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
@@ -335,7 +335,7 @@ func TestAdapter_IntakeErrorReconnectsInsteadOfStalling(t *testing.T) {
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	logger := slog.New(slog.NewTextHandler(logs, nil))
 	cfg := testAdapterConfig()
-	adapter, err := New(&cfg, resumes, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, logger)
+	adapter, err := newRoutedTestAdapter(t, &cfg, resumes, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, logger)
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}

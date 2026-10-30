@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -239,6 +240,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateDiscord(&cfg.Channels.Discord); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateBindings(cfg.Bindings, &cfg.Channels.Discord); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateBroadcast(&cfg.Broadcast); err != nil {
 		return LoadResult{}, err
 	}
@@ -415,6 +419,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateDiscordShapes(doc); err != nil {
+		return err
+	}
+	if err := validateBindingsShapes(doc); err != nil {
 		return err
 	}
 	if err := validateBroadcastShapes(doc); err != nil {
@@ -728,22 +735,15 @@ func validateDiscordShapes(doc *yamlv3.Node) error {
 		keyNode := discordNode.Content[i]
 		valueNode := discordNode.Content[i+1]
 		switch keyNode.Value {
-		case "enabled", "accept_dms":
+		case "enabled":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
 				return fmt.Errorf("channels.discord.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
 			}
-		case "instance", "bot_token_ref":
-			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
-				return fmt.Errorf("channels.discord.%s must be a string at line %d", keyNode.Value, valueNode.Line)
-			}
-		case "allowed_user_ids", "allowed_guild_ids", "allowed_channel_ids":
-			if valueNode.Kind != yamlv3.SequenceNode {
-				return fmt.Errorf("channels.discord.%s must be a sequence at line %d", keyNode.Value, valueNode.Line)
-			}
-			for _, item := range valueNode.Content {
-				if item.Kind != yamlv3.ScalarNode || item.Tag != "!!str" {
-					return fmt.Errorf("channels.discord.%s entries must be quoted strings at line %d", keyNode.Value, item.Line)
-				}
+		case "instance", "bot_token_ref", "allowed_user_ids", "allowed_guild_ids", "allowed_channel_ids", "accept_dms":
+			return &Error{Code: ErrorCodeConfigShapeChanged, Detail: fmt.Sprintf("channels.discord.%s at line %d moved into channels.discord.accounts[]", keyNode.Value, keyNode.Line)}
+		case "accounts":
+			if err := validateDiscordAccountShapes(valueNode); err != nil {
+				return err
 			}
 		case "min_edit_interval":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
@@ -756,6 +756,71 @@ func validateDiscordShapes(doc *yamlv3.Node) error {
 		case "thread_auto_archive_minutes":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
 				return fmt.Errorf("channels.discord.thread_auto_archive_minutes must be an integer at line %d", valueNode.Line)
+			}
+		}
+	}
+	return nil
+}
+
+func validateDiscordAccountShapes(accountsNode *yamlv3.Node) error {
+	if accountsNode.Kind != yamlv3.SequenceNode {
+		return fmt.Errorf("channels.discord.accounts must be a sequence at line %d", accountsNode.Line)
+	}
+	for index, accountNode := range accountsNode.Content {
+		field := fmt.Sprintf("channels.discord.accounts[%d]", index)
+		if accountNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("%s must be a mapping at line %d", field, accountNode.Line)
+		}
+		for i := 0; i+1 < len(accountNode.Content); i += 2 {
+			keyNode := accountNode.Content[i]
+			valueNode := accountNode.Content[i+1]
+			switch keyNode.Value {
+			case "accept_dms":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+					return fmt.Errorf("%s.accept_dms must be a boolean at line %d", field, valueNode.Line)
+				}
+			case "name", "bot_token_ref", "persona":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+					return fmt.Errorf("%s.%s must be a string at line %d", field, keyNode.Value, valueNode.Line)
+				}
+			case "allowed_user_ids", "allowed_guild_ids", "allowed_channel_ids":
+				if err := quotedStringSequence(field+"."+keyNode.Value, valueNode); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func quotedStringSequence(field string, valueNode *yamlv3.Node) error {
+	if valueNode.Kind != yamlv3.SequenceNode {
+		return fmt.Errorf("%s must be a sequence at line %d", field, valueNode.Line)
+	}
+	for _, item := range valueNode.Content {
+		if item.Kind != yamlv3.ScalarNode || item.Tag != "!!str" {
+			return fmt.Errorf("%s entries must be quoted strings at line %d", field, item.Line)
+		}
+	}
+	return nil
+}
+
+func validateBindingsShapes(doc *yamlv3.Node) error {
+	bindingsNode := mappingValue(doc, "bindings")
+	if bindingsNode == nil {
+		return nil
+	}
+	if bindingsNode.Kind != yamlv3.SequenceNode {
+		return fmt.Errorf("bindings must be a sequence at line %d", bindingsNode.Line)
+	}
+	for index, bindingNode := range bindingsNode.Content {
+		if bindingNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("bindings[%d] must be a mapping at line %d", index, bindingNode.Line)
+		}
+		for i := 0; i+1 < len(bindingNode.Content); i += 2 {
+			valueNode := bindingNode.Content[i+1]
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("bindings[%d].%s must be a quoted string at line %d", index, bindingNode.Content[i].Value, valueNode.Line)
 			}
 		}
 	}
@@ -2444,15 +2509,6 @@ func applyVisionDefaults(cfg *Config, doc *yamlv3.Node) {
 
 func applyDiscordDefaults(cfg *Config, doc *yamlv3.Node, defaults *Discord) {
 	discord := &cfg.Channels.Discord
-	if discord.Instance == "" && !configValuePresent(doc, "channels", "discord", "instance") && !envValuePresent("channels.discord.instance") {
-		discord.Instance = defaults.Instance
-	}
-	if discord.BotTokenRef == "" && !configValuePresent(doc, "channels", "discord", "bot_token_ref") && !envValuePresent("channels.discord.bot_token_ref") {
-		discord.BotTokenRef = defaults.BotTokenRef
-	}
-	if !discord.AcceptDMs && !configValuePresent(doc, "channels", "discord", "accept_dms") && !envValuePresent("channels.discord.accept_dms") {
-		discord.AcceptDMs = defaults.AcceptDMs
-	}
 	if discord.MinEditInterval == 0 && !configValuePresent(doc, "channels", "discord", "min_edit_interval") && !envValuePresent("channels.discord.min_edit_interval") {
 		discord.MinEditInterval = defaults.MinEditInterval
 	}
@@ -2462,6 +2518,30 @@ func applyDiscordDefaults(cfg *Config, doc *yamlv3.Node, defaults *Discord) {
 	if discord.ThreadAutoArchiveMinutes == 0 && !configValuePresent(doc, "channels", "discord", "thread_auto_archive_minutes") && !envValuePresent("channels.discord.thread_auto_archive_minutes") {
 		discord.ThreadAutoArchiveMinutes = defaults.ThreadAutoArchiveMinutes
 	}
+	accountsNode := nestedValue(doc, "channels", "discord", "accounts")
+	for i := range discord.Accounts {
+		if !discord.Accounts[i].AcceptDMs && !sequenceItemHasKey(accountsNode, i, "accept_dms") {
+			discord.Accounts[i].AcceptDMs = true
+		}
+	}
+}
+
+func nestedValue(node *yamlv3.Node, path ...string) *yamlv3.Node {
+	for _, key := range path {
+		if node == nil || node.Kind != yamlv3.MappingNode {
+			return nil
+		}
+		node = mappingValue(node, key)
+	}
+	return node
+}
+
+func sequenceItemHasKey(sequence *yamlv3.Node, index int, key string) bool {
+	if sequence == nil || sequence.Kind != yamlv3.SequenceNode || index >= len(sequence.Content) {
+		return false
+	}
+	item := sequence.Content[index]
+	return item.Kind == yamlv3.MappingNode && mappingValue(item, key) != nil
 }
 
 func applyTerminalDefaults(cfg *Config, doc *yamlv3.Node, defaults Terminal) {
@@ -3069,38 +3149,45 @@ func validateWebhook(w *Webhook, healthListen string) error {
 	return nil
 }
 
+var discordAccountNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+
 func validateDiscord(discord *Discord) error {
 	if discord == nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord must not be nil"}
 	}
 	var problems []error
-	if discord.Instance == "" {
-		problems = append(problems, errors.New("channels.discord.instance must not be empty"))
-	}
-	if discord.BotTokenRef != "" && !strings.HasPrefix(discord.BotTokenRef, "env://") && !strings.HasPrefix(discord.BotTokenRef, "file://") {
-		problems = append(problems, fmt.Errorf("channels.discord.bot_token_ref %q must use env:// or file://", discord.BotTokenRef))
-	}
-	for _, list := range []struct {
-		name string
-		ids  []string
-	}{
-		{"allowed_user_ids", discord.AllowedUserIDs},
-		{"allowed_guild_ids", discord.AllowedGuildIDs},
-		{"allowed_channel_ids", discord.AllowedChannelIDs},
-	} {
-		seen := make(map[string]bool, len(list.ids))
-		for _, id := range list.ids {
-			switch {
-			case id == "":
-				problems = append(problems, fmt.Errorf("channels.discord.%s must not contain empty ids", list.name))
-			case !isSnowflake(id):
-				problems = append(problems, fmt.Errorf("channels.discord.%s id %q is not a decimal snowflake", list.name, id))
-			case seen[id]:
-				problems = append(problems, fmt.Errorf("channels.discord.%s id %q is configured more than once", list.name, id))
-			default:
-				seen[id] = true
-			}
+	names := make(map[string]bool, len(discord.Accounts))
+	tokenRefs := make(map[string]bool, len(discord.Accounts))
+	for i := range discord.Accounts {
+		account := &discord.Accounts[i]
+		field := fmt.Sprintf("channels.discord.accounts[%d]", i)
+		switch {
+		case !discordAccountNamePattern.MatchString(account.Name):
+			problems = append(problems, fmt.Errorf("%s.name %q must match %s", field, account.Name, discordAccountNamePattern.String()))
+		case names[account.Name]:
+			problems = append(problems, fmt.Errorf("%s.name %q is configured more than once", field, account.Name))
+		default:
+			names[account.Name] = true
 		}
+		switch {
+		case account.BotTokenRef == "":
+			problems = append(problems, fmt.Errorf("%s.bot_token_ref must not be empty", field))
+		case !strings.HasPrefix(account.BotTokenRef, "env://") && !strings.HasPrefix(account.BotTokenRef, "file://"):
+			problems = append(problems, fmt.Errorf("%s.bot_token_ref must use env:// or file://", field))
+		case tokenRefs[account.BotTokenRef]:
+			problems = append(problems, fmt.Errorf("%s.bot_token_ref is shared with another account", field))
+		default:
+			tokenRefs[account.BotTokenRef] = true
+		}
+		problems = append(problems, snowflakeListProblems(field+".allowed_user_ids", account.AllowedUserIDs)...)
+		problems = append(problems, snowflakeListProblems(field+".allowed_guild_ids", account.AllowedGuildIDs)...)
+		problems = append(problems, snowflakeListProblems(field+".allowed_channel_ids", account.AllowedChannelIDs)...)
+		if discord.Enabled && len(account.AllowedUserIDs) == 0 {
+			problems = append(problems, fmt.Errorf("%s requires at least one allowed_user_ids entry when channels.discord is enabled", field))
+		}
+	}
+	if discord.Enabled && len(discord.Accounts) == 0 {
+		problems = append(problems, errors.New("channels.discord.enabled requires at least one channels.discord.accounts entry"))
 	}
 	if discord.MinEditInterval <= 0 {
 		problems = append(problems, errors.New("channels.discord.min_edit_interval must be positive"))
@@ -3114,14 +3201,72 @@ func validateDiscord(discord *Discord) error {
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
 	}
-	if !discord.Enabled {
-		return nil
+	return nil
+}
+
+func snowflakeListProblems(field string, ids []string) []error {
+	var problems []error
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		switch {
+		case id == "":
+			problems = append(problems, fmt.Errorf("%s must not contain empty ids", field))
+		case !isSnowflake(id):
+			problems = append(problems, fmt.Errorf("%s id %q is not a decimal snowflake", field, id))
+		case seen[id]:
+			problems = append(problems, fmt.Errorf("%s id %q is configured more than once", field, id))
+		default:
+			seen[id] = true
+		}
 	}
-	if discord.BotTokenRef == "" {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord.enabled requires bot_token_ref"}
+	return problems
+}
+
+func validateBindings(bindings []Binding, discord *Discord) error {
+	if discord == nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord must not be nil"}
 	}
-	if len(discord.AllowedUserIDs) == 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord.enabled requires at least one allowed_user_ids entry"}
+	accounts := make(map[string]bool, len(discord.Accounts))
+	for i := range discord.Accounts {
+		accounts[discord.Accounts[i].Name] = true
+	}
+	var problems []error
+	seen := make(map[Binding]int, len(bindings))
+	for i := range bindings {
+		binding := bindings[i]
+		field := fmt.Sprintf("bindings[%d]", i)
+		if strings.TrimSpace(binding.Persona) == "" {
+			problems = append(problems, fmt.Errorf("%s.persona must not be empty", field))
+		}
+		if binding.Channel != BindingChannelDiscord {
+			problems = append(problems, fmt.Errorf("%s.channel %q is not supported; only %q", field, binding.Channel, BindingChannelDiscord))
+		}
+		if !accounts[binding.Account] {
+			problems = append(problems, fmt.Errorf("%s.account %q is not a configured channels.discord.accounts name", field, binding.Account))
+		}
+		if binding.GuildID == "" && binding.ChannelID == "" && binding.ThreadID == "" && binding.UserID == "" {
+			problems = append(problems, fmt.Errorf("%s must set at least one of guild_id, channel_id, thread_id, user_id", field))
+		}
+		for _, match := range []struct{ name, id string }{
+			{"guild_id", binding.GuildID},
+			{"channel_id", binding.ChannelID},
+			{"thread_id", binding.ThreadID},
+			{"user_id", binding.UserID},
+		} {
+			if match.id != "" && !isSnowflake(match.id) {
+				problems = append(problems, fmt.Errorf("%s.%s %q is not a decimal snowflake", field, match.name, match.id))
+			}
+		}
+		key := binding
+		key.Persona = ""
+		if first, ok := seen[key]; ok {
+			problems = append(problems, fmt.Errorf("%s has the same match fields as bindings[%d]", field, first))
+			continue
+		}
+		seen[key] = i
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeBindingInvalid, Detail: err.Error()}
 	}
 	return nil
 }
@@ -3568,7 +3713,9 @@ func configuredSecretValues(cfg *Config) []string {
 	if cfg.Tools != nil {
 		add(resolveSecretRef(cfg.Tools.WebSearch.CredentialRef))
 	}
-	add(resolveSecretRef(cfg.Channels.Discord.BotTokenRef))
+	for i := range cfg.Channels.Discord.Accounts {
+		add(resolveSecretRef(cfg.Channels.Discord.Accounts[i].BotTokenRef))
+	}
 	for _, key := range cfg.Webhook.Keys {
 		if key.SecretEnv != "" {
 			add(os.Getenv(key.SecretEnv))

@@ -79,6 +79,11 @@ func (a *Adapter) rememberTarget(conversationID string, binding approvalBinding)
 	a.targets[conversationID] = binding
 }
 
+func (a *Adapter) HoldsApprovalTarget(sessionID string) bool {
+	_, ok := a.lookupTarget(sessionID)
+	return ok
+}
+
 func (a *Adapter) lookupTarget(conversationID string) (approvalBinding, bool) {
 	a.targetsMu.Lock()
 	defer a.targetsMu.Unlock()

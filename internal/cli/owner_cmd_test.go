@@ -27,7 +27,13 @@ func writeOwnerCLIConfig(t *testing.T) string {
     - discord:` + testOwnerDiscordID + `
 channels:
   discord:
-    allowed_user_ids: ["` + testOwnerDiscordID + `", "` + testTrustedDiscordID + `"]
+    accounts:
+      - name: owner
+        bot_token_ref: env://AURA_DISCORD_BOT_TOKEN
+        allowed_user_ids: ["` + testOwnerDiscordID + `"]
+      - name: kuma
+        bot_token_ref: env://AURA_DISCORD_KUMA_TOKEN
+        allowed_user_ids: ["` + testTrustedDiscordID + `", "` + testOwnerDiscordID + `"]
 `
 	loaded, err := readFileForTest(path)
 	if err != nil {
@@ -162,7 +168,10 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 func TestOwnerRekeyMoves(t *testing.T) {
 	cfg := config.Default()
 	cfg.Owner = &config.Owner{Identities: []string{"discord:" + testOwnerDiscordID}}
-	cfg.Channels.Discord.AllowedUserIDs = []string{testTrustedDiscordID, testOwnerDiscordID}
+	cfg.Channels.Discord.Accounts = []config.DiscordAccount{
+		{Name: "owner", AllowedUserIDs: []string{testOwnerDiscordID}},
+		{Name: "kuma", AllowedUserIDs: []string{testTrustedDiscordID, testOwnerDiscordID}},
+	}
 	cases := map[string]struct {
 		osUser string
 		want   []store.OwnerMove

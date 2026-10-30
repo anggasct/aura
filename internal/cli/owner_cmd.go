@@ -122,13 +122,22 @@ func ownerRekeyMoves(cfg *config.Config, osUser string) ([]store.OwnerMove, erro
 		}
 	}
 	if cfg != nil {
-		for _, id := range slices.Sorted(slices.Values(cfg.Channels.Discord.AllowedUserIDs)) {
+		for _, id := range discordAllowedUserIDs(&cfg.Channels.Discord) {
 			if !owners.IsOwnerIdentity(principal.ChannelDiscord, id) {
 				add(id, principal.Namespaced(principal.ChannelDiscord, id))
 			}
 		}
 	}
 	return moves, nil
+}
+
+func discordAllowedUserIDs(discord *config.Discord) []string {
+	var ids []string
+	for i := range discord.Accounts {
+		ids = append(ids, discord.Accounts[i].AllowedUserIDs...)
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids)
 }
 
 func ownerRekeyLines(report store.OwnerRekeyReport, apply bool) []string {

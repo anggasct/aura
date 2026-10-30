@@ -469,3 +469,43 @@ func TestDeliveredEntriesExpireAfterDedupeWindow(t *testing.T) {
 		}
 	})
 }
+
+type namedCapturingAdapter struct {
+	*capturingAdapter
+	name string
+}
+
+func (a *namedCapturingAdapter) ChannelName() string {
+	return a.name
+}
+
+func TestDeliveryLeavesThroughTheOriginAccountAdapter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor(nil)
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, "channel:333")
+		home := &namedCapturingAdapter{capturingAdapter: &capturingAdapter{}, name: "discord:home"}
+		kuma := &namedCapturingAdapter{capturingAdapter: &capturingAdapter{}, name: "discord:kuma"}
+		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{home, kuma})
+		events := []store.RuntimeEvent{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hi from kuma"}`)}}
+
+		req := channelTurnRequest("channel:333", "turn-account-kuma")
+		req.Origin = runtime.Origin("discord:kuma")
+		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+			t.Fatalf("deliver: %v", err)
+		}
+		if home.count() != 0 || kuma.count() != 1 {
+			t.Fatalf("deliveries home=%d kuma=%d, want only kuma", home.count(), kuma.count())
+		}
+
+		gone := channelTurnRequest("channel:333", "turn-account-gone")
+		gone.Origin = runtime.Origin("discord:gone")
+		err := engine.deliverCompletedTurn(context.Background(), gone, events)
+		if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeDeliveryFailed {
+			t.Fatalf("unconfigured account code = %q (ok=%v), want delivery_failed", code, ok)
+		}
+		if home.count() != 0 || kuma.count() != 1 {
+			t.Fatalf("unconfigured account leaked through another bot: home=%d kuma=%d", home.count(), kuma.count())
+		}
+	})
+}

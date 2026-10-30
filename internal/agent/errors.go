@@ -15,6 +15,7 @@ const (
 	ErrorCodeUnknownModelRoute ErrorCode = "agent_unknown_model_route"
 	ErrorCodeNotFound          ErrorCode = "agent_not_found"
 	ErrorCodeResolutionFailed  ErrorCode = "agent_resolution_failed"
+	ErrorCodeBindingInvalid    ErrorCode = "binding_invalid"
 )
 
 type Error struct {

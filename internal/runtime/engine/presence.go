@@ -42,29 +42,36 @@ func presenceAdapterFor(req *runtime.TurnRequest, adapters []runtimechannelhost.
 	if delivery == nil {
 		return nil, nil, false
 	}
-	var fallback runtimechannelhost.PresencePort
+	presenceCapable := make([]runtimechannelhost.ChannelPort, 0, len(adapters))
 	for _, adapter := range adapters {
-		presence, ok := adapter.(runtimechannelhost.PresencePort)
-		if !ok {
-			continue
+		if _, ok := adapter.(runtimechannelhost.PresencePort); ok {
+			presenceCapable = append(presenceCapable, adapter)
 		}
+	}
+	adapter, ok := adapterForOrigin(req.Origin, presenceCapable)
+	if !ok {
+		return nil, nil, false
+	}
+	presence, ok := adapter.(runtimechannelhost.PresencePort)
+	return presence, delivery, ok
+}
+
+func adapterForOrigin(origin runtime.Origin, adapters []runtimechannelhost.ChannelPort) (runtimechannelhost.ChannelPort, bool) {
+	var fallback runtimechannelhost.ChannelPort
+	for _, adapter := range adapters {
 		identity, named := adapter.(runtimechannelhost.ChannelIdentity)
 		if named && identity.ChannelName() != "" {
 			name := identity.ChannelName()
-			origin := string(req.Origin)
-			if origin == name || strings.HasPrefix(origin, name+":") {
-				return presence, delivery, true
+			if string(origin) == name || strings.HasPrefix(string(origin), name+":") {
+				return adapter, true
 			}
 			continue
 		}
 		if fallback == nil {
-			fallback = presence
+			fallback = adapter
 		}
 	}
-	if fallback != nil {
-		return fallback, delivery, true
-	}
-	return nil, nil, false
+	return fallback, fallback != nil
 }
 
 func (e *Engine) currentPresence(req *runtime.TurnRequest) (runtimechannelhost.PresencePort, *runtimechannelhost.DeliveryRequest, bool) {

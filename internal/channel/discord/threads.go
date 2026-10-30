@@ -83,14 +83,14 @@ func (a *Adapter) lookupTriggerThread(triggerID string) (string, bool) {
 	return id, ok
 }
 
-func (a *Adapter) lookupThreadParent(threadID string) (string, bool) {
+func (a *Adapter) lookupThread(threadID string) (threadRoute, bool) {
 	a.threadsMu.Lock()
 	defer a.threadsMu.Unlock()
-	parent, ok := a.threadParents[threadID]
-	return parent, ok
+	route, ok := a.threadParents[threadID]
+	return route, ok
 }
 
-func (a *Adapter) rememberThread(triggerID, threadID, parentID string) {
+func (a *Adapter) rememberThread(triggerID, threadID string, route threadRoute) {
 	a.threadsMu.Lock()
 	defer a.threadsMu.Unlock()
 	if triggerID != "" {
@@ -98,8 +98,8 @@ func (a *Adapter) rememberThread(triggerID, threadID, parentID string) {
 			a.triggerThreads[triggerID] = threadID
 		}
 	}
-	if _, ok := a.threadParents[threadID]; !ok {
-		a.threadParents[threadID] = parentID
+	if existing, ok := a.threadParents[threadID]; !ok || existing.persona == "" {
+		a.threadParents[threadID] = route
 	}
 }
 
@@ -174,7 +174,7 @@ func deliveryTarget(ref *replyReference) (target, parent, messageID string) {
 	return ref.ChannelID, "", ref.MessageID
 }
 
-func buildThreadEnvelope(instance, principalID string, class principal.Class, msg *messagePayload, threadID, parentID string) (*runtimeingress.IngressEnvelope, error) {
+func buildThreadEnvelope(account, principalID string, class principal.Class, msg *messagePayload, threadID, parentID string) (*runtimeingress.IngressEnvelope, error) {
 	reference, err := json.Marshal(replyReference{
 		ChannelID: parentID,
 		MessageID: msg.ID,
@@ -185,7 +185,7 @@ func buildThreadEnvelope(instance, principalID string, class principal.Class, ms
 		return nil, Errorf(ErrorCodeProtocolInvalid, "reply reference is not serializable")
 	}
 	return &runtimeingress.IngressEnvelope{
-		Source:         "discord:" + instance,
+		Source:         "discord:" + account,
 		ExternalID:     "message:" + msg.ID,
 		PrincipalID:    principalID,
 		PrincipalClass: string(class),
@@ -196,7 +196,7 @@ func buildThreadEnvelope(instance, principalID string, class principal.Class, ms
 	}, nil
 }
 
-func validThreadAuthor(cfg *config.Discord, owners *principal.Resolver, selfID string, msg *messagePayload) bool {
+func validThreadAuthor(account *config.DiscordAccount, owners *principal.Resolver, selfID string, msg *messagePayload) bool {
 	if msg.Author.Bot || msg.Author.ID == selfID {
 		return false
 	}
@@ -206,11 +206,11 @@ func validThreadAuthor(cfg *config.Discord, owners *principal.Resolver, selfID s
 	if msg.Type != 0 && msg.Type != 19 {
 		return false
 	}
-	_, _, admitted := resolveAuthor(cfg, owners, msg.Author.ID)
+	_, _, admitted := resolveAuthor(account, owners, msg.Author.ID)
 	return admitted
 }
 
-func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayload, parentID string) (string, error) {
+func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayload, parentID, persona string) (string, error) {
 	if id, ok := a.lookupTriggerThread(msg.ID); ok {
 		return id, nil
 	}
@@ -221,9 +221,9 @@ func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayloa
 	if existing != "" {
 		return existing, nil
 	}
-	sessionID := a.sessionKey("channel:" + parentID)
-	principalID, _, _ := resolveAuthor(a.cfg, a.owners, msg.Author.ID)
-	if err := a.sessions.EnsureSession(ctx, sessionID, principalID, a.persona); err != nil {
+	sessionID := a.sessionKey(persona, "channel:"+parentID)
+	principalID, _, _ := resolveAuthor(a.account, a.owners, msg.Author.ID)
+	if err := a.sessions.EnsureSession(ctx, sessionID, principalID, persona); err != nil {
 		return "", ErrorWrapf(ErrorCodeThreadCreateFailed, err, "thread create for message %s: parent session could not be ensured", msg.ID)
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
@@ -247,7 +247,7 @@ func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayloa
 		if err := json.Unmarshal(intent.ProviderReceipt, &receipt); err != nil || receipt.ThreadID == "" {
 			return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
 		}
-		return a.commitThreadReceipt(msg.ID, receipt.ThreadID, parentID)
+		return a.commitThreadReceipt(msg.ID, receipt.ThreadID, threadRoute{parent: parentID, persona: persona})
 	case effect.StateUnknown:
 		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
 	default:
@@ -274,14 +274,14 @@ func (a *Adapter) buildThreadCreateRequest(msg *messagePayload, parentID string)
 	return request, "", nil
 }
 
-func (a *Adapter) commitThreadReceipt(triggerID, threadID, parentID string) (string, error) {
+func (a *Adapter) commitThreadReceipt(triggerID, threadID string, route threadRoute) (string, error) {
 	a.threadsMu.Lock()
 	defer a.threadsMu.Unlock()
 	if id, ok := a.triggerThreads[triggerID]; ok {
 		return id, nil
 	}
 	a.triggerThreads[triggerID] = threadID
-	a.threadParents[threadID] = parentID
+	a.threadParents[threadID] = route
 	return threadID, nil
 }
 
