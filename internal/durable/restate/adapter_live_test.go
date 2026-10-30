@@ -18,6 +18,11 @@ func liveIngressURL(t *testing.T) string {
 	if url := os.Getenv("AURA_RESTATE_INGRESS"); url != "" {
 		return url
 	}
+	if os.Getenv("AURA_RESTATE_BINARY") != "" || os.Getenv("AURA_DURABLE_REQUIRE_BINARY") == "1" {
+		server := startLiveServer(t, liveRestateBinary(t), t.TempDir(), freePort(t), freePort(t))
+		t.Cleanup(server.stop)
+		return server.ingress
+	}
 	return "http://127.0.0.1:8080"
 }
 

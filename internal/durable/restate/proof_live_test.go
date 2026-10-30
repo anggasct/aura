@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -198,13 +197,7 @@ func waitForHoldCISuspend(t *testing.T, disk *workflow.Store, runID string, api 
 }
 
 func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
-	binary := os.Getenv("AURA_RESTATE_BINARY")
-	if binary == "" {
-		t.Skip("AURA_RESTATE_BINARY is not set")
-	}
-	if _, err := os.Stat(binary); err != nil {
-		t.Skipf("restate-server binary is not available: %v", err)
-	}
+	binary := liveRestateBinary(t)
 	t.Setenv("AURA_PROOF_GITHUB_TOKEN", "proof-token")
 	api := startProofGitHubAPI(t)
 

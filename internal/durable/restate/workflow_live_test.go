@@ -253,13 +253,7 @@ func waitForAdapterStatus(t *testing.T, adapter *Adapter, ref durable.RunRef, wa
 }
 
 func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
-	binary := os.Getenv("AURA_RESTATE_BINARY")
-	if binary == "" {
-		t.Skip("AURA_RESTATE_BINARY is not set")
-	}
-	if _, err := os.Stat(binary); err != nil {
-		t.Skipf("restate-server binary is not available: %v", err)
-	}
+	binary := liveRestateBinary(t)
 	registry, err := auraagent.Build(nil, []string{"read_file", "list_dir"}, []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)

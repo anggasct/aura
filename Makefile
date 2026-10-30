@@ -11,11 +11,15 @@ LDFLAGS   := -s -w -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT) -X $(
 
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
+RESTATE_VERSION := 1.7.14
+RESTATE_DIR     := $(CURDIR)/.cache/restate/$(RESTATE_VERSION)
+RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
+
 # Source must read as a standalone product: no internal tracking IDs, doc
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration durable-test fuzz-smoke fuzz-one release-snapshot clean
+.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -33,6 +37,14 @@ test:
 
 durable-test:
 	$(GO) test -race -tags durable -count=1 ./internal/durable/...
+
+restate-server: $(RESTATE_BINARY)
+
+$(RESTATE_BINARY):
+	./scripts/fetch-restate-server.sh $(RESTATE_VERSION) $(RESTATE_DIR)
+
+durable-live: $(RESTATE_BINARY)
+	AURA_RESTATE_BINARY=$(RESTATE_BINARY) AURA_DURABLE_REQUIRE_BINARY=1 $(GO) test -v -race -tags durable -count=1 ./internal/durable/... ./cmd/aura/
 
 vet:
 	$(GO) vet ./...

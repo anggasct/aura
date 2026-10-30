@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -22,10 +21,7 @@ func (parkAgent) Run(_ context.Context, _ *auraagent.Definition, _ *workflow.Exe
 }
 
 func TestParkDurationSurvival(t *testing.T) {
-	binary := os.Getenv("AURA_RESTATE_BINARY")
-	if binary == "" {
-		t.Skip("no binary")
-	}
+	binary := liveRestateBinary(t)
 	ctx := context.Background()
 	disk := workflow.NewStore(liveTestDB(t))
 	registry, err := auraagent.Build(nil, []string{"read_file", "list_dir"}, []string{"primary"})

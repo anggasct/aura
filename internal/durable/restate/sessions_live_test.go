@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/anggasct/aura/internal/durable"
@@ -33,13 +32,7 @@ func callSession(t *testing.T, adapter *Adapter, sessionID, handler string, payl
 }
 
 func TestLiveSessionTurnsSurviveCrash(t *testing.T) {
-	binary := os.Getenv("AURA_RESTATE_BINARY")
-	if binary == "" {
-		t.Skip("AURA_RESTATE_BINARY is not set")
-	}
-	if _, err := os.Stat(binary); err != nil {
-		t.Skipf("restate-server binary is not available: %v", err)
-	}
+	binary := liveRestateBinary(t)
 	ctx := context.Background()
 	db := liveTestDB(t)
 	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: "session-1", OwnerID: "user-1"}); err != nil {
