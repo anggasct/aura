@@ -81,7 +81,7 @@ func TestDurableStatusReachable(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	for _, want := range []string{"mode: external", "ingress: reachable", "admin: reachable", "deployment: absent"} {
+	for _, want := range []string{"mode: external", "ingress: reachable", "admin: reachable", "deployment: absent", "node_addr: 127.0.0.1:5122"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output = %q, want %q", out.String(), want)
 		}

@@ -420,13 +420,7 @@ func liveTurnRequest(turnID string) *runtime.TurnRequest {
 }
 
 func TestLiveTurnToolsSurviveCrash(t *testing.T) {
-	binary := os.Getenv("AURA_RESTATE_BINARY")
-	if binary == "" {
-		t.Skip("AURA_RESTATE_BINARY is not set")
-	}
-	if _, err := os.Stat(binary); err != nil {
-		t.Skipf("restate-server binary is not available: %v", err)
-	}
+	binary := liveRestateBinary(t)
 	model := &liveScriptModel{steps: []liveModelStep{{tool: "tool-a"}, {tool: "tool-b"}, {text: "done"}}}
 	rig := startLiveTurnRig(t, binary, model, []liveToolDef{{name: "tool-a"}, {name: "tool-b"}})
 	entered := filepath.Join(t.TempDir(), "tool-b-entered")
@@ -486,13 +480,7 @@ func TestLiveTurnToolsSurviveCrash(t *testing.T) {
 }
 
 func TestLiveTurnApprovalSurvivesCrash(t *testing.T) {
-	binary := os.Getenv("AURA_RESTATE_BINARY")
-	if binary == "" {
-		t.Skip("AURA_RESTATE_BINARY is not set")
-	}
-	if _, err := os.Stat(binary); err != nil {
-		t.Skipf("restate-server binary is not available: %v", err)
-	}
+	binary := liveRestateBinary(t)
 	model := &liveScriptModel{steps: []liveModelStep{{tool: "tool-c"}, {text: "done"}}}
 	rig := startLiveTurnRig(t, binary, model, []liveToolDef{{name: "tool-c", approval: true}})
 
