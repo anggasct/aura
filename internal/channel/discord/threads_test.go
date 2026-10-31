@@ -230,7 +230,7 @@ func TestThreads_InThreadNeedsNoMention(t *testing.T) {
 	if _, err := adapter.admit(t.Context(), threadTrigger("9011", "open a thread", []string{"999"})); err != nil {
 		t.Fatalf("trigger admit(): %v", err)
 	}
-	before := stub.postCount()
+	before := len(stub.messageSends(0))
 	admitted, err := adapter.admit(t.Context(), threadFollowUp("9012", "777002", "follow up without mention"))
 	if err != nil {
 		t.Fatalf("in-thread admit(): %v", err)
@@ -256,7 +256,7 @@ func TestThreads_InThreadNeedsNoMention(t *testing.T) {
 	if creates != 1 {
 		t.Fatalf("thread creates = %d, want 1 (follow-up creates none)", creates)
 	}
-	if got := stub.postCount(); got != before {
+	if got := len(stub.messageSends(0)); got != before {
 		t.Fatalf("message posts changed across in-thread intake: %d vs %d", got, before)
 	}
 }
