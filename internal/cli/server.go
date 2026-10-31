@@ -187,6 +187,13 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			adkExecutor.SetEventPublisher(runtimeEngine)
+			commandRecorder, err := telemetry.NewCommandRecorder(pipeline.TracerProvider(), pipeline.MeterProvider())
+			if err != nil {
+				return err
+			}
+			if err := wireDiscordCommands(channelAdapters, runtimeEngine, sessions, events, commandRecorder); err != nil {
+				return err
+			}
 			host, err := runtimeengine.NewHost(runtimeEngine, channelAdapters, logger)
 			if err != nil {
 				return err

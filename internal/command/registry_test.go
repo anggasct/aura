@@ -160,3 +160,30 @@ func TestHelpGoldenPerChannelAndClass(t *testing.T) {
 		t.Errorf("help outputs are not distinct: %d of %d", len(outputs), len(tests))
 	}
 }
+
+func TestRecognizedAndMetricNames(t *testing.T) {
+	registry, err := New(terminalBinding(), Binding{Channel: "discord", Style: StyleMessenger, Names: []string{"help", "status"}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	tests := []struct {
+		channel, name string
+		recognized    bool
+		metric        string
+	}{
+		{"discord", "help", true, "help"},
+		{"discord", "quit", true, NameTerminalOnly},
+		{"discord", "new", false, "new"},
+		{"discord", "bogus", false, ""},
+		{ChannelTerminal, "quit", true, "exit"},
+		{"web", "clear", true, NameTerminalOnly},
+	}
+	for _, tt := range tests {
+		if got := registry.Recognized(tt.channel, tt.name); got != tt.recognized {
+			t.Errorf("Recognized(%s, %s) = %v", tt.channel, tt.name, got)
+		}
+		if got := registry.MetricName(tt.channel, tt.name); got != tt.metric {
+			t.Errorf("MetricName(%s, %s) = %q, want %q", tt.channel, tt.name, got, tt.metric)
+		}
+	}
+}

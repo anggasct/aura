@@ -348,6 +348,7 @@ type fakeEffectRunner struct {
 	crashAfterInvoke bool
 	invokeErr        error
 	sessionExists    func(sessionID string) bool
+	requests         []effect.PrepareRequest
 }
 
 func newFakeEffectRunner() *fakeEffectRunner {
@@ -361,6 +362,7 @@ func (f *fakeEffectRunner) Execute(ctx context.Context, req *effect.PrepareReque
 	digest := sha256.Sum256(req.Request)
 	key := req.Provider + "|" + req.Operation + "|" + req.IdempotencyKey
 	f.mu.Lock()
+	f.requests = append(f.requests, *req)
 	existing, ok := f.intents[key]
 	if ok && existing.digest != string(digest[:]) {
 		f.mu.Unlock()
