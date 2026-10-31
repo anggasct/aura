@@ -88,6 +88,12 @@ func (s *discordCommandSessions) Switch(ctx context.Context, caller *command.Cal
 	if key == "" || (id != key && !strings.HasPrefix(id, key+conversationSessionSeparator)) {
 		return command.Session{}, command.Errorf(command.ErrorCodeNotSwitchable, "outside this conversation")
 	}
+	if id == key {
+		if err := s.pointers.Clear(ctx, key); err != nil {
+			return command.Session{}, err
+		}
+		return command.Session{ID: key, OwnerID: caller.PrincipalID, AgentID: caller.AgentID}, nil
+	}
 	sess, err := s.sessions.Get(ctx, id)
 	if err != nil {
 		if missingSession(err) {
@@ -98,11 +104,7 @@ func (s *discordCommandSessions) Switch(ctx context.Context, caller *command.Cal
 	if sess.OwnerID != caller.PrincipalID || sess.AgentID != caller.AgentID {
 		return command.Session{}, command.Errorf(command.ErrorCodeNotSwitchable, "owned by another principal or persona")
 	}
-	if id == key {
-		err = s.pointers.Clear(ctx, key)
-	} else {
-		err = s.pointers.Point(ctx, key, id)
-	}
+	err = s.pointers.Point(ctx, key, id)
 	if err != nil {
 		if missingSession(err) {
 			return command.Session{}, command.Errorf(command.ErrorCodeNotSwitchable, "not found")

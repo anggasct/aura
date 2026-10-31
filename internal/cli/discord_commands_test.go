@@ -187,6 +187,27 @@ func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
 	if _, err := port.Switch(t.Context(), caller, second.ID); !isNotSwitchable(err) {
 		t.Errorf("Switch to a collected session error = %v", err)
 	}
+
+	if _, err := port.Switch(t.Context(), caller, created.ID); err != nil {
+		t.Fatalf("Switch back to the live pointed session: %v", err)
+	}
+	if _, err := db.ExecContext(t.Context(), `DELETE FROM session WHERE id = ?`, key); err != nil {
+		t.Fatalf("drop base session row: %v", err)
+	}
+	sess, err := port.Switch(t.Context(), caller, key)
+	if err != nil || sess.ID != key || sess.OwnerID != principal.OwnerID || sess.AgentID != "main" {
+		t.Fatalf("Switch to the base key with the base row absent = %+v %v", sess, err)
+	}
+	if _, found, _ := pointers.Resolve(t.Context(), key); found {
+		t.Fatal("switching to the base key with the base row absent kept the pointer")
+	}
+	ensurer := &discordSessionEnsurer{sessions: sessions}
+	if err := ensurer.EnsureSession(t.Context(), key, principal.OwnerID, "main"); err != nil {
+		t.Fatalf("next message re-ensures the base session: %v", err)
+	}
+	if _, err := sessions.Get(t.Context(), key); err != nil {
+		t.Fatalf("base session row after re-ensure: %v", err)
+	}
 }
 
 func isNotSwitchable(err error) bool {
