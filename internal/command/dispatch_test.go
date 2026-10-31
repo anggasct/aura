@@ -401,3 +401,16 @@ func TestExecuteRejectsNilCallerAndInvocationWithoutPanic(t *testing.T) {
 		t.Errorf("rejection was recorded: %+v", recorder.seen)
 	}
 }
+
+func TestReplayedRecordsOnlyTheReplayResult(t *testing.T) {
+	ports := &spyPorts{}
+	recorder := &spyRecorder{}
+	d := newTestDispatcher(t, ports, recorder)
+	d.Replayed(t.Context(), caller("discord", principal.ClassOwner), &Invocation{Name: "cancel"})
+	d.Replayed(t.Context(), caller("discord", principal.ClassTrusted), &Invocation{Name: "quit"})
+	d.Replayed(t.Context(), nil, &Invocation{Name: "cancel"})
+	want := []observed{{"cancel", "discord", "owner", ResultReplayed}, {NameTerminalOnly, "discord", "trusted", ResultReplayed}}
+	if !slices.Equal(recorder.seen, want) || len(ports.calls) != 0 {
+		t.Errorf("observed = %+v calls = %v", recorder.seen, ports.calls)
+	}
+}

@@ -161,6 +161,7 @@ type turn struct {
 	cancel   context.CancelFunc
 	start    func()
 	done     chan struct{}
+	running  bool
 }
 
 type subscriber struct {
@@ -578,6 +579,7 @@ func (e *Engine) startRunnableLocked() {
 			picked = sq.queue[0]
 			sq.queue = sq.queue[1:]
 			sq.active = true
+			picked.running = true
 			e.active++
 			e.pending--
 			break
@@ -722,6 +724,46 @@ func (e *Engine) Publish(ev *store.RuntimeEvent) {
 	for _, sub := range subs {
 		sub.send(ev)
 	}
+}
+
+func (e *Engine) CancelActive(ctx context.Context, sessionID string) (turnID string, cancelled bool, err error) {
+	if sessionID == "" {
+		return "", false, invalidArgument("session id must not be empty")
+	}
+	e.mu.Lock()
+	t := e.runningTurnLocked(sessionID)
+	e.mu.Unlock()
+	if t == nil || t.cancel == nil {
+		return "", false, nil
+	}
+	e.logger.DebugContext(ctx, "cancelling active turn", "session_id", sessionID, "turn_id", t.turnID)
+	t.cancel()
+	return t.turnID, true, nil
+}
+
+func (e *Engine) SessionActivity(sessionID string) (activeTurnID string, queued int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, t := range e.turns {
+		if t.req.SessionID != sessionID {
+			continue
+		}
+		if t.running {
+			activeTurnID = t.turnID
+			continue
+		}
+		queued++
+	}
+	return activeTurnID, queued
+}
+
+func (e *Engine) runningTurnLocked(sessionID string) *turn {
+	for _, t := range e.turns {
+		if t.running && t.req.SessionID == sessionID {
+			return t
+		}
+	}
+	return nil
 }
 
 func (e *Engine) cancelTurn(turnID string) {

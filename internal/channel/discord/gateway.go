@@ -419,6 +419,9 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 		return false, nil
 	}
 	envelope.AgentID = persona
+	if inv, ok := a.commandInvocation(msg); ok {
+		return a.runCommand(ctx, msg, &inv, envelope)
+	}
 	if msg.GuildID != "" && !skipThreadCreate(msg.ChannelType) {
 		if threadID, threadErr := a.createThreadForTrigger(ctx, msg, msg.ChannelID, persona); threadErr == nil {
 			if rewriteErr := rewriteEnvelopeForThread(envelope, msg, threadID, msg.ChannelID); rewriteErr == nil {
@@ -467,6 +470,9 @@ func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, t
 		return false, err
 	}
 	envelope.AgentID = persona
+	if inv, ok := a.commandInvocation(msg); ok {
+		return a.runCommand(ctx, msg, &inv, envelope)
+	}
 	return a.acceptEnvelope(ctx, msg, envelope, threadID)
 }
 

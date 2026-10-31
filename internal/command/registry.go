@@ -151,6 +151,27 @@ func (r *Registry) Bound(channel, name string) bool {
 	return ok && b.names[def.Name]
 }
 
+func (r *Registry) Recognized(channel, name string) bool {
+	if r.Bound(channel, name) {
+		return true
+	}
+	def, ok := r.Lookup(name)
+	return ok && def.Kind == KindTerminalOnly
+}
+
+func (r *Registry) MetricName(channel, name string) string {
+	def, ok := r.Lookup(name)
+	if !ok {
+		return ""
+	}
+	if def.Kind == KindTerminalOnly {
+		if b, bound := r.bindings[channel]; !bound || b.binding.Style != StyleTerminal {
+			return NameTerminalOnly
+		}
+	}
+	return def.Name
+}
+
 func (r *Registry) Help(channel string, class principal.Class) []string {
 	b, ok := r.bindings[channel]
 	if !ok {

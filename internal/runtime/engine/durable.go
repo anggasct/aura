@@ -177,6 +177,7 @@ func (e *Engine) tryStartStagedLocked(ctx context.Context, t *turn) {
 	}
 	delete(e.staged, t.turnID)
 	delete(e.granted, t.turnID)
+	t.running = true
 	e.active++
 	e.pending--
 	e.wg.Add(1)

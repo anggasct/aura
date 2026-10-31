@@ -70,8 +70,16 @@ func (d *Dispatcher) Execute(ctx context.Context, caller *Caller, inv *Invocatio
 	}
 	ctx, finish := d.start(ctx, def.Name, caller)
 	result := d.execute(ctx, caller, inv, &def, &b.binding)
-	finish(resultLabel(result.Code))
+	finish(ResultOf(result.Code))
 	return result
+}
+
+func (d *Dispatcher) Replayed(ctx context.Context, caller *Caller, inv *Invocation) {
+	if caller == nil || inv == nil {
+		return
+	}
+	_, finish := d.start(ctx, d.registry.MetricName(caller.Channel, inv.Name), caller)
+	finish(ResultReplayed)
 }
 
 func (d *Dispatcher) start(ctx context.Context, name string, caller *Caller) (spanCtx context.Context, finish func(string)) {
@@ -247,7 +255,7 @@ func failure(code ErrorCode, line string) Result {
 	return Result{Lines: []string{line}, Diagnostic: true, Code: code}
 }
 
-func resultLabel(code ErrorCode) string {
+func ResultOf(code ErrorCode) string {
 	switch code {
 	case ErrorCodeOK:
 		return ResultOK

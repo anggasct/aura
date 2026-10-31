@@ -17,6 +17,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/principal"
@@ -92,6 +93,7 @@ type Adapter struct {
 	media          MediaStore
 	sessions       SessionEnsurer
 	router         PersonaRouter
+	commands       *command.Dispatcher
 	owners         *principal.Resolver
 	admitted       func(ctx context.Context, class principal.Class)
 	images         atomic.Pointer[vision.Service]
