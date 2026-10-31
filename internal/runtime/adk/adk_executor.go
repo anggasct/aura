@@ -48,6 +48,7 @@ type ADKExecutor struct {
 	recall            RecallProvider
 	ownerContext      string
 	profile           ProfileContextProvider
+	skills            SkillContextProvider
 }
 
 type RecallProvider interface {
@@ -56,6 +57,10 @@ type RecallProvider interface {
 
 type ProfileContextProvider interface {
 	ProfileContext(ctx context.Context, req *runtime.TurnRequest) (string, error)
+}
+
+type SkillContextProvider interface {
+	SkillContext(ctx context.Context, req *runtime.TurnRequest) (string, error)
 }
 
 type AgentResolver interface {
@@ -186,6 +191,16 @@ func WithProfileContext(provider ProfileContextProvider) ExecutorOption {
 	}
 }
 
+func WithSkillContext(provider SkillContextProvider) ExecutorOption {
+	return func(e *ADKExecutor) error {
+		if provider == nil {
+			return invalidArgument("skill context provider must not be nil")
+		}
+		e.skills = provider
+		return nil
+	}
+}
+
 func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		definition, err := x.resolveDefinition(req)
@@ -225,7 +240,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 				recallAttached = true
 			}
 		}
-		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, recallAttached, x.ownerContextFor(req), x.profileContextFor(runCtx, req))
+		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, recallAttached, x.ownerContextFor(req), turnContext{profile: x.profileContextFor(runCtx, req), skills: x.skillContextFor(runCtx, req)})
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
@@ -298,7 +313,36 @@ func (x *ADKExecutor) profileContextFor(ctx context.Context, req *runtime.TurnRe
 	return strings.TrimSpace(block)
 }
 
-func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, recallAttached bool, ownerContext, profileContext string) (*runner.Runner, error) {
+type turnContext struct {
+	profile string
+	skills  string
+}
+
+func (x *ADKExecutor) skillContextFor(ctx context.Context, req *runtime.TurnRequest) string {
+	if x.skills == nil || req.PrincipalClass != principal.ClassOwner {
+		return ""
+	}
+	render := func(ctx context.Context) ([]byte, error) {
+		block, err := x.skills.SkillContext(ctx, req)
+		if err != nil {
+			x.logger.WarnContext(ctx, "skill context unavailable", "component", "skills", "error", err, "turn_id", req.TurnID)
+			return []byte{}, nil
+		}
+		return []byte(strings.TrimSpace(block)), nil
+	}
+	if scope, ok := durable.TurnScopeFrom(ctx); ok {
+		raw, err := scope.Invocation().RunAction(ctx, "skill-context", render)
+		if err != nil {
+			x.logger.WarnContext(ctx, "skill context journal failed", "component", "skills", "error", err, "turn_id", req.TurnID)
+			return ""
+		}
+		return string(raw)
+	}
+	raw, _ := render(ctx)
+	return string(raw)
+}
+
+func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, recallAttached bool, ownerContext string, extra turnContext) (*runner.Runner, error) {
 	model, err := x.resolveModel(ctx, definition)
 	if err != nil {
 		return nil, err
@@ -313,7 +357,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool, recallAttached, ownerContext, profileContext)
+	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool, recallAttached, ownerContext, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -504,7 +548,7 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition) []tool.Tool {
 	return filtered
 }
 
-func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext, profileContext string) (agent.Agent, error) {
+func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string, extra turnContext) (agent.Agent, error) {
 	instruction := definition.Instructions
 	if ownerContext != "" {
 		instruction = ownerContext
@@ -517,8 +561,11 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 	}
 	instruction = appendStatusProtocol(instruction)
 	var beforeModel []llmagent.BeforeModelCallback
-	if profileContext != "" {
-		beforeModel = append(beforeModel, withUntrustedProfilePart(profileContext))
+	if extra.profile != "" {
+		beforeModel = append(beforeModel, withUntrustedContextPart(extra.profile))
+	}
+	if extra.skills != "" {
+		beforeModel = append(beforeModel, withUntrustedContextPart(extra.skills))
 	}
 	return llmagent.New(llmagent.Config{
 		Name:                 name,
@@ -534,7 +581,7 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 }
 
 // The part is added per model request, never to session events, so served facts are not journaled, projected into memory, or re-read by the extractor.
-func withUntrustedProfilePart(block string) llmagent.BeforeModelCallback {
+func withUntrustedContextPart(block string) llmagent.BeforeModelCallback {
 	return func(_ agent.Context, req *adkmodel.LLMRequest) (*adkmodel.LLMResponse, error) {
 		part := &genai.Content{Role: genai.RoleUser, Parts: []*genai.Part{{Text: block}}}
 		req.Contents = append([]*genai.Content{part}, req.Contents...)

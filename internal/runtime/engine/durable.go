@@ -42,6 +42,7 @@ func turnDescriptorFromRequest(req *runtime.TurnRequest) runtimesessions.Descrip
 		TraceParent:    req.TraceParent,
 		AgentID:        req.AgentID,
 		Persona:        req.Persona,
+		Skill:          req.Skill,
 	}
 }
 
@@ -64,6 +65,7 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRe
 		TraceParent:    desc.TraceParent,
 		AgentID:        desc.AgentID,
 		Persona:        desc.Persona,
+		Skill:          desc.Skill,
 	}
 }
 
@@ -478,25 +480,27 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		return persist(ctx, ev)
 	}
 
-	var execErr error
 	var executed []store.RuntimeEvent
 	e.notifyPresenceStarted(ctx, req)
-	for ev, err := range e.executor.Execute(ctx, req) {
-		if err != nil {
-			execErr = err
-			break
-		}
-		if emitErr := persist(ctx, &ev); emitErr != nil {
-			execErr = emitErr
-			break
-		}
-		executed = append(executed, ev)
-		if isPresenceFailureEvent(&ev) {
-			e.notifyPresenceFailed(ctx, req)
-			continue
-		}
-		if text, args, ok := extractPresenceActivity(&ev); ok {
-			e.notifyPresenceText(ctx, req, text, args)
+	execErr := e.persistSkillActivation(ctx, req, journaledSkillActivation(scope, e.renderSkillActivation), persist)
+	if execErr == nil {
+		for ev, err := range e.executor.Execute(ctx, req) {
+			if err != nil {
+				execErr = err
+				break
+			}
+			if emitErr := persist(ctx, &ev); emitErr != nil {
+				execErr = emitErr
+				break
+			}
+			executed = append(executed, ev)
+			if isPresenceFailureEvent(&ev) {
+				e.notifyPresenceFailed(ctx, req)
+				continue
+			}
+			if text, args, ok := extractPresenceActivity(&ev); ok {
+				e.notifyPresenceText(ctx, req, text, args)
+			}
 		}
 	}
 	if ctx.Err() == context.Canceled {

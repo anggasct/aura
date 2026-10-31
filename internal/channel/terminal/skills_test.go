@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 )
 
 type fakeSkills struct {
-	context     command.Activation
+	pin         command.SkillPin
 	draft       command.Draft
 	err         error
 	name        string
@@ -19,12 +20,12 @@ type fakeSkills struct {
 	createCalls int
 }
 
-func (f *fakeSkills) Activate(_ context.Context, name string) (command.Activation, error) {
+func (f *fakeSkills) Activate(_ context.Context, name string) (command.SkillPin, error) {
 	f.name = name
 	if f.err != nil {
-		return command.Activation{}, f.err
+		return command.SkillPin{}, f.err
 	}
-	return f.context, nil
+	return f.pin, nil
 }
 
 func (f *fakeSkills) StageDraft(_ context.Context, name, description string) (command.Draft, error) {
@@ -38,26 +39,52 @@ func (f *fakeSkills) StageDraft(_ context.Context, name, description string) (co
 
 func runSkillCommand(t *testing.T, skills command.Skills, input string) (out, diag string) {
 	t.Helper()
-	console, stdout, stderr, cancel := newConsoleForTest(&fakeRunner{eventsFor: func(string) []Event { return nil }}, newFakeSessions(), input)
+	out, diag, _ = runSkillTurns(t, skills, input)
+	return out, diag
+}
+
+func runSkillTurns(t *testing.T, skills command.Skills, input string) (out, diag string, calls []Request) {
+	t.Helper()
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return []Event{{Kind: "message.completed", Payload: []byte(`{"text":"done"}`)}, {Kind: "turn.completed"}}
+	}}
+	console, stdout, stderr, cancel := newConsoleForTest(runner, newFakeSessions(), input)
 	defer cancel()
 	console.SetSkills(skills)
 	if err := console.Run(t.Context()); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	return stdout.String(), stderr.String()
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return stdout.String(), stderr.String(), slices.Clone(runner.calls)
 }
 
-func TestSkillCommandActivates(t *testing.T) {
-	activated := command.Activation{SkillID: "local/pdf@0123456789ab", Caveat: "untrusted", Text: "Do things."}
-	fake := &fakeSkills{context: activated}
-	out, _ := runSkillCommand(t, fake, "/skill pdf\n")
+func TestSkillCommandStartsAPinnedTurn(t *testing.T) {
+	pin := command.SkillPin{SkillID: "local/pdf@0123456789ab", Digest: "0123456789abcdef", InvocationID: "inv_1", PolicyVersion: "1"}
+	fake := &fakeSkills{pin: pin}
+	out, _, calls := runSkillTurns(t, fake, "/skill pdf check the auth module\nthanks\n")
 	if fake.name != "pdf" {
 		t.Errorf("name = %q", fake.name)
 	}
-	for _, want := range []string{"skill local/pdf@0123456789ab", "untrusted", "Do things."} {
-		if !strings.Contains(out, want) {
-			t.Errorf("out missing %q: %q", want, out)
-		}
+	if len(calls) != 2 {
+		t.Fatalf("turns = %d, want 2", len(calls))
+	}
+	if calls[0].Skill == nil || *calls[0].Skill != pin || calls[0].Parts[0].Text != "/skill pdf check the auth module" {
+		t.Errorf("skill turn = %+v", calls[0])
+	}
+	if calls[1].Skill != nil || calls[1].Parts[0].Text != "thanks" {
+		t.Errorf("follow-up turn = %+v", calls[1])
+	}
+	if strings.Contains(out, "skill local/pdf") || !strings.Contains(out, "done") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestSkillCommandWithoutRequestStartsATurn(t *testing.T) {
+	fake := &fakeSkills{pin: command.SkillPin{SkillID: "local/pdf@0123456789ab", Digest: "d", InvocationID: "i", PolicyVersion: "1"}}
+	_, _, calls := runSkillTurns(t, fake, "/skill pdf\n")
+	if len(calls) != 1 || calls[0].Parts[0].Text != "/skill pdf" || calls[0].Skill == nil {
+		t.Errorf("turns = %+v", calls)
 	}
 }
 

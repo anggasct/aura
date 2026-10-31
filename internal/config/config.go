@@ -111,13 +111,14 @@ type QuietHours struct {
 }
 
 type Skills struct {
-	Enabled              bool     `koanf:"enabled" yaml:"enabled"`
-	Roots                []string `koanf:"roots" yaml:"roots"`
-	AutoSelect           bool     `koanf:"auto_select" yaml:"auto_select"`
-	MaxIndexedSkills     int      `koanf:"max_indexed_skills" yaml:"max_indexed_skills"`
-	MaxInstructionTokens int      `koanf:"max_instruction_tokens" yaml:"max_instruction_tokens"`
-	MaxResourceBytes     int64    `koanf:"max_resource_bytes" yaml:"max_resource_bytes"`
-	QuarantineRetention  Duration `koanf:"quarantine_retention" yaml:"quarantine_retention"`
+	Enabled                 bool     `koanf:"enabled" yaml:"enabled"`
+	Roots                   []string `koanf:"roots" yaml:"roots"`
+	AutoSelect              bool     `koanf:"auto_select" yaml:"auto_select"`
+	MaxIndexedSkills        int      `koanf:"max_indexed_skills" yaml:"max_indexed_skills"`
+	MaxInstructionTokens    int      `koanf:"max_instruction_tokens" yaml:"max_instruction_tokens"`
+	MaxSessionContextTokens int      `koanf:"max_session_context_tokens" yaml:"max_session_context_tokens"`
+	MaxResourceBytes        int64    `koanf:"max_resource_bytes" yaml:"max_resource_bytes"`
+	QuarantineRetention     Duration `koanf:"quarantine_retention" yaml:"quarantine_retention"`
 }
 
 type Context struct {
@@ -870,13 +871,14 @@ func Default() Config {
 			PurgeLimit:           100,
 		},
 		Skills: &Skills{
-			Enabled:              true,
-			Roots:                []string{"/srv/aura/skills"},
-			AutoSelect:           true,
-			MaxIndexedSkills:     256,
-			MaxInstructionTokens: 5000,
-			MaxResourceBytes:     8388608,
-			QuarantineRetention:  Duration(720 * time.Hour),
+			Enabled:                 true,
+			Roots:                   []string{"/srv/aura/skills"},
+			AutoSelect:              true,
+			MaxIndexedSkills:        256,
+			MaxInstructionTokens:    5000,
+			MaxSessionContextTokens: 15000,
+			MaxResourceBytes:        8388608,
+			QuarantineRetention:     Duration(720 * time.Hour),
 		},
 		Sync: &Sync{
 			Enabled:            false,

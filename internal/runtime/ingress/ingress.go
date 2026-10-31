@@ -22,6 +22,14 @@ type IngressEnvelope struct {
 	Parts          []InputPart
 	ReceivedAt     time.Time
 	TraceParent    string
+	Skill          *SkillPin
+}
+
+type SkillPin struct {
+	SkillID       string `json:"skill_id"`
+	Digest        string `json:"digest"`
+	InvocationID  string `json:"invocation_id"`
+	PolicyVersion string `json:"policy_version"`
 }
 
 func SessionKey(agentID, source, conversationID string) string {

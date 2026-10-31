@@ -6,6 +6,8 @@ import (
 	"errors"
 	"iter"
 	"time"
+
+	"github.com/anggasct/aura/internal/command"
 )
 
 var ErrSessionNotFound = errors.New("session not found")
@@ -43,6 +45,7 @@ type Request struct {
 	Origin         string
 	Parts          []Input
 	IdempotencyKey string
+	Skill          *command.SkillPin
 }
 
 type Sessions interface {

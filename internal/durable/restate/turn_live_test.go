@@ -182,7 +182,12 @@ type liveTurnRig struct {
 	done        chan error
 }
 
-func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolDefs []liveToolDef) *liveTurnRig {
+type liveSkillWiring struct {
+	renderer runtimeengine.SkillRenderer
+	context  runtimeadk.SkillContextProvider
+}
+
+func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolDefs []liveToolDef, skills ...liveSkillWiring) *liveTurnRig {
 	t.Helper()
 	ctx := context.Background()
 	db := liveTestDB(t)
@@ -228,9 +233,13 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 	adkmodel.Register("^"+modelName+"$", func(context.Context, string) (adkmodel.LLM, error) {
 		return model, nil
 	})
-	executor, err := runtimeadk.NewADKExecutor("aura", modelName, store.NewSessionService(db), events, counting, nil, nil,
-		runtimeadk.WithBuiltinToolExecutor(counting),
-	)
+	executorOpts := []runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(counting)}
+	var renderer runtimeengine.SkillRenderer
+	for _, wiring := range skills {
+		executorOpts = append(executorOpts, runtimeadk.WithSkillContext(wiring.context))
+		renderer = wiring.renderer
+	}
+	executor, err := runtimeadk.NewADKExecutor("aura", modelName, store.NewSessionService(db), events, counting, nil, nil, executorOpts...)
 	if err != nil {
 		t.Fatalf("new ADK executor: %v", err)
 	}
@@ -254,6 +263,7 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 		MaxPendingTurns: 16,
 		TurnTimeout:     5 * time.Minute,
 		DefaultAgentID:  "main",
+		Skills:          renderer,
 		Durable: &runtimeengine.DurableConfig{
 			Sessions: sessionCalls,
 			Runtime:  adapter,

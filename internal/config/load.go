@@ -960,7 +960,7 @@ func validateSkillsShapes(doc *yamlv3.Node) error {
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
 				return fmt.Errorf("skills.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
 			}
-		case "max_indexed_skills", "max_instruction_tokens", "max_resource_bytes":
+		case "max_indexed_skills", "max_instruction_tokens", "max_session_context_tokens", "max_resource_bytes":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
 				return fmt.Errorf("skills.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
 			}
@@ -2257,6 +2257,9 @@ func applySkillsDefaults(cfg *Config, doc *yamlv3.Node) {
 	if cfg.Skills.MaxInstructionTokens == 0 && !configValuePresent(doc, "skills", "max_instruction_tokens") && !envValuePresent("skills.max_instruction_tokens") {
 		cfg.Skills.MaxInstructionTokens = defaults.MaxInstructionTokens
 	}
+	if cfg.Skills.MaxSessionContextTokens == 0 && !configValuePresent(doc, "skills", "max_session_context_tokens") && !envValuePresent("skills.max_session_context_tokens") {
+		cfg.Skills.MaxSessionContextTokens = defaults.MaxSessionContextTokens
+	}
 	if cfg.Skills.MaxResourceBytes == 0 && !configValuePresent(doc, "skills", "max_resource_bytes") && !envValuePresent("skills.max_resource_bytes") {
 		cfg.Skills.MaxResourceBytes = defaults.MaxResourceBytes
 	}
@@ -3425,6 +3428,11 @@ func validateSkills(skillsConfig *Skills, profile capability.Profile) error {
 	}
 	if skillsConfig.MaxInstructionTokens <= 0 || skillsConfig.MaxInstructionTokens > 128000 {
 		problems = append(problems, errors.New("skills.max_instruction_tokens must be between 1 and 128000"))
+	}
+	if skillsConfig.MaxSessionContextTokens <= 0 {
+		problems = append(problems, errors.New("skills.max_session_context_tokens must be positive"))
+	} else if skillsConfig.MaxSessionContextTokens < skillsConfig.MaxInstructionTokens {
+		problems = append(problems, errors.New("skills.max_session_context_tokens must be at least skills.max_instruction_tokens"))
 	}
 	if skillsConfig.MaxResourceBytes <= 0 || skillsConfig.MaxResourceBytes > 1<<30 {
 		problems = append(problems, errors.New("skills.max_resource_bytes must be between 1 and 1073741824"))
