@@ -11,6 +11,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/child"
+	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/logging"
@@ -155,6 +156,17 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				profileRuntime.start(ctx)
 				healthChecks = append(slices.Clone(discordChecks), profileRuntime.check(cfg))
 			}
+			var skillRenderer runtimeengine.SkillRenderer
+			var skillCommands command.Skills
+			if cfg.Skills != nil && cfg.Skills.Enabled {
+				skillRuntime, err := buildSkillRuntime(ctx, cfg.Skills, db, logger)
+				if err != nil {
+					return err
+				}
+				executorOpts = append(executorOpts, runtimeadk.WithSkillContext(skillRuntime.context))
+				skillRenderer = skillRuntime.context
+				skillCommands = skillRuntime.bridge
+			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
 				executorOpts...,
@@ -180,6 +192,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 				DefaultAgentID:  auraagent.DefaultID,
 				Personas:        registryPersonas{registry: agentRegistry},
+				Skills:          skillRenderer,
 				Durable:         durableConfig,
 				PostTurnHook:    composePostTurnHooks(memoryHook, profileHook, personaTurnHook(personaRecorder)),
 			}, events, store.NewDedupeStore(db), adkExecutor, logger)
@@ -191,7 +204,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := wireDiscordCommands(channelAdapters, runtimeEngine, sessions, events, store.NewConversationSessionStore(db), commandRecorder); err != nil {
+			if err := wireDiscordCommands(channelAdapters, runtimeEngine, sessions, events, store.NewConversationSessionStore(db), skillCommands, commandRecorder); err != nil {
 				return err
 			}
 			host, err := runtimeengine.NewHost(runtimeEngine, channelAdapters, logger)

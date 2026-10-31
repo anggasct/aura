@@ -24,6 +24,7 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	DefaultAgentID  string
 	Personas        runtime.Personas
+	Skills          SkillRenderer
 	Durable         *DurableConfig
 	PostTurnHook    func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
 }
@@ -644,24 +645,26 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 
 	var terminalKind string
 	var terminalPayload []byte
-	var execErr error
 	var executed []store.RuntimeEvent
-	for ev, err := range e.executor.Execute(ctx, &t.req) {
-		if err != nil {
-			execErr = err
-			break
-		}
-		if emitErr := persistEvent(ctx, &ev); emitErr != nil {
-			execErr = emitErr
-			break
-		}
-		executed = append(executed, ev)
-		if isPresenceFailureEvent(&ev) {
-			e.notifyPresenceFailed(ctx, &t.req)
-			continue
-		}
-		if text, args, ok := extractPresenceActivity(&ev); ok {
-			e.notifyPresenceText(ctx, &t.req, text, args)
+	execErr := e.persistSkillActivation(ctx, &t.req, e.renderSkillActivation, persistEvent)
+	if execErr == nil {
+		for ev, err := range e.executor.Execute(ctx, &t.req) {
+			if err != nil {
+				execErr = err
+				break
+			}
+			if emitErr := persistEvent(ctx, &ev); emitErr != nil {
+				execErr = emitErr
+				break
+			}
+			executed = append(executed, ev)
+			if isPresenceFailureEvent(&ev) {
+				e.notifyPresenceFailed(ctx, &t.req)
+				continue
+			}
+			if text, args, ok := extractPresenceActivity(&ev); ok {
+				e.notifyPresenceText(ctx, &t.req, text, args)
+			}
 		}
 	}
 

@@ -151,7 +151,7 @@ func (r *discordConversationResolver) ActiveSession(ctx context.Context, convers
 	return id, nil
 }
 
-func wireDiscordCommands(ports []runtimechannelhost.ChannelPort, engine sessionActivity, sessions store.SessionService, events sequenceReader, pointers store.ConversationSessionStore, recorder command.Recorder) error {
+func wireDiscordCommands(ports []runtimechannelhost.ChannelPort, engine sessionActivity, sessions store.SessionService, events sequenceReader, pointers store.ConversationSessionStore, skills command.Skills, recorder command.Recorder) error {
 	registry, err := command.New(discord.CommandBinding())
 	if err != nil {
 		return err
@@ -159,6 +159,7 @@ func wireDiscordCommands(ports []runtimechannelhost.ChannelPort, engine sessionA
 	dispatcher, err := command.NewDispatcher(registry, command.Ports{
 		Sessions: &discordCommandSessions{sessions: sessions, events: events, pointers: pointers},
 		Turns:    engineCommandTurns{engine: engine},
+		Skills:   skills,
 	}, recorder)
 	if err != nil {
 		return err

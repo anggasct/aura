@@ -174,7 +174,7 @@ func (c *Console) Run(ctx context.Context) error {
 					continue
 				}
 				if ok {
-					if err := c.runTurn(ctx, composed); err != nil {
+					if err := c.runTurn(ctx, composed, nil); err != nil {
 						return err
 					}
 					continue
@@ -193,7 +193,7 @@ func (c *Console) Run(ctx context.Context) error {
 				continue
 			}
 			ack()
-			if err := c.runTurn(ctx, line); err != nil {
+			if err := c.runTurn(ctx, line, nil); err != nil {
 				return err
 			}
 		case <-ctx.Done():
@@ -205,7 +205,7 @@ func (c *Console) Run(ctx context.Context) error {
 	}
 }
 
-func (c *Console) runTurn(ctx context.Context, line string) error {
+func (c *Console) runTurn(ctx context.Context, line string, skill *command.SkillPin) error {
 	turnCtx, cancel := context.WithCancel(ctx)
 	c.setTurnCancel(cancel)
 	defer c.clearTurnCancel(cancel)
@@ -217,6 +217,7 @@ func (c *Console) runTurn(ctx context.Context, line string) error {
 		AgentID:     c.agentID,
 		Origin:      "terminal",
 		Parts:       []Input{{Text: line}},
+		Skill:       skill,
 	}
 	var streamErr error
 	var failed, cancelled bool

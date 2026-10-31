@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/skills"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -131,16 +133,62 @@ type skillCommandBridge struct {
 	root   string
 }
 
-func (b *skillCommandBridge) Activate(ctx context.Context, name string) (command.Activation, error) {
+func (b *skillCommandBridge) Activate(ctx context.Context, name string) (command.SkillPin, error) {
 	activation, err := b.engine.Activate(ctx, name, "explicit: /skill "+name)
 	if err != nil {
-		return command.Activation{}, err
+		return command.SkillPin{}, err
 	}
-	return command.Activation{
-		SkillID: activation.SkillID,
-		Caveat:  activation.Context.Caveat,
-		Text:    activation.Context.Text,
+	current, err := b.engine.Current(ctx, activation.SkillID, activation.Digest)
+	if err != nil {
+		return command.SkillPin{}, err
+	}
+	if !current {
+		return command.SkillPin{}, skills.Errorf(skills.ErrorCodeSkillUnavailable, "skill is not active")
+	}
+	return command.SkillPin{
+		SkillID:       activation.SkillID,
+		Digest:        activation.Digest,
+		InvocationID:  activation.InvocationID,
+		PolicyVersion: activation.PolicyVersion,
 	}, nil
+}
+
+type skillActivationLog struct {
+	events store.EventKindReader
+}
+
+func (l *skillActivationLog) Activations(ctx context.Context, sessionID string, limit int) ([]runtime.SkillActivation, error) {
+	events, err := l.events.LatestByKind(ctx, sessionID, runtime.EventKindSkillActivated, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]runtime.SkillActivation, 0, len(events))
+	for i := range events {
+		var activation runtime.SkillActivation
+		if err := json.Unmarshal(events[i].Payload, &activation); err != nil || activation.SkillID == "" {
+			continue
+		}
+		out = append(out, activation)
+	}
+	return out, nil
+}
+
+type skillRuntime struct {
+	engine  *skills.Engine
+	context *skills.SessionContext
+	bridge  *skillCommandBridge
+}
+
+func buildSkillRuntime(ctx context.Context, cfg *config.Skills, db *sql.DB, logger *slog.Logger) (*skillRuntime, error) {
+	engine, err := buildSkillsEngine(ctx, cfg, db, logger)
+	if err != nil {
+		return nil, err
+	}
+	sessionContext, err := skills.NewSessionContext(engine, &skillActivationLog{events: store.NewEventKindReader(db)}, cfg.MaxSessionContextTokens*skills.CharsPerToken)
+	if err != nil {
+		return nil, err
+	}
+	return &skillRuntime{engine: engine, context: sessionContext, bridge: &skillCommandBridge{engine: engine, root: cfg.Roots[0]}}, nil
 }
 
 func (b *skillCommandBridge) StageDraft(ctx context.Context, name, description string) (command.Draft, error) {

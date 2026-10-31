@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/anggasct/aura/internal/principal"
+	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
 const ChannelTerminal = "terminal"
@@ -118,6 +119,7 @@ type Invocation struct {
 	Name  string
 	Token string
 	Args  []string
+	Text  string
 }
 
 type Session struct {
@@ -133,12 +135,14 @@ type Result struct {
 	Control    Control
 	Session    *Session
 	Pending    *Invocation
+	Turn       *TurnStart
 }
 
-type Activation struct {
-	SkillID string
-	Caveat  string
-	Text    string
+type SkillPin = runtimeingress.SkillPin
+
+type TurnStart struct {
+	Text  string
+	Skill *SkillPin
 }
 
 type Draft struct {
@@ -158,7 +162,7 @@ type Turns interface {
 }
 
 type Skills interface {
-	Activate(ctx context.Context, name string) (Activation, error)
+	Activate(ctx context.Context, name string) (SkillPin, error)
 	StageDraft(ctx context.Context, name, description string) (Draft, error)
 }
 

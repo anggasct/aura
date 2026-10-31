@@ -20,7 +20,7 @@ func CommandBinding() command.Binding {
 	return command.Binding{
 		Channel: principal.ChannelDiscord,
 		Style:   command.StyleMessenger,
-		Names:   []string{"help", "status", "session", "new", "cancel"},
+		Names:   []string{"help", "status", "session", "new", "cancel", "skill", "skill-create"},
 	}
 }
 
@@ -38,8 +38,9 @@ type commandRequest struct {
 }
 
 type commandReceipt struct {
-	Lines []string `json:"lines"`
-	Code  string   `json:"code,omitempty"`
+	Lines []string                 `json:"lines"`
+	Code  string                   `json:"code,omitempty"`
+	Skill *runtimeingress.SkillPin `json:"skill,omitempty"`
 }
 
 type commandScope struct {
@@ -143,23 +144,27 @@ func (a *Adapter) runCommand(ctx context.Context, msg *messagePayload, inv *comm
 	if intent == nil || intent.State != effect.StateSucceeded {
 		return true, nil
 	}
-	lines, ok := receiptLines(intent.ProviderReceipt)
+	receipt, ok := decodeReceipt(intent.ProviderReceipt)
 	if !ok {
 		a.logger.WarnContext(ctx, "command receipt unreadable", "component", "command", "session_id", scope.effectSession)
 		return true, nil
 	}
-	if err := a.replyCommand(ctx, msg, intent.ID, scope.effectSession, lines); err != nil {
+	if receipt.Skill != nil {
+		envelope.Skill = receipt.Skill
+		return false, nil
+	}
+	if err := a.replyCommand(ctx, msg, intent.ID, scope.effectSession, receipt.Lines); err != nil {
 		a.logger.WarnContext(ctx, "command reply failed", "component", "command", "session_id", scope.effectSession, "error", err)
 	}
 	return true, nil
 }
 
-func receiptLines(raw json.RawMessage) ([]string, bool) {
+func decodeReceipt(raw json.RawMessage) (commandReceipt, bool) {
 	var receipt commandReceipt
-	if json.Unmarshal(raw, &receipt) != nil || len(receipt.Lines) == 0 {
-		return nil, false
+	if json.Unmarshal(raw, &receipt) != nil || (len(receipt.Lines) == 0 && receipt.Skill == nil) {
+		return commandReceipt{}, false
 	}
-	return receipt.Lines, true
+	return receipt, true
 }
 
 func (a *Adapter) logCommand(ctx context.Context, caller *command.Caller, name, result, sessionID string) {
@@ -210,7 +215,11 @@ func (p *commandProvider) Invoke(ctx context.Context, _ *effect.Invocation) (eff
 	result := p.run(ctx)
 	p.ran = true
 	p.code = string(result.Code)
-	receipt, err := json.Marshal(commandReceipt{Lines: result.Lines, Code: p.code})
+	var skill *runtimeingress.SkillPin
+	if result.Turn != nil {
+		skill = result.Turn.Skill
+	}
+	receipt, err := json.Marshal(commandReceipt{Lines: result.Lines, Code: p.code, Skill: skill})
 	if err != nil {
 		return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "command receipt is not serializable")
 	}
