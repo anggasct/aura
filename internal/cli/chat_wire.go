@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/telemetry"
 	"github.com/anggasct/aura/internal/toolbroker"
 	"github.com/anggasct/aura/internal/tools/builtin"
 )
@@ -116,6 +118,9 @@ func (s *terminalSessions) Create(ctx context.Context, owner, agentID string) (t
 func (s *terminalSessions) Get(ctx context.Context, id string) (terminal.Session, error) {
 	internal, err := s.sessions.Get(ctx, id)
 	if err != nil {
+		if code, ok := store.CodeOf(err); errors.Is(err, sql.ErrNoRows) || (ok && code == store.ErrorCodeSessionNotFound) {
+			return terminal.Session{}, fmt.Errorf("%w: %s", terminal.ErrSessionNotFound, id)
+		}
 		return terminal.Session{}, err
 	}
 	return terminal.Session{ID: internal.ID, OwnerID: internal.OwnerID, AgentID: internal.AgentID}, nil
@@ -260,12 +265,17 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		},
 		principal.OwnerID,
 	)
+	commandRecorder, err := telemetry.NewCommandRecorder(nil, nil)
+	if err != nil {
+		return err
+	}
+	console.SetCommandRecorder(commandRecorder)
 	if cfg.Skills != nil && cfg.Skills.Enabled {
 		skillEngine, err := buildSkillsEngine(ctx, cfg.Skills, db, logger)
 		if err != nil {
 			return err
 		}
-		console.SetSkills(&skillTerminalBridge{engine: skillEngine, root: cfg.Skills.Roots[0]})
+		console.SetSkills(&skillCommandBridge{engine: skillEngine, root: cfg.Skills.Roots[0]})
 	}
 	console.SetInputCloser(func() { _ = os.Stdin.Close() })
 	console.SetSessionID(sessionID)

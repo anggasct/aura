@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/terminal"
+	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/skills"
 	"github.com/anggasct/aura/internal/store"
@@ -126,29 +126,29 @@ func mapSkillStoreError(err error) error {
 	}
 }
 
-type skillTerminalBridge struct {
+type skillCommandBridge struct {
 	engine *skills.Engine
 	root   string
 }
 
-func (b *skillTerminalBridge) ActivateSkill(ctx context.Context, name string) (terminal.SkillContext, error) {
+func (b *skillCommandBridge) Activate(ctx context.Context, name string) (command.Activation, error) {
 	activation, err := b.engine.Activate(ctx, name, "explicit: /skill "+name)
 	if err != nil {
-		return terminal.SkillContext{}, err
+		return command.Activation{}, err
 	}
-	return terminal.SkillContext{
-		ID:     activation.SkillID,
-		Caveat: activation.Context.Caveat,
-		Text:   activation.Context.Text,
+	return command.Activation{
+		SkillID: activation.SkillID,
+		Caveat:  activation.Context.Caveat,
+		Text:    activation.Context.Text,
 	}, nil
 }
 
-func (b *skillTerminalBridge) CreateSkill(ctx context.Context, name, description string) (terminal.SkillDraft, error) {
+func (b *skillCommandBridge) StageDraft(ctx context.Context, name, description string) (command.Draft, error) {
 	summary, err := b.engine.StageDraft(ctx, name, description, b.root)
 	if err != nil {
-		return terminal.SkillDraft{}, err
+		return command.Draft{}, err
 	}
-	return terminal.SkillDraft{ID: summary.ID, Digest: summary.Digest}, nil
+	return command.Draft{ID: summary.ID, Digest: summary.Digest}, nil
 }
 
 func buildSkillsEngine(ctx context.Context, cfg *config.Skills, db *sql.DB, logger *slog.Logger) (*skills.Engine, error) {

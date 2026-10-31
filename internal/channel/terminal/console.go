@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anggasct/aura/internal/command"
 )
 
 var ErrInterrupted = errors.New("terminal: interrupted")
@@ -27,8 +29,10 @@ type Console struct {
 	principal           string
 	sessionID           string
 	agentID             string
-	skills              Skills
-	pendingSkill        string
+	skills              command.Skills
+	recorder            command.Recorder
+	commands            *command.Dispatcher
+	pending             *command.Invocation
 	closeInput          func()
 	tty                 *TTYRenderer
 	terminalSeen        bool
@@ -66,7 +70,9 @@ func (c *Console) SetSessionID(id string) { c.sessionID = id }
 
 func (c *Console) SetAgentID(id string) { c.agentID = id }
 
-func (c *Console) SetSkills(skills Skills) { c.skills = skills }
+func (c *Console) SetSkills(skills command.Skills) { c.skills = skills }
+
+func (c *Console) SetCommandRecorder(recorder command.Recorder) { c.recorder = recorder }
 
 func (c *Console) SetInputCloser(closeInput func()) { c.closeInput = closeInput }
 
@@ -99,6 +105,9 @@ func (c *Console) Run(ctx context.Context) error {
 	c.sessionID = sess.ID
 	if sess.AgentID != "" {
 		c.agentID = sess.AgentID
+	}
+	if err := c.buildCommands(); err != nil {
+		return fmt.Errorf("terminal: commands: %w", err)
 	}
 
 	c.escalated = make(chan struct{})
@@ -145,18 +154,14 @@ func (c *Console) Run(ctx context.Context) error {
 				ack()
 				continue
 			}
-			if c.pendingSkill != "" && !strings.HasPrefix(line, "/") {
+			if c.pending != nil && !strings.HasPrefix(line, "/") {
 				ack()
-				name := c.pendingSkill
-				c.pendingSkill = ""
-				if err := c.finishSkillCreate(ctx, name, line); err != nil {
+				if _, err := c.resumePending(ctx, line); err != nil {
 					return err
 				}
 				continue
 			}
-			if c.pendingSkill != "" {
-				c.pendingSkill = ""
-			}
+			c.pending = nil
 			if line == "." && c.tty != nil {
 				pauseReading()
 				ack()

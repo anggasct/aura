@@ -107,7 +107,7 @@ func (s *fakeSessions) Get(ctx context.Context, id string) (Session, error) {
 	}
 	sess, ok := s.sessions[id]
 	if !ok {
-		return Session{}, errors.New("session not found")
+		return Session{}, ErrSessionNotFound
 	}
 	return sess, nil
 }
@@ -280,13 +280,18 @@ func TestSessionSwitchValidatesOwner(t *testing.T) {
 	sessions := newFakeSessions()
 	own := sessions.sessions
 	own["sess_other"] = Session{ID: "sess_other", OwnerID: "someone-else"}
-	console, _, diag, cancel := newConsoleForTest(&fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}, sessions, "/session sess_other\n")
+	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
+	console, _, diag, cancel := newConsoleForTest(runner, sessions, "/session sess_other\nprompt\n")
 	defer cancel()
-	err := console.Run(context.Background())
-	if err == nil {
-		t.Fatal("expected owner validation error")
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-	_ = diag
+	if !strings.Contains(diag.String(), "aura: session sess_other: not owned by owner") {
+		t.Errorf("stderr = %q, want ownership diagnostic", diag.String())
+	}
+	if len(runner.calls) != 1 || runner.calls[0].SessionID == "sess_other" {
+		t.Errorf("turn = %+v, want the original session", runner.calls)
+	}
 }
 
 func TestSessionSwitchToOwnedSession(t *testing.T) {
@@ -361,12 +366,17 @@ func TestConfiguredSessionIsUsed(t *testing.T) {
 func TestSessionSwitchRejectsOwnerlessSession(t *testing.T) {
 	sessions := newFakeSessions()
 	sessions.sessions["sess_ownerless"] = Session{ID: "sess_ownerless"}
-	console, _, _, cancel := newConsoleForTest(&fakeRunner{eventsFor: func(string) []Event {
+	console, _, diag, cancel := newConsoleForTest(&fakeRunner{eventsFor: func(string) []Event {
 		return []Event{{Kind: "turn.completed"}}
-	}}, sessions, "/session sess_ownerless\n")
+	}}, sessions, "/session sess_ownerless\n/session missing\n")
 	defer cancel()
-	if err := console.Run(context.Background()); err == nil {
-		t.Fatal("expected owner validation error")
+	if err := console.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, want := range []string{"aura: session sess_ownerless: not owned by owner", "aura: session missing: not found"} {
+		if !strings.Contains(diag.String(), want) {
+			t.Errorf("stderr = %q, want %q", diag.String(), want)
+		}
 	}
 }
 

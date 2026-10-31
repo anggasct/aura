@@ -2,16 +2,20 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/store"
 )
 
 type fakeTerminalSessionService struct {
 	created *store.Session
+	getErr  error
 }
 
 func (f *fakeTerminalSessionService) Create(_ context.Context, sess *store.Session) error {
@@ -20,6 +24,9 @@ func (f *fakeTerminalSessionService) Create(_ context.Context, sess *store.Sessi
 }
 
 func (f *fakeTerminalSessionService) Get(context.Context, string) (store.Session, error) {
+	if f.getErr != nil {
+		return store.Session{}, f.getErr
+	}
 	return store.Session{}, errors.New("not implemented")
 }
 
@@ -36,6 +43,23 @@ func TestTerminalSessionIDFailureIsReturned(t *testing.T) {
 	}
 	if svc.created != nil {
 		t.Fatal("session was created after ID generation failed")
+	}
+}
+
+func TestTerminalSessionGetReportsMissingSessions(t *testing.T) {
+	for _, missing := range []error{
+		fmt.Errorf("get session x: %w", sql.ErrNoRows),
+		&store.Error{Code: store.ErrorCodeSessionNotFound, Detail: "session does not exist"},
+	} {
+		sessions := &terminalSessions{sessions: &fakeTerminalSessionService{getErr: missing}}
+		if _, err := sessions.Get(t.Context(), "x"); !errors.Is(err, terminal.ErrSessionNotFound) {
+			t.Errorf("Get(%v) error = %v, want session not found", missing, err)
+		}
+	}
+	other := errors.New("database is locked")
+	sessions := &terminalSessions{sessions: &fakeTerminalSessionService{getErr: other}}
+	if _, err := sessions.Get(t.Context(), "x"); !errors.Is(err, other) || errors.Is(err, terminal.ErrSessionNotFound) {
+		t.Errorf("Get error = %v, want the store error", err)
 	}
 }
 

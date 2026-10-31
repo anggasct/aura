@@ -5,11 +5,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/command"
 )
 
 type fakeSkills struct {
-	context     SkillContext
-	draft       SkillDraft
+	context     command.Activation
+	draft       command.Draft
 	err         error
 	name        string
 	draftName   string
@@ -17,24 +19,24 @@ type fakeSkills struct {
 	createCalls int
 }
 
-func (f *fakeSkills) ActivateSkill(_ context.Context, name string) (SkillContext, error) {
+func (f *fakeSkills) Activate(_ context.Context, name string) (command.Activation, error) {
 	f.name = name
 	if f.err != nil {
-		return SkillContext{}, f.err
+		return command.Activation{}, f.err
 	}
 	return f.context, nil
 }
 
-func (f *fakeSkills) CreateSkill(_ context.Context, name, description string) (SkillDraft, error) {
+func (f *fakeSkills) StageDraft(_ context.Context, name, description string) (command.Draft, error) {
 	f.createCalls++
 	f.draftName, f.draftDesc = name, description
 	if f.err != nil {
-		return SkillDraft{}, f.err
+		return command.Draft{}, f.err
 	}
 	return f.draft, nil
 }
 
-func runSkillCommand(t *testing.T, skills Skills, input string) (out, diag string) {
+func runSkillCommand(t *testing.T, skills command.Skills, input string) (out, diag string) {
 	t.Helper()
 	console, stdout, stderr, cancel := newConsoleForTest(&fakeRunner{eventsFor: func(string) []Event { return nil }}, newFakeSessions(), input)
 	defer cancel()
@@ -46,7 +48,7 @@ func runSkillCommand(t *testing.T, skills Skills, input string) (out, diag strin
 }
 
 func TestSkillCommandActivates(t *testing.T) {
-	activated := SkillContext{ID: "local/pdf@0123456789ab", Caveat: "untrusted", Text: "Do things."}
+	activated := command.Activation{SkillID: "local/pdf@0123456789ab", Caveat: "untrusted", Text: "Do things."}
 	fake := &fakeSkills{context: activated}
 	out, _ := runSkillCommand(t, fake, "/skill pdf\n")
 	if fake.name != "pdf" {
@@ -60,7 +62,7 @@ func TestSkillCommandActivates(t *testing.T) {
 }
 
 func TestSkillCreateCommandImmediate(t *testing.T) {
-	fake := &fakeSkills{draft: SkillDraft{ID: "local/n@0123456789ab", Digest: "0123456789abcdef"}}
+	fake := &fakeSkills{draft: command.Draft{ID: "local/n@0123456789ab", Digest: "0123456789abcdef"}}
 	out, _ := runSkillCommand(t, fake, "/skill-create n A new skill.\n")
 	if fake.createCalls != 1 || fake.draftName != "n" || fake.draftDesc != "A new skill." {
 		t.Errorf("create = %+v", fake)
@@ -73,7 +75,7 @@ func TestSkillCreateCommandImmediate(t *testing.T) {
 }
 
 func TestSkillCreateCommandPrompts(t *testing.T) {
-	fake := &fakeSkills{draft: SkillDraft{ID: "local/n@0123456789ab", Digest: "0123456789abcdef"}}
+	fake := &fakeSkills{draft: command.Draft{ID: "local/n@0123456789ab", Digest: "0123456789abcdef"}}
 	out, _ := runSkillCommand(t, fake, "/skill-create n\nA prompted description.\n")
 	if fake.createCalls != 1 || fake.draftDesc != "A prompted description." {
 		t.Errorf("create = %+v", fake)

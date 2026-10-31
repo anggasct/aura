@@ -3,9 +3,12 @@ package terminal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"time"
 )
+
+var ErrSessionNotFound = errors.New("session not found")
 
 type Input struct {
 	Text  string
