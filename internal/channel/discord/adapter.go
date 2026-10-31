@@ -92,6 +92,7 @@ type Adapter struct {
 	effects        EffectRunner
 	media          MediaStore
 	sessions       SessionEnsurer
+	resolver       SessionResolver
 	router         PersonaRouter
 	commands       *command.Dispatcher
 	owners         *principal.Resolver
@@ -135,6 +136,27 @@ func (a *Adapter) SetPrincipalResolver(owners *principal.Resolver) {
 		return
 	}
 	a.owners = owners
+}
+
+func (a *Adapter) SetSessionResolver(resolver SessionResolver) {
+	if a == nil {
+		return
+	}
+	a.resolver = resolver
+}
+
+func (a *Adapter) activeSession(ctx context.Context, conversationKey string) (string, error) {
+	if a.resolver == nil {
+		return conversationKey, nil
+	}
+	active, err := a.resolver.ActiveSession(ctx, conversationKey)
+	if err != nil {
+		return "", fmt.Errorf("resolve conversation session: %w", err)
+	}
+	if active == "" {
+		return conversationKey, nil
+	}
+	return active, nil
 }
 
 func (a *Adapter) SetPersonaRouter(router PersonaRouter) {

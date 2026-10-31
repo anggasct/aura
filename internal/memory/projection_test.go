@@ -344,3 +344,22 @@ func TestRecallFallbackSearchFailureLeavesProjectionCounter(t *testing.T) {
 		t.Errorf("projection failures = %d, want %d", got, before)
 	}
 }
+
+func TestRecallFromAFreshConversationSessionReachesThePriorSession(t *testing.T) {
+	service := testService()
+	base := "main/discord:owner/dm:111"
+	event := &Event{
+		ID: "ev-base", SessionID: base, Sequence: 1, Author: "user", Kind: "adk_event",
+		Payload: adkPayload(t, "user", "the staging database moved to port 6543", false), CreatedAt: time.Now().UTC(),
+	}
+	if _, _, err := service.ProjectEvent(t.Context(), "local-owner", event); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "local-owner", SessionID: base + "~abcdefghijklmnop", Query: "staging database port"})
+	if err != nil {
+		t.Fatalf("Recall(): %v", err)
+	}
+	if len(recalled) != 1 || recalled[0].SessionID != base {
+		t.Fatalf("recalled = %+v, want the prior conversation session through the fallback", recalled)
+	}
+}

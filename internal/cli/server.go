@@ -191,7 +191,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := wireDiscordCommands(channelAdapters, runtimeEngine, sessions, events, commandRecorder); err != nil {
+			if err := wireDiscordCommands(channelAdapters, runtimeEngine, sessions, events, store.NewConversationSessionStore(db), commandRecorder); err != nil {
 				return err
 			}
 			host, err := runtimeengine.NewHost(runtimeEngine, channelAdapters, logger)

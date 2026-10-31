@@ -20,7 +20,7 @@ func CommandBinding() command.Binding {
 	return command.Binding{
 		Channel: principal.ChannelDiscord,
 		Style:   command.StyleMessenger,
-		Names:   []string{"help", "status", "session", "cancel"},
+		Names:   []string{"help", "status", "session", "new", "cancel"},
 	}
 }
 
@@ -79,17 +79,25 @@ func stripLeadingMentions(text, selfID string) string {
 	}
 }
 
-func (a *Adapter) conversationScope(envelope *runtimeingress.IngressEnvelope, msg *messagePayload) commandScope {
+func (a *Adapter) conversationScope(ctx context.Context, envelope *runtimeingress.IngressEnvelope, msg *messagePayload) (commandScope, error) {
 	key := a.sessionKey(envelope.AgentID, envelope.ConversationID)
 	scope := commandScope{conversationKey: key, effectSession: key}
-	if msg.GuildID == "" || strings.HasPrefix(envelope.ConversationID, "thread:") {
-		scope.sessionID = key
+	if msg.GuildID != "" && !strings.HasPrefix(envelope.ConversationID, "thread:") {
+		return scope, nil
 	}
-	return scope
+	active, err := a.activeSession(ctx, key)
+	if err != nil {
+		return commandScope{}, err
+	}
+	scope.sessionID, scope.effectSession = active, active
+	return scope, nil
 }
 
 func (a *Adapter) runCommand(ctx context.Context, msg *messagePayload, inv *command.Invocation, envelope *runtimeingress.IngressEnvelope) (bool, error) {
-	scope := a.conversationScope(envelope, msg)
+	scope, err := a.conversationScope(ctx, envelope, msg)
+	if err != nil {
+		return false, err
+	}
 	caller := &command.Caller{
 		Channel:         principal.ChannelDiscord,
 		PrincipalID:     envelope.PrincipalID,

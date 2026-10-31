@@ -2,9 +2,12 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +53,7 @@ func TestCommandParityAcrossTerminalAndDiscord(t *testing.T) {
 		"discord dm":     {Channel: principal.ChannelDiscord, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, ConversationKey: "sess-parity", SessionID: "sess-parity", AgentID: "main"},
 		"discord thread": {Channel: principal.ChannelDiscord, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, ConversationKey: "sess-parity", SessionID: "sess-parity", AgentID: "main"},
 	}
-	for _, text := range []string{"/status", "/session", "/cancel", "/session sess-parity"} {
+	for _, text := range []string{"/status", "/session", "/new", "/cancel", "/session sess-parity"} {
 		results := map[string][]string{}
 		for name, caller := range callers {
 			inv, ok := command.Parse(text)
@@ -94,7 +97,8 @@ func (s *stubActivity) CancelActive(_ context.Context, sessionID string) (turnID
 
 func (s *stubActivity) SessionActivity(string) (activeTurnID string, queued int) { return "turn-1", 3 }
 
-func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
+func newCommandStore(t *testing.T) (store.SessionService, store.EventStore, store.ConversationSessionStore, *sql.DB) {
+	t.Helper()
 	db, err := store.OpenDB(t.Context(), filepath.Join(t.TempDir(), "aura.db"))
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
@@ -103,40 +107,106 @@ func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
 	if err := store.Migrate(t.Context(), db); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	sessions := store.NewSessionService(db)
+	return store.NewSessionService(db), store.NewEventStore(db), store.NewConversationSessionStore(db), db
+}
+
+func seedCommandSession(t *testing.T, sessions store.SessionService, id, owner, agent string) {
+	t.Helper()
 	now := time.Now().UTC()
-	for _, sess := range []store.Session{
-		{ID: "main/discord:owner/dm:111", OwnerID: principal.OwnerID, AgentID: "main"},
-		{ID: "main/discord:owner/dm:222", OwnerID: "discord:222", AgentID: "main"},
-	} {
-		sess.Metadata, sess.CreatedAt, sess.UpdatedAt = json.RawMessage(`{}`), now, now
-		if err := sessions.Create(t.Context(), &sess); err != nil {
-			t.Fatalf("create session: %v", err)
-		}
+	sess := store.Session{ID: id, OwnerID: owner, AgentID: agent, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}
+	if err := sessions.Create(t.Context(), &sess); err != nil {
+		t.Fatalf("create session %s: %v", id, err)
 	}
-	events := store.NewEventStore(db)
-	for range 2 {
-		if _, err := events.AppendSequenced(t.Context(), "main/discord:owner/dm:111", &store.RuntimeEvent{ID: "ev-" + time.Now().Format(time.RFC3339Nano), SessionID: "main/discord:owner/dm:111", Kind: "message.completed", SchemaVersion: 1, Payload: json.RawMessage(`{}`), CreatedAt: now}); err != nil {
+}
+
+func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
+	sessions, events, pointers, db := newCommandStore(t)
+	key := "main/discord:owner/dm:111"
+	seedCommandSession(t, sessions, key, principal.OwnerID, "main")
+	seedCommandSession(t, sessions, "main/discord:owner/dm:222", "discord:222", "main")
+	seedCommandSession(t, sessions, key+"~engineer", principal.OwnerID, "engineer")
+	seedCommandSession(t, sessions, key+"~foreign", "discord:222", "main")
+	now := time.Now().UTC()
+	for i := range 2 {
+		if _, err := events.AppendSequenced(t.Context(), key, &store.RuntimeEvent{ID: "ev-" + strconv.Itoa(i), SessionID: key, Kind: "message.completed", SchemaVersion: 1, Payload: json.RawMessage(`{}`), CreatedAt: now}); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
-	port := &discordCommandSessions{sessions: sessions, events: events}
-	if n, err := port.EventCount(t.Context(), "main/discord:owner/dm:111"); err != nil || n != 2 {
+	port := &discordCommandSessions{sessions: sessions, events: events, pointers: pointers}
+	resolver := &discordConversationResolver{pointers: pointers}
+	if n, err := port.EventCount(t.Context(), key); err != nil || n != 2 {
 		t.Errorf("EventCount = %d %v, want 2", n, err)
 	}
-	caller := &command.Caller{Channel: principal.ChannelDiscord, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, ConversationKey: "main/discord:owner/dm:111", SessionID: "main/discord:owner/dm:111", AgentID: "main"}
-	if sess, err := port.Switch(t.Context(), caller, "main/discord:owner/dm:111"); err != nil || sess.ID != caller.ConversationKey {
-		t.Errorf("Switch to own conversation = %+v %v", sess, err)
+	caller := &command.Caller{Channel: principal.ChannelDiscord, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, ConversationKey: key, SessionID: key, AgentID: "main"}
+
+	created, err := port.Create(t.Context(), caller)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	for _, id := range []string{"main/discord:owner/dm:222", "sess_terminal"} {
+	if !regexp.MustCompile(`^`+regexp.QuoteMeta(key)+`~[a-z2-7]{16}$`).MatchString(created.ID) || created.OwnerID != principal.OwnerID || created.AgentID != "main" {
+		t.Fatalf("created = %+v", created)
+	}
+	if active, err := resolver.ActiveSession(t.Context(), key); err != nil || active != created.ID {
+		t.Fatalf("active after /new = %q %v, want %s", active, err, created.ID)
+	}
+	second, err := port.Create(t.Context(), caller)
+	if err != nil || second.ID == created.ID {
+		t.Fatalf("second Create = %+v %v", second, err)
+	}
+
+	if sess, err := port.Switch(t.Context(), caller, created.ID); err != nil || sess.ID != created.ID {
+		t.Fatalf("Switch to own pointed session = %+v %v", sess, err)
+	}
+	if active, _ := resolver.ActiveSession(t.Context(), key); active != created.ID {
+		t.Fatalf("active after switch = %q", active)
+	}
+	for _, id := range []string{"main/discord:owner/dm:222", "sess_terminal", key + "~engineer", key + "~foreign", key + "~missing", key + "x"} {
 		if _, err := port.Switch(t.Context(), caller, id); !isNotSwitchable(err) {
 			t.Errorf("Switch(%s) error = %v, want not switchable", id, err)
 		}
+		if active, _ := resolver.ActiveSession(t.Context(), key); active != created.ID {
+			t.Errorf("Switch(%s) moved the pointer to %s", id, active)
+		}
 	}
-	other := *caller
-	other.ConversationKey, other.AgentID = "main/discord:owner/dm:222", "main"
-	if _, err := port.Switch(t.Context(), &other, "main/discord:owner/dm:222"); !isNotSwitchable(err) {
-		t.Errorf("Switch to a foreign-owned session error = %v", err)
+	if sess, err := port.Switch(t.Context(), caller, key); err != nil || sess.ID != key {
+		t.Fatalf("Switch back to base = %+v %v", sess, err)
+	}
+	if _, found, _ := pointers.Resolve(t.Context(), key); found {
+		t.Fatal("switching to the base key kept the pointer")
+	}
+
+	if _, err := port.Switch(t.Context(), caller, second.ID); err != nil {
+		t.Fatalf("Switch(second): %v", err)
+	}
+	if _, err := db.ExecContext(t.Context(), `DELETE FROM session WHERE id = ?`, second.ID); err != nil {
+		t.Fatalf("gc pointed session: %v", err)
+	}
+	if active, err := resolver.ActiveSession(t.Context(), key); err != nil || active != key {
+		t.Fatalf("active after gc = %q %v, want the base key", active, err)
+	}
+	if _, err := port.Switch(t.Context(), caller, second.ID); !isNotSwitchable(err) {
+		t.Errorf("Switch to a collected session error = %v", err)
+	}
+
+	if _, err := port.Switch(t.Context(), caller, created.ID); err != nil {
+		t.Fatalf("Switch back to the live pointed session: %v", err)
+	}
+	if _, err := db.ExecContext(t.Context(), `DELETE FROM session WHERE id = ?`, key); err != nil {
+		t.Fatalf("drop base session row: %v", err)
+	}
+	sess, err := port.Switch(t.Context(), caller, key)
+	if err != nil || sess.ID != key || sess.OwnerID != principal.OwnerID || sess.AgentID != "main" {
+		t.Fatalf("Switch to the base key with the base row absent = %+v %v", sess, err)
+	}
+	if _, found, _ := pointers.Resolve(t.Context(), key); found {
+		t.Fatal("switching to the base key with the base row absent kept the pointer")
+	}
+	ensurer := &discordSessionEnsurer{sessions: sessions}
+	if err := ensurer.EnsureSession(t.Context(), key, principal.OwnerID, "main"); err != nil {
+		t.Fatalf("next message re-ensures the base session: %v", err)
+	}
+	if _, err := sessions.Get(t.Context(), key); err != nil {
+		t.Fatalf("base session row after re-ensure: %v", err)
 	}
 }
 
@@ -148,7 +218,7 @@ func isNotSwitchable(err error) bool {
 func TestDiscordCommandWiringDelegatesToTheEngine(t *testing.T) {
 	activity := &stubActivity{}
 	recorder := &wireRecorder{}
-	if err := wireDiscordCommands([]runtimechannelhost.ChannelPort{}, activity, nil, nil, recorder); err != nil {
+	if err := wireDiscordCommands([]runtimechannelhost.ChannelPort{}, activity, nil, nil, nil, recorder); err != nil {
 		t.Fatalf("wire without adapters: %v", err)
 	}
 	turns := engineCommandTurns{engine: activity}
