@@ -45,6 +45,12 @@ func NewDispatcher(registry *Registry, ports Ports, recorder Recorder) (*Dispatc
 func (d *Dispatcher) Registry() *Registry { return d.registry }
 
 func (d *Dispatcher) Execute(ctx context.Context, caller *Caller, inv *Invocation) Result {
+	if caller == nil {
+		return failure(ErrorCodeInvalidArgument, "aura: caller must not be nil")
+	}
+	if inv == nil {
+		return failure(ErrorCodeInvalidArgument, "aura: invocation must not be nil")
+	}
 	b, ok := d.registry.binding(caller.Channel)
 	if !ok {
 		return unknown(inv)
@@ -57,7 +63,7 @@ func (d *Dispatcher) Execute(ctx context.Context, caller *Caller, inv *Invocatio
 	if def.Kind == KindTerminalOnly && style != StyleTerminal {
 		_, finish := d.start(ctx, NameTerminalOnly, caller)
 		finish(ResultUnavailable)
-		return failure(CodeUnavailable, "/"+inv.Name+" only works in the terminal.")
+		return failure(ErrorCodeUnavailable, "/"+inv.Name+" only works in the terminal.")
 	}
 	if !b.names[def.Name] {
 		return unknown(inv)
@@ -77,10 +83,10 @@ func (d *Dispatcher) start(ctx context.Context, name string, caller *Caller) (sp
 
 func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocation, def *Definition, b *Binding) Result {
 	if !permits(def.Audience, caller.Class) {
-		return failure(CodeDenied, ReplyDenied)
+		return failure(ErrorCodeDenied, ReplyDenied)
 	}
 	if def.Session && caller.SessionID == "" {
-		return failure(CodeScope, "Use /"+def.Name+" inside an Aura thread or a DM.")
+		return failure(ErrorCodeScope, "Use /"+def.Name+" inside an Aura thread or a DM.")
 	}
 	if len(inv.Args) < def.MinArgs {
 		if def.Prompt != "" && b.Interactive && len(inv.Args) == def.MinArgs-1 {
@@ -152,12 +158,14 @@ func (h *handler) session(ctx context.Context) Result {
 	id := h.args[0]
 	sess, err := h.ports.Sessions.Switch(ctx, h.caller, id)
 	if err != nil {
-		var cerr *Error
-		if errors.As(err, &cerr) && cerr.Code == CodeNotSwitchable {
+		if code, ok := CodeOf(err); ok && code == ErrorCodeNotSwitchable {
 			if h.style == StyleTerminal {
-				return failure(CodeNotSwitchable, "aura: session "+id+": "+cerr.Detail)
+				var cerr *Error
+				if errors.As(err, &cerr) {
+					return failure(code, "aura: session "+id+": "+cerr.Detail)
+				}
 			}
-			return failure(CodeNotSwitchable, ReplyNotSwitchable)
+			return failure(code, ReplyNotSwitchable)
 		}
 		return h.failed("session", err)
 	}
@@ -200,9 +208,9 @@ func (h *handler) skill(ctx context.Context) Result {
 
 func (h *handler) skillUnavailable(name, detail string) Result {
 	if h.style == StyleTerminal {
-		return failure(CodeSkillUnavailable, "aura: skill "+name+": "+detail)
+		return failure(ErrorCodeSkillUnavailable, "aura: skill "+name+": "+detail)
 	}
-	return failure(CodeSkillUnavailable, "Skill "+name+" is not available.")
+	return failure(ErrorCodeSkillUnavailable, "Skill "+name+" is not available.")
 }
 
 func (h *handler) skillCreate(ctx context.Context) Result {
@@ -222,38 +230,38 @@ func (h *handler) skillCreate(ctx context.Context) Result {
 
 func (h *handler) failed(name string, err error) Result {
 	if h.style == StyleTerminal {
-		return failure(CodeFailed, "aura: /"+name+": "+err.Error())
+		return failure(ErrorCodeFailed, "aura: /"+name+": "+err.Error())
 	}
-	return failure(CodeFailed, "/"+name+" failed; check aura status.")
+	return failure(ErrorCodeFailed, "/"+name+" failed; check aura status.")
 }
 
 func usage(def *Definition) Result {
-	return failure(CodeUsage, strings.TrimSpace("usage: /"+def.Name+" "+def.Usage))
+	return failure(ErrorCodeUsage, strings.TrimSpace("usage: /"+def.Name+" "+def.Usage))
 }
 
 func unknown(inv *Invocation) Result {
-	return failure(CodeUnknown, "aura: unknown command "+inv.Token+" (try /help)")
+	return failure(ErrorCodeUnknown, "aura: unknown command "+inv.Token+" (try /help)")
 }
 
-func failure(code Code, line string) Result {
+func failure(code ErrorCode, line string) Result {
 	return Result{Lines: []string{line}, Diagnostic: true, Code: code}
 }
 
-func resultLabel(code Code) string {
+func resultLabel(code ErrorCode) string {
 	switch code {
-	case CodeOK:
+	case ErrorCodeOK:
 		return ResultOK
-	case CodeUsage:
+	case ErrorCodeUsage:
 		return ResultUsage
-	case CodeDenied:
+	case ErrorCodeDenied:
 		return ResultDenied
-	case CodeUnavailable:
+	case ErrorCodeUnavailable:
 		return ResultUnavailable
-	case CodeScope:
+	case ErrorCodeScope:
 		return ResultScope
-	case CodeNotSwitchable:
+	case ErrorCodeNotSwitchable:
 		return ResultNotSwitchable
-	case CodeSkillUnavailable:
+	case ErrorCodeSkillUnavailable:
 		return ResultSkillUnavailable
 	default:
 		return ResultFailed

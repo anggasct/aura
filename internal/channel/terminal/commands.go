@@ -119,12 +119,12 @@ func (s consoleSessions) Switch(ctx context.Context, caller *command.Caller, id 
 	sess, err := s.console.sessions.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
-			return command.Session{}, command.Errorf(command.CodeNotSwitchable, "not found")
+			return command.Session{}, command.Errorf(command.ErrorCodeNotSwitchable, "not found")
 		}
 		return command.Session{}, err
 	}
 	if caller.PrincipalID == "" || sess.OwnerID != caller.PrincipalID {
-		return command.Session{}, command.Errorf(command.CodeNotSwitchable, "not owned by %s", caller.PrincipalID)
+		return command.Session{}, command.Errorf(command.ErrorCodeNotSwitchable, "not owned by %s", caller.PrincipalID)
 	}
 	return command.Session{ID: sess.ID, OwnerID: sess.OwnerID, AgentID: sess.AgentID}, nil
 }

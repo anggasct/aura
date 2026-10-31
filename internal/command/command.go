@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/anggasct/aura/internal/principal"
@@ -68,22 +69,23 @@ type Binding struct {
 	Notes       []Note
 }
 
-type Code string
+type ErrorCode string
 
 const (
-	CodeOK               Code = ""
-	CodeUnknown          Code = "command_unknown"
-	CodeUsage            Code = "command_usage"
-	CodeDenied           Code = "command_denied"
-	CodeUnavailable      Code = "command_unavailable"
-	CodeScope            Code = "command_scope"
-	CodeNotSwitchable    Code = "session_not_switchable"
-	CodeSkillUnavailable Code = "skill_unavailable"
-	CodeFailed           Code = "command_failed"
+	ErrorCodeOK               ErrorCode = ""
+	ErrorCodeUnknown          ErrorCode = "command_unknown"
+	ErrorCodeUsage            ErrorCode = "command_usage"
+	ErrorCodeDenied           ErrorCode = "command_denied"
+	ErrorCodeUnavailable      ErrorCode = "command_unavailable"
+	ErrorCodeScope            ErrorCode = "command_scope"
+	ErrorCodeNotSwitchable    ErrorCode = "session_not_switchable"
+	ErrorCodeSkillUnavailable ErrorCode = "skill_unavailable"
+	ErrorCodeFailed           ErrorCode = "command_failed"
+	ErrorCodeInvalidArgument  ErrorCode = "invalid_argument"
 )
 
 type Error struct {
-	Code   Code
+	Code   ErrorCode
 	Detail string
 }
 
@@ -91,7 +93,15 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
 }
 
-func Errorf(code Code, format string, args ...any) error {
+func CodeOf(err error) (ErrorCode, bool) {
+	var target *Error
+	if !errors.As(err, &target) {
+		return "", false
+	}
+	return target.Code, true
+}
+
+func Errorf(code ErrorCode, format string, args ...any) error {
 	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
 }
 
@@ -119,7 +129,7 @@ type Session struct {
 type Result struct {
 	Lines      []string
 	Diagnostic bool
-	Code       Code
+	Code       ErrorCode
 	Control    Control
 	Session    *Session
 	Pending    *Invocation

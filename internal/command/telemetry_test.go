@@ -25,7 +25,7 @@ func TestTelemetryCarriesOnlyBoundedAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCommandRecorder: %v", err)
 	}
-	ports := &spyPorts{skillErr: Errorf(CodeSkillUnavailable, hostile), draftErr: Errorf(CodeFailed, hostile)}
+	ports := &spyPorts{skillErr: Errorf(ErrorCodeSkillUnavailable, hostile), draftErr: Errorf(ErrorCodeFailed, hostile)}
 	d := newTestDispatcher(t, ports, recorder)
 	for _, c := range []*Caller{caller(ChannelTerminal, principal.ClassOwner), caller("discord", principal.ClassOwner), caller("discord", principal.ClassTrusted)} {
 		for _, text := range []string{

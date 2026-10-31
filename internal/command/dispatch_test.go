@@ -148,11 +148,11 @@ func TestAuthorizationMatrix(t *testing.T) {
 				recorder := &spyRecorder{}
 				result := run(t, newTestDispatcher(t, ports, recorder), caller("discord", class), invocations[def.Name])
 				allowed := def.Audience == AudienceAny || class == principal.ClassOwner
-				if allowed && result.Code == CodeDenied {
+				if allowed && result.Code == ErrorCodeDenied {
 					t.Fatalf("%s denied for %s", def.Name, class)
 				}
 				if !allowed {
-					if result.Code != CodeDenied || !slices.Equal(result.Lines, []string{ReplyDenied}) {
+					if result.Code != ErrorCodeDenied || !slices.Equal(result.Lines, []string{ReplyDenied}) {
 						t.Fatalf("result = %+v, want denial", result)
 					}
 					if len(ports.calls) != 0 {
@@ -177,7 +177,7 @@ func TestTerminalOnlyNamesAreUnavailableInMessengers(t *testing.T) {
 			recorder := &spyRecorder{}
 			result := run(t, newTestDispatcher(t, &spyPorts{}, recorder), caller("discord", principal.ClassTrusted), text)
 			name := strings.ToLower(strings.Fields(text)[0])
-			if result.Code != CodeUnavailable || result.Lines[0] != name+" only works in the terminal." || result.Control != ControlNone {
+			if result.Code != ErrorCodeUnavailable || result.Lines[0] != name+" only works in the terminal." || result.Control != ControlNone {
 				t.Fatalf("result = %+v", result)
 			}
 			if len(recorder.seen) != 1 || recorder.seen[0].name != NameTerminalOnly || recorder.seen[0].result != ResultUnavailable {
@@ -195,7 +195,7 @@ func TestTerminalOnlyNamesControlTheTerminal(t *testing.T) {
 	if got := run(t, d, caller(ChannelTerminal, principal.ClassOwner), "/clear"); got.Control != ControlClear {
 		t.Errorf("/clear = %+v", got)
 	}
-	if got := run(t, d, caller(ChannelTerminal, principal.ClassOwner), "/exit now"); got.Code != CodeUsage || got.Control != ControlNone {
+	if got := run(t, d, caller(ChannelTerminal, principal.ClassOwner), "/exit now"); got.Code != ErrorCodeUsage || got.Control != ControlNone {
 		t.Errorf("/exit now = %+v, want usage", got)
 	}
 }
@@ -204,10 +204,10 @@ func TestUnknownAndUnboundNames(t *testing.T) {
 	recorder := &spyRecorder{}
 	d := newTestDispatcher(t, &spyPorts{}, recorder)
 	got := run(t, d, caller(ChannelTerminal, principal.ClassOwner), "/Bogus x")
-	if got.Code != CodeUnknown || got.Lines[0] != "aura: unknown command /Bogus (try /help)" || !got.Diagnostic {
+	if got.Code != ErrorCodeUnknown || got.Lines[0] != "aura: unknown command /Bogus (try /help)" || !got.Diagnostic {
 		t.Errorf("unknown = %+v", got)
 	}
-	if got := run(t, d, caller("web", principal.ClassOwner), "/help"); got.Code != CodeUnknown {
+	if got := run(t, d, caller("web", principal.ClassOwner), "/help"); got.Code != ErrorCodeUnknown {
 		t.Errorf("unbound channel = %+v", got)
 	}
 	if len(recorder.seen) != 0 {
@@ -232,7 +232,7 @@ func TestStrictArity(t *testing.T) {
 		t.Run(tt.text, func(t *testing.T) {
 			ports := &spyPorts{}
 			got := run(t, newTestDispatcher(t, ports, nil), caller("discord", principal.ClassOwner), tt.text)
-			if got.Code != CodeUsage || !slices.Equal(got.Lines, []string{tt.want}) || !got.Diagnostic {
+			if got.Code != ErrorCodeUsage || !slices.Equal(got.Lines, []string{tt.want}) || !got.Diagnostic {
 				t.Errorf("result = %+v, want %q", got, tt.want)
 			}
 			if len(ports.calls) != 0 {
@@ -252,14 +252,14 @@ func TestSkillCreatePromptsOnlyInInteractiveBindings(t *testing.T) {
 	resumed := *got.Pending
 	resumed.Args = append(resumed.Args, "A prompted  description.")
 	done := d.Execute(t.Context(), caller(ChannelTerminal, principal.ClassOwner), &resumed)
-	if done.Code != CodeOK || ports.draftDesc != "A prompted  description." {
+	if done.Code != ErrorCodeOK || ports.draftDesc != "A prompted  description." {
 		t.Fatalf("resumed = %+v desc %q", done, ports.draftDesc)
 	}
 	want := []string{"draft local/n@0123456789ab", "digest 0123456789abcdef", "review with: aura skills review local/n@0123456789ab"}
 	if !slices.Equal(done.Lines, want) {
 		t.Errorf("lines = %q", done.Lines)
 	}
-	if got := run(t, d, caller("discord", principal.ClassOwner), "/skill-create n"); got.Code != CodeUsage || got.Pending != nil {
+	if got := run(t, d, caller("discord", principal.ClassOwner), "/skill-create n"); got.Code != ErrorCodeUsage || got.Pending != nil {
 		t.Errorf("messenger = %+v, want usage", got)
 	}
 }
@@ -270,11 +270,11 @@ func TestSessionScopedCommandsNeedAConversationSession(t *testing.T) {
 	parent.SessionID = ""
 	for _, name := range []string{"status", "session", "new", "cancel"} {
 		got := run(t, d, parent, "/"+name)
-		if got.Code != CodeScope || got.Lines[0] != "Use /"+name+" inside an Aura thread or a DM." {
+		if got.Code != ErrorCodeScope || got.Lines[0] != "Use /"+name+" inside an Aura thread or a DM." {
 			t.Errorf("/%s = %+v", name, got)
 		}
 	}
-	if got := run(t, d, parent, "/help"); got.Code != CodeOK {
+	if got := run(t, d, parent, "/help"); got.Code != ErrorCodeOK {
 		t.Errorf("/help = %+v", got)
 	}
 }
@@ -315,7 +315,7 @@ func TestCanonicalOutcomes(t *testing.T) {
 
 func TestErrorRenderingPerStyle(t *testing.T) {
 	ports := &spyPorts{
-		switchErr: Errorf(CodeNotSwitchable, "not owned by local-owner"),
+		switchErr: Errorf(ErrorCodeNotSwitchable, "not owned by local-owner"),
 		createErr: errors.New("create: disk full at /var/lib/aura"),
 		skillErr:  errors.New("skill_unavailable: skill is not available"),
 		draftErr:  errors.New("invalid name"),
@@ -324,15 +324,15 @@ func TestErrorRenderingPerStyle(t *testing.T) {
 	d := newTestDispatcher(t, ports, nil)
 	tests := []struct {
 		text     string
-		code     Code
+		code     ErrorCode
 		terminal string
 		discord  string
 	}{
-		{"/session other", CodeNotSwitchable, "aura: session other: not owned by local-owner", ReplyNotSwitchable},
-		{"/new", CodeFailed, "aura: /new: create: disk full at /var/lib/aura", "/new failed; check aura status."},
-		{"/status", CodeFailed, "aura: /status: database is locked", "/status failed; check aura status."},
-		{"/skill pdf", CodeSkillUnavailable, "aura: skill pdf: skill_unavailable: skill is not available", "Skill pdf is not available."},
-		{"/skill-create n A b", CodeFailed, "aura: /skill-create: invalid name", "/skill-create failed; check aura status."},
+		{"/session other", ErrorCodeNotSwitchable, "aura: session other: not owned by local-owner", ReplyNotSwitchable},
+		{"/new", ErrorCodeFailed, "aura: /new: create: disk full at /var/lib/aura", "/new failed; check aura status."},
+		{"/status", ErrorCodeFailed, "aura: /status: database is locked", "/status failed; check aura status."},
+		{"/skill pdf", ErrorCodeSkillUnavailable, "aura: skill pdf: skill_unavailable: skill is not available", "Skill pdf is not available."},
+		{"/skill-create n A b", ErrorCodeFailed, "aura: /skill-create: invalid name", "/skill-create failed; check aura status."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.text, func(t *testing.T) {
@@ -361,10 +361,43 @@ func TestMissingOptionalPorts(t *testing.T) {
 	if got := run(t, d, owner, "/cancel"); got.Lines[0] != "no active turn" {
 		t.Errorf("/cancel = %+v", got)
 	}
-	if got := run(t, d, owner, "/skill pdf"); got.Code != CodeSkillUnavailable {
+	if got := run(t, d, owner, "/skill pdf"); got.Code != ErrorCodeSkillUnavailable {
 		t.Errorf("/skill = %+v", got)
 	}
-	if got := run(t, d, owner, "/skill-create n A b"); got.Code != CodeFailed {
+	if got := run(t, d, owner, "/skill-create n A b"); got.Code != ErrorCodeFailed {
 		t.Errorf("/skill-create = %+v", got)
+	}
+}
+
+func TestExecuteRejectsNilCallerAndInvocationWithoutPanic(t *testing.T) {
+	ports := &spyPorts{}
+	recorder := &spyRecorder{}
+	d := newTestDispatcher(t, ports, recorder)
+	inv, ok := Parse("/status")
+	if !ok {
+		t.Fatalf("Parse(%q) failed", "/status")
+	}
+	tests := []struct {
+		name   string
+		caller *Caller
+		inv    *Invocation
+	}{
+		{name: "nil caller", caller: nil, inv: &inv},
+		{name: "nil invocation", caller: caller("discord", principal.ClassOwner), inv: nil},
+		{name: "both nil", caller: nil, inv: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := d.Execute(t.Context(), tt.caller, tt.inv)
+			if got.Code != ErrorCodeInvalidArgument || !got.Diagnostic || len(got.Lines) != 1 {
+				t.Fatalf("result = %+v, want invalid_argument diagnostic", got)
+			}
+		})
+	}
+	if len(ports.calls) != 0 {
+		t.Errorf("rejection reached ports: %v", ports.calls)
+	}
+	if len(recorder.seen) != 0 {
+		t.Errorf("rejection was recorded: %+v", recorder.seen)
 	}
 }
