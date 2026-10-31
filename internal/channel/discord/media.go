@@ -55,6 +55,10 @@ type SessionEnsurer interface {
 	SessionExists(ctx context.Context, sessionID string) (bool, error)
 }
 
+type SessionResolver interface {
+	ActiveSession(ctx context.Context, conversationKey string) (string, error)
+}
+
 type artifactSummary struct {
 	RefID     string `json:"ref_id"`
 	Digest    string `json:"digest"`

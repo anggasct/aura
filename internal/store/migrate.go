@@ -37,6 +37,7 @@ var migrations = []migration{
 	{version: 19, sql: childRunTypedResultSchemaSQL},
 	{version: 20, sql: personaAttributionSchemaSQL},
 	{version: 21, sql: memoryPersonaSchemaSQL},
+	{version: 22, sql: conversationSessionSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -534,6 +535,15 @@ ALTER TABLE memory_document ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'main';
 UPDATE memory_document SET agent_id = (SELECT session.agent_id FROM session WHERE session.id = memory_document.session_id)
     WHERE EXISTS (SELECT 1 FROM session WHERE session.id = memory_document.session_id);
 CREATE INDEX memory_document_owner_agent_idx ON memory_document(owner_id, agent_id, created_at);
+`
+
+const conversationSessionSchemaSQL = `
+CREATE TABLE conversation_session (
+    conversation_key TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX conversation_session_session_idx ON conversation_session(session_id);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

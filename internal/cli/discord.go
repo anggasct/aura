@@ -210,6 +210,7 @@ func newDiscordAdapter(cfg *config.Config, account *config.DiscordAccount, db *s
 	if err != nil {
 		return nil, err
 	}
+	adapter.SetSessionResolver(&discordConversationResolver{pointers: store.NewConversationSessionStore(db)})
 	adapter.SetSecretVault(buildSecretVault(cfg))
 	if svc := newVisionService(cfg, db, artifactRoot); svc != nil {
 		adapter.SetVisionService(svc)

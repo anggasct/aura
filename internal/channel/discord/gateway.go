@@ -557,7 +557,11 @@ func (a *Adapter) admitThreadRoute(ctx context.Context, msg *messagePayload, rou
 }
 
 func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope, bindingChannel string) (bool, error) {
-	envelope.ConversationID = a.sessionKey(envelope.AgentID, envelope.ConversationID)
+	active, err := a.activeSession(ctx, a.sessionKey(envelope.AgentID, envelope.ConversationID))
+	if err != nil {
+		return false, err
+	}
+	envelope.ConversationID = active
 	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, actor: msg.Author.ID, guildID: msg.GuildID, channelID: bindingChannel})
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)
