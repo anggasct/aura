@@ -2,152 +2,141 @@ package terminal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/anggasct/aura/internal/command"
+	"github.com/anggasct/aura/internal/principal"
 )
 
-type SkillContext struct {
-	ID     string
-	Caveat string
-	Text   string
+func CommandBinding() command.Binding {
+	return command.Binding{
+		Channel:     command.ChannelTerminal,
+		Style:       command.StyleTerminal,
+		Interactive: true,
+		Names:       []string{"help", "status", "session", "new", "cancel", "skill", "skill-create", "exit", "clear"},
+		Notes:       []command.Note{{Syntax: ".", Summary: "compose a multi-line prompt in $EDITOR (interactive)"}},
+	}
 }
 
-type Skills interface {
-	ActivateSkill(ctx context.Context, name string) (SkillContext, error)
-	CreateSkill(ctx context.Context, name, description string) (SkillDraft, error)
+func (c *Console) buildCommands() error {
+	registry, err := command.New(CommandBinding())
+	if err != nil {
+		return err
+	}
+	dispatcher, err := command.NewDispatcher(registry, command.Ports{
+		Sessions: consoleSessions{console: c},
+		Turns:    idleTurns{},
+		Skills:   c.skills,
+	}, c.recorder)
+	if err != nil {
+		return err
+	}
+	c.commands = dispatcher
+	return nil
 }
 
-type SkillDraft struct {
-	ID     string
-	Digest string
+func (c *Console) caller() *command.Caller {
+	return &command.Caller{
+		Channel:     command.ChannelTerminal,
+		PrincipalID: c.principal,
+		Class:       principal.ClassOwner,
+		SessionID:   c.sessionID,
+		AgentID:     c.agentID,
+	}
 }
 
 func (c *Console) dispatch(ctx context.Context, raw string) (bool, error) {
-	fields := strings.Fields(raw)
-	command := strings.ToLower(strings.TrimPrefix(fields[0], "/"))
-	args := fields[1:]
-	switch command {
-	case "help":
-		return true, writeLine(c.out, helpText())
-	case "exit", "quit":
+	inv, ok := command.Parse(raw)
+	if !ok {
+		return true, writeLinef(c.diag, "aura: unknown command %s (try /help)", strings.Fields(raw)[0])
+	}
+	return c.execute(ctx, &inv)
+}
+
+func (c *Console) resumePending(ctx context.Context, line string) (bool, error) {
+	inv := *c.pending
+	c.pending = nil
+	inv.Args = append(inv.Args, line)
+	return c.execute(ctx, &inv)
+}
+
+func (c *Console) execute(ctx context.Context, inv *command.Invocation) (bool, error) {
+	result := c.commands.Execute(ctx, c.caller(), inv)
+	switch result.Control {
+	case command.ControlExit:
 		return false, nil
-	case "clear":
+	case command.ControlClear:
 		if c.tty != nil {
 			return true, c.tty.clearScreen(ctx)
 		}
 		return true, writeLine(c.out, "")
-	case "new":
-		return true, c.newSession(ctx)
-	case "session":
-		return true, c.sessionCommand(ctx, args)
-	case "cancel":
-		c.cancelTurn()
-		return true, nil
-	case "status":
-		return true, c.status(ctx)
-	case "skill":
-		return true, c.skillCommand(ctx, args)
-	case "skill-create":
-		return true, c.skillCreateCommand(ctx, args)
-	default:
-		return true, writeLinef(c.diag, "aura: unknown command %s (try /help)", fields[0])
+	case command.ControlNone:
 	}
-}
-
-func (c *Console) newSession(ctx context.Context) error {
-	sess, err := c.sessions.Create(ctx, c.principal, c.agentID)
-	if err != nil {
-		return fmt.Errorf("terminal: create session: %w", err)
-	}
-	c.sessionID = sess.ID
-	if sess.AgentID != "" {
-		c.agentID = sess.AgentID
-	}
-	return writeLinef(c.diag, "new session %s", sess.ID)
-}
-
-func (c *Console) sessionCommand(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return writeLinef(c.out, "session %s", c.sessionID)
-	}
-	id := args[0]
-	sess, err := c.sessions.Get(ctx, id)
-	if err != nil {
-		return fmt.Errorf("terminal: session %s: %w", id, err)
-	}
-	if c.principal == "" || sess.OwnerID != c.principal {
-		return fmt.Errorf("terminal: session %s is not owned by %s", id, c.principal)
-	}
-	c.sessionID = sess.ID
-	if sess.AgentID != "" {
-		c.agentID = sess.AgentID
-	}
-	return writeLinef(c.diag, "switched to session %s", sess.ID)
-}
-
-func (c *Console) skillCommand(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return writeLine(c.diag, "usage: /skill <name>")
-	}
-	if c.skills == nil {
-		return writeLine(c.diag, "skill support is not available")
-	}
-	activated, err := c.skills.ActivateSkill(ctx, args[0])
-	if err != nil {
-		return writeLinef(c.diag, "aura: skill %s: %v", args[0], err)
-	}
-	if err := writeLinef(c.out, "skill %s", activated.ID); err != nil {
-		return err
-	}
-	if err := writeLine(c.out, activated.Caveat); err != nil {
-		return err
-	}
-	return writeLine(c.out, activated.Text)
-}
-
-func (c *Console) skillCreateCommand(ctx context.Context, args []string) error {
-	if c.skills == nil {
-		return writeLine(c.diag, "skill support is not available")
-	}
-	switch len(args) {
-	case 0:
-		return writeLine(c.diag, "usage: /skill-create <name> [description]")
-	case 1:
-		c.pendingSkill = args[0]
-		return writeLine(c.out, "describe the skill in one line:")
-	default:
-		return c.finishSkillCreate(ctx, args[0], strings.Join(args[1:], " "))
-	}
-}
-
-func (c *Console) finishSkillCreate(ctx context.Context, name, description string) error {
-	if c.skills == nil {
-		return writeLine(c.diag, "skill support is not available")
-	}
-	draft, err := c.skills.CreateSkill(ctx, name, description)
-	if err != nil {
-		return writeLinef(c.diag, "aura: skill-create %s: %v", name, err)
-	}
-	if err := writeLinef(c.out, "draft %s", draft.ID); err != nil {
-		return err
-	}
-	if err := writeLinef(c.out, "digest %s", draft.Digest); err != nil {
-		return err
-	}
-	return writeLine(c.out, "review with: aura skills review "+draft.ID)
-}
-
-func (c *Console) status(ctx context.Context) error {
-	events, err := c.sessions.ListEvents(ctx, c.sessionID, 0, c.config.InMemoryHistory)
-	if err != nil {
-		if code := codeOf(err); code != "session_not_found" && code != "" {
-			return fmt.Errorf("terminal: session events: %w", err)
+	if result.Session != nil {
+		c.sessionID = result.Session.ID
+		if result.Session.AgentID != "" {
+			c.agentID = result.Session.AgentID
 		}
 	}
-	if err := writeLinef(c.out, "session %s", c.sessionID); err != nil {
-		return err
+	c.pending = result.Pending
+	w := c.out
+	if result.Diagnostic {
+		w = c.diag
 	}
-	return writeLinef(c.out, "events %d", len(events))
+	for _, line := range result.Lines {
+		if err := writeLine(w, line); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
+type consoleSessions struct {
+	console *Console
+}
+
+func (s consoleSessions) EventCount(ctx context.Context, sessionID string) (int, error) {
+	events, err := s.console.sessions.ListEvents(ctx, sessionID, 0, s.console.config.InMemoryHistory)
+	if err != nil {
+		if code := codeOf(err); code != "session_not_found" && code != "" {
+			return 0, fmt.Errorf("session events: %w", err)
+		}
+	}
+	return len(events), nil
+}
+
+func (s consoleSessions) Create(ctx context.Context, caller *command.Caller) (command.Session, error) {
+	sess, err := s.console.sessions.Create(ctx, caller.PrincipalID, caller.AgentID)
+	if err != nil {
+		return command.Session{}, fmt.Errorf("create session: %w", err)
+	}
+	return command.Session{ID: sess.ID, OwnerID: sess.OwnerID, AgentID: sess.AgentID}, nil
+}
+
+func (s consoleSessions) Switch(ctx context.Context, caller *command.Caller, id string) (command.Session, error) {
+	sess, err := s.console.sessions.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return command.Session{}, command.Errorf(command.CodeNotSwitchable, "not found")
+		}
+		return command.Session{}, err
+	}
+	if caller.PrincipalID == "" || sess.OwnerID != caller.PrincipalID {
+		return command.Session{}, command.Errorf(command.CodeNotSwitchable, "not owned by %s", caller.PrincipalID)
+	}
+	return command.Session{ID: sess.ID, OwnerID: sess.OwnerID, AgentID: sess.AgentID}, nil
+}
+
+type idleTurns struct{}
+
+func (idleTurns) CancelActive(context.Context, string) (turnID string, cancelled bool, err error) {
+	return "", false, nil
+}
+
+func (idleTurns) Activity(string) (activeTurnID string, queued int) {
+	return "", 0
 }
 
 func codeOf(err error) string {
@@ -156,18 +145,4 @@ func codeOf(err error) string {
 		return c.Code()
 	}
 	return ""
-}
-
-func helpText() string {
-	return "commands:\n" +
-		"  /help              show this help\n" +
-		"  /exit, /quit       leave the console\n" +
-		"  /clear             clear the screen\n" +
-		"  /new               start a new session\n" +
-		"  /session [id]      show or switch to a session\n" +
-		"  /cancel            cancel the active turn\n" +
-		"  /status            show the current session\n" +
-		"  /skill <name>      activate a skill\n" +
-		"  /skill-create      stage a skill draft\n" +
-		"  .                  compose a multi-line prompt in $EDITOR (interactive)\n"
 }
