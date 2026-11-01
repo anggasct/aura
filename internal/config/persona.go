@@ -7,12 +7,39 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/secret"
 )
 
 const MaxSoulBytes = 32 << 10
+
+const MaxPersonaNameRunes = 64
+
+func validatePersonaNames(cfg *Config) error {
+	if cfg.Agents == nil {
+		return nil
+	}
+	for i := range cfg.Agents.Definitions {
+		name := cfg.Agents.Definitions[i].Name
+		if name == "" {
+			continue
+		}
+		field := fmt.Sprintf("agents.definitions[%d].name", i)
+		switch {
+		case strings.TrimSpace(name) != name:
+			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + " must not have surrounding whitespace"}
+		case strings.ContainsFunc(name, unicode.IsControl):
+			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + " must be a single line without control characters"}
+		case utf8.RuneCountInString(name) > MaxPersonaNameRunes:
+			return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s must be at most %d characters", field, MaxPersonaNameRunes)}
+		case strings.EqualFold(name, "user"):
+			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + " must not be \"user\""}
+		}
+	}
+	return nil
+}
 
 func loadPersonaSouls(cfg *Config, configPath string) error {
 	if cfg.Agents == nil {

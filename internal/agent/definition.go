@@ -10,6 +10,7 @@ import (
 
 type Definition struct {
 	ID           string
+	Name         string
 	Description  string
 	Instructions string
 	SoulFile     string
@@ -59,6 +60,7 @@ func (d *Definition) key() string {
 func (d *Definition) clone() Definition {
 	return Definition{
 		ID:           d.ID,
+		Name:         d.Name,
 		Description:  d.Description,
 		Instructions: d.Instructions,
 		SoulFile:     d.SoulFile,

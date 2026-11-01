@@ -411,3 +411,33 @@ func TestBuildRejectsUnknownMemoryScope(t *testing.T) {
 		t.Fatalf("Build error = %v, want %s", err, ErrorCodeDefinitionInvalid)
 	}
 }
+
+func TestBuildResolvesPersonaNames(t *testing.T) {
+	registry, err := Build([]config.AgentDefinition{
+		{ID: "kuma", Description: "d", Instructions: "i"},
+		{ID: "engineer", Name: "Eng"},
+	}, validTools, []string{"primary", "auxiliary"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	for id, want := range map[string]string{DefaultID: DefaultName, "kuma": "kuma", "engineer": "Eng", "reviewer": "reviewer"} {
+		definition, ok := registry.Lookup(id)
+		if !ok || definition.Name != want {
+			t.Errorf("%s name = %q (registered %v), want %q", id, definition.Name, ok, want)
+		}
+	}
+	renamed, err := Build([]config.AgentDefinition{{ID: DefaultID, Name: "Mira"}}, validTools, []string{"primary"})
+	if err != nil {
+		t.Fatalf("Build renamed main: %v", err)
+	}
+	if main, _ := renamed.Lookup(DefaultID); main.Name != "Mira" {
+		t.Fatalf("renamed main = %q, want Mira", main.Name)
+	}
+	unnamed, err := Build([]config.AgentDefinition{{ID: DefaultID, SoulFile: "soul.md", Soul: "You are Aura."}}, validTools, []string{"primary"})
+	if err != nil {
+		t.Fatalf("Build main override: %v", err)
+	}
+	if main, _ := unnamed.Lookup(DefaultID); main.Name != DefaultName {
+		t.Fatalf("main override without a name = %q, want %q", main.Name, DefaultName)
+	}
+}

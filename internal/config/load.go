@@ -261,6 +261,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := screenOwnerSecrets(cfg.Owner, cfg); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validatePersonaNames(cfg); err != nil {
+		return LoadResult{}, err
+	}
 	if err := loadPersonaSouls(cfg, resolved); err != nil {
 		return LoadResult{}, err
 	}
@@ -1412,9 +1415,9 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 	if definitionsNode.Kind != yamlv3.SequenceNode {
 		return fmt.Errorf("agents.definitions must be a list at line %d", definitionsNode.Line)
 	}
-	stringFields := []string{"id", "description", "instructions", "soul_file", "model_route", "memory_scope"}
+	stringFields := []string{"id", "name", "description", "instructions", "soul_file", "model_route", "memory_scope"}
 	listFields := []string{"tools", "capabilities"}
-	for _, item := range definitionsNode.Content {
+	for index, item := range definitionsNode.Content {
 		if item.Kind != yamlv3.MappingNode {
 			return fmt.Errorf("agents.definitions entries must be mappings at line %d", item.Line)
 		}
@@ -1425,6 +1428,9 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 			case slices.Contains(stringFields, key):
 				if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
 					return fmt.Errorf("agents.definitions.%s must be a string at line %d", key, value.Line)
+				}
+				if key == "name" && value.Value == "" {
+					return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("agents.definitions[%d].name must not be empty", index)}
 				}
 			case slices.Contains(listFields, key):
 				if value.Kind != yamlv3.SequenceNode {

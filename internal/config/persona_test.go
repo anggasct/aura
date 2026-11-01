@@ -134,3 +134,44 @@ func TestLoad_MemoryScopeShape(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_PersonaNameValidation(t *testing.T) {
+	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
+	cases := map[string]struct {
+		name   string
+		detail string
+	}{
+		"absent":              {},
+		"valid":               {name: `"Kuma"`},
+		"surrounding space":   {name: `" Kuma"`, detail: "surrounding whitespace"},
+		"multi line":          {name: `"a\nb"`, detail: "single line"},
+		"too long":            {name: `"` + strings.Repeat("k", MaxPersonaNameRunes+1) + `"`, detail: "at most"},
+		"explicitly empty":    {name: `""`, detail: "must not be empty"},
+		"reserved user":       {name: `"User"`, detail: `"user"`},
+		"at the length limit": {name: `"` + strings.Repeat("k", MaxPersonaNameRunes) + `"`},
+	}
+	for label, tc := range cases {
+		t.Run(label, func(t *testing.T) {
+			definition := "    - id: kuma\n      description: d\n      instructions: i\n"
+			if tc.name != "" {
+				definition += "      name: " + tc.name + "\n"
+			}
+			res, err := Load(writePersonaConfig(t, "", "", definition))
+			if tc.detail == "" {
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				if got, want := res.Config.Agents.Definitions[0].Name, strings.Trim(tc.name, `"`); got != want {
+					t.Fatalf("name = %q, want %q", got, want)
+				}
+				return
+			}
+			if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaInvalid {
+				t.Fatalf("code = %q, %v (err %v), want persona_invalid", code, ok, err)
+			}
+			if !strings.Contains(err.Error(), "agents.definitions[0].name") || !strings.Contains(err.Error(), tc.detail) {
+				t.Fatalf("error %q does not name the field and %q", err, tc.detail)
+			}
+		})
+	}
+}
