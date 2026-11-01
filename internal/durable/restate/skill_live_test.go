@@ -110,3 +110,62 @@ func TestLivePinnedTurnSurvivesCrashWithOneActivation(t *testing.T) {
 		t.Fatalf("renders = %d context calls = %d, want both journaled once across the restart", renders, contextCalls)
 	}
 }
+
+func TestLivePinnedTurnRetriesTransientRenderFailure(t *testing.T) {
+	binary := liveRestateBinary(t)
+	stub := &liveSkillStub{body: "RECOVERED-SKILL-BODY", block: runtime.SkillContextStart + "]\nRECOVERED-BLOCK\n" + runtime.SkillContextEnd, renderErr: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
+	model := &liveScriptModel{steps: []liveModelStep{{tool: "tool-a"}, {text: "done"}}}
+	rig := startLiveTurnRig(t, binary, model, []liveToolDef{{name: "tool-a"}}, liveSkillWiring{renderer: stub, context: stub})
+
+	req := liveTurnRequest("turn-skill-retry")
+	req.PrincipalClass = principal.ClassOwner
+	req.Skill = &runtime.SkillPin{SkillID: "local/pdf@0123456789ab", Digest: "0123456789abcdef", InvocationID: "inv-live", PolicyVersion: "1"}
+	streamDone := make(chan error, 1)
+	go func() {
+		for _, err := range rig.engine.Run(context.Background(), req) {
+			if err != nil {
+				streamDone <- err
+				return
+			}
+		}
+		streamDone <- nil
+	}()
+	attemptDeadline := time.Now().Add(90 * time.Second)
+	for {
+		if renders, _ := stub.counts(); renders > 0 {
+			break
+		}
+		if time.Now().After(attemptDeadline) {
+			t.Fatal("transient render failure was never attempted")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	stub.mu.Lock()
+	stub.renderErr = nil
+	stub.mu.Unlock()
+	events := rig.waitTerminal("turn-skill-retry", 120*time.Second)
+	if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
+		t.Fatalf("terminal = %q, want turn.completed", last.Kind)
+	}
+	select {
+	case err := <-streamDone:
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("stream never terminated")
+	}
+	var activations []store.RuntimeEvent
+	for i := range events {
+		if events[i].Kind == runtime.EventKindSkillActivated {
+			activations = append(activations, events[i])
+		}
+	}
+	if len(activations) != 1 {
+		t.Fatalf("activations = %d, want 1", len(activations))
+	}
+	var payload runtime.SkillActivation
+	if err := json.Unmarshal(activations[0].Payload, &payload); err != nil || payload.Body != "RECOVERED-SKILL-BODY" || payload.InvocationID != "inv-live" || payload.TurnID != "turn-skill-retry" {
+		t.Fatalf("activation = %+v %v", payload, err)
+	}
+}

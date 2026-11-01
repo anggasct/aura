@@ -483,6 +483,11 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	var executed []store.RuntimeEvent
 	e.notifyPresenceStarted(ctx, req)
 	execErr := e.persistSkillActivation(ctx, req, journaledSkillActivation(scope, e.renderSkillActivation), persist)
+	if execErr != nil {
+		if code, ok := runtime.CodeOf(execErr); ok && code.Retryable() {
+			return execErr
+		}
+	}
 	if execErr == nil {
 		for ev, err := range e.executor.Execute(ctx, req) {
 			if err != nil {

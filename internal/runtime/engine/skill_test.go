@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/skills"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -118,7 +119,7 @@ func TestPinnedTurnRecordsTheActivationBeforeExecution(t *testing.T) {
 func TestPinnedTurnFailsClosedWhenTheSkillIsUnavailable(t *testing.T) {
 	for name, renderer := range map[string]SkillRenderer{
 		"not configured": nil,
-		"render fails":   &stubSkillRenderer{err: errors.New("skill_unavailable: digest changed")},
+		"render fails":   &stubSkillRenderer{err: skills.Errorf(skills.ErrorCodeSkillUnavailable, "digest changed")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			executor := &pinRecordingExecutor{}
@@ -140,6 +141,132 @@ func TestPinnedTurnFailsClosedWhenTheSkillIsUnavailable(t *testing.T) {
 				t.Fatal("executor ran without its pinned skill")
 			}
 		})
+	}
+}
+
+func TestPinnedTurnSurfacesTransientRenderFailuresWithTheirOwnCode(t *testing.T) {
+	for name, renderer := range map[string]SkillRenderer{
+		"storage failed":  &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")},
+		"storage busy":    &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageBusy, "read skill")},
+		"renderer broken": &stubSkillRenderer{err: errors.New("renderer panicked")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			executor := &pinRecordingExecutor{}
+			engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, executor)
+			mustCreateSession(t, db, "session-a")
+			events, err := collect(t, engine, pinnedRequest("session-a", "turn-1"))
+			if err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			last := events[len(events)-1]
+			var failed struct {
+				Code string `json:"code"`
+			}
+			_ = json.Unmarshal(last.Payload, &failed)
+			want := string(runtime.ErrorCodeStorageUnavailable)
+			if name == "renderer broken" {
+				want = string(runtime.ErrorCodeRuntimeInternal)
+			}
+			if last.Kind != runtime.EventKindTurnFailed || failed.Code != want {
+				t.Fatalf("terminal = %s %s, want turn.failed %s", last.Kind, last.Payload, want)
+			}
+			if len(executor.started()) != 0 {
+				t.Fatal("executor ran without its pinned skill")
+			}
+		})
+	}
+}
+
+func TestDurableTransientRenderFailureIsRetriedNotJournaled(t *testing.T) {
+	renderer := &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
+	engine, db, events := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, &pinRecordingExecutor{})
+	mustCreateSession(t, db, "session-a")
+	inv := &journalInvocation{}
+	req := pinnedRequest("session-a", "turn-1")
+	attempt := func() error {
+		scope := durable.NewTurnScope(inv)
+		persist := func(ctx context.Context, ev *store.RuntimeEvent) error {
+			ev.ID = scope.NextEventID(req.TurnID)
+			ev.SessionID, ev.TurnID, ev.SchemaVersion, ev.CreatedAt = req.SessionID, req.TurnID, 1, time.Unix(0, 0).UTC()
+			_, _, err := events.UpsertEvent(ctx, ev)
+			return err
+		}
+		return engine.persistSkillActivation(context.Background(), req, journaledSkillActivation(scope, engine.renderSkillActivation), persist)
+	}
+	err := attempt()
+	if err == nil {
+		t.Fatal("transient render failure journaled a result")
+	}
+	if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeStorageUnavailable {
+		t.Fatalf("attempt error = %v, want storage_unavailable", err)
+	}
+	inv.mu.Lock()
+	_, journaled := inv.journal["skill-activation"]
+	inv.mu.Unlock()
+	if journaled {
+		t.Fatal("transient render failure journaled a skill-activation result")
+	}
+	renderer.mu.Lock()
+	renderer.err, renderer.body = nil, "Recovered body."
+	renderer.mu.Unlock()
+	if err := attempt(); err != nil {
+		t.Fatalf("retried attempt: %v", err)
+	}
+	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("stored = %v, want one activation", kinds(stored))
+	}
+	assertActivation(t, &stored[0], "turn-1", "Recovered body.")
+	if renderer.calls != 2 {
+		t.Errorf("renderer calls = %d, want the retry to re-render", renderer.calls)
+	}
+}
+
+func TestDurableUnavailableSkillJournalsNullOnce(t *testing.T) {
+	renderer := &stubSkillRenderer{err: skills.Errorf(skills.ErrorCodeSkillUnavailable, "quarantined")}
+	engine, db, events := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, &pinRecordingExecutor{})
+	mustCreateSession(t, db, "session-a")
+	inv := &journalInvocation{}
+	req := pinnedRequest("session-a", "turn-1")
+	attempt := func() error {
+		scope := durable.NewTurnScope(inv)
+		persist := func(ctx context.Context, ev *store.RuntimeEvent) error {
+			ev.ID = scope.NextEventID(req.TurnID)
+			ev.SessionID, ev.TurnID, ev.SchemaVersion, ev.CreatedAt = req.SessionID, req.TurnID, 1, time.Unix(0, 0).UTC()
+			_, _, err := events.UpsertEvent(ctx, ev)
+			return err
+		}
+		return engine.persistSkillActivation(context.Background(), req, journaledSkillActivation(scope, engine.renderSkillActivation), persist)
+	}
+	err := attempt()
+	if err == nil {
+		t.Fatal("unavailable skill journaled an activation")
+	}
+	if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeSkillUnavailable {
+		t.Fatalf("attempt error = %v, want skill_unavailable", err)
+	}
+	inv.mu.Lock()
+	raw := string(inv.journal["skill-activation"])
+	inv.mu.Unlock()
+	if raw != "null" {
+		t.Fatalf("journaled activation = %q, want null", raw)
+	}
+	renderer.mu.Lock()
+	renderer.err, renderer.body = nil, "Back."
+	renderer.mu.Unlock()
+	if err := attempt(); err == nil {
+		t.Fatal("replayed unavailability flipped to success")
+	} else if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodeSkillUnavailable {
+		t.Fatalf("replayed attempt error = %v, want skill_unavailable", err)
+	}
+	if renderer.calls != 1 {
+		t.Errorf("renderer calls = %d, want the replay to reuse the journal", renderer.calls)
+	}
+	if stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-1"); err != nil || len(stored) != 0 {
+		t.Fatalf("stored activations = %v (%v), want none", kinds(stored), err)
 	}
 }
 
@@ -226,7 +353,7 @@ func TestDurableReplayReusesTheJournaledActivation(t *testing.T) {
 		t.Fatalf("first attempt: %v", err)
 	}
 	renderer.mu.Lock()
-	renderer.body, renderer.err = "Changed body.", errors.New("skill_unavailable: quarantined")
+	renderer.body, renderer.err = "Changed body.", skills.Errorf(skills.ErrorCodeSkillUnavailable, "quarantined")
 	renderer.mu.Unlock()
 	if err := attempt(); err != nil {
 		t.Fatalf("replayed attempt: %v", err)

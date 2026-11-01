@@ -123,6 +123,8 @@ func mapSkillStoreError(err error) error {
 		return skills.Errorf(skills.ErrorCodeSkillDigestChanged, "skill content changed since review")
 	case store.ErrorCodeInvalidArgument:
 		return skills.Errorf(skills.ErrorCodeInvalidArgument, "skill argument is not valid")
+	case store.ErrorCodeStorageUnavailable, store.ErrorCodeStorageBusy:
+		return err
 	default:
 		return skills.Errorf(skills.ErrorCodeSkillUnavailable, "skill registry is unavailable")
 	}
