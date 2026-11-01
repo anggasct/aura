@@ -38,6 +38,7 @@ var migrations = []migration{
 	{version: 20, sql: personaAttributionSchemaSQL},
 	{version: 21, sql: memoryPersonaSchemaSQL},
 	{version: 22, sql: conversationSessionSchemaSQL},
+	{version: 23, sql: accessSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -544,6 +545,51 @@ CREATE TABLE conversation_session (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX conversation_session_session_idx ON conversation_session(session_id);
+`
+
+const accessSchemaSQL = `
+CREATE TABLE principal_grant (
+    principal_id TEXT NOT NULL,
+    account      TEXT NOT NULL,
+    class        TEXT NOT NULL CHECK (class IN ('trusted')),
+    granted_at   TEXT NOT NULL,
+    granted_by   TEXT NOT NULL,
+    revoked_at   TEXT,
+    PRIMARY KEY (principal_id, account)
+);
+
+CREATE TABLE pairing_request (
+    code_sha256     TEXT PRIMARY KEY,
+    principal_id    TEXT NOT NULL,
+    account         TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    expires_at      TEXT NOT NULL,
+    failed_attempts INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX pairing_request_account_idx ON pairing_request(account, expires_at);
+
+CREATE TABLE standing_grant (
+    id           TEXT PRIMARY KEY,
+    principal_id TEXT NOT NULL,
+    agent_id     TEXT NOT NULL,
+    tool_name    TEXT NOT NULL,
+    granted_at   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    granted_by   TEXT NOT NULL,
+    revoked_at   TEXT
+);
+CREATE INDEX standing_grant_lookup_idx ON standing_grant(principal_id, agent_id, tool_name, expires_at);
+
+CREATE TABLE session_handoff (
+    session_id  TEXT PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+    reason      TEXT NOT NULL,
+    opened_at   TEXT NOT NULL,
+    released_at TEXT
+);
+
+ALTER TABLE usage_reservation ADD COLUMN principal_id TEXT;
+ALTER TABLE usage_reservation ADD COLUMN principal_class TEXT;
+CREATE INDEX usage_reservation_principal_idx ON usage_reservation(principal_id, window_day);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

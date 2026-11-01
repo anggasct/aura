@@ -40,11 +40,14 @@ type approvalStub struct {
 	patches   []patchCall
 	postID    string
 	postCode  int
+	dmID      string
+	dmCode    int
+	dmCalls   int
 }
 
 func newApprovalStub(t *testing.T) *approvalStub {
 	t.Helper()
-	stub := &approvalStub{postID: "card-7", postCode: http.StatusOK}
+	stub := &approvalStub{postID: "card-7", postCode: http.StatusOK, dmID: "555", dmCode: http.StatusOK}
 	stub.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(io.LimitReader(r.Body, approvalHTTPBytes))
 		_ = r.Body.Close()
@@ -55,6 +58,13 @@ func newApprovalStub(t *testing.T) *approvalStub {
 		stub.mu.Lock()
 		defer stub.mu.Unlock()
 		switch {
+		case r.Method == http.MethodPost && path == "users/@me/channels":
+			stub.dmCalls++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(stub.dmCode)
+			if stub.dmCode == http.StatusOK {
+				_, _ = w.Write([]byte(`{"id":"` + stub.dmID + `","type":1}`))
+			}
 		case r.Method == http.MethodPost && len(segments) == 3 && segments[0] == "channels" && segments[2] == "messages":
 			stub.posts = append(stub.posts, cardPost{channel: segments[1], body: decoded})
 			w.Header().Set("Content-Type", "application/json")
@@ -95,8 +105,8 @@ func newApprovalAdapter(t *testing.T, stub *approvalStub, logs *logCapture) *Ada
 		t.Fatalf("New(): %v", err)
 	}
 	adapter.restBase = stub.srv.URL
-	adapter.rememberTarget("dm:111", approvalBinding{principal: "discord:111", actor: "111", channelID: "333"})
-	adapter.rememberTarget("channel:333", approvalBinding{principal: "discord:111", actor: "111", guildID: "222", channelID: "333"})
+	adapter.rememberTarget("dm:111", &approvalBinding{principal: principal.OwnerID, class: principal.ClassOwner, actor: "111", channelID: "333"})
+	adapter.rememberTarget("channel:333", &approvalBinding{principal: principal.OwnerID, class: principal.ClassOwner, actor: "111", guildID: "222", channelID: "333"})
 	return adapter
 }
 
@@ -106,7 +116,7 @@ func testPrompt(session string, expiresAt time.Time) *ApprovalPrompt {
 		ToolVersion:   "1",
 		SessionID:     session,
 		TurnID:        "turn-1",
-		PrincipalID:   "discord:111",
+		PrincipalID:   principal.OwnerID,
 		Arguments:     `{"command":"ls"}`,
 		PolicyVersion: "v3",
 		ReasonCode:    "approval_required",
@@ -466,7 +476,7 @@ func TestParseApprovalCustomID(t *testing.T) {
 func TestRenderApprovalCardBoundsArguments(t *testing.T) {
 	prompt := testPrompt("dm:111", time.Now().Add(time.Minute))
 	prompt.Arguments = "@everyone " + strings.Repeat("x", approvalCardArgRunes+100)
-	card := renderApprovalCard(prompt)
+	card := renderApprovalCard(prompt, "")
 	if strings.Contains(card, "@everyone") {
 		t.Error("card preserves a mass mention")
 	}
@@ -529,7 +539,7 @@ func TestDecide_ClickDuringCardPostStillDisables(t *testing.T) {
 		t.Fatalf("New(): %v", err)
 	}
 	adapter.restBase = srv.URL
-	adapter.rememberTarget("dm:111", approvalBinding{principal: "discord:111", actor: "111", channelID: "333"})
+	adapter.rememberTarget("dm:111", &approvalBinding{principal: principal.OwnerID, class: principal.ClassOwner, actor: "111", channelID: "333"})
 
 	result := decideAsync(t.Context(), adapter, testPrompt("dm:111", time.Now().Add(time.Minute)))
 	var approve string
@@ -560,7 +570,7 @@ func TestDecide_ClickDuringCardPostStillDisables(t *testing.T) {
 func TestApproval_OwnerPrincipalAuthorizesOnlyTheSender(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter := newApprovalAdapter(t, stub, nil)
-	adapter.rememberTarget("dm:777", approvalBinding{principal: principal.OwnerID, actor: "777", channelID: "333"})
+	adapter.rememberTarget("dm:777", &approvalBinding{principal: principal.OwnerID, actor: "777", channelID: "333"})
 	prompt := testPrompt("dm:777", time.Now().Add(time.Minute))
 	prompt.PrincipalID = principal.OwnerID
 	result := decideAsync(t.Context(), adapter, prompt)

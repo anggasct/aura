@@ -3,12 +3,14 @@ package agent
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/tools"
 )
 
 var validID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
@@ -96,6 +98,7 @@ func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string)
 		definition := builtins[index].clone()
 		definition.MemoryScope = MemoryScopePersona
 		definition.Name = cmp.Or(definition.Name, definition.ID)
+		definition.Audience = config.AudienceOwner
 		registry.upsert(&definition)
 	}
 	seen := make(map[string]struct{}, len(overrides))
@@ -122,11 +125,17 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".id must be lowercase letters, digits, '-' or '_', start with a letter, and be at most 64 characters")
 	}
 	definition := Definition{
-		ID:          override.ID,
-		Description: override.Description,
-		ModelRoute:  override.ModelRoute,
-		MemoryScope: cmp.Or(override.MemoryScope, MemoryScopePersona),
-		Limits:      Limits{TurnTimeout: time.Duration(override.Limits.TurnTimeout)},
+		ID:              override.ID,
+		Description:     override.Description,
+		ModelRoute:      override.ModelRoute,
+		MemoryScope:     cmp.Or(override.MemoryScope, MemoryScopePersona),
+		Limits:          Limits{TurnTimeout: time.Duration(override.Limits.TurnTimeout)},
+		Audience:        cmp.Or(override.Audience, config.AudienceOwner),
+		Pairing:         override.Pairing,
+		PrincipalTools:  slices.Clone(override.PrincipalTools),
+		PublicTools:     slices.Clone(override.PublicTools),
+		ApprovalTimeout: time.Duration(override.ApprovalTimeout),
+		Messages:        maps.Clone(override.Messages),
 	}
 	if definition.MemoryScope != MemoryScopePersona && definition.MemoryScope != MemoryScopeShared {
 		return nil, codedError(ErrorCodeDefinitionInvalid, fmt.Sprintf("%s.memory_scope must be %q or %q", field, MemoryScopePersona, MemoryScopeShared))
@@ -163,6 +172,9 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 			return nil, codedError(ErrorCodeUnknownTool, field+".tools: unknown tool "+fmt.Sprintf("%q", tool))
 		}
 	}
+	if err := validateToolCeilings(&definition, field, knownTools); err != nil {
+		return nil, err
+	}
 	seenCapabilities := make([]string, 0, len(definition.Capabilities))
 	for _, capability := range definition.Capabilities {
 		if !knownCapability(capability) {
@@ -180,4 +192,25 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".limits.turn_timeout must not be negative")
 	}
 	return &definition, nil
+}
+
+func validateToolCeilings(definition *Definition, field string, knownTools []string) error {
+	available := definition.Tools
+	if len(available) == 0 {
+		available = knownTools
+	}
+	for _, tool := range definition.PrincipalTools {
+		if !slices.Contains(available, tool) {
+			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.principal_tools: %q is not one of the persona's tools", field, tool))
+		}
+	}
+	for _, tool := range definition.PublicTools {
+		if !slices.Contains(available, tool) {
+			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is not one of the persona's tools", field, tool))
+		}
+		if tools.EffectTier(tool) {
+			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is an effect-tier tool", field, tool))
+		}
+	}
+	return nil
 }

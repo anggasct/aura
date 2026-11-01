@@ -107,7 +107,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider)
+			accessRecorder, err := telemetry.NewAccessRecorder(pipeline.MeterProvider())
+			if err != nil {
+				return err
+			}
+			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder))
 			if err != nil {
 				return err
 			}

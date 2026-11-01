@@ -245,9 +245,18 @@ func testAdapterAccount() config.DiscordAccount {
 	}
 }
 
+func trustedBuiltinPersonas() []config.AgentDefinition {
+	return []config.AgentDefinition{
+		{ID: auraagent.DefaultID, Audience: config.AudienceTrusted},
+		{ID: "engineer", Audience: config.AudienceTrusted},
+		{ID: "reviewer", Audience: config.AudienceTrusted},
+		{ID: "researcher", Audience: config.AudienceTrusted},
+	}
+}
+
 func testPersonaRouter(t *testing.T, cfg *config.Discord, bindings []config.Binding) *auraagent.Router {
 	t.Helper()
-	registry, err := auraagent.Build(nil, nil, nil)
+	registry, err := auraagent.Build(trustedBuiltinPersonas(), []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}

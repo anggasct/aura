@@ -55,7 +55,7 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 	published := 0
 	executor, err := New(&cfg, db, dataRoot, nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 		return true, nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

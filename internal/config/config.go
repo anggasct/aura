@@ -45,6 +45,7 @@ type Config struct {
 	Profile      *Profile              `koanf:"profile" yaml:"profile,omitempty"`
 	Owner        *Owner                `koanf:"owner" yaml:"owner,omitempty"`
 	Children     *Children             `koanf:"children" yaml:"children,omitempty"`
+	Access       *Access               `koanf:"access" yaml:"access,omitempty"`
 	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
 	Vision       *Vision               `koanf:"vision" yaml:"vision,omitempty"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
@@ -165,6 +166,11 @@ type Owner struct {
 	Timezone    string            `koanf:"timezone" yaml:"timezone,omitempty"`
 	Preferences map[string]string `koanf:"preferences" yaml:"preferences,omitempty"`
 	Identities  []string          `koanf:"identities" yaml:"identities,omitempty"`
+}
+
+type Access struct {
+	ApprovalTimeout  Duration `koanf:"approval_timeout" yaml:"approval_timeout"`
+	StandingGrantTTL Duration `koanf:"standing_grant_ttl" yaml:"standing_grant_ttl"`
 }
 
 type Children struct {
@@ -592,17 +598,23 @@ type AgentLimits struct {
 }
 
 type AgentDefinition struct {
-	ID           string      `koanf:"id" yaml:"id"`
-	Name         string      `koanf:"name" yaml:"name,omitempty"`
-	Description  string      `koanf:"description" yaml:"description"`
-	Instructions string      `koanf:"instructions" yaml:"instructions"`
-	SoulFile     string      `koanf:"soul_file" yaml:"soul_file"`
-	Soul         string      `koanf:"-" yaml:"-"`
-	Tools        []string    `koanf:"tools" yaml:"tools"`
-	Capabilities []string    `koanf:"capabilities" yaml:"capabilities"`
-	ModelRoute   string      `koanf:"model_route" yaml:"model_route"`
-	MemoryScope  string      `koanf:"memory_scope" yaml:"memory_scope,omitempty"`
-	Limits       AgentLimits `koanf:"limits" yaml:"limits"`
+	ID              string            `koanf:"id" yaml:"id"`
+	Name            string            `koanf:"name" yaml:"name,omitempty"`
+	Description     string            `koanf:"description" yaml:"description"`
+	Instructions    string            `koanf:"instructions" yaml:"instructions"`
+	SoulFile        string            `koanf:"soul_file" yaml:"soul_file"`
+	Soul            string            `koanf:"-" yaml:"-"`
+	Tools           []string          `koanf:"tools" yaml:"tools"`
+	Capabilities    []string          `koanf:"capabilities" yaml:"capabilities"`
+	ModelRoute      string            `koanf:"model_route" yaml:"model_route"`
+	MemoryScope     string            `koanf:"memory_scope" yaml:"memory_scope,omitempty"`
+	Limits          AgentLimits       `koanf:"limits" yaml:"limits"`
+	Audience        string            `koanf:"audience" yaml:"audience,omitempty"`
+	Pairing         bool              `koanf:"pairing" yaml:"pairing,omitempty"`
+	PrincipalTools  []string          `koanf:"principal_tools" yaml:"principal_tools,omitempty"`
+	PublicTools     []string          `koanf:"public_tools" yaml:"public_tools,omitempty"`
+	ApprovalTimeout Duration          `koanf:"approval_timeout" yaml:"approval_timeout,omitempty"`
+	Messages        map[string]string `koanf:"messages" yaml:"messages,omitempty"`
 }
 
 type Agents struct {
@@ -938,6 +950,10 @@ func Default() Config {
 			DefaultTimeout:     Duration(5 * time.Minute),
 			MaxTimeout:         Duration(30 * time.Minute),
 			Recovery:           "interrupt",
+		},
+		Access: &Access{
+			ApprovalTimeout:  Duration(30 * time.Minute),
+			StandingGrantTTL: Duration(168 * time.Hour),
 		},
 	}
 }

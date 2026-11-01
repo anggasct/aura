@@ -65,6 +65,8 @@ var _ runtimechannelhost.PresencePort = (*Adapter)(nil)
 type PersonaRouter interface {
 	Resolve(scope *auraagent.RouteScope) (auraagent.RouteMatch, bool)
 	Personas() []string
+	Persona(id string) (auraagent.Definition, bool)
+	ServesPublic(channel, account string) bool
 }
 
 type threadRoute struct {
@@ -115,6 +117,9 @@ type Adapter struct {
 	approvalKey    [32]byte
 	targetsMu      sync.Mutex
 	targets        map[string]approvalBinding
+	access         AccessSettings
+	ownerDMsMu     sync.Mutex
+	ownerDMs       map[string]string
 	deliverSem     chan struct{}
 	selfID         string
 	selfName       string
@@ -241,6 +246,7 @@ func New(cfg *config.Discord, account *config.DiscordAccount, resumes ResumeStor
 		seen:           map[string]struct{}{},
 		approvalKey:    approvalKey,
 		targets:        map[string]approvalBinding{},
+		ownerDMs:       map[string]string{},
 		triggerThreads: map[string]string{},
 		threadParents:  map[string]threadRoute{},
 		deliverSem:     make(chan struct{}, maxDeliverInflight),

@@ -3,22 +3,76 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 )
 
 type Definition struct {
-	ID           string
-	Name         string
-	Description  string
-	Instructions string
-	SoulFile     string
-	Tools        []string
-	Capabilities []string
-	ModelRoute   string
-	MemoryScope  string
-	Limits       Limits
+	ID              string
+	Name            string
+	Description     string
+	Instructions    string
+	SoulFile        string
+	Tools           []string
+	Capabilities    []string
+	ModelRoute      string
+	MemoryScope     string
+	Limits          Limits
+	Audience        string
+	Pairing         bool
+	PrincipalTools  []string
+	PublicTools     []string
+	ApprovalTimeout time.Duration
+	Messages        map[string]string
+}
+
+func audienceRank(audience string) int {
+	switch audience {
+	case config.AudiencePublic:
+		return 2
+	case config.AudienceTrusted:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func classRank(class principal.Class) int {
+	switch class {
+	case principal.ClassOwner:
+		return -1
+	case principal.ClassPublic:
+		return 2
+	default:
+		return 1
+	}
+}
+
+func (d *Definition) Admits(class principal.Class) bool {
+	return classRank(class) <= audienceRank(d.Audience)
+}
+
+func (d *Definition) ToolCeiling(class principal.Class) (tools []string, restricted bool) {
+	switch class {
+	case principal.ClassOwner:
+		return slices.Clone(d.Tools), false
+	case principal.ClassPublic:
+		return slices.Clone(d.PublicTools), true
+	default:
+		return slices.Clone(d.PrincipalTools), true
+	}
+}
+
+func (d *Definition) Message(key string) string {
+	if text, ok := d.Messages[key]; ok {
+		return text
+	}
+	return config.PersonaMessageDefaults()[key]
 }
 
 const (
@@ -59,16 +113,22 @@ func (d *Definition) key() string {
 
 func (d *Definition) clone() Definition {
 	return Definition{
-		ID:           d.ID,
-		Name:         d.Name,
-		Description:  d.Description,
-		Instructions: d.Instructions,
-		SoulFile:     d.SoulFile,
-		Tools:        append([]string(nil), d.Tools...),
-		Capabilities: append([]string(nil), d.Capabilities...),
-		ModelRoute:   d.ModelRoute,
-		MemoryScope:  d.MemoryScope,
-		Limits:       d.Limits,
+		ID:              d.ID,
+		Name:            d.Name,
+		Description:     d.Description,
+		Instructions:    d.Instructions,
+		SoulFile:        d.SoulFile,
+		Tools:           append([]string(nil), d.Tools...),
+		Capabilities:    append([]string(nil), d.Capabilities...),
+		ModelRoute:      d.ModelRoute,
+		MemoryScope:     d.MemoryScope,
+		Limits:          d.Limits,
+		Audience:        d.Audience,
+		Pairing:         d.Pairing,
+		PrincipalTools:  slices.Clone(d.PrincipalTools),
+		PublicTools:     slices.Clone(d.PublicTools),
+		ApprovalTimeout: d.ApprovalTimeout,
+		Messages:        maps.Clone(d.Messages),
 	}
 }
 

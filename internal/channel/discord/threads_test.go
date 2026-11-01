@@ -844,13 +844,13 @@ func TestThreadAuthor_ResolvesOwnerAndTrusted(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			msg := testMessage()
 			msg.Author.ID = tc.author
-			if got := validThreadAuthor(cfg, owners, "999", msg); got != tc.admit {
+			if got := validThreadAuthor(cfg, owners, "999", false, msg); got != tc.admit {
 				t.Fatalf("validThreadAuthor() = %v, want %v", got, tc.admit)
 			}
 			if !tc.admit {
 				return
 			}
-			id, class, _ := resolveAuthor(cfg, owners, tc.author)
+			id, class, _ := resolveAuthor(cfg, owners, tc.author, false)
 			env, err := buildThreadEnvelope(cfg.Name, id, class, msg, "777001", "333")
 			if err != nil {
 				t.Fatalf("buildThreadEnvelope(): %v", err)

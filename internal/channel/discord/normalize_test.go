@@ -139,7 +139,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			cfg := testDiscordConfig()
 			msg := testMessage()
 			tc.mutate(cfg, msg)
-			env, admitted, err := normalizeMessage(cfg, testOwners(t, "discord:777"), selfID, msg)
+			env, admitted, err := normalizeMessage(cfg, testOwners(t, "discord:777"), selfID, false, msg)
 			if err != nil {
 				t.Fatalf("normalizeMessage: %v", err)
 			}
@@ -189,13 +189,13 @@ func TestNormalizeMessage_RejectsMalformed(t *testing.T) {
 		"missing author":  {ID: "1001", ChannelID: "333", Content: "hi"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := normalizeMessage(cfg, nil, "999", msg)
+			_, _, err := normalizeMessage(cfg, nil, "999", false, msg)
 			if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
 				t.Errorf("code = %v, %v; want protocol_invalid", code, ok)
 			}
 		})
 	}
-	if _, _, err := normalizeMessage(nil, nil, "999", testMessage()); err == nil {
+	if _, _, err := normalizeMessage(nil, nil, "999", false, testMessage()); err == nil {
 		t.Error("nil config accepted")
 	}
 }

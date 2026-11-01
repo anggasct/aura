@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/egress"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/tools"
@@ -29,6 +30,8 @@ type ToolRequest struct {
 	TurnID          string
 	SessionID       string
 	PrincipalID     string
+	PrincipalClass  principal.Class
+	AgentID         string
 	ToolName        string
 	ToolVersion     string
 	Arguments       json.RawMessage
@@ -66,6 +69,7 @@ const (
 	ApprovalAuto     = "auto"
 	ApprovalApproved = "approved"
 	ApprovalRejected = "rejected"
+	ApprovalStanding = "standing"
 
 	ExecutorDirect = "direct"
 	ExecutorEffect = "effect"
@@ -101,6 +105,11 @@ type ApprovalPrompt struct {
 
 type ApprovalDecider func(ctx context.Context, prompt *ApprovalPrompt) (bool, error)
 
+type AccessPolicy interface {
+	ToolCeiling(agentID string, class principal.Class) (tools []string, known bool)
+	StandingGrant(ctx context.Context, principalID, agentID, toolName string) (bool, error)
+}
+
 type Options struct {
 	Policy               approval.Policy
 	Adapters             map[string]Adapter
@@ -110,6 +119,7 @@ type Options struct {
 	Effects              *effect.Executor
 	Observer             Observer
 	ApprovalDecider      ApprovalDecider
+	Access               AccessPolicy
 }
 
 type Broker struct {
@@ -123,6 +133,7 @@ type Broker struct {
 	effects              *effect.Executor
 	observer             Observer
 	decider              ApprovalDecider
+	access               AccessPolicy
 }
 
 func New(options *Options) (*Broker, error) {
@@ -156,6 +167,7 @@ func New(options *Options) (*Broker, error) {
 		effects:              options.Effects,
 		observer:             options.Observer,
 		decider:              options.ApprovalDecider,
+		access:               options.Access,
 	}, nil
 }
 
@@ -324,6 +336,15 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if !ok {
 		return ToolResult{}, errorf(ResultCapabilityUnavailable, "tool %q is not available in this artifact", key)
 	}
+	class := requestClass(&canonical)
+	if err := b.enforceToolTier(&canonical, class, definition); err != nil {
+		policyOutcome = PolicyOutcomeDeny
+		return ToolResult{}, err
+	}
+	if class != principal.ClassOwner && definition.Effectful && decision.Outcome == approval.OutcomeAllow {
+		decision.Outcome = approval.OutcomeRequireApproval
+		policyOutcome = decision.Outcome
+	}
 	if definition.Effectful {
 		if b.effects == nil {
 			return ToolResult{}, errorf(ResultCapabilityUnavailable, "effect journal is required for tool %q", key)
@@ -335,7 +356,15 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 
 	approvalExpiry := absoluteApprovalExpiry(canonical.Deadline)
 	grant := canonical.Approval
-	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil {
+	standing := false
+	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && class == principal.ClassTrusted {
+		standing, err = b.standingGrant(ctx, &canonical)
+		if err != nil {
+			approvalState = ApprovalRejected
+			return ToolResult{}, err
+		}
+	}
+	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && !standing {
 		if scope, ok := durable.TurnScopeFrom(ctx); ok {
 			parked, err := b.parkForApproval(ctx, scope, evalKey, &canonical, approvalExpiry)
 			if err != nil {
@@ -350,7 +379,10 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 	}
 	if grant == nil {
-		if decision.Outcome == approval.OutcomeRequireApproval {
+		switch {
+		case standing:
+			approvalState = ApprovalStanding
+		case decision.Outcome == approval.OutcomeRequireApproval:
 			accepted, err := b.decider(ctx, b.buildApprovalPrompt(&canonical, decision, approvalExpiry))
 			if err != nil {
 				approvalState = ApprovalRejected
@@ -364,7 +396,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 				return ToolResult{}, errorf(ResultApprovalRequired, "tool %q approval was rejected", key)
 			}
 			approvalState = ApprovalApproved
-		} else {
+		default:
 			approvalState = ApprovalAuto
 		}
 		if err := contextError(ctx, approvalExpiry); err != nil {
@@ -615,6 +647,58 @@ const (
 	defaultApprovalTTL      = 5 * time.Minute
 	maxApprovalDisplayBytes = 2048
 )
+
+func requestClass(request *ToolRequest) principal.Class {
+	if request.PrincipalClass == "" {
+		return principal.ClassOwner
+	}
+	return principal.ParseClass(string(request.PrincipalClass))
+}
+
+func (b *Broker) enforceToolTier(request *ToolRequest, class principal.Class, definition *tools.Definition) error {
+	if class == principal.ClassOwner {
+		return nil
+	}
+	if class == principal.ClassPublic && definition.Effectful {
+		return errorf(ResultToolTierDenied, "tool %q is not available to public principals", request.ToolName)
+	}
+	if b.access == nil {
+		return errorf(ResultToolTierDenied, "tool %q is not available to %s principals", request.ToolName, class)
+	}
+	ceiling, known := b.access.ToolCeiling(request.AgentID, class)
+	if !known || !slices.Contains(ceiling, request.ToolName) {
+		return errorf(ResultToolTierDenied, "tool %q is not available to %s principals", request.ToolName, class)
+	}
+	return nil
+}
+
+func (b *Broker) standingGrant(ctx context.Context, request *ToolRequest) (bool, error) {
+	if b.access == nil || request.AgentID == "" {
+		return false, nil
+	}
+	lookup := func(ctx context.Context) ([]byte, error) {
+		active, err := b.access.StandingGrant(ctx, request.PrincipalID, request.AgentID, request.ToolName)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(active)
+	}
+	var raw []byte
+	var err error
+	if scope, ok := durable.TurnScopeFrom(ctx); ok {
+		raw, err = scope.Invocation().RunAction(ctx, scope.NextOp(), lookup)
+	} else {
+		raw, err = lookup(ctx)
+	}
+	if err != nil {
+		return false, errorf(ResultPolicyDenied, "tool %q standing grant lookup failed closed", request.ToolName)
+	}
+	var active bool
+	if err := json.Unmarshal(raw, &active); err != nil {
+		return false, errorf(ResultPolicyDenied, "tool %q standing grant lookup failed closed", request.ToolName)
+	}
+	return active, nil
+}
 
 func absoluteApprovalExpiry(deadline time.Time) time.Time {
 	if !deadline.IsZero() {

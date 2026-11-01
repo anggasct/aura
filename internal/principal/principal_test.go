@@ -11,21 +11,25 @@ func TestResolverResolve(t *testing.T) {
 		t.Fatalf("NewResolver: %v", err)
 	}
 	cases := map[string]struct {
-		externalID  string
-		allowlisted bool
-		id          string
-		class       Class
-		ok          bool
+		externalID   string
+		allowlisted  bool
+		servesPublic bool
+		id           string
+		class        Class
+		ok           bool
 	}{
-		"owner identity":                  {externalID: "777", id: OwnerID, class: ClassOwner, ok: true},
-		"owner identity also allowlisted": {externalID: "777", allowlisted: true, id: OwnerID, class: ClassOwner, ok: true},
-		"allowlisted user":                {externalID: "111", allowlisted: true, id: "discord:111", class: ClassTrusted, ok: true},
-		"unknown user":                    {externalID: "666"},
-		"empty id":                        {externalID: "", allowlisted: true},
+		"owner identity":                       {externalID: "777", id: OwnerID, class: ClassOwner, ok: true},
+		"owner identity also allowlisted":      {externalID: "777", allowlisted: true, id: OwnerID, class: ClassOwner, ok: true},
+		"allowlisted user":                     {externalID: "111", allowlisted: true, id: "discord:111", class: ClassTrusted, ok: true},
+		"unknown user":                         {externalID: "666"},
+		"unknown user on a public account":     {externalID: "666", servesPublic: true, id: "discord:666", class: ClassPublic, ok: true},
+		"allowlisted user on a public account": {externalID: "111", allowlisted: true, servesPublic: true, id: "discord:111", class: ClassTrusted, ok: true},
+		"owner on a public account":            {externalID: "777", servesPublic: true, id: OwnerID, class: ClassOwner, ok: true},
+		"empty id":                             {externalID: "", allowlisted: true, servesPublic: true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			id, class, ok := owners.Resolve(ChannelDiscord, tc.externalID, tc.allowlisted)
+			id, class, ok := owners.Resolve(ChannelDiscord, tc.externalID, tc.allowlisted, tc.servesPublic)
 			if id != tc.id || class != tc.class || ok != tc.ok {
 				t.Errorf("Resolve() = %q, %q, %v; want %q, %q, %v", id, class, ok, tc.id, tc.class, tc.ok)
 			}
@@ -35,14 +39,28 @@ func TestResolverResolve(t *testing.T) {
 
 func TestNilResolverAdmitsOnlyAllowlisted(t *testing.T) {
 	var owners *Resolver
-	if id, class, ok := owners.Resolve(ChannelDiscord, "111", true); id != "discord:111" || class != ClassTrusted || !ok {
+	if id, class, ok := owners.Resolve(ChannelDiscord, "111", true, false); id != "discord:111" || class != ClassTrusted || !ok {
 		t.Errorf("Resolve() = %q, %q, %v", id, class, ok)
 	}
-	if _, _, ok := owners.Resolve(ChannelDiscord, "111", false); ok {
+	if _, _, ok := owners.Resolve(ChannelDiscord, "111", false, false); ok {
 		t.Error("nil resolver admitted a non-allowlisted user")
 	}
 	if owners.Count(ChannelDiscord) != 0 || owners.IsOwnerIdentity(ChannelDiscord, "111") {
 		t.Error("nil resolver reports owner identities")
+	}
+}
+
+func TestOwnerExternalIDsKeepConfigOrder(t *testing.T) {
+	owners, err := NewResolver([]string{"discord:900", "discord:42"})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if got := owners.OwnerExternalIDs(ChannelDiscord); len(got) != 2 || got[0] != "900" || got[1] != "42" {
+		t.Errorf("OwnerExternalIDs() = %v, want [900 42]", got)
+	}
+	var none *Resolver
+	if got := none.OwnerExternalIDs(ChannelDiscord); got != nil {
+		t.Errorf("nil resolver OwnerExternalIDs() = %v", got)
 	}
 }
 

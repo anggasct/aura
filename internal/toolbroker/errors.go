@@ -15,6 +15,7 @@ const (
 	ResultCapabilityUnavailable ResultClass = "capability_unavailable"
 	ResultDeadlineExceeded      ResultClass = "deadline_exceeded"
 	ResultExecutionFailed       ResultClass = "execution_failed"
+	ResultToolTierDenied        ResultClass = "tool_tier_denied"
 )
 
 type Error struct {
@@ -45,7 +46,7 @@ func CodeOf(err error) (ResultClass, bool) {
 func (c ResultClass) stable() bool {
 	switch c {
 	case ResultOK, ResultInvalidArgument, ResultPolicyDenied, ResultApprovalRequired,
-		ResultCapabilityUnavailable, ResultDeadlineExceeded, ResultExecutionFailed:
+		ResultCapabilityUnavailable, ResultDeadlineExceeded, ResultExecutionFailed, ResultToolTierDenied:
 		return true
 	}
 	return false

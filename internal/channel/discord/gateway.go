@@ -392,7 +392,7 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if route, ok := a.lookupThread(msg.ChannelID); ok {
 		return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
 	}
-	envelope, admitted, err := normalizeMessage(a.account, a.owners, a.selfID, msg)
+	envelope, admitted, err := normalizeMessage(a.account, a.owners, a.selfID, a.servesPublic(), msg)
 	if err != nil {
 		return false, err
 	}
@@ -421,6 +421,9 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 		return false, nil
 	}
 	envelope.AgentID = persona
+	if !a.personaAdmits(ctx, persona, principal.ParseClass(envelope.PrincipalClass)) {
+		return false, nil
+	}
 	if inv, ok := a.commandInvocation(msg); ok {
 		if handled, err := a.runCommand(ctx, msg, &inv, envelope); handled || err != nil {
 			return handled, err
@@ -455,7 +458,7 @@ func (a *Adapter) sessionKey(persona, conversationID string) string {
 }
 
 func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, threadID string, route threadRoute) (bool, error) {
-	if msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, msg) {
+	if msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, a.servesPublic(), msg) {
 		return false, nil
 	}
 	if len(a.account.AllowedGuildIDs) > 0 && !slices.Contains(a.account.AllowedGuildIDs, msg.GuildID) {
@@ -468,7 +471,10 @@ func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, t
 	if err != nil || !routed {
 		return false, err
 	}
-	principalID, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID)
+	principalID, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, a.servesPublic())
+	if !a.personaAdmits(ctx, persona, class) {
+		return false, nil
+	}
 	envelope, err := buildThreadEnvelope(a.account.Name, principalID, class, msg, threadID, route.parent)
 	if err != nil {
 		return false, err
@@ -524,8 +530,12 @@ type channelProbe struct {
 }
 
 func (a *Adapter) threadClassificationNeeded(ctx context.Context, msg *messagePayload, admitted bool) bool {
-	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, msg) {
+	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, a.servesPublic(), msg) {
 		return false
+	}
+	if _, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, true); class == principal.ClassPublic {
+		_, found, err := a.existingThreadPersona(ctx, msg.ChannelID)
+		return err == nil && found
 	}
 	if msg.ChannelType != nil {
 		return isThreadChannelType(*msg.ChannelType)
@@ -569,7 +579,7 @@ func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envel
 		return false, err
 	}
 	envelope.ConversationID = active
-	a.rememberTarget(envelope.ConversationID, approvalBinding{principal: envelope.PrincipalID, actor: msg.Author.ID, guildID: msg.GuildID, channelID: bindingChannel})
+	a.rememberTarget(envelope.ConversationID, &approvalBinding{principal: envelope.PrincipalID, class: principal.ParseClass(envelope.PrincipalClass), persona: envelope.AgentID, actor: msg.Author.ID, guildID: msg.GuildID, channelID: bindingChannel})
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)
 	}
