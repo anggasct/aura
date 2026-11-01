@@ -761,3 +761,21 @@ func TestRecallMultilingualContent(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectEventIgnoresSkillActivations(t *testing.T) {
+	service := testService()
+	payload, err := json.Marshal(runtime.SkillActivation{SkillID: "local/pdf@0123456789ab", Digest: "d", InvocationID: "i", PolicyVersion: "1", TurnID: "t", Caveat: "c", Body: "SKILL-BODY-MARKER"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, author := range []string{runtime.AuthorSystem, "user", "model"} {
+		event := &Event{ID: "ev-skill-" + author, SessionID: "sess-1", Sequence: 1, Author: author, Kind: runtime.EventKindSkillActivated, Payload: payload, CreatedAt: time.Now().UTC()}
+		document, indexed, err := service.ProjectEvent(t.Context(), "owner-1", event)
+		if err != nil {
+			t.Fatalf("ProjectEvent(): %v", err)
+		}
+		if indexed {
+			t.Fatalf("skill activation indexed as %+v", document)
+		}
+	}
+}

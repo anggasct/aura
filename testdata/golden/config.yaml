@@ -134,6 +134,7 @@ skills:
   auto_select: true
   max_indexed_skills: 256
   max_instruction_tokens: 5000
+  max_session_context_tokens: 15000
   max_resource_bytes: 8388608
   quarantine_retention: 720h0m0s
 context:

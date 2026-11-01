@@ -81,6 +81,9 @@ func (c *Console) execute(ctx context.Context, inv *command.Invocation) (bool, e
 		}
 	}
 	c.pending = result.Pending
+	if result.Turn != nil {
+		return true, c.runTurn(ctx, result.Turn.Text, result.Turn.Skill)
+	}
 	w := c.out
 	if result.Diagnostic {
 		w = c.diag

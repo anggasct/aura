@@ -16,5 +16,6 @@ func Parse(text string) (Invocation, bool) {
 		Name:  strings.ToLower(fields[0][1:]),
 		Token: fields[0],
 		Args:  fields[1:],
+		Text:  text,
 	}, true
 }

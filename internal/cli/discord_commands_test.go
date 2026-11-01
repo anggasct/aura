@@ -38,13 +38,21 @@ func (parityPorts) CancelActive(context.Context, string) (turnID string, cancell
 
 func (parityPorts) Activity(string) (activeTurnID string, queued int) { return "turn-7", 1 }
 
+func (parityPorts) Activate(_ context.Context, name string) (command.SkillPin, error) {
+	return command.SkillPin{SkillID: "local/" + name + "@0123456789ab", Digest: "0123456789abcdef", InvocationID: "inv-parity", PolicyVersion: "1"}, nil
+}
+
+func (parityPorts) StageDraft(_ context.Context, name, _ string) (command.Draft, error) {
+	return command.Draft{ID: "local/" + name + "@0123456789ab", Digest: "0123456789abcdef"}, nil
+}
+
 func TestCommandParityAcrossTerminalAndDiscord(t *testing.T) {
 	registry, err := command.New(terminal.CommandBinding(), discord.CommandBinding())
 	if err != nil {
 		t.Fatalf("command.New: %v", err)
 	}
 	ports := parityPorts{}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: ports, Turns: ports}, nil)
+	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: ports, Turns: ports, Skills: ports}, nil)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -53,8 +61,9 @@ func TestCommandParityAcrossTerminalAndDiscord(t *testing.T) {
 		"discord dm":     {Channel: principal.ChannelDiscord, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, ConversationKey: "sess-parity", SessionID: "sess-parity", AgentID: "main"},
 		"discord thread": {Channel: principal.ChannelDiscord, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, ConversationKey: "sess-parity", SessionID: "sess-parity", AgentID: "main"},
 	}
-	for _, text := range []string{"/status", "/session", "/new", "/cancel", "/session sess-parity"} {
+	for _, text := range []string{"/help", "/status", "/session", "/new", "/cancel", "/session sess-parity", "/skill pdf check the auth module", "/skill-create notes Keep tidy notes."} {
 		results := map[string][]string{}
+		turns := map[string]command.TurnStart{}
 		for name, caller := range callers {
 			inv, ok := command.Parse(text)
 			if !ok {
@@ -65,9 +74,24 @@ func TestCommandParityAcrossTerminalAndDiscord(t *testing.T) {
 				t.Fatalf("%s %s = %+v", name, text, result)
 			}
 			results[name] = result.Lines
+			if result.Turn != nil {
+				turns[name] = command.TurnStart{Text: result.Turn.Text, Skill: result.Turn.Skill}
+			}
+		}
+		if text == "/help" {
+			continue
 		}
 		if !slices.Equal(results["terminal"], results["discord dm"]) || !slices.Equal(results["terminal"], results["discord thread"]) {
 			t.Errorf("%s results diverge: %q", text, results)
+		}
+		if len(turns) != 0 && len(turns) != len(callers) {
+			t.Errorf("%s started a turn in only some bindings: %+v", text, turns)
+		}
+		for name, turn := range turns {
+			want := turns["terminal"]
+			if turn.Text != want.Text || turn.Skill == nil || *turn.Skill != *want.Skill {
+				t.Errorf("%s %s turn = %+v, want %+v", name, text, turn, want)
+			}
 		}
 	}
 	rows := func(channel string) map[string]string {
@@ -218,7 +242,7 @@ func isNotSwitchable(err error) bool {
 func TestDiscordCommandWiringDelegatesToTheEngine(t *testing.T) {
 	activity := &stubActivity{}
 	recorder := &wireRecorder{}
-	if err := wireDiscordCommands([]runtimechannelhost.ChannelPort{}, activity, nil, nil, nil, recorder); err != nil {
+	if err := wireDiscordCommands([]runtimechannelhost.ChannelPort{}, activity, nil, nil, nil, nil, recorder); err != nil {
 		t.Fatalf("wire without adapters: %v", err)
 	}
 	turns := engineCommandTurns{engine: activity}

@@ -41,6 +41,19 @@ type TurnRequest struct {
 	TraceParent      string
 	AgentID          string
 	Persona          *PersonaFingerprint
+	Skill            *SkillPin
+}
+
+type SkillPin = runtimeingress.SkillPin
+
+type SkillActivation struct {
+	SkillID       string `json:"skill_id"`
+	Digest        string `json:"digest"`
+	InvocationID  string `json:"invocation_id"`
+	PolicyVersion string `json:"policy_version"`
+	TurnID        string `json:"turn_id"`
+	Caveat        string `json:"caveat"`
+	Body          string `json:"body"`
 }
 
 type PersonaFingerprint struct {
@@ -93,7 +106,10 @@ const (
 	EventKindTurnCompleted    = "turn.completed"
 	EventKindTurnFailed       = "turn.failed"
 	EventKindTurnCancelled    = "turn.cancelled"
+	EventKindSkillActivated   = "skill.activated.v1"
 )
+
+const AuthorSystem = "system"
 
 const (
 	RecallEvidenceStart = "[untrusted recall evidence"
@@ -101,6 +117,9 @@ const (
 
 	ProfileEvidenceStart = "[untrusted profile context"
 	ProfileEvidenceEnd   = "[/untrusted profile context]"
+
+	SkillContextStart = "[untrusted_skill_context"
+	SkillContextEnd   = "[/untrusted_skill_context]"
 )
 
 type AgentRuntime interface {

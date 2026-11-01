@@ -58,12 +58,12 @@ func (s *spyPorts) Activity(string) (activeTurnID string, queued int) {
 	return s.active, s.queued
 }
 
-func (s *spyPorts) Activate(_ context.Context, name string) (Activation, error) {
+func (s *spyPorts) Activate(_ context.Context, name string) (SkillPin, error) {
 	s.calls = append(s.calls, "Activate")
 	if s.skillErr != nil {
-		return Activation{}, s.skillErr
+		return SkillPin{}, s.skillErr
 	}
-	return Activation{SkillID: "local/" + name + "@0123456789ab", Caveat: "untrusted", Text: "Do things."}, nil
+	return SkillPin{SkillID: "local/" + name + "@0123456789ab", Digest: "0123456789abcdef", InvocationID: "inv_1", PolicyVersion: "1"}, nil
 }
 
 func (s *spyPorts) StageDraft(_ context.Context, name, description string) (Draft, error) {
@@ -277,6 +277,9 @@ func TestSessionScopedCommandsNeedAConversationSession(t *testing.T) {
 	if got := run(t, d, parent, "/help"); got.Code != ErrorCodeOK {
 		t.Errorf("/help = %+v", got)
 	}
+	if got := run(t, d, parent, "/skill pdf review"); got.Code != ErrorCodeOK || got.Turn == nil {
+		t.Errorf("/skill in a parent channel = %+v, want a turn", got)
+	}
 }
 
 func TestCanonicalOutcomes(t *testing.T) {
@@ -308,8 +311,12 @@ func TestCanonicalOutcomes(t *testing.T) {
 	if got := run(t, d, owner, "/cancel"); !slices.Equal(got.Lines, []string{"no active turn"}) {
 		t.Errorf("idle /cancel = %q", got.Lines)
 	}
-	if got := run(t, d, owner, "/skill pdf"); !slices.Equal(got.Lines, []string{"skill local/pdf@0123456789ab", "untrusted", "Do things."}) {
-		t.Errorf("/skill = %q", got.Lines)
+	want := SkillPin{SkillID: "local/pdf@0123456789ab", Digest: "0123456789abcdef", InvocationID: "inv_1", PolicyVersion: "1"}
+	for _, text := range []string{"/skill pdf", "/skill pdf check the auth module"} {
+		got := run(t, d, owner, text)
+		if got.Turn == nil || got.Turn.Text != text || got.Turn.Skill == nil || *got.Turn.Skill != want || len(got.Lines) != 0 || got.Diagnostic {
+			t.Errorf("%s = %+v", text, got)
+		}
 	}
 }
 

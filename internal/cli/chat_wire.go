@@ -63,6 +63,7 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 			Parts:          parts,
 			IdempotencyKey: req.IdempotencyKey,
 			AgentID:        agentID,
+			Skill:          req.Skill,
 		}
 		for ev, err := range r.engine.Run(ctx, runtimeReq) {
 			if err != nil {
@@ -234,6 +235,16 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		profileHook = profileRuntime.hook
 		profileRuntime.start(ctx)
 	}
+	var skillRuntime *skillRuntime
+	var skillRenderer runtimeengine.SkillRenderer
+	if cfg.Skills != nil && cfg.Skills.Enabled {
+		skillRuntime, err = buildSkillRuntime(ctx, cfg.Skills, db, logger)
+		if err != nil {
+			return err
+		}
+		executorOpts = append(executorOpts, runtimeadk.WithSkillContext(skillRuntime.context))
+		skillRenderer = skillRuntime.context
+	}
 	executor, err := runtimeadk.NewADKExecutor(
 		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,
 	)
@@ -247,6 +258,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
 		DefaultAgentID:  auraagent.DefaultID,
 		Personas:        registryPersonas{registry: registry},
+		Skills:          skillRenderer,
 		PostTurnHook:    composePostTurnHooks(memoryHook, profileHook),
 	}, events, store.NewDedupeStore(db), executor, logger)
 	if err != nil {
@@ -270,12 +282,8 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		return err
 	}
 	console.SetCommandRecorder(commandRecorder)
-	if cfg.Skills != nil && cfg.Skills.Enabled {
-		skillEngine, err := buildSkillsEngine(ctx, cfg.Skills, db, logger)
-		if err != nil {
-			return err
-		}
-		console.SetSkills(&skillCommandBridge{engine: skillEngine, root: cfg.Skills.Roots[0]})
+	if skillRuntime != nil {
+		console.SetSkills(skillRuntime.bridge)
 	}
 	console.SetInputCloser(func() { _ = os.Stdin.Close() })
 	console.SetSessionID(sessionID)

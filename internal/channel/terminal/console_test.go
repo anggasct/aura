@@ -217,7 +217,7 @@ func TestCancellationWithoutTerminalEventFails(t *testing.T) {
 	defer cleanup()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- console.runTurn(ctx, "prompt") }()
+	go func() { done <- console.runTurn(ctx, "prompt", nil) }()
 	<-runner.started
 	cancel()
 	if err := <-done; err == nil {

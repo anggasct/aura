@@ -93,7 +93,7 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 	if !permits(def.Audience, caller.Class) {
 		return failure(ErrorCodeDenied, ReplyDenied)
 	}
-	if def.Session && caller.SessionID == "" {
+	if def.Session && def.Kind == KindLocal && caller.SessionID == "" {
 		return failure(ErrorCodeScope, "Use /"+def.Name+" inside an Aura thread or a DM.")
 	}
 	if len(inv.Args) < def.MinArgs {
@@ -109,7 +109,7 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 	if def.Control != ControlNone {
 		return Result{Control: def.Control}
 	}
-	h := handler{ports: d.ports, caller: caller, style: b.Style, args: inv.Args}
+	h := handler{ports: d.ports, caller: caller, style: b.Style, args: inv.Args, text: inv.Text}
 	switch def.Name {
 	case "help":
 		return Result{Lines: d.registry.Help(caller.Channel, caller.Class)}
@@ -135,6 +135,7 @@ type handler struct {
 	caller *Caller
 	style  Style
 	args   []string
+	text   string
 }
 
 func (h *handler) status(ctx context.Context) Result {
@@ -207,11 +208,11 @@ func (h *handler) skill(ctx context.Context) Result {
 	if h.ports.Skills == nil {
 		return h.skillUnavailable(name, "skill support is not available")
 	}
-	activation, err := h.ports.Skills.Activate(ctx, name)
+	pin, err := h.ports.Skills.Activate(ctx, name)
 	if err != nil {
 		return h.skillUnavailable(name, err.Error())
 	}
-	return Result{Lines: []string{"skill " + activation.SkillID, activation.Caveat, activation.Text}}
+	return Result{Turn: &TurnStart{Text: h.text, Skill: &pin}}
 }
 
 func (h *handler) skillUnavailable(name, detail string) Result {

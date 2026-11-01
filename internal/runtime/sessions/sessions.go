@@ -34,6 +34,7 @@ type Descriptor struct {
 	TraceParent    string                      `json:"trace_parent"`
 	AgentID        string                      `json:"agent_id"`
 	Persona        *runtime.PersonaFingerprint `json:"persona_fingerprint,omitempty"`
+	Skill          *runtime.SkillPin           `json:"skill,omitempty"`
 }
 
 type QueuedTurn struct {
@@ -118,6 +119,9 @@ func (d *Descriptor) Validate() error {
 		if err := d.Parts[i].Validate(); err != nil {
 			return err
 		}
+	}
+	if d.Skill != nil && (d.Skill.SkillID == "" || d.Skill.Digest == "" || d.Skill.InvocationID == "" || d.Skill.PolicyVersion == "") {
+		return invalidArgument("skill pin must name a skill, digest, invocation, and policy version")
 	}
 	return nil
 }

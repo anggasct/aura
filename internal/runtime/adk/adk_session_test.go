@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/store"
 
 	"google.golang.org/adk/v2/session"
@@ -152,5 +153,28 @@ func TestADKSessionServiceUnsupportedOps(t *testing.T) {
 	}
 	if _, err := svc.Create(ctx, &session.CreateRequest{UserID: ""}); err == nil {
 		t.Fatal("Create with empty user accepted")
+	}
+}
+
+func TestADKSessionHistoryIgnoresSkillActivations(t *testing.T) {
+	db, sessions, events := newSessionTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	payload := []byte(`{"skill_id":"local/pdf@0123456789ab","body":"SKILL-RULES"}`)
+	if _, err := events.AppendSequenced(context.Background(), "session-1", &store.RuntimeEvent{
+		ID: "ev-skill", SessionID: "session-1", TurnID: "turn-1", Author: runtime.AuthorSystem,
+		Kind: runtime.EventKindSkillActivated, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	svc, err := NewADKSessionService(sessions)
+	if err != nil {
+		t.Fatalf("NewADKSessionService: %v", err)
+	}
+	got, err := svc.Get(context.Background(), &session.GetRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Session.Events().Len() != 0 {
+		t.Fatalf("history events = %d, want the activation excluded", got.Session.Events().Len())
 	}
 }

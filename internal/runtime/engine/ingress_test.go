@@ -158,3 +158,20 @@ func TestAcceptValidatesIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestAcceptCarriesTheSkillPin(t *testing.T) {
+	envelope := sampleEnvelope("conv-1", "msg-1")
+	envelope.Skill = &runtimeingress.SkillPin{SkillID: "local/pdf@0123456789ab", Digest: "d", InvocationID: "i", PolicyVersion: "1"}
+	req, err := turnRequestFromEnvelope(envelope)
+	if err != nil {
+		t.Fatalf("turnRequestFromEnvelope: %v", err)
+	}
+	if req.Skill == nil || *req.Skill != *envelope.Skill {
+		t.Fatalf("request pin = %+v", req.Skill)
+	}
+	desc := turnDescriptorFromRequest(req)
+	round := turnRequestFromDescriptor(&desc)
+	if round.Skill == nil || *round.Skill != *envelope.Skill {
+		t.Fatalf("descriptor round trip pin = %+v", round.Skill)
+	}
+}

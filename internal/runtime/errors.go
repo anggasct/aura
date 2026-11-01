@@ -25,6 +25,7 @@ const (
 	ErrorCodeCheckpointUnsupported      ErrorCode = "checkpoint_unsupported"
 	ErrorCodePersonaNotFound            ErrorCode = "persona_not_found"
 	ErrorCodePersonaMismatch            ErrorCode = "persona_mismatch"
+	ErrorCodeSkillUnavailable           ErrorCode = "skill_unavailable"
 )
 
 func (c ErrorCode) Retryable() bool {

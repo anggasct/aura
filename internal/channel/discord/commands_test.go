@@ -47,6 +47,8 @@ func (r *fakeResolver) point(key, id string) {
 type fakeCommandPorts struct {
 	mu        sync.Mutex
 	calls     []string
+	pins      int
+	skillErr  error
 	events    int
 	active    string
 	queued    int
@@ -100,6 +102,22 @@ func (p *fakeCommandPorts) CancelActive(_ context.Context, sessionID string) (tu
 	}
 	p.cancelled = append(p.cancelled, sessionID)
 	return p.active, true, nil
+}
+
+func (p *fakeCommandPorts) Activate(_ context.Context, name string) (command.SkillPin, error) {
+	p.record("Activate")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.skillErr != nil {
+		return command.SkillPin{}, p.skillErr
+	}
+	p.pins++
+	return command.SkillPin{SkillID: "local/" + name + "@0123456789ab", Digest: "0123456789abcdef", InvocationID: "inv-" + strconv.Itoa(p.pins), PolicyVersion: "1"}, nil
+}
+
+func (p *fakeCommandPorts) StageDraft(_ context.Context, name, _ string) (command.Draft, error) {
+	p.record("StageDraft")
+	return command.Draft{ID: "local/" + name + "@0123456789ab", Digest: "0123456789abcdef"}, nil
 }
 
 func (p *fakeCommandPorts) Activity(string) (activeTurnID string, queued int) {
@@ -176,7 +194,7 @@ func (f *commandFixture) newAdapter(t *testing.T) *Adapter {
 	if err != nil {
 		t.Fatalf("command.New: %v", err)
 	}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: f.ports, Turns: f.ports}, f.recorder)
+	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: f.ports, Turns: f.ports, Skills: f.ports}, f.recorder)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -284,7 +302,7 @@ func TestDiscordCommandRecognitionInGuildChannels(t *testing.T) {
 		{"mention mid-text", "hi <@999> /status", false, ""},
 		{"unknown slash name", "<@999> /bogus", false, ""},
 		{"new in parent", "<@999> /new", true, "Use /new inside an Aura thread or a DM."},
-		{"unbound portable name", "<@999> /skill pdf", false, ""},
+		{"skill-create in parent", "<@999> /skill-create n A skill.", true, "draft local/n@0123456789ab"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -390,11 +408,13 @@ func TestDiscordHelpGoldensPerClass(t *testing.T) {
 	f.admit(t, dmMessage("8502", "112", "/help"))
 	replies := f.replies(t)
 	owner := "commands:\n" +
-		"  /help          show this help\n" +
-		"  /status        show the current session\n" +
-		"  /session [id]  show or switch to a session\n" +
-		"  /new           start a new session\n" +
-		"  /cancel        cancel the active turn"
+		"  /help                                show this help\n" +
+		"  /status                              show the current session\n" +
+		"  /session [id]                        show or switch to a session\n" +
+		"  /new                                 start a new session\n" +
+		"  /cancel                              cancel the active turn\n" +
+		"  /skill <name> [request…]             activate a skill\n" +
+		"  /skill-create <name> <description…>  stage a skill draft"
 	trusted := "commands:\n  /help  show this help"
 	if len(replies) != 2 || replies[0].content != owner || replies[1].content != trusted {
 		t.Fatalf("help replies = %+v", replies)
