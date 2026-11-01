@@ -264,7 +264,7 @@ func (a *Adapter) buildThreadCreateRequest(msg *messagePayload, parentID string)
 	operation := createThreadOperation{
 		ParentID:           parentID,
 		MessageID:          msg.ID,
-		Name:               threadName(msg.Content),
+		Name:               threadName(a.modelText(msg)),
 		AutoArchiveMinutes: a.threadAutoArchiveMinutes(),
 	}
 	request, err = marshalOperation(operation)

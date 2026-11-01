@@ -117,6 +117,7 @@ type Adapter struct {
 	targets        map[string]approvalBinding
 	deliverSem     chan struct{}
 	selfID         string
+	selfName       string
 	sessionID      string
 	sequence       atomic.Int64
 	hasSeq         atomic.Bool
