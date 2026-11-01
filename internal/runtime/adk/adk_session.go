@@ -18,7 +18,8 @@ import (
 const maxEventLoad = 1 << 20
 
 type ADKSessionService struct {
-	sessions SessionPort
+	sessions      SessionPort
+	historyAuthor string
 }
 
 type SessionPort interface {
@@ -277,6 +278,9 @@ func (s *ADKSessionService) loadEvents(ctx context.Context, sessionID string) ([
 		ev, err := store.RuntimeEventToADK(&stored[i])
 		if err != nil {
 			return nil, err
+		}
+		if s.historyAuthor != "" && ev.Author != userAuthor {
+			ev.Author = s.historyAuthor
 		}
 		events = append(events, ev)
 	}

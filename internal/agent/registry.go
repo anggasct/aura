@@ -95,6 +95,7 @@ func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string)
 	for index := range builtins {
 		definition := builtins[index].clone()
 		definition.MemoryScope = MemoryScopePersona
+		definition.Name = cmp.Or(definition.Name, definition.ID)
 		registry.upsert(&definition)
 	}
 	seen := make(map[string]struct{}, len(overrides))
@@ -132,6 +133,7 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 	}
 	builtin, isBuiltin := builtinByID(override.ID)
 	if isBuiltin {
+		definition.Name = builtin.Name
 		definition.Tools = append([]string(nil), builtin.Tools...)
 		definition.Instructions = builtin.Instructions
 	} else {
@@ -148,6 +150,7 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 		definition.Tools = append([]string(nil), override.Tools...)
 	}
 	definition.Capabilities = append([]string(nil), override.Capabilities...)
+	definition.Name = cmp.Or(override.Name, definition.Name, definition.ID)
 
 	if !isBuiltin && strings.TrimSpace(definition.Instructions) == "" {
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".instructions must not be empty")

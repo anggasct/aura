@@ -48,7 +48,7 @@ func logPersonas(ctx context.Context, logger *slog.Logger, registry *auraagent.R
 	for i := range definitions {
 		definition := &definitions[i]
 		fingerprint := definition.Fingerprint()
-		logger.InfoContext(ctx, "persona registered", "component", "persona", "agent_id", definition.ID,
+		logger.InfoContext(ctx, "persona registered", "component", "persona", "agent_id", definition.ID, "name", definition.Name,
 			"soul_sha256", fingerprint.SoulSHA256, "tools_sha256", fingerprint.ToolsSHA256, "model_route", agentRouteLabel(definition.ModelRoute))
 	}
 }
@@ -100,12 +100,13 @@ func newPersonaListCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			tbl := newTable(cmd.OutOrStdout())
-			tbl.printf("ID\tSOUL\tSOUL SHA256\tMODEL ROUTE\n")
+			tbl.printf("ID\tNAME\tSOUL\tSOUL SHA256\tMODEL ROUTE\n")
 			definitions := registry.Definitions()
 			for i := range definitions {
 				definition := &definitions[i]
-				tbl.printf("%s\t%s\t%s\t%s\n",
+				tbl.printf("%s\t%s\t%s\t%s\t%s\n",
 					definition.ID,
+					definition.Name,
 					soulSource(definition),
 					definition.Fingerprint().SoulSHA256[:soulDigestDisplayLength],
 					agentRouteLabel(definition.ModelRoute),

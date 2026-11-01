@@ -61,11 +61,14 @@ func TestPersonaListShowsSoulSourceAndDigest(t *testing.T) {
 		t.Fatalf("persona list: %v", err)
 	}
 	digest := auraagent.Definition{Instructions: "You are Kuma."}
-	want := regexp.MustCompile(`(?m)^kuma\s+personas/kuma\.md\s+` + digest.Fingerprint().SoulSHA256[:soulDigestDisplayLength] + `\s+runtime default\s*$`)
+	want := regexp.MustCompile(`(?m)^kuma\s+kuma\s+personas/kuma\.md\s+` + digest.Fingerprint().SoulSHA256[:soulDigestDisplayLength] + `\s+runtime default\s*$`)
 	if !want.MatchString(out.String()) {
 		t.Fatalf("persona list output lacks the kuma soul row:\n%s", out)
 	}
-	for _, row := range []string{`(?m)^main\s+\(none\)`, `(?m)^engineer\s+inline`} {
+	if !regexp.MustCompile(`^ID\s+NAME\s+SOUL\s+SOUL SHA256\s+MODEL ROUTE`).MatchString(out.String()) {
+		t.Errorf("persona list header:\n%s", out)
+	}
+	for _, row := range []string{`(?m)^main\s+Aura\s+\(none\)`, `(?m)^engineer\s+engineer\s+inline`} {
 		if !regexp.MustCompile(row).MatchString(out.String()) {
 			t.Errorf("persona list output lacks %s:\n%s", row, out)
 		}

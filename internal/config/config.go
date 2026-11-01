@@ -593,6 +593,7 @@ type AgentLimits struct {
 
 type AgentDefinition struct {
 	ID           string      `koanf:"id" yaml:"id"`
+	Name         string      `koanf:"name" yaml:"name,omitempty"`
 	Description  string      `koanf:"description" yaml:"description"`
 	Instructions string      `koanf:"instructions" yaml:"instructions"`
 	SoulFile     string      `koanf:"soul_file" yaml:"soul_file"`

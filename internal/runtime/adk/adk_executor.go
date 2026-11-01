@@ -1,6 +1,7 @@
 package runtimeadk
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -225,6 +226,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 			yield(store.RuntimeEvent{}, err)
 			return
 		}
+		sessionService.historyAuthor = x.agentName(&definition)
 		recallAttached := req.UntrustedContext != nil
 		if x.recall != nil && !recallAttached {
 			evidence, rerr := x.recall.RecallTurn(runCtx, req)
@@ -342,6 +344,12 @@ func (x *ADKExecutor) skillContextFor(ctx context.Context, req *runtime.TurnRequ
 	return string(raw)
 }
 
+const userAuthor = "user"
+
+func (x *ADKExecutor) agentName(definition *auraagent.Definition) string {
+	return cmp.Or(definition.Name, x.appName)
+}
+
 func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, recallAttached bool, ownerContext string, extra turnContext) (*runner.Runner, error) {
 	model, err := x.resolveModel(ctx, definition)
 	if err != nil {
@@ -357,7 +365,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.appName, definition, model, x.toolsFor(definition), x.beforeTool, recallAttached, ownerContext, extra)
+	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition), x.beforeTool, recallAttached, ownerContext, extra)
 	if err != nil {
 		return nil, err
 	}

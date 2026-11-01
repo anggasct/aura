@@ -2,11 +2,14 @@ package agent
 
 const DefaultID = "main"
 
+const DefaultName = "Aura"
+
 const defaultModelRoute = "primary"
 
 var builtins = []Definition{
 	{
-		ID: DefaultID,
+		ID:   DefaultID,
+		Name: DefaultName,
 		// The default target must keep the prompt surface it had before
 		// definitions existed: the executor maps these fields straight onto
 		// the ADK agent, so any text here would silently change every
