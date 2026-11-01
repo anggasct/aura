@@ -19,8 +19,6 @@ import (
 	"github.com/anggasct/aura/internal/telemetry"
 )
 
-const accessOwnerActionEventKind = "access.owner_action.v1"
-
 const (
 	accessActionStandingGrant       = "standing_grant"
 	accessActionStandingGrantRevoke = "standing_grant_revoke"
@@ -90,36 +88,45 @@ func (r *standingGrantRecorder) RecordStandingGrant(ctx context.Context, request
 	return recordAccessOwnerAction(ctx, r.db, accessActionStandingGrant, &grant, at)
 }
 
+type accessAction struct {
+	Action    string `json:"action"`
+	GrantID   string `json:"grant_id,omitempty"`
+	Principal string `json:"principal_id,omitempty"`
+	Persona   string `json:"agent_id,omitempty"`
+	Tool      string `json:"tool_name,omitempty"`
+	Account   string `json:"account,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+	At        string `json:"at"`
+}
+
 func recordAccessOwnerAction(ctx context.Context, db *sql.DB, action string, grant *store.StandingGrant, at time.Time) error {
+	return recordAccessAction(ctx, db, &accessAction{
+		Action: action, GrantID: grant.ID, Principal: grant.PrincipalID, Persona: grant.AgentID, Tool: grant.ToolName,
+		ExpiresAt: grant.ExpiresAt.UTC().Format(time.RFC3339Nano),
+	}, grant.ID, at)
+}
+
+func recordAccessAction(ctx context.Context, db *sql.DB, action *accessAction, subject string, at time.Time) error {
 	sessionID, err := ensureOwnerActionSession(ctx, db, principal.OwnerID)
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(struct {
-		Action    string `json:"action"`
-		GrantID   string `json:"grant_id"`
-		Principal string `json:"principal_id"`
-		Persona   string `json:"agent_id"`
-		Tool      string `json:"tool_name"`
-		ExpiresAt string `json:"expires_at"`
-		At        string `json:"at"`
-	}{
-		Action: action, GrantID: grant.ID, Principal: grant.PrincipalID, Persona: grant.AgentID, Tool: grant.ToolName,
-		ExpiresAt: grant.ExpiresAt.UTC().Format(time.RFC3339Nano), At: at.Format(time.RFC3339Nano),
-	})
+	action.At = at.UTC().Format(time.RFC3339Nano)
+	payload, err := json.Marshal(action)
 	if err != nil {
 		return fmt.Errorf("cli: marshal access owner action: %w", err)
 	}
 	_, _, err = store.NewEventStore(db).UpsertEvent(ctx, &store.RuntimeEvent{
-		ID:            "access-owner-action-" + action + "-" + grant.ID + "-" + at.Format(time.RFC3339Nano),
+		ID:            "access-owner-action-" + action.Action + "-" + subject + "-" + action.At,
 		SessionID:     sessionID,
 		TurnID:        "owner-action",
 		InvocationID:  "owner-action",
 		Author:        principal.OwnerID,
-		Kind:          accessOwnerActionEventKind,
+		Kind:          store.AccessOwnerActionEventKind,
 		SchemaVersion: 1,
 		Payload:       payload,
-		CreatedAt:     at,
+		CreatedAt:     at.UTC(),
 	})
 	return err
 }
@@ -127,6 +134,7 @@ func recordAccessOwnerAction(ctx context.Context, db *sql.DB, action string, gra
 func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.AccessRecorder) discord.AccessSettings {
 	settings := discord.AccessSettings{
 		Grants:         newStandingGrantRecorder(db),
+		Pairing:        newPairingService(db, recorder),
 		Denied:         recorder.Denied,
 		ApprovalRouted: recorder.ApprovalRouted,
 	}

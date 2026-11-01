@@ -392,9 +392,12 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if route, ok := a.lookupThread(msg.ChannelID); ok {
 		return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
 	}
-	envelope, admitted, err := normalizeMessage(a.account, a.owners, a.selfID, a.servesPublic(), msg)
+	envelope, admitted, err := normalizeMessage(a.account, a.owners, a.selfID, a.authorAccess(ctx), msg)
 	if err != nil {
 		return false, err
+	}
+	if !admitted && a.tryPairing(ctx, msg) {
+		return false, nil
 	}
 	if a.threadClassificationNeeded(ctx, msg, admitted) {
 		probe, probeErr := a.probeChannel(ctx, msg.ChannelID)
@@ -422,6 +425,7 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	}
 	envelope.AgentID = persona
 	if !a.personaAdmits(ctx, persona, principal.ParseClass(envelope.PrincipalClass)) {
+		a.tryPairing(ctx, msg)
 		return false, nil
 	}
 	if inv, ok := a.commandInvocation(msg); ok {
@@ -458,7 +462,7 @@ func (a *Adapter) sessionKey(persona, conversationID string) string {
 }
 
 func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, threadID string, route threadRoute) (bool, error) {
-	if msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, a.servesPublic(), msg) {
+	if msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, a.authorAccess(ctx), msg) {
 		return false, nil
 	}
 	if len(a.account.AllowedGuildIDs) > 0 && !slices.Contains(a.account.AllowedGuildIDs, msg.GuildID) {
@@ -471,7 +475,7 @@ func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, t
 	if err != nil || !routed {
 		return false, err
 	}
-	principalID, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, a.servesPublic())
+	principalID, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, a.authorAccess(ctx))
 	if !a.personaAdmits(ctx, persona, class) {
 		return false, nil
 	}
@@ -530,10 +534,10 @@ type channelProbe struct {
 }
 
 func (a *Adapter) threadClassificationNeeded(ctx context.Context, msg *messagePayload, admitted bool) bool {
-	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, a.servesPublic(), msg) {
+	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, a.authorAccess(ctx), msg) {
 		return false
 	}
-	if _, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, true); class == principal.ClassPublic {
+	if _, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, a.authorAccess(ctx)); class == principal.ClassPublic {
 		_, found, err := a.existingThreadPersona(ctx, msg.ChannelID)
 		return err == nil && found
 	}

@@ -17,21 +17,22 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 		code   ErrorCode
 		detail string
 	}{
-		"defaults":                    {},
-		"trusted with pairing":        {fields: "      audience: trusted\n      pairing: true\n"},
-		"public":                      {fields: "      audience: public\n"},
-		"unknown audience":            {fields: "      audience: everyone\n", code: ErrorCodePersonaInvalid, detail: "audience"},
-		"pairing on public":           {fields: "      audience: public\n      pairing: true\n", code: ErrorCodePersonaInvalid, detail: "pairing"},
-		"pairing on owner":            {fields: "      pairing: true\n", code: ErrorCodePersonaInvalid, detail: "pairing"},
-		"duplicate principal tool":    {fields: "      principal_tools: [web_fetch, web_fetch]\n", code: ErrorCodePersonaInvalid, detail: "principal_tools"},
-		"approval timeout in range":   {fields: "      approval_timeout: 10m\n"},
-		"approval timeout too short":  {fields: "      approval_timeout: 30s\n", code: ErrorCodeConfigInvalid, detail: "approval_timeout"},
-		"approval timeout too long":   {fields: "      approval_timeout: 25h\n", code: ErrorCodeConfigInvalid, detail: "approval_timeout"},
-		"unknown message key":         {fields: "      messages:\n        hello: hi\n", code: ErrorCodePersonaInvalid, detail: `unknown key "hello"`},
-		"empty message":               {fields: "      messages:\n        waiting_for_owner: \" \"\n", code: ErrorCodePersonaInvalid, detail: "must not be empty"},
-		"multi line message":          {fields: "      messages:\n        waiting_for_owner: \"a\\nb\"\n", code: ErrorCodePersonaInvalid, detail: "single line"},
-		"overlong message":            {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", MaxPersonaMessageRunes+1) + "\n", code: ErrorCodePersonaInvalid, detail: "at most"},
-		"message at the length limit": {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", MaxPersonaMessageRunes) + "\n"},
+		"defaults":                         {},
+		"trusted with pairing":             {fields: "      audience: trusted\n      pairing: true\n"},
+		"public":                           {fields: "      audience: public\n"},
+		"unknown audience":                 {fields: "      audience: everyone\n", code: ErrorCodePersonaInvalid, detail: "audience"},
+		"pairing on public":                {fields: "      audience: public\n      pairing: true\n", code: ErrorCodePersonaInvalid, detail: "pairing"},
+		"pairing on owner":                 {fields: "      pairing: true\n", code: ErrorCodePersonaInvalid, detail: "pairing"},
+		"duplicate principal tool":         {fields: "      principal_tools: [web_fetch, web_fetch]\n", code: ErrorCodePersonaInvalid, detail: "principal_tools"},
+		"approval timeout in range":        {fields: "      approval_timeout: 10m\n"},
+		"approval timeout too short":       {fields: "      approval_timeout: 30s\n", code: ErrorCodeConfigInvalid, detail: "approval_timeout"},
+		"approval timeout too long":        {fields: "      approval_timeout: 25h\n", code: ErrorCodeConfigInvalid, detail: "approval_timeout"},
+		"unknown message key":              {fields: "      messages:\n        hello: hi\n", code: ErrorCodePersonaInvalid, detail: `unknown key "hello"`},
+		"empty message":                    {fields: "      messages:\n        waiting_for_owner: \" \"\n", code: ErrorCodePersonaInvalid, detail: "must not be empty"},
+		"multi line message":               {fields: "      messages:\n        waiting_for_owner: \"a\\nb\"\n", code: ErrorCodePersonaInvalid, detail: "single line"},
+		"overlong message":                 {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", MaxPersonaMessageRunes+1) + "\n", code: ErrorCodePersonaInvalid, detail: "at most"},
+		"pairing code without placeholder": {fields: "      messages:\n        pairing_code: here is your code\n", code: ErrorCodePersonaInvalid, detail: "{code}"},
+		"message at the length limit":      {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", MaxPersonaMessageRunes) + "\n"},
 	}
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {
@@ -62,12 +63,16 @@ func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 	}
 	for _, key := range keys {
 		t.Run(key, func(t *testing.T) {
-			definition := "    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        " + key + ": custom " + key + "\n"
+			value := "custom " + key
+			if key == MessagePairingCode {
+				value += " " + PairingCodePlaceholder
+			}
+			definition := "    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        " + key + ": " + value + "\n"
 			res, err := Load(writePersonaConfig(t, "", "", definition))
 			if err != nil {
 				t.Fatalf("Load: %v", err)
 			}
-			if got := res.Config.Agents.Definitions[0].Messages[key]; got != "custom "+key {
+			if got := res.Config.Agents.Definitions[0].Messages[key]; got != value {
 				t.Fatalf("messages.%s = %q", key, got)
 			}
 			if strings.TrimSpace(defaults[key]) == "" {

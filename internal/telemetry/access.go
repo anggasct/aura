@@ -15,12 +15,15 @@ const (
 	MetricStandingGrantUsedTotal = "standing_grant.used.total"
 	AttrAccessDeniedReason       = "access.denied.reason"
 	AttrApprovalRoutedResult     = "approval.routed.result"
+	MetricPairingRequestsTotal   = "pairing.requests.total"
+	AttrPairingResult            = "pairing.result"
 )
 
 type AccessRecorder struct {
 	denied   metric.Int64Counter
 	routed   metric.Int64Counter
 	standing metric.Int64Counter
+	pairing  metric.Int64Counter
 }
 
 func NewAccessRecorder(mp metric.MeterProvider) (*AccessRecorder, error) {
@@ -40,7 +43,11 @@ func NewAccessRecorder(mp metric.MeterProvider) (*AccessRecorder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: create standing grant counter: %w", err)
 	}
-	return &AccessRecorder{denied: denied, routed: routed, standing: standing}, nil
+	pairing, err := meter.Int64Counter(MetricPairingRequestsTotal, metric.WithDescription("dm pairing requests by result"))
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: create pairing requests counter: %w", err)
+	}
+	return &AccessRecorder{denied: denied, routed: routed, standing: standing, pairing: pairing}, nil
 }
 
 func (r *AccessRecorder) Denied(ctx context.Context, reason string) {
@@ -62,4 +69,11 @@ func (r *AccessRecorder) StandingGrantUsed(ctx context.Context) {
 		return
 	}
 	r.standing.Add(ctx, 1)
+}
+
+func (r *AccessRecorder) PairingRequest(ctx context.Context, result string) {
+	if r == nil {
+		return
+	}
+	r.pairing.Add(ctx, 1, metric.WithAttributes(attribute.String(AttrPairingResult, result)))
 }

@@ -36,7 +36,7 @@ func accessEventCount(t *testing.T, cfg, action string) int {
 	}
 	defer func() { _ = db.Close() }()
 	var count int
-	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runtime_event WHERE kind = ? AND json_extract(payload_json, '$.action') = ?`, accessOwnerActionEventKind, action).Scan(&count); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runtime_event WHERE kind = ? AND json_extract(payload_json, '$.action') = ?`, store.AccessOwnerActionEventKind, action).Scan(&count); err != nil {
 		t.Fatalf("count owner actions: %v", err)
 	}
 	return count
