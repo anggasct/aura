@@ -18,6 +18,8 @@ const (
 	ErrorCodeAttachmentRejected  ErrorCode = "attachment_rejected"
 	ErrorCodeThreadCreateFailed  ErrorCode = "thread_create_failed"
 	ErrorCodeThreadUnavailable   ErrorCode = "thread_unavailable"
+	ErrorCodeApprovalUnavailable ErrorCode = "approval_unavailable"
+	ErrorCodeApprovalTimeout     ErrorCode = "approval_timeout"
 )
 
 type Error struct {

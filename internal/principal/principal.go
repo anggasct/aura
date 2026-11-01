@@ -90,7 +90,8 @@ func isSnowflake(id string) bool {
 }
 
 type Resolver struct {
-	owners map[string]struct{}
+	owners  map[string]struct{}
+	ordered []string
 }
 
 func NewResolver(identities []string) (*Resolver, error) {
@@ -108,6 +109,7 @@ func NewResolver(identities []string) (*Resolver, error) {
 			continue
 		}
 		r.owners[key] = struct{}{}
+		r.ordered = append(r.ordered, key)
 	}
 	if err := errors.Join(problems...); err != nil {
 		return nil, err
@@ -137,7 +139,21 @@ func (r *Resolver) Count(channel string) int {
 	return n
 }
 
-func (r *Resolver) Resolve(channel, externalID string, allowlisted bool) (id string, class Class, ok bool) {
+func (r *Resolver) OwnerExternalIDs(channel string) []string {
+	if r == nil {
+		return nil
+	}
+	prefix := channel + ":"
+	var ids []string
+	for _, key := range r.ordered {
+		if externalID, found := strings.CutPrefix(key, prefix); found {
+			ids = append(ids, externalID)
+		}
+	}
+	return ids
+}
+
+func (r *Resolver) Resolve(channel, externalID string, allowlisted, servesPublic bool) (id string, class Class, ok bool) {
 	if externalID == "" {
 		return "", "", false
 	}
@@ -146,6 +162,9 @@ func (r *Resolver) Resolve(channel, externalID string, allowlisted bool) (id str
 	}
 	if allowlisted {
 		return Namespaced(channel, externalID), ClassTrusted, true
+	}
+	if servesPublic {
+		return Namespaced(channel, externalID), ClassPublic, true
 	}
 	return "", "", false
 }

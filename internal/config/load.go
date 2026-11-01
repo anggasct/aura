@@ -195,6 +195,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateChildren(cfg.Children, options.Build.Profile()); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateAccess(cfg.Access); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateSync(cfg.Sync); err != nil {
 		return LoadResult{}, err
 	}
@@ -262,6 +265,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	if err := validatePersonaNames(cfg); err != nil {
+		return LoadResult{}, err
+	}
+	if err := validatePersonaAccess(cfg); err != nil {
 		return LoadResult{}, err
 	}
 	if err := loadPersonaSouls(cfg, resolved); err != nil {
@@ -449,6 +455,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateChildrenShapes(doc); err != nil {
+		return err
+	}
+	if err := validateAccessShapes(doc); err != nil {
 		return err
 	}
 	if err := validateSyncShapes(doc); err != nil {
@@ -1415,8 +1424,8 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 	if definitionsNode.Kind != yamlv3.SequenceNode {
 		return fmt.Errorf("agents.definitions must be a list at line %d", definitionsNode.Line)
 	}
-	stringFields := []string{"id", "name", "description", "instructions", "soul_file", "model_route", "memory_scope"}
-	listFields := []string{"tools", "capabilities"}
+	stringFields := []string{"id", "name", "description", "instructions", "soul_file", "model_route", "memory_scope", "audience", "approval_timeout"}
+	listFields := []string{"tools", "capabilities", "principal_tools", "public_tools"}
 	for index, item := range definitionsNode.Content {
 		if item.Kind != yamlv3.MappingNode {
 			return fmt.Errorf("agents.definitions entries must be mappings at line %d", item.Line)
@@ -1439,6 +1448,20 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 				for _, entry := range value.Content {
 					if entry.Kind != yamlv3.ScalarNode || entry.Tag != "!!str" {
 						return fmt.Errorf("agents.definitions.%s entries must be strings at line %d", key, entry.Line)
+					}
+				}
+			case key == "pairing":
+				if value.Kind != yamlv3.ScalarNode || value.Tag != "!!bool" {
+					return fmt.Errorf("agents.definitions.pairing must be a boolean at line %d", value.Line)
+				}
+			case key == "messages":
+				if value.Kind != yamlv3.MappingNode {
+					return fmt.Errorf("agents.definitions.messages must be a mapping at line %d", value.Line)
+				}
+				for j := 0; j+1 < len(value.Content); j += 2 {
+					messageValue := value.Content[j+1]
+					if messageValue.Kind != yamlv3.ScalarNode || messageValue.Tag != "!!str" {
+						return fmt.Errorf("agents.definitions.messages.%s must be a string at line %d", value.Content[j].Value, messageValue.Line)
 					}
 				}
 			case key == "limits":
@@ -2114,6 +2137,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyContextDefaults(cfg, doc)
 	applyProfileDefaults(cfg, doc)
 	applyChildrenDefaults(cfg, doc)
+	applyAccessDefaults(cfg, doc)
 	applySyncDefaults(cfg, doc)
 	applyVisionDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)

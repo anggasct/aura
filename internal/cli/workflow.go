@@ -285,7 +285,7 @@ func newWorkflowToolRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	executor, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, workflowApprovalDecider)
+	executor, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, workflowApprovalDecider, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build builtin tool executor: %w", err)
 	}

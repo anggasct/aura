@@ -210,3 +210,12 @@ func DefinitionsByKey() map[string]*Definition {
 	}
 	return result
 }
+
+func EffectTier(name string) bool {
+	for _, definition := range Builtins() {
+		if definition.Name == name {
+			return definition.Effectful
+		}
+	}
+	return true
+}

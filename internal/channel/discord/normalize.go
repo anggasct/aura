@@ -18,7 +18,7 @@ type replyReference struct {
 	Artifacts []artifactSummary `json:"artifacts,omitempty"`
 }
 
-func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver, selfID string, msg *messagePayload) (*runtimeingress.IngressEnvelope, bool, error) {
+func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver, selfID string, servesPublic bool, msg *messagePayload) (*runtimeingress.IngressEnvelope, bool, error) {
 	if account == nil || msg == nil {
 		return nil, false, Errorf(ErrorCodeInvalidArgument, "account and message must not be nil")
 	}
@@ -34,7 +34,7 @@ func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver
 	if msg.Content == "" {
 		return nil, false, nil
 	}
-	principalID, class, admitted := resolveAuthor(account, owners, msg.Author.ID)
+	principalID, class, admitted := resolveAuthor(account, owners, msg.Author.ID, servesPublic)
 	if !admitted {
 		return nil, false, nil
 	}
@@ -77,6 +77,6 @@ func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver
 	}, true, nil
 }
 
-func resolveAuthor(account *config.DiscordAccount, owners *principal.Resolver, authorID string) (string, principal.Class, bool) {
-	return owners.Resolve(principal.ChannelDiscord, authorID, slices.Contains(account.AllowedUserIDs, authorID))
+func resolveAuthor(account *config.DiscordAccount, owners *principal.Resolver, authorID string, servesPublic bool) (string, principal.Class, bool) {
+	return owners.Resolve(principal.ChannelDiscord, authorID, slices.Contains(account.AllowedUserIDs, authorID), servesPublic)
 }

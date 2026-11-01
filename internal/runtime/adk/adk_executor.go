@@ -209,7 +209,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 			yield(store.RuntimeEvent{}, err)
 			return
 		}
-		runCtx := withTurnID(ctx, req.TurnID)
+		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req.PrincipalClass, definition.ID)
 		if req.SessionID != "" {
 			runCtx = auramodel.WithSessionID(runCtx, req.SessionID)
 		}
@@ -242,7 +242,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 				recallAttached = true
 			}
 		}
-		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, recallAttached, x.ownerContextFor(req), turnContext{profile: x.profileContextFor(runCtx, req), skills: x.skillContextFor(runCtx, req)})
+		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, recallAttached, x.ownerContextFor(req), turnContext{profile: x.profileContextFor(runCtx, req), skills: x.skillContextFor(runCtx, req)})
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
@@ -350,7 +350,7 @@ func (x *ADKExecutor) agentName(definition *auraagent.Definition) string {
 	return cmp.Or(definition.Name, x.appName)
 }
 
-func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, recallAttached bool, ownerContext string, extra turnContext) (*runner.Runner, error) {
+func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, class principal.Class, recallAttached bool, ownerContext string, extra turnContext) (*runner.Runner, error) {
 	model, err := x.resolveModel(ctx, definition)
 	if err != nil {
 		return nil, err
@@ -365,7 +365,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition), x.beforeTool, recallAttached, ownerContext, extra)
+	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition, class), x.beforeTool, recallAttached, ownerContext, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -429,11 +429,14 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		turnID = actx.InvocationID()
 	}
 	deadline, _ := actx.Deadline()
+	access := turnAccessFromContext(actx)
 	request := &BuiltinToolRequest{
 		RequestID:       requestID,
 		TurnID:          turnID,
 		SessionID:       actx.SessionID(),
 		PrincipalID:     actx.UserID(),
+		PrincipalClass:  access.class,
+		AgentID:         access.agentID,
 		ToolName:        definition.Name,
 		ToolVersion:     definition.Version,
 		Arguments:       raw,
@@ -543,13 +546,23 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 	return model, nil
 }
 
-func (x *ADKExecutor) toolsFor(definition *auraagent.Definition) []tool.Tool {
-	if len(definition.Tools) == 0 {
+func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class) []tool.Tool {
+	allowed := definition.Tools
+	if class != "" {
+		ceiling, restricted := definition.ToolCeiling(class)
+		if restricted {
+			allowed = ceiling
+			if len(allowed) == 0 {
+				return nil
+			}
+		}
+	}
+	if len(allowed) == 0 {
 		return x.tools
 	}
 	filtered := make([]tool.Tool, 0, len(x.tools))
 	for _, t := range x.tools {
-		if slices.Contains(definition.Tools, t.Name()) {
+		if slices.Contains(allowed, t.Name()) {
 			filtered = append(filtered, t)
 		}
 	}

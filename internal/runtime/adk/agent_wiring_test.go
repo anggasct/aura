@@ -9,6 +9,7 @@ import (
 
 	"database/sql"
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/principal"
 	auraruntime "github.com/anggasct/aura/internal/runtime"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
@@ -134,11 +135,11 @@ func TestResolveDefinitionPassesRequestedID(t *testing.T) {
 
 func TestToolsForNarrowsToDeclaredTools(t *testing.T) {
 	executor := &ADKExecutor{tools: []tool.Tool{namedToolStub{name: "read_file"}, namedToolStub{name: "web_fetch"}}}
-	narrowed := executor.toolsFor(&auraagent.Definition{Tools: []string{"web_fetch"}})
+	narrowed := executor.toolsFor(&auraagent.Definition{Tools: []string{"web_fetch"}}, principal.ClassOwner)
 	if len(narrowed) != 1 || narrowed[0].Name() != "web_fetch" {
 		t.Fatalf("tools = %v, want only web_fetch", narrowed)
 	}
-	full := executor.toolsFor(&auraagent.Definition{})
+	full := executor.toolsFor(&auraagent.Definition{}, principal.ClassOwner)
 	if len(full) != 2 {
 		t.Fatalf("tools = %d, want the full set when no tools are declared", len(full))
 	}

@@ -167,6 +167,10 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	accessRecorder, err := telemetry.NewAccessRecorder(mp)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	adapters := make(discordAdapters, 0, len(cfg.Channels.Discord.Accounts))
 	ports := make([]runtimechannelhost.ChannelPort, 0, len(cfg.Channels.Discord.Accounts))
 	for i := range cfg.Channels.Discord.Accounts {
@@ -176,6 +180,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 		}
 		adapter.SetPrincipalResolver(owners)
 		adapter.SetPersonaRouter(router)
+		adapter.SetAccess(discordAccessSettings(cfg, db, accessRecorder))
 		adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
 			recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
 		})

@@ -16,6 +16,7 @@ const (
 	ErrorCodeNotFound          ErrorCode = "agent_not_found"
 	ErrorCodeResolutionFailed  ErrorCode = "agent_resolution_failed"
 	ErrorCodeBindingInvalid    ErrorCode = "binding_invalid"
+	ErrorCodePersonaInvalid    ErrorCode = "persona_invalid"
 )
 
 type Error struct {

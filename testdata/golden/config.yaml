@@ -164,6 +164,9 @@ children:
   default_timeout: 5m0s
   max_timeout: 30m0s
   recovery: interrupt
+access:
+  approval_timeout: 30m0s
+  standing_grant_ttl: 168h0m0s
 sync:
   enabled: false
   remote: ""

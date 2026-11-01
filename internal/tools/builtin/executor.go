@@ -41,7 +41,7 @@ func (e *Executor) SetEventPublisher(publish func(*store.RuntimeEvent)) {
 	e.journal.SetEventPublisher(effectPublisherFunc(publish))
 }
 
-func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider) (*Executor, error) {
+func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider, access toolbroker.AccessPolicy) (*Executor, error) {
 	if cfg == nil || cfg.Tools == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -74,6 +74,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 		Effects:              effects,
 		Observer:             observer,
 		ApprovalDecider:      decider,
+		Access:               access,
 	})
 	if err != nil {
 		return nil, err
@@ -214,7 +215,8 @@ func (e *Executor) Execute(ctx context.Context, request *runtimeadk.BuiltinToolR
 	}
 	result, err := e.broker.Execute(ctx, &toolbroker.ToolRequest{
 		RequestID: request.RequestID, TurnID: request.TurnID, SessionID: request.SessionID,
-		PrincipalID: request.PrincipalID, ToolName: request.ToolName, ToolVersion: request.ToolVersion,
+		PrincipalID: request.PrincipalID, PrincipalClass: request.PrincipalClass, AgentID: request.AgentID,
+		ToolName: request.ToolName, ToolVersion: request.ToolVersion,
 		Arguments: request.Arguments, Capabilities: request.Capabilities, Trust: approval.TrustLabel(request.Trust),
 		Deadline: request.Deadline, IdempotencyKey: request.IdempotencyKey,
 		EventSequence: request.EventSequence, EventInvocation: request.EventInvocation,

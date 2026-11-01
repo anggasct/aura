@@ -210,7 +210,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		if err != nil {
 			return err
 		}
-		builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, approvalDeciderFor(approvals))
+		builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, approvalDeciderFor(approvals), nil)
 		if err != nil {
 			return err
 		}

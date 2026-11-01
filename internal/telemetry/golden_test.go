@@ -63,6 +63,10 @@ func TestMetricNamesPinned(t *testing.T) {
 		"MetricProfileExpiryLag":            MetricProfileExpiryLag,
 		"MetricProfileContextFacts":         MetricProfileContextFacts,
 		"MetricProfileContextTokens":        MetricProfileContextTokens,
+
+		"MetricAccessDeniedTotal":      MetricAccessDeniedTotal,
+		"MetricApprovalRoutedTotal":    MetricApprovalRoutedTotal,
+		"MetricStandingGrantUsedTotal": MetricStandingGrantUsedTotal,
 	}
 	want := map[string]string{
 		"MetricTurnsTotal":            "runtime.turns.total",
@@ -89,6 +93,10 @@ func TestMetricNamesPinned(t *testing.T) {
 		"MetricProfileExpiryLag":            "profile.expiry.lag",
 		"MetricProfileContextFacts":         "profile.context.facts",
 		"MetricProfileContextTokens":        "profile.context.tokens",
+
+		"MetricAccessDeniedTotal":      "access.denied.total",
+		"MetricApprovalRoutedTotal":    "approval.routed.total",
+		"MetricStandingGrantUsedTotal": "standing_grant.used.total",
 	}
 	for name, got := range metrics {
 		if got != want[name] {

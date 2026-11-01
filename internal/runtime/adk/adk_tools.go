@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"github.com/anggasct/aura/internal/principal"
+
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/tool/functiontool"
@@ -29,6 +31,8 @@ type BuiltinToolRequest struct {
 	TurnID          string
 	SessionID       string
 	PrincipalID     string
+	PrincipalClass  principal.Class
+	AgentID         string
 	ToolName        string
 	ToolVersion     string
 	Arguments       json.RawMessage
@@ -56,6 +60,22 @@ func withTurnID(ctx context.Context, turnID string) context.Context {
 func turnIDFromContext(ctx context.Context) string {
 	turnID, _ := ctx.Value(turnIDContextKey{}).(string)
 	return turnID
+}
+
+type turnAccessContextKey struct{}
+
+type turnAccess struct {
+	class   principal.Class
+	agentID string
+}
+
+func withTurnAccess(ctx context.Context, class principal.Class, agentID string) context.Context {
+	return context.WithValue(ctx, turnAccessContextKey{}, turnAccess{class: class, agentID: agentID})
+}
+
+func turnAccessFromContext(ctx context.Context) turnAccess {
+	access, _ := ctx.Value(turnAccessContextKey{}).(turnAccess)
+	return access
 }
 
 func buildBuiltinTools(definitions []BuiltinToolDefinition) ([]tool.Tool, error) {

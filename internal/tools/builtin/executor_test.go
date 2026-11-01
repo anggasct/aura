@@ -36,7 +36,7 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 	var observations []toolbroker.Observation
 	executor, err := New(&cfg, db, dataRoot, nil, func(_ context.Context, observation toolbroker.Observation) {
 		observations = append(observations, observation)
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	cfg.Tools.MaxInlineResultBytes = 256
 	dataRoot := filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
 	cfg.Storage.Path = dataRoot
-	executor, err := New(&cfg, db, dataRoot, nil, nil, nil)
+	executor, err := New(&cfg, db, dataRoot, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	executor, err := New(&cfg, db, dataRoot, nil, nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 		prompted = prompt
 		return false, nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 
 	diagnosticExecutor, err := New(&cfg, db, dataRoot, nil, nil, func(_ context.Context, _ *toolbroker.ApprovalPrompt) (bool, error) {
 		return false, errors.New("approval surface failed: " + canary)
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("new diagnostic executor: %v", err)
 	}

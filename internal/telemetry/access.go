@@ -1,0 +1,65 @@
+package telemetry
+
+import (
+	"context"
+	"fmt"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+)
+
+const (
+	MetricAccessDeniedTotal      = "access.denied.total"
+	MetricApprovalRoutedTotal    = "approval.routed.total"
+	MetricStandingGrantUsedTotal = "standing_grant.used.total"
+	AttrAccessDeniedReason       = "access.denied.reason"
+	AttrApprovalRoutedResult     = "approval.routed.result"
+)
+
+type AccessRecorder struct {
+	denied   metric.Int64Counter
+	routed   metric.Int64Counter
+	standing metric.Int64Counter
+}
+
+func NewAccessRecorder(mp metric.MeterProvider) (*AccessRecorder, error) {
+	if mp == nil {
+		mp = otel.GetMeterProvider()
+	}
+	meter := mp.Meter(ScopeName)
+	denied, err := meter.Int64Counter(MetricAccessDeniedTotal, metric.WithDescription("channel messages dropped by persona audience"))
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: create access denied counter: %w", err)
+	}
+	routed, err := meter.Int64Counter(MetricApprovalRoutedTotal, metric.WithDescription("owner-routed approvals by result"))
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: create approval routed counter: %w", err)
+	}
+	standing, err := meter.Int64Counter(MetricStandingGrantUsedTotal, metric.WithDescription("tool calls allowed by an owner standing grant"))
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: create standing grant counter: %w", err)
+	}
+	return &AccessRecorder{denied: denied, routed: routed, standing: standing}, nil
+}
+
+func (r *AccessRecorder) Denied(ctx context.Context, reason string) {
+	if r == nil {
+		return
+	}
+	r.denied.Add(ctx, 1, metric.WithAttributes(attribute.String(AttrAccessDeniedReason, reason)))
+}
+
+func (r *AccessRecorder) ApprovalRouted(ctx context.Context, result string) {
+	if r == nil {
+		return
+	}
+	r.routed.Add(ctx, 1, metric.WithAttributes(attribute.String(AttrApprovalRoutedResult, result)))
+}
+
+func (r *AccessRecorder) StandingGrantUsed(ctx context.Context) {
+	if r == nil {
+		return
+	}
+	r.standing.Add(ctx, 1)
+}

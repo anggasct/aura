@@ -196,7 +196,7 @@ func buildThreadEnvelope(account, principalID string, class principal.Class, msg
 	}, nil
 }
 
-func validThreadAuthor(account *config.DiscordAccount, owners *principal.Resolver, selfID string, msg *messagePayload) bool {
+func validThreadAuthor(account *config.DiscordAccount, owners *principal.Resolver, selfID string, servesPublic bool, msg *messagePayload) bool {
 	if msg.Author.Bot || msg.Author.ID == selfID {
 		return false
 	}
@@ -206,7 +206,7 @@ func validThreadAuthor(account *config.DiscordAccount, owners *principal.Resolve
 	if msg.Type != 0 && msg.Type != 19 {
 		return false
 	}
-	_, _, admitted := resolveAuthor(account, owners, msg.Author.ID)
+	_, _, admitted := resolveAuthor(account, owners, msg.Author.ID, servesPublic)
 	return admitted
 }
 
@@ -222,7 +222,7 @@ func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayloa
 		return existing, nil
 	}
 	sessionID := a.sessionKey(persona, "channel:"+parentID)
-	principalID, _, _ := resolveAuthor(a.account, a.owners, msg.Author.ID)
+	principalID, _, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, a.servesPublic())
 	if err := a.sessions.EnsureSession(ctx, sessionID, principalID, persona); err != nil {
 		return "", ErrorWrapf(ErrorCodeThreadCreateFailed, err, "thread create for message %s: parent session could not be ensured", msg.ID)
 	}

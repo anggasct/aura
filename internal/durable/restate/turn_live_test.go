@@ -20,6 +20,7 @@ import (
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
 	runtimeengine "github.com/anggasct/aura/internal/runtime/engine"
@@ -436,11 +437,12 @@ func (r *liveTurnRig) countKind(turnID, kind string) int {
 
 func liveTurnRequest(turnID string) *runtime.TurnRequest {
 	return &runtime.TurnRequest{
-		TurnID:      turnID,
-		SessionID:   "session-1",
-		PrincipalID: "user-1",
-		Origin:      runtime.OriginTerminal,
-		Parts:       []runtimeingress.InputPart{{Text: "go"}},
+		TurnID:         turnID,
+		SessionID:      "session-1",
+		PrincipalID:    "user-1",
+		PrincipalClass: principal.ClassOwner,
+		Origin:         runtime.OriginTerminal,
+		Parts:          []runtimeingress.InputPart{{Text: "go"}},
 	}
 }
 

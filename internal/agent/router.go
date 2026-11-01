@@ -42,6 +42,7 @@ type Router struct {
 	accounts map[routeAccount]bool
 	bindings []config.Binding
 	personas []string
+	registry *Registry
 }
 
 func NewRouter(registry *Registry, discord *config.Discord, bindings []config.Binding) (*Router, error) {
@@ -55,6 +56,7 @@ func NewRouter(registry *Registry, discord *config.Discord, bindings []config.Bi
 		defaults: make(map[routeAccount]string, len(discord.Accounts)),
 		accounts: make(map[routeAccount]bool, len(discord.Accounts)),
 		bindings: append([]config.Binding(nil), bindings...),
+		registry: registry,
 	}
 	for i := range registry.definitions {
 		router.personas = append(router.personas, registry.definitions[i].ID)
@@ -94,6 +96,34 @@ func (r *Router) Personas() []string {
 		return nil
 	}
 	return append([]string(nil), r.personas...)
+}
+
+func (r *Router) Persona(id string) (Definition, bool) {
+	if r == nil {
+		return Definition{}, false
+	}
+	return r.registry.Lookup(id)
+}
+
+func (r *Router) ServesPublic(channel, account string) bool {
+	if r == nil {
+		return false
+	}
+	reachable := make([]string, 0, len(r.bindings)+1)
+	if persona, ok := r.defaults[routeAccount{channel: channel, account: account}]; ok {
+		reachable = append(reachable, persona)
+	}
+	for i := range r.bindings {
+		if r.bindings[i].Channel == channel && r.bindings[i].Account == account {
+			reachable = append(reachable, r.bindings[i].Persona)
+		}
+	}
+	for _, persona := range reachable {
+		if definition, ok := r.registry.Lookup(persona); ok && definition.Audience == config.AudiencePublic {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Router) Resolve(scope *RouteScope) (RouteMatch, bool) {

@@ -1,0 +1,135 @@
+package config
+
+import (
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestLoad_PersonaAccessValidation(t *testing.T) {
+	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
+	cases := map[string]struct {
+		fields string
+		code   ErrorCode
+		detail string
+	}{
+		"defaults":                    {},
+		"trusted with pairing":        {fields: "      audience: trusted\n      pairing: true\n"},
+		"public":                      {fields: "      audience: public\n"},
+		"unknown audience":            {fields: "      audience: everyone\n", code: ErrorCodePersonaInvalid, detail: "audience"},
+		"pairing on public":           {fields: "      audience: public\n      pairing: true\n", code: ErrorCodePersonaInvalid, detail: "pairing"},
+		"pairing on owner":            {fields: "      pairing: true\n", code: ErrorCodePersonaInvalid, detail: "pairing"},
+		"duplicate principal tool":    {fields: "      principal_tools: [web_fetch, web_fetch]\n", code: ErrorCodePersonaInvalid, detail: "principal_tools"},
+		"approval timeout in range":   {fields: "      approval_timeout: 10m\n"},
+		"approval timeout too short":  {fields: "      approval_timeout: 30s\n", code: ErrorCodeConfigInvalid, detail: "approval_timeout"},
+		"approval timeout too long":   {fields: "      approval_timeout: 25h\n", code: ErrorCodeConfigInvalid, detail: "approval_timeout"},
+		"unknown message key":         {fields: "      messages:\n        hello: hi\n", code: ErrorCodePersonaInvalid, detail: `unknown key "hello"`},
+		"empty message":               {fields: "      messages:\n        waiting_for_owner: \" \"\n", code: ErrorCodePersonaInvalid, detail: "must not be empty"},
+		"multi line message":          {fields: "      messages:\n        waiting_for_owner: \"a\\nb\"\n", code: ErrorCodePersonaInvalid, detail: "single line"},
+		"overlong message":            {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", MaxPersonaMessageRunes+1) + "\n", code: ErrorCodePersonaInvalid, detail: "at most"},
+		"message at the length limit": {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", MaxPersonaMessageRunes) + "\n"},
+	}
+	for label, tc := range cases {
+		t.Run(label, func(t *testing.T) {
+			definition := "    - id: kantor\n      description: d\n      instructions: i\n" + tc.fields
+			_, err := Load(writePersonaConfig(t, "", "", definition))
+			if tc.code == "" {
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				return
+			}
+			if code, ok := CodeOf(err); !ok || code != tc.code {
+				t.Fatalf("code = %q, %v (err %v), want %s", code, ok, err, tc.code)
+			}
+			if !strings.Contains(err.Error(), "agents.definitions[0]") || !strings.Contains(err.Error(), tc.detail) {
+				t.Fatalf("error %q does not name the field and %q", err, tc.detail)
+			}
+		})
+	}
+}
+
+func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
+	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
+	defaults := PersonaMessageDefaults()
+	keys := slices.Sorted(maps.Keys(defaults))
+	if len(keys) != 13 {
+		t.Fatalf("message keys = %v, want the 13 fixed replies", keys)
+	}
+	for _, key := range keys {
+		t.Run(key, func(t *testing.T) {
+			definition := "    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        " + key + ": custom " + key + "\n"
+			res, err := Load(writePersonaConfig(t, "", "", definition))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := res.Config.Agents.Definitions[0].Messages[key]; got != "custom "+key {
+				t.Fatalf("messages.%s = %q", key, got)
+			}
+			if strings.TrimSpace(defaults[key]) == "" {
+				t.Fatalf("default for %s is empty", key)
+			}
+		})
+	}
+}
+
+func writeAccessConfig(t *testing.T, access string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "version: 1\n"
+	if access != "" {
+		content += "access:\n" + access
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+func TestLoad_AccessSection(t *testing.T) {
+	res, err := Load(writeAccessConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if res.Config.Access == nil || time.Duration(res.Config.Access.ApprovalTimeout) != 30*time.Minute || time.Duration(res.Config.Access.StandingGrantTTL) != 168*time.Hour {
+		t.Fatalf("access defaults = %+v, want 30m and 168h", res.Config.Access)
+	}
+	res, err = Load(writeAccessConfig(t, "  approval_timeout: 10m\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if time.Duration(res.Config.Access.ApprovalTimeout) != 10*time.Minute || time.Duration(res.Config.Access.StandingGrantTTL) != 168*time.Hour {
+		t.Fatalf("partial access = %+v, want 10m and default ttl", res.Config.Access)
+	}
+	for label, access := range map[string]string{
+		"approval timeout too short":  "  approval_timeout: 59s\n",
+		"approval timeout too long":   "  approval_timeout: 24h1s\n",
+		"standing grant ttl too long": "  standing_grant_ttl: 721h\n",
+		"standing grant ttl zero":     "  standing_grant_ttl: 0s\n",
+	} {
+		t.Run(label, func(t *testing.T) {
+			_, err := Load(writeAccessConfig(t, access))
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
+				t.Fatalf("code = %q, %v (err %v), want config_invalid", code, ok, err)
+			}
+		})
+	}
+	if _, err := Load(writeAccessConfig(t, "  standing_grant_ttl: 720h\n")); err != nil {
+		t.Fatalf("Load at the ttl limit: %v", err)
+	}
+	if _, err := Load(writeAccessConfig(t, "  unknown: 1\n")); err == nil || !strings.Contains(err.Error(), "access.unknown") {
+		t.Fatalf("unknown access key err = %v", err)
+	}
+	t.Setenv("AURA_ACCESS_APPROVAL_TIMEOUT", "5m")
+	res, err = Load(writeAccessConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load with env override: %v", err)
+	}
+	if time.Duration(res.Config.Access.ApprovalTimeout) != 5*time.Minute {
+		t.Fatalf("env approval_timeout = %v, want 5m", time.Duration(res.Config.Access.ApprovalTimeout))
+	}
+}
