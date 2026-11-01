@@ -24,6 +24,8 @@ const MaxPersonaNameRunes = 64
 
 const MaxPersonaMessageRunes = 500
 
+const PairingCodePlaceholder = "{code}"
+
 const (
 	AudienceOwner   = "owner"
 	AudienceTrusted = "trusted"
@@ -50,7 +52,7 @@ const (
 )
 
 var personaMessageDefaults = map[string]string{
-	MessagePairingCode:     "To talk with me, ask the owner to approve this pairing code: {code}",
+	MessagePairingCode:     "To talk with me, ask the owner to approve this pairing code: " + PairingCodePlaceholder,
 	MessagePairingPending:  "A pairing request is already pending. Please wait for the owner.",
 	MessagePairingLocked:   "Too many pairing attempts. Please try again later.",
 	MessageWaitingForOwner: "One moment, I am checking with the owner.",
@@ -109,6 +111,8 @@ func validatePersonaAccess(cfg *Config) error {
 				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.messages.%s must be a single line without control characters", field, key)}
 			case utf8.RuneCountInString(value) > MaxPersonaMessageRunes:
 				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.messages.%s must be at most %d characters", field, key, MaxPersonaMessageRunes)}
+			case key == MessagePairingCode && !strings.Contains(value, PairingCodePlaceholder):
+				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.messages.%s must contain %s", field, key, PairingCodePlaceholder)}
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
@@ -37,10 +38,27 @@ type StandingGrantRequest struct {
 	TTL         time.Duration
 }
 
+const (
+	PairingOutcomeIssued  = "issued"
+	PairingOutcomePending = "pending"
+	PairingOutcomeLocked  = "locked"
+)
+
+type PairingResult struct {
+	Outcome string
+	Code    string
+}
+
+type PairingService interface {
+	Granted(ctx context.Context, principalID, account string) (bool, error)
+	Request(ctx context.Context, principalID, account string) (PairingResult, error)
+}
+
 type AccessSettings struct {
 	ApprovalTimeout  time.Duration
 	StandingGrantTTL time.Duration
 	Grants           StandingGrantRecorder
+	Pairing          PairingService
 	Denied           func(ctx context.Context, reason string)
 	ApprovalRouted   func(ctx context.Context, result string)
 }
@@ -54,6 +72,68 @@ func (a *Adapter) SetAccess(settings AccessSettings) {
 
 func (a *Adapter) servesPublic() bool {
 	return a.router != nil && a.router.ServesPublic(config.BindingChannelDiscord, a.account.Name)
+}
+
+func (a *Adapter) authorAccess(ctx context.Context) authorAccess {
+	access := authorAccess{servesPublic: a.servesPublic()}
+	if a.access.Pairing == nil {
+		return access
+	}
+	granted := map[string]bool{}
+	access.granted = func(authorID string) bool {
+		if cached, ok := granted[authorID]; ok {
+			return cached
+		}
+		active, err := a.access.Pairing.Granted(ctx, principal.Namespaced(principal.ChannelDiscord, authorID), a.account.Name)
+		if err != nil {
+			a.logger.WarnContext(ctx, "principal grant lookup failed", "component", "discord")
+			active = false
+		}
+		granted[authorID] = active
+		return active
+	}
+	return access
+}
+
+func (a *Adapter) tryPairing(ctx context.Context, msg *messagePayload) bool {
+	if a.access.Pairing == nil || msg.GuildID != "" || !a.account.AcceptDMs {
+		return false
+	}
+	if msg.Author.Bot || msg.Author.ID == "" || msg.Author.ID == a.selfID || msg.Content == "" || (msg.Type != 0 && msg.Type != 19) {
+		return false
+	}
+	if _, class, admitted := resolveAuthor(a.account, a.owners, msg.Author.ID, a.authorAccess(ctx)); admitted && class != principal.ClassPublic {
+		return false
+	}
+	persona, routed := a.routePersona(ctx, &auraagent.RouteScope{ChannelID: msg.ChannelID, UserID: msg.Author.ID})
+	if !routed {
+		return false
+	}
+	definition, ok := a.personaDefinition(persona)
+	if !ok || !definition.Pairing || definition.Audience != config.AudienceTrusted {
+		return false
+	}
+	result, err := a.access.Pairing.Request(ctx, principal.Namespaced(principal.ChannelDiscord, msg.Author.ID), a.account.Name)
+	if err != nil {
+		a.logger.WarnContext(ctx, "pairing request failed", "component", "discord")
+		return true
+	}
+	var reply string
+	switch result.Outcome {
+	case PairingOutcomeIssued:
+		reply = strings.ReplaceAll(definition.Message(config.MessagePairingCode), config.PairingCodePlaceholder, result.Code)
+	case PairingOutcomeLocked:
+		reply = definition.Message(config.MessagePairingLocked)
+	default:
+		reply = definition.Message(config.MessagePairingPending)
+	}
+	token, err := a.tokenRef.Resolve()
+	if err != nil {
+		a.logger.WarnContext(ctx, "pairing reply token unavailable", "component", "discord")
+		return true
+	}
+	a.postNotice(ctx, token, msg.ChannelID, reply)
+	return true
 }
 
 func (a *Adapter) personaDefinition(persona string) (auraagent.Definition, bool) {

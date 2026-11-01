@@ -67,6 +67,7 @@ func TestMetricNamesPinned(t *testing.T) {
 		"MetricAccessDeniedTotal":      MetricAccessDeniedTotal,
 		"MetricApprovalRoutedTotal":    MetricApprovalRoutedTotal,
 		"MetricStandingGrantUsedTotal": MetricStandingGrantUsedTotal,
+		"MetricPairingRequestsTotal":   MetricPairingRequestsTotal,
 	}
 	want := map[string]string{
 		"MetricTurnsTotal":            "runtime.turns.total",
@@ -97,6 +98,7 @@ func TestMetricNamesPinned(t *testing.T) {
 		"MetricAccessDeniedTotal":      "access.denied.total",
 		"MetricApprovalRoutedTotal":    "approval.routed.total",
 		"MetricStandingGrantUsedTotal": "standing_grant.used.total",
+		"MetricPairingRequestsTotal":   "pairing.requests.total",
 	}
 	for name, got := range metrics {
 		if got != want[name] {
