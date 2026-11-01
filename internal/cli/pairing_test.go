@@ -80,10 +80,15 @@ func TestPairingLockedUntil(t *testing.T) {
 		locked   bool
 		until    time.Time
 	}{
-		"four failures":              {spaced(time.Minute, 4), base.Add(5 * time.Minute), false, time.Time{}},
-		"five within the hour":       {spaced(time.Minute, 5), base.Add(5 * time.Minute), true, base.Add(4*time.Minute + time.Hour)},
-		"lock ends after an hour":    {spaced(time.Minute, 5), base.Add(4*time.Minute + time.Hour), false, base.Add(4*time.Minute + time.Hour)},
-		"five spread beyond an hour": {spaced(20*time.Minute, 5), base.Add(81 * time.Minute), false, time.Time{}},
+		"four failures":                 {spaced(time.Minute, 4), base.Add(5 * time.Minute), false, time.Time{}},
+		"five within the hour":          {spaced(time.Minute, 5), base.Add(5 * time.Minute), true, base.Add(4*time.Minute + time.Hour)},
+		"lock ends after an hour":       {spaced(time.Minute, 5), base.Add(4*time.Minute + time.Hour), false, base.Add(4*time.Minute + time.Hour)},
+		"five spread beyond an hour":    {spaced(20*time.Minute, 5), base.Add(81 * time.Minute), false, time.Time{}},
+		"five spanning exactly an hour": {spaced(15*time.Minute, 5), base.Add(61 * time.Minute), true, base.Add(2 * time.Hour)},
+		"five spanning just over an hour": {
+			append(spaced(15*time.Minute, 4), base.Add(time.Hour+time.Nanosecond)), base.Add(61 * time.Minute), false, time.Time{},
+		},
+		"lock holds until its last instant": {spaced(time.Minute, 5), base.Add(4*time.Minute + time.Hour - time.Nanosecond), true, base.Add(4*time.Minute + time.Hour)},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -92,6 +97,26 @@ func TestPairingLockedUntil(t *testing.T) {
 				t.Fatalf("pairingLockedUntil() = %v, %v; want %v, %v", until, locked, tc.until, tc.locked)
 			}
 		})
+	}
+}
+
+func TestPairingLockLooksBackFarEnoughForTheOldestRun(t *testing.T) {
+	cfg := writeChildrenCLIConfig(t)
+	db := openAccessDB(t, cfg)
+	now := time.Now().UTC().Truncate(time.Second)
+	first := now.Add(-2*time.Hour + time.Minute)
+	for i := range pairingLockoutFailures {
+		at := first.Add(time.Duration(i) * 15 * time.Minute)
+		if err := recordAccessAction(t.Context(), db, &accessAction{Action: store.AccessActionPairingInvalid, Channel: "discord"}, "discord", at); err != nil {
+			t.Fatalf("recordAccessAction: %v", err)
+		}
+	}
+	until, locked, err := pairingLock(t.Context(), store.NewPairingStore(db), "discord", now)
+	if err != nil || !locked || !until.Equal(first.Add(2*time.Hour)) {
+		t.Fatalf("pairingLock() = %v, %v, %v; want locked until %v", until, locked, err, first.Add(2*time.Hour))
+	}
+	if _, locked, _ := pairingLock(t.Context(), store.NewPairingStore(db), "telegram", now); locked {
+		t.Fatal("discord wrong codes locked another channel")
 	}
 }
 
