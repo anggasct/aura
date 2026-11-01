@@ -111,7 +111,7 @@ func TestLivePinnedTurnSurvivesCrashWithOneActivation(t *testing.T) {
 	}
 }
 
-func TestLivePinnedTurnFailsAndReleasesOnTransientRenderFailure(t *testing.T) {
+func TestLivePinnedTurnFailsOnTransientRender(t *testing.T) {
 	binary := liveRestateBinary(t)
 	stub := &liveSkillStub{block: runtime.SkillContextStart + "]\nUNUSED-BLOCK\n" + runtime.SkillContextEnd, renderErr: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
 	model := &liveScriptModel{steps: []liveModelStep{{text: "after"}}}
