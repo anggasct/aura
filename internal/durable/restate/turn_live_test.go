@@ -244,6 +244,7 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 		t.Fatalf("new ADK executor: %v", err)
 	}
 
+	requireLiveSocketPathFits(t)
 	dir := t.TempDir()
 	ingressPort, adminPort := freePort(t), freePort(t)
 	handlerPort := freePort(t)
@@ -326,6 +327,20 @@ func liveSessionCall[Result any](ctx context.Context, rt durable.Runtime, sessio
 		return zero, err
 	}
 	return result, nil
+}
+
+const liveSocketPathLimit = 108
+
+func requireLiveSocketPathFits(t *testing.T) {
+	t.Helper()
+	host, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("hostname: %v", err)
+	}
+	longest := filepath.Join(os.TempDir(), t.Name()+"4294967295", "999", "data", host, "ingress.sock")
+	if len(longest) >= liveSocketPathLimit {
+		t.Fatalf("restate socket path can reach %d bytes, over the %d byte unix socket limit; shorten %s", len(longest), liveSocketPathLimit, t.Name())
+	}
 }
 
 func (r *liveTurnRig) startEndpoint(handlerAddr string) {
