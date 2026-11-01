@@ -177,7 +177,7 @@ func TestPinnedTurnSurfacesTransientRenderFailuresWithTheirOwnCode(t *testing.T)
 	}
 }
 
-func TestDurableTransientRenderFailureIsRetriedNotJournaled(t *testing.T) {
+func TestDurableTransientRenderFailureKeepsItsOwnCode(t *testing.T) {
 	renderer := &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
 	engine, db, events := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, &pinRecordingExecutor{})
 	mustCreateSession(t, db, "session-a")
@@ -206,22 +206,12 @@ func TestDurableTransientRenderFailureIsRetriedNotJournaled(t *testing.T) {
 	if journaled {
 		t.Fatal("transient render failure journaled a skill-activation result")
 	}
-	renderer.mu.Lock()
-	renderer.err, renderer.body = nil, "Recovered body."
-	renderer.mu.Unlock()
-	if err := attempt(); err != nil {
-		t.Fatalf("retried attempt: %v", err)
-	}
 	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-1")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(stored) != 1 {
-		t.Fatalf("stored = %v, want one activation", kinds(stored))
-	}
-	assertActivation(t, &stored[0], "turn-1", "Recovered body.")
-	if renderer.calls != 2 {
-		t.Errorf("renderer calls = %d, want the retry to re-render", renderer.calls)
+	if len(stored) != 0 {
+		t.Fatalf("stored = %v, want no activation", kinds(stored))
 	}
 }
 
@@ -294,6 +284,42 @@ func TestDurablePinnedTurnRecordsOneActivation(t *testing.T) {
 	assertActivation(t, &activations[0], ref.TurnID, "Do things.")
 	if pins := executor.started(); len(pins) != 1 || pins[0] == nil || pins[0].InvocationID != "inv-1" {
 		t.Fatalf("executor pins = %+v", pins)
+	}
+}
+
+func TestDurablePinnedTurnFailsAndReleasesOnTransientRenderFailure(t *testing.T) {
+	executor := &pinRecordingExecutor{}
+	renderer := &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
+	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, executor)
+	pinned := sampleEnvelope("conv-1", "msg-1")
+	pinned.Skill = samplePin()
+	mustCreateSession(t, db, pinned.ConversationID)
+	ref, err := engine.Accept(context.Background(), pinned)
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	events := collectDurableTerminal(t, db, ref.TurnID)
+	last := events[len(events)-1]
+	var failed struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(last.Payload, &failed); err != nil || last.Kind != runtime.EventKindTurnFailed || failed.Code != string(runtime.ErrorCodeStorageUnavailable) {
+		t.Fatalf("terminal = %s %s, want turn.failed storage_unavailable", last.Kind, last.Payload)
+	}
+	for i := range events {
+		if events[i].Kind == runtime.EventKindSkillActivated {
+			t.Fatalf("kinds = %v, want no activation", kinds(events))
+		}
+	}
+	if len(executor.started()) != 0 {
+		t.Fatal("executor ran without its pinned skill")
+	}
+	next, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-2"))
+	if err != nil {
+		t.Fatalf("accept follow-up: %v", err)
+	}
+	if after := collectDurableTerminal(t, db, next.TurnID); after[len(after)-1].Kind != runtime.EventKindTurnCompleted {
+		t.Fatalf("follow-up kinds = %v, want the session released", kinds(after))
 	}
 }
 

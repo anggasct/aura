@@ -111,61 +111,48 @@ func TestLivePinnedTurnSurvivesCrashWithOneActivation(t *testing.T) {
 	}
 }
 
-func TestLivePinnedTurnRetriesTransientRenderFailure(t *testing.T) {
+func TestLivePinnedTurnFailsAndReleasesOnTransientRenderFailure(t *testing.T) {
 	binary := liveRestateBinary(t)
-	stub := &liveSkillStub{body: "RECOVERED-SKILL-BODY", block: runtime.SkillContextStart + "]\nRECOVERED-BLOCK\n" + runtime.SkillContextEnd, renderErr: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
-	model := &liveScriptModel{steps: []liveModelStep{{tool: "tool-a"}, {text: "done"}}}
+	stub := &liveSkillStub{block: runtime.SkillContextStart + "]\nUNUSED-BLOCK\n" + runtime.SkillContextEnd, renderErr: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
+	model := &liveScriptModel{steps: []liveModelStep{{text: "after"}}}
 	rig := startLiveTurnRig(t, binary, model, []liveToolDef{{name: "tool-a"}}, liveSkillWiring{renderer: stub, context: stub})
 
-	req := liveTurnRequest("turn-skill-retry")
+	req := liveTurnRequest("turn-skill-transient")
 	req.PrincipalClass = principal.ClassOwner
 	req.Skill = &runtime.SkillPin{SkillID: "local/pdf@0123456789ab", Digest: "0123456789abcdef", InvocationID: "inv-live", PolicyVersion: "1"}
-	streamDone := make(chan error, 1)
-	go func() {
-		for _, err := range rig.engine.Run(context.Background(), req) {
-			if err != nil {
-				streamDone <- err
-				return
+	drain := func(req *runtime.TurnRequest) {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for range rig.engine.Run(context.Background(), req) {
 			}
-		}
-		streamDone <- nil
-	}()
-	attemptDeadline := time.Now().Add(90 * time.Second)
-	for {
-		if renders, _ := stub.counts(); renders > 0 {
-			break
-		}
-		if time.Now().After(attemptDeadline) {
-			t.Fatal("transient render failure was never attempted")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	stub.mu.Lock()
-	stub.renderErr = nil
-	stub.mu.Unlock()
-	events := rig.waitTerminal("turn-skill-retry", 120*time.Second)
-	if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
-		t.Fatalf("terminal = %q, want turn.completed", last.Kind)
-	}
-	select {
-	case err := <-streamDone:
-		if err != nil {
-			t.Fatalf("stream: %v", err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("stream never terminated")
-	}
-	var activations []store.RuntimeEvent
-	for i := range events {
-		if events[i].Kind == runtime.EventKindSkillActivated {
-			activations = append(activations, events[i])
+		}()
+		select {
+		case <-done:
+		case <-time.After(120 * time.Second):
+			t.Fatalf("stream for %s never terminated", req.TurnID)
 		}
 	}
-	if len(activations) != 1 {
-		t.Fatalf("activations = %d, want 1", len(activations))
+	drain(req)
+	events := rig.waitTerminal("turn-skill-transient", 30*time.Second)
+	last := events[len(events)-1]
+	var failed struct {
+		Code string `json:"code"`
 	}
-	var payload runtime.SkillActivation
-	if err := json.Unmarshal(activations[0].Payload, &payload); err != nil || payload.Body != "RECOVERED-SKILL-BODY" || payload.InvocationID != "inv-live" || payload.TurnID != "turn-skill-retry" {
-		t.Fatalf("activation = %+v %v", payload, err)
+	if err := json.Unmarshal(last.Payload, &failed); err != nil || last.Kind != runtime.EventKindTurnFailed || failed.Code != string(runtime.ErrorCodeStorageUnavailable) {
+		t.Fatalf("terminal = %s %s, want turn.failed storage_unavailable", last.Kind, last.Payload)
+	}
+	if got := rig.countKind("turn-skill-transient", runtime.EventKindSkillActivated); got != 0 {
+		t.Fatalf("activations = %d, want 0", got)
+	}
+	if calls := model.callCount(); calls != 0 {
+		t.Fatalf("model calls = %d, want none before the pinned skill renders", calls)
+	}
+
+	follow := liveTurnRequest("turn-after-transient")
+	follow.PrincipalClass = principal.ClassOwner
+	drain(follow)
+	if after := rig.waitTerminal("turn-after-transient", 30*time.Second); after[len(after)-1].Kind != runtime.EventKindTurnCompleted {
+		t.Fatalf("follow-up terminal = %q, want the session released", after[len(after)-1].Kind)
 	}
 }
