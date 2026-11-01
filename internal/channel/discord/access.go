@@ -160,27 +160,31 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *messagePayload) bool {
 	return true
 }
 
-func (a *Adapter) budgetRefused(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope) bool {
+func (a *Adapter) budgetDrop(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope) dropReason {
 	class := principal.ParseClass(envelope.PrincipalClass)
 	if a.access.Budgets == nil || class == principal.ClassOwner {
-		return false
+		return ""
 	}
 	refusal, err := a.access.Budgets.Admit(ctx, envelope.PrincipalID, class)
 	if err != nil {
 		a.logger.WarnContext(ctx, "principal budget check failed", "component", "discord")
-		return true
+		return dropBudgetCheckFailed
 	}
 	if refusal == "" {
-		return false
+		return ""
+	}
+	reason := dropBudgetExhausted
+	if refusal == BudgetRefusalRateLimited {
+		reason = dropRateLimited
 	}
 	definition, _ := a.personaDefinition(envelope.AgentID)
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
 		a.logger.WarnContext(ctx, "budget reply token unavailable", "component", "discord")
-		return true
+		return reason
 	}
 	a.postNotice(ctx, token, msg.ChannelID, definition.Message(refusal))
-	return true
+	return reason
 }
 
 func (a *Adapter) forgetMe(ctx context.Context, msg *messagePayload, inv *command.Invocation, envelope *runtimeingress.IngressEnvelope) {

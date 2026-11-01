@@ -99,6 +99,7 @@ type Adapter struct {
 	commands       *command.Dispatcher
 	owners         *principal.Resolver
 	admitted       func(ctx context.Context, class principal.Class)
+	dropped        func(ctx context.Context, reason string)
 	images         atomic.Pointer[vision.Service]
 	gate           *editGate
 	postedMu       sync.Mutex
