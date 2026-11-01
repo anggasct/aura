@@ -49,8 +49,15 @@ type readyPayload struct {
 }
 
 type userPayload struct {
-	ID  string `json:"id"`
-	Bot bool   `json:"bot"`
+	ID         string         `json:"id"`
+	Bot        bool           `json:"bot"`
+	Username   string         `json:"username,omitempty"`
+	GlobalName string         `json:"global_name,omitempty"`
+	Member     *memberPayload `json:"member,omitempty"`
+}
+
+type memberPayload struct {
+	Nick string `json:"nick,omitempty"`
 }
 
 type messageReferencePayload struct {

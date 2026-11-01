@@ -175,10 +175,10 @@ func (a *Adapter) runSession(ctx context.Context, ws *websocket.Conn, token stri
 		a.sequence.Store(cursor.Sequence)
 		a.hasSeq.Store(true)
 		if a.selfID == "" {
-			if selfID, err := a.fetchSelfID(ctx, token); err != nil {
+			if self, err := a.fetchSelf(ctx, token); err != nil {
 				a.logger.WarnContext(ctx, "self lookup failed", "component", "discord")
 			} else {
-				a.selfID = selfID
+				a.selfID, a.selfName = self.ID, self.displayName()
 			}
 		}
 		if err := sendPayload(ws, opResume, resumePayload{
@@ -356,6 +356,7 @@ func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope,
 		}
 		a.sessionID = ready.SessionID
 		a.selfID = ready.User.ID
+		a.selfName = ready.User.displayName()
 		if ready.ResumeGatewayURL != "" {
 			a.resumeURL.Store(ready.ResumeGatewayURL)
 		}
@@ -414,6 +415,7 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if !admitted {
 		return false, nil
 	}
+	envelope.Parts = []runtimeingress.InputPart{{Text: a.modelText(msg)}}
 	persona, routed := a.routePersona(ctx, &auraagent.RouteScope{GuildID: msg.GuildID, ChannelID: msg.ChannelID, UserID: msg.Author.ID})
 	if !routed {
 		return false, nil
@@ -471,6 +473,7 @@ func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, t
 	if err != nil {
 		return false, err
 	}
+	envelope.Parts = []runtimeingress.InputPart{{Text: a.modelText(msg)}}
 	envelope.AgentID = persona
 	if inv, ok := a.commandInvocation(msg); ok {
 		if handled, err := a.runCommand(ctx, msg, &inv, envelope); handled || err != nil {
@@ -645,34 +648,34 @@ func (a *Adapter) saveCursor(ctx context.Context, sessionID string, sequence int
 	}
 }
 
-func (a *Adapter) fetchSelfID(ctx context.Context, token string) (string, error) {
+func (a *Adapter) fetchSelf(ctx context.Context, token string) (userPayload, error) {
 	rest, cancel := context.WithTimeout(ctx, restTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(rest, http.MethodGet, a.restBase+"/users/@me", http.NoBody)
 	if err != nil {
-		return "", err
+		return userPayload{}, err
 	}
 	req.Header.Set("Authorization", "Bot "+token)
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return userPayload{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", Errorf(ErrorCodeConnectionFailed, "self lookup did not succeed")
+		return userPayload{}, Errorf(ErrorCodeConnectionFailed, "self lookup did not succeed")
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRestBytes))
 	if err != nil {
-		return "", Errorf(ErrorCodeProtocolInvalid, "self payload is not readable")
+		return userPayload{}, Errorf(ErrorCodeProtocolInvalid, "self payload is not readable")
 	}
 	var user userPayload
 	if err := json.Unmarshal(body, &user); err != nil {
-		return "", Errorf(ErrorCodeProtocolInvalid, "self payload is not decodable")
+		return userPayload{}, Errorf(ErrorCodeProtocolInvalid, "self payload is not decodable")
 	}
 	if user.ID == "" {
-		return "", Errorf(ErrorCodeProtocolInvalid, "self payload is missing the user id")
+		return userPayload{}, Errorf(ErrorCodeProtocolInvalid, "self payload is missing the user id")
 	}
-	return user.ID, nil
+	return user, nil
 }
 
 func receiveEnvelope(ws *websocket.Conn) (*gatewayEnvelope, error) {
