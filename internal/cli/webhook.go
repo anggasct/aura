@@ -26,6 +26,11 @@ import (
 	"github.com/anggasct/aura/internal/workflow"
 )
 
+const (
+	webhookStartedSweepAt    = 4096
+	webhookStartedSweepEvery = time.Minute
+)
+
 type webhookDispatcher struct {
 	mu         sync.Mutex
 	sessions   store.SessionService
@@ -35,8 +40,9 @@ type webhookDispatcher struct {
 	clock      func() time.Time
 	logger     *slog.Logger
 	github     *github.Adapter
-	liveMu     sync.Mutex
-	live       map[string]struct{}
+	startedMu  sync.Mutex
+	started    map[string]time.Time
+	sweptAt    time.Time
 	drains     sync.WaitGroup
 }
 
@@ -66,7 +72,7 @@ func newWebhookDispatcher(sessions store.SessionService, executions store.Webhoo
 		retention:  retention,
 		clock:      clock,
 		logger:     logger,
-		live:       make(map[string]struct{}),
+		started:    make(map[string]time.Time),
 	}, nil
 }
 
@@ -133,7 +139,7 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.
 		_ = d.executions.DeleteExecution(context.WithoutCancel(ctx), executionID)
 		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeRuntimeOverloaded, "runtime did not accept the turn")
 	}
-	d.markLive(executionID)
+	d.markStarted(executionID)
 	d.startDrain(context.WithoutCancel(ctx), executionID, next, stop)
 
 	return gatewaywebhook.ExecutionRef{ExecutionID: executionID, TurnID: turnID}, nil
@@ -157,28 +163,31 @@ func (d *webhookDispatcher) replayIdentical(ctx context.Context, event *gatewayw
 	if previous.BodyDigest != event.BodyDigest {
 		return empty, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeReplayConflict, "identity was already used with different content")
 	}
-	if previous.State == store.WebhookExecutionStateAccepted && !d.isLive(previous.ID) {
+	if previous.State == store.WebhookExecutionStateAccepted && !d.startedHere(previous.ID) {
 		d.resubmitOrphaned(ctx, &previous, event)
 	}
 	return gatewaywebhook.ExecutionRef{ExecutionID: previous.ID, TurnID: previous.TurnID}, nil
 }
 
-func (d *webhookDispatcher) markLive(executionID string) {
-	d.liveMu.Lock()
-	defer d.liveMu.Unlock()
-	d.live[executionID] = struct{}{}
+func (d *webhookDispatcher) markStarted(executionID string) {
+	now := d.clock()
+	d.startedMu.Lock()
+	defer d.startedMu.Unlock()
+	if len(d.started) >= webhookStartedSweepAt || now.Sub(d.sweptAt) >= webhookStartedSweepEvery {
+		for id, at := range d.started {
+			if now.Sub(at) > d.retention {
+				delete(d.started, id)
+			}
+		}
+		d.sweptAt = now
+	}
+	d.started[executionID] = now
 }
 
-func (d *webhookDispatcher) unmarkLive(executionID string) {
-	d.liveMu.Lock()
-	defer d.liveMu.Unlock()
-	delete(d.live, executionID)
-}
-
-func (d *webhookDispatcher) isLive(executionID string) bool {
-	d.liveMu.Lock()
-	defer d.liveMu.Unlock()
-	_, ok := d.live[executionID]
+func (d *webhookDispatcher) startedHere(executionID string) bool {
+	d.startedMu.Lock()
+	defer d.startedMu.Unlock()
+	_, ok := d.started[executionID]
 	return ok
 }
 
@@ -211,7 +220,7 @@ func (d *webhookDispatcher) resubmitOrphaned(ctx context.Context, previous *stor
 		)
 		return
 	}
-	d.markLive(previous.ID)
+	d.markStarted(previous.ID)
 	d.startDrain(context.WithoutCancel(ctx), previous.ID, next, stop)
 }
 
@@ -252,7 +261,6 @@ func (d *webhookDispatcher) Wait(ctx context.Context) error {
 
 func (d *webhookDispatcher) drain(ctx context.Context, executionID string, next turnStep, stop func()) {
 	defer stop()
-	defer d.unmarkLive(executionID)
 	completedMessage := ""
 	for {
 		event, err, ok := next()
