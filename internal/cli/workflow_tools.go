@@ -6,22 +6,115 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
+	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 	"github.com/anggasct/aura/internal/workflow"
 )
+
+type proposalOfferer interface {
+	OfferProposal(ctx context.Context, proposalID, plan string, decide discord.ProposalDecider) error
+	ReplyTarget(sessionID string) (discord.HandoffTarget, bool)
+}
+
+const proposalCardQueue = 16
+
+type proposalOffer struct {
+	sessionID  string
+	proposalID string
+	plan       string
+}
+
+type proposalCards struct {
+	cfg      *config.Config
+	offerers []proposalOfferer
+	logger   *slog.Logger
+	requests chan proposalOffer
+}
 
 type workflowToolController struct {
 	interpreter *workflow.Interpreter
 	runs        *workflow.Store
 	registry    *auraagent.Registry
 	targets     []replyTargeter
+	cards       *proposalCards
+}
+
+func proposalOfferers(ports []runtimechannelhost.ChannelPort) []proposalOfferer {
+	var offerers []proposalOfferer
+	for _, port := range ports {
+		if offerer, ok := port.(proposalOfferer); ok {
+			offerers = append(offerers, offerer)
+		}
+	}
+	return offerers
+}
+
+func (c *workflowToolController) enableProposalCards(cfg *config.Config, offerers []proposalOfferer, logger *slog.Logger) {
+	if len(offerers) == 0 {
+		return
+	}
+	c.cards = &proposalCards{cfg: cfg, offerers: offerers, logger: logger, requests: make(chan proposalOffer, proposalCardQueue)}
+}
+
+func (c *workflowToolController) runProposalCards(ctx context.Context) {
+	if c.cards == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case offer := <-c.cards.requests:
+			c.deliverProposalCard(ctx, &offer)
+		}
+	}
+}
+
+func (c *workflowToolController) offerProposal(ctx context.Context, sessionID, proposalID, plan string) {
+	if c.cards == nil {
+		return
+	}
+	select {
+	case c.cards.requests <- proposalOffer{sessionID: sessionID, proposalID: proposalID, plan: plan}:
+	default:
+		c.cards.logger.WarnContext(ctx, "proposal card unavailable", "component", "workflow", "proposal_id", proposalID, "error", "card queue is full")
+	}
+}
+
+func (c *workflowToolController) deliverProposalCard(ctx context.Context, offer *proposalOffer) {
+	sessionID, proposalID, plan := offer.sessionID, offer.proposalID, offer.plan
+	offerer := c.cards.offerers[0]
+	for _, candidate := range c.cards.offerers {
+		if _, ok := candidate.ReplyTarget(sessionID); ok {
+			offerer = candidate
+			break
+		}
+	}
+	decide := func(ctx context.Context, approved bool) (string, error) {
+		if !approved {
+			if err := c.runs.DecideProposal(ctx, proposalID, workflow.ProposalRejected, "", time.Now()); err != nil {
+				return "", err
+			}
+			return "rejected " + proposalID, nil
+		}
+		runID, err := approveProposal(ctx, c.cards.cfg, c.interpreter, c.runs, proposalID, time.Now())
+		if err != nil {
+			return "", err
+		}
+		return "approved " + proposalID + ": run " + runID, nil
+	}
+	if err := offerer.OfferProposal(ctx, proposalID, plan, decide); err != nil {
+		c.cards.logger.WarnContext(ctx, "proposal card unavailable", "component", "workflow", "proposal_id", proposalID, "error", err)
+	}
 }
 
 func newWorkflowToolController(interpreter *workflow.Interpreter, runs *workflow.Store, registry *auraagent.Registry, targets ...replyTargeter) (*workflowToolController, error) {
@@ -158,6 +251,7 @@ func (c *workflowToolController) Propose(ctx context.Context, caller *toolsbuilt
 		return toolsbuiltin.WorkflowProposal{}, err
 	}
 	plan := workflow.RenderPlan(normalized, graph) + "\nApprove with: aura workflow proposal approve " + id
+	c.offerProposal(ctx, caller.SessionID, id, plan)
 	return toolsbuiltin.WorkflowProposal{ProposalID: id, Digest: digest, Plan: plan}, nil
 }
 
