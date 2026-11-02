@@ -34,6 +34,7 @@ func (s Source) valid() bool {
 
 type Spec struct {
 	ID      string     `json:"id"`
+	Name    string     `json:"name,omitempty"`
 	Goal    string     `json:"goal"`
 	Version int        `json:"version"`
 	Source  Source     `json:"source"`

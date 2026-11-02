@@ -160,3 +160,17 @@ func (c *workflowToolController) Propose(ctx context.Context, caller *toolsbuilt
 	plan := workflow.RenderPlan(normalized, graph) + "\nApprove with: aura workflow proposal approve " + id
 	return toolsbuiltin.WorkflowProposal{ProposalID: id, Digest: digest, Plan: plan}, nil
 }
+
+func (c *workflowToolController) SaveRoutine(ctx context.Context, caller *toolsbuiltin.WorkflowCaller, runID, name string) (toolsbuiltin.WorkflowRoutine, error) {
+	if caller.PrincipalClass != principal.ClassOwner {
+		return toolsbuiltin.WorkflowRoutine{}, toolsbuiltin.ErrWorkflowNotPermitted
+	}
+	routine, err := c.interpreter.SaveRoutine(ctx, runID, name)
+	if code, ok := workflow.CodeOf(err); ok && code == workflow.ErrorCodeRunNotFound {
+		return toolsbuiltin.WorkflowRoutine{}, toolsbuiltin.ErrWorkflowRunNotFound
+	}
+	if err != nil {
+		return toolsbuiltin.WorkflowRoutine{}, workflowRejection(err)
+	}
+	return toolsbuiltin.WorkflowRoutine{ID: routine.ID, Version: routine.Version}, nil
+}

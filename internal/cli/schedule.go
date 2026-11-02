@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/anggasct/aura/internal/broadcast"
@@ -20,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/scheduler"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
+	"github.com/anggasct/aura/internal/workflow"
 )
 
 type scheduleStore struct {
@@ -35,6 +37,7 @@ func (s *scheduleStore) InsertJob(ctx context.Context, job *scheduler.Job) error
 		Prompt: job.Prompt, OriginChannel: job.OriginChannel, OriginDestination: job.OriginDestination,
 		OverlapPolicy: job.OverlapPolicy, CatchUpGraceSeconds: job.CatchUpGraceSeconds,
 		State: job.State, Version: job.Version, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
+		WorkflowID: job.WorkflowID, WorkflowInputJSON: job.WorkflowInput,
 	}))
 }
 
@@ -44,6 +47,7 @@ func toScheduleJob(job *store.ScheduledJob) scheduler.Job {
 		Prompt: job.Prompt, OriginChannel: job.OriginChannel, OriginDestination: job.OriginDestination,
 		OverlapPolicy: job.OverlapPolicy, CatchUpGraceSeconds: job.CatchUpGraceSeconds,
 		State: job.State, Version: job.Version, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
+		WorkflowID: job.WorkflowID, WorkflowInput: job.WorkflowInputJSON,
 	}
 }
 
@@ -194,14 +198,55 @@ type cronTurnEngine interface {
 	Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error]
 }
 
+type workflowStarter interface {
+	StartKeyed(ctx context.Context, definitionID string, input *workflow.RunInput, origin *workflow.RunOrigin, durableKey string) (*workflow.RunSummary, error)
+}
+
+type scheduleWorkflows struct {
+	starter atomic.Pointer[workflowStarter]
+}
+
+func (w *scheduleWorkflows) set(starter workflowStarter) {
+	if w != nil && starter != nil {
+		w.starter.Store(&starter)
+	}
+}
+
+func (w *scheduleWorkflows) start(ctx context.Context, req *scheduler.TurnRequest) (scheduler.TurnResult, error) {
+	var starter *workflowStarter
+	if w != nil {
+		starter = w.starter.Load()
+	}
+	if starter == nil {
+		return scheduler.TurnResult{}, errors.New("scheduled workflows need the durable runtime")
+	}
+	input := &workflow.RunInput{}
+	if req.WorkflowInput != "" {
+		if err := json.Unmarshal([]byte(req.WorkflowInput), input); err != nil {
+			return scheduler.TurnResult{}, fmt.Errorf("scheduled workflow input: %w", err)
+		}
+	}
+	run, err := (*starter).StartKeyed(ctx, req.WorkflowID, &workflow.RunInput{Objective: input.Objective}, &workflow.RunOrigin{
+		PrincipalID: req.PrincipalID, PrincipalClass: string(principal.ClassForPrincipal(req.PrincipalID)),
+	}, "sched-"+req.IdempotencyKey)
+	if err != nil {
+		return scheduler.TurnResult{}, err
+	}
+	return scheduler.TurnResult{TurnID: run.ID, Text: fmt.Sprintf("started workflow %s (run %s)", req.WorkflowID, run.ID), Succeeded: true}, nil
+}
+
 type engineTurnRunner struct {
-	engine   cronTurnEngine
-	sessions store.SessionService
+	engine    cronTurnEngine
+	sessions  store.SessionService
+	workflows *scheduleWorkflows
 }
 
 func (r *engineTurnRunner) RunTurn(ctx context.Context, req *scheduler.TurnRequest) (scheduler.TurnResult, error) {
 	if req == nil {
 		return scheduler.TurnResult{}, errors.New("schedule turn request must not be nil")
+	}
+	if req.WorkflowID != "" {
+		return r.workflows.start(ctx, req)
 	}
 	if r.engine == nil {
 		return scheduler.TurnResult{}, errors.New("turn engine is not wired")
@@ -301,8 +346,8 @@ func notifyContentJSON(text string) string {
 	return string(raw)
 }
 
-func buildScheduleRunner(db *sql.DB, logger *slog.Logger, engine cronTurnEngine, broadcaster *broadcast.Broadcaster, retention time.Duration, observer scheduler.Observer) (*scheduler.Runner, error) {
-	turns := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
+func buildScheduleRunner(db *sql.DB, logger *slog.Logger, engine cronTurnEngine, broadcaster *broadcast.Broadcaster, retention time.Duration, observer scheduler.Observer, workflows *scheduleWorkflows) (*scheduler.Runner, error) {
+	turns := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db), workflows: workflows}
 	return scheduler.NewRunner(
 		&scheduleStore{store: store.NewScheduleStore(db)},
 		turns,

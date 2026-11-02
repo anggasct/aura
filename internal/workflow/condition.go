@@ -32,6 +32,7 @@ const (
 	ErrorCodeProposalNotFound     ErrorCode = "workflow_proposal_not_found"
 	ErrorCodeProposalDecided      ErrorCode = "workflow_proposal_decided"
 	ErrorCodeNotPermitted         ErrorCode = "workflow_not_permitted"
+	ErrorCodeRoutineInvalid       ErrorCode = "workflow_routine_invalid"
 )
 
 type Error struct {

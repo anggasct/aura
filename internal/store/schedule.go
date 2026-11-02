@@ -42,6 +42,8 @@ type ScheduledJob struct {
 	Version             int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	WorkflowID          string
+	WorkflowInputJSON   string
 }
 
 type JobEdit struct {
@@ -124,8 +126,8 @@ func validateScheduledJob(job *ScheduledJob) error {
 	if job.ID == "" || job.Name == "" || job.CronExpression == "" || job.Timezone == "" {
 		return Errorf(ErrorCodeInvalidArgument, "schedule job identity, name, expression, and timezone must not be empty")
 	}
-	if job.Prompt == "" || job.OriginChannel == "" || job.OriginDestination == "" {
-		return Errorf(ErrorCodeInvalidArgument, "schedule prompt and origin must not be empty")
+	if (job.Prompt == "") == (job.WorkflowID == "") || job.OriginChannel == "" || job.OriginDestination == "" {
+		return Errorf(ErrorCodeInvalidArgument, "schedule needs exactly one of a prompt or a workflow, and an origin")
 	}
 	if !validOverlapPolicy(job.OverlapPolicy) {
 		return Errorf(ErrorCodeScheduleInvalid, "schedule overlap policy is not valid")
@@ -152,11 +154,13 @@ func (s *sqliteScheduleStore) InsertJob(ctx context.Context, job *ScheduledJob) 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO scheduled_job (
 			id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
-			overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at,
+			workflow_id, workflow_input_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Name, job.CronExpression, job.Timezone, job.Prompt,
 		job.OriginChannel, job.OriginDestination, job.OverlapPolicy, job.CatchUpGraceSeconds,
 		job.State, job.Version, formatTime(job.CreatedAt.UTC()), formatTime(job.UpdatedAt.UTC()),
+		nullableText(job.WorkflowID), nullableText(job.WorkflowInputJSON),
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
@@ -173,7 +177,8 @@ func (s *sqliteScheduleStore) Job(ctx context.Context, id string) (ScheduledJob,
 	}
 	job, found, err := scanOneScheduledJob(s.db.QueryRowContext(ctx,
 		`SELECT id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
-		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at
+		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at,
+		COALESCE(workflow_id, ''), COALESCE(workflow_input_json, '')
 		FROM scheduled_job WHERE id = ?`, id))
 	if err != nil {
 		return ScheduledJob{}, err
@@ -191,11 +196,15 @@ func (s *sqliteScheduleStore) EditJob(ctx context.Context, id string, edit *JobE
 	if edit == nil {
 		return ScheduledJob{}, errNilArgument("edit")
 	}
+	current, err := s.Job(ctx, id)
+	if err != nil {
+		return ScheduledJob{}, err
+	}
 	candidate := &ScheduledJob{
 		ID: id, Name: edit.Name, CronExpression: edit.CronExpression, Timezone: edit.Timezone,
 		Prompt: edit.Prompt, OriginChannel: edit.OriginChannel, OriginDestination: edit.OriginDestination,
 		OverlapPolicy: edit.OverlapPolicy, CatchUpGraceSeconds: edit.CatchUpGraceSeconds,
-		State: ScheduleJobActive, Version: edit.ExpectedVersion + 1,
+		State: ScheduleJobActive, Version: edit.ExpectedVersion + 1, WorkflowID: current.WorkflowID,
 	}
 	if err := validateScheduledJob(candidate); err != nil {
 		return ScheduledJob{}, err
@@ -357,7 +366,7 @@ func scanOneScheduledJob(row rowScanner) (ScheduledJob, bool, error) {
 	err := row.Scan(
 		&job.ID, &job.Name, &job.CronExpression, &job.Timezone, &job.Prompt,
 		&job.OriginChannel, &job.OriginDestination, &job.OverlapPolicy, &job.CatchUpGraceSeconds,
-		&job.State, &job.Version, &createdAtRaw, &updatedAtRaw,
+		&job.State, &job.Version, &createdAtRaw, &updatedAtRaw, &job.WorkflowID, &job.WorkflowInputJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ScheduledJob{}, false, nil
@@ -518,7 +527,8 @@ func (s *sqliteScheduleStore) ActiveJobs(ctx context.Context, limit int) ([]Sche
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
-		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at
+		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at,
+		COALESCE(workflow_id, ''), COALESCE(workflow_input_json, '')
 		FROM scheduled_job WHERE state = ? ORDER BY id LIMIT ?`,
 		ScheduleJobActive, limit)
 	if err != nil {
@@ -609,7 +619,8 @@ func (s *sqliteScheduleStore) ListJobs(ctx context.Context, limit int) ([]Schedu
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
-		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at
+		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at,
+		COALESCE(workflow_id, ''), COALESCE(workflow_input_json, '')
 		FROM scheduled_job ORDER BY created_at DESC, id DESC LIMIT ?`,
 		limit)
 	if err != nil {
@@ -632,4 +643,11 @@ func (s *sqliteScheduleStore) ListJobs(ctx context.Context, limit int) ([]Schedu
 		return nil, classifyBusy(fmt.Errorf("list jobs: %w", err))
 	}
 	return jobs, nil
+}
+
+func nullableText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }

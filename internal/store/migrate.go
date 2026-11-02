@@ -45,6 +45,7 @@ var migrations = []migration{
 	{version: 27, sql: workflowRunOriginSchemaSQL},
 	{version: 28, sql: workflowCompletionSchemaSQL},
 	{version: 29, sql: workflowProposalSchemaSQL},
+	{version: 30, sql: workflowRoutineSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -596,6 +597,12 @@ CREATE TABLE session_handoff (
 ALTER TABLE usage_reservation ADD COLUMN principal_id TEXT;
 ALTER TABLE usage_reservation ADD COLUMN principal_class TEXT;
 CREATE INDEX usage_reservation_principal_idx ON usage_reservation(principal_id, window_day);
+`
+
+const workflowRoutineSchemaSQL = `
+ALTER TABLE workflow_definition ADD COLUMN name TEXT;
+ALTER TABLE scheduled_job ADD COLUMN workflow_id TEXT;
+ALTER TABLE scheduled_job ADD COLUMN workflow_input_json TEXT CHECK (workflow_input_json IS NULL OR json_valid(workflow_input_json));
 `
 
 const workflowProposalSchemaSQL = `
