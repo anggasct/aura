@@ -90,6 +90,7 @@ func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, err
 	}
 	cfg := config.Default()
 	cfg.Storage.Path = dataRoot
+	ignoreHostDiskHeadroom(&cfg)
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
@@ -99,6 +100,12 @@ func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, err
 		return runStatus(c, &cfg, capability.Report{}, negotiate, true, false, pinnedProcessProbe)
 	}
 	return cmd
+}
+
+func ignoreHostDiskHeadroom(cfg *config.Config) {
+	cfg.Health.DiskWarningPercent = 0
+	cfg.Health.DiskCriticalPercent = 0
+	cfg.Health.DiskCriticalFloorBytes = 0
 }
 
 func pinnedProcessProbe() (health.ProcessStatus, bool) {
@@ -152,6 +159,7 @@ func TestStatusJSONEncodesContract(t *testing.T) {
 	seedHealthyStorage(t, dataRoot)
 	cfg := config.Default()
 	cfg.Storage.Path = dataRoot
+	ignoreHostDiskHeadroom(&cfg)
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
