@@ -14,10 +14,12 @@ import (
 )
 
 type stubSessionStore struct {
-	mu     sync.Mutex
-	states map[string]*runtimesessions.State
-	events store.EventStore
-	dedupe store.DedupeStore
+	mu         sync.Mutex
+	states     map[string]*runtimesessions.State
+	events     store.EventStore
+	dedupe     store.DedupeStore
+	afterAdmit func(turnID string)
+	release    func(sessionID, turnID string) (runtimesessions.ReleaseResult, bool)
 }
 
 func newStubSessionStore(events store.EventStore, dedupe store.DedupeStore) *stubSessionStore {
@@ -34,6 +36,14 @@ func (s *stubSessionStore) stateLocked(sessionID string) *runtimesessions.State 
 }
 
 func (s *stubSessionStore) Admit(ctx context.Context, req *runtimesessions.AdmitRequest) (runtimesessions.AdmitResult, error) {
+	result, err := s.admit(ctx, req)
+	if err == nil && s.afterAdmit != nil {
+		s.afterAdmit(req.Turn.TurnID)
+	}
+	return result, err
+}
+
+func (s *stubSessionStore) admit(ctx context.Context, req *runtimesessions.AdmitRequest) (runtimesessions.AdmitResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state := s.stateLocked(req.Turn.SessionID)
@@ -101,6 +111,11 @@ func acceptedPayloadFor(desc *runtimesessions.Descriptor) []byte {
 }
 
 func (s *stubSessionStore) Release(_ context.Context, sessionID, turnID string) (runtimesessions.ReleaseResult, error) {
+	if s.release != nil {
+		if result, ok := s.release(sessionID, turnID); ok {
+			return result, nil
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return runtimesessions.Release(s.stateLocked(sessionID), turnID)

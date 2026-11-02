@@ -83,6 +83,21 @@ func (e *Engine) claimDurable(ctx context.Context, req *runtime.TurnRequest) (ac
 	}
 	descriptor := turnDescriptorFromRequest(req)
 	eventID := NewTurnID()
+	e.mu.Lock()
+	if e.admitting == nil {
+		e.admitting = map[string]string{}
+	}
+	e.admitting[req.TurnID] = req.SessionID
+	e.mu.Unlock()
+	staging := false
+	defer func() {
+		if !staging {
+			e.mu.Lock()
+			delete(e.admitting, req.TurnID)
+			delete(e.granted, req.TurnID)
+			e.mu.Unlock()
+		}
+	}()
 	result, err := e.sessionStore.Admit(ctx, &runtimesessions.AdmitRequest{
 		Turn:            descriptor,
 		AcceptedEventID: eventID,
@@ -119,6 +134,7 @@ func (e *Engine) claimDurable(ctx context.Context, req *runtime.TurnRequest) (ac
 		Payload:       []byte(result.EventPayload),
 		CreatedAt:     createdAt,
 	}
+	staging = true
 	return accepted, "", false, result.ToStart != nil, nil
 }
 
@@ -142,7 +158,9 @@ func (e *Engine) stageDurable(ctx context.Context, req *runtime.TurnRequest, acc
 		t.start = func() { e.runTurn(turnCtx, t) }
 	}
 	e.mu.Lock()
+	delete(e.admitting, req.TurnID)
 	if e.shutdown {
+		delete(e.granted, req.TurnID)
 		e.mu.Unlock()
 		e.terminateStaged(context.WithoutCancel(ctx), t)
 		return
@@ -199,7 +217,9 @@ func (e *Engine) scheduleDurable(ctx context.Context) {
 				next = t
 				break
 			}
-			delete(e.granted, turnID)
+			if _, admitting := e.admitting[turnID]; !admitting {
+				delete(e.granted, turnID)
+			}
 		}
 		if next == nil {
 			return
@@ -243,6 +263,21 @@ func (e *Engine) releaseTurn(ctx context.Context, t *turn) {
 			e.granted[staged.turnID] = struct{}{}
 			e.mu.Unlock()
 			e.scheduleDurable(ctx)
+			return
+		}
+		if admittingSession, admitting := e.admitting[result.ToStart.Descriptor.TurnID]; admitting {
+			if admittingSession != t.req.SessionID {
+				e.mu.Unlock()
+				e.logger.ErrorContext(ctx, "durable release returned a turn from another session", "turn_id", result.ToStart.Descriptor.TurnID)
+				return
+			}
+			if !shutdown {
+				if e.granted == nil {
+					e.granted = map[string]struct{}{}
+				}
+				e.granted[result.ToStart.Descriptor.TurnID] = struct{}{}
+			}
+			e.mu.Unlock()
 			return
 		}
 		e.mu.Unlock()
