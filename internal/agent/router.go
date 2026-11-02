@@ -45,16 +45,17 @@ type Router struct {
 	registry *Registry
 }
 
-func NewRouter(registry *Registry, discord *config.Discord, bindings []config.Binding) (*Router, error) {
+func NewRouter(registry *Registry, channels *config.Channels, bindings []config.Binding) (*Router, error) {
 	if registry == nil {
 		return nil, codedError(ErrorCodeBindingInvalid, "agent registry must not be nil")
 	}
-	if discord == nil {
-		return nil, codedError(ErrorCodeBindingInvalid, "discord config must not be nil")
+	if channels == nil {
+		return nil, codedError(ErrorCodeBindingInvalid, "channels config must not be nil")
 	}
+	accounts := channelAccounts(channels)
 	router := &Router{
-		defaults: make(map[routeAccount]string, len(discord.Accounts)),
-		accounts: make(map[routeAccount]bool, len(discord.Accounts)),
+		defaults: make(map[routeAccount]string, len(accounts)),
+		accounts: make(map[routeAccount]bool, len(accounts)),
 		bindings: append([]config.Binding(nil), bindings...),
 		registry: registry,
 	}
@@ -62,18 +63,17 @@ func NewRouter(registry *Registry, discord *config.Discord, bindings []config.Bi
 		router.personas = append(router.personas, registry.definitions[i].ID)
 	}
 	var problems []error
-	for i := range discord.Accounts {
-		account := &discord.Accounts[i]
-		key := routeAccount{channel: config.BindingChannelDiscord, account: account.Name}
+	for _, account := range accounts {
+		key := routeAccount{channel: account.channel, account: account.name}
 		router.accounts[key] = true
-		if account.Persona == "" {
+		if account.persona == "" {
 			continue
 		}
-		if _, ok := registry.Lookup(account.Persona); !ok {
-			problems = append(problems, fmt.Errorf("channels.discord.accounts[%d].persona %q is not a registered persona", i, account.Persona))
+		if _, ok := registry.Lookup(account.persona); !ok {
+			problems = append(problems, fmt.Errorf("%s.persona %q is not a registered persona", account.field, account.persona))
 			continue
 		}
-		router.defaults[key] = account.Persona
+		router.defaults[key] = account.persona
 	}
 	for i := range bindings {
 		binding := &bindings[i]
@@ -85,6 +85,36 @@ func NewRouter(registry *Registry, discord *config.Discord, bindings []config.Bi
 		return nil, codedError(ErrorCodeBindingInvalid, err.Error())
 	}
 	return router, nil
+}
+
+type channelAccount struct {
+	channel string
+	name    string
+	persona string
+	field   string
+}
+
+func channelAccounts(channels *config.Channels) []channelAccount {
+	accounts := make([]channelAccount, 0, len(channels.Discord.Accounts)+len(channels.Telegram.Accounts))
+	for i := range channels.Discord.Accounts {
+		account := &channels.Discord.Accounts[i]
+		accounts = append(accounts, channelAccount{
+			channel: config.BindingChannelDiscord,
+			name:    account.Name,
+			persona: account.Persona,
+			field:   fmt.Sprintf("channels.discord.accounts[%d]", i),
+		})
+	}
+	for i := range channels.Telegram.Accounts {
+		account := &channels.Telegram.Accounts[i]
+		accounts = append(accounts, channelAccount{
+			channel: config.BindingChannelTelegram,
+			name:    account.Name,
+			persona: account.Persona,
+			field:   fmt.Sprintf("channels.telegram.accounts[%d]", i),
+		})
+	}
+	return accounts
 }
 
 func (r *Router) HasAccount(channel, account string) bool {

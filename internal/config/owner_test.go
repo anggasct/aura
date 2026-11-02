@@ -261,7 +261,7 @@ func TestLoad_OwnerIdentitiesRejected(t *testing.T) {
 		index string
 		value string
 	}{
-		"unknown channel prefix": {body: "    - telegram:5550001\n", index: "owner.identities[0]", value: "5550001"},
+		"unknown channel prefix": {body: "    - slack:5550001\n", index: "owner.identities[0]", value: "5550001"},
 		"empty discord id":       {body: "    - \"discord:\"\n", index: "owner.identities[0]"},
 		"non-numeric discord id": {body: "    - discord:5550001\n    - discord:owner5550002\n", index: "owner.identities[1]", value: "owner5550002"},
 		"duplicate identity":     {body: "    - discord:5550003\n    - discord:5550003\n", index: "owner.identities[1]", value: "5550003"},
@@ -284,7 +284,7 @@ func TestLoad_OwnerIdentitiesRejected(t *testing.T) {
 }
 
 func TestLoad_OwnerIdentitiesRenderSingleCode(t *testing.T) {
-	path := writeOwnerConfig(t, "version: 1\nowner:\n  identities:\n    - telegram:5550001\n    - discord:owner5550002\n")
+	path := writeOwnerConfig(t, "version: 1\nowner:\n  identities:\n    - slack:5550001\n    - discord:owner5550002\n")
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("invalid identities accepted")

@@ -69,7 +69,8 @@ type WebhookKey struct {
 }
 
 type Channels struct {
-	Discord Discord `koanf:"discord" yaml:"discord"`
+	Discord  Discord  `koanf:"discord" yaml:"discord"`
+	Telegram Telegram `koanf:"telegram" yaml:"telegram"`
 }
 
 type Broadcast struct {
@@ -243,7 +244,27 @@ type DiscordAccount struct {
 	AcceptDMs         bool     `koanf:"accept_dms" yaml:"accept_dms"`
 }
 
-const BindingChannelDiscord = "discord"
+type Telegram struct {
+	Enabled  bool              `koanf:"enabled" yaml:"enabled"`
+	Accounts []TelegramAccount `koanf:"accounts" yaml:"accounts"`
+	Polling  TelegramPolling   `koanf:"polling" yaml:"polling"`
+}
+
+type TelegramAccount struct {
+	Name        string `koanf:"name" yaml:"name"`
+	BotTokenRef string `koanf:"bot_token_ref" yaml:"bot_token_ref"`
+	Persona     string `koanf:"persona" yaml:"persona,omitempty"`
+}
+
+type TelegramPolling struct {
+	Timeout    Duration `koanf:"timeout" yaml:"timeout"`
+	MaxBackoff Duration `koanf:"max_backoff" yaml:"max_backoff"`
+}
+
+const (
+	BindingChannelDiscord  = "discord"
+	BindingChannelTelegram = "telegram"
+)
 
 type Binding struct {
 	Persona   string `koanf:"persona" yaml:"persona"`
@@ -896,6 +917,12 @@ func Default() Config {
 				MinEditInterval:          Duration(2 * time.Second),
 				MaxAttachmentBytes:       20971520,
 				ThreadAutoArchiveMinutes: 1440,
+			},
+			Telegram: Telegram{
+				Polling: TelegramPolling{
+					Timeout:    Duration(30 * time.Second),
+					MaxBackoff: Duration(time.Minute),
+				},
 			},
 		},
 		Broadcast: Broadcast{

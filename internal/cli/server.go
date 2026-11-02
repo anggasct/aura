@@ -101,7 +101,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			logPersonas(ctx, logger, agentRegistry)
-			personaRouter, err := auraagent.NewRouter(agentRegistry, &cfg.Channels.Discord, cfg.Bindings)
+			personaRouter, err := auraagent.NewRouter(agentRegistry, &cfg.Channels, cfg.Bindings)
 			if err != nil {
 				return err
 			}

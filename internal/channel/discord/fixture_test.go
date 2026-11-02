@@ -260,7 +260,7 @@ func testPersonaRouter(t *testing.T, cfg *config.Discord, bindings []config.Bind
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}
-	router, err := auraagent.NewRouter(registry, cfg, bindings)
+	router, err := auraagent.NewRouter(registry, &config.Channels{Discord: *cfg}, bindings)
 	if err != nil {
 		t.Fatalf("persona router: %v", err)
 	}

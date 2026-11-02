@@ -45,7 +45,7 @@ func testRouter(t *testing.T, cfg *config.Config) *auraagent.Router {
 	if err != nil {
 		t.Fatalf("buildAgentRegistry(): %v", err)
 	}
-	router, err := auraagent.NewRouter(registry, &cfg.Channels.Discord, cfg.Bindings)
+	router, err := auraagent.NewRouter(registry, &cfg.Channels, cfg.Bindings)
 	if err != nil {
 		t.Fatalf("NewRouter(): %v", err)
 	}

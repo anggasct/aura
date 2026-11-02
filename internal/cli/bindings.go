@@ -52,7 +52,7 @@ func newBindingsExplainCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			router, err := auraagent.NewRouter(registry, &result.Config.Channels.Discord, result.Config.Bindings)
+			router, err := auraagent.NewRouter(registry, &result.Config.Channels, result.Config.Bindings)
 			if err != nil {
 				return err
 			}
