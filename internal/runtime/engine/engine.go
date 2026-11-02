@@ -86,7 +86,7 @@ type Engine struct {
 	turns     map[string]*turn
 	staged    map[string]*turn
 	granted   map[string]struct{}
-	admitting map[string]struct{}
+	admitting map[string]string
 	sesKeys   map[string]struct{}
 	pending   int
 	active    int

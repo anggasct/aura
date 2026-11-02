@@ -85,15 +85,16 @@ func (e *Engine) claimDurable(ctx context.Context, req *runtime.TurnRequest) (ac
 	eventID := NewTurnID()
 	e.mu.Lock()
 	if e.admitting == nil {
-		e.admitting = map[string]struct{}{}
+		e.admitting = map[string]string{}
 	}
-	e.admitting[req.TurnID] = struct{}{}
+	e.admitting[req.TurnID] = req.SessionID
 	e.mu.Unlock()
 	staging := false
 	defer func() {
 		if !staging {
 			e.mu.Lock()
 			delete(e.admitting, req.TurnID)
+			delete(e.granted, req.TurnID)
 			e.mu.Unlock()
 		}
 	}()
@@ -159,6 +160,7 @@ func (e *Engine) stageDurable(ctx context.Context, req *runtime.TurnRequest, acc
 	e.mu.Lock()
 	delete(e.admitting, req.TurnID)
 	if e.shutdown {
+		delete(e.granted, req.TurnID)
 		e.mu.Unlock()
 		e.terminateStaged(context.WithoutCancel(ctx), t)
 		return
@@ -263,11 +265,18 @@ func (e *Engine) releaseTurn(ctx context.Context, t *turn) {
 			e.scheduleDurable(ctx)
 			return
 		}
-		if _, admitting := e.admitting[result.ToStart.Descriptor.TurnID]; admitting && !shutdown {
-			if e.granted == nil {
-				e.granted = map[string]struct{}{}
+		if admittingSession, admitting := e.admitting[result.ToStart.Descriptor.TurnID]; admitting {
+			if admittingSession != t.req.SessionID {
+				e.mu.Unlock()
+				e.logger.ErrorContext(ctx, "durable release returned a turn from another session", "turn_id", result.ToStart.Descriptor.TurnID)
+				return
 			}
-			e.granted[result.ToStart.Descriptor.TurnID] = struct{}{}
+			if !shutdown {
+				if e.granted == nil {
+					e.granted = map[string]struct{}{}
+				}
+				e.granted[result.ToStart.Descriptor.TurnID] = struct{}{}
+			}
 			e.mu.Unlock()
 			return
 		}

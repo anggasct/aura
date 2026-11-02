@@ -19,6 +19,7 @@ type stubSessionStore struct {
 	events     store.EventStore
 	dedupe     store.DedupeStore
 	afterAdmit func(turnID string)
+	release    func(sessionID, turnID string) (runtimesessions.ReleaseResult, bool)
 }
 
 func newStubSessionStore(events store.EventStore, dedupe store.DedupeStore) *stubSessionStore {
@@ -110,6 +111,11 @@ func acceptedPayloadFor(desc *runtimesessions.Descriptor) []byte {
 }
 
 func (s *stubSessionStore) Release(_ context.Context, sessionID, turnID string) (runtimesessions.ReleaseResult, error) {
+	if s.release != nil {
+		if result, ok := s.release(sessionID, turnID); ok {
+			return result, nil
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return runtimesessions.Release(s.stateLocked(sessionID), turnID)

@@ -622,3 +622,56 @@ func TestDurableTurnReleasedBeforeItIsStagedStillReachesItsCaller(t *testing.T) 
 		}
 	})
 }
+
+func TestShutdownBetweenGrantAndStagingCancelsTheTurnAndLeavesNoGrant(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
+			{Kind: runtime.EventKindMessageCompleted, Payload: []byte(`{}`)},
+		})
+		engine, stub, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
+		mustCreateSession(t, db, "session-a")
+		stub.afterAdmit = func(turnID string) {
+			if turnID != "turn-1" {
+				return
+			}
+			close(gate)
+			synctest.Wait()
+			if err := engine.Shutdown(context.Background()); err != nil {
+				t.Errorf("shutdown: %v", err)
+			}
+		}
+		go func() { _, _ = collect(t, engine, sampleRequest("session-a", "turn-0")) }()
+		waitFor(t, func() bool { return executor.StartCount() == 1 })
+		events, _ := collect(t, engine, sampleRequest("session-a", "turn-1"))
+		if len(events) == 0 || events[len(events)-1].Kind != runtime.EventKindTurnCancelled {
+			t.Fatalf("turn-1 events = %+v, want it cancelled by the shutdown", events)
+		}
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		if len(engine.granted) != 0 || len(engine.admitting) != 0 || executor.StartCount() != 1 {
+			t.Fatalf("granted = %v admitting = %v starts = %d", engine.granted, engine.admitting, executor.StartCount())
+		}
+	})
+}
+
+func TestReleaseNeverGrantsAnAdmittingTurnOfAnotherSession(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindMessageCompleted, Payload: []byte(`{}`)}})
+		engine, stub, _ := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		stub.release = func(string, string) (runtimesessions.ReleaseResult, bool) {
+			return runtimesessions.ReleaseResult{ToStart: &runtimesessions.QueuedTurn{Descriptor: runtimesessions.Descriptor{TurnID: "turn-x", SessionID: "session-b"}}}, true
+		}
+		engine.mu.Lock()
+		engine.admitting = map[string]string{"turn-x": "session-b"}
+		engine.mu.Unlock()
+		engine.releaseTurn(context.Background(), &turn{req: runtime.TurnRequest{SessionID: "session-a"}, turnID: "turn-0"})
+		synctest.Wait()
+		engine.mu.Lock()
+		defer engine.mu.Unlock()
+		if _, granted := engine.granted["turn-x"]; granted || executor.StartCount() != 0 {
+			t.Fatalf("a turn of another session was granted (%v) or started (%d)", engine.granted, executor.StartCount())
+		}
+	})
+}
