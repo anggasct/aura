@@ -50,5 +50,40 @@ signs:
     artifacts: checksum
     output: true
 
+dockers_v2:
+  - id: aura
+    ids: [aura]
+    images:
+      - ghcr.io/anggasct/aura
+    tags:
+      - "{{ .Version }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    sbom: true
+    labels:
+      "org.opencontainers.image.title": "aura"
+      "org.opencontainers.image.source": "https://github.com/anggasct/aura"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.version": "{{ .Version }}"
+    annotations:
+      "org.opencontainers.image.title": "aura"
+      "org.opencontainers.image.description": "Aura personal agent runtime (core profile)"
+      "org.opencontainers.image.source": "https://github.com/anggasct/aura"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.created": "{{ .Date }}"
+      "org.opencontainers.image.base.name": "{{ .BaseImage }}"
+      "org.opencontainers.image.base.digest": "{{ .BaseImageDigest }}"
+
+docker_signs:
+  - cmd: cosign
+    artifacts: all
+    output: true
+    args:
+      - "sign"
+      - "--yes"
+      - "${artifact}"
+
 changelog:
   disable: true
