@@ -65,12 +65,13 @@ func turnIDFromContext(ctx context.Context) string {
 type turnAccessContextKey struct{}
 
 type turnAccess struct {
-	class   principal.Class
-	agentID string
+	principalID string
+	class       principal.Class
+	agentID     string
 }
 
-func withTurnAccess(ctx context.Context, class principal.Class, agentID string) context.Context {
-	return context.WithValue(ctx, turnAccessContextKey{}, turnAccess{class: class, agentID: agentID})
+func withTurnAccess(ctx context.Context, principalID string, class principal.Class, agentID string) context.Context {
+	return context.WithValue(ctx, turnAccessContextKey{}, turnAccess{principalID: principalID, class: class, agentID: agentID})
 }
 
 func turnAccessFromContext(ctx context.Context) turnAccess {

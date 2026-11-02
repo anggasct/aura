@@ -31,7 +31,7 @@ func TestReserveCreatesConservativeReservation(t *testing.T) {
 func TestReserveDuplicateAttemptIdempotent(t *testing.T) {
 	l := newTestLedger(t, 1000000, 10000000)
 	first := reserve(t, l, "inv-1", 0, 100, 200)
-	second, err := l.Reserve(context.Background(), ReserveRequest{
+	second, err := l.Reserve(context.Background(), &ReserveRequest{
 		InvocationID:             "inv-1",
 		Attempt:                  0,
 		ModelDefinitionID:        "primary",
@@ -111,7 +111,7 @@ func TestReserveConflictPathBothMisses(t *testing.T) {
 func TestReserveBudgetExceeded(t *testing.T) {
 	l := newTestLedger(t, 20000, 1000000)
 	reserve(t, l, "inv-1", 0, 100, 200) // 14000
-	_, err := l.Reserve(context.Background(), ReserveRequest{
+	_, err := l.Reserve(context.Background(), &ReserveRequest{
 		InvocationID:             "inv-2",
 		Attempt:                  0,
 		ModelDefinitionID:        "primary",
@@ -125,7 +125,7 @@ func TestReserveBudgetExceeded(t *testing.T) {
 
 func TestReserveUnknownPriceRejectedWhenCapped(t *testing.T) {
 	l := newTestLedger(t, 1000000, 10000000)
-	_, err := l.Reserve(context.Background(), ReserveRequest{
+	_, err := l.Reserve(context.Background(), &ReserveRequest{
 		InvocationID:             "inv-1",
 		Attempt:                  0,
 		ModelDefinitionID:        "unregistered",
@@ -390,7 +390,7 @@ func TestConcurrentReserveAtomic(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := l.Reserve(context.Background(), ReserveRequest{
+			_, err := l.Reserve(context.Background(), &ReserveRequest{
 				InvocationID:             "inv-" + string(rune('a'+i)),
 				Attempt:                  0,
 				ModelDefinitionID:        "primary",
@@ -527,7 +527,7 @@ func TestRestartPreservesCapState(t *testing.T) {
 		t.Errorf("after restart used = %d, want %d", used, 2*r2.ReservedCostMicros)
 	}
 
-	r3, err := l2.Reserve(context.Background(), ReserveRequest{
+	r3, err := l2.Reserve(context.Background(), &ReserveRequest{
 		InvocationID:             "inv-3",
 		Attempt:                  0,
 		ModelDefinitionID:        "primary",
@@ -552,7 +552,7 @@ func TestMonthlyCapEnforced(t *testing.T) {
 	l := newTestLedger(t, 10000000, 30000)
 	reserve(t, l, "inv-1", 0, 100, 200) // 14000
 	reserve(t, l, "inv-2", 0, 100, 200) // 14000
-	_, err := l.Reserve(context.Background(), ReserveRequest{
+	_, err := l.Reserve(context.Background(), &ReserveRequest{
 		InvocationID:             "inv-3",
 		Attempt:                  0,
 		ModelDefinitionID:        "primary",

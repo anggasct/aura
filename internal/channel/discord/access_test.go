@@ -89,7 +89,8 @@ func newAccessAdapter(t *testing.T, persona string, owners []string, personas []
 	adapter.SetPersonaRouter(router)
 	adapter.SetPrincipalResolver(testOwners(t, owners...))
 	observer := &accessObserver{denied: map[string]int{}, routed: map[string]int{}}
-	adapter.SetAccess(observer.settings())
+	settings := observer.settings()
+	adapter.SetAccess(&settings)
 	adapter.selfID = "999"
 	sink := newMemorySink()
 	adapter.sink = sink

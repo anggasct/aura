@@ -17,6 +17,8 @@ const (
 	AttrApprovalRoutedResult     = "approval.routed.result"
 	MetricPairingRequestsTotal   = "pairing.requests.total"
 	AttrPairingResult            = "pairing.result"
+	MetricBudgetExhaustedTotal   = "budget.exhausted.total"
+	AttrBudgetLimit              = "budget.limit"
 )
 
 type AccessRecorder struct {
@@ -24,6 +26,7 @@ type AccessRecorder struct {
 	routed   metric.Int64Counter
 	standing metric.Int64Counter
 	pairing  metric.Int64Counter
+	budget   metric.Int64Counter
 }
 
 func NewAccessRecorder(mp metric.MeterProvider) (*AccessRecorder, error) {
@@ -47,7 +50,18 @@ func NewAccessRecorder(mp metric.MeterProvider) (*AccessRecorder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: create pairing requests counter: %w", err)
 	}
-	return &AccessRecorder{denied: denied, routed: routed, standing: standing, pairing: pairing}, nil
+	budget, err := meter.Int64Counter(MetricBudgetExhaustedTotal, metric.WithDescription("non-owner turns refused by a principal budget"))
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: create budget exhausted counter: %w", err)
+	}
+	return &AccessRecorder{denied: denied, routed: routed, standing: standing, pairing: pairing, budget: budget}, nil
+}
+
+func (r *AccessRecorder) BudgetExhausted(ctx context.Context, class, limit string) {
+	if r == nil {
+		return
+	}
+	r.budget.Add(ctx, 1, metric.WithAttributes(attribute.String(AttrPrincipalClass, class), attribute.String(AttrBudgetLimit, limit)))
 }
 
 func (r *AccessRecorder) Denied(ctx context.Context, reason string) {

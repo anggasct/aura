@@ -14,6 +14,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
+	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
 const (
@@ -59,15 +60,25 @@ type AccessSettings struct {
 	StandingGrantTTL time.Duration
 	Grants           StandingGrantRecorder
 	Pairing          PairingService
+	Budgets          BudgetGate
 	Denied           func(ctx context.Context, reason string)
 	ApprovalRouted   func(ctx context.Context, result string)
 }
 
-func (a *Adapter) SetAccess(settings AccessSettings) {
-	if a == nil {
+const (
+	BudgetRefusalRateLimited = config.MessageRateLimited
+	BudgetRefusalExhausted   = config.MessageBudgetExhausted
+)
+
+type BudgetGate interface {
+	Admit(ctx context.Context, principalID string, class principal.Class) (string, error)
+}
+
+func (a *Adapter) SetAccess(settings *AccessSettings) {
+	if a == nil || settings == nil {
 		return
 	}
-	a.access = settings
+	a.access = *settings
 }
 
 func (a *Adapter) servesPublic() bool {
@@ -133,6 +144,29 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *messagePayload) bool {
 		return true
 	}
 	a.postNotice(ctx, token, msg.ChannelID, reply)
+	return true
+}
+
+func (a *Adapter) budgetRefused(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope) bool {
+	class := principal.ParseClass(envelope.PrincipalClass)
+	if a.access.Budgets == nil || class == principal.ClassOwner {
+		return false
+	}
+	refusal, err := a.access.Budgets.Admit(ctx, envelope.PrincipalID, class)
+	if err != nil {
+		a.logger.WarnContext(ctx, "principal budget check failed", "component", "discord")
+		return true
+	}
+	if refusal == "" {
+		return false
+	}
+	definition, _ := a.personaDefinition(envelope.AgentID)
+	token, err := a.tokenRef.Resolve()
+	if err != nil {
+		a.logger.WarnContext(ctx, "budget reply token unavailable", "component", "discord")
+		return true
+	}
+	a.postNotice(ctx, token, msg.ChannelID, definition.Message(refusal))
 	return true
 }
 

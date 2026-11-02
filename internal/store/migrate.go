@@ -39,6 +39,7 @@ var migrations = []migration{
 	{version: 21, sql: memoryPersonaSchemaSQL},
 	{version: 22, sql: conversationSessionSchemaSQL},
 	{version: 23, sql: accessSchemaSQL},
+	{version: 24, sql: reservationEstimateSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -590,6 +591,10 @@ CREATE TABLE session_handoff (
 ALTER TABLE usage_reservation ADD COLUMN principal_id TEXT;
 ALTER TABLE usage_reservation ADD COLUMN principal_class TEXT;
 CREATE INDEX usage_reservation_principal_idx ON usage_reservation(principal_id, window_day);
+`
+
+const reservationEstimateSchemaSQL = `
+ALTER TABLE usage_reservation ADD COLUMN reserved_tokens INTEGER NOT NULL DEFAULT 0 CHECK (reserved_tokens >= 0);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

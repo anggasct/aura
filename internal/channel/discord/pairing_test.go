@@ -50,7 +50,7 @@ func newPairingAdapter(t *testing.T, persona string, pairing *fakePairing) (*Ada
 	adapter, sink, observer := newAccessAdapter(t, persona, []string{"discord:777"}, pairingPersonas())
 	settings := observer.settings()
 	settings.Pairing = pairing
-	adapter.SetAccess(settings)
+	adapter.SetAccess(&settings)
 	adapter.restBase = stub.srv.URL
 	return adapter, sink, stub
 }
