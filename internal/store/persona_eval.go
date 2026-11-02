@@ -33,6 +33,7 @@ type PersonaEvalStore interface {
 	Record(ctx context.Context, result *PersonaEvalResult) (PersonaEvalResult, error)
 	Latest(ctx context.Context, agentID, digest, layer string) (PersonaEvalResult, bool, error)
 	List(ctx context.Context, agentID string, limit int) ([]PersonaEvalResult, error)
+	EverPassed(ctx context.Context, agentID, digest, layer string) (bool, error)
 }
 
 type sqlitePersonaEvalStore struct {
@@ -90,6 +91,16 @@ func (s *sqlitePersonaEvalStore) Latest(ctx context.Context, agentID, digest, la
 		return PersonaEvalResult{}, false, err
 	}
 	return result, true, nil
+}
+
+func (s *sqlitePersonaEvalStore) EverPassed(ctx context.Context, agentID, digest, layer string) (bool, error) {
+	var passed int
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM persona_eval_result WHERE agent_id = ? AND fingerprint = ? AND layer = ? AND passed = 1)`,
+		agentID, digest, layer).Scan(&passed)
+	if err != nil {
+		return false, classifyBusy(fmt.Errorf("check persona eval history: %w", err))
+	}
+	return passed == 1, nil
 }
 
 func (s *sqlitePersonaEvalStore) List(ctx context.Context, agentID string, limit int) ([]PersonaEvalResult, error) {

@@ -638,7 +638,16 @@ type AgentDefinition struct {
 }
 
 type AgentEvals struct {
-	Dir string `koanf:"dir" yaml:"dir,omitempty"`
+	Dir      string             `koanf:"dir" yaml:"dir,omitempty"`
+	Behavior *AgentEvalBehavior `koanf:"behavior" yaml:"behavior,omitempty"`
+}
+
+type AgentEvalBehavior struct {
+	Required            bool    `koanf:"required" yaml:"required,omitempty"`
+	MinScore            float64 `koanf:"min_score" yaml:"min_score,omitempty"`
+	JudgeRoute          string  `koanf:"judge_route" yaml:"judge_route,omitempty"`
+	Schedule            string  `koanf:"schedule" yaml:"schedule,omitempty"`
+	EnforceOnRegression bool    `koanf:"enforce_on_regression" yaml:"enforce_on_regression,omitempty"`
 }
 
 type Agents struct {

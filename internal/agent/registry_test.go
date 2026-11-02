@@ -43,6 +43,7 @@ func TestBuildRejectsInvalidOverrides(t *testing.T) {
 		overrides []config.AgentDefinition
 		wantCode  ErrorCode
 		wantField string
+		routes    []string
 	}{
 		{
 			name:      "empty id",
@@ -87,6 +88,19 @@ func TestBuildRejectsInvalidOverrides(t *testing.T) {
 			wantField: ".model_route",
 		},
 		{
+			name:      "unknown judge route",
+			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{JudgeRoute: "tertiary"}}}},
+			wantCode:  ErrorCodeUnknownModelRoute,
+			wantField: ".evals.behavior.judge_route",
+		},
+		{
+			name:      "default judge route not configured",
+			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{}}}},
+			wantCode:  ErrorCodeUnknownModelRoute,
+			wantField: `"auxiliary"`,
+			routes:    []string{"primary"},
+		},
+		{
 			name:      "empty instructions on a new definition",
 			overrides: []config.AgentDefinition{{ID: "ops", Description: "d"}},
 			wantCode:  ErrorCodeDefinitionInvalid,
@@ -110,7 +124,11 @@ func TestBuildRejectsInvalidOverrides(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			registry, err := Build(tc.overrides, validTools, []string{"primary", "auxiliary"})
+			routes := tc.routes
+			if routes == nil {
+				routes = []string{"primary", "auxiliary"}
+			}
+			registry, err := Build(tc.overrides, validTools, routes)
 			if err == nil {
 				t.Fatal("Build accepted an invalid definition")
 			}
@@ -439,5 +457,27 @@ func TestBuildResolvesPersonaNames(t *testing.T) {
 	}
 	if main, _ := unnamed.Lookup(DefaultID); main.Name != DefaultName {
 		t.Fatalf("main override without a name = %q, want %q", main.Name, DefaultName)
+	}
+}
+
+func TestEvalBehaviorDefaults(t *testing.T) {
+	registry, err := Build([]config.AgentDefinition{
+		{ID: "lobby", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{Required: true}}},
+		{ID: "desk", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{MinScore: 0.6, JudgeRoute: "primary", Schedule: "0 3 * * 1", EnforceOnRegression: true}}},
+		{ID: "plain", Description: "d", Instructions: "x"},
+	}, validTools, []string{"primary", "auxiliary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lobby, _ := registry.Lookup("lobby")
+	if lobby.EvalBehavior == nil || !lobby.EvalBehavior.Required || lobby.EvalBehavior.MinScore != DefaultEvalMinScore || lobby.EvalBehavior.JudgeRoute != DefaultEvalJudgeRoute {
+		t.Fatalf("lobby behavior = %+v", lobby.EvalBehavior)
+	}
+	desk, _ := registry.Lookup("desk")
+	if want := (EvalBehavior{MinScore: 0.6, JudgeRoute: "primary", Schedule: "0 3 * * 1", EnforceOnRegression: true}); desk.EvalBehavior == nil || *desk.EvalBehavior != want {
+		t.Fatalf("desk behavior = %+v", desk.EvalBehavior)
+	}
+	if plain, _ := registry.Lookup("plain"); plain.EvalBehavior != nil {
+		t.Fatalf("plain behavior = %+v", plain.EvalBehavior)
 	}
 }

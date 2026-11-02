@@ -32,6 +32,20 @@ type Definition struct {
 	Messages        map[string]string
 	GroupContext    string
 	EvalDir         string
+	EvalBehavior    *EvalBehavior
+}
+
+const (
+	DefaultEvalMinScore   = 0.8
+	DefaultEvalJudgeRoute = "auxiliary"
+)
+
+type EvalBehavior struct {
+	Required            bool
+	MinScore            float64
+	JudgeRoute          string
+	Schedule            string
+	EnforceOnRegression bool
 }
 
 func audienceRank(audience string) int {
@@ -159,7 +173,16 @@ func (d *Definition) clone() Definition {
 		Messages:        maps.Clone(d.Messages),
 		GroupContext:    d.GroupContext,
 		EvalDir:         d.EvalDir,
+		EvalBehavior:    d.EvalBehavior.clone(),
 	}
+}
+
+func (b *EvalBehavior) clone() *EvalBehavior {
+	if b == nil {
+		return nil
+	}
+	cloned := *b
+	return &cloned
 }
 
 func (d *Definition) supports(required []string) bool {
