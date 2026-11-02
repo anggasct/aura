@@ -88,8 +88,16 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 
 	attempt := 0
 	for {
+		if !e.budget.admit() {
+			e.exhaustBudget(ctx, step, attempt, "max_steps")
+			return
+		}
 		update, ended := e.executeAttempt(ctx, step, attempt)
 		if ended {
+			return
+		}
+		if !e.budget.spend(update.Tokens) {
+			e.exhaustBudget(ctx, step, update.Attempt, "max_tokens")
 			return
 		}
 		if update.ErrorCode == "" {
@@ -195,17 +203,24 @@ func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec) *stepU
 	if err != nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: err.Error(), EndedAt: nowPtr()}
 	}
-	output, err := runner.Run(ctx, &resolved, &ExecutionContext{
+	execution := &ExecutionContext{
 		Objective:   e.input.Objective,
 		Resources:   e.input.Resources,
 		Artifacts:   e.input.Artifacts,
 		Permissions: e.input.Permissions,
 		Metadata:    e.input.Metadata,
-	})
-	if err != nil {
-		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr()}
 	}
-	return &stepUpdate{Status: StepSucceeded, Output: []byte(output), EndedAt: nowPtr()}
+	var output json.RawMessage
+	var tokens int64
+	if metered, ok := runner.(MeteredAgentRunner); ok {
+		output, tokens, err = metered.RunMetered(ctx, &resolved, execution)
+	} else {
+		output, err = runner.Run(ctx, &resolved, execution)
+	}
+	if err != nil {
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr(), Tokens: tokens}
+	}
+	return &stepUpdate{Status: StepSucceeded, Output: []byte(output), EndedAt: nowPtr(), Tokens: tokens}
 }
 
 func toolArguments(step *StepSpec) json.RawMessage {

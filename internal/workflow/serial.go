@@ -20,6 +20,7 @@ type journaledAttempt struct {
 	ArtifactDigest string          `json:"artifact_digest,omitempty"`
 	ErrorCode      string          `json:"error_code,omitempty"`
 	Detail         string          `json:"detail,omitempty"`
+	Tokens         int64           `json:"tokens,omitempty"`
 }
 
 func journaledFromUpdate(update *stepUpdate) journaledAttempt {
@@ -32,6 +33,7 @@ func journaledFromUpdate(update *stepUpdate) journaledAttempt {
 		ArtifactDigest: update.ArtifactDigest,
 		ErrorCode:      update.ErrorCode,
 		Detail:         update.Detail,
+		Tokens:         update.Tokens,
 	}
 }
 
@@ -45,10 +47,15 @@ func updateFromJournaled(record *journaledAttempt) *stepUpdate {
 		ArtifactDigest: record.ArtifactDigest,
 		ErrorCode:      record.ErrorCode,
 		Detail:         record.Detail,
+		Tokens:         record.Tokens,
 	}
 }
 
 func (i *Interpreter) DriveSerial(ctx context.Context, inv durable.Invocation, runID string) (string, error) {
+	return i.driveSerial(ctx, inv, runID, nil)
+}
+
+func (i *Interpreter) driveSerial(ctx context.Context, inv durable.Invocation, runID string, inherited *runBudget) (string, error) {
 	if inv == nil {
 		return "", codedError(ErrorCodeStepFailed, "serial drive requires an invocation")
 	}
@@ -77,6 +84,7 @@ func (i *Interpreter) DriveSerial(ctx context.Context, inv durable.Invocation, r
 		outputs:     map[string]json.RawMessage{},
 		statuses:    map[string]string{},
 		awaiting:    map[string]bool{},
+		budget:      i.budgetFor(compiled.spec, inherited),
 	}
 	for _, stepID := range compiled.graph.Order {
 		execution.driveStep(ctx, compiled.graph.ByStep[stepID])
@@ -129,8 +137,16 @@ func (e *stepExecution) driveStep(ctx context.Context, step *StepSpec) {
 
 	attempt := 0
 	for {
+		if !e.budget.admit() {
+			e.exhaustBudget(ctx, step, attempt, "max_steps")
+			return
+		}
 		update, ended := e.executeSerial(ctx, step, attempt)
 		if ended {
+			return
+		}
+		if !e.budget.spend(update.Tokens) {
+			e.exhaustBudget(ctx, step, update.Attempt, "max_tokens")
 			return
 		}
 		if update.ErrorCode == "" {

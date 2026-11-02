@@ -656,9 +656,15 @@ type Agents struct {
 }
 
 type Workflows struct {
-	DefinitionsDir     string   `koanf:"definitions_dir" yaml:"definitions_dir"`
-	MaxConcurrentSteps int      `koanf:"max_concurrent_steps" yaml:"max_concurrent_steps"`
-	DefaultStepTimeout Duration `koanf:"default_step_timeout" yaml:"default_step_timeout"`
+	DefinitionsDir     string             `koanf:"definitions_dir" yaml:"definitions_dir"`
+	MaxConcurrentSteps int                `koanf:"max_concurrent_steps" yaml:"max_concurrent_steps"`
+	DefaultStepTimeout Duration           `koanf:"default_step_timeout" yaml:"default_step_timeout"`
+	Generated          GeneratedWorkflows `koanf:"generated" yaml:"generated"`
+}
+
+type GeneratedWorkflows struct {
+	MaxSteps  int   `koanf:"max_steps" yaml:"max_steps"`
+	MaxTokens int64 `koanf:"max_tokens" yaml:"max_tokens"`
 }
 
 const (
@@ -794,6 +800,7 @@ func Default() Config {
 		Workflows: &Workflows{
 			MaxConcurrentSteps: 4,
 			DefaultStepTimeout: Duration(15 * time.Minute),
+			Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
 		},
 		Durable: &Durable{
 			Enabled:               false,

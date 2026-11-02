@@ -385,3 +385,151 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
+	binary := liveRestateBinary(t)
+	registry, err := auraagent.Build(nil, []string{"read_file", "list_dir"}, []string{"primary"})
+	if err != nil {
+		t.Fatalf("agent registry: %v", err)
+	}
+	ctx := context.Background()
+	disk := workflow.NewStore(liveTestDB(t))
+	tools := &countingToolRunner{}
+	runner := durable.NewFake()
+	budget := workflow.Budget{MaxSteps: 3, MaxTokens: 1}
+	interpreter := workflow.NewInterpreter(disk, runner, &workflow.Options{
+		MaxConcurrentSteps: 1,
+		AgentResolver:      registry,
+		Tools:              tools,
+		GeneratedBudget:    budget,
+	})
+
+	readFile, listDir, ciEvent := "read_file", "list_dir", "ci"
+	spec := &workflow.Spec{
+		ID: "gen_prop_live", Goal: "Live generated crash resume", Version: 1, Source: workflow.SourceGenerated,
+		Steps: []workflow.StepSpec{
+			{ID: "build", Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: &readFile}, Timeout: 30 * time.Second},
+			{ID: "hold", DependsOn: []string{"build"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &ciEvent}, Timeout: 5 * time.Minute},
+			{ID: "ship", DependsOn: []string{"hold"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: &listDir}, Timeout: 30 * time.Second},
+		},
+	}
+	deps := workflow.ValidationDeps{
+		KnownTools:     []string{"read_file", "list_dir"},
+		EffectfulTools: []string{},
+		Agents:         registry,
+	}
+	if err := interpreter.Load(ctx, spec, deps); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	summary, err := disk.CreateRun(ctx, spec, &workflow.RunInput{Objective: "survive restart"})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	runID := summary.ID
+	durableKey := fmt.Sprintf("live-generated-%d", time.Now().UnixNano())
+
+	dir := t.TempDir()
+	ingressPort, adminPort := freePort(t), freePort(t)
+	handlerPort := freePort(t)
+	handlerAddr := fmt.Sprintf("127.0.0.1:%d", handlerPort)
+	server := startLiveServer(t, binary, dir, ingressPort, adminPort)
+	t.Cleanup(func() { server.stop() })
+
+	endpoint, err := NewEndpoint(EndpointConfig{HandlerAddr: handlerAddr}, nil)
+	if err != nil {
+		t.Fatalf("NewEndpoint: %v", err)
+	}
+	endpoint.RegisterHandler("workflow", func(ctx context.Context, inv durable.Invocation) error {
+		_, err := interpreter.DriveSerial(ctx, inv, runID)
+		return err
+	})
+	endpointCtx, stopEndpoint := context.WithCancel(context.Background())
+	endpointDone := make(chan error, 1)
+	go func() { endpointDone <- endpoint.Start(endpointCtx) }()
+	waitEndpointReady(t, endpoint)
+	server.registerDeployment(t, handlerAddr)
+	t.Cleanup(func() {
+		stopEndpoint()
+		select {
+		case <-endpointDone:
+		case <-time.After(10 * time.Second):
+		}
+	})
+
+	adapter, err := NewAdapter(Config{IngressURL: server.ingress}, nil)
+	if err != nil {
+		t.Fatalf("NewAdapter: %v", err)
+	}
+	adapter.RegisterHandler("workflow", func(context.Context, durable.Invocation) error { return nil })
+	ref, err := adapter.Start(ctx, durable.StartRequest{Handler: "workflow", Key: durableKey, Payload: []byte(`{"objective":"survive restart"}`)})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	waitForStoreStatus(t, disk, runID, workflow.RunSuspended, 90*time.Second)
+	if got := tools.snapshot(); len(got) != 1 || got[0] != "read_file" {
+		t.Fatalf("tool calls before crash = %v, want one read_file", got)
+	}
+
+	stopEndpoint()
+	<-endpointDone
+	server.stop()
+
+	server = startLiveServer(t, binary, dir, ingressPort, adminPort)
+	resumed := workflow.NewInterpreter(disk, durable.NewFake(), &workflow.Options{
+		MaxConcurrentSteps: 1,
+		AgentResolver:      registry,
+		Tools:              tools,
+		GeneratedBudget:    budget,
+	})
+	if err := resumed.LoadAll(ctx, nil, deps); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if _, loaded := resumed.Spec(spec.ID); loaded {
+		t.Fatal("the resuming interpreter must not have the generated definition in memory")
+	}
+	endpoint, err = NewEndpoint(EndpointConfig{HandlerAddr: handlerAddr}, nil)
+	if err != nil {
+		t.Fatalf("NewEndpoint: %v", err)
+	}
+	endpoint.RegisterHandler("workflow", func(ctx context.Context, inv durable.Invocation) error {
+		_, err := resumed.DriveSerial(ctx, inv, runID)
+		return err
+	})
+	secondCtx, stopSecond := context.WithCancel(context.Background())
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- endpoint.Start(secondCtx) }()
+	waitEndpointReady(t, endpoint)
+	t.Cleanup(func() {
+		stopEndpoint()
+		stopSecond()
+		select {
+		case <-endpointDone:
+		case <-time.After(10 * time.Second):
+		}
+		select {
+		case <-secondDone:
+		case <-time.After(10 * time.Second):
+		}
+	})
+	server.registerDeployment(t, handlerAddr)
+
+	if err := adapter.Signal(ctx, ref, "wait.hold", []byte(`{"ci":"green"}`)); err != nil {
+		t.Fatalf("Signal: %v", err)
+	}
+	waitForAdapterStatus(t, adapter, ref, durable.RunSucceeded, 120*time.Second)
+	waitForStoreStatus(t, disk, runID, workflow.RunSucceeded, 30*time.Second)
+
+	if got := tools.snapshot(); len(got) != 2 || got[0] != "read_file" || got[1] != "list_dir" {
+		t.Fatalf("tool calls after resume = %v, want build once and ship once", got)
+	}
+	steps, err := disk.Steps(ctx, runID)
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	for _, step := range steps {
+		if step.Status != workflow.StepSucceeded {
+			t.Errorf("step %s = %s, want %s", step.StepID, step.Status, workflow.StepSucceeded)
+		}
+	}
+}

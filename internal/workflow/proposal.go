@@ -227,6 +227,9 @@ func (i *Interpreter) CompileProposal(spec *Spec, tools []string) (*Graph, error
 	if err := CheckCeiling(spec, tools); err != nil {
 		return nil, err
 	}
+	if err := checkStepBudget(spec, i.options.GeneratedBudget); err != nil {
+		return nil, err
+	}
 	return graph, nil
 }
 
