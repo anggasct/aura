@@ -151,16 +151,16 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 	if operation.ChatID == 0 || strings.TrimSpace(operation.Text) == "" {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is missing chat or text")
 	}
-	token, err := a.tokenRef.Resolve()
-	if err != nil || strings.TrimSpace(token) == "" {
-		return effect.Outcome{Succeeded: false, SafeErrorCode: faultTokenUnavailable}, nil
+	token, ok := a.botToken()
+	if !ok {
+		return effect.Outcome{Succeeded: false, SafeErrorCode: faultBotRefUnresolved}, nil
 	}
 	request := &sendMessageRequest{ChatID: operation.ChatID, Text: operation.Text}
 	if operation.ReplyTo != 0 {
 		request.ReplyParameters = &replyParameters{MessageID: operation.ReplyTo, AllowSendingWithoutReply: true}
 	}
 	limited := 0
-	for attempt := 0; attempt < sendMaxAttempts; attempt++ {
+	for range sendMaxAttempts {
 		call, cancel := context.WithTimeout(ctx, sendTimeout)
 		sent, err := a.bot.sendMessage(call, token, request)
 		cancel()

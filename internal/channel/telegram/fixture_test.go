@@ -119,18 +119,36 @@ func (f *fakeBotAPI) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeOK(w http.ResponseWriter, result any) {
-	raw, _ := json.Marshal(map[string]any{"ok": true, "result": result})
+	raw, err := json.Marshal(map[string]any{"ok": true, "result": result})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(raw)
 }
 
+type failurePayload struct {
+	OK          bool   `json:"ok"`
+	ErrorCode   int    `json:"error_code"`
+	Description string `json:"description"`
+	Parameters  *struct {
+		RetryAfter int `json:"retry_after"`
+	} `json:"parameters,omitempty"`
+}
+
 func apiFailure(status, retryAfter int) func(w http.ResponseWriter) bool {
 	return func(w http.ResponseWriter) bool {
-		payload := map[string]any{"ok": false, "error_code": status, "description": "failure"}
+		payload := failurePayload{ErrorCode: status, Description: "failure"}
 		if retryAfter > 0 {
-			payload["parameters"] = map[string]any{"retry_after": retryAfter}
+			payload.Parameters = &struct {
+				RetryAfter int `json:"retry_after"`
+			}{RetryAfter: retryAfter}
 		}
-		raw, _ := json.Marshal(payload)
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return false
+		}
 		w.WriteHeader(status)
 		_, _ = w.Write(raw)
 		return true

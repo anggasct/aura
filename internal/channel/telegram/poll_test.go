@@ -230,11 +230,11 @@ func TestMissingTokenReportsUnavailableWithoutPolling(t *testing.T) {
 	stop := startAdapter(t, adapter, newMemorySink())
 	defer stop()
 	deadline := time.Now().Add(5 * time.Second)
-	for adapter.currentFault() != faultTokenUnavailable && time.Now().Before(deadline) {
+	for adapter.currentFault() != faultBotRefUnresolved && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if adapter.currentFault() != faultTokenUnavailable {
-		t.Fatalf("fault = %q, want %q", adapter.currentFault(), faultTokenUnavailable)
+	if adapter.currentFault() != faultBotRefUnresolved {
+		t.Fatalf("fault = %q, want %q", adapter.currentFault(), faultBotRefUnresolved)
 	}
 	select {
 	case <-h.api.polled:

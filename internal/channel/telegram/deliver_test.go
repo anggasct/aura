@@ -14,12 +14,15 @@ import (
 
 const deliverySession = "main/telegram:pocket/chat:424242"
 
-func deliveryRequest(t *testing.T, h *harness, effectID string, text string) *runtimechannelhost.DeliveryRequest {
+func deliveryRequest(t *testing.T, h *harness, effectID, text string) *runtimechannelhost.DeliveryRequest {
 	t.Helper()
 	if err := h.sessions.EnsureSession(t.Context(), deliverySession, "local-owner", testPersona); err != nil {
 		t.Fatalf("EnsureSession: %v", err)
 	}
-	reference, _ := json.Marshal(replyReference{ChatID: ownerUserID, MessageID: 100})
+	reference, err := json.Marshal(replyReference{ChatID: ownerUserID, MessageID: 100})
+	if err != nil {
+		t.Fatalf("marshal reply context: %v", err)
+	}
 	return &runtimechannelhost.DeliveryRequest{
 		EffectID:       effectID,
 		Channel:        "telegram:pocket",
@@ -44,6 +47,9 @@ func intentStates(t *testing.T, h *harness) map[effect.State]int {
 			t.Fatalf("scan: %v", err)
 		}
 		states[effect.State(state)]++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate intents: %v", err)
 	}
 	return states
 }

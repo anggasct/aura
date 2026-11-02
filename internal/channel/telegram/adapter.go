@@ -32,7 +32,7 @@ const (
 
 const (
 	faultNone             = ""
-	faultTokenUnavailable = "telegram_token_unavailable"
+	faultBotRefUnresolved = "telegram_token_unavailable"
 	faultUnauthorized     = "telegram_unauthorized"
 	faultPollConflict     = "telegram_poll_conflict"
 	faultUnreachable      = "telegram_unreachable"
@@ -40,7 +40,7 @@ const (
 )
 
 var faultDetails = map[string]string{
-	faultTokenUnavailable: "bot token reference does not resolve",
+	faultBotRefUnresolved: "bot token reference does not resolve",
 	faultUnauthorized:     "bot token was rejected by telegram",
 	faultPollConflict:     "another getUpdates poller or a webhook holds this bot",
 	faultUnreachable:      "telegram bot api is unreachable",
@@ -233,6 +233,15 @@ func (a *Adapter) Check(context.Context) []health.Finding {
 		Detail:      fmt.Sprintf("telegram account %s: %s", a.account.Name, detail),
 		Remediation: RemediationReviewBot,
 	}}
+}
+
+func (a *Adapter) botToken() (string, bool) {
+	token, err := a.tokenRef.Resolve()
+	if err != nil {
+		return "", false
+	}
+	token = strings.TrimSpace(token)
+	return token, token != ""
 }
 
 func (a *Adapter) currentFault() string {

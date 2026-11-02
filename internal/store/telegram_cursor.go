@@ -21,19 +21,18 @@ func NewTelegramCursorStore(db *sql.DB) TelegramCursorStore {
 	return &sqliteTelegramCursorStore{db: db}
 }
 
-func (s *sqliteTelegramCursorStore) Load(ctx context.Context, source string) (int64, bool, error) {
+func (s *sqliteTelegramCursorStore) Load(ctx context.Context, source string) (nextUpdateID int64, found bool, err error) {
 	if s.db == nil {
 		return 0, false, nil
 	}
-	var next int64
-	err := s.db.QueryRowContext(ctx, `SELECT next_update_id FROM telegram_cursor WHERE source = ?`, source).Scan(&next)
+	err = s.db.QueryRowContext(ctx, `SELECT next_update_id FROM telegram_cursor WHERE source = ?`, source).Scan(&nextUpdateID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
 	if err != nil {
 		return 0, false, classifyBusy(fmt.Errorf("load telegram cursor: %w", err))
 	}
-	return next, true, nil
+	return nextUpdateID, true, nil
 }
 
 func (s *sqliteTelegramCursorStore) Advance(ctx context.Context, source string, nextUpdateID int64, at time.Time) error {

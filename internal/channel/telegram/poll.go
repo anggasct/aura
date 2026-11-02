@@ -29,10 +29,12 @@ type replyReference struct {
 
 func (a *Adapter) pollLoop(ctx context.Context) error {
 	attempt := 0
-	for ctx.Err() == nil {
+	for {
 		err := a.pollOnce(ctx)
-		if ctx.Err() != nil {
+		select {
+		case <-ctx.Done():
 			return nil
+		default:
 		}
 		if err == nil {
 			attempt = 0
@@ -45,12 +47,11 @@ func (a *Adapter) pollLoop(ctx context.Context) error {
 		}
 		attempt++
 	}
-	return nil
 }
 
 func (a *Adapter) pollOnce(ctx context.Context) error {
-	token, err := a.tokenRef.Resolve()
-	if err != nil || strings.TrimSpace(token) == "" {
+	token, ok := a.botToken()
+	if !ok {
 		return errTokenUnavailable
 	}
 	next, _, err := a.cursors.Load(ctx, a.source())
@@ -207,7 +208,7 @@ var errTokenUnavailable = Errorf(ErrorCodeConnectionFailed, "bot token is unavai
 
 func classifyFault(err error) string {
 	if errors.Is(err, errTokenUnavailable) {
-		return faultTokenUnavailable
+		return faultBotRefUnresolved
 	}
 	if apiErr, ok := apiErrorOf(err); ok {
 		switch apiErr.Status {
