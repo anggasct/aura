@@ -61,6 +61,17 @@ func workflowValidationDeps(cfg *config.Config) (workflow.ValidationDeps, error)
 	return deps, nil
 }
 
+func workflowSet(specs []*workflow.Spec) func(id string) (*workflow.Spec, bool) {
+	byID := make(map[string]*workflow.Spec, len(specs))
+	for _, spec := range specs {
+		byID[spec.ID] = spec
+	}
+	return func(id string) (*workflow.Spec, bool) {
+		spec, ok := byID[id]
+		return spec, ok
+	}
+}
+
 func newWorkflowValidateCmd(gf *globalFlags) *cobra.Command {
 	return &cobra.Command{
 		Use:   "validate <file>",
@@ -79,7 +90,14 @@ func newWorkflowValidateCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			siblings, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(result.Config))
+			if err != nil {
+				return err
+			}
 			if _, err := workflow.Compile(spec, deps); err != nil {
+				return fmt.Errorf("invalid workflow definition: %w", err)
+			}
+			if err := workflow.ValidateComposition(spec, workflowSet(append(siblings, spec))); err != nil {
 				return fmt.Errorf("invalid workflow definition: %w", err)
 			}
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), "valid: "+spec.ID)
@@ -214,10 +232,8 @@ func buildWorkflowInterpreterWithDB(ctx context.Context, cfg *config.Config, db 
 		return nil, err
 	}
 	interpreter := workflow.NewInterpreter(workflow.NewStore(db), runtime, options)
-	for _, spec := range specs {
-		if err := interpreter.Load(ctx, spec, deps); err != nil {
-			return nil, fmt.Errorf("definition %s: %w", spec.ID, err)
-		}
+	if err := interpreter.LoadAll(ctx, specs, deps); err != nil {
+		return nil, err
 	}
 	return interpreter, nil
 }

@@ -109,14 +109,39 @@ func NewInterpreter(store *Store, runtime durable.Runtime, options *Options) *In
 }
 
 func (i *Interpreter) Load(ctx context.Context, spec *Spec, deps ValidationDeps) error {
-	graph, err := Compile(spec, deps)
-	if err != nil {
-		return err
+	return i.LoadAll(ctx, []*Spec{spec}, deps)
+}
+
+func (i *Interpreter) LoadAll(ctx context.Context, specs []*Spec, deps ValidationDeps) error {
+	pending := make(map[string]*Spec, len(specs))
+	for _, spec := range specs {
+		if spec != nil {
+			pending[spec.ID] = spec
+		}
 	}
-	if err := i.store.SaveDefinition(ctx, spec); err != nil {
-		return err
+	lookup := func(id string) (*Spec, bool) {
+		if spec, ok := pending[id]; ok {
+			return spec, true
+		}
+		return i.Spec(id)
 	}
-	i.specs.put(spec, graph)
+	graphs := make([]*Graph, len(specs))
+	for index, spec := range specs {
+		graph, err := Compile(spec, deps)
+		if err != nil {
+			return fmt.Errorf("definition %s: %w", spec.ID, err)
+		}
+		if err := ValidateComposition(spec, lookup); err != nil {
+			return fmt.Errorf("definition %s: %w", spec.ID, err)
+		}
+		graphs[index] = graph
+	}
+	for index, spec := range specs {
+		if err := i.store.SaveDefinition(ctx, spec); err != nil {
+			return err
+		}
+		i.specs.put(spec, graphs[index])
+	}
 	return nil
 }
 

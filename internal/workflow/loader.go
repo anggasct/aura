@@ -39,6 +39,7 @@ type executorFile struct {
 	ToolID   *string  `yaml:"tool"`
 	Args     any      `yaml:"args"`
 	Event    *string  `yaml:"event"`
+	Workflow *string  `yaml:"workflow"`
 }
 
 type retryFile struct {
@@ -100,6 +101,7 @@ func parseSpec(content []byte) (*Spec, error) {
 		step.Executor.RequiredCapabilities = entry.Executor.Requires
 		step.Executor.ToolID = entry.Executor.ToolID
 		step.Executor.Event = entry.Executor.Event
+		step.Executor.WorkflowID = entry.Executor.Workflow
 		if entry.Executor.Args != nil {
 			raw, err := decodeToolArgs(index, entry.Executor.Args)
 			if err != nil {
