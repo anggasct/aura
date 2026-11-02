@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 )
 
 type fakeHandoffGate struct {
@@ -95,4 +96,16 @@ func TestOpenHandoffForwardsMessagesInsteadOfStartingTurns(t *testing.T) {
 		t.Fatalf("requester notices = %q, want handoff_closed", got)
 	}
 	routedEnvelope(t, sink, "message:9913")
+}
+
+func TestReplyTargetNamesTheConversationChannel(t *testing.T) {
+	adapter, _, _ := newAccessAdapter(t, "team", []string{"discord:777"}, accessPersonas())
+	if _, ok := adapter.ReplyTarget("dm:111"); ok {
+		t.Fatal("an unseen conversation has a reply target")
+	}
+	adapter.rememberTarget("dm:111", &approvalBinding{principal: "discord:111", class: principal.ClassTrusted, persona: "team", actor: "111", channelID: "333"})
+	target, ok := adapter.ReplyTarget("dm:111")
+	if !ok || target.ChannelID != "333" || target.Account != adapter.account.Name {
+		t.Fatalf("ReplyTarget = %+v, %v", target, ok)
+	}
 }

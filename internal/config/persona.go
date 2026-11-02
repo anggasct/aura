@@ -38,41 +38,48 @@ const (
 )
 
 const (
-	MinApprovalTimeout     = time.Minute
-	MaxApprovalTimeout     = 24 * time.Hour
-	MaxStandingGrantTTL    = 720 * time.Hour
-	MinRetention           = 24 * time.Hour
-	MessagePairingCode     = "pairing_code"
-	MessagePairingPending  = "pairing_pending"
-	MessagePairingLocked   = "pairing_locked"
-	MessageWaitingForOwner = "waiting_for_owner"
-	MessageApprovalTimeout = "approval_timeout"
-	MessageApprovalDenied  = "approval_denied"
-	MessageBudgetExhausted = "budget_exhausted"
-	MessageRateLimited     = "rate_limited"
-	MessageNotPermitted    = "not_permitted"
-	MessageHandoffOpen     = "handoff_open"
-	MessageHandoffClosed   = "handoff_closed"
-	MessageForgetmeConfirm = "forgetme_confirm"
-	MessageForgetmeDone    = "forgetme_done"
-	MessageUnavailable     = "unavailable"
+	MinApprovalTimeout       = time.Minute
+	MaxApprovalTimeout       = 24 * time.Hour
+	MaxStandingGrantTTL      = 720 * time.Hour
+	MinRetention             = 24 * time.Hour
+	MessagePairingCode       = "pairing_code"
+	MessagePairingPending    = "pairing_pending"
+	MessagePairingLocked     = "pairing_locked"
+	MessageWaitingForOwner   = "waiting_for_owner"
+	MessageApprovalTimeout   = "approval_timeout"
+	MessageApprovalDenied    = "approval_denied"
+	MessageBudgetExhausted   = "budget_exhausted"
+	MessageRateLimited       = "rate_limited"
+	MessageNotPermitted      = "not_permitted"
+	MessageHandoffOpen       = "handoff_open"
+	MessageHandoffClosed     = "handoff_closed"
+	MessageForgetmeConfirm   = "forgetme_confirm"
+	MessageForgetmeDone      = "forgetme_done"
+	MessageUnavailable       = "unavailable"
+	MessageWorkflowSucceeded = "workflow_succeeded"
+	MessageWorkflowFailed    = "workflow_failed"
+	MessageWorkflowCancelled = "workflow_cancelled"
+	WorkflowGoalPlaceholder  = "{goal}"
 )
 
 var personaMessageDefaults = map[string]string{
-	MessagePairingCode:     "To talk with me, ask the owner to approve this pairing code: " + PairingCodePlaceholder,
-	MessagePairingPending:  "A pairing request is already pending. Please wait for the owner.",
-	MessagePairingLocked:   "Too many pairing attempts. Please try again later.",
-	MessageWaitingForOwner: "One moment, I am checking with the owner.",
-	MessageApprovalTimeout: "The owner did not respond in time, so the request was cancelled. Please try again later.",
-	MessageApprovalDenied:  "The owner declined this request.",
-	MessageBudgetExhausted: "Your daily quota is used up. Please try again tomorrow.",
-	MessageRateLimited:     "You are sending messages too quickly. Please wait a moment.",
-	MessageNotPermitted:    "That is not available here.",
-	MessageHandoffOpen:     "I have passed this conversation to the owner, who will reply here.",
-	MessageHandoffClosed:   "The owner has handed the conversation back to me.",
-	MessageForgetmeConfirm: "This erases your conversations and data with me. Send /forgetme confirm to proceed.",
-	MessageForgetmeDone:    "Your data has been erased.",
-	MessageUnavailable:     "This assistant is not available right now.",
+	MessagePairingCode:       "To talk with me, ask the owner to approve this pairing code: " + PairingCodePlaceholder,
+	MessagePairingPending:    "A pairing request is already pending. Please wait for the owner.",
+	MessagePairingLocked:     "Too many pairing attempts. Please try again later.",
+	MessageWaitingForOwner:   "One moment, I am checking with the owner.",
+	MessageApprovalTimeout:   "The owner did not respond in time, so the request was cancelled. Please try again later.",
+	MessageApprovalDenied:    "The owner declined this request.",
+	MessageBudgetExhausted:   "Your daily quota is used up. Please try again tomorrow.",
+	MessageRateLimited:       "You are sending messages too quickly. Please wait a moment.",
+	MessageNotPermitted:      "That is not available here.",
+	MessageHandoffOpen:       "I have passed this conversation to the owner, who will reply here.",
+	MessageHandoffClosed:     "The owner has handed the conversation back to me.",
+	MessageForgetmeConfirm:   "This erases your conversations and data with me. Send /forgetme confirm to proceed.",
+	MessageForgetmeDone:      "Your data has been erased.",
+	MessageUnavailable:       "This assistant is not available right now.",
+	MessageWorkflowSucceeded: "Done: " + WorkflowGoalPlaceholder,
+	MessageWorkflowFailed:    "Sorry, " + WorkflowGoalPlaceholder + " could not be completed.",
+	MessageWorkflowCancelled: WorkflowGoalPlaceholder + " was cancelled.",
 }
 
 func PersonaMessageDefaults() map[string]string {

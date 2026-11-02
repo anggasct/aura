@@ -117,3 +117,11 @@ func DeliverText(ctx context.Context, account *config.DiscordAccount, channelID,
 	}
 	return sendText(ctx, &http.Client{Timeout: restTimeout}, discordRestBase, token, channelID, text)
 }
+
+func (a *Adapter) ReplyTarget(sessionID string) (HandoffTarget, bool) {
+	binding, ok := a.lookupTarget(sessionID)
+	if !ok || binding.channelID == "" {
+		return HandoffTarget{}, false
+	}
+	return HandoffTarget{Account: a.account.Name, ChannelID: binding.channelID}, true
+}

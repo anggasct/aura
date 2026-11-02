@@ -178,11 +178,12 @@ func (s *Store) CreateRunFor(ctx context.Context, spec *Spec, input *RunInput, o
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id, reply_account, reply_channel_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		summary.ID, summary.DefinitionID, summary.DefinitionVersion, summary.DurableKey, summary.Goal,
 		string(encodedInput), summary.Status,
 		summary.CreatedAt.Format(time.RFC3339Nano), summary.UpdatedAt.Format(time.RFC3339Nano),
 		nullable(summary.Origin.PrincipalID), nullable(summary.Origin.PrincipalClass), nullable(summary.Origin.AgentID), nullable(summary.Origin.SessionID),
+		nullable(summary.Origin.ReplyAccount), nullable(summary.Origin.ReplyChannelID),
 	); err != nil {
 		return nil, fmt.Errorf("insert run: %w", err)
 	}
@@ -205,10 +206,10 @@ func (s *Store) Run(ctx context.Context, runID string) (*RunSummary, error) {
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, definition_id, definition_version, COALESCE(durable_key, ''), goal, status, created_at, updated_at,
-			COALESCE(principal_id, ''), COALESCE(principal_class, ''), COALESCE(agent_id, ''), COALESCE(origin_session_id, '') FROM workflow_run WHERE id = ?`,
+			`+runOriginColumns+` FROM workflow_run WHERE id = ?`,
 		runID,
 	).Scan(&summary.ID, &summary.DefinitionID, &summary.DefinitionVersion, &summary.DurableKey, &summary.Goal, &summary.Status, &createdAt, &updatedAt,
-		&summary.Origin.PrincipalID, &summary.Origin.PrincipalClass, &summary.Origin.AgentID, &summary.Origin.SessionID)
+		&summary.Origin.PrincipalID, &summary.Origin.PrincipalClass, &summary.Origin.AgentID, &summary.Origin.SessionID, &summary.Origin.ReplyAccount, &summary.Origin.ReplyChannelID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, codedError(ErrorCodeRunNotFound, "run "+runID+" is not registered")
 	}
@@ -398,4 +399,67 @@ func nullable(value string) any {
 		return nil
 	}
 	return value
+}
+
+const runOriginColumns = `COALESCE(principal_id, ''), COALESCE(principal_class, ''), COALESCE(agent_id, ''), COALESCE(origin_session_id, ''),
+	COALESCE(reply_account, ''), COALESCE(reply_channel_id, '')`
+
+const MaxCompletionAttempts = 5
+
+func (s *Store) PendingCompletions(ctx context.Context, limit int) ([]*RunSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, definition_id, definition_version, COALESCE(durable_key, ''), goal, status, created_at, updated_at, `+runOriginColumns+`
+		FROM workflow_run WHERE origin_session_id IS NOT NULL AND completion_notified_at IS NULL AND status IN (?, ?, ?)
+		ORDER BY updated_at, id LIMIT ?`, RunSucceeded, RunFailed, RunCancelled, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list pending completions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var runs []*RunSummary
+	for rows.Next() {
+		var summary RunSummary
+		var createdAt, updatedAt string
+		if err := rows.Scan(&summary.ID, &summary.DefinitionID, &summary.DefinitionVersion, &summary.DurableKey, &summary.Goal, &summary.Status, &createdAt, &updatedAt,
+			&summary.Origin.PrincipalID, &summary.Origin.PrincipalClass, &summary.Origin.AgentID, &summary.Origin.SessionID, &summary.Origin.ReplyAccount, &summary.Origin.ReplyChannelID); err != nil {
+			return nil, fmt.Errorf("scan pending completion: %w", err)
+		}
+		summary.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		summary.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
+		runs = append(runs, &summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending completions: %w", err)
+	}
+	return runs, nil
+}
+
+func (s *Store) ClaimCompletion(ctx context.Context, runID string, at time.Time) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE workflow_run SET completion_notified_at = ? WHERE id = ? AND completion_notified_at IS NULL`,
+		at.UTC().Format(time.RFC3339Nano), runID)
+	if err != nil {
+		return false, fmt.Errorf("claim completion: %w", err)
+	}
+	claimed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim completion: %w", err)
+	}
+	return claimed == 1, nil
+}
+
+func (s *Store) ReleaseCompletion(ctx context.Context, runID string) (exhausted bool, err error) {
+	var attempts int
+	err = s.db.QueryRowContext(ctx, `UPDATE workflow_run SET completion_attempts = completion_attempts + 1,
+		completion_notified_at = CASE WHEN completion_attempts + 1 >= ? THEN completion_notified_at ELSE NULL END
+		WHERE id = ? RETURNING completion_attempts`, MaxCompletionAttempts, runID).Scan(&attempts)
+	if err != nil {
+		return false, fmt.Errorf("release completion: %w", err)
+	}
+	return attempts >= MaxCompletionAttempts, nil
+}
+
+func (s *Store) CompletionAttempts(ctx context.Context, runID string) (int, error) {
+	var attempts int
+	if err := s.db.QueryRowContext(ctx, `SELECT completion_attempts FROM workflow_run WHERE id = ?`, runID).Scan(&attempts); err != nil {
+		return 0, fmt.Errorf("read completion attempts: %w", err)
+	}
+	return attempts, nil
 }

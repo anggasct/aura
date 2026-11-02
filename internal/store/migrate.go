@@ -43,6 +43,7 @@ var migrations = []migration{
 	{version: 25, sql: handoffTargetSchemaSQL},
 	{version: 26, sql: personaEvalSchemaSQL},
 	{version: 27, sql: workflowRunOriginSchemaSQL},
+	{version: 28, sql: workflowCompletionSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -594,6 +595,15 @@ CREATE TABLE session_handoff (
 ALTER TABLE usage_reservation ADD COLUMN principal_id TEXT;
 ALTER TABLE usage_reservation ADD COLUMN principal_class TEXT;
 CREATE INDEX usage_reservation_principal_idx ON usage_reservation(principal_id, window_day);
+`
+
+const workflowCompletionSchemaSQL = `
+ALTER TABLE workflow_run ADD COLUMN reply_account TEXT;
+ALTER TABLE workflow_run ADD COLUMN reply_channel_id TEXT;
+ALTER TABLE workflow_run ADD COLUMN completion_notified_at TEXT;
+ALTER TABLE workflow_run ADD COLUMN completion_attempts INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX workflow_run_completion_idx ON workflow_run(status, updated_at)
+    WHERE origin_session_id IS NOT NULL AND completion_notified_at IS NULL;
 `
 
 const workflowRunOriginSchemaSQL = `

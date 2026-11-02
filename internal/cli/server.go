@@ -308,7 +308,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				workflowTools, err := newWorkflowToolController(durableListener.interpreter, workflow.NewStore(db), agentRegistry)
+				workflowTools, err := newWorkflowToolController(durableListener.interpreter, workflow.NewStore(db), agentRegistry, replyTargeters(channelAdapters)...)
 				if err != nil {
 					return err
 				}
@@ -349,6 +349,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			sweepCtx, stopSweeps := context.WithCancel(ctx)
 			var sweeps sync.WaitGroup
 			sweeps.Go(func() { runRetentionSweeps(sweepCtx, cfg, db, artifactRoot, logger) })
+			if cfg.Durable != nil && cfg.Durable.Enabled {
+				sweeps.Go(func() {
+					newWorkflowCompletionNotifier(cfg, db, agentRegistry, logger).run(sweepCtx, workflowCompletionInterval)
+				})
+			}
 			sweeps.Go(func() {
 				runPersonaEvalSchedules(sweepCtx, result.Path, db, agentRegistry, behaviorModels{defaultModel: modelDefinition.Model, route: routeModel}, logger, wallEvalClock)
 			})

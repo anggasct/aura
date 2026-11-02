@@ -115,6 +115,8 @@ type RunOrigin struct {
 	PrincipalClass string
 	AgentID        string
 	SessionID      string
+	ReplyAccount   string
+	ReplyChannelID string
 }
 
 type RunSummary struct {

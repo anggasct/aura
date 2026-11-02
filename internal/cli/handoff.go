@@ -112,13 +112,7 @@ func openHandoff(ctx context.Context, db *sql.DB, sessionID string) (store.Hando
 }
 
 func appendPersonaReply(ctx context.Context, db *sql.DB, handoff *store.Handoff, author, text string, at time.Time) error {
-	id := fmt.Sprintf("handoff-reply-%d", at.UnixNano())
-	event, err := store.RuntimeEventFromADK(handoff.SessionID, id, sessionEventWithText(id, author, text, at))
-	if err != nil {
-		return err
-	}
-	_, err = store.NewEventStore(db).AppendSequenced(ctx, handoff.SessionID, &event)
-	return err
+	return appendSessionText(ctx, db, handoff.SessionID, fmt.Sprintf("handoff-reply-%d", at.UnixNano()), author, text, at)
 }
 
 func sessionEventWithText(id, author, text string, at time.Time) *session.Event {

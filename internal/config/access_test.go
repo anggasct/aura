@@ -77,8 +77,8 @@ func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
 	defaults := PersonaMessageDefaults()
 	keys := slices.Sorted(maps.Keys(defaults))
-	if len(keys) != 14 {
-		t.Fatalf("message keys = %v, want the 14 fixed replies", keys)
+	if len(keys) != 17 {
+		t.Fatalf("message keys = %v, want the 17 fixed replies", keys)
 	}
 	for _, key := range keys {
 		t.Run(key, func(t *testing.T) {

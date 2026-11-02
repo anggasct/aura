@@ -18,9 +18,10 @@ type workflowToolController struct {
 	interpreter *workflow.Interpreter
 	runs        *workflow.Store
 	registry    *auraagent.Registry
+	targets     []replyTargeter
 }
 
-func newWorkflowToolController(interpreter *workflow.Interpreter, runs *workflow.Store, registry *auraagent.Registry) (*workflowToolController, error) {
+func newWorkflowToolController(interpreter *workflow.Interpreter, runs *workflow.Store, registry *auraagent.Registry, targets ...replyTargeter) (*workflowToolController, error) {
 	definitions := registry.Definitions()
 	for i := range definitions {
 		for _, id := range definitions[i].Workflows {
@@ -29,7 +30,7 @@ func newWorkflowToolController(interpreter *workflow.Interpreter, runs *workflow
 			}
 		}
 	}
-	return &workflowToolController{interpreter: interpreter, runs: runs, registry: registry}, nil
+	return &workflowToolController{interpreter: interpreter, runs: runs, registry: registry, targets: targets}, nil
 }
 
 func (c *workflowToolController) permits(caller *toolsbuiltin.WorkflowCaller, id string) bool {
@@ -58,9 +59,16 @@ func (c *workflowToolController) Start(ctx context.Context, caller *toolsbuiltin
 	if _, ok := c.interpreter.Spec(id); !ok {
 		return toolsbuiltin.WorkflowRunState{}, fmt.Errorf("workflow %q is not loaded", id)
 	}
-	summary, err := c.interpreter.StartFor(ctx, id, &workflow.RunInput{Objective: strings.TrimSpace(objective)}, &workflow.RunOrigin{
+	origin := &workflow.RunOrigin{
 		PrincipalID: caller.PrincipalID, PrincipalClass: string(caller.PrincipalClass), AgentID: caller.AgentID, SessionID: caller.SessionID,
-	})
+	}
+	for _, targeter := range c.targets {
+		if target, ok := targeter.ReplyTarget(caller.SessionID); ok {
+			origin.ReplyAccount, origin.ReplyChannelID = target.Account, target.ChannelID
+			break
+		}
+	}
+	summary, err := c.interpreter.StartFor(ctx, id, &workflow.RunInput{Objective: strings.TrimSpace(objective)}, origin)
 	if err != nil {
 		return toolsbuiltin.WorkflowRunState{}, err
 	}
