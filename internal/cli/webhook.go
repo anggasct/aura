@@ -169,11 +169,9 @@ func (d *webhookDispatcher) markStarted(executionID string) {
 	now := d.clock()
 	d.startedMu.Lock()
 	defer d.startedMu.Unlock()
-	if len(d.started) >= webhookStartedSweepAt {
-		for id, at := range d.started {
-			if now.Sub(at) > d.retention {
-				delete(d.started, id)
-			}
+	for id, at := range d.started {
+		if now.Sub(at) > d.retention {
+			delete(d.started, id)
 		}
 	}
 	d.started[executionID] = now

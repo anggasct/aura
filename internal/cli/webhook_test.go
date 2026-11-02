@@ -585,3 +585,54 @@ func TestWebhookDispatcher_FinishedDrainIsNotResubmittedAsOrphan(t *testing.T) {
 		t.Fatalf("submitted turns = %d, want 1: a drain this process already ran is not an orphan", backend.submitted())
 	}
 }
+
+func TestWebhookDispatcher_PrunesExpiredStartedEntries(t *testing.T) {
+	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
+	now := time.Now()
+	dispatcher, _ := webhookTestSetup(t, backend)
+	dispatcher.retention = time.Millisecond
+	dispatcher.clock = func() time.Time { return now }
+	dispatcher.markStarted("old")
+	now = now.Add(10 * time.Millisecond)
+	dispatcher.markStarted("new")
+	dispatcher.startedMu.Lock()
+	defer dispatcher.startedMu.Unlock()
+	if dispatcher.started["old"] != (time.Time{}) {
+		t.Fatalf("expected old entry to be pruned")
+	}
+	if _, ok := dispatcher.started["new"]; !ok {
+		t.Fatalf("expected new entry to remain")
+	}
+}
+
+func TestWebhookDispatcher_RestartClearsStartedAllowsOrphanResubmission(t *testing.T) {
+	backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
+		return []turnOutcome{{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: runtime.EventKindTurnAccepted}}}
+	}}
+	dispatcher, executions := webhookTestSetup(t, backend)
+	first, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if err := dispatcher.Wait(t.Context()); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	execution, found, err := executions.ExecutionByNonce(t.Context(), "primary", "nonce-abcdefghijklmnop")
+	if err != nil || !found || execution.State != store.WebhookExecutionStateAccepted {
+		t.Fatalf("execution = %+v, %v, %v; want it left accepted by a turn that ended without a terminal event", execution, found, err)
+	}
+	dispatcher.started = map[string]time.Time{}
+	again, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
+	if err != nil {
+		t.Fatalf("Dispatch after restart: %v", err)
+	}
+	if again.ExecutionID != first.ExecutionID {
+		t.Fatalf("execution id changed after restart")
+	}
+	if err := dispatcher.Wait(t.Context()); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if backend.submitted() != 2 {
+		t.Fatalf("submitted turns = %d, want 2 after restart resubmission", backend.submitted())
+	}
+}
