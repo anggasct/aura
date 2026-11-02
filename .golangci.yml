@@ -368,6 +368,12 @@ linters:
         text: G404
         path: internal/channel/discord/gateway\.go
 
+      # Same retry-jitter rationale: telegram poll backoff only.
+      - linters:
+          - gosec
+        text: G404
+        path: internal/channel/telegram/poll\.go
+
       # Same retry-jitter rationale: sync interval jitter only.
       - linters:
           - gosec

@@ -215,3 +215,9 @@ channels:
     min_edit_interval: 2s
     max_attachment_bytes: 20971520
     thread_auto_archive_minutes: 1440
+  telegram:
+    enabled: false
+    accounts: []
+    polling:
+      timeout: 30s
+      max_backoff: 1m0s

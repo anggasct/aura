@@ -46,6 +46,7 @@ var migrations = []migration{
 	{version: 28, sql: workflowCompletionSchemaSQL},
 	{version: 29, sql: workflowProposalSchemaSQL},
 	{version: 30, sql: workflowRoutineSchemaSQL},
+	{version: 31, sql: telegramCursorSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -597,6 +598,14 @@ CREATE TABLE session_handoff (
 ALTER TABLE usage_reservation ADD COLUMN principal_id TEXT;
 ALTER TABLE usage_reservation ADD COLUMN principal_class TEXT;
 CREATE INDEX usage_reservation_principal_idx ON usage_reservation(principal_id, window_day);
+`
+
+const telegramCursorSchemaSQL = `
+CREATE TABLE telegram_cursor (
+    source TEXT PRIMARY KEY,
+    next_update_id INTEGER NOT NULL CHECK (next_update_id >= 0),
+    updated_at TEXT NOT NULL
+);
 `
 
 const workflowRoutineSchemaSQL = `

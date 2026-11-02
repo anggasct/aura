@@ -243,7 +243,10 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateDiscord(&cfg.Channels.Discord); err != nil {
 		return LoadResult{}, err
 	}
-	if err := validateBindings(cfg.Bindings, &cfg.Channels.Discord); err != nil {
+	if err := validateTelegram(&cfg.Channels.Telegram, &cfg.Channels.Discord, cfg.Owner); err != nil {
+		return LoadResult{}, err
+	}
+	if err := validateBindings(cfg.Bindings, &cfg.Channels); err != nil {
 		return LoadResult{}, err
 	}
 	if err := validateBroadcast(&cfg.Broadcast); err != nil {
@@ -428,6 +431,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateDiscordShapes(doc); err != nil {
+		return err
+	}
+	if err := validateTelegramShapes(doc); err != nil {
 		return err
 	}
 	if err := validateBindingsShapes(doc); err != nil {
@@ -799,6 +805,60 @@ func validateDiscordAccountShapes(accountsNode *yamlv3.Node) error {
 				if err := quotedStringSequence(field+"."+keyNode.Value, valueNode); err != nil {
 					return err
 				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateTelegramShapes(doc *yamlv3.Node) error {
+	telegramNode := nestedValue(doc, "channels", "telegram")
+	if telegramNode == nil {
+		return nil
+	}
+	if telegramNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("channels.telegram must be a mapping at line %d", telegramNode.Line)
+	}
+	for i := 0; i+1 < len(telegramNode.Content); i += 2 {
+		keyNode := telegramNode.Content[i]
+		valueNode := telegramNode.Content[i+1]
+		switch keyNode.Value {
+		case "enabled":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+				return fmt.Errorf("channels.telegram.enabled must be a boolean at line %d", valueNode.Line)
+			}
+		case "accounts":
+			if err := validateTelegramAccountShapes(valueNode); err != nil {
+				return err
+			}
+		case "polling":
+			if valueNode.Kind != yamlv3.MappingNode {
+				return fmt.Errorf("channels.telegram.polling must be a mapping at line %d", valueNode.Line)
+			}
+			for j := 0; j+1 < len(valueNode.Content); j += 2 {
+				pollingValue := valueNode.Content[j+1]
+				if pollingValue.Kind != yamlv3.ScalarNode || pollingValue.Tag != "!!str" {
+					return fmt.Errorf("channels.telegram.polling.%s must be a duration string at line %d", valueNode.Content[j].Value, pollingValue.Line)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateTelegramAccountShapes(accountsNode *yamlv3.Node) error {
+	if accountsNode.Kind != yamlv3.SequenceNode {
+		return fmt.Errorf("channels.telegram.accounts must be a sequence at line %d", accountsNode.Line)
+	}
+	for index, accountNode := range accountsNode.Content {
+		field := fmt.Sprintf("channels.telegram.accounts[%d]", index)
+		if accountNode.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("%s must be a mapping at line %d", field, accountNode.Line)
+		}
+		for i := 0; i+1 < len(accountNode.Content); i += 2 {
+			valueNode := accountNode.Content[i+1]
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("%s.%s must be a string at line %d", field, accountNode.Content[i].Value, valueNode.Line)
 			}
 		}
 	}
@@ -2201,6 +2261,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applySyncDefaults(cfg, doc)
 	applyVisionDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
+	applyTelegramDefaults(cfg, doc, &defaults.Channels.Telegram)
 	return nil
 }
 
@@ -2616,6 +2677,16 @@ func applyDiscordDefaults(cfg *Config, doc *yamlv3.Node, defaults *Discord) {
 		if !discord.Accounts[i].AcceptDMs && !sequenceItemHasKey(accountsNode, i, "accept_dms") {
 			discord.Accounts[i].AcceptDMs = true
 		}
+	}
+}
+
+func applyTelegramDefaults(cfg *Config, doc *yamlv3.Node, defaults *Telegram) {
+	polling := &cfg.Channels.Telegram.Polling
+	if polling.Timeout == 0 && !configValuePresent(doc, "channels", "telegram", "polling", "timeout") && !envValuePresent("channels.telegram.polling.timeout") {
+		polling.Timeout = defaults.Polling.Timeout
+	}
+	if polling.MaxBackoff == 0 && !configValuePresent(doc, "channels", "telegram", "polling", "max_backoff") && !envValuePresent("channels.telegram.polling.max_backoff") {
+		polling.MaxBackoff = defaults.Polling.MaxBackoff
 	}
 }
 
@@ -3347,6 +3418,75 @@ func validateDiscord(discord *Discord) error {
 	return nil
 }
 
+const (
+	telegramMaxPollTimeout = 50 * time.Second
+	telegramMaxBackoffCap  = 10 * time.Minute
+)
+
+func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error {
+	if telegram == nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.telegram must not be nil"}
+	}
+	var problems []error
+	names := make(map[string]bool, len(telegram.Accounts))
+	tokenRefs := make(map[string]bool, len(telegram.Accounts)+len(discord.Accounts))
+	for i := range discord.Accounts {
+		tokenRefs[discord.Accounts[i].BotTokenRef] = true
+	}
+	for i := range telegram.Accounts {
+		account := &telegram.Accounts[i]
+		field := fmt.Sprintf("channels.telegram.accounts[%d]", i)
+		switch {
+		case !discordAccountNamePattern.MatchString(account.Name):
+			problems = append(problems, fmt.Errorf("%s.name %q must match %s", field, account.Name, discordAccountNamePattern.String()))
+		case names[account.Name]:
+			problems = append(problems, fmt.Errorf("%s.name %q is configured more than once", field, account.Name))
+		default:
+			names[account.Name] = true
+		}
+		switch {
+		case account.BotTokenRef == "":
+			problems = append(problems, fmt.Errorf("%s.bot_token_ref must not be empty", field))
+		case !strings.HasPrefix(account.BotTokenRef, "env://") && !strings.HasPrefix(account.BotTokenRef, "file://"):
+			problems = append(problems, fmt.Errorf("%s.bot_token_ref must use env:// or file://", field))
+		case tokenRefs[account.BotTokenRef]:
+			problems = append(problems, fmt.Errorf("%s.bot_token_ref is shared with another account", field))
+		default:
+			tokenRefs[account.BotTokenRef] = true
+		}
+	}
+	if telegram.Enabled && len(telegram.Accounts) == 0 {
+		problems = append(problems, errors.New("channels.telegram.enabled requires at least one channels.telegram.accounts entry"))
+	}
+	if telegram.Enabled && !hasTelegramOwner(owner) {
+		problems = append(problems, errors.New("channels.telegram.enabled requires a telegram:<user_id> entry in owner.identities"))
+	}
+	timeout := time.Duration(telegram.Polling.Timeout)
+	if timeout < time.Second || timeout > telegramMaxPollTimeout || timeout%time.Second != 0 {
+		problems = append(problems, fmt.Errorf("channels.telegram.polling.timeout must be a whole number of seconds between 1s and %s", telegramMaxPollTimeout))
+	}
+	backoff := time.Duration(telegram.Polling.MaxBackoff)
+	if backoff < time.Second || backoff > telegramMaxBackoffCap {
+		problems = append(problems, fmt.Errorf("channels.telegram.polling.max_backoff must be between 1s and %s", telegramMaxBackoffCap))
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func hasTelegramOwner(owner *Owner) bool {
+	if owner == nil {
+		return false
+	}
+	for _, identity := range owner.Identities {
+		if channel, _, found := strings.Cut(identity, ":"); found && channel == principal.ChannelTelegram {
+			return true
+		}
+	}
+	return false
+}
+
 func snowflakeListProblems(field string, ids []string) []error {
 	var problems []error
 	seen := make(map[string]bool, len(ids))
@@ -3365,13 +3505,19 @@ func snowflakeListProblems(field string, ids []string) []error {
 	return problems
 }
 
-func validateBindings(bindings []Binding, discord *Discord) error {
-	if discord == nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord must not be nil"}
+func validateBindings(bindings []Binding, channels *Channels) error {
+	if channels == nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels must not be nil"}
 	}
-	accounts := make(map[string]bool, len(discord.Accounts))
-	for i := range discord.Accounts {
-		accounts[discord.Accounts[i].Name] = true
+	accounts := map[string]map[string]bool{
+		BindingChannelDiscord:  make(map[string]bool, len(channels.Discord.Accounts)),
+		BindingChannelTelegram: make(map[string]bool, len(channels.Telegram.Accounts)),
+	}
+	for i := range channels.Discord.Accounts {
+		accounts[BindingChannelDiscord][channels.Discord.Accounts[i].Name] = true
+	}
+	for i := range channels.Telegram.Accounts {
+		accounts[BindingChannelTelegram][channels.Telegram.Accounts[i].Name] = true
 	}
 	var problems []error
 	seen := make(map[Binding]int, len(bindings))
@@ -3381,24 +3527,13 @@ func validateBindings(bindings []Binding, discord *Discord) error {
 		if strings.TrimSpace(binding.Persona) == "" {
 			problems = append(problems, fmt.Errorf("%s.persona must not be empty", field))
 		}
-		if binding.Channel != BindingChannelDiscord {
-			problems = append(problems, fmt.Errorf("%s.channel %q is not supported; only %q", field, binding.Channel, BindingChannelDiscord))
-		}
-		if !accounts[binding.Account] {
-			problems = append(problems, fmt.Errorf("%s.account %q is not a configured channels.discord.accounts name", field, binding.Account))
-		}
-		if binding.GuildID == "" && binding.ChannelID == "" && binding.ThreadID == "" && binding.UserID == "" {
-			problems = append(problems, fmt.Errorf("%s must set at least one of guild_id, channel_id, thread_id, user_id", field))
-		}
-		for _, match := range []struct{ name, id string }{
-			{"guild_id", binding.GuildID},
-			{"channel_id", binding.ChannelID},
-			{"thread_id", binding.ThreadID},
-			{"user_id", binding.UserID},
-		} {
-			if match.id != "" && !isSnowflake(match.id) {
-				problems = append(problems, fmt.Errorf("%s.%s %q is not a decimal snowflake", field, match.name, match.id))
-			}
+		switch binding.Channel {
+		case BindingChannelDiscord:
+			problems = append(problems, discordBindingProblems(field, &binding, accounts[BindingChannelDiscord])...)
+		case BindingChannelTelegram:
+			problems = append(problems, telegramBindingProblems(field, &binding, accounts[BindingChannelTelegram])...)
+		default:
+			problems = append(problems, fmt.Errorf("%s.channel %q is not supported; use %q or %q", field, binding.Channel, BindingChannelDiscord, BindingChannelTelegram))
 		}
 		key := binding
 		key.Persona = ""
@@ -3412,6 +3547,44 @@ func validateBindings(bindings []Binding, discord *Discord) error {
 		return &Error{Code: ErrorCodeBindingInvalid, Detail: err.Error()}
 	}
 	return nil
+}
+
+func discordBindingProblems(field string, binding *Binding, accounts map[string]bool) []error {
+	var problems []error
+	if !accounts[binding.Account] {
+		problems = append(problems, fmt.Errorf("%s.account %q is not a configured channels.discord.accounts name", field, binding.Account))
+	}
+	if binding.GuildID == "" && binding.ChannelID == "" && binding.ThreadID == "" && binding.UserID == "" {
+		problems = append(problems, fmt.Errorf("%s must set at least one of guild_id, channel_id, thread_id, user_id", field))
+	}
+	for _, match := range []struct{ name, id string }{
+		{"guild_id", binding.GuildID},
+		{"channel_id", binding.ChannelID},
+		{"thread_id", binding.ThreadID},
+		{"user_id", binding.UserID},
+	} {
+		if match.id != "" && !isSnowflake(match.id) {
+			problems = append(problems, fmt.Errorf("%s.%s %q is not a decimal snowflake", field, match.name, match.id))
+		}
+	}
+	return problems
+}
+
+func telegramBindingProblems(field string, binding *Binding, accounts map[string]bool) []error {
+	var problems []error
+	if !accounts[binding.Account] {
+		problems = append(problems, fmt.Errorf("%s.account %q is not a configured channels.telegram.accounts name", field, binding.Account))
+	}
+	if binding.GuildID != "" || binding.ChannelID != "" || binding.ThreadID != "" {
+		problems = append(problems, fmt.Errorf("%s matches telegram chats by user_id only", field))
+	}
+	switch {
+	case binding.UserID == "":
+		problems = append(problems, fmt.Errorf("%s must set user_id", field))
+	case !principal.IsTelegramUserID(binding.UserID):
+		problems = append(problems, fmt.Errorf("%s.user_id %q is not a positive decimal telegram user id", field, binding.UserID))
+	}
+	return problems
 }
 
 func validateBroadcast(broadcast *Broadcast) error {

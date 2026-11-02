@@ -17,6 +17,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channel/telegram"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/principal"
@@ -153,7 +154,7 @@ func (adapters discordAdapters) Check(ctx context.Context) []health.Finding {
 }
 
 func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, toolbroker.ApprovalDecider, error) {
-	if cfg == nil || !cfg.Channels.Discord.Enabled {
+	if cfg == nil || (!cfg.Channels.Discord.Enabled && !cfg.Channels.Telegram.Enabled) {
 		return nil, nil, nil, nil
 	}
 	if router == nil {
@@ -171,35 +172,63 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	adapters := make(discordAdapters, 0, len(cfg.Channels.Discord.Accounts))
-	ports := make([]runtimechannelhost.ChannelPort, 0, len(cfg.Channels.Discord.Accounts))
-	for i := range cfg.Channels.Discord.Accounts {
-		adapter, err := newDiscordAdapter(cfg, &cfg.Channels.Discord.Accounts[i], db, artifactRoot, logger)
-		if err != nil {
-			return nil, nil, nil, err
+	var ports []runtimechannelhost.ChannelPort
+	var checks []health.RegisteredCheck
+	var decider toolbroker.ApprovalDecider
+	if cfg.Channels.Discord.Enabled {
+		adapters := make(discordAdapters, 0, len(cfg.Channels.Discord.Accounts))
+		for i := range cfg.Channels.Discord.Accounts {
+			adapter, err := newDiscordAdapter(cfg, &cfg.Channels.Discord.Accounts[i], db, artifactRoot, logger)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			adapter.SetPrincipalResolver(owners)
+			adapter.SetPersonaRouter(router)
+			settings := discordAccessSettings(cfg, db, accessRecorder)
+			adapter.SetAccess(&settings)
+			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
+				recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
+			})
+			adapters = append(adapters, adapter)
+			ports = append(ports, adapter)
 		}
-		adapter.SetPrincipalResolver(owners)
-		adapter.SetPersonaRouter(router)
-		settings := discordAccessSettings(cfg, db, accessRecorder)
-		adapter.SetAccess(&settings)
-		adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-			recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
+		checks = append(checks, health.RegisteredCheck{
+			ID:          "discord",
+			Checker:     adapters,
+			Timeout:     time.Duration(cfg.Health.CheckTimeout),
+			Remediation: discord.RemediationReviewGateway,
+		}, health.RegisteredCheck{
+			ID:          "principal",
+			Checker:     identityMappingCheck{owners: owners},
+			Timeout:     time.Duration(cfg.Health.CheckTimeout),
+			Remediation: remediationMapOwnerIdentity,
 		})
-		adapters = append(adapters, adapter)
-		ports = append(ports, adapter)
+		decider = discordApprovalDecider(adapters)
 	}
-	checks := []health.RegisteredCheck{{
-		ID:          "discord",
-		Checker:     adapters,
-		Timeout:     time.Duration(cfg.Health.CheckTimeout),
-		Remediation: discord.RemediationReviewGateway,
-	}, {
-		ID:          "principal",
-		Checker:     identityMappingCheck{owners: owners},
-		Timeout:     time.Duration(cfg.Health.CheckTimeout),
-		Remediation: remediationMapOwnerIdentity,
-	}}
-	return ports, checks, discordApprovalDecider(adapters), nil
+	if cfg.Channels.Telegram.Enabled {
+		adapters := make(telegramAdapters, 0, len(cfg.Channels.Telegram.Accounts))
+		for i := range cfg.Channels.Telegram.Accounts {
+			adapter, err := newTelegramAdapter(cfg, &cfg.Channels.Telegram.Accounts[i], db, logger)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			adapter.SetPrincipalResolver(owners)
+			adapter.SetPersonaRouter(router)
+			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
+				recorder.Admitted(ctx, string(class), principal.ChannelTelegram)
+			})
+			adapter.SetDenialObserver(accessRecorder.Denied)
+			adapters = append(adapters, adapter)
+			ports = append(ports, adapter)
+		}
+		checks = append(checks, health.RegisteredCheck{
+			ID:          "telegram",
+			Checker:     adapters,
+			Timeout:     time.Duration(cfg.Health.CheckTimeout),
+			Remediation: telegram.RemediationReviewBot,
+		})
+	}
+	return ports, checks, decider, nil
 }
 
 func newDiscordAdapter(cfg *config.Config, account *config.DiscordAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*discord.Adapter, error) {
@@ -231,6 +260,14 @@ func buildSecretVault(cfg *config.Config) *secret.Vault {
 		if ref := parseSecretRef(account.BotTokenRef); ref.Env != "" {
 			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
 				vault.Set("discord_bot_token_"+account.Name, val)
+			}
+		}
+	}
+	for i := range cfg.Channels.Telegram.Accounts {
+		account := &cfg.Channels.Telegram.Accounts[i]
+		if ref := parseSecretRef(account.BotTokenRef); ref.Env != "" || ref.File != "" {
+			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
+				vault.Set("telegram_bot_token_"+account.Name, val)
 			}
 		}
 	}

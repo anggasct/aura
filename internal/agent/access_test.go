@@ -137,7 +137,7 @@ func TestRouterServesPublicOnlyWhenAPublicPersonaIsReachable(t *testing.T) {
 		{Name: "office", Persona: "kantor"},
 		{Name: "front", Persona: "lobby"},
 	}}
-	router, err := NewRouter(registry, discord, []config.Binding{discordBinding("lobby", "home", config.Binding{ChannelID: "9"})})
+	router, err := NewRouter(registry, &config.Channels{Discord: *discord}, []config.Binding{discordBinding("lobby", "home", config.Binding{ChannelID: "9"})})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

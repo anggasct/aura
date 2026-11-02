@@ -3,6 +3,7 @@ package principal
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -16,7 +17,10 @@ const (
 
 const OwnerID = "local-owner"
 
-const ChannelDiscord = "discord"
+const (
+	ChannelDiscord  = "discord"
+	ChannelTelegram = "telegram"
+)
 
 type ErrorCode string
 
@@ -71,10 +75,19 @@ func ParseIdentity(raw string) (channel, externalID string, err error) {
 		if !isSnowflake(externalID) {
 			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "discord identity must be a numeric user id"}
 		}
+	case ChannelTelegram:
+		if !IsTelegramUserID(externalID) {
+			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "telegram identity must be a positive decimal user id"}
+		}
 	default:
 		return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "identity channel is not supported"}
 	}
 	return channel, externalID, nil
+}
+
+func IsTelegramUserID(id string) bool {
+	value, err := strconv.ParseInt(id, 10, 64)
+	return err == nil && value > 0 && strconv.FormatInt(value, 10) == id
 }
 
 func isSnowflake(id string) bool {

@@ -69,7 +69,13 @@ func TestNewResolverRejectsInvalidIdentities(t *testing.T) {
 		identities []string
 		index      string
 	}{
-		"unknown channel":      {identities: []string{"telegram:123"}, index: "owner.identities[0]"},
+		"unknown channel":      {identities: []string{"slack:123"}, index: "owner.identities[0]"},
+		"empty telegram id":    {identities: []string{"telegram:"}, index: "owner.identities[0]"},
+		"negative telegram id": {identities: []string{"telegram:-42"}, index: "owner.identities[0]"},
+		"zero telegram id":     {identities: []string{"discord:42", "telegram:0"}, index: "owner.identities[1]"},
+		"padded telegram id":   {identities: []string{"telegram:0042"}, index: "owner.identities[0]"},
+		"signed telegram id":   {identities: []string{"telegram:+42"}, index: "owner.identities[0]"},
+		"telegram overflow":    {identities: []string{"telegram:9223372036854775808"}, index: "owner.identities[0]"},
 		"terminal is implicit": {identities: []string{"discord:900", "terminal:me"}, index: "owner.identities[1]"},
 		"missing separator":    {identities: []string{"123456"}, index: "owner.identities[0]"},
 		"empty discord id":     {identities: []string{"discord:"}, index: "owner.identities[0]"},
@@ -96,11 +102,27 @@ func TestNewResolverRejectsInvalidIdentities(t *testing.T) {
 }
 
 func TestNewResolverAggregatesProblems(t *testing.T) {
-	_, err := NewResolver([]string{"telegram:1", "discord:x"})
+	_, err := NewResolver([]string{"telegram:x", "discord:x"})
 	for _, index := range []string{"owner.identities[0]", "owner.identities[1]"} {
 		if err == nil || !strings.Contains(err.Error(), index) {
 			t.Errorf("error %v does not name %s", err, index)
 		}
+	}
+}
+
+func TestResolverKeepsChannelsApart(t *testing.T) {
+	owners, err := NewResolver([]string{"telegram:777", "discord:900"})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if id, class, ok := owners.Resolve(ChannelTelegram, "777", false, false); id != OwnerID || class != ClassOwner || !ok {
+		t.Fatalf("telegram owner = %q %q %v", id, class, ok)
+	}
+	if _, _, ok := owners.Resolve(ChannelTelegram, "900", false, false); ok {
+		t.Fatal("a discord owner id admitted on telegram")
+	}
+	if owners.Count(ChannelTelegram) != 1 || owners.Count(ChannelDiscord) != 1 {
+		t.Fatalf("counts telegram=%d discord=%d", owners.Count(ChannelTelegram), owners.Count(ChannelDiscord))
 	}
 }
 

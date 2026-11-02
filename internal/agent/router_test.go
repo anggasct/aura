@@ -16,7 +16,10 @@ func routerFixture(t *testing.T, bindings []config.Binding) *Router {
 		{Name: "home", Persona: DefaultID},
 		{Name: "kuma"},
 	}}
-	router, err := NewRouter(registry, discord, bindings)
+	router, err := NewRouter(registry, &config.Channels{
+		Discord:  *discord,
+		Telegram: config.Telegram{Accounts: []config.TelegramAccount{{Name: "pocket", Persona: "researcher"}}},
+	}, bindings)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
@@ -104,6 +107,7 @@ func TestRouterRejectsUnregisteredPersonas(t *testing.T) {
 	}
 	cases := map[string]struct {
 		discord  config.Discord
+		telegram config.Telegram
 		bindings []config.Binding
 	}{
 		"binding persona": {
@@ -113,20 +117,23 @@ func TestRouterRejectsUnregisteredPersonas(t *testing.T) {
 		"account default persona": {
 			discord: config.Discord{Accounts: []config.DiscordAccount{{Name: "home", Persona: "ghost"}}},
 		},
+		"telegram account default persona": {
+			telegram: config.Telegram{Accounts: []config.TelegramAccount{{Name: "pocket", Persona: "ghost"}}},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewRouter(registry, &tc.discord, tc.bindings)
+			_, err := NewRouter(registry, &config.Channels{Discord: tc.discord, Telegram: tc.telegram}, tc.bindings)
 			if code, ok := CodeOf(err); !ok || code != ErrorCodeBindingInvalid {
 				t.Fatalf("NewRouter error = %v, want %s", err, ErrorCodeBindingInvalid)
 			}
 		})
 	}
-	if _, err := NewRouter(nil, &config.Discord{}, nil); err == nil {
+	if _, err := NewRouter(nil, &config.Channels{}, nil); err == nil {
 		t.Error("nil registry accepted")
 	}
 	if _, err := NewRouter(registry, nil, nil); err == nil {
-		t.Error("nil discord config accepted")
+		t.Error("nil channels config accepted")
 	}
 }
 
@@ -138,5 +145,28 @@ func TestRouterListsRegisteredPersonasAndAccounts(t *testing.T) {
 	}
 	if !router.HasAccount(config.BindingChannelDiscord, "kuma") || router.HasAccount(config.BindingChannelDiscord, "work") {
 		t.Error("HasAccount does not reflect configured accounts")
+	}
+	if !router.HasAccount(config.BindingChannelTelegram, "pocket") || router.HasAccount(config.BindingChannelDiscord, "pocket") {
+		t.Error("HasAccount does not keep telegram accounts apart from discord")
+	}
+}
+
+func TestRouterResolvesTelegramAccountsAndUserBindings(t *testing.T) {
+	router := routerFixture(t, []config.Binding{{
+		Persona: "engineer",
+		Channel: config.BindingChannelTelegram,
+		Account: "pocket",
+		UserID:  "42",
+	}})
+	match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelTelegram, Account: "pocket", UserID: "7"})
+	if !ok || match.Persona != "researcher" || match.Binding != AccountDefaultBinding {
+		t.Fatalf("account default = %+v %v, want researcher", match, ok)
+	}
+	match, ok = router.Resolve(&RouteScope{Channel: config.BindingChannelTelegram, Account: "pocket", UserID: "42"})
+	if !ok || match.Persona != "engineer" || match.Score != ScoreUser {
+		t.Fatalf("user binding = %+v %v, want engineer", match, ok)
+	}
+	if match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelDiscord, Account: "pocket", UserID: "42"}); ok {
+		t.Fatalf("telegram binding resolved for a discord scope: %+v", match)
 	}
 }
