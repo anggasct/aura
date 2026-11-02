@@ -175,6 +175,8 @@ func (e *stepExecution) executeSerial(ctx context.Context, step *StepSpec, attem
 		return e.runWaitStepSerial(ctx, step, attempt), false
 	case KindApproval:
 		return e.runApprovalStepSerial(ctx, step, attempt), false
+	case KindWorkflow:
+		return e.runWorkflowStepSerial(ctx, step, attempt)
 	default:
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: fmt.Sprintf("kind %q is not executable", step.Executor.Kind), EndedAt: nowPtr()}, false
 	}

@@ -12,6 +12,7 @@ const (
 	KindTool     Kind = "tool"
 	KindWait     Kind = "wait"
 	KindApproval Kind = "approval"
+	KindWorkflow Kind = "workflow"
 )
 
 type Source string
@@ -57,6 +58,7 @@ type ExecutorSpec struct {
 	Event                *string         `json:"event,omitempty"`
 	Source               *string         `json:"source,omitempty"`
 	ExternalRef          *string         `json:"external_ref,omitempty"`
+	WorkflowID           *string         `json:"workflow,omitempty"`
 }
 
 type RetryPolicy struct {

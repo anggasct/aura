@@ -131,8 +131,10 @@ func (e *stepExecution) executeAttempt(ctx context.Context, step *StepSpec, atte
 		e.failRun(ctx, step.ID, err)
 		return nil, true
 	}
-	e.interpreter.acquire()
-	defer e.interpreter.release()
+	if step.Executor.Kind != KindWorkflow {
+		e.interpreter.acquire()
+		defer e.interpreter.release()
+	}
 
 	attemptCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -169,6 +171,8 @@ func (e *stepExecution) invokeExecutor(ctx context.Context, step *StepSpec, atte
 		return e.runWaitStep(ctx, step, attempt)
 	case KindApproval:
 		return e.runApprovalStep(ctx, step, attempt)
+	case KindWorkflow:
+		return e.runWorkflowStep(ctx, step)
 	default:
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: fmt.Sprintf("kind %q is not executable", step.Executor.Kind), EndedAt: nowPtr()}
 	}

@@ -463,3 +463,11 @@ func (s *Store) CompletionAttempts(ctx context.Context, runID string) (int, erro
 	}
 	return attempts, nil
 }
+
+func (s *Store) runStatus(ctx context.Context, runID string) (string, error) {
+	var status string
+	if err := s.db.QueryRowContext(ctx, `SELECT status FROM workflow_run WHERE id = ?`, runID).Scan(&status); err != nil {
+		return "", fmt.Errorf("read run status: %w", err)
+	}
+	return status, nil
+}

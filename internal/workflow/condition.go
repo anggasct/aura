@@ -25,6 +25,8 @@ const (
 	ErrorCodeStepTimeout          ErrorCode = "workflow_step_timeout"
 	ErrorCodeBudgetExhausted      ErrorCode = "workflow_budget_exhausted"
 	ErrorCodeConcurrencyBounded   ErrorCode = "workflow_concurrency_bounded"
+	ErrorCodeCompositionInvalid   ErrorCode = "workflow_composition_invalid"
+	ErrorCodeChildFailed          ErrorCode = "workflow_child_failed"
 )
 
 type Error struct {

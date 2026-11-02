@@ -21,6 +21,8 @@ type ValidationDeps struct {
 	DefaultStepTimeout time.Duration
 }
 
+const MaxCompositionDepth = 3
+
 func Validate(spec *Spec, deps ValidationDeps) error {
 	if spec == nil {
 		return codedError(ErrorCodeSpecInvalid, "spec must not be nil")
@@ -177,11 +179,18 @@ func validateExecutor(step *StepSpec, deps ValidationDeps, ids map[string]bool) 
 			}
 		}
 	case KindApproval:
-		if step.Executor.AgentID != nil || len(step.Executor.RequiredCapabilities) > 0 || step.Executor.ToolID != nil || step.Executor.Event != nil {
+		if step.Executor.AgentID != nil || len(step.Executor.RequiredCapabilities) > 0 || step.Executor.ToolID != nil || step.Executor.Event != nil || step.Executor.WorkflowID != nil {
 			return codedError(ErrorCodeExecutorInvalid, field+" takes no executor extras")
 		}
+	case KindWorkflow:
+		if step.Executor.WorkflowID == nil || *step.Executor.WorkflowID == "" {
+			return codedError(ErrorCodeExecutorInvalid, field+" needs workflow")
+		}
+		if step.Executor.AgentID != nil || len(step.Executor.RequiredCapabilities) > 0 || step.Executor.ToolID != nil || step.Executor.Event != nil {
+			return codedError(ErrorCodeExecutorInvalid, field+" takes only workflow")
+		}
 	default:
-		return codedError(ErrorCodeExecutorInvalid, fmt.Sprintf("%s kind %q is not agent, tool, wait, or approval", field, step.Executor.Kind))
+		return codedError(ErrorCodeExecutorInvalid, fmt.Sprintf("%s kind %q is not agent, tool, wait, approval, or workflow", field, step.Executor.Kind))
 	}
 	return nil
 }
@@ -236,4 +245,43 @@ func hasTransitiveApproval(stepsByID map[string]*StepSpec, step *StepSpec) bool 
 		stack = append(stack, predecessor.DependsOn...)
 	}
 	return false
+}
+
+func ValidateComposition(spec *Spec, lookup func(id string) (*Spec, bool)) error {
+	var depthOf func(current *Spec, path []string) (int, error)
+	depthOf = func(current *Spec, path []string) (int, error) {
+		if slices.Contains(path, current.ID) {
+			return 0, codedError(ErrorCodeCompositionInvalid, fmt.Sprintf("workflow %q reaches itself through %s", spec.ID, strings.Join(append(path, current.ID), " -> ")))
+		}
+		path = append(path, current.ID)
+		deepest := 0
+		for index := range current.Steps {
+			step := &current.Steps[index]
+			if step.Executor.Kind != KindWorkflow || step.Executor.WorkflowID == nil {
+				continue
+			}
+			childID := *step.Executor.WorkflowID
+			if lookup == nil {
+				return 0, codedError(ErrorCodeCompositionInvalid, fmt.Sprintf("step %q references workflow %q, but no workflow set is loaded", step.ID, childID))
+			}
+			child, ok := lookup(childID)
+			if !ok {
+				return 0, codedError(ErrorCodeCompositionInvalid, fmt.Sprintf("step %q references unknown workflow %q", step.ID, childID))
+			}
+			depth, err := depthOf(child, path)
+			if err != nil {
+				return 0, err
+			}
+			deepest = max(deepest, depth)
+		}
+		return deepest + 1, nil
+	}
+	depth, err := depthOf(spec, nil)
+	if err != nil {
+		return err
+	}
+	if depth > MaxCompositionDepth {
+		return codedError(ErrorCodeCompositionInvalid, fmt.Sprintf("workflow %q composes %d levels deep, more than %d", spec.ID, depth, MaxCompositionDepth))
+	}
+	return nil
 }
