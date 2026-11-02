@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/cli"
 	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/server"
 )
 
 func main() {
@@ -15,12 +16,20 @@ func main() {
 		os.Exit(sandbox.RunChild())
 		return
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	terms := make(chan os.Signal, 1)
+	signal.Notify(terms, syscall.SIGTERM)
+	go func() {
+		if sig, ok := <-terms; ok {
+			cancel(&server.SignalCause{Signal: sig})
+		}
+	}()
 	interrupts := make(chan os.Signal, 2)
 	signal.Notify(interrupts, os.Interrupt)
 	ctx = cli.WithInterrupts(ctx, interrupts)
 	code := cli.ExecuteContext(ctx)
-	stop()
+	signal.Stop(terms)
 	signal.Stop(interrupts)
+	cancel(nil)
 	os.Exit(code)
 }
