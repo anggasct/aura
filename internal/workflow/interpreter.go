@@ -41,6 +41,8 @@ type Interpreter struct {
 	specs    *definitionRegistry
 	options  *Options
 	inflight chan struct{}
+	depsMu   sync.Mutex
+	deps     ValidationDeps
 	// writeMu serializes run-status writes across step goroutines; it is
 	// never held while another mutex is acquired.
 	writeMu sync.Mutex
@@ -74,7 +76,9 @@ func (r *definitionRegistry) list() []*Spec {
 	defer r.mu.Unlock()
 	specs := make([]*Spec, 0, len(r.specs))
 	for _, compiled := range r.specs {
-		specs = append(specs, compiled.spec)
+		if compiled.spec.Source != SourceGenerated {
+			specs = append(specs, compiled.spec)
+		}
 	}
 	slices.SortFunc(specs, func(a, b *Spec) int {
 		return strings.Compare(a.ID, b.ID)
@@ -112,7 +116,36 @@ func (i *Interpreter) Load(ctx context.Context, spec *Spec, deps ValidationDeps)
 	return i.LoadAll(ctx, []*Spec{spec}, deps)
 }
 
+func (i *Interpreter) compiledFor(ctx context.Context, id string, version int) (*compiledSpec, bool) {
+	cached, present := i.specs.get(id)
+	if present && (version == 0 || cached.spec.Version == version) {
+		return cached, true
+	}
+	if version == 0 {
+		return nil, false
+	}
+	spec, err := i.store.Definition(ctx, id, version)
+	if err != nil {
+		return nil, false
+	}
+	i.depsMu.Lock()
+	deps := i.deps
+	i.depsMu.Unlock()
+	graph, err := Compile(spec, deps)
+	if err != nil {
+		i.options.Logger.WarnContext(ctx, "stored workflow definition does not compile", "component", "workflow", "definition_id", id, "version", version, "error", err)
+		return nil, false
+	}
+	if !present {
+		i.specs.put(spec, graph)
+	}
+	return &compiledSpec{spec: spec, graph: graph}, true
+}
+
 func (i *Interpreter) LoadAll(ctx context.Context, specs []*Spec, deps ValidationDeps) error {
+	i.depsMu.Lock()
+	i.deps = deps
+	i.depsMu.Unlock()
 	pending := make(map[string]*Spec, len(specs))
 	for _, spec := range specs {
 		if spec != nil {
@@ -223,7 +256,7 @@ func (i *Interpreter) handleInvocation(ctx context.Context, inv durable.Invocati
 	if err := json.Unmarshal(inv.Payload(), &tick); err != nil {
 		return fmt.Errorf("decode invocation payload: %w", err)
 	}
-	compiled, ok := i.specs.get(tick.DefinitionID)
+	compiled, ok := i.compiledFor(ctx, tick.DefinitionID, tick.Version)
 	if !ok {
 		return codedError(ErrorCodeDefinitionNotFound, "definition "+tick.DefinitionID+" is not loaded")
 	}

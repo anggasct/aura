@@ -21,7 +21,7 @@ func (i *Interpreter) driveInline(ctx context.Context, inv durable.Invocation, r
 	if err != nil {
 		return "", err
 	}
-	compiled, ok := i.specs.get(summary.DefinitionID)
+	compiled, ok := i.compiledFor(ctx, summary.DefinitionID, summary.DefinitionVersion)
 	if !ok {
 		return "", codedError(ErrorCodeDefinitionNotFound, "definition "+summary.DefinitionID+" is not loaded")
 	}

@@ -34,6 +34,11 @@ func (s *scriptedWorkflows) Start(_ context.Context, caller *WorkflowCaller, id,
 	return WorkflowRunState{RunID: "run_1", WorkflowID: id, Status: "queued"}, s.err
 }
 
+func (s *scriptedWorkflows) Propose(_ context.Context, caller *WorkflowCaller, spec json.RawMessage) (WorkflowProposal, error) {
+	s.record(caller, "propose "+string(spec))
+	return WorkflowProposal{ProposalID: "prop_1", Digest: "abc", Plan: "Plan: x"}, s.err
+}
+
 func (s *scriptedWorkflows) Status(_ context.Context, caller *WorkflowCaller, runID string) (WorkflowRunState, error) {
 	s.record(caller, "status "+runID)
 	return WorkflowRunState{RunID: runID, Status: "running", Steps: []WorkflowStepState{{ID: "hold", Status: "running"}}}, s.err
@@ -94,6 +99,24 @@ func TestWorkflowAdaptersPassTheCallerAndShapeResults(t *testing.T) {
 	}
 }
 
+func TestWorkflowProposeAdapterPassesTheSpecAndMapsRejections(t *testing.T) {
+	holder := &workflowHolder{}
+	controller := &scriptedWorkflows{}
+	(&Executor{workflows: holder}).SetWorkflowController(controller)
+	result, err := runWorkflowTool(t, holder, workflowRequest(principal.ClassOwner, tools.WorkflowProposeToolName, `{"spec":{"goal":"g","steps":[]}}`))
+	if err != nil || string(result.Output) != `{"proposal_id":"prop_1","digest":"abc","plan":"Plan: x"}` {
+		t.Fatalf("propose = %s, %v", result.Output, err)
+	}
+	if controller.calls[0] != `propose {"goal":"g","steps":[]}` {
+		t.Fatalf("calls = %v", controller.calls)
+	}
+	controller.err = &WorkflowRejection{Code: "workflow_capability_exceeded", Detail: "step uses exec"}
+	_, err = runWorkflowTool(t, holder, workflowRequest(principal.ClassOwner, tools.WorkflowProposeToolName, `{"spec":{"goal":"g","steps":[]}}`))
+	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultInvalidArgument || !strings.Contains(err.Error(), "workflow_capability_exceeded: step uses exec") {
+		t.Fatalf("rejection surfaced as %v", err)
+	}
+}
+
 func TestWorkflowAdaptersMapControllerErrors(t *testing.T) {
 	holder := &workflowHolder{}
 	controller := &scriptedWorkflows{}
@@ -116,7 +139,7 @@ func TestWorkflowAdaptersMapControllerErrors(t *testing.T) {
 }
 
 func TestWorkflowDefinitionsAreReadTierOptInAndStrict(t *testing.T) {
-	for _, name := range []string{tools.WorkflowListToolName, tools.WorkflowStartToolName, tools.WorkflowStatusToolName, tools.WorkflowCancelToolName} {
+	for _, name := range []string{tools.WorkflowListToolName, tools.WorkflowStartToolName, tools.WorkflowStatusToolName, tools.WorkflowCancelToolName, tools.WorkflowProposeToolName} {
 		definition := tools.DefinitionsByKey()[name+"@"+tools.Version]
 		if definition.Effectful || definition.RequiresApproval || !definition.OptIn || tools.EffectTier(name) {
 			t.Fatalf("%s = %+v, want read tier and opt-in", name, definition)
@@ -132,6 +155,10 @@ func TestWorkflowDefinitionsAreReadTierOptInAndStrict(t *testing.T) {
 		},
 		tools.WorkflowStatusToolName: {`{"run_id":"run_1"}`: true, `{}`: false, `{"run_id":"r","id":"x"}`: false},
 		tools.WorkflowCancelToolName: {`{"run_id":"run_1"}`: true, `{"run_id":""}`: false},
+		tools.WorkflowProposeToolName: {
+			`{"spec":{"goal":"g","steps":[{"id":"a"}]}}`: true,
+			`{}`: false, `{"spec":{}}`: false, `{"spec":"text"}`: false, `{"spec":{"goal":"g"},"run":true}`: false,
+		},
 	} {
 		definition := tools.DefinitionsByKey()[tool+"@"+tools.Version]
 		for raw, valid := range cases {

@@ -27,6 +27,11 @@ const (
 	ErrorCodeConcurrencyBounded   ErrorCode = "workflow_concurrency_bounded"
 	ErrorCodeCompositionInvalid   ErrorCode = "workflow_composition_invalid"
 	ErrorCodeChildFailed          ErrorCode = "workflow_child_failed"
+	ErrorCodeCapabilityExceeded   ErrorCode = "workflow_capability_exceeded"
+	ErrorCodeDigestMismatch       ErrorCode = "workflow_proposal_digest_mismatch"
+	ErrorCodeProposalNotFound     ErrorCode = "workflow_proposal_not_found"
+	ErrorCodeProposalDecided      ErrorCode = "workflow_proposal_decided"
+	ErrorCodeNotPermitted         ErrorCode = "workflow_not_permitted"
 )
 
 type Error struct {
