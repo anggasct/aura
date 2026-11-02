@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
@@ -213,6 +214,10 @@ func TestInterpreterSkipsDownstreamOnFalseCondition(t *testing.T) {
 }
 
 func TestInterpreterStepTimeoutRetriesThenFailsRun(t *testing.T) {
+	synctest.Test(t, testStepTimeoutRetriesThenFailsRun)
+}
+
+func testStepTimeoutRetriesThenFailsRun(t *testing.T) {
 	ctx := context.Background()
 	registry, err := buildTestRegistry()
 	if err != nil {
@@ -241,14 +246,8 @@ func TestInterpreterStepTimeoutRetriesThenFailsRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	for range 24 {
-		clock.Advance(time.Minute)
-		time.Sleep(2 * time.Millisecond)
-		if run, err := disk.Run(ctx, summary.ID); err == nil && run.Status == RunFailed {
-			break
-		}
-	}
-	waitForRunStatus(t, disk, summary.ID, RunFailed, 2*time.Second)
+	expireAttempts(t, clock, 3)
+	requireRunStatus(t, disk, summary.ID, RunFailed)
 	steps, err := disk.Steps(ctx, summary.ID)
 	if err != nil {
 		t.Fatalf("Steps: %v", err)
@@ -429,6 +428,25 @@ func waitForRunStatus(t *testing.T, disk *Store, runID, status string, within ti
 	t.Fatalf("run %s status = %s, want %s within %s", runID, run.Status, status, within)
 }
 
+func expireAttempts(t *testing.T, clock *durable.ManualClock, attempts int) {
+	t.Helper()
+	for range attempts {
+		synctest.Wait()
+		clock.Advance(time.Minute)
+		synctest.Wait()
+		clock.Advance(time.Minute)
+	}
+	synctest.Wait()
+}
+
+func requireRunStatus(t *testing.T, disk *Store, runID, status string) {
+	t.Helper()
+	run, err := disk.Run(context.Background(), runID)
+	if err != nil || run.Status != status {
+		t.Fatalf("run %s = %+v, %v; want %s", runID, run, err, status)
+	}
+}
+
 func ptr(value string) *string { return &value }
 
 func strPtr(value string) *string { return &value }
@@ -532,60 +550,52 @@ func TestInterpreterSignalStepTimeoutRetryConvergesOnSignal(t *testing.T) {
 		{name: "approval", kind: KindApproval, signal: "approval.gate"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			clock := durable.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
-			fake := durable.NewFake().WithClock(clock)
-			disk := newTestStore(t)
-			interpreter := NewInterpreter(disk, fake, &Options{MaxConcurrentSteps: 1, AgentResolver: registry})
-			step := StepSpec{ID: "gate", Executor: ExecutorSpec{Kind: tc.kind}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 1, Backoff: time.Minute}}
-			if tc.kind == KindWait {
-				step.Executor.Event = ptr("ci.completed")
-			}
-			spec := &Spec{
-				ID: "retry-" + tc.name, Goal: "Signal step retry", Version: 1, Source: SourceDefined,
-				Steps: []StepSpec{step},
-			}
-			if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
-				t.Fatalf("Load: %v", err)
-			}
-			summary, err := interpreter.Start(ctx, spec.ID, nil)
-			if err != nil {
-				t.Fatalf("Start: %v", err)
-			}
-			waitForRunStatus(t, disk, summary.ID, RunSuspended, 2*time.Second)
-			deadline := time.Now().Add(2 * time.Second)
-			retried := false
-			for time.Now().Before(deadline) {
-				clock.Advance(time.Minute)
-				time.Sleep(2 * time.Millisecond)
-				steps, err := disk.Steps(ctx, summary.ID)
-				if err == nil && len(steps) == 1 && steps[0].Attempt >= 1 {
-					retried = true
-					break
+			synctest.Test(t, func(t *testing.T) {
+				ctx := context.Background()
+				clock := durable.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
+				fake := durable.NewFake().WithClock(clock)
+				disk := newTestStore(t)
+				interpreter := NewInterpreter(disk, fake, &Options{MaxConcurrentSteps: 1, AgentResolver: registry})
+				step := StepSpec{ID: "gate", Executor: ExecutorSpec{Kind: tc.kind}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 1, Backoff: time.Minute}}
+				if tc.kind == KindWait {
+					step.Executor.Event = ptr("ci.completed")
 				}
-			}
-			if !retried {
-				t.Fatal("retry attempt never started after the timeout")
-			}
-			if err := fake.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, tc.signal, []byte(`{"decision":"approve"}`)); err != nil {
-				t.Fatalf("Signal on the retried step: %v", err)
-			}
-			waitForRunStatus(t, disk, summary.ID, RunSucceeded, 2*time.Second)
-			cancelDone := make(chan error, 1)
-			go func() { cancelDone <- interpreter.Cancel(ctx, summary.ID) }()
-			select {
-			case err := <-cancelDone:
+				spec := &Spec{
+					ID: "retry-" + tc.name, Goal: "Signal step retry", Version: 1, Source: SourceDefined,
+					Steps: []StepSpec{step},
+				}
+				if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				summary, err := interpreter.Start(ctx, spec.ID, nil)
 				if err != nil {
-					t.Fatalf("Cancel: %v", err)
+					t.Fatalf("Start: %v", err)
 				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("Cancel did not return after the retried signal step")
-			}
+				synctest.Wait()
+				requireRunStatus(t, disk, summary.ID, RunSuspended)
+				expireAttempts(t, clock, 1)
+				steps, err := disk.Steps(ctx, summary.ID)
+				if err != nil || len(steps) != 1 || steps[0].Attempt != 1 {
+					t.Fatalf("steps after the first timeout and backoff = %+v, %v; want the retry attempt running", steps, err)
+				}
+				if err := fake.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, tc.signal, []byte(`{"decision":"approve"}`)); err != nil {
+					t.Fatalf("Signal on the retried step: %v", err)
+				}
+				synctest.Wait()
+				requireRunStatus(t, disk, summary.ID, RunSucceeded)
+				if err := interpreter.Cancel(ctx, summary.ID); err != nil {
+					t.Fatalf("Cancel after the retried signal step: %v", err)
+				}
+			})
 		})
 	}
 }
 
 func TestInterpreterTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
+	synctest.Test(t, testTimeoutCancelsAttemptBeforeRetry)
+}
+
+func testTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
 	ctx := context.Background()
 	registry, err := buildTestRegistry()
 	if err != nil {
@@ -613,14 +623,8 @@ func TestInterpreterTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	for range 24 {
-		clock.Advance(time.Minute)
-		time.Sleep(2 * time.Millisecond)
-		if run, err := disk.Run(ctx, summary.ID); err == nil && run.Status == RunFailed {
-			break
-		}
-	}
-	waitForRunStatus(t, disk, summary.ID, RunFailed, 2*time.Second)
+	expireAttempts(t, clock, 3)
+	requireRunStatus(t, disk, summary.ID, RunFailed)
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 	if tracker.maxLive != 1 {
