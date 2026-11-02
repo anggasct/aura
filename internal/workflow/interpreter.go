@@ -28,6 +28,7 @@ type Options struct {
 	Artifacts          ArtifactSink
 	Approvals          ApprovalRequester
 	Logger             logger
+	GeneratedBudget    Budget
 }
 
 type logger interface {
@@ -275,6 +276,7 @@ func (i *Interpreter) handleInvocation(ctx context.Context, inv durable.Invocati
 		runID:       tick.RunID,
 		input:       input,
 		awaiting:    map[string]bool{},
+		budget:      i.budgetFor(compiled.spec, nil),
 	}
 	return execution.run(ctx)
 }
@@ -289,6 +291,7 @@ type stepExecution struct {
 	outputs     map[string]json.RawMessage
 	statuses    map[string]string
 	failedStep  string
+	budget      *runBudget
 	mu          sync.Mutex
 	// statusMu guards the in-memory awaiting set of steps currently
 	// suspended on a signal; it is never held across a database write.

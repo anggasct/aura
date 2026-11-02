@@ -28,6 +28,9 @@ workflows:
   definitions_dir: ""
   max_concurrent_steps: 4
   default_step_timeout: 15m0s
+  generated:
+    max_steps: 20
+    max_tokens: 200000
 durable:
   enabled: false
   mode: supervised

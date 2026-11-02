@@ -326,6 +326,7 @@ type stepUpdate struct {
 	ArtifactDigest string
 	ErrorCode      string
 	Detail         string
+	Tokens         int64
 }
 
 func UpdateStep(ctx context.Context, tx *sql.Tx, runID, stepID string, update *stepUpdate) error {

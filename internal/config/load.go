@@ -1277,6 +1277,19 @@ func validateWorkflowsShapes(doc *yamlv3.Node) error {
 			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
 				return fmt.Errorf("workflows.default_step_timeout must be a duration string at line %d", value.Line)
 			}
+		case "generated":
+			if value.Kind != yamlv3.MappingNode {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.generated must be a mapping"}
+			}
+			for j := 0; j+1 < len(value.Content); j += 2 {
+				limit, limitValue := value.Content[j].Value, value.Content[j+1]
+				if limit != "max_steps" && limit != "max_tokens" {
+					return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.generated." + limit + " is not a known key"}
+				}
+				if limitValue.Kind != yamlv3.ScalarNode || limitValue.Tag != "!!int" {
+					return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.generated." + limit + " must be an integer"}
+				}
+			}
 		}
 	}
 	return nil
@@ -2680,6 +2693,12 @@ func applyWorkflowDefaults(cfg *Config, doc *yamlv3.Node) {
 	if cfg.Workflows.DefaultStepTimeout == 0 && !configValuePresent(doc, "workflows", "default_step_timeout") && !envValuePresent("workflows.default_step_timeout") {
 		cfg.Workflows.DefaultStepTimeout = defaults.DefaultStepTimeout
 	}
+	if cfg.Workflows.Generated.MaxSteps == 0 && !configValuePresent(doc, "workflows", "generated", "max_steps") && !envValuePresent("workflows.generated.max_steps") {
+		cfg.Workflows.Generated.MaxSteps = defaults.Generated.MaxSteps
+	}
+	if cfg.Workflows.Generated.MaxTokens == 0 && !configValuePresent(doc, "workflows", "generated", "max_tokens") && !envValuePresent("workflows.generated.max_tokens") {
+		cfg.Workflows.Generated.MaxTokens = defaults.Generated.MaxTokens
+	}
 }
 
 func applyDurableDefaults(cfg *Config, doc *yamlv3.Node) {
@@ -2859,6 +2878,9 @@ func validateWorkflows(workflows *Workflows) error {
 	}
 	if workflows.MaxConcurrentSteps < 1 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.max_concurrent_steps must be at least 1"}
+	}
+	if workflows.Generated.MaxSteps < 1 || workflows.Generated.MaxTokens < 1 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.generated.max_steps and max_tokens must be positive"}
 	}
 	return nil
 }

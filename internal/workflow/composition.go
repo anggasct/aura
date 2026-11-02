@@ -16,7 +16,7 @@ func (i *Interpreter) createChildRun(ctx context.Context, workflowID string, inp
 	return i.store.CreateRun(ctx, compiled.spec, input)
 }
 
-func (i *Interpreter) driveInline(ctx context.Context, inv durable.Invocation, runID string) (string, error) {
+func (i *Interpreter) driveInline(ctx context.Context, inv durable.Invocation, runID string, inherited *runBudget) (string, error) {
 	summary, err := i.store.Run(ctx, runID)
 	if err != nil {
 		return "", err
@@ -40,6 +40,7 @@ func (i *Interpreter) driveInline(ctx context.Context, inv durable.Invocation, r
 		runID:       runID,
 		input:       input,
 		awaiting:    map[string]bool{},
+		budget:      i.budgetFor(compiled.spec, inherited),
 	}
 	if err := execution.run(ctx); err != nil {
 		return RunCancelled, err
@@ -64,7 +65,7 @@ func (e *stepExecution) runWorkflowStep(ctx context.Context, step *StepSpec) *st
 	if err != nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeChildFailed), Detail: err.Error(), EndedAt: nowPtr()}
 	}
-	status, err := e.interpreter.driveInline(ctx, e.invocation, child.ID)
+	status, err := e.interpreter.driveInline(ctx, e.invocation, child.ID, e.budget)
 	return childUpdate(child.ID, status, err)
 }
 
@@ -85,7 +86,7 @@ func (e *stepExecution) runWorkflowStepSerial(ctx context.Context, step *StepSpe
 		e.failRun(ctx, step.ID, err)
 		return nil, true
 	}
-	status, driveErr := e.interpreter.DriveSerial(ctx, e.invocation, string(raw))
+	status, driveErr := e.interpreter.driveSerial(ctx, e.invocation, string(raw), e.budget)
 	if ctx.Err() != nil {
 		return nil, true
 	}

@@ -222,6 +222,9 @@ func buildWorkflowInterpreterWithDB(ctx context.Context, cfg *config.Config, db 
 		MaxConcurrentSteps: workflowMaxConcurrentSteps(cfg),
 		Logger:             logger,
 	}
+	if cfg.Workflows != nil {
+		options.GeneratedBudget = workflow.Budget{MaxSteps: cfg.Workflows.Generated.MaxSteps, MaxTokens: cfg.Workflows.Generated.MaxTokens}
+	}
 	if cfg.Tools != nil {
 		tools, err := newWorkflowToolRunner(cfg, db, logger)
 		if err != nil {
