@@ -584,3 +584,41 @@ func TestDurableShutdownDrainsActive(t *testing.T) {
 		t.Fatalf("drained terminal = %q, want turn.completed", last.Kind)
 	}
 }
+
+func TestDurableTurnReleasedBeforeItIsStagedStillReachesItsCaller(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		executor := runtime.NewFakeExecutor([]runtime.FakeStep{
+			{Kind: runtime.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
+			{Kind: runtime.EventKindMessageCompleted, Payload: []byte(`{}`)},
+		})
+		engine, stub, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		mustCreateSession(t, db, "session-a")
+		stub.afterAdmit = func(turnID string) {
+			if turnID != "turn-1" {
+				return
+			}
+			close(gate)
+			synctest.Wait()
+		}
+		first := make(chan error, 1)
+		go func() {
+			_, err := collect(t, engine, sampleRequest("session-a", "turn-0"))
+			first <- err
+		}()
+		waitFor(t, func() bool { return executor.StartCount() == 1 })
+		events, err := collect(t, engine, sampleRequest("session-a", "turn-1"))
+		if err != nil {
+			t.Fatalf("turn-1: %v", err)
+		}
+		if err := <-first; err != nil {
+			t.Fatalf("turn-0: %v", err)
+		}
+		if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
+			t.Fatalf("turn-1 ended with %q, want turn.completed", last.Kind)
+		}
+		if starts := executor.StartCount(); starts != 2 {
+			t.Fatalf("executor starts = %d, want each turn once", starts)
+		}
+	})
+}

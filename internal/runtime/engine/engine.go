@@ -81,16 +81,17 @@ type Engine struct {
 	adapters       []runtimechannelhost.ChannelPort
 	delivered      map[string]time.Time
 
-	mu       sync.Mutex
-	sessions map[string]*sessionQueue
-	turns    map[string]*turn
-	staged   map[string]*turn
-	granted  map[string]struct{}
-	sesKeys  map[string]struct{}
-	pending  int
-	active   int
-	shutdown bool
-	wg       sync.WaitGroup
+	mu        sync.Mutex
+	sessions  map[string]*sessionQueue
+	turns     map[string]*turn
+	staged    map[string]*turn
+	granted   map[string]struct{}
+	admitting map[string]struct{}
+	sesKeys   map[string]struct{}
+	pending   int
+	active    int
+	shutdown  bool
+	wg        sync.WaitGroup
 }
 
 type EventStore interface {
