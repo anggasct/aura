@@ -115,6 +115,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			builtin.SetHandoffOpener(newHandoffService(db, handoffNotifiers(channelAdapters)))
 			modelDefinition := cfg.Models.Definitions["primary"]
 			if modelDefinition.Model == "" {
 				return &config.Error{Code: config.ErrorCodeConfigInvalid, Detail: "models.definitions.primary.model is required for the server runtime"}

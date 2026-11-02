@@ -40,6 +40,7 @@ var migrations = []migration{
 	{version: 22, sql: conversationSessionSchemaSQL},
 	{version: 23, sql: accessSchemaSQL},
 	{version: 24, sql: reservationEstimateSchemaSQL},
+	{version: 25, sql: handoffTargetSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -591,6 +592,14 @@ CREATE TABLE session_handoff (
 ALTER TABLE usage_reservation ADD COLUMN principal_id TEXT;
 ALTER TABLE usage_reservation ADD COLUMN principal_class TEXT;
 CREATE INDEX usage_reservation_principal_idx ON usage_reservation(principal_id, window_day);
+`
+
+const handoffTargetSchemaSQL = `
+ALTER TABLE session_handoff ADD COLUMN principal_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE session_handoff ADD COLUMN agent_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE session_handoff ADD COLUMN account TEXT NOT NULL DEFAULT '';
+ALTER TABLE session_handoff ADD COLUMN reply_channel_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX session_handoff_open_idx ON session_handoff(released_at, opened_at);
 `
 
 const reservationEstimateSchemaSQL = `

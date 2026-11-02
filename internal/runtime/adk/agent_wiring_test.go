@@ -203,3 +203,39 @@ func TestRegistryBuiltinsResolvePerCapability(t *testing.T) {
 		t.Fatal("main does not declare the builtin tool set")
 	}
 }
+
+func TestToolsForOffersOptInToolsOnlyWhenListedForNonOwners(t *testing.T) {
+	executor := &ADKExecutor{
+		tools: []tool.Tool{namedToolStub{name: "read_file"}, namedToolStub{name: "handoff_to_owner"}},
+		optIn: map[string]bool{"handoff_to_owner": true},
+	}
+	names := func(tools []tool.Tool) []string {
+		out := make([]string, 0, len(tools))
+		for _, t := range tools {
+			out = append(out, t.Name())
+		}
+		return out
+	}
+	listed := &auraagent.Definition{
+		Audience: "public", Tools: []string{"read_file", "handoff_to_owner"},
+		PrincipalTools: []string{"read_file", "handoff_to_owner"}, PublicTools: []string{"handoff_to_owner"},
+	}
+	cases := map[string]struct {
+		definition *auraagent.Definition
+		class      principal.Class
+		want       []string
+	}{
+		"implicit full set skips opt-in tools": {&auraagent.Definition{}, principal.ClassOwner, []string{"read_file"}},
+		"owner never gets handoff":             {listed, principal.ClassOwner, []string{"read_file"}},
+		"unclassified turns never get handoff": {listed, "", []string{"read_file"}},
+		"trusted gets the listed handoff":      {listed, principal.ClassTrusted, []string{"read_file", "handoff_to_owner"}},
+		"public gets the listed handoff":       {listed, principal.ClassPublic, []string{"handoff_to_owner"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := names(executor.toolsFor(tc.definition, tc.class)); !slices.Equal(got, tc.want) {
+				t.Fatalf("tools = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -63,6 +63,7 @@ type AccessSettings struct {
 	Pairing          PairingService
 	Budgets          BudgetGate
 	Erasure          PrincipalEraser
+	Handoffs         HandoffGate
 	Denied           func(ctx context.Context, reason string)
 	ApprovalRouted   func(ctx context.Context, result string)
 }
@@ -305,32 +306,38 @@ func (a *Adapter) ownerDMChannel(ctx context.Context, token, ownerID string) (st
 }
 
 func (a *Adapter) postNotice(ctx context.Context, token, channelID, text string) {
+	if err := sendText(ctx, a.httpClient, a.restBase, token, channelID, text); err != nil {
+		a.logger.WarnContext(ctx, "access notice delivery failed", "component", "discord")
+	}
+}
+
+func sendText(ctx context.Context, client *http.Client, base, token, channelID, text string) error {
 	if channelID == "" || text == "" {
-		return
+		return nil
 	}
 	payload, err := json.Marshal(map[string]any{
 		"content":          neutralizeMentions(text),
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	})
 	if err != nil {
-		return
+		return Errorf(ErrorCodeProtocolInvalid, "notice is not serializable")
 	}
 	call, cancel := context.WithTimeout(ctx, restTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(call, http.MethodPost, a.restBase+"/channels/"+channelID+"/messages", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(call, http.MethodPost, base+"/channels/"+channelID+"/messages", bytes.NewReader(payload))
 	if err != nil {
-		return
+		return err
 	}
 	req.Header.Set("Authorization", "Bot "+token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := a.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		a.logger.WarnContext(ctx, "access notice delivery failed", "component", "discord")
-		return
+		return err
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, approvalHTTPBytes))
 	_ = resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		a.logger.WarnContext(ctx, "access notice delivery failed", "component", "discord", "status", resp.StatusCode)
+		return Errorf(ErrorCodeConnectionFailed, "notice delivery returned status %d", resp.StatusCode)
 	}
+	return nil
 }

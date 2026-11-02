@@ -218,3 +218,18 @@ func TestLoad_AccessRetention(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_AccessHandoffTimeout(t *testing.T) {
+	res, err := Load(writeAccessConfig(t, ""))
+	if err != nil || time.Duration(res.Config.Access.HandoffTimeout) != 24*time.Hour {
+		t.Fatalf("handoff_timeout default = %v, %v; want 24h", res.Config.Access.HandoffTimeout, err)
+	}
+	if res, err := Load(writeAccessConfig(t, "  handoff_timeout: 2h\n")); err != nil || time.Duration(res.Config.Access.HandoffTimeout) != 2*time.Hour {
+		t.Fatalf("handoff_timeout override = %v", err)
+	}
+	for _, access := range []string{"  handoff_timeout: 30s\n", "  handoff_timeout: 721h\n", "  handoff_timeout: 5\n"} {
+		if _, err := Load(writeAccessConfig(t, access)); err == nil || !strings.Contains(err.Error(), "handoff_timeout") {
+			t.Errorf("Load(%q) err = %v, want a handoff_timeout error", access, err)
+		}
+	}
+}

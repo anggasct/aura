@@ -145,6 +145,9 @@ func validateAccess(access *Access) error {
 	if ttl := time.Duration(access.StandingGrantTTL); ttl <= 0 || ttl > MaxStandingGrantTTL {
 		problems = append(problems, errors.New("access.standing_grant_ttl must be positive and at most 720h"))
 	}
+	if timeout := time.Duration(access.HandoffTimeout); timeout < MinApprovalTimeout || timeout > MaxStandingGrantTTL {
+		problems = append(problems, errors.New("access.handoff_timeout must be between 1m and 720h"))
+	}
 	for _, retention := range []struct {
 		class string
 		ttl   Duration
@@ -182,7 +185,7 @@ func validateAccessShapes(doc *yamlv3.Node) error {
 		keyNode := accessNode.Content[i]
 		valueNode := accessNode.Content[i+1]
 		switch keyNode.Value {
-		case "approval_timeout", "standing_grant_ttl":
+		case "approval_timeout", "standing_grant_ttl", "handoff_timeout":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 				return fmt.Errorf("access.%s must be a duration string at line %d", keyNode.Value, valueNode.Line)
 			}
@@ -240,6 +243,9 @@ func applyAccessDefaults(cfg *Config, doc *yamlv3.Node) {
 	}
 	if cfg.Access.StandingGrantTTL == 0 && !configValuePresent(doc, "access", "standing_grant_ttl") && !envValuePresent("access.standing_grant_ttl") {
 		cfg.Access.StandingGrantTTL = defaults.StandingGrantTTL
+	}
+	if cfg.Access.HandoffTimeout == 0 && !configValuePresent(doc, "access", "handoff_timeout") && !envValuePresent("access.handoff_timeout") {
+		cfg.Access.HandoffTimeout = defaults.HandoffTimeout
 	}
 	applyBudgetDefaults(&cfg.Access.Budgets.Trusted, defaults.Budgets.Trusted, doc, AudienceTrusted)
 	applyBudgetDefaults(&cfg.Access.Budgets.Public, defaults.Budgets.Public, doc, AudiencePublic)

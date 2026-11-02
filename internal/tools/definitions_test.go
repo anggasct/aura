@@ -8,8 +8,8 @@ import (
 
 func TestBuiltinsExposeVersionedSchemas(t *testing.T) {
 	definitions := Builtins()
-	if len(definitions) != 6 {
-		t.Fatalf("built-in definitions = %d, want 6", len(definitions))
+	if len(definitions) != 7 {
+		t.Fatalf("built-in definitions = %d, want 7", len(definitions))
 	}
 	for _, definition := range definitions {
 		var schema map[string]any
