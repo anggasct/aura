@@ -26,7 +26,10 @@ import (
 	"github.com/anggasct/aura/internal/workflow"
 )
 
-const webhookStartedSweepAt = 4096
+const (
+	webhookStartedSweepAt    = 4096
+	webhookStartedSweepEvery = time.Minute
+)
 
 type webhookDispatcher struct {
 	mu         sync.Mutex
@@ -39,6 +42,7 @@ type webhookDispatcher struct {
 	github     *github.Adapter
 	startedMu  sync.Mutex
 	started    map[string]time.Time
+	sweptAt    time.Time
 	drains     sync.WaitGroup
 }
 
@@ -169,10 +173,13 @@ func (d *webhookDispatcher) markStarted(executionID string) {
 	now := d.clock()
 	d.startedMu.Lock()
 	defer d.startedMu.Unlock()
-	for id, at := range d.started {
-		if now.Sub(at) > d.retention {
-			delete(d.started, id)
+	if len(d.started) >= webhookStartedSweepAt || now.Sub(d.sweptAt) >= webhookStartedSweepEvery {
+		for id, at := range d.started {
+			if now.Sub(at) > d.retention {
+				delete(d.started, id)
+			}
 		}
+		d.sweptAt = now
 	}
 	d.started[executionID] = now
 }

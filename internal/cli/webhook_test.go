@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
 	"path/filepath"
 	"sync"
@@ -594,14 +595,26 @@ func TestWebhookDispatcher_PrunesExpiredStartedEntries(t *testing.T) {
 	dispatcher.clock = func() time.Time { return now }
 	dispatcher.markStarted("old")
 	now = now.Add(10 * time.Millisecond)
-	dispatcher.markStarted("new")
-	dispatcher.startedMu.Lock()
-	defer dispatcher.startedMu.Unlock()
-	if dispatcher.started["old"] != (time.Time{}) {
-		t.Fatalf("expected old entry to be pruned")
+	dispatcher.markStarted("recent")
+	if !dispatcher.startedHere("old") {
+		t.Fatal("an expired entry was swept before the sweep interval")
 	}
-	if _, ok := dispatcher.started["new"]; !ok {
-		t.Fatalf("expected new entry to remain")
+	now = now.Add(webhookStartedSweepEvery)
+	dispatcher.markStarted("new")
+	if dispatcher.startedHere("old") || dispatcher.startedHere("recent") {
+		t.Fatal("expired entries survived the periodic sweep")
+	}
+	if !dispatcher.startedHere("new") {
+		t.Fatal("the entry just started was dropped")
+	}
+	dispatcher.retention = time.Hour
+	for i := range webhookStartedSweepAt {
+		dispatcher.markStarted(fmt.Sprintf("bulk-%d", i))
+	}
+	now = now.Add(2 * time.Hour)
+	dispatcher.markStarted("after-threshold")
+	if dispatcher.startedHere("bulk-0") || !dispatcher.startedHere("after-threshold") {
+		t.Fatal("reaching the size threshold did not sweep expired entries")
 	}
 }
 
