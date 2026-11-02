@@ -84,6 +84,9 @@ jobs:
       - name: Image checks (non-root, read-only, content)
         run: make image-check
 
+      - name: Compose smoke (private Restate, upgrade job, restart survival)
+        run: make compose-smoke
+
   integration:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

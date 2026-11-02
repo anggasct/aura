@@ -2,12 +2,14 @@ package restate
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -395,5 +397,46 @@ func TestSupervisorBlackHoleReadinessFailsBounded(t *testing.T) {
 	}
 	if regElapsed > 10*time.Second {
 		t.Errorf("black-hole registration took %s, want a bounded per-request timeout", regElapsed)
+	}
+}
+
+func TestAwaitRegistrationRetriesUntilTheHandlerIsDiscoverable(t *testing.T) {
+	var attempts atomic.Int32
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) < 3 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(admin.Close)
+	if err := AwaitRegistration(t.Context(), admin.URL, "http://aura:9080", 30*time.Second); err != nil {
+		t.Fatalf("AwaitRegistration = %v", err)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+}
+
+func TestAwaitRegistrationFailsAfterItsTimeout(t *testing.T) {
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(admin.Close)
+	err := AwaitRegistration(t.Context(), admin.URL, "http://aura:9080", 0)
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeRegistrationFailed {
+		t.Fatalf("AwaitRegistration = %v, want %s", err, ErrorCodeRegistrationFailed)
+	}
+}
+
+func TestAwaitRegistrationReturnsTheContextErrorOnShutdown(t *testing.T) {
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(admin.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	if err := AwaitRegistration(ctx, admin.URL, "http://aura:9080", time.Minute); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("AwaitRegistration on shutdown = %v, want the context error", err)
 	}
 }

@@ -679,6 +679,8 @@ type Durable struct {
 	Endpoint              string   `koanf:"endpoint" yaml:"endpoint"`
 	AdminEndpoint         string   `koanf:"admin_endpoint" yaml:"admin_endpoint"`
 	HandlerAddr           string   `koanf:"handler_addr" yaml:"handler_addr"`
+	HandlerURL            string   `koanf:"handler_url" yaml:"handler_url,omitempty"`
+	AllowPlaintext        bool     `koanf:"allow_plaintext" yaml:"allow_plaintext,omitempty"`
 	NodeAddr              string   `koanf:"node_addr" yaml:"node_addr"`
 	DataDir               string   `koanf:"data_dir" yaml:"data_dir,omitempty"`
 	RestartBackoffInitial Duration `koanf:"restart_backoff_initial" yaml:"restart_backoff_initial"`

@@ -1,0 +1,4 @@
+services:
+  aura:
+    volumes:
+      - ./smoke/workflows:/etc/aura/workflows:ro
