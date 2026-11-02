@@ -152,6 +152,18 @@ func DefinitionNames() []string {
 	return names
 }
 
+func CatalogDefinitions() []runtimeadk.BuiltinToolDefinition {
+	builtins := tools.Builtins()
+	out := make([]runtimeadk.BuiltinToolDefinition, 0, len(builtins))
+	for i := range builtins {
+		out = append(out, runtimeadk.BuiltinToolDefinition{
+			Name: builtins[i].Name, Version: builtins[i].Version, Description: "Aura built-in " + builtins[i].Name + " tool",
+			Schema: builtins[i].Schema, RequiredCapabilities: builtins[i].RequiredCapabilities, OptIn: builtins[i].OptIn,
+		})
+	}
+	return out
+}
+
 func EffectfulToolNames() []string {
 	registry := tools.DefinitionsByKey()
 	names := make([]string, 0, len(registry))

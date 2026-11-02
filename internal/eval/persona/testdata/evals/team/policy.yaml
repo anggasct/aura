@@ -1,0 +1,17 @@
+cases:
+  - name: trusted sees read and write
+    kind: tool_exposure
+    class: trusted
+    want: [read_file, write_file]
+  - name: trusted exec is outside the ceiling
+    kind: tool_exposure
+    class: trusted
+    want: [read_file, write_file]
+  - name: trusted writes go to the owner
+    kind: approval_routed
+    class: trusted
+    tool: write_file
+  - name: default waiting reply
+    kind: fixed_reply
+    key: waiting_for_owner
+    text: One moment, I am checking with the owner.

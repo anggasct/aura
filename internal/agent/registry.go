@@ -138,6 +138,7 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 		ApprovalTimeout: time.Duration(override.ApprovalTimeout),
 		Messages:        maps.Clone(override.Messages),
 		GroupContext:    cmp.Or(override.GroupContext, config.GroupContextPerPrincipal),
+		EvalDir:         override.Evals.Dir,
 	}
 	if definition.MemoryScope != MemoryScopePersona && definition.MemoryScope != MemoryScopeShared {
 		return nil, codedError(ErrorCodeDefinitionInvalid, fmt.Sprintf("%s.memory_scope must be %q or %q", field, MemoryScopePersona, MemoryScopeShared))

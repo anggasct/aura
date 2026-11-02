@@ -428,6 +428,9 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 		a.tryPairing(ctx, msg)
 		return false, nil
 	}
+	if !a.personaEvaluated(ctx, msg, persona, principal.ParseClass(envelope.PrincipalClass)) {
+		return false, nil
+	}
 	if msg.GuildID != "" {
 		envelope.ConversationID = a.channelConversation(persona, msg.ChannelID, envelope.PrincipalID, principal.ParseClass(envelope.PrincipalClass))
 	}
@@ -480,6 +483,9 @@ func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, t
 	}
 	principalID, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, a.authorAccess(ctx))
 	if !a.personaAdmits(ctx, persona, class) {
+		return false, nil
+	}
+	if !a.personaEvaluated(ctx, msg, persona, class) {
 		return false, nil
 	}
 	envelope, err := buildThreadEnvelope(a.account.Name, principalID, class, msg, threadID, route.parent)

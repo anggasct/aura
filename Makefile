@@ -75,7 +75,8 @@ security:
 	$(GO) tool govulncheck ./...
 
 eval:
-	$(GO) test -race ./internal/eval/
+	$(GO) test -race ./internal/eval/...
+	$(GO) test -race -run 'TestPersonaPolicySuites|TestPersonaCaptureSeedsOwnerDataOnlyForTheOwner' ./internal/cli/
 
 load:
 	$(GO) test -tags load -race -run TestLoad ./internal/runtime/engine/

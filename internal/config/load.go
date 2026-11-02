@@ -1454,6 +1454,19 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 				if value.Kind != yamlv3.ScalarNode || value.Tag != "!!bool" {
 					return fmt.Errorf("agents.definitions.pairing must be a boolean at line %d", value.Line)
 				}
+			case key == "evals":
+				if value.Kind != yamlv3.MappingNode {
+					return fmt.Errorf("agents.definitions.evals must be a mapping at line %d", value.Line)
+				}
+				for j := 0; j+1 < len(value.Content); j += 2 {
+					evalKey, evalValue := value.Content[j].Value, value.Content[j+1]
+					if evalKey == "behavior" {
+						return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("agents.definitions[%d].evals.behavior is not supported yet", index)}
+					}
+					if evalKey == "dir" && (evalValue.Kind != yamlv3.ScalarNode || evalValue.Tag != "!!str" || evalValue.Value == "") {
+						return fmt.Errorf("agents.definitions.evals.dir must be a non-empty string at line %d", evalValue.Line)
+					}
+				}
 			case key == "messages":
 				if value.Kind != yamlv3.MappingNode {
 					return fmt.Errorf("agents.definitions.messages must be a mapping at line %d", value.Line)

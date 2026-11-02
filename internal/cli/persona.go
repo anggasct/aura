@@ -81,7 +81,7 @@ func newPersonaCmd(gf *globalFlags) *cobra.Command {
 		Use:   "persona",
 		Short: "Inspect configured personas",
 	}
-	cmd.AddCommand(newPersonaListCmd(gf))
+	cmd.AddCommand(newPersonaListCmd(gf), newPersonaEvalCmd(gf), newPersonaEvalResultsCmd(gf))
 	return cmd
 }
 
