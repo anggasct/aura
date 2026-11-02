@@ -37,6 +37,7 @@ type webhookDispatcher struct {
 	github     *github.Adapter
 	liveMu     sync.Mutex
 	live       map[string]struct{}
+	drains     sync.WaitGroup
 }
 
 func newWebhookDispatcher(sessions store.SessionService, executions store.WebhookExecutionStore, backend runtime.AgentRuntime, retention time.Duration, clock func() time.Time, logger *slog.Logger) (*webhookDispatcher, error) {
@@ -133,7 +134,7 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.
 		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeRuntimeOverloaded, "runtime did not accept the turn")
 	}
 	d.markLive(executionID)
-	go d.drain(context.WithoutCancel(ctx), executionID, next, stop)
+	d.startDrain(context.WithoutCancel(ctx), executionID, next, stop)
 
 	return gatewaywebhook.ExecutionRef{ExecutionID: executionID, TurnID: turnID}, nil
 }
@@ -211,7 +212,7 @@ func (d *webhookDispatcher) resubmitOrphaned(ctx context.Context, previous *stor
 		return
 	}
 	d.markLive(previous.ID)
-	go d.drain(context.WithoutCancel(ctx), previous.ID, next, stop)
+	d.startDrain(context.WithoutCancel(ctx), previous.ID, next, stop)
 }
 
 func (d *webhookDispatcher) createSession(ctx context.Context, sessionID, keyID string, now time.Time) error {
@@ -229,6 +230,24 @@ func (d *webhookDispatcher) createSession(ctx context.Context, sessionID, keyID 
 		return gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
 	}
 	return nil
+}
+
+func (d *webhookDispatcher) startDrain(ctx context.Context, executionID string, next turnStep, stop func()) {
+	d.drains.Go(func() { d.drain(ctx, executionID, next, stop) })
+}
+
+func (d *webhookDispatcher) Wait(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		d.drains.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (d *webhookDispatcher) drain(ctx context.Context, executionID string, next turnStep, stop func()) {
@@ -389,8 +408,9 @@ func (s *webhookStatusStore) ExecutionStatus(ctx context.Context, id string) (ga
 }
 
 type webhookListener struct {
-	listen  string
-	handler http.Handler
+	listen     string
+	handler    http.Handler
+	dispatcher *webhookDispatcher
 }
 
 func (l *webhookListener) Name() string { return "webhook" }
@@ -418,6 +438,9 @@ func (l *webhookListener) Start(ctx context.Context) error {
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("webhook listener shutdown: %w", err)
+		}
+		if err := l.dispatcher.Wait(shutdownCtx); err != nil {
+			return fmt.Errorf("webhook listener drain: %w", err)
 		}
 		return nil
 	}
@@ -485,7 +508,7 @@ func buildWebhookListener(cfg *config.Config, db *sql.DB, backend runtime.AgentR
 	mux := http.NewServeMux()
 	mux.Handle(gatewaywebhook.StatusPathPrefix, status)
 	mux.Handle("/", handler)
-	return &webhookListener{listen: cfg.Webhook.Listen, handler: mux}, nil
+	return &webhookListener{listen: cfg.Webhook.Listen, handler: mux, dispatcher: dispatcher}, nil
 }
 
 func webhookKeySource(envName string) (string, error) {

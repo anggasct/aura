@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"iter"
 	"path/filepath"
 	"sync"
@@ -121,6 +122,11 @@ func webhookTestSetup(t *testing.T, backend *fakeTurnRuntime) (*webhookDispatche
 	if err != nil {
 		t.Fatalf("newWebhookDispatcher: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := dispatcher.Wait(context.Background()); err != nil {
+			t.Errorf("dispatcher drains: %v", err)
+		}
+	})
 	return dispatcher, executions
 }
 
@@ -525,5 +531,29 @@ func TestDispatcherRoutesEnvelopeWrappedGitHubEventToCorrelation(t *testing.T) {
 	}
 	if counter.count() != 1 {
 		t.Errorf("signals after redelivery = %d, want exactly one", counter.count())
+	}
+}
+
+func TestWebhookDispatcherWaitTracksInFlightDrains(t *testing.T) {
+	dispatcher, _ := webhookTestSetup(t, &fakeTurnRuntime{events: acceptedTurnEvents})
+	release := make(chan struct{})
+	stopped := make(chan struct{})
+	dispatcher.startDrain(context.Background(), "exec-held", func() (store.RuntimeEvent, error, bool) {
+		<-release
+		return store.RuntimeEvent{}, nil, false
+	}, func() { close(stopped) })
+	short, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := dispatcher.Wait(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait with a drain in flight = %v, want the deadline", err)
+	}
+	close(release)
+	if err := dispatcher.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait after the drain finished = %v", err)
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("drain finished without stopping its turn")
 	}
 }

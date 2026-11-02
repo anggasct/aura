@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"errors"
 	"github.com/anggasct/aura/internal/principal"
 
 	"context"
@@ -313,6 +314,17 @@ func TestDecide_CancelFailsClosed(t *testing.T) {
 	adapter.resolveComponentClick(t.Context(), clickPayload("ix-late", "111", "", "333", approve))
 	if _, callbacks, _ := stub.counts(); callbacks != 1 {
 		t.Errorf("callbacks = %d, want only the late-click silent ack", callbacks)
+	}
+}
+
+func TestDecide_CancelBeforeCardPostFailsClosed(t *testing.T) {
+	stub := newApprovalStub(t)
+	adapter := newApprovalAdapter(t, stub, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	accepted, err := adapter.Decide(ctx, testPrompt("dm:111", time.Now().Add(time.Minute)))
+	if accepted || !errors.Is(err, context.Canceled) {
+		t.Fatalf("Decide() = %v, %v; want a denial carrying context.Canceled", accepted, err)
 	}
 }
 
