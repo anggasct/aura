@@ -167,6 +167,13 @@ children:
 access:
   approval_timeout: 30m0s
   standing_grant_ttl: 168h0m0s
+  budgets:
+    trusted:
+      max_tokens_per_day: 200000
+      max_turns_per_minute: 6
+    public:
+      max_tokens_per_day: 20000
+      max_turns_per_minute: 3
 sync:
   enabled: false
   remote: ""

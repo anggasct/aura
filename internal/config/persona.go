@@ -130,6 +130,17 @@ func validateAccess(access *Access) error {
 	if ttl := time.Duration(access.StandingGrantTTL); ttl <= 0 || ttl > MaxStandingGrantTTL {
 		problems = append(problems, errors.New("access.standing_grant_ttl must be positive and at most 720h"))
 	}
+	for _, budget := range []struct {
+		class  string
+		limits PrincipalBudget
+	}{{AudienceTrusted, access.Budgets.Trusted}, {AudiencePublic, access.Budgets.Public}} {
+		if budget.limits.MaxTokensPerDay < 1 {
+			problems = append(problems, fmt.Errorf("access.budgets.%s.max_tokens_per_day must be at least 1", budget.class))
+		}
+		if budget.limits.MaxTurnsPerMinute < 1 {
+			problems = append(problems, fmt.Errorf("access.budgets.%s.max_turns_per_minute must be at least 1", budget.class))
+		}
+	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
 	}
@@ -152,6 +163,28 @@ func validateAccessShapes(doc *yamlv3.Node) error {
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 				return fmt.Errorf("access.%s must be a duration string at line %d", keyNode.Value, valueNode.Line)
 			}
+		case "budgets":
+			if err := validateBudgetShapes(valueNode); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateBudgetShapes(budgets *yamlv3.Node) error {
+	if budgets.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("access.budgets must be a mapping at line %d", budgets.Line)
+	}
+	for i := 0; i+1 < len(budgets.Content); i += 2 {
+		class, limits := budgets.Content[i].Value, budgets.Content[i+1]
+		if limits.Kind != yamlv3.MappingNode {
+			return fmt.Errorf("access.budgets.%s must be a mapping at line %d", class, limits.Line)
+		}
+		for j := 0; j+1 < len(limits.Content); j += 2 {
+			if value := limits.Content[j+1]; value.Kind != yamlv3.ScalarNode || value.Tag != "!!int" {
+				return fmt.Errorf("access.budgets.%s.%s must be an integer at line %d", class, limits.Content[j].Value, value.Line)
+			}
 		}
 	}
 	return nil
@@ -168,6 +201,17 @@ func applyAccessDefaults(cfg *Config, doc *yamlv3.Node) {
 	}
 	if cfg.Access.StandingGrantTTL == 0 && !configValuePresent(doc, "access", "standing_grant_ttl") && !envValuePresent("access.standing_grant_ttl") {
 		cfg.Access.StandingGrantTTL = defaults.StandingGrantTTL
+	}
+	applyBudgetDefaults(&cfg.Access.Budgets.Trusted, defaults.Budgets.Trusted, doc, AudienceTrusted)
+	applyBudgetDefaults(&cfg.Access.Budgets.Public, defaults.Budgets.Public, doc, AudiencePublic)
+}
+
+func applyBudgetDefaults(budget *PrincipalBudget, defaults PrincipalBudget, doc *yamlv3.Node, class string) {
+	if budget.MaxTokensPerDay == 0 && !configValuePresent(doc, "access", "budgets", class, "max_tokens_per_day") && !envValuePresent("access.budgets."+class+".max_tokens_per_day") {
+		budget.MaxTokensPerDay = defaults.MaxTokensPerDay
+	}
+	if budget.MaxTurnsPerMinute == 0 && !configValuePresent(doc, "access", "budgets", class, "max_turns_per_minute") && !envValuePresent("access.budgets."+class+".max_turns_per_minute") {
+		budget.MaxTurnsPerMinute = defaults.MaxTurnsPerMinute
 	}
 }
 

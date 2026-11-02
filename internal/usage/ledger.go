@@ -30,6 +30,7 @@ type Ledger struct {
 	dailyCap       int64
 	monthlyCap     int64
 	reservationTTL time.Duration
+	principalCaps  map[string]int64
 	now            func() time.Time
 	logger         *slog.Logger
 }
@@ -40,6 +41,7 @@ type LedgerOptions struct {
 	DailyCapMicros   int64
 	MonthlyCapMicros int64
 	ReservationTTL   time.Duration
+	PrincipalCaps    map[string]int64
 	Now              func() time.Time
 	Logger           *slog.Logger
 }
@@ -70,6 +72,7 @@ func NewLedger(db *sql.DB, opts LedgerOptions) (*Ledger, error) {
 		dailyCap:       opts.DailyCapMicros,
 		monthlyCap:     opts.MonthlyCapMicros,
 		reservationTTL: opts.ReservationTTL,
+		principalCaps:  opts.PrincipalCaps,
 		now:            opts.Now,
 		logger:         opts.Logger,
 	}, nil
@@ -80,6 +83,8 @@ type ReserveRequest struct {
 	Attempt                  int
 	ModelDefinitionID        string
 	AgentID                  string
+	PrincipalID              string
+	PrincipalClass           string
 	KnownInputTokens         int64
 	RequestedMaxOutputTokens int64
 }
@@ -98,7 +103,7 @@ type Reservation struct {
 	CreatedAt          time.Time
 }
 
-func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation, error) {
+func (l *Ledger) Reserve(ctx context.Context, req *ReserveRequest) (*Reservation, error) {
 	if err := validateReserveRequest(req); err != nil {
 		return nil, err
 	}
@@ -129,8 +134,20 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 	}
 
 	reserved := price.ReserveCostMicros(req.KnownInputTokens, req.RequestedMaxOutputTokens)
+	reservedTokens := req.KnownInputTokens + req.RequestedMaxOutputTokens
 	day, month := windowKeys(now)
 	expiresAt := now.Add(l.reservationTTL)
+
+	if limit := l.principalCaps[req.PrincipalClass]; limit > 0 && req.PrincipalID != "" {
+		used, err := l.principalTokens(ctx, tx, req.PrincipalID, day)
+		if err != nil {
+			return nil, err
+		}
+		if used+reservedTokens > limit {
+			return nil, codedError(ErrorCodeBudgetExceeded,
+				fmt.Sprintf("usage: principal daily tokens %d exceed cap %d", used+reservedTokens, limit), nil)
+		}
+	}
 
 	if l.capsEnabled() {
 		dayUsed, monthUsed, err := l.windowUsed(ctx, tx, day, month, reserved)
@@ -155,11 +172,11 @@ func (l *Ledger) Reserve(ctx context.Context, req ReserveRequest) (*Reservation,
 	attempt := req.Attempt
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO usage_reservation
-			(id, invocation_id, attempt, model_definition_id, agent_id, window_day, window_month,
-			 reserved_cost_micros, state, expires_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, invocationID, attempt, req.ModelDefinitionID, nullableAgent(req.AgentID), day, month,
-		reserved, stateActive, fmtTime(expiresAt), fmtTime(now), fmtTime(now),
+			(id, invocation_id, attempt, model_definition_id, agent_id, principal_id, principal_class, window_day, window_month,
+			 reserved_cost_micros, reserved_tokens, state, expires_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, invocationID, attempt, req.ModelDefinitionID, nullableAgent(req.AgentID), nullable(req.PrincipalID), nullable(req.PrincipalClass), day, month,
+		reserved, reservedTokens, stateActive, fmtTime(expiresAt), fmtTime(now), fmtTime(now),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -267,7 +284,7 @@ func (l *Ledger) reservationByKey(ctx context.Context, q queryer, invocationID s
 	return &row, true, nil
 }
 
-func validateReserveRequest(req ReserveRequest) error {
+func validateReserveRequest(req *ReserveRequest) error {
 	if req.InvocationID == "" {
 		return codedError(ErrorCodeInvalidArgument, "usage: invocation_id must not be empty", nil)
 	}
@@ -489,6 +506,25 @@ func (l *Ledger) WindowUsage(ctx context.Context, day, month string) (int64, err
 		day, month, stateActive, stateExpired, stateSettled).Scan(&used)
 	if err != nil {
 		return 0, fmt.Errorf("usage: read window usage: %w", err)
+	}
+	return used, nil
+}
+
+func (l *Ledger) PrincipalTokensToday(ctx context.Context, principalID string) (int64, error) {
+	day, _ := windowKeys(l.now())
+	return l.principalTokens(ctx, l.db, principalID, day)
+}
+
+func (l *Ledger) principalTokens(ctx context.Context, q queryer, principalID, day string) (int64, error) {
+	var used int64
+	err := q.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(CASE WHEN e.id IS NOT NULL THEN e.input_tokens + e.output_tokens ELSE r.reserved_tokens END), 0)
+		FROM usage_reservation r
+		LEFT JOIN usage_entry e ON e.reservation_id = r.id
+		WHERE r.principal_id = ? AND r.window_day = ? AND r.state IN (?, ?, ?)`,
+		principalID, day, stateActive, stateExpired, stateSettled).Scan(&used)
+	if err != nil {
+		return 0, fmt.Errorf("usage: read principal tokens: %w", err)
 	}
 	return used, nil
 }

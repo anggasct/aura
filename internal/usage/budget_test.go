@@ -56,7 +56,7 @@ func budgetedLedger(t *testing.T, dailyCap int64) (*Ledger, *fakeLLM) {
 
 func TestBudgetedReservesAndSettles(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestBudgetedReservesAndSettles(t *testing.T) {
 
 func TestBudgetedBlocksOnBudgetExhaustion(t *testing.T) {
 	l, inner := budgetedLedger(t, 100) // too small for any reservation
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestBudgetedBlocksOnBudgetExhaustion(t *testing.T) {
 func TestBudgetedSettlesEstimatedOnError(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
 	inner.err = errors.New("provider down")
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestBudgetedSettlesEstimatedOnError(t *testing.T) {
 
 func TestBudgetedNilLedgerPassthrough(t *testing.T) {
 	inner := &fakeLLM{name: "fake"}
-	got, err := NewBudgeted(inner, nil, "primary", "", nil)
+	got, err := NewBudgeted(inner, nil, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,14 +160,14 @@ func TestBudgetedNilLedgerPassthrough(t *testing.T) {
 
 func TestBudgetedNilInnerRejected(t *testing.T) {
 	l := newTestLedger(t, 1000000, 10000000)
-	if _, err := NewBudgeted(nil, l, "primary", "", nil); err == nil {
+	if _, err := NewBudgeted(nil, l, "primary", Attribution{}, nil); err == nil {
 		t.Error("expected error for nil inner")
 	}
 }
 
 func TestBudgetedConcurrentDispatch(t *testing.T) {
 	l, inner := budgetedLedger(t, 10000000)
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestBudgetedPropagatesSettlementFailure(t *testing.T) {
 			CandidatesTokenCount: 20,
 		},
 	}
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestBudgetedJoinsProviderAndSettlementErrors(t *testing.T) {
 	l, db := newTestLedgerWithDB(t, 1000000, 10000000)
 	providerErr := errors.New("provider exploded")
 	inner := &dbClosingLLM{db: db, fail: providerErr}
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestBudgetedErrorPathYieldsFinalResponse(t *testing.T) {
 	l, _ := budgetedLedger(t, 1000000)
 	providerErr := errors.New("provider exploded mid-stream")
 
-	b, err := NewBudgeted(&errAfterResponseLLM{providerErr: providerErr}, l, "primary", "", nil)
+	b, err := NewBudgeted(&errAfterResponseLLM{providerErr: providerErr}, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func (f *noCompleteLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMReques
 
 func TestBudgetedConsumerStopSettlesConservative(t *testing.T) {
 	l := newTestLedger(t, 10000000, 10000000)
-	b, err := NewBudgeted(&streamStopsLLM{}, l, "primary", "", nil)
+	b, err := NewBudgeted(&streamStopsLLM{}, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestBudgetedConsumerStopSettlesConservative(t *testing.T) {
 
 func TestBudgetedCleanExhaustionWithoutCompleteSettlesConservative(t *testing.T) {
 	l := newTestLedger(t, 10000000, 10000000)
-	b, err := NewBudgeted(&noCompleteLLM{}, l, "primary", "", nil)
+	b, err := NewBudgeted(&noCompleteLLM{}, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestBudgetedSettlesCacheAndReasoningTokens(t *testing.T) {
 		CachedContentTokenCount: 30,
 		ThoughtsTokenCount:      7,
 	}
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestBudgetedSettlesCacheAndReasoningTokens(t *testing.T) {
 
 func TestBudgetedCancelledContextBlocksDispatch(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +453,7 @@ func TestBudgetedCancelledContextBlocksDispatch(t *testing.T) {
 
 func TestBudgetedIdempotentReplay(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func TestEstimateInputTokensRejectsFileDataUnderCap(t *testing.T) {
 
 func TestBudgetedRejectsFileDataUnderCap(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
-	b, err := NewBudgeted(inner, l, "primary", "", nil)
+	b, err := NewBudgeted(inner, l, "primary", Attribution{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +552,7 @@ func TestBudgetedAttributesSpendToPersona(t *testing.T) {
 	l, inner := budgetedLedger(t, 1000000)
 	req := &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello"}}}}}
 	for _, agentID := range []string{"kuma", "kuma", "main", ""} {
-		b, err := NewBudgeted(inner, l, "primary", agentID, nil)
+		b, err := NewBudgeted(inner, l, "primary", Attribution{AgentID: agentID}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

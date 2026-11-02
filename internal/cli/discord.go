@@ -180,7 +180,8 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 		}
 		adapter.SetPrincipalResolver(owners)
 		adapter.SetPersonaRouter(router)
-		adapter.SetAccess(discordAccessSettings(cfg, db, accessRecorder))
+		settings := discordAccessSettings(cfg, db, accessRecorder)
+		adapter.SetAccess(&settings)
 		adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
 			recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
 		})

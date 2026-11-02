@@ -50,7 +50,7 @@ func newTestLedgerWithDB(t *testing.T, dailyCap, monthlyCap int64) (*Ledger, *sq
 
 func reserve(t *testing.T, l *Ledger, invocation string, attempt int, input, maxOutput int64) *Reservation {
 	t.Helper()
-	r, err := l.Reserve(context.Background(), ReserveRequest{
+	r, err := l.Reserve(context.Background(), &ReserveRequest{
 		InvocationID:             invocation,
 		Attempt:                  attempt,
 		ModelDefinitionID:        "primary",

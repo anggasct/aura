@@ -129,7 +129,12 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			turnLedger, err := newTurnLedger(cfg, db, prices, logger)
+			if err != nil {
+				return err
+			}
 			executorOpts := []runtimeadk.ExecutorOption{
+				runtimeadk.WithBudgetLedger(turnLedger, "primary"),
 				runtimeadk.WithBuiltinToolExecutor(builtin),
 				runtimeadk.WithAgentResolver(agentRegistry, routeModel),
 				ownerContextOption(ctx, cfg.Owner, logger),

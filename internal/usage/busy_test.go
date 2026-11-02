@@ -67,7 +67,7 @@ func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 
 	reserveDone := make(chan error, 1)
 	go func() {
-		_, rerr := l.Reserve(ctx, ReserveRequest{
+		_, rerr := l.Reserve(ctx, &ReserveRequest{
 			InvocationID:             "inv-retry",
 			ModelDefinitionID:        "primary",
 			KnownInputTokens:         100,

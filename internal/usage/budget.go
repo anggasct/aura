@@ -14,16 +14,22 @@ import (
 
 const defaultMaxOutputBound = 4096
 
+type Attribution struct {
+	AgentID        string
+	PrincipalID    string
+	PrincipalClass string
+}
+
 type Budgeted struct {
 	inner             adkmodel.LLM
 	ledger            *Ledger
 	modelDefinitionID string
-	agentID           string
+	attribution       Attribution
 	logger            *slog.Logger
 	attempts          atomic.Int64
 }
 
-func NewBudgeted(inner adkmodel.LLM, ledger *Ledger, modelDefinitionID, agentID string, logger *slog.Logger) (adkmodel.LLM, error) {
+func NewBudgeted(inner adkmodel.LLM, ledger *Ledger, modelDefinitionID string, attribution Attribution, logger *slog.Logger) (adkmodel.LLM, error) {
 	if inner == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "usage: inner model must not be nil", nil)
 	}
@@ -36,7 +42,7 @@ func NewBudgeted(inner adkmodel.LLM, ledger *Ledger, modelDefinitionID, agentID 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Budgeted{inner: inner, ledger: ledger, modelDefinitionID: modelDefinitionID, agentID: agentID, logger: logger}, nil
+	return &Budgeted{inner: inner, ledger: ledger, modelDefinitionID: modelDefinitionID, attribution: attribution, logger: logger}, nil
 }
 
 func (b *Budgeted) Name() string {
@@ -55,11 +61,13 @@ func (b *Budgeted) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest
 			yield(nil, err)
 			return
 		}
-		reservation, err := b.ledger.Reserve(ctx, ReserveRequest{
+		reservation, err := b.ledger.Reserve(ctx, &ReserveRequest{
 			InvocationID:             invocationID,
 			Attempt:                  attempt,
 			ModelDefinitionID:        b.modelDefinitionID,
-			AgentID:                  b.agentID,
+			AgentID:                  b.attribution.AgentID,
+			PrincipalID:              b.attribution.PrincipalID,
+			PrincipalClass:           b.attribution.PrincipalClass,
 			KnownInputTokens:         inputTokens,
 			RequestedMaxOutputTokens: requestedMaxOutput(req),
 		})

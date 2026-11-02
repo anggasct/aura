@@ -209,7 +209,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 			yield(store.RuntimeEvent{}, err)
 			return
 		}
-		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req.PrincipalClass, definition.ID)
+		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req.PrincipalID, req.PrincipalClass, definition.ID)
 		if req.SessionID != "" {
 			runCtx = auramodel.WithSessionID(runCtx, req.SessionID)
 		}
@@ -356,7 +356,12 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 		return nil, err
 	}
 	if x.ledger != nil {
-		wrapped, werr := usage.NewBudgeted(model, x.ledger, x.modelDefinitionID, definition.ID, x.logger)
+		access := turnAccessFromContext(ctx)
+		wrapped, werr := usage.NewBudgeted(model, x.ledger, x.modelDefinitionID, usage.Attribution{
+			AgentID:        definition.ID,
+			PrincipalID:    access.principalID,
+			PrincipalClass: string(access.class),
+		}, x.logger)
 		if werr != nil {
 			return nil, fmt.Errorf("wrap model with budget: %w", werr)
 		}

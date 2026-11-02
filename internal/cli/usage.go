@@ -58,14 +58,7 @@ func withUsage(cmd *cobra.Command, gf *globalFlags, pricesPath string, fn func(c
 		return err
 	}
 
-	ledger, err := usage.NewLedger(db, usage.LedgerOptions{
-		Prices:           reg,
-		Currency:         cfg.Usage.Currency,
-		DailyCapMicros:   cfg.Usage.DailyBudgetMicros,
-		MonthlyCapMicros: cfg.Usage.MonthlyBudgetMicros,
-		ReservationTTL:   time.Duration(cfg.Usage.ReservationTTL),
-		Logger:           logger,
-	})
+	ledger, err := newTurnLedger(cfg, db, reg, logger)
 	if err != nil {
 		return err
 	}

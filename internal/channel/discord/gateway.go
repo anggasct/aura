@@ -578,6 +578,9 @@ func (a *Adapter) admitThreadRoute(ctx context.Context, msg *messagePayload, rou
 }
 
 func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope, bindingChannel string) (bool, error) {
+	if a.budgetRefused(ctx, msg, envelope) {
+		return false, nil
+	}
 	active, err := a.activeSession(ctx, a.sessionKey(envelope.AgentID, envelope.ConversationID))
 	if err != nil {
 		return false, err

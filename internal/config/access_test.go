@@ -138,3 +138,48 @@ func TestLoad_AccessSection(t *testing.T) {
 		t.Fatalf("env approval_timeout = %v, want 5m", time.Duration(res.Config.Access.ApprovalTimeout))
 	}
 }
+
+func TestLoad_AccessBudgets(t *testing.T) {
+	res, err := Load(writeAccessConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := AccessBudgets{
+		Trusted: PrincipalBudget{MaxTokensPerDay: 200000, MaxTurnsPerMinute: 6},
+		Public:  PrincipalBudget{MaxTokensPerDay: 20000, MaxTurnsPerMinute: 3},
+	}
+	if res.Config.Access.Budgets != want {
+		t.Fatalf("budget defaults = %+v, want %+v", res.Config.Access.Budgets, want)
+	}
+	res, err = Load(writeAccessConfig(t, "  budgets:\n    public:\n      max_tokens_per_day: 5000\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := res.Config.Access.Budgets; got.Public != (PrincipalBudget{MaxTokensPerDay: 5000, MaxTurnsPerMinute: 3}) || got.Trusted != want.Trusted {
+		t.Fatalf("partial budgets = %+v, want public tokens 5000 and other defaults", got)
+	}
+	for label, access := range map[string]string{
+		"zero tokens":         "  budgets:\n    trusted:\n      max_tokens_per_day: 0\n",
+		"negative turns":      "  budgets:\n    public:\n      max_turns_per_minute: -1\n",
+		"string tokens":       "  budgets:\n    public:\n      max_tokens_per_day: lots\n",
+		"budgets not mapping": "  budgets: 5\n",
+		"class not mapping":   "  budgets:\n    public: 5\n",
+	} {
+		t.Run(label, func(t *testing.T) {
+			_, err := Load(writeAccessConfig(t, access))
+			if err == nil || !strings.Contains(err.Error(), "access.budgets") {
+				t.Fatalf("err = %v, want an access.budgets error", err)
+			}
+		})
+	}
+	for label, access := range map[string]string{
+		"unknown class": "  budgets:\n    owner:\n      max_tokens_per_day: 1\n",
+		"unknown limit": "  budgets:\n    public:\n      max_cost: 1\n",
+	} {
+		t.Run(label, func(t *testing.T) {
+			if _, err := Load(writeAccessConfig(t, access)); err == nil || !strings.Contains(err.Error(), "access.budgets") {
+				t.Fatalf("err = %v, want the unknown key rejected", err)
+			}
+		})
+	}
+}

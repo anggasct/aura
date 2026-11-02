@@ -56,7 +56,7 @@ func seedUsage(t *testing.T, dataRoot string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reservation, err := ledger.Reserve(ctx, usage.ReserveRequest{
+	reservation, err := ledger.Reserve(ctx, &usage.ReserveRequest{
 		InvocationID: "inv-1", Attempt: 0, ModelDefinitionID: "primary", AgentID: "kuma",
 		KnownInputTokens: 100, RequestedMaxOutputTokens: 200,
 	})

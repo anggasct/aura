@@ -169,8 +169,19 @@ type Owner struct {
 }
 
 type Access struct {
-	ApprovalTimeout  Duration `koanf:"approval_timeout" yaml:"approval_timeout"`
-	StandingGrantTTL Duration `koanf:"standing_grant_ttl" yaml:"standing_grant_ttl"`
+	ApprovalTimeout  Duration      `koanf:"approval_timeout" yaml:"approval_timeout"`
+	StandingGrantTTL Duration      `koanf:"standing_grant_ttl" yaml:"standing_grant_ttl"`
+	Budgets          AccessBudgets `koanf:"budgets" yaml:"budgets"`
+}
+
+type AccessBudgets struct {
+	Trusted PrincipalBudget `koanf:"trusted" yaml:"trusted"`
+	Public  PrincipalBudget `koanf:"public" yaml:"public"`
+}
+
+type PrincipalBudget struct {
+	MaxTokensPerDay   int64 `koanf:"max_tokens_per_day" yaml:"max_tokens_per_day"`
+	MaxTurnsPerMinute int   `koanf:"max_turns_per_minute" yaml:"max_turns_per_minute"`
 }
 
 type Children struct {
@@ -954,6 +965,10 @@ func Default() Config {
 		Access: &Access{
 			ApprovalTimeout:  Duration(30 * time.Minute),
 			StandingGrantTTL: Duration(168 * time.Hour),
+			Budgets: AccessBudgets{
+				Trusted: PrincipalBudget{MaxTokensPerDay: 200000, MaxTurnsPerMinute: 6},
+				Public:  PrincipalBudget{MaxTokensPerDay: 20000, MaxTurnsPerMinute: 3},
+			},
 		},
 	}
 }

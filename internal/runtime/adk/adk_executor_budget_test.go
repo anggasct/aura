@@ -7,6 +7,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/usage"
@@ -129,5 +130,55 @@ func TestADKExecutorBudgetAttributesPersona(t *testing.T) {
 	}
 	if len(spends) != 1 || spends[0].AgentID != "kuma" || spends[0].MonthUsedMicros() == 0 {
 		t.Fatalf("spend by persona = %+v, want the turn charged to kuma", spends)
+	}
+}
+
+func TestADKExecutorBudgetAttributesAndCapsPrincipal(t *testing.T) {
+	model := &fakeADKModel{answer: "final answer", tokens: 7}
+	modelName := registerFakeModel(t, model)
+	db, sessions, events := newSessionTestDB(t)
+	reg := usage.NewPriceRegistry()
+	ledger, err := usage.NewLedger(db, usage.LedgerOptions{Prices: reg, PrincipalCaps: map[string]int64{"trusted": 1_000_000, "public": 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBudgetLedger(ledger, "primary"))
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	mustCreateSession(t, db, "session-trusted")
+	mustCreateSession(t, db, "session-public")
+	trusted := &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-trusted", PrincipalID: "discord:111", PrincipalClass: principal.ClassTrusted,
+		Origin: runtime.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hello"}},
+	}
+	for _, err := range executor.Execute(context.Background(), trusted) {
+		if err != nil {
+			t.Fatalf("trusted Execute: %v", err)
+		}
+	}
+	var principalID, class string
+	if err := db.QueryRowContext(t.Context(), `SELECT principal_id, principal_class FROM usage_reservation`).Scan(&principalID, &class); err != nil {
+		t.Fatal(err)
+	}
+	if principalID != "discord:111" || class != "trusted" {
+		t.Fatalf("reservation principal = %q/%q, want discord:111/trusted", principalID, class)
+	}
+	calls := model.callCount
+	public := &runtime.TurnRequest{
+		TurnID: "turn-2", SessionID: "session-public", PrincipalID: "discord:666", PrincipalClass: principal.ClassPublic,
+		Origin: runtime.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hello"}},
+	}
+	var sawErr error
+	for _, err := range executor.Execute(context.Background(), public) {
+		if err != nil {
+			sawErr = err
+		}
+	}
+	if code, ok := usage.CodeOf(sawErr); !ok || code != usage.ErrorCodeBudgetExceeded {
+		t.Fatalf("public turn err = %v, want usage_budget_exceeded", sawErr)
+	}
+	if model.callCount != calls {
+		t.Fatalf("model calls = %d, want %d (no call for an exhausted principal)", model.callCount, calls)
 	}
 }

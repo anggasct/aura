@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
+	"github.com/anggasct/aura/internal/usage"
 )
 
 const (
@@ -141,6 +142,11 @@ func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.A
 	if cfg.Access != nil {
 		settings.ApprovalTimeout = time.Duration(cfg.Access.ApprovalTimeout)
 		settings.StandingGrantTTL = time.Duration(cfg.Access.StandingGrantTTL)
+	}
+	if db != nil && cfg.Access != nil {
+		if ledger, err := usage.NewLedger(db, usage.LedgerOptions{}); err == nil {
+			settings.Budgets = newPrincipalBudgetGate(cfg.Access, ledger, recorder)
+		}
 	}
 	return settings
 }
