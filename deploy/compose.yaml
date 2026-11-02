@@ -1,0 +1,76 @@
+name: aura
+
+x-aura: &aura
+  image: ${AURA_IMAGE:-ghcr.io/anggasct/aura:${AURA_VERSION:?set AURA_VERSION to the release version or AURA_IMAGE to an image reference}}
+  user: "65532:65532"
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  env_file:
+    - path: ${AURA_ENV_FILE:-.env}
+      required: false
+  environment:
+    AURA_CONFIG: /etc/aura/aura.yaml
+  volumes:
+    - aura-data:/var/lib/aura
+    - ./aura.yaml:/etc/aura/aura.yaml:ro
+
+services:
+  restate:
+    image: docker.restate.dev/restatedev/restate:1.7.14@sha256:43eb4272d06ae8b0bd68280f8cf0bd3b2f08324b6ecdf625e987787b8bb62c64
+    hostname: restate
+    restart: unless-stopped
+    environment:
+      RESTATE_NODE_NAME: restate
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - restate-data:/restate-data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/restate/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  aura-upgrade:
+    <<: *aura
+    command: ["storage", "upgrade"]
+    restart: "no"
+    network_mode: none
+
+  aura:
+    <<: *aura
+    command: ["server"]
+    restart: unless-stopped
+    depends_on:
+      restate:
+        condition: service_healthy
+      aura-upgrade:
+        condition: service_completed_successfully
+    networks:
+      - internal
+      - egress
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/aura", "status", "--probe", "live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+networks:
+  internal:
+    internal: true
+  egress: {}
+
+volumes:
+  aura-data: {}
+  restate-data: {}

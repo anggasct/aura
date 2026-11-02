@@ -19,7 +19,7 @@ RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check clean
+.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -139,6 +139,9 @@ release-snapshot:
 
 image-check:
 	scripts/check-image.sh $$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' dist/metadata.json | head -1 | xargs -I{} docker images --format '{{.Repository}}:{{.Tag}}' --filter 'reference=ghcr.io/anggasct/aura:{}-*')
+
+compose-smoke:
+	AURA_IMAGE=$${AURA_IMAGE:-$$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' dist/metadata.json | head -1 | sed 's|^|ghcr.io/anggasct/aura:|; s|$$|-amd64|')} scripts/compose-smoke.sh
 
 clean:
 	rm -f $(BINARY)

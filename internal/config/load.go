@@ -2893,15 +2893,21 @@ func validateDurable(durable *Durable) error {
 	if durable.Mode != DurableModeSupervised && durable.Mode != DurableModeExternal {
 		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.mode %q must be %q or %q", durable.Mode, DurableModeSupervised, DurableModeExternal)})
 	}
-	if err := ValidateBaseURL(durable.Endpoint); err != nil {
+	if durable.Mode != DurableModeExternal && (durable.HandlerURL != "" || durable.AllowPlaintext) {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.handler_url and durable.allow_plaintext apply only to durable.mode \"external\""})
+	}
+	if err := validateDurableURL(durable.Endpoint, durable.AllowPlaintext); err != nil {
 		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.endpoint: %v", err)})
 	} else if durable.Endpoint == "" {
 		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.endpoint must not be empty"})
 	}
-	if err := ValidateBaseURL(durable.AdminEndpoint); err != nil {
+	if err := validateDurableURL(durable.AdminEndpoint, durable.AllowPlaintext); err != nil {
 		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.admin_endpoint: %v", err)})
 	} else if durable.AdminEndpoint == "" {
 		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.admin_endpoint must not be empty"})
+	}
+	if err := validateDurableURL(durable.HandlerURL, durable.AllowPlaintext); err != nil {
+		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("durable.handler_url: %v", err)})
 	}
 	host, portRaw, err := net.SplitHostPort(durable.HandlerAddr)
 	if err != nil || host == "" {
@@ -2919,6 +2925,20 @@ func validateDurable(durable *Durable) error {
 		problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: "durable.restart_backoff_max must cover restart_backoff_initial"})
 	}
 	return errors.Join(problems...)
+}
+
+func validateDurableURL(raw string, allowPlaintext bool) error {
+	if raw == "" || !allowPlaintext {
+		return ValidateBaseURL(raw)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Scheme == "http" {
+		u.Scheme = "https"
+	}
+	return ValidateBaseURL(u.String())
 }
 
 func loopbackHostPort(addr string) bool {

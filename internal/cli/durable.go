@@ -63,7 +63,7 @@ func runDurableStatus(cmd *cobra.Command, cfg *config.Config) error {
 	adminOK := restateEndpointHealthy(ctx, durableCfg.AdminEndpoint+"/version")
 	registration := "unknown"
 	if adminOK {
-		switch probeDeploymentRegistration(ctx, durableCfg.AdminEndpoint, durableCfg.HandlerAddr) {
+		switch probeDeploymentRegistration(ctx, durableCfg.AdminEndpoint, deploymentMatch(durableCfg)) {
 		case deploymentRegistered:
 			registration = "registered"
 		case deploymentAbsent:
@@ -72,16 +72,22 @@ func runDurableStatus(cmd *cobra.Command, cfg *config.Config) error {
 			registration = "unknown"
 		}
 	}
-	for _, line := range []string{
+	lines := []string{
 		"mode: " + durableCfg.Mode,
 		"endpoint: " + durableCfg.Endpoint,
 		"admin_endpoint: " + durableCfg.AdminEndpoint,
 		"handler_addr: " + durableCfg.HandlerAddr,
-		"node_addr: " + durableCfg.NodeAddr,
-		"ingress: " + reachableWord(ingressOK),
-		"admin: " + reachableWord(adminOK),
-		"deployment: " + registration,
-	} {
+	}
+	if durableCfg.HandlerURL != "" {
+		lines = append(lines, "handler_url: "+durableCfg.HandlerURL)
+	}
+	lines = append(lines,
+		"node_addr: "+durableCfg.NodeAddr,
+		"ingress: "+reachableWord(ingressOK),
+		"admin: "+reachableWord(adminOK),
+		"deployment: "+registration,
+	)
+	for _, line := range lines {
 		if _, err := fmt.Fprintln(out, line); err != nil {
 			return err
 		}
@@ -90,6 +96,13 @@ func runDurableStatus(cmd *cobra.Command, cfg *config.Config) error {
 		return &restate.Error{Code: restate.ErrorCodeUnreachable, Detail: "durable runtime is unreachable"}
 	}
 	return nil
+}
+
+func deploymentMatch(durableCfg *config.Durable) string {
+	if durableCfg.HandlerURL != "" {
+		return durableCfg.HandlerURL
+	}
+	return durableCfg.HandlerAddr
 }
 
 func reachableWord(ok bool) string {
@@ -225,7 +238,10 @@ func (l *durableListener) Start(ctx context.Context) error {
 		if err := restate.CheckExternal(gateCtx, l.config.Endpoint, l.config.AdminEndpoint); err != nil {
 			return err
 		}
-		return l.serveEndpointUntilDone(ctx)
+		if l.config.HandlerURL == "" {
+			return l.serveEndpointUntilDone(ctx)
+		}
+		return l.serveAndRegister(ctx)
 	}
 	supervisor, err := restate.NewSupervisor(&restate.SuperviseConfig{
 		BinaryPath:     l.config.BinaryPath,
@@ -257,6 +273,25 @@ func (l *durableListener) Start(ctx context.Context) error {
 		}
 	}
 	return supervisorErr
+}
+
+const externalRegistrationTimeout = time.Minute
+
+func (l *durableListener) serveAndRegister(ctx context.Context) error {
+	serveCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	served := make(chan error, 1)
+	go func() { served <- l.serveEndpointUntilDone(serveCtx) }()
+	if err := restate.AwaitRegistration(ctx, l.config.AdminEndpoint, l.config.HandlerURL, externalRegistrationTimeout); err != nil {
+		stop()
+		serveErr := <-served
+		if ctx.Err() != nil {
+			return serveErr
+		}
+		return err
+	}
+	l.logger.InfoContext(ctx, "durable handler deployment registered", "handler_url", l.config.HandlerURL)
+	return <-served
 }
 
 func (l *durableListener) serveEndpointUntilDone(ctx context.Context) error {

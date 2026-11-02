@@ -1364,6 +1364,11 @@ func TestLoad_DurableValidation(t *testing.T) {
 		{"non-string node addr", "version: 1\ndurable:\n  enabled: true\n  node_addr: 5122\n", "durable.node_addr must be a string"},
 		{"inverted backoff", "version: 1\ndurable:\n  enabled: true\n  restart_backoff_initial: 30s\n  restart_backoff_max: 1s\n", "durable.restart_backoff_max"},
 		{"non-bool enabled", "version: 1\ndurable:\n  enabled: \"yes\"\n", "durable.enabled must be a boolean"},
+		{"handler url in supervised mode", "version: 1\ndurable:\n  enabled: true\n  handler_url: https://aura.example:9080\n", "apply only to durable.mode \"external\""},
+		{"plaintext in supervised mode", "version: 1\ndurable:\n  enabled: true\n  allow_plaintext: true\n", "apply only to durable.mode \"external\""},
+		{"private endpoint without plaintext opt-in", "version: 1\ndurable:\n  enabled: true\n  mode: external\n  endpoint: http://restate:8080\n", "durable.endpoint: https is required"},
+		{"private handler url without plaintext opt-in", "version: 1\ndurable:\n  enabled: true\n  mode: external\n  handler_url: http://aura:9080\n", "durable.handler_url: https is required"},
+		{"handler url with query", "version: 1\ndurable:\n  enabled: true\n  mode: external\n  allow_plaintext: true\n  handler_url: http://aura:9080?x=1\n", "durable.handler_url: query and fragment"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1372,6 +1377,17 @@ func TestLoad_DurableValidation(t *testing.T) {
 				t.Fatalf("Load error = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoad_DurableExternalPrivateNetwork(t *testing.T) {
+	content := "version: 1\ndurable:\n  enabled: true\n  mode: external\n  allow_plaintext: true\n  endpoint: http://restate:8080\n  admin_endpoint: http://restate:9070\n  handler_addr: 0.0.0.0:9080\n  handler_url: http://aura:9080\n"
+	result, err := Load(writeTempConfig(t, content))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if durable := result.Config.Durable; durable.HandlerURL != "http://aura:9080" || !durable.AllowPlaintext {
+		t.Fatalf("durable = %+v", durable)
 	}
 }
 

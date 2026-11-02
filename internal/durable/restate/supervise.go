@@ -475,6 +475,27 @@ func RegisterDeployment(ctx context.Context, adminURL, handlerURL string) error 
 	return nil
 }
 
+func AwaitRegistration(ctx context.Context, adminURL, handlerURL string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := RegisterDeployment(ctx, adminURL, handlerURL)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-time.After(time.Second):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 func CheckExternal(ctx context.Context, ingressURL, adminURL string) error {
 	if ingressURL == "" || adminURL == "" {
 		return &Error{Code: ErrorCodeUnreachable, Detail: "external durable runtime requires endpoint and admin endpoint"}

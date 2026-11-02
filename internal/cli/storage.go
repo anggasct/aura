@@ -30,6 +30,7 @@ func newStorageCmd(gf *globalFlags) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newStorageBackupCmd(gf),
+		newStorageUpgradeCmd(gf),
 		newStorageVerifyCmd(gf),
 		newStorageRestoreCmd(gf),
 		newStorageReconcileCmd(gf),
@@ -122,6 +123,60 @@ func newStorageBackupCmd(gf *globalFlags) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&output, "output", "", "backup destination directory (default: storage.backup_directory)")
 	return cmd
+}
+
+func newStorageUpgradeCmd(gf *globalFlags) *cobra.Command {
+	return &cobra.Command{
+		Use:   "upgrade",
+		Short: "Back up and verify the database, then apply pending migrations",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, _ *sql.DB) error {
+				return runStorageUpgrade(ctx, logger, cfg, time.Now())
+			})
+		},
+	}
+}
+
+func runStorageUpgrade(ctx context.Context, logger *slog.Logger, cfg *config.Config, now time.Time) error {
+	dbPath, artifactRoot, backupDir, err := storagePaths(cfg)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dbPath); errors.Is(err, os.ErrNotExist) {
+		db, err := openStorage(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		logger.InfoContext(ctx, "storage initialized", "component", "storage", "operation", "upgrade")
+		return db.Close()
+	} else if err != nil {
+		return fmt.Errorf("stat live database: %w", err)
+	}
+	db, err := store.OpenDBWithOptions(ctx, dbPath, store.OpenOptions{BusyTimeout: time.Duration(cfg.Storage.BusyTimeout)})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	start := time.Now()
+	result, err := store.UpgradeWithBackup(ctx, db, backupDir, artifactRoot, now)
+	if err != nil {
+		if result.Backup != "" {
+			return fmt.Errorf("storage upgrade from schema %d to %d failed; restore the pre-upgrade backup %s with aura storage restore: %w", result.Applied, result.Latest, result.Backup, err)
+		}
+		return err
+	}
+	logger.InfoContext(ctx, "storage upgrade complete",
+		"component", "storage",
+		"operation", "upgrade",
+		"duration_ms", time.Since(start).Milliseconds(),
+		"from_schema", result.Applied,
+		"to_schema", result.Latest,
+		"backup", result.Backup,
+		"sessions", result.Report.Sessions,
+		"verified_blobs", result.Report.VerifiedBlobs,
+	)
+	return nil
 }
 
 func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {

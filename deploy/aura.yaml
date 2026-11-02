@@ -1,0 +1,29 @@
+version: 1
+storage:
+  path: /var/lib/aura/data
+tools:
+  workspace: /var/lib/aura/workspace
+workflows:
+  definitions_dir: /etc/aura/workflows
+durable:
+  enabled: true
+  mode: external
+  allow_plaintext: true
+  endpoint: http://restate:8080
+  admin_endpoint: http://restate:9070
+  handler_addr: 0.0.0.0:9080
+  handler_url: http://aura:9080
+models:
+  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet-5-5
+      api_key_env: ANTHROPIC_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: true
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: cl100k
+        usage_reporting: true

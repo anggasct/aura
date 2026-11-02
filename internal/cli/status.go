@@ -32,6 +32,7 @@ const (
 func newStatusCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error)) *cobra.Command {
 	var asJSON bool
 	var offline bool
+	var probe string
 	cmd := &cobra.Command{
 		Use:           "status",
 		Short:         "Report system and sandbox health",
@@ -42,12 +43,47 @@ func newStatusCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 			if err != nil {
 				return &exitCodeError{code: exitCommand, err: err}
 			}
+			if probe != "" {
+				if offline || asJSON {
+					return &exitCodeError{code: exitCommand, err: errors.New("--probe cannot be combined with --offline or --json")}
+				}
+				return runProcessProbe(cmd, loaded.Config.Health.Listen, probe)
+			}
 			return runStatus(cmd, loaded.Config, loaded.CapabilityReport, negotiate, offline, asJSON, processProbe)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable output")
 	cmd.Flags().BoolVar(&offline, "offline", false, "skip the live process probe and use local stores only")
+	cmd.Flags().StringVar(&probe, "probe", "", "query the running process's live or ready probe and exit 0 only when it passes (container health check)")
 	return cmd
+}
+
+func runProcessProbe(cmd *cobra.Command, listen, probe string) error {
+	path, ok := map[string]string{"live": "/livez", "ready": "/readyz"}[probe]
+	if !ok {
+		return &exitCodeError{code: exitCommand, err: fmt.Errorf("--probe %q must be live or ready", probe)}
+	}
+	if listen == "" {
+		return &exitCodeError{code: exitCommand, err: errors.New("health.listen is not configured")}
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 3*liveProbeWait)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+listen+path, http.NoBody)
+	if err != nil {
+		return &exitCodeError{code: exitCommand, err: err}
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), probe+": unreachable")
+		return &exitCodeError{code: exitCritical, err: errors.New("the running process is unreachable")}
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), probe+": no")
+		return &exitCodeError{code: exitCritical, err: fmt.Errorf("the running process failed its %s probe (%s)", probe, response.Status)}
+	}
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), probe+": yes")
+	return err
 }
 
 func runStatus(cmd *cobra.Command, cfg *config.Config, report capability.Report, negotiate func() (sandbox.Primitives, error), offline, asJSON bool, processProbe func() (health.ProcessStatus, bool)) error {
