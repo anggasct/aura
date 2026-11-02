@@ -188,7 +188,7 @@ func (a *Adapter) Decide(ctx context.Context, prompt *ApprovalPrompt) (bool, err
 	}
 	card, ok := a.openChannelCard(ctx, prompt, &binding)
 	if !ok {
-		return false, nil
+		return false, ctx.Err()
 	}
 	outcome, _, err := a.awaitApproval(ctx, card.token, card.tokenID, card.pending, card.expiresAt)
 	return outcome.accepted, err
