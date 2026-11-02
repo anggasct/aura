@@ -210,4 +210,3 @@ func TestSplitMessageCountsUTF16AndKeepsOrder(t *testing.T) {
 		t.Fatalf("split did not prefer the line boundary: %d chunks, last %q", len(lines), lines[len(lines)-1])
 	}
 }
-
