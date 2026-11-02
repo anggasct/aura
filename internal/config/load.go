@@ -1424,7 +1424,7 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 	if definitionsNode.Kind != yamlv3.SequenceNode {
 		return fmt.Errorf("agents.definitions must be a list at line %d", definitionsNode.Line)
 	}
-	stringFields := []string{"id", "name", "description", "instructions", "soul_file", "model_route", "memory_scope", "audience", "approval_timeout"}
+	stringFields := []string{"id", "name", "description", "instructions", "soul_file", "model_route", "memory_scope", "audience", "approval_timeout", "group_context"}
 	listFields := []string{"tools", "capabilities", "principal_tools", "public_tools"}
 	for index, item := range definitionsNode.Content {
 		if item.Kind != yamlv3.MappingNode {

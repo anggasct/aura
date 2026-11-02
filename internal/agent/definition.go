@@ -29,6 +29,7 @@ type Definition struct {
 	PublicTools     []string
 	ApprovalTimeout time.Duration
 	Messages        map[string]string
+	GroupContext    string
 }
 
 func audienceRank(audience string) int {
@@ -129,6 +130,7 @@ func (d *Definition) clone() Definition {
 		PublicTools:     slices.Clone(d.PublicTools),
 		ApprovalTimeout: d.ApprovalTimeout,
 		Messages:        maps.Clone(d.Messages),
+		GroupContext:    d.GroupContext,
 	}
 }
 

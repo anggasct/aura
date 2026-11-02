@@ -33,6 +33,11 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 		"overlong message":                 {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", MaxPersonaMessageRunes+1) + "\n", code: ErrorCodePersonaInvalid, detail: "at most"},
 		"pairing code without placeholder": {fields: "      messages:\n        pairing_code: here is your code\n", code: ErrorCodePersonaInvalid, detail: "{code}"},
 		"message at the length limit":      {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", MaxPersonaMessageRunes) + "\n"},
+		"shared group on trusted":          {fields: "      audience: trusted\n      group_context: shared\n"},
+		"per principal group on public":    {fields: "      audience: public\n      group_context: per_principal\n"},
+		"shared group on public":           {fields: "      audience: public\n      group_context: shared\n", code: ErrorCodePersonaInvalid, detail: "group_context"},
+		"shared group on owner":            {fields: "      group_context: shared\n", code: ErrorCodePersonaInvalid, detail: "group_context"},
+		"unknown group context":            {fields: "      audience: trusted\n      group_context: everyone\n", code: ErrorCodePersonaInvalid, detail: "group_context"},
 	}
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {

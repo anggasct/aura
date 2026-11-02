@@ -210,7 +210,7 @@ func TestThreads_CreateJournalsUnderEnsuredPersonaChannelSession(t *testing.T) {
 	if conv != testSessionKey("thread:777010") || ref.ThreadID != "777010" {
 		t.Fatalf("conversation = %q thread %q, want the created thread, not the channel fallback", conv, ref.ThreadID)
 	}
-	if owner, ok := ensuredOwner(sessions, testSessionKey("channel:333")); !ok || owner != "discord:111" {
+	if owner, ok := ensuredOwner(sessions, testSessionKey("channel:333/principal:discord:111")); !ok || owner != "discord:111" {
 		t.Fatalf("parent channel session owner = %q, ok = %v; want discord:111 before the intent", owner, ok)
 	}
 	sink.mu.Lock()
@@ -313,7 +313,7 @@ func TestThreads_CreateFailureFallsBackToChannel(t *testing.T) {
 		t.Fatal("admit() = false, want channel fallback admission")
 	}
 	conv, ref := envelopeThreadID(t, sink, "message:9031")
-	if conv != testSessionKey("channel:333") {
+	if conv != testSessionKey("channel:333/principal:discord:111") {
 		t.Fatalf("conversation = %q, want channel:333 fallback", conv)
 	}
 	if ref.ThreadID != "" {
@@ -799,7 +799,7 @@ func TestThreads_ForumMentionSkipsThreadCreate(t *testing.T) {
 		t.Fatal("admit() = false, want channel admission for forum")
 	}
 	conv, ref := envelopeThreadID(t, sink, "message:9071")
-	if conv != testSessionKey("channel:333") {
+	if conv != testSessionKey("channel:333/principal:discord:111") {
 		t.Fatalf("conversation = %q, want channel:333 for forum", conv)
 	}
 	if ref.ThreadID != "" {

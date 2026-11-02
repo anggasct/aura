@@ -146,9 +146,9 @@ func TestSameChannelServedByTwoPersonasKeepsSeparateSessions(t *testing.T) {
 		mention string
 		want    string
 	}{
-		{home, "8101", "111", "901", "engineer/discord:home/channel:333"},
-		{home, "8102", "112", "901", "researcher/discord:home/channel:333"},
-		{kuma, "8103", "111", "902", "reviewer/discord:kuma/channel:333"},
+		{home, "8101", "111", "901", "engineer/discord:home/channel:333/principal:discord:111"},
+		{home, "8102", "112", "901", "researcher/discord:home/channel:333/principal:discord:112"},
+		{kuma, "8103", "111", "902", "reviewer/discord:kuma/channel:333/principal:discord:111"},
 	}
 	seen := map[string]string{}
 	for _, msg := range messages {

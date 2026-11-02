@@ -428,6 +428,9 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 		a.tryPairing(ctx, msg)
 		return false, nil
 	}
+	if msg.GuildID != "" {
+		envelope.ConversationID = a.channelConversation(persona, msg.ChannelID, envelope.PrincipalID, principal.ParseClass(envelope.PrincipalClass))
+	}
 	if inv, ok := a.commandInvocation(msg); ok {
 		if handled, err := a.runCommand(ctx, msg, &inv, envelope); handled || err != nil {
 			return handled, err

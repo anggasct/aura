@@ -150,3 +150,19 @@ func TestRouterServesPublicOnlyWhenAPublicPersonaIsReachable(t *testing.T) {
 		t.Errorf("Persona(kantor) = %+v, %v", definition, ok)
 	}
 }
+
+func TestGroupContextDefaultsToPerPrincipal(t *testing.T) {
+	registry, err := Build([]config.AgentDefinition{
+		{ID: "crew", Description: "d", Instructions: "i", Audience: config.AudienceTrusted, GroupContext: config.GroupContextShared},
+		{ID: "lobby", Description: "d", Instructions: "i", Audience: config.AudiencePublic},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	for id, want := range map[string]string{"crew": config.GroupContextShared, "lobby": config.GroupContextPerPrincipal, DefaultID: config.GroupContextPerPrincipal} {
+		definition, ok := registry.Lookup(id)
+		if !ok || definition.GroupContext != want {
+			t.Fatalf("%s group context = %q (found %v), want %q", id, definition.GroupContext, ok, want)
+		}
+	}
+}
