@@ -10,7 +10,7 @@ deploy_dir="$(cd "$(dirname "$0")/../deploy" && pwd)"
 project="aura-smoke-$$"
 env_file="$(mktemp)"
 printf 'ANTHROPIC_API_KEY=compose-smoke-placeholder\n' >"$env_file"
-export AURA_IMAGE AURA_ENV_FILE="$env_file"
+export AURA_IMAGE AURA_ENV_FILE="$env_file" AURA_VERSION="${AURA_VERSION:-compose-smoke}"
 
 compose() {
 	docker compose -p "$project" --project-directory "$deploy_dir" -f "$deploy_dir/compose.yaml" -f "$deploy_dir/smoke/compose.smoke.yaml" "$@"
