@@ -41,6 +41,8 @@ func newWorkflowCmd(gf *globalFlags) *cobra.Command {
 		newWorkflowCancelCmd(gf),
 		newWorkflowApproveCmd(gf),
 		newWorkflowSignalCmd(gf),
+		newWorkflowProposalsCmd(gf),
+		newWorkflowProposalCmd(gf),
 	)
 	return cmd
 }

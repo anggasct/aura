@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
@@ -118,4 +121,42 @@ func (c *workflowToolController) Cancel(ctx context.Context, caller *toolsbuilti
 		return toolsbuiltin.WorkflowRunState{}, err
 	}
 	return toolsbuiltin.WorkflowRunState{RunID: run.ID, WorkflowID: run.DefinitionID, Status: status}, nil
+}
+
+func workflowRejection(err error) error {
+	if code, ok := workflow.CodeOf(err); ok {
+		return &toolsbuiltin.WorkflowRejection{Code: string(code), Detail: err.Error()}
+	}
+	return err
+}
+
+func (c *workflowToolController) Propose(ctx context.Context, caller *toolsbuiltin.WorkflowCaller, raw json.RawMessage) (toolsbuiltin.WorkflowProposal, error) {
+	if caller.PrincipalClass != principal.ClassOwner {
+		return toolsbuiltin.WorkflowProposal{}, toolsbuiltin.ErrWorkflowNotPermitted
+	}
+	var spec workflow.Spec
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&spec); err != nil {
+		return toolsbuiltin.WorkflowProposal{}, &toolsbuiltin.WorkflowRejection{Code: string(workflow.ErrorCodeSpecInvalid), Detail: "spec is not a workflow spec: " + err.Error()}
+	}
+	id := workflow.NewProposalID()
+	normalized := workflow.NormalizeProposal(&spec, id)
+	definition, _ := c.registry.Lookup(caller.AgentID)
+	graph, err := c.interpreter.CompileProposal(normalized, definition.Tools)
+	if err != nil {
+		return toolsbuiltin.WorkflowProposal{}, workflowRejection(err)
+	}
+	digest, err := workflow.Digest(normalized)
+	if err != nil {
+		return toolsbuiltin.WorkflowProposal{}, workflowRejection(err)
+	}
+	if err := c.runs.CreateProposal(ctx, &workflow.Proposal{
+		ID: id, SessionID: caller.SessionID, AgentID: caller.AgentID, PrincipalID: caller.PrincipalID,
+		Spec: normalized, Digest: digest, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		return toolsbuiltin.WorkflowProposal{}, err
+	}
+	plan := workflow.RenderPlan(normalized, graph) + "\nApprove with: aura workflow proposal approve " + id
+	return toolsbuiltin.WorkflowProposal{ProposalID: id, Digest: digest, Plan: plan}, nil
 }

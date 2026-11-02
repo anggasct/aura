@@ -47,7 +47,21 @@ type WorkflowRunState struct {
 	Steps      []WorkflowStepState `json:"steps,omitempty"`
 }
 
+type WorkflowProposal struct {
+	ProposalID string `json:"proposal_id"`
+	Digest     string `json:"digest"`
+	Plan       string `json:"plan"`
+}
+
+type WorkflowRejection struct {
+	Code   string
+	Detail string
+}
+
+func (r *WorkflowRejection) Error() string { return r.Code + ": " + r.Detail }
+
 type WorkflowController interface {
+	Propose(ctx context.Context, caller *WorkflowCaller, spec json.RawMessage) (WorkflowProposal, error)
 	List(ctx context.Context, caller *WorkflowCaller) ([]WorkflowInfo, error)
 	Start(ctx context.Context, caller *WorkflowCaller, id, objective string) (WorkflowRunState, error)
 	Status(ctx context.Context, caller *WorkflowCaller, runID string) (WorkflowRunState, error)
@@ -80,6 +94,9 @@ func (h *workflowHolder) adapters() map[string]toolbroker.Adapter {
 		tools.WorkflowStatusToolName + "@" + tools.Version: h.adapter(func(ctx context.Context, controller WorkflowController, caller *WorkflowCaller, args workflowArgs) (any, error) {
 			return controller.Status(ctx, caller, args.RunID)
 		}),
+		tools.WorkflowProposeToolName + "@" + tools.Version: h.adapter(func(ctx context.Context, controller WorkflowController, caller *WorkflowCaller, args workflowArgs) (any, error) {
+			return controller.Propose(ctx, caller, args.Spec)
+		}),
 		tools.WorkflowCancelToolName + "@" + tools.Version: h.adapter(func(ctx context.Context, controller WorkflowController, caller *WorkflowCaller, args workflowArgs) (any, error) {
 			return controller.Cancel(ctx, caller, args.RunID)
 		}),
@@ -87,9 +104,10 @@ func (h *workflowHolder) adapters() map[string]toolbroker.Adapter {
 }
 
 type workflowArgs struct {
-	ID        string `json:"id"`
-	Objective string `json:"objective"`
-	RunID     string `json:"run_id"`
+	ID        string          `json:"id"`
+	Objective string          `json:"objective"`
+	RunID     string          `json:"run_id"`
+	Spec      json.RawMessage `json:"spec"`
 }
 
 type workflowCall func(ctx context.Context, controller WorkflowController, caller *WorkflowCaller, args workflowArgs) (any, error)
@@ -114,9 +132,12 @@ func (h *workflowHolder) adapter(call workflowCall) toolbroker.Adapter {
 		result, err := call(ctx, *controller, &WorkflowCaller{
 			SessionID: request.SessionID, PrincipalID: request.PrincipalID, PrincipalClass: class, AgentID: request.AgentID,
 		}, args)
+		var rejection *WorkflowRejection
 		switch {
 		case errors.Is(err, ErrWorkflowNotPermitted):
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "%s: this workflow is not available here", WorkflowCodeNotPermitted)
+		case errors.As(err, &rejection):
+			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "%s", rejection.Error())
 		case errors.Is(err, ErrWorkflowRunNotFound):
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "%s: no such workflow run", WorkflowCodeRunNotFound)
 		case err != nil:

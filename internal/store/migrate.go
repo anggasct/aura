@@ -44,6 +44,7 @@ var migrations = []migration{
 	{version: 26, sql: personaEvalSchemaSQL},
 	{version: 27, sql: workflowRunOriginSchemaSQL},
 	{version: 28, sql: workflowCompletionSchemaSQL},
+	{version: 29, sql: workflowProposalSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -595,6 +596,22 @@ CREATE TABLE session_handoff (
 ALTER TABLE usage_reservation ADD COLUMN principal_id TEXT;
 ALTER TABLE usage_reservation ADD COLUMN principal_class TEXT;
 CREATE INDEX usage_reservation_principal_idx ON usage_reservation(principal_id, window_day);
+`
+
+const workflowProposalSchemaSQL = `
+CREATE TABLE workflow_proposal (
+    id            TEXT PRIMARY KEY,
+    session_id    TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+    agent_id      TEXT NOT NULL,
+    principal_id  TEXT NOT NULL,
+    spec_json     TEXT NOT NULL CHECK (json_valid(spec_json)),
+    spec_sha256   TEXT NOT NULL,
+    status        TEXT NOT NULL CHECK (status IN ('proposed','approved','rejected','expired')),
+    decided_at    TEXT,
+    run_id        TEXT,
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX workflow_proposal_status_idx ON workflow_proposal(status, created_at);
 `
 
 const workflowCompletionSchemaSQL = `
