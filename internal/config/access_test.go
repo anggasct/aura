@@ -39,7 +39,16 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 		"shared group on owner":            {fields: "      group_context: shared\n", code: ErrorCodePersonaInvalid, detail: "group_context"},
 		"unknown group context":            {fields: "      audience: trusted\n      group_context: everyone\n", code: ErrorCodePersonaInvalid, detail: "group_context"},
 		"evals dir":                        {fields: "      evals:\n        dir: evals/kantor\n"},
-		"evals behavior not yet supported": {fields: "      evals:\n        behavior:\n          required: true\n", code: ErrorCodeConfigInvalid, detail: "evals.behavior"},
+		"evals behavior":                   {fields: "      evals:\n        behavior:\n          required: true\n          min_score: 0.75\n          judge_route: primary\n          schedule: \"0 3 * * 1\"\n          enforce_on_regression: true\n"},
+		"evals behavior min score 1":       {fields: "      evals:\n        behavior:\n          min_score: 1\n"},
+		"evals behavior min score zero":    {fields: "      evals:\n        behavior:\n          min_score: 0\n", code: ErrorCodeConfigInvalid, detail: "min_score"},
+		"evals behavior min score above 1": {fields: "      evals:\n        behavior:\n          min_score: 1.5\n", code: ErrorCodeConfigInvalid, detail: "min_score"},
+		"evals behavior min score text":    {fields: "      evals:\n        behavior:\n          min_score: high\n", code: ErrorCodeConfigInvalid, detail: "min_score"},
+		"evals behavior required text":     {fields: "      evals:\n        behavior:\n          required: yes please\n", code: ErrorCodeConfigInvalid, detail: "required"},
+		"evals behavior empty judge":       {fields: "      evals:\n        behavior:\n          judge_route: \"\"\n", code: ErrorCodeConfigInvalid, detail: "judge_route"},
+		"evals behavior unknown key":       {fields: "      evals:\n        behavior:\n          judge: primary\n", code: ErrorCodeConfigInvalid, detail: "evals.behavior.judge"},
+		"evals behavior not a mapping":     {fields: "      evals:\n        behavior: true\n", code: ErrorCodeConfigInvalid, detail: "evals.behavior"},
+		"evals unknown key":                {fields: "      evals:\n        directory: x\n", code: ErrorCodeConfigInvalid, detail: "evals.directory"},
 	}
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {

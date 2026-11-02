@@ -1409,6 +1409,34 @@ func validateMCPShapes(doc *yamlv3.Node) error {
 	return nil
 }
 
+func validateEvalBehaviorShape(index int, node *yamlv3.Node) error {
+	field := fmt.Sprintf("agents.definitions[%d].evals.behavior", index)
+	if node.Kind != yamlv3.MappingNode {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " must be a mapping"}
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i].Value, node.Content[i+1]
+		switch key {
+		case "required", "enforce_on_regression":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!bool" {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.%s must be a boolean", field, key)}
+			}
+		case "min_score":
+			score, err := strconv.ParseFloat(value.Value, 64)
+			if value.Kind != yamlv3.ScalarNode || (value.Tag != "!!float" && value.Tag != "!!int") || err != nil || score <= 0 || score > 1 {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".min_score must be a number greater than 0 and at most 1"}
+			}
+		case "judge_route", "schedule":
+			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" || strings.TrimSpace(value.Value) == "" {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.%s must be a non-empty string", field, key)}
+			}
+		default:
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.%s is not a known key", field, key)}
+		}
+	}
+	return nil
+}
+
 func validateAgentsShapes(doc *yamlv3.Node) error {
 	agentsNode := mappingValue(doc, "agents")
 	if agentsNode == nil {
@@ -1461,7 +1489,13 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 				for j := 0; j+1 < len(value.Content); j += 2 {
 					evalKey, evalValue := value.Content[j].Value, value.Content[j+1]
 					if evalKey == "behavior" {
-						return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("agents.definitions[%d].evals.behavior is not supported yet", index)}
+						if err := validateEvalBehaviorShape(index, evalValue); err != nil {
+							return err
+						}
+						continue
+					}
+					if evalKey != "dir" {
+						return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("agents.definitions[%d].evals.%s is not a known key", index, evalKey)}
 					}
 					if evalKey == "dir" && (evalValue.Kind != yamlv3.ScalarNode || evalValue.Tag != "!!str" || evalValue.Value == "") {
 						return fmt.Errorf("agents.definitions.evals.dir must be a non-empty string at line %d", evalValue.Line)

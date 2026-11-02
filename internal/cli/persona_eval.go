@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"time"
 
@@ -55,9 +56,10 @@ func loadPersona(cfg *config.Config, id string) (auraagent.Definition, error) {
 }
 
 func newPersonaEvalCmd(gf *globalFlags) *cobra.Command {
-	return &cobra.Command{
+	var behavior bool
+	cmd := &cobra.Command{
 		Use:   "eval <id>",
-		Short: "Run a persona's policy evaluation and record the result",
+		Short: "Run a persona's policy evaluation, and its behavior evaluation with --behavior, and record the results",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			result, err := config.Load(gf.configPath)
@@ -67,6 +69,9 @@ func newPersonaEvalCmd(gf *globalFlags) *cobra.Command {
 			definition, err := loadPersona(result.Config, args[0])
 			if err != nil {
 				return err
+			}
+			if behavior && definition.EvalBehavior == nil {
+				return &exitCodeError{code: 1, err: fmt.Errorf("%s: persona %q does not enable behavior evaluation (set evals.behavior)", personaeval.ErrorCodeInvalid, definition.ID)}
 			}
 			db, err := openStorage(cmd.Context(), result.Config)
 			if err != nil {
@@ -85,15 +90,30 @@ func newPersonaEvalCmd(gf *globalFlags) *cobra.Command {
 			for _, name := range recorded.FailedCases {
 				lines = append(lines, "failed: "+name)
 			}
-			if !recorded.Passed {
+			passed := recorded.Passed
+			if behavior {
+				models, err := registerBehaviorModels(cmd.Context(), result.Config, db, slog.New(slog.DiscardHandler))
+				if err != nil {
+					return err
+				}
+				scored, report, err := runPersonaBehaviorEval(cmd.Context(), db, result.Path, &definition, models)
+				if err != nil {
+					return err
+				}
+				lines = append(lines, behaviorLines(&report)...)
+				passed = passed && scored.Passed
+			}
+			if !passed {
 				if err := writeChildLines(cmd, append(lines, "result: fail")); err != nil {
 					return err
 				}
-				return &exitCodeError{code: 1, err: errors.New("persona_eval_failed: the policy evaluation did not pass")}
+				return &exitCodeError{code: 1, err: errors.New("persona_eval_failed: the persona evaluation did not pass")}
 			}
 			return writeChildLines(cmd, append(lines, "result: pass"))
 		},
 	}
+	cmd.Flags().BoolVar(&behavior, "behavior", false, "also run the live behavior evaluation (persona must set evals.behavior)")
+	return cmd
 }
 
 func newPersonaEvalResultsCmd(gf *globalFlags) *cobra.Command {
@@ -150,9 +170,21 @@ func (g *personaEvalGate) Evaluated(ctx context.Context, persona string) (bool, 
 	if !ok {
 		return false, nil
 	}
-	latest, found, err := g.results.Latest(ctx, persona, definition.EvalDigest(), store.EvalLayerPolicy)
+	digest := definition.EvalDigest()
+	latest, found, err := g.results.Latest(ctx, persona, digest, store.EvalLayerPolicy)
+	if err != nil || !found || !latest.Passed {
+		return false, err
+	}
+	behavior := definition.EvalBehavior
+	if behavior == nil || (!behavior.Required && !behavior.EnforceOnRegression) {
+		return true, nil
+	}
+	scored, found, err := g.results.Latest(ctx, persona, digest, store.EvalLayerBehavior)
 	if err != nil {
 		return false, err
 	}
-	return found && latest.Passed, nil
+	if !found {
+		return !behavior.Required, nil
+	}
+	return scored.Passed, nil
 }

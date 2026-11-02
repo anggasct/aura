@@ -244,3 +244,7 @@ func (e *Engine) deliverCompletedTurn(ctx context.Context, req *runtime.TurnRequ
 	}
 	return nil
 }
+
+func DeliveryTexts(events []store.RuntimeEvent) []string {
+	return extractDeliveryTexts(events)
+}

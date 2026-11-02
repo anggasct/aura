@@ -140,6 +140,15 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 		GroupContext:    cmp.Or(override.GroupContext, config.GroupContextPerPrincipal),
 		EvalDir:         override.Evals.Dir,
 	}
+	if behavior := override.Evals.Behavior; behavior != nil {
+		definition.EvalBehavior = &EvalBehavior{
+			Required:            behavior.Required,
+			MinScore:            cmp.Or(behavior.MinScore, DefaultEvalMinScore),
+			JudgeRoute:          cmp.Or(behavior.JudgeRoute, DefaultEvalJudgeRoute),
+			Schedule:            behavior.Schedule,
+			EnforceOnRegression: behavior.EnforceOnRegression,
+		}
+	}
 	if definition.MemoryScope != MemoryScopePersona && definition.MemoryScope != MemoryScopeShared {
 		return nil, codedError(ErrorCodeDefinitionInvalid, fmt.Sprintf("%s.memory_scope must be %q or %q", field, MemoryScopePersona, MemoryScopeShared))
 	}
@@ -190,6 +199,9 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 	}
 	if definition.ModelRoute != "" && !slices.Contains(modelRoutes, definition.ModelRoute) {
 		return nil, codedError(ErrorCodeUnknownModelRoute, field+".model_route: unknown model route "+fmt.Sprintf("%q", definition.ModelRoute))
+	}
+	if definition.EvalBehavior != nil && !slices.Contains(modelRoutes, definition.EvalBehavior.JudgeRoute) {
+		return nil, codedError(ErrorCodeUnknownModelRoute, field+".evals.behavior.judge_route: unknown model route "+fmt.Sprintf("%q", definition.EvalBehavior.JudgeRoute))
 	}
 	if definition.Limits.TurnTimeout < 0 {
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".limits.turn_timeout must not be negative")

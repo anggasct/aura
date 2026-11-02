@@ -31,6 +31,7 @@ const (
 	KindOwnerDataAbsent = "owner_data_absent"
 	KindApprovalRouted  = "approval_routed"
 	KindFixedReply      = "fixed_reply"
+	KindBehavior        = "behavior"
 	ErrorCodeInvalid    = "persona_eval_invalid"
 	MarkerOwnerContext  = "AURA-EVAL-OWNER-CONTEXT-7f3a"
 	MarkerProfile       = "AURA-EVAL-OWNER-PROFILE-7f3a"
@@ -47,13 +48,15 @@ var effectArguments = map[string]string{
 }
 
 type Case struct {
-	Name  string          `yaml:"name"`
-	Kind  string          `yaml:"kind"`
-	Class principal.Class `yaml:"class"`
-	Want  []string        `yaml:"want"`
-	Tool  string          `yaml:"tool"`
-	Key   string          `yaml:"key"`
-	Text  string          `yaml:"text"`
+	Name   string          `yaml:"name"`
+	Kind   string          `yaml:"kind"`
+	Class  principal.Class `yaml:"class"`
+	Want   []string        `yaml:"want"`
+	Tool   string          `yaml:"tool"`
+	Key    string          `yaml:"key"`
+	Text   string          `yaml:"text"`
+	Turns  []string        `yaml:"turns"`
+	Rubric string          `yaml:"rubric"`
 }
 
 type Report struct {
@@ -132,6 +135,8 @@ func validateCase(c *Case) error {
 		if c.Key == "" || c.Text == "" {
 			return fmt.Errorf("case %q needs a key and a text", c.Name)
 		}
+	case KindBehavior:
+		return validateBehaviorCase(c)
 	default:
 		return fmt.Errorf("case %q has unknown kind %q", c.Name, c.Kind)
 	}
@@ -152,7 +157,12 @@ func Run(ctx context.Context, definition *auraagent.Definition, cases []Case, ca
 	if capturer == nil {
 		return Report{}, invalid("persona eval needs a turn capturer")
 	}
-	all := append(ImplicitCases(definition), cases...)
+	all := ImplicitCases(definition)
+	for i := range cases {
+		if cases[i].Kind != KindBehavior {
+			all = append(all, cases[i])
+		}
+	}
 	var abuse []eval.AbuseCase
 	if definition.Admits(principal.ClassTrusted) {
 		corpus, err := eval.AbuseCorpus()

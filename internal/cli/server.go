@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -289,6 +290,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err := host.Start(ctx); err != nil {
 				return err
 			}
+			healthChecks = append(slices.Clone(healthChecks), personaEvalCheck(cfg, agentRegistry, db))
 			probeListener, err := buildProbeListener(cfg, mapCapabilityStatuses(result.CapabilityReport), store.NewEventStore(db), store.NewSessionService(db), healthChecks...)
 			if err != nil {
 				return err
@@ -339,14 +341,14 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				"port", cfg.Server.Port,
 			)
 			sweepCtx, stopSweeps := context.WithCancel(ctx)
-			sweepsDone := make(chan struct{})
-			go func() {
-				defer close(sweepsDone)
-				runRetentionSweeps(sweepCtx, cfg, db, artifactRoot, logger)
-			}()
+			var sweeps sync.WaitGroup
+			sweeps.Go(func() { runRetentionSweeps(sweepCtx, cfg, db, artifactRoot, logger) })
+			sweeps.Go(func() {
+				runPersonaEvalSchedules(sweepCtx, result.Path, db, agentRegistry, behaviorModels{defaultModel: modelDefinition.Model, route: routeModel}, logger, wallEvalClock)
+			})
 			runErr := srv.Run(ctx)
 			stopSweeps()
-			<-sweepsDone
+			sweeps.Wait()
 			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
 			defer cancel()
 			if err := host.Shutdown(shutdownCtx); runErr == nil {

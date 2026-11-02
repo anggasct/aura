@@ -10,6 +10,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/scheduler"
 	"github.com/anggasct/aura/internal/tools/builtin"
 )
 
@@ -138,5 +139,19 @@ func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
 	if cfg.Agents != nil {
 		overrides = cfg.Agents.Definitions
 	}
-	return auraagent.Build(overrides, toolsbuiltin.DefinitionNames(), modelRoutes)
+	registry, err := auraagent.Build(overrides, toolsbuiltin.DefinitionNames(), modelRoutes)
+	if err != nil {
+		return nil, err
+	}
+	definitions := registry.Definitions()
+	for i := range definitions {
+		behavior := definitions[i].EvalBehavior
+		if behavior == nil || behavior.Schedule == "" {
+			continue
+		}
+		if _, err := scheduler.ParseExpression(behavior.Schedule); err != nil {
+			return nil, &auraagent.Error{Code: auraagent.ErrorCodeDefinitionInvalid, Detail: fmt.Sprintf("agent %q evals.behavior.schedule: %v", definitions[i].ID, err)}
+		}
+	}
+	return registry, nil
 }
