@@ -1453,7 +1453,7 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 		return fmt.Errorf("agents.definitions must be a list at line %d", definitionsNode.Line)
 	}
 	stringFields := []string{"id", "name", "description", "instructions", "soul_file", "model_route", "memory_scope", "audience", "approval_timeout", "group_context"}
-	listFields := []string{"tools", "capabilities", "principal_tools", "public_tools"}
+	listFields := []string{"tools", "capabilities", "principal_tools", "public_tools", "workflows"}
 	for index, item := range definitionsNode.Content {
 		if item.Kind != yamlv3.MappingNode {
 			return fmt.Errorf("agents.definitions entries must be mappings at line %d", item.Line)

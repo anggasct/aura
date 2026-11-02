@@ -113,6 +113,14 @@ func validatePersonaAccess(cfg *Config) error {
 				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.%s must not list a tool twice", field, list.name)}
 			}
 		}
+		for _, id := range definition.Workflows {
+			if strings.TrimSpace(id) == "" || id != strings.TrimSpace(id) {
+				return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".workflows entries must be non-empty workflow ids"}
+			}
+		}
+		if sorted := slices.Sorted(slices.Values(definition.Workflows)); len(slices.Compact(sorted)) != len(definition.Workflows) {
+			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".workflows must not list a workflow twice"}
+		}
 		if timeout := time.Duration(definition.ApprovalTimeout); timeout != 0 && (timeout < MinApprovalTimeout || timeout > MaxApprovalTimeout) {
 			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".approval_timeout must be between 1m and 24h"}
 		}
