@@ -150,6 +150,10 @@ func decodeSpec(encoded string) (*Spec, error) {
 }
 
 func (s *Store) CreateRun(ctx context.Context, spec *Spec, input *RunInput) (*RunSummary, error) {
+	return s.CreateRunFor(ctx, spec, input, nil)
+}
+
+func (s *Store) CreateRunFor(ctx context.Context, spec *Spec, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
 	encodedInput, err := json.Marshal(input)
 	if err != nil {
 		return nil, codedError(ErrorCodeSpecInvalid, "encode run input: "+err.Error())
@@ -165,16 +169,20 @@ func (s *Store) CreateRun(ctx context.Context, spec *Spec, input *RunInput) (*Ru
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
+	if origin != nil {
+		summary.Origin = *origin
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin run create: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		summary.ID, summary.DefinitionID, summary.DefinitionVersion, summary.DurableKey, summary.Goal,
 		string(encodedInput), summary.Status,
 		summary.CreatedAt.Format(time.RFC3339Nano), summary.UpdatedAt.Format(time.RFC3339Nano),
+		nullable(summary.Origin.PrincipalID), nullable(summary.Origin.PrincipalClass), nullable(summary.Origin.AgentID), nullable(summary.Origin.SessionID),
 	); err != nil {
 		return nil, fmt.Errorf("insert run: %w", err)
 	}
@@ -196,9 +204,11 @@ func (s *Store) Run(ctx context.Context, runID string) (*RunSummary, error) {
 	var summary RunSummary
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, definition_id, definition_version, COALESCE(durable_key, ''), goal, status, created_at, updated_at FROM workflow_run WHERE id = ?`,
+		`SELECT id, definition_id, definition_version, COALESCE(durable_key, ''), goal, status, created_at, updated_at,
+			COALESCE(principal_id, ''), COALESCE(principal_class, ''), COALESCE(agent_id, ''), COALESCE(origin_session_id, '') FROM workflow_run WHERE id = ?`,
 		runID,
-	).Scan(&summary.ID, &summary.DefinitionID, &summary.DefinitionVersion, &summary.DurableKey, &summary.Goal, &summary.Status, &createdAt, &updatedAt)
+	).Scan(&summary.ID, &summary.DefinitionID, &summary.DefinitionVersion, &summary.DurableKey, &summary.Goal, &summary.Status, &createdAt, &updatedAt,
+		&summary.Origin.PrincipalID, &summary.Origin.PrincipalClass, &summary.Origin.AgentID, &summary.Origin.SessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, codedError(ErrorCodeRunNotFound, "run "+runID+" is not registered")
 	}
@@ -381,4 +391,11 @@ func (s *Store) RunInputFor(ctx context.Context, runID string) (*RunInput, error
 		return nil, codedError(ErrorCodeSpecInvalid, "decode run input: "+err.Error())
 	}
 	return &input, nil
+}
+
+func nullable(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }

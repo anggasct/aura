@@ -139,6 +139,7 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 		Messages:        maps.Clone(override.Messages),
 		GroupContext:    cmp.Or(override.GroupContext, config.GroupContextPerPrincipal),
 		EvalDir:         override.Evals.Dir,
+		Workflows:       slices.Clone(override.Workflows),
 	}
 	if behavior := override.Evals.Behavior; behavior != nil {
 		definition.EvalBehavior = &EvalBehavior{

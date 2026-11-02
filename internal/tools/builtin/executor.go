@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -26,9 +27,10 @@ import (
 )
 
 type Executor struct {
-	broker  *toolbroker.Broker
-	journal *effect.Journal
-	handoff *handoffHolder
+	broker    *toolbroker.Broker
+	journal   *effect.Journal
+	handoff   *handoffHolder
+	workflows *workflowHolder
 }
 
 type effectPublisherFunc func(*store.RuntimeEvent)
@@ -56,7 +58,8 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 		logger = slog.Default()
 	}
 	handoff := &handoffHolder{}
-	adapters, err := builtinAdapters(cfg.Tools, handoff)
+	workflows := &workflowHolder{}
+	adapters, err := builtinAdapters(cfg.Tools, handoff, workflows)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +84,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{broker: broker, journal: journal, handoff: handoff}, nil
+	return &Executor{broker: broker, journal: journal, handoff: handoff, workflows: workflows}, nil
 }
 
 func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {
@@ -98,7 +101,7 @@ func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error
 	return effect.NewExecutor(journal)
 }
 
-func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder) (map[string]toolbroker.Adapter, error) {
+func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, workflows *workflowHolder) (map[string]toolbroker.Adapter, error) {
 	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -139,6 +142,7 @@ func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder) (map[string
 	adapters["web_fetch@v1"] = fetchAdapter
 	adapters["web_search@v1"] = searchAdapter
 	adapters[tools.HandoffToolName+"@"+tools.Version] = handoff.adapter
+	maps.Copy(adapters, workflows.adapters())
 	return adapters, nil
 }
 

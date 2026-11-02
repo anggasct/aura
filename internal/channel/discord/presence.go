@@ -379,13 +379,9 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 	statusID := session.statusID
 	started := session.started
 	lastTyping := session.lastTyping
-	failedNotified := session.failedNotified
 	a.presenceMu.Unlock()
 
 	if failed {
-		if failedNotified {
-			return nil
-		}
 		activity := strings.TrimSpace(text)
 		if activity == "" {
 			activity = lastText
@@ -399,6 +395,10 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 		}
 		display := failureLine(activity)
 		a.presenceMu.Lock()
+		if session.failedNotified {
+			a.presenceMu.Unlock()
+			return nil
+		}
 		session.failedNotified = true
 		session.lastText = display
 		a.presenceMu.Unlock()

@@ -133,11 +133,15 @@ func (i *Interpreter) Spec(id string) (*Spec, bool) {
 }
 
 func (i *Interpreter) Start(ctx context.Context, definitionID string, input *RunInput) (*RunSummary, error) {
+	return i.StartFor(ctx, definitionID, input, nil)
+}
+
+func (i *Interpreter) StartFor(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
 	compiled, ok := i.specs.get(definitionID)
 	if !ok {
 		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+definitionID+" is not loaded")
 	}
-	summary, err := i.store.CreateRun(ctx, compiled.spec, input)
+	summary, err := i.store.CreateRunFor(ctx, compiled.spec, input, origin)
 	if err != nil {
 		return nil, err
 	}

@@ -20,8 +20,8 @@ import (
 	"github.com/anggasct/aura/internal/durable/restate"
 	runtimeengine "github.com/anggasct/aura/internal/runtime/engine"
 	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
-	"github.com/anggasct/aura/internal/server"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/workflow"
 )
 
 const durableProbeTimeout = 5 * time.Second
@@ -165,7 +165,7 @@ func durableRuntimeForConfig(cfg *config.Config, logger *slog.Logger) (durable.R
 	return durable.NewFake(), nil
 }
 
-func buildDurableListener(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger, engine *runtimeengine.Engine) (server.Listener, error) {
+func buildDurableListener(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger, engine *runtimeengine.Engine) (*durableListener, error) {
 	durableCfg := cfg.Durable
 	interpreter, err := buildWorkflowInterpreterWithDB(ctx, cfg, db, logger)
 	if err != nil {
@@ -199,13 +199,14 @@ func buildDurableListener(ctx context.Context, cfg *config.Config, db *sql.DB, l
 		_, err := interpreter.DriveSerial(ctx, inv, tick.RunID)
 		return err
 	})
-	return &durableListener{config: durableCfg, endpoint: endpoint, logger: logger}, nil
+	return &durableListener{config: durableCfg, endpoint: endpoint, logger: logger, interpreter: interpreter}, nil
 }
 
 type durableListener struct {
-	config   *config.Durable
-	endpoint *restate.Endpoint
-	logger   *slog.Logger
+	config      *config.Durable
+	endpoint    *restate.Endpoint
+	logger      *slog.Logger
+	interpreter *workflow.Interpreter
 }
 
 func (l *durableListener) Name() string { return "durable" }

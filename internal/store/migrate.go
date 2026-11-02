@@ -42,6 +42,7 @@ var migrations = []migration{
 	{version: 24, sql: reservationEstimateSchemaSQL},
 	{version: 25, sql: handoffTargetSchemaSQL},
 	{version: 26, sql: personaEvalSchemaSQL},
+	{version: 27, sql: workflowRunOriginSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -593,6 +594,14 @@ CREATE TABLE session_handoff (
 ALTER TABLE usage_reservation ADD COLUMN principal_id TEXT;
 ALTER TABLE usage_reservation ADD COLUMN principal_class TEXT;
 CREATE INDEX usage_reservation_principal_idx ON usage_reservation(principal_id, window_day);
+`
+
+const workflowRunOriginSchemaSQL = `
+ALTER TABLE workflow_run ADD COLUMN principal_id TEXT;
+ALTER TABLE workflow_run ADD COLUMN principal_class TEXT CHECK (principal_class IS NULL OR principal_class IN ('owner','trusted','public'));
+ALTER TABLE workflow_run ADD COLUMN agent_id TEXT;
+ALTER TABLE workflow_run ADD COLUMN origin_session_id TEXT;
+CREATE INDEX workflow_run_principal_idx ON workflow_run(principal_id, created_at);
 `
 
 const personaEvalSchemaSQL = `

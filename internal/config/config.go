@@ -635,6 +635,7 @@ type AgentDefinition struct {
 	Messages        map[string]string `koanf:"messages" yaml:"messages,omitempty"`
 	GroupContext    string            `koanf:"group_context" yaml:"group_context,omitempty"`
 	Evals           AgentEvals        `koanf:"evals" yaml:"evals,omitempty"`
+	Workflows       []string          `koanf:"workflows" yaml:"workflows,omitempty"`
 }
 
 type AgentEvals struct {

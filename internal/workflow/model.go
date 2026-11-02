@@ -110,7 +110,15 @@ type ExecutionContext struct {
 	Metadata    map[string]string
 }
 
+type RunOrigin struct {
+	PrincipalID    string
+	PrincipalClass string
+	AgentID        string
+	SessionID      string
+}
+
 type RunSummary struct {
+	Origin            RunOrigin
 	ID                string
 	DefinitionID      string
 	DefinitionVersion int

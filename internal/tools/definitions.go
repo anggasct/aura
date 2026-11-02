@@ -7,11 +7,19 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"unicode/utf8"
 )
 
 const (
 	Version         = "v1"
 	HandoffToolName = "handoff_to_owner"
+
+	WorkflowListToolName   = "workflow_list"
+	WorkflowStartToolName  = "workflow_start"
+	WorkflowStatusToolName = "workflow_status"
+	WorkflowCancelToolName = "workflow_cancel"
+
+	MaxWorkflowObjectiveRunes = 2000
 )
 
 type Definition struct {
@@ -88,6 +96,30 @@ func (d *Definition) Validate(raw json.RawMessage) (json.RawMessage, error) {
 		if err := validateString(value, "url"); err != nil {
 			return nil, err
 		}
+	case WorkflowListToolName:
+		if err := rejectUnknown(value); err != nil {
+			return nil, err
+		}
+	case WorkflowStartToolName:
+		if err := rejectUnknown(value, "id", "objective"); err != nil {
+			return nil, err
+		}
+		if err := validateString(value, "id"); err != nil {
+			return nil, err
+		}
+		if objective, ok := value["objective"]; ok {
+			text, isString := objective.(string)
+			if !isString || utf8.RuneCountInString(text) > MaxWorkflowObjectiveRunes {
+				return nil, fmt.Errorf("argument %q must be a string of at most %d characters", "objective", MaxWorkflowObjectiveRunes)
+			}
+		}
+	case WorkflowStatusToolName, WorkflowCancelToolName:
+		if err := rejectUnknown(value, "run_id"); err != nil {
+			return nil, err
+		}
+		if err := validateString(value, "run_id"); err != nil {
+			return nil, err
+		}
 	case HandoffToolName:
 		if err := rejectUnknown(value, "reason"); err != nil {
 			return nil, err
@@ -120,6 +152,10 @@ func Builtins() []Definition {
 		{Name: "web_fetch", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_fetch/v1","type":"object","properties":{"url":{"type":"string","format":"uri","minLength":1}},"required":["url"],"additionalProperties":false}`), RequiredCapabilities: []string{"public-web"}},
 		{Name: "web_search", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1},"max_results":{"type":"integer","minimum":1}},"required":["query"],"additionalProperties":false}`), RequiredCapabilities: []string{"provider-search"}},
 		{Name: HandoffToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/handoff_to_owner/v1","type":"object","properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"],"additionalProperties":false}`), OptIn: true},
+		{Name: WorkflowListToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_list/v1","type":"object","properties":{},"additionalProperties":false}`), OptIn: true},
+		{Name: WorkflowStartToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_start/v1","type":"object","properties":{"id":{"type":"string","minLength":1},"objective":{"type":"string","maxLength":2000}},"required":["id"],"additionalProperties":false}`), OptIn: true},
+		{Name: WorkflowStatusToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_status/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true},
+		{Name: WorkflowCancelToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_cancel/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true},
 	}
 }
 

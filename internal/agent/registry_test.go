@@ -481,3 +481,28 @@ func TestEvalBehaviorDefaults(t *testing.T) {
 		t.Fatalf("plain behavior = %+v", plain.EvalBehavior)
 	}
 }
+
+func TestEvalDigestCoversTheWorkflowAllowlist(t *testing.T) {
+	base := Definition{ID: "lobby", Instructions: "You help visitors.", Audience: config.AudiencePublic, Tools: []string{"workflow_start"}}
+	empty := base
+	empty.Workflows = []string{}
+	if base.EvalDigest() != empty.EvalDigest() {
+		t.Fatal("an empty allowlist changed the digest of a persona without workflows")
+	}
+	allowed := base
+	allowed.Workflows = []string{"refund", "book_visit"}
+	reordered := base
+	reordered.Workflows = []string{"book_visit", "refund"}
+	if allowed.EvalDigest() == base.EvalDigest() || allowed.EvalDigest() != reordered.EvalDigest() {
+		t.Fatal("the allowlist must re-gate the persona and its order must not")
+	}
+	registry, err := Build([]config.AgentDefinition{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"book_visit"}}}, validTools, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := registry.Lookup("lobby")
+	first.Workflows[0] = "mutated"
+	if second, _ := registry.Lookup("lobby"); len(second.Workflows) != 1 || second.Workflows[0] != "book_visit" {
+		t.Fatalf("lookup shares the allowlist: %v", second.Workflows)
+	}
+}

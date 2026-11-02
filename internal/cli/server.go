@@ -26,6 +26,7 @@ import (
 	"github.com/anggasct/aura/internal/telemetry"
 	"github.com/anggasct/aura/internal/toolbroker"
 	"github.com/anggasct/aura/internal/tools/builtin"
+	"github.com/anggasct/aura/internal/workflow"
 )
 
 func newServerCmd(gf *globalFlags) *cobra.Command {
@@ -307,6 +308,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				workflowTools, err := newWorkflowToolController(durableListener.interpreter, workflow.NewStore(db), agentRegistry)
+				if err != nil {
+					return err
+				}
+				builtin.SetWorkflowController(workflowTools)
 				if err := registerBroadcastHandler(durableListener, broadcastRunner); err != nil {
 					return err
 				}

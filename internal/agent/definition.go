@@ -32,6 +32,7 @@ type Definition struct {
 	Messages        map[string]string
 	GroupContext    string
 	EvalDir         string
+	Workflows       []string
 	EvalBehavior    *EvalBehavior
 }
 
@@ -141,6 +142,9 @@ func (d *Definition) EvalDigest() string {
 		fmt.Sprintf("model_route=%q", d.ModelRoute),
 		"messages=" + strings.Join(messages, ","),
 	}, "\n")
+	if len(d.Workflows) > 0 {
+		canonical += "\nworkflows=" + sorted(d.Workflows)
+	}
 	return sha256Hex(canonical)
 }
 
@@ -173,6 +177,7 @@ func (d *Definition) clone() Definition {
 		Messages:        maps.Clone(d.Messages),
 		GroupContext:    d.GroupContext,
 		EvalDir:         d.EvalDir,
+		Workflows:       slices.Clone(d.Workflows),
 		EvalBehavior:    d.EvalBehavior.clone(),
 	}
 }
