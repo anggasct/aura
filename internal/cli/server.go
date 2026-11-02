@@ -313,6 +313,8 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				workflowTools.enableProposalCards(cfg, proposalOfferers(channelAdapters), logger)
+				go workflowTools.runProposalCards(ctx)
 				builtin.SetWorkflowController(workflowTools)
 				scheduledWorkflows.set(durableListener.interpreter)
 				if err := registerBroadcastHandler(durableListener, broadcastRunner); err != nil {
