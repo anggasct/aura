@@ -589,6 +589,9 @@ func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envel
 		return false, err
 	}
 	envelope.ConversationID = active
+	if a.handoffHeld(ctx, msg, envelope) {
+		return true, nil
+	}
 	a.rememberTarget(envelope.ConversationID, &approvalBinding{principal: envelope.PrincipalID, class: principal.ParseClass(envelope.PrincipalClass), persona: envelope.AgentID, actor: msg.Author.ID, guildID: msg.GuildID, channelID: bindingChannel})
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)

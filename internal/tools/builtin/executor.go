@@ -28,6 +28,7 @@ import (
 type Executor struct {
 	broker  *toolbroker.Broker
 	journal *effect.Journal
+	handoff *handoffHolder
 }
 
 type effectPublisherFunc func(*store.RuntimeEvent)
@@ -54,7 +55,8 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 	if logger == nil {
 		logger = slog.Default()
 	}
-	adapters, err := builtinAdapters(cfg.Tools)
+	handoff := &handoffHolder{}
+	adapters, err := builtinAdapters(cfg.Tools, handoff)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +81,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{broker: broker, journal: journal}, nil
+	return &Executor{broker: broker, journal: journal, handoff: handoff}, nil
 }
 
 func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {
@@ -96,7 +98,7 @@ func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error
 	return effect.NewExecutor(journal)
 }
 
-func builtinAdapters(toolsCfg *config.Tools) (map[string]toolbroker.Adapter, error) {
+func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder) (map[string]toolbroker.Adapter, error) {
 	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -136,6 +138,7 @@ func builtinAdapters(toolsCfg *config.Tools) (map[string]toolbroker.Adapter, err
 	adapters["exec@v1"] = execAdapter
 	adapters["web_fetch@v1"] = fetchAdapter
 	adapters["web_search@v1"] = searchAdapter
+	adapters[tools.HandoffToolName+"@"+tools.Version] = handoff.adapter
 	return adapters, nil
 }
 
@@ -192,6 +195,7 @@ func (e *Executor) Definitions() []runtimeadk.BuiltinToolDefinition {
 			Description:          "Aura built-in " + definition.Name + " tool",
 			Schema:               definition.Schema,
 			RequiredCapabilities: definition.RequiredCapabilities,
+			OptIn:                definition.OptIn,
 		})
 	}
 	return result

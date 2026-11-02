@@ -19,7 +19,7 @@ import (
 func TestWiringRegistersEveryBuiltinAdapter(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tools.Workspace = t.TempDir()
-	adapters, err := builtinAdapters(cfg.Tools)
+	adapters, err := builtinAdapters(cfg.Tools, &handoffHolder{})
 	if err != nil {
 		t.Fatalf("builtinAdapters: %v", err)
 	}

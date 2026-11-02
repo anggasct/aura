@@ -38,6 +38,7 @@ type ADKExecutor struct {
 	events            runtimeengine.EventStore
 	broker            runtime.ToolBroker
 	tools             []tool.Tool
+	optIn             map[string]bool
 	logger            *slog.Logger
 	builtins          BuiltinToolExecutor
 	toolSeq           toolSequence
@@ -161,6 +162,12 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 		}
 		e.builtins = executor
 		e.tools = tools
+		e.optIn = map[string]bool{}
+		for i := range definitions {
+			if definitions[i].OptIn {
+				e.optIn[definitions[i].Name] = true
+			}
+		}
 		return nil
 	}
 }
@@ -562,12 +569,13 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 			}
 		}
 	}
-	if len(allowed) == 0 {
-		return x.tools
-	}
+	listed := len(allowed) > 0
 	filtered := make([]tool.Tool, 0, len(x.tools))
 	for _, t := range x.tools {
-		if slices.Contains(allowed, t.Name()) {
+		if x.optIn[t.Name()] && (!listed || class == "" || class == principal.ClassOwner) {
+			continue
+		}
+		if !listed || slices.Contains(allowed, t.Name()) {
 			filtered = append(filtered, t)
 		}
 	}

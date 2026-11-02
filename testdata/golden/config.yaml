@@ -177,6 +177,7 @@ access:
   retention:
     trusted: 4320h0m0s
     public: 720h0m0s
+  handoff_timeout: 24h0m0s
 sync:
   enabled: false
   remote: ""

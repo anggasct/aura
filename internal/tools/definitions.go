@@ -9,7 +9,10 @@ import (
 	"slices"
 )
 
-const Version = "v1"
+const (
+	Version         = "v1"
+	HandoffToolName = "handoff_to_owner"
+)
 
 type Definition struct {
 	Name                 string
@@ -18,6 +21,7 @@ type Definition struct {
 	RequiredCapabilities []string
 	RequiresApproval     bool
 	Effectful            bool
+	OptIn                bool
 	Validator            func(raw json.RawMessage) (json.RawMessage, error)
 }
 
@@ -84,6 +88,13 @@ func (d *Definition) Validate(raw json.RawMessage) (json.RawMessage, error) {
 		if err := validateString(value, "url"); err != nil {
 			return nil, err
 		}
+	case HandoffToolName:
+		if err := rejectUnknown(value, "reason"); err != nil {
+			return nil, err
+		}
+		if err := validateString(value, "reason"); err != nil {
+			return nil, err
+		}
 	case "web_search":
 		if err := rejectUnknown(value, "query", "max_results"); err != nil {
 			return nil, err
@@ -108,6 +119,7 @@ func Builtins() []Definition {
 		{Name: "list_dir", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/list_dir/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"recursive":{"type":"boolean"}},"required":["path"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-read"}},
 		{Name: "web_fetch", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_fetch/v1","type":"object","properties":{"url":{"type":"string","format":"uri","minLength":1}},"required":["url"],"additionalProperties":false}`), RequiredCapabilities: []string{"public-web"}},
 		{Name: "web_search", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1},"max_results":{"type":"integer","minimum":1}},"required":["query"],"additionalProperties":false}`), RequiredCapabilities: []string{"provider-search"}},
+		{Name: HandoffToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/handoff_to_owner/v1","type":"object","properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"],"additionalProperties":false}`), OptIn: true},
 	}
 }
 
