@@ -187,6 +187,93 @@ func TestRunForcedExitOnDoubleSignal(t *testing.T) {
 	}
 }
 
+func TestRunSignalCancelledContextDrainsOnTheSameSignal(t *testing.T) {
+	started := make(chan struct{})
+	exitCh := make(chan int, 1)
+	buf := &syncBuffer{}
+	srv := New(Options{Logger: slog.New(slog.NewTextHandler(buf, nil)), ShutdownTimeout: 5 * time.Second})
+	srv.exitFunc = func(code int) { exitCh <- code }
+	if err := srv.Add(slowDrainListener("test", started, 300*time.Millisecond)); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- srv.Run(ctx) }()
+	<-started
+
+	cancel(&SignalCause{Signal: syscall.SIGTERM})
+	waitForLog(t, buf, "shutdown requested")
+	signalSelf(t, syscall.SIGTERM)
+	waitForLog(t, buf, "shutdown signal already handled")
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("Run returned error after a graceful drain: %v", err)
+		}
+	case code := <-exitCh:
+		t.Fatalf("the signal that cancelled the context forced exit %d instead of draining", code)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after the drain")
+	}
+}
+
+func TestRunSignalCancelledContextForcesExitOnASecondSignal(t *testing.T) {
+	started := make(chan struct{})
+	exitCh := make(chan int, 1)
+	buf := &syncBuffer{}
+	srv := New(Options{Logger: slog.New(slog.NewTextHandler(buf, nil)), ShutdownTimeout: 5 * time.Second})
+	srv.exitFunc = func(code int) { exitCh <- code }
+	if err := srv.Add(slowDrainListener("test", started, 2*time.Second)); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	go func() { _ = srv.Run(ctx) }()
+	<-started
+
+	cancel(&SignalCause{Signal: syscall.SIGTERM})
+	waitForLog(t, buf, "shutdown requested")
+	signalSelf(t, syscall.SIGTERM)
+	waitForLog(t, buf, "shutdown signal already handled")
+	signalSelf(t, syscall.SIGTERM)
+
+	select {
+	case code := <-exitCh:
+		if code != 143 {
+			t.Errorf("forced exit code = %d, want 143", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a second SIGTERM did not force exit")
+	}
+}
+
+func TestRunPlainCancelledContextStillForcesExitOnASignal(t *testing.T) {
+	started := make(chan struct{})
+	exitCh := make(chan int, 1)
+	buf := &syncBuffer{}
+	srv := New(Options{Logger: slog.New(slog.NewTextHandler(buf, nil)), ShutdownTimeout: 5 * time.Second})
+	srv.exitFunc = func(code int) { exitCh <- code }
+	if err := srv.Add(slowDrainListener("test", started, 2*time.Second)); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = srv.Run(ctx) }()
+	<-started
+
+	cancel()
+	waitForLog(t, buf, "shutdown requested")
+	signalSelf(t, syscall.SIGTERM)
+
+	select {
+	case code := <-exitCh:
+		if code != 143 {
+			t.Errorf("forced exit code = %d, want 143", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a signal during a non-signal shutdown did not force exit")
+	}
+}
+
 func TestRunForcedExitSIGINT(t *testing.T) {
 	started := make(chan struct{})
 	exitCh := make(chan int, 1)
@@ -283,7 +370,7 @@ func TestForceExitWatcherExitsOnDone(t *testing.T) {
 	done := make(chan struct{})
 	close(done)
 
-	go srv.forceExitOnSecondSignal(t.Context(), sigCh, done)
+	go srv.forceExitOnSecondSignal(t.Context(), sigCh, done, nil)
 	select {
 	case <-exited:
 		t.Error("exitFunc called after done closed — watcher leaked")
