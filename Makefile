@@ -19,7 +19,7 @@ RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot clean
+.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -136,6 +136,9 @@ SYFT_VERSION       ?= v1.42.3
 release-snapshot:
 	$(GO) install github.com/anchore/syft/cmd/syft@$(SYFT_VERSION)
 	$(GO) run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --snapshot --clean --skip=sign
+
+image-check:
+	scripts/check-image.sh $$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' dist/metadata.json | head -1 | xargs -I{} docker images --format '{{.Repository}}:{{.Tag}}' --filter 'reference=ghcr.io/anggasct/aura:{}-*')
 
 clean:
 	rm -f $(BINARY)
