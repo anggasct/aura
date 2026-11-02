@@ -746,7 +746,8 @@ func TestDurableCancelRunSignalsCounterpart(t *testing.T) {
 		case signalled <- payload:
 		default:
 		}
-		return nil
+		<-ctx.Done()
+		return ctx.Err()
 	})
 	ref, err := runtime.Start(t.Context(), durable.StartRequest{Handler: "test-cancel", Key: "child/ch-cancel", Payload: []byte(`{}`)})
 	if err != nil {
