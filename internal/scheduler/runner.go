@@ -26,6 +26,8 @@ type TurnRequest struct {
 	Origin         string
 	Prompt         string
 	IdempotencyKey string
+	WorkflowID     string
+	WorkflowInput  string
 }
 
 type TurnResult struct {
@@ -274,6 +276,8 @@ func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, 
 			Origin:         "internal",
 			Prompt:         job.Prompt,
 			IdempotencyKey: turnKey(job.ID, fire),
+			WorkflowID:     job.WorkflowID,
+			WorkflowInput:  job.WorkflowInput,
 		})
 		if err != nil {
 			if code, ok := CodeOf(err); ok && code == ErrorCodeRuntimeOverloaded {

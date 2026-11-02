@@ -83,8 +83,8 @@ func (s *Store) SaveDefinition(ctx context.Context, spec *Spec) error {
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := conn.ExecContext(ctx,
-			`INSERT INTO workflow_definition (id, version, goal, source, spec_json, spec_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			spec.ID, spec.Version, spec.Goal, string(spec.Source), string(encoded), digest, now,
+			`INSERT INTO workflow_definition (id, version, goal, source, spec_json, spec_sha256, created_at, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			spec.ID, spec.Version, spec.Goal, string(spec.Source), string(encoded), digest, now, nullable(spec.Name),
 		); err != nil {
 			if isConstraintUnique(err) {
 				return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("definition %s version %d already exists with different content", spec.ID, spec.Version))
@@ -154,6 +154,10 @@ func (s *Store) CreateRun(ctx context.Context, spec *Spec, input *RunInput) (*Ru
 }
 
 func (s *Store) CreateRunFor(ctx context.Context, spec *Spec, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
+	return s.createRun(ctx, spec, input, origin, newID("dur"))
+}
+
+func (s *Store) createRun(ctx context.Context, spec *Spec, input *RunInput, origin *RunOrigin, durableKey string) (*RunSummary, error) {
 	encodedInput, err := json.Marshal(input)
 	if err != nil {
 		return nil, codedError(ErrorCodeSpecInvalid, "encode run input: "+err.Error())
@@ -163,7 +167,7 @@ func (s *Store) CreateRunFor(ctx context.Context, spec *Spec, input *RunInput, o
 		ID:                newID("run"),
 		DefinitionID:      spec.ID,
 		DefinitionVersion: spec.Version,
-		DurableKey:        newID("dur"),
+		DurableKey:        durableKey,
 		Goal:              spec.Goal,
 		Status:            RunQueued,
 		CreatedAt:         now,
@@ -471,4 +475,55 @@ func (s *Store) runStatus(ctx context.Context, runID string) (string, error) {
 		return "", fmt.Errorf("read run status: %w", err)
 	}
 	return status, nil
+}
+
+func (s *Store) LatestDefinition(ctx context.Context, id string) (*Spec, error) {
+	var encoded string
+	err := s.db.QueryRowContext(ctx, `SELECT spec_json FROM workflow_definition WHERE id = ? ORDER BY version DESC LIMIT 1`, id).Scan(&encoded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+id+" is not registered")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read latest definition: %w", err)
+	}
+	return decodeSpec(encoded)
+}
+
+func (s *Store) Routines(ctx context.Context) ([]*Spec, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT d.spec_json FROM workflow_definition d
+		WHERE d.name IS NOT NULL AND d.source = ? AND d.version = (SELECT MAX(version) FROM workflow_definition WHERE id = d.id)
+		ORDER BY d.id`, string(SourceGenerated))
+	if err != nil {
+		return nil, fmt.Errorf("list routines: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var routines []*Spec
+	for rows.Next() {
+		var encoded string
+		if err := rows.Scan(&encoded); err != nil {
+			return nil, fmt.Errorf("scan routine: %w", err)
+		}
+		spec, err := decodeSpec(encoded)
+		if err != nil {
+			return nil, err
+		}
+		routines = append(routines, spec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate routines: %w", err)
+	}
+	return routines, nil
+}
+
+func (s *Store) RunByDurableKey(ctx context.Context, durableKey string) (*RunSummary, bool, error) {
+	var runID string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM workflow_run WHERE durable_key = ?`, durableKey).Scan(&runID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read run by durable key: %w", err)
+	}
+	run, err := s.Run(ctx, runID)
+	return run, err == nil, err
 }

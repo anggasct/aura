@@ -39,6 +39,11 @@ func (s *scriptedWorkflows) Propose(_ context.Context, caller *WorkflowCaller, s
 	return WorkflowProposal{ProposalID: "prop_1", Digest: "abc", Plan: "Plan: x"}, s.err
 }
 
+func (s *scriptedWorkflows) SaveRoutine(_ context.Context, caller *WorkflowCaller, runID, name string) (WorkflowRoutine, error) {
+	s.record(caller, "save "+runID+" "+name)
+	return WorkflowRoutine{ID: "routine_weekly", Version: 2}, s.err
+}
+
 func (s *scriptedWorkflows) Status(_ context.Context, caller *WorkflowCaller, runID string) (WorkflowRunState, error) {
 	s.record(caller, "status "+runID)
 	return WorkflowRunState{RunID: runID, Status: "running", Steps: []WorkflowStepState{{ID: "hold", Status: "running"}}}, s.err
@@ -117,6 +122,16 @@ func TestWorkflowProposeAdapterPassesTheSpecAndMapsRejections(t *testing.T) {
 	}
 }
 
+func TestWorkflowSaveRoutineAdapterPassesRunAndName(t *testing.T) {
+	holder := &workflowHolder{}
+	controller := &scriptedWorkflows{}
+	(&Executor{workflows: holder}).SetWorkflowController(controller)
+	result, err := runWorkflowTool(t, holder, workflowRequest(principal.ClassOwner, tools.WorkflowSaveRoutineToolName, `{"run_id":"run_9","name":"weekly report"}`))
+	if err != nil || string(result.Output) != `{"id":"routine_weekly","version":2}` || controller.calls[0] != "save run_9 weekly report" {
+		t.Fatalf("save routine = %s, %v, calls %v", result.Output, err, controller.calls)
+	}
+}
+
 func TestWorkflowAdaptersMapControllerErrors(t *testing.T) {
 	holder := &workflowHolder{}
 	controller := &scriptedWorkflows{}
@@ -139,7 +154,7 @@ func TestWorkflowAdaptersMapControllerErrors(t *testing.T) {
 }
 
 func TestWorkflowDefinitionsAreReadTierOptInAndStrict(t *testing.T) {
-	for _, name := range []string{tools.WorkflowListToolName, tools.WorkflowStartToolName, tools.WorkflowStatusToolName, tools.WorkflowCancelToolName, tools.WorkflowProposeToolName} {
+	for _, name := range []string{tools.WorkflowListToolName, tools.WorkflowStartToolName, tools.WorkflowStatusToolName, tools.WorkflowCancelToolName, tools.WorkflowProposeToolName, tools.WorkflowSaveRoutineToolName} {
 		definition := tools.DefinitionsByKey()[name+"@"+tools.Version]
 		if definition.Effectful || definition.RequiresApproval || !definition.OptIn || tools.EffectTier(name) {
 			t.Fatalf("%s = %+v, want read tier and opt-in", name, definition)
@@ -155,6 +170,10 @@ func TestWorkflowDefinitionsAreReadTierOptInAndStrict(t *testing.T) {
 		},
 		tools.WorkflowStatusToolName: {`{"run_id":"run_1"}`: true, `{}`: false, `{"run_id":"r","id":"x"}`: false},
 		tools.WorkflowCancelToolName: {`{"run_id":"run_1"}`: true, `{"run_id":""}`: false},
+		tools.WorkflowSaveRoutineToolName: {
+			`{"run_id":"run_1","name":"weekly report"}`: true,
+			`{"run_id":"run_1"}`:                        false, `{"name":"x"}`: false, `{"run_id":"r","name":"x","version":2}`: false,
+		},
 		tools.WorkflowProposeToolName: {
 			`{"spec":{"goal":"g","steps":[{"id":"a"}]}}`: true,
 			`{}`: false, `{"spec":{}}`: false, `{"spec":"text"}`: false, `{"spec":{"goal":"g"},"run":true}`: false,

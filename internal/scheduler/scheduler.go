@@ -49,6 +49,8 @@ type Job struct {
 	Version             int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	WorkflowID          string
+	WorkflowInput       string
 }
 
 type JobSpec struct {
@@ -60,6 +62,8 @@ type JobSpec struct {
 	OriginDestination   string
 	OverlapPolicy       string
 	CatchUpGraceSeconds int64
+	WorkflowID          string
+	WorkflowInput       string
 }
 
 type JobEdit struct {
@@ -125,7 +129,14 @@ func validateJobSpec(spec *JobSpec) error {
 	if _, err := time.LoadLocation(spec.Timezone); err != nil {
 		return Errorf(ErrorCodeTimezoneInvalid, "timezone is not a valid IANA name")
 	}
-	if strings.TrimSpace(spec.Prompt) == "" || len(spec.Prompt) > maxPromptBytes {
+	if spec.WorkflowID != "" {
+		if spec.Prompt != "" {
+			return Errorf(ErrorCodeInvalidArgument, "a job runs either a prompt or a workflow, not both")
+		}
+		if len(spec.WorkflowInput) > maxPromptBytes {
+			return Errorf(ErrorCodeInvalidArgument, "job workflow input is not within bounds")
+		}
+	} else if strings.TrimSpace(spec.Prompt) == "" || len(spec.Prompt) > maxPromptBytes {
 		return Errorf(ErrorCodeInvalidArgument, "job prompt is not within bounds")
 	}
 	if strings.TrimSpace(spec.OriginChannel) == "" || len([]rune(spec.OriginChannel)) > maxOriginRunes {
@@ -160,6 +171,7 @@ func (s *Service) Create(ctx context.Context, spec *JobSpec) (Job, error) {
 		Prompt: spec.Prompt, OriginChannel: spec.OriginChannel, OriginDestination: spec.OriginDestination,
 		OverlapPolicy: spec.OverlapPolicy, CatchUpGraceSeconds: spec.CatchUpGraceSeconds,
 		State: JobActive, Version: 1, CreatedAt: now, UpdatedAt: now,
+		WorkflowID: spec.WorkflowID, WorkflowInput: spec.WorkflowInput,
 	}
 	if err := s.jobs.InsertJob(ctx, job); err != nil {
 		return Job{}, err
@@ -188,19 +200,20 @@ func (s *Service) Edit(ctx context.Context, id string, edit *JobEdit) (Job, erro
 	if edit == nil {
 		return Job{}, Errorf(ErrorCodeInvalidArgument, "job edit must not be nil")
 	}
-	if err := validateJobSpec(&JobSpec{
-		Name: edit.Name, CronExpression: edit.CronExpression, Timezone: edit.Timezone,
-		Prompt: edit.Prompt, OriginChannel: edit.OriginChannel, OriginDestination: edit.OriginDestination,
-		OverlapPolicy: edit.OverlapPolicy, CatchUpGraceSeconds: edit.CatchUpGraceSeconds,
-	}); err != nil {
-		return Job{}, err
-	}
 	current, found, err := s.jobs.Job(ctx, id)
 	if err != nil {
 		return Job{}, err
 	}
 	if !found {
 		return Job{}, Errorf(ErrorCodeJobNotFound, "schedule job not found")
+	}
+	if err := validateJobSpec(&JobSpec{
+		Name: edit.Name, CronExpression: edit.CronExpression, Timezone: edit.Timezone,
+		Prompt: edit.Prompt, OriginChannel: edit.OriginChannel, OriginDestination: edit.OriginDestination,
+		OverlapPolicy: edit.OverlapPolicy, CatchUpGraceSeconds: edit.CatchUpGraceSeconds,
+		WorkflowID: current.WorkflowID, WorkflowInput: current.WorkflowInput,
+	}); err != nil {
+		return Job{}, err
 	}
 	updated, err := s.jobs.EditJob(ctx, id, &JobEdit{
 		Name: edit.Name, CronExpression: edit.CronExpression, Timezone: edit.Timezone,

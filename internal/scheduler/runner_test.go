@@ -567,3 +567,45 @@ func TestRunner_RejectsBadWiring(t *testing.T) {
 		t.Error("nil context accepted")
 	}
 }
+
+func TestRunner_WorkflowJobsPassTheirTargetInsteadOfAPrompt(t *testing.T) {
+	fixture := newScheduleFixture(t, &JobSpec{
+		Name: "weekly", CronExpression: "* * * * *", Timezone: "UTC",
+		WorkflowID: "routine_weekly_report", WorkflowInput: `{"objective":"last week"}`,
+		OriginChannel: "discord", OriginDestination: "default",
+		OverlapPolicy: OverlapSkip, CatchUpGraceSeconds: 900,
+	}, nil)
+	startScheduleRun(t, fixture, fixture.job.ID)
+	waitOccurrenceState(t, fixture, fixture.job.ID, OccurrenceCompleted)
+	if fixture.turns.callCount() != 1 {
+		t.Fatalf("turn calls = %d, want 1", fixture.turns.callCount())
+	}
+	call := fixture.turns.calls[0]
+	if call.WorkflowID != "routine_weekly_report" || call.WorkflowInput != `{"objective":"last week"}` || call.Prompt != "" || call.IdempotencyKey == "" {
+		t.Errorf("fire request = %+v", call)
+	}
+}
+
+func TestJobSpecsNeedExactlyOneTarget(t *testing.T) {
+	service, err := NewService(newFakeJobStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := JobSpec{Name: "n", CronExpression: "* * * * *", Timezone: "UTC", OriginChannel: "discord", OriginDestination: "default", OverlapPolicy: OverlapSkip}
+	for label, mutate := range map[string]func(*JobSpec){
+		"neither":            func(*JobSpec) {},
+		"both":               func(s *JobSpec) { s.Prompt, s.WorkflowID = "p", "w" },
+		"oversized workflow": func(s *JobSpec) { s.WorkflowID, s.WorkflowInput = "w", string(make([]byte, maxPromptBytes+1)) },
+	} {
+		spec := base
+		mutate(&spec)
+		if _, err := service.Create(t.Context(), &spec); err == nil {
+			t.Errorf("%s: Create accepted %+v", label, spec)
+		}
+	}
+	spec := base
+	spec.WorkflowID = "routine_x"
+	if _, err := service.Create(t.Context(), &spec); err != nil {
+		t.Fatalf("workflow job: %v", err)
+	}
+}

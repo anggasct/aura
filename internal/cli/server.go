@@ -262,7 +262,8 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			scheduleRunner, err := buildScheduleRunner(db, logger, runtimeEngine, cronBroadcaster, time.Duration(cfg.Scheduler.OccurrenceRetention), scheduleRecorderObserver(scheduleRecorder))
+			scheduledWorkflows := &scheduleWorkflows{}
+			scheduleRunner, err := buildScheduleRunner(db, logger, runtimeEngine, cronBroadcaster, time.Duration(cfg.Scheduler.OccurrenceRetention), scheduleRecorderObserver(scheduleRecorder), scheduledWorkflows)
 			if err != nil {
 				return err
 			}
@@ -313,6 +314,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				builtin.SetWorkflowController(workflowTools)
+				scheduledWorkflows.set(durableListener.interpreter)
 				if err := registerBroadcastHandler(durableListener, broadcastRunner); err != nil {
 					return err
 				}

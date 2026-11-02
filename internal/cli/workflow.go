@@ -237,7 +237,11 @@ func buildWorkflowInterpreterWithDB(ctx context.Context, cfg *config.Config, db 
 		return nil, err
 	}
 	interpreter := workflow.NewInterpreter(workflow.NewStore(db), runtime, options)
-	if err := interpreter.LoadAll(ctx, specs, deps); err != nil {
+	routines, err := workflow.NewStore(db).Routines(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := interpreter.LoadAll(ctx, append(specs, routines...), deps); err != nil {
 		return nil, err
 	}
 	return interpreter, nil

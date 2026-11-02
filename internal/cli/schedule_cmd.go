@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/scheduler"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/workflow"
 )
 
 func newScheduleCmd(gf *globalFlags) *cobra.Command {
@@ -39,7 +42,7 @@ func scheduleService(db *sql.DB) (*scheduler.Service, error) {
 }
 
 func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
-	var name, schedule, timezone, channel, destination, prompt, overlap string
+	var name, schedule, timezone, channel, destination, prompt, overlap, workflowID, workflowInput string
 	var grace time.Duration
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -61,10 +64,20 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 					{"schedule", schedule},
 					{"channel", channel},
 					{"destination", destination},
-					{"prompt", prompt},
 				} {
 					if flag.value == "" {
 						return &usageError{fmt.Errorf("%s requires --%s", cmd.CommandPath(), flag.name)}
+					}
+				}
+				if (prompt == "") == (workflowID == "") {
+					return &usageError{fmt.Errorf("%s requires exactly one of --prompt or --workflow", cmd.CommandPath())}
+				}
+				if workflowInput != "" && workflowID == "" {
+					return &usageError{fmt.Errorf("%s --input requires --workflow", cmd.CommandPath())}
+				}
+				if workflowID != "" {
+					if err := checkScheduledWorkflow(ctx, cfg, db, workflowID, workflowInput); err != nil {
+						return err
 					}
 				}
 				service, err := scheduleService(db)
@@ -75,6 +88,7 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 					Name: name, CronExpression: schedule, Timezone: timezone,
 					Prompt: prompt, OriginChannel: channel, OriginDestination: destination,
 					OverlapPolicy: overlap, CatchUpGraceSeconds: graceSeconds,
+					WorkflowID: workflowID, WorkflowInput: workflowInput,
 				})
 				if err != nil {
 					return err
@@ -93,6 +107,8 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 	cmd.Flags().StringVar(&channel, "channel", "", "origin channel source")
 	cmd.Flags().StringVar(&destination, "destination", "", "origin destination alias")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "turn prompt")
+	cmd.Flags().StringVar(&workflowID, "workflow", "", "workflow or routine id to start instead of a prompt")
+	cmd.Flags().StringVar(&workflowInput, "input", "", `workflow input as JSON, for example {"objective":"..."}`)
 	cmd.Flags().StringVar(&overlap, "overlap", "skip", "overlap policy: skip or queue_one")
 	cmd.Flags().DurationVar(&grace, "grace", 0, "catch-up grace (default from config)")
 	return cmd
@@ -288,4 +304,30 @@ func newScheduleRunNowCmd(gf *globalFlags) *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func checkScheduledWorkflow(ctx context.Context, cfg *config.Config, db *sql.DB, id, input string) error {
+	if input != "" {
+		decoder := json.NewDecoder(strings.NewReader(input))
+		decoder.DisallowUnknownFields()
+		var parsed struct {
+			Objective string `json:"objective"`
+		}
+		if err := decoder.Decode(&parsed); err != nil {
+			return &usageError{fmt.Errorf("--input must be a JSON object with an optional objective: %w", err)}
+		}
+	}
+	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(cfg))
+	if err != nil {
+		return err
+	}
+	for _, spec := range specs {
+		if spec.ID == id {
+			return nil
+		}
+	}
+	if _, err := workflow.NewStore(db).LatestDefinition(ctx, id); err != nil {
+		return &usageError{fmt.Errorf("workflow %q is neither a definition nor a saved routine", id)}
+	}
+	return nil
 }

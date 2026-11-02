@@ -14,11 +14,12 @@ const (
 	Version         = "v1"
 	HandoffToolName = "handoff_to_owner"
 
-	WorkflowListToolName    = "workflow_list"
-	WorkflowStartToolName   = "workflow_start"
-	WorkflowStatusToolName  = "workflow_status"
-	WorkflowCancelToolName  = "workflow_cancel"
-	WorkflowProposeToolName = "workflow_propose"
+	WorkflowListToolName        = "workflow_list"
+	WorkflowStartToolName       = "workflow_start"
+	WorkflowStatusToolName      = "workflow_status"
+	WorkflowCancelToolName      = "workflow_cancel"
+	WorkflowProposeToolName     = "workflow_propose"
+	WorkflowSaveRoutineToolName = "workflow_save_routine"
 
 	MaxWorkflowObjectiveRunes = 2000
 )
@@ -114,6 +115,16 @@ func (d *Definition) Validate(raw json.RawMessage) (json.RawMessage, error) {
 				return nil, fmt.Errorf("argument %q must be a string of at most %d characters", "objective", MaxWorkflowObjectiveRunes)
 			}
 		}
+	case WorkflowSaveRoutineToolName:
+		if err := rejectUnknown(value, "run_id", "name"); err != nil {
+			return nil, err
+		}
+		if err := validateString(value, "run_id"); err != nil {
+			return nil, err
+		}
+		if err := validateString(value, "name"); err != nil {
+			return nil, err
+		}
 	case WorkflowProposeToolName:
 		if err := rejectUnknown(value, "spec"); err != nil {
 			return nil, err
@@ -164,6 +175,7 @@ func Builtins() []Definition {
 		{Name: WorkflowStartToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_start/v1","type":"object","properties":{"id":{"type":"string","minLength":1},"objective":{"type":"string","maxLength":2000}},"required":["id"],"additionalProperties":false}`), OptIn: true},
 		{Name: WorkflowStatusToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_status/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true},
 		{Name: WorkflowProposeToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_propose/v1","type":"object","properties":{"spec":{"type":"object","properties":{"goal":{"type":"string","minLength":1},"steps":{"type":"array","minItems":1}},"required":["goal","steps"]}},"required":["spec"],"additionalProperties":false}`), OptIn: true},
+		{Name: WorkflowSaveRoutineToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_save_routine/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1,"maxLength":64}},"required":["run_id","name"],"additionalProperties":false}`), OptIn: true},
 		{Name: WorkflowCancelToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_cancel/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true},
 	}
 }

@@ -77,7 +77,7 @@ func (r *definitionRegistry) list() []*Spec {
 	defer r.mu.Unlock()
 	specs := make([]*Spec, 0, len(r.specs))
 	for _, compiled := range r.specs {
-		if compiled.spec.Source != SourceGenerated {
+		if compiled.spec.Source != SourceGenerated || compiled.spec.Name != "" {
 			specs = append(specs, compiled.spec)
 		}
 	}
@@ -122,10 +122,13 @@ func (i *Interpreter) compiledFor(ctx context.Context, id string, version int) (
 	if present && (version == 0 || cached.spec.Version == version) {
 		return cached, true
 	}
+	var spec *Spec
+	var err error
 	if version == 0 {
-		return nil, false
+		spec, err = i.store.LatestDefinition(ctx, id)
+	} else {
+		spec, err = i.store.Definition(ctx, id, version)
 	}
-	spec, err := i.store.Definition(ctx, id, version)
 	if err != nil {
 		return nil, false
 	}
@@ -196,11 +199,26 @@ func (i *Interpreter) Start(ctx context.Context, definitionID string, input *Run
 }
 
 func (i *Interpreter) StartFor(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
-	compiled, ok := i.specs.get(definitionID)
+	return i.start(ctx, definitionID, input, origin, newID("dur"))
+}
+
+func (i *Interpreter) StartKeyed(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin, durableKey string) (*RunSummary, error) {
+	existing, found, err := i.store.RunByDurableKey(ctx, durableKey)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return existing, nil
+	}
+	return i.start(ctx, definitionID, input, origin, durableKey)
+}
+
+func (i *Interpreter) start(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin, durableKey string) (*RunSummary, error) {
+	compiled, ok := i.compiledFor(ctx, definitionID, 0)
 	if !ok {
 		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+definitionID+" is not loaded")
 	}
-	summary, err := i.store.CreateRunFor(ctx, compiled.spec, input, origin)
+	summary, err := i.store.createRun(ctx, compiled.spec, input, origin, durableKey)
 	if err != nil {
 		return nil, err
 	}

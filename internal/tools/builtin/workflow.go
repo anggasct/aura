@@ -60,7 +60,13 @@ type WorkflowRejection struct {
 
 func (r *WorkflowRejection) Error() string { return r.Code + ": " + r.Detail }
 
+type WorkflowRoutine struct {
+	ID      string `json:"id"`
+	Version int    `json:"version"`
+}
+
 type WorkflowController interface {
+	SaveRoutine(ctx context.Context, caller *WorkflowCaller, runID, name string) (WorkflowRoutine, error)
 	Propose(ctx context.Context, caller *WorkflowCaller, spec json.RawMessage) (WorkflowProposal, error)
 	List(ctx context.Context, caller *WorkflowCaller) ([]WorkflowInfo, error)
 	Start(ctx context.Context, caller *WorkflowCaller, id, objective string) (WorkflowRunState, error)
@@ -97,6 +103,9 @@ func (h *workflowHolder) adapters() map[string]toolbroker.Adapter {
 		tools.WorkflowProposeToolName + "@" + tools.Version: h.adapter(func(ctx context.Context, controller WorkflowController, caller *WorkflowCaller, args workflowArgs) (any, error) {
 			return controller.Propose(ctx, caller, args.Spec)
 		}),
+		tools.WorkflowSaveRoutineToolName + "@" + tools.Version: h.adapter(func(ctx context.Context, controller WorkflowController, caller *WorkflowCaller, args workflowArgs) (any, error) {
+			return controller.SaveRoutine(ctx, caller, args.RunID, args.Name)
+		}),
 		tools.WorkflowCancelToolName + "@" + tools.Version: h.adapter(func(ctx context.Context, controller WorkflowController, caller *WorkflowCaller, args workflowArgs) (any, error) {
 			return controller.Cancel(ctx, caller, args.RunID)
 		}),
@@ -108,6 +117,7 @@ type workflowArgs struct {
 	Objective string          `json:"objective"`
 	RunID     string          `json:"run_id"`
 	Spec      json.RawMessage `json:"spec"`
+	Name      string          `json:"name"`
 }
 
 type workflowCall func(ctx context.Context, controller WorkflowController, caller *WorkflowCaller, args workflowArgs) (any, error)
