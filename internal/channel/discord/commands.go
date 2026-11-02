@@ -20,7 +20,7 @@ func CommandBinding() command.Binding {
 	return command.Binding{
 		Channel: principal.ChannelDiscord,
 		Style:   command.StyleMessenger,
-		Names:   []string{"help", "status", "session", "new", "cancel", "skill", "skill-create"},
+		Names:   []string{"help", "forgetme", "status", "session", "new", "cancel", "skill", "skill-create"},
 	}
 }
 
@@ -95,6 +95,10 @@ func (a *Adapter) conversationScope(ctx context.Context, envelope *runtimeingres
 }
 
 func (a *Adapter) runCommand(ctx context.Context, msg *messagePayload, inv *command.Invocation, envelope *runtimeingress.IngressEnvelope) (bool, error) {
+	if inv.Name == command.NameForgetMe {
+		a.forgetMe(ctx, msg, inv, envelope)
+		return true, nil
+	}
 	scope, err := a.conversationScope(ctx, envelope, msg)
 	if err != nil {
 		return false, err

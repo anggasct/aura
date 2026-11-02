@@ -188,3 +188,33 @@ func TestLoad_AccessBudgets(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_AccessRetention(t *testing.T) {
+	res, err := Load(writeAccessConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := res.Config.Access.Retention; time.Duration(got.Trusted) != 4320*time.Hour || time.Duration(got.Public) != 720*time.Hour {
+		t.Fatalf("retention defaults = %+v, want 4320h and 720h", got)
+	}
+	res, err = Load(writeAccessConfig(t, "  retention:\n    public: 48h\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := res.Config.Access.Retention; time.Duration(got.Public) != 48*time.Hour || time.Duration(got.Trusted) != 4320*time.Hour {
+		t.Fatalf("partial retention = %+v", got)
+	}
+	for label, access := range map[string]string{
+		"below a day":   "  retention:\n    public: 23h\n",
+		"zero":          "  retention:\n    trusted: 0s\n",
+		"integer value": "  retention:\n    public: 720\n",
+		"not a mapping": "  retention: 720h\n",
+		"unknown class": "  retention:\n    owner: 720h\n",
+	} {
+		t.Run(label, func(t *testing.T) {
+			if _, err := Load(writeAccessConfig(t, access)); err == nil || !strings.Contains(err.Error(), "access.retention") {
+				t.Fatalf("err = %v, want an access.retention error", err)
+			}
+		})
+	}
+}

@@ -137,6 +137,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 		"cancel":       "/cancel",
 		"skill":        "/skill pdf now",
 		"skill-create": "/skill-create n A skill.",
+		"forgetme":     "/forgetme",
 	}
 	for _, class := range []principal.Class{principal.ClassOwner, principal.ClassTrusted, principal.ClassPublic} {
 		for _, def := range Catalog() {
@@ -147,12 +148,16 @@ func TestAuthorizationMatrix(t *testing.T) {
 				ports := &spyPorts{}
 				recorder := &spyRecorder{}
 				result := run(t, newTestDispatcher(t, ports, recorder), caller("discord", class), invocations[def.Name])
-				allowed := def.Audience == AudienceAny || class == principal.ClassOwner
+				allowed := permits(def.Audience, class)
 				if allowed && result.Code == ErrorCodeDenied {
 					t.Fatalf("%s denied for %s", def.Name, class)
 				}
+				denial := ReplyDenied
+				if def.Audience == AudienceGuests {
+					denial = ReplyGuestsOnly
+				}
 				if !allowed {
-					if result.Code != ErrorCodeDenied || !slices.Equal(result.Lines, []string{ReplyDenied}) {
+					if result.Code != ErrorCodeDenied || !slices.Equal(result.Lines, []string{denial}) {
 						t.Fatalf("result = %+v, want denial", result)
 					}
 					if len(ports.calls) != 0 {

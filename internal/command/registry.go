@@ -73,7 +73,7 @@ func validateDefinition(def *Definition) error {
 		}
 	}
 	switch def.Audience {
-	case AudienceOwner, AudienceAny:
+	case AudienceOwner, AudienceAny, AudienceGuests:
 	default:
 		return fmt.Errorf("command: %q has unknown audience %q", def.Name, def.Audience)
 	}
@@ -212,7 +212,14 @@ func syntax(def *Definition) string {
 }
 
 func permits(audience Audience, class principal.Class) bool {
-	return audience == AudienceAny || class == principal.ClassOwner
+	switch audience {
+	case AudienceAny:
+		return true
+	case AudienceGuests:
+		return class != principal.ClassOwner
+	default:
+		return class == principal.ClassOwner
+	}
 }
 
 func (r *Registry) binding(channel string) (*bound, bool) {

@@ -24,6 +24,8 @@ const NameTerminalOnly = "terminal_only"
 const (
 	ReplyDenied        = "That command is only available to the owner."
 	ReplyNotSwitchable = "That session can't be used in this conversation."
+	ReplyGuestsOnly    = "That command is not available to the owner."
+	ReplyForgetMe      = "Send /forgetme confirm to erase everything you shared with this bot."
 )
 
 type Dispatcher struct {
@@ -91,6 +93,9 @@ func (d *Dispatcher) start(ctx context.Context, name string, caller *Caller) (sp
 
 func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocation, def *Definition, b *Binding) Result {
 	if !permits(def.Audience, caller.Class) {
+		if def.Audience == AudienceGuests {
+			return failure(ErrorCodeDenied, ReplyGuestsOnly)
+		}
 		return failure(ErrorCodeDenied, ReplyDenied)
 	}
 	if def.Session && def.Kind == KindLocal && caller.SessionID == "" {
@@ -125,6 +130,8 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 		return h.skill(ctx)
 	case "skill-create":
 		return h.skillCreate(ctx)
+	case NameForgetMe:
+		return Result{Lines: []string{ReplyForgetMe}}
 	default:
 		return h.failed(def.Name, errors.New("command has no handler"))
 	}
