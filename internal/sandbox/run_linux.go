@@ -8,10 +8,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func negotiate() (Primitives, error) {
@@ -40,7 +43,17 @@ func usernsAvailable() bool {
 			return false
 		}
 	}
-	return true
+	return usernsSyscallPermitted()
+}
+
+func usernsSyscallPermitted() bool {
+	result := make(chan error, 1)
+	go func() {
+		runtime.LockOSThread()
+		result <- unix.Unshare(unix.CLONE_NEWUSER)
+	}()
+	err := <-result
+	return !errors.Is(err, unix.EPERM) && !errors.Is(err, unix.ENOSPC)
 }
 
 func cgroupV2Available() (available bool, detail string) {
@@ -70,11 +83,8 @@ func errorDetail(err error) string {
 }
 
 func landlockAvailable() bool {
-	data, err := os.ReadFile("/sys/kernel/security/lsm")
-	if err != nil {
-		return false
-	}
-	return strings.Contains(string(data), "landlock")
+	abi, err := landlockABI()
+	return err == nil && abi >= 1
 }
 
 func resolveExecutable(command string) (string, error) {

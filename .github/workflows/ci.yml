@@ -87,6 +87,9 @@ jobs:
       - name: Compose smoke (private Restate, upgrade job, restart survival)
         run: make compose-smoke
 
+      - name: Exec profile in a hardened container fails closed
+        run: make exec-container-check
+
   integration:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
