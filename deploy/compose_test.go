@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
 )
 
@@ -129,5 +130,24 @@ func TestSmokeOverrideOnlyMountsTheSmokeWorkflows(t *testing.T) {
 	file := loadCompose(t, "smoke/compose.smoke.yaml")
 	if len(file.Services) != 1 || !slices.Equal(service(t, &file, "aura").Volumes, []string{"./smoke/workflows:/etc/aura/workflows:ro"}) {
 		t.Fatalf("smoke override = %+v", file.Services)
+	}
+}
+
+func TestExecProfileFixtureLoadsForTheExecBuild(t *testing.T) {
+	build, err := capability.ParseBuild("exec-linux", "exec-linux", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AURA_CONFIG", "")
+	result, err := config.LoadWithOptions("smoke/exec-profile.yaml", config.LoadOptions{Build: build, Registry: registry, Dependencies: capability.Dependencies{capability.DependencyProcessContainment: true}})
+	if err != nil {
+		t.Fatalf("smoke/exec-profile.yaml does not load for the exec-linux build: %v", err)
+	}
+	if !slices.Equal(result.Config.Capabilities.Enabled, []string{"exec-linux"}) {
+		t.Fatalf("enabled capabilities = %v, want exec-linux", result.Config.Capabilities.Enabled)
 	}
 }

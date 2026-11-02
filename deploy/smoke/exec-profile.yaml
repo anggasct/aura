@@ -1,0 +1,30 @@
+version: 1
+capabilities:
+  enabled: [exec-linux]
+storage:
+  path: /tmp/aura-data
+tools:
+  workspace: /tmp/aura-workspace
+skills: {}
+context: {}
+models:
+  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet-5-5
+      api_key_env: ANTHROPIC_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        context_tokens: 200000
+        tokenizer: cl100k
+  routing:
+    agent: primary
+    compression: primary
+    curation: primary
+    profiling: primary
+    summarize: primary
+    title: primary
+profile: {}
+children: {}
+vision: {}
