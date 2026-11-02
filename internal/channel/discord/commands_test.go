@@ -415,7 +415,9 @@ func TestDiscordHelpGoldensPerClass(t *testing.T) {
 		"  /cancel                              cancel the active turn\n" +
 		"  /skill <name> [request…]             activate a skill\n" +
 		"  /skill-create <name> <description…>  stage a skill draft"
-	trusted := "commands:\n  /help  show this help"
+	trusted := "commands:\n" +
+		"  /help                show this help\n" +
+		"  /forgetme [confirm]  erase everything you shared with this bot"
 	if len(replies) != 2 || replies[0].content != owner || replies[1].content != trusted {
 		t.Fatalf("help replies = %+v", replies)
 	}

@@ -11,7 +11,7 @@ func messengerBinding() Binding {
 	return Binding{
 		Channel: "discord",
 		Style:   StyleMessenger,
-		Names:   []string{"help", "status", "session", "new", "cancel", "skill", "skill-create"},
+		Names:   []string{"help", "forgetme", "status", "session", "new", "cancel", "skill", "skill-create"},
 	}
 }
 
@@ -144,7 +144,8 @@ func TestHelpGoldenPerChannelAndClass(t *testing.T) {
   /skill <name> [request…]             activate a skill
   /skill-create <name> <description…>  stage a skill draft`},
 		{"trusted messenger", "discord", principal.ClassTrusted, `commands:
-  /help  show this help`},
+  /help                show this help
+  /forgetme [confirm]  erase everything you shared with this bot`},
 	}
 	outputs := map[string]bool{}
 	for _, tt := range tests {

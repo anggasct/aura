@@ -12,6 +12,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
@@ -61,6 +62,7 @@ type AccessSettings struct {
 	Grants           StandingGrantRecorder
 	Pairing          PairingService
 	Budgets          BudgetGate
+	Erasure          PrincipalEraser
 	Denied           func(ctx context.Context, reason string)
 	ApprovalRouted   func(ctx context.Context, result string)
 }
@@ -69,6 +71,10 @@ const (
 	BudgetRefusalRateLimited = config.MessageRateLimited
 	BudgetRefusalExhausted   = config.MessageBudgetExhausted
 )
+
+type PrincipalEraser interface {
+	Forget(ctx context.Context, principalID string) error
+}
 
 type BudgetGate interface {
 	Admit(ctx context.Context, principalID string, class principal.Class) (string, error)
@@ -168,6 +174,28 @@ func (a *Adapter) budgetRefused(ctx context.Context, msg *messagePayload, envelo
 	}
 	a.postNotice(ctx, token, msg.ChannelID, definition.Message(refusal))
 	return true
+}
+
+func (a *Adapter) forgetMe(ctx context.Context, msg *messagePayload, inv *command.Invocation, envelope *runtimeingress.IngressEnvelope) {
+	definition, _ := a.personaDefinition(envelope.AgentID)
+	token, err := a.tokenRef.Resolve()
+	if err != nil {
+		a.logger.WarnContext(ctx, "forgetme reply token unavailable", "component", "discord")
+		return
+	}
+	if principal.ParseClass(envelope.PrincipalClass) == principal.ClassOwner || a.access.Erasure == nil {
+		a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageNotPermitted))
+		return
+	}
+	if len(inv.Args) != 1 || !strings.EqualFold(inv.Args[0], command.ArgConfirm) {
+		a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageForgetmeConfirm))
+		return
+	}
+	if err := a.access.Erasure.Forget(ctx, envelope.PrincipalID); err != nil {
+		a.logger.WarnContext(ctx, "forgetme erasure failed", "component", "discord")
+		return
+	}
+	a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageForgetmeDone))
 }
 
 func (a *Adapter) channelConversation(persona, channelID, principalID string, class principal.Class) string {

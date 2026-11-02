@@ -169,9 +169,15 @@ type Owner struct {
 }
 
 type Access struct {
-	ApprovalTimeout  Duration      `koanf:"approval_timeout" yaml:"approval_timeout"`
-	StandingGrantTTL Duration      `koanf:"standing_grant_ttl" yaml:"standing_grant_ttl"`
-	Budgets          AccessBudgets `koanf:"budgets" yaml:"budgets"`
+	ApprovalTimeout  Duration        `koanf:"approval_timeout" yaml:"approval_timeout"`
+	StandingGrantTTL Duration        `koanf:"standing_grant_ttl" yaml:"standing_grant_ttl"`
+	Budgets          AccessBudgets   `koanf:"budgets" yaml:"budgets"`
+	Retention        AccessRetention `koanf:"retention" yaml:"retention"`
+}
+
+type AccessRetention struct {
+	Trusted Duration `koanf:"trusted" yaml:"trusted"`
+	Public  Duration `koanf:"public" yaml:"public"`
 }
 
 type AccessBudgets struct {
@@ -970,6 +976,7 @@ func Default() Config {
 				Trusted: PrincipalBudget{MaxTokensPerDay: 200000, MaxTurnsPerMinute: 6},
 				Public:  PrincipalBudget{MaxTokensPerDay: 20000, MaxTurnsPerMinute: 3},
 			},
+			Retention: AccessRetention{Trusted: Duration(4320 * time.Hour), Public: Duration(720 * time.Hour)},
 		},
 	}
 }

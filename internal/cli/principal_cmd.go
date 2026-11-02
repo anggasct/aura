@@ -97,7 +97,7 @@ func newPrincipalCmd(gf *globalFlags) *cobra.Command {
 		Use:   "principal",
 		Short: "Inspect people who talk to your personas",
 	}
-	cmd.AddCommand(newPrincipalListCmd(gf), newPrincipalShowCmd(gf))
+	cmd.AddCommand(newPrincipalListCmd(gf), newPrincipalShowCmd(gf), newPrincipalForgetCmd(gf))
 	return cmd
 }
 

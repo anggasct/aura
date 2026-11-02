@@ -41,6 +41,7 @@ const (
 	MinApprovalTimeout     = time.Minute
 	MaxApprovalTimeout     = 24 * time.Hour
 	MaxStandingGrantTTL    = 720 * time.Hour
+	MinRetention           = 24 * time.Hour
 	MessagePairingCode     = "pairing_code"
 	MessagePairingPending  = "pairing_pending"
 	MessagePairingLocked   = "pairing_locked"
@@ -144,6 +145,14 @@ func validateAccess(access *Access) error {
 	if ttl := time.Duration(access.StandingGrantTTL); ttl <= 0 || ttl > MaxStandingGrantTTL {
 		problems = append(problems, errors.New("access.standing_grant_ttl must be positive and at most 720h"))
 	}
+	for _, retention := range []struct {
+		class string
+		ttl   Duration
+	}{{AudienceTrusted, access.Retention.Trusted}, {AudiencePublic, access.Retention.Public}} {
+		if time.Duration(retention.ttl) < MinRetention {
+			problems = append(problems, fmt.Errorf("access.retention.%s must be at least 24h", retention.class))
+		}
+	}
 	for _, budget := range []struct {
 		class  string
 		limits PrincipalBudget
@@ -181,6 +190,22 @@ func validateAccessShapes(doc *yamlv3.Node) error {
 			if err := validateBudgetShapes(valueNode); err != nil {
 				return err
 			}
+		case "retention":
+			if err := validateRetentionShapes(valueNode); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateRetentionShapes(retention *yamlv3.Node) error {
+	if retention.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("access.retention must be a mapping at line %d", retention.Line)
+	}
+	for i := 0; i+1 < len(retention.Content); i += 2 {
+		if value := retention.Content[i+1]; value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
+			return fmt.Errorf("access.retention.%s must be a duration string at line %d", retention.Content[i].Value, value.Line)
 		}
 	}
 	return nil
@@ -218,6 +243,12 @@ func applyAccessDefaults(cfg *Config, doc *yamlv3.Node) {
 	}
 	applyBudgetDefaults(&cfg.Access.Budgets.Trusted, defaults.Budgets.Trusted, doc, AudienceTrusted)
 	applyBudgetDefaults(&cfg.Access.Budgets.Public, defaults.Budgets.Public, doc, AudiencePublic)
+	if cfg.Access.Retention.Trusted == 0 && !configValuePresent(doc, "access", "retention", AudienceTrusted) && !envValuePresent("access.retention.trusted") {
+		cfg.Access.Retention.Trusted = defaults.Retention.Trusted
+	}
+	if cfg.Access.Retention.Public == 0 && !configValuePresent(doc, "access", "retention", AudiencePublic) && !envValuePresent("access.retention.public") {
+		cfg.Access.Retention.Public = defaults.Retention.Public
+	}
 }
 
 func applyBudgetDefaults(budget *PrincipalBudget, defaults PrincipalBudget, doc *yamlv3.Node, class string) {

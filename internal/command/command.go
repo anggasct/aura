@@ -9,13 +9,18 @@ import (
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
-const ChannelTerminal = "terminal"
+const (
+	ChannelTerminal = "terminal"
+	NameForgetMe    = "forgetme"
+	ArgConfirm      = "confirm"
+)
 
 type Audience string
 
 const (
-	AudienceOwner Audience = "owner"
-	AudienceAny   Audience = "any"
+	AudienceOwner  Audience = "owner"
+	AudienceAny    Audience = "any"
+	AudienceGuests Audience = "guests"
 )
 
 type Kind string
@@ -179,6 +184,7 @@ type Recorder interface {
 func Catalog() []Definition {
 	return []Definition{
 		{Name: "help", Summary: "show this help", Audience: AudienceAny, Kind: KindLocal},
+		{Name: NameForgetMe, Usage: "[confirm]", Summary: "erase everything you shared with this bot", Audience: AudienceGuests, Kind: KindLocal, MaxArgs: 1},
 		{Name: "status", Summary: "show the current session", Audience: AudienceOwner, Kind: KindLocal, Session: true},
 		{Name: "session", Usage: "[id]", Summary: "show or switch to a session", Audience: AudienceOwner, Kind: KindLocal, Session: true, MaxArgs: 1},
 		{Name: "new", Summary: "start a new session", Audience: AudienceOwner, Kind: KindLocal, Session: true},

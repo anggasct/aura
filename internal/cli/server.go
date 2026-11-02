@@ -337,7 +337,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				"host", cfg.Server.Host,
 				"port", cfg.Server.Port,
 			)
+			sweepCtx, stopSweeps := context.WithCancel(ctx)
+			sweepsDone := make(chan struct{})
+			go func() {
+				defer close(sweepsDone)
+				runRetentionSweeps(sweepCtx, cfg, db, artifactRoot, logger)
+			}()
 			runErr := srv.Run(ctx)
+			stopSweeps()
+			<-sweepsDone
 			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
 			defer cancel()
 			if err := host.Shutdown(shutdownCtx); runErr == nil {

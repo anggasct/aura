@@ -148,6 +148,10 @@ func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.A
 			settings.Budgets = newPrincipalBudgetGate(cfg.Access, ledger, recorder)
 		}
 	}
+	if db != nil {
+		_, artifactRoot, _, _ := storagePaths(cfg)
+		settings.Erasure = &principalEraser{db: db, artifactRoot: artifactRoot, now: time.Now}
+	}
 	return settings
 }
 
