@@ -170,6 +170,17 @@ func (a *Adapter) budgetRefused(ctx context.Context, msg *messagePayload, envelo
 	return true
 }
 
+func (a *Adapter) channelConversation(persona, channelID, principalID string, class principal.Class) string {
+	conversation := "channel:" + channelID
+	if class == principal.ClassOwner {
+		return conversation
+	}
+	if definition, ok := a.personaDefinition(persona); ok && definition.GroupContext == config.GroupContextShared {
+		return conversation
+	}
+	return conversation + "/principal:" + principalID
+}
+
 func (a *Adapter) personaDefinition(persona string) (auraagent.Definition, bool) {
 	if a.router == nil {
 		return auraagent.Definition{}, false

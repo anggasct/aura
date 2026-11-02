@@ -99,6 +99,7 @@ func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string)
 		definition.MemoryScope = MemoryScopePersona
 		definition.Name = cmp.Or(definition.Name, definition.ID)
 		definition.Audience = config.AudienceOwner
+		definition.GroupContext = config.GroupContextPerPrincipal
 		registry.upsert(&definition)
 	}
 	seen := make(map[string]struct{}, len(overrides))
@@ -136,6 +137,7 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 		PublicTools:     slices.Clone(override.PublicTools),
 		ApprovalTimeout: time.Duration(override.ApprovalTimeout),
 		Messages:        maps.Clone(override.Messages),
+		GroupContext:    cmp.Or(override.GroupContext, config.GroupContextPerPrincipal),
 	}
 	if definition.MemoryScope != MemoryScopePersona && definition.MemoryScope != MemoryScopeShared {
 		return nil, codedError(ErrorCodeDefinitionInvalid, fmt.Sprintf("%s.memory_scope must be %q or %q", field, MemoryScopePersona, MemoryScopeShared))

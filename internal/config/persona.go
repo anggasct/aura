@@ -33,6 +33,11 @@ const (
 )
 
 const (
+	GroupContextPerPrincipal = "per_principal"
+	GroupContextShared       = "shared"
+)
+
+const (
 	MinApprovalTimeout     = time.Minute
 	MaxApprovalTimeout     = 24 * time.Hour
 	MaxStandingGrantTTL    = 720 * time.Hour
@@ -85,6 +90,15 @@ func validatePersonaAccess(cfg *Config) error {
 		}
 		if definition.Pairing && definition.Audience != AudienceTrusted {
 			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".pairing requires audience \"trusted\""}
+		}
+		switch definition.GroupContext {
+		case "", GroupContextPerPrincipal:
+		case GroupContextShared:
+			if definition.Audience != AudienceTrusted {
+				return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".group_context \"shared\" requires audience \"trusted\""}
+			}
+		default:
+			return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.group_context must be %q or %q", field, GroupContextPerPrincipal, GroupContextShared)}
 		}
 		for _, list := range []struct {
 			name  string
