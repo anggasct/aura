@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -30,6 +31,7 @@ type Definition struct {
 	ApprovalTimeout time.Duration
 	Messages        map[string]string
 	GroupContext    string
+	EvalDir         string
 }
 
 func audienceRank(audience string) int {
@@ -103,6 +105,31 @@ func (d *Definition) Fingerprint() Fingerprint {
 	}
 }
 
+func (d *Definition) EvalDigest() string {
+	sorted := func(values []string) string {
+		out := slices.Clone(values)
+		slices.Sort(out)
+		return fmt.Sprintf("%q", out)
+	}
+	keys := slices.Sorted(maps.Keys(d.Messages))
+	messages := make([]string, 0, len(keys))
+	for _, key := range keys {
+		messages = append(messages, fmt.Sprintf("%q=%q", key, d.Messages[key]))
+	}
+	canonical := strings.Join([]string{
+		fmt.Sprintf("soul=%q", d.Instructions),
+		"tools=" + sorted(d.Tools),
+		"principal_tools=" + sorted(d.PrincipalTools),
+		"public_tools=" + sorted(d.PublicTools),
+		fmt.Sprintf("audience=%q", d.Audience),
+		fmt.Sprintf("pairing=%t", d.Pairing),
+		fmt.Sprintf("group_context=%q", d.GroupContext),
+		fmt.Sprintf("model_route=%q", d.ModelRoute),
+		"messages=" + strings.Join(messages, ","),
+	}, "\n")
+	return sha256Hex(canonical)
+}
+
 func sha256Hex(text string) string {
 	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:])
@@ -131,6 +158,7 @@ func (d *Definition) clone() Definition {
 		ApprovalTimeout: d.ApprovalTimeout,
 		Messages:        maps.Clone(d.Messages),
 		GroupContext:    d.GroupContext,
+		EvalDir:         d.EvalDir,
 	}
 }
 

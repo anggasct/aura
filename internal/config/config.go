@@ -634,6 +634,11 @@ type AgentDefinition struct {
 	ApprovalTimeout Duration          `koanf:"approval_timeout" yaml:"approval_timeout,omitempty"`
 	Messages        map[string]string `koanf:"messages" yaml:"messages,omitempty"`
 	GroupContext    string            `koanf:"group_context" yaml:"group_context,omitempty"`
+	Evals           AgentEvals        `koanf:"evals" yaml:"evals,omitempty"`
+}
+
+type AgentEvals struct {
+	Dir string `koanf:"dir" yaml:"dir,omitempty"`
 }
 
 type Agents struct {

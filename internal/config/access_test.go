@@ -38,6 +38,8 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 		"shared group on public":           {fields: "      audience: public\n      group_context: shared\n", code: ErrorCodePersonaInvalid, detail: "group_context"},
 		"shared group on owner":            {fields: "      group_context: shared\n", code: ErrorCodePersonaInvalid, detail: "group_context"},
 		"unknown group context":            {fields: "      audience: trusted\n      group_context: everyone\n", code: ErrorCodePersonaInvalid, detail: "group_context"},
+		"evals dir":                        {fields: "      evals:\n        dir: evals/kantor\n"},
+		"evals behavior not yet supported": {fields: "      evals:\n        behavior:\n          required: true\n", code: ErrorCodeConfigInvalid, detail: "evals.behavior"},
 	}
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {
@@ -63,8 +65,8 @@ func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
 	defaults := PersonaMessageDefaults()
 	keys := slices.Sorted(maps.Keys(defaults))
-	if len(keys) != 13 {
-		t.Fatalf("message keys = %v, want the 13 fixed replies", keys)
+	if len(keys) != 14 {
+		t.Fatalf("message keys = %v, want the 14 fixed replies", keys)
 	}
 	for _, key := range keys {
 		t.Run(key, func(t *testing.T) {

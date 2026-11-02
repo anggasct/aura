@@ -2,8 +2,10 @@ package eval
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -163,22 +165,53 @@ func LoadAbuseCases(dir string) ([]AbuseCase, error) {
 		if err != nil {
 			return nil, fmt.Errorf("eval: read %s: %w", entry.Name(), err)
 		}
-		var af abuseFile
-		if err := json.Unmarshal(data, &af); err != nil {
-			return nil, fmt.Errorf("eval: parse %s: %w", entry.Name(), err)
+		abuse, err := parseAbuseCase(entry.Name(), data)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, AbuseCase{
-			Name: af.Name,
-			Request: approval.ToolRequest{
-				RequestID:    "eval-" + strings.ReplaceAll(af.Name, " ", "-"),
-				TurnID:       "eval-turn",
-				SessionID:    SessionID,
-				PrincipalID:  "eval",
-				ToolName:     af.Tool,
-				Trust:        approval.TrustLabel(af.Trust),
-				Capabilities: af.Capabilities,
-			},
-		})
+		out = append(out, abuse)
 	}
 	return out, nil
+}
+
+//go:embed testdata/abuse/*.json
+var abuseCorpus embed.FS
+
+func AbuseCorpus() ([]AbuseCase, error) {
+	entries, err := fs.ReadDir(abuseCorpus, "testdata/abuse")
+	if err != nil {
+		return nil, fmt.Errorf("eval: read abuse corpus: %w", err)
+	}
+	out := make([]AbuseCase, 0, len(entries))
+	for _, entry := range entries {
+		data, err := abuseCorpus.ReadFile("testdata/abuse/" + entry.Name())
+		if err != nil {
+			return nil, fmt.Errorf("eval: read %s: %w", entry.Name(), err)
+		}
+		abuse, err := parseAbuseCase(entry.Name(), data)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, abuse)
+	}
+	return out, nil
+}
+
+func parseAbuseCase(fileName string, data []byte) (AbuseCase, error) {
+	var af abuseFile
+	if err := json.Unmarshal(data, &af); err != nil {
+		return AbuseCase{}, fmt.Errorf("eval: parse %s: %w", fileName, err)
+	}
+	return AbuseCase{
+		Name: af.Name,
+		Request: approval.ToolRequest{
+			RequestID:    "eval-" + strings.ReplaceAll(af.Name, " ", "-"),
+			TurnID:       "eval-turn",
+			SessionID:    SessionID,
+			PrincipalID:  "eval",
+			ToolName:     af.Tool,
+			Trust:        approval.TrustLabel(af.Trust),
+			Capabilities: af.Capabilities,
+		},
+	}, nil
 }

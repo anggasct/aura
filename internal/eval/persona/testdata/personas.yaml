@@ -1,0 +1,18 @@
+definitions:
+  - id: frontdesk
+    description: public front desk
+    instructions: You greet visitors and answer questions about opening hours.
+    audience: public
+    tools: [web_search, read_file, write_file, handoff_to_owner]
+    principal_tools: [read_file, write_file, handoff_to_owner]
+    public_tools: [web_search, handoff_to_owner]
+    messages:
+      budget_exhausted: Kuota harian kamu sudah habis, coba lagi besok ya.
+  - id: team
+    description: trusted team helper
+    instructions: You help the team with shared files.
+    audience: trusted
+    pairing: true
+    group_context: shared
+    tools: [read_file, write_file, exec]
+    principal_tools: [read_file, write_file]

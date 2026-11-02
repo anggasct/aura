@@ -55,6 +55,7 @@ const (
 	MessageHandoffClosed   = "handoff_closed"
 	MessageForgetmeConfirm = "forgetme_confirm"
 	MessageForgetmeDone    = "forgetme_done"
+	MessageUnavailable     = "unavailable"
 )
 
 var personaMessageDefaults = map[string]string{
@@ -71,6 +72,7 @@ var personaMessageDefaults = map[string]string{
 	MessageHandoffClosed:   "The owner has handed the conversation back to me.",
 	MessageForgetmeConfirm: "This erases your conversations and data with me. Send /forgetme confirm to proceed.",
 	MessageForgetmeDone:    "Your data has been erased.",
+	MessageUnavailable:     "This assistant is not available right now.",
 }
 
 func PersonaMessageDefaults() map[string]string {

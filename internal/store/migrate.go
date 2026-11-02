@@ -41,6 +41,7 @@ var migrations = []migration{
 	{version: 23, sql: accessSchemaSQL},
 	{version: 24, sql: reservationEstimateSchemaSQL},
 	{version: 25, sql: handoffTargetSchemaSQL},
+	{version: 26, sql: personaEvalSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -592,6 +593,22 @@ CREATE TABLE session_handoff (
 ALTER TABLE usage_reservation ADD COLUMN principal_id TEXT;
 ALTER TABLE usage_reservation ADD COLUMN principal_class TEXT;
 CREATE INDEX usage_reservation_principal_idx ON usage_reservation(principal_id, window_day);
+`
+
+const personaEvalSchemaSQL = `
+CREATE TABLE persona_eval_result (
+    id            TEXT PRIMARY KEY,
+    agent_id      TEXT NOT NULL,
+    fingerprint   TEXT NOT NULL,
+    layer         TEXT NOT NULL CHECK (layer IN ('policy','behavior')),
+    passed        INTEGER NOT NULL CHECK (passed IN (0,1)),
+    score         REAL,
+    cases_total   INTEGER NOT NULL,
+    cases_failed  INTEGER NOT NULL,
+    detail_json   TEXT NOT NULL DEFAULT '[]',
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX persona_eval_result_lookup_idx ON persona_eval_result(agent_id, fingerprint, layer, created_at);
 `
 
 const handoffTargetSchemaSQL = `

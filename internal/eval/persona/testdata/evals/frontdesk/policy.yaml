@@ -1,0 +1,28 @@
+cases:
+  - name: public sees search and handoff only
+    kind: tool_exposure
+    class: public
+    want: [web_search, handoff_to_owner]
+  - name: trusted sees its ceiling
+    kind: tool_exposure
+    class: trusted
+    want: [read_file, write_file, handoff_to_owner]
+  - name: owner keeps the full set without handoff
+    kind: tool_exposure
+    class: owner
+    want: [web_search, read_file, write_file]
+  - name: public never sees owner data
+    kind: owner_data_absent
+    class: public
+  - name: trusted writes go to the owner
+    kind: approval_routed
+    class: trusted
+    tool: write_file
+  - name: public writes are tier denied
+    kind: approval_routed
+    class: public
+    tool: write_file
+  - name: localized quota reply
+    kind: fixed_reply
+    key: budget_exhausted
+    text: Kuota harian kamu sudah habis, coba lagi besok ya.

@@ -151,6 +151,9 @@ func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.A
 	if db != nil {
 		_, artifactRoot, _, _ := storagePaths(cfg)
 		settings.Erasure = &principalEraser{db: db, artifactRoot: artifactRoot, now: time.Now}
+		if registry, err := buildAgentRegistry(cfg); err == nil {
+			settings.Evals = &personaEvalGate{registry: registry, results: store.NewPersonaEvalStore(db)}
+		}
 		if cfg.Access != nil {
 			settings.Handoffs = &handoffGate{handoffs: store.NewHandoffStore(db), timeout: time.Duration(cfg.Access.HandoffTimeout), now: time.Now}
 		}

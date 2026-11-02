@@ -19,7 +19,8 @@ import (
 )
 
 const (
-	DeniedReasonAudience = "audience"
+	DeniedReasonAudience    = "audience"
+	DeniedReasonEvalMissing = "persona_eval_missing"
 
 	ApprovalRoutedApproved    = "approved"
 	ApprovalRoutedStanding    = "standing"
@@ -64,6 +65,7 @@ type AccessSettings struct {
 	Budgets          BudgetGate
 	Erasure          PrincipalEraser
 	Handoffs         HandoffGate
+	Evals            EvalGate
 	Denied           func(ctx context.Context, reason string)
 	ApprovalRouted   func(ctx context.Context, result string)
 }
@@ -75,6 +77,10 @@ const (
 
 type PrincipalEraser interface {
 	Forget(ctx context.Context, principalID string) error
+}
+
+type EvalGate interface {
+	Evaluated(ctx context.Context, persona string) (bool, error)
 }
 
 type BudgetGate interface {
@@ -224,6 +230,30 @@ func (a *Adapter) personaAdmits(ctx context.Context, persona string, class princ
 	}
 	if a.access.Denied != nil {
 		a.access.Denied(ctx, DeniedReasonAudience)
+	}
+	return false
+}
+
+func (a *Adapter) personaEvaluated(ctx context.Context, msg *messagePayload, persona string, class principal.Class) bool {
+	if class == principal.ClassOwner || a.access.Evals == nil {
+		return true
+	}
+	definition, ok := a.personaDefinition(persona)
+	if ok && definition.Audience == config.AudienceOwner {
+		return true
+	}
+	evaluated, err := a.access.Evals.Evaluated(ctx, persona)
+	if err != nil {
+		a.logger.WarnContext(ctx, "persona eval lookup failed", "component", "discord")
+	}
+	if err == nil && evaluated {
+		return true
+	}
+	if a.access.Denied != nil {
+		a.access.Denied(ctx, DeniedReasonEvalMissing)
+	}
+	if token, tokenErr := a.tokenRef.Resolve(); tokenErr == nil {
+		a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageUnavailable))
 	}
 	return false
 }
