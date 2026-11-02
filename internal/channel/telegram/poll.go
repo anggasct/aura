@@ -1,0 +1,256 @@
+package telegram
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math/rand/v2"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/runtime"
+	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
+)
+
+const pollGrace = 10 * time.Second
+
+const chatTypePrivate = "private"
+
+type replyReference struct {
+	ChatID    int64 `json:"chat_id"`
+	MessageID int64 `json:"message_id"`
+}
+
+func (a *Adapter) pollLoop(ctx context.Context) error {
+	attempt := 0
+	for ctx.Err() == nil {
+		err := a.pollOnce(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err == nil {
+			attempt = 0
+			continue
+		}
+		a.markFault(classifyFault(err))
+		a.logger.WarnContext(ctx, "telegram poll failed", "component", "telegram", "account", a.account.Name, "error", err)
+		if !sleepContext(ctx, a.retryDelay(attempt, err)) {
+			return nil
+		}
+		attempt++
+	}
+	return nil
+}
+
+func (a *Adapter) pollOnce(ctx context.Context) error {
+	token, err := a.tokenRef.Resolve()
+	if err != nil || strings.TrimSpace(token) == "" {
+		return errTokenUnavailable
+	}
+	next, _, err := a.cursors.Load(ctx, a.source())
+	if err != nil {
+		return &Error{Code: ErrorCodeIntakeFailed, Detail: "telegram cursor is not readable", Cause: err}
+	}
+	timeout := time.Duration(a.cfg.Polling.Timeout)
+	call, cancel := context.WithTimeout(ctx, timeout+pollGrace)
+	updates, err := a.bot.getUpdates(call, token, next, timeout)
+	cancel()
+	if err != nil {
+		return err
+	}
+	a.markLive()
+	advance := next
+	for i := range updates {
+		item := &updates[i]
+		if item.UpdateID < next {
+			continue
+		}
+		if err := a.handleUpdate(ctx, item); err != nil {
+			if advance > next {
+				a.advanceCursor(ctx, advance)
+			}
+			return err
+		}
+		if item.UpdateID+1 > advance {
+			advance = item.UpdateID + 1
+		}
+	}
+	if advance > next {
+		return a.advanceCursorErr(ctx, advance)
+	}
+	return nil
+}
+
+func (a *Adapter) advanceCursor(ctx context.Context, next int64) {
+	if err := a.advanceCursorErr(ctx, next); err != nil {
+		a.logger.WarnContext(ctx, "telegram cursor save failed", "component", "telegram", "account", a.account.Name)
+	}
+}
+
+func (a *Adapter) advanceCursorErr(ctx context.Context, next int64) error {
+	if err := a.cursors.Advance(ctx, a.source(), next, time.Now().UTC()); err != nil {
+		return &Error{Code: ErrorCodeIntakeFailed, Detail: "telegram cursor is not writable", Cause: err}
+	}
+	return nil
+}
+
+func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
+	envelope, ok := a.normalize(ctx, item)
+	if !ok {
+		return nil
+	}
+	active, err := a.activeSession(ctx, envelope.ConversationID)
+	if err != nil {
+		return &Error{Code: ErrorCodeIntakeFailed, Detail: "conversation session is not resolvable", Cause: err}
+	}
+	envelope.ConversationID = active
+	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
+		return &Error{Code: ErrorCodeIntakeFailed, Detail: "session is not ensurable", Cause: err}
+	}
+	if _, err := a.sink.Accept(ctx, envelope); err != nil {
+		if retryableIntake(err) {
+			return &Error{Code: ErrorCodeIntakeFailed, Detail: "runtime did not accept the update", Cause: err}
+		}
+		a.logger.WarnContext(ctx, "telegram update rejected by the runtime", "component", "telegram", "account", a.account.Name, "error", err)
+		return nil
+	}
+	if a.admitted != nil {
+		a.admitted(ctx, principal.ParseClass(envelope.PrincipalClass))
+	}
+	return nil
+}
+
+func (a *Adapter) normalize(ctx context.Context, item *update) (*runtimeingress.IngressEnvelope, bool) {
+	msg := item.Message
+	if msg == nil || msg.From == nil || msg.From.IsBot || msg.Chat.Type != chatTypePrivate || strings.TrimSpace(msg.Text) == "" {
+		return nil, false
+	}
+	userID := strconv.FormatInt(msg.From.ID, 10)
+	principalID, class, ok := a.owners.Resolve(principal.ChannelTelegram, userID, false, false)
+	if !ok || class != principal.ClassOwner {
+		if a.denied != nil {
+			a.denied(ctx, DeniedReasonIdentity)
+		}
+		return nil, false
+	}
+	persona, ok := a.routePersona(userID)
+	if !ok {
+		a.logger.DebugContext(ctx, "persona unresolved", "component", "telegram", "account", a.account.Name)
+		return nil, false
+	}
+	reference, err := json.Marshal(replyReference{ChatID: msg.Chat.ID, MessageID: msg.MessageID})
+	if err != nil {
+		return nil, false
+	}
+	return &runtimeingress.IngressEnvelope{
+		Source:         a.source(),
+		AgentID:        persona,
+		ExternalID:     "update:" + strconv.FormatInt(item.UpdateID, 10),
+		PrincipalID:    principalID,
+		PrincipalClass: string(class),
+		ConversationID: runtimeingress.SessionKey(persona, a.source(), "chat:"+strconv.FormatInt(msg.Chat.ID, 10)),
+		ReplyContext:   reference,
+		Parts:          []runtimeingress.InputPart{{Text: msg.Text}},
+		ReceivedAt:     time.Now().UTC(),
+	}, true
+}
+
+func (a *Adapter) routePersona(userID string) (string, bool) {
+	if a.router == nil {
+		return "", false
+	}
+	match, ok := a.router.Resolve(&auraagent.RouteScope{
+		Channel: config.BindingChannelTelegram,
+		Account: a.account.Name,
+		UserID:  userID,
+	})
+	if !ok {
+		return "", false
+	}
+	return match.Persona, true
+}
+
+func (a *Adapter) activeSession(ctx context.Context, conversationKey string) (string, error) {
+	if a.resolver == nil {
+		return conversationKey, nil
+	}
+	active, err := a.resolver.ActiveSession(ctx, conversationKey)
+	if err != nil {
+		return "", fmt.Errorf("resolve conversation session: %w", err)
+	}
+	if active == "" {
+		return conversationKey, nil
+	}
+	return active, nil
+}
+
+func retryableIntake(err error) bool {
+	code, ok := runtime.CodeOf(err)
+	if !ok {
+		return true
+	}
+	switch code {
+	case runtime.ErrorCodeRuntimeOverloaded, runtime.ErrorCodeStorageUnavailable, runtime.ErrorCodeRuntimeInternal:
+		return true
+	default:
+		return false
+	}
+}
+
+var errTokenUnavailable = Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+
+func classifyFault(err error) string {
+	if errors.Is(err, errTokenUnavailable) {
+		return faultTokenUnavailable
+	}
+	if apiErr, ok := apiErrorOf(err); ok {
+		switch apiErr.Status {
+		case http.StatusUnauthorized, http.StatusNotFound:
+			return faultUnauthorized
+		case http.StatusConflict:
+			return faultPollConflict
+		}
+		return faultUnreachable
+	}
+	if code, ok := CodeOf(err); ok && code == ErrorCodeIntakeFailed {
+		return faultIntake
+	}
+	return faultUnreachable
+}
+
+func (a *Adapter) retryDelay(attempt int, err error) time.Duration {
+	ceiling := time.Duration(a.cfg.Polling.MaxBackoff)
+	if apiErr, ok := apiErrorOf(err); ok && apiErr.RetryAfter > 0 {
+		if apiErr.RetryAfter > ceiling {
+			return ceiling
+		}
+		return apiErr.RetryAfter
+	}
+	shift := min(attempt, 6)
+	limit := a.retryBase << shift
+	if limit > ceiling || limit <= 0 {
+		limit = ceiling
+	}
+	half := int64(limit / 2)
+	return time.Duration(half + rand.Int64N(half+1))
+}
+
+func sleepContext(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}

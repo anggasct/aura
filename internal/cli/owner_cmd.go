@@ -42,9 +42,15 @@ func newOwnerWhoamiCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				var counts []string
+				for _, channel := range []string{principal.ChannelDiscord, principal.ChannelTelegram} {
+					if n := owners.Count(channel); n > 0 {
+						counts = append(counts, fmt.Sprintf("%s=%d", channel, n))
+					}
+				}
 				identities := "none"
-				if n := owners.Count(principal.ChannelDiscord); n > 0 {
-					identities = fmt.Sprintf("%s=%d", principal.ChannelDiscord, n)
+				if len(counts) > 0 {
+					identities = strings.Join(counts, " ")
 				}
 				return writeProfileLines(cmd, []string{
 					"owner: " + principal.OwnerID,

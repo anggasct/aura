@@ -105,7 +105,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			channelAdapters, discordChecks, approvalDecider, err := buildChannelAdapters(cfg, personaRouter, db, artifactRoot, pipeline.MeterProvider(), logger)
+			channelAdapters, channelChecks, approvalDecider, err := buildChannelAdapters(cfg, personaRouter, db, artifactRoot, pipeline.MeterProvider(), logger)
 			if err != nil {
 				return err
 			}
@@ -157,7 +157,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				memoryRuntime.service.StartPurgeLoop(ctx, time.Duration(cfg.Memory.PurgeInterval), cfg.Memory.PurgeLimit)
 			}
 			var profileHook postTurnHook
-			healthChecks := discordChecks
+			healthChecks := channelChecks
 			if cfg.Profile != nil && cfg.Profile.Enabled {
 				profileRuntime, err := buildProfileRuntime(ctx, cfg, db, pipeline.MeterProvider(), logger)
 				if err != nil {
@@ -166,7 +166,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				executorOpts = append(executorOpts, runtimeadk.WithProfileContext(profileRuntime))
 				profileHook = profileRuntime.hook
 				profileRuntime.start(ctx)
-				healthChecks = append(slices.Clone(discordChecks), profileRuntime.check(cfg))
+				healthChecks = append(slices.Clone(channelChecks), profileRuntime.check(cfg))
 			}
 			var skillRenderer runtimeengine.SkillRenderer
 			var skillCommands command.Skills

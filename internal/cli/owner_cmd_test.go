@@ -56,6 +56,28 @@ func runOwnerCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	return out.String(), err
 }
 
+func TestOwnerWhoamiCountsEachChannel(t *testing.T) {
+	path := writeProfileCLIConfig(t)
+	loaded, err := readFileForTest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := "owner:\n  identities:\n    - discord:" + testOwnerDiscordID + "\n    - telegram:424242\n    - telegram:424243\n"
+	if err := writeFileForTest(path, loaded+extra); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runOwnerCommand(t, path, "whoami")
+	if err != nil {
+		t.Fatalf("whoami: %v (%s)", err, out)
+	}
+	if !strings.Contains(out, "identities: discord=1 telegram=2") {
+		t.Errorf("whoami does not count telegram identities:\n%s", out)
+	}
+	if strings.Contains(out, "424242") {
+		t.Errorf("whoami printed a telegram identity value:\n%s", out)
+	}
+}
+
 func TestOwnerWhoamiMasksIdentities(t *testing.T) {
 	out, err := runOwnerCommand(t, writeOwnerCLIConfig(t), "whoami")
 	if err != nil {
