@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"database/sql"
 	"errors"
 	"log/slog"
 	"strings"
@@ -23,7 +24,7 @@ func waitingSpec(id, goal string) *workflow.Spec {
 	}
 }
 
-func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolController, *workflow.Store) {
+func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolController, *workflow.Store, *sql.DB) {
 	t.Helper()
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
 	runs := workflow.NewStore(db)
@@ -45,7 +46,7 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolContro
 	if err != nil {
 		t.Fatal(err)
 	}
-	return controller, runs
+	return controller, runs, db
 }
 
 func caller(class principal.Class, id string) *toolsbuiltin.WorkflowCaller {
@@ -66,7 +67,7 @@ func listedIDs(t *testing.T, controller *workflowToolController, who *toolsbuilt
 }
 
 func TestOwnerStartsAnyLoadedWorkflowAndReadsItsSteps(t *testing.T) {
-	controller, runs := workflowToolFixture(t, "book_visit")
+	controller, runs, _ := workflowToolFixture(t, "book_visit")
 	owner := caller(principal.ClassOwner, principal.OwnerID)
 	if got := listedIDs(t, controller, owner); got != "book_visit,refund" {
 		t.Fatalf("owner list = %q", got)
@@ -96,7 +97,7 @@ func TestOwnerStartsAnyLoadedWorkflowAndReadsItsSteps(t *testing.T) {
 }
 
 func TestNonOwnersStartOnlyAllowlistedWorkflowsAndSeeOnlyTheirRuns(t *testing.T) {
-	controller, _ := workflowToolFixture(t, "book_visit")
+	controller, _, _ := workflowToolFixture(t, "book_visit")
 	visitor := caller(principal.ClassPublic, "discord:111")
 	other := caller(principal.ClassTrusted, "discord:222")
 	owner := caller(principal.ClassOwner, principal.OwnerID)
