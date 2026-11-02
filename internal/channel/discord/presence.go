@@ -351,6 +351,8 @@ func (a *Adapter) refreshPresence(ctx context.Context, session *presenceSession)
 }
 
 func (a *Adapter) postInitialStatus(ctx context.Context, session *presenceSession) {
+	session.statusMu.Lock()
+	defer session.statusMu.Unlock()
 	a.presenceMu.Lock()
 	statusID := session.statusID
 	display := session.lastText
@@ -362,7 +364,7 @@ func (a *Adapter) postInitialStatus(ctx context.Context, session *presenceSessio
 	if display == "" {
 		display = fallbackStatus(updates)
 	}
-	_ = a.postOrPatchStatus(ctx, session, display)
+	_ = a.postOrPatchStatusLocked(ctx, session, display)
 }
 
 func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.DeliveryRequest, text, args string, failed bool) error {

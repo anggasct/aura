@@ -774,3 +774,50 @@ func TestPresenceFailedStatusPostDoesNotBreakDelivery(t *testing.T) {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
+
+func TestLateInitialStatusNeverOverwritesANewerStatus(t *testing.T) {
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		writeMessage(t, w, "status-id")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = 0
+	})
+	session, _, err := adapter.ensurePresence(presenceTestRequest("turn-late-initial"))
+	if err != nil {
+		t.Fatalf("ensurePresence(): %v", err)
+	}
+	adapter.presenceMu.Lock()
+	session.lastText = "Checking tasks"
+	adapter.presenceMu.Unlock()
+	session.statusMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		adapter.postInitialStatus(t.Context(), session)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if err := adapter.postOrPatchStatusLocked(t.Context(), session, "Checking tasks"); err != nil {
+		t.Fatalf("status post: %v", err)
+	}
+	failure := failureLine("Checking tasks")
+	adapter.presenceMu.Lock()
+	session.lastText = failure
+	adapter.presenceMu.Unlock()
+	if err := adapter.postOrPatchStatusLocked(t.Context(), session, failure); err != nil {
+		t.Fatalf("failure edit: %v", err)
+	}
+	session.statusMu.Unlock()
+	<-done
+	if posts := messagePostCount(stub); posts != 1 {
+		t.Fatalf("status posts = %d, want 1", posts)
+	}
+	patches := stub.patchBodies()
+	if len(patches) != 1 {
+		t.Fatalf("patches = %d, want only the failure edit", len(patches))
+	}
+	var payload map[string]any
+	_ = json.Unmarshal(patches[0], &payload)
+	if content, _ := payload["content"].(string); content != failure {
+		t.Fatalf("final status = %q, want the failure line %q", content, failure)
+	}
+}
