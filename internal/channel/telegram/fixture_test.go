@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"encoding/xml"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -34,6 +36,12 @@ const (
 type botCall struct {
 	method string
 	body   map[string]any
+	at     time.Time
+}
+
+type scriptedReply struct {
+	method string
+	reply  func(w http.ResponseWriter) bool
 }
 
 type fakeBotAPI struct {
@@ -42,7 +50,7 @@ type fakeBotAPI struct {
 	mu      sync.Mutex
 	batches [][]update
 	calls   []botCall
-	replies []func(w http.ResponseWriter) bool
+	replies []scriptedReply
 	nextID  int64
 	polled  chan int64
 	hold    bool
@@ -67,11 +75,14 @@ func (f *fakeBotAPI) serve(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	_ = json.Unmarshal(raw, &body)
 	f.mu.Lock()
-	f.calls = append(f.calls, botCall{method: method, body: body})
+	f.calls = append(f.calls, botCall{method: method, body: body, at: time.Now()})
 	var reply func(w http.ResponseWriter) bool
-	if len(f.replies) > 0 {
-		reply = f.replies[0]
-		f.replies = f.replies[1:]
+	for i, scripted := range f.replies {
+		if scripted.method == "" || scripted.method == method {
+			reply = scripted.reply
+			f.replies = append(f.replies[:i:i], f.replies[i+1:]...)
+			break
+		}
 	}
 	f.mu.Unlock()
 	if reply != nil && reply(w) {
@@ -107,11 +118,20 @@ func (f *fakeBotAPI) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		writeOK(w, batch)
 	case "sendMessage":
+		if rejection := htmlRejection(body); rejection != "" {
+			writeFailure(w, http.StatusBadRequest, rejection, 0)
+			return
+		}
 		f.mu.Lock()
 		f.nextID++
 		id := f.nextID
 		f.mu.Unlock()
 		writeOK(w, map[string]any{"message_id": id})
+	case "editMessageText":
+		id, _ := body["message_id"].(float64)
+		writeOK(w, map[string]any{"message_id": int64(id)})
+	case "sendChatAction":
+		writeOK(w, true)
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"ok":false,"error_code":400,"description":"unknown method"}`)
@@ -138,21 +158,105 @@ type failurePayload struct {
 }
 
 func apiFailure(status, retryAfter int) func(w http.ResponseWriter) bool {
+	return describedFailure(status, "failure", retryAfter)
+}
+
+func describedFailure(status int, description string, retryAfter int) func(w http.ResponseWriter) bool {
 	return func(w http.ResponseWriter) bool {
-		payload := failurePayload{ErrorCode: status, Description: "failure"}
-		if retryAfter > 0 {
-			payload.Parameters = &struct {
-				RetryAfter int `json:"retry_after"`
-			}{RetryAfter: retryAfter}
-		}
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			return false
-		}
-		w.WriteHeader(status)
-		_, _ = w.Write(raw)
+		writeFailure(w, status, description, retryAfter)
 		return true
 	}
+}
+
+func writeFailure(w http.ResponseWriter, status int, description string, retryAfter int) {
+	payload := failurePayload{ErrorCode: status, Description: description}
+	if retryAfter > 0 {
+		payload.Parameters = &struct {
+			RetryAfter int `json:"retry_after"`
+		}{RetryAfter: retryAfter}
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(raw)
+}
+
+const entityParseFailure = "Bad Request: can't parse entities: unsupported start tag"
+
+func htmlRejection(body map[string]any) string {
+	text, _ := body["text"].(string)
+	mode, _ := body["parse_mode"].(string)
+	if mode == "" {
+		if utf16Len(text) > messageLimit {
+			return "Bad Request: message is too long"
+		}
+		return ""
+	}
+	if mode != parseModeHTML {
+		return "Bad Request: unsupported parse_mode"
+	}
+	visible, err := visibleHTMLText(text)
+	if err != nil {
+		return entityParseFailure
+	}
+	if utf16Len(visible) > messageLimit {
+		return "Bad Request: message is too long"
+	}
+	return ""
+}
+
+func xmlSafeRune(r rune) rune {
+	if r == '\t' || r == '\n' || r == '\r' || (r >= 0x20 && r <= 0xD7FF) || (r >= 0xE000 && r <= 0xFFFD) || r >= 0x10000 {
+		return r
+	}
+	return ' '
+}
+
+var telegramTags = map[string]bool{"b": true, "i": true, "s": true, "code": true, "pre": true, "a": true}
+
+func visibleHTMLText(markup string) (string, error) {
+	decoder := xml.NewDecoder(strings.NewReader("<root>" + strings.Map(xmlSafeRune, markup) + "</root>"))
+	decoder.Strict = true
+	var visible strings.Builder
+	var open []string
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		switch element := token.(type) {
+		case xml.StartElement:
+			name := element.Name.Local
+			if name == "root" {
+				continue
+			}
+			if !telegramTags[name] {
+				return "", errors.New("unsupported tag " + name)
+			}
+			for _, attr := range element.Attr {
+				switch {
+				case name == "a" && attr.Name.Local == "href":
+				case name == "code" && attr.Name.Local == "class" && strings.HasPrefix(attr.Value, "language-") && len(open) > 0 && open[len(open)-1] == "pre":
+				default:
+					return "", errors.New("unsupported attribute " + attr.Name.Local)
+				}
+			}
+			open = append(open, name)
+		case xml.EndElement:
+			if element.Name.Local != "root" {
+				open = open[:len(open)-1]
+			}
+		case xml.CharData:
+			visible.Write(element)
+		}
+	}
+	return visible.String(), nil
 }
 
 func (f *fakeBotAPI) queue(batch ...update) {
@@ -162,21 +266,56 @@ func (f *fakeBotAPI) queue(batch ...update) {
 }
 
 func (f *fakeBotAPI) failNext(reply func(w http.ResponseWriter) bool) {
+	f.failNextOn("", reply)
+}
+
+func (f *fakeBotAPI) failNextOn(method string, reply func(w http.ResponseWriter) bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.replies = append(f.replies, reply)
+	f.replies = append(f.replies, scriptedReply{method: method, reply: reply})
 }
 
 func (f *fakeBotAPI) sends() []map[string]any {
+	return f.bodies("sendMessage")
+}
+
+func (f *fakeBotAPI) bodies(method string) []map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []map[string]any
 	for _, call := range f.calls {
-		if call.method == "sendMessage" {
+		if call.method == method {
 			out = append(out, call.body)
 		}
 	}
 	return out
+}
+
+func (f *fakeBotAPI) callsOf(method string) []botCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []botCall
+	for _, call := range f.calls {
+		if call.method == method {
+			out = append(out, call)
+		}
+	}
+	return out
+}
+
+func (f *fakeBotAPI) count(method string) int {
+	return len(f.callsOf(method))
+}
+
+func eventually(t *testing.T, what string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not happen within 5s", what)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 func (f *fakeBotAPI) awaitPoll(t *testing.T) int64 {

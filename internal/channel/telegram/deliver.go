@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"github.com/anggasct/aura/internal/effect"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
@@ -18,6 +18,7 @@ import (
 const (
 	ProviderName    = "telegram"
 	OpSendMessage   = "send_message"
+	opEditMessage   = "edit_message"
 	messageLimit    = 4096
 	sendTimeout     = 30 * time.Second
 	sendMaxAttempts = 3
@@ -26,7 +27,15 @@ const (
 type sendOperation struct {
 	ChatID  int64  `json:"chat_id"`
 	Text    string `json:"text"`
+	HTML    string `json:"html,omitempty"`
 	ReplyTo int64  `json:"reply_to_message_id,omitempty"`
+	Status  bool   `json:"status,omitempty"`
+}
+
+type editOperation struct {
+	ChatID    int64  `json:"chat_id"`
+	MessageID int64  `json:"message_id"`
+	Text      string `json:"text"`
 }
 
 type messageReceipt struct {
@@ -54,6 +63,9 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	if err := json.Unmarshal(req.ReplyContext, &target); err != nil || target.ChatID == 0 {
 		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery reply context carries no chat")
 	}
+	if req.EffectID != "" {
+		a.stopPresence(req.EffectID)
+	}
 	select {
 	case a.deliverSem <- struct{}{}:
 	case <-ctx.Done():
@@ -62,7 +74,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	defer func() { <-a.deliverSem }()
 	var receipt runtimechannelhost.ProviderReceipt
 	for index, chunk := range splitMessage(strings.Join(texts, "\n")) {
-		operation := sendOperation{ChatID: target.ChatID, Text: chunk}
+		operation := sendOperation{ChatID: target.ChatID, Text: chunk, HTML: renderHTML(chunk)}
 		if index == 0 {
 			operation.ReplyTo = target.MessageID
 		}
@@ -111,8 +123,16 @@ func keyBase(req *runtimechannelhost.DeliveryRequest) string {
 }
 
 func idempotencyKey(base string, chatID int64, index int, text string) string {
-	sum := sha256.Sum256([]byte(base + "|" + strconv.FormatInt(chatID, 10) + "|" + strconv.Itoa(index) + "|" + text))
-	return ProviderName + ":" + base + ":c" + strconv.Itoa(index) + ":" + hex.EncodeToString(sum[:])[:16]
+	return effectKey(base, chatID, "c"+strconv.Itoa(index), strconv.Itoa(index), text)
+}
+
+func statusKey(base string, chatID int64, slot, text string) string {
+	return effectKey(base, chatID, slot, slot, text)
+}
+
+func effectKey(base string, chatID int64, slot, digestSlot, text string) string {
+	sum := sha256.Sum256([]byte(base + "|" + strconv.FormatInt(chatID, 10) + "|" + digestSlot + "|" + text))
+	return ProviderName + ":" + base + ":" + slot + ":" + hex.EncodeToString(sum[:])[:16]
 }
 
 func receiptMessageID(intent *effect.Intent) (int64, error) {
@@ -141,34 +161,76 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 	if invocation == nil {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "invocation must not be nil")
 	}
-	if invocation.Operation != OpSendMessage {
+	switch invocation.Operation {
+	case OpSendMessage:
+		return a.invokeSend(ctx, invocation.Request)
+	case opEditMessage:
+		return a.invokeEdit(ctx, invocation.Request)
+	default:
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "unsupported effect operation")
 	}
+}
+
+func (a *Adapter) invokeSend(ctx context.Context, raw json.RawMessage) (effect.Outcome, error) {
 	var operation sendOperation
-	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
+	if err := json.Unmarshal(raw, &operation); err != nil {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is not decodable")
 	}
 	if operation.ChatID == 0 || strings.TrimSpace(operation.Text) == "" {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is missing chat or text")
 	}
+	request := &sendMessageRequest{ChatID: operation.ChatID, Text: operation.Text}
+	if operation.HTML != "" {
+		request.Text = operation.HTML
+		request.ParseMode = parseModeHTML
+	}
+	if operation.ReplyTo != 0 {
+		request.ReplyParameters = &replyParameters{MessageID: operation.ReplyTo, AllowSendingWithoutReply: true}
+	}
+	return a.dispatch(ctx, operation.ChatID, !operation.Status, func(call context.Context, token string) (int64, error) {
+		sent, err := a.bot.sendMessage(call, token, request)
+		if apiErr, rejected := apiErrorOf(err); rejected && apiErr.Status == http.StatusBadRequest && request.ParseMode != "" {
+			request.Text = operation.Text
+			request.ParseMode = ""
+			sent, err = a.bot.sendMessage(call, token, request)
+		}
+		return sent.MessageID, err
+	})
+}
+
+func (a *Adapter) invokeEdit(ctx context.Context, raw json.RawMessage) (effect.Outcome, error) {
+	var operation editOperation
+	if err := json.Unmarshal(raw, &operation); err != nil {
+		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "edit request is not decodable")
+	}
+	if operation.ChatID == 0 || operation.MessageID == 0 || strings.TrimSpace(operation.Text) == "" {
+		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "edit request is missing chat, message, or text")
+	}
+	request := &editMessageTextRequest{ChatID: operation.ChatID, MessageID: operation.MessageID, Text: operation.Text}
+	return a.dispatch(ctx, operation.ChatID, false, func(call context.Context, token string) (int64, error) {
+		edited, err := a.bot.editMessageText(call, token, request)
+		if err != nil {
+			return 0, err
+		}
+		return cmp.Or(edited.MessageID, operation.MessageID), nil
+	})
+}
+
+func (a *Adapter) dispatch(ctx context.Context, chatID int64, waitOnLimit bool, send func(ctx context.Context, token string) (int64, error)) (effect.Outcome, error) {
 	token, ok := a.botToken()
 	if !ok {
 		return effect.Outcome{Succeeded: false, SafeErrorCode: faultBotRefUnresolved}, nil
 	}
-	request := &sendMessageRequest{ChatID: operation.ChatID, Text: operation.Text}
-	if operation.ReplyTo != 0 {
-		request.ReplyParameters = &replyParameters{MessageID: operation.ReplyTo, AllowSendingWithoutReply: true}
-	}
 	limited := 0
 	for range sendMaxAttempts {
 		call, cancel := context.WithTimeout(ctx, sendTimeout)
-		sent, err := a.bot.sendMessage(call, token, request)
+		messageID, err := send(call, token)
 		cancel()
 		if err == nil {
-			if sent.MessageID == 0 {
+			if messageID == 0 {
 				return effect.Outcome{Ambiguous: true}, nil
 			}
-			receipt, marshalErr := json.Marshal(messageReceipt{ChatID: operation.ChatID, MessageID: sent.MessageID})
+			receipt, marshalErr := json.Marshal(messageReceipt{ChatID: chatID, MessageID: messageID})
 			if marshalErr != nil {
 				return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "receipt is not serializable")
 			}
@@ -184,13 +246,14 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 		case !rejected:
 			return effect.Outcome{Ambiguous: true}, nil
 		case apiErr.Status == http.StatusTooManyRequests:
-			limited++
-			if limited >= sendMaxAttempts {
-				return effect.Outcome{Succeeded: false, SafeErrorCode: "telegram_rate_limited"}, nil
-			}
 			delay := apiErr.RetryAfter
 			if delay <= 0 || delay > a.rateCap {
 				delay = a.rateCap
+			}
+			a.holdChat(chatID, delay)
+			limited++
+			if !waitOnLimit || limited >= sendMaxAttempts {
+				return effect.Outcome{Succeeded: false, SafeErrorCode: "telegram_rate_limited"}, nil
 			}
 			if !sleepContext(ctx, delay) {
 				return effect.Outcome{}, ctx.Err()
@@ -206,47 +269,4 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 		}
 	}
 	return effect.Outcome{Ambiguous: true}, nil
-}
-
-func splitMessage(text string) []string {
-	var chunks []string
-	var current strings.Builder
-	units := 0
-	flush := func() {
-		if strings.TrimSpace(current.String()) != "" {
-			chunks = append(chunks, current.String())
-		}
-		current.Reset()
-		units = 0
-	}
-	for _, line := range strings.SplitAfter(text, "\n") {
-		if units > 0 && units+utf16Len(line) > messageLimit {
-			flush()
-		}
-		for _, r := range line {
-			width := utf16.RuneLen(r)
-			if width < 1 {
-				width = 1
-			}
-			if units+width > messageLimit {
-				flush()
-			}
-			current.WriteRune(r)
-			units += width
-		}
-	}
-	flush()
-	return chunks
-}
-
-func utf16Len(text string) int {
-	n := 0
-	for _, r := range text {
-		width := utf16.RuneLen(r)
-		if width < 1 {
-			width = 1
-		}
-		n += width
-	}
-	return n
 }

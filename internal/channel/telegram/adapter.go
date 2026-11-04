@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -97,6 +98,14 @@ type Adapter struct {
 	deliverSem chan struct{}
 	state      atomic.Int32
 	fault      atomic.Value
+
+	secretVault   *secret.Vault
+	presenceMu    sync.Mutex
+	presence      map[string]*presenceSession
+	typingRefresh time.Duration
+	statusAfter   time.Duration
+	holdMu        sync.Mutex
+	holds         map[int64]time.Time
 }
 
 func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorStore, effects EffectRunner, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
@@ -134,6 +143,8 @@ func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorSt
 		retryBase:  backoffBase,
 		rateCap:    rateLimitCap,
 		deliverSem: make(chan struct{}, maxDeliverInflight),
+		presence:   map[string]*presenceSession{},
+		holds:      map[int64]time.Time{},
 	}
 	adapter.state.Store(int32(stateDown))
 	adapter.fault.Store(faultNone)

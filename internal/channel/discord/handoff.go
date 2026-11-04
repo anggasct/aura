@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/anggasct/aura/internal/channel/status"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
@@ -48,7 +49,7 @@ func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (
 		"persona: " + personaLabel(&definition),
 		"session: " + sessionID,
 		"principal: " + binding.principal,
-		"reason: " + truncateRunes(strings.TrimSpace(reason), handoffForwardRunes),
+		"reason: " + status.TruncateRunes(strings.TrimSpace(reason), handoffForwardRunes),
 		"reply: aura reply " + sessionID + " <text>",
 		"release: aura handoff release " + sessionID,
 	}
@@ -87,7 +88,7 @@ func (a *Adapter) handoffHeld(ctx context.Context, msg *messagePayload, envelope
 			a.logger.WarnContext(ctx, "handoff forward failed", "component", "discord")
 			return true
 		}
-		text := "handoff · session " + envelope.ConversationID + "\n" + envelope.PrincipalID + ": " + truncateRunes(strings.TrimSpace(msg.Content), handoffForwardRunes)
+		text := "handoff · session " + envelope.ConversationID + "\n" + envelope.PrincipalID + ": " + status.TruncateRunes(strings.TrimSpace(msg.Content), handoffForwardRunes)
 		if err := sendText(ctx, a.httpClient, a.restBase, token, dm, text); err != nil {
 			a.logger.WarnContext(ctx, "handoff forward failed", "component", "discord")
 		}

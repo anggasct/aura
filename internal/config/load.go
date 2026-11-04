@@ -841,6 +841,10 @@ func validateTelegramShapes(doc *yamlv3.Node) error {
 					return fmt.Errorf("channels.telegram.polling.%s must be a duration string at line %d", valueNode.Content[j].Value, pollingValue.Line)
 				}
 			}
+		case "min_edit_interval":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+				return fmt.Errorf("channels.telegram.min_edit_interval must be a duration string at line %d", valueNode.Line)
+			}
 		}
 	}
 	return nil
@@ -2688,6 +2692,10 @@ func applyTelegramDefaults(cfg *Config, doc *yamlv3.Node, defaults *Telegram) {
 	if polling.MaxBackoff == 0 && !configValuePresent(doc, "channels", "telegram", "polling", "max_backoff") && !envValuePresent("channels.telegram.polling.max_backoff") {
 		polling.MaxBackoff = defaults.Polling.MaxBackoff
 	}
+	telegram := &cfg.Channels.Telegram
+	if telegram.MinEditInterval == 0 && !configValuePresent(doc, "channels", "telegram", "min_edit_interval") && !envValuePresent("channels.telegram.min_edit_interval") {
+		telegram.MinEditInterval = defaults.MinEditInterval
+	}
 }
 
 func nestedValue(node *yamlv3.Node, path ...string) *yamlv3.Node {
@@ -3421,6 +3429,8 @@ func validateDiscord(discord *Discord) error {
 const (
 	telegramMaxPollTimeout = 50 * time.Second
 	telegramMaxBackoffCap  = 10 * time.Minute
+	telegramMinEditFloor   = time.Second
+	telegramMinEditCeiling = time.Minute
 )
 
 func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error {
@@ -3468,6 +3478,10 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 	backoff := time.Duration(telegram.Polling.MaxBackoff)
 	if backoff < time.Second || backoff > telegramMaxBackoffCap {
 		problems = append(problems, fmt.Errorf("channels.telegram.polling.max_backoff must be between 1s and %s", telegramMaxBackoffCap))
+	}
+	editInterval := time.Duration(telegram.MinEditInterval)
+	if editInterval < telegramMinEditFloor || editInterval > telegramMinEditCeiling {
+		problems = append(problems, fmt.Errorf("channels.telegram.min_edit_interval must be between %s and %s", telegramMinEditFloor, telegramMinEditCeiling))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

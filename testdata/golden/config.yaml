@@ -221,3 +221,4 @@ channels:
     polling:
       timeout: 30s
       max_backoff: 1m0s
+    min_edit_interval: 2s

@@ -142,16 +142,19 @@ func TestDeliverDefinitiveRejectionsFailWithoutRetry(t *testing.T) {
 	cases := map[string]struct {
 		status int
 		code   string
+		sends  int
 	}{
-		"blocked by the user": {status: http.StatusForbidden, code: "telegram_forbidden"},
-		"bad request":         {status: http.StatusBadRequest, code: "telegram_rejected"},
-		"revoked token":       {status: http.StatusUnauthorized, code: "telegram_unauthorized"},
+		"blocked by the user":           {status: http.StatusForbidden, code: "telegram_forbidden", sends: 1},
+		"bad request after plain retry": {status: http.StatusBadRequest, code: "telegram_rejected", sends: 2},
+		"revoked token":                 {status: http.StatusUnauthorized, code: "telegram_unauthorized", sends: 1},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
 			adapter := h.adapter(t, nil)
-			h.api.failNext(apiFailure(tc.status, 0))
+			for range tc.sends {
+				h.api.failNext(apiFailure(tc.status, 0))
+			}
 			_, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-4", "hello"))
 			if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryFailed {
 				t.Fatalf("Deliver error = %v, want %s", err, ErrorCodeDeliveryFailed)
@@ -160,10 +163,89 @@ func TestDeliverDefinitiveRejectionsFailWithoutRetry(t *testing.T) {
 			if err := h.db.QueryRowContext(t.Context(), `SELECT safe_error_code FROM effect_intent WHERE provider = 'telegram'`).Scan(&safe); err != nil || safe != tc.code {
 				t.Fatalf("safe_error_code = %q (%v), want %q", safe, err, tc.code)
 			}
-			if got := len(h.api.sends()); got != 1 {
-				t.Fatalf("sendMessage calls = %d, want 1", got)
+			if got := len(h.api.sends()); got != tc.sends {
+				t.Fatalf("sendMessage calls = %d, want %d", got, tc.sends)
 			}
 		})
+	}
+}
+
+func TestDeliverSendsEscapedHTMLWithParseMode(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapter(t, nil)
+	source := "**Done** with <script>alert(1)</script> & `x<y`"
+	if _, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-html", source)); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	sends := h.api.sends()
+	if len(sends) != 1 {
+		t.Fatalf("sendMessage calls = %d, want 1", len(sends))
+	}
+	if sends[0]["parse_mode"] != parseModeHTML {
+		t.Errorf("parse_mode = %v, want HTML", sends[0]["parse_mode"])
+	}
+	want := "<b>Done</b> with &lt;script&gt;alert(1)&lt;/script&gt; &amp; <code>x&lt;y</code>"
+	if sends[0]["text"] != want {
+		t.Errorf("text = %q, want %q", sends[0]["text"], want)
+	}
+	var key string
+	if err := h.db.QueryRowContext(t.Context(), `SELECT idempotency_key FROM effect_intent WHERE provider = 'telegram'`).Scan(&key); err != nil {
+		t.Fatalf("query key: %v", err)
+	}
+	if want := idempotencyKey("turn-html", ownerUserID, 0, source); key != want {
+		t.Errorf("idempotency key = %q, want %q derived from the source text", key, want)
+	}
+}
+
+func TestDeliverFallsBackToPlainTextWhenEntitiesAreRejected(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapter(t, nil)
+	h.api.failNextOn("sendMessage", describedFailure(http.StatusBadRequest, entityParseFailure, 0))
+	source := "**bold** and [link](https://example.com/a?b=1&c=2)"
+	receipt, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-plain", source))
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	sends := h.api.sends()
+	if len(sends) != 2 {
+		t.Fatalf("sendMessage calls = %d, want the formatted attempt and one plain resend", len(sends))
+	}
+	if sends[0]["parse_mode"] != parseModeHTML {
+		t.Errorf("first attempt parse_mode = %v, want HTML", sends[0]["parse_mode"])
+	}
+	if _, formatted := sends[1]["parse_mode"]; formatted || sends[1]["text"] != source {
+		t.Errorf("fallback = %v, want the original text without parse_mode", sends[1])
+	}
+	if _, replies := sends[1]["reply_parameters"]; !replies {
+		t.Error("fallback dropped the reply reference")
+	}
+	if receipt.ExternalID == "" {
+		t.Error("fallback receipt carries no message id")
+	}
+	if states := intentStates(t, h); states[effect.StateSucceeded] != 1 || len(states) != 1 {
+		t.Errorf("intent states = %v, want one succeeded intent", states)
+	}
+}
+
+func TestDeliverSplitsFencedCodeIntoBalancedFormattedChunks(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapter(t, nil)
+	text := "Here is the file:\n```go\n" + strings.Repeat("if a < b && c > d { return }\n", 300) + "```\nDone."
+	if _, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-fence", text)); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	sends := h.api.sends()
+	if len(sends) < 3 {
+		t.Fatalf("sendMessage calls = %d, want the fenced block split across chunks", len(sends))
+	}
+	for i, send := range sends {
+		if send["parse_mode"] != parseModeHTML {
+			t.Errorf("chunk %d parse_mode = %v, want HTML (no plain fallback needed)", i, send["parse_mode"])
+		}
+		markup, _ := send["text"].(string)
+		if !strings.Contains(markup, `<pre><code class="language-go">`) {
+			t.Errorf("chunk %d lost the code block: %.80q", i, markup)
+		}
 	}
 }
 

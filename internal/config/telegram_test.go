@@ -20,6 +20,19 @@ func TestLoad_TelegramDefaults(t *testing.T) {
 	if telegram.Polling.Timeout != Duration(30*time.Second) || telegram.Polling.MaxBackoff != Duration(time.Minute) {
 		t.Errorf("polling = %+v, want 30s timeout and 1m backoff", telegram.Polling)
 	}
+	if telegram.MinEditInterval != Duration(2*time.Second) {
+		t.Errorf("min_edit_interval = %v, want 2s", telegram.MinEditInterval)
+	}
+}
+
+func TestLoad_TelegramMinEditIntervalOverride(t *testing.T) {
+	res, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  telegram:\n    min_edit_interval: 5s\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := res.Config.Channels.Telegram.MinEditInterval; got != Duration(5*time.Second) {
+		t.Errorf("min_edit_interval = %v, want 5s", got)
+	}
 }
 
 func TestLoad_TelegramAccountsValid(t *testing.T) {
@@ -115,6 +128,22 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		"numeric poll timeout": {
 			yaml: account("    polling:\n      timeout: 30\n"),
 			want: "must be a duration string",
+		},
+		"zero edit interval": {
+			yaml: account("    min_edit_interval: 0s\n"),
+			want: "min_edit_interval must be between 1s and 1m0s",
+		},
+		"edit interval below a second": {
+			yaml: account("    min_edit_interval: 500ms\n"),
+			want: "min_edit_interval must be between 1s and 1m0s",
+		},
+		"edit interval above a minute": {
+			yaml: account("    min_edit_interval: 2m\n"),
+			want: "min_edit_interval must be between 1s and 1m0s",
+		},
+		"numeric edit interval": {
+			yaml: account("    min_edit_interval: 2\n"),
+			want: "min_edit_interval must be a duration string",
 		},
 		"unknown account key": {
 			yaml: account("        mode: polling\n"),

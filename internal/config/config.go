@@ -245,9 +245,10 @@ type DiscordAccount struct {
 }
 
 type Telegram struct {
-	Enabled  bool              `koanf:"enabled" yaml:"enabled"`
-	Accounts []TelegramAccount `koanf:"accounts" yaml:"accounts"`
-	Polling  TelegramPolling   `koanf:"polling" yaml:"polling"`
+	Enabled         bool              `koanf:"enabled" yaml:"enabled"`
+	Accounts        []TelegramAccount `koanf:"accounts" yaml:"accounts"`
+	Polling         TelegramPolling   `koanf:"polling" yaml:"polling"`
+	MinEditInterval Duration          `koanf:"min_edit_interval" yaml:"min_edit_interval"`
 }
 
 type TelegramAccount struct {
@@ -923,6 +924,7 @@ func Default() Config {
 					Timeout:    Duration(30 * time.Second),
 					MaxBackoff: Duration(time.Minute),
 				},
+				MinEditInterval: Duration(2 * time.Second),
 			},
 		},
 		Broadcast: Broadcast{

@@ -178,7 +178,19 @@ type replyParameters struct {
 type sendMessageRequest struct {
 	ChatID          int64            `json:"chat_id"`
 	Text            string           `json:"text"`
+	ParseMode       string           `json:"parse_mode,omitempty"`
 	ReplyParameters *replyParameters `json:"reply_parameters,omitempty"`
+}
+
+type editMessageTextRequest struct {
+	ChatID    int64  `json:"chat_id"`
+	MessageID int64  `json:"message_id"`
+	Text      string `json:"text"`
+}
+
+type chatActionRequest struct {
+	ChatID int64  `json:"chat_id"`
+	Action string `json:"action"`
 }
 
 type sentMessage struct {
@@ -199,4 +211,22 @@ func (c *botClient) sendMessage(ctx context.Context, token string, req *sendMess
 	var sent sentMessage
 	err := c.call(ctx, token, "sendMessage", req, &sent)
 	return sent, err
+}
+
+func (c *botClient) editMessageText(ctx context.Context, token string, req *editMessageTextRequest) (sentMessage, error) {
+	var result json.RawMessage
+	if err := c.call(ctx, token, "editMessageText", req, &result); err != nil {
+		return sentMessage{}, err
+	}
+	var edited sentMessage
+	if len(result) > 0 && result[0] == '{' {
+		if err := json.Unmarshal(result, &edited); err != nil {
+			return sentMessage{}, Errorf(ErrorCodeProtocolInvalid, "bot api editMessageText result is not decodable")
+		}
+	}
+	return edited, nil
+}
+
+func (c *botClient) sendChatAction(ctx context.Context, token string, chatID int64, action string) error {
+	return c.call(ctx, token, "sendChatAction", chatActionRequest{ChatID: chatID, Action: action}, nil)
 }

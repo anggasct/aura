@@ -32,5 +32,6 @@ func newTelegramAdapter(cfg *config.Config, account *config.TelegramAccount, db 
 		return nil, err
 	}
 	adapter.SetSessionResolver(&discordConversationResolver{pointers: store.NewConversationSessionStore(db)})
+	adapter.SetSecretVault(buildSecretVault(cfg))
 	return adapter, nil
 }

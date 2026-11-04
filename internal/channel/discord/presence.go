@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/channel/status"
 	"github.com/anggasct/aura/internal/effect"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/secret"
@@ -17,12 +18,7 @@ import (
 const (
 	typingRefreshInterval = 8 * time.Second
 	statusPostAfter       = 10 * time.Second
-	maxStatusWords        = 6
-	maxArgRunes           = 80
-	maxStatusRunes        = 280
 )
-
-var fallbackStatuses = [3]string{"Working…", "Still working…", "Wrapping up…"}
 
 type presenceSession struct {
 	channelID      string
@@ -55,128 +51,11 @@ func presenceKey(channel, effectID string) string {
 	return channel + "|" + effectID
 }
 
-func truncateWords(s string, n int) string {
-	words := strings.Fields(s)
-	if len(words) <= n {
-		return strings.Join(words, " ")
-	}
-	return strings.Join(words[:n], " ")
-}
-
-func truncateRunes(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
-	return string(runes[:n])
-}
-
-func fallbackStatus(count int) string {
-	if count < 0 {
-		count = 0
-	}
-	return fallbackStatuses[count%len(fallbackStatuses)]
-}
-
-// failureMarker flags a failed step without committing to any language, so the
-// line stays distinguishable from a normal status while the wording remains the
-// model's own.
-const failureMarker = "⚠️"
-
-func failureLine(activity string) string {
-	activity = strings.TrimSpace(activity)
-	activity = strings.TrimSuffix(activity, ".")
-	activity = strings.TrimSpace(activity)
-	if activity == "" {
-		return failureMarker
-	}
-	return failureMarker + " " + activity
-}
-
-func containsSecretKeyword(s string) bool {
-	lowered := strings.ToLower(s)
-	for _, keyword := range []string{"password", "secret", "token", "api_key", "apikey", "bearer", "authorization", "private_key", "client_secret"} {
-		if strings.Contains(lowered, keyword) {
-			return true
-		}
-	}
-	return false
-}
-
-func humanizeArgs(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
-		return ""
-	}
-	var parts []string
-	var collect func(v any)
-	collect = func(v any) {
-		switch value := v.(type) {
-		case string:
-			if strings.TrimSpace(value) != "" {
-				parts = append(parts, value)
-			}
-		case map[string]any:
-			for _, item := range value {
-				collect(item)
-			}
-		case []any:
-			for _, item := range value {
-				collect(item)
-			}
-		}
-	}
-	collect(decoded)
-	if len(parts) == 0 {
-		return ""
-	}
-	return truncateRunes(strings.Join(parts, " "), maxArgRunes)
-}
-
 func (a *Adapter) vaultOrNil() *secret.Vault {
 	if a == nil {
 		return nil
 	}
 	return a.secretVault
-}
-
-func renderStatusText(raw, args string, updateCount int, vault *secret.Vault) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return fallbackStatus(updateCount)
-	}
-	short := truncateWords(trimmed, maxStatusWords)
-	short = truncateRunes(strings.TrimSpace(short), maxStatusRunes)
-	if short == "" {
-		return fallbackStatus(updateCount)
-	}
-	if vault != nil {
-		short = vault.Redact(short)
-	}
-	if containsSecretKeyword(short) {
-		return fallbackStatus(updateCount)
-	}
-	argText := humanizeArgs(args)
-	secretHit := false
-	switch {
-	case vault != nil && argText != "" && vault.Contains(argText):
-		secretHit = true
-	case vault != nil && args != "" && vault.Contains(args):
-		secretHit = true
-	case containsSecretKeyword(args) || containsSecretKeyword(argText):
-		secretHit = true
-	}
-	if secretHit || argText == "" {
-		return short
-	}
-	if vault != nil {
-		argText = vault.Redact(argText)
-	}
-	return truncateRunes(short+" "+argText, maxStatusRunes)
 }
 
 func (a *Adapter) triggerTyping(ctx context.Context, channelID string) error {
@@ -362,7 +241,7 @@ func (a *Adapter) postInitialStatus(ctx context.Context, session *presenceSessio
 		return
 	}
 	if display == "" {
-		display = fallbackStatus(updates)
+		display = status.Fallback(updates)
 	}
 	_ = a.postOrPatchStatusLocked(ctx, session, display)
 }
@@ -388,14 +267,7 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 		if activity == "" {
 			activity = lastText
 		}
-		activity = truncateWords(activity, maxStatusWords)
-		if vault := a.vaultOrNil(); vault != nil {
-			activity = vault.Redact(activity)
-		}
-		if containsSecretKeyword(activity) {
-			activity = ""
-		}
-		display := failureLine(activity)
+		display := status.RenderFailure(activity, a.vaultOrNil())
 		a.presenceMu.Lock()
 		if session.failedNotified {
 			a.presenceMu.Unlock()
@@ -410,7 +282,7 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 	if strings.TrimSpace(text) == "" {
 		text = lastText
 	}
-	display := renderStatusText(text, args, updates, a.vaultOrNil())
+	display := status.Render(text, args, updates, a.vaultOrNil())
 	if display == "" {
 		return nil
 	}
