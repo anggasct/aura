@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -107,48 +109,45 @@ type fileTrustEnvelope struct {
 }
 
 type FileTrustRegistry struct {
-	mu      sync.Mutex
-	path    string
-	records map[string]*TrustRecord
-	loaded  bool
+	mu   sync.Mutex
+	path string
 }
 
 func NewFileTrustRegistry(path string) (*FileTrustRegistry, error) {
 	if path == "" {
 		return nil, Errorf(ErrConfigInvalid, "trust registry path must not be empty")
 	}
-	return &FileTrustRegistry{path: filepath.Clean(path), records: make(map[string]*TrustRecord)}, nil
+	return &FileTrustRegistry{path: filepath.Clean(path)}, nil
 }
 
-func (r *FileTrustRegistry) loadLocked() error {
-	if r.loaded {
-		return nil
-	}
-	r.loaded = true
+func (r *FileTrustRegistry) readLocked() (map[string]*TrustRecord, error) {
+	records := make(map[string]*TrustRecord)
 	raw, err := os.ReadFile(r.path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return records, nil
 		}
-		return Errorf(ErrServerUnavailable, "trust registry is not readable")
+		return nil, Errorf(ErrServerUnavailable, "trust registry is not readable")
 	}
 	var envelope fileTrustEnvelope
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return Errorf(ErrServerUnavailable, "trust registry is corrupt")
+		return nil, Errorf(ErrServerUnavailable, "trust registry is corrupt")
+	}
+	if envelope.Version != fileStoreVersion {
+		return nil, Errorf(ErrServerUnavailable, "trust registry version is not supported")
 	}
 	for name := range envelope.Servers {
 		record := envelope.Servers[name]
-		copied := record
-		copied.Capabilities = append([]string(nil), record.Capabilities...)
-		copied.Tools = append([]string(nil), record.Tools...)
-		r.records[name] = &copied
+		record.Capabilities = append([]string(nil), record.Capabilities...)
+		record.Tools = append([]string(nil), record.Tools...)
+		records[name] = &record
 	}
-	return nil
+	return records, nil
 }
 
-func (r *FileTrustRegistry) persistLocked() error {
-	servers := make(map[string]TrustRecord, len(r.records))
-	for name, record := range r.records {
+func (r *FileTrustRegistry) writeLocked(records map[string]*TrustRecord) error {
+	servers := make(map[string]TrustRecord, len(records))
+	for name, record := range records {
 		servers[name] = *record
 	}
 	raw, err := json.Marshal(fileTrustEnvelope{Version: fileStoreVersion, Servers: servers})
@@ -158,29 +157,36 @@ func (r *FileTrustRegistry) persistLocked() error {
 	return writeFileAtomic(r.path, raw)
 }
 
+func (r *FileTrustRegistry) mutate(serverName string, update func(rec *TrustRecord, existed bool) error) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	records, err := r.readLocked()
+	if err != nil {
+		return err
+	}
+	rec, existed := records[serverName]
+	if !existed {
+		rec = &TrustRecord{ServerName: serverName}
+	}
+	if err := update(rec, existed); err != nil {
+		return err
+	}
+	records[serverName] = rec
+	return r.writeLocked(records)
+}
+
 func (r *FileTrustRegistry) GetTrust(_ context.Context, serverName string) (*TrustRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.loadLocked(); err != nil {
+	records, err := r.readLocked()
+	if err != nil {
 		return nil, err
 	}
-	rec, ok := r.records[serverName]
-	if !ok || rec == nil {
+	rec, ok := records[serverName]
+	if !ok {
 		return nil, ErrTrustNotFound
 	}
-	recCopy := *rec
-	recCopy.Capabilities = append([]string(nil), rec.Capabilities...)
-	recCopy.Tools = append([]string(nil), rec.Tools...)
-	return &recCopy, nil
-}
-
-func (r *FileTrustRegistry) saveLocked(serverName string, update func(*TrustRecord)) {
-	rec := r.records[serverName]
-	if rec == nil {
-		rec = &TrustRecord{ServerName: serverName}
-	}
-	update(rec)
-	r.records[serverName] = rec
+	return rec, nil
 }
 
 func (r *FileTrustRegistry) SaveSessionTrust(_ context.Context, serverName, digest string, capabilities, tools []string) error {
@@ -190,99 +196,82 @@ func (r *FileTrustRegistry) SaveSessionTrust(_ context.Context, serverName, dige
 	if digest == "" {
 		return Errorf(ErrConfigInvalid, "trust digest must not be empty")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err := r.loadLocked(); err != nil {
-		return err
-	}
-	r.saveLocked(serverName, func(rec *TrustRecord) {
+	return r.mutate(serverName, func(rec *TrustRecord, _ bool) error {
 		if rec.Digest == digest && rec.Decision == TrustDecisionApproved {
-			return
+			return nil
 		}
 		rec.Digest = digest
 		rec.Decision = TrustDecisionPending
 		rec.Capabilities = append([]string(nil), capabilities...)
 		rec.Tools = append([]string(nil), tools...)
+		return nil
 	})
-	return r.persistLocked()
 }
 
 func (r *FileTrustRegistry) Approve(_ context.Context, serverName, digest string) error {
-	return r.decide(serverName, digest, false, TrustDecisionApproved)
-}
-
-func (r *FileTrustRegistry) IsTrusted(_ context.Context, serverName, digest string) (bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err := r.loadLocked(); err != nil {
-		return false, err
-	}
-	rec, ok := r.records[serverName]
-	return ok && rec != nil && rec.Digest == digest && rec.Decision == TrustDecisionApproved, nil
-}
-
-func (r *FileTrustRegistry) SaveSpawnTrust(_ context.Context, serverName, spawnDigest string) error {
-	if serverName == "" {
-		return Errorf(ErrConfigInvalid, "server name must not be empty")
-	}
-	if spawnDigest == "" {
-		return Errorf(ErrConfigInvalid, "spawn digest must not be empty")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err := r.loadLocked(); err != nil {
-		return err
-	}
-	r.saveLocked(serverName, func(rec *TrustRecord) {
-		if rec.SpawnDigest == spawnDigest && rec.SpawnDecision == TrustDecisionApproved {
-			return
-		}
-		rec.SpawnDigest = spawnDigest
-		rec.SpawnDecision = TrustDecisionPending
-	})
-	return r.persistLocked()
-}
-
-func (r *FileTrustRegistry) ApproveSpawn(_ context.Context, serverName, spawnDigest string) error {
-	return r.decide(serverName, spawnDigest, true, TrustDecisionApproved)
-}
-
-func (r *FileTrustRegistry) IsSpawnTrusted(_ context.Context, serverName, spawnDigest string) (bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err := r.loadLocked(); err != nil {
-		return false, err
-	}
-	rec, ok := r.records[serverName]
-	return ok && rec != nil && rec.SpawnDigest == spawnDigest && rec.SpawnDecision == TrustDecisionApproved, nil
-}
-
-func (r *FileTrustRegistry) decide(serverName, digest string, spawn bool, decision TrustDecision) error {
 	if serverName == "" {
 		return Errorf(ErrConfigInvalid, "server name must not be empty")
 	}
 	if digest == "" {
 		return Errorf(ErrConfigInvalid, "trust digest must not be empty")
 	}
+	return r.mutate(serverName, func(rec *TrustRecord, existed bool) error {
+		if !existed || rec.Digest != digest {
+			return ErrTrustNotFound
+		}
+		rec.Decision = TrustDecisionApproved
+		rec.ReviewedAt = time.Now().UTC()
+		return nil
+	})
+}
+
+func (r *FileTrustRegistry) IsTrusted(_ context.Context, serverName, digest string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.loadLocked(); err != nil {
-		return err
+	records, err := r.readLocked()
+	if err != nil {
+		return false, err
 	}
-	rec, ok := r.records[serverName]
-	if !ok || rec == nil {
-		return ErrTrustNotFound
+	rec, ok := records[serverName]
+	return ok && digest != "" && rec.Digest == digest && rec.Decision == TrustDecisionApproved, nil
+}
+
+func (r *FileTrustRegistry) ApproveConfig(_ context.Context, serverName, digest string) error {
+	if serverName == "" {
+		return Errorf(ErrConfigInvalid, "server name must not be empty")
 	}
-	if spawn {
-		if rec.SpawnDigest != digest {
-			return ErrTrustNotFound
-		}
-		rec.SpawnDecision = decision
-	} else {
-		if rec.Digest != digest {
-			return ErrTrustNotFound
-		}
-		rec.Decision = decision
+	if digest == "" {
+		return Errorf(ErrConfigInvalid, "config digest must not be empty")
 	}
-	return r.persistLocked()
+	return r.mutate(serverName, func(rec *TrustRecord, _ bool) error {
+		approveConfigRecord(rec, digest, time.Now().UTC())
+		return nil
+	})
+}
+
+func (r *FileTrustRegistry) IsConfigTrusted(_ context.Context, serverName, digest string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	records, err := r.readLocked()
+	if err != nil {
+		return false, err
+	}
+	return configTrusted(records[serverName], digest), nil
+}
+
+func (r *FileTrustRegistry) Revoke(_ context.Context, serverName string) (bool, error) {
+	if serverName == "" {
+		return false, Errorf(ErrConfigInvalid, "server name must not be empty")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	records, err := r.readLocked()
+	if err != nil {
+		return false, err
+	}
+	if _, existed := records[serverName]; !existed {
+		return false, nil
+	}
+	delete(records, serverName)
+	return true, r.writeLocked(records)
 }

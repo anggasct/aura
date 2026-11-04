@@ -39,13 +39,17 @@ func newStorageCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
+func resolveDataRoot(cfg *config.Config) (string, error) {
+	if cfg.Storage.Path != "" {
+		return cfg.Storage.Path, nil
+	}
+	return defaultDataRoot()
+}
+
 func storagePaths(cfg *config.Config) (dbPath, artifactRoot, backupDir string, err error) {
-	dataRoot := cfg.Storage.Path
-	if dataRoot == "" {
-		dataRoot, err = defaultDataRoot()
-		if err != nil {
-			return "", "", "", err
-		}
+	dataRoot, err := resolveDataRoot(cfg)
+	if err != nil {
+		return "", "", "", err
 	}
 	dbPath = filepath.Join(dataRoot, liveDatabaseFilename)
 	artifactRoot = dataRoot

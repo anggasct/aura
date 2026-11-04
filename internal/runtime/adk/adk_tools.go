@@ -21,6 +21,7 @@ import (
 type BuiltinToolDefinition struct {
 	Name                 string
 	Version              string
+	Server               string
 	Description          string
 	Schema               json.RawMessage
 	RequiredCapabilities []string

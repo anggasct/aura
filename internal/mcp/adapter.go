@@ -11,10 +11,11 @@ import (
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/toolbroker"
+	"github.com/anggasct/aura/internal/tools"
 )
 
 func FormatToolName(serverName, toolName string) string {
-	return fmt.Sprintf("mcp_%s_%s", serverName, toolName)
+	return fmt.Sprintf("%s%s_%s", tools.MCPToolPrefix, serverName, toolName)
 }
 
 func parseToolSchema(schema json.RawMessage) (*jsonschema.Resolved, error) {

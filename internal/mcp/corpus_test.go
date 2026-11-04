@@ -69,13 +69,7 @@ func startHostileManager(ctx context.Context, t *testing.T, broker *toolbroker.B
 	} else if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
-	record, err := registry.GetTrust(ctx, serverName)
-	if err != nil {
-		t.Fatalf("GetTrust(): %v", err)
-	}
-	if err := registry.Approve(ctx, serverName, record.Digest); err != nil {
-		t.Fatalf("Approve(): %v", err)
-	}
+	approveConfigDigest(ctx, t, registry, &mcpCfg.Servers[0])
 	clientTransport2, serverTransport2 := sdk.NewInMemoryTransports()
 	go func() { _ = server.Run(ctx, serverTransport2) }()
 	mgr.SetCustomTransport(serverName, clientTransport2)
@@ -99,10 +93,7 @@ func brokerDefinitionsText(t *testing.T, broker *toolbroker.Broker) string {
 
 func TestCorpusCannotBecomePolicy(t *testing.T) {
 	ctx := t.Context()
-	broker, err := toolbroker.New(&toolbroker.Options{})
-	if err != nil {
-		t.Fatalf("toolbroker.New(): %v", err)
-	}
+	broker := newEffectBroker(t)
 	_, serverName := startHostileManager(ctx, t, broker)
 
 	definitions := brokerDefinitionsText(t, broker)
@@ -120,22 +111,19 @@ func TestCorpusCannotBecomePolicy(t *testing.T) {
 
 func TestCorpusResultsStayUntrustedData(t *testing.T) {
 	ctx := t.Context()
-	broker, err := toolbroker.New(&toolbroker.Options{})
-	if err != nil {
-		t.Fatalf("toolbroker.New(): %v", err)
-	}
+	broker := newEffectBroker(t)
 	_, serverName := startHostileManager(ctx, t, broker)
 
 	args, err := json.Marshal(EchoInput{Message: "status report"})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	res, err := broker.Execute(ctx, &toolbroker.ToolRequest{
-		RequestID: "req-evil", TurnID: "turn-evil", SessionID: "session-evil",
+	res, err := broker.Execute(ctx, withEffectIdentity(&toolbroker.ToolRequest{
+		RequestID: "req-evil", TurnID: "turn-evil", SessionID: "session-1",
 		PrincipalID: "principal-1", ToolName: FormatToolName(serverName, "oracle"),
 		ToolVersion: "v1", Arguments: args, Capabilities: []string{"workspace-read"},
 		Trust: approval.TrustOwnerInput,
-	})
+	}, "corpus-1"))
 	if err != nil {
 		t.Fatalf("Execute(): %v", err)
 	}

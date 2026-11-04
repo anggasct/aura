@@ -7,8 +7,19 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"unicode/utf8"
 )
+
+const MCPToolPrefix = "mcp_"
+
+func IsMCPEntry(name string) bool {
+	return strings.HasPrefix(name, MCPToolPrefix)
+}
+
+func MCPServerEntry(server string) string {
+	return MCPToolPrefix + server
+}
 
 const (
 	Version         = "v1"
@@ -27,6 +38,7 @@ const (
 type Definition struct {
 	Name                 string
 	Version              string
+	Server               string
 	Schema               json.RawMessage
 	RequiredCapabilities []string
 	RequiresApproval     bool

@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/store"
+	auratools "github.com/anggasct/aura/internal/tools"
 	"github.com/anggasct/aura/internal/usage"
 	"github.com/anggasct/aura/internal/vision"
 
@@ -39,6 +40,7 @@ type ADKExecutor struct {
 	broker            runtime.ToolBroker
 	tools             []tool.Tool
 	optIn             map[string]bool
+	externalServers   map[string]string
 	logger            *slog.Logger
 	builtins          BuiltinToolExecutor
 	toolSeq           toolSequence
@@ -163,9 +165,13 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 		e.builtins = executor
 		e.tools = tools
 		e.optIn = map[string]bool{}
+		e.externalServers = map[string]string{}
 		for i := range definitions {
 			if definitions[i].OptIn {
 				e.optIn[definitions[i].Name] = true
+			}
+			if definitions[i].Server != "" {
+				e.externalServers[definitions[i].Name] = definitions[i].Server
 			}
 		}
 		return nil
@@ -572,6 +578,12 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 	listed := len(allowed) > 0
 	filtered := make([]tool.Tool, 0, len(x.tools))
 	for _, t := range x.tools {
+		if server, external := x.externalServers[t.Name()]; external {
+			if exposesExternalTool(definition, class, t.Name(), server) {
+				filtered = append(filtered, t)
+			}
+			continue
+		}
 		if x.optIn[t.Name()] && (!listed || class == "" || class == principal.ClassOwner) {
 			continue
 		}
@@ -580,6 +592,13 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 		}
 	}
 	return filtered
+}
+
+func exposesExternalTool(definition *auraagent.Definition, class principal.Class, toolName, server string) bool {
+	if class != "" && class != principal.ClassOwner {
+		return false
+	}
+	return slices.Contains(definition.Tools, toolName) || slices.Contains(definition.Tools, auratools.MCPServerEntry(server))
 }
 
 func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string, extra turnContext) (agent.Agent, error) {

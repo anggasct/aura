@@ -659,6 +659,9 @@ func (b *Broker) enforceToolTier(request *ToolRequest, class principal.Class, de
 	if class == principal.ClassOwner {
 		return nil
 	}
+	if definition.Server != "" {
+		return errorf(ResultToolTierDenied, "tool %q is available to the owner only", request.ToolName)
+	}
 	if class == principal.ClassPublic && definition.Effectful {
 		return errorf(ResultToolTierDenied, "tool %q is not available to public principals", request.ToolName)
 	}

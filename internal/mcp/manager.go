@@ -2,12 +2,17 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/config"
@@ -15,6 +20,8 @@ import (
 	"github.com/anggasct/aura/internal/tools"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+const toolVersion = "v1"
 
 type ManagerOptions struct {
 	Config            *config.MCP
@@ -43,10 +50,26 @@ type Manager struct {
 	capabilityChecker func([]string) error
 	clients           map[string]*Client
 	registeredTools   map[string][]string
+	toolOwners        map[string]string
+	failures          map[string]ErrorCode
 	customTransports  map[string]sdk.Transport
 	mu                sync.Mutex
 	closed            bool
 }
+
+type ServerStatus struct {
+	Name      string
+	Transport string
+	Code      ErrorCode
+	Connected bool
+	Tools     []string
+}
+
+const (
+	startConcurrency       = 4
+	maxExposedToolNameSize = 64
+	defaultToolSchema      = `{"type":"object"}`
+)
 
 func NewManager(opts *ManagerOptions) (*Manager, error) {
 	if opts == nil {
@@ -87,6 +110,8 @@ func NewManager(opts *ManagerOptions) (*Manager, error) {
 		capabilityChecker: opts.CapabilityChecker,
 		clients:           make(map[string]*Client),
 		registeredTools:   make(map[string][]string),
+		toolOwners:        make(map[string]string),
+		failures:          make(map[string]ErrorCode),
 		customTransports:  make(map[string]sdk.Transport),
 	}, nil
 }
@@ -97,24 +122,57 @@ func (m *Manager) SetCustomTransport(serverName string, transport sdk.Transport)
 	m.customTransports[serverName] = transport
 }
 
-func (m *Manager) enforceSpawnTrust(ctx context.Context, registry TrustRegistry, serverCfg *config.MCPServer) error {
-	spawnDigest, err := ComputeSpawnDigest(serverCfg)
-	if err != nil {
-		return err
+func (m *Manager) Statuses() []ServerStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	statuses := make([]ServerStatus, 0, len(m.cfg.Servers))
+	for i := range m.cfg.Servers {
+		server := &m.cfg.Servers[i]
+		status := ServerStatus{Name: server.Name, Transport: server.Transport, Code: ErrServerUnavailable}
+		if client, running := m.clients[server.Name]; running {
+			status.Code = ""
+			status.Connected = client.Connected()
+			status.Tools = slices.Clone(m.registeredTools[server.Name])
+		} else if code, failed := m.failures[server.Name]; failed {
+			status.Code = code
+		}
+		statuses = append(statuses, status)
 	}
+	return statuses
+}
 
-	spawnTrusted, err := registry.IsSpawnTrusted(ctx, serverCfg.Name, spawnDigest)
-	if err != nil {
-		return Errorf(ErrTrustRequired, "server %q spawn trust check failed: %v", serverCfg.Name, err)
+func (m *Manager) UnexposedEntries(entries []string) []string {
+	statuses := m.Statuses()
+	registered := make(map[string]bool)
+	running := make(map[string]bool)
+	for i := range statuses {
+		if statuses[i].Code != "" {
+			continue
+		}
+		running[statuses[i].Name] = true
+		for _, name := range statuses[i].Tools {
+			registered[name] = true
+		}
 	}
-	if spawnTrusted {
-		return nil
+	var unexposed []string
+	for _, entry := range entries {
+		if !tools.IsMCPEntry(entry) || registered[entry] {
+			continue
+		}
+		namesServer, namesTool := false, false
+		for server := range running {
+			serverEntry := tools.MCPServerEntry(server)
+			if entry == serverEntry {
+				namesServer = true
+			} else if strings.HasPrefix(entry, serverEntry+"_") {
+				namesTool = true
+			}
+		}
+		if namesTool && !namesServer {
+			unexposed = append(unexposed, entry)
+		}
 	}
-
-	if err := registry.SaveSpawnTrust(ctx, serverCfg.Name, spawnDigest); err != nil {
-		return Errorf(ErrTrustRequired, "server %q failed to record pending spawn trust: %v", serverCfg.Name, err)
-	}
-	return Errorf(ErrTrustRequired, "server %q command approval required for digest %s before execution", serverCfg.Name, spawnDigest)
+	return unexposed
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -128,155 +186,239 @@ func (m *Manager) Start(ctx context.Context) error {
 		return Errorf(ErrServerUnavailable, "manager is closed")
 	}
 	servers := slices.Clone(m.cfg.Servers)
-	transports := make(map[string]sdk.Transport, len(m.customTransports))
-	for k, v := range m.customTransports {
-		transports[k] = v
-	}
-	checker := m.capabilityChecker
-	broker := m.broker
-	registry := m.trustRegistry
-	logger := m.logger
-	httpClient := m.httpClient
-	endpointPolicy := m.endpointPolicy
-	secretResolver := m.secretResolver
-	sessionStarter := m.sessionStarter
-	observer := m.observer
+	transports := maps.Clone(m.customTransports)
 	m.mu.Unlock()
 
+	errs := make([]error, len(servers))
+	var group errgroup.Group
+	group.SetLimit(startConcurrency)
 	for i := range servers {
-		serverCfg := &servers[i]
+		group.Go(func() error {
+			serverCfg := &servers[i]
+			err := m.startServer(ctx, serverCfg, transports[serverCfg.Name])
+			m.recordOutcome(ctx, serverCfg.Name, err)
+			errs[i] = err
+			return nil
+		})
+	}
+	_ = group.Wait()
+	return errors.Join(errs...)
+}
 
-		if checker != nil && len(serverCfg.Capabilities) > 0 {
-			if err := checker(serverCfg.Capabilities); err != nil {
-				return Wrap(ErrCapabilityUnavailable, err, "required capabilities unavailable")
-			}
+func (m *Manager) recordOutcome(ctx context.Context, serverName string, err error) {
+	if err == nil {
+		return
+	}
+	code, ok := CodeOf(err)
+	if !ok {
+		code = ErrServerUnavailable
+	}
+	m.mu.Lock()
+	m.failures[serverName] = code
+	m.mu.Unlock()
+	m.logger.WarnContext(ctx, "server start failed",
+		"component", "mcp_manager",
+		"server", serverName,
+		"code", string(code),
+	)
+}
+
+func (m *Manager) startServer(ctx context.Context, serverCfg *config.MCPServer, transport sdk.Transport) error {
+	if m.capabilityChecker != nil && len(serverCfg.Capabilities) > 0 {
+		if err := m.capabilityChecker(serverCfg.Capabilities); err != nil {
+			return Wrap(ErrCapabilityUnavailable, err, "server "+serverCfg.Name+": required capabilities unavailable")
 		}
-
-		// Trust gate must run before any exec: Connect spawns the stdio
-		// process, so an unapproved command must fail closed here.
-		if transports[serverCfg.Name] == nil && serverCfg.Transport == config.MCPTransportStdio {
-			if err := m.enforceSpawnTrust(ctx, registry, serverCfg); err != nil {
-				return err
-			}
-		}
-
-		client, err := NewClient(serverCfg, logger,
-			WithHTTPClient(httpClient),
-			WithEndpointPolicy(endpointPolicy),
-			WithSecretResolver(secretResolver),
-			WithSessionStarter(sessionStarter),
-			WithObserver(observer),
-		)
-		if err != nil {
-			return err
-		}
-
-		transport := transports[serverCfg.Name]
-		if err := client.Connect(ctx, transport); err != nil {
-			_ = client.Close(ctx)
-			return err
-		}
-
-		discovered, err := client.DiscoverTools(ctx)
-		if err != nil {
-			_ = client.Close(ctx)
-			return err
-		}
-
-		digest, err := ComputeTrustDigest(serverCfg, discovered)
-		if err != nil {
-			_ = client.Close(ctx)
-			return err
-		}
-
-		trusted, err := registry.IsTrusted(ctx, serverCfg.Name, digest)
-		if err != nil {
-			_ = client.Close(ctx)
-			return Wrap(ErrResultInvalid, err, "failed to check trust")
-		}
-
-		if !trusted {
-			toolNames := make([]string, 0, len(discovered))
-			for _, t := range discovered {
-				toolNames = append(toolNames, t.Name)
-			}
-			if err := registry.SaveSessionTrust(ctx, serverCfg.Name, digest, serverCfg.Capabilities, toolNames); err != nil {
-				_ = client.Close(ctx)
-				return Errorf(ErrTrustRequired, "server %q failed to record pending trust: %v", serverCfg.Name, err)
-			}
-			_ = client.Close(ctx)
-			return Errorf(ErrTrustRequired, "server %q trust review required for digest %s", serverCfg.Name, digest)
-		}
-
-		registeredNames := make([]string, 0, len(discovered))
-		registerFailed := false
-		var registerErr error
-		for _, tool := range discovered {
-			namespaced := FormatToolName(serverCfg.Name, tool.Name)
-			version := "v1"
-
-			def := tools.Definition{
-				Name:                 namespaced,
-				Version:              version,
-				Schema:               tool.InputSchema,
-				RequiredCapabilities: slices.Clone(serverCfg.Capabilities),
-				Validator:            MakeValidator(tool.InputSchema, int64(serverCfg.MaxMessageSize)),
-			}
-
-			rule := approval.Rule{
-				ToolName:             namespaced,
-				ToolVersion:          version,
-				RequiresApproval:     false,
-				RequiredCapabilities: slices.Clone(serverCfg.Capabilities),
-				AllowedTrust: []approval.TrustLabel{
-					approval.TrustOwnerInput,
-					approval.TrustTrustedConfiguration,
-					approval.TrustDerivedUntrusted,
-				},
-				Constraints: approval.Constraints{
-					MaxOutputBytes: int64(serverCfg.MaxMessageSize),
-					Timeout:        time.Duration(serverCfg.RequestTimeout),
-				},
-			}
-
-			adapter := NewAdapter(client, tool.Name, int64(serverCfg.MaxMessageSize))
-			if err := broker.RegisterTool(&def, adapter, &rule); err != nil {
-				registerFailed = true
-				registerErr = Wrap(ErrServerUnavailable, err, "failed to register tool in broker")
-				break
-			}
-
-			registeredNames = append(registeredNames, namespaced)
-		}
-		if registerFailed {
-			for _, name := range registeredNames {
-				broker.UnregisterTool(name, "v1")
-			}
-			_ = client.Close(ctx)
-			return registerErr
-		}
-
-		m.mu.Lock()
-		if m.closed {
-			m.mu.Unlock()
-			for _, name := range registeredNames {
-				broker.UnregisterTool(name, "v1")
-			}
-			_ = client.Close(ctx)
-			return Errorf(ErrServerUnavailable, "manager is closed")
-		}
-		m.clients[serverCfg.Name] = client
-		m.registeredTools[serverCfg.Name] = registeredNames
-		m.mu.Unlock()
-
-		logger.InfoContext(ctx, "server tools registered",
-			"component", "mcp_manager",
-			"server", serverCfg.Name,
-			"tool_count", len(registeredNames),
-		)
 	}
 
+	configDigest, err := ComputeConfigDigest(serverCfg)
+	if err != nil {
+		return err
+	}
+	approved, err := m.trustRegistry.IsConfigTrusted(ctx, serverCfg.Name, configDigest)
+	if err != nil {
+		return Errorf(ErrTrustRequired, "server %q trust registry is unavailable", serverCfg.Name)
+	}
+	if !approved {
+		return Errorf(ErrTrustRequired, "server %q requires owner approval before it is started", serverCfg.Name)
+	}
+
+	client, err := NewClient(serverCfg, m.logger,
+		WithHTTPClient(m.httpClient),
+		WithEndpointPolicy(m.endpointPolicy),
+		WithSecretResolver(m.secretResolver),
+		WithSessionStarter(m.sessionStarter),
+		WithObserver(m.observer),
+	)
+	if err != nil {
+		return err
+	}
+	if err := client.Connect(ctx, transport); err != nil {
+		_ = client.Close(ctx)
+		return err
+	}
+	discovered, err := client.DiscoverTools(ctx)
+	if err != nil {
+		_ = client.Close(ctx)
+		return err
+	}
+	if err := m.pinToolSurface(ctx, serverCfg, discovered); err != nil {
+		_ = client.Close(ctx)
+		return err
+	}
+
+	registered, err := m.registerTools(ctx, client, serverCfg, discovered)
+	if err != nil {
+		_ = client.Close(ctx)
+		return err
+	}
+
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		m.unregister(registered)
+		_ = client.Close(ctx)
+		return Errorf(ErrServerUnavailable, "manager is closed")
+	}
+	previous := m.clients[serverCfg.Name]
+	previousTools := m.registeredTools[serverCfg.Name]
+	m.clients[serverCfg.Name] = client
+	m.registeredTools[serverCfg.Name] = registered
+	delete(m.failures, serverCfg.Name)
+	m.mu.Unlock()
+	if previous != nil {
+		m.unregisterStale(previousTools, registered)
+		_ = previous.Close(ctx)
+	}
+
+	m.logger.InfoContext(ctx, "server tools registered",
+		"component", "mcp_manager",
+		"server", serverCfg.Name,
+		"tool_count", len(registered),
+	)
 	return nil
+}
+
+func (m *Manager) pinToolSurface(ctx context.Context, serverCfg *config.MCPServer, discovered []DiscoveredTool) error {
+	digest, err := ComputeTrustDigest(serverCfg, discovered)
+	if err != nil {
+		return err
+	}
+	trusted, err := m.trustRegistry.IsTrusted(ctx, serverCfg.Name, digest)
+	if err != nil {
+		return Errorf(ErrTrustRequired, "server %q trust registry is unavailable", serverCfg.Name)
+	}
+	if trusted {
+		return nil
+	}
+	record, err := m.trustRegistry.GetTrust(ctx, serverCfg.Name)
+	if err != nil && !errors.Is(err, ErrTrustNotFound) {
+		return Errorf(ErrTrustRequired, "server %q trust registry is unavailable", serverCfg.Name)
+	}
+	firstDiscovery := err != nil || record.Digest == ""
+	toolNames := make([]string, 0, len(discovered))
+	for i := range discovered {
+		toolNames = append(toolNames, discovered[i].Name)
+	}
+	if err := m.trustRegistry.SaveSessionTrust(ctx, serverCfg.Name, digest, serverCfg.Capabilities, toolNames); err != nil {
+		return Errorf(ErrTrustRequired, "server %q could not record its tool surface", serverCfg.Name)
+	}
+	if !firstDiscovery {
+		return Errorf(ErrTrustRequired, "server %q tool surface changed since approval", serverCfg.Name)
+	}
+	if err := m.trustRegistry.Approve(ctx, serverCfg.Name, digest); err != nil {
+		return Errorf(ErrTrustRequired, "server %q could not pin its tool surface", serverCfg.Name)
+	}
+	return nil
+}
+
+func (m *Manager) registerTools(ctx context.Context, client *Client, serverCfg *config.MCPServer, discovered []DiscoveredTool) ([]string, error) {
+	registered := make([]string, 0, len(discovered))
+	for i := range discovered {
+		tool := &discovered[i]
+		namespaced := FormatToolName(serverCfg.Name, tool.Name)
+		if len(namespaced) > maxExposedToolNameSize {
+			m.logger.WarnContext(ctx, "tool skipped because its exposed name is too long",
+				"component", "mcp_manager",
+				"server", serverCfg.Name,
+				"tool", tool.Name,
+			)
+			continue
+		}
+		if err := m.claimToolName(namespaced, serverCfg.Name); err != nil {
+			m.unregister(registered)
+			return nil, err
+		}
+		schema := tool.InputSchema
+		if !hasToolSchema(schema) {
+			schema = json.RawMessage(defaultToolSchema)
+		}
+		def := tools.Definition{
+			Name:                 namespaced,
+			Version:              toolVersion,
+			Server:               serverCfg.Name,
+			Schema:               schema,
+			RequiredCapabilities: slices.Clone(serverCfg.Capabilities),
+			RequiresApproval:     true,
+			Effectful:            true,
+			Validator:            MakeValidator(tool.InputSchema, int64(serverCfg.MaxMessageSize)),
+		}
+		rule := approval.Rule{
+			ToolName:             namespaced,
+			ToolVersion:          toolVersion,
+			RequiresApproval:     true,
+			RequiredCapabilities: slices.Clone(serverCfg.Capabilities),
+			AllowedTrust: []approval.TrustLabel{
+				approval.TrustOwnerInput,
+				approval.TrustTrustedConfiguration,
+				approval.TrustDerivedUntrusted,
+			},
+			Constraints: approval.Constraints{
+				MaxOutputBytes: int64(serverCfg.MaxMessageSize),
+				Timeout:        time.Duration(serverCfg.RequestTimeout),
+			},
+		}
+		adapter := NewAdapter(client, tool.Name, int64(serverCfg.MaxMessageSize))
+		if err := m.broker.RegisterTool(&def, adapter, &rule); err != nil {
+			m.releaseToolName(namespaced)
+			m.unregister(registered)
+			return nil, Wrap(ErrServerUnavailable, err, "failed to register tool in broker")
+		}
+		registered = append(registered, namespaced)
+	}
+	return registered, nil
+}
+
+func (m *Manager) claimToolName(namespaced, serverName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if owner, taken := m.toolOwners[namespaced]; taken && owner != serverName {
+		return Errorf(ErrSchemaInvalid, "server %q exposes a tool name already provided by another server", serverName)
+	}
+	m.toolOwners[namespaced] = serverName
+	return nil
+}
+
+func (m *Manager) releaseToolName(namespaced string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.toolOwners, namespaced)
+}
+
+func (m *Manager) unregister(names []string) {
+	for _, name := range names {
+		m.broker.UnregisterTool(name, toolVersion)
+		m.releaseToolName(name)
+	}
+}
+
+func (m *Manager) unregisterStale(previous, current []string) {
+	for _, name := range previous {
+		if slices.Contains(current, name) {
+			continue
+		}
+		m.broker.UnregisterTool(name, toolVersion)
+		m.releaseToolName(name)
+	}
 }
 
 func (m *Manager) Close(ctx context.Context) error {
@@ -293,7 +435,8 @@ func (m *Manager) Close(ctx context.Context) error {
 	var errs []error
 	for serverName, toolNames := range m.registeredTools {
 		for _, name := range toolNames {
-			m.broker.UnregisterTool(name, "v1")
+			m.broker.UnregisterTool(name, toolVersion)
+			delete(m.toolOwners, name)
 		}
 		delete(m.registeredTools, serverName)
 	}

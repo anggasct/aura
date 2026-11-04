@@ -93,6 +93,10 @@ func (r *Registry) Resolve(required []string, preferID *string) (Definition, err
 }
 
 func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string) (*Registry, error) {
+	return BuildWithMCP(overrides, knownTools, nil, modelRoutes)
+}
+
+func BuildWithMCP(overrides []config.AgentDefinition, knownTools, mcpServers, modelRoutes []string) (*Registry, error) {
 	registry := newRegistry()
 	for index := range builtins {
 		definition := builtins[index].clone()
@@ -104,7 +108,7 @@ func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string)
 	}
 	seen := make(map[string]struct{}, len(overrides))
 	for index := range overrides {
-		definition, err := buildOverride(&overrides[index], index, knownTools, modelRoutes)
+		definition, err := buildOverride(&overrides[index], index, knownTools, mcpServers, modelRoutes)
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +121,7 @@ func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string)
 	return registry, nil
 }
 
-func buildOverride(override *config.AgentDefinition, index int, knownTools, modelRoutes []string) (*Definition, error) {
+func buildOverride(override *config.AgentDefinition, index int, knownTools, mcpServers, modelRoutes []string) (*Definition, error) {
 	field := fmt.Sprintf("agents.definitions[%d]", index)
 	if strings.TrimSpace(override.ID) == "" {
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".id must not be empty")
@@ -181,6 +185,12 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mode
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".description must not be empty")
 	}
 	for _, tool := range definition.Tools {
+		if tools.IsMCPEntry(tool) {
+			if !namesConfiguredMCPServer(tool, mcpServers) {
+				return nil, codedError(ErrorCodePersonaInvalid, field+".tools: "+fmt.Sprintf("%q", tool)+" does not name a configured mcp server")
+			}
+			continue
+		}
 		if !slices.Contains(knownTools, tool) {
 			return nil, codedError(ErrorCodeUnknownTool, field+".tools: unknown tool "+fmt.Sprintf("%q", tool))
 		}
@@ -216,11 +226,17 @@ func validateToolCeilings(definition *Definition, field string, knownTools []str
 		available = knownTools
 	}
 	for _, tool := range definition.PrincipalTools {
+		if tools.IsMCPEntry(tool) {
+			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.principal_tools: %q is an mcp tool and is available to the owner only", field, tool))
+		}
 		if !slices.Contains(available, tool) {
 			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.principal_tools: %q is not one of the persona's tools", field, tool))
 		}
 	}
 	for _, tool := range definition.PublicTools {
+		if tools.IsMCPEntry(tool) {
+			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is an mcp tool and is available to the owner only", field, tool))
+		}
 		if !slices.Contains(available, tool) {
 			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is not one of the persona's tools", field, tool))
 		}
@@ -229,4 +245,14 @@ func validateToolCeilings(definition *Definition, field string, knownTools []str
 		}
 	}
 	return nil
+}
+
+func namesConfiguredMCPServer(entry string, servers []string) bool {
+	for _, server := range servers {
+		serverEntry := tools.MCPServerEntry(server)
+		if entry == serverEntry || (strings.HasPrefix(entry, serverEntry+"_") && len(entry) > len(serverEntry)+1) {
+			return true
+		}
+	}
+	return false
 }

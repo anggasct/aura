@@ -580,3 +580,9 @@ func validateDiscoveredToolName(name string) error {
 	}
 	return nil
 }
+
+func (c *Client) Connected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.closed && c.session != nil
+}

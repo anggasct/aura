@@ -246,3 +246,33 @@ func TestUnclassifiedRequestsKeepTheShippedPolicy(t *testing.T) {
 		t.Fatalf("unclassified read_file: %v", err)
 	}
 }
+
+func TestExternalServerToolsAreOwnerOnlyEvenInsideTheCeiling(t *testing.T) {
+	access := teamAccess()
+	access.ceilings[principal.ClassTrusted] = append(access.ceilings[principal.ClassTrusted], "mcp_docs_search")
+	access.ceilings[principal.ClassPublic] = append(access.ceilings[principal.ClassPublic], "mcp_docs_search")
+	harness := newAccessBroker(t, access)
+	calls := 0
+	definition := &tools.Definition{Name: "mcp_docs_search", Version: "v1", Server: "docs", Schema: json.RawMessage(`{"type":"object"}`), RequiresApproval: true, Effectful: true, Validator: func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil }}
+	rule := approval.Rule{
+		ToolName: "mcp_docs_search", ToolVersion: "v1", RequiresApproval: true,
+		AllowedTrust: []approval.TrustLabel{approval.TrustOwnerInput, approval.TrustDerivedUntrusted},
+	}
+	adapter := func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+		calls++
+		return ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
+	}
+	if err := harness.broker.RegisterTool(definition, adapter, &rule); err != nil {
+		t.Fatalf("RegisterTool: %v", err)
+	}
+	for _, class := range []principal.Class{principal.ClassTrusted, principal.ClassPublic} {
+		request := classifiedRequest("mcp_docs_search", `{}`, class)
+		_, err := harness.broker.Execute(t.Context(), request)
+		if classOf(err) != ResultToolTierDenied {
+			t.Fatalf("%s error = %v, want tool_tier_denied", class, err)
+		}
+	}
+	if calls != 0 || harness.prompts != 0 {
+		t.Fatalf("adapter calls = %d prompts = %d, want neither", calls, harness.prompts)
+	}
+}

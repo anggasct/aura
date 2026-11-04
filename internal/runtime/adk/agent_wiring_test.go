@@ -239,3 +239,45 @@ func TestToolsForOffersOptInToolsOnlyWhenListedForNonOwners(t *testing.T) {
 		})
 	}
 }
+
+func TestToolsForExposesExternalToolsOnlyToListedOwnerPersonas(t *testing.T) {
+	executor := &ADKExecutor{
+		tools: []tool.Tool{namedToolStub{name: "read_file"}, namedToolStub{name: "mcp_docs_search"}, namedToolStub{name: "mcp_docs_write"}, namedToolStub{name: "mcp_files_ls"}},
+		externalServers: map[string]string{
+			"mcp_docs_search": "docs", "mcp_docs_write": "docs", "mcp_files_ls": "files",
+		},
+	}
+	names := func(tools []tool.Tool) []string {
+		out := make([]string, 0, len(tools))
+		for _, t := range tools {
+			out = append(out, t.Name())
+		}
+		return out
+	}
+	cases := map[string]struct {
+		definition *auraagent.Definition
+		class      principal.Class
+		want       []string
+	}{
+		"persona without a tools list sees no mcp tool":  {&auraagent.Definition{}, principal.ClassOwner, []string{"read_file"}},
+		"persona without mcp entries sees no mcp tool":   {&auraagent.Definition{Tools: []string{"read_file"}}, principal.ClassOwner, []string{"read_file"}},
+		"server entry exposes every tool of that server": {&auraagent.Definition{Tools: []string{"mcp_docs"}}, principal.ClassOwner, []string{"mcp_docs_search", "mcp_docs_write"}},
+		"tool entry exposes exactly that tool":           {&auraagent.Definition{Tools: []string{"mcp_docs_search", "mcp_files_ls"}}, principal.ClassOwner, []string{"mcp_docs_search", "mcp_files_ls"}},
+		"unclassified turns follow the owner rule":       {&auraagent.Definition{Tools: []string{"mcp_docs"}}, "", []string{"mcp_docs_search", "mcp_docs_write"}},
+		"trusted principals never see mcp tools": {
+			&auraagent.Definition{Tools: []string{"read_file", "mcp_docs"}, PrincipalTools: []string{"read_file", "mcp_docs"}},
+			principal.ClassTrusted, []string{"read_file"},
+		},
+		"public principals never see mcp tools": {
+			&auraagent.Definition{Tools: []string{"read_file", "mcp_docs"}, PublicTools: []string{"read_file", "mcp_docs_search"}},
+			principal.ClassPublic, []string{"read_file"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := names(executor.toolsFor(tc.definition, tc.class)); !slices.Equal(got, tc.want) {
+				t.Fatalf("tools = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
