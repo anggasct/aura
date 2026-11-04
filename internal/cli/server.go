@@ -118,6 +118,20 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			builtin.SetHandoffOpener(newHandoffService(db, handoffNotifiers(channelAdapters)))
+			var mcpServers *mcpRuntime
+			if mcpServersConfigured(cfg) {
+				mcpServers, err = startConfiguredMCP(ctx, cfg, builtin.Broker(), logger, pipeline.MeterProvider(), mapCapabilityStatuses(result.CapabilityReport), agentRegistry.Definitions())
+				if err != nil {
+					return err
+				}
+				defer func() {
+					closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
+					defer cancel()
+					if err := mcpServers.Close(closeCtx); err != nil {
+						logger.WarnContext(closeCtx, "mcp shutdown", "component", "mcp", "error", err)
+					}
+				}()
+			}
 			modelDefinition := cfg.Models.Definitions["primary"]
 			if modelDefinition.Model == "" {
 				return &config.Error{Code: config.ErrorCodeConfigInvalid, Detail: "models.definitions.primary.model is required for the server runtime"}
@@ -158,6 +172,9 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			var profileHook postTurnHook
 			healthChecks := channelChecks
+			if mcpServers != nil {
+				healthChecks = append(slices.Clone(healthChecks), mcpServers.check)
+			}
 			if cfg.Profile != nil && cfg.Profile.Enabled {
 				profileRuntime, err := buildProfileRuntime(ctx, cfg, db, pipeline.MeterProvider(), logger)
 				if err != nil {
@@ -166,7 +183,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				executorOpts = append(executorOpts, runtimeadk.WithProfileContext(profileRuntime))
 				profileHook = profileRuntime.hook
 				profileRuntime.start(ctx)
-				healthChecks = append(slices.Clone(channelChecks), profileRuntime.check(cfg))
+				healthChecks = append(slices.Clone(healthChecks), profileRuntime.check(cfg))
 			}
 			var skillRenderer runtimeengine.SkillRenderer
 			var skillCommands command.Skills

@@ -152,34 +152,8 @@ func copyStringMap(src map[string]string) map[string]string {
 	return dst
 }
 
-type SpawnTrustContent struct {
-	Name        string            `json:"name"`
-	Transport   string            `json:"transport"`
-	Command     string            `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Environment map[string]string `json:"environment,omitempty"`
-}
-
-func ComputeSpawnDigest(serverCfg *config.MCPServer) (string, error) {
-	if serverCfg == nil {
-		return "", Errorf(ErrConfigInvalid, "server configuration is required")
-	}
-
-	content := SpawnTrustContent{
-		Name:        serverCfg.Name,
-		Transport:   serverCfg.Transport,
-		Command:     serverCfg.Command,
-		Args:        slices.Clone(serverCfg.Args),
-		Environment: copyStringMap(serverCfg.Environment),
-	}
-
-	payload, err := json.Marshal(content)
-	if err != nil {
-		return "", Wrap(ErrResultInvalid, err, "failed to marshal spawn trust payload")
-	}
-
-	digest := sha256.Sum256(payload)
-	return hex.EncodeToString(digest[:]), nil
+func ComputeConfigDigest(serverCfg *config.MCPServer) (string, error) {
+	return ComputeTrustDigest(serverCfg, nil)
 }
 
 type TrustDecision string
@@ -191,14 +165,14 @@ const (
 )
 
 type TrustRecord struct {
-	ServerName    string        `json:"server_name"`
-	Digest        string        `json:"digest"`
-	Decision      TrustDecision `json:"decision"`
-	Capabilities  []string      `json:"capabilities"`
-	Tools         []string      `json:"tools"`
-	SpawnDigest   string        `json:"spawn_digest,omitempty"`
-	SpawnDecision TrustDecision `json:"spawn_decision,omitempty"`
-	ReviewedAt    time.Time     `json:"reviewed_at"`
+	ServerName     string        `json:"server_name"`
+	ConfigDigest   string        `json:"config_digest,omitempty"`
+	ConfigDecision TrustDecision `json:"config_decision,omitempty"`
+	Digest         string        `json:"digest"`
+	Decision       TrustDecision `json:"decision"`
+	Capabilities   []string      `json:"capabilities"`
+	Tools          []string      `json:"tools"`
+	ReviewedAt     time.Time     `json:"reviewed_at"`
 }
 
 var ErrTrustNotFound = errors.New("mcp: trust record not found")
@@ -208,9 +182,26 @@ type TrustRegistry interface {
 	SaveSessionTrust(ctx context.Context, serverName, digest string, capabilities, tools []string) error
 	Approve(ctx context.Context, serverName, digest string) error
 	IsTrusted(ctx context.Context, serverName, digest string) (bool, error)
-	SaveSpawnTrust(ctx context.Context, serverName, spawnDigest string) error
-	ApproveSpawn(ctx context.Context, serverName, spawnDigest string) error
-	IsSpawnTrusted(ctx context.Context, serverName, spawnDigest string) (bool, error)
+	ApproveConfig(ctx context.Context, serverName, digest string) error
+	IsConfigTrusted(ctx context.Context, serverName, digest string) (bool, error)
+	Revoke(ctx context.Context, serverName string) (bool, error)
+}
+
+func approveConfigRecord(rec *TrustRecord, digest string, now time.Time) {
+	if rec.ConfigDecision == TrustDecisionApproved && rec.ConfigDigest == digest {
+		return
+	}
+	rec.ConfigDigest = digest
+	rec.ConfigDecision = TrustDecisionApproved
+	rec.Digest = ""
+	rec.Decision = ""
+	rec.Capabilities = nil
+	rec.Tools = nil
+	rec.ReviewedAt = now
+}
+
+func configTrusted(rec *TrustRecord, digest string) bool {
+	return rec != nil && digest != "" && rec.ConfigDecision == TrustDecisionApproved && rec.ConfigDigest == digest
 }
 
 type MemoryTrustRegistry struct {
@@ -300,12 +291,12 @@ func (r *MemoryTrustRegistry) IsTrusted(_ context.Context, serverName, digest st
 	return rec.Decision == TrustDecisionApproved && rec.Digest == digest, nil
 }
 
-func (r *MemoryTrustRegistry) SaveSpawnTrust(_ context.Context, serverName, spawnDigest string) error {
+func (r *MemoryTrustRegistry) ApproveConfig(_ context.Context, serverName, digest string) error {
 	if serverName == "" {
 		return Errorf(ErrConfigInvalid, "server name must not be empty")
 	}
-	if spawnDigest == "" {
-		return Errorf(ErrConfigInvalid, "spawn trust digest must not be empty")
+	if digest == "" {
+		return Errorf(ErrConfigInvalid, "config digest must not be empty")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -314,45 +305,24 @@ func (r *MemoryTrustRegistry) SaveSpawnTrust(_ context.Context, serverName, spaw
 	if rec == nil {
 		rec = &TrustRecord{ServerName: serverName}
 	}
-	if rec.SpawnDigest == spawnDigest && rec.SpawnDecision == TrustDecisionApproved {
-		return nil
-	}
-	rec.SpawnDigest = spawnDigest
-	rec.SpawnDecision = TrustDecisionPending
+	approveConfigRecord(rec, digest, time.Now().UTC())
 	r.records[serverName] = rec
 	return nil
 }
 
-func (r *MemoryTrustRegistry) ApproveSpawn(_ context.Context, serverName, spawnDigest string) error {
-	if serverName == "" {
-		return Errorf(ErrConfigInvalid, "server name must not be empty")
-	}
-	if spawnDigest == "" {
-		return Errorf(ErrConfigInvalid, "spawn trust digest must not be empty")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	rec := r.records[serverName]
-	if rec == nil {
-		rec = &TrustRecord{ServerName: serverName}
-	}
-	rec.SpawnDigest = spawnDigest
-	rec.SpawnDecision = TrustDecisionApproved
-	r.records[serverName] = rec
-	return nil
-}
-
-func (r *MemoryTrustRegistry) IsSpawnTrusted(_ context.Context, serverName, spawnDigest string) (bool, error) {
-	if serverName == "" || spawnDigest == "" {
-		return false, nil
-	}
+func (r *MemoryTrustRegistry) IsConfigTrusted(_ context.Context, serverName, digest string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	return configTrusted(r.records[serverName], digest), nil
+}
 
-	rec, ok := r.records[serverName]
-	if !ok || rec == nil {
-		return false, nil
+func (r *MemoryTrustRegistry) Revoke(_ context.Context, serverName string) (bool, error) {
+	if serverName == "" {
+		return false, Errorf(ErrConfigInvalid, "server name must not be empty")
 	}
-	return rec.SpawnDecision == TrustDecisionApproved && rec.SpawnDigest == spawnDigest, nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, existed := r.records[serverName]
+	delete(r.records, serverName)
+	return existed, nil
 }

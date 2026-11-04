@@ -205,10 +205,15 @@ func (e *Executor) Definitions() []runtimeadk.BuiltinToolDefinition {
 	definitions := e.broker.Definitions()
 	result := make([]runtimeadk.BuiltinToolDefinition, 0, len(definitions))
 	for _, definition := range definitions {
+		description := "Aura built-in " + definition.Name + " tool"
+		if definition.Server != "" {
+			description = "Tool " + definition.Name + " provided by the external server " + definition.Server
+		}
 		result = append(result, runtimeadk.BuiltinToolDefinition{
 			Name:                 definition.Name,
 			Version:              definition.Version,
-			Description:          "Aura built-in " + definition.Name + " tool",
+			Server:               definition.Server,
+			Description:          description,
 			Schema:               definition.Schema,
 			RequiredCapabilities: definition.RequiredCapabilities,
 			OptIn:                definition.OptIn,

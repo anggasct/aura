@@ -132,6 +132,12 @@ func (s *stubSessionStarter) StartSession(_ context.Context, req *ContainedSessi
 	return s.session, nil
 }
 
+func (s *stubSessionStarter) starts() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.requests)
+}
+
 func containedStdioConfig() *config.MCPServer {
 	return &config.MCPServer{
 		Name:           "contained",

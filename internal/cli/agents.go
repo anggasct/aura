@@ -139,7 +139,7 @@ func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
 	if cfg.Agents != nil {
 		overrides = cfg.Agents.Definitions
 	}
-	registry, err := auraagent.Build(overrides, toolsbuiltin.DefinitionNames(), modelRoutes)
+	registry, err := auraagent.BuildWithMCP(overrides, toolsbuiltin.DefinitionNames(), configuredMCPServerNames(cfg), modelRoutes)
 	if err != nil {
 		return nil, err
 	}
