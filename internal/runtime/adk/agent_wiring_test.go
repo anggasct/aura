@@ -264,12 +264,20 @@ func TestToolsForExposesExternalToolsOnlyToListedOwnerPersonas(t *testing.T) {
 		"server entry exposes every tool of that server": {&auraagent.Definition{Tools: []string{"mcp_docs"}}, principal.ClassOwner, []string{"mcp_docs_search", "mcp_docs_write"}},
 		"tool entry exposes exactly that tool":           {&auraagent.Definition{Tools: []string{"mcp_docs_search", "mcp_files_ls"}}, principal.ClassOwner, []string{"mcp_docs_search", "mcp_files_ls"}},
 		"unclassified turns follow the owner rule":       {&auraagent.Definition{Tools: []string{"mcp_docs"}}, "", []string{"mcp_docs_search", "mcp_docs_write"}},
-		"trusted principals never see mcp tools": {
-			&auraagent.Definition{Tools: []string{"read_file", "mcp_docs"}, PrincipalTools: []string{"read_file", "mcp_docs"}},
+		"trusted principal sees only the mcp tools in principal_tools": {
+			&auraagent.Definition{Tools: []string{"read_file", "mcp_docs"}, PrincipalTools: []string{"read_file", "mcp_docs_search"}},
+			principal.ClassTrusted, []string{"read_file", "mcp_docs_search"},
+		},
+		"trusted principal with a server entry sees every tool of that server": {
+			&auraagent.Definition{Tools: []string{"read_file", "mcp_docs"}, PrincipalTools: []string{"mcp_docs"}},
+			principal.ClassTrusted, []string{"mcp_docs_search", "mcp_docs_write"},
+		},
+		"trusted principal without mcp entries in principal_tools sees none": {
+			&auraagent.Definition{Tools: []string{"read_file", "mcp_docs"}, PrincipalTools: []string{"read_file"}},
 			principal.ClassTrusted, []string{"read_file"},
 		},
 		"public principals never see mcp tools": {
-			&auraagent.Definition{Tools: []string{"read_file", "mcp_docs"}, PublicTools: []string{"read_file", "mcp_docs_search"}},
+			&auraagent.Definition{Tools: []string{"read_file", "mcp_docs"}, PublicTools: []string{"read_file", "mcp_docs_search"}, PrincipalTools: []string{"mcp_docs"}},
 			principal.ClassPublic, []string{"read_file"},
 		},
 	}

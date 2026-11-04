@@ -21,6 +21,13 @@ func MCPServerEntry(server string) string {
 	return MCPToolPrefix + server
 }
 
+func ListsTool(entries []string, name, server string) bool {
+	if slices.Contains(entries, name) {
+		return true
+	}
+	return server != "" && slices.Contains(entries, MCPServerEntry(server))
+}
+
 const (
 	Version         = "v1"
 	HandoffToolName = "handoff_to_owner"

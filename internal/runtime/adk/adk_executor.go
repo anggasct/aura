@@ -595,10 +595,16 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 }
 
 func exposesExternalTool(definition *auraagent.Definition, class principal.Class, toolName, server string) bool {
-	if class != "" && class != principal.ClassOwner {
+	if class == principal.ClassPublic {
 		return false
 	}
-	return slices.Contains(definition.Tools, toolName) || slices.Contains(definition.Tools, auratools.MCPServerEntry(server))
+	allowed := definition.Tools
+	if class != "" {
+		if ceiling, restricted := definition.ToolCeiling(class); restricted {
+			allowed = ceiling
+		}
+	}
+	return auratools.ListsTool(allowed, toolName, server)
 }
 
 func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string, extra turnContext) (agent.Agent, error) {

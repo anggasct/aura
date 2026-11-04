@@ -134,14 +134,14 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 			t.Fatalf("Grant %s: %v", tool, err)
 		}
 	}
-	if active, err := policy.StandingGrant(t.Context(), "discord:111", "kantor", "write_file"); err != nil || !active {
+	if active, err := policy.StandingGrant(t.Context(), "discord:111", "kantor", "write_file", ""); err != nil || !active {
 		t.Fatalf("write_file standing = %v, %v; want active", active, err)
 	}
-	if active, _ := policy.StandingGrant(t.Context(), "discord:111", "kantor", "exec"); active {
+	if active, _ := policy.StandingGrant(t.Context(), "discord:111", "kantor", "exec", ""); active {
 		t.Fatal("standing grant for a tool outside principal_tools still applied")
 	}
 	policy.now = func() time.Time { return now.Add(2 * time.Hour) }
-	if active, _ := policy.StandingGrant(t.Context(), "discord:111", "kantor", "write_file"); active {
+	if active, _ := policy.StandingGrant(t.Context(), "discord:111", "kantor", "write_file", ""); active {
 		t.Fatal("expired standing grant still applied")
 	}
 }

@@ -267,7 +267,7 @@ func (p definitionPolicy) ToolCeiling(agentID string, class principal.Class) ([]
 	return p.definition.ToolCeiling(class)
 }
 
-func (definitionPolicy) StandingGrant(context.Context, string, string, string) (bool, error) {
+func (definitionPolicy) StandingGrant(context.Context, string, string, string, string) (bool, error) {
 	return false, nil
 }
 
