@@ -107,7 +107,7 @@ type ApprovalDecider func(ctx context.Context, prompt *ApprovalPrompt) (bool, er
 
 type AccessPolicy interface {
 	ToolCeiling(agentID string, class principal.Class) (tools []string, known bool)
-	StandingGrant(ctx context.Context, principalID, agentID, toolName string) (bool, error)
+	StandingGrant(ctx context.Context, principalID, agentID, toolName, server string) (bool, error)
 }
 
 type Options struct {
@@ -358,7 +358,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	grant := canonical.Approval
 	standing := false
 	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && class == principal.ClassTrusted {
-		standing, err = b.standingGrant(ctx, &canonical)
+		standing, err = b.standingGrant(ctx, &canonical, definition.Server)
 		if err != nil {
 			approvalState = ApprovalRejected
 			return ToolResult{}, err
@@ -659,8 +659,8 @@ func (b *Broker) enforceToolTier(request *ToolRequest, class principal.Class, de
 	if class == principal.ClassOwner {
 		return nil
 	}
-	if definition.Server != "" {
-		return errorf(ResultToolTierDenied, "tool %q is available to the owner only", request.ToolName)
+	if class == principal.ClassPublic && definition.Server != "" {
+		return errorf(ResultToolTierDenied, "tool %q is not available to public principals", request.ToolName)
 	}
 	if class == principal.ClassPublic && definition.Effectful {
 		return errorf(ResultToolTierDenied, "tool %q is not available to public principals", request.ToolName)
@@ -669,18 +669,18 @@ func (b *Broker) enforceToolTier(request *ToolRequest, class principal.Class, de
 		return errorf(ResultToolTierDenied, "tool %q is not available to %s principals", request.ToolName, class)
 	}
 	ceiling, known := b.access.ToolCeiling(request.AgentID, class)
-	if !known || !slices.Contains(ceiling, request.ToolName) {
+	if !known || !tools.ListsTool(ceiling, request.ToolName, definition.Server) {
 		return errorf(ResultToolTierDenied, "tool %q is not available to %s principals", request.ToolName, class)
 	}
 	return nil
 }
 
-func (b *Broker) standingGrant(ctx context.Context, request *ToolRequest) (bool, error) {
+func (b *Broker) standingGrant(ctx context.Context, request *ToolRequest, server string) (bool, error) {
 	if b.access == nil || request.AgentID == "" {
 		return false, nil
 	}
 	lookup := func(ctx context.Context) ([]byte, error) {
-		active, err := b.access.StandingGrant(ctx, request.PrincipalID, request.AgentID, request.ToolName)
+		active, err := b.access.StandingGrant(ctx, request.PrincipalID, request.AgentID, request.ToolName, server)
 		if err != nil {
 			return nil, err
 		}

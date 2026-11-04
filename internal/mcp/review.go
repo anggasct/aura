@@ -22,6 +22,7 @@ type ServerReview struct {
 	Transport string
 	State     TrustState
 	Digest    string
+	Tools     []string
 }
 
 func (r *ServerReview) DigestPrefix() string {
@@ -61,6 +62,9 @@ func ReviewServer(ctx context.Context, registry TrustRegistry, serverCfg *config
 	if err != nil {
 		return ServerReview{}, err
 	}
+	if record.Decision == TrustDecisionApproved {
+		review.Tools = slices.Sorted(slices.Values(record.Tools))
+	}
 	switch {
 	case record.ConfigDecision != TrustDecisionApproved:
 		review.State = TrustStateRequired
@@ -95,7 +99,7 @@ func ApproveServer(ctx context.Context, registry TrustRegistry, serverCfg *confi
 	case TrustStateApproved:
 		return ApprovalResult{Change: ApprovalChangeAlreadyCurrent, Review: review}, nil
 	case TrustStateRequired:
-		return approveConfig(ctx, registry, serverCfg, review)
+		return approveConfig(ctx, registry, serverCfg, &review)
 	case TrustStateDigestChanged:
 	}
 	record, err := registry.GetTrust(ctx, serverCfg.Name)
@@ -103,7 +107,7 @@ func ApproveServer(ctx context.Context, registry TrustRegistry, serverCfg *confi
 		return ApprovalResult{}, err
 	}
 	if record.ConfigDigest != review.Digest {
-		return approveConfig(ctx, registry, serverCfg, review)
+		return approveConfig(ctx, registry, serverCfg, &review)
 	}
 	if err := registry.Approve(ctx, serverCfg.Name, record.Digest); err != nil {
 		return ApprovalResult{}, err
@@ -112,12 +116,12 @@ func ApproveServer(ctx context.Context, registry TrustRegistry, serverCfg *confi
 	return ApprovalResult{Change: ApprovalChangeToolSurface, Review: review, Tools: slices.Sorted(slices.Values(record.Tools))}, nil
 }
 
-func approveConfig(ctx context.Context, registry TrustRegistry, serverCfg *config.MCPServer, review ServerReview) (ApprovalResult, error) {
+func approveConfig(ctx context.Context, registry TrustRegistry, serverCfg *config.MCPServer, review *ServerReview) (ApprovalResult, error) {
 	if err := registry.ApproveConfig(ctx, serverCfg.Name, review.Digest); err != nil {
 		return ApprovalResult{}, err
 	}
 	review.State = TrustStateApproved
-	return ApprovalResult{Change: ApprovalChangeApproved, Review: review}, nil
+	return ApprovalResult{Change: ApprovalChangeApproved, Review: *review}, nil
 }
 
 func RevokeServer(ctx context.Context, registry TrustRegistry, serverName string) (bool, error) {

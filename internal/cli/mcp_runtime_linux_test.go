@@ -184,6 +184,11 @@ type mcpHarness struct {
 
 func newMCPHarness(t *testing.T, servers []config.MCPServer) *mcpHarness {
 	t.Helper()
+	return newMCPHarnessWithAccess(t, servers, nil)
+}
+
+func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access func(db *sql.DB) toolbroker.AccessPolicy) *mcpHarness {
+	t.Helper()
 	ctx := t.Context()
 	dataRoot := t.TempDir()
 	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
@@ -202,12 +207,16 @@ func newMCPHarness(t *testing.T, servers []config.MCPServer) *mcpHarness {
 	harness.cfg.Tools.Workspace = t.TempDir()
 	harness.cfg.Storage.Path = dataRoot
 	harness.cfg.MCP = &config.MCP{Servers: servers}
+	var policy toolbroker.AccessPolicy
+	if access != nil {
+		policy = access(db)
+	}
 	executor, err := toolsbuiltin.New(&harness.cfg, db, dataRoot, slog.New(slog.DiscardHandler), nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 		harness.mu.Lock()
 		defer harness.mu.Unlock()
 		harness.prompts = append(harness.prompts, prompt.ToolName)
 		return harness.approve, nil
-	}, nil)
+	}, policy)
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}
@@ -272,12 +281,16 @@ func (h *mcpHarness) promptedTools() []string {
 }
 
 func (h *mcpHarness) callTool(ctx context.Context, name, id string, class principal.Class) error {
+	return h.callToolAs(ctx, name, id, class, "")
+}
+
+func (h *mcpHarness) callToolAs(ctx context.Context, name, id string, class principal.Class, agentID string) error {
 	h.mu.Lock()
 	h.sequence++
 	sequence := h.sequence
 	h.mu.Unlock()
 	_, err := h.executor.Execute(ctx, &runtimeadk.BuiltinToolRequest{
-		RequestID: id, TurnID: "turn-" + id, SessionID: "session-1", PrincipalID: "owner-1", PrincipalClass: class,
+		RequestID: id, TurnID: "turn-" + id, SessionID: "session-1", PrincipalID: "owner-1", PrincipalClass: class, AgentID: agentID,
 		ToolName: name, ToolVersion: "v1", Arguments: json.RawMessage(`{}`),
 		Capabilities: []string{"fs.read"}, Trust: string(approval.TrustDerivedUntrusted),
 		IdempotencyKey: "key-" + id, EventSequence: sequence, EventInvocation: "inv-" + id, EventBranch: "main", EventAuthor: "agent",
@@ -385,6 +398,66 @@ func TestMCPToolsAreDeniedToNonOwnersAtTheBroker(t *testing.T) {
 	}
 	if prompts := harness.promptedTools(); len(prompts) != 0 {
 		t.Errorf("non-owner calls raised approval prompts: %v", prompts)
+	}
+}
+
+func TestTrustedPrincipalsReachMCPToolsOnlyThroughPrincipalToolsAndTheOwner(t *testing.T) {
+	registry, err := auraagent.BuildWithMCP([]config.AgentDefinition{
+		{ID: "team", Description: "Team", Instructions: "Help.", Audience: config.AudienceTrusted, Tools: []string{"mcp_docs"}, PrincipalTools: []string{"mcp_docs_ping"}},
+		{ID: "plain", Description: "Plain", Instructions: "Help.", Audience: config.AudienceTrusted, Tools: []string{"mcp_docs"}},
+	}, []string{"read_file"}, []string{"docs"}, []string{"primary"})
+	if err != nil {
+		t.Fatalf("BuildWithMCP: %v", err)
+	}
+	harness := newMCPHarnessWithAccess(t, []config.MCPServer{mcpTestServer("docs")}, func(db *sql.DB) toolbroker.AccessPolicy {
+		return newAccessPolicy(registry, db, nil)
+	})
+	harness.approveServer(t, "docs")
+	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
+	harness.start(t, starter)
+
+	if err := harness.callToolAs(t.Context(), "mcp_docs_ping", "t1", principal.ClassTrusted, "team"); err != nil {
+		t.Fatalf("trusted call through principal_tools: %v", err)
+	}
+	if got := harness.promptedTools(); !slices.Equal(got, []string{"mcp_docs_ping"}) {
+		t.Errorf("approval prompts = %v, want one owner card for the mcp tool", got)
+	}
+	if intents := countIntents(t, harness.db); intents != 1 {
+		t.Errorf("effect intents = %d, want 1", intents)
+	}
+	if calls := starter.session("docs").callCount(); calls != 1 {
+		t.Errorf("tool calls reaching the server = %d, want 1", calls)
+	}
+
+	harness.mu.Lock()
+	harness.approve = false
+	harness.mu.Unlock()
+	if err := harness.callToolAs(t.Context(), "mcp_docs_ping", "t2", principal.ClassTrusted, "team"); err == nil {
+		t.Fatal("a rejected owner approval still ran the tool")
+	}
+	if calls := starter.session("docs").callCount(); calls != 1 {
+		t.Errorf("tool calls after a rejected approval = %d, want 1", calls)
+	}
+
+	prompts := len(harness.promptedTools())
+	denied := map[string]struct {
+		class   principal.Class
+		agentID string
+	}{
+		"persona without a principal entry": {principal.ClassTrusted, "plain"},
+		"unknown persona":                   {principal.ClassTrusted, "ghost"},
+		"public principal":                  {principal.ClassPublic, "team"},
+	}
+	for name, tc := range denied {
+		if err := harness.callToolAs(t.Context(), "mcp_docs_ping", "d-"+name, tc.class, tc.agentID); err == nil {
+			t.Errorf("%s ran an mcp tool", name)
+		}
+	}
+	if calls := starter.session("docs").callCount(); calls != 1 {
+		t.Errorf("denied calls reached the server: %d", calls)
+	}
+	if got := len(harness.promptedTools()); got != prompts {
+		t.Errorf("denied calls raised %d approval prompts", got-prompts)
 	}
 }
 
@@ -570,24 +643,49 @@ func TestUnknownMCPServerInPersonaFailsBootWithPersonaInvalid(t *testing.T) {
 	}
 }
 
-func TestMCPEntriesInPrincipalAndPublicToolsFailBoot(t *testing.T) {
-	for _, section := range []string{"principal_tools: [mcp_docs]", "public_tools: [mcp_docs_search]"} {
-		path := writeAgentsConfig(t, "storage:\n  path: "+t.TempDir()+"\n"+mcpServersYAML("--x")+`agents:
+func mcpTierConfig(t *testing.T, section string) *config.Config {
+	t.Helper()
+	path := writeAgentsConfig(t, "storage:\n  path: "+t.TempDir()+"\n"+mcpServersYAML("--x")+`agents:
   definitions:
     - id: lobby
       description: Front desk
       instructions: Help visitors.
-      audience: public
-      tools: [read_file, mcp_docs, mcp_docs_search]
+      audience: trusted
+      tools: [read_file, mcp_docs]
       `+section+`
 `)
-		result, err := config.Load(path)
-		if err != nil {
-			t.Fatalf("config.Load: %v", err)
-		}
-		if _, err := buildAgentRegistry(result.Config); err == nil {
+	result, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	return result.Config
+}
+
+func TestMCPEntriesInPublicToolsFailBoot(t *testing.T) {
+	for _, section := range []string{"public_tools: [mcp_docs]", "public_tools: [mcp_docs_search]"} {
+		_, err := buildAgentRegistry(mcpTierConfig(t, section))
+		if err == nil {
 			t.Errorf("%s accepted", section)
 		} else if code, ok := auraagent.CodeOf(err); !ok || code != auraagent.ErrorCodePersonaInvalid {
+			t.Errorf("%s: error = %v, want persona_invalid", section, err)
+		}
+	}
+}
+
+func TestMCPEntriesInPrincipalToolsNeedToolsCoverageAtBoot(t *testing.T) {
+	for _, section := range []string{"principal_tools: [mcp_docs]", "principal_tools: [read_file, mcp_docs_search]"} {
+		registry, err := buildAgentRegistry(mcpTierConfig(t, section))
+		if err != nil {
+			t.Errorf("%s rejected: %v", section, err)
+			continue
+		}
+		if _, ok := registry.Lookup("lobby"); !ok {
+			t.Errorf("%s: persona missing", section)
+		}
+	}
+	for _, section := range []string{"principal_tools: [mcp_docs_search, mcp_files]", "principal_tools: [mcp_ghost]"} {
+		_, err := buildAgentRegistry(mcpTierConfig(t, section))
+		if code, ok := auraagent.CodeOf(err); !ok || code != auraagent.ErrorCodePersonaInvalid {
 			t.Errorf("%s: error = %v, want persona_invalid", section, err)
 		}
 	}

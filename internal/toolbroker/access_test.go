@@ -18,6 +18,7 @@ type fakeAccess struct {
 	standing  bool
 	lookupErr error
 	lookups   int
+	servers   []string
 }
 
 func (f *fakeAccess) ToolCeiling(agentID string, class principal.Class) ([]string, bool) {
@@ -27,8 +28,9 @@ func (f *fakeAccess) ToolCeiling(agentID string, class principal.Class) ([]strin
 	return slices.Clone(f.ceilings[class]), true
 }
 
-func (f *fakeAccess) StandingGrant(_ context.Context, principalID, agentID, toolName string) (bool, error) {
+func (f *fakeAccess) StandingGrant(_ context.Context, principalID, agentID, toolName, server string) (bool, error) {
 	f.lookups++
+	f.servers = append(f.servers, server)
 	if f.lookupErr != nil {
 		return false, f.lookupErr
 	}
@@ -247,32 +249,101 @@ func TestUnclassifiedRequestsKeepTheShippedPolicy(t *testing.T) {
 	}
 }
 
-func TestExternalServerToolsAreOwnerOnlyEvenInsideTheCeiling(t *testing.T) {
-	access := teamAccess()
-	access.ceilings[principal.ClassTrusted] = append(access.ceilings[principal.ClassTrusted], "mcp_docs_search")
-	access.ceilings[principal.ClassPublic] = append(access.ceilings[principal.ClassPublic], "mcp_docs_search")
-	harness := newAccessBroker(t, access)
-	calls := 0
-	definition := &tools.Definition{Name: "mcp_docs_search", Version: "v1", Server: "docs", Schema: json.RawMessage(`{"type":"object"}`), RequiresApproval: true, Effectful: true, Validator: func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil }}
+func registerServerTool(t *testing.T, harness *accessBroker, name string) {
+	t.Helper()
+	definition := &tools.Definition{Name: name, Version: "v1", Server: "docs", Schema: json.RawMessage(`{"type":"object"}`), RequiresApproval: true, Effectful: true, Validator: func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil }}
 	rule := approval.Rule{
-		ToolName: "mcp_docs_search", ToolVersion: "v1", RequiresApproval: true,
+		ToolName: name, ToolVersion: "v1", RequiresApproval: true,
 		AllowedTrust: []approval.TrustLabel{approval.TrustOwnerInput, approval.TrustDerivedUntrusted},
 	}
 	adapter := func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
-		calls++
+		harness.calls[name]++
 		return ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
 	}
 	if err := harness.broker.RegisterTool(definition, adapter, &rule); err != nil {
 		t.Fatalf("RegisterTool: %v", err)
 	}
-	for _, class := range []principal.Class{principal.ClassTrusted, principal.ClassPublic} {
-		request := classifiedRequest("mcp_docs_search", `{}`, class)
-		_, err := harness.broker.Execute(t.Context(), request)
-		if classOf(err) != ResultToolTierDenied {
-			t.Fatalf("%s error = %v, want tool_tier_denied", class, err)
-		}
+}
+
+func TestPublicPrincipalsNeverRunServerToolsEvenInsideTheCeiling(t *testing.T) {
+	access := teamAccess()
+	access.ceilings[principal.ClassPublic] = append(access.ceilings[principal.ClassPublic], "mcp_docs", "mcp_docs_search")
+	access.standing = true
+	harness := newAccessBroker(t, access)
+	registerServerTool(t, harness, "mcp_docs_search")
+	_, err := harness.broker.Execute(t.Context(), classifiedRequest("mcp_docs_search", `{}`, principal.ClassPublic))
+	if classOf(err) != ResultToolTierDenied {
+		t.Fatalf("public error = %v, want tool_tier_denied", err)
 	}
-	if calls != 0 || harness.prompts != 0 {
-		t.Fatalf("adapter calls = %d prompts = %d, want neither", calls, harness.prompts)
+	if harness.calls["mcp_docs_search"] != 0 || harness.prompts != 0 || access.lookups != 0 {
+		t.Fatalf("calls = %d prompts = %d lookups = %d, want none", harness.calls["mcp_docs_search"], harness.prompts, access.lookups)
+	}
+}
+
+func TestTrustedServerToolsFollowThePrincipalCeiling(t *testing.T) {
+	cases := map[string]struct {
+		ceiling []string
+		allowed bool
+	}{
+		"exact tool entry":                {[]string{"mcp_docs_search"}, true},
+		"server entry covers its tools":   {[]string{"mcp_docs"}, true},
+		"sibling tool entry":              {[]string{"mcp_docs_read"}, false},
+		"other server entry":              {[]string{"mcp_files"}, false},
+		"longer tool entry":               {[]string{"mcp_docs_search_all"}, false},
+		"built-in tools only":             {[]string{"exec", "read_file"}, false},
+		"server entry of a longer server": {[]string{"mcp_docs_extra"}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			access := teamAccess()
+			access.ceilings[principal.ClassTrusted] = tc.ceiling
+			harness := newAccessBroker(t, access)
+			registerServerTool(t, harness, "mcp_docs_search")
+			_, err := harness.broker.Execute(t.Context(), classifiedRequest("mcp_docs_search", `{}`, principal.ClassTrusted))
+			if tc.allowed {
+				if err != nil {
+					t.Fatalf("Execute: %v", err)
+				}
+				return
+			}
+			if classOf(err) != ResultToolTierDenied {
+				t.Fatalf("Execute error = %v, want tool_tier_denied", err)
+			}
+			if harness.calls["mcp_docs_search"] != 0 || harness.prompts != 0 {
+				t.Fatalf("calls = %d prompts = %d, want neither", harness.calls["mcp_docs_search"], harness.prompts)
+			}
+		})
+	}
+}
+
+func TestTrustedServerToolCallsGoToTheOwnerForApproval(t *testing.T) {
+	access := teamAccess()
+	access.ceilings[principal.ClassTrusted] = []string{"mcp_docs"}
+	harness := newAccessBroker(t, access)
+	registerServerTool(t, harness, "mcp_docs_search")
+	if _, err := harness.broker.Execute(t.Context(), classifiedRequest("mcp_docs_search", `{}`, principal.ClassTrusted)); err != nil {
+		t.Fatalf("approved trusted call: %v", err)
+	}
+	if harness.prompts != 1 || harness.calls["mcp_docs_search"] != 1 || harness.states[0] != ApprovalApproved {
+		t.Fatalf("prompts = %d calls = %d states = %v, want one approved owner card", harness.prompts, harness.calls["mcp_docs_search"], harness.states)
+	}
+	harness.approved = false
+	rejected := classifiedRequest("mcp_docs_search", `{}`, principal.ClassTrusted)
+	rejected.RequestID, rejected.IdempotencyKey, rejected.EventSequence = "request-2", "idempotency-2", 2
+	if _, err := harness.broker.Execute(t.Context(), rejected); classOf(err) != ResultApprovalRequired {
+		t.Fatalf("rejected call error = %v, want approval_required", err)
+	}
+	if harness.calls["mcp_docs_search"] != 1 {
+		t.Fatalf("calls = %d, want the rejected call not to run", harness.calls["mcp_docs_search"])
+	}
+	harness.approved = true
+	access.standing = true
+	standing := classifiedRequest("mcp_docs_search", `{}`, principal.ClassTrusted)
+	standing.RequestID, standing.IdempotencyKey, standing.EventSequence = "request-3", "idempotency-3", 3
+	if _, err := harness.broker.Execute(t.Context(), standing); err != nil {
+		t.Fatalf("standing trusted call: %v", err)
+	}
+	if harness.prompts != 2 || harness.calls["mcp_docs_search"] != 2 || !slices.Equal(slices.Compact(access.servers), []string{"docs"}) {
+		t.Fatalf("prompts = %d calls = %d lookup servers = %v, want the grant lookup to name the server and skip the card", harness.prompts, harness.calls["mcp_docs_search"], access.servers)
 	}
 }

@@ -45,9 +45,9 @@ func (p *accessPolicy) ToolCeiling(agentID string, class principal.Class) ([]str
 	return ceiling, true
 }
 
-func (p *accessPolicy) StandingGrant(ctx context.Context, principalID, agentID, toolName string) (bool, error) {
+func (p *accessPolicy) StandingGrant(ctx context.Context, principalID, agentID, toolName, server string) (bool, error) {
 	definition, ok := p.registry.Lookup(agentID)
-	if !ok || !slices.Contains(definition.PrincipalTools, toolName) {
+	if !ok || !definition.AllowsPrincipalTool(toolName, server) {
 		return false, nil
 	}
 	_, active, err := p.grants.Active(ctx, principalID, agentID, toolName, p.now().UTC())

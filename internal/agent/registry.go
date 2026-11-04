@@ -195,7 +195,7 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mcpS
 			return nil, codedError(ErrorCodeUnknownTool, field+".tools: unknown tool "+fmt.Sprintf("%q", tool))
 		}
 	}
-	if err := validateToolCeilings(&definition, field, knownTools); err != nil {
+	if err := validateToolCeilings(&definition, field, knownTools, mcpServers); err != nil {
 		return nil, err
 	}
 	seenCapabilities := make([]string, 0, len(definition.Capabilities))
@@ -220,22 +220,19 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mcpS
 	return &definition, nil
 }
 
-func validateToolCeilings(definition *Definition, field string, knownTools []string) error {
+func validateToolCeilings(definition *Definition, field string, knownTools, mcpServers []string) error {
 	available := definition.Tools
 	if len(available) == 0 {
 		available = knownTools
 	}
 	for _, tool := range definition.PrincipalTools {
-		if tools.IsMCPEntry(tool) {
-			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.principal_tools: %q is an mcp tool and is available to the owner only", field, tool))
-		}
-		if !slices.Contains(available, tool) {
+		if !listedInTools(tool, available, mcpServers) {
 			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.principal_tools: %q is not one of the persona's tools", field, tool))
 		}
 	}
 	for _, tool := range definition.PublicTools {
 		if tools.IsMCPEntry(tool) {
-			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is an mcp tool and is available to the owner only", field, tool))
+			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is an mcp tool and mcp tools are never available to public principals", field, tool))
 		}
 		if !slices.Contains(available, tool) {
 			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is not one of the persona's tools", field, tool))
@@ -245,6 +242,26 @@ func validateToolCeilings(definition *Definition, field string, knownTools []str
 		}
 	}
 	return nil
+}
+
+func (d *Definition) AllowsPrincipalTool(toolName, server string) bool {
+	return tools.ListsTool(d.PrincipalTools, toolName, server)
+}
+
+func listedInTools(entry string, available, servers []string) bool {
+	if slices.Contains(available, entry) {
+		return true
+	}
+	if !tools.IsMCPEntry(entry) {
+		return false
+	}
+	for _, server := range servers {
+		serverEntry := tools.MCPServerEntry(server)
+		if strings.HasPrefix(entry, serverEntry+"_") && len(entry) > len(serverEntry)+1 && slices.Contains(available, serverEntry) {
+			return true
+		}
+	}
+	return false
 }
 
 func namesConfiguredMCPServer(entry string, servers []string) bool {

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,10 +42,11 @@ func writeMCPConfig(t *testing.T, dataRoot, args, extra string) string {
 
 type mcpListJSON struct {
 	Servers []struct {
-		Name         string `json:"name"`
-		Transport    string `json:"transport"`
-		State        string `json:"state"`
-		DigestPrefix string `json:"digest_prefix"`
+		Name         string   `json:"name"`
+		Transport    string   `json:"transport"`
+		State        string   `json:"state"`
+		DigestPrefix string   `json:"digest_prefix"`
+		Tools        []string `json:"tools"`
 	} `json:"servers"`
 }
 
@@ -69,10 +72,10 @@ func TestMCPListShowsStateWithoutSecrets(t *testing.T) {
 		t.Fatalf("mcp list: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(text), "\n")
-	if len(lines) != 3 || lines[0] != "SERVER\tTRANSPORT\tSTATE\tDIGEST" {
+	if len(lines) != 3 || lines[0] != "SERVER\tTRANSPORT\tSTATE\tDIGEST\tTOOLS" {
 		t.Fatalf("list output = %q", text)
 	}
-	for _, want := range []string{"docs\tstdio\ttrust_required\t", "remote\tstreamable_http\ttrust_required\t"} {
+	for _, want := range []string{"docs\tstdio\ttrust_required\t", "remote\tstreamable_http\ttrust_required\t", "\t-\n"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("list output lacks %q:\n%s", want, text)
 		}
@@ -93,7 +96,7 @@ func TestMCPListShowsStateWithoutSecrets(t *testing.T) {
 		t.Fatalf("servers = %+v", decoded.Servers)
 	}
 	for _, server := range decoded.Servers {
-		if server.State != "trust_required" || len(server.DigestPrefix) != 12 {
+		if server.State != "trust_required" || len(server.DigestPrefix) != 12 || server.Tools == nil || len(server.Tools) != 0 {
 			t.Errorf("server = %+v", server)
 		}
 	}
@@ -218,6 +221,47 @@ func TestMCPTrustApprovesChangedToolSurface(t *testing.T) {
 	}
 	if got := listMCPJSON(t, cfg).Servers[0].State; got != "approved" {
 		t.Fatalf("state after tool surface approval = %q", got)
+	}
+}
+
+func TestMCPListShowsOnlyThePinnedToolSurface(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeMCPConfig(t, dataRoot, "--x", "")
+	if _, err := execute(t, "mcp", "trust", "approve", "docs", "--config", cfg); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	registry, err := mcp.NewFileTrustRegistry(filepath.Join(dataRoot, "mcp", "trust.json"))
+	if err != nil {
+		t.Fatalf("NewFileTrustRegistry: %v", err)
+	}
+	if err := registry.SaveSessionTrust(t.Context(), "docs", "surface-1", nil, []string{"write", "read"}); err != nil {
+		t.Fatalf("SaveSessionTrust: %v", err)
+	}
+	if got := listMCPJSON(t, cfg).Servers[0]; len(got.Tools) != 0 {
+		t.Fatalf("tools of an unpinned surface = %v, want none", got.Tools)
+	}
+	if err := registry.Approve(t.Context(), "docs", "surface-1"); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	decoded := listMCPJSON(t, cfg)
+	if got := decoded.Servers[0].Tools; !slices.Equal(got, []string{"read", "write"}) {
+		t.Fatalf("pinned tools = %v, want [read write]", got)
+	}
+	if got := decoded.Servers[1].Tools; got == nil || len(got) != 0 {
+		t.Fatalf("tools of a server without a record = %#v, want an empty list", got)
+	}
+	text, err := execute(t, "mcp", "list", "--config", cfg)
+	if err != nil {
+		t.Fatalf("mcp list: %v", err)
+	}
+	if !regexp.MustCompile(`(?m)^docs\tstdio\tapproved\t[0-9a-f]{12}\tread,write$`).MatchString(text) || !regexp.MustCompile(`(?m)^remote\tstreamable_http\ttrust_required\t[0-9a-f]{12}\t-$`).MatchString(text) {
+		t.Fatalf("list output = %q", text)
+	}
+	if err := registry.SaveSessionTrust(t.Context(), "docs", "surface-2", nil, []string{"read", "write", "delete"}); err != nil {
+		t.Fatalf("SaveSessionTrust drift: %v", err)
+	}
+	if got := listMCPJSON(t, cfg).Servers[0]; got.State != "digest_changed" || len(got.Tools) != 0 {
+		t.Fatalf("drifted server = %+v, want digest_changed with no pinned tools", got)
 	}
 }
 

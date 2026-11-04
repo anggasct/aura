@@ -57,10 +57,11 @@ func newMCPCmd(gf *globalFlags) *cobra.Command {
 }
 
 type mcpListRow struct {
-	Name         string `json:"name"`
-	Transport    string `json:"transport"`
-	State        string `json:"state"`
-	DigestPrefix string `json:"digest_prefix"`
+	Name         string   `json:"name"`
+	Transport    string   `json:"transport"`
+	State        string   `json:"state"`
+	DigestPrefix string   `json:"digest_prefix"`
+	Tools        []string `json:"tools"`
 }
 
 type mcpListOutput struct {
@@ -93,6 +94,7 @@ func newMCPListCmd(gf *globalFlags) *cobra.Command {
 					Transport:    reviews[i].Transport,
 					State:        string(reviews[i].State),
 					DigestPrefix: reviews[i].DigestPrefix(),
+					Tools:        append([]string{}, reviews[i].Tools...),
 				})
 			}
 			out := cmd.OutOrStdout()
@@ -105,11 +107,11 @@ func newMCPListCmd(gf *globalFlags) *cobra.Command {
 				_, err := fmt.Fprintln(out, "no mcp servers configured")
 				return err
 			}
-			if _, err := fmt.Fprintln(out, "SERVER\tTRANSPORT\tSTATE\tDIGEST"); err != nil {
+			if _, err := fmt.Fprintln(out, "SERVER\tTRANSPORT\tSTATE\tDIGEST\tTOOLS"); err != nil {
 				return err
 			}
 			for i := range rows {
-				if _, err := fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", rows[i].Name, rows[i].Transport, rows[i].State, rows[i].DigestPrefix); err != nil {
+				if _, err := fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", rows[i].Name, rows[i].Transport, rows[i].State, rows[i].DigestPrefix, toolsColumn(rows[i].Tools)); err != nil {
 					return err
 				}
 			}
@@ -118,6 +120,13 @@ func newMCPListCmd(gf *globalFlags) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable output")
 	return cmd
+}
+
+func toolsColumn(tools []string) string {
+	if len(tools) == 0 {
+		return "-"
+	}
+	return strings.Join(tools, ",")
 }
 
 func openMCPTrustRegistry(cfg *config.Config) (*mcp.FileTrustRegistry, error) {

@@ -90,7 +90,7 @@ load:
 # passwordless sudo; fails closed anywhere else.
 integration:
 ifeq ($(shell uname -s),Linux)
-	@sudo -n env PATH="$(PATH)" bash -ec 'echo $$$$ > /sys/fs/cgroup/cgroup.procs && cd "$(CURDIR)" && $(GO) test -tags=integration -race -count=1 ./internal/sandbox/...'
+	@sudo -n env PATH="$(PATH)" bash -ec 'echo $$$$ > /sys/fs/cgroup/cgroup.procs && cd "$(CURDIR)" && $(GO) test -tags=integration -race -count=1 ./internal/sandbox/... && $(GO) test -tags=integration -race -count=1 -run "^TestIntegration" ./internal/cli/'
 else
 	@echo "integration: containment suite is Linux-only; nothing to run on $(shell uname -s)"
 endif
