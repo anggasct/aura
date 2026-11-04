@@ -172,6 +172,10 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	ingressRecorder, err := telemetry.NewIngressRecorder(mp)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	var ports []runtimechannelhost.ChannelPort
 	var checks []health.RegisteredCheck
 	var decider toolbroker.ApprovalDecider
@@ -188,6 +192,9 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			adapter.SetAccess(&settings)
 			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
 				recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
+			})
+			adapter.SetDropObserver(func(ctx context.Context, reason string) {
+				ingressRecorder.Dropped(ctx, principal.ChannelDiscord, reason)
 			})
 			adapters = append(adapters, adapter)
 			ports = append(ports, adapter)

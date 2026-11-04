@@ -196,18 +196,20 @@ func buildThreadEnvelope(account, principalID string, class principal.Class, msg
 	}, nil
 }
 
-func validThreadAuthor(account *config.DiscordAccount, owners *principal.Resolver, selfID string, access authorAccess, msg *messagePayload) bool {
+func authorDrop(account *config.DiscordAccount, owners *principal.Resolver, selfID string, access authorAccess, msg *messagePayload) dropReason {
 	if msg.Author.Bot || msg.Author.ID == selfID {
-		return false
-	}
-	if msg.Content == "" {
-		return false
+		return dropAuthorBot
 	}
 	if msg.Type != 0 && msg.Type != 19 {
-		return false
+		return dropMessageType
 	}
-	_, _, admitted := resolveAuthor(account, owners, msg.Author.ID, access)
-	return admitted
+	if msg.Content == "" {
+		return dropEmptyContent
+	}
+	if _, _, admitted := resolveAuthor(account, owners, msg.Author.ID, access); !admitted {
+		return dropAuthorNotAllowed
+	}
+	return ""
 }
 
 func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayload, parentID, persona string) (string, error) {

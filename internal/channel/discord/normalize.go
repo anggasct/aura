@@ -18,42 +18,33 @@ type replyReference struct {
 	Artifacts []artifactSummary `json:"artifacts,omitempty"`
 }
 
-func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver, selfID string, access authorAccess, msg *messagePayload) (*runtimeingress.IngressEnvelope, bool, error) {
+func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver, selfID string, access authorAccess, msg *messagePayload) (*runtimeingress.IngressEnvelope, dropReason, error) {
 	if account == nil || msg == nil {
-		return nil, false, Errorf(ErrorCodeInvalidArgument, "account and message must not be nil")
+		return nil, "", Errorf(ErrorCodeInvalidArgument, "account and message must not be nil")
 	}
 	if msg.ID == "" || msg.ChannelID == "" || msg.Author.ID == "" {
-		return nil, false, Errorf(ErrorCodeProtocolInvalid, "message is missing id, channel, or author")
+		return nil, "", Errorf(ErrorCodeProtocolInvalid, "message is missing id, channel, or author")
 	}
-	if msg.Author.Bot || msg.Author.ID == selfID {
-		return nil, false, nil
+	if reason := authorDrop(account, owners, selfID, access, msg); reason != "" {
+		return nil, reason, nil
 	}
-	if msg.Type != 0 && msg.Type != 19 {
-		return nil, false, nil
-	}
-	if msg.Content == "" {
-		return nil, false, nil
-	}
-	principalID, class, admitted := resolveAuthor(account, owners, msg.Author.ID, access)
-	if !admitted {
-		return nil, false, nil
-	}
+	principalID, class, _ := resolveAuthor(account, owners, msg.Author.ID, access)
 	var conversationID string
 	if msg.GuildID != "" {
 		if len(account.AllowedChannelIDs) > 0 && !slices.Contains(account.AllowedChannelIDs, msg.ChannelID) {
-			return nil, false, nil
+			return nil, dropChannelNotAllowed, nil
 		}
 		if len(account.AllowedGuildIDs) > 0 && !slices.Contains(account.AllowedGuildIDs, msg.GuildID) {
-			return nil, false, nil
+			return nil, dropGuildNotAllowed, nil
 		}
 		mentioned := slices.ContainsFunc(msg.Mentions, func(user userPayload) bool { return user.ID == selfID })
 		if !mentioned {
-			return nil, false, nil
+			return nil, dropNotMentioned, nil
 		}
 		conversationID = "channel:" + msg.ChannelID
 	} else {
 		if !account.AcceptDMs {
-			return nil, false, nil
+			return nil, dropDMsDisabled, nil
 		}
 		conversationID = "dm:" + msg.Author.ID
 	}
@@ -63,7 +54,7 @@ func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver
 		GuildID:   msg.GuildID,
 	})
 	if err != nil {
-		return nil, false, Errorf(ErrorCodeProtocolInvalid, "reply reference is not serializable")
+		return nil, "", Errorf(ErrorCodeProtocolInvalid, "reply reference is not serializable")
 	}
 	return &runtimeingress.IngressEnvelope{
 		Source:         "discord:" + account.Name,
@@ -74,7 +65,7 @@ func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver
 		ReplyContext:   reference,
 		Parts:          []runtimeingress.InputPart{{Text: msg.Content}},
 		ReceivedAt:     time.Now().UTC(),
-	}, true, nil
+	}, "", nil
 }
 
 type authorAccess struct {

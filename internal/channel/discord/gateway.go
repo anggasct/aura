@@ -392,44 +392,47 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if route, ok := a.lookupThread(msg.ChannelID); ok {
 		return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
 	}
-	envelope, admitted, err := normalizeMessage(a.account, a.owners, a.selfID, a.authorAccess(ctx), msg)
+	envelope, reason, err := normalizeMessage(a.account, a.owners, a.selfID, a.authorAccess(ctx), msg)
 	if err != nil {
 		return false, err
 	}
-	if !admitted && a.tryPairing(ctx, msg) {
-		return false, nil
+	scope := messageScope(msg)
+	if reason != "" && a.tryPairing(ctx, msg) {
+		return a.drop(ctx, msg, scope, dropPairing)
 	}
-	if a.threadClassificationNeeded(ctx, msg, admitted) {
+	if a.threadClassificationNeeded(ctx, msg, reason == "") {
 		probe, probeErr := a.probeChannel(ctx, msg.ChannelID)
 		if probeErr != nil {
 			a.logger.DebugContext(ctx, "thread classification failed", "component", "discord", "error", probeErr)
-			return false, nil
+			return a.drop(ctx, msg, dropScopeThread, dropThreadProbeFailed)
 		}
 		if probe.isThread {
 			if !probe.owned {
-				return false, nil
+				return a.drop(ctx, msg, dropScopeThread, dropThreadForeign)
 			}
 			return a.admitThreadRoute(ctx, msg, threadRoute{parent: probe.parent})
 		}
 		if msg.ChannelType != nil && isThreadChannelType(*msg.ChannelType) {
-			return false, nil
+			return a.drop(ctx, msg, dropScopeThread, dropThreadUnresolved)
 		}
 	}
-	if !admitted {
-		return false, nil
+	if reason != "" {
+		return a.drop(ctx, msg, scope, reason)
 	}
 	envelope.Parts = []runtimeingress.InputPart{{Text: a.modelText(msg)}}
 	persona, routed := a.routePersona(ctx, &auraagent.RouteScope{GuildID: msg.GuildID, ChannelID: msg.ChannelID, UserID: msg.Author.ID})
 	if !routed {
-		return false, nil
+		return a.drop(ctx, msg, scope, dropPersonaUnrouted)
 	}
 	envelope.AgentID = persona
 	if !a.personaAdmits(ctx, persona, principal.ParseClass(envelope.PrincipalClass)) {
-		a.tryPairing(ctx, msg)
-		return false, nil
+		if a.tryPairing(ctx, msg) {
+			return a.drop(ctx, msg, scope, dropPairing)
+		}
+		return a.drop(ctx, msg, scope, dropAudience)
 	}
 	if !a.personaEvaluated(ctx, msg, persona, principal.ParseClass(envelope.PrincipalClass)) {
-		return false, nil
+		return a.drop(ctx, msg, scope, dropPersonaEvalMissing)
 	}
 	if msg.GuildID != "" {
 		envelope.ConversationID = a.channelConversation(persona, msg.ChannelID, envelope.PrincipalID, principal.ParseClass(envelope.PrincipalClass))
@@ -468,25 +471,31 @@ func (a *Adapter) sessionKey(persona, conversationID string) string {
 }
 
 func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, threadID string, route threadRoute) (bool, error) {
-	if msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, a.authorAccess(ctx), msg) {
-		return false, nil
+	if msg.GuildID == "" {
+		return a.drop(ctx, msg, dropScopeThread, dropGuildNotAllowed)
+	}
+	if reason := authorDrop(a.account, a.owners, a.selfID, a.authorAccess(ctx), msg); reason != "" {
+		return a.drop(ctx, msg, dropScopeThread, reason)
 	}
 	if len(a.account.AllowedGuildIDs) > 0 && !slices.Contains(a.account.AllowedGuildIDs, msg.GuildID) {
-		return false, nil
+		return a.drop(ctx, msg, dropScopeThread, dropGuildNotAllowed)
 	}
 	if len(a.account.AllowedChannelIDs) > 0 && !slices.Contains(a.account.AllowedChannelIDs, route.parent) {
-		return false, nil
+		return a.drop(ctx, msg, dropScopeThread, dropChannelNotAllowed)
 	}
 	persona, routed, err := a.threadPersona(ctx, msg, threadID, route)
-	if err != nil || !routed {
+	if err != nil {
 		return false, err
+	}
+	if !routed {
+		return a.drop(ctx, msg, dropScopeThread, dropPersonaUnrouted)
 	}
 	principalID, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, a.authorAccess(ctx))
 	if !a.personaAdmits(ctx, persona, class) {
-		return false, nil
+		return a.drop(ctx, msg, dropScopeThread, dropAudience)
 	}
 	if !a.personaEvaluated(ctx, msg, persona, class) {
-		return false, nil
+		return a.drop(ctx, msg, dropScopeThread, dropPersonaEvalMissing)
 	}
 	envelope, err := buildThreadEnvelope(a.account.Name, principalID, class, msg, threadID, route.parent)
 	if err != nil {
@@ -543,7 +552,7 @@ type channelProbe struct {
 }
 
 func (a *Adapter) threadClassificationNeeded(ctx context.Context, msg *messagePayload, admitted bool) bool {
-	if msg == nil || msg.GuildID == "" || !validThreadAuthor(a.account, a.owners, a.selfID, a.authorAccess(ctx), msg) {
+	if msg == nil || msg.GuildID == "" || authorDrop(a.account, a.owners, a.selfID, a.authorAccess(ctx), msg) != "" {
 		return false
 	}
 	if _, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, a.authorAccess(ctx)); class == principal.ClassPublic {
@@ -580,15 +589,16 @@ func (a *Adapter) probeChannel(ctx context.Context, channelID string) (channelPr
 
 func (a *Adapter) admitThreadRoute(ctx context.Context, msg *messagePayload, route threadRoute) (bool, error) {
 	if len(a.account.AllowedChannelIDs) > 0 && !slices.Contains(a.account.AllowedChannelIDs, route.parent) {
-		return false, nil
+		return a.drop(ctx, msg, dropScopeThread, dropChannelNotAllowed)
 	}
 	a.rememberThread("", msg.ChannelID, route)
 	return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
 }
 
 func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope, bindingChannel string) (bool, error) {
-	if a.budgetRefused(ctx, msg, envelope) {
-		return false, nil
+	scope, _, _ := strings.Cut(envelope.ConversationID, ":")
+	if reason := a.budgetDrop(ctx, msg, envelope); reason != "" {
+		return a.drop(ctx, msg, scope, reason)
 	}
 	active, err := a.activeSession(ctx, a.sessionKey(envelope.AgentID, envelope.ConversationID))
 	if err != nil {
@@ -603,7 +613,7 @@ func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envel
 		return false, fmt.Errorf("ensure session: %w", err)
 	}
 	if len(msg.Attachments) > 0 && !a.intakeAttachments(ctx, msg, envelope) {
-		return false, nil
+		return a.drop(ctx, msg, scope, dropAttachmentFailed)
 	}
 	if _, err := a.sink.Accept(ctx, envelope); err != nil {
 		return false, fmt.Errorf("accept ingress: %w", err)

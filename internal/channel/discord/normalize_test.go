@@ -139,12 +139,12 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			cfg := testDiscordConfig()
 			msg := testMessage()
 			tc.mutate(cfg, msg)
-			env, admitted, err := normalizeMessage(cfg, testOwners(t, "discord:777"), selfID, authorAccess{}, msg)
+			env, reason, err := normalizeMessage(cfg, testOwners(t, "discord:777"), selfID, authorAccess{}, msg)
 			if err != nil {
 				t.Fatalf("normalizeMessage: %v", err)
 			}
-			if admitted != tc.admit {
-				t.Fatalf("admitted = %v, want %v", admitted, tc.admit)
+			if admitted := reason == ""; admitted != tc.admit {
+				t.Fatalf("admitted = %v (reason %q), want %v", admitted, reason, tc.admit)
 			}
 			if !tc.admit {
 				return
