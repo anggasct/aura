@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/channel/status"
 	"github.com/anggasct/aura/internal/config"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/secret"
@@ -177,7 +178,7 @@ func TestPresenceSilentFallback(t *testing.T) {
 	}
 	stub.mu.Unlock()
 	matched := false
-	for _, fallback := range fallbackStatuses {
+	for _, fallback := range status.Fallbacks() {
 		if strings.Contains(body, fallback) {
 			matched = true
 		}
@@ -330,7 +331,7 @@ func TestPresenceFailureUsesActivityLanguage(t *testing.T) {
 	if !strings.Contains(content, "Mencari catatan") {
 		t.Errorf("failure line = %q, want the model activity text", content)
 	}
-	if !strings.HasPrefix(content, failureMarker) {
+	if !strings.HasPrefix(content, status.FailureMarker) {
 		t.Errorf("failure line = %q, want it marked as a failure", content)
 	}
 	if strings.Contains(content, "Couldn't finish") || strings.Contains(strings.ToLower(content), "continuing") {
@@ -547,32 +548,6 @@ func TestPresenceStatusReplacedByFinalDelivery(t *testing.T) {
 	}
 	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
-	}
-}
-
-func TestRenderStatusHelpers(t *testing.T) {
-	if got := truncateWords("one two three four five six seven", 6); got != "one two three four five six" {
-		t.Errorf("truncateWords = %q", got)
-	}
-	if got := fallbackStatus(0); got == "" {
-		t.Error("empty fallback")
-	}
-	if failureLine("") == "" {
-		t.Error("empty failure line is blank")
-	}
-	if got := failureLine("Reading notes"); got == "Reading notes" || !strings.Contains(got, "Reading notes") {
-		t.Errorf("failureLine = %q, want the activity marked as failed", got)
-	}
-	rendered := renderStatusText("Looking through notes", `{"path":"secret-token abc123"}`, 0, nil)
-	if strings.Contains(strings.ToLower(rendered), "secret-token") && strings.Contains(rendered, "abc123") {
-		t.Errorf("keyword-bearing args were not omitted: %q", rendered)
-	}
-	human := humanizeArgs(`{"path":"src/main.go","query":"hello"}`)
-	if strings.Contains(human, "{") || strings.Contains(human, `"`) {
-		t.Errorf("humanized args leak JSON: %q", human)
-	}
-	if !strings.Contains(human, "src/main.go") {
-		t.Errorf("humanized args = %q, want values preserved", human)
 	}
 }
 
@@ -799,7 +774,7 @@ func TestLateInitialStatusNeverOverwritesANewerStatus(t *testing.T) {
 	if err := adapter.postOrPatchStatusLocked(t.Context(), session, "Checking tasks"); err != nil {
 		t.Fatalf("status post: %v", err)
 	}
-	failure := failureLine("Checking tasks")
+	failure := status.FailureLine("Checking tasks")
 	adapter.presenceMu.Lock()
 	session.lastText = failure
 	adapter.presenceMu.Unlock()

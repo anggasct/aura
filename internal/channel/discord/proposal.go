@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/anggasct/aura/internal/channel/status"
 	"github.com/anggasct/aura/internal/principal"
 )
 
@@ -42,7 +43,7 @@ func (a *Adapter) OfferProposal(ctx context.Context, proposalID, plan string, de
 	if err != nil {
 		return Errorf(ErrorCodeApprovalUnavailable, "approval token mint failed")
 	}
-	content := proposalCardHeader + proposalID + "\n" + truncateRunes(plan, proposalPlanRunes)
+	content := proposalCardHeader + proposalID + "\n" + status.TruncateRunes(plan, proposalPlanRunes)
 	cardID, err := a.postApprovalCard(ctx, token, dmChannel, content, tokenID, &binding, expiresAt)
 	if err != nil {
 		a.dropApproval(tokenID, pending)
