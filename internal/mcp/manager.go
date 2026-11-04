@@ -344,9 +344,13 @@ func (m *Manager) registerTools(ctx context.Context, client *Client, serverCfg *
 			)
 			continue
 		}
-		if err := m.claimToolName(namespaced, serverCfg.Name); err != nil {
-			m.unregister(registered)
-			return nil, err
+		if !m.claimToolName(namespaced, serverCfg.Name) {
+			m.logger.WarnContext(ctx, "tool skipped because another server provides the same exposed name",
+				"component", "mcp_manager",
+				"server", serverCfg.Name,
+				"tool", tool.Name,
+			)
+			continue
 		}
 		schema := tool.InputSchema
 		if !hasToolSchema(schema) {
@@ -388,14 +392,14 @@ func (m *Manager) registerTools(ctx context.Context, client *Client, serverCfg *
 	return registered, nil
 }
 
-func (m *Manager) claimToolName(namespaced, serverName string) error {
+func (m *Manager) claimToolName(namespaced, serverName string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if owner, taken := m.toolOwners[namespaced]; taken && owner != serverName {
-		return Errorf(ErrSchemaInvalid, "server %q exposes a tool name already provided by another server", serverName)
+		return false
 	}
 	m.toolOwners[namespaced] = serverName
-	return nil
+	return true
 }
 
 func (m *Manager) releaseToolName(namespaced string) {

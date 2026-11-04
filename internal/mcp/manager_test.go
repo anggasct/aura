@@ -746,7 +746,7 @@ func TestManagerRegistersToolsAsEffectfulWithApproval(t *testing.T) {
 	}
 }
 
-func TestManagerRejectsToolNamesProvidedByAnotherServer(t *testing.T) {
+func TestManagerSkipsToolNamesProvidedByAnotherServer(t *testing.T) {
 	ctx := t.Context()
 	broker := newEffectBroker(t)
 	first := startableStdioConfig("a")
@@ -755,8 +755,8 @@ func TestManagerRejectsToolNamesProvidedByAnotherServer(t *testing.T) {
 	approveConfigDigest(t.Context(), t, registry, &first)
 	approveConfigDigest(t.Context(), t, registry, &second)
 	starter := &perServerStarter{sessions: map[string]ContainedSession{
-		"a":   &scriptedSession{toolNames: []string{"b_c"}},
-		"a_b": &scriptedSession{toolNames: []string{"c"}},
+		"a":   &scriptedSession{toolNames: []string{"b_c", "solo"}},
+		"a_b": &scriptedSession{toolNames: []string{"c", "other"}},
 	}}
 	mgr, err := NewManager(&ManagerOptions{
 		Config:         &config.MCP{Servers: []config.MCPServer{first, second}},
@@ -769,23 +769,22 @@ func TestManagerRejectsToolNamesProvidedByAnotherServer(t *testing.T) {
 	}
 	defer func() { _ = mgr.Close(t.Context()) }()
 	_ = mgr.Start(ctx)
-	running := 0
 	for _, status := range mgr.Statuses() {
-		if status.Code == "" {
-			running++
+		if status.Code != "" {
+			t.Fatalf("server %q status = %q, want both servers running", status.Name, status.Code)
 		}
 	}
-	if running != 1 {
-		t.Fatalf("running servers = %d, want exactly one owner of the colliding tool name", running)
-	}
-	count := 0
+	counts := map[string]int{}
 	for _, def := range broker.Definitions() {
-		if def.Name == "mcp_a_b_c" {
-			count++
-		}
+		counts[def.Name]++
 	}
-	if count != 1 {
-		t.Fatalf("colliding tool registered %d times", count)
+	if counts["mcp_a_b_c"] != 1 {
+		t.Fatalf("colliding tool registered %d times, want once", counts["mcp_a_b_c"])
+	}
+	for _, name := range []string{"mcp_a_solo", "mcp_a_b_other"} {
+		if counts[name] != 1 {
+			t.Errorf("tool %q registered %d times, want the non-colliding tools of both servers served", name, counts[name])
+		}
 	}
 }
 
