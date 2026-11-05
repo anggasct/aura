@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	"github.com/anggasct/aura/internal/toolbroker"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -23,14 +24,7 @@ import (
 func newEffectBroker(t *testing.T) *toolbroker.Broker {
 	t.Helper()
 	ctx := t.Context()
-	db, err := store.OpenDB(ctx, filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("OpenDB(): %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate(): %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	session := store.Session{ID: "session-1", OwnerID: "principal-1"}
 	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
 		t.Fatalf("Create(): %v", err)

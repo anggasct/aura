@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func oversizedAdapter(output json.RawMessage) map[string]Adapter {
@@ -169,14 +170,7 @@ func TestBrokerOversizedOutputReturnsDecodableTruncationEnvelope(t *testing.T) {
 
 func TestBrokerOversizedOutputSpillsToArtifact(t *testing.T) {
 	output := oversizedOutput(8192)
-	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	sessions := store.NewSessionService(db)
 	if err := sessions.Create(context.Background(), &store.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("seed session: %v", err)

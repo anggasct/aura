@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	"github.com/anggasct/aura/internal/usage"
 )
 
@@ -29,14 +30,12 @@ func writeUsageConfig(t *testing.T, dataRoot string) string {
 func seedUsage(t *testing.T, dataRoot string) {
 	t.Helper()
 	ctx := context.Background()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	reg := usage.NewPriceRegistry()
 	price := &usage.Price{
 		ModelDefinitionID:    "primary",
@@ -169,6 +168,7 @@ func TestUsageSubcommandsRejectPositionalArgs(t *testing.T) {
 
 func TestUsageEntriesEmpty(t *testing.T) {
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
 	cfg := writeUsageConfig(t, dataRoot)
 
 	out, err := execute(t, "usage", "entries", "--config", cfg)
@@ -182,6 +182,7 @@ func TestUsageEntriesEmpty(t *testing.T) {
 
 func TestUsagePrices(t *testing.T) {
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
 	cfg := writeUsageConfig(t, dataRoot)
 	prices := filepath.Join(t.TempDir(), "prices.yaml")
 	content := "version: 1\nprices:\n  - model_definition_id: primary\n    currency: USD\n" +
@@ -204,6 +205,7 @@ func TestUsagePrices(t *testing.T) {
 
 func TestUsagePricesMissingExplicitFile(t *testing.T) {
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
 	cfg := writeUsageConfig(t, dataRoot)
 	_, err := execute(t, "usage", "prices", "--config", cfg, "--prices", filepath.Join(t.TempDir(), "nope.yaml"))
 	if err == nil {

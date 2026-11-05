@@ -15,6 +15,7 @@ func writeScheduleCLIConfig(t *testing.T, dataDir string) string {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
+	seedConfiguredStorage(t, path)
 	return path
 }
 

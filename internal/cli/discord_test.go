@@ -11,19 +11,12 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func discordTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := store.OpenDB(t.Context(), t.TempDir()+"/aura.db")
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	return db
+	return storetest.OpenMigrated(t)
 }
 
 func enabledDiscordConfig() config.Config {

@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const (
@@ -494,15 +494,7 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	t.Setenv(testTokenEnv, testToken)
-	ctx := t.Context()
-	db, err := store.OpenDB(ctx, filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)

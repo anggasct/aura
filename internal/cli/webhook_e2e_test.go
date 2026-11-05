@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	gatewaywebhook "github.com/anggasct/aura/internal/gateway/webhook"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const webhookE2ESecret = "e2e-secret-0123456789abcdef"
@@ -78,15 +78,7 @@ func webhookSignedGet(t *testing.T, path, nonce string) *http.Request {
 
 func TestBuildWebhookListener(t *testing.T) {
 	t.Setenv("AURA_WEBHOOK_E2E_SECRET", webhookE2ESecret)
-	ctx := context.Background()
-	db, err := store.OpenDB(ctx, t.TempDir()+"/aura.db")
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
 	cfg := &config.Config{
 		Webhook: config.Webhook{

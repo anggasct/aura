@@ -8,19 +8,18 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/skills"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func openSkillsTestDB(t *testing.T) (db store.SkillStore, cleanup func()) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "aura.db")
+	storetest.Seed(t, dbPath)
 	handle, err := store.OpenDB(t.Context(), dbPath)
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = handle.Close() })
-	if err := store.Migrate(t.Context(), handle); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	return store.NewSkillStore(handle), func() { _ = handle.Close() }
 }
 
@@ -53,14 +52,12 @@ func TestSkillStoreRegistryRoundTrip(t *testing.T) {
 
 func TestBuildSkillsEngine(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "chat.db")
+	storetest.Seed(t, dbPath)
 	chatDB, err := store.OpenDB(t.Context(), dbPath)
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = chatDB.Close() })
-	if err := store.Migrate(t.Context(), chatDB); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	root := t.TempDir()
 	skillDir := filepath.Join(root, "pdf-tools")
 	if err := os.MkdirAll(skillDir, 0o700); err != nil {

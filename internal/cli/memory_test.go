@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"iter"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"testing"
@@ -19,21 +18,13 @@ import (
 	"github.com/anggasct/aura/internal/runtime"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	"github.com/anggasct/aura/internal/telemetry"
 )
 
 func newMemoryTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	ctx := context.Background()
-	db, err := store.OpenDB(ctx, filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	return db
+	return storetest.OpenMigrated(t)
 }
 
 func TestMemoryDocumentStoreRoundTrip(t *testing.T) {

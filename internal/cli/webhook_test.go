@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	"github.com/anggasct/aura/internal/workflow"
 )
 
@@ -107,15 +107,7 @@ func acceptedTurnEvents(turnID string) []turnOutcome {
 
 func webhookTestSetup(t *testing.T, backend *fakeTurnRuntime) (*webhookDispatcher, store.WebhookExecutionStore) {
 	t.Helper()
-	ctx := context.Background()
-	db, err := store.OpenDB(ctx, t.TempDir()+"/aura.db")
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	executions := store.NewWebhookExecutionStore(db)
 	backend.store = store.NewEventStore(db)
 	backend.sequences = make(map[string]uint64)
@@ -340,14 +332,7 @@ func TestWebhookDispatcher_FailedTurnRecordsCode(t *testing.T) {
 
 func githubTestStore(t *testing.T) (*sql.DB, *workflow.Store) {
 	t.Helper()
-	db, err := store.OpenDB(t.Context(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	return db, workflow.NewStore(db)
 }
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func newTestLedger(t *testing.T, dailyCap, monthlyCap int64) *Ledger {
@@ -17,14 +17,7 @@ func newTestLedger(t *testing.T, dailyCap, monthlyCap int64) *Ledger {
 
 func newTestLedgerWithDB(t *testing.T, dailyCap, monthlyCap int64) (*Ledger, *sql.DB) {
 	t.Helper()
-	db, err := store.OpenDB(context.Background(), t.TempDir()+"/usage.db")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	reg := NewPriceRegistry()
 	primary := testPrice("primary")
 	if err := reg.Put(primary); err != nil {

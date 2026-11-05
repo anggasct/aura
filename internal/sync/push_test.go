@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type stubRunner struct {
@@ -72,14 +73,7 @@ func (s *stubRunner) Reconcile(ctx context.Context, id string, _ effect.Provider
 
 func openPushJournal(t *testing.T) *effect.Journal {
 	t.Helper()
-	db, err := store.OpenDB(t.Context(), t.TempDir()+"/push.db")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	svc := store.NewSessionService(db)
 	if err := svc.Create(t.Context(), &store.Session{ID: "session-1", OwnerID: "owner-1"}); err != nil {
 		t.Fatalf("seed session: %v", err)

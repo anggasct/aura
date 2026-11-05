@@ -45,6 +45,7 @@ models:
 	if err := os.WriteFile(path, []byte(base), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
+	seedConfiguredStorage(t, path)
 	return path
 }
 

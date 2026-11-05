@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type e2eRunner struct {
@@ -83,14 +84,7 @@ func (s e2eSessions) ListEvents(ctx context.Context, sessionID string, after uin
 }
 
 func TestTerminalVerticalSlice(t *testing.T) {
-	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
@@ -136,14 +130,7 @@ func TestTerminalVerticalSlice(t *testing.T) {
 }
 
 func TestTerminalReplayCompletedEventWins(t *testing.T) {
-	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
 	executor := runtime.NewFakeExecutor([]runtime.FakeStep{

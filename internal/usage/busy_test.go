@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
@@ -15,12 +16,10 @@ func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 	t.Cleanup(cancel)
 	dsn := t.TempDir() + "/usage.db"
 
+	storetest.Seed(t, dsn)
 	seed, err := store.OpenDB(ctx, dsn)
 	if err != nil {
-		t.Fatalf("open seed db: %v", err)
-	}
-	if err := store.Migrate(ctx, seed); err != nil {
-		t.Fatalf("migrate: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	if err := seed.Close(); err != nil {
 		t.Fatalf("close seed db: %v", err)
@@ -114,12 +113,10 @@ func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 	ctx := context.Background()
 	dsn := t.TempDir() + "/usage.db"
 
+	storetest.Seed(t, dsn)
 	seed, err := store.OpenDB(ctx, dsn)
 	if err != nil {
-		t.Fatalf("open seed db: %v", err)
-	}
-	if err := store.Migrate(ctx, seed); err != nil {
-		t.Fatalf("migrate: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	if err := seed.Close(); err != nil {
 		t.Fatalf("close seed db: %v", err)

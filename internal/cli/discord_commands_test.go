@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -18,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type parityPorts struct{}
@@ -123,14 +123,7 @@ func (s *stubActivity) SessionActivity(string) (activeTurnID string, queued int)
 
 func newCommandStore(t *testing.T) (store.SessionService, store.EventStore, store.ConversationSessionStore, *sql.DB) {
 	t.Helper()
-	db, err := store.OpenDB(t.Context(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	return store.NewSessionService(db), store.NewEventStore(db), store.NewConversationSessionStore(db), db
 }
 

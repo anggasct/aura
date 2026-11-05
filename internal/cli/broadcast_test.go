@@ -2,12 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func writeBroadcastCLIConfig(t *testing.T, dataDir string) string {
@@ -22,14 +25,14 @@ func writeBroadcastCLIConfig(t *testing.T, dataDir string) string {
 
 func seedBroadcastCLIItem(t *testing.T, dbPath, id, state, content string) {
 	t.Helper()
+	if _, err := os.Stat(dbPath); errors.Is(err, fs.ErrNotExist) {
+		storetest.Seed(t, dbPath)
+	}
 	db, err := store.OpenDB(t.Context(), dbPath)
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	now := "2026-09-12T12:00:00Z"
 	if _, err := db.ExecContext(t.Context(), `INSERT INTO broadcast_item (id, producer, idempotency_key, content_digest, priority, destination_alias, content_json, state, not_before, attempt_count, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, "cron", "key-"+id, "digest-"+id, "info", "default", content, state, now, 0, now, now); err != nil {
