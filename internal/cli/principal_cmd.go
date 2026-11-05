@@ -71,6 +71,20 @@ func collectPrincipals(ctx context.Context, cfg *config.Config, db *sql.DB) (map
 		summary.class = principal.ClassTrusted
 		summary.access = append(summary.access, "grant:"+grants[i].Account)
 	}
+	keys, err := store.NewAPIKeyStore(db).List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range keys {
+		key := &keys[i]
+		class, ok := apiKeyClass(key.Class)
+		if !ok || class == principal.ClassOwner {
+			continue
+		}
+		summary := entry(principal.Namespaced(principal.ChannelHTTP, key.ID))
+		summary.class = class
+		summary.access = append(summary.access, keyAccess(key))
+	}
 	activities, err := store.ListPrincipalActivity(ctx, db)
 	if err != nil {
 		return nil, err
@@ -82,11 +96,19 @@ func collectPrincipals(ctx context.Context, cfg *config.Config, db *sql.DB) (map
 	}
 	delete(summaries, principal.OwnerID)
 	for id := range summaries {
-		if !strings.HasPrefix(id, principal.ChannelDiscord+":") && !strings.HasPrefix(id, principal.ChannelTelegram+":") {
+		channel, _, _ := strings.Cut(id, ":")
+		if channel != principal.ChannelDiscord && channel != principal.ChannelTelegram && channel != principal.ChannelHTTP {
 			delete(summaries, id)
 		}
 	}
 	return summaries, nil
+}
+
+func keyAccess(key *store.APIKey) string {
+	if key.Active() {
+		return "key:" + key.PersonaID
+	}
+	return "revoked-key:" + key.PersonaID
 }
 
 func formatLastActive(at time.Time) string {
