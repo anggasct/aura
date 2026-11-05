@@ -20,6 +20,8 @@ type bindingScopeFlags struct {
 	channelID string
 	threadID  string
 	userID    string
+	chatID    string
+	topicID   string
 }
 
 func newBindingsCmd(gf *globalFlags) *cobra.Command {
@@ -38,8 +40,8 @@ func newBindingsExplainCmd(gf *globalFlags) *cobra.Command {
 		Short: "Show which persona a channel scope routes to",
 		Args:  noPositionalArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if scope.channel != config.BindingChannelDiscord {
-				return &usageError{fmt.Errorf("%s: --channel %q is not supported; only %q", cmd.CommandPath(), scope.channel, config.BindingChannelDiscord)}
+			if err := scope.validate(cmd); err != nil {
+				return err
 			}
 			if scope.account == "" {
 				return &usageError{fmt.Errorf("%s requires --account", cmd.CommandPath())}
@@ -59,14 +61,7 @@ func newBindingsExplainCmd(gf *globalFlags) *cobra.Command {
 			if !router.HasAccount(scope.channel, scope.account) {
 				return &usageError{fmt.Errorf("%s: account %q is not configured under channels.%s.accounts", cmd.CommandPath(), scope.account, scope.channel)}
 			}
-			match, ok := router.Resolve(&auraagent.RouteScope{
-				Channel:   scope.channel,
-				Account:   scope.account,
-				GuildID:   scope.guildID,
-				ChannelID: scope.channelID,
-				ThreadID:  scope.threadID,
-				UserID:    scope.userID,
-			})
+			match, ok := router.Resolve(scope.routeScope())
 			out := cmd.OutOrStdout()
 			if !ok {
 				if _, err := fmt.Fprintln(out, "no persona"); err != nil {
@@ -87,7 +82,58 @@ func newBindingsExplainCmd(gf *globalFlags) *cobra.Command {
 	flags.StringVar(&scope.channelID, "channel-id", "", "channel id (the parent channel for thread messages)")
 	flags.StringVar(&scope.threadID, "thread", "", "thread id")
 	flags.StringVar(&scope.userID, "user", "", "author user id")
+	flags.StringVar(&scope.chatID, "chat", "", "telegram group chat id")
+	flags.StringVar(&scope.topicID, "topic", "", "telegram forum topic id")
 	return cmd
+}
+
+func (s *bindingScopeFlags) validate(cmd *cobra.Command) error {
+	var foreign []string
+	switch s.channel {
+	case config.BindingChannelDiscord:
+		foreign = changedFlags(cmd, "chat", "topic")
+	case config.BindingChannelTelegram:
+		foreign = changedFlags(cmd, "guild", "channel-id", "thread")
+		if s.topicID != "" && s.chatID == "" {
+			return &usageError{fmt.Errorf("%s: --topic requires --chat", cmd.CommandPath())}
+		}
+	default:
+		return &usageError{fmt.Errorf("%s: --channel %q is not supported; use %q or %q", cmd.CommandPath(), s.channel, config.BindingChannelDiscord, config.BindingChannelTelegram)}
+	}
+	if len(foreign) > 0 {
+		return &usageError{fmt.Errorf("%s: --%s does not apply to --channel %s", cmd.CommandPath(), strings.Join(foreign, ", --"), s.channel)}
+	}
+	return nil
+}
+
+func changedFlags(cmd *cobra.Command, names ...string) []string {
+	var set []string
+	for _, name := range names {
+		if cmd.Flags().Changed(name) {
+			set = append(set, name)
+		}
+	}
+	return set
+}
+
+func (s *bindingScopeFlags) routeScope() *auraagent.RouteScope {
+	if s.channel == config.BindingChannelTelegram {
+		return &auraagent.RouteScope{
+			Channel:  s.channel,
+			Account:  s.account,
+			ChatID:   s.chatID,
+			ThreadID: s.topicID,
+			UserID:   s.userID,
+		}
+	}
+	return &auraagent.RouteScope{
+		Channel:   s.channel,
+		Account:   s.account,
+		GuildID:   s.guildID,
+		ChannelID: s.channelID,
+		ThreadID:  s.threadID,
+		UserID:    s.userID,
+	}
 }
 
 func bindingLabel(scope *bindingScopeFlags, bindings []config.Binding, index int) string {
@@ -98,6 +144,7 @@ func bindingLabel(scope *bindingScopeFlags, bindings []config.Binding, index int
 	fields := []string{fmt.Sprintf("bindings[%d]", index)}
 	for _, field := range []struct{ name, value string }{
 		{"guild_id", binding.GuildID},
+		{"chat_id", binding.ChatID},
 		{"channel_id", binding.ChannelID},
 		{"thread_id", binding.ThreadID},
 		{"user_id", binding.UserID},
