@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 type Class string
@@ -23,7 +25,10 @@ const (
 	ChannelDiscord  = "discord"
 	ChannelTelegram = "telegram"
 	ChannelHTTP     = "http"
+	ChannelEmail    = "email"
 )
+
+const MaxEmailAddressBytes = 254
 
 type ErrorCode string
 
@@ -82,6 +87,10 @@ func ParseIdentity(raw string) (channel, externalID string, err error) {
 		if !IsTelegramUserID(externalID) {
 			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "telegram identity must be a positive decimal user id"}
 		}
+	case ChannelEmail:
+		if !IsEmailAddress(externalID) {
+			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "email identity must be a lowercase address"}
+		}
 	case ChannelHTTP:
 		if !IsHTTPKeyID(externalID) {
 			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "http identity must be an api key id"}
@@ -90,6 +99,17 @@ func ParseIdentity(raw string) (channel, externalID string, err error) {
 		return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "identity channel is not supported"}
 	}
 	return channel, externalID, nil
+}
+
+func IsEmailAddress(addr string) bool {
+	if addr == "" || len(addr) > MaxEmailAddressBytes || !utf8.ValidString(addr) || addr != strings.ToLower(addr) {
+		return false
+	}
+	if strings.IndexFunc(addr, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return false
+	}
+	local, domain, found := strings.Cut(addr, "@")
+	return found && local != "" && domain != "" && !strings.Contains(domain, "@")
 }
 
 func IsHTTPKeyID(id string) bool {

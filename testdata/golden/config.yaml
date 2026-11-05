@@ -228,6 +228,10 @@ channels:
       public_base_url: ""
       max_body_bytes: 1048576
       max_connections: 4
+  email:
+    enabled: false
+    accounts: []
+    max_attachment_bytes: 20971520
   http:
     enabled: false
     listen_address: 127.0.0.1:8284

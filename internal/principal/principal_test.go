@@ -214,3 +214,67 @@ func TestParseIdentityHTTPKeyPrincipal(t *testing.T) {
 		})
 	}
 }
+
+func TestParseIdentityEmailAddress(t *testing.T) {
+	cases := map[string]struct {
+		raw   string
+		id    string
+		valid bool
+	}{
+		"plain address":       {raw: "email:owner@example.com", id: "owner@example.com", valid: true},
+		"plus tag":            {raw: "email:owner+tag@example.com", id: "owner+tag@example.com", valid: true},
+		"unicode local part":  {raw: "email:émile@example.com", id: "émile@example.com", valid: true},
+		"longest address":     {raw: "email:" + strings.Repeat("a", 242) + "@example.com", id: strings.Repeat("a", 242) + "@example.com", valid: true},
+		"uppercase":           {raw: "email:Owner@example.com"},
+		"two at signs":        {raw: "email:a@b@example.com"},
+		"no at sign":          {raw: "email:owner.example.com"},
+		"empty local part":    {raw: "email:@example.com"},
+		"empty domain":        {raw: "email:owner@"},
+		"empty":               {raw: "email:"},
+		"space":               {raw: "email:own er@example.com"},
+		"tab":                 {raw: "email:owner\t@example.com"},
+		"newline":             {raw: "email:owner@example.com\n"},
+		"control character":   {raw: "email:own\x00er@example.com"},
+		"unicode space":       {raw: "email:own er@example.com"},
+		"invalid utf-8":       {raw: "email:own\xffer@example.com"},
+		"over the byte bound": {raw: "email:" + strings.Repeat("a", 243) + "@example.com"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			channel, id, err := ParseIdentity(tc.raw)
+			if !tc.valid {
+				if code, ok := CodeOf(err); !ok || code != ErrorCodeIdentityInvalid {
+					t.Fatalf("code = %q, %v; want %q", code, ok, ErrorCodeIdentityInvalid)
+				}
+				return
+			}
+			if err != nil || channel != ChannelEmail || id != tc.id {
+				t.Fatalf("ParseIdentity() = %q, %q, %v", channel, id, err)
+			}
+		})
+	}
+}
+
+func TestResolverEmailOwnerIdentity(t *testing.T) {
+	owners, err := NewResolver([]string{"email:owner@example.com", "discord:42"})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	if !owners.IsOwnerIdentity(ChannelEmail, "owner@example.com") || owners.IsOwnerIdentity(ChannelEmail, "other@example.com") {
+		t.Fatal("email owner identity lookup is wrong")
+	}
+	if owners.Count(ChannelEmail) != 1 {
+		t.Errorf("Count(email) = %d, want 1", owners.Count(ChannelEmail))
+	}
+	id, class, ok := owners.Resolve(ChannelEmail, "owner@example.com", false, false)
+	if !ok || id != OwnerID || class != ClassOwner {
+		t.Errorf("Resolve(owner) = %q %q %v", id, class, ok)
+	}
+	id, class, ok = owners.Resolve(ChannelEmail, "friend@example.com", true, false)
+	if !ok || id != "email:friend@example.com" || class != ClassTrusted {
+		t.Errorf("Resolve(allowlisted) = %q %q %v", id, class, ok)
+	}
+	if _, _, ok := owners.Resolve(ChannelEmail, "stranger@example.com", false, false); ok {
+		t.Error("Resolve(stranger) admitted an unlisted sender")
+	}
+}

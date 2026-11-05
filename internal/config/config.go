@@ -71,6 +71,7 @@ type WebhookKey struct {
 type Channels struct {
 	Discord  Discord  `koanf:"discord" yaml:"discord"`
 	Telegram Telegram `koanf:"telegram" yaml:"telegram"`
+	Email    Email    `koanf:"email" yaml:"email"`
 	HTTP     HTTP     `koanf:"http" yaml:"http"`
 }
 
@@ -306,6 +307,39 @@ type TelegramPolling struct {
 }
 
 const (
+	EmailMaxAttachmentBytes  int64 = 20971520
+	EmailDefaultIMAPPort           = 993
+	EmailDefaultFolder             = "INBOX"
+	EmailDefaultPollInterval       = time.Minute
+	EmailMinPollInterval           = 10 * time.Second
+	EmailMaxPollInterval           = time.Hour
+)
+
+type Email struct {
+	Enabled            bool           `koanf:"enabled" yaml:"enabled"`
+	Accounts           []EmailAccount `koanf:"accounts" yaml:"accounts"`
+	MaxAttachmentBytes int64          `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
+}
+
+type EmailAccount struct {
+	Name           string    `koanf:"name" yaml:"name"`
+	Persona        string    `koanf:"persona" yaml:"persona"`
+	Address        string    `koanf:"address" yaml:"address"`
+	IMAP           EmailIMAP `koanf:"imap" yaml:"imap"`
+	AuthservID     string    `koanf:"authserv_id" yaml:"authserv_id"`
+	AllowedSenders []string  `koanf:"allowed_senders" yaml:"allowed_senders"`
+}
+
+type EmailIMAP struct {
+	Host         string   `koanf:"host" yaml:"host"`
+	Port         int      `koanf:"port" yaml:"port"`
+	Username     string   `koanf:"username" yaml:"username"`
+	PasswordRef  string   `koanf:"password_ref" yaml:"password_ref"`
+	Folder       string   `koanf:"folder" yaml:"folder"`
+	PollInterval Duration `koanf:"poll_interval" yaml:"poll_interval"`
+}
+
+const (
 	HTTPListenAddress            = "127.0.0.1:8284"
 	HTTPMaxBodyBytes             = 1048576
 	HTTPMaxBodyCeiling           = 10485760
@@ -336,6 +370,7 @@ type HTTP struct {
 const (
 	BindingChannelDiscord  = "discord"
 	BindingChannelTelegram = "telegram"
+	BindingChannelEmail    = "email"
 )
 
 type Binding struct {
@@ -1003,6 +1038,9 @@ func Default() Config {
 					MaxBodyBytes:   TelegramWebhookMaxBodyBytes,
 					MaxConnections: TelegramWebhookMaxConnections,
 				},
+			},
+			Email: Email{
+				MaxAttachmentBytes: EmailMaxAttachmentBytes,
 			},
 			HTTP: HTTP{
 				ListenAddress:       HTTPListenAddress,

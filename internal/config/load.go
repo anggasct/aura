@@ -246,6 +246,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateTelegram(&cfg.Channels.Telegram, &cfg.Channels.Discord, cfg.Owner); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateEmail(&cfg.Channels.Email, cfg.Owner); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateHTTP(&cfg.Channels.HTTP); err != nil {
 		return LoadResult{}, err
 	}
@@ -437,6 +440,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateTelegramShapes(doc); err != nil {
+		return err
+	}
+	if err := validateEmailShapes(doc); err != nil {
 		return err
 	}
 	if err := validateHTTPShapes(doc); err != nil {
@@ -2341,6 +2347,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyVisionDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	applyTelegramDefaults(cfg, doc, &defaults.Channels.Telegram)
+	applyEmailDefaults(cfg, doc, &defaults.Channels.Email)
 	applyHTTPDefaults(cfg, doc, &defaults.Channels.HTTP)
 	return nil
 }

@@ -222,3 +222,32 @@ func TestRouterChatBindingNeverMatchesDiscordScopes(t *testing.T) {
 		t.Fatalf("Resolve = %+v %v, want the discord account default", match, ok)
 	}
 }
+
+func TestRouterEmailAccountRoutesToItsPersona(t *testing.T) {
+	registry, err := Build(nil, validTools, []string{"primary"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	channels := &config.Channels{Email: config.Email{Accounts: []config.EmailAccount{
+		{Name: "work", Persona: DefaultID},
+		{Name: "ghost", Persona: "not-registered"},
+	}}}
+	if _, err := NewRouter(registry, channels, nil); err == nil {
+		t.Fatal("NewRouter accepted an email account with an unregistered persona")
+	}
+	channels.Email.Accounts = channels.Email.Accounts[:1]
+	router, err := NewRouter(registry, channels, nil)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	if !router.HasAccount(config.BindingChannelEmail, "work") || router.HasAccount(config.BindingChannelTelegram, "work") {
+		t.Error("email account is not registered under the email channel only")
+	}
+	match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelEmail, Account: "work", UserID: "friend@example.com"})
+	if !ok || match.Persona != DefaultID || match.Binding != AccountDefaultBinding {
+		t.Errorf("match = %+v %v, want the account persona", match, ok)
+	}
+	if !router.ServesPersona(config.BindingChannelEmail, "work", DefaultID) {
+		t.Error("ServesPersona(email) = false for the account persona")
+	}
+}

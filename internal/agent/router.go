@@ -97,7 +97,7 @@ type channelAccount struct {
 }
 
 func channelAccounts(channels *config.Channels) []channelAccount {
-	accounts := make([]channelAccount, 0, len(channels.Discord.Accounts)+len(channels.Telegram.Accounts))
+	accounts := make([]channelAccount, 0, len(channels.Discord.Accounts)+len(channels.Telegram.Accounts)+len(channels.Email.Accounts))
 	for i := range channels.Discord.Accounts {
 		account := &channels.Discord.Accounts[i]
 		accounts = append(accounts, channelAccount{
@@ -114,6 +114,15 @@ func channelAccounts(channels *config.Channels) []channelAccount {
 			name:    account.Name,
 			persona: account.Persona,
 			field:   fmt.Sprintf("channels.telegram.accounts[%d]", i),
+		})
+	}
+	for i := range channels.Email.Accounts {
+		account := &channels.Email.Accounts[i]
+		accounts = append(accounts, channelAccount{
+			channel: config.BindingChannelEmail,
+			name:    account.Name,
+			persona: account.Persona,
+			field:   fmt.Sprintf("channels.email.accounts[%d]", i),
 		})
 	}
 	return accounts

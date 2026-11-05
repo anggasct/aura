@@ -50,6 +50,7 @@ var migrations = []migration{
 	{version: 32, sql: handoffChannelSchemaSQL},
 	{version: 33, sql: channelKeySchemaSQL},
 	{version: 34, sql: handoffHTTPChannelSchemaSQL},
+	{version: 35, sql: emailCursorSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -607,6 +608,15 @@ const telegramCursorSchemaSQL = `
 CREATE TABLE telegram_cursor (
     source TEXT PRIMARY KEY,
     next_update_id INTEGER NOT NULL CHECK (next_update_id >= 0),
+    updated_at TEXT NOT NULL
+);
+`
+
+const emailCursorSchemaSQL = `
+CREATE TABLE email_cursor (
+    source TEXT PRIMARY KEY,
+    uid_validity INTEGER NOT NULL CHECK (uid_validity >= 0),
+    last_uid INTEGER NOT NULL CHECK (last_uid >= 0),
     updated_at TEXT NOT NULL
 );
 `
