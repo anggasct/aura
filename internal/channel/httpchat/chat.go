@@ -133,6 +133,9 @@ func (c *Chat) ServeChat(w http.ResponseWriter, r *http.Request, call *Call) {
 		c.reject(ctx, w, spec, "session")
 		return
 	}
+	if continuing {
+		w.Header().Set(SessionHeader, sessionID)
+	}
 	if spec := c.admitBudget(ctx, w, caller); spec != nil {
 		c.reject(ctx, w, spec, "budget")
 		return

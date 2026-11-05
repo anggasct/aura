@@ -539,6 +539,24 @@ func TestChatBudgetGate(t *testing.T) {
 	}
 }
 
+func TestChatBudgetRefusalOnAContinuedSessionNamesTheSession(t *testing.T) {
+	fixture := newChatFixture(t, chatFixtureOptions{})
+	fixture.budgets.refusal = access.BudgetRefusalExhausted
+	issued := fixture.keys.add(t, principal.ClassPublic, testPersona)
+	session := testPersona + "/http/" + issued.ID + "/" + strings.Repeat("a", sessionTokenLength)
+	fixture.sessions.put(Session{ID: session, OwnerID: "http:" + issued.ID, PersonaID: testPersona})
+
+	rec := fixture.post(t, issued.Plaintext, chatBody(userMessage("hi")), SessionHeader, session)
+
+	expectCoded(t, rec, http.StatusTooManyRequests, "insufficient_quota", "budget_exhausted", "")
+	if got := rec.Header().Get(SessionHeader); got != session {
+		t.Errorf("%s = %q, want %q", SessionHeader, got, session)
+	}
+	if len(fixture.runtime.requests()) != 0 {
+		t.Error("a refused request ran a turn")
+	}
+}
+
 func TestChatOwnerKeysSkipBudgetAndHandoffGates(t *testing.T) {
 	fixture := newChatFixture(t, chatFixtureOptions{})
 	fixture.budgets.refusal = access.BudgetRefusalExhausted
@@ -578,8 +596,9 @@ func TestChatHandoffGate(t *testing.T) {
 			fixture.handoffs.state, fixture.handoffs.err = tc.state, tc.err
 			issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
 			var headers []string
+			var session string
 			if tc.session {
-				session := testPersona + "/http/" + issued.ID + "/" + strings.Repeat("a", sessionTokenLength)
+				session = testPersona + "/http/" + issued.ID + "/" + strings.Repeat("a", sessionTokenLength)
 				fixture.sessions.put(Session{ID: session, OwnerID: "http:" + issued.ID, PersonaID: testPersona})
 				headers = []string{SessionHeader, session}
 			}
@@ -595,6 +614,9 @@ func TestChatHandoffGate(t *testing.T) {
 				kind = errorTypeServer
 			}
 			expectCoded(t, rec, tc.status, kind, tc.code, "")
+			if got := rec.Header().Get(SessionHeader); got != session {
+				t.Errorf("%s = %q, want %q", SessionHeader, got, session)
+			}
 			if len(fixture.runtime.requests()) != 0 {
 				t.Error("a held session ran a turn")
 			}
