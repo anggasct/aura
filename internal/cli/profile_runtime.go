@@ -188,9 +188,9 @@ func (r *profileRuntime) ProfileContext(ctx context.Context, req *runtime.TurnRe
 	return part.Render(), nil
 }
 
-// Cron and child turns resolve to the owner class but carry repeated or model-written prompts, not new owner signal.
 func directOwnerOrigin(origin runtime.Origin) bool {
-	return origin == runtime.OriginTerminal || strings.HasPrefix(string(origin), principal.ChannelDiscord+":")
+	channel, _, _ := strings.Cut(string(origin), ":")
+	return origin == runtime.OriginTerminal || channel == principal.ChannelDiscord || channel == principal.ChannelTelegram
 }
 
 func profileJob(sessionID string, events []store.RuntimeEvent) (profile.Job, bool) {

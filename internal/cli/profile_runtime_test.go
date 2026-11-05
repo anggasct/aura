@@ -159,14 +159,16 @@ func TestProfileHookEnqueuesOnlyDirectOwnerInput(t *testing.T) {
 		events []store.RuntimeEvent
 		want   int
 	}{
-		"owner terminal":      {class: principal.ClassOwner, origin: runtime.OriginTerminal, want: 1},
-		"owner discord":       {class: principal.ClassOwner, origin: "discord:owner", want: 1},
-		"trusted discord":     {class: principal.ClassTrusted, origin: "discord:owner"},
-		"public discord":      {class: principal.ClassPublic, origin: "discord:owner"},
-		"owner cron or child": {class: principal.ClassOwner, origin: runtime.OriginInternal},
-		"owner webhook":       {class: principal.ClassOwner, origin: runtime.OriginWebhook},
-		"owner http":          {class: principal.ClassOwner, origin: runtime.OriginHTTP},
-		"owner no words":      {class: principal.ClassOwner, origin: runtime.OriginTerminal, events: []store.RuntimeEvent{modelEvent(t, "evt-m", 2, "hello")}},
+		"owner terminal":   {class: principal.ClassOwner, origin: runtime.OriginTerminal, want: 1},
+		"owner discord":    {class: principal.ClassOwner, origin: "discord:owner", want: 1},
+		"owner telegram":   {class: principal.ClassOwner, origin: "telegram:pocket", want: 1},
+		"trusted telegram": {class: principal.ClassTrusted, origin: "telegram:pocket"},
+		"trusted discord":  {class: principal.ClassTrusted, origin: "discord:owner"},
+		"public discord":   {class: principal.ClassPublic, origin: "discord:owner"},
+		"owner cron or child repeat or model-write their prompts": {class: principal.ClassOwner, origin: runtime.OriginInternal},
+		"owner webhook text comes from another system":            {class: principal.ClassOwner, origin: runtime.OriginWebhook},
+		"owner http key text may come from a script or app":       {class: principal.ClassOwner, origin: runtime.OriginHTTP},
+		"owner no words": {class: principal.ClassOwner, origin: runtime.OriginTerminal, events: []store.RuntimeEvent{modelEvent(t, "evt-m", 2, "hello")}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
