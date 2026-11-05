@@ -514,3 +514,38 @@ func TestPrincipalForgetCoversHTTPKeyPrincipals(t *testing.T) {
 		t.Fatal("a malformed http principal was accepted")
 	}
 }
+
+func TestHTTPChatStreamsTurnsThroughTheRealRuntime(t *testing.T) {
+	h := newHTTPChatHarness(t, "50")
+	key, _ := h.key("lobby", "public")
+	whole := h.post(key, chatJSON(chatMessage("user", "what are your hours?")))
+
+	streamed := h.post(key, `{"stream":true,"stream_options":{"include_usage":true},"messages":[`+chatMessage("user", "what are your hours?")+`]}`)
+
+	if streamed.status != http.StatusOK || streamed.session == "" {
+		t.Fatalf("stream reply = %+v", streamed)
+	}
+	frames := strings.Split(strings.TrimSuffix(streamed.body, "\n\n"), "\n\n")
+	if len(frames) < 4 || frames[len(frames)-1] != "data: [DONE]" {
+		t.Fatalf("frames = %q", frames)
+	}
+	var text strings.Builder
+	for _, frame := range frames[:len(frames)-1] {
+		var decoded struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(frame, "data: ")), &decoded); err != nil {
+			t.Fatalf("decode frame %q: %v", frame, err)
+		}
+		for _, choice := range decoded.Choices {
+			text.WriteString(choice.Delta.Content)
+		}
+	}
+	if text.String() != whole.content(t) || text.String() == "" {
+		t.Errorf("streamed %q, non-streaming %q", text.String(), whole.content(t))
+	}
+}

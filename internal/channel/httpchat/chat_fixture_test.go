@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
@@ -25,6 +26,8 @@ const (
 	testReply     = "hello from the persona"
 	testTurnID    = "turn_test"
 	testUsageJSON = `{"promptTokenCount":10,"candidatesTokenCount":4,"thoughtsTokenCount":1}`
+
+	testKeepalive = 15 * time.Second
 )
 
 type scriptedRuntime struct {
@@ -228,6 +231,8 @@ type chatFixtureOptions struct {
 	maxMessages int
 	maxBytes    int
 	audience    string
+	backend     runtime.AgentRuntime
+	answers     func(events []store.RuntimeEvent) []string
 }
 
 func newChatFixture(t *testing.T, opts chatFixtureOptions) *chatFixture {
@@ -250,8 +255,16 @@ func newChatFixture(t *testing.T, opts chatFixtureOptions) *chatFixture {
 		logs:     logs,
 	}
 	logger := slog.New(slog.NewTextHandler(&lockedWriter{w: logs}, nil))
+	var backend runtime.AgentRuntime = fixture.runtime
+	if opts.backend != nil {
+		backend = opts.backend
+	}
+	answers := testAnswerTexts
+	if opts.answers != nil {
+		answers = opts.answers
+	}
 	chat, err := NewChat(&ChatOptions{
-		Runtime:  fixture.runtime,
+		Runtime:  backend,
 		Sessions: fixture.sessions,
 		Personas: fixture.personas,
 		Budgets:  fixture.budgets,
@@ -262,9 +275,10 @@ func newChatFixture(t *testing.T, opts chatFixtureOptions) *chatFixture {
 			defer gates.mu.Unlock()
 			gates.denied = append(gates.denied, reason)
 		},
-		AnswerTexts:        testAnswerTexts,
+		AnswerTexts:        answers,
 		MaxHistoryMessages: opts.maxMessages,
 		MaxHistoryBytes:    opts.maxBytes,
+		KeepaliveInterval:  testKeepalive,
 		Logger:             logger,
 	})
 	if err != nil {

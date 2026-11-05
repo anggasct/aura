@@ -28,6 +28,12 @@ type wireRequest struct {
 	Messages []wireMessage `json:"messages"`
 	Stream   *bool         `json:"stream"`
 	N        *int          `json:"n"`
+
+	StreamOptions *wireStreamOptions `json:"stream_options"`
+}
+
+type wireStreamOptions struct {
+	IncludeUsage *bool `json:"include_usage"`
 }
 
 type wireMessage struct {
@@ -46,8 +52,10 @@ type message struct {
 }
 
 type chatRequest struct {
-	model    *string
-	messages []message
+	model        *string
+	messages     []message
+	stream       bool
+	includeUsage bool
 }
 
 func (r *chatRequest) final() *message {
@@ -70,13 +78,14 @@ func parseRequest(body []byte) (*chatRequest, *errorSpec) {
 	if wire.N != nil && *wire.N != 1 {
 		return nil, &errChoiceCount
 	}
-	if wire.Stream != nil && *wire.Stream {
-		return nil, &errStreamUnsupported
-	}
 	if len(wire.Messages) == 0 {
 		return nil, &errMessagesRequired
 	}
 	parsed := &chatRequest{model: wire.Model, messages: make([]message, 0, len(wire.Messages))}
+	if wire.Stream != nil && *wire.Stream {
+		parsed.stream = true
+		parsed.includeUsage = wire.StreamOptions != nil && wire.StreamOptions.IncludeUsage != nil && *wire.StreamOptions.IncludeUsage
+	}
 	for i := range wire.Messages {
 		entry, spec := parseMessage(&wire.Messages[i])
 		if spec != nil {

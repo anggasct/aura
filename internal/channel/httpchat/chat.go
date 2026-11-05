@@ -55,6 +55,7 @@ type ChatOptions struct {
 	AnswerTexts        func(events []store.RuntimeEvent) []string
 	MaxHistoryMessages int
 	MaxHistoryBytes    int
+	KeepaliveInterval  time.Duration
 	Logger             *slog.Logger
 }
 
@@ -69,6 +70,7 @@ type Chat struct {
 	answerTexts func(events []store.RuntimeEvent) []string
 	maxMessages int
 	maxBytes    int
+	keepalive   time.Duration
 	logger      *slog.Logger
 }
 
@@ -94,6 +96,8 @@ func NewChat(opts *ChatOptions) (*Chat, error) {
 		return nil, Errorf(ErrorCodeInvalidArgument, "answer extraction must not be nil")
 	case opts.MaxHistoryMessages < 0 || opts.MaxHistoryBytes < 0:
 		return nil, Errorf(ErrorCodeInvalidArgument, "history bounds must not be negative")
+	case opts.KeepaliveInterval <= 0:
+		return nil, Errorf(ErrorCodeInvalidArgument, "keepalive interval must be positive")
 	case opts.Logger == nil:
 		return nil, Errorf(ErrorCodeInvalidArgument, "logger must not be nil")
 	}
@@ -108,6 +112,7 @@ func NewChat(opts *ChatOptions) (*Chat, error) {
 		answerTexts: opts.AnswerTexts,
 		maxMessages: opts.MaxHistoryMessages,
 		maxBytes:    opts.MaxHistoryBytes,
+		keepalive:   opts.KeepaliveInterval,
 		logger:      opts.Logger,
 	}, nil
 }
@@ -161,6 +166,10 @@ func (c *Chat) ServeChat(w http.ResponseWriter, r *http.Request, call *Call) {
 	}
 	if !continuing {
 		turn.UntrustedContext = boundedHistory(request.preceding(), c.maxMessages, c.maxBytes)
+	}
+	if request.stream {
+		c.stream(ctx, w, caller, turn, request.includeUsage)
+		return
 	}
 	c.complete(ctx, w, caller, turn)
 }
@@ -330,16 +339,23 @@ func failureCode(payload json.RawMessage) runtime.ErrorCode {
 	return runtime.ErrorCode(decoded.Code)
 }
 
-func (c *Chat) rejectFailure(ctx context.Context, w http.ResponseWriter, code runtime.ErrorCode) {
+func failureSpec(code runtime.ErrorCode) (spec *errorSpec, reason string) {
 	switch code {
 	case runtime.ErrorCodeRuntimeOverloaded:
-		w.Header().Set("Retry-After", overloadRetryAfter)
-		c.reject(ctx, w, &errRuntimeOverloaded, "turn_overloaded")
+		return &errRuntimeOverloaded, "turn_overloaded"
 	case runtime.ErrorCodeBudgetExhausted:
-		c.reject(ctx, w, &errBudgetExhausted, "turn_budget")
+		return &errBudgetExhausted, "turn_budget"
 	default:
-		c.reject(ctx, w, &errInternal, "turn_failed")
+		return &errInternal, "turn_failed"
 	}
+}
+
+func (c *Chat) rejectFailure(ctx context.Context, w http.ResponseWriter, code runtime.ErrorCode) {
+	spec, reason := failureSpec(code)
+	if code == runtime.ErrorCodeRuntimeOverloaded {
+		w.Header().Set("Retry-After", overloadRetryAfter)
+	}
+	c.reject(ctx, w, spec, reason)
 }
 
 func (c *Chat) reject(ctx context.Context, w http.ResponseWriter, spec *errorSpec, reason string) {
