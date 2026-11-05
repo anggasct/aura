@@ -65,6 +65,10 @@ func (r accessRouter) ServesPublic(channel, account string) bool {
 	return r.public && channel == config.BindingChannelTelegram && account == "pocket"
 }
 
+func (r accessRouter) ServesPersona(channel, account, persona string) bool {
+	return channel == config.BindingChannelTelegram && account == "pocket" && persona == r.definition.ID
+}
+
 type fakePairing struct {
 	mu        sync.Mutex
 	granted   map[string]bool

@@ -431,6 +431,10 @@ func (fixedRouter) ServesPublic(string, string) bool {
 	return false
 }
 
+func (fixedRouter) ServesPersona(channel, account, persona string) bool {
+	return channel == config.BindingChannelTelegram && account == "pocket" && persona == testPersona
+}
+
 type storeSessions struct {
 	sessions store.SessionService
 }

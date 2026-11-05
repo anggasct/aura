@@ -67,6 +67,7 @@ type PersonaRouter interface {
 	Personas() []string
 	Persona(id string) (auraagent.Definition, bool)
 	ServesPublic(channel, account string) bool
+	ServesPersona(channel, account, persona string) bool
 }
 
 type threadRoute struct {

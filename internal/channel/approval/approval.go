@@ -57,6 +57,12 @@ type Prompt struct {
 	ExpiresAt      time.Time
 }
 
+type Requester struct {
+	Principal string
+	Class     principal.Class
+	Persona   string
+}
+
 type Binding struct {
 	Principal string
 	Class     principal.Class

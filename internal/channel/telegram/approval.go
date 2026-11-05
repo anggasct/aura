@@ -60,15 +60,22 @@ func (a *Adapter) observeRouted(ctx context.Context, result string) {
 	}
 }
 
-func (a *Adapter) Decide(ctx context.Context, prompt *approval.Prompt) (bool, error) {
+func validateApprovalPrompt(ctx context.Context, prompt *approval.Prompt) error {
 	if ctx == nil {
-		return false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if prompt == nil {
-		return false, Errorf(ErrorCodeInvalidArgument, "approval prompt must not be nil")
+		return Errorf(ErrorCodeInvalidArgument, "approval prompt must not be nil")
 	}
 	if strings.TrimSpace(prompt.ToolName) == "" || strings.TrimSpace(prompt.SessionID) == "" || strings.TrimSpace(prompt.PrincipalID) == "" {
-		return false, Errorf(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
+		return Errorf(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
+	}
+	return nil
+}
+
+func (a *Adapter) Decide(ctx context.Context, prompt *approval.Prompt) (bool, error) {
+	if err := validateApprovalPrompt(ctx, prompt); err != nil {
+		return false, err
 	}
 	target, ok := a.lookupTarget(prompt.SessionID)
 	if !ok || target.binding.Principal != prompt.PrincipalID {
@@ -78,6 +85,20 @@ func (a *Adapter) Decide(ctx context.Context, prompt *approval.Prompt) (bool, er
 		return a.decideForOwner(ctx, prompt, &target)
 	}
 	return a.decideInChat(ctx, prompt, &target)
+}
+
+func (a *Adapter) DecideForOwner(ctx context.Context, prompt *approval.Prompt, requester *approval.Requester) (bool, error) {
+	if err := validateApprovalPrompt(ctx, prompt); err != nil {
+		return false, err
+	}
+	if requester == nil || requester.Principal == "" || requester.Principal != prompt.PrincipalID {
+		return false, Errorf(ErrorCodeInvalidArgument, "approval requester is missing or does not match the prompt")
+	}
+	return a.decideForOwner(ctx, prompt, &approvalTarget{binding: approval.Binding{Principal: requester.Principal, Class: requester.Class, Persona: requester.Persona}})
+}
+
+func (a *Adapter) ServesPersona(persona string) bool {
+	return a.router != nil && a.router.ServesPersona(config.BindingChannelTelegram, a.account.Name, persona)
 }
 
 func (a *Adapter) decideInChat(ctx context.Context, prompt *approval.Prompt, target *approvalTarget) (bool, error) {
