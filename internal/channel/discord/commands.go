@@ -7,14 +7,12 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/anggasct/aura/internal/channel/chatcommand"
 	"github.com/anggasct/aura/internal/command"
-	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
-
-const ProviderCommand = "command"
 
 func CommandBinding() command.Binding {
 	return command.Binding{
@@ -29,18 +27,6 @@ func (a *Adapter) SetCommands(commands *command.Dispatcher) {
 		return
 	}
 	a.commands = commands
-}
-
-type commandRequest struct {
-	Command      string `json:"command"`
-	Conversation string `json:"conversation"`
-	Target       string `json:"target,omitempty"`
-}
-
-type commandReceipt struct {
-	Lines []string                 `json:"lines"`
-	Code  string                   `json:"code,omitempty"`
-	Skill *runtimeingress.SkillPin `json:"skill,omitempty"`
 }
 
 type commandScope struct {
@@ -114,78 +100,29 @@ func (a *Adapter) runCommand(ctx context.Context, msg *messagePayload, inv *comm
 	if err := a.sessions.EnsureSession(ctx, scope.effectSession, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)
 	}
-	def, _ := a.commands.Registry().Lookup(inv.Name)
-	request := commandRequest{Command: def.Name, Conversation: scope.conversationKey}
-	if def.Name == "session" && len(inv.Args) > 0 {
-		request.Target = inv.Args[0]
-	}
-	raw, err := marshalOperation(request)
+	outcome, err := chatcommand.Execute(ctx, &chatcommand.Run{
+		Effects:        a.effects,
+		Dispatcher:     a.commands,
+		Logger:         a.logger,
+		Caller:         caller,
+		Invocation:     inv,
+		IdempotencyKey: envelope.Source + ":" + envelope.ExternalID,
+		EffectSession:  scope.effectSession,
+	})
 	if err != nil {
 		return false, err
 	}
-	provider := &commandProvider{run: func(ctx context.Context) command.Result {
-		return a.commands.Execute(ctx, caller, inv)
-	}}
-	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
-		SessionID:      scope.effectSession,
-		IdempotencyKey: envelope.Source + ":" + envelope.ExternalID,
-		Provider:       ProviderCommand,
-		Operation:      def.Name,
-		Classification: effect.ClassificationEffectful,
-		Request:        raw,
-		EventKind:      effect.EventKindChannelRequested,
-	}, provider)
-	if err != nil {
-		return false, fmt.Errorf("command effect: %w", err)
-	}
-	result := command.ResultReplayed
-	if provider.ran {
-		result = command.ResultOf(command.ErrorCode(provider.code))
-	} else {
-		a.commands.Replayed(ctx, caller, inv)
-	}
-	a.logCommand(ctx, caller, a.commands.Registry().MetricName(principal.ChannelDiscord, inv.Name), result, scope.effectSession)
-	if intent == nil || intent.State != effect.StateSucceeded {
+	if outcome.Receipt == nil {
 		return true, nil
 	}
-	receipt, ok := decodeReceipt(intent.ProviderReceipt)
-	if !ok {
-		a.logger.WarnContext(ctx, "command receipt unreadable", "component", "command", "session_id", scope.effectSession)
-		return true, nil
-	}
-	if receipt.Skill != nil {
-		envelope.Skill = receipt.Skill
+	if outcome.Receipt.Skill != nil {
+		envelope.Skill = outcome.Receipt.Skill
 		return false, nil
 	}
-	if err := a.replyCommand(ctx, msg, intent.ID, scope.effectSession, receipt.Lines); err != nil {
+	if err := a.replyCommand(ctx, msg, outcome.IntentID, scope.effectSession, outcome.Receipt.Lines); err != nil {
 		a.logger.WarnContext(ctx, "command reply failed", "component", "command", "session_id", scope.effectSession, "error", err)
 	}
 	return true, nil
-}
-
-func decodeReceipt(raw json.RawMessage) (commandReceipt, bool) {
-	var receipt commandReceipt
-	if json.Unmarshal(raw, &receipt) != nil || (len(receipt.Lines) == 0 && receipt.Skill == nil) {
-		return commandReceipt{}, false
-	}
-	return receipt, true
-}
-
-func (a *Adapter) logCommand(ctx context.Context, caller *command.Caller, name, result, sessionID string) {
-	attrs := []any{
-		"component", "command",
-		"name", name,
-		"channel", caller.Channel,
-		"class", string(caller.Class),
-		"result", result,
-		"session_id", sessionID,
-	}
-	switch result {
-	case command.ResultDenied, command.ResultUnavailable, command.ResultFailed:
-		a.logger.WarnContext(ctx, "chat command", attrs...)
-	default:
-		a.logger.InfoContext(ctx, "chat command", attrs...)
-	}
 }
 
 func (a *Adapter) replyCommand(ctx context.Context, msg *messagePayload, intentID, sessionID string, lines []string) error {
@@ -205,27 +142,4 @@ func (a *Adapter) replyCommand(ctx context.Context, msg *messagePayload, intentI
 		ReplyContext:   reference,
 	}, msg.ChannelID, reference, texts, uploads)
 	return err
-}
-
-type commandProvider struct {
-	run  func(ctx context.Context) command.Result
-	ran  bool
-	code string
-}
-
-func (p *commandProvider) SupportsIdempotency() bool { return false }
-
-func (p *commandProvider) Invoke(ctx context.Context, _ *effect.Invocation) (effect.Outcome, error) {
-	result := p.run(ctx)
-	p.ran = true
-	p.code = string(result.Code)
-	var skill *runtimeingress.SkillPin
-	if result.Turn != nil {
-		skill = result.Turn.Skill
-	}
-	receipt, err := json.Marshal(commandReceipt{Lines: result.Lines, Code: p.code, Skill: skill})
-	if err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "command receipt is not serializable")
-	}
-	return effect.Outcome{Succeeded: true, Receipt: receipt}, nil
 }
