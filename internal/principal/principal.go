@@ -20,6 +20,7 @@ const OwnerID = "local-owner"
 const (
 	ChannelDiscord  = "discord"
 	ChannelTelegram = "telegram"
+	ChannelHTTP     = "http"
 )
 
 type ErrorCode string

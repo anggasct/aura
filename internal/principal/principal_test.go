@@ -77,6 +77,7 @@ func TestNewResolverRejectsInvalidIdentities(t *testing.T) {
 		"signed telegram id":   {identities: []string{"telegram:+42"}, index: "owner.identities[0]"},
 		"telegram overflow":    {identities: []string{"telegram:9223372036854775808"}, index: "owner.identities[0]"},
 		"terminal is implicit": {identities: []string{"discord:900", "terminal:me"}, index: "owner.identities[1]"},
+		"http key principal":   {identities: []string{"http:abcdefghijkl"}, index: "owner.identities[0]"},
 		"missing separator":    {identities: []string{"123456"}, index: "owner.identities[0]"},
 		"empty discord id":     {identities: []string{"discord:"}, index: "owner.identities[0]"},
 		"non-numeric id":       {identities: []string{"discord:12ab"}, index: "owner.identities[0]"},
