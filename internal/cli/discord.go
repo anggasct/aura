@@ -255,6 +255,11 @@ func buildSecretVault(cfg *config.Config) *secret.Vault {
 				vault.Set("telegram_bot_token_"+account.Name, val)
 			}
 		}
+		if ref := parseSecretRef(account.WebhookSecretRef); ref.Env != "" || ref.File != "" {
+			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
+				vault.Set("telegram_webhook_secret_"+account.Name, val)
+			}
+		}
 	}
 	if cfg.Sync != nil {
 		if ref := parseSecretRef(cfg.Sync.TransportSecretRef); ref.Env != "" {
