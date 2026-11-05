@@ -161,6 +161,8 @@ func TestProfileHookEnqueuesOnlyDirectOwnerInput(t *testing.T) {
 	}{
 		"owner terminal":      {class: principal.ClassOwner, origin: runtime.OriginTerminal, want: 1},
 		"owner discord":       {class: principal.ClassOwner, origin: "discord:owner", want: 1},
+		"owner telegram":      {class: principal.ClassOwner, origin: "telegram:pocket", want: 1},
+		"trusted telegram":    {class: principal.ClassTrusted, origin: "telegram:pocket"},
 		"trusted discord":     {class: principal.ClassTrusted, origin: "discord:owner"},
 		"public discord":      {class: principal.ClassPublic, origin: "discord:owner"},
 		"owner cron or child": {class: principal.ClassOwner, origin: runtime.OriginInternal},
