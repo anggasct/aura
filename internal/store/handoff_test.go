@@ -84,6 +84,23 @@ func TestHandoffRoundTripsATelegramReplyTarget(t *testing.T) {
 	}
 }
 
+func TestHandoffRoundTripsAnHTTPTarget(t *testing.T) {
+	db := newTestDB(t)
+	ctx := t.Context()
+	sessionID := "lobby/http/abcdefghijkl/token"
+	seedPersonaSession(t, db, sessionID, "http:abcdefghijkl", "lobby")
+	handoffs := NewHandoffStore(db)
+	opened := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	open := &Handoff{SessionID: sessionID, Reason: "refund", PrincipalID: "http:abcdefghijkl", AgentID: "lobby", Account: "abcdefghijkl", Channel: HandoffChannelHTTP, OpenedAt: opened}
+	if err := handoffs.Open(ctx, open); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, found, err := handoffs.Get(ctx, sessionID)
+	if err != nil || !found || got.Channel != HandoffChannelHTTP || got.Account != "abcdefghijkl" || got.ReplyChannelID != "" || got.ReplyThreadID != "" {
+		t.Fatalf("Get = %+v, %v, %v", got, found, err)
+	}
+}
+
 func TestHandoffOpenRejectsInvalidInput(t *testing.T) {
 	db := newTestDB(t)
 	sessionID := "lobby/discord:owner/dm:601"
@@ -144,5 +161,55 @@ func TestHandoffChannelMigrationKeepsExistingDiscordRows(t *testing.T) {
 	}
 	if got.Channel != HandoffChannelDiscord || got.ReplyThreadID != "" || got.ReplyChannelID != "4400" || got.Account != "owner" {
 		t.Fatalf("migrated handoff = %+v, want a discord row with no thread", got)
+	}
+}
+
+func TestHandoffHTTPChannelMigrationKeepsRowsAndAcceptsHTTP(t *testing.T) {
+	ctx := t.Context()
+	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), len(migrations)-1)
+	seeded := []struct {
+		session, channel, account, replyChannel, replyThread string
+		released                                             any
+	}{
+		{"lobby/discord:owner/dm:601", "discord", "owner", "4400", "", nil},
+		{"lobby/telegram:pocket/chat:555001", "telegram", "pocket", "-1001234567890", "77", "2026-11-05T10:00:00Z"},
+	}
+	for _, row := range seeded {
+		seedPersonaSession(t, db, row.session, "owner-1", "lobby")
+		if _, err := db.ExecContext(ctx, `INSERT INTO session_handoff (session_id, reason, opened_at, released_at, principal_id, agent_id, account, channel, reply_channel_id, reply_thread_id) VALUES (?, 'refund', '2026-11-05T09:00:00Z', ?, 'owner-1', 'lobby', ?, ?, ?, ?)`,
+			row.session, row.released, row.account, row.channel, row.replyChannel, row.replyThread); err != nil {
+			t.Fatalf("seed %s handoff: %v", row.channel, err)
+		}
+	}
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	handoffs := NewHandoffStore(db)
+	for _, row := range seeded {
+		got, found, err := handoffs.Get(ctx, row.session)
+		if err != nil || !found {
+			t.Fatalf("Get(%s) = %+v, %v, %v", row.channel, got, found, err)
+		}
+		if got.Channel != row.channel || got.Account != row.account || got.ReplyChannelID != row.replyChannel || got.ReplyThreadID != row.replyThread || got.Reason != "refund" || got.PrincipalID != "owner-1" || got.AgentID != "lobby" || (got.ReleasedAt.IsZero() != (row.released == nil)) {
+			t.Fatalf("migrated %s handoff = %+v", row.channel, got)
+		}
+	}
+	var indexes int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'session_handoff_open_idx' AND tbl_name = 'session_handoff'`).Scan(&indexes); err != nil || indexes != 1 {
+		t.Fatalf("open index count = %d, %v; want 1", indexes, err)
+	}
+	httpSession := "lobby/http/abcdefghijkl/token"
+	seedPersonaSession(t, db, httpSession, "http:abcdefghijkl", "lobby")
+	if err := handoffs.Open(ctx, &Handoff{SessionID: httpSession, Reason: "refund", Channel: HandoffChannelHTTP, Account: "abcdefghijkl", OpenedAt: time.Now()}); err != nil {
+		t.Fatalf("Open http handoff after migration: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE session_handoff SET channel = 'slack' WHERE session_id = ?`, httpSession); !isConstraintCheck(err) {
+		t.Fatalf("update to an unknown channel err = %v, want a check violation", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM session WHERE id = ?`, httpSession); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+	if _, found, err := handoffs.Get(ctx, httpSession); err != nil || found {
+		t.Fatalf("handoff survived its session: found=%v err=%v", found, err)
 	}
 }

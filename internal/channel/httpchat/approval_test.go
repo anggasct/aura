@@ -251,6 +251,9 @@ func TestApprovalsHoldASessionUntilEveryTurnReleasesIt(t *testing.T) {
 	requester := &approval.Requester{Principal: "http:key", Class: principal.ClassPublic, Persona: testPersona}
 	first := approvals.hold("s", requester)
 	second := approvals.hold("s", requester)
+	if got, ok := approvals.RequesterOf("s"); !ok || got != *requester {
+		t.Fatalf("RequesterOf during the turns = %+v, %v; want %+v", got, ok, *requester)
+	}
 	first()
 	first()
 	if !approvals.HoldsApprovalTarget("s") {
@@ -259,6 +262,9 @@ func TestApprovalsHoldASessionUntilEveryTurnReleasesIt(t *testing.T) {
 	second()
 	if approvals.HoldsApprovalTarget("s") {
 		t.Fatal("the session stayed held after every turn released it")
+	}
+	if got, ok := approvals.RequesterOf("s"); ok {
+		t.Fatalf("RequesterOf after release = %+v, want none", got)
 	}
 	var absent *Approvals
 	absent.hold("s", requester)()

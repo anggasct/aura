@@ -17,6 +17,7 @@ const (
 const (
 	HandoffChannelDiscord  = "discord"
 	HandoffChannelTelegram = "telegram"
+	HandoffChannelHTTP     = "http"
 )
 
 type Handoff struct {
@@ -57,8 +58,10 @@ func (s *sqliteHandoffStore) Open(ctx context.Context, handoff *Handoff) error {
 	if handoff.SessionID == "" || handoff.Reason == "" {
 		return &Error{Code: ErrorCodeInvalidArgument, Detail: "open handoff: session and reason are required"}
 	}
-	if handoff.Channel != HandoffChannelDiscord && handoff.Channel != HandoffChannelTelegram {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "open handoff: channel must be discord or telegram"}
+	switch handoff.Channel {
+	case HandoffChannelDiscord, HandoffChannelTelegram, HandoffChannelHTTP:
+	default:
+		return &Error{Code: ErrorCodeInvalidArgument, Detail: "open handoff: channel must be discord, telegram or http"}
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO session_handoff (session_id, reason, principal_id, agent_id, account, channel, reply_channel_id, reply_thread_id, opened_at, released_at)

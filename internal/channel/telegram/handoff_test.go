@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 )
@@ -131,6 +132,89 @@ func TestNotifyHandoffRefusals(t *testing.T) {
 			if strings.Contains(err.Error(), leak) || strings.Contains(rig.h.logs.String(), leak) {
 				t.Errorf("%q leaked into the error or the logs", leak)
 			}
+		}
+	})
+}
+
+func TestNotifyOwnerHandoffReachesOnlyTheOwner(t *testing.T) {
+	rig := newApprovalRig(t, accessOpts{})
+	requester := httpRequester(principal.ClassPublic)
+	const session = "main/http/abcdefghijkl/token"
+	if err := rig.adapter.NotifyOwnerHandoff(t.Context(), requester, session, "  wants a refund  "); err != nil {
+		t.Fatalf("NotifyOwnerHandoff: %v", err)
+	}
+	sends := rig.h.api.sends()
+	if len(sends) != 1 {
+		t.Fatalf("sent %d messages, want only the owner notice", len(sends))
+	}
+	owner := strings.Join(noticesTo(rig, privateDest(ownerUserID)), "\n")
+	for _, want := range []string{
+		"handoff requested",
+		"persona: Main (main)",
+		"session: " + session,
+		"principal: " + httpPrincipal,
+		"reason: wants a refund",
+		"reply: aura reply " + session + " <text>",
+		"release: aura handoff release " + session,
+	} {
+		if !strings.Contains(owner, want) {
+			t.Errorf("owner notice %q lacks %q", owner, want)
+		}
+	}
+}
+
+func TestNotifyOwnerHandoffRefusals(t *testing.T) {
+	t.Run("owner without a telegram identity", func(t *testing.T) {
+		rig := newApprovalRig(t, accessOpts{})
+		owners, err := principal.NewResolver(nil)
+		if err != nil {
+			t.Fatalf("NewResolver: %v", err)
+		}
+		rig.adapter.SetPrincipalResolver(owners)
+		err = rig.adapter.NotifyOwnerHandoff(t.Context(), httpRequester(principal.ClassPublic), handoffSession, "x")
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeHandoffUnavailable {
+			t.Fatalf("err = %v, want %s", err, ErrorCodeHandoffUnavailable)
+		}
+		if sends := rig.h.api.sends(); len(sends) != 0 {
+			t.Errorf("sent %d messages without an owner chat", len(sends))
+		}
+	})
+	t.Run("unresolvable bot token", func(t *testing.T) {
+		rig := newApprovalRig(t, accessOpts{})
+		t.Setenv(testTokenEnv, "")
+		err := rig.adapter.NotifyOwnerHandoff(t.Context(), httpRequester(principal.ClassPublic), handoffSession, "x")
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeConnectionFailed {
+			t.Fatalf("err = %v, want %s", err, ErrorCodeConnectionFailed)
+		}
+	})
+	t.Run("invalid arguments", func(t *testing.T) {
+		rig := newApprovalRig(t, accessOpts{})
+		cases := map[string]struct {
+			requester *approval.Requester
+			session   string
+		}{
+			"nil requester":      {requester: nil, session: handoffSession},
+			"missing principal":  {requester: &approval.Requester{Persona: testPersona}, session: handoffSession},
+			"missing persona":    {requester: &approval.Requester{Principal: httpPrincipal}, session: handoffSession},
+			"missing session":    {requester: httpRequester(principal.ClassPublic), session: ""},
+			"missing everything": {requester: &approval.Requester{}, session: ""},
+		}
+		for name, tc := range cases {
+			err := rig.adapter.NotifyOwnerHandoff(t.Context(), tc.requester, tc.session, "x")
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+				t.Errorf("%s: err = %v, want %s", name, err, ErrorCodeInvalidArgument)
+			}
+		}
+		if sends := rig.h.api.sends(); len(sends) != 0 {
+			t.Errorf("sent %d messages for invalid input", len(sends))
+		}
+	})
+	t.Run("owner notice that cannot be delivered", func(t *testing.T) {
+		rig := newApprovalRig(t, accessOpts{})
+		rig.h.api.failNextOn("sendMessage", apiFailure(http.StatusForbidden, 0))
+		err := rig.adapter.NotifyOwnerHandoff(t.Context(), httpRequester(principal.ClassPublic), handoffSession, "x")
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeBotAPIRejected {
+			t.Fatalf("err = %v, want %s", err, ErrorCodeBotAPIRejected)
 		}
 	})
 }

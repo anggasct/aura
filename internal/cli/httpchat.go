@@ -68,15 +68,32 @@ func (s *httpSessionStore) Create(ctx context.Context, session *httpchat.Session
 	})
 }
 
+type httpHandoffReplies struct {
+	replies store.HandoffReplyStore
+}
+
+func (r *httpHandoffReplies) List(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]httpchat.HandoffReply, error) {
+	stored, err := r.replies.List(ctx, sessionID, afterSequence, limit)
+	if err != nil {
+		return nil, err
+	}
+	replies := make([]httpchat.HandoffReply, 0, len(stored))
+	for i := range stored {
+		replies = append(replies, httpchat.HandoffReply{Sequence: stored[i].Sequence, Text: stored[i].Text, CreatedAt: stored[i].CreatedAt})
+	}
+	return replies, nil
+}
+
 func buildHTTPChat(cfg *config.Config, db *sql.DB, backend runtime.AgentRuntime, registry *auraagent.Registry, recorder *telemetry.AccessRecorder, approvals *httpchat.Approvals, logger *slog.Logger) (*httpchat.Server, []health.RegisteredCheck, error) {
 	settings := &cfg.Channels.HTTP
 	if !settings.Enabled {
 		return nil, nil, nil
 	}
 	gates := discordAccessSettings(cfg, db, recorder)
+	sessions := &httpSessionStore{sessions: store.NewSessionService(db)}
 	chat, err := httpchat.NewChat(&httpchat.ChatOptions{
 		Runtime:            backend,
-		Sessions:           &httpSessionStore{sessions: store.NewSessionService(db)},
+		Sessions:           sessions,
 		Personas:           registry,
 		Budgets:            gates.Budgets,
 		Evals:              gates.Evals,
@@ -92,9 +109,19 @@ func buildHTTPChat(cfg *config.Config, db *sql.DB, backend runtime.AgentRuntime,
 	if err != nil {
 		return nil, nil, err
 	}
+	replies, err := httpchat.NewReplies(&httpchat.RepliesOptions{
+		Sessions: sessions,
+		Handoffs: gates.Handoffs,
+		Replies:  &httpHandoffReplies{replies: store.NewHandoffReplyStore(db)},
+		Logger:   logger,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
 	handler, err := httpchat.NewHandler(&httpchat.Options{
 		Keys:                &apiKeyDirectory{keys: store.NewAPIKeyStore(db)},
 		Chat:                chat,
+		Replies:             replies,
 		MaxBodyBytes:        settings.MaxBodyBytes,
 		RequestsPerMinute:   settings.RequestsPerMinute,
 		MaxConcurrentPerKey: settings.MaxConcurrentPerKey,

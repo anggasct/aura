@@ -47,14 +47,14 @@ func (a *Approvals) Decide(ctx context.Context, prompt *approval.Prompt) (bool, 
 	if strings.TrimSpace(prompt.ToolName) == "" || strings.TrimSpace(prompt.SessionID) == "" || strings.TrimSpace(prompt.PrincipalID) == "" {
 		return false, Errorf(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
 	}
-	requester, ok := a.requesterOf(prompt.SessionID)
+	requester, ok := a.RequesterOf(prompt.SessionID)
 	if !ok || requester.Principal != prompt.PrincipalID {
 		return false, nil
 	}
 	return a.owners.DecideForOwner(ctx, prompt, &requester)
 }
 
-func (a *Approvals) requesterOf(sessionID string) (approval.Requester, bool) {
+func (a *Approvals) RequesterOf(sessionID string) (approval.Requester, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	entry, ok := a.held[sessionID]

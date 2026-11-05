@@ -16,24 +16,36 @@ func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (
 	if !ok {
 		return access.HandoffTarget{}, access.ErrNoHandoffTarget
 	}
+	owner := approval.Requester{Principal: requester.binding.Principal, Class: requester.binding.Class, Persona: requester.binding.Persona}
+	if err := a.NotifyOwnerHandoff(ctx, &owner, sessionID, reason); err != nil {
+		return access.HandoffTarget{}, err
+	}
+	definition, _ := a.personaDefinition(requester.binding.Persona)
+	a.postNotice(ctx, requester.dest, definition.Message(config.MessageHandoffOpen))
+	return a.handoffTarget(&requester), nil
+}
+
+func (a *Adapter) NotifyOwnerHandoff(ctx context.Context, requester *approval.Requester, sessionID, reason string) error {
+	if ctx == nil {
+		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if requester == nil || requester.Principal == "" || requester.Persona == "" || sessionID == "" {
+		return Errorf(ErrorCodeInvalidArgument, "handoff requester or session is missing")
+	}
 	ownerChat, ok := a.ownerChatID()
 	if !ok {
-		return access.HandoffTarget{}, Errorf(ErrorCodeHandoffUnavailable, "owner has no telegram identity")
+		return Errorf(ErrorCodeHandoffUnavailable, "owner has no telegram identity")
 	}
 	token, ok := a.botToken()
 	if !ok {
-		return access.HandoffTarget{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
-	definition, _ := a.personaDefinition(requester.binding.Persona)
+	definition, _ := a.personaDefinition(requester.Persona)
 	if definition.ID == "" {
-		definition.ID = requester.binding.Persona
+		definition.ID = requester.Persona
 	}
-	notice := access.HandoffOwnerNotice(approval.PersonaLabel(definition.ID, definition.Name), sessionID, requester.binding.Principal, reason)
-	if err := sendPlainText(ctx, a.bot, token, destination{chatID: ownerChat}, notice); err != nil {
-		return access.HandoffTarget{}, err
-	}
-	a.postNotice(ctx, requester.dest, definition.Message(config.MessageHandoffOpen))
-	return a.handoffTarget(&requester), nil
+	notice := access.HandoffOwnerNotice(approval.PersonaLabel(definition.ID, definition.Name), sessionID, requester.Principal, reason)
+	return sendPlainText(ctx, a.bot, token, destination{chatID: ownerChat}, notice)
 }
 
 func (a *Adapter) ReplyTarget(sessionID string) (access.HandoffTarget, bool) {

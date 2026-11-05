@@ -27,6 +27,8 @@ type askedRequest struct {
 	approver  string
 	prompt    approval.Prompt
 	requester approval.Requester
+	session   string
+	reason    string
 }
 
 type askLog struct {
@@ -60,11 +62,12 @@ func (l *askLog) first() askedRequest {
 }
 
 type scriptedApprover struct {
-	name   string
-	serves string
-	accept bool
-	err    error
-	log    *askLog
+	name       string
+	serves     string
+	accept     bool
+	err        error
+	handoffErr error
+	log        *askLog
 }
 
 func (s *scriptedApprover) HoldsApprovalTarget(string) bool { return false }
@@ -80,6 +83,11 @@ func (s *scriptedApprover) ServesPersona(persona string) bool {
 func (s *scriptedApprover) DecideForOwner(_ context.Context, prompt *approval.Prompt, requester *approval.Requester) (bool, error) {
 	s.log.record(&askedRequest{approver: s.name, prompt: *prompt, requester: *requester})
 	return s.accept, s.err
+}
+
+func (s *scriptedApprover) NotifyOwnerHandoff(_ context.Context, requester *approval.Requester, sessionID, reason string) error {
+	s.log.record(&askedRequest{approver: s.name, requester: *requester, session: sessionID, reason: reason})
+	return s.handoffErr
 }
 
 type routedResults struct {
