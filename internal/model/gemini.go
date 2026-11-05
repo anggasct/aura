@@ -53,11 +53,13 @@ func (geminiCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	complete := response.TurnComplete
-	var ops []streamOp
+	ops := []streamOp{
+		{kind: opModel, model: response.ModelVersion},
+		{kind: opUsage, usageIn: usageIn(response), usageOut: usageOut(response)},
+	}
 	for _, part := range response.Content.Parts {
 		if part.Text != "" {
-			ops = append(ops, streamOp{kind: opText, text: part.Text, usageIn: usageIn(response), usageOut: usageOut(response)})
+			ops = append(ops, streamOp{kind: opText, text: part.Text})
 		}
 		if part.FunctionCall != nil {
 			args, err := json.Marshal(part.FunctionCall.Args)
@@ -70,10 +72,10 @@ func (geminiCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, error) {
 			)
 		}
 	}
-	if complete {
-		ops = append(ops, streamOp{kind: opDone, final: response})
+	if response.TurnComplete {
+		ops = append(ops, streamOp{kind: opStop, finish: response.FinishReason}, streamOp{kind: opDone})
 	}
-	return ops, complete, nil
+	return ops, response.TurnComplete, nil
 }
 
 func usageIn(response *adkmodel.LLMResponse) int32 {
@@ -302,5 +304,11 @@ func parseGeminiResponse(body []byte) (*adkmodel.LLMResponse, error) {
 		}
 	}
 	complete := response.Candidates[0].FinishReason != "" && response.Candidates[0].FinishReason != "FINISH_REASON_UNSPECIFIED"
-	return &adkmodel.LLMResponse{Content: content, ModelVersion: response.ModelVersion, UsageMetadata: usage, TurnComplete: complete}, nil
+	return &adkmodel.LLMResponse{
+		Content:       content,
+		ModelVersion:  response.ModelVersion,
+		UsageMetadata: usage,
+		TurnComplete:  complete,
+		FinishReason:  geminiFinishReason(response.Candidates[0].FinishReason),
+	}, nil
 }

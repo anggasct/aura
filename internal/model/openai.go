@@ -74,7 +74,7 @@ func (openaiCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, error) {
 	}
 	done := choice.FinishReason != "" && choice.FinishReason != "null"
 	if done {
-		ops = append(ops, streamOp{kind: opStop, stop: choice.FinishReason}, streamOp{kind: opDone})
+		ops = append(ops, streamOp{kind: opStop, finish: openaiFinishReason(choice.FinishReason)}, streamOp{kind: opDone})
 	}
 	return ops, done, nil
 }
@@ -118,11 +118,16 @@ type openaiRequestBody struct {
 	Model       string                 `json:"model"`
 	Messages    []openaiRequestMessage `json:"messages"`
 	Stream      bool                   `json:"stream,omitempty"`
+	StreamOpts  *openaiStreamOptions   `json:"stream_options,omitempty"`
 	Tools       []openaiTool           `json:"tools,omitempty"`
 	MaxTokens   int32                  `json:"max_tokens,omitempty"`
 	Temperature *float32               `json:"temperature,omitempty"`
 	TopP        *float32               `json:"top_p,omitempty"`
 	Stop        []string               `json:"stop,omitempty"`
+}
+
+type openaiStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type openaiMessage struct {
@@ -218,6 +223,9 @@ func buildOpenAIRequest(req *adkmodel.LLMRequest, stream bool, detail ...string)
 		imageDetail = normalizeVisionDetail(detail[0])
 	}
 	body := openaiRequestBody{Model: req.Model, Stream: stream}
+	if stream {
+		body.StreamOpts = &openaiStreamOptions{IncludeUsage: true}
+	}
 	if req.Config != nil {
 		body.MaxTokens = req.Config.MaxOutputTokens
 		body.Temperature = req.Config.Temperature
@@ -373,6 +381,7 @@ func parseOpenAIResponse(body []byte) (*adkmodel.LLMResponse, error) {
 		UsageMetadata: openaiUsageToMetadata(resp.Usage),
 		ModelVersion:  resp.Model,
 		TurnComplete:  true,
+		FinishReason:  openaiFinishReason(resp.Choices[0].FinishReason),
 	}, nil
 }
 
