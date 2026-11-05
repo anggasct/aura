@@ -12,6 +12,10 @@ const emailAccountYAML = `      - name: work
         persona: main
         address: aura@example.com
         authserv_id: mx.example.com
+        smtp:
+          host: smtp.example.com
+          username: aura@example.com
+          password_ref: env://AURA_EMAIL_SMTP_PASSWORD
         imap:
           host: imap.example.com
           username: aura@example.com
@@ -56,6 +60,13 @@ func TestLoad_EmailAccountApplied(t *testing.T) {
 	if imap.Host != "imap.example.com" || imap.Username != "aura@example.com" || imap.PasswordRef != "env://AURA_EMAIL_PASSWORD" {
 		t.Errorf("imap = %+v", imap)
 	}
+	smtp := account.SMTP
+	if smtp.Host != "smtp.example.com" || smtp.Username != "aura@example.com" || smtp.PasswordRef != "env://AURA_EMAIL_SMTP_PASSWORD" {
+		t.Errorf("smtp = %+v", smtp)
+	}
+	if smtp.Port != 587 {
+		t.Errorf("smtp default port = %d, want 587", smtp.Port)
+	}
 	if imap.Port != 993 || imap.Folder != "INBOX" || imap.PollInterval != Duration(time.Minute) {
 		t.Errorf("imap defaults = port %d folder %q poll %v, want 993 INBOX 1m", imap.Port, imap.Folder, imap.PollInterval)
 	}
@@ -70,6 +81,36 @@ func TestLoad_EmailIMAPOverrides(t *testing.T) {
 	imap := res.Config.Channels.Email.Accounts[0].IMAP
 	if imap.Port != 1993 || imap.Folder != "Aura" || imap.PollInterval != Duration(30*time.Second) {
 		t.Errorf("imap = %+v", imap)
+	}
+}
+
+func TestLoad_EmailSMTPOverrides(t *testing.T) {
+	account := strings.Replace(emailAccountYAML, "          host: smtp.example.com\n", "          host: smtp.example.com\n          port: 2525\n", 1)
+	res, err := Load(writeDiscordConfig(t, emailConfig(emailOwner, "", account)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if smtp := res.Config.Channels.Email.Accounts[0].SMTP; smtp.Port != 2525 {
+		t.Errorf("smtp = %+v", smtp)
+	}
+}
+
+func TestLoad_EmailSMTPOnlyRequiredWhenEnabled(t *testing.T) {
+	withoutSMTP := strings.Replace(emailAccountYAML, "        smtp:\n          host: smtp.example.com\n          username: aura@example.com\n          password_ref: env://AURA_EMAIL_SMTP_PASSWORD\n", "", 1)
+	if withoutSMTP == emailAccountYAML {
+		t.Fatal("fixture does not contain the smtp block")
+	}
+	if _, err := Load(writeDiscordConfig(t, emailConfig(emailOwner, "", withoutSMTP))); err != nil {
+		t.Fatalf("Load of a disabled channel without smtp: %v", err)
+	}
+	_, err := Load(writeDiscordConfig(t, emailConfig(emailOwner, "    enabled: true\n", withoutSMTP)))
+	if err == nil || !strings.Contains(err.Error(), "smtp.host must be a host name") || !strings.Contains(err.Error(), "smtp.password_ref must not be empty") {
+		t.Fatalf("Load error = %v, want the missing smtp settings rejected when the channel is enabled", err)
+	}
+	partial := strings.Replace(withoutSMTP, "        imap:\n", "        smtp:\n          host: smtp.example.com\n        imap:\n", 1)
+	_, err = Load(writeDiscordConfig(t, emailConfig(emailOwner, "", partial)))
+	if err == nil || !strings.Contains(err.Error(), "smtp.password_ref must not be empty") {
+		t.Fatalf("Load error = %v, want a partial smtp block rejected even when disabled", err)
 	}
 }
 
@@ -115,6 +156,9 @@ func TestLoad_EmailInvalid(t *testing.T) {
 	}
 	withIMAP := func(extra string) string {
 		return emailConfig(emailOwner, "", emailAccountYAML+extra)
+	}
+	withSMTP := func(extra string) string {
+		return emailConfig(emailOwner, "", strings.Replace(emailAccountYAML, "          host: smtp.example.com\n", "          host: smtp.example.com\n"+extra, 1))
 	}
 	cases := map[string]struct {
 		yaml string
@@ -189,7 +233,7 @@ func TestLoad_EmailInvalid(t *testing.T) {
 			want: "imap.host must be a host name",
 		},
 		"missing username": {
-			yaml: replace("          username: aura@example.com\n", ""),
+			yaml: replace("          host: imap.example.com\n          username: aura@example.com\n", "          host: imap.example.com\n"),
 			want: "imap.username must be a single line",
 		},
 		"port below range": {
@@ -244,9 +288,65 @@ func TestLoad_EmailInvalid(t *testing.T) {
 			yaml: withIMAP("        allowed_senders: friend@example.com\n"),
 			want: "allowed_senders must be a sequence",
 		},
-		"smtp is not accepted yet": {
-			yaml: withIMAP("        smtp:\n          host: smtp.example.com\n"),
+		"smtp inline password": {
+			yaml: replace("env://AURA_EMAIL_SMTP_PASSWORD", "hunter2"),
+			want: "smtp.password_ref must use env:// or file://",
+		},
+		"smtp plaintext url password": {
+			yaml: replace("env://AURA_EMAIL_SMTP_PASSWORD", "https://user:hunter2@example.com"),
+			want: "smtp.password_ref must use env:// or file://",
+		},
+		"smtp missing password": {
+			yaml: replace("          password_ref: env://AURA_EMAIL_SMTP_PASSWORD\n", ""),
+			want: "smtp.password_ref must not be empty",
+		},
+		"smtp host with a scheme": {
+			yaml: replace("host: smtp.example.com", "host: smtps://smtp.example.com"),
+			want: "smtp.host must be a host name",
+		},
+		"smtp host with a port": {
+			yaml: replace("host: smtp.example.com", "host: smtp.example.com:587"),
+			want: "smtp.host must be a host name",
+		},
+		"smtp missing username": {
+			yaml: replace("          username: aura@example.com\n          password_ref: env://AURA_EMAIL_SMTP_PASSWORD", "          password_ref: env://AURA_EMAIL_SMTP_PASSWORD"),
+			want: "smtp.username must be a single line",
+		},
+		"smtp port below range": {
+			yaml: withSMTP("          port: 0\n"),
+			want: "smtp.port must be between 1 and 65535",
+		},
+		"smtp port above range": {
+			yaml: withSMTP("          port: 65536\n"),
+			want: "smtp.port must be between 1 and 65535",
+		},
+		"smtp port as a string": {
+			yaml: withSMTP("          port: \"587\"\n"),
+			want: "smtp.port must be an integer",
+		},
+		"smtp not a mapping": {
+			yaml: emailConfig(emailOwner, "", strings.Replace(emailAccountYAML, "        smtp:\n          host: smtp.example.com\n          username: aura@example.com\n          password_ref: env://AURA_EMAIL_SMTP_PASSWORD\n", "        smtp: relay\n", 1)),
+			want: "smtp must be a mapping",
+		},
+		"smtp tls switch is not accepted": {
+			yaml: withSMTP("          tls: false\n"),
 			want: "unknown key",
+		},
+		"smtp verification switch is not accepted": {
+			yaml: withSMTP("          insecure_skip_verify: true\n"),
+			want: "unknown key",
+		},
+		"smtp starttls switch is not accepted": {
+			yaml: withSMTP("          starttls: false\n"),
+			want: "unknown key",
+		},
+		"smtp folder is not accepted": {
+			yaml: withSMTP("          folder: Sent\n"),
+			want: "unknown key",
+		},
+		"address with an angle bracket": {
+			yaml: replace("address: aura@example.com", "address: \"a>b@example.com\""),
+			want: "address must be a lowercase mailbox address",
 		},
 		"tls switch is not accepted": {
 			yaml: withIMAP("          tls: false\n"),

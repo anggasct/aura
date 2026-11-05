@@ -55,6 +55,10 @@ channels:
           host: imap.example.com
           username: aura@example.com
           password_ref: env://AURA_EMAIL_TEST_PASSWORD
+        smtp:
+          host: smtp.example.com
+          username: aura@example.com
+          password_ref: env://AURA_EMAIL_TEST_SMTP_PASSWORD
 access:
   budgets:
     trusted:

@@ -112,6 +112,48 @@ func IsEmailAddress(addr string) bool {
 	return found && local != "" && domain != "" && !strings.Contains(domain, "@")
 }
 
+const (
+	maxPlainLocalBytes = 64
+	maxPlainLabelBytes = 63
+	plainLocalSymbols  = "!#$%&'*+/=?^_`{|}~-"
+)
+
+func IsPlainEmailAddress(addr string) bool {
+	if !IsEmailAddress(addr) {
+		return false
+	}
+	local, domain, _ := strings.Cut(addr, "@")
+	if len(local) > maxPlainLocalBytes {
+		return false
+	}
+	for atom := range strings.SplitSeq(local, ".") {
+		if atom == "" || strings.IndexFunc(atom, func(r rune) bool { return !isPlainLocalRune(r) }) >= 0 {
+			return false
+		}
+	}
+	for label := range strings.SplitSeq(domain, ".") {
+		if !isPlainDomainLabel(label) {
+			return false
+		}
+	}
+	return true
+}
+
+func isPlainLocalRune(r rune) bool {
+	return isLowerAlnum(r) || strings.ContainsRune(plainLocalSymbols, r)
+}
+
+func isLowerAlnum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+}
+
+func isPlainDomainLabel(label string) bool {
+	if label == "" || len(label) > maxPlainLabelBytes || label[0] == '-' || label[len(label)-1] == '-' {
+		return false
+	}
+	return strings.IndexFunc(label, func(r rune) bool { return !isLowerAlnum(r) && r != '-' }) < 0
+}
+
 func IsHTTPKeyID(id string) bool {
 	if len(id) != HTTPKeyIDLength {
 		return false
