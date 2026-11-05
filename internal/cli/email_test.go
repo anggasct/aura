@@ -3,8 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"io"
 	"iter"
 	"log/slog"
+	netmail "net/mail"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,11 +18,13 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/email"
+	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/store"
+	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 const (
@@ -179,18 +183,40 @@ func (s *fakeMailSession) Wait(ctx context.Context, _ time.Duration) error {
 
 func (s *fakeMailSession) Close() error { return nil }
 
-func emailMessage(from, messageID, subject, body string) string {
-	return strings.Join([]string{
+func emailMessage(from, messageID, subject, body string, extra ...string) string {
+	lines := []string{
 		"Authentication-Results: mx.example.com; dmarc=pass header.from=example.com",
 		"From: " + from,
 		"To: aura@example.com",
 		"Subject: " + subject,
 		"Message-ID: <" + messageID + ">",
-		"Content-Type: text/plain; charset=utf-8",
-		"",
-		body,
-		"",
-	}, "\r\n")
+	}
+	lines = append(lines, extra...)
+	return strings.Join(append(lines, "Content-Type: text/plain; charset=utf-8", "", body, ""), "\r\n")
+}
+
+type fakeSubmissions struct {
+	mu        sync.Mutex
+	sent      []email.Submission
+	submitted chan struct{}
+}
+
+func newFakeSubmissions() *fakeSubmissions {
+	return &fakeSubmissions{submitted: make(chan struct{}, 16)}
+}
+
+func (m *fakeSubmissions) Submit(_ context.Context, submission *email.Submission) error {
+	m.mu.Lock()
+	m.sent = append(m.sent, *submission)
+	m.mu.Unlock()
+	m.submitted <- struct{}{}
+	return nil
+}
+
+func (m *fakeSubmissions) all() []email.Submission {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]email.Submission(nil), m.sent...)
 }
 
 func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
@@ -229,8 +255,13 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 		t.Fatalf("ownerResolver: %v", err)
 	}
 	mail := newFakeMail()
-	adapter, err := email.New(&cfg.Channels.Email, &cfg.Channels.Email.Accounts[0], mail,
-		emailCursors{cursors: store.NewEmailCursorStore(db)},
+	submissions := newFakeSubmissions()
+	effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("NewChannelEffects: %v", err)
+	}
+	adapter, err := email.New(&cfg.Channels.Email, &cfg.Channels.Email.Accounts[0], mail, submissions,
+		emailCursors{cursors: store.NewEmailCursorStore(db)}, effects,
 		&emailSessions{discordSessionEnsurer{sessions: store.NewSessionService(db)}},
 		slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -247,17 +278,20 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	if err := host.Start(t.Context()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	t.Cleanup(func() {
+	shutdown := sync.OnceFunc(func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), emailTestWait)
 		defer cancel()
 		if err := host.Shutdown(ctx); err != nil {
 			t.Errorf("Shutdown: %v", err)
 		}
 	})
+	t.Cleanup(shutdown)
 	awaitSignal(t, mail.waiting, "adapter never waited for mail")
 
-	mail.deliver(emailMessage(emailOwnerSender, "owner-1@example.com", "owner question", "what is on my calendar?"))
-	mail.deliver(emailMessage(emailOwnerSender, "owner-1@example.com", "owner question", "what is on my calendar?"))
+	ownerMail := emailMessage(emailOwnerSender, "owner-1@example.com", "owner question", "what is on my calendar?",
+		"Reply-To: attacker@evil.example", "Cc: bystander@example.org", "References: <root-1@example.com>")
+	mail.deliver(ownerMail)
+	mail.deliver(ownerMail)
 	mail.deliver(emailMessage(emailFriend, "friend-1@example.com", "friend question", "can you send the notes?"))
 	mail.wake <- struct{}{}
 
@@ -309,9 +343,53 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 		}
 	}
 
-	_, err = adapter.Deliver(t.Context(), &runtimechannelhost.DeliveryRequest{})
-	if code, ok := email.CodeOf(err); !ok || code != email.ErrorCodeDeliveryUnavailable {
-		t.Fatalf("Deliver error = %v, want %s", err, email.ErrorCodeDeliveryUnavailable)
+	awaitSignal(t, submissions.submitted, "first reply never reached the submission server")
+	awaitSignal(t, submissions.submitted, "second reply never reached the submission server")
+
+	sent := submissions.all()
+	if len(sent) != 2 {
+		t.Fatalf("submissions = %d, want one reply per turn", len(sent))
+	}
+	byRecipient := map[string]email.Submission{}
+	for _, submission := range sent {
+		byRecipient[submission.To] = submission
+	}
+	for _, recipient := range []string{emailOwnerSender, emailFriend} {
+		submission, ok := byRecipient[recipient]
+		if !ok {
+			t.Fatalf("no reply addressed to the authenticated sender %s; got %d recipients", recipient, len(byRecipient))
+		}
+		if submission.From != "aura@example.com" {
+			t.Errorf("reply from %q, want the account address", submission.From)
+		}
+		parsed, err := netmail.ReadMessage(bytes.NewReader(submission.Message))
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		if parsed.Header.Get("To") != recipient || parsed.Header.Get("Auto-Submitted") != "auto-replied" {
+			t.Errorf("reply headers To=%q Auto-Submitted=%q", parsed.Header.Get("To"), parsed.Header.Get("Auto-Submitted"))
+		}
+		for _, header := range []string{"Reply-To", "Cc", "Bcc"} {
+			if _, present := parsed.Header[header]; present {
+				t.Errorf("reply to %s carries a %s header", recipient, header)
+			}
+		}
+		if body, _ := io.ReadAll(parsed.Body); strings.TrimSpace(string(body)) != "ok" {
+			t.Errorf("reply body = %q, want the model answer", body)
+		}
+	}
+	ownerReply, err := netmail.ReadMessage(bytes.NewReader(byRecipient[emailOwnerSender].Message))
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+	if ownerReply.Header.Get("Subject") != "Re: owner question" || ownerReply.Header.Get("In-Reply-To") != "<owner-1@example.com>" ||
+		strings.Join(strings.Fields(ownerReply.Header.Get("References")), " ") != "<root-1@example.com> <owner-1@example.com>" {
+		t.Errorf("owner reply threading: Subject=%q In-Reply-To=%q References=%q", ownerReply.Header.Get("Subject"), ownerReply.Header.Get("In-Reply-To"), ownerReply.Header.Get("References"))
+	}
+	shutdown()
+	var intents int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM effect_intent WHERE provider = 'email' AND state = 'succeeded'`).Scan(&intents); err != nil || intents != 2 {
+		t.Errorf("succeeded email intents = %d (%v), want 2", intents, err)
 	}
 }
 
@@ -321,5 +399,22 @@ func awaitSignal(t *testing.T, signal <-chan struct{}, failure string) {
 	case <-signal:
 	case <-time.After(emailTestWait):
 		t.Fatal(failure)
+	}
+}
+
+func TestBuildSecretVaultRedactsEmailPasswords(t *testing.T) {
+	t.Setenv("AURA_TEST_VAULT_IMAP", "imap-secret-probe")
+	t.Setenv("AURA_TEST_VAULT_SMTP", "smtp-secret-probe")
+	cfg := config.Default()
+	cfg.Channels.Email.Accounts = []config.EmailAccount{{
+		Name: "work",
+		IMAP: config.EmailIMAP{PasswordRef: "env://AURA_TEST_VAULT_IMAP"},
+		SMTP: config.EmailSMTP{PasswordRef: "env://AURA_TEST_VAULT_SMTP"},
+	}}
+	vault := buildSecretVault(&cfg)
+	for _, secret := range []string{"imap-secret-probe", "smtp-secret-probe"} {
+		if got := vault.Redact("password " + secret); strings.Contains(got, secret) {
+			t.Errorf("Redact() = %q, want %s hidden", got, secret)
+		}
 	}
 }

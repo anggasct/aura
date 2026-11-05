@@ -282,6 +282,11 @@ func buildSecretVault(cfg *config.Config) *secret.Vault {
 				vault.Set("email_imap_password_"+account.Name, val)
 			}
 		}
+		if ref := parseSecretRef(account.SMTP.PasswordRef); ref.Env != "" || ref.File != "" {
+			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
+				vault.Set("email_smtp_password_"+account.Name, val)
+			}
+		}
 	}
 	for i := range cfg.Channels.Telegram.Accounts {
 		account := &cfg.Channels.Telegram.Accounts[i]

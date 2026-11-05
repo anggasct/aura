@@ -15,7 +15,10 @@ import (
 )
 
 type replyReference struct {
-	MessageID string `json:"message_id"`
+	MessageID  string   `json:"message_id"`
+	Sender     string   `json:"sender"`
+	Subject    string   `json:"subject"`
+	References []string `json:"references,omitempty"`
 }
 
 type admission struct {
@@ -79,7 +82,7 @@ func (a *Adapter) ingest(ctx context.Context, session Session, info MessageInfo)
 		return &Error{Code: ErrorCodeIntakeFailed, Detail: "thread session is not resolvable", Cause: err}
 	}
 	found.session = sessionID
-	reply, err := json.Marshal(replyReference{MessageID: messageID})
+	reply, err := json.Marshal(replyReference{MessageID: messageID, Sender: sender, Subject: found.subject, References: referenceIDs(header)})
 	if err != nil {
 		return &Error{Code: ErrorCodeIntakeFailed, Detail: "reply reference is not encodable", Cause: err}
 	}

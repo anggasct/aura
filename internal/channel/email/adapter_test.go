@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func wantDigest(text string) string {
@@ -24,19 +25,32 @@ func wantDigest(text string) string {
 func TestNew_RejectsMissingDependencies(t *testing.T) {
 	cfg := &config.Email{}
 	account := &config.EmailAccount{Name: testAccount}
+	effects := newEffects(t, storetest.OpenMigrated(t))
 	cases := map[string]func() (*Adapter, error){
 		"nil config": func() (*Adapter, error) {
-			return New(nil, account, newFakeMailbox(), newMemoryCursors(), newMemorySessions(), nil)
+			return New(nil, account, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), effects, newMemorySessions(), nil)
 		},
 		"nil account": func() (*Adapter, error) {
-			return New(cfg, nil, newFakeMailbox(), newMemoryCursors(), newMemorySessions(), nil)
+			return New(cfg, nil, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), effects, newMemorySessions(), nil)
 		},
 		"unnamed": func() (*Adapter, error) {
-			return New(cfg, &config.EmailAccount{}, newFakeMailbox(), newMemoryCursors(), newMemorySessions(), nil)
+			return New(cfg, &config.EmailAccount{}, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), effects, newMemorySessions(), nil)
 		},
-		"nil connector": func() (*Adapter, error) { return New(cfg, account, nil, newMemoryCursors(), newMemorySessions(), nil) },
-		"nil cursors":   func() (*Adapter, error) { return New(cfg, account, newFakeMailbox(), nil, newMemorySessions(), nil) },
-		"nil sessions":  func() (*Adapter, error) { return New(cfg, account, newFakeMailbox(), newMemoryCursors(), nil, nil) },
+		"nil connector": func() (*Adapter, error) {
+			return New(cfg, account, nil, &fakeMailer{}, newMemoryCursors(), effects, newMemorySessions(), nil)
+		},
+		"nil mailer": func() (*Adapter, error) {
+			return New(cfg, account, newFakeMailbox(), nil, newMemoryCursors(), effects, newMemorySessions(), nil)
+		},
+		"nil cursors": func() (*Adapter, error) {
+			return New(cfg, account, newFakeMailbox(), &fakeMailer{}, nil, effects, newMemorySessions(), nil)
+		},
+		"nil effects": func() (*Adapter, error) {
+			return New(cfg, account, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), nil, newMemorySessions(), nil)
+		},
+		"nil sessions": func() (*Adapter, error) {
+			return New(cfg, account, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), effects, nil, nil)
+		},
 	}
 	for name, build := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -79,11 +93,8 @@ func TestIngest_OwnerMessageStartsOneThreadTurn(t *testing.T) {
 		t.Errorf("parts = %+v", env.Parts)
 	}
 	var reply replyReference
-	if err := json.Unmarshal(env.ReplyContext, &reply); err != nil || reply.MessageID != "m1@example.com" {
-		t.Errorf("reply context = %s (%v), want the Message-ID only", env.ReplyContext, err)
-	}
-	if strings.Contains(string(env.ReplyContext), ownerAddress) {
-		t.Error("reply context carries the sender address")
+	if err := json.Unmarshal(env.ReplyContext, &reply); err != nil || reply.MessageID != "m1@example.com" || reply.Sender != ownerAddress || reply.Subject != "Plan the week" {
+		t.Errorf("reply context = %s (%v), want the Message-ID, authenticated sender and subject", env.ReplyContext, err)
 	}
 	if got := h.admittedClasses(); len(got) != 1 || got[0] != principal.ClassOwner {
 		t.Errorf("admitted = %v, want one owner turn", got)
@@ -687,17 +698,6 @@ type stampedConnector struct {
 func (c *stampedConnector) Connect(ctx context.Context) (Session, error) {
 	*c.stamps = append(*c.stamps, time.Now())
 	return c.inner.Connect(ctx)
-}
-
-func TestDeliver_IsUnavailableInThisStep(t *testing.T) {
-	h := newHarness(t, harnessOptions{})
-	_, err := h.adapter.Deliver(t.Context(), &runtimechannelhost.DeliveryRequest{
-		EffectID: "turn-1", Channel: "email:work", ConversationID: "main/email:work/thread:x",
-		Parts: []runtimechannelhost.OutputPart{{Text: "reply"}},
-	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryUnavailable {
-		t.Fatalf("Deliver() error = %v, want delivery_unavailable", err)
-	}
 }
 
 func TestChannelName_IsTheSource(t *testing.T) {

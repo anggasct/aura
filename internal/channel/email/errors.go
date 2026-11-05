@@ -15,7 +15,13 @@ const (
 	ErrorCodeProtocolInvalid        ErrorCode = "protocol_invalid"
 	ErrorCodeMessageUnavailable     ErrorCode = "message_unavailable"
 	ErrorCodeIntakeFailed           ErrorCode = "intake_failed"
-	ErrorCodeDeliveryUnavailable    ErrorCode = "delivery_unavailable"
+	ErrorCodeDeliveryAmbiguous      ErrorCode = "delivery_ambiguous"
+	ErrorCodeDeliveryFailed         ErrorCode = "delivery_failed"
+	ErrorCodeTLSRequired            ErrorCode = "tls_required"
+	ErrorCodeTLSUntrusted           ErrorCode = "tls_untrusted"
+	ErrorCodeSubmissionRejected     ErrorCode = "submission_rejected"
+	ErrorCodeSubmissionDeferred     ErrorCode = "submission_deferred"
+	ErrorCodeMessageInvalid         ErrorCode = "message_invalid"
 )
 
 type Error struct {

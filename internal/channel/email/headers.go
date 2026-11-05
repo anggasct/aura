@@ -18,6 +18,9 @@ const (
 	maxMessageIDBytes = 998
 	maxSubjectBytes   = 998
 	digestChars       = 26
+	maxReferenceIDs   = 20
+	maxHeaderIDBytes  = 255
+	headerIDSymbols   = "!#$%&'*+-/=?^_`{|}~.@"
 )
 
 var digestEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
@@ -124,13 +127,47 @@ func subjectOf(header *mail.Header) string {
 	if err != nil {
 		subject = header.Get("Subject")
 	}
-	subject = strings.Join(strings.FieldsFunc(strings.ToValidUTF8(subject, ""), func(r rune) bool {
+	return truncateUTF8(singleLine(subject), maxSubjectBytes)
+}
+
+func singleLine(text string) string {
+	return strings.Join(strings.FieldsFunc(strings.ToValidUTF8(text, ""), func(r rune) bool {
 		return unicode.IsSpace(r) || unicode.IsControl(r)
 	}), " ")
-	if len(subject) > maxSubjectBytes {
-		subject = truncateUTF8(subject, maxSubjectBytes)
+}
+
+func referenceIDs(header *mail.Header) []string {
+	ids, err := header.MsgIDList("References")
+	if err != nil {
+		return nil
 	}
-	return subject
+	return boundedReferences(ids)
+}
+
+func boundedReferences(ids []string) []string {
+	safe := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if headerSafeID(id) {
+			safe = append(safe, id)
+		}
+	}
+	if len(safe) > maxReferenceIDs {
+		safe = safe[len(safe)-maxReferenceIDs:]
+	}
+	return safe
+}
+
+func headerSafeID(id string) bool {
+	if id == "" || len(id) > maxHeaderIDBytes {
+		return false
+	}
+	for i := range len(id) {
+		c := id[i]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune(headerIDSymbols, rune(c)) {
+			return false
+		}
+	}
+	return true
 }
 
 func digestOf(text string) string {
