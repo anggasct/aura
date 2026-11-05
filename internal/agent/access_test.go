@@ -124,6 +124,51 @@ func TestBuildRejectsInvalidToolCeilings(t *testing.T) {
 	}
 }
 
+func TestRouterServesPersonaByAccountDefaultOrBinding(t *testing.T) {
+	public := kantorOverride()
+	public.ID = "lobby"
+	public.Audience = config.AudiencePublic
+	registry, err := Build([]config.AgentDefinition{kantorOverride(), public}, validTools, []string{"primary"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	channels := &config.Channels{
+		Discord:  config.Discord{Accounts: []config.DiscordAccount{{Name: "home", Persona: DefaultID}, {Name: "office", Persona: "kantor"}}},
+		Telegram: config.Telegram{Accounts: []config.TelegramAccount{{Name: "pocket", Persona: DefaultID}}},
+	}
+	router, err := NewRouter(registry, channels, []config.Binding{discordBinding("lobby", "home", config.Binding{ChannelID: "9"})})
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	cases := []struct {
+		name    string
+		channel string
+		account string
+		persona string
+		want    bool
+	}{
+		{"account default", config.BindingChannelDiscord, "office", "kantor", true},
+		{"binding on the account", config.BindingChannelDiscord, "home", "lobby", true},
+		{"default of the same account", config.BindingChannelDiscord, "home", DefaultID, true},
+		{"persona bound to another account", config.BindingChannelDiscord, "office", "lobby", false},
+		{"same account name on another channel", config.BindingChannelTelegram, "home", DefaultID, false},
+		{"telegram account default", config.BindingChannelTelegram, "pocket", DefaultID, true},
+		{"unknown account", config.BindingChannelDiscord, "missing", "kantor", false},
+		{"blank persona", config.BindingChannelDiscord, "home", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := router.ServesPersona(tc.channel, tc.account, tc.persona); got != tc.want {
+				t.Errorf("ServesPersona(%s, %s, %q) = %v, want %v", tc.channel, tc.account, tc.persona, got, tc.want)
+			}
+		})
+	}
+	var missing *Router
+	if missing.ServesPersona(config.BindingChannelDiscord, "home", DefaultID) {
+		t.Error("a nil router serves a persona")
+	}
+}
+
 func TestRouterServesPublicOnlyWhenAPublicPersonaIsReachable(t *testing.T) {
 	public := kantorOverride()
 	public.ID = "lobby"

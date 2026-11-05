@@ -69,15 +69,22 @@ func (a *Adapter) lookupTarget(conversationID string) (approvalBinding, bool) {
 	return binding, ok
 }
 
-func (a *Adapter) Decide(ctx context.Context, prompt *ApprovalPrompt) (bool, error) {
+func validateApprovalPrompt(ctx context.Context, prompt *ApprovalPrompt) error {
 	if ctx == nil {
-		return false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if prompt == nil {
-		return false, Errorf(ErrorCodeInvalidArgument, "approval prompt must not be nil")
+		return Errorf(ErrorCodeInvalidArgument, "approval prompt must not be nil")
 	}
 	if strings.TrimSpace(prompt.ToolName) == "" || strings.TrimSpace(prompt.SessionID) == "" || strings.TrimSpace(prompt.PrincipalID) == "" {
-		return false, Errorf(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
+		return Errorf(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
+	}
+	return nil
+}
+
+func (a *Adapter) Decide(ctx context.Context, prompt *ApprovalPrompt) (bool, error) {
+	if err := validateApprovalPrompt(ctx, prompt); err != nil {
+		return false, err
 	}
 	binding, ok := a.lookupTarget(prompt.SessionID)
 	if !ok || binding.principal != prompt.PrincipalID {
@@ -92,6 +99,20 @@ func (a *Adapter) Decide(ctx context.Context, prompt *ApprovalPrompt) (bool, err
 	}
 	outcome, _, err := a.awaitApproval(ctx, card.token, card.tokenID, card.pending, card.ref)
 	return outcome.Accepted, err
+}
+
+func (a *Adapter) DecideForOwner(ctx context.Context, prompt *ApprovalPrompt, requester *approval.Requester) (bool, error) {
+	if err := validateApprovalPrompt(ctx, prompt); err != nil {
+		return false, err
+	}
+	if requester == nil || requester.Principal == "" || requester.Principal != prompt.PrincipalID {
+		return false, Errorf(ErrorCodeInvalidArgument, "approval requester is missing or does not match the prompt")
+	}
+	return a.decideForOwner(ctx, prompt, &approvalBinding{principal: requester.Principal, class: requester.Class, persona: requester.Persona})
+}
+
+func (a *Adapter) ServesPersona(persona string) bool {
+	return a.router != nil && a.router.ServesPersona(config.BindingChannelDiscord, a.account.Name, persona)
 }
 
 type openedCard struct {

@@ -1,0 +1,85 @@
+package cli
+
+import (
+	"context"
+
+	"github.com/anggasct/aura/internal/channel/approval"
+	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channel/httpchat"
+	"github.com/anggasct/aura/internal/channel/telegram"
+)
+
+type ownerApprover interface {
+	ServesPersona(persona string) bool
+	DecideForOwner(ctx context.Context, prompt *approval.Prompt, requester *approval.Requester) (bool, error)
+}
+
+type approvalAdapter interface {
+	approvalChannel
+	ownerApprover
+}
+
+type ownerApprovalRouter struct {
+	approvers []ownerApprover
+	routed    func(ctx context.Context, result string)
+}
+
+var _ httpchat.OwnerApprover = (*ownerApprovalRouter)(nil)
+
+func (r *ownerApprovalRouter) DecideForOwner(ctx context.Context, prompt *approval.Prompt, requester *approval.Requester) (bool, error) {
+	if len(r.approvers) == 0 {
+		if r.routed != nil {
+			r.routed(ctx, approval.RoutedUnavailable)
+		}
+		return false, nil
+	}
+	var unavailable error
+	for _, approver := range r.ordered(requester.Persona) {
+		accepted, err := approver.DecideForOwner(ctx, prompt, requester)
+		if err == nil || !approvalUnavailable(err) {
+			return accepted, err
+		}
+		unavailable = err
+	}
+	return false, unavailable
+}
+
+func (r *ownerApprovalRouter) ordered(persona string) []ownerApprover {
+	serving := make([]ownerApprover, 0, len(r.approvers))
+	rest := make([]ownerApprover, 0, len(r.approvers))
+	for _, approver := range r.approvers {
+		if approver.ServesPersona(persona) {
+			serving = append(serving, approver)
+			continue
+		}
+		rest = append(rest, approver)
+	}
+	return append(serving, rest...)
+}
+
+func approvalUnavailable(err error) bool {
+	if code, ok := discord.CodeOf(err); ok && code == discord.ErrorCodeApprovalUnavailable {
+		return true
+	}
+	code, ok := telegram.CodeOf(err)
+	return ok && code == telegram.ErrorCodeApprovalUnavailable
+}
+
+func newHTTPApprovals(adapters []approvalAdapter, routed func(ctx context.Context, result string)) (*httpchat.Approvals, error) {
+	approvers := make([]ownerApprover, 0, len(adapters))
+	for _, adapter := range adapters {
+		approvers = append(approvers, adapter)
+	}
+	return httpchat.NewApprovals(&ownerApprovalRouter{approvers: approvers, routed: routed})
+}
+
+func approvalChannels(adapters []approvalAdapter, httpApprovals *httpchat.Approvals) []approvalChannel {
+	channels := make([]approvalChannel, 0, len(adapters)+1)
+	for _, adapter := range adapters {
+		channels = append(channels, adapter)
+	}
+	if httpApprovals != nil {
+		channels = append(channels, httpApprovals)
+	}
+	return channels
+}

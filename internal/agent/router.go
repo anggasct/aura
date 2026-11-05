@@ -158,6 +158,21 @@ func (r *Router) ServesPublic(channel, account string) bool {
 	return false
 }
 
+func (r *Router) ServesPersona(channel, account, persona string) bool {
+	if r == nil || persona == "" {
+		return false
+	}
+	if r.defaults[routeAccount{channel: channel, account: account}] == persona {
+		return true
+	}
+	for i := range r.bindings {
+		if r.bindings[i].Channel == channel && r.bindings[i].Account == account && r.bindings[i].Persona == persona {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Router) Resolve(scope *RouteScope) (RouteMatch, bool) {
 	if r == nil || scope == nil {
 		return RouteMatch{}, false
