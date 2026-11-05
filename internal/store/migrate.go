@@ -49,6 +49,7 @@ var migrations = []migration{
 	{version: 31, sql: telegramCursorSchemaSQL},
 	{version: 32, sql: handoffChannelSchemaSQL},
 	{version: 33, sql: channelKeySchemaSQL},
+	{version: 34, sql: handoffHTTPChannelSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -688,6 +689,26 @@ CREATE TABLE api_key (
     created_at  TEXT NOT NULL,
     revoked_at  TEXT
 );
+`
+
+const handoffHTTPChannelSchemaSQL = `
+CREATE TABLE session_handoff_v34 (
+    session_id       TEXT PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+    reason           TEXT NOT NULL,
+    opened_at        TEXT NOT NULL,
+    released_at      TEXT,
+    principal_id     TEXT NOT NULL DEFAULT '',
+    agent_id         TEXT NOT NULL DEFAULT '',
+    account          TEXT NOT NULL DEFAULT '',
+    reply_channel_id TEXT NOT NULL DEFAULT '',
+    channel          TEXT NOT NULL DEFAULT 'discord' CHECK (channel IN ('discord','telegram','http')),
+    reply_thread_id  TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO session_handoff_v34 (session_id, reason, opened_at, released_at, principal_id, agent_id, account, reply_channel_id, channel, reply_thread_id)
+SELECT session_id, reason, opened_at, released_at, principal_id, agent_id, account, reply_channel_id, channel, reply_thread_id FROM session_handoff;
+DROP TABLE session_handoff;
+ALTER TABLE session_handoff_v34 RENAME TO session_handoff;
+CREATE INDEX session_handoff_open_idx ON session_handoff(released_at, opened_at);
 `
 
 const reservationEstimateSchemaSQL = `

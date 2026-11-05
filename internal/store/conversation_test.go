@@ -93,8 +93,8 @@ func TestConversationSessionMigrationAppliesOnV21(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	applied, latest, err := SchemaVersions(ctx, db)
-	if err != nil || applied != 33 || latest != 33 {
-		t.Fatalf("schema = applied %d latest %d %v, want 33", applied, latest, err)
+	if err != nil || applied != 34 || latest != 34 {
+		t.Fatalf("schema = applied %d latest %d %v, want 34", applied, latest, err)
 	}
 	if _, found, err := NewConversationSessionStore(db).Resolve(ctx, "main/discord:owner/dm:111"); err != nil || found {
 		t.Fatalf("existing conversation resolved to a pointer: %v %v", found, err)
