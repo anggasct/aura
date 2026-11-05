@@ -22,7 +22,7 @@ func scopedContext(t *testing.T, inv durable.Invocation) context.Context {
 	return durable.WithTurnScope(t.Context(), durable.NewTurnScope(inv))
 }
 
-func journaledKinds(t *testing.T, model adkmodel.LLM, ctx context.Context, stream bool) (partials, finals int, err error) {
+func journaledKinds(ctx context.Context, t *testing.T, model adkmodel.LLM, stream bool) (partials, finals int, err error) {
 	t.Helper()
 	for response, genErr := range model.GenerateContent(ctx, journaledRequest(), stream) {
 		if genErr != nil {
@@ -56,7 +56,7 @@ func TestJournaledModelYieldsPartialsLiveAndJournalsOnlyTheFinalResponse(t *test
 	inner := &streamingADKModel{chunks: []string{"par", "tial"}, finalTokens: 4}
 	inv := &journalInvocation{}
 
-	partials, finals, err := journaledKinds(t, journalModel(inner), scopedContext(t, inv), true)
+	partials, finals, err := journaledKinds(scopedContext(t, inv), t, journalModel(inner), true)
 
 	if err != nil {
 		t.Fatalf("GenerateContent: %v", err)
@@ -81,11 +81,11 @@ func TestJournaledModelYieldsPartialsLiveAndJournalsOnlyTheFinalResponse(t *test
 func TestJournaledModelReplayYieldsTheFinalResponseWithoutCallingTheProvider(t *testing.T) {
 	inner := &streamingADKModel{chunks: []string{"par", "tial"}, finalTokens: 4}
 	inv := &journalInvocation{}
-	if _, _, err := journaledKinds(t, journalModel(inner), scopedContext(t, inv), true); err != nil {
+	if _, _, err := journaledKinds(scopedContext(t, inv), t, journalModel(inner), true); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 
-	partials, finals, err := journaledKinds(t, journalModel(inner), scopedContext(t, inv), true)
+	partials, finals, err := journaledKinds(scopedContext(t, inv), t, journalModel(inner), true)
 
 	if err != nil {
 		t.Fatalf("replay: %v", err)
@@ -111,7 +111,7 @@ func TestJournaledModelCallsTheProviderWithTheCallersStreamFlag(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			inner := &streamingADKModel{chunks: []string{"par", "tial"}, finalTokens: 4}
 
-			partials, finals, err := journaledKinds(t, journalModel(inner), scopedContext(t, &journalInvocation{}), tc.stream)
+			partials, finals, err := journaledKinds(scopedContext(t, &journalInvocation{}), t, journalModel(inner), tc.stream)
 
 			if err != nil {
 				t.Fatalf("GenerateContent: %v", err)
@@ -150,7 +150,7 @@ func TestJournaledModelStopsCleanlyWhenTheConsumerStops(t *testing.T) {
 	if journal := journalSnapshot(t, inv); len(journal) != 0 {
 		t.Errorf("a stopped stream was journaled: %+v", journal)
 	}
-	if _, finals, err := journaledKinds(t, journalModel(inner), scopedContext(t, inv), true); err != nil || finals != 1 {
+	if _, finals, err := journaledKinds(scopedContext(t, inv), t, journalModel(inner), true); err != nil || finals != 1 {
 		t.Errorf("next call after a stop = %d finals, err %v, want a fresh provider call", finals, err)
 	}
 }
