@@ -85,6 +85,7 @@ func buildHTTPChat(cfg *config.Config, db *sql.DB, backend runtime.AgentRuntime,
 		AnswerTexts:        runtimeengine.DeliveryTexts,
 		MaxHistoryMessages: settings.MaxHistoryMessages,
 		MaxHistoryBytes:    settings.MaxHistoryBytes,
+		KeepaliveInterval:  time.Duration(settings.KeepaliveInterval),
 		Logger:             logger,
 	})
 	if err != nil {

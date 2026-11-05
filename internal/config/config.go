@@ -317,16 +317,20 @@ const (
 	HTTPMaxHistoryMessagesLimit  = 100
 	HTTPMaxHistoryBytes          = 32768
 	HTTPMaxHistoryBytesLimit     = 262144
+	HTTPKeepaliveInterval        = 15 * time.Second
+	HTTPKeepaliveIntervalFloor   = time.Second
+	HTTPKeepaliveIntervalCeiling = time.Minute
 )
 
 type HTTP struct {
-	Enabled             bool   `koanf:"enabled" yaml:"enabled"`
-	ListenAddress       string `koanf:"listen_address" yaml:"listen_address"`
-	MaxBodyBytes        int64  `koanf:"max_body_bytes" yaml:"max_body_bytes"`
-	RequestsPerMinute   int    `koanf:"requests_per_minute" yaml:"requests_per_minute"`
-	MaxConcurrentPerKey int    `koanf:"max_concurrent_per_key" yaml:"max_concurrent_per_key"`
-	MaxHistoryMessages  int    `koanf:"max_history_messages" yaml:"max_history_messages"`
-	MaxHistoryBytes     int    `koanf:"max_history_bytes" yaml:"max_history_bytes"`
+	Enabled             bool     `koanf:"enabled" yaml:"enabled"`
+	ListenAddress       string   `koanf:"listen_address" yaml:"listen_address"`
+	MaxBodyBytes        int64    `koanf:"max_body_bytes" yaml:"max_body_bytes"`
+	RequestsPerMinute   int      `koanf:"requests_per_minute" yaml:"requests_per_minute"`
+	MaxConcurrentPerKey int      `koanf:"max_concurrent_per_key" yaml:"max_concurrent_per_key"`
+	MaxHistoryMessages  int      `koanf:"max_history_messages" yaml:"max_history_messages"`
+	MaxHistoryBytes     int      `koanf:"max_history_bytes" yaml:"max_history_bytes"`
+	KeepaliveInterval   Duration `koanf:"keepalive_interval" yaml:"keepalive_interval"`
 }
 
 const (
@@ -1007,6 +1011,7 @@ func Default() Config {
 				MaxConcurrentPerKey: HTTPMaxConcurrentPerKey,
 				MaxHistoryMessages:  HTTPMaxHistoryMessages,
 				MaxHistoryBytes:     HTTPMaxHistoryBytes,
+				KeepaliveInterval:   Duration(HTTPKeepaliveInterval),
 			},
 		},
 		Broadcast: Broadcast{

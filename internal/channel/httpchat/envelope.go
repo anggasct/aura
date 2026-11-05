@@ -18,7 +18,6 @@ const (
 	paramMessages         = "messages"
 	paramModel            = "model"
 	paramN                = "n"
-	paramStream           = "stream"
 	paramSessionHeader    = "X-Aura-Session"
 )
 
@@ -87,10 +86,6 @@ var (
 		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
 		message: "Only n=1 is supported.", param: paramN,
 	}
-	errStreamUnsupported = errorSpec{
-		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
-		message: "Streaming responses are not supported yet.", param: paramStream,
-	}
 	errSessionHeader = errorSpec{
 		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
 		message: "The X-Aura-Session header must be sent at most once.", param: paramSessionHeader,
@@ -136,13 +131,17 @@ type errorDetail struct {
 	Code    string  `json:"code"`
 }
 
-func writeError(w http.ResponseWriter, spec *errorSpec) {
+func newErrorEnvelope(spec *errorSpec) *errorEnvelope {
 	detail := errorDetail{Message: spec.message, Type: spec.kind, Code: spec.code}
 	if spec.param != "" {
 		param := spec.param
 		detail.Param = &param
 	}
-	writeJSON(w, spec.status, &errorEnvelope{Error: detail})
+	return &errorEnvelope{Error: detail}
+}
+
+func writeError(w http.ResponseWriter, spec *errorSpec) {
+	writeJSON(w, spec.status, newErrorEnvelope(spec))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

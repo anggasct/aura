@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad_HTTPDefaults(t *testing.T) {
@@ -10,7 +11,7 @@ func TestLoad_HTTPDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4, MaxHistoryMessages: 20, MaxHistoryBytes: 32768}
+	want := HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4, MaxHistoryMessages: 20, MaxHistoryBytes: 32768, KeepaliveInterval: Duration(15 * time.Second)}
 	if got := res.Config.Channels.HTTP; got != want {
 		t.Errorf("channels.http = %+v, want %+v", got, want)
 	}
@@ -22,20 +23,20 @@ func TestLoad_HTTPValid(t *testing.T) {
 		want  HTTP
 	}{
 		"enabled with overrides": {
-			block: "    enabled: true\n    listen_address: 0.0.0.0:9000\n    max_body_bytes: 2048\n    requests_per_minute: 120\n    max_concurrent_per_key: 8\n    max_history_messages: 5\n    max_history_bytes: 4096\n",
-			want:  HTTP{Enabled: true, ListenAddress: "0.0.0.0:9000", MaxBodyBytes: 2048, RequestsPerMinute: 120, MaxConcurrentPerKey: 8, MaxHistoryMessages: 5, MaxHistoryBytes: 4096},
+			block: "    enabled: true\n    listen_address: 0.0.0.0:9000\n    max_body_bytes: 2048\n    requests_per_minute: 120\n    max_concurrent_per_key: 8\n    max_history_messages: 5\n    max_history_bytes: 4096\n    keepalive_interval: 30s\n",
+			want:  HTTP{Enabled: true, ListenAddress: "0.0.0.0:9000", MaxBodyBytes: 2048, RequestsPerMinute: 120, MaxConcurrentPerKey: 8, MaxHistoryMessages: 5, MaxHistoryBytes: 4096, KeepaliveInterval: Duration(30 * time.Second)},
 		},
 		"lower bounds": {
-			block: "    max_body_bytes: 1\n    requests_per_minute: 1\n    max_concurrent_per_key: 1\n",
-			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1, RequestsPerMinute: 1, MaxConcurrentPerKey: 1, MaxHistoryMessages: 20, MaxHistoryBytes: 32768},
+			block: "    max_body_bytes: 1\n    requests_per_minute: 1\n    max_concurrent_per_key: 1\n    keepalive_interval: 1s\n",
+			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1, RequestsPerMinute: 1, MaxConcurrentPerKey: 1, MaxHistoryMessages: 20, MaxHistoryBytes: 32768, KeepaliveInterval: Duration(time.Second)},
 		},
 		"history disabled": {
 			block: "    max_history_messages: 0\n    max_history_bytes: 0\n",
-			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4},
+			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4, KeepaliveInterval: Duration(15 * time.Second)},
 		},
 		"upper bounds": {
-			block: "    max_body_bytes: 10485760\n    requests_per_minute: 6000\n    max_concurrent_per_key: 64\n    max_history_messages: 100\n    max_history_bytes: 262144\n",
-			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 10485760, RequestsPerMinute: 6000, MaxConcurrentPerKey: 64, MaxHistoryMessages: 100, MaxHistoryBytes: 262144},
+			block: "    max_body_bytes: 10485760\n    requests_per_minute: 6000\n    max_concurrent_per_key: 64\n    max_history_messages: 100\n    max_history_bytes: 262144\n    keepalive_interval: 60s\n",
+			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 10485760, RequestsPerMinute: 6000, MaxConcurrentPerKey: 64, MaxHistoryMessages: 100, MaxHistoryBytes: 262144, KeepaliveInterval: Duration(time.Minute)},
 		},
 	}
 	for name, tc := range cases {
@@ -74,7 +75,11 @@ func TestLoad_HTTPInvalid(t *testing.T) {
 		"rate not an integer":                {block: "    requests_per_minute: fast\n", want: "channels.http.requests_per_minute must be an integer", shape: true},
 		"concurrency not an integer":         {block: "    max_concurrent_per_key: 2.5\n", want: "channels.http.max_concurrent_per_key must be an integer", shape: true},
 		"unknown key":                        {block: "    route: /x\n", want: "unknown key", shape: true},
-		"keepalive is not accepted yet":      {block: "    keepalive_interval: 15s\n", want: "unknown key", shape: true},
+		"keepalive below the floor":          {block: "    keepalive_interval: 999ms\n", want: "channels.http.keepalive_interval must be between 1s and 1m0s"},
+		"keepalive zero":                     {block: "    keepalive_interval: 0s\n", want: "channels.http.keepalive_interval must be between 1s and 1m0s"},
+		"keepalive negative":                 {block: "    keepalive_interval: -5s\n", want: "channels.http.keepalive_interval must be between 1s and 1m0s"},
+		"keepalive above the ceiling":        {block: "    keepalive_interval: 61s\n", want: "channels.http.keepalive_interval must be between 1s and 1m0s"},
+		"keepalive without a unit":           {block: "    keepalive_interval: 15\n", want: "keepalive_interval", shape: true},
 		"history messages negative":          {block: "    max_history_messages: -1\n", want: "channels.http.max_history_messages must be between 0 and 100"},
 		"history messages above the ceiling": {block: "    max_history_messages: 101\n", want: "channels.http.max_history_messages must be between 0 and 100"},
 		"history bytes negative":             {block: "    max_history_bytes: -1\n", want: "channels.http.max_history_bytes must be between 0 and 262144"},

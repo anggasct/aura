@@ -2780,6 +2780,9 @@ func applyHTTPDefaults(cfg *Config, doc *yamlv3.Node, defaults *HTTP) {
 	if http.MaxHistoryBytes == 0 && !configValuePresent(doc, "channels", "http", "max_history_bytes") && !envValuePresent("channels.http.max_history_bytes") {
 		http.MaxHistoryBytes = defaults.MaxHistoryBytes
 	}
+	if http.KeepaliveInterval == 0 && !configValuePresent(doc, "channels", "http", "keepalive_interval") && !envValuePresent("channels.http.keepalive_interval") {
+		http.KeepaliveInterval = defaults.KeepaliveInterval
+	}
 }
 
 func applyTelegramDefaults(cfg *Config, doc *yamlv3.Node, defaults *Telegram) {
@@ -3649,6 +3652,9 @@ func validateHTTP(http *HTTP) error {
 	}
 	if http.MaxHistoryBytes < 0 || http.MaxHistoryBytes > HTTPMaxHistoryBytesLimit {
 		problems = append(problems, fmt.Errorf("channels.http.max_history_bytes must be between 0 and %d", HTTPMaxHistoryBytesLimit))
+	}
+	if keepalive := time.Duration(http.KeepaliveInterval); keepalive < HTTPKeepaliveIntervalFloor || keepalive > HTTPKeepaliveIntervalCeiling {
+		problems = append(problems, fmt.Errorf("channels.http.keepalive_interval must be between %s and %s", HTTPKeepaliveIntervalFloor, HTTPKeepaliveIntervalCeiling))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

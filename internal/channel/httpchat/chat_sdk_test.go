@@ -1,16 +1,21 @@
 package httpchat
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/ssestream"
 
 	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/store"
 )
 
 func newSDKClient(server *httptest.Server, key string, extra ...option.RequestOption) openai.Client {
@@ -105,5 +110,162 @@ func TestSDKSurfacesTheDocumentedErrors(t *testing.T) {
 				t.Fatalf("error = %v, want status %d code %s", err, tc.status, tc.code)
 			}
 		})
+	}
+}
+
+func sdkParams(messages ...openai.ChatCompletionMessageParamUnion) openai.ChatCompletionNewParams {
+	return openai.ChatCompletionNewParams{Model: testPersona, Messages: messages}
+}
+
+func TestSDKStreamingMatchesTheNonStreamingCompletion(t *testing.T) {
+	script := fixedTurn(
+		turnEvent(runtime.EventKindTurnAccepted), answerEvent("first part"),
+		turnEvent(runtime.EventKindToolStarted), turnEvent(runtime.EventKindToolCompleted),
+		usageEvent("second part"), turnEvent(runtime.EventKindTurnCompleted))
+	fixture := newChatFixture(t, chatFixtureOptions{backend: script})
+	issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
+	server := httptest.NewServer(fixture.handler)
+	defer server.Close()
+	client := newSDKClient(server, issued.Plaintext)
+	whole, err := client.Chat.Completions.New(t.Context(), sdkParams(openai.UserMessage("hello")))
+	if err != nil {
+		t.Fatalf("Completions.New: %v", err)
+	}
+	var raw *http.Response
+	params := sdkParams(openai.UserMessage("hello"))
+	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
+
+	stream := client.Chat.Completions.NewStreaming(t.Context(), params, option.WithResponseInto(&raw))
+	defer func() { _ = stream.Close() }()
+	accumulated := openai.ChatCompletionAccumulator{}
+	var chunks []openai.ChatCompletionChunk
+	for stream.Next() {
+		chunk := stream.Current()
+		chunks = append(chunks, chunk)
+		accumulated.AddChunk(chunk)
+	}
+
+	if err := stream.Err(); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if got := raw.Header.Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("content type = %q", got)
+	}
+	if !strings.HasPrefix(raw.Header.Get(SessionHeader), testPersona+"/http/"+issued.ID+"/") {
+		t.Errorf("session header = %q", raw.Header.Get(SessionHeader))
+	}
+	if len(accumulated.Choices) != 1 || accumulated.Choices[0].Message.Content != whole.Choices[0].Message.Content ||
+		accumulated.Choices[0].Message.Content != "first part\n\nsecond part" {
+		t.Fatalf("accumulated choices = %+v, non-streaming %q", accumulated.Choices, whole.Choices[0].Message.Content)
+	}
+	if string(accumulated.Choices[0].Message.Role) != "assistant" || accumulated.Choices[0].FinishReason != "stop" {
+		t.Errorf("accumulated message = %+v finish %q", accumulated.Choices[0].Message, accumulated.Choices[0].FinishReason)
+	}
+	if len(chunks) < 3 || chunks[0].Choices[0].Delta.Role != "assistant" || chunks[0].ID != "chatcmpl-"+testTurnID || chunks[0].Model != testPersona {
+		t.Fatalf("chunks = %+v", chunks)
+	}
+	last := chunks[len(chunks)-1]
+	if len(last.Choices) != 0 || last.Usage.PromptTokens != whole.Usage.PromptTokens || last.Usage.CompletionTokens != whole.Usage.CompletionTokens || last.Usage.TotalTokens != 15 {
+		t.Errorf("usage chunk = %+v, non-streaming usage %+v", last, whole.Usage)
+	}
+}
+
+func TestSDKStreamingWithoutUsageEndsAfterTheFinishChunk(t *testing.T) {
+	fixture := newChatFixture(t, chatFixtureOptions{})
+	issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
+	server := httptest.NewServer(fixture.handler)
+	defer server.Close()
+	client := newSDKClient(server, issued.Plaintext)
+
+	stream := client.Chat.Completions.NewStreaming(t.Context(), sdkParams(openai.UserMessage("hello")))
+	defer func() { _ = stream.Close() }()
+	var chunks []openai.ChatCompletionChunk
+	for stream.Next() {
+		chunks = append(chunks, stream.Current())
+	}
+
+	if err := stream.Err(); err != nil {
+		t.Fatalf("stream error: %v", err)
+	}
+	if len(chunks) != 2 || chunks[0].Choices[0].Delta.Content != testReply || chunks[1].Choices[0].FinishReason != "stop" {
+		t.Fatalf("chunks = %+v", chunks)
+	}
+}
+
+func TestSDKStreamingSurfacesAMidStreamFailure(t *testing.T) {
+	script := fixedTurn(turnEvent(runtime.EventKindTurnAccepted), answerEvent("partial"), failedEvent("budget_exhausted"))
+	fixture := newChatFixture(t, chatFixtureOptions{backend: script})
+	issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
+	server := httptest.NewServer(fixture.handler)
+	defer server.Close()
+	client := newSDKClient(server, issued.Plaintext)
+
+	stream := client.Chat.Completions.NewStreaming(t.Context(), sdkParams(openai.UserMessage("hello")))
+	defer func() { _ = stream.Close() }()
+	var content strings.Builder
+	for stream.Next() {
+		for _, choice := range stream.Current().Choices {
+			content.WriteString(choice.Delta.Content)
+		}
+	}
+
+	var streamErr *ssestream.StreamError
+	if !errors.As(stream.Err(), &streamErr) || !strings.Contains(string(streamErr.Event.Data), `"code":"budget_exhausted"`) {
+		t.Fatalf("stream error = %v, want the budget error event", stream.Err())
+	}
+	if content.String() != "partial" {
+		t.Errorf("content before the failure = %q", content.String())
+	}
+}
+
+func TestSDKStreamingGateErrorsArriveAsAPIErrors(t *testing.T) {
+	fixture := newChatFixture(t, chatFixtureOptions{})
+	issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
+	server := httptest.NewServer(fixture.handler)
+	defer server.Close()
+	client := newSDKClient(server, issued.Plaintext)
+	params := sdkParams(openai.UserMessage("hello"))
+	params.Model = "main"
+
+	stream := client.Chat.Completions.NewStreaming(t.Context(), params)
+	defer func() { _ = stream.Close() }()
+
+	var apiErr *openai.Error
+	if stream.Next() || !errors.As(stream.Err(), &apiErr) || apiErr.StatusCode != http.StatusForbidden || apiErr.Code != "persona_not_permitted" {
+		t.Fatalf("stream error = %v, want 403 persona_not_permitted", stream.Err())
+	}
+}
+
+func TestSDKStreamingClientLeavingCancelsTheTurn(t *testing.T) {
+	observed := make(chan error, 1)
+	script := scriptRuntime(func(ctx context.Context, yield func(store.RuntimeEvent, error) bool) {
+		if !emit(yield, turnEvent(runtime.EventKindTurnAccepted), answerEvent("first")) {
+			return
+		}
+		<-ctx.Done()
+		observed <- ctx.Err()
+	})
+	fixture := newChatFixture(t, chatFixtureOptions{backend: script})
+	issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
+	server := httptest.NewServer(fixture.handler)
+	defer server.Close()
+	client := newSDKClient(server, issued.Plaintext)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	stream := client.Chat.Completions.NewStreaming(ctx, sdkParams(openai.UserMessage("hello")))
+	defer func() { _ = stream.Close() }()
+	if !stream.Next() || stream.Current().Choices[0].Delta.Content != "first" {
+		t.Fatalf("first chunk missing: %v", stream.Err())
+	}
+	cancel()
+
+	select {
+	case err := <-observed:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("runtime context error = %v, want cancellation", err)
+		}
+	case <-time.After(testWait):
+		t.Fatal("the turn kept running after the client left")
 	}
 }

@@ -236,3 +236,4 @@ channels:
     max_concurrent_per_key: 4
     max_history_messages: 20
     max_history_bytes: 32768
+    keepalive_interval: 15s
