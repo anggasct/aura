@@ -144,13 +144,17 @@ func pairingLockedUntil(failures []time.Time, now time.Time) (time.Time, bool) {
 	return until, now.Before(until)
 }
 
+func pairingChannel(channel string) bool {
+	return channel == principal.ChannelDiscord || channel == principal.ChannelTelegram
+}
+
 func parsePrincipalArg(channel, raw string) (string, error) {
-	if channel != principal.ChannelDiscord {
-		return "", &usageError{err: errors.New("channel must be discord")}
+	if !pairingChannel(channel) {
+		return "", &usageError{err: errors.New("channel must be discord or telegram")}
 	}
 	externalID := strings.TrimPrefix(raw, channel+":")
 	if _, _, err := principal.ParseIdentity(channel + ":" + externalID); err != nil {
-		return "", &usageError{err: errors.New("principal must be a discord user id")}
+		return "", &usageError{err: fmt.Errorf("principal must be a %s user id", channel)}
 	}
 	return principal.Namespaced(channel, externalID), nil
 }
@@ -210,8 +214,8 @@ func newPairingApproveCmd(gf *globalFlags) *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			channel := args[0]
-			if channel != principal.ChannelDiscord {
-				return &usageError{err: errors.New("channel must be discord")}
+			if !pairingChannel(channel) {
+				return &usageError{err: errors.New("channel must be discord or telegram")}
 			}
 			db, pairings, _, err := openPairingStores(cmd, gf)
 			if err != nil {
@@ -225,11 +229,11 @@ func newPairingApproveCmd(gf *globalFlags) *cobra.Command {
 			} else if locked {
 				return &exitCodeError{code: 1, err: fmt.Errorf("pairing_locked: too many wrong codes; approvals for %s reopen at %s", channel, until.Format(time.RFC3339))}
 			}
-			request, found, err := pairings.Approve(ctx, pairingCodeDigest(args[1]), principal.OwnerID, now)
+			request, found, err := pairings.Approve(ctx, channel, pairingCodeDigest(args[1]), principal.OwnerID, now)
 			if err != nil {
 				return err
 			}
-			if !found || !strings.HasPrefix(request.PrincipalID, channel+":") {
+			if !found {
 				if err := recordAccessAction(ctx, db, &accessAction{Action: store.AccessActionPairingInvalid, Channel: channel}, channel, now); err != nil {
 					return err
 				}

@@ -860,9 +860,21 @@ func validateTelegramAccountShapes(accountsNode *yamlv3.Node) error {
 			return fmt.Errorf("%s must be a mapping at line %d", field, accountNode.Line)
 		}
 		for i := 0; i+1 < len(accountNode.Content); i += 2 {
+			keyNode := accountNode.Content[i]
 			valueNode := accountNode.Content[i+1]
-			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
-				return fmt.Errorf("%s.%s must be a string at line %d", field, accountNode.Content[i].Value, valueNode.Line)
+			switch keyNode.Value {
+			case "accept_private_chats":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+					return fmt.Errorf("%s.accept_private_chats must be a boolean at line %d", field, valueNode.Line)
+				}
+			case "allowed_user_ids":
+				if err := quotedStringSequence(field+".allowed_user_ids", valueNode); err != nil {
+					return err
+				}
+			default:
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
+					return fmt.Errorf("%s.%s must be a string at line %d", field, keyNode.Value, valueNode.Line)
+				}
 			}
 		}
 	}
@@ -2696,6 +2708,12 @@ func applyTelegramDefaults(cfg *Config, doc *yamlv3.Node, defaults *Telegram) {
 	if telegram.MinEditInterval == 0 && !configValuePresent(doc, "channels", "telegram", "min_edit_interval") && !envValuePresent("channels.telegram.min_edit_interval") {
 		telegram.MinEditInterval = defaults.MinEditInterval
 	}
+	accountsNode := nestedValue(doc, "channels", "telegram", "accounts")
+	for i := range telegram.Accounts {
+		if !telegram.Accounts[i].AcceptPrivateChats && !sequenceItemHasKey(accountsNode, i, "accept_private_chats") {
+			telegram.Accounts[i].AcceptPrivateChats = true
+		}
+	}
 }
 
 func nestedValue(node *yamlv3.Node, path ...string) *yamlv3.Node {
@@ -3464,12 +3482,18 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 		default:
 			tokenRefs[account.BotTokenRef] = true
 		}
+		problems = append(problems, telegramUserListProblems(field+".allowed_user_ids", account.AllowedUserIDs)...)
 	}
 	if telegram.Enabled && len(telegram.Accounts) == 0 {
 		problems = append(problems, errors.New("channels.telegram.enabled requires at least one channels.telegram.accounts entry"))
 	}
 	if telegram.Enabled && !hasTelegramOwner(owner) {
-		problems = append(problems, errors.New("channels.telegram.enabled requires a telegram:<user_id> entry in owner.identities"))
+		for i := range telegram.Accounts {
+			if len(telegram.Accounts[i].AllowedUserIDs) == 0 {
+				problems = append(problems, errors.New("channels.telegram.enabled requires a telegram:<user_id> entry in owner.identities or an allowed_user_ids entry on every account"))
+				break
+			}
+		}
 	}
 	timeout := time.Duration(telegram.Polling.Timeout)
 	if timeout < time.Second || timeout > telegramMaxPollTimeout || timeout%time.Second != 0 {
@@ -3487,6 +3511,24 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
 	}
 	return nil
+}
+
+func telegramUserListProblems(field string, ids []string) []error {
+	var problems []error
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		switch {
+		case id == "":
+			problems = append(problems, fmt.Errorf("%s must not contain empty ids", field))
+		case !principal.IsTelegramUserID(id):
+			problems = append(problems, fmt.Errorf("%s id %q is not a positive decimal telegram user id", field, id))
+		case seen[id]:
+			problems = append(problems, fmt.Errorf("%s id %q is configured more than once", field, id))
+		default:
+			seen[id] = true
+		}
+	}
+	return problems
 }
 
 func hasTelegramOwner(owner *Owner) bool {

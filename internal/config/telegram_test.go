@@ -145,6 +145,46 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 			yaml: account("    min_edit_interval: 2\n"),
 			want: "min_edit_interval must be a duration string",
 		},
+		"enabled without owner or allowlist": {
+			yaml: "version: 1\nchannels:\n  telegram:\n    enabled: true\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n",
+			want: "or an allowed_user_ids entry on every account",
+		},
+		"allowlist missing on one of two accounts": {
+			yaml: "version: 1\nchannels:\n  telegram:\n    enabled: true\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n        allowed_user_ids:\n          - \"7\"\n      - name: spare\n        bot_token_ref: env://AURA_TELEGRAM_SPARE\n",
+			want: "or an allowed_user_ids entry on every account",
+		},
+		"unquoted allowed user id": {
+			yaml: account("        allowed_user_ids:\n          - 7\n"),
+			want: "entries must be quoted strings",
+		},
+		"allowed user ids not a sequence": {
+			yaml: account("        allowed_user_ids: \"7\"\n"),
+			want: "allowed_user_ids must be a sequence",
+		},
+		"non numeric allowed user id": {
+			yaml: account("        allowed_user_ids:\n          - \"alice\"\n"),
+			want: "is not a positive decimal telegram user id",
+		},
+		"zero allowed user id": {
+			yaml: account("        allowed_user_ids:\n          - \"0\"\n"),
+			want: "is not a positive decimal telegram user id",
+		},
+		"negative allowed user id": {
+			yaml: account("        allowed_user_ids:\n          - \"-7\"\n"),
+			want: "is not a positive decimal telegram user id",
+		},
+		"empty allowed user id": {
+			yaml: account("        allowed_user_ids:\n          - \"\"\n"),
+			want: "must not contain empty ids",
+		},
+		"duplicate allowed user id": {
+			yaml: account("        allowed_user_ids:\n          - \"7\"\n          - \"7\"\n"),
+			want: "is configured more than once",
+		},
+		"accept private chats not a boolean": {
+			yaml: account("        accept_private_chats: \"yes\"\n"),
+			want: "accept_private_chats must be a boolean",
+		},
 		"unknown account key": {
 			yaml: account("        mode: polling\n"),
 			want: "unknown key",
@@ -183,5 +223,62 @@ func TestLoad_TelegramBindingsInvalid(t *testing.T) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoad_TelegramAccessKeys(t *testing.T) {
+	res, err := Load(writeDiscordConfig(t, `version: 1
+`+telegramOwner+`channels:
+  telegram:
+    enabled: true
+    accounts:
+      - name: pocket
+        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN
+        allowed_user_ids:
+          - "7"
+          - "8"
+        accept_private_chats: false
+      - name: spare
+        bot_token_ref: env://AURA_TELEGRAM_SPARE
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	accounts := res.Config.Channels.Telegram.Accounts
+	if got := accounts[0]; got.AcceptPrivateChats || len(got.AllowedUserIDs) != 2 || got.AllowedUserIDs[0] != "7" || got.AllowedUserIDs[1] != "8" {
+		t.Errorf("explicit account = %+v, want two allowed ids and private chats off", got)
+	}
+	if got := accounts[1]; !got.AcceptPrivateChats || len(got.AllowedUserIDs) != 0 {
+		t.Errorf("default account = %+v, want private chats on and no allowlist", got)
+	}
+}
+
+func TestLoad_TelegramAllowlistReplacesOwnerRequirement(t *testing.T) {
+	res, err := Load(writeDiscordConfig(t, `version: 1
+channels:
+  telegram:
+    enabled: true
+    accounts:
+      - name: pocket
+        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN
+        allowed_user_ids:
+          - "7"
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !res.Config.Channels.Telegram.Enabled {
+		t.Fatal("telegram with an allowlist and no owner identity did not load as enabled")
+	}
+}
+
+func TestLoad_TelegramOwnerOnlyAccountKeepsPrivateChatsOn(t *testing.T) {
+	res, err := Load(writeDiscordConfig(t, "version: 1\n"+telegramOwner+"channels:\n  telegram:\n    enabled: true\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	account := res.Config.Channels.Telegram.Accounts[0]
+	if !account.AcceptPrivateChats || len(account.AllowedUserIDs) != 0 {
+		t.Errorf("account = %+v, want the step 2 shape: private chats on, no allowlist", account)
 	}
 }

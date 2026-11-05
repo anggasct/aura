@@ -102,8 +102,12 @@ func (a *Adapter) advanceCursorErr(ctx context.Context, next int64) error {
 }
 
 func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
-	envelope, ok := a.normalize(ctx, item)
+	envelope, msg, ok := a.admit(ctx, item)
 	if !ok {
+		return nil
+	}
+	if reason := a.budgetDrop(ctx, msg.Chat.ID, envelope); reason != "" {
+		a.drop(ctx, messageScope(msg), reason, true)
 		return nil
 	}
 	active, err := a.activeSession(ctx, envelope.ConversationID)
@@ -111,6 +115,12 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 		return &Error{Code: ErrorCodeIntakeFailed, Detail: "conversation session is not resolvable", Cause: err}
 	}
 	envelope.ConversationID = active
+	if held, reason := a.handoffHeld(ctx, msg.Chat.ID, msg.Text, envelope); held {
+		if reason != "" {
+			a.drop(ctx, messageScope(msg), reason, true)
+		}
+		return nil
+	}
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return &Error{Code: ErrorCodeIntakeFailed, Detail: "session is not ensurable", Cause: err}
 	}
@@ -127,29 +137,65 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 	return nil
 }
 
-func (a *Adapter) normalize(ctx context.Context, item *update) (*runtimeingress.IngressEnvelope, bool) {
+func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.IngressEnvelope, *message, bool) {
 	msg := item.Message
-	if msg == nil || msg.From == nil || msg.From.IsBot || msg.Chat.Type != chatTypePrivate || strings.TrimSpace(msg.Text) == "" {
-		return nil, false
+	if msg == nil {
+		return nil, nil, false
+	}
+	scope := messageScope(msg)
+	switch {
+	case msg.From == nil || msg.From.ID <= 0:
+		a.drop(ctx, scope, dropAuthorMissing, false)
+		return nil, nil, false
+	case msg.From.IsBot:
+		a.drop(ctx, scope, dropAuthorBot, false)
+		return nil, nil, false
+	case msg.Chat.Type != chatTypePrivate:
+		a.drop(ctx, scope, dropChatNotSupported, false)
+		return nil, nil, false
+	case strings.TrimSpace(msg.Text) == "":
+		a.drop(ctx, scope, dropEmptyContent, false)
+		return nil, nil, false
 	}
 	userID := strconv.FormatInt(msg.From.ID, 10)
-	principalID, class, ok := a.owners.Resolve(principal.ChannelTelegram, userID, false, false)
-	if !ok || class != principal.ClassOwner {
-		if a.denied != nil {
-			a.denied(ctx, DeniedReasonIdentity)
+	reach := a.authorAccess(ctx)
+	principalID, class, known := a.resolveAuthor(userID, reach)
+	if !known {
+		if a.tryPairing(ctx, msg, reach) {
+			a.drop(ctx, scope, dropPairing, false)
+			return nil, nil, false
 		}
-		return nil, false
+		a.deny(ctx, DeniedReasonIdentity)
+		a.drop(ctx, scope, dropAuthorNotAllowed, false)
+		return nil, nil, false
 	}
-	persona, ok := a.routePersona(userID)
-	if !ok {
+	if class != principal.ClassOwner && !a.account.AcceptPrivateChats {
+		a.drop(ctx, scope, dropPrivateChatsDisabled, true)
+		return nil, nil, false
+	}
+	persona, routed := a.routePersona(userID)
+	if !routed {
 		a.logger.DebugContext(ctx, "persona unresolved", "component", "telegram", "account", a.account.Name)
-		return nil, false
+		a.drop(ctx, scope, dropPersonaUnrouted, true)
+		return nil, nil, false
+	}
+	if !a.personaAdmits(ctx, persona, class) {
+		if a.tryPairing(ctx, msg, reach) {
+			a.drop(ctx, scope, dropPairing, true)
+			return nil, nil, false
+		}
+		a.drop(ctx, scope, dropAudience, true)
+		return nil, nil, false
+	}
+	if !a.personaEvaluated(ctx, msg.Chat.ID, persona, class) {
+		a.drop(ctx, scope, dropPersonaEvalMissing, true)
+		return nil, nil, false
 	}
 	reference, err := json.Marshal(replyReference{ChatID: msg.Chat.ID, MessageID: msg.MessageID})
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
-	return &runtimeingress.IngressEnvelope{
+	envelope := &runtimeingress.IngressEnvelope{
 		Source:         a.source(),
 		AgentID:        persona,
 		ExternalID:     "update:" + strconv.FormatInt(item.UpdateID, 10),
@@ -159,7 +205,12 @@ func (a *Adapter) normalize(ctx context.Context, item *update) (*runtimeingress.
 		ReplyContext:   reference,
 		Parts:          []runtimeingress.InputPart{{Text: msg.Text}},
 		ReceivedAt:     time.Now().UTC(),
-	}, true
+	}
+	if inv, isForgetMe := a.forgetMeInvocation(msg.Text); isForgetMe {
+		a.forgetMe(ctx, msg.Chat.ID, &inv, envelope)
+		return nil, nil, false
+	}
+	return envelope, msg, true
 }
 
 func (a *Adapter) routePersona(userID string) (string, bool) {

@@ -46,7 +46,7 @@ type PrincipalGrant struct {
 
 type PairingStore interface {
 	Issue(ctx context.Context, issue *PairingIssue) (string, error)
-	Approve(ctx context.Context, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error)
+	Approve(ctx context.Context, channel, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error)
 	Pending(ctx context.Context, now time.Time) ([]PairingRequest, error)
 	ClearPending(ctx context.Context) (int64, error)
 	FailedApprovals(ctx context.Context, channel string, since time.Time) ([]time.Time, error)
@@ -122,7 +122,14 @@ VALUES (?, ?, ?, ?, ?)`,
 	return PairingIssued, nil
 }
 
-func (s *sqlitePairingStore) Approve(ctx context.Context, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error) {
+func (s *sqlitePairingStore) Approve(ctx context.Context, channel, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error) {
+	if channel == "" {
+		return PairingRequest{}, false, Errorf(ErrorCodeInvalidArgument, "pairing approval needs a channel")
+	}
+	return s.approve(ctx, channel+":", codeSHA256, grantedBy, now)
+}
+
+func (s *sqlitePairingStore) approve(ctx context.Context, principalPrefix, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error) {
 	if codeSHA256 == "" || grantedBy == "" {
 		return PairingRequest{}, false, Errorf(ErrorCodeInvalidArgument, "pairing approval needs a code and a granter")
 	}
@@ -135,7 +142,7 @@ func (s *sqlitePairingStore) Approve(ctx context.Context, codeSHA256, grantedBy 
 	if err != nil {
 		return PairingRequest{}, false, err
 	}
-	if len(rows) == 0 || !rows[0].ExpiresAt.After(now) {
+	if len(rows) == 0 || !rows[0].ExpiresAt.After(now) || !strings.HasPrefix(rows[0].PrincipalID, principalPrefix) {
 		return PairingRequest{}, false, nil
 	}
 	request := rows[0].PairingRequest

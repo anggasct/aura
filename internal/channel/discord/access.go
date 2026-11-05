@@ -12,6 +12,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
@@ -19,8 +20,8 @@ import (
 )
 
 const (
-	DeniedReasonAudience    = "audience"
-	DeniedReasonEvalMissing = "persona_eval_missing"
+	DeniedReasonAudience    = access.DeniedReasonAudience
+	DeniedReasonEvalMissing = access.DeniedReasonEvalMissing
 
 	ApprovalRoutedApproved    = "approved"
 	ApprovalRoutedStanding    = "standing"
@@ -42,20 +43,15 @@ type StandingGrantRequest struct {
 }
 
 const (
-	PairingOutcomeIssued  = "issued"
-	PairingOutcomePending = "pending"
-	PairingOutcomeLocked  = "locked"
+	PairingOutcomeIssued  = access.PairingOutcomeIssued
+	PairingOutcomePending = access.PairingOutcomePending
+	PairingOutcomeLocked  = access.PairingOutcomeLocked
 )
 
-type PairingResult struct {
-	Outcome string
-	Code    string
-}
-
-type PairingService interface {
-	Granted(ctx context.Context, principalID, account string) (bool, error)
-	Request(ctx context.Context, principalID, account string) (PairingResult, error)
-}
+type (
+	PairingResult  = access.PairingResult
+	PairingService = access.PairingService
+)
 
 type AccessSettings struct {
 	ApprovalTimeout  time.Duration
@@ -71,21 +67,15 @@ type AccessSettings struct {
 }
 
 const (
-	BudgetRefusalRateLimited = config.MessageRateLimited
-	BudgetRefusalExhausted   = config.MessageBudgetExhausted
+	BudgetRefusalRateLimited = access.BudgetRefusalRateLimited
+	BudgetRefusalExhausted   = access.BudgetRefusalExhausted
 )
 
-type PrincipalEraser interface {
-	Forget(ctx context.Context, principalID string) error
-}
-
-type EvalGate interface {
-	Evaluated(ctx context.Context, persona string) (bool, error)
-}
-
-type BudgetGate interface {
-	Admit(ctx context.Context, principalID string, class principal.Class) (string, error)
-}
+type (
+	PrincipalEraser = access.PrincipalEraser
+	EvalGate        = access.EvalGate
+	BudgetGate      = access.BudgetGate
+)
 
 func (a *Adapter) SetAccess(settings *AccessSettings) {
 	if a == nil || settings == nil {
@@ -99,12 +89,12 @@ func (a *Adapter) servesPublic() bool {
 }
 
 func (a *Adapter) authorAccess(ctx context.Context) authorAccess {
-	access := authorAccess{servesPublic: a.servesPublic()}
+	reach := authorAccess{servesPublic: a.servesPublic()}
 	if a.access.Pairing == nil {
-		return access
+		return reach
 	}
 	granted := map[string]bool{}
-	access.granted = func(authorID string) bool {
+	reach.granted = func(authorID string) bool {
 		if cached, ok := granted[authorID]; ok {
 			return cached
 		}
@@ -116,7 +106,7 @@ func (a *Adapter) authorAccess(ctx context.Context) authorAccess {
 		granted[authorID] = active
 		return active
 	}
-	return access
+	return reach
 }
 
 func (a *Adapter) tryPairing(ctx context.Context, msg *messagePayload) bool {

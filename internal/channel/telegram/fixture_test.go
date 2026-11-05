@@ -393,6 +393,14 @@ func (fixedRouter) Resolve(scope *auraagent.RouteScope) (auraagent.RouteMatch, b
 	return auraagent.RouteMatch{Persona: testPersona, Score: auraagent.ScoreAccountDefault, Binding: auraagent.AccountDefaultBinding}, true
 }
 
+func (fixedRouter) Persona(id string) (auraagent.Definition, bool) {
+	return auraagent.Definition{ID: id, Audience: config.AudienceOwner}, id == testPersona
+}
+
+func (fixedRouter) ServesPublic(string, string) bool {
+	return false
+}
+
 type storeSessions struct {
 	sessions store.SessionService
 }

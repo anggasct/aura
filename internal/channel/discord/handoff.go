@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/channel/status"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
@@ -13,17 +14,15 @@ import (
 )
 
 const (
-	HandoffStateNone    = "none"
-	HandoffStateOpen    = "open"
-	HandoffStateExpired = "expired"
+	HandoffStateNone    = access.HandoffStateNone
+	HandoffStateOpen    = access.HandoffStateOpen
+	HandoffStateExpired = access.HandoffStateExpired
 	handoffForwardRunes = 1500
 )
 
 var ErrNoHandoffTarget = errors.New("discord: session has no known requester on this account")
 
-type HandoffGate interface {
-	Check(ctx context.Context, sessionID string) (string, error)
-}
+type HandoffGate = access.HandoffGate
 
 type HandoffTarget struct {
 	Account   string

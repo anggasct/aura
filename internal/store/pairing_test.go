@@ -66,14 +66,14 @@ func TestPairingApproveGrantsOnceAndReactivatesRevokedGrants(t *testing.T) {
 	if _, err := pairings.Issue(ctx, pairingIssue("code-a", "discord:1", "office", now)); err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if _, found, err := pairings.Approve(ctx, "wrong", "local-owner", now); err != nil || found {
+	if _, found, err := pairings.Approve(ctx, "discord", "wrong", "local-owner", now); err != nil || found {
 		t.Fatalf("wrong code Approve() found = %v, %v", found, err)
 	}
-	request, found, err := pairings.Approve(ctx, "code-a", "local-owner", now.Add(time.Minute))
+	request, found, err := pairings.Approve(ctx, "discord", "code-a", "local-owner", now.Add(time.Minute))
 	if err != nil || !found || request.PrincipalID != "discord:1" || request.Account != "office" {
 		t.Fatalf("Approve() = %+v, %v, %v", request, found, err)
 	}
-	if _, found, _ := pairings.Approve(ctx, "code-a", "local-owner", now.Add(2*time.Minute)); found {
+	if _, found, _ := pairings.Approve(ctx, "discord", "code-a", "local-owner", now.Add(2*time.Minute)); found {
 		t.Fatal("code approved twice")
 	}
 	if active, err := grants.Active(ctx, "discord:1", "office"); err != nil || !active {
@@ -95,7 +95,7 @@ func TestPairingApproveGrantsOnceAndReactivatesRevokedGrants(t *testing.T) {
 	if _, err := pairings.Issue(ctx, pairingIssue("code-b", "discord:1", "office", now.Add(20*time.Minute))); err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if _, found, _ := pairings.Approve(ctx, "code-b", "local-owner", now.Add(21*time.Minute)); !found {
+	if _, found, _ := pairings.Approve(ctx, "discord", "code-b", "local-owner", now.Add(21*time.Minute)); !found {
 		t.Fatal("re-approval failed")
 	}
 	list, err := grants.List(ctx)
@@ -111,7 +111,7 @@ func TestPairingExpiredCodeIsNotApproved(t *testing.T) {
 	if _, err := pairings.Issue(t.Context(), pairingIssue("code-x", "discord:1", "office", now)); err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if _, found, _ := pairings.Approve(t.Context(), "code-x", "local-owner", now.Add(time.Hour)); found {
+	if _, found, _ := pairings.Approve(t.Context(), "discord", "code-x", "local-owner", now.Add(time.Hour)); found {
 		t.Fatal("expired code approved")
 	}
 	if cleared, err := pairings.ClearPending(t.Context()); err != nil || cleared != 1 {
@@ -160,5 +160,36 @@ func TestListPrincipalActivityAggregatesSessions(t *testing.T) {
 	activity, err := ListPrincipalActivity(t.Context(), db)
 	if err != nil || len(activity) != 1 || activity[0].PrincipalID != "discord:1" || activity[0].Sessions != 2 || activity[0].LastActive.IsZero() {
 		t.Fatalf("ListPrincipalActivity() = %+v, %v", activity, err)
+	}
+}
+
+func TestPairingApproveNeverConsumesAnotherChannelsCode(t *testing.T) {
+	db := newTestDB(t)
+	ctx := t.Context()
+	pairings := NewPairingStore(db)
+	grants := NewPrincipalGrantStore(db)
+	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	if _, err := pairings.Issue(ctx, pairingIssue("code-t", "telegram:7", "pocket", now)); err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if _, found, err := pairings.Approve(ctx, "discord", "code-t", "local-owner", now.Add(time.Minute)); err != nil || found {
+		t.Fatalf("cross-channel Approve() found = %v, %v; want not found", found, err)
+	}
+	if active, _ := grants.Active(ctx, "telegram:7", "pocket"); active {
+		t.Fatal("a cross-channel approval granted access")
+	}
+	var pending int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pairing_request WHERE code_sha256 = 'code-t'`).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("pending rows = %d, %v; want the code kept for its own channel", pending, err)
+	}
+	request, found, err := pairings.Approve(ctx, "telegram", "code-t", "local-owner", now.Add(2*time.Minute))
+	if err != nil || !found || request.PrincipalID != "telegram:7" {
+		t.Fatalf("Approve() = %+v, %v, %v", request, found, err)
+	}
+	if active, _ := grants.Active(ctx, "telegram:7", "pocket"); !active {
+		t.Fatal("approval did not grant access")
+	}
+	if _, _, err := pairings.Approve(ctx, "", "code-t", "local-owner", now); err == nil {
+		t.Fatal("approval without a channel accepted")
 	}
 }
