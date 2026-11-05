@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestFormatSandboxStatusAvailable(t *testing.T) {
@@ -112,14 +113,28 @@ func pinnedProcessProbe() (health.ProcessStatus, bool) {
 	return health.ProcessStatus{FDsOpen: 10, FDsLimit: 4096, MemoryUsedBytes: 1 << 20, MemoryLimitBytes: 1 << 30, MemoryLimitKnown: true}, true
 }
 
+func seedConfiguredStorage(t *testing.T, configPath string) {
+	t.Helper()
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if loaded.Config.Storage.Path == "" {
+		return
+	}
+	dbPath, _, _, err := storagePaths(loaded.Config)
+	if err != nil {
+		t.Fatalf("storagePaths: %v", err)
+	}
+	storetest.Seed(t, dbPath)
+}
+
 func seedHealthyStorage(t *testing.T, dataRoot string) {
 	t.Helper()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(t.Context(), filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
-	}
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)

@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestComposedEntryVerifiesExternalWorldEvidence(t *testing.T) {
@@ -28,14 +29,7 @@ func TestComposedEntryVerifiesExternalWorldEvidence(t *testing.T) {
 	}
 	before := digestFile(t, marker)
 
-	db, err := store.OpenDB(ctx, filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: "world-session", OwnerID: "owner"}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}

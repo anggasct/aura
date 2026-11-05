@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/scheduler"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type fakeCronEngine struct {
@@ -53,15 +54,7 @@ func (f *fakeCronEngine) Run(_ context.Context, req *runtime.TurnRequest) iter.S
 
 func cronTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := store.OpenDB(t.Context(), t.TempDir()+"/cron.db")
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	return db
+	return storetest.OpenMigrated(t)
 }
 
 func cronCompletedBatch(turnID, text string) []store.RuntimeEvent {

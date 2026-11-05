@@ -14,20 +14,19 @@ import (
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func newTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *sql.DB, store.EventStore) {
 	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
+	storetest.Seed(t, dsn)
 	db, err := store.OpenDB(ctx, dsn)
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	events := store.NewEventStore(db)
 	dedupe := store.NewDedupeStore(db)
 	engine, err := NewEngine(&cfg, events, dedupe, executor, nil)

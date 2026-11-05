@@ -23,6 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	"github.com/anggasct/aura/internal/toolbroker"
 	"github.com/anggasct/aura/internal/tools/builtin"
 )
@@ -191,14 +192,12 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	t.Helper()
 	ctx := t.Context()
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	session := store.Session{ID: "session-1", OwnerID: "owner-1"}
 	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
 		t.Fatalf("Create session: %v", err)

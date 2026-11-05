@@ -13,19 +13,18 @@ import (
 
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func seedUnknownEffect(t *testing.T, dataRoot string) (configPath, intentID string) {
 	t.Helper()
 	ctx := context.Background()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	if err := store.NewSessionService(db).Create(ctx, &store.Session{
 		ID: "session-cli", OwnerID: "owner-cli", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {

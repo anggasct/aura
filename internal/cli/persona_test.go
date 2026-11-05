@@ -34,6 +34,7 @@ agents:
 	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "personas", "kuma.md"), []byte(soul), 0o600); err != nil {
 		t.Fatalf("write soul: %v", err)
 	}
+	seedConfiguredStorage(t, path)
 	return path
 }
 

@@ -15,16 +15,15 @@ import (
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(t.Context(), filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
-	}
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	if err := mkdirBackup(t, dataRoot); err != nil {

@@ -10,18 +10,12 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func newTestJournal(t *testing.T) (*Journal, *sql.DB) {
 	t.Helper()
-	db, err := store.OpenDB(context.Background(), t.TempDir()+"/effect.db")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	j, err := NewJournal(db, Options{
 		Now:    func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
 		Logger: slog.New(slog.DiscardHandler),

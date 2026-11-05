@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type bridgeStore struct {
@@ -50,14 +51,12 @@ func TestLifecycleUnlinkAndCollectLeavesNoOrphan(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "aura.db")
+	storetest.Seed(t, dsn)
 	db, err := store.OpenDB(ctx, dsn)
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	root := filepath.Join(dir, "artifacts")
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
@@ -118,14 +117,12 @@ func TestLifecycleQuotaEnforcedDuringCopy(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "aura.db")
+	storetest.Seed(t, dsn)
 	db, err := store.OpenDB(ctx, dsn)
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	root := filepath.Join(dir, "artifacts")
 	now := time.Now().UTC()
 	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -152,14 +149,12 @@ func TestLifecycleBackupCarriesMetadataOnly(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "aura.db")
+	storetest.Seed(t, dsn)
 	db, err := store.OpenDB(ctx, dsn)
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	root := filepath.Join(dir, "artifacts")
 	now := time.Now().UTC()
 	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {

@@ -24,6 +24,7 @@ import (
 	"github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/skills"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 
 	"google.golang.org/adk/v2/agent"
 	adkmodel "google.golang.org/adk/v2/model"
@@ -98,14 +99,7 @@ type skillHarness struct {
 
 func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills) *skillHarness {
 	t.Helper()
-	db, err := store.OpenDB(t.Context(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	root := t.TempDir()
 	for name, body := range bodies {
 		dir := filepath.Join(root, name)
@@ -282,14 +276,7 @@ func TestSkillSessionBudgetEvictsTheOldestActivation(t *testing.T) {
 }
 
 func TestBuildSkillRuntimeRejectsASessionBoundBelowOneActivation(t *testing.T) {
-	db, err := store.OpenDB(t.Context(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	cfg := defaultSkillConfig()
 	cfg.Enabled, cfg.Roots, cfg.MaxSessionContextTokens = true, []string{t.TempDir()}, 99
 	if _, err := buildSkillRuntime(t.Context(), cfg, db, nil); err == nil {

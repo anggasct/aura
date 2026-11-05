@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
@@ -74,14 +75,7 @@ type replayFixture struct {
 
 func newReplayFixture(t *testing.T, gap time.Duration) *replayFixture {
 	t.Helper()
-	db, err := store.OpenDB(t.Context(), t.TempDir()+"/replay.db")
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	sessions := store.NewSessionService(db)
 	now := time.Now().UTC()
 	if err := sessions.Create(t.Context(), &store.Session{

@@ -35,6 +35,7 @@ children:
 	if err := writeFileForTest(path, content); err != nil {
 		t.Fatal(err)
 	}
+	seedConfiguredStorage(t, path)
 	return path
 }
 

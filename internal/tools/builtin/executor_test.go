@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	"github.com/anggasct/aura/internal/toolbroker"
 )
 
@@ -91,14 +92,7 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "big.txt"), []byte(big), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
-	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	sess := store.Session{ID: "session-1", OwnerID: "owner-1"}
 	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session: %v", err)
@@ -163,14 +157,12 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 		t.Fatalf("write secret fixture: %v", err)
 	}
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	session := store.Session{ID: "session-secret", OwnerID: "owner-1"}
 	if err := store.NewSessionService(db).Create(context.Background(), &session); err != nil {
 		t.Fatalf("create session: %v", err)

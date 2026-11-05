@@ -3,25 +3,18 @@ package toolbroker
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func newBrokerEffectExecutor(t *testing.T) *effect.Executor {
 	t.Helper()
-	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	now := time.Now().UTC()
 	if err := store.NewSessionService(db).Create(context.Background(), &store.Session{
 		ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now,

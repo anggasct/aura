@@ -32,6 +32,7 @@ children:
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	seedConfiguredStorage(t, path)
 	return path
 }
 
@@ -57,6 +58,7 @@ children:
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	seedConfiguredStorage(t, path)
 	return path
 }
 

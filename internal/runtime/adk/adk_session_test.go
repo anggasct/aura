@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
@@ -19,14 +20,12 @@ func newSessionTestDB(t *testing.T) (*sql.DB, store.SessionService, store.EventS
 	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
+	storetest.Seed(t, dsn)
 	db, err := store.OpenDB(ctx, dsn)
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	return db, store.NewSessionService(db), store.NewEventStore(db)
 }
 

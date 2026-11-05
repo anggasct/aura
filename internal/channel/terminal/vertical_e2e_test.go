@@ -24,6 +24,7 @@ import (
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	"github.com/anggasct/aura/internal/toolbroker"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -140,14 +141,7 @@ type approvalE2EStack struct {
 
 func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answer string) *approvalE2EStack {
 	t.Helper()
-	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
 	journal, err := effect.NewJournal(db, effect.Options{})
@@ -339,14 +333,7 @@ func (b *blockingExecutor) Execute(ctx context.Context, req *runtime.TurnRequest
 }
 
 func TestTerminalOverloadSurfacesError(t *testing.T) {
-	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
 	now := time.Now().UTC()
@@ -431,12 +418,10 @@ func TestTerminalRestartResume(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "aura.db")
 
+	storetest.Seed(t, dbPath)
 	db1, err := store.OpenDB(context.Background(), dbPath)
 	if err != nil {
-		t.Fatalf("open first process store: %v", err)
-	}
-	if err := store.Migrate(context.Background(), db1); err != nil {
-		t.Fatalf("migrate: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	sessions1 := store.NewSessionService(db1)
 	events1 := store.NewEventStore(db1)
@@ -521,14 +506,12 @@ func TestTerminalRestartResume(t *testing.T) {
 func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "aura.db")
+	storetest.Seed(t, dbPath)
 	db, err := store.OpenDB(context.Background(), dbPath)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
 	executor := runtime.NewFakeExecutor([]runtime.FakeStep{

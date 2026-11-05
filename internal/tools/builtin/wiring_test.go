@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	"github.com/anggasct/aura/internal/toolbroker"
 	"github.com/anggasct/aura/internal/tools"
 )
@@ -37,14 +38,12 @@ func TestWiringRegistersEveryBuiltinAdapter(t *testing.T) {
 func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 	workspace := t.TempDir()
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	sess := store.Session{ID: "session-1", OwnerID: "owner-1"}
 	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session: %v", err)
@@ -98,14 +97,12 @@ func TestNewChannelEffectsBuildsExecutor(t *testing.T) {
 		t.Fatal("nil database accepted")
 	}
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	if _, err := NewChannelEffects(db, nil); err != nil {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}

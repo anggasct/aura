@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 	"github.com/anggasct/aura/internal/workflow"
 )
@@ -53,6 +54,7 @@ workflows:
 	if err := os.WriteFile(configPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
+	seedConfiguredStorage(t, configPath)
 	return &globalFlags{configPath: configPath}
 }
 
@@ -382,14 +384,12 @@ func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, s
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dir
 	ctx := t.Context()
+	storetest.Seed(t, filepath.Join(dir, "aura.db"))
 	db, err := store.OpenDB(ctx, filepath.Join(dir, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	runner, err := newWorkflowToolRunner(&cfg, db, slog.Default())
 	if err != nil {
 		t.Fatalf("newWorkflowToolRunner: %v", err)

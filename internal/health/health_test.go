@@ -11,20 +11,14 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func fixedNow() time.Time { return time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC) }
 
 func TestMigrationCheckerAgainstRealStore(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.OpenDB(ctx, filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 
 	checker := MigrationChecker{Versions: func(ctx context.Context) (int, int, error) {
 		return store.SchemaVersions(ctx, db)

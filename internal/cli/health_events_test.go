@@ -13,20 +13,14 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func baseTime() time.Time { return time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC) }
 
 func TestHealthEventLogRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.OpenDB(ctx, filepath.Join(t.TempDir(), "aura.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.OpenMigrated(t)
 	log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
 
 	first := health.Transition{FindingID: "backup/ok", From: health.StatusNone, To: health.StatusUp, Code: "ok", At: baseTime()}
@@ -60,14 +54,12 @@ func TestHealthEventLogRoundTrip(t *testing.T) {
 
 func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(t.Context(), filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	cfg := config.Default()
 	cfg.Storage.Path = dataRoot
 	listener, err := buildProbeListener(&cfg, nil, store.NewEventStore(db), store.NewSessionService(db))
@@ -110,14 +102,12 @@ func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
 	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 
 	expired := make(chan struct{})
 	var expiredOnce sync.Once
@@ -231,14 +221,13 @@ func TestObserverStopCancelsInFlightPersistence(t *testing.T) {
 
 func TestHistoryPagesBeyondFirstThousandEvents(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.OpenDB(ctx, filepath.Join(dataRoot(t), "aura.db"))
+	dbPath := filepath.Join(dataRoot(t), "aura.db")
+	storetest.Seed(t, dbPath)
+	db, err := store.OpenDB(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	log := newHealthEventLog(store.NewEventStore(db), store.NewSessionService(db))
 	stamp := baseTime()
 	for i := range 1200 {
