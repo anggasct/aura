@@ -242,7 +242,7 @@ func isNotSwitchable(err error) bool {
 func TestDiscordCommandWiringDelegatesToTheEngine(t *testing.T) {
 	activity := &stubActivity{}
 	recorder := &wireRecorder{}
-	if err := wireDiscordCommands([]runtimechannelhost.ChannelPort{}, activity, nil, nil, nil, nil, recorder); err != nil {
+	if err := wireChatCommands([]runtimechannelhost.ChannelPort{}, activity, nil, nil, nil, nil, recorder); err != nil {
 		t.Fatalf("wire without adapters: %v", err)
 	}
 	turns := engineCommandTurns{engine: activity}

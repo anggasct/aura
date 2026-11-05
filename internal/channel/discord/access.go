@@ -2,10 +2,8 @@ package discord
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -13,6 +11,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
@@ -23,24 +22,17 @@ const (
 	DeniedReasonAudience    = access.DeniedReasonAudience
 	DeniedReasonEvalMissing = access.DeniedReasonEvalMissing
 
-	ApprovalRoutedApproved    = "approved"
-	ApprovalRoutedStanding    = "standing"
-	ApprovalRoutedRejected    = "rejected"
-	ApprovalRoutedTimeout     = "timeout"
-	ApprovalRoutedUnavailable = "unavailable"
+	ApprovalRoutedApproved    = approval.RoutedApproved
+	ApprovalRoutedStanding    = approval.RoutedStanding
+	ApprovalRoutedRejected    = approval.RoutedRejected
+	ApprovalRoutedTimeout     = approval.RoutedTimeout
+	ApprovalRoutedUnavailable = approval.RoutedUnavailable
 )
 
-type StandingGrantRecorder interface {
-	RecordStandingGrant(ctx context.Context, grant *StandingGrantRequest) error
-}
-
-type StandingGrantRequest struct {
-	PrincipalID string
-	AgentID     string
-	ToolName    string
-	OwnerID     string
-	TTL         time.Duration
-}
+type (
+	StandingGrantRecorder = approval.StandingGrantRecorder
+	StandingGrantRequest  = approval.StandingGrantRequest
+)
 
 const (
 	PairingOutcomeIssued  = access.PairingOutcomeIssued
@@ -258,32 +250,12 @@ func (a *Adapter) observeRouted(ctx context.Context, result string) {
 	}
 }
 
-func (a *Adapter) ownerApprovalTimeout(definition *auraagent.Definition) time.Duration {
-	return cmp.Or(definition.ApprovalTimeout, a.access.ApprovalTimeout, approvalFallbackTTL)
-}
-
 func (a *Adapter) offersStandingGrant(class principal.Class) bool {
-	return class == principal.ClassTrusted && a.access.Grants != nil && a.access.StandingGrantTTL > 0
-}
-
-func standingGrantLabel(ttl time.Duration) string {
-	switch {
-	case ttl == 24*time.Hour:
-		return "Allow 1 day"
-	case ttl%(24*time.Hour) == 0:
-		return fmt.Sprintf("Allow %d days", ttl/(24*time.Hour))
-	case ttl%time.Hour == 0:
-		return fmt.Sprintf("Allow %d hours", ttl/time.Hour)
-	default:
-		return "Allow " + ttl.String()
-	}
+	return approval.OffersStandingGrant(class, a.access.Grants, a.access.StandingGrantTTL)
 }
 
 func personaLabel(definition *auraagent.Definition) string {
-	if definition.Name == "" || definition.Name == definition.ID {
-		return definition.ID
-	}
-	return definition.Name + " (" + definition.ID + ")"
+	return approval.PersonaLabel(definition.ID, definition.Name)
 }
 
 func (a *Adapter) ownerDMChannel(ctx context.Context, token, ownerID string) (string, error) {

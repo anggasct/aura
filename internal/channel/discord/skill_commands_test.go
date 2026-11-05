@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/channel/chatcommand"
 	"github.com/anggasct/aura/internal/command"
 )
 
@@ -35,7 +36,7 @@ func TestDiscordSkillInADMStartsOnePinnedTurn(t *testing.T) {
 		t.Errorf("DM skill created a thread")
 	}
 	for _, req := range f.effects.requests {
-		if req.Provider == ProviderCommand && (req.Operation != "skill" || strings.Contains(string(req.Request), "canary") || strings.Contains(string(req.Request), "review-pr")) {
+		if req.Provider == chatcommand.Provider && (req.Operation != "skill" || strings.Contains(string(req.Request), "canary") || strings.Contains(string(req.Request), "review-pr")) {
 			t.Errorf("command intent = %s %s", req.Operation, req.Request)
 		}
 	}

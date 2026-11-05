@@ -9,6 +9,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/channel/status"
 	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
@@ -22,11 +23,15 @@ const (
 )
 
 type AccessSettings struct {
-	Pairing  access.PairingService
-	Budgets  access.BudgetGate
-	Erasure  access.PrincipalEraser
-	Handoffs access.HandoffGate
-	Evals    access.EvalGate
+	ApprovalTimeout  time.Duration
+	StandingGrantTTL time.Duration
+	Grants           approval.StandingGrantRecorder
+	Pairing          access.PairingService
+	Budgets          access.BudgetGate
+	Erasure          access.PrincipalEraser
+	Handoffs         access.HandoffGate
+	Evals            access.EvalGate
+	ApprovalRouted   func(ctx context.Context, result string)
 }
 
 func (a *Adapter) SetAccess(settings *AccessSettings) {
@@ -166,17 +171,6 @@ func (a *Adapter) budgetDrop(ctx context.Context, target destination, envelope *
 	definition, _ := a.personaDefinition(envelope.AgentID)
 	a.postNotice(ctx, target, definition.Message(refusal))
 	return reason
-}
-
-func (a *Adapter) forgetMeInvocation(text string) (command.Invocation, bool) {
-	if a.access.Erasure == nil {
-		return command.Invocation{}, false
-	}
-	inv, ok := command.Parse(text)
-	if !ok || inv.Name != command.NameForgetMe {
-		return command.Invocation{}, false
-	}
-	return inv, true
 }
 
 func (a *Adapter) forgetMe(ctx context.Context, target destination, inv *command.Invocation, envelope *runtimeingress.IngressEnvelope) {

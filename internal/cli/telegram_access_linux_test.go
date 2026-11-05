@@ -29,7 +29,7 @@ func (telegramOriginAccess) StandingGrant(context.Context, string, string, strin
 	return false, nil
 }
 
-func TestTelegramTrustedEffectfulToolFailsClosedWithoutApprovalCards(t *testing.T) {
+func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testing.T) {
 	both := enabledDiscordConfig()
 	telegramCfg := enabledTelegramConfig()
 	both.Owner = telegramCfg.Owner
@@ -38,7 +38,7 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutApprovalCards(t *testing.
 		cfg        config.Config
 		wantDecide bool
 	}{
-		"telegram only":        {cfg: telegramCfg},
+		"telegram only":        {cfg: telegramCfg, wantDecide: true},
 		"discord and telegram": {cfg: both, wantDecide: true},
 	}
 	for name, tc := range cases {

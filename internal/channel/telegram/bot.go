@@ -143,8 +143,16 @@ func isDialError(err error) bool {
 }
 
 type update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *message `json:"message"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *message       `json:"message"`
+	CallbackQuery *callbackQuery `json:"callback_query,omitempty"`
+}
+
+type callbackQuery struct {
+	ID      string   `json:"id"`
+	From    *user    `json:"from"`
+	Message *message `json:"message,omitempty"`
+	Data    string   `json:"data"`
 }
 
 type message struct {
@@ -196,6 +204,26 @@ type sendMessageRequest struct {
 	ParseMode       string           `json:"parse_mode,omitempty"`
 	ReplyParameters *replyParameters `json:"reply_parameters,omitempty"`
 	MessageThreadID int64            `json:"message_thread_id,omitempty"`
+	ReplyMarkup     *inlineKeyboard  `json:"reply_markup,omitempty"`
+}
+
+type inlineKeyboard struct {
+	Rows [][]inlineButton `json:"inline_keyboard"`
+}
+
+type inlineButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
+}
+
+type answerCallbackRequest struct {
+	CallbackQueryID string `json:"callback_query_id"`
+}
+
+type clearKeyboardRequest struct {
+	ChatID      int64          `json:"chat_id"`
+	MessageID   int64          `json:"message_id"`
+	ReplyMarkup inlineKeyboard `json:"reply_markup"`
 }
 
 type editMessageTextRequest struct {
@@ -219,7 +247,7 @@ func (c *botClient) getUpdates(ctx context.Context, token string, offset int64, 
 	err := c.call(ctx, token, "getUpdates", getUpdatesRequest{
 		Offset:         offset,
 		Timeout:        int(timeout / time.Second),
-		AllowedUpdates: []string{"message"},
+		AllowedUpdates: []string{"message", "callback_query"},
 	}, &updates)
 	return updates, err
 }
@@ -246,6 +274,18 @@ func (c *botClient) editMessageText(ctx context.Context, token string, req *edit
 
 func (c *botClient) sendChatAction(ctx context.Context, token string, target destination, action string) error {
 	return c.call(ctx, token, "sendChatAction", chatActionRequest{ChatID: target.chatID, MessageThreadID: target.threadID, Action: action}, nil)
+}
+
+func (c *botClient) answerCallbackQuery(ctx context.Context, token, callbackQueryID string) error {
+	return c.call(ctx, token, "answerCallbackQuery", answerCallbackRequest{CallbackQueryID: callbackQueryID}, nil)
+}
+
+func (c *botClient) clearKeyboard(ctx context.Context, token string, chatID, messageID int64) error {
+	return c.call(ctx, token, "editMessageReplyMarkup", clearKeyboardRequest{
+		ChatID:      chatID,
+		MessageID:   messageID,
+		ReplyMarkup: inlineKeyboard{Rows: [][]inlineButton{}},
+	}, nil)
 }
 
 type botIdentity struct {

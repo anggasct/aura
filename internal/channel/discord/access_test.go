@@ -10,6 +10,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 )
@@ -381,7 +382,7 @@ func TestPublicApprovalCardOffersNoStandingGrant(t *testing.T) {
 	if strings.Join(labels, "|") != "Approve|Reject" {
 		t.Fatalf("public card buttons = %v, want no standing grant", labels)
 	}
-	forged := strings.Replace(ids[0], ":"+approvalActionOk+":", ":"+approvalActionStanding+":", 1)
+	forged := strings.Replace(ids[0], ":"+approval.ActionApprove+":", ":"+approval.ActionStanding+":", 1)
 	adapter.resolveComponentClick(t.Context(), clickPayload("ix-forged", "777", "", "555", forged))
 	adapter.resolveComponentClick(t.Context(), clickPayload("ix-reject", "777", "", "555", ids[1]))
 	if outcome := awaitDecide(t, result, 5*time.Second); outcome.err != nil || outcome.accepted {
@@ -403,18 +404,5 @@ func TestOwnerDMChannelIsOpenedOnce(t *testing.T) {
 	defer stub.mu.Unlock()
 	if stub.dmCalls != 1 {
 		t.Fatalf("dm opens = %d, want the channel cached after the first", stub.dmCalls)
-	}
-}
-
-func TestStandingGrantLabelFollowsTheTTL(t *testing.T) {
-	for ttl, want := range map[time.Duration]string{
-		168 * time.Hour:  "Allow 7 days",
-		24 * time.Hour:   "Allow 1 day",
-		36 * time.Hour:   "Allow 36 hours",
-		90 * time.Minute: "Allow 1h30m0s",
-	} {
-		if got := standingGrantLabel(ttl); got != want {
-			t.Errorf("standingGrantLabel(%v) = %q, want %q", ttl, got, want)
-		}
 	}
 }

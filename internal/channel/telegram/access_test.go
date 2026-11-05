@@ -183,6 +183,11 @@ type accessRig struct {
 func newAccessRig(t *testing.T, opts accessOpts) *accessRig {
 	t.Helper()
 	h := newHarness(t)
+	return assembleRig(t, h, opts, h.cursors, h.effects, h.sessions)
+}
+
+func assembleRig(t *testing.T, h *harness, opts accessOpts, cursors CursorStore, effects EffectRunner, sessions SessionEnsurer) *accessRig {
+	t.Helper()
 	if opts.definition.ID == "" {
 		opts.definition = auraagent.Definition{ID: testPersona, Name: "Main", Audience: config.AudiencePublic}
 	}
@@ -198,7 +203,7 @@ func newAccessRig(t *testing.T, opts accessOpts) *accessRig {
 		AcceptPrivateChats: !opts.privateOff,
 	}
 	logger := slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	adapter, err := New(cfg, account, h.cursors, h.effects, h.sessions, logger)
+	adapter, err := New(cfg, account, cursors, effects, sessions, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

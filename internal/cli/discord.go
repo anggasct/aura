@@ -178,7 +178,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 	}
 	var ports []runtimechannelhost.ChannelPort
 	var checks []health.RegisteredCheck
-	var decider toolbroker.ApprovalDecider
+	var channels []approvalChannel
 	if cfg.Channels.Discord.Enabled {
 		adapters := make(discordAdapters, 0, len(cfg.Channels.Discord.Accounts))
 		for i := range cfg.Channels.Discord.Accounts {
@@ -198,6 +198,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			})
 			adapters = append(adapters, adapter)
 			ports = append(ports, adapter)
+			channels = append(channels, adapter)
 		}
 		checks = append(checks, health.RegisteredCheck{
 			ID:          "discord",
@@ -210,7 +211,6 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			Timeout:     time.Duration(cfg.Health.CheckTimeout),
 			Remediation: remediationMapOwnerIdentity,
 		})
-		decider = discordApprovalDecider(adapters)
 	}
 	if cfg.Channels.Telegram.Enabled {
 		adapters := make(telegramAdapters, 0, len(cfg.Channels.Telegram.Accounts))
@@ -232,6 +232,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			})
 			adapters = append(adapters, adapter)
 			ports = append(ports, adapter)
+			channels = append(channels, adapter)
 		}
 		checks = append(checks, health.RegisteredCheck{
 			ID:          "telegram",
@@ -240,7 +241,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			Remediation: telegram.RemediationReviewBot,
 		})
 	}
-	return ports, checks, decider, nil
+	return ports, checks, channelApprovalDecider(channels), nil
 }
 
 func newDiscordAdapter(cfg *config.Config, account *config.DiscordAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*discord.Adapter, error) {
@@ -336,37 +337,5 @@ func parseSecretRef(raw string) secret.Reference {
 		return secret.Reference{File: strings.TrimPrefix(raw, "file://")}
 	default:
 		return secret.Reference{}
-	}
-}
-
-func discordApprovalDecider(adapters discordAdapters) toolbroker.ApprovalDecider {
-	if len(adapters) == 0 {
-		return nil
-	}
-	return func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
-		if prompt == nil {
-			return false, errors.New("approval prompt must not be nil")
-		}
-		adapter := adapters[0]
-		for _, candidate := range adapters {
-			if candidate.HoldsApprovalTarget(prompt.SessionID) {
-				adapter = candidate
-				break
-			}
-		}
-		return adapter.Decide(ctx, &discord.ApprovalPrompt{
-			ToolName:       prompt.ToolName,
-			ToolVersion:    prompt.ToolVersion,
-			SessionID:      prompt.SessionID,
-			TurnID:         prompt.TurnID,
-			PrincipalID:    prompt.PrincipalID,
-			Arguments:      prompt.Arguments,
-			Network:        prompt.Network,
-			Timeout:        prompt.Timeout,
-			MaxOutputBytes: prompt.MaxOutputBytes,
-			PolicyVersion:  prompt.PolicyVersion,
-			ReasonCode:     prompt.ReasonCode,
-			ExpiresAt:      prompt.ExpiresAt,
-		})
 	}
 }

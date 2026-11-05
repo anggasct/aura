@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/channel/chatcommand"
 	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/effect"
 )
@@ -282,7 +283,7 @@ func TestDiscordCommandsInDMReplyWithoutATurn(t *testing.T) {
 		t.Errorf("conversation session %s was not ensured", key)
 	}
 	for _, req := range f.effects.requests {
-		if req.Provider == ProviderCommand && (req.SessionID != key || req.EventKind != effect.EventKindChannelRequested || !strings.HasPrefix(req.IdempotencyKey, "discord:owner:message:")) {
+		if req.Provider == chatcommand.Provider && (req.SessionID != key || req.EventKind != effect.EventKindChannelRequested || !strings.HasPrefix(req.IdempotencyKey, "discord:owner:message:")) {
 			t.Errorf("command intent = %+v", req)
 		}
 	}
@@ -451,7 +452,7 @@ func TestDiscordCommandPrivacy(t *testing.T) {
 		t.Errorf("logs carry command arguments: %s", f.logs.String())
 	}
 	for _, req := range f.effects.requests {
-		if req.Provider == ProviderCommand && strings.Contains(string(req.Request), "canary") {
+		if req.Provider == chatcommand.Provider && strings.Contains(string(req.Request), "canary") {
 			t.Errorf("command intent carries arguments: %s", req.Request)
 		}
 	}
@@ -463,8 +464,8 @@ func TestDiscordCommandPrivacy(t *testing.T) {
 	f.admit(t, dmMessage("8720", "111", "/session "+testSessionKey("dm:111")))
 	var target string
 	for _, req := range f.effects.requests {
-		if req.Provider == ProviderCommand && req.Operation == "session" {
-			var body commandRequest
+		if req.Provider == chatcommand.Provider && req.Operation == "session" {
+			var body chatcommand.Request
 			_ = json.Unmarshal(req.Request, &body)
 			target = body.Target
 		}
