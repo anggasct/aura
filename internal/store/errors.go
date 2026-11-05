@@ -51,6 +51,9 @@ const (
 	ErrorCodeChildConflict             ErrorCode = "child_conflict"
 	ErrorCodeChildNotFound             ErrorCode = "child_not_found"
 	ErrorCodeChildInvalid              ErrorCode = "child_invalid"
+	ErrorCodeAPIKeyConflict            ErrorCode = "apikey_conflict"
+	ErrorCodeAPIKeyNotFound            ErrorCode = "apikey_not_found"
+	ErrorCodeAPIKeyInvalid             ErrorCode = "apikey_invalid"
 )
 
 type Error struct {

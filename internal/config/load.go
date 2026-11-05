@@ -246,6 +246,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateTelegram(&cfg.Channels.Telegram, &cfg.Channels.Discord, cfg.Owner); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateHTTP(&cfg.Channels.HTTP); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateBindings(cfg.Bindings, &cfg.Channels); err != nil {
 		return LoadResult{}, err
 	}
@@ -434,6 +437,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateTelegramShapes(doc); err != nil {
+		return err
+	}
+	if err := validateHTTPShapes(doc); err != nil {
 		return err
 	}
 	if err := validateBindingsShapes(doc); err != nil {
@@ -853,6 +859,35 @@ func validateTelegramShapes(doc *yamlv3.Node) error {
 			if err := validateTelegramWebhookShape(valueNode); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func validateHTTPShapes(doc *yamlv3.Node) error {
+	httpNode := nestedValue(doc, "channels", "http")
+	if httpNode == nil {
+		return nil
+	}
+	if httpNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("channels.http must be a mapping at line %d", httpNode.Line)
+	}
+	for i := 0; i+1 < len(httpNode.Content); i += 2 {
+		key := httpNode.Content[i].Value
+		value := httpNode.Content[i+1]
+		var tag, kind string
+		switch key {
+		case "enabled":
+			tag, kind = "!!bool", "a boolean"
+		case "listen_address":
+			tag, kind = "!!str", "a string"
+		case "max_body_bytes", "requests_per_minute", "max_concurrent_per_key":
+			tag, kind = "!!int", "an integer"
+		default:
+			continue
+		}
+		if value.Kind != yamlv3.ScalarNode || value.Tag != tag {
+			return fmt.Errorf("channels.http.%s must be %s at line %d", key, kind, value.Line)
 		}
 	}
 	return nil
@@ -2306,6 +2341,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyVisionDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	applyTelegramDefaults(cfg, doc, &defaults.Channels.Telegram)
+	applyHTTPDefaults(cfg, doc, &defaults.Channels.HTTP)
 	return nil
 }
 
@@ -2721,6 +2757,22 @@ func applyDiscordDefaults(cfg *Config, doc *yamlv3.Node, defaults *Discord) {
 		if !discord.Accounts[i].AcceptDMs && !sequenceItemHasKey(accountsNode, i, "accept_dms") {
 			discord.Accounts[i].AcceptDMs = true
 		}
+	}
+}
+
+func applyHTTPDefaults(cfg *Config, doc *yamlv3.Node, defaults *HTTP) {
+	http := &cfg.Channels.HTTP
+	if http.ListenAddress == "" && !configValuePresent(doc, "channels", "http", "listen_address") && !envValuePresent("channels.http.listen_address") {
+		http.ListenAddress = defaults.ListenAddress
+	}
+	if http.MaxBodyBytes == 0 && !configValuePresent(doc, "channels", "http", "max_body_bytes") && !envValuePresent("channels.http.max_body_bytes") {
+		http.MaxBodyBytes = defaults.MaxBodyBytes
+	}
+	if http.RequestsPerMinute == 0 && !configValuePresent(doc, "channels", "http", "requests_per_minute") && !envValuePresent("channels.http.requests_per_minute") {
+		http.RequestsPerMinute = defaults.RequestsPerMinute
+	}
+	if http.MaxConcurrentPerKey == 0 && !configValuePresent(doc, "channels", "http", "max_concurrent_per_key") && !envValuePresent("channels.http.max_concurrent_per_key") {
+		http.MaxConcurrentPerKey = defaults.MaxConcurrentPerKey
 	}
 }
 
@@ -3565,6 +3617,26 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 	}
 	if telegram.MaxAttachmentBytes < 1 || telegram.MaxAttachmentBytes > TelegramMaxAttachmentBytes {
 		problems = append(problems, fmt.Errorf("channels.telegram.max_attachment_bytes must be between 1 and %d", TelegramMaxAttachmentBytes))
+	}
+	if err := errors.Join(problems...); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func validateHTTP(http *HTTP) error {
+	var problems []error
+	if err := listenAddressProblem("channels.http.listen_address", http.ListenAddress); err != nil {
+		problems = append(problems, err)
+	}
+	if http.MaxBodyBytes < 1 || http.MaxBodyBytes > HTTPMaxBodyCeiling {
+		problems = append(problems, fmt.Errorf("channels.http.max_body_bytes must be between 1 and %d", HTTPMaxBodyCeiling))
+	}
+	if http.RequestsPerMinute < 1 || http.RequestsPerMinute > HTTPRequestsPerMinuteCeiling {
+		problems = append(problems, fmt.Errorf("channels.http.requests_per_minute must be between 1 and %d", HTTPRequestsPerMinuteCeiling))
+	}
+	if http.MaxConcurrentPerKey < 1 || http.MaxConcurrentPerKey > HTTPMaxConcurrentPerKeyLimit {
+		problems = append(problems, fmt.Errorf("channels.http.max_concurrent_per_key must be between 1 and %d", HTTPMaxConcurrentPerKeyLimit))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

@@ -71,6 +71,7 @@ type WebhookKey struct {
 type Channels struct {
 	Discord  Discord  `koanf:"discord" yaml:"discord"`
 	Telegram Telegram `koanf:"telegram" yaml:"telegram"`
+	HTTP     HTTP     `koanf:"http" yaml:"http"`
 }
 
 type Broadcast struct {
@@ -302,6 +303,24 @@ func (t *Telegram) UsesWebhook() bool {
 type TelegramPolling struct {
 	Timeout    Duration `koanf:"timeout" yaml:"timeout"`
 	MaxBackoff Duration `koanf:"max_backoff" yaml:"max_backoff"`
+}
+
+const (
+	HTTPListenAddress            = "127.0.0.1:8284"
+	HTTPMaxBodyBytes             = 1048576
+	HTTPMaxBodyCeiling           = 10485760
+	HTTPRequestsPerMinute        = 60
+	HTTPRequestsPerMinuteCeiling = 6000
+	HTTPMaxConcurrentPerKey      = 4
+	HTTPMaxConcurrentPerKeyLimit = 64
+)
+
+type HTTP struct {
+	Enabled             bool   `koanf:"enabled" yaml:"enabled"`
+	ListenAddress       string `koanf:"listen_address" yaml:"listen_address"`
+	MaxBodyBytes        int64  `koanf:"max_body_bytes" yaml:"max_body_bytes"`
+	RequestsPerMinute   int    `koanf:"requests_per_minute" yaml:"requests_per_minute"`
+	MaxConcurrentPerKey int    `koanf:"max_concurrent_per_key" yaml:"max_concurrent_per_key"`
 }
 
 const (
@@ -974,6 +993,12 @@ func Default() Config {
 					MaxBodyBytes:   TelegramWebhookMaxBodyBytes,
 					MaxConnections: TelegramWebhookMaxConnections,
 				},
+			},
+			HTTP: HTTP{
+				ListenAddress:       HTTPListenAddress,
+				MaxBodyBytes:        HTTPMaxBodyBytes,
+				RequestsPerMinute:   HTTPRequestsPerMinute,
+				MaxConcurrentPerKey: HTTPMaxConcurrentPerKey,
 			},
 		},
 		Broadcast: Broadcast{

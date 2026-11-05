@@ -310,6 +310,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			healthChecks = append(slices.Clone(healthChecks), personaEvalCheck(cfg, agentRegistry, db))
+			httpChat, httpChatChecks, err := buildHTTPChat(cfg, db, logger)
+			if err != nil {
+				return err
+			}
+			healthChecks = append(healthChecks, httpChatChecks...)
 			probeListener, err := buildProbeListener(cfg, mapCapabilityStatuses(result.CapabilityReport), store.NewEventStore(db), store.NewSessionService(db), healthChecks...)
 			if err != nil {
 				return err
@@ -368,6 +373,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				if err := srv.Add(telegramWebhook); err != nil {
+					return err
+				}
+			}
+			if httpChat != nil {
+				if err := srv.Add(httpChat); err != nil {
 					return err
 				}
 			}
