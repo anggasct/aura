@@ -2,6 +2,7 @@ package restate
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -86,8 +87,8 @@ func TestEndpointStopWithoutStartFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEndpoint: %v", err)
 	}
-	if err := endpoint.Stop(context.Background()); err == nil {
-		t.Error("expected Stop without Start to fail, got nil")
+	if err := endpoint.Stop(context.Background()); !errors.Is(err, ErrHandlerNotRunning) {
+		t.Errorf("Stop without Start = %v, want ErrHandlerNotRunning", err)
 	}
 }
 
