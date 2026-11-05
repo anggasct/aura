@@ -299,23 +299,17 @@ func (l *durableListener) serveEndpointUntilDone(ctx context.Context) error {
 	go func() { done <- l.endpoint.Start(ctx) }()
 	select {
 	case err := <-done:
-		return err
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		if err := l.endpoint.Stop(shutdownCtx); err != nil {
+		if ctx.Err() == nil {
 			return err
 		}
+	case <-ctx.Done():
 		select {
-		case err := <-done:
-			if err != nil && ctx.Err() != nil {
-				return nil
-			}
-			return err
+		case <-done:
 		case <-time.After(15 * time.Second):
 			return &restate.Error{Code: restate.ErrorCodeUnreachable, Detail: "durable handler endpoint did not stop"}
 		}
 	}
+	return nil
 }
 
 type durableSessionStore struct {

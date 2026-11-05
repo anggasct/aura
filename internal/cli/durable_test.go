@@ -192,6 +192,44 @@ func TestExternalListenerRegistersItsHandlerURL(t *testing.T) {
 	}
 }
 
+func TestEndpointCancelledAroundItsBindStopsCleanly(t *testing.T) {
+	dataRoot := t.TempDir()
+	seedHealthyStorage(t, dataRoot)
+	cfg := config.Default()
+	cfg.Storage.Path = dataRoot
+	cfg.Tools = nil
+	cfg.Models.Definitions = map[string]config.ModelDefinition{
+		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
+	}
+	cfg.Durable.Enabled = true
+	cfg.Durable.Mode = config.DurableModeExternal
+	cfg.Durable.HandlerAddr = "127.0.0.1:0"
+	cfg.Durable.HandlerURL = "http://aura:9080"
+	db, err := openStorage(t.Context(), &cfg)
+	if err != nil {
+		t.Fatalf("openStorage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for name, delay := range map[string]time.Duration{"before start": -1, "right after start": 0, "after bind": 50 * time.Millisecond} {
+		t.Run(name, func(t *testing.T) {
+			listener, err := buildDurableListener(t.Context(), &cfg, db, slog.New(slog.DiscardHandler), nil)
+			if err != nil {
+				t.Fatalf("buildDurableListener: %v", err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			if delay < 0 {
+				cancel()
+			} else {
+				time.AfterFunc(delay, cancel)
+			}
+			defer cancel()
+			if err := listener.serveEndpointUntilDone(ctx); err != nil {
+				t.Fatalf("serveEndpointUntilDone after cancel = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func TestDurableStatusMatchesTheRegisteredHandlerURL(t *testing.T) {
 	probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
