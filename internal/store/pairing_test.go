@@ -162,3 +162,34 @@ func TestListPrincipalActivityAggregatesSessions(t *testing.T) {
 		t.Fatalf("ListPrincipalActivity() = %+v, %v", activity, err)
 	}
 }
+
+func TestPairingApproveChannelNeverConsumesAnotherChannelsCode(t *testing.T) {
+	db := newTestDB(t)
+	ctx := t.Context()
+	pairings := NewPairingStore(db)
+	grants := NewPrincipalGrantStore(db)
+	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	if _, err := pairings.Issue(ctx, pairingIssue("code-t", "telegram:7", "pocket", now)); err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if _, found, err := pairings.ApproveChannel(ctx, "discord", "code-t", "local-owner", now.Add(time.Minute)); err != nil || found {
+		t.Fatalf("cross-channel ApproveChannel() found = %v, %v; want not found", found, err)
+	}
+	if active, _ := grants.Active(ctx, "telegram:7", "pocket"); active {
+		t.Fatal("a cross-channel approval granted access")
+	}
+	var pending int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pairing_request WHERE code_sha256 = 'code-t'`).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("pending rows = %d, %v; want the code kept for its own channel", pending, err)
+	}
+	request, found, err := pairings.ApproveChannel(ctx, "telegram", "code-t", "local-owner", now.Add(2*time.Minute))
+	if err != nil || !found || request.PrincipalID != "telegram:7" {
+		t.Fatalf("ApproveChannel() = %+v, %v, %v", request, found, err)
+	}
+	if active, _ := grants.Active(ctx, "telegram:7", "pocket"); !active {
+		t.Fatal("approval did not grant access")
+	}
+	if _, _, err := pairings.ApproveChannel(ctx, "", "code-t", "local-owner", now); err == nil {
+		t.Fatal("approval without a channel accepted")
+	}
+}

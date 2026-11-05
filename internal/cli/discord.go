@@ -221,10 +221,15 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			}
 			adapter.SetPrincipalResolver(owners)
 			adapter.SetPersonaRouter(router)
+			settings := telegramAccessSettings(cfg, db, accessRecorder)
+			adapter.SetAccess(&settings)
 			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
 				recorder.Admitted(ctx, string(class), principal.ChannelTelegram)
 			})
 			adapter.SetDenialObserver(accessRecorder.Denied)
+			adapter.SetDropObserver(func(ctx context.Context, reason string) {
+				ingressRecorder.Dropped(ctx, principal.ChannelTelegram, reason)
+			})
 			adapters = append(adapters, adapter)
 			ports = append(ports, adapter)
 		}

@@ -3,29 +3,31 @@ package discord
 import (
 	"context"
 	"log/slog"
+
+	"github.com/anggasct/aura/internal/channel/access"
 )
 
 type dropReason string
 
 const (
-	dropAuthorBot          dropReason = "author_bot"
+	dropAuthorBot          dropReason = access.DropAuthorBot
 	dropMessageType        dropReason = "message_type"
-	dropEmptyContent       dropReason = "empty_content"
-	dropAuthorNotAllowed   dropReason = "author_not_allowed"
+	dropEmptyContent       dropReason = access.DropEmptyContent
+	dropAuthorNotAllowed   dropReason = access.DropAuthorNotAllowed
 	dropGuildNotAllowed    dropReason = "guild_not_allowed"
 	dropChannelNotAllowed  dropReason = "channel_not_allowed"
 	dropNotMentioned       dropReason = "not_mentioned"
 	dropDMsDisabled        dropReason = "dms_disabled"
-	dropPairing            dropReason = "pairing"
+	dropPairing            dropReason = access.DropPairing
 	dropThreadProbeFailed  dropReason = "thread_probe_failed"
 	dropThreadForeign      dropReason = "thread_foreign"
 	dropThreadUnresolved   dropReason = "thread_unresolved"
-	dropPersonaUnrouted    dropReason = "persona_unrouted"
-	dropAudience           dropReason = "audience"
-	dropPersonaEvalMissing dropReason = "persona_eval_missing"
-	dropRateLimited        dropReason = "rate_limited"
-	dropBudgetExhausted    dropReason = "budget_exhausted"
-	dropBudgetCheckFailed  dropReason = "budget_check_failed"
+	dropPersonaUnrouted    dropReason = access.DropPersonaUnrouted
+	dropAudience           dropReason = access.DropAudience
+	dropPersonaEvalMissing dropReason = access.DropPersonaEvalMissing
+	dropRateLimited        dropReason = access.DropRateLimited
+	dropBudgetExhausted    dropReason = access.DropBudgetExhausted
+	dropBudgetCheckFailed  dropReason = access.DropBudgetCheckFailed
 	dropAttachmentFailed   dropReason = "attachment_failed"
 )
 

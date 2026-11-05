@@ -76,6 +76,8 @@ type SessionResolver interface {
 
 type PersonaRouter interface {
 	Resolve(scope *auraagent.RouteScope) (auraagent.RouteMatch, bool)
+	Persona(id string) (auraagent.Definition, bool)
+	ServesPublic(channel, account string) bool
 }
 
 type Adapter struct {
@@ -90,6 +92,8 @@ type Adapter struct {
 	owners     *principal.Resolver
 	admitted   func(ctx context.Context, class principal.Class)
 	denied     func(ctx context.Context, reason string)
+	dropped    func(ctx context.Context, reason string)
+	access     AccessSettings
 	logger     *slog.Logger
 	bot        *botClient
 	sink       runtimeingress.IngressSink

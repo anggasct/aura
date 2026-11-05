@@ -252,9 +252,11 @@ type Telegram struct {
 }
 
 type TelegramAccount struct {
-	Name        string `koanf:"name" yaml:"name"`
-	BotTokenRef string `koanf:"bot_token_ref" yaml:"bot_token_ref"`
-	Persona     string `koanf:"persona" yaml:"persona,omitempty"`
+	Name               string   `koanf:"name" yaml:"name"`
+	BotTokenRef        string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
+	Persona            string   `koanf:"persona" yaml:"persona,omitempty"`
+	AllowedUserIDs     []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
+	AcceptPrivateChats bool     `koanf:"accept_private_chats" yaml:"accept_private_chats"`
 }
 
 type TelegramPolling struct {

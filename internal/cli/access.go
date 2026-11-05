@@ -13,6 +13,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channel/telegram"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -159,6 +160,17 @@ func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.A
 		}
 	}
 	return settings
+}
+
+func telegramAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.AccessRecorder) telegram.AccessSettings {
+	shared := discordAccessSettings(cfg, db, recorder)
+	return telegram.AccessSettings{
+		Pairing:  shared.Pairing,
+		Budgets:  shared.Budgets,
+		Erasure:  shared.Erasure,
+		Handoffs: shared.Handoffs,
+		Evals:    shared.Evals,
+	}
 }
 
 func openStandingGrants(cmd *cobra.Command, gf *globalFlags) (*sql.DB, store.StandingGrantStore, error) {
