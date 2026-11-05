@@ -810,3 +810,69 @@ func TestDeliver_TemporaryAuthFailureFailsOnce(t *testing.T) {
 		t.Errorf("findings = %+v, want %s", findings, faultSMTPLogin)
 	}
 }
+
+type resolvingReconciler struct {
+	evidence effect.Evidence
+}
+
+func (r resolvingReconciler) Reconcile(context.Context, *effect.Intent) (effect.Evidence, error) {
+	return r.evidence, nil
+}
+
+func TestDeliver_StartupRecoveryMakesOrphanedIntentsUnknownAndReconcilable(t *testing.T) {
+	f := newDeliveryFixture(t)
+	req := f.request("turn-orphan", defaultReply(), "maybe sent")
+	adapter, journal := restartedAdapter(t, f)
+	orphan := prepareLikeDeliver(t, f, journal, req)
+	if _, err := journal.Start(t.Context(), orphan.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	foreign, err := journal.Prepare(t.Context(), &effect.PrepareRequest{
+		SessionID:      deliverySession,
+		IdempotencyKey: "telegram:turn-foreign",
+		Provider:       "telegram",
+		Operation:      "send_message",
+		Classification: effect.ClassificationEffectful,
+		Request:        json.RawMessage(`{"text":"hi"}`),
+		EventKind:      effect.EventKindChannelRequested,
+	})
+	if err != nil {
+		t.Fatalf("Prepare foreign: %v", err)
+	}
+	if _, err := journal.Start(t.Context(), foreign.ID); err != nil {
+		t.Fatalf("Start foreign: %v", err)
+	}
+
+	restarted, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger})
+	if err != nil {
+		t.Fatalf("NewJournal: %v", err)
+	}
+	report, err := restarted.RecoverProvider(t.Context(), ProviderName)
+	if err != nil || report.Claimed != 1 {
+		t.Fatalf("RecoverProvider = %+v, %v; want the email intent claimed", report, err)
+	}
+	if intent, err := restarted.Get(t.Context(), foreign.ID); err != nil || intent.State != effect.StateStarted {
+		t.Fatalf("foreign intent = %+v (%v), want it untouched", intent, err)
+	}
+	f.wantIntents(map[effect.State][]string{effect.StateUnknown: {""}})
+
+	_, err = adapter.Deliver(t.Context(), req)
+	wantCode(t, err, ErrorCodeDeliveryAmbiguous)
+	if len(f.server.sessions()) != 0 {
+		t.Fatal("a recovered intent was sent again")
+	}
+
+	executor, err := effect.NewExecutor(restarted)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	resolved, err := executor.Reconcile(t.Context(), orphan.ID, adapter, resolvingReconciler{evidence: effect.Evidence{Definitive: true, SafeErrorCode: "email_not_delivered"}})
+	if err != nil || resolved.State != effect.StateFailed {
+		t.Fatalf("Reconcile = %+v, %v; want the intent resolved as failed", resolved, err)
+	}
+	_, err = adapter.Deliver(t.Context(), req)
+	wantCode(t, err, ErrorCodeDeliveryFailed)
+	if len(f.server.sessions()) != 0 {
+		t.Error("a reconciled intent was sent again")
+	}
+}

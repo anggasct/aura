@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -75,4 +76,20 @@ func newEmailAdapter(cfg *config.Config, account *config.EmailAccount, db *sql.D
 		return nil, err
 	}
 	return email.New(&cfg.Channels.Email, account, connector, mailer, emailCursors{cursors: store.NewEmailCursorStore(db)}, executor, &emailSessions{discordSessionEnsurer{sessions: store.NewSessionService(db)}}, logger)
+}
+
+func recoverEmailEffects(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger) error {
+	if !cfg.Channels.Email.Enabled {
+		return nil
+	}
+	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
+	if err != nil {
+		return err
+	}
+	report, err := executor.Journal().RecoverProvider(ctx, email.ProviderName)
+	if err != nil {
+		return fmt.Errorf("recover email effects: %w", err)
+	}
+	logger.InfoContext(ctx, "email effects recovered", "component", "email", "scanned", report.Scanned, "claimed", report.Claimed)
+	return nil
 }

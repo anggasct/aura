@@ -106,6 +106,9 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := recoverEmailEffects(ctx, cfg, db, logger); err != nil {
+				return err
+			}
 			channelAdapters, channelChecks, approvalAdapters, err := buildChannelAdapters(cfg, personaRouter, db, artifactRoot, pipeline.MeterProvider(), logger)
 			if err != nil {
 				return err

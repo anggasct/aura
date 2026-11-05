@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
@@ -20,11 +21,13 @@ import (
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/email"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/runtime/engine"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
@@ -426,5 +429,74 @@ func TestBuildSecretVaultRedactsEmailPasswords(t *testing.T) {
 		if got := vault.Redact("password " + secret); strings.Contains(got, secret) {
 			t.Errorf("Redact() = %q, want %s hidden", got, secret)
 		}
+	}
+}
+
+func startedIntent(t *testing.T, journal *effect.Journal, provider string) *effect.Intent {
+	t.Helper()
+	intent, err := journal.Prepare(t.Context(), &effect.PrepareRequest{
+		SessionID:      "desk/email:work/thread:recover",
+		IdempotencyKey: provider + ":turn-recover",
+		Provider:       provider,
+		Operation:      "send",
+		Classification: effect.ClassificationEffectful,
+		Request:        json.RawMessage(`{"text":"hi"}`),
+		EventKind:      effect.EventKindChannelRequested,
+	})
+	if err != nil {
+		t.Fatalf("Prepare %s: %v", provider, err)
+	}
+	started, err := journal.Start(t.Context(), intent.ID)
+	if err != nil {
+		t.Fatalf("Start %s: %v", provider, err)
+	}
+	return started
+}
+
+func TestRecoverEmailEffects(t *testing.T) {
+	cases := map[string]struct {
+		enabled   bool
+		wantEmail effect.State
+	}{
+		"email enabled":  {enabled: true, wantEmail: effect.StateUnknown},
+		"email disabled": {enabled: false, wantEmail: effect.StateStarted},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			db := storetest.OpenMigrated(t)
+			ensurer := discordSessionEnsurer{sessions: store.NewSessionService(db)}
+			if err := ensurer.EnsureSession(t.Context(), "desk/email:work/thread:recover", principal.OwnerID, "desk"); err != nil {
+				t.Fatalf("EnsureSession: %v", err)
+			}
+			journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+			if err != nil {
+				t.Fatalf("NewJournal: %v", err)
+			}
+			mine := startedIntent(t, journal, email.ProviderName)
+			foreign := startedIntent(t, journal, "telegram")
+			cfg := config.Default()
+			cfg.Channels.Email.Enabled = tc.enabled
+			if err := recoverEmailEffects(t.Context(), &cfg, db, slog.New(slog.DiscardHandler)); err != nil {
+				t.Fatalf("recoverEmailEffects: %v", err)
+			}
+			for intent, want := range map[*effect.Intent]effect.State{mine: tc.wantEmail, foreign: effect.StateStarted} {
+				got, err := journal.Get(t.Context(), intent.ID)
+				if err != nil || got.State != want {
+					t.Errorf("%s intent = %+v (%v), want %s", intent.Provider, got, err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestRecoverEmailEffects_FailsClosedWhenTheJournalIsUnreadable(t *testing.T) {
+	db := storetest.OpenMigrated(t)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	cfg := config.Default()
+	cfg.Channels.Email.Enabled = true
+	if err := recoverEmailEffects(t.Context(), &cfg, db, slog.New(slog.DiscardHandler)); err == nil {
+		t.Fatal("recoverEmailEffects succeeded against an unreadable journal")
 	}
 }
