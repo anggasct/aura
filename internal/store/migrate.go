@@ -47,6 +47,7 @@ var migrations = []migration{
 	{version: 29, sql: workflowProposalSchemaSQL},
 	{version: 30, sql: workflowRoutineSchemaSQL},
 	{version: 31, sql: telegramCursorSchemaSQL},
+	{version: 32, sql: handoffChannelSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -669,6 +670,11 @@ ALTER TABLE session_handoff ADD COLUMN agent_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE session_handoff ADD COLUMN account TEXT NOT NULL DEFAULT '';
 ALTER TABLE session_handoff ADD COLUMN reply_channel_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX session_handoff_open_idx ON session_handoff(released_at, opened_at);
+`
+
+const handoffChannelSchemaSQL = `
+ALTER TABLE session_handoff ADD COLUMN channel TEXT NOT NULL DEFAULT 'discord' CHECK (channel IN ('discord','telegram'));
+ALTER TABLE session_handoff ADD COLUMN reply_thread_id TEXT NOT NULL DEFAULT '';
 `
 
 const reservationEstimateSchemaSQL = `

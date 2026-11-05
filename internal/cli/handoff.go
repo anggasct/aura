@@ -14,7 +14,9 @@ import (
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 
+	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channel/telegram"
 	"github.com/anggasct/aura/internal/config"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/store"
@@ -27,10 +29,13 @@ const (
 	handoffReplyAuthorFallback = "aura"
 )
 
-var deliverText = discord.DeliverText
+var (
+	deliverText         = discord.DeliverText
+	deliverTelegramText = telegram.DeliverText
+)
 
 type handoffNotifier interface {
-	NotifyHandoff(ctx context.Context, sessionID, reason string) (discord.HandoffTarget, error)
+	NotifyHandoff(ctx context.Context, sessionID, reason string) (access.HandoffTarget, error)
 }
 
 type handoffService struct {
@@ -46,7 +51,7 @@ func newHandoffService(db *sql.DB, notifiers []handoffNotifier) *handoffService 
 func (s *handoffService) OpenHandoff(ctx context.Context, request *toolsbuiltin.HandoffRequest) error {
 	for _, notifier := range s.notifiers {
 		target, err := notifier.NotifyHandoff(ctx, request.SessionID, request.Reason)
-		if errors.Is(err, discord.ErrNoHandoffTarget) {
+		if errors.Is(err, access.ErrNoHandoffTarget) {
 			continue
 		}
 		if err != nil {
@@ -54,7 +59,7 @@ func (s *handoffService) OpenHandoff(ctx context.Context, request *toolsbuiltin.
 		}
 		return s.handoffs.Open(ctx, &store.Handoff{
 			SessionID: request.SessionID, Reason: request.Reason, PrincipalID: request.PrincipalID, AgentID: request.AgentID,
-			Account: target.Account, ReplyChannelID: target.ChannelID, OpenedAt: s.now().UTC(),
+			Account: target.Account, Channel: target.Channel, ReplyChannelID: target.ChannelID, ReplyThreadID: target.ThreadID, OpenedAt: s.now().UTC(),
 		})
 	}
 	return errors.New("handoff: no channel knows where this session's requester is")
@@ -69,15 +74,15 @@ type handoffGate struct {
 func (g *handoffGate) Check(ctx context.Context, sessionID string) (string, error) {
 	state, _, err := g.handoffs.Check(ctx, sessionID, g.timeout, g.now().UTC())
 	if err != nil {
-		return discord.HandoffStateNone, err
+		return access.HandoffStateNone, err
 	}
 	switch state {
 	case store.HandoffOpen:
-		return discord.HandoffStateOpen, nil
+		return access.HandoffStateOpen, nil
 	case store.HandoffExpired:
-		return discord.HandoffStateExpired, nil
+		return access.HandoffStateExpired, nil
 	default:
-		return discord.HandoffStateNone, nil
+		return access.HandoffStateNone, nil
 	}
 }
 
@@ -98,6 +103,34 @@ func discordAccount(cfg *config.Config, name string) (*config.DiscordAccount, bo
 		}
 	}
 	return nil, false
+}
+
+func telegramAccount(cfg *config.Config, name string) (*config.TelegramAccount, bool) {
+	for i := range cfg.Channels.Telegram.Accounts {
+		if cfg.Channels.Telegram.Accounts[i].Name == name {
+			return &cfg.Channels.Telegram.Accounts[i], true
+		}
+	}
+	return nil, false
+}
+
+func deliverToHandoff(ctx context.Context, cfg *config.Config, handoff *store.Handoff, text string) error {
+	switch handoff.Channel {
+	case store.HandoffChannelTelegram:
+		account, ok := telegramAccount(cfg, handoff.Account)
+		if !ok {
+			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", handoff.Account)}
+		}
+		return deliverTelegramText(ctx, account, handoff.ReplyChannelID, handoff.ReplyThreadID, text)
+	case store.HandoffChannelDiscord:
+		account, ok := discordAccount(cfg, handoff.Account)
+		if !ok {
+			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", handoff.Account)}
+		}
+		return deliverText(ctx, account, handoff.ReplyChannelID, text)
+	default:
+		return &exitCodeError{code: 1, err: fmt.Errorf("handoff channel %q is not supported", handoff.Channel)}
+	}
 }
 
 func openHandoff(ctx context.Context, db *sql.DB, sessionID string) (store.Handoff, error) {
@@ -136,11 +169,7 @@ func newReplyCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				account, ok := discordAccount(cfg, handoff.Account)
-				if !ok {
-					return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", handoff.Account)}
-				}
-				if err := deliverText(ctx, account, handoff.ReplyChannelID, text); err != nil {
+				if err := deliverToHandoff(ctx, cfg, &handoff, text); err != nil {
 					return err
 				}
 				now := time.Now().UTC()
@@ -205,10 +234,8 @@ func newHandoffCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				definition, _ := registry.Lookup(handoff.AgentID)
-				if account, ok := discordAccount(cfg, handoff.Account); ok {
-					if err := deliverText(ctx, account, handoff.ReplyChannelID, definition.Message(config.MessageHandoffClosed)); err != nil {
-						logger.WarnContext(ctx, "handoff release notice failed", "component", "access")
-					}
+				if err := deliverToHandoff(ctx, cfg, &handoff, definition.Message(config.MessageHandoffClosed)); err != nil {
+					logger.WarnContext(ctx, "handoff release notice failed", "component", "access")
 				}
 				if err := recordAccessAction(ctx, db, &accessAction{Action: accessActionHandoffRelease, Principal: handoff.PrincipalID, Persona: handoff.AgentID, Account: handoff.Account}, "release-"+handoff.SessionID+"-"+now.Format(time.RFC3339Nano), now); err != nil {
 					return err

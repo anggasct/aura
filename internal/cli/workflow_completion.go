@@ -9,7 +9,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/config"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/store"
@@ -22,7 +22,7 @@ const (
 )
 
 type replyTargeter interface {
-	ReplyTarget(sessionID string) (discord.HandoffTarget, bool)
+	ReplyTarget(sessionID string) (access.HandoffTarget, bool)
 }
 
 func replyTargeters(ports []runtimechannelhost.ChannelPort) []replyTargeter {

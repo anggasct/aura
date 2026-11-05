@@ -12,6 +12,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
@@ -22,7 +23,7 @@ import (
 
 type proposalOfferer interface {
 	OfferProposal(ctx context.Context, proposalID, plan string, decide discord.ProposalDecider) error
-	ReplyTarget(sessionID string) (discord.HandoffTarget, bool)
+	ReplyTarget(sessionID string) (access.HandoffTarget, bool)
 }
 
 const proposalCardQueue = 16
@@ -159,7 +160,7 @@ func (c *workflowToolController) Start(ctx context.Context, caller *toolsbuiltin
 		PrincipalID: caller.PrincipalID, PrincipalClass: string(caller.PrincipalClass), AgentID: caller.AgentID, SessionID: caller.SessionID,
 	}
 	for _, targeter := range c.targets {
-		if target, ok := targeter.ReplyTarget(caller.SessionID); ok {
+		if target, ok := targeter.ReplyTarget(caller.SessionID); ok && target.Channel == principal.ChannelDiscord {
 			origin.ReplyAccount, origin.ReplyChannelID = target.Account, target.ChannelID
 			break
 		}

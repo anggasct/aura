@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 )
@@ -52,7 +53,7 @@ func TestNotifyHandoffTellsTheOwnerAndTheRequester(t *testing.T) {
 	}
 	session := routedEnvelope(t, sink, "message:9901").ConversationID
 	target, err := adapter.NotifyHandoff(t.Context(), session, "wants a refund")
-	if err != nil || target != (HandoffTarget{Account: "owner", ChannelID: "4400"}) {
+	if err != nil || target != (access.HandoffTarget{Channel: "discord", Account: "owner", ChannelID: "4400"}) {
 		t.Fatalf("NotifyHandoff = %+v, %v", target, err)
 	}
 	owner := strings.Join(postContents(stub, "555"), "\n")
@@ -64,7 +65,7 @@ func TestNotifyHandoffTellsTheOwnerAndTheRequester(t *testing.T) {
 	if got := postContents(stub, "4400"); len(got) != 1 || got[0] != config.PersonaMessageDefaults()[config.MessageHandoffOpen] {
 		t.Fatalf("requester notices = %q, want handoff_open", got)
 	}
-	if _, err := adapter.NotifyHandoff(t.Context(), "lobby/discord:owner/dm:unknown", "x"); !errors.Is(err, ErrNoHandoffTarget) {
+	if _, err := adapter.NotifyHandoff(t.Context(), "lobby/discord:owner/dm:unknown", "x"); !errors.Is(err, access.ErrNoHandoffTarget) {
 		t.Fatalf("unknown session err = %v, want ErrNoHandoffTarget", err)
 	}
 }
@@ -105,7 +106,7 @@ func TestReplyTargetNamesTheConversationChannel(t *testing.T) {
 	}
 	adapter.rememberTarget("dm:111", &approvalBinding{principal: "discord:111", class: principal.ClassTrusted, persona: "team", actor: "111", channelID: "333"})
 	target, ok := adapter.ReplyTarget("dm:111")
-	if !ok || target.ChannelID != "333" || target.Account != adapter.account.Name {
+	if !ok || target.ChannelID != "333" || target.Channel != principal.ChannelDiscord || target.Account != adapter.account.Name {
 		t.Fatalf("ReplyTarget = %+v, %v", target, ok)
 	}
 }
