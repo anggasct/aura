@@ -43,6 +43,7 @@ func turnDescriptorFromRequest(req *runtime.TurnRequest) runtimesessions.Descrip
 		AgentID:        req.AgentID,
 		Persona:        req.Persona,
 		Skill:          req.Skill,
+		StreamPartial:  req.StreamPartial,
 	}
 }
 
@@ -66,6 +67,7 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRe
 		AgentID:        desc.AgentID,
 		Persona:        desc.Persona,
 		Skill:          desc.Skill,
+		StreamPartial:  desc.StreamPartial,
 	}
 }
 

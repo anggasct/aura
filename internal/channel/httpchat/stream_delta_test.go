@@ -227,6 +227,12 @@ func TestStreamSurvivesDroppedModelDeltas(t *testing.T) {
 			events:    []store.RuntimeEvent{accepted(), deltaEvent(0, "Hel"), modelEvent("Hello", finishModelStop, false), completed()},
 			wantParts: []string{"Hel", "lo"},
 		},
+		"restarted indexes with the same text are not forwarded twice": {
+			events: []store.RuntimeEvent{
+				accepted(), deltaEvent(0, "Hel"), deltaEvent(1, "lo"), deltaEvent(0, "Hel"), deltaEvent(1, "lo"),
+				modelEvent("Hello", finishModelStop, false), completed()},
+			wantParts: []string{"Hel", "lo"},
+		},
 		"next message streams again after the gap": {
 			events: []store.RuntimeEvent{
 				accepted(), deltaEvent(0, "on"), deltaEvent(2, "e"), modelEvent("one", finishModelStop, false),
@@ -417,5 +423,32 @@ func TestSDKAccumulatesTokenLevelChunks(t *testing.T) {
 	}
 	if len(accumulated.Choices) != 1 || accumulated.Choices[0].Message.Content != "Hello world" || accumulated.Choices[0].FinishReason != "length" {
 		t.Errorf("accumulated = %+v", accumulated.Choices)
+	}
+}
+
+func TestStreamFailsClosedWhenPartialTextIsResent(t *testing.T) {
+	cases := map[string][]store.RuntimeEvent{
+		"restarted indexes with different text": {
+			accepted(), deltaEvent(0, "Hel"), deltaEvent(1, "lo"), deltaEvent(0, "Hey"), deltaEvent(1, "!"),
+			modelEvent("Hey!", finishModelStop, false), completed()},
+		"consecutive indexes repeating the text": {
+			accepted(), deltaEvent(0, "Hel"), deltaEvent(1, "Hel"), modelEvent("Hello", finishModelStop, false), completed()},
+	}
+	for name, events := range cases {
+		t.Run(name, func(t *testing.T) {
+			fixture := newChatFixture(t, chatFixtureOptions{backend: fixedTurn(events...), answers: modelAnswerTexts})
+			issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
+
+			rec := fixture.post(t, issued.Plaintext, defaultStreamBody())
+
+			frames := sseFrames(t, rec.Body.String())
+			failure := errorEventOf(t, frames[len(frames)-1])
+			if failure.Error.Code != "internal_error" || strings.Count(rec.Body.String(), `"error"`) != 1 {
+				t.Errorf("stream = %s", rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "[DONE]") || strings.Contains(rec.Body.String(), `"finish_reason":"`) {
+				t.Errorf("a stream with resent text was closed as complete: %s", rec.Body.String())
+			}
+		})
 	}
 }

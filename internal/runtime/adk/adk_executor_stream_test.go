@@ -20,6 +20,7 @@ import (
 type streamingADKModel struct {
 	mu            sync.Mutex
 	streams       []bool
+	partialsSent  int
 	chunks        []string
 	finish        genai.FinishReason
 	finalTokens   int32
@@ -35,6 +36,9 @@ func (m *streamingADKModel) GenerateContent(_ context.Context, _ *adkmodel.LLMRe
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
 		if stream {
 			for _, chunk := range m.chunks {
+				m.mu.Lock()
+				m.partialsSent++
+				m.mu.Unlock()
 				partial := &adkmodel.LLMResponse{
 					Content: &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{{Text: chunk}}},
 					Partial: true,

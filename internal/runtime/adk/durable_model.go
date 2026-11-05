@@ -8,6 +8,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/runtime"
 )
 
 func runTasksSequential(ctx context.Context, tasks []func(context.Context)) {
@@ -32,25 +33,36 @@ func (m *journaledModel) GenerateContent(ctx context.Context, req *adkmodel.LLMR
 		return m.inner.GenerateContent(ctx, req, stream)
 	}
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		stopped := false
 		var runErr error
 		defer func() {
 			if recovered := durable.RecoveredPanic(); recovered != nil {
 				runErr = recovered
 			}
-			if runErr != nil {
+			if runErr != nil && !stopped {
 				yield(nil, runErr)
 			}
 		}()
 		raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), func(ctx context.Context) ([]byte, error) {
 			var chunks []*adkmodel.LLMResponse
-			for response, err := range m.inner.GenerateContent(ctx, req, false) {
+			for response, err := range m.inner.GenerateContent(ctx, req, stream) {
 				if err != nil {
 					return nil, err
 				}
-				chunks = append(chunks, response)
+				if response == nil || !response.Partial {
+					chunks = append(chunks, response)
+					continue
+				}
+				if !yield(response, nil) {
+					stopped = true
+					return nil, codedError(runtime.ErrorCodeTurnCancelled, "model stream consumer stopped", nil)
+				}
 			}
 			return json.Marshal(chunks)
 		})
+		if stopped {
+			return
+		}
 		if err != nil {
 			yield(nil, err)
 			return

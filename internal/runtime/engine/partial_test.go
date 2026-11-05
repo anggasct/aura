@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/channelhost"
+	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -224,5 +225,118 @@ func TestStreamPartialReachesTheExecutor(t *testing.T) {
 				t.Errorf("executor saw StreamPartial %v, want [%v]", executor.seen, tc.want)
 			}
 		})
+	}
+}
+
+func TestDescriptorCarriesStreamPartial(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "requested", want: true},
+		{name: "not requested", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := sampleRequest("session-a", "turn-0")
+			req.StreamPartial = tc.want
+
+			desc := turnDescriptorFromRequest(req)
+			raw, err := json.Marshal(&desc)
+			if err != nil {
+				t.Fatalf("marshal descriptor: %v", err)
+			}
+			var decoded runtimesessions.Descriptor
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatalf("unmarshal descriptor: %v", err)
+			}
+
+			if got := turnRequestFromDescriptor(&decoded).StreamPartial; got != tc.want {
+				t.Errorf("StreamPartial = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDescriptorWithoutStreamPartialDecodesAsFalse(t *testing.T) {
+	legacy := []byte(`{"turn_id":"turn-0","session_id":"session-a","principal_id":"user-1","origin":"http","parts":[{"text":"hello"}],"idempotency_key":"","max_tokens":0,"max_cost":0,"trace_parent":"","agent_id":""}`)
+	var desc runtimesessions.Descriptor
+	if err := json.Unmarshal(legacy, &desc); err != nil {
+		t.Fatalf("unmarshal legacy descriptor: %v", err)
+	}
+
+	if turnRequestFromDescriptor(&desc).StreamPartial {
+		t.Error("a descriptor written before the field existed asks for streaming")
+	}
+}
+
+type gatedPartialExecutor struct {
+	partials []runtime.FakeStep
+	final    runtime.FakeStep
+}
+
+func (e *gatedPartialExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+	script := []runtime.FakeStep{e.final}
+	if req.StreamPartial {
+		script = append(slices.Clone(e.partials), e.final)
+	}
+	return runtime.NewFakeExecutor(script).Execute(ctx, req)
+}
+
+func TestDurableTurnRelaysPartialModelTextWithoutJournalingIt(t *testing.T) {
+	executor := &gatedPartialExecutor{partials: []runtime.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo")}, final: adkFinalStep("Hello")}
+	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	mustCreateSession(t, db, "session-live")
+	req := sampleRequest("session-live", "turn-durable-partial")
+	req.StreamPartial = true
+
+	live, err := collect(t, engine, req)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	wantDeltas := []runtime.ModelDelta{{Text: "Hel", Index: 0}, {Text: "lo", Index: 1}}
+	if got := decodeDeltas(t, live); !slices.Equal(got, wantDeltas) {
+		t.Errorf("deltas = %+v, want %+v", got, wantDeltas)
+	}
+	lastDelta, terminal := -1, -1
+	for i := range live {
+		switch live[i].Kind {
+		case runtime.EventKindModelDelta:
+			lastDelta = i
+		case runtime.EventKindTurnCompleted:
+			terminal = i
+		}
+	}
+	if lastDelta < 0 || lastDelta > terminal {
+		t.Errorf("deltas did not arrive before the turn ended: %v", kindsOf(live))
+	}
+	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-durable-partial")
+	if err != nil {
+		t.Fatalf("ListTurnEvents: %v", err)
+	}
+	wantStored := []string{runtime.EventKindTurnAccepted, store.EventKindADK, runtime.EventKindTurnCompleted}
+	if got := kindsOf(stored); !slices.Equal(got, wantStored) {
+		t.Errorf("stored kinds = %v, want %v", got, wantStored)
+	}
+	for i := range stored {
+		if _, partial := partialModelText(&stored[i]); partial {
+			t.Errorf("stored event %d is partial", i)
+		}
+	}
+}
+
+func TestDurableTurnWithoutStreamPartialRelaysNoDeltas(t *testing.T) {
+	executor := &gatedPartialExecutor{partials: []runtime.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo")}, final: adkFinalStep("Hello")}
+	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	mustCreateSession(t, db, "session-live")
+
+	live, err := collect(t, engine, sampleRequest("session-live", "turn-durable-plain"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := decodeDeltas(t, live); len(got) != 0 {
+		t.Errorf("deltas = %+v, want none without StreamPartial", got)
 	}
 }
