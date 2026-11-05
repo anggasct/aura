@@ -251,6 +251,13 @@ func TestMediaKindsLandInTheArtifactStore(t *testing.T) {
 			wantName: "voice.ogg",
 		},
 		{
+			name:     "voice served as a generic binary",
+			attach:   func(m *message) { m.Voice = &mediaFile{FileID: "vo", FileSize: 9, MimeType: "audio/ogg"} },
+			file:     fakeFile{id: "vo", path: "voice/file_503.oga", declared: 9, contentType: "application/octet-stream", body: []byte("ogg-voice")},
+			wantType: "audio/ogg",
+			wantName: "voice.ogg",
+		},
+		{
 			name: "video",
 			attach: func(m *message) {
 				m.Video = &mediaFile{FileID: "vi", FileSize: 9, MimeType: "video/mp4", FileName: "clip.mp4"}
