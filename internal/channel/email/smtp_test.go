@@ -160,7 +160,8 @@ func TestSMTPMailer_ClassifiesFailuresBeforeData(t *testing.T) {
 		want     ErrorCode
 	}{
 		"credentials rejected":      {behavior: smtpBehavior{authReply: "535 5.7.8 no"}, want: ErrorCodeLoginRejected},
-		"credentials deferred":      {behavior: smtpBehavior{authReply: "454 4.7.0 later"}, want: ErrorCodeSubmissionDeferred},
+		"credentials deferred":      {behavior: smtpBehavior{authReply: "454 4.7.0 later"}, want: ErrorCodeLoginRejected},
+		"starttls refused":          {behavior: smtpBehavior{startTLSReply: "454 4.7.0 later"}, want: ErrorCodeTLSRequired},
 		"no authentication offered": {behavior: smtpBehavior{noAuth: true}, want: ErrorCodeLoginRejected},
 		"sender refused":            {behavior: smtpBehavior{mailReply: "550 5.7.1 no"}, want: ErrorCodeSubmissionRejected},
 		"sender deferred":           {behavior: smtpBehavior{mailReply: "451 4.3.0 busy"}, want: ErrorCodeSubmissionDeferred},
@@ -257,6 +258,32 @@ func TestSMTPMailer_FailureAfterDataIsAmbiguousOrRejectedNeverRetriedHere(t *tes
 				if strings.Contains(err.Error(), leak) {
 					t.Errorf("error %q carries %q", err, leak)
 				}
+			}
+		})
+	}
+}
+
+func TestSMTPMailer_HandshakeFailuresAreTLSFailures(t *testing.T) {
+	cases := map[string]smtpBehavior{
+		"alert":   {handshake: "alert"},
+		"garbage": {handshake: "garbage"},
+		"stall":   {handshake: "stall"},
+	}
+	for name, behavior := range cases {
+		t.Run(name, func(t *testing.T) {
+			authority := newAuthority(t)
+			server := newFakeSMTP(t, authority)
+			server.script(behavior)
+			mailer := newTestMailer(t, server, authority)
+			mailer.stepTimeout = shortTimeout
+			wantCode(t, mailer.Submit(t.Context(), wireSubmission(t)), ErrorCodeTLSRequired)
+			for _, session := range server.sessions() {
+				if session.authenticated || slices.Contains(commandVerbs(&session), "AUTH") {
+					t.Errorf("credentials were offered after a failed handshake: %+v", session)
+				}
+			}
+			if len(server.received()) != 0 {
+				t.Error("a message was accepted")
 			}
 		})
 	}

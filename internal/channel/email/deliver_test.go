@@ -408,6 +408,8 @@ func TestDeliver_PermanentFailuresDoNotRetryAndSurfaceInHealth(t *testing.T) {
 	}{
 		"credentials rejected": {behavior: smtpBehavior{authReply: "535 5.7.8 no"}, intent: "email_login_rejected", finding: faultSMTPLogin},
 		"no starttls":          {behavior: smtpBehavior{noStartTLS: true, authBeforeTLS: true}, intent: "email_tls_required", finding: faultSMTPTLS},
+		"credentials deferred": {behavior: smtpBehavior{authReply: "454 4.7.0 later"}, intent: "email_login_rejected", finding: faultSMTPLogin},
+		"starttls deferred":    {behavior: smtpBehavior{startTLSReply: "454 4.7.0 later"}, intent: "email_tls_required", finding: faultSMTPTLS},
 		"sender refused":       {behavior: smtpBehavior{mailReply: "550 5.7.1 no"}, intent: "email_submission_rejected"},
 		"password unavailable": {mutate: func(f *deliveryFixture) { f.t.Setenv(smtpPasswordEnv, "") }, intent: "email_credentials_unavailable", finding: faultSMTPUnresolved},
 	}
@@ -768,4 +770,43 @@ func TestSubmit_CancellationDuringBackoffFailsWithoutAmbiguity(t *testing.T) {
 			t.Errorf("attempts = %d, want 1", n)
 		}
 	})
+}
+
+func TestDeliver_HandshakeFailuresFailOnceAsUnsafeTLS(t *testing.T) {
+	cases := map[string]smtpBehavior{
+		"alert":   {handshake: "alert"},
+		"garbage": {handshake: "garbage"},
+		"stall":   {handshake: "stall"},
+	}
+	for name, behavior := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newDeliveryFixture(t, behavior, behavior, behavior)
+			f.mailer.stepTimeout = shortTimeout
+			_, err := f.h.adapter.Deliver(t.Context(), f.request("turn-handshake", defaultReply(), "never sent"))
+			wantCode(t, err, ErrorCodeDeliveryFailed)
+			if got := len(f.server.sessions()); got != 1 {
+				t.Fatalf("connections = %d, want exactly 1", got)
+			}
+			f.wantIntents(map[effect.State][]string{effect.StateFailed: {"email_tls_required"}})
+			findings := f.h.adapter.Check(t.Context())
+			if len(findings) != 1 || findings[0].Code != faultSMTPTLS {
+				t.Errorf("findings = %+v, want %s", findings, faultSMTPTLS)
+			}
+		})
+	}
+}
+
+func TestDeliver_TemporaryAuthFailureFailsOnce(t *testing.T) {
+	behavior := smtpBehavior{authReply: "454 4.7.0 try later"}
+	f := newDeliveryFixture(t, behavior, behavior, behavior)
+	_, err := f.h.adapter.Deliver(t.Context(), f.request("turn-auth-4xx", defaultReply(), "never sent"))
+	wantCode(t, err, ErrorCodeDeliveryFailed)
+	if got := len(f.server.sessions()); got != 1 {
+		t.Fatalf("connections = %d, want exactly 1", got)
+	}
+	f.wantIntents(map[effect.State][]string{effect.StateFailed: {"email_login_rejected"}})
+	findings := f.h.adapter.Check(t.Context())
+	if len(findings) != 1 || findings[0].Code != faultSMTPLogin {
+		t.Errorf("findings = %+v, want %s", findings, faultSMTPLogin)
+	}
 }

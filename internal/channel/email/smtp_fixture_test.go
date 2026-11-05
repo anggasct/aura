@@ -93,10 +93,12 @@ type smtpBehavior struct {
 	authBeforeTLS  bool
 	authReply      string
 	mailReply      string
+	startTLSReply  string
 	rcptReply      string
 	dataReply      string
 	finalReply     string
 	afterData      string
+	handshake      string
 	certificate    *tls.Certificate
 }
 
@@ -255,12 +257,28 @@ func (s *fakeSMTP) serve(raw net.Conn, behavior *smtpBehavior, connection *smtpC
 		case "EHLO", "HELO":
 			s.ehlo(conn, behavior, connection)
 		case "STARTTLS":
+			if behavior.startTLSReply != "" {
+				say(behavior.startTLSReply)
+				continue
+			}
 			say("220 go ahead")
 			certificate := s.certificate
 			if behavior.certificate != nil {
 				certificate = *behavior.certificate
 			}
-			secured := tls.Server(conn, &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12})
+			config := &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}
+			switch behavior.handshake {
+			case "garbage":
+				_, _ = conn.Write([]byte("this is not a tls record\r\n"))
+				return
+			case "stall":
+				<-s.done
+				return
+			case "alert":
+				config.MinVersion = tls.VersionTLS10
+				config.MaxVersion = tls.VersionTLS10
+			}
+			secured := tls.Server(conn, config)
 			if err := secured.HandshakeContext(s.t.Context()); err != nil {
 				return
 			}

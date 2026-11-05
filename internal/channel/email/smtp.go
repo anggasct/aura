@@ -106,7 +106,7 @@ func (m *smtpMailer) Submit(ctx context.Context, submission *Submission) error {
 	client, err := smtp.NewClient(&stepConn{Conn: conn, timeout: m.stepTimeout}, m.host)
 	if err != nil {
 		_ = conn.Close()
-		return classify(ErrorCodeSubmissionRejected, err)
+		return classifyCommand(err)
 	}
 	defer func() { _ = client.Close() }()
 	if err := m.secure(client, password); err != nil {
@@ -117,13 +117,13 @@ func (m *smtpMailer) Submit(ctx context.Context, submission *Submission) error {
 
 func (m *smtpMailer) secure(client *smtp.Client, password string) error {
 	if err := client.Hello(m.hello); err != nil {
-		return classify(ErrorCodeSubmissionRejected, err)
+		return classifyCommand(err)
 	}
 	if offered, _ := client.Extension("STARTTLS"); !offered {
 		return Errorf(ErrorCodeTLSRequired, "submission server does not offer STARTTLS")
 	}
 	if err := client.StartTLS(&tls.Config{ServerName: m.host, MinVersion: tls.VersionTLS12, RootCAs: m.roots}); err != nil {
-		return classify(ErrorCodeTLSRequired, err)
+		return classifyTLS(err)
 	}
 	if state, encrypted := client.TLSConnectionState(); !encrypted || !state.HandshakeComplete {
 		return Errorf(ErrorCodeTLSRequired, "submission connection is not encrypted")
@@ -132,21 +132,21 @@ func (m *smtpMailer) secure(client *smtp.Client, password string) error {
 		return Errorf(ErrorCodeLoginRejected, "submission server offers no authentication")
 	}
 	if err := client.Auth(smtp.PlainAuth("", m.username, password, m.host)); err != nil {
-		return classify(ErrorCodeLoginRejected, err)
+		return classifyAuth(err)
 	}
 	return nil
 }
 
 func transfer(client *smtp.Client, submission *Submission) error {
 	if err := client.Mail(submission.From); err != nil {
-		return classify(ErrorCodeSubmissionRejected, err)
+		return classifyCommand(err)
 	}
 	if err := client.Rcpt(submission.To); err != nil {
-		return classify(ErrorCodeSubmissionRejected, err)
+		return classifyCommand(err)
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return classify(ErrorCodeSubmissionRejected, err)
+		return classifyCommand(err)
 	}
 	if _, err := writer.Write(submission.Message); err != nil {
 		return refusal(ErrorCodeDeliveryAmbiguous, "submission outcome is unknown", err)
@@ -162,13 +162,21 @@ func transfer(client *smtp.Client, submission *Submission) error {
 	return nil
 }
 
-func classify(permanent ErrorCode, err error) error {
+func classifyCommand(err error) error {
 	var reply *textproto.Error
 	if errors.As(err, &reply) {
 		if reply.Code/smtpClassDivisor == smtpPermanentClass {
-			return Errorf(permanent, "submission server refused the command")
+			return Errorf(ErrorCodeSubmissionRejected, "submission server refused the command")
 		}
 		return Errorf(ErrorCodeSubmissionDeferred, "submission server deferred the command")
+	}
+	return refusal(ErrorCodeConnectionFailed, "submission connection failed", err)
+}
+
+func classifyTLS(err error) error {
+	var reply *textproto.Error
+	if errors.As(err, &reply) {
+		return Errorf(ErrorCodeTLSRequired, "submission server refused STARTTLS")
 	}
 	var unknownAuthority x509.UnknownAuthorityError
 	var hostname x509.HostnameError
@@ -177,7 +185,15 @@ func classify(permanent ErrorCode, err error) error {
 	if errors.As(err, &unknownAuthority) || errors.As(err, &hostname) || errors.As(err, &invalid) || errors.As(err, &verification) {
 		return &Error{Code: ErrorCodeTLSUntrusted, Detail: "submission server certificate is not trusted", Cause: err}
 	}
-	return refusal(ErrorCodeConnectionFailed, "submission connection failed", err)
+	return &Error{Code: ErrorCodeTLSRequired, Detail: "submission server did not complete a verified TLS handshake", Cause: err}
+}
+
+func classifyAuth(err error) error {
+	var reply *textproto.Error
+	if errors.As(err, &reply) {
+		return Errorf(ErrorCodeLoginRejected, "submission server refused the credentials")
+	}
+	return &Error{Code: ErrorCodeLoginRejected, Detail: "submission authentication did not complete", Cause: err}
 }
 
 func refusal(code ErrorCode, detail string, cause error) error {
