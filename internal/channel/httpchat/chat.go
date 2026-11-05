@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/genai"
+
 	"github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/channel/approval"
@@ -28,6 +30,7 @@ const (
 	rateRetryAfter     = "60"
 	answerSeparator    = "\n\n"
 	finishStop         = "stop"
+	finishLength       = "length"
 )
 
 type Session struct {
@@ -174,6 +177,7 @@ func (c *Chat) ServeChat(w http.ResponseWriter, r *http.Request, call *Call) {
 		turn.UntrustedContext = boundedHistory(request.preceding(), c.maxMessages, c.maxBytes)
 	}
 	if request.stream {
+		turn.StreamPartial = true
 		c.stream(ctx, w, caller, turn, request.includeUsage)
 		return
 	}
@@ -413,7 +417,7 @@ func (c *Chat) writeCompletion(w http.ResponseWriter, caller *Principal, outcome
 		Choices: []choice{{
 			Index:        0,
 			Message:      assistantMessage{Role: roleAssistant, Content: strings.Join(c.answerTexts(outcome.events), answerSeparator)},
-			FinishReason: finishStop,
+			FinishReason: finishReason(outcome.events),
 		}},
 		Usage: consumed,
 	})
@@ -438,4 +442,30 @@ func tokenUsage(events []store.RuntimeEvent) usage {
 	}
 	total.TotalTokens = total.PromptTokens + total.CompletionTokens
 	return total
+}
+
+func finishReason(events []store.RuntimeEvent) string {
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind != store.EventKindADK {
+			continue
+		}
+		var decoded struct {
+			Content *struct {
+				Role string `json:"role"`
+			} `json:"content"`
+			Partial      bool   `json:"partial"`
+			FinishReason string `json:"finishReason"`
+		}
+		if err := json.Unmarshal(events[i].Payload, &decoded); err != nil || decoded.Partial {
+			continue
+		}
+		if decoded.Content == nil || decoded.Content.Role != genai.RoleModel {
+			continue
+		}
+		if decoded.FinishReason == string(genai.FinishReasonMaxTokens) {
+			return finishLength
+		}
+		return finishStop
+	}
+	return finishStop
 }

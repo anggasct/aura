@@ -148,6 +148,14 @@ func serveHTTPChat(t *testing.T, server *httpchat.Server) string {
 
 func newHTTPChatHarness(t *testing.T, turnsPerMinute string) *httpChatHarness {
 	t.Helper()
+	model := &personaEvalModel{}
+	h := newHTTPChatHarnessWithModel(t, turnsPerMinute, model)
+	h.model = model
+	return h
+}
+
+func newHTTPChatHarnessWithModel(t *testing.T, turnsPerMinute string, llm adkmodel.LLM) *httpChatHarness {
+	t.Helper()
 	path := writeHTTPChatRuntimeConfig(t, turnsPerMinute)
 	cfg := mustLoadConfig(t, path)
 	db := openAccessDB(t, path)
@@ -156,9 +164,8 @@ func newHTTPChatHarness(t *testing.T, turnsPerMinute string) *httpChatHarness {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
 	passEvals(t, db, registry, "lobby", "staff")
-	model := &personaEvalModel{}
 	name := "http-chat-model-" + strings.ReplaceAll(t.Name(), "/", "-")
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return model, nil })
+	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return llm, nil })
 	events := store.NewEventStore(db)
 	executor, err := runtimeadk.NewADKExecutor("aura", name, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
@@ -179,7 +186,7 @@ func newHTTPChatHarness(t *testing.T, turnsPerMinute string) *httpChatHarness {
 		t.Fatalf("buildHTTPChat: %v", err)
 	}
 	baseURL := serveHTTPChat(t, server)
-	return &httpChatHarness{t: t, config: path, baseURL: baseURL, db: db, model: model}
+	return &httpChatHarness{t: t, config: path, baseURL: baseURL, db: db}
 }
 
 func (h *httpChatHarness) key(persona, class string) (plaintext, id string) {
