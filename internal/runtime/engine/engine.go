@@ -367,7 +367,7 @@ func isTerminalKind(kind string) bool {
 	return false
 }
 
-func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay, granted bool, err error) {
+func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest, sub *subscriber) (accepted store.RuntimeEvent, originalTurnID string, replay, granted bool, err error) {
 	if req == nil {
 		return store.RuntimeEvent{}, "", false, false, invalidArgument("turn request must not be nil")
 	}
@@ -413,6 +413,7 @@ func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted 
 		e.releasePending()
 		return store.RuntimeEvent{}, "", false, false, err
 	}
+	var queued bool
 	if req.IdempotencyKey != "" {
 		err = sq.lock(func() error {
 			seq, seqErr := e.nextSequence(ctx, req.SessionID)
@@ -423,31 +424,40 @@ func (e *Engine) claim(ctx context.Context, req *runtime.TurnRequest) (accepted 
 			var created bool
 			originalTurnID, created, seqErr = e.dedupe.Accept(ctx, string(req.Origin), req.IdempotencyKey, time.Now().Add(dedupeWindow), &accepted)
 			replay = !created
+			if seqErr == nil && created {
+				queued = e.enqueue(ctx, req, &accepted, sub)
+			}
 			return seqErr
 		})
 		if err != nil {
 			e.releasePending()
 			return store.RuntimeEvent{}, "", false, false, codedError(runtime.ErrorCodeStorageUnavailable, "dedupe claim failed", err)
 		}
-		return accepted, originalTurnID, replay, false, nil
-	}
-
-	err = sq.lock(func() error {
-		seq, seqErr := e.nextSequence(ctx, req.SessionID)
-		if seqErr != nil {
-			return seqErr
+	} else {
+		err = sq.lock(func() error {
+			seq, seqErr := e.nextSequence(ctx, req.SessionID)
+			if seqErr != nil {
+				return seqErr
+			}
+			accepted.Sequence = seq
+			if appendErr := e.events.Append(ctx, &accepted); appendErr != nil {
+				return appendErr
+			}
+			queued = e.enqueue(ctx, req, &accepted, sub)
+			return nil
+		})
+		if err != nil {
+			e.releasePending()
+			return store.RuntimeEvent{}, "", false, false, codedError(runtime.ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
 		}
-		accepted.Sequence = seq
-		return e.events.Append(ctx, &accepted)
-	})
-	if err != nil {
-		e.releasePending()
-		return store.RuntimeEvent{}, "", false, false, codedError(runtime.ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
 	}
-	return accepted, "", false, false, nil
+	if queued {
+		e.schedule(ctx)
+	}
+	return accepted, originalTurnID, replay, false, nil
 }
 
-func (e *Engine) enqueue(ctx context.Context, req *runtime.TurnRequest, accepted *store.RuntimeEvent, sub *subscriber) {
+func (e *Engine) enqueue(ctx context.Context, req *runtime.TurnRequest, accepted *store.RuntimeEvent, sub *subscriber) bool {
 	subs := map[*subscriber]struct{}{}
 	if sub != nil {
 		subs[sub] = struct{}{}
@@ -467,21 +477,20 @@ func (e *Engine) enqueue(ctx context.Context, req *runtime.TurnRequest, accepted
 		e.mu.Unlock()
 		e.releasePending()
 		go e.terminateQueued(context.WithoutCancel(ctx), t)
-		return
+		return false
 	}
 	e.sessions[req.SessionID].queue = append(e.sessions[req.SessionID].queue, t)
 	e.turns[req.TurnID] = t
 	e.mu.Unlock()
-
-	e.schedule(ctx)
+	return true
 }
 
 func (e *Engine) submit(ctx context.Context, req *runtime.TurnRequest) (*subscriber, error) {
-	accepted, originalTurnID, replay, granted, err := e.claim(ctx, req)
+	sub := newSubscriber()
+	accepted, originalTurnID, replay, granted, err := e.claim(ctx, req, sub)
 	if err != nil {
 		return nil, err
 	}
-	sub := newSubscriber()
 	if replay {
 		e.releasePending()
 		go e.replay(ctx, originalTurnID, sub)
@@ -489,9 +498,7 @@ func (e *Engine) submit(ctx context.Context, req *runtime.TurnRequest) (*subscri
 	}
 	if e.sessionStore != nil {
 		e.stageDurable(ctx, req, &accepted, sub, granted)
-		return sub, nil
 	}
-	e.enqueue(ctx, req, &accepted, sub)
 	return sub, nil
 }
 

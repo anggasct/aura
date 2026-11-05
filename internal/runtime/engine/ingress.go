@@ -20,7 +20,7 @@ func (e *Engine) Accept(ctx context.Context, env *runtimeingress.IngressEnvelope
 	if err != nil {
 		return runtimeingress.TurnRef{}, err
 	}
-	accepted, originalTurnID, replay, granted, err := e.claim(ctx, req)
+	accepted, originalTurnID, replay, granted, err := e.claim(ctx, req, nil)
 	if err != nil {
 		return runtimeingress.TurnRef{}, err
 	}
@@ -32,7 +32,6 @@ func (e *Engine) Accept(ctx context.Context, env *runtimeingress.IngressEnvelope
 		e.stageDurable(ctx, req, &accepted, nil, granted)
 		return runtimeingress.TurnRef{TurnID: req.TurnID, SessionID: req.SessionID}, nil
 	}
-	e.enqueue(ctx, req, &accepted, nil)
 	return runtimeingress.TurnRef{TurnID: req.TurnID, SessionID: req.SessionID}, nil
 }
 
