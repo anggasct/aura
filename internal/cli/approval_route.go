@@ -17,6 +17,11 @@ type ownerApprover interface {
 type approvalAdapter interface {
 	approvalChannel
 	ownerApprover
+	ownerHandoffNotifier
+}
+
+type personaServer interface {
+	ServesPersona(persona string) bool
 }
 
 type ownerApprovalRouter struct {
@@ -45,14 +50,18 @@ func (r *ownerApprovalRouter) DecideForOwner(ctx context.Context, prompt *approv
 }
 
 func (r *ownerApprovalRouter) ordered(persona string) []ownerApprover {
-	serving := make([]ownerApprover, 0, len(r.approvers))
-	rest := make([]ownerApprover, 0, len(r.approvers))
-	for _, approver := range r.approvers {
-		if approver.ServesPersona(persona) {
-			serving = append(serving, approver)
+	return servingFirst(r.approvers, persona)
+}
+
+func servingFirst[T personaServer](candidates []T, persona string) []T {
+	serving := make([]T, 0, len(candidates))
+	rest := make([]T, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.ServesPersona(persona) {
+			serving = append(serving, candidate)
 			continue
 		}
-		rest = append(rest, approver)
+		rest = append(rest, candidate)
 	}
 	return append(serving, rest...)
 }

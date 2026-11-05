@@ -126,7 +126,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			builtin.SetHandoffOpener(newHandoffService(db, handoffNotifiers(channelAdapters)))
+			notifiers := handoffNotifiers(channelAdapters)
+			if httpApprovals != nil {
+				notifiers = append(notifiers, newHTTPHandoffNotifier(httpApprovals, approvalAdapters))
+			}
+			builtin.SetHandoffOpener(newHandoffService(db, notifiers))
 			var mcpServers *mcpRuntime
 			if mcpServersConfigured(cfg) {
 				mcpServers, err = startConfiguredMCP(ctx, cfg, builtin.Broker(), logger, pipeline.MeterProvider(), mapCapabilityStatuses(result.CapabilityReport), agentRegistry.Definitions())

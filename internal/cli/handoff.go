@@ -122,6 +122,8 @@ func deliverToHandoff(ctx context.Context, cfg *config.Config, handoff *store.Ha
 			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", handoff.Account)}
 		}
 		return deliverTelegramText(ctx, account, handoff.ReplyChannelID, handoff.ReplyThreadID, text)
+	case store.HandoffChannelHTTP:
+		return nil
 	case store.HandoffChannelDiscord:
 		account, ok := discordAccount(cfg, handoff.Account)
 		if !ok {
@@ -145,7 +147,7 @@ func openHandoff(ctx context.Context, db *sql.DB, sessionID string) (store.Hando
 }
 
 func appendPersonaReply(ctx context.Context, db *sql.DB, handoff *store.Handoff, author, text string, at time.Time) error {
-	return appendSessionText(ctx, db, handoff.SessionID, fmt.Sprintf("handoff-reply-%d", at.UnixNano()), author, text, at)
+	return appendSessionText(ctx, db, handoff.SessionID, store.HandoffReplyEventID(at), author, text, at)
 }
 
 func sessionEventWithText(id, author, text string, at time.Time) *session.Event {
