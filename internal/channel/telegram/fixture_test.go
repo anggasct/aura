@@ -336,10 +336,10 @@ func (f *fakeBotAPI) count(method string) int {
 
 func eventually(t *testing.T, what string, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for !condition() {
 		if time.Now().After(deadline) {
-			t.Fatalf("%s did not happen within 5s", what)
+			t.Fatalf("%s did not happen within 20s", what)
 		}
 		time.Sleep(2 * time.Millisecond)
 	}

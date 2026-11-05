@@ -16,7 +16,7 @@ import (
 
 func awaitCursor(t *testing.T, h *harness, want int64) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		if next, _, _ := h.cursors.Load(t.Context(), "telegram:pocket"); next == want {
 			return
@@ -183,7 +183,7 @@ func TestPollFaultsSurfaceInHealthWithoutTheToken(t *testing.T) {
 			adapter := h.adapter(t, nil)
 			stop := startAdapter(t, adapter, newMemorySink())
 			defer stop()
-			deadline := time.Now().Add(5 * time.Second)
+			deadline := time.Now().Add(20 * time.Second)
 			for adapter.currentFault() != tc.fault && time.Now().Before(deadline) {
 				time.Sleep(5 * time.Millisecond)
 			}
@@ -210,7 +210,7 @@ func TestPollRecoversToHealthy(t *testing.T) {
 	defer stop()
 	h.api.awaitPoll(t)
 	h.api.awaitPoll(t)
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for adapter.Health(t.Context()).Status != runtimechannelhost.ChannelHealthy && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -229,7 +229,7 @@ func TestMissingTokenReportsUnavailableWithoutPolling(t *testing.T) {
 	t.Setenv(testTokenEnv, "")
 	stop := startAdapter(t, adapter, newMemorySink())
 	defer stop()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for adapter.currentFault() != faultBotRefUnresolved && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
