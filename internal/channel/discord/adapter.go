@@ -2,7 +2,6 @@ package discord
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
@@ -112,10 +112,7 @@ type Adapter struct {
 	secretVault    *secret.Vault
 	typingRefresh  time.Duration
 	statusAfter    time.Duration
-	approvalsMu    sync.Mutex
-	approvals      map[string]*pendingApproval
-	seen           map[string]struct{}
-	approvalKey    [32]byte
+	approvals      *approval.Registry
 	targetsMu      sync.Mutex
 	targets        map[string]approvalBinding
 	access         AccessSettings
@@ -224,9 +221,9 @@ func New(cfg *config.Discord, account *config.DiscordAccount, resumes ResumeStor
 	if err != nil {
 		return nil, err
 	}
-	var approvalKey [32]byte
-	if _, err := rand.Read(approvalKey[:]); err != nil {
-		return nil, Errorf(ErrorCodeConnectionFailed, "approval token key is unavailable")
+	approvals, err := approval.NewRegistry()
+	if err != nil {
+		return nil, ErrorWrapf(ErrorCodeConnectionFailed, err, "approval token key is unavailable")
 	}
 	adapter := &Adapter{
 		cfg:            cfg,
@@ -243,9 +240,7 @@ func New(cfg *config.Discord, account *config.DiscordAccount, resumes ResumeStor
 		httpClient:     &http.Client{Timeout: mediaTimeout},
 		gate:           newEditGate(time.Duration(cfg.MinEditInterval)),
 		posted:         map[string][]string{},
-		approvals:      map[string]*pendingApproval{},
-		seen:           map[string]struct{}{},
-		approvalKey:    approvalKey,
+		approvals:      approvals,
 		targets:        map[string]approvalBinding{},
 		ownerDMs:       map[string]string{},
 		triggerThreads: map[string]string{},

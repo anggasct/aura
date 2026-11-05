@@ -3,54 +3,21 @@ package discord
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 )
 
-const (
-	approvalTokenPrefix    = "aura"
-	approvalTokenBytes     = 8
-	approvalMacBytes       = 8
-	approvalActionOk       = "a"
-	approvalActionDeny     = "r"
-	approvalActionStanding = "s"
-)
+const approvalHTTPBytes = 1 << 16
 
-const (
-	maxTrackedApprovals  = 1024
-	maxSeenInteractions  = 4096
-	approvalFallbackTTL  = 5 * time.Minute
-	approvalCardArgRunes = 1200
-	approvalHTTPBytes    = 1 << 16
-)
-
-type ApprovalPrompt struct {
-	ToolName       string
-	ToolVersion    string
-	SessionID      string
-	TurnID         string
-	PrincipalID    string
-	Arguments      string
-	Network        bool
-	Timeout        time.Duration
-	MaxOutputBytes int64
-	PolicyVersion  string
-	ReasonCode     string
-	ExpiresAt      time.Time
-}
+type ApprovalPrompt = approval.Prompt
 
 type approvalBinding struct {
 	principal string
@@ -62,18 +29,20 @@ type approvalBinding struct {
 	standing  bool
 }
 
-type approvalOutcome struct {
-	accepted bool
-	standing bool
+func (b *approvalBinding) shared() *approval.Binding {
+	return &approval.Binding{
+		Principal: b.principal,
+		Class:     b.class,
+		Persona:   b.persona,
+		Actor:     b.actor,
+		Scope:     [2]string{b.guildID, b.channelID},
+		Standing:  b.standing,
+	}
 }
 
-type pendingApproval struct {
-	binding     approvalBinding
-	expiresAt   time.Time
-	decided     bool
-	result      chan approvalOutcome
-	cardChannel string
-	cardMessage string
+type cardRef struct {
+	channel string
+	message string
 }
 
 func (a *Adapter) rememberTarget(conversationID string, binding *approvalBinding) {
@@ -100,75 +69,6 @@ func (a *Adapter) lookupTarget(conversationID string) (approvalBinding, bool) {
 	return binding, ok
 }
 
-func (a *Adapter) approvalMAC(tokenID, action string, binding *approvalBinding, expiryUnix int64) string {
-	mac := hmac.New(sha256.New, a.approvalKey[:])
-	_, _ = mac.Write([]byte(tokenID + "|" + action + "|" + binding.actor + "|" + binding.guildID + "|" + binding.channelID + "|" + strconv.FormatInt(expiryUnix, 10)))
-	return hex.EncodeToString(mac.Sum(nil)[:approvalMacBytes])
-}
-
-func approvalCustomID(tokenID, action, mac string) string {
-	return approvalTokenPrefix + ":" + tokenID + ":" + action + ":" + mac
-}
-
-func parseApprovalCustomID(raw string) (tokenID, action, mac string, ok bool) {
-	parts := strings.Split(raw, ":")
-	if len(parts) != 4 || parts[0] != approvalTokenPrefix {
-		return "", "", "", false
-	}
-	tokenID, action, mac = parts[1], parts[2], parts[3]
-	if len(tokenID) != approvalTokenBytes*2 || len(mac) != approvalMacBytes*2 {
-		return "", "", "", false
-	}
-	if action != approvalActionOk && action != approvalActionDeny && action != approvalActionStanding {
-		return "", "", "", false
-	}
-	if !isHex(tokenID) || !isHex(mac) {
-		return "", "", "", false
-	}
-	return tokenID, action, mac, true
-}
-
-func isHex(value string) bool {
-	for i := range len(value) {
-		c := value[i]
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func (a *Adapter) issueApproval(binding *approvalBinding, expiresAt time.Time) (tokenID string, pending *pendingApproval, err error) {
-	var raw [approvalTokenBytes]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", nil, err
-	}
-	tokenID = hex.EncodeToString(raw[:])
-	pending = &pendingApproval{
-		binding:   *binding,
-		expiresAt: expiresAt,
-		result:    make(chan approvalOutcome, 1),
-	}
-	a.approvalsMu.Lock()
-	defer a.approvalsMu.Unlock()
-	if len(a.approvals) >= maxTrackedApprovals {
-		for drop := range a.approvals {
-			delete(a.approvals, drop)
-			break
-		}
-	}
-	a.approvals[tokenID] = pending
-	return tokenID, pending, nil
-}
-
-func (a *Adapter) dropApproval(tokenID string, pending *pendingApproval) {
-	a.approvalsMu.Lock()
-	defer a.approvalsMu.Unlock()
-	if current, ok := a.approvals[tokenID]; ok && current == pending {
-		delete(a.approvals, tokenID)
-	}
-}
-
 func (a *Adapter) Decide(ctx context.Context, prompt *ApprovalPrompt) (bool, error) {
 	if ctx == nil {
 		return false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
@@ -190,21 +90,21 @@ func (a *Adapter) Decide(ctx context.Context, prompt *ApprovalPrompt) (bool, err
 	if !ok {
 		return false, ctx.Err()
 	}
-	outcome, _, err := a.awaitApproval(ctx, card.token, card.tokenID, card.pending, card.expiresAt)
-	return outcome.accepted, err
+	outcome, _, err := a.awaitApproval(ctx, card.token, card.tokenID, card.pending, card.ref)
+	return outcome.Accepted, err
 }
 
 type openedCard struct {
-	token     string
-	tokenID   string
-	pending   *pendingApproval
-	expiresAt time.Time
+	token   string
+	tokenID string
+	pending *approval.Pending
+	ref     cardRef
 }
 
 func (a *Adapter) openChannelCard(ctx context.Context, prompt *ApprovalPrompt, binding *approvalBinding) (openedCard, bool) {
 	expiresAt := prompt.ExpiresAt
 	if expiresAt.IsZero() {
-		expiresAt = time.Now().Add(approvalFallbackTTL)
+		expiresAt = time.Now().Add(approval.FallbackTTL)
 	}
 	if !time.Now().Before(expiresAt) {
 		return openedCard{}, false
@@ -214,19 +114,18 @@ func (a *Adapter) openChannelCard(ctx context.Context, prompt *ApprovalPrompt, b
 		a.logger.WarnContext(ctx, "approval token unavailable", "component", "discord")
 		return openedCard{}, false
 	}
-	tokenID, pending, err := a.issueApproval(binding, expiresAt)
+	tokenID, pending, err := a.approvals.Issue(binding.shared(), expiresAt)
 	if err != nil {
 		a.logger.WarnContext(ctx, "approval token mint failed", "component", "discord")
 		return openedCard{}, false
 	}
-	cardID, err := a.postApprovalCard(ctx, token, binding.channelID, renderApprovalCard(prompt, ""), tokenID, binding, expiresAt)
+	cardID, err := a.postApprovalCard(ctx, token, binding.channelID, renderApprovalCard(prompt, ""), tokenID, pending)
 	if err != nil {
-		a.dropApproval(tokenID, pending)
+		a.approvals.Drop(tokenID, pending)
 		a.logger.WarnContext(ctx, "approval card delivery failed", "component", "discord")
 		return openedCard{}, false
 	}
-	a.trackApprovalCard(pending, binding.channelID, cardID)
-	return openedCard{token: token, tokenID: tokenID, pending: pending, expiresAt: expiresAt}, true
+	return openedCard{token: token, tokenID: tokenID, pending: pending, ref: cardRef{channel: binding.channelID, message: cardID}}, true
 }
 
 func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, requester *approvalBinding) (bool, error) {
@@ -236,22 +135,22 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 	}
 	owners := a.owners.OwnerExternalIDs(principal.ChannelDiscord)
 	if len(owners) == 0 {
-		a.observeRouted(ctx, ApprovalRoutedUnavailable)
+		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, Errorf(ErrorCodeApprovalUnavailable, "owner has no discord identity")
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
-		a.observeRouted(ctx, ApprovalRoutedUnavailable)
+		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, Errorf(ErrorCodeApprovalUnavailable, "approval token is unavailable")
 	}
 	ownerID := owners[0]
 	dmChannel, err := a.ownerDMChannel(ctx, token, ownerID)
 	if err != nil {
-		a.observeRouted(ctx, ApprovalRoutedUnavailable)
+		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, Errorf(ErrorCodeApprovalUnavailable, "owner dm channel is unavailable")
 	}
 	now := time.Now()
-	expiresAt := now.Add(a.ownerApprovalTimeout(&definition))
+	expiresAt := now.Add(approval.OwnerTimeout(definition.ApprovalTimeout, a.access.ApprovalTimeout))
 	if !prompt.ExpiresAt.IsZero() && prompt.ExpiresAt.Before(expiresAt) {
 		expiresAt = prompt.ExpiresAt
 	}
@@ -266,24 +165,23 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 		channelID: dmChannel,
 		standing:  a.offersStandingGrant(requester.class),
 	}
-	tokenID, pending, err := a.issueApproval(&binding, expiresAt)
+	tokenID, pending, err := a.approvals.Issue(binding.shared(), expiresAt)
 	if err != nil {
-		a.observeRouted(ctx, ApprovalRoutedUnavailable)
+		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, Errorf(ErrorCodeApprovalUnavailable, "approval token mint failed")
 	}
-	cardID, err := a.postApprovalCard(ctx, token, dmChannel, renderApprovalCard(prompt, personaLabel(&definition)), tokenID, &binding, expiresAt)
+	cardID, err := a.postApprovalCard(ctx, token, dmChannel, renderApprovalCard(prompt, personaLabel(&definition)), tokenID, pending)
 	if err != nil {
-		a.dropApproval(tokenID, pending)
-		a.observeRouted(ctx, ApprovalRoutedUnavailable)
+		a.approvals.Drop(tokenID, pending)
+		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, Errorf(ErrorCodeApprovalUnavailable, "owner approval card delivery failed")
 	}
-	a.trackApprovalCard(pending, dmChannel, cardID)
 	a.postNotice(ctx, token, requester.channelID, definition.Message(config.MessageWaitingForOwner))
-	outcome, timedOut, err := a.awaitApproval(ctx, token, tokenID, pending, expiresAt)
+	outcome, timedOut, err := a.awaitApproval(ctx, token, tokenID, pending, cardRef{channel: dmChannel, message: cardID})
 	notify := context.WithoutCancel(ctx)
 	switch {
 	case timedOut || errors.Is(err, context.DeadlineExceeded):
-		a.observeRouted(ctx, ApprovalRoutedTimeout)
+		a.observeRouted(ctx, approval.RoutedTimeout)
 		a.postNotice(notify, token, requester.channelID, definition.Message(config.MessageApprovalTimeout))
 		if err != nil {
 			return false, err
@@ -291,8 +189,8 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 		return false, Errorf(ErrorCodeApprovalTimeout, "owner did not answer the approval in time")
 	case err != nil:
 		return false, err
-	case outcome.standing:
-		a.observeRouted(ctx, ApprovalRoutedStanding)
+	case outcome.Standing:
+		a.observeRouted(ctx, approval.RoutedStanding)
 		if recordErr := a.access.Grants.RecordStandingGrant(notify, &StandingGrantRequest{
 			PrincipalID: requester.principal,
 			AgentID:     requester.persona,
@@ -303,83 +201,42 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 			a.logger.WarnContext(ctx, "standing grant record failed", "component", "discord")
 		}
 		return true, nil
-	case outcome.accepted:
-		a.observeRouted(ctx, ApprovalRoutedApproved)
+	case outcome.Accepted:
+		a.observeRouted(ctx, approval.RoutedApproved)
 		return true, nil
 	default:
-		a.observeRouted(ctx, ApprovalRoutedRejected)
+		a.observeRouted(ctx, approval.RoutedRejected)
 		a.postNotice(notify, token, requester.channelID, definition.Message(config.MessageApprovalDenied))
 		return false, nil
 	}
 }
 
-func (a *Adapter) trackApprovalCard(pending *pendingApproval, channelID, messageID string) {
-	a.approvalsMu.Lock()
-	pending.cardChannel = channelID
-	pending.cardMessage = messageID
-	a.approvalsMu.Unlock()
-}
-
-func (a *Adapter) awaitApproval(ctx context.Context, token, tokenID string, pending *pendingApproval, expiresAt time.Time) (outcome approvalOutcome, timedOut bool, err error) {
-	timer := time.NewTimer(time.Until(expiresAt))
-	defer timer.Stop()
+func (a *Adapter) awaitApproval(ctx context.Context, token, tokenID string, pending *approval.Pending, card cardRef) (approval.Outcome, bool, error) {
 	defer func() {
-		a.dropApproval(tokenID, pending)
-		a.approvalsMu.Lock()
-		cardChannel, cardMessage := pending.cardChannel, pending.cardMessage
-		a.approvalsMu.Unlock()
-		a.disableApprovalCard(context.WithoutCancel(ctx), token, cardChannel, cardMessage)
+		a.disableApprovalCard(context.WithoutCancel(ctx), token, card.channel, card.message)
 	}()
-	select {
-	case outcome = <-pending.result:
-		return outcome, false, nil
-	case <-timer.C:
-		return approvalOutcome{}, true, nil
-	case <-ctx.Done():
-		return approvalOutcome{}, false, ctx.Err()
-	}
+	return a.approvals.Await(ctx, tokenID, pending)
 }
 
 func renderApprovalCard(prompt *ApprovalPrompt, persona string) string {
-	arguments := neutralizeMentions(strings.TrimSpace(prompt.Arguments))
-	if arguments == "" {
-		arguments = "{}"
-	}
-	if runes := []rune(arguments); len(runes) > approvalCardArgRunes {
-		arguments = string(runes[:approvalCardArgRunes]) + "...[truncated]"
-	}
-	var card strings.Builder
-	card.WriteString("approval required: " + neutralizeMentions(prompt.ToolName))
-	if prompt.ToolVersion != "" {
-		card.WriteString("@" + neutralizeMentions(prompt.ToolVersion))
-	}
-	if persona != "" {
-		card.WriteString("\npersona: " + neutralizeMentions(persona))
-	}
-	card.WriteString("\nsession: " + neutralizeMentions(prompt.SessionID))
-	card.WriteString("\nprincipal: " + neutralizeMentions(prompt.PrincipalID))
-	card.WriteString("\narguments: " + arguments)
-	card.WriteString("\napprove exactly this request?")
-	return card.String()
+	return approval.RenderCard(prompt, persona, neutralizeMentions)
 }
 
-func (a *Adapter) approvalButtons(tokenID string, binding *approvalBinding, expiresAt time.Time) []componentPayload {
-	expiry := expiresAt.Unix()
-	approve := approvalCustomID(tokenID, approvalActionOk, a.approvalMAC(tokenID, approvalActionOk, binding, expiry))
-	reject := approvalCustomID(tokenID, approvalActionDeny, a.approvalMAC(tokenID, approvalActionDeny, binding, expiry))
-	buttons := []buttonPayload{{Type: componentButton, Style: buttonStyleDanger, Label: "Approve", CustomID: approve}}
-	if binding.standing {
-		standing := approvalCustomID(tokenID, approvalActionStanding, a.approvalMAC(tokenID, approvalActionStanding, binding, expiry))
-		buttons = append(buttons, buttonPayload{Type: componentButton, Style: buttonStyleDanger, Label: standingGrantLabel(a.access.StandingGrantTTL), CustomID: standing})
+func (a *Adapter) approvalButtons(tokenID string, pending *approval.Pending) []componentPayload {
+	binding := pending.Binding()
+	callbacks := a.approvals.Callbacks(tokenID, &binding, pending.ExpiresAt())
+	buttons := []buttonPayload{{Type: componentButton, Style: buttonStyleDanger, Label: "Approve", CustomID: callbacks.Approve}}
+	if callbacks.Standing != "" {
+		buttons = append(buttons, buttonPayload{Type: componentButton, Style: buttonStyleDanger, Label: approval.StandingGrantLabel(a.access.StandingGrantTTL), CustomID: callbacks.Standing})
 	}
-	buttons = append(buttons, buttonPayload{Type: componentButton, Style: buttonStylePrimary, Label: "Reject", CustomID: reject})
+	buttons = append(buttons, buttonPayload{Type: componentButton, Style: buttonStylePrimary, Label: "Reject", CustomID: callbacks.Reject})
 	return []componentPayload{{Type: componentActionRow, Components: buttons}}
 }
 
-func (a *Adapter) postApprovalCard(ctx context.Context, token, channelID, content, tokenID string, binding *approvalBinding, expiresAt time.Time) (string, error) {
+func (a *Adapter) postApprovalCard(ctx context.Context, token, channelID, content, tokenID string, pending *approval.Pending) (string, error) {
 	payload, err := json.Marshal(map[string]any{
 		"content":          content,
-		"components":       a.approvalButtons(tokenID, binding, expiresAt),
+		"components":       a.approvalButtons(tokenID, pending),
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	})
 	if err != nil {
@@ -459,22 +316,6 @@ func (a *Adapter) ackInteraction(ctx context.Context, interaction *interactionPa
 	_ = resp.Body.Close()
 }
 
-func (a *Adapter) noteSeenInteraction(id string) bool {
-	a.approvalsMu.Lock()
-	defer a.approvalsMu.Unlock()
-	if _, ok := a.seen[id]; ok {
-		return false
-	}
-	if len(a.seen) >= maxSeenInteractions {
-		for drop := range a.seen {
-			delete(a.seen, drop)
-			break
-		}
-	}
-	a.seen[id] = struct{}{}
-	return true
-}
-
 func (a *Adapter) resolveComponentClick(ctx context.Context, interaction *interactionPayload) {
 	if interaction == nil || interaction.ID == "" || interaction.Token == "" {
 		return
@@ -483,44 +324,11 @@ func (a *Adapter) resolveComponentClick(ctx context.Context, interaction *intera
 		return
 	}
 	defer a.ackInteraction(ctx, interaction)
-	if !a.noteSeenInteraction(interaction.ID) {
+	if !a.approvals.NoteSeen(interaction.ID) {
 		return
 	}
-	tokenID, action, mac, ok := parseApprovalCustomID(interaction.Data.CustomID)
-	if !ok {
-		return
-	}
-	a.approvalsMu.Lock()
-	pending, found := a.approvals[tokenID]
-	if found && (pending.decided || !time.Now().Before(pending.expiresAt)) {
-		if !pending.decided {
-			delete(a.approvals, tokenID)
-		}
-		a.approvalsMu.Unlock()
-		return
-	}
-	if !found {
-		a.approvalsMu.Unlock()
-		return
-	}
-	expected := a.approvalMAC(tokenID, action, &pending.binding, pending.expiresAt.Unix())
-	binding := pending.binding
-	a.approvalsMu.Unlock()
-	if subtle.ConstantTimeCompare([]byte(mac), []byte(expected)) != 1 {
-		return
-	}
-	if interaction.actorID() != binding.actor || interaction.ChannelID != binding.channelID || (binding.guildID != "" && interaction.GuildID != binding.guildID) {
-		return
-	}
-	if action == approvalActionStanding && !binding.standing {
-		return
-	}
-	a.approvalsMu.Lock()
-	if pending.decided {
-		a.approvalsMu.Unlock()
-		return
-	}
-	pending.decided = true
-	a.approvalsMu.Unlock()
-	pending.result <- approvalOutcome{accepted: action == approvalActionOk || action == approvalActionStanding, standing: action == approvalActionStanding}
+	a.approvals.Resolve(interaction.Data.CustomID, &approval.Presser{
+		Actor: interaction.actorID(),
+		Scope: [2]string{interaction.GuildID, interaction.ChannelID},
+	})
 }

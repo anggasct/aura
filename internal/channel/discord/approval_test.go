@@ -2,6 +2,7 @@ package discord
 
 import (
 	"errors"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/principal"
 
 	"context"
@@ -336,9 +337,7 @@ func TestDecide_CardPostFailureDenies(t *testing.T) {
 	if err != nil || accepted {
 		t.Errorf("Decide() = %v, %v; want deny when the card cannot post", accepted, err)
 	}
-	adapter.approvalsMu.Lock()
-	pending := len(adapter.approvals)
-	adapter.approvalsMu.Unlock()
+	pending := adapter.approvals.Len()
 	if pending != 0 {
 		t.Errorf("pending approvals = %d, want none after card failure", pending)
 	}
@@ -461,38 +460,14 @@ func TestApproval_ConcurrentClicksOneWins(t *testing.T) {
 	}
 }
 
-func TestParseApprovalCustomID(t *testing.T) {
-	cases := []struct {
-		name  string
-		raw   string
-		valid bool
-	}{
-		{"empty", "", false},
-		{"wrong prefix", "bogus:0123456789abcdef:a:0123456789abcdef", false},
-		{"short token", "aura:abc:a:0123456789abcdef", false},
-		{"bad action", "aura:0123456789abcdef:x:0123456789abcdef", false},
-		{"non-hex mac", "aura:0123456789abcdef:a:zzzzzzzzzzzzzzzz", false},
-		{"approve", "aura:0123456789abcdef:a:0123456789abcdef", true},
-		{"reject", "aura:0123456789abcdef:r:fedcba9876543210", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, _, _, ok := parseApprovalCustomID(tc.raw)
-			if ok != tc.valid {
-				t.Errorf("parse(%q) valid = %v, want %v", tc.raw, ok, tc.valid)
-			}
-		})
-	}
-}
-
 func TestRenderApprovalCardBoundsArguments(t *testing.T) {
 	prompt := testPrompt("dm:111", time.Now().Add(time.Minute))
-	prompt.Arguments = "@everyone " + strings.Repeat("x", approvalCardArgRunes+100)
+	prompt.Arguments = "@everyone " + strings.Repeat("x", approval.CardArgRunes+100)
 	card := renderApprovalCard(prompt, "")
 	if strings.Contains(card, "@everyone") {
 		t.Error("card preserves a mass mention")
 	}
-	if len([]rune(card)) > approvalCardArgRunes+512 {
+	if len([]rune(card)) > approval.CardArgRunes+512 {
 		t.Errorf("card runes = %d, want bounded arguments", len([]rune(card)))
 	}
 }

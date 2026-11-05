@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/channel/status"
 	"github.com/anggasct/aura/internal/principal"
 )
@@ -39,29 +40,28 @@ func (a *Adapter) OfferProposal(ctx context.Context, proposalID, plan string, de
 		actor:     owners[0],
 		channelID: dmChannel,
 	}
-	tokenID, pending, err := a.issueApproval(&binding, expiresAt)
+	tokenID, pending, err := a.approvals.Issue(binding.shared(), expiresAt)
 	if err != nil {
 		return Errorf(ErrorCodeApprovalUnavailable, "approval token mint failed")
 	}
 	content := proposalCardHeader + proposalID + "\n" + status.TruncateRunes(plan, proposalPlanRunes)
-	cardID, err := a.postApprovalCard(ctx, token, dmChannel, content, tokenID, &binding, expiresAt)
+	cardID, err := a.postApprovalCard(ctx, token, dmChannel, content, tokenID, pending)
 	if err != nil {
-		a.dropApproval(tokenID, pending)
+		a.approvals.Drop(tokenID, pending)
 		return Errorf(ErrorCodeApprovalUnavailable, "proposal card delivery failed")
 	}
-	a.trackApprovalCard(pending, dmChannel, cardID)
-	go a.awaitProposal(ctx, token, tokenID, pending, expiresAt, proposalID, dmChannel, decide)
+	go a.awaitProposal(ctx, token, tokenID, pending, cardRef{channel: dmChannel, message: cardID}, proposalID, decide)
 	return nil
 }
 
-func (a *Adapter) awaitProposal(ctx context.Context, token, tokenID string, pending *pendingApproval, expiresAt time.Time, proposalID, dmChannel string, decide ProposalDecider) {
-	outcome, timedOut, err := a.awaitApproval(ctx, token, tokenID, pending, expiresAt)
+func (a *Adapter) awaitProposal(ctx context.Context, token, tokenID string, pending *approval.Pending, card cardRef, proposalID string, decide ProposalDecider) {
+	outcome, timedOut, err := a.awaitApproval(ctx, token, tokenID, pending, card)
 	if timedOut || err != nil {
 		return
 	}
-	result, decideErr := decide(ctx, outcome.accepted)
+	result, decideErr := decide(ctx, outcome.Accepted)
 	if decideErr != nil {
 		result = "proposal " + proposalID + " could not be decided: " + decideErr.Error()
 	}
-	a.postNotice(ctx, token, dmChannel, result)
+	a.postNotice(ctx, token, card.channel, result)
 }
