@@ -109,7 +109,7 @@ func TestPrincipalListIncludesTelegramPrincipals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if _, _, err := store.NewPairingStore(db).ApproveChannel(t.Context(), principal.ChannelTelegram, pairingCodeDigest(issued.Code), principal.OwnerID, time.Now().UTC()); err != nil {
+	if _, _, err := store.NewPairingStore(db).Approve(t.Context(), principal.ChannelTelegram, pairingCodeDigest(issued.Code), principal.OwnerID, time.Now().UTC()); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	now := time.Now().UTC()

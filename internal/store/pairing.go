@@ -46,8 +46,7 @@ type PrincipalGrant struct {
 
 type PairingStore interface {
 	Issue(ctx context.Context, issue *PairingIssue) (string, error)
-	Approve(ctx context.Context, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error)
-	ApproveChannel(ctx context.Context, channel, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error)
+	Approve(ctx context.Context, channel, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error)
 	Pending(ctx context.Context, now time.Time) ([]PairingRequest, error)
 	ClearPending(ctx context.Context) (int64, error)
 	FailedApprovals(ctx context.Context, channel string, since time.Time) ([]time.Time, error)
@@ -123,11 +122,7 @@ VALUES (?, ?, ?, ?, ?)`,
 	return PairingIssued, nil
 }
 
-func (s *sqlitePairingStore) Approve(ctx context.Context, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error) {
-	return s.approve(ctx, "", codeSHA256, grantedBy, now)
-}
-
-func (s *sqlitePairingStore) ApproveChannel(ctx context.Context, channel, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error) {
+func (s *sqlitePairingStore) Approve(ctx context.Context, channel, codeSHA256, grantedBy string, now time.Time) (PairingRequest, bool, error) {
 	if channel == "" {
 		return PairingRequest{}, false, Errorf(ErrorCodeInvalidArgument, "pairing approval needs a channel")
 	}

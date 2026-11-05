@@ -229,7 +229,7 @@ func newPairingApproveCmd(gf *globalFlags) *cobra.Command {
 			} else if locked {
 				return &exitCodeError{code: 1, err: fmt.Errorf("pairing_locked: too many wrong codes; approvals for %s reopen at %s", channel, until.Format(time.RFC3339))}
 			}
-			request, found, err := pairings.ApproveChannel(ctx, channel, pairingCodeDigest(args[1]), principal.OwnerID, now)
+			request, found, err := pairings.Approve(ctx, channel, pairingCodeDigest(args[1]), principal.OwnerID, now)
 			if err != nil {
 				return err
 			}
