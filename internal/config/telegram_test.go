@@ -255,7 +255,7 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 			want: "accept_private_chats must be a boolean",
 		},
 		"unknown account key": {
-			yaml: account("        mode: polling\n"),
+			yaml: account("        transport: webhook\n"),
 			want: "unknown key",
 		},
 	}
@@ -427,5 +427,157 @@ func TestLoad_TelegramChatBindingMustBeQuoted(t *testing.T) {
 	_, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  telegram:\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\nbindings:\n  - persona: main\n    channel: telegram\n    account: pocket\n    chat_id: -100\n"))
 	if err == nil || !strings.Contains(err.Error(), "bindings[0].chat_id must be a quoted string") {
 		t.Fatalf("Load error = %v, want a quoted-string shape error", err)
+	}
+}
+
+func TestLoad_TelegramWebhookDefaults(t *testing.T) {
+	res, err := Load(writeDiscordConfig(t, "version: 1\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	webhook := res.Config.Channels.Telegram.Webhook
+	want := TelegramWebhook{ListenAddress: "127.0.0.1:8283", MaxBodyBytes: 1048576, MaxConnections: 4}
+	if webhook != want {
+		t.Errorf("webhook = %+v, want %+v", webhook, want)
+	}
+}
+
+func TestLoad_TelegramAccountModeDefaultsToPolling(t *testing.T) {
+	res, err := Load(writeDiscordConfig(t, "version: 1\n"+telegramOwner+`channels:
+  telegram:
+    enabled: true
+    accounts:
+      - name: pocket
+        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	account := res.Config.Channels.Telegram.Accounts[0]
+	if account.Mode != TelegramModePolling || account.WebhookMode() || res.Config.Channels.Telegram.UsesWebhook() {
+		t.Errorf("account = %+v, want polling", account)
+	}
+}
+
+func TestLoad_TelegramWebhookValid(t *testing.T) {
+	res, err := Load(writeDiscordConfig(t, "version: 1\n"+telegramOwner+`channels:
+  telegram:
+    enabled: true
+    accounts:
+      - name: pocket
+        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN
+        mode: webhook
+        webhook_secret_ref: file:///run/secrets/telegram-hook
+      - name: spare
+        bot_token_ref: env://AURA_TELEGRAM_SPARE
+    webhook:
+      listen_address: 0.0.0.0:9000
+      public_base_url: https://aura.example.com/edge
+      max_body_bytes: 2048
+      max_connections: 10
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	telegram := res.Config.Channels.Telegram
+	if !telegram.UsesWebhook() || !telegram.Accounts[0].WebhookMode() || telegram.Accounts[1].WebhookMode() {
+		t.Fatalf("accounts = %+v, want only pocket in webhook mode", telegram.Accounts)
+	}
+	if telegram.Accounts[0].WebhookSecretRef != "file:///run/secrets/telegram-hook" {
+		t.Errorf("webhook_secret_ref = %q", telegram.Accounts[0].WebhookSecretRef)
+	}
+	want := TelegramWebhook{ListenAddress: "0.0.0.0:9000", PublicBaseURL: "https://aura.example.com/edge", MaxBodyBytes: 2048, MaxConnections: 10}
+	if telegram.Webhook != want {
+		t.Errorf("webhook = %+v, want %+v", telegram.Webhook, want)
+	}
+}
+
+func TestLoad_TelegramWebhookInvalid(t *testing.T) {
+	hook := func(accountExtra, webhookBlock string) string {
+		yaml := "version: 1\n" + telegramOwner + "channels:\n  telegram:\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n" + accountExtra
+		if webhookBlock != "" {
+			yaml += "    webhook:\n" + webhookBlock
+		}
+		return yaml
+	}
+	const webhookAccount = "        mode: webhook\n        webhook_secret_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n"
+	const publicURL = "      public_base_url: https://aura.example.com\n"
+	cases := map[string]struct {
+		yaml  string
+		want  string
+		shape bool
+	}{
+		"unknown mode":                     {yaml: hook("        mode: carrier\n", ""), want: `mode "carrier" must be polling or webhook`},
+		"empty mode":                       {yaml: hook("        mode: \"\"\n", ""), want: "mode \"\" must be polling or webhook"},
+		"non string mode":                  {yaml: hook("        mode: 3\n", ""), want: "mode must be a string", shape: true},
+		"webhook without secret ref":       {yaml: hook("        mode: webhook\n", publicURL), want: "webhook_secret_ref must not be empty in webhook mode"},
+		"inline secret":                    {yaml: hook("        mode: webhook\n        webhook_secret_ref: plain\n", publicURL), want: "webhook_secret_ref must use env:// or file://"},
+		"secret ref equals own token":      {yaml: hook("        mode: webhook\n        webhook_secret_ref: env://AURA_TELEGRAM_BOT_TOKEN\n", publicURL), want: "must differ from every bot token reference"},
+		"secret ref equals other token":    {yaml: hook(webhookAccount+"      - name: spare\n        bot_token_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n", publicURL), want: "must differ from every bot token reference"},
+		"secret ref equals discord token":  {yaml: "version: 1\nchannels:\n  discord:\n    accounts:\n      - name: home\n        bot_token_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n  telegram:\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n" + webhookAccount + "    webhook:\n" + publicURL, want: "must differ from every bot token reference"},
+		"secret ref on a polling account":  {yaml: hook("        webhook_secret_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n", ""), want: "webhook_secret_ref is only valid when mode is webhook"},
+		"missing public base url":          {yaml: hook(webhookAccount, ""), want: "public_base_url is required when an account uses webhook mode"},
+		"http public base url":             {yaml: hook(webhookAccount, "      public_base_url: http://aura.example.com\n"), want: "public_base_url must use https"},
+		"loopback http public base url":    {yaml: hook(webhookAccount, "      public_base_url: http://127.0.0.1:8283\n"), want: "public_base_url must use https"},
+		"public base url with query":       {yaml: hook(webhookAccount, "      public_base_url: https://aura.example.com/?a=b\n"), want: "must not carry a query or fragment"},
+		"public base url with empty query": {yaml: hook(webhookAccount, "      public_base_url: https://aura.example.com/?\n"), want: "must not carry a query or fragment"},
+		"public base url with fragment":    {yaml: hook(webhookAccount, "      public_base_url: https://aura.example.com/#top\n"), want: "must not carry a query or fragment"},
+		"public base url with userinfo":    {yaml: hook(webhookAccount, "      public_base_url: https://user:pass@aura.example.com\n"), want: "user info is not allowed"},
+		"public base url without host":     {yaml: hook(webhookAccount, "      public_base_url: https://\n"), want: "missing host"},
+		"public base url on polling only":  {yaml: hook("", "      public_base_url: http://aura.example.com\n"), want: "public_base_url must use https"},
+		"listen address without port":      {yaml: hook("", "      listen_address: 127.0.0.1\n"), want: "listen_address must be host:port"},
+		"listen address port zero":         {yaml: hook("", "      listen_address: 127.0.0.1:0\n"), want: "listen_address port must be between 1 and 65535"},
+		"listen address port too large":    {yaml: hook("", "      listen_address: 127.0.0.1:70000\n"), want: "listen_address port must be between 1 and 65535"},
+		"listen address without host":      {yaml: hook("", "      listen_address: \":8283\"\n"), want: "listen_address must include a host"},
+		"body bound zero":                  {yaml: hook("", "      max_body_bytes: 0\n"), want: "max_body_bytes must be between 1 and 10485760"},
+		"body bound negative":              {yaml: hook("", "      max_body_bytes: -1\n"), want: "max_body_bytes must be between 1 and 10485760"},
+		"body bound above the ceiling":     {yaml: hook("", "      max_body_bytes: 10485761\n"), want: "max_body_bytes must be between 1 and 10485760"},
+		"connections zero":                 {yaml: hook("", "      max_connections: 0\n"), want: "max_connections must be between 1 and 100"},
+		"connections above the ceiling":    {yaml: hook("", "      max_connections: 101\n"), want: "max_connections must be between 1 and 100"},
+		"connections not an integer":       {yaml: hook("", "      max_connections: many\n"), want: "max_connections must be an integer", shape: true},
+		"body bound not an integer":        {yaml: hook("", "      max_body_bytes: \"1MB\"\n"), want: "max_body_bytes must be an integer", shape: true},
+		"listen address not a string":      {yaml: hook("", "      listen_address: 8283\n"), want: "listen_address must be a string", shape: true},
+		"webhook block not a mapping":      {yaml: "version: 1\nchannels:\n  telegram:\n    webhook: yes\n", want: "channels.telegram.webhook must be a mapping", shape: true},
+		"unknown webhook key":              {yaml: hook("", "      route: /x\n"), want: "unknown key", shape: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(writeDiscordConfig(t, tc.yaml))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
+			}
+			if code, ok := CodeOf(err); !tc.shape && (!ok || code != ErrorCodeConfigInvalid) {
+				t.Errorf("error code = %q, want %q", code, ErrorCodeConfigInvalid)
+			}
+		})
+	}
+}
+
+func TestMarshal_TelegramWebhookSecretStaysAReference(t *testing.T) {
+	const secretValue = "hook-secret-probe-81c4"
+	t.Setenv("AURA_TELEGRAM_WEBHOOK_SECRET", secretValue)
+	res, err := Load(writeDiscordConfig(t, "version: 1\n"+telegramOwner+`channels:
+  telegram:
+    enabled: true
+    accounts:
+      - name: pocket
+        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN
+        mode: webhook
+        webhook_secret_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET
+    webhook:
+      public_base_url: https://aura.example.com
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	dump, err := Marshal(res.Config)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(dump), secretValue) {
+		t.Errorf("config dump carries the resolved webhook secret")
+	}
+	if !strings.Contains(string(dump), "webhook_secret_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET") {
+		t.Errorf("config dump does not carry the secret reference:\n%s", dump)
 	}
 }

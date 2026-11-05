@@ -205,6 +205,18 @@ type chat struct {
 	Type string `json:"type"`
 }
 
+type setWebhookRequest struct {
+	URL            string   `json:"url"`
+	SecretToken    string   `json:"secret_token"`
+	AllowedUpdates []string `json:"allowed_updates"`
+	MaxConnections int      `json:"max_connections"`
+}
+
+type webhookInfo struct {
+	URL           string `json:"url"`
+	LastErrorDate int64  `json:"last_error_date"`
+}
+
 type getUpdatesRequest struct {
 	Offset         int64    `json:"offset,omitempty"`
 	Timeout        int      `json:"timeout"`
@@ -274,9 +286,23 @@ func (c *botClient) getUpdates(ctx context.Context, token string, offset int64, 
 	err := c.call(ctx, token, "getUpdates", getUpdatesRequest{
 		Offset:         offset,
 		Timeout:        int(timeout / time.Second),
-		AllowedUpdates: []string{"message", "callback_query"},
+		AllowedUpdates: allowedUpdates(),
 	}, &updates)
 	return updates, err
+}
+
+func allowedUpdates() []string {
+	return []string{"message", "callback_query"}
+}
+
+func (c *botClient) setWebhook(ctx context.Context, token string, req *setWebhookRequest) error {
+	return c.call(ctx, token, "setWebhook", req, nil)
+}
+
+func (c *botClient) getWebhookInfo(ctx context.Context, token string) (webhookInfo, error) {
+	var info webhookInfo
+	err := c.call(ctx, token, "getWebhookInfo", struct{}{}, &info)
+	return info, err
 }
 
 func (c *botClient) sendMessage(ctx context.Context, token string, req *sendMessageRequest) (sentMessage, error) {

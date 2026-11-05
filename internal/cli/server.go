@@ -362,6 +362,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 			}
+			if cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.UsesWebhook() {
+				telegramWebhook, err := buildTelegramWebhookServer(cfg, channelAdapters)
+				if err != nil {
+					return err
+				}
+				if err := srv.Add(telegramWebhook); err != nil {
+					return err
+				}
+			}
 			logger.InfoContext(ctx, "starting server",
 				"component", "server",
 				"host", cfg.Server.Host,

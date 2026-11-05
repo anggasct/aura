@@ -77,3 +77,53 @@ func TestBuildSecretVaultRedactsTelegramTokens(t *testing.T) {
 		t.Fatalf("vault did not redact the telegram token: %q", got)
 	}
 }
+
+func webhookTelegramConfig() config.Config {
+	cfg := enabledTelegramConfig()
+	cfg.Channels.Telegram.Accounts[0].Mode = config.TelegramModeWebhook
+	cfg.Channels.Telegram.Accounts[0].WebhookSecretRef = "env://AURA_TELEGRAM_WEBHOOK_SECRET"
+	cfg.Channels.Telegram.Webhook.PublicBaseURL = "https://aura.example.com"
+	return cfg
+}
+
+func TestBuildTelegramWebhookServer(t *testing.T) {
+	db := discordTestDB(t)
+	cases := map[string]struct {
+		cfg     config.Config
+		wantErr bool
+	}{
+		"webhook account": {cfg: webhookTelegramConfig()},
+		"polling only":    {cfg: enabledTelegramConfig(), wantErr: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ports, _, _, err := buildChannelAdapters(&tc.cfg, testRouter(t, &tc.cfg), db, t.TempDir(), nil, nil)
+			if err != nil {
+				t.Fatalf("buildChannelAdapters(): %v", err)
+			}
+			listener, err := buildTelegramWebhookServer(&tc.cfg, ports)
+			if tc.wantErr {
+				if code, ok := telegram.CodeOf(err); !ok || code != telegram.ErrorCodeInvalidArgument || listener != nil {
+					t.Fatalf("buildTelegramWebhookServer() = %v, %v; want invalid_argument", listener, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("buildTelegramWebhookServer(): %v", err)
+			}
+			if listener.Name() != "telegram-webhook" {
+				t.Errorf("Name() = %q", listener.Name())
+			}
+		})
+	}
+}
+
+func TestBuildSecretVaultRedactsTelegramWebhookSecrets(t *testing.T) {
+	t.Setenv("AURA_TELEGRAM_BOT_TOKEN", "123456:telegram-secret-probe")
+	t.Setenv("AURA_TELEGRAM_WEBHOOK_SECRET", "hook-secret-probe-66a1")
+	cfg := webhookTelegramConfig()
+	vault := buildSecretVault(&cfg)
+	if got := vault.Redact("header hook-secret-probe-66a1 leaked"); strings.Contains(got, "hook-secret-probe-66a1") {
+		t.Fatalf("vault did not redact the webhook secret: %q", got)
+	}
+}

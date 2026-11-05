@@ -223,3 +223,8 @@ channels:
       max_backoff: 1m0s
     min_edit_interval: 2s
     max_attachment_bytes: 20971520
+    webhook:
+      listen_address: 127.0.0.1:8283
+      public_base_url: ""
+      max_body_bytes: 1048576
+      max_connections: 4

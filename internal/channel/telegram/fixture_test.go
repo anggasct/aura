@@ -60,6 +60,7 @@ type fakeBotAPI struct {
 	meName  string
 	files   map[string]*fakeFile
 	fetches []string
+	hook    webhookReply
 }
 
 func newFakeBotAPI(t *testing.T) *fakeBotAPI {
@@ -153,6 +154,8 @@ func (f *fakeBotAPI) serve(w http.ResponseWriter, r *http.Request) {
 		writeOK(w, map[string]any{"message_id": int64(id)})
 	case "sendChatAction", "answerCallbackQuery", "editMessageReplyMarkup":
 		writeOK(w, true)
+	case "setWebhook", "getWebhookInfo":
+		f.serveWebhookCall(w, method)
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"ok":false,"error_code":400,"description":"unknown method"}`)
@@ -516,6 +519,11 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) adapter(t *testing.T, cursors CursorStore) *Adapter {
 	t.Helper()
+	return h.adapterWith(t, cursors, nil)
+}
+
+func (h *harness) adapterWith(t *testing.T, cursors CursorStore, configure func(*config.Telegram, *config.TelegramAccount)) *Adapter {
+	t.Helper()
 	if cursors == nil {
 		cursors = h.cursors
 	}
@@ -525,6 +533,9 @@ func (h *harness) adapter(t *testing.T, cursors CursorStore) *Adapter {
 		MaxAttachmentBytes: config.TelegramMaxAttachmentBytes,
 	}
 	account := &config.TelegramAccount{Name: "pocket", BotTokenRef: "env://" + testTokenEnv}
+	if configure != nil {
+		configure(cfg, account)
+	}
 	logger := slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	adapter, err := New(cfg, account, cursors, h.effects, h.sessions, logger)
 	if err != nil {

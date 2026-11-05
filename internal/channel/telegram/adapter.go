@@ -41,6 +41,8 @@ const (
 	faultPollConflict     = "telegram_poll_conflict"
 	faultUnreachable      = "telegram_unreachable"
 	faultIntake           = "telegram_intake_failed"
+
+	faultWebhookSecretInvalid = "telegram_webhook_secret_invalid"
 )
 
 var faultDetails = map[string]string{
@@ -49,6 +51,8 @@ var faultDetails = map[string]string{
 	faultPollConflict:     "another getUpdates poller or a webhook holds this bot",
 	faultUnreachable:      "telegram bot api is unreachable",
 	faultIntake:           "accepted updates could not be handed to the runtime",
+
+	faultWebhookSecretInvalid: "webhook secret reference does not resolve to a valid secret token",
 }
 
 type adapterState int32
@@ -106,6 +110,10 @@ type Adapter struct {
 	state      atomic.Int32
 	fault      atomic.Value
 
+	webhookRef   secret.Reference
+	webhookSlots chan struct{}
+	webhook      atomic.Pointer[webhookSession]
+
 	artifacts    MediaStore
 	images       atomic.Pointer[vision.Service]
 	ledger       UpdateLedger
@@ -151,6 +159,10 @@ func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorSt
 	if err != nil {
 		return nil, err
 	}
+	webhookRef, webhookSlots, err := webhookSettings(cfg, account)
+	if err != nil {
+		return nil, err
+	}
 	approvals, err := approval.NewRegistry()
 	if err != nil {
 		return nil, &Error{Code: ErrorCodeConnectionFailed, Detail: "approval token key is unavailable", Cause: err}
@@ -167,10 +179,14 @@ func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorSt
 		retryBase:  backoffBase,
 		rateCap:    rateLimitCap,
 		deliverSem: make(chan struct{}, maxDeliverInflight),
-		presence:   map[string]*presenceSession{},
-		holds:      map[int64]time.Time{},
-		approvals:  approvals,
-		targets:    map[string]approvalTarget{},
+
+		webhookRef:   webhookRef,
+		webhookSlots: webhookSlots,
+
+		presence:  map[string]*presenceSession{},
+		holds:     map[int64]time.Time{},
+		approvals: approvals,
+		targets:   map[string]approvalTarget{},
 
 		identityRefresh: make(chan struct{}, 1),
 		mediaTimeout:    defaultMediaTimeout,
@@ -181,13 +197,17 @@ func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorSt
 }
 
 func parseTokenRef(raw string) (secret.Reference, error) {
+	return parseSecretReference(raw, "bot token")
+}
+
+func parseSecretReference(raw, what string) (secret.Reference, error) {
 	switch {
 	case strings.HasPrefix(raw, "env://"):
 		return secret.Reference{Env: strings.TrimPrefix(raw, "env://")}, nil
 	case strings.HasPrefix(raw, "file://"):
 		return secret.Reference{File: strings.TrimPrefix(raw, "file://")}, nil
 	default:
-		return secret.Reference{}, Errorf(ErrorCodeInvalidArgument, "bot token reference must use env:// or file://")
+		return secret.Reference{}, Errorf(ErrorCodeInvalidArgument, "%s reference must use env:// or file://", what)
 	}
 }
 
@@ -251,34 +271,50 @@ func (a *Adapter) Start(ctx context.Context, sink runtimeingress.IngressSink) er
 		lookups.Go(func() { a.identityLoop(ctx) })
 	}
 	defer lookups.Wait()
+	if a.account.WebhookMode() {
+		a.webhookLoop(ctx)
+		return nil
+	}
 	a.pollLoop(ctx)
 	return nil
 }
 
 func (a *Adapter) Health(context.Context) runtimechannelhost.ChannelHealth {
+	mode := config.TelegramModePolling
+	idle := "not polling"
+	if a.account.WebhookMode() {
+		mode = config.TelegramModeWebhook
+		idle = "webhook not registered"
+	}
 	if adapterState(a.state.Load()) == stateLive {
-		return runtimechannelhost.ChannelHealth{Status: runtimechannelhost.ChannelHealthy, Detail: "polling"}
+		return runtimechannelhost.ChannelHealth{Status: runtimechannelhost.ChannelHealthy, Detail: mode}
 	}
 	if detail, ok := faultDetails[a.currentFault()]; ok {
 		return runtimechannelhost.ChannelHealth{Status: runtimechannelhost.ChannelDown, Detail: detail}
 	}
-	return runtimechannelhost.ChannelHealth{Status: runtimechannelhost.ChannelDown, Detail: "not polling"}
+	return runtimechannelhost.ChannelHealth{Status: runtimechannelhost.ChannelDown, Detail: idle}
 }
 
-func (a *Adapter) Check(context.Context) []health.Finding {
+func (a *Adapter) Check(ctx context.Context) []health.Finding {
 	fault := a.currentFault()
-	detail, ok := faultDetails[fault]
-	if !ok {
+	if detail, ok := faultDetails[fault]; ok {
+		return []health.Finding{a.finding(fault, detail)}
+	}
+	if !a.account.WebhookMode() || adapterState(a.state.Load()) != stateLive {
 		return nil
 	}
-	return []health.Finding{{
+	return a.webhookFindings(ctx)
+}
+
+func (a *Adapter) finding(code, detail string) health.Finding {
+	return health.Finding{
 		Component:   "telegram",
-		Code:        fault,
+		Code:        code,
 		Status:      health.StatusDegraded,
 		Severity:    health.SeverityWarning,
 		Detail:      fmt.Sprintf("telegram account %s: %s", a.account.Name, detail),
 		Remediation: RemediationReviewBot,
-	}}
+	}
 }
 
 func (a *Adapter) botToken() (string, bool) {

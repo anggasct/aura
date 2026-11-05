@@ -343,6 +343,9 @@ func classifyFault(err error) string {
 	if errors.Is(err, errTokenUnavailable) {
 		return faultBotRefUnresolved
 	}
+	if errors.Is(err, errWebhookSecretInvalid) {
+		return faultWebhookSecretInvalid
+	}
 	if apiErr, ok := apiErrorOf(err); ok {
 		switch apiErr.Status {
 		case http.StatusUnauthorized, http.StatusNotFound:
