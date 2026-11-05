@@ -258,8 +258,8 @@ func TestMemoryStore_SchemaAppliesLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}
-	if latest != 32 || applied != 32 {
-		t.Errorf("schema = applied %d latest %d, want 32", applied, latest)
+	if latest != 33 || applied != 33 {
+		t.Errorf("schema = applied %d latest %d, want 33", applied, latest)
 	}
 	var ftsSQL string
 	if err := db.QueryRowContext(t.Context(), `SELECT sql FROM sqlite_master WHERE name = 'memory_document_fts'`).Scan(&ftsSQL); err != nil {
