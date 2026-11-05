@@ -145,8 +145,8 @@ func containedStdioConfig() *config.MCPServer {
 		Command:        "/bin/contained-server",
 		Args:           []string{"--stdio"},
 		Environment:    map[string]string{"SERVER_MODE": "test"},
-		RequestTimeout: config.Duration(10 * time.Second),
-		StartupTimeout: config.Duration(10 * time.Second),
+		RequestTimeout: config.Duration(2 * time.Second),
+		StartupTimeout: config.Duration(15 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 }
@@ -172,8 +172,8 @@ func TestContainedStdioExchange(t *testing.T) {
 	if len(req.Environment) != 1 || req.Environment["SERVER_MODE"] != "test" {
 		t.Errorf("environment = %v, want exactly the declared map", req.Environment)
 	}
-	if req.Timeout <= 0 || req.MaxOutputBytes <= 0 {
-		t.Errorf("limits = %+v", req)
+	if req.Timeout != 2*time.Second || req.SetupTimeout != 15*time.Second || req.MaxOutputBytes <= 0 {
+		t.Errorf("limits = %+v, want request_timeout per exchange and startup_timeout for setup", req)
 	}
 	tools, err := client.DiscoverTools(ctx)
 	if err != nil {

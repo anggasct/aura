@@ -141,7 +141,7 @@ func startSessionWithCgroups(ctx context.Context, cgroups *cgroupHost, req *Sess
 		return abort(Errorf(ErrorCodeSandboxInitFailed, "attach child to cgroup: %v", pathlessCause(err)))
 	}
 
-	if err := awaitChildSetup(errR, min(req.Limits.Timeout, sessionSetupWait)); err != nil {
+	if err := awaitChildSetup(errR, setupWait(req)); err != nil {
 		return abort(err)
 	}
 	closeAll(errR)
@@ -394,6 +394,13 @@ func (ls *linuxSession) exchangeTimeout(ctx context.Context) time.Duration {
 		return timeout
 	}
 	return min(time.Until(deadline), timeout)
+}
+
+func setupWait(req *SessionRequest) time.Duration {
+	if req.SetupTimeout > 0 {
+		return req.SetupTimeout
+	}
+	return min(req.Limits.Timeout, sessionSetupWait)
 }
 
 func closeAll(files ...*os.File) {

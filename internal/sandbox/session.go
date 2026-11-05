@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 type SessionRequest struct {
@@ -18,6 +19,7 @@ type SessionRequest struct {
 	Environment     map[string]string
 	Capabilities    []string
 	Limits          Limits
+	SetupTimeout    time.Duration
 	ApprovalGrantID string
 }
 
@@ -49,6 +51,9 @@ func (r *SessionRequest) validate() error {
 	}
 	if r.Limits.Timeout <= 0 {
 		return Errorf(ErrorCodeInvalidArgument, "timeout must be positive")
+	}
+	if r.SetupTimeout < 0 {
+		return Errorf(ErrorCodeInvalidArgument, "setup timeout must not be negative")
 	}
 	return nil
 }

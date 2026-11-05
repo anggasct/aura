@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	integrationRequestTimeout = 10 * time.Second
+	integrationRequestTimeout = 3 * time.Second
 	integrationHangBound      = integrationRequestTimeout + 6*time.Second
 	integrationReapDeadline   = 10 * time.Second
 )
