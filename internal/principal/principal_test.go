@@ -182,3 +182,35 @@ func TestTelegramIDShapes(t *testing.T) {
 		}
 	}
 }
+
+func TestParseIdentityHTTPKeyPrincipal(t *testing.T) {
+	cases := map[string]struct {
+		raw     string
+		channel string
+		id      string
+		valid   bool
+	}{
+		"key id":            {raw: "http:abcdefghijkl", channel: ChannelHTTP, id: "abcdefghijkl", valid: true},
+		"key id with 2-7":   {raw: "http:a2b3c4d5e6f7", channel: ChannelHTTP, id: "a2b3c4d5e6f7", valid: true},
+		"too short":         {raw: "http:abcdefghijk"},
+		"too long":          {raw: "http:abcdefghijklm"},
+		"uppercase":         {raw: "http:ABCDEFGHIJKL"},
+		"digit outside 2-7": {raw: "http:abcdefghij01"},
+		"separator inside":  {raw: "http:abcdefg/ijkl"},
+		"empty":             {raw: "http:"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			channel, id, err := ParseIdentity(tc.raw)
+			if !tc.valid {
+				if code, ok := CodeOf(err); !ok || code != ErrorCodeIdentityInvalid {
+					t.Fatalf("code = %q, %v; want %q", code, ok, ErrorCodeIdentityInvalid)
+				}
+				return
+			}
+			if err != nil || channel != tc.channel || id != tc.id {
+				t.Fatalf("ParseIdentity() = %q, %q, %v", channel, id, err)
+			}
+		})
+	}
+}
