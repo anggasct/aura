@@ -43,6 +43,7 @@ type TurnRequest struct {
 	AgentID          string
 	Persona          *PersonaFingerprint
 	Skill            *SkillPin
+	StreamPartial    bool
 }
 
 type SkillPin = runtimeingress.SkillPin
@@ -111,6 +112,23 @@ const (
 )
 
 const AuthorSystem = "system"
+
+type ModelDelta struct {
+	Text  string `json:"text"`
+	Index uint64 `json:"index"`
+}
+
+func EncodeModelDelta(delta ModelDelta) (json.RawMessage, error) {
+	return json.Marshal(delta)
+}
+
+func DecodeModelDelta(payload json.RawMessage) (ModelDelta, bool) {
+	var delta ModelDelta
+	if err := json.Unmarshal(payload, &delta); err != nil {
+		return ModelDelta{}, false
+	}
+	return delta, true
+}
 
 const (
 	RecallEvidenceStart = "[untrusted recall evidence"

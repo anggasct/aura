@@ -43,6 +43,7 @@ func turnDescriptorFromRequest(req *runtime.TurnRequest) runtimesessions.Descrip
 		AgentID:        req.AgentID,
 		Persona:        req.Persona,
 		Skill:          req.Skill,
+		StreamPartial:  req.StreamPartial,
 	}
 }
 
@@ -66,6 +67,7 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRe
 		AgentID:        desc.AgentID,
 		Persona:        desc.Persona,
 		Skill:          desc.Skill,
+		StreamPartial:  desc.StreamPartial,
 	}
 }
 
@@ -519,10 +521,22 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	e.notifyPresenceStarted(ctx, req)
 	execErr := e.persistSkillActivation(ctx, req, journaledSkillActivation(scope, e.renderSkillActivation), persist)
 	if execErr == nil {
+		var nextDelta uint64
 		for ev, err := range e.executor.Execute(ctx, req) {
 			if err != nil {
 				execErr = err
 				break
+			}
+			if delta, partial, deltaErr := e.deltaFromPartial(t, &nextDelta, &ev); partial {
+				if deltaErr != nil {
+					execErr = deltaErr
+					break
+				}
+				if delta != nil {
+					e.broadcast(t, delta)
+					e.Publish(delta)
+				}
+				continue
 			}
 			if emitErr := persist(ctx, &ev); emitErr != nil {
 				execErr = emitErr

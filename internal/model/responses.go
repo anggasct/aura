@@ -52,7 +52,7 @@ func (openAIResponsesCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, er
 			return nil, false, nil
 		}
 		return []streamOp{{kind: opText, text: event.Delta}}, false, nil
-	case "response.completed":
+	case "response.completed", "response.incomplete":
 		if event.Response == nil {
 			return nil, false, nil
 		}
@@ -229,9 +229,15 @@ func contentToOpenAIResponsesInput(content *genai.Content) ([]openAIResponsesInp
 }
 
 type openAIResponsesResponse struct {
-	Model  string                  `json:"model"`
-	Output []openAIResponsesOutput `json:"output"`
-	Usage  *openAIResponsesUsage   `json:"usage,omitempty"`
+	Model             string                     `json:"model"`
+	Status            string                     `json:"status,omitempty"`
+	IncompleteDetails *openAIResponsesIncomplete `json:"incomplete_details,omitempty"`
+	Output            []openAIResponsesOutput    `json:"output"`
+	Usage             *openAIResponsesUsage      `json:"usage,omitempty"`
+}
+
+type openAIResponsesIncomplete struct {
+	Reason string `json:"reason"`
 }
 
 type openAIResponsesOutput struct {
@@ -296,5 +302,15 @@ func parseOpenAIResponsesValue(response openAIResponsesResponse) (*adkmodel.LLMR
 			TotalTokenCount:      response.Usage.TotalTokens,
 		}
 	}
-	return &adkmodel.LLMResponse{Content: content, ModelVersion: response.Model, UsageMetadata: usage, TurnComplete: true}, nil
+	incompleteReason := ""
+	if response.IncompleteDetails != nil {
+		incompleteReason = response.IncompleteDetails.Reason
+	}
+	return &adkmodel.LLMResponse{
+		Content:       content,
+		ModelVersion:  response.Model,
+		UsageMetadata: usage,
+		TurnComplete:  true,
+		FinishReason:  responsesFinishReason(response.Status, incompleteReason),
+	}, nil
 }

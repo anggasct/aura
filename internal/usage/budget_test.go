@@ -584,3 +584,76 @@ func TestBudgetedAttributesSpendToPersona(t *testing.T) {
 		}
 	}
 }
+
+type partialThenFinalLLM struct {
+	partials int
+}
+
+func (f *partialThenFinalLLM) Name() string { return "partial-then-final" }
+
+func (f *partialThenFinalLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		if stream {
+			for range f.partials {
+				partial := &adkmodel.LLMResponse{
+					Content: &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{{Text: "x"}}},
+					Partial: true,
+					UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+						PromptTokenCount:     50,
+						CandidatesTokenCount: 100,
+					},
+				}
+				if !yield(partial, nil) {
+					return
+				}
+			}
+		}
+		yield(&adkmodel.LLMResponse{
+			Content: &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{{Text: "x"}}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:     50,
+				CandidatesTokenCount: 100,
+			},
+			TurnComplete: true,
+		}, nil)
+	}
+}
+
+func TestBudgetedSettlesStreamedResponseOnce(t *testing.T) {
+	tests := []struct {
+		name   string
+		stream bool
+	}{
+		{name: "streaming", stream: true},
+		{name: "not streaming", stream: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			l := newTestLedger(t, 1000000, 10000000)
+			b, err := NewBudgeted(&partialThenFinalLLM{partials: 3}, l, "primary", Attribution{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := &adkmodel.LLMRequest{
+				Contents: []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hello world"}}}},
+			}
+
+			for _, err := range b.GenerateContent(context.Background(), req, tc.stream) {
+				if err != nil {
+					t.Fatalf("GenerateContent: %v", err)
+				}
+			}
+
+			entries, err := l.Entries(context.Background(), 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("entries = %d, want 1", len(entries))
+			}
+			if entries[0].InputTokens != 50 || entries[0].OutputTokens != 100 {
+				t.Errorf("usage = %d/%d, want 50/100", entries[0].InputTokens, entries[0].OutputTokens)
+			}
+		})
+	}
+}

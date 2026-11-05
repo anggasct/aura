@@ -20,6 +20,7 @@ type adkEventPayload struct {
 	Actions            session.EventActions `json:"actions"`
 	LongRunningToolIDs []string             `json:"longRunningToolIds,omitempty"`
 	Partial            bool                 `json:"partial,omitempty"`
+	FinishReason       genai.FinishReason   `json:"finishReason,omitempty"`
 }
 
 func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (RuntimeEvent, error) {
@@ -31,6 +32,7 @@ func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (RuntimeEv
 		Actions:            ev.Actions,
 		LongRunningToolIDs: ev.LongRunningToolIDs,
 		Partial:            ev.Partial,
+		FinishReason:       ev.FinishReason,
 	})
 	if err != nil {
 		return RuntimeEvent{}, fmt.Errorf("marshal adk event %s payload: %w", ev.ID, err)
@@ -85,6 +87,7 @@ func RuntimeEventToADK(e *RuntimeEvent) (*session.Event, error) {
 			Content:       payload.Content,
 			UsageMetadata: usage,
 			Partial:       payload.Partial,
+			FinishReason:  payload.FinishReason,
 		},
 		ID:                 e.ID,
 		Timestamp:          e.CreatedAt,

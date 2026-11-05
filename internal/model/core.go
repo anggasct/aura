@@ -56,7 +56,7 @@ type streamOp struct {
 	toolArgs string
 	usageIn  int32
 	usageOut int32
-	stop     string
+	finish   genai.FinishReason
 	final    *adkmodel.LLMResponse
 }
 
@@ -234,6 +234,8 @@ func (c *coreClient) do(ctx context.Context, req *adkmodel.LLMRequest, stream bo
 func (c *coreClient) stream(ctx context.Context, body io.ReadCloser, telemetry *modelTelemetry, yield func(*adkmodel.LLMResponse, error) bool) {
 	acc := &streamAccumulator{}
 	completed := false
+	terminalSeen := false
+	var terminalResponse *adkmodel.LLMResponse
 	budget := BudgetFromContext(ctx)
 	err := scanSSE(ctx, body, c.idleTimeout, func(data []byte) error {
 		if budget != nil {
@@ -256,9 +258,6 @@ func (c *coreClient) stream(ctx context.Context, body io.ReadCloser, telemetry *
 					Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: op.text}}},
 					Partial: true,
 				}
-				if op.usageIn != 0 || op.usageOut != 0 {
-					partial.UsageMetadata = usageMetadata(op.usageIn, op.usageOut)
-				}
 				if !yield(partial, nil) {
 					return errStopYield
 				}
@@ -269,28 +268,11 @@ func (c *coreClient) stream(ctx context.Context, body io.ReadCloser, telemetry *
 			case opUsage:
 				acc.setUsage(op.usageIn, op.usageOut)
 			case opStop:
-				acc.stopReason = op.stop
+				acc.finishReason = op.finish
 			case opDone:
 				completed = true
-				resp := op.final
-				if resp == nil {
-					var finalErr error
-					resp, finalErr = acc.final()
-					if finalErr != nil {
-						return finalErr
-					}
-				}
-				if budget != nil && resp != nil && resp.UsageMetadata != nil {
-					if bErr := budget.RecordTokens(ctx, int(resp.UsageMetadata.CandidatesTokenCount)); bErr != nil {
-						telemetry.finish(ctx, nil, bErr)
-						yield(nil, bErr)
-						return errStopYield
-					}
-				}
-				telemetry.finish(ctx, resp, nil)
-				if !yield(resp, nil) {
-					return errStopYield
-				}
+				terminalSeen = true
+				terminalResponse = op.final
 			}
 		}
 		if terminal {
@@ -298,6 +280,29 @@ func (c *coreClient) stream(ctx context.Context, body io.ReadCloser, telemetry *
 		}
 		return nil
 	})
+	if err == nil && terminalSeen {
+		resp := terminalResponse
+		if resp == nil {
+			var finalErr error
+			resp, finalErr = acc.final()
+			if finalErr != nil {
+				err = finalErr
+			}
+		}
+		if err == nil && budget != nil && resp != nil && resp.UsageMetadata != nil {
+			if bErr := budget.RecordTokens(ctx, int(resp.UsageMetadata.CandidatesTokenCount)); bErr != nil {
+				telemetry.finish(ctx, nil, bErr)
+				yield(nil, bErr)
+				return
+			}
+		}
+		if err == nil {
+			telemetry.finish(ctx, resp, nil)
+			if !yield(resp, nil) {
+				return
+			}
+		}
+	}
 	if err != nil && !errors.Is(err, errStopYield) {
 		if errors.Is(err, bufio.ErrTooLong) {
 			err = codedError(ErrorCodeStreamInvalid, bufio.ErrTooLong, c.codec.protocol()+": stream line exceeds the buffer cap")
@@ -307,7 +312,7 @@ func (c *coreClient) stream(ctx context.Context, body io.ReadCloser, telemetry *
 		return
 	}
 	telemetry.finishIfNeeded(ctx)
-	if !completed {
+	if !completed && !errors.Is(err, errStopYield) {
 		yield(nil, codedError(ErrorCodeStreamInvalid, ErrStreamTruncated, c.codec.protocol()+": stream ended before the terminal event"))
 	}
 }
@@ -362,7 +367,7 @@ type streamAccumulator struct {
 	toolsByIndex map[int]*toolCallAccum
 	inputTokens  int32
 	outputTokens int32
-	stopReason   string
+	finishReason genai.FinishReason
 }
 
 func (a *streamAccumulator) appendText(s string) {
@@ -438,6 +443,7 @@ func (a *streamAccumulator) final() (*adkmodel.LLMResponse, error) {
 		Content:       content,
 		ModelVersion:  a.model,
 		TurnComplete:  true,
+		FinishReason:  a.finishReason,
 		UsageMetadata: usageMetadata(a.inputTokens, a.outputTokens),
 	}, nil
 }

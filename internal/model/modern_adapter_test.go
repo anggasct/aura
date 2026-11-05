@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	adkmodel "google.golang.org/adk/v2/model"
+	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
 )
@@ -103,8 +104,11 @@ func TestGeminiStreamFixture(t *testing.T) {
 	if final == nil || !final.TurnComplete {
 		t.Fatalf("final = %+v, want a complete terminal response", final)
 	}
-	if got := final.Content.Parts[0].Text; got != " world" {
-		t.Errorf("final text = %q, want %q", got, " world")
+	if got := final.Content.Parts[0].Text; got != "Hello world" {
+		t.Errorf("final text = %q, want %q", got, "Hello world")
+	}
+	if final.FinishReason != genai.FinishReasonStop {
+		t.Errorf("final finish reason = %q, want %q", final.FinishReason, genai.FinishReasonStop)
 	}
 	if final.UsageMetadata == nil || final.UsageMetadata.TotalTokenCount != 8 {
 		t.Errorf("final usage = %+v", final.UsageMetadata)

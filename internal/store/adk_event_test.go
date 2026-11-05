@@ -26,6 +26,7 @@ func TestADKEventRoundTripPreservesRequiredFields(t *testing.T) {
 		LongRunningToolIDs: []string{"tool-call-1", "tool-call-2"},
 	}
 	original.Content = genai.NewContentFromText("final answer", genai.RoleModel)
+	original.FinishReason = genai.FinishReasonMaxTokens
 	original.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
 		PromptTokenCount:     10,
 		CandidatesTokenCount: 20,
@@ -63,6 +64,9 @@ func TestADKEventRoundTripPreservesRequiredFields(t *testing.T) {
 	}
 	if !reflect.DeepEqual(roundTripped.UsageMetadata, original.UsageMetadata) {
 		t.Errorf("UsageMetadata = %+v, want %+v", roundTripped.UsageMetadata, original.UsageMetadata)
+	}
+	if roundTripped.FinishReason != original.FinishReason {
+		t.Errorf("FinishReason = %q, want %q", roundTripped.FinishReason, original.FinishReason)
 	}
 }
 

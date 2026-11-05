@@ -115,9 +115,18 @@ type streamRun struct {
 	created      int64
 	turnID       string
 	events       []store.RuntimeEvent
-	streamed     strings.Builder
-	texts        int
+	live         *liveMessage
+	nextDelta    uint64
+	answered     strings.Builder
+	answers      int
+	messages     int
 	roleSent     bool
+}
+
+type liveMessage struct {
+	text   strings.Builder
+	opened bool
+	lost   bool
 }
 
 func (c *Chat) stream(ctx context.Context, w http.ResponseWriter, caller *Principal, turn *runtime.TurnRequest, includeUsage bool) {
@@ -128,7 +137,7 @@ func (c *Chat) stream(ctx context.Context, w http.ResponseWriter, caller *Princi
 	defer pump.Wait()
 	defer cancel()
 
-	run := &streamRun{chat: c, w: w, caller: caller, es: newEventStream(w), includeUsage: includeUsage, created: time.Now().Unix()}
+	run := &streamRun{chat: c, w: w, caller: caller, es: newEventStream(w), includeUsage: includeUsage, created: time.Now().Unix(), live: &liveMessage{}}
 	idle := time.NewTimer(c.keepalive)
 	defer idle.Stop()
 	for {
@@ -190,6 +199,9 @@ func (r *streamRun) consume(ctx context.Context, item *turnItem, open bool) (boo
 	if r.turnID == "" {
 		r.turnID = event.TurnID
 	}
+	if event.Kind == runtime.EventKindModelDelta {
+		return false, r.delta(event)
+	}
 	r.events = append(r.events, *event)
 	switch event.Kind {
 	case runtime.EventKindTurnFailed:
@@ -201,8 +213,12 @@ func (r *streamRun) consume(ctx context.Context, item *turnItem, open bool) (boo
 	if err := r.es.commit(); err != nil {
 		return true, err
 	}
-	if err := r.deliver(r.events[len(r.events)-1:]); err != nil {
+	consistent, err := r.deliver(event)
+	if err != nil {
 		return true, err
+	}
+	if !consistent {
+		return true, r.refuse(ctx, &errInternal, "stream_diverged")
 	}
 	if event.Kind == runtime.EventKindTurnCompleted {
 		return true, r.finish(ctx)
@@ -233,25 +249,67 @@ func (r *streamRun) errorEvent(ctx context.Context, spec *errorSpec, reason stri
 	return r.es.writeData(newErrorEnvelope(spec))
 }
 
-func (r *streamRun) deliver(events []store.RuntimeEvent) error {
-	for _, text := range r.chat.answerTexts(events) {
-		piece := text
-		if r.texts > 0 {
-			piece = answerSeparator + text
+func (r *streamRun) delta(event *store.RuntimeEvent) error {
+	delta, ok := runtime.DecodeModelDelta(event.Payload)
+	if !ok || delta.Index != r.nextDelta {
+		r.live.lost = true
+	}
+	if ok {
+		r.nextDelta = delta.Index + 1
+	}
+	if r.live.lost || delta.Text == "" {
+		return nil
+	}
+	piece := delta.Text
+	if !r.live.opened {
+		r.live.opened = true
+		piece = r.openMessage() + piece
+	}
+	r.live.text.WriteString(delta.Text)
+	return r.content(piece)
+}
+
+func (r *streamRun) openMessage() string {
+	separator := ""
+	if r.messages > 0 {
+		separator = answerSeparator
+	}
+	r.messages++
+	return separator
+}
+
+func (r *streamRun) deliver(event *store.RuntimeEvent) (consistent bool, err error) {
+	live := r.live
+	if event.Kind == store.EventKindADK {
+		r.live = &liveMessage{}
+	}
+	for i, text := range r.chat.answerTexts(r.events[len(r.events)-1:]) {
+		if r.answers > 0 {
+			r.answered.WriteString(answerSeparator)
 		}
-		r.texts++
+		r.answered.WriteString(text)
+		r.answers++
+		var piece string
+		if i == 0 && live.opened {
+			rest, found := strings.CutPrefix(text, live.text.String())
+			if !found {
+				return false, nil
+			}
+			piece = rest
+		} else {
+			piece = r.openMessage() + text
+		}
 		if err := r.content(piece); err != nil {
-			return err
+			return true, err
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func (r *streamRun) content(piece string) error {
 	if piece == "" {
 		return nil
 	}
-	r.streamed.WriteString(piece)
 	delta := chunkDelta{Content: piece}
 	if !r.roleSent {
 		delta.Role = roleAssistant
@@ -273,7 +331,7 @@ func (r *streamRun) chunk(choices []chunkChoice, consumed *usage) error {
 
 func (r *streamRun) finish(ctx context.Context) error {
 	answer := strings.Join(r.chat.answerTexts(r.events), answerSeparator)
-	rest, consistent := strings.CutPrefix(answer, r.streamed.String())
+	rest, consistent := strings.CutPrefix(answer, r.answered.String())
 	if !consistent {
 		return r.refuse(ctx, &errInternal, "stream_diverged")
 	}
@@ -286,7 +344,7 @@ func (r *streamRun) finish(ctx context.Context) error {
 			return err
 		}
 	}
-	reason := finishStop
+	reason := finishReason(r.events)
 	if err := r.chunk([]chunkChoice{{FinishReason: &reason}}, nil); err != nil {
 		return err
 	}

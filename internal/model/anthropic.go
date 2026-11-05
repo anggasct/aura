@@ -77,7 +77,7 @@ func (anthropicCodec) decodeStreamEvent(data []byte) ([]streamOp, bool, error) {
 		}
 	case "message_delta":
 		if event.Delta != nil && event.Delta.StopReason != "" {
-			ops = append(ops, streamOp{kind: opStop, stop: event.Delta.StopReason})
+			ops = append(ops, streamOp{kind: opStop, finish: anthropicFinishReason(event.Delta.StopReason)})
 		}
 		if event.Usage != nil {
 			ops = append(ops, streamOp{kind: opUsage, usageOut: event.Usage.OutputTokens})
@@ -321,6 +321,7 @@ func parseAnthropicResponse(body []byte) (*adkmodel.LLMResponse, error) {
 		Content:       c,
 		ModelVersion:  resp.Model,
 		TurnComplete:  true,
+		FinishReason:  anthropicFinishReason(resp.StopReason),
 		UsageMetadata: anthropicUsageToMetadata(&resp.Usage),
 	}, nil
 }
