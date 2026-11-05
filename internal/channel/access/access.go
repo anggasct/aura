@@ -60,6 +60,7 @@ const (
 	DropEmptyContent       = "empty_content"
 	DropAuthorNotAllowed   = "author_not_allowed"
 	DropPairing            = "pairing"
+	DropNotMentioned       = "not_mentioned"
 	DropPersonaUnrouted    = "persona_unrouted"
 	DropAudience           = "audience"
 	DropPersonaEvalMissing = "persona_eval_missing"

@@ -256,6 +256,7 @@ type TelegramAccount struct {
 	BotTokenRef        string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
 	Persona            string   `koanf:"persona" yaml:"persona,omitempty"`
 	AllowedUserIDs     []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
+	AllowedChatIDs     []string `koanf:"allowed_chat_ids" yaml:"allowed_chat_ids"`
 	AcceptPrivateChats bool     `koanf:"accept_private_chats" yaml:"accept_private_chats"`
 }
 
@@ -275,6 +276,7 @@ type Binding struct {
 	Account   string `koanf:"account" yaml:"account"`
 	GuildID   string `koanf:"guild_id" yaml:"guild_id,omitempty"`
 	ChannelID string `koanf:"channel_id" yaml:"channel_id,omitempty"`
+	ChatID    string `koanf:"chat_id" yaml:"chat_id,omitempty"`
 	ThreadID  string `koanf:"thread_id" yaml:"thread_id,omitempty"`
 	UserID    string `koanf:"user_id" yaml:"user_id,omitempty"`
 }

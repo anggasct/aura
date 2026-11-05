@@ -13,6 +13,9 @@ const (
 	dropAuthorMissing        dropReason = "author_missing"
 	dropAuthorBot            dropReason = access.DropAuthorBot
 	dropChatNotSupported     dropReason = "chat_not_supported"
+	dropChatNotAllowed       dropReason = "chat_not_allowed"
+	dropBotIdentityUnknown   dropReason = "bot_identity_unknown"
+	dropNotMentioned         dropReason = access.DropNotMentioned
 	dropEmptyContent         dropReason = access.DropEmptyContent
 	dropAuthorNotAllowed     dropReason = access.DropAuthorNotAllowed
 	dropPrivateChatsDisabled dropReason = "private_chats_disabled"

@@ -151,3 +151,33 @@ func TestClassForPrincipal(t *testing.T) {
 		}
 	}
 }
+
+func TestTelegramIDShapes(t *testing.T) {
+	cases := []struct {
+		id                 string
+		user, topic, group bool
+	}{
+		{"7", true, true, false},
+		{"-1001234567890", false, false, true},
+		{"0", false, false, false},
+		{"-0", false, false, false},
+		{"-007", false, false, false},
+		{"+7", false, false, false},
+		{"7.0", false, false, false},
+		{"", false, false, false},
+		{"abc", false, false, false},
+		{"9223372036854775808", false, false, false},
+		{"-9223372036854775809", false, false, false},
+	}
+	for _, tc := range cases {
+		if got := IsTelegramUserID(tc.id); got != tc.user {
+			t.Errorf("IsTelegramUserID(%q) = %v, want %v", tc.id, got, tc.user)
+		}
+		if got := IsTelegramTopicID(tc.id); got != tc.topic {
+			t.Errorf("IsTelegramTopicID(%q) = %v, want %v", tc.id, got, tc.topic)
+		}
+		if got := IsTelegramGroupChatID(tc.id); got != tc.group {
+			t.Errorf("IsTelegramGroupChatID(%q) = %v, want %v", tc.id, got, tc.group)
+		}
+	}
+}

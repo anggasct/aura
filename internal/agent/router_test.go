@@ -170,3 +170,55 @@ func TestRouterResolvesTelegramAccountsAndUserBindings(t *testing.T) {
 		t.Fatalf("telegram binding resolved for a discord scope: %+v", match)
 	}
 }
+
+func telegramBinding(persona string, match config.Binding) config.Binding {
+	match.Persona = persona
+	match.Channel = config.BindingChannelTelegram
+	match.Account = "pocket"
+	return match
+}
+
+func TestRouterScoresTelegramChatBindings(t *testing.T) {
+	router := routerFixture(t, []config.Binding{
+		telegramBinding("engineer", config.Binding{ChatID: "-100"}),
+		telegramBinding("reviewer", config.Binding{ChatID: "-100", ThreadID: "5"}),
+		telegramBinding("researcher", config.Binding{ChatID: "-100", UserID: "7"}),
+		telegramBinding("reviewer", config.Binding{UserID: "8"}),
+		discordBinding("engineer", "home", config.Binding{ChatID: "-100"}),
+	})
+	cases := []struct {
+		name        string
+		scope       RouteScope
+		wantPersona string
+		wantScore   int
+		wantBinding int
+	}{
+		{"user beats topic and chat", RouteScope{ChatID: "-100", ThreadID: "5", UserID: "7"}, "researcher", ScoreUser + ScoreChat, 2},
+		{"topic beats chat", RouteScope{ChatID: "-100", ThreadID: "5", UserID: "9"}, "reviewer", ScoreThread + ScoreChat, 1},
+		{"chat binding", RouteScope{ChatID: "-100", UserID: "9"}, "engineer", ScoreChat, 0},
+		{"other topic falls back to the chat", RouteScope{ChatID: "-100", ThreadID: "6", UserID: "9"}, "engineer", ScoreChat, 0},
+		{"user binding in any chat", RouteScope{ChatID: "-200", UserID: "8"}, "reviewer", ScoreUser, 3},
+		{"unbound chat uses the account default", RouteScope{ChatID: "-200", UserID: "9"}, "researcher", ScoreAccountDefault, AccountDefaultBinding},
+		{"private chat ignores chat bindings", RouteScope{UserID: "9"}, "researcher", ScoreAccountDefault, AccountDefaultBinding},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			scope := tc.scope
+			scope.Channel, scope.Account = config.BindingChannelTelegram, "pocket"
+			match, ok := router.Resolve(&scope)
+			if !ok || match.Persona != tc.wantPersona || match.Score != tc.wantScore || match.Binding != tc.wantBinding {
+				t.Fatalf("Resolve = %+v %v, want %s score %d binding %d", match, ok, tc.wantPersona, tc.wantScore, tc.wantBinding)
+			}
+		})
+	}
+}
+
+func TestRouterChatBindingNeverMatchesDiscordScopes(t *testing.T) {
+	router := routerFixture(t, []config.Binding{
+		telegramBinding("engineer", config.Binding{ChatID: "-100"}),
+	})
+	match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelDiscord, Account: "home", ChannelID: "-100", ChatID: "-100"})
+	if !ok || match.Binding != AccountDefaultBinding {
+		t.Fatalf("Resolve = %+v %v, want the discord account default", match, ok)
+	}
+}

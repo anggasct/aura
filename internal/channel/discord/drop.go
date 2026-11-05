@@ -16,7 +16,7 @@ const (
 	dropAuthorNotAllowed   dropReason = access.DropAuthorNotAllowed
 	dropGuildNotAllowed    dropReason = "guild_not_allowed"
 	dropChannelNotAllowed  dropReason = "channel_not_allowed"
-	dropNotMentioned       dropReason = "not_mentioned"
+	dropNotMentioned       dropReason = access.DropNotMentioned
 	dropDMsDisabled        dropReason = "dms_disabled"
 	dropPairing            dropReason = access.DropPairing
 	dropThreadProbeFailed  dropReason = "thread_probe_failed"

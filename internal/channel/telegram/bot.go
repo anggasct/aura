@@ -148,15 +148,30 @@ type update struct {
 }
 
 type message struct {
-	MessageID int64  `json:"message_id"`
-	From      *user  `json:"from"`
-	Chat      chat   `json:"chat"`
-	Text      string `json:"text"`
+	MessageID         int64               `json:"message_id"`
+	From              *user               `json:"from"`
+	Chat              chat                `json:"chat"`
+	Text              string              `json:"text"`
+	Entities          []messageEntity     `json:"entities,omitempty"`
+	ReplyTo           *message            `json:"reply_to_message,omitempty"`
+	ThreadID          int64               `json:"message_thread_id,omitempty"`
+	IsTopicMessage    bool                `json:"is_topic_message,omitempty"`
+	ForumTopicCreated *forumTopicCreation `json:"forum_topic_created,omitempty"`
+}
+
+type forumTopicCreation struct{}
+
+type messageEntity struct {
+	Type   string `json:"type"`
+	Offset int    `json:"offset"`
+	Length int    `json:"length"`
+	User   *user  `json:"user,omitempty"`
 }
 
 type user struct {
-	ID    int64 `json:"id"`
-	IsBot bool  `json:"is_bot"`
+	ID       int64  `json:"id"`
+	IsBot    bool   `json:"is_bot"`
+	Username string `json:"username,omitempty"`
 }
 
 type chat struct {
@@ -180,6 +195,7 @@ type sendMessageRequest struct {
 	Text            string           `json:"text"`
 	ParseMode       string           `json:"parse_mode,omitempty"`
 	ReplyParameters *replyParameters `json:"reply_parameters,omitempty"`
+	MessageThreadID int64            `json:"message_thread_id,omitempty"`
 }
 
 type editMessageTextRequest struct {
@@ -189,8 +205,9 @@ type editMessageTextRequest struct {
 }
 
 type chatActionRequest struct {
-	ChatID int64  `json:"chat_id"`
-	Action string `json:"action"`
+	ChatID          int64  `json:"chat_id"`
+	MessageThreadID int64  `json:"message_thread_id,omitempty"`
+	Action          string `json:"action"`
 }
 
 type sentMessage struct {
@@ -227,6 +244,22 @@ func (c *botClient) editMessageText(ctx context.Context, token string, req *edit
 	return edited, nil
 }
 
-func (c *botClient) sendChatAction(ctx context.Context, token string, chatID int64, action string) error {
-	return c.call(ctx, token, "sendChatAction", chatActionRequest{ChatID: chatID, Action: action}, nil)
+func (c *botClient) sendChatAction(ctx context.Context, token string, target destination, action string) error {
+	return c.call(ctx, token, "sendChatAction", chatActionRequest{ChatID: target.chatID, MessageThreadID: target.threadID, Action: action}, nil)
+}
+
+type botIdentity struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+}
+
+func (c *botClient) getMe(ctx context.Context, token string) (botIdentity, error) {
+	var self botIdentity
+	if err := c.call(ctx, token, "getMe", struct{}{}, &self); err != nil {
+		return botIdentity{}, err
+	}
+	if self.ID <= 0 || self.Username == "" {
+		return botIdentity{}, Errorf(ErrorCodeProtocolInvalid, "bot api getMe result carries no bot identity")
+	}
+	return self, nil
 }
