@@ -14,6 +14,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channel/email"
 	"github.com/anggasct/aura/internal/channel/telegram"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
@@ -125,7 +126,7 @@ func (adapters discordAdapters) Check(ctx context.Context) []health.Finding {
 }
 
 func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
-	if cfg == nil || (!cfg.Channels.Discord.Enabled && !cfg.Channels.Telegram.Enabled) {
+	if cfg == nil || (!cfg.Channels.Discord.Enabled && !cfg.Channels.Telegram.Enabled && !cfg.Channels.Email.Enabled) {
 		return nil, nil, nil, nil
 	}
 	if router == nil {
@@ -212,6 +213,33 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			Remediation: telegram.RemediationReviewBot,
 		})
 	}
+	if cfg.Channels.Email.Enabled {
+		adapters := make(emailAdapters, 0, len(cfg.Channels.Email.Accounts))
+		for i := range cfg.Channels.Email.Accounts {
+			adapter, err := newEmailAdapter(cfg, &cfg.Channels.Email.Accounts[i], db, logger)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			adapter.SetPrincipalResolver(owners)
+			adapter.SetPersonaRouter(router)
+			settings := discordAccessSettings(cfg, db, accessRecorder)
+			adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals})
+			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
+				recorder.Admitted(ctx, string(class), principal.ChannelEmail)
+			})
+			adapter.SetDropObserver(func(ctx context.Context, reason string) {
+				ingressRecorder.Dropped(ctx, principal.ChannelEmail, reason)
+			})
+			adapters = append(adapters, adapter)
+			ports = append(ports, adapter)
+		}
+		checks = append(checks, health.RegisteredCheck{
+			ID:          "email",
+			Checker:     adapters,
+			Timeout:     time.Duration(cfg.Health.CheckTimeout),
+			Remediation: email.RemediationReviewMailbox,
+		})
+	}
 	return ports, checks, approvers, nil
 }
 
@@ -244,6 +272,14 @@ func buildSecretVault(cfg *config.Config) *secret.Vault {
 		if ref := parseSecretRef(account.BotTokenRef); ref.Env != "" {
 			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
 				vault.Set("discord_bot_token_"+account.Name, val)
+			}
+		}
+	}
+	for i := range cfg.Channels.Email.Accounts {
+		account := &cfg.Channels.Email.Accounts[i]
+		if ref := parseSecretRef(account.IMAP.PasswordRef); ref.Env != "" || ref.File != "" {
+			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
+				vault.Set("email_imap_password_"+account.Name, val)
 			}
 		}
 	}
