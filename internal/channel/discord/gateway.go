@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/media"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
@@ -648,17 +649,7 @@ func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, en
 	return true
 }
 
-func isVisionImageMIME(contentType string) bool {
-	media := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
-	switch media {
-	case "image/png", "image/jpeg", "image/webp", "image/gif":
-		return true
-	default:
-		return false
-	}
-}
-
-func attachArtifacts(envelope *runtimeingress.IngressEnvelope, summaries []artifactSummary) error {
+func attachArtifacts(envelope *runtimeingress.IngressEnvelope, summaries []media.ArtifactSummary) error {
 	var reference replyReference
 	if err := json.Unmarshal(envelope.ReplyContext, &reference); err != nil {
 		return Errorf(ErrorCodeProtocolInvalid, "reply context is not decodable")

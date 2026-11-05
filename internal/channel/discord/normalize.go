@@ -5,17 +5,18 @@ import (
 	"slices"
 	"time"
 
+	"github.com/anggasct/aura/internal/channel/media"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 )
 
 type replyReference struct {
-	ChannelID string            `json:"channel_id"`
-	MessageID string            `json:"message_id"`
-	GuildID   string            `json:"guild_id,omitempty"`
-	ThreadID  string            `json:"thread_id,omitempty"`
-	Artifacts []artifactSummary `json:"artifacts,omitempty"`
+	ChannelID string                  `json:"channel_id"`
+	MessageID string                  `json:"message_id"`
+	GuildID   string                  `json:"guild_id,omitempty"`
+	ThreadID  string                  `json:"thread_id,omitempty"`
+	Artifacts []media.ArtifactSummary `json:"artifacts,omitempty"`
 }
 
 func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver, selfID string, access authorAccess, msg *messagePayload) (*runtimeingress.IngressEnvelope, dropReason, error) {

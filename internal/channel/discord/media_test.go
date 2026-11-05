@@ -176,19 +176,3 @@ func TestAdapter_DuplicateMediaAdmitsBothTurns(t *testing.T) {
 		t.Errorf("media puts = %d, want 2", tc.doubles.media.puts)
 	}
 }
-
-func TestSanitizeFilename(t *testing.T) {
-	cases := map[string]string{
-		"cat.png":                "cat.png",
-		"../../etc/passwd":       "passwd",
-		"":                       "attachment",
-		"   ":                    "attachment",
-		"a\x00b.png":             "ab.png",
-		strings.Repeat("n", 200): strings.Repeat("n", 128),
-	}
-	for input, want := range cases {
-		if got := sanitizeFilename(input); got != want {
-			t.Errorf("sanitize(%q) = %q, want %q", input, got, want)
-		}
-	}
-}
