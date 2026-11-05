@@ -221,7 +221,7 @@ func TestAdmitDropsSayWhy(t *testing.T) {
 			}
 			adapter.restBase = dropChannelStub(t).srv.URL
 			logs := &logCapture{}
-			adapter.logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			adapter.logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: dropTimeAttr}))
 			drops := &dropRecorder{}
 			adapter.SetDropObserver(drops.observe)
 			if tc.setup != nil {
@@ -261,7 +261,7 @@ func TestAdmittedMessagesLeaveNoDropRecord(t *testing.T) {
 	adapter, sink, _ := newPairingAdapter(t, "owneronly", &fakePairing{})
 	adapter.restBase = dropChannelStub(t).srv.URL
 	logs := &logCapture{}
-	adapter.logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	adapter.logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: dropTimeAttr}))
 	drops := &dropRecorder{}
 	adapter.SetDropObserver(drops.observe)
 	adapter.rememberThread("9304", "7774", threadRoute{parent: "333", persona: "owneronly"})
@@ -277,4 +277,11 @@ func TestAdmittedMessagesLeaveNoDropRecord(t *testing.T) {
 	if records := dropRecords(logs); len(records) != 0 || len(drops.reasons) != 0 {
 		t.Fatalf("admitted messages logged drops %v / %v", records, drops.reasons)
 	}
+}
+
+func dropTimeAttr(groups []string, attr slog.Attr) slog.Attr {
+	if len(groups) == 0 && attr.Key == slog.TimeKey {
+		return slog.Attr{}
+	}
+	return attr
 }
