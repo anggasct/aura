@@ -94,6 +94,36 @@ func TestFakeCancelTerminatesWait(t *testing.T) {
 	}
 }
 
+func TestFakeCloseStopsEveryRunBeforeReturning(t *testing.T) {
+	fake := NewFake()
+	var finished atomic.Int32
+	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
+		defer finished.Add(1)
+		_, _ = inv.Signal(ctx, "never")
+		return nil
+	})
+	fake.RegisterHandler("quick", func(context.Context, Invocation) error {
+		defer finished.Add(1)
+		return nil
+	})
+	waiting, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-wait"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, err := fake.Start(context.Background(), StartRequest{Handler: "quick", Key: "run-quick"}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	fake.Close()
+	if got := finished.Load(); got != 2 {
+		t.Fatalf("finished handlers after Close = %d, want 2", got)
+	}
+	status, _ := fake.Status(context.Background(), waiting)
+	if status.State != RunCancelled {
+		t.Fatalf("waiting run state = %s, want cancelled", status.State)
+	}
+	fake.Close()
+}
+
 func errIs(err, target error) bool {
 	return errors.Is(err, target)
 }

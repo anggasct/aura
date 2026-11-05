@@ -331,6 +331,19 @@ func NewFake() *Fake {
 	return &Fake{handlers: map[string]Handler{}, runs: map[string]*fakeRun{}, clock: RealClock()}
 }
 
+func (f *Fake) Close() {
+	f.mu.Lock()
+	runs := make([]*fakeRun, 0, len(f.runs))
+	for _, run := range f.runs {
+		runs = append(runs, run)
+	}
+	f.mu.Unlock()
+	for _, run := range runs {
+		run.cancel()
+		<-run.done
+	}
+}
+
 func (f *Fake) WithClock(clock Clock) *Fake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
