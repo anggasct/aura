@@ -10,6 +10,8 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/approval"
+	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/health"
@@ -106,6 +108,11 @@ type Adapter struct {
 	identity        atomic.Pointer[botIdentity]
 	identityRefresh chan struct{}
 
+	approvals *approval.Registry
+	targetsMu sync.Mutex
+	targets   map[string]approvalTarget
+	commands  *command.Dispatcher
+
 	secretVault   *secret.Vault
 	presenceMu    sync.Mutex
 	presence      map[string]*presenceSession
@@ -138,6 +145,10 @@ func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorSt
 	if err != nil {
 		return nil, err
 	}
+	approvals, err := approval.NewRegistry()
+	if err != nil {
+		return nil, &Error{Code: ErrorCodeConnectionFailed, Detail: "approval token key is unavailable", Cause: err}
+	}
 	adapter := &Adapter{
 		cfg:        cfg,
 		account:    account,
@@ -152,6 +163,8 @@ func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorSt
 		deliverSem: make(chan struct{}, maxDeliverInflight),
 		presence:   map[string]*presenceSession{},
 		holds:      map[int64]time.Time{},
+		approvals:  approvals,
+		targets:    map[string]approvalTarget{},
 
 		identityRefresh: make(chan struct{}, 1),
 	}

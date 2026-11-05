@@ -165,11 +165,15 @@ func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.A
 func telegramAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.AccessRecorder) telegram.AccessSettings {
 	shared := discordAccessSettings(cfg, db, recorder)
 	return telegram.AccessSettings{
-		Pairing:  shared.Pairing,
-		Budgets:  shared.Budgets,
-		Erasure:  shared.Erasure,
-		Handoffs: shared.Handoffs,
-		Evals:    shared.Evals,
+		ApprovalTimeout:  shared.ApprovalTimeout,
+		StandingGrantTTL: shared.StandingGrantTTL,
+		Grants:           shared.Grants,
+		Pairing:          shared.Pairing,
+		Budgets:          shared.Budgets,
+		Erasure:          shared.Erasure,
+		Handoffs:         shared.Handoffs,
+		Evals:            shared.Evals,
+		ApprovalRouted:   shared.ApprovalRouted,
 	}
 }
 

@@ -1,6 +1,7 @@
 package command
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ func messengerBinding() Binding {
 	return Binding{
 		Channel: "discord",
 		Style:   StyleMessenger,
-		Names:   []string{"help", "forgetme", "status", "session", "new", "cancel", "skill", "skill-create"},
+		Names:   MessengerNames(),
 	}
 }
 
@@ -186,5 +187,20 @@ func TestRecognizedAndMetricNames(t *testing.T) {
 		if got := registry.MetricName(tt.channel, tt.name); got != tt.metric {
 			t.Errorf("MetricName(%s, %s) = %q, want %q", tt.channel, tt.name, got, tt.metric)
 		}
+	}
+}
+
+func TestMessengerNamesAreBindableOnAMessengerChannel(t *testing.T) {
+	registry, err := New(Binding{Channel: "chat", Style: StyleMessenger, Names: MessengerNames()})
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+	for _, name := range MessengerNames() {
+		if !registry.Bound("chat", name) {
+			t.Errorf("%q is not bound", name)
+		}
+	}
+	if slices.Contains(MessengerNames(), "exit") || slices.Contains(MessengerNames(), "clear") {
+		t.Error("terminal-only commands listed as messenger names")
 	}
 }

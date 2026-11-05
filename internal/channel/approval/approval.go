@@ -107,7 +107,7 @@ type Registry struct {
 func NewRegistry() (*Registry, error) {
 	registry := &Registry{pending: map[string]*Pending{}, seen: map[string]struct{}{}}
 	if _, err := rand.Read(registry.key[:]); err != nil {
-		return nil, ErrorWrapf(ErrorCodeTokenUnavailable, err, "approval token key is unavailable")
+		return nil, ErrorWrapf(ErrorCodeEntropyUnavailable, err, "approval token key is unavailable")
 	}
 	return registry, nil
 }
@@ -118,7 +118,7 @@ func (r *Registry) Issue(binding *Binding, expiresAt time.Time) (tokenID string,
 	}
 	var raw [tokenBytes]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		return "", nil, ErrorWrapf(ErrorCodeTokenUnavailable, err, "approval token mint failed")
+		return "", nil, ErrorWrapf(ErrorCodeEntropyUnavailable, err, "approval token mint failed")
 	}
 	tokenID = hex.EncodeToString(raw[:])
 	pending = &Pending{binding: *binding, expiresAt: expiresAt, result: make(chan Outcome, 1)}

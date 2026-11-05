@@ -143,7 +143,7 @@ func (f *fakeBotAPI) serve(w http.ResponseWriter, r *http.Request) {
 	case "editMessageText":
 		id, _ := body["message_id"].(float64)
 		writeOK(w, map[string]any{"message_id": int64(id)})
-	case "sendChatAction":
+	case "sendChatAction", "answerCallbackQuery", "editMessageReplyMarkup":
 		writeOK(w, true)
 	default:
 		w.WriteHeader(http.StatusBadRequest)

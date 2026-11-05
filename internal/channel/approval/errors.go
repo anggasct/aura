@@ -8,8 +8,8 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeInvalidArgument  ErrorCode = "invalid_argument"
-	ErrorCodeTokenUnavailable ErrorCode = "token_unavailable"
+	ErrorCodeInvalidArgument    ErrorCode = "invalid_argument"
+	ErrorCodeEntropyUnavailable ErrorCode = "entropy_unavailable"
 )
 
 type Error struct {

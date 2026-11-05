@@ -12,6 +12,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
@@ -106,9 +107,22 @@ func (a *Adapter) advanceCursorErr(ctx context.Context, next int64) error {
 }
 
 func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
+	if item.CallbackQuery != nil {
+		a.handleCallback(ctx, item.CallbackQuery)
+		return nil
+	}
 	envelope, msg, ok := a.admit(ctx, item)
 	if !ok {
 		return nil
+	}
+	if inv, isCommand := a.commandInvocation(envelope.Parts[0].Text); isCommand {
+		handled, err := a.runCommand(ctx, msg, &inv, envelope)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
 	}
 	if reason := a.budgetDrop(ctx, msg.destination(), envelope); reason != "" {
 		a.drop(ctx, messageScope(msg), reason, true)
@@ -125,6 +139,16 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 		}
 		return nil
 	}
+	a.rememberTarget(envelope.ConversationID, &approvalTarget{
+		binding: approval.Binding{
+			Principal: envelope.PrincipalID,
+			Class:     principal.ParseClass(envelope.PrincipalClass),
+			Persona:   envelope.AgentID,
+			Actor:     strconv.FormatInt(msg.From.ID, 10),
+			Scope:     scopeOf(msg.destination()),
+		},
+		dest: msg.destination(),
+	})
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return &Error{Code: ErrorCodeIntakeFailed, Detail: "session is not ensurable", Cause: err}
 	}
@@ -223,10 +247,6 @@ func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.Ingr
 		ReplyContext:   reference,
 		Parts:          []runtimeingress.InputPart{{Text: text}},
 		ReceivedAt:     time.Now().UTC(),
-	}
-	if inv, isForgetMe := a.forgetMeInvocation(text); isForgetMe {
-		a.forgetMe(ctx, msg.destination(), &inv, envelope)
-		return nil, nil, false
 	}
 	return envelope, msg, true
 }

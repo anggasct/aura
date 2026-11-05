@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channel/telegram"
 	"github.com/anggasct/aura/internal/command"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	"github.com/anggasct/aura/internal/store"
@@ -151,8 +152,8 @@ func (r *discordConversationResolver) ActiveSession(ctx context.Context, convers
 	return id, nil
 }
 
-func wireDiscordCommands(ports []runtimechannelhost.ChannelPort, engine sessionActivity, sessions store.SessionService, events sequenceReader, pointers store.ConversationSessionStore, skills command.Skills, recorder command.Recorder) error {
-	registry, err := command.New(discord.CommandBinding())
+func wireChatCommands(ports []runtimechannelhost.ChannelPort, engine sessionActivity, sessions store.SessionService, events sequenceReader, pointers store.ConversationSessionStore, skills command.Skills, recorder command.Recorder) error {
+	registry, err := command.New(discord.CommandBinding(), telegram.CommandBinding())
 	if err != nil {
 		return err
 	}
@@ -165,7 +166,10 @@ func wireDiscordCommands(ports []runtimechannelhost.ChannelPort, engine sessionA
 		return err
 	}
 	for _, port := range ports {
-		if adapter, ok := port.(*discord.Adapter); ok {
+		switch adapter := port.(type) {
+		case *discord.Adapter:
+			adapter.SetCommands(dispatcher)
+		case *telegram.Adapter:
 			adapter.SetCommands(dispatcher)
 		}
 	}

@@ -42,8 +42,8 @@ func TestBuildChannelAdapters_TelegramBuildsAdapterAndCheck(t *testing.T) {
 	if len(checks) != 1 || checks[0].ID != "telegram" || checks[0].Remediation != telegram.RemediationReviewBot {
 		t.Fatalf("checks = %+v, want the telegram check only", checks)
 	}
-	if decider != nil {
-		t.Error("telegram-only config built an approval decider before approval cards exist")
+	if decider == nil {
+		t.Error("telegram-only config built no approval decider")
 	}
 }
 
@@ -58,7 +58,7 @@ func TestBuildChannelAdapters_DiscordAndTelegramTogether(t *testing.T) {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
 	if len(ports) != 2 || decider == nil {
-		t.Fatalf("ports = %d, decider nil = %v; want both channels and the discord decider", len(ports), decider == nil)
+		t.Fatalf("ports = %d, decider nil = %v; want both channels and a decider", len(ports), decider == nil)
 	}
 	ids := make([]string, 0, len(checks))
 	for _, check := range checks {

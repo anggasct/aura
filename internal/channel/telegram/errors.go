@@ -16,6 +16,8 @@ const (
 	ErrorCodeDeliveryUnavailable ErrorCode = "delivery_unavailable"
 	ErrorCodeDeliveryAmbiguous   ErrorCode = "delivery_ambiguous"
 	ErrorCodeDeliveryFailed      ErrorCode = "delivery_failed"
+	ErrorCodeApprovalUnavailable ErrorCode = "approval_unavailable"
+	ErrorCodeApprovalTimeout     ErrorCode = "approval_timeout"
 )
 
 type Error struct {

@@ -28,6 +28,7 @@ const (
 	dropBudgetCheckFailed    dropReason = access.DropBudgetCheckFailed
 	dropHandoffCheckFailed   dropReason = "handoff_check_failed"
 	dropHandoffForwardFailed dropReason = "handoff_forward_failed"
+	dropCallbackRejected     dropReason = "callback_rejected"
 )
 
 const (

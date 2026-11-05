@@ -181,6 +181,10 @@ type Recorder interface {
 	Start(ctx context.Context, name, channel, class string) (spanCtx context.Context, finish func(result string))
 }
 
+func MessengerNames() []string {
+	return []string{"help", NameForgetMe, "status", "session", "new", "cancel", "skill", "skill-create"}
+}
+
 func Catalog() []Definition {
 	return []Definition{
 		{Name: "help", Summary: "show this help", Audience: AudienceAny, Kind: KindLocal},

@@ -18,7 +18,7 @@ func CommandBinding() command.Binding {
 	return command.Binding{
 		Channel: principal.ChannelDiscord,
 		Style:   command.StyleMessenger,
-		Names:   []string{"help", "forgetme", "status", "session", "new", "cancel", "skill", "skill-create"},
+		Names:   command.MessengerNames(),
 	}
 }
 
