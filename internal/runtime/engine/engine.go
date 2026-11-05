@@ -305,7 +305,9 @@ func (e *Engine) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[st
 					}
 					return
 				}
-				lastSequence = ev.Sequence
+				if ev.Sequence != 0 {
+					lastSequence = ev.Sequence
+				}
 				if !yield(ev, nil) {
 					return
 				}
@@ -320,7 +322,9 @@ func (e *Engine) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[st
 func (e *Engine) drainUntilTerminal(ctx context.Context, turnID string, sub *subscriber, yield func(store.RuntimeEvent, error) bool) {
 	var lastSequence uint64
 	for ev := range sub.events {
-		lastSequence = ev.Sequence
+		if ev.Sequence != 0 {
+			lastSequence = ev.Sequence
+		}
 		if !yield(ev, nil) {
 			return
 		}
@@ -656,10 +660,21 @@ func (e *Engine) runTurn(ctx context.Context, t *turn) {
 	var executed []store.RuntimeEvent
 	execErr := e.persistSkillActivation(ctx, &t.req, e.renderSkillActivation, persistEvent)
 	if execErr == nil {
+		var nextDelta uint64
 		for ev, err := range e.executor.Execute(ctx, &t.req) {
 			if err != nil {
 				execErr = err
 				break
+			}
+			if delta, partial, deltaErr := e.deltaFromPartial(t, &nextDelta, &ev); partial {
+				if deltaErr != nil {
+					execErr = deltaErr
+					break
+				}
+				if delta != nil {
+					e.broadcast(t, delta)
+				}
+				continue
 			}
 			if emitErr := persistEvent(ctx, &ev); emitErr != nil {
 				execErr = emitErr

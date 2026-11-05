@@ -269,7 +269,11 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 
 		turnUsage := &usageTracker{maxTokens: req.Budget.MaxTokens}
 		runOpts := []runner.RunOption{runner.WithYieldUserMessage()}
-		for ev, err := range adkRunner.Run(runCtx, req.PrincipalID, req.SessionID, content, agent.RunConfig{}, runOpts...) {
+		runConfig := agent.RunConfig{}
+		if req.StreamPartial {
+			runConfig.StreamingMode = agent.StreamingModeSSE
+		}
+		for ev, err := range adkRunner.Run(runCtx, req.PrincipalID, req.SessionID, content, runConfig, runOpts...) {
 			if err != nil {
 				if turnUsage.exceeded {
 					yield(store.RuntimeEvent{}, codedError(runtime.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
@@ -535,7 +539,7 @@ type usageTracker struct {
 }
 
 func (u *usageTracker) add(ev *session.Event) bool {
-	if ev == nil || ev.UsageMetadata == nil {
+	if ev == nil || ev.Partial || ev.UsageMetadata == nil {
 		return u.exceeded
 	}
 	u.tokens += int64(ev.UsageMetadata.TotalTokenCount)
