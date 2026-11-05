@@ -25,7 +25,7 @@ func (e *Engine) channelAdapterFor(req *runtime.TurnRequest) (runtimechannelhost
 		return nil, false
 	}
 	switch req.Origin {
-	case runtime.OriginTerminal, runtime.OriginInternal, runtime.OriginWebhook:
+	case runtime.OriginTerminal, runtime.OriginInternal, runtime.OriginWebhook, runtime.OriginHTTP:
 		return nil, false
 	}
 	if len(req.ReplyContext) == 0 {
@@ -215,7 +215,7 @@ func (e *Engine) deliverCompletedTurn(ctx context.Context, req *runtime.TurnRequ
 	}
 	adapter, ok := e.channelAdapterFor(req)
 	if !ok {
-		if req.Origin == runtime.OriginTerminal || req.Origin == runtime.OriginInternal || req.Origin == runtime.OriginWebhook || len(req.ReplyContext) == 0 {
+		if req.Origin == runtime.OriginTerminal || req.Origin == runtime.OriginInternal || req.Origin == runtime.OriginWebhook || req.Origin == runtime.OriginHTTP || len(req.ReplyContext) == 0 {
 			e.markDelivered(req.TurnID)
 			return codedError(runtime.ErrorCodeDeliverySkipped, "turn has no channel destination", nil)
 		}

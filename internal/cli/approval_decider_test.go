@@ -71,6 +71,24 @@ func TestChannelApprovalDeciderRoutesToTheChannelHoldingTheSession(t *testing.T)
 	}
 }
 
+func TestChannelApprovalDeciderDeniesHTTPSessions(t *testing.T) {
+	accepting := &fakeApprovalChannel{sessions: map[string]bool{"main/discord:owner/dm:1": true}, accept: true}
+	decider := channelApprovalDecider([]approvalChannel{accepting})
+	sessions := []string{
+		"lobby/http/abcdefghijkl/abcdefghijklmnopqrstuvwxyz",
+		"main/http/abcdefghijkl/a2b3c4d5e6f7g2h3i4j5k6l7m2",
+	}
+	for _, session := range sessions {
+		accepted, err := decider(t.Context(), brokerPrompt(session))
+		if accepted || err != nil {
+			t.Errorf("decider(%s) = %v, %v; want a clean denial", session, accepted, err)
+		}
+	}
+	if len(accepting.prompts) != 0 {
+		t.Errorf("an http session reached a channel owner prompt: %+v", accepting.prompts)
+	}
+}
+
 func TestChannelApprovalDeciderCarriesTheWholePrompt(t *testing.T) {
 	channel := &fakeApprovalChannel{sessions: map[string]bool{"s": true}}
 	if _, err := channelApprovalDecider([]approvalChannel{channel})(t.Context(), brokerPrompt("s")); err != nil {

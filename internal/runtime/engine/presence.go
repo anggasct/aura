@@ -29,7 +29,7 @@ func presenceAdapterFor(req *runtime.TurnRequest, adapters []runtimechannelhost.
 		return nil, nil, false
 	}
 	switch req.Origin {
-	case runtime.OriginTerminal, runtime.OriginInternal, runtime.OriginWebhook:
+	case runtime.OriginTerminal, runtime.OriginInternal, runtime.OriginWebhook, runtime.OriginHTTP:
 		return nil, nil, false
 	}
 	if len(req.ReplyContext) == 0 {
