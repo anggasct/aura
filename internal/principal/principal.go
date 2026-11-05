@@ -17,6 +17,8 @@ const (
 
 const OwnerID = "local-owner"
 
+const HTTPKeyIDLength = 12
+
 const (
 	ChannelDiscord  = "discord"
 	ChannelTelegram = "telegram"
@@ -80,10 +82,27 @@ func ParseIdentity(raw string) (channel, externalID string, err error) {
 		if !IsTelegramUserID(externalID) {
 			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "telegram identity must be a positive decimal user id"}
 		}
+	case ChannelHTTP:
+		if !IsHTTPKeyID(externalID) {
+			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "http identity must be an api key id"}
+		}
 	default:
 		return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "identity channel is not supported"}
 	}
 	return channel, externalID, nil
+}
+
+func IsHTTPKeyID(id string) bool {
+	if len(id) != HTTPKeyIDLength {
+		return false
+	}
+	for i := range len(id) {
+		c := id[i]
+		if (c < 'a' || c > 'z') && (c < '2' || c > '7') {
+			return false
+		}
+	}
+	return true
 }
 
 func IsTelegramUserID(id string) bool {
@@ -125,6 +144,9 @@ func NewResolver(identities []string) (*Resolver, error) {
 	var problems []error
 	for i, raw := range identities {
 		channel, externalID, err := ParseIdentity(raw)
+		if err == nil && channel == ChannelHTTP {
+			err = &Error{Code: ErrorCodeIdentityInvalid, Detail: "http identities cannot be owner identities"}
+		}
 		if err != nil {
 			problems = append(problems, fmt.Errorf("owner.identities[%d]: %w", i, err))
 			continue

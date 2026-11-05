@@ -234,3 +234,5 @@ channels:
     max_body_bytes: 1048576
     requests_per_minute: 60
     max_concurrent_per_key: 4
+    max_history_messages: 20
+    max_history_bytes: 32768

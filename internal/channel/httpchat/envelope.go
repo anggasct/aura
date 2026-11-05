@@ -12,11 +12,22 @@ const (
 	errorTypeServer         = "server_error"
 )
 
+const (
+	errorTypePermission   = "permission_error"
+	errorTypeInsufficient = "insufficient_quota"
+	paramMessages         = "messages"
+	paramModel            = "model"
+	paramN                = "n"
+	paramStream           = "stream"
+	paramSessionHeader    = "X-Aura-Session"
+)
+
 type errorSpec struct {
 	status  int
 	kind    string
 	code    string
 	message string
+	param   string
 }
 
 var (
@@ -52,6 +63,62 @@ var (
 		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
 		message: "The request could not be read.",
 	}
+	errBodyNotJSON = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
+		message: "The request body must be a single JSON object with the documented field types.",
+	}
+	errMessagesRequired = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
+		message: "The messages field must contain at least one message.", param: paramMessages,
+	}
+	errMessageShape = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
+		message: "Each message needs a system, user or assistant role and string or text-part content.", param: paramMessages,
+	}
+	errLastMessageNotUser = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
+		message: "The last message must have the user role and a non-empty text.", param: paramMessages,
+	}
+	errUnsupportedContent = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "unsupported_content",
+		message: "Only text content parts are supported.", param: paramMessages,
+	}
+	errChoiceCount = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
+		message: "Only n=1 is supported.", param: paramN,
+	}
+	errStreamUnsupported = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
+		message: "Streaming responses are not supported yet.", param: paramStream,
+	}
+	errSessionHeader = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
+		message: "The X-Aura-Session header must be sent at most once.", param: paramSessionHeader,
+	}
+	errPersonaNotPermitted = errorSpec{
+		status: http.StatusForbidden, kind: errorTypePermission, code: "persona_not_permitted",
+		message: "The model does not match the persona this API key is bound to.", param: paramModel,
+	}
+	errAudienceDenied = errorSpec{
+		status: http.StatusForbidden, kind: errorTypePermission, code: "audience_denied",
+		message: "The persona does not serve this API key's access class.",
+	}
+	errEvalGateClosed = errorSpec{
+		status: http.StatusForbidden, kind: errorTypePermission, code: "eval_gate_closed",
+		message: "The persona is not available to this API key yet.",
+	}
+	errSessionNotFound = errorSpec{
+		status: http.StatusNotFound, kind: errorTypeInvalidRequest, code: "session_not_found",
+		message: "The session does not exist for this API key.", param: paramSessionHeader,
+	}
+	errHandoffOpen = errorSpec{
+		status: http.StatusConflict, kind: errorTypeInvalidRequest, code: "handoff_open",
+		message: "The session is handed over to the owner.",
+	}
+	errBudgetExhausted = errorSpec{
+		status: http.StatusTooManyRequests, kind: errorTypeInsufficient, code: "budget_exhausted",
+		message: "The usage budget for this API key is exhausted.",
+	}
 	errInternal = errorSpec{
 		status: http.StatusInternalServerError, kind: errorTypeServer, code: "internal_error",
 		message: "The server could not complete the request.",
@@ -70,7 +137,12 @@ type errorDetail struct {
 }
 
 func writeError(w http.ResponseWriter, spec *errorSpec) {
-	writeJSON(w, spec.status, &errorEnvelope{Error: errorDetail{Message: spec.message, Type: spec.kind, Code: spec.code}})
+	detail := errorDetail{Message: spec.message, Type: spec.kind, Code: spec.code}
+	if spec.param != "" {
+		param := spec.param
+		detail.Param = &param
+	}
+	writeJSON(w, spec.status, &errorEnvelope{Error: detail})
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

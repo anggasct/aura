@@ -881,7 +881,7 @@ func validateHTTPShapes(doc *yamlv3.Node) error {
 			tag, kind = "!!bool", "a boolean"
 		case "listen_address":
 			tag, kind = "!!str", "a string"
-		case "max_body_bytes", "requests_per_minute", "max_concurrent_per_key":
+		case "max_body_bytes", "requests_per_minute", "max_concurrent_per_key", "max_history_messages", "max_history_bytes":
 			tag, kind = "!!int", "an integer"
 		default:
 			continue
@@ -2774,6 +2774,12 @@ func applyHTTPDefaults(cfg *Config, doc *yamlv3.Node, defaults *HTTP) {
 	if http.MaxConcurrentPerKey == 0 && !configValuePresent(doc, "channels", "http", "max_concurrent_per_key") && !envValuePresent("channels.http.max_concurrent_per_key") {
 		http.MaxConcurrentPerKey = defaults.MaxConcurrentPerKey
 	}
+	if http.MaxHistoryMessages == 0 && !configValuePresent(doc, "channels", "http", "max_history_messages") && !envValuePresent("channels.http.max_history_messages") {
+		http.MaxHistoryMessages = defaults.MaxHistoryMessages
+	}
+	if http.MaxHistoryBytes == 0 && !configValuePresent(doc, "channels", "http", "max_history_bytes") && !envValuePresent("channels.http.max_history_bytes") {
+		http.MaxHistoryBytes = defaults.MaxHistoryBytes
+	}
 }
 
 func applyTelegramDefaults(cfg *Config, doc *yamlv3.Node, defaults *Telegram) {
@@ -3637,6 +3643,12 @@ func validateHTTP(http *HTTP) error {
 	}
 	if http.MaxConcurrentPerKey < 1 || http.MaxConcurrentPerKey > HTTPMaxConcurrentPerKeyLimit {
 		problems = append(problems, fmt.Errorf("channels.http.max_concurrent_per_key must be between 1 and %d", HTTPMaxConcurrentPerKeyLimit))
+	}
+	if http.MaxHistoryMessages < 0 || http.MaxHistoryMessages > HTTPMaxHistoryMessagesLimit {
+		problems = append(problems, fmt.Errorf("channels.http.max_history_messages must be between 0 and %d", HTTPMaxHistoryMessagesLimit))
+	}
+	if http.MaxHistoryBytes < 0 || http.MaxHistoryBytes > HTTPMaxHistoryBytesLimit {
+		problems = append(problems, fmt.Errorf("channels.http.max_history_bytes must be between 0 and %d", HTTPMaxHistoryBytesLimit))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

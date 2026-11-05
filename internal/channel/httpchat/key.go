@@ -9,12 +9,14 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+
+	"github.com/anggasct/aura/internal/principal"
 )
 
 const (
 	KeyPrefix = "aura_sk_"
 
-	KeyIDLength     = 12
+	KeyIDLength     = principal.HTTPKeyIDLength
 	keyIDBytes      = 8
 	keySecretBytes  = 32
 	keySecretLength = 52
@@ -67,7 +69,7 @@ func ParseKey(raw string) (string, error) {
 		return "", Errorf(ErrorCodeKeyMalformed, "api key has the wrong shape")
 	}
 	id, secret := rest[:KeyIDLength], rest[KeyIDLength+1:]
-	if !isKeyAlphabet(id) || !isKeyAlphabet(secret) {
+	if !principal.IsHTTPKeyID(id) || !isKeyAlphabet(secret) {
 		return "", Errorf(ErrorCodeKeyMalformed, "api key has characters outside its alphabet")
 	}
 	return id, nil

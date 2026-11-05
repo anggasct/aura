@@ -165,6 +165,7 @@ func TestProfileHookEnqueuesOnlyDirectOwnerInput(t *testing.T) {
 		"public discord":      {class: principal.ClassPublic, origin: "discord:owner"},
 		"owner cron or child": {class: principal.ClassOwner, origin: runtime.OriginInternal},
 		"owner webhook":       {class: principal.ClassOwner, origin: runtime.OriginWebhook},
+		"owner http":          {class: principal.ClassOwner, origin: runtime.OriginHTTP},
 		"owner no words":      {class: principal.ClassOwner, origin: runtime.OriginTerminal, events: []store.RuntimeEvent{modelEvent(t, "evt-m", 2, "hello")}},
 	}
 	for name, tc := range cases {

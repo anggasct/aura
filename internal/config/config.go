@@ -313,6 +313,10 @@ const (
 	HTTPRequestsPerMinuteCeiling = 6000
 	HTTPMaxConcurrentPerKey      = 4
 	HTTPMaxConcurrentPerKeyLimit = 64
+	HTTPMaxHistoryMessages       = 20
+	HTTPMaxHistoryMessagesLimit  = 100
+	HTTPMaxHistoryBytes          = 32768
+	HTTPMaxHistoryBytesLimit     = 262144
 )
 
 type HTTP struct {
@@ -321,6 +325,8 @@ type HTTP struct {
 	MaxBodyBytes        int64  `koanf:"max_body_bytes" yaml:"max_body_bytes"`
 	RequestsPerMinute   int    `koanf:"requests_per_minute" yaml:"requests_per_minute"`
 	MaxConcurrentPerKey int    `koanf:"max_concurrent_per_key" yaml:"max_concurrent_per_key"`
+	MaxHistoryMessages  int    `koanf:"max_history_messages" yaml:"max_history_messages"`
+	MaxHistoryBytes     int    `koanf:"max_history_bytes" yaml:"max_history_bytes"`
 }
 
 const (
@@ -999,6 +1005,8 @@ func Default() Config {
 				MaxBodyBytes:        HTTPMaxBodyBytes,
 				RequestsPerMinute:   HTTPRequestsPerMinute,
 				MaxConcurrentPerKey: HTTPMaxConcurrentPerKey,
+				MaxHistoryMessages:  HTTPMaxHistoryMessages,
+				MaxHistoryBytes:     HTTPMaxHistoryBytes,
 			},
 		},
 		Broadcast: Broadcast{

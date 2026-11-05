@@ -10,7 +10,7 @@ func TestLoad_HTTPDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4}
+	want := HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4, MaxHistoryMessages: 20, MaxHistoryBytes: 32768}
 	if got := res.Config.Channels.HTTP; got != want {
 		t.Errorf("channels.http = %+v, want %+v", got, want)
 	}
@@ -22,16 +22,20 @@ func TestLoad_HTTPValid(t *testing.T) {
 		want  HTTP
 	}{
 		"enabled with overrides": {
-			block: "    enabled: true\n    listen_address: 0.0.0.0:9000\n    max_body_bytes: 2048\n    requests_per_minute: 120\n    max_concurrent_per_key: 8\n",
-			want:  HTTP{Enabled: true, ListenAddress: "0.0.0.0:9000", MaxBodyBytes: 2048, RequestsPerMinute: 120, MaxConcurrentPerKey: 8},
+			block: "    enabled: true\n    listen_address: 0.0.0.0:9000\n    max_body_bytes: 2048\n    requests_per_minute: 120\n    max_concurrent_per_key: 8\n    max_history_messages: 5\n    max_history_bytes: 4096\n",
+			want:  HTTP{Enabled: true, ListenAddress: "0.0.0.0:9000", MaxBodyBytes: 2048, RequestsPerMinute: 120, MaxConcurrentPerKey: 8, MaxHistoryMessages: 5, MaxHistoryBytes: 4096},
 		},
 		"lower bounds": {
 			block: "    max_body_bytes: 1\n    requests_per_minute: 1\n    max_concurrent_per_key: 1\n",
-			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1, RequestsPerMinute: 1, MaxConcurrentPerKey: 1},
+			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1, RequestsPerMinute: 1, MaxConcurrentPerKey: 1, MaxHistoryMessages: 20, MaxHistoryBytes: 32768},
+		},
+		"history disabled": {
+			block: "    max_history_messages: 0\n    max_history_bytes: 0\n",
+			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4},
 		},
 		"upper bounds": {
-			block: "    max_body_bytes: 10485760\n    requests_per_minute: 6000\n    max_concurrent_per_key: 64\n",
-			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 10485760, RequestsPerMinute: 6000, MaxConcurrentPerKey: 64},
+			block: "    max_body_bytes: 10485760\n    requests_per_minute: 6000\n    max_concurrent_per_key: 64\n    max_history_messages: 100\n    max_history_bytes: 262144\n",
+			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 10485760, RequestsPerMinute: 6000, MaxConcurrentPerKey: 64, MaxHistoryMessages: 100, MaxHistoryBytes: 262144},
 		},
 	}
 	for name, tc := range cases {
@@ -53,25 +57,30 @@ func TestLoad_HTTPInvalid(t *testing.T) {
 		want  string
 		shape bool
 	}{
-		"listen address without port":   {block: "    listen_address: 127.0.0.1\n", want: "channels.http.listen_address must be host:port"},
-		"listen address port zero":      {block: "    listen_address: 127.0.0.1:0\n", want: "channels.http.listen_address port must be between 1 and 65535"},
-		"listen address port too large": {block: "    listen_address: 127.0.0.1:70000\n", want: "channels.http.listen_address port must be between 1 and 65535"},
-		"listen address without host":   {block: "    listen_address: \":8284\"\n", want: "channels.http.listen_address must include a host"},
-		"body bound zero":               {block: "    max_body_bytes: 0\n", want: "channels.http.max_body_bytes must be between 1 and 10485760"},
-		"body bound negative":           {block: "    max_body_bytes: -1\n", want: "channels.http.max_body_bytes must be between 1 and 10485760"},
-		"body bound above the ceiling":  {block: "    max_body_bytes: 10485761\n", want: "channels.http.max_body_bytes must be between 1 and 10485760"},
-		"rate zero":                     {block: "    requests_per_minute: 0\n", want: "channels.http.requests_per_minute must be between 1 and 6000"},
-		"rate above the ceiling":        {block: "    requests_per_minute: 6001\n", want: "channels.http.requests_per_minute must be between 1 and 6000"},
-		"concurrency zero":              {block: "    max_concurrent_per_key: 0\n", want: "channels.http.max_concurrent_per_key must be between 1 and 64"},
-		"concurrency above the ceiling": {block: "    max_concurrent_per_key: 65\n", want: "channels.http.max_concurrent_per_key must be between 1 and 64"},
-		"enabled not a boolean":         {block: "    enabled: \"yes\"\n", want: "channels.http.enabled must be a boolean", shape: true},
-		"listen address not a string":   {block: "    listen_address: 8284\n", want: "channels.http.listen_address must be a string", shape: true},
-		"body bound not an integer":     {block: "    max_body_bytes: \"1MB\"\n", want: "channels.http.max_body_bytes must be an integer", shape: true},
-		"rate not an integer":           {block: "    requests_per_minute: fast\n", want: "channels.http.requests_per_minute must be an integer", shape: true},
-		"concurrency not an integer":    {block: "    max_concurrent_per_key: 2.5\n", want: "channels.http.max_concurrent_per_key must be an integer", shape: true},
-		"unknown key":                   {block: "    route: /x\n", want: "unknown key", shape: true},
-		"keepalive is not accepted yet": {block: "    keepalive_interval: 15s\n", want: "unknown key", shape: true},
-		"history bound is not accepted": {block: "    max_history_messages: 20\n", want: "unknown key", shape: true},
+		"listen address without port":        {block: "    listen_address: 127.0.0.1\n", want: "channels.http.listen_address must be host:port"},
+		"listen address port zero":           {block: "    listen_address: 127.0.0.1:0\n", want: "channels.http.listen_address port must be between 1 and 65535"},
+		"listen address port too large":      {block: "    listen_address: 127.0.0.1:70000\n", want: "channels.http.listen_address port must be between 1 and 65535"},
+		"listen address without host":        {block: "    listen_address: \":8284\"\n", want: "channels.http.listen_address must include a host"},
+		"body bound zero":                    {block: "    max_body_bytes: 0\n", want: "channels.http.max_body_bytes must be between 1 and 10485760"},
+		"body bound negative":                {block: "    max_body_bytes: -1\n", want: "channels.http.max_body_bytes must be between 1 and 10485760"},
+		"body bound above the ceiling":       {block: "    max_body_bytes: 10485761\n", want: "channels.http.max_body_bytes must be between 1 and 10485760"},
+		"rate zero":                          {block: "    requests_per_minute: 0\n", want: "channels.http.requests_per_minute must be between 1 and 6000"},
+		"rate above the ceiling":             {block: "    requests_per_minute: 6001\n", want: "channels.http.requests_per_minute must be between 1 and 6000"},
+		"concurrency zero":                   {block: "    max_concurrent_per_key: 0\n", want: "channels.http.max_concurrent_per_key must be between 1 and 64"},
+		"concurrency above the ceiling":      {block: "    max_concurrent_per_key: 65\n", want: "channels.http.max_concurrent_per_key must be between 1 and 64"},
+		"enabled not a boolean":              {block: "    enabled: \"yes\"\n", want: "channels.http.enabled must be a boolean", shape: true},
+		"listen address not a string":        {block: "    listen_address: 8284\n", want: "channels.http.listen_address must be a string", shape: true},
+		"body bound not an integer":          {block: "    max_body_bytes: \"1MB\"\n", want: "channels.http.max_body_bytes must be an integer", shape: true},
+		"rate not an integer":                {block: "    requests_per_minute: fast\n", want: "channels.http.requests_per_minute must be an integer", shape: true},
+		"concurrency not an integer":         {block: "    max_concurrent_per_key: 2.5\n", want: "channels.http.max_concurrent_per_key must be an integer", shape: true},
+		"unknown key":                        {block: "    route: /x\n", want: "unknown key", shape: true},
+		"keepalive is not accepted yet":      {block: "    keepalive_interval: 15s\n", want: "unknown key", shape: true},
+		"history messages negative":          {block: "    max_history_messages: -1\n", want: "channels.http.max_history_messages must be between 0 and 100"},
+		"history messages above the ceiling": {block: "    max_history_messages: 101\n", want: "channels.http.max_history_messages must be between 0 and 100"},
+		"history bytes negative":             {block: "    max_history_bytes: -1\n", want: "channels.http.max_history_bytes must be between 0 and 262144"},
+		"history bytes above the ceiling":    {block: "    max_history_bytes: 262145\n", want: "channels.http.max_history_bytes must be between 0 and 262144"},
+		"history messages not an integer":    {block: "    max_history_messages: many\n", want: "channels.http.max_history_messages must be an integer", shape: true},
+		"history bytes not an integer":       {block: "    max_history_bytes: \"1KB\"\n", want: "channels.http.max_history_bytes must be an integer", shape: true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

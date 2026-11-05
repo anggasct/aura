@@ -310,7 +310,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			healthChecks = append(slices.Clone(healthChecks), personaEvalCheck(cfg, agentRegistry, db))
-			httpChat, httpChatChecks, err := buildHTTPChat(cfg, db, logger)
+			httpChat, httpChatChecks, err := buildHTTPChat(cfg, db, runtimeEngine, agentRegistry, accessRecorder, logger)
 			if err != nil {
 				return err
 			}

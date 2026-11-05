@@ -323,9 +323,9 @@ func TestHTTPChatListenerBindsOnlyWhenEnabled(t *testing.T) {
 	address := freeLoopbackAddress(t)
 	disabled := writeHTTPChatConfig(t, false, address)
 	db := openAccessDB(t, disabled)
-	server, checks, err := buildHTTPChat(mustLoadConfig(t, disabled), db, slog.New(slog.DiscardHandler))
-	if err != nil || server != nil || len(checks) != 0 {
-		t.Fatalf("buildHTTPChat(disabled) = %v, %v, %v; want nothing", server, checks, err)
+	server, checks := buildTestHTTPChat(t, disabled, db, slog.New(slog.DiscardHandler))
+	if server != nil || len(checks) != 0 {
+		t.Fatalf("buildHTTPChat(disabled) = %v, %v; want nothing", server, checks)
 	}
 	if conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", address); err == nil {
 		_ = conn.Close()
@@ -347,9 +347,9 @@ func TestHTTPChatListenerServesModelsForActiveKeysOnly(t *testing.T) {
 	}
 
 	db := openAccessDB(t, path)
-	server, checks, err := buildHTTPChat(mustLoadConfig(t, path), db, slog.New(slog.DiscardHandler))
-	if err != nil || server == nil {
-		t.Fatalf("buildHTTPChat(enabled) = %v, %v", server, err)
+	server, checks := buildTestHTTPChat(t, path, db, slog.New(slog.DiscardHandler))
+	if server == nil {
+		t.Fatal("buildHTTPChat(enabled) built no server")
 	}
 	if len(checks) != 1 || checks[0].ID != "http" || checks[0].Remediation != httpchat.RemediationReviewListener {
 		t.Fatalf("checks = %+v", checks)
@@ -413,9 +413,9 @@ func TestHTTPChatBindFailureSurfacesAsHealthFinding(t *testing.T) {
 	db := openAccessDB(t, path)
 	seen := make(chan struct{})
 	logger := slog.New(&bindSignal{Handler: slog.DiscardHandler, seen: seen})
-	server, checks, err := buildHTTPChat(mustLoadConfig(t, path), db, logger)
-	if err != nil || server == nil {
-		t.Fatalf("buildHTTPChat = %v, %v", server, err)
+	server, checks := buildTestHTTPChat(t, path, db, logger)
+	if server == nil {
+		t.Fatal("buildHTTPChat built no server")
 	}
 	registry, err := health.NewRegistry(checks...)
 	if err != nil {
