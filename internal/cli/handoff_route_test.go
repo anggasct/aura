@@ -1,13 +1,13 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"testing"
 
 	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/channel/approval"
-	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/channel/telegram"
 	"github.com/anggasct/aura/internal/principal"
 )
@@ -65,36 +65,24 @@ func TestOwnerHandoffRouterOrdersAndFallsThrough(t *testing.T) {
 			wantAsked: []string{"telegram", "discord"},
 		},
 		{
-			name: "an uncoded failure is final",
+			name: "a failed notice falls through to the next notifier",
 			build: func(log *askLog) []ownerHandoffNotifier {
 				return []ownerHandoffNotifier{
 					&scriptedApprover{name: "discord", handoffErr: failure, log: log},
 					&scriptedApprover{name: "telegram", log: log},
 				}
 			},
-			wantErr:   func(err error) bool { return errors.Is(err, failure) },
-			wantAsked: []string{"discord"},
+			wantAsked: []string{"discord", "telegram"},
 		},
 		{
-			name: "an approval code from telegram is not a handoff fall through",
-			build: func(log *askLog) []ownerHandoffNotifier {
-				return []ownerHandoffNotifier{
-					&scriptedApprover{name: "telegram", handoffErr: telegramUnavailable(), log: log},
-					&scriptedApprover{name: "discord", log: log},
-				}
-			},
-			wantErr:   func(err error) bool { return err != nil && !handoffUnavailable(err) },
-			wantAsked: []string{"telegram"},
-		},
-		{
-			name: "every notifier unavailable reports the last one",
+			name: "every notifier failing reports the last failure",
 			build: func(log *askLog) []ownerHandoffNotifier {
 				return []ownerHandoffNotifier{
 					&scriptedApprover{name: "discord", handoffErr: discordUnavailable(), log: log},
-					&scriptedApprover{name: "telegram", handoffErr: telegramHandoffUnavailable(), log: log},
+					&scriptedApprover{name: "telegram", handoffErr: failure, log: log},
 				}
 			},
-			wantErr:   handoffUnavailable,
+			wantErr:   func(err error) bool { return errors.Is(err, failure) },
 			wantAsked: []string{"discord", "telegram"},
 		},
 		{
@@ -125,24 +113,20 @@ func TestOwnerHandoffRouterOrdersAndFallsThrough(t *testing.T) {
 	}
 }
 
-func TestHandoffUnavailableRecognisesOnlyUnreachableOwnerCodes(t *testing.T) {
-	cases := map[string]struct {
-		err  error
-		want bool
-	}{
-		"discord owner unreachable":  {err: discordUnavailable(), want: true},
-		"telegram owner unreachable": {err: telegramHandoffUnavailable(), want: true},
-		"discord timeout":            {err: discord.Errorf(discord.ErrorCodeApprovalTimeout, "late"), want: false},
-		"telegram approval code":     {err: telegramUnavailable(), want: false},
-		"uncoded":                    {err: errors.New("boom"), want: false},
-		"nil":                        {err: nil, want: false},
+func TestOwnerHandoffRouterStopsWhenTheTurnIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	log := &askLog{}
+	router := &ownerHandoffRouter{notifiers: []ownerHandoffNotifier{
+		&scriptedApprover{name: "discord", handoffErr: context.Canceled, log: log},
+		&scriptedApprover{name: "telegram", log: log},
+	}}
+
+	if err := router.NotifyOwner(ctx, routedRequester(), "lobby/http/key/session", "needs a human"); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v", err)
 	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			if got := handoffUnavailable(tc.err); got != tc.want {
-				t.Errorf("handoffUnavailable() = %v, want %v", got, tc.want)
-			}
-		})
+	if got := log.approvers(); !slices.Equal(got, []string{"discord"}) {
+		t.Errorf("asked = %v", got)
 	}
 }
 

@@ -6,8 +6,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/channel/approval"
-	"github.com/anggasct/aura/internal/channel/discord"
-	"github.com/anggasct/aura/internal/channel/telegram"
 	"github.com/anggasct/aura/internal/principal"
 )
 
@@ -29,20 +27,12 @@ func (r *ownerHandoffRouter) NotifyOwner(ctx context.Context, requester *approva
 		if err == nil {
 			return nil
 		}
-		if !handoffUnavailable(err) {
+		if ctx.Err() != nil {
 			return err
 		}
 		unreachable = err
 	}
 	return unreachable
-}
-
-func handoffUnavailable(err error) bool {
-	if code, ok := discord.CodeOf(err); ok && code == discord.ErrorCodeApprovalUnavailable {
-		return true
-	}
-	code, ok := telegram.CodeOf(err)
-	return ok && code == telegram.ErrorCodeHandoffUnavailable
 }
 
 type httpRequesters interface {
