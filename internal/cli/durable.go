@@ -299,14 +299,11 @@ func (l *durableListener) serveEndpointUntilDone(ctx context.Context) error {
 	go func() { done <- l.endpoint.Start(ctx) }()
 	select {
 	case err := <-done:
-		if err != nil && ctx.Err() != nil {
-			return nil
-		}
 		return err
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		if err := l.endpoint.Stop(shutdownCtx); err != nil && !errors.Is(err, restate.ErrHandlerNotRunning) {
+		if err := l.endpoint.Stop(shutdownCtx); err != nil {
 			return err
 		}
 		select {

@@ -17,10 +17,6 @@ import (
 
 const defaultHandlerAddr = "127.0.0.1:9080"
 
-// ErrHandlerNotRunning reports Stop on an endpoint whose server never started,
-// for example when shutdown wins the race against Start.
-var ErrHandlerNotRunning = errors.New("restate handler is not running")
-
 type EndpointConfig struct {
 	ServiceName string
 	HandlerAddr string
@@ -141,7 +137,7 @@ func (e *Endpoint) Stop(ctx context.Context) error {
 	srv := e.server
 	e.mu.Unlock()
 	if srv == nil {
-		return ErrHandlerNotRunning
+		return errors.New("restate handler is not running")
 	}
 	return srv.Shutdown(ctx)
 }

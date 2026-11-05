@@ -192,19 +192,6 @@ func TestExternalListenerRegistersItsHandlerURL(t *testing.T) {
 	}
 }
 
-func TestServeEndpointUntilDoneShutdownBeforeStartIsClean(t *testing.T) {
-	endpoint, err := restate.NewEndpoint(restate.EndpointConfig{HandlerAddr: "127.0.0.1:0"}, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatalf("NewEndpoint: %v", err)
-	}
-	listener := &durableListener{config: &config.Durable{}, endpoint: endpoint, logger: slog.New(slog.DiscardHandler)}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if err := listener.serveEndpointUntilDone(ctx); err != nil {
-		t.Fatalf("serveEndpointUntilDone after shutdown before start = %v", err)
-	}
-}
-
 func TestDurableStatusMatchesTheRegisteredHandlerURL(t *testing.T) {
 	probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
