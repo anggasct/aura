@@ -25,7 +25,7 @@ func enabledTelegramConfig() config.Config {
 func TestBuildChannelAdapters_TelegramBuildsAdapterAndCheck(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledTelegramConfig()
-	ports, checks, decider, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+	ports, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -42,8 +42,8 @@ func TestBuildChannelAdapters_TelegramBuildsAdapterAndCheck(t *testing.T) {
 	if len(checks) != 1 || checks[0].ID != "telegram" || checks[0].Remediation != telegram.RemediationReviewBot {
 		t.Fatalf("checks = %+v, want the telegram check only", checks)
 	}
-	if decider == nil {
-		t.Error("telegram-only config built no approval decider")
+	if len(approvers) != 1 {
+		t.Error("telegram-only config built no approval channel")
 	}
 }
 
@@ -53,12 +53,12 @@ func TestBuildChannelAdapters_DiscordAndTelegramTogether(t *testing.T) {
 	telegramCfg := enabledTelegramConfig()
 	cfg.Owner = telegramCfg.Owner
 	cfg.Channels.Telegram = telegramCfg.Channels.Telegram
-	ports, checks, decider, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+	ports, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
-	if len(ports) != 2 || decider == nil {
-		t.Fatalf("ports = %d, decider nil = %v; want both channels and a decider", len(ports), decider == nil)
+	if len(ports) != 2 || len(approvers) != 2 {
+		t.Fatalf("ports = %d, approvers = %d; want both channels to approve", len(ports), len(approvers))
 	}
 	ids := make([]string, 0, len(checks))
 	for _, check := range checks {

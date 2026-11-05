@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/httpchat"
 	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
@@ -105,7 +106,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			channelAdapters, channelChecks, approvalDecider, err := buildChannelAdapters(cfg, personaRouter, db, artifactRoot, pipeline.MeterProvider(), logger)
+			channelAdapters, channelChecks, approvalAdapters, err := buildChannelAdapters(cfg, personaRouter, db, artifactRoot, pipeline.MeterProvider(), logger)
 			if err != nil {
 				return err
 			}
@@ -113,6 +114,14 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var httpApprovals *httpchat.Approvals
+			if cfg.Channels.HTTP.Enabled {
+				httpApprovals, err = newHTTPApprovals(approvalAdapters, accessRecorder.ApprovalRouted)
+				if err != nil {
+					return err
+				}
+			}
+			approvalDecider := channelApprovalDecider(approvalChannels(approvalAdapters, httpApprovals))
 			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder))
 			if err != nil {
 				return err
@@ -310,7 +319,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			healthChecks = append(slices.Clone(healthChecks), personaEvalCheck(cfg, agentRegistry, db))
-			httpChat, httpChatChecks, err := buildHTTPChat(cfg, db, runtimeEngine, agentRegistry, accessRecorder, logger)
+			httpChat, httpChatChecks, err := buildHTTPChat(cfg, db, runtimeEngine, agentRegistry, accessRecorder, httpApprovals, logger)
 			if err != nil {
 				return err
 			}

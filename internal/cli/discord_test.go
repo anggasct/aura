@@ -60,12 +60,12 @@ func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 func TestBuildChannelAdapters_EnabledBuildsAdapterAndCheck(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
-	adapters, checks, decider, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+	adapters, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
-	if decider == nil {
-		t.Error("decider is nil for enabled adapter")
+	if len(approvers) != 1 {
+		t.Error("enabled adapter is not an approval channel")
 	}
 	if len(adapters) != 1 {
 		t.Fatalf("adapters = %d, want 1", len(adapters))
@@ -195,12 +195,12 @@ func TestBuildChannelAdapters_OneAdapterPerAccount(t *testing.T) {
 		Persona:        "engineer",
 		AllowedUserIDs: []string{"111"},
 	})
-	ports, checks, decider, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+	ports, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
-	if len(ports) != 2 || decider == nil {
-		t.Fatalf("ports = %d, decider nil = %v; want two adapters and a decider", len(ports), decider == nil)
+	if len(ports) != 2 || len(approvers) != 2 {
+		t.Fatalf("ports = %d, approvers = %d; want two adapters that can approve", len(ports), len(approvers))
 	}
 	names := make([]string, 0, len(ports))
 	for _, port := range ports {

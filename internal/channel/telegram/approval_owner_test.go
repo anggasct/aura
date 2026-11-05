@@ -117,6 +117,7 @@ func TestDecideForOwnerOffersStandingGrantsByClass(t *testing.T) {
 	}{
 		{"trusted requester", principal.ClassTrusted, []string{"Approve", "Allow 7 days", "Reject"}, 1},
 		{"public requester", principal.ClassPublic, []string{"Approve", "Reject"}, 0},
+		{"owner requester", principal.ClassOwner, []string{"Approve", "Reject"}, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -185,20 +186,28 @@ func TestDecideForOwnerRejectsInvalidArguments(t *testing.T) {
 	rig := newApprovalRig(t, accessOpts{definition: routedDefinition()})
 	var missing context.Context
 	cases := []struct {
-		name      string
-		ctx       context.Context
-		prompt    *approval.Prompt
-		requester *approval.Requester
+		name   string
+		decide func() (bool, error)
 	}{
-		{"nil context", missing, approvalPrompt("s", httpPrincipal), httpRequester(principal.ClassPublic)},
-		{"nil prompt", t.Context(), nil, httpRequester(principal.ClassPublic)},
-		{"nil requester", t.Context(), approvalPrompt("s", httpPrincipal), nil},
-		{"requester for another principal", t.Context(), approvalPrompt("s", "http:key-2"), httpRequester(principal.ClassPublic)},
-		{"blank requester principal", t.Context(), approvalPrompt("s", httpPrincipal), &approval.Requester{Persona: testPersona}},
+		{"nil context", func() (bool, error) {
+			return rig.adapter.DecideForOwner(missing, approvalPrompt("s", httpPrincipal), httpRequester(principal.ClassPublic))
+		}},
+		{"nil prompt", func() (bool, error) {
+			return rig.adapter.DecideForOwner(t.Context(), nil, httpRequester(principal.ClassPublic))
+		}},
+		{"nil requester", func() (bool, error) {
+			return rig.adapter.DecideForOwner(t.Context(), approvalPrompt("s", httpPrincipal), nil)
+		}},
+		{"requester for another principal", func() (bool, error) {
+			return rig.adapter.DecideForOwner(t.Context(), approvalPrompt("s", "http:key-2"), httpRequester(principal.ClassPublic))
+		}},
+		{"blank requester principal", func() (bool, error) {
+			return rig.adapter.DecideForOwner(t.Context(), approvalPrompt("s", httpPrincipal), &approval.Requester{Persona: testPersona})
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			accepted, err := rig.adapter.DecideForOwner(tc.ctx, tc.prompt, tc.requester)
+			accepted, err := tc.decide()
 			code, ok := CodeOf(err)
 			if accepted || !ok || code != ErrorCodeInvalidArgument {
 				t.Errorf("DecideForOwner() = %v, %v; want a denial with invalid_argument", accepted, err)

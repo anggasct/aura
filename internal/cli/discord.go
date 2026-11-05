@@ -22,7 +22,6 @@ import (
 	"github.com/anggasct/aura/internal/secret"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
-	"github.com/anggasct/aura/internal/toolbroker"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
@@ -125,7 +124,7 @@ func (adapters discordAdapters) Check(ctx context.Context) []health.Finding {
 	return findings
 }
 
-func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, toolbroker.ApprovalDecider, error) {
+func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
 	if cfg == nil || (!cfg.Channels.Discord.Enabled && !cfg.Channels.Telegram.Enabled) {
 		return nil, nil, nil, nil
 	}
@@ -150,7 +149,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 	}
 	var ports []runtimechannelhost.ChannelPort
 	var checks []health.RegisteredCheck
-	var channels []approvalChannel
+	var approvers []approvalAdapter
 	if cfg.Channels.Discord.Enabled {
 		adapters := make(discordAdapters, 0, len(cfg.Channels.Discord.Accounts))
 		for i := range cfg.Channels.Discord.Accounts {
@@ -170,7 +169,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			})
 			adapters = append(adapters, adapter)
 			ports = append(ports, adapter)
-			channels = append(channels, adapter)
+			approvers = append(approvers, adapter)
 		}
 		checks = append(checks, health.RegisteredCheck{
 			ID:          "discord",
@@ -204,7 +203,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			})
 			adapters = append(adapters, adapter)
 			ports = append(ports, adapter)
-			channels = append(channels, adapter)
+			approvers = append(approvers, adapter)
 		}
 		checks = append(checks, health.RegisteredCheck{
 			ID:          "telegram",
@@ -213,7 +212,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			Remediation: telegram.RemediationReviewBot,
 		})
 	}
-	return ports, checks, channelApprovalDecider(channels), nil
+	return ports, checks, approvers, nil
 }
 
 func newDiscordAdapter(cfg *config.Config, account *config.DiscordAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*discord.Adapter, error) {

@@ -44,7 +44,7 @@ func buildTestHTTPChat(t *testing.T, path string, db *sql.DB, logger *slog.Logge
 	if err != nil {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
-	server, checks, err := buildHTTPChat(cfg, db, idleRuntime{}, registry, nil, logger)
+	server, checks, err := buildHTTPChat(cfg, db, idleRuntime{}, registry, nil, nil, logger)
 	if err != nil {
 		t.Fatalf("buildHTTPChat: %v", err)
 	}
@@ -110,16 +110,9 @@ type httpChatHarness struct {
 	model   *personaEvalModel
 }
 
-func newHTTPChatHarness(t *testing.T, turnsPerMinute string) *httpChatHarness {
+func passEvals(t *testing.T, db *sql.DB, registry *auraagent.Registry, ids ...string) {
 	t.Helper()
-	path := writeHTTPChatRuntimeConfig(t, turnsPerMinute)
-	cfg := mustLoadConfig(t, path)
-	db := openAccessDB(t, path)
-	registry, err := buildAgentRegistry(cfg)
-	if err != nil {
-		t.Fatalf("buildAgentRegistry: %v", err)
-	}
-	for _, id := range []string{"lobby", "staff"} {
+	for _, id := range ids {
 		definition, _ := registry.Lookup(id)
 		_, err := store.NewPersonaEvalStore(db).Record(t.Context(), &store.PersonaEvalResult{
 			AgentID: id, Digest: definition.EvalDigest(), Layer: store.EvalLayerPolicy, Passed: true, CreatedAt: time.Now().UTC(),
@@ -128,28 +121,10 @@ func newHTTPChatHarness(t *testing.T, turnsPerMinute string) *httpChatHarness {
 			t.Fatalf("record eval: %v", err)
 		}
 	}
-	model := &personaEvalModel{}
-	name := "http-chat-model-" + strings.ReplaceAll(t.Name(), "/", "-")
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return model, nil })
-	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
-		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
-		runtimeadk.WithAgentResolver(registry, nil),
-	)
-	if err != nil {
-		t.Fatalf("NewADKExecutor: %v", err)
-	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
-		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
-	}, events, store.NewDedupeStore(db), executor, nil)
-	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
-	}
-	server, _, err := buildHTTPChat(cfg, db, engine, registry, nil, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatalf("buildHTTPChat: %v", err)
-	}
+}
+
+func serveHTTPChat(t *testing.T, server *httpchat.Server) string {
+	t.Helper()
 	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
@@ -168,7 +143,43 @@ func newHTTPChatHarness(t *testing.T, turnsPerMinute string) *httpChatHarness {
 			t.Error("http listener did not stop")
 		}
 	})
-	return &httpChatHarness{t: t, config: path, baseURL: "http://" + listener.Addr().String(), db: db, model: model}
+	return "http://" + listener.Addr().String()
+}
+
+func newHTTPChatHarness(t *testing.T, turnsPerMinute string) *httpChatHarness {
+	t.Helper()
+	path := writeHTTPChatRuntimeConfig(t, turnsPerMinute)
+	cfg := mustLoadConfig(t, path)
+	db := openAccessDB(t, path)
+	registry, err := buildAgentRegistry(cfg)
+	if err != nil {
+		t.Fatalf("buildAgentRegistry: %v", err)
+	}
+	passEvals(t, db, registry, "lobby", "staff")
+	model := &personaEvalModel{}
+	name := "http-chat-model-" + strings.ReplaceAll(t.Name(), "/", "-")
+	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return model, nil })
+	events := store.NewEventStore(db)
+	executor, err := runtimeadk.NewADKExecutor("aura", name, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
+		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
+		runtimeadk.WithAgentResolver(registry, nil),
+	)
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
+		DefaultAgentID: auraagent.DefaultID,
+		Personas:       registryPersonas{registry: registry},
+	}, events, store.NewDedupeStore(db), executor, nil)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	server, _, err := buildHTTPChat(cfg, db, engine, registry, nil, nil, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("buildHTTPChat: %v", err)
+	}
+	baseURL := serveHTTPChat(t, server)
+	return &httpChatHarness{t: t, config: path, baseURL: baseURL, db: db, model: model}
 }
 
 func (h *httpChatHarness) key(persona, class string) (plaintext, id string) {
@@ -480,7 +491,7 @@ func TestHTTPChatBuildFailsClosedWithoutGates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
-	server, _, err := buildHTTPChat(cfg, nil, idleRuntime{}, registry, nil, slog.New(slog.DiscardHandler))
+	server, _, err := buildHTTPChat(cfg, nil, idleRuntime{}, registry, nil, nil, slog.New(slog.DiscardHandler))
 	if err == nil || server != nil {
 		t.Fatalf("buildHTTPChat without a database = %v, %v; want a refusal", server, err)
 	}

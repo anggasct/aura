@@ -45,10 +45,11 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testi
 		t.Run(name, func(t *testing.T) {
 			db := discordTestDB(t)
 			cfg := tc.cfg
-			_, _, decider, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+			_, _, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
 			if err != nil {
 				t.Fatalf("buildChannelAdapters(): %v", err)
 			}
+			decider := channelApprovalDecider(approvalChannels(approvers, nil))
 			if (decider != nil) != tc.wantDecide {
 				t.Fatalf("decider present = %v, want %v", decider != nil, tc.wantDecide)
 			}

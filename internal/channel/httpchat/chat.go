@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
@@ -51,6 +52,7 @@ type ChatOptions struct {
 	Budgets            access.BudgetGate
 	Evals              access.EvalGate
 	Handoffs           access.HandoffGate
+	Approvals          *Approvals
 	Denied             func(ctx context.Context, reason string)
 	AnswerTexts        func(events []store.RuntimeEvent) []string
 	MaxHistoryMessages int
@@ -66,6 +68,7 @@ type Chat struct {
 	budgets     access.BudgetGate
 	evals       access.EvalGate
 	handoffs    access.HandoffGate
+	approvals   *Approvals
 	denied      func(ctx context.Context, reason string)
 	answerTexts func(events []store.RuntimeEvent) []string
 	maxMessages int
@@ -108,6 +111,7 @@ func NewChat(opts *ChatOptions) (*Chat, error) {
 		budgets:     opts.Budgets,
 		evals:       opts.Evals,
 		handoffs:    opts.Handoffs,
+		approvals:   opts.Approvals,
 		denied:      opts.Denied,
 		answerTexts: opts.AnswerTexts,
 		maxMessages: opts.MaxHistoryMessages,
@@ -164,6 +168,8 @@ func (c *Chat) ServeChat(w http.ResponseWriter, r *http.Request, call *Call) {
 		Parts:          []runtimeingress.InputPart{{Text: request.final().text}},
 		AgentID:        caller.PersonaID,
 	}
+	release := c.approvals.hold(sessionID, &approval.Requester{Principal: caller.ID, Class: caller.Class, Persona: caller.PersonaID})
+	defer release()
 	if !continuing {
 		turn.UntrustedContext = boundedHistory(request.preceding(), c.maxMessages, c.maxBytes)
 	}

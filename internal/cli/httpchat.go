@@ -68,7 +68,7 @@ func (s *httpSessionStore) Create(ctx context.Context, session *httpchat.Session
 	})
 }
 
-func buildHTTPChat(cfg *config.Config, db *sql.DB, backend runtime.AgentRuntime, registry *auraagent.Registry, recorder *telemetry.AccessRecorder, logger *slog.Logger) (*httpchat.Server, []health.RegisteredCheck, error) {
+func buildHTTPChat(cfg *config.Config, db *sql.DB, backend runtime.AgentRuntime, registry *auraagent.Registry, recorder *telemetry.AccessRecorder, approvals *httpchat.Approvals, logger *slog.Logger) (*httpchat.Server, []health.RegisteredCheck, error) {
 	settings := &cfg.Channels.HTTP
 	if !settings.Enabled {
 		return nil, nil, nil
@@ -81,6 +81,7 @@ func buildHTTPChat(cfg *config.Config, db *sql.DB, backend runtime.AgentRuntime,
 		Budgets:            gates.Budgets,
 		Evals:              gates.Evals,
 		Handoffs:           gates.Handoffs,
+		Approvals:          approvals,
 		Denied:             gates.Denied,
 		AnswerTexts:        runtimeengine.DeliveryTexts,
 		MaxHistoryMessages: settings.MaxHistoryMessages,

@@ -232,6 +232,7 @@ type chatFixtureOptions struct {
 	maxBytes    int
 	audience    string
 	backend     runtime.AgentRuntime
+	approvals   *Approvals
 	answers     func(events []store.RuntimeEvent) []string
 }
 
@@ -264,12 +265,13 @@ func newChatFixture(t *testing.T, opts chatFixtureOptions) *chatFixture {
 		answers = opts.answers
 	}
 	chat, err := NewChat(&ChatOptions{
-		Runtime:  backend,
-		Sessions: fixture.sessions,
-		Personas: fixture.personas,
-		Budgets:  fixture.budgets,
-		Evals:    fixture.evals,
-		Handoffs: fixture.handoffs,
+		Runtime:   backend,
+		Sessions:  fixture.sessions,
+		Personas:  fixture.personas,
+		Budgets:   fixture.budgets,
+		Evals:     fixture.evals,
+		Handoffs:  fixture.handoffs,
+		Approvals: opts.approvals,
 		Denied: func(_ context.Context, reason string) {
 			gates.mu.Lock()
 			defer gates.mu.Unlock()

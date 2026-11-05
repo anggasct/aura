@@ -102,17 +102,32 @@ func TestDecideForOwnerRecordsAStandingGrantForTrustedRequesters(t *testing.T) {
 	}
 }
 
-func TestDecideForOwnerOffersNoStandingGrantToPublicRequesters(t *testing.T) {
-	stub := newApprovalStub(t)
-	adapter, _ := newHTTPOwnerAdapter(t, stub, []string{"discord:777"}, accessPersonas())
-	result := decideForOwnerAsync(t.Context(), adapter, httpPrompt(time.Now().Add(time.Minute)), httpRequester(principal.ClassPublic))
-	labels, ids := cardButtons(t, stub.waitPostTo(t, "555", 1)[0])
-	if strings.Join(labels, "|") != "Approve|Reject" {
-		t.Fatalf("public card buttons = %v, want no standing grant", labels)
+func TestDecideForOwnerOffersNoStandingGrantToPublicOrOwnerRequesters(t *testing.T) {
+	cases := []struct {
+		name      string
+		principal string
+		class     principal.Class
+	}{
+		{"public requester", httpPrincipal, principal.ClassPublic},
+		{"owner requester", principal.OwnerID, principal.ClassOwner},
 	}
-	adapter.resolveComponentClick(t.Context(), clickPayload("ix-reject", "777", "", "555", ids[1]))
-	if outcome := awaitDecide(t, result, 5*time.Second); outcome.err != nil || outcome.accepted {
-		t.Fatalf("DecideForOwner() = %v, %v; want the rejection applied", outcome.accepted, outcome.err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newApprovalStub(t)
+			adapter, _ := newHTTPOwnerAdapter(t, stub, []string{"discord:777"}, accessPersonas())
+			prompt := httpPrompt(time.Now().Add(time.Minute))
+			prompt.PrincipalID = tc.principal
+			requester := &approval.Requester{Principal: tc.principal, Class: tc.class, Persona: "team"}
+			result := decideForOwnerAsync(t.Context(), adapter, prompt, requester)
+			labels, ids := cardButtons(t, stub.waitPostTo(t, "555", 1)[0])
+			if strings.Join(labels, "|") != "Approve|Reject" {
+				t.Fatalf("card buttons = %v, want no standing grant", labels)
+			}
+			adapter.resolveComponentClick(t.Context(), clickPayload("ix-reject", "777", "", "555", ids[1]))
+			if outcome := awaitDecide(t, result, 5*time.Second); outcome.err != nil || outcome.accepted {
+				t.Fatalf("DecideForOwner() = %v, %v; want the rejection applied", outcome.accepted, outcome.err)
+			}
+		})
 	}
 }
 
@@ -166,20 +181,26 @@ func TestDecideForOwnerRejectsInvalidArguments(t *testing.T) {
 	var missing context.Context
 	expires := time.Now().Add(time.Minute)
 	cases := []struct {
-		name      string
-		ctx       context.Context
-		prompt    *ApprovalPrompt
-		requester *approval.Requester
+		name   string
+		decide func() (bool, error)
 	}{
-		{"nil context", missing, httpPrompt(expires), httpRequester(principal.ClassPublic)},
-		{"nil prompt", t.Context(), nil, httpRequester(principal.ClassPublic)},
-		{"nil requester", t.Context(), httpPrompt(expires), nil},
-		{"requester for another principal", t.Context(), httpPrompt(expires), &approval.Requester{Principal: "http:key-2", Persona: "team"}},
-		{"blank requester principal", t.Context(), httpPrompt(expires), &approval.Requester{Persona: "team"}},
+		{"nil context", func() (bool, error) {
+			return adapter.DecideForOwner(missing, httpPrompt(expires), httpRequester(principal.ClassPublic))
+		}},
+		{"nil prompt", func() (bool, error) {
+			return adapter.DecideForOwner(t.Context(), nil, httpRequester(principal.ClassPublic))
+		}},
+		{"nil requester", func() (bool, error) { return adapter.DecideForOwner(t.Context(), httpPrompt(expires), nil) }},
+		{"requester for another principal", func() (bool, error) {
+			return adapter.DecideForOwner(t.Context(), httpPrompt(expires), &approval.Requester{Principal: "http:key-2", Persona: "team"})
+		}},
+		{"blank requester principal", func() (bool, error) {
+			return adapter.DecideForOwner(t.Context(), httpPrompt(expires), &approval.Requester{Persona: "team"})
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			accepted, err := adapter.DecideForOwner(tc.ctx, tc.prompt, tc.requester)
+			accepted, err := tc.decide()
 			if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeInvalidArgument {
 				t.Errorf("DecideForOwner() = %v, %v; want a denial with invalid_argument", accepted, err)
 			}
