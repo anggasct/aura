@@ -57,6 +57,7 @@ type ChatHandler interface {
 type Options struct {
 	Keys                KeyStore
 	Chat                ChatHandler
+	Replies             RepliesHandler
 	MaxBodyBytes        int64
 	RequestsPerMinute   int
 	MaxConcurrentPerKey int
@@ -106,6 +107,9 @@ func NewHandler(opts *Options) (*Handler, error) {
 			method: http.MethodPost,
 			serve:  func(w http.ResponseWriter, r *http.Request, caller *Principal) { h.serveChat(chat, w, r, caller) },
 		}
+	}
+	if opts.Replies != nil {
+		h.routes[routeHandoffReplies] = route{method: http.MethodGet, serve: opts.Replies.ServeReplies}
 	}
 	return h, nil
 }

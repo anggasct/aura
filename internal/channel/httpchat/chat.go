@@ -220,18 +220,26 @@ func (c *Chat) resolveSession(ctx context.Context, r *http.Request, caller *Prin
 		}
 		return created, false, nil
 	}
-	if !ownsSessionShape(caller, values[0]) {
-		return "", false, &errSessionNotFound
+	found, spec := ownedSession(ctx, c.sessions, c.logger, caller, values[0])
+	if spec != nil {
+		return "", false, spec
 	}
-	found, ok, err := c.sessions.Get(ctx, values[0])
+	return found, true, nil
+}
+
+func ownedSession(ctx context.Context, sessions SessionStore, logger *slog.Logger, caller *Principal, raw string) (string, *errorSpec) {
+	if !ownsSessionShape(caller, raw) {
+		return "", &errSessionNotFound
+	}
+	found, ok, err := sessions.Get(ctx, raw)
 	switch {
 	case err != nil:
-		c.logger.ErrorContext(ctx, "http session lookup failed", "component", "http", "error", err)
-		return "", false, &errInternal
+		logger.ErrorContext(ctx, "http session lookup failed", "component", "http", "error", err)
+		return "", &errInternal
 	case !ok || found.OwnerID != caller.ID || found.PersonaID != caller.PersonaID:
-		return "", false, &errSessionNotFound
+		return "", &errSessionNotFound
 	}
-	return found.ID, true, nil
+	return found.ID, nil
 }
 
 func sessionPrefix(persona string) string {

@@ -19,6 +19,7 @@ const (
 	paramModel            = "model"
 	paramN                = "n"
 	paramSessionHeader    = "X-Aura-Session"
+	paramAfter            = "after"
 )
 
 type errorSpec struct {
@@ -89,6 +90,14 @@ var (
 	errSessionHeader = errorSpec{
 		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
 		message: "The X-Aura-Session header must be sent at most once.", param: paramSessionHeader,
+	}
+	errSessionRequired = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
+		message: "The X-Aura-Session header is required.", param: paramSessionHeader,
+	}
+	errCursorInvalid = errorSpec{
+		status: http.StatusBadRequest, kind: errorTypeInvalidRequest, code: "invalid_request",
+		message: "The after cursor must be a reply id from an earlier response.", param: paramAfter,
 	}
 	errPersonaNotPermitted = errorSpec{
 		status: http.StatusForbidden, kind: errorTypePermission, code: "persona_not_permitted",
