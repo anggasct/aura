@@ -34,6 +34,7 @@ type ContainedSessionRequest struct {
 	WorkingDir     string
 	Environment    map[string]string
 	Timeout        time.Duration
+	SetupTimeout   time.Duration
 	MaxOutputBytes int64
 }
 
@@ -85,6 +86,7 @@ func (c *Client) containedTransport(ctx context.Context) (sdk.Transport, error) 
 		WorkingDir:     workingDir,
 		Environment:    environment,
 		Timeout:        time.Duration(c.cfg.RequestTimeout),
+		SetupTimeout:   time.Duration(c.cfg.StartupTimeout),
 		MaxOutputBytes: maxMessageBytes(c.cfg),
 	})
 	if err != nil {

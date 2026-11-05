@@ -39,6 +39,7 @@ func TestStartValidatesRequest(t *testing.T) {
 		{"empty workdir", func(r *SessionRequest) { r.WorkingDir = " " }},
 		{"empty executable", func(r *SessionRequest) { r.Executable = " " }},
 		{"zero timeout", func(r *SessionRequest) { r.Limits.Timeout = 0 }},
+		{"negative setup timeout", func(r *SessionRequest) { r.SetupTimeout = -time.Second }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

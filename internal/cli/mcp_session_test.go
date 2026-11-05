@@ -21,7 +21,7 @@ func TestMCPSessionStarterMapping(t *testing.T) {
 		RequestID: "req-1", ServerName: "docs", Executable: "/bin/server",
 		Arguments: []string{"--stdio"}, WorkingDir: "/work",
 		Environment: map[string]string{"SERVER_MODE": "test"},
-		Timeout:     time.Minute, MaxOutputBytes: 1 << 20,
+		Timeout:     time.Minute, SetupTimeout: 20 * time.Second, MaxOutputBytes: 1 << 20,
 	}
 	if _, err := starter.StartSession(t.Context(), req); err == nil {
 		t.Fatal("stub error swallowed")
@@ -40,6 +40,9 @@ func TestMCPSessionStarterMapping(t *testing.T) {
 	}
 	if got.Limits.Timeout != time.Minute || got.Limits.MaxOutputBytes != 1<<20 {
 		t.Errorf("limits = %+v", got.Limits)
+	}
+	if got.SetupTimeout != 20*time.Second {
+		t.Errorf("setup timeout = %v, want the server startup timeout", got.SetupTimeout)
 	}
 	if len(got.Capabilities) != 0 || got.ApprovalGrantID != "" {
 		t.Errorf("grant surface = %v %q, want empty", got.Capabilities, got.ApprovalGrantID)

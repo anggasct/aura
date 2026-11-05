@@ -113,6 +113,7 @@ func newMCPSessionStarter(
 				Timeout:        req.Timeout,
 				MaxOutputBytes: req.MaxOutputBytes,
 			},
+			SetupTimeout: req.SetupTimeout,
 		})
 		if err != nil {
 			return nil, translateSessionError(err)
