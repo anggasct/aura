@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/channel/status"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
@@ -26,21 +27,40 @@ func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (
 	if !ok {
 		return access.HandoffTarget{}, access.ErrNoHandoffTarget
 	}
+	owner := approval.Requester{Principal: binding.principal, Class: binding.class, Persona: binding.persona}
+	if err := a.NotifyOwnerHandoff(ctx, &owner, sessionID, reason); err != nil {
+		return access.HandoffTarget{}, err
+	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
 		return access.HandoffTarget{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
-	dm, err := a.ownerDM(ctx, token)
-	if err != nil {
-		return access.HandoffTarget{}, err
-	}
 	definition, _ := a.personaDefinition(binding.persona)
-	notice := access.HandoffOwnerNotice(personaLabel(&definition), sessionID, binding.principal, reason)
-	if err := sendText(ctx, a.httpClient, a.restBase, token, dm, notice); err != nil {
-		return access.HandoffTarget{}, err
-	}
 	a.postNotice(ctx, token, binding.channelID, definition.Message(config.MessageHandoffOpen))
 	return access.HandoffTarget{Channel: principal.ChannelDiscord, Account: a.account.Name, ChannelID: binding.channelID}, nil
+}
+
+func (a *Adapter) NotifyOwnerHandoff(ctx context.Context, requester *approval.Requester, sessionID, reason string) error {
+	if ctx == nil {
+		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if requester == nil || requester.Principal == "" || requester.Persona == "" || sessionID == "" {
+		return Errorf(ErrorCodeInvalidArgument, "handoff requester or session is missing")
+	}
+	token, err := a.tokenRef.Resolve()
+	if err != nil {
+		return Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+	}
+	dm, err := a.ownerDM(ctx, token)
+	if err != nil {
+		return err
+	}
+	definition, _ := a.personaDefinition(requester.Persona)
+	if definition.ID == "" {
+		definition.ID = requester.Persona
+	}
+	notice := access.HandoffOwnerNotice(personaLabel(&definition), sessionID, requester.Principal, reason)
+	return sendText(ctx, a.httpClient, a.restBase, token, dm, notice)
 }
 
 func (a *Adapter) ownerDM(ctx context.Context, token string) (string, error) {

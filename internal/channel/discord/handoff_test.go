@@ -3,11 +3,13 @@ package discord
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 )
@@ -68,6 +70,73 @@ func TestNotifyHandoffTellsTheOwnerAndTheRequester(t *testing.T) {
 	if _, err := adapter.NotifyHandoff(t.Context(), "lobby/discord:owner/dm:unknown", "x"); !errors.Is(err, access.ErrNoHandoffTarget) {
 		t.Fatalf("unknown session err = %v, want ErrNoHandoffTarget", err)
 	}
+}
+
+func TestNotifyOwnerHandoffReachesOnlyTheOwner(t *testing.T) {
+	stub := newApprovalStub(t)
+	adapter, _ := newHTTPOwnerAdapter(t, stub, []string{"discord:777"}, accessPersonas())
+	const session = "team/http/abcdefghijkl/token"
+	if err := adapter.NotifyOwnerHandoff(t.Context(), httpRequester(principal.ClassPublic), session, "wants a refund"); err != nil {
+		t.Fatalf("NotifyOwnerHandoff: %v", err)
+	}
+	if posts, _, _ := stub.counts(); posts != 1 {
+		t.Fatalf("posts = %d, want only the owner notice", posts)
+	}
+	owner := strings.Join(postContents(stub, "555"), "\n")
+	for _, want := range []string{"handoff requested", "session: " + session, "principal: " + httpPrincipal, "reason: wants a refund", "aura reply " + session, "aura handoff release " + session} {
+		if !strings.Contains(owner, want) {
+			t.Errorf("owner notice %q lacks %q", owner, want)
+		}
+	}
+}
+
+func TestNotifyOwnerHandoffRefusals(t *testing.T) {
+	t.Run("owner is unreachable", func(t *testing.T) {
+		cases := map[string]struct {
+			owners []string
+			dmCode int
+		}{
+			"no owner discord identity": {owners: nil, dmCode: http.StatusOK},
+			"owner dm cannot be opened": {owners: []string{"discord:777"}, dmCode: http.StatusForbidden},
+		}
+		for name, tc := range cases {
+			t.Run(name, func(t *testing.T) {
+				stub := newApprovalStub(t)
+				stub.dmCode = tc.dmCode
+				adapter, _ := newHTTPOwnerAdapter(t, stub, tc.owners, accessPersonas())
+				err := adapter.NotifyOwnerHandoff(t.Context(), httpRequester(principal.ClassPublic), "team/http/abcdefghijkl/token", "x")
+				if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalUnavailable {
+					t.Fatalf("err = %v, want %s", err, ErrorCodeApprovalUnavailable)
+				}
+				if posts, _, _ := stub.counts(); posts != 0 {
+					t.Fatalf("posts = %d, want none", posts)
+				}
+			})
+		}
+	})
+	t.Run("invalid arguments", func(t *testing.T) {
+		stub := newApprovalStub(t)
+		adapter, _ := newHTTPOwnerAdapter(t, stub, []string{"discord:777"}, accessPersonas())
+		cases := map[string]struct {
+			requester *approval.Requester
+			session   string
+		}{
+			"nil requester":      {requester: nil, session: "team/http/abcdefghijkl/token"},
+			"missing principal":  {requester: &approval.Requester{Persona: "team"}, session: "team/http/abcdefghijkl/token"},
+			"missing persona":    {requester: &approval.Requester{Principal: httpPrincipal}, session: "team/http/abcdefghijkl/token"},
+			"missing session":    {requester: httpRequester(principal.ClassPublic), session: ""},
+			"missing everything": {requester: &approval.Requester{}, session: ""},
+		}
+		for name, tc := range cases {
+			err := adapter.NotifyOwnerHandoff(t.Context(), tc.requester, tc.session, "x")
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+				t.Errorf("%s: err = %v, want %s", name, err, ErrorCodeInvalidArgument)
+			}
+		}
+		if posts, _, _ := stub.counts(); posts != 0 {
+			t.Errorf("posts = %d for invalid input", posts)
+		}
+	})
 }
 
 func TestOpenHandoffForwardsMessagesInsteadOfStartingTurns(t *testing.T) {
