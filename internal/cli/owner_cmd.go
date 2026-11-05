@@ -43,7 +43,7 @@ func newOwnerWhoamiCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				var counts []string
-				for _, channel := range []string{principal.ChannelDiscord, principal.ChannelTelegram} {
+				for _, channel := range []string{principal.ChannelDiscord, principal.ChannelTelegram, principal.ChannelEmail} {
 					if n := owners.Count(channel); n > 0 {
 						counts = append(counts, fmt.Sprintf("%s=%d", channel, n))
 					}
