@@ -250,11 +250,14 @@ type Telegram struct {
 	Polling            TelegramPolling   `koanf:"polling" yaml:"polling"`
 	MinEditInterval    Duration          `koanf:"min_edit_interval" yaml:"min_edit_interval"`
 	MaxAttachmentBytes int64             `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
+	Webhook            TelegramWebhook   `koanf:"webhook" yaml:"webhook"`
 }
 
 type TelegramAccount struct {
 	Name               string   `koanf:"name" yaml:"name"`
 	BotTokenRef        string   `koanf:"bot_token_ref" yaml:"bot_token_ref"`
+	Mode               string   `koanf:"mode" yaml:"mode"`
+	WebhookSecretRef   string   `koanf:"webhook_secret_ref" yaml:"webhook_secret_ref,omitempty"`
 	Persona            string   `koanf:"persona" yaml:"persona,omitempty"`
 	AllowedUserIDs     []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
 	AllowedChatIDs     []string `koanf:"allowed_chat_ids" yaml:"allowed_chat_ids"`
@@ -262,6 +265,39 @@ type TelegramAccount struct {
 }
 
 const TelegramMaxAttachmentBytes int64 = 20971520
+
+const (
+	TelegramModePolling = "polling"
+	TelegramModeWebhook = "webhook"
+)
+
+const (
+	TelegramWebhookListenAddress   = "127.0.0.1:8283"
+	TelegramWebhookMaxBodyBytes    = 1048576
+	TelegramWebhookMaxBodyCeiling  = 10485760
+	TelegramWebhookMaxConnections  = 4
+	TelegramWebhookConnectionLimit = 100
+)
+
+type TelegramWebhook struct {
+	ListenAddress  string `koanf:"listen_address" yaml:"listen_address"`
+	PublicBaseURL  string `koanf:"public_base_url" yaml:"public_base_url"`
+	MaxBodyBytes   int64  `koanf:"max_body_bytes" yaml:"max_body_bytes"`
+	MaxConnections int    `koanf:"max_connections" yaml:"max_connections"`
+}
+
+func (a *TelegramAccount) WebhookMode() bool {
+	return a != nil && a.Mode == TelegramModeWebhook
+}
+
+func (t *Telegram) UsesWebhook() bool {
+	for i := range t.Accounts {
+		if t.Accounts[i].WebhookMode() {
+			return true
+		}
+	}
+	return false
+}
 
 type TelegramPolling struct {
 	Timeout    Duration `koanf:"timeout" yaml:"timeout"`
@@ -933,6 +969,11 @@ func Default() Config {
 				},
 				MinEditInterval:    Duration(2 * time.Second),
 				MaxAttachmentBytes: TelegramMaxAttachmentBytes,
+				Webhook: TelegramWebhook{
+					ListenAddress:  TelegramWebhookListenAddress,
+					MaxBodyBytes:   TelegramWebhookMaxBodyBytes,
+					MaxConnections: TelegramWebhookMaxConnections,
+				},
 			},
 		},
 		Broadcast: Broadcast{

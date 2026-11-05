@@ -849,6 +849,30 @@ func validateTelegramShapes(doc *yamlv3.Node) error {
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
 				return fmt.Errorf("channels.telegram.max_attachment_bytes must be an integer at line %d", valueNode.Line)
 			}
+		case "webhook":
+			if err := validateTelegramWebhookShape(valueNode); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateTelegramWebhookShape(webhookNode *yamlv3.Node) error {
+	if webhookNode.Kind != yamlv3.MappingNode {
+		return fmt.Errorf("channels.telegram.webhook must be a mapping at line %d", webhookNode.Line)
+	}
+	for i := 0; i+1 < len(webhookNode.Content); i += 2 {
+		key := webhookNode.Content[i].Value
+		value := webhookNode.Content[i+1]
+		tag := "!!str"
+		kind := "a string"
+		if key == "max_body_bytes" || key == "max_connections" {
+			tag = "!!int"
+			kind = "an integer"
+		}
+		if value.Kind != yamlv3.ScalarNode || value.Tag != tag {
+			return fmt.Errorf("channels.telegram.webhook.%s must be %s at line %d", key, kind, value.Line)
 		}
 	}
 	return nil
@@ -2715,10 +2739,23 @@ func applyTelegramDefaults(cfg *Config, doc *yamlv3.Node, defaults *Telegram) {
 	if telegram.MaxAttachmentBytes == 0 && !configValuePresent(doc, "channels", "telegram", "max_attachment_bytes") && !envValuePresent("channels.telegram.max_attachment_bytes") {
 		telegram.MaxAttachmentBytes = defaults.MaxAttachmentBytes
 	}
+	webhook := &telegram.Webhook
+	if webhook.ListenAddress == "" && !configValuePresent(doc, "channels", "telegram", "webhook", "listen_address") && !envValuePresent("channels.telegram.webhook.listen_address") {
+		webhook.ListenAddress = defaults.Webhook.ListenAddress
+	}
+	if webhook.MaxBodyBytes == 0 && !configValuePresent(doc, "channels", "telegram", "webhook", "max_body_bytes") && !envValuePresent("channels.telegram.webhook.max_body_bytes") {
+		webhook.MaxBodyBytes = defaults.Webhook.MaxBodyBytes
+	}
+	if webhook.MaxConnections == 0 && !configValuePresent(doc, "channels", "telegram", "webhook", "max_connections") && !envValuePresent("channels.telegram.webhook.max_connections") {
+		webhook.MaxConnections = defaults.Webhook.MaxConnections
+	}
 	accountsNode := nestedValue(doc, "channels", "telegram", "accounts")
 	for i := range telegram.Accounts {
 		if !telegram.Accounts[i].AcceptPrivateChats && !sequenceItemHasKey(accountsNode, i, "accept_private_chats") {
 			telegram.Accounts[i].AcceptPrivateChats = true
+		}
+		if telegram.Accounts[i].Mode == "" && !sequenceItemHasKey(accountsNode, i, "mode") {
+			telegram.Accounts[i].Mode = TelegramModePolling
 		}
 	}
 }
@@ -3320,17 +3357,24 @@ func validateLoopbackListen(listen, field string) error {
 	return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " must bind loopback; non-loopback probe exposure requires the authenticated admin surface"}
 }
 
-func validateWebhook(w *Webhook, healthListen string) error {
-	host, portText, err := net.SplitHostPort(w.Listen)
+func listenAddressProblem(field, address string) error {
+	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("webhook.listen_address must be host:port: %v", err)}
+		return fmt.Errorf("%s must be host:port: %w", field, err)
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port < 1 || port > 65535 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.listen_address port must be between 1 and 65535"}
+		return fmt.Errorf("%s port must be between 1 and 65535", field)
 	}
 	if host == "" {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.listen_address must include a host"}
+		return fmt.Errorf("%s must include a host", field)
+	}
+	return nil
+}
+
+func validateWebhook(w *Webhook, healthListen string) error {
+	if err := listenAddressProblem("webhook.listen_address", w.Listen); err != nil {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
 	}
 	if w.MaxBodySize <= 0 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.max_body_size must be positive"}
@@ -3492,6 +3536,10 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 		problems = append(problems, telegramUserListProblems(field+".allowed_user_ids", account.AllowedUserIDs)...)
 		problems = append(problems, telegramChatListProblems(field+".allowed_chat_ids", account.AllowedChatIDs)...)
 	}
+	for i := range telegram.Accounts {
+		problems = append(problems, telegramModeProblems(fmt.Sprintf("channels.telegram.accounts[%d]", i), &telegram.Accounts[i], tokenRefs)...)
+	}
+	problems = append(problems, telegramWebhookProblems(telegram)...)
 	if telegram.Enabled && len(telegram.Accounts) == 0 {
 		problems = append(problems, errors.New("channels.telegram.enabled requires at least one channels.telegram.accounts entry"))
 	}
@@ -3520,6 +3568,69 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+	}
+	return nil
+}
+
+func telegramModeProblems(field string, account *TelegramAccount, tokenRefs map[string]bool) []error {
+	switch account.Mode {
+	case TelegramModePolling:
+		if account.WebhookSecretRef != "" {
+			return []error{fmt.Errorf("%s.webhook_secret_ref is only valid when mode is %s", field, TelegramModeWebhook)}
+		}
+		return nil
+	case TelegramModeWebhook:
+		switch {
+		case account.WebhookSecretRef == "":
+			return []error{fmt.Errorf("%s.webhook_secret_ref must not be empty in webhook mode", field)}
+		case !strings.HasPrefix(account.WebhookSecretRef, "env://") && !strings.HasPrefix(account.WebhookSecretRef, "file://"):
+			return []error{fmt.Errorf("%s.webhook_secret_ref must use env:// or file://", field)}
+		case tokenRefs[account.WebhookSecretRef]:
+			return []error{fmt.Errorf("%s.webhook_secret_ref must differ from every bot token reference", field)}
+		}
+		return nil
+	default:
+		return []error{fmt.Errorf("%s.mode %q must be %s or %s", field, account.Mode, TelegramModePolling, TelegramModeWebhook)}
+	}
+}
+
+func telegramWebhookProblems(telegram *Telegram) []error {
+	var problems []error
+	webhook := &telegram.Webhook
+	if err := listenAddressProblem("channels.telegram.webhook.listen_address", webhook.ListenAddress); err != nil {
+		problems = append(problems, err)
+	}
+	if webhook.MaxBodyBytes < 1 || webhook.MaxBodyBytes > TelegramWebhookMaxBodyCeiling {
+		problems = append(problems, fmt.Errorf("channels.telegram.webhook.max_body_bytes must be between 1 and %d", TelegramWebhookMaxBodyCeiling))
+	}
+	if webhook.MaxConnections < 1 || webhook.MaxConnections > TelegramWebhookConnectionLimit {
+		problems = append(problems, fmt.Errorf("channels.telegram.webhook.max_connections must be between 1 and %d", TelegramWebhookConnectionLimit))
+	}
+	if webhook.PublicBaseURL == "" {
+		if telegram.UsesWebhook() {
+			problems = append(problems, errors.New("channels.telegram.webhook.public_base_url is required when an account uses webhook mode"))
+		}
+		return problems
+	}
+	if err := validatePublicWebhookURL(webhook.PublicBaseURL); err != nil {
+		problems = append(problems, fmt.Errorf("channels.telegram.webhook.public_base_url %w", err))
+	}
+	return problems
+}
+
+func validatePublicWebhookURL(raw string) error {
+	if strings.ContainsAny(raw, "?#") {
+		return errors.New("must not carry a query or fragment")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.New("is not a valid URL")
+	}
+	if u.Scheme != "https" {
+		return errors.New("must use https")
+	}
+	if err := ValidateBaseURL(raw); err != nil {
+		return fmt.Errorf("is not valid: %w", err)
 	}
 	return nil
 }
