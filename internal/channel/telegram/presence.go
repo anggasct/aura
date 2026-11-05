@@ -28,6 +28,7 @@ var _ runtimechannelhost.PresencePort = (*Adapter)(nil)
 
 type presenceSession struct {
 	chatID         int64
+	threadID       int64
 	request        *runtimechannelhost.DeliveryRequest
 	started        time.Time
 	lastTyping     time.Time
@@ -97,10 +98,11 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 	cloned.Parts = nil
 	cloned.ReplyContext = slices.Clone(req.ReplyContext)
 	session := &presenceSession{
-		chatID:  target.ChatID,
-		request: &cloned,
-		started: time.Now(),
-		wake:    make(chan struct{}, 1),
+		chatID:   target.ChatID,
+		threadID: target.ThreadID,
+		request:  &cloned,
+		started:  time.Now(),
+		wake:     make(chan struct{}, 1),
 	}
 	a.presence[req.EffectID] = session
 	return session, nil
@@ -123,7 +125,7 @@ func (a *Adapter) PresenceStarted(ctx context.Context, req *runtimechannelhost.D
 	if startClock {
 		go a.runPresenceClock(ctx, session, stop, done)
 	}
-	a.sendTyping(ctx, session.chatID)
+	a.sendTyping(ctx, session.destination())
 	return nil
 }
 
@@ -170,7 +172,7 @@ func (a *Adapter) refreshPresence(ctx context.Context, session *presenceSession)
 	a.presenceMu.Lock()
 	session.lastTyping = now
 	a.presenceMu.Unlock()
-	a.sendTyping(ctx, session.chatID)
+	a.sendTyping(ctx, session.destination())
 }
 
 func (a *Adapter) postInitialStatus(ctx context.Context, session *presenceSession) {
@@ -224,7 +226,7 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 			a.presenceMu.Lock()
 			session.lastTyping = now
 			a.presenceMu.Unlock()
-			a.sendTyping(ctx, session.chatID)
+			a.sendTyping(ctx, session.destination())
 		}
 		return nil
 	}
@@ -326,7 +328,7 @@ func (a *Adapter) recordShown(session *presenceSession, statusID int64, display 
 }
 
 func (a *Adapter) postStatusMessage(ctx context.Context, session *presenceSession, attempt int, text string) (int64, error) {
-	request, err := json.Marshal(sendOperation{ChatID: session.chatID, Text: text, Status: true})
+	request, err := json.Marshal(sendOperation{ChatID: session.chatID, ThreadID: session.threadID, Text: text, Status: true})
 	if err != nil {
 		return 0, Errorf(ErrorCodeProtocolInvalid, "status request is not serializable")
 	}
@@ -366,7 +368,12 @@ func (a *Adapter) editStatusMessage(ctx context.Context, session *presenceSessio
 	return err
 }
 
-func (a *Adapter) sendTyping(ctx context.Context, chatID int64) {
+func (s *presenceSession) destination() destination {
+	return destination{chatID: s.chatID, threadID: s.threadID}
+}
+
+func (a *Adapter) sendTyping(ctx context.Context, target destination) {
+	chatID := target.chatID
 	if time.Until(a.chatHeldUntil(chatID)) > 0 {
 		return
 	}
@@ -377,7 +384,7 @@ func (a *Adapter) sendTyping(ctx context.Context, chatID int64) {
 	}
 	call, cancel := context.WithTimeout(ctx, typingTimeout)
 	defer cancel()
-	err := a.bot.sendChatAction(call, token, chatID, chatActionTyping)
+	err := a.bot.sendChatAction(call, token, target, chatActionTyping)
 	if err == nil || ctx.Err() != nil {
 		return
 	}

@@ -867,8 +867,8 @@ func validateTelegramAccountShapes(accountsNode *yamlv3.Node) error {
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
 					return fmt.Errorf("%s.accept_private_chats must be a boolean at line %d", field, valueNode.Line)
 				}
-			case "allowed_user_ids":
-				if err := quotedStringSequence(field+".allowed_user_ids", valueNode); err != nil {
+			case "allowed_user_ids", "allowed_chat_ids":
+				if err := quotedStringSequence(field+"."+keyNode.Value, valueNode); err != nil {
 					return err
 				}
 			default:
@@ -3483,6 +3483,7 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 			tokenRefs[account.BotTokenRef] = true
 		}
 		problems = append(problems, telegramUserListProblems(field+".allowed_user_ids", account.AllowedUserIDs)...)
+		problems = append(problems, telegramChatListProblems(field+".allowed_chat_ids", account.AllowedChatIDs)...)
 	}
 	if telegram.Enabled && len(telegram.Accounts) == 0 {
 		problems = append(problems, errors.New("channels.telegram.enabled requires at least one channels.telegram.accounts entry"))
@@ -3522,6 +3523,24 @@ func telegramUserListProblems(field string, ids []string) []error {
 			problems = append(problems, fmt.Errorf("%s must not contain empty ids", field))
 		case !principal.IsTelegramUserID(id):
 			problems = append(problems, fmt.Errorf("%s id %q is not a positive decimal telegram user id", field, id))
+		case seen[id]:
+			problems = append(problems, fmt.Errorf("%s id %q is configured more than once", field, id))
+		default:
+			seen[id] = true
+		}
+	}
+	return problems
+}
+
+func telegramChatListProblems(field string, ids []string) []error {
+	var problems []error
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		switch {
+		case id == "":
+			problems = append(problems, fmt.Errorf("%s must not contain empty ids", field))
+		case !principal.IsTelegramGroupChatID(id):
+			problems = append(problems, fmt.Errorf("%s id %q is not a negative decimal telegram group chat id", field, id))
 		case seen[id]:
 			problems = append(problems, fmt.Errorf("%s id %q is configured more than once", field, id))
 		default:
@@ -3610,6 +3629,9 @@ func discordBindingProblems(field string, binding *Binding, accounts map[string]
 	if !accounts[binding.Account] {
 		problems = append(problems, fmt.Errorf("%s.account %q is not a configured channels.discord.accounts name", field, binding.Account))
 	}
+	if binding.ChatID != "" {
+		problems = append(problems, fmt.Errorf("%s.chat_id is only valid on telegram bindings", field))
+	}
 	if binding.GuildID == "" && binding.ChannelID == "" && binding.ThreadID == "" && binding.UserID == "" {
 		problems = append(problems, fmt.Errorf("%s must set at least one of guild_id, channel_id, thread_id, user_id", field))
 	}
@@ -3631,13 +3653,24 @@ func telegramBindingProblems(field string, binding *Binding, accounts map[string
 	if !accounts[binding.Account] {
 		problems = append(problems, fmt.Errorf("%s.account %q is not a configured channels.telegram.accounts name", field, binding.Account))
 	}
-	if binding.GuildID != "" || binding.ChannelID != "" || binding.ThreadID != "" {
-		problems = append(problems, fmt.Errorf("%s matches telegram chats by user_id only", field))
+	if binding.GuildID != "" || binding.ChannelID != "" {
+		problems = append(problems, fmt.Errorf("%s matches telegram chats by chat_id, thread_id and user_id only", field))
 	}
-	switch {
-	case binding.UserID == "":
-		problems = append(problems, fmt.Errorf("%s must set user_id", field))
-	case !principal.IsTelegramUserID(binding.UserID):
+	if binding.ChatID == "" && binding.UserID == "" {
+		problems = append(problems, fmt.Errorf("%s must set chat_id or user_id", field))
+	}
+	if binding.ChatID != "" && !principal.IsTelegramGroupChatID(binding.ChatID) {
+		problems = append(problems, fmt.Errorf("%s.chat_id %q is not a negative decimal telegram group chat id", field, binding.ChatID))
+	}
+	if binding.ThreadID != "" {
+		switch {
+		case binding.ChatID == "":
+			problems = append(problems, fmt.Errorf("%s.thread_id requires chat_id", field))
+		case !principal.IsTelegramTopicID(binding.ThreadID):
+			problems = append(problems, fmt.Errorf("%s.thread_id %q is not a positive decimal telegram topic id", field, binding.ThreadID))
+		}
+	}
+	if binding.UserID != "" && !principal.IsTelegramUserID(binding.UserID) {
 		problems = append(problems, fmt.Errorf("%s.user_id %q is not a positive decimal telegram user id", field, binding.UserID))
 	}
 	return problems

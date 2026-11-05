@@ -103,6 +103,9 @@ type Adapter struct {
 	state      atomic.Int32
 	fault      atomic.Value
 
+	identity        atomic.Pointer[botIdentity]
+	identityRefresh chan struct{}
+
 	secretVault   *secret.Vault
 	presenceMu    sync.Mutex
 	presence      map[string]*presenceSession
@@ -149,6 +152,8 @@ func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorSt
 		deliverSem: make(chan struct{}, maxDeliverInflight),
 		presence:   map[string]*presenceSession{},
 		holds:      map[int64]time.Time{},
+
+		identityRefresh: make(chan struct{}, 1),
 	}
 	adapter.state.Store(int32(stateDown))
 	adapter.fault.Store(faultNone)
@@ -221,7 +226,13 @@ func (a *Adapter) Start(ctx context.Context, sink runtimeingress.IngressSink) er
 		return Errorf(ErrorCodeInvalidArgument, "ingress sink must not be nil")
 	}
 	a.sink = sink
-	return a.pollLoop(ctx)
+	var lookups sync.WaitGroup
+	if len(a.account.AllowedChatIDs) > 0 {
+		lookups.Go(func() { a.identityLoop(ctx) })
+	}
+	defer lookups.Wait()
+	a.pollLoop(ctx)
+	return nil
 }
 
 func (a *Adapter) Health(context.Context) runtimechannelhost.ChannelHealth {

@@ -25,11 +25,12 @@ const (
 )
 
 type sendOperation struct {
-	ChatID  int64  `json:"chat_id"`
-	Text    string `json:"text"`
-	HTML    string `json:"html,omitempty"`
-	ReplyTo int64  `json:"reply_to_message_id,omitempty"`
-	Status  bool   `json:"status,omitempty"`
+	ChatID   int64  `json:"chat_id"`
+	ThreadID int64  `json:"message_thread_id,omitempty"`
+	Text     string `json:"text"`
+	HTML     string `json:"html,omitempty"`
+	ReplyTo  int64  `json:"reply_to_message_id,omitempty"`
+	Status   bool   `json:"status,omitempty"`
 }
 
 type editOperation struct {
@@ -74,7 +75,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	defer func() { <-a.deliverSem }()
 	var receipt runtimechannelhost.ProviderReceipt
 	for index, chunk := range splitMessage(strings.Join(texts, "\n")) {
-		operation := sendOperation{ChatID: target.ChatID, Text: chunk, HTML: renderHTML(chunk)}
+		operation := sendOperation{ChatID: target.ChatID, ThreadID: target.ThreadID, Text: chunk, HTML: renderHTML(chunk)}
 		if index == 0 {
 			operation.ReplyTo = target.MessageID
 		}
@@ -179,7 +180,7 @@ func (a *Adapter) invokeSend(ctx context.Context, raw json.RawMessage) (effect.O
 	if operation.ChatID == 0 || strings.TrimSpace(operation.Text) == "" {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is missing chat or text")
 	}
-	request := &sendMessageRequest{ChatID: operation.ChatID, Text: operation.Text}
+	request := &sendMessageRequest{ChatID: operation.ChatID, MessageThreadID: operation.ThreadID, Text: operation.Text}
 	if operation.HTML != "" {
 		request.Text = operation.HTML
 		request.ParseMode = parseModeHTML

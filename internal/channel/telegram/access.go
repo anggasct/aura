@@ -86,7 +86,7 @@ func (a *Adapter) personaAdmits(ctx context.Context, persona string, class princ
 	return false
 }
 
-func (a *Adapter) personaEvaluated(ctx context.Context, chatID int64, persona string, class principal.Class) bool {
+func (a *Adapter) personaEvaluated(ctx context.Context, target destination, persona string, class principal.Class) bool {
 	if class == principal.ClassOwner || a.access.Evals == nil {
 		return true
 	}
@@ -102,7 +102,7 @@ func (a *Adapter) personaEvaluated(ctx context.Context, chatID int64, persona st
 		return true
 	}
 	a.deny(ctx, access.DeniedReasonEvalMissing)
-	a.postNotice(ctx, chatID, definition.Message(config.MessageUnavailable))
+	a.postNotice(ctx, target, definition.Message(config.MessageUnavailable))
 	return false
 }
 
@@ -123,7 +123,7 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *message, reach authorAcce
 	if _, class, admitted := a.resolveAuthor(userID, reach); admitted && class != principal.ClassPublic {
 		return false
 	}
-	persona, routed := a.routePersona(userID)
+	persona, routed := a.routePersona(userID, msg)
 	if !routed {
 		return false
 	}
@@ -145,11 +145,11 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *message, reach authorAcce
 	default:
 		reply = definition.Message(config.MessagePairingPending)
 	}
-	a.postNotice(ctx, msg.Chat.ID, reply)
+	a.postNotice(ctx, msg.destination(), reply)
 	return true
 }
 
-func (a *Adapter) budgetDrop(ctx context.Context, chatID int64, envelope *runtimeingress.IngressEnvelope) dropReason {
+func (a *Adapter) budgetDrop(ctx context.Context, target destination, envelope *runtimeingress.IngressEnvelope) dropReason {
 	class := principal.ParseClass(envelope.PrincipalClass)
 	if a.access.Budgets == nil || class == principal.ClassOwner {
 		return ""
@@ -164,7 +164,7 @@ func (a *Adapter) budgetDrop(ctx context.Context, chatID int64, envelope *runtim
 	}
 	reason := dropReason(access.BudgetDropReason(refusal))
 	definition, _ := a.personaDefinition(envelope.AgentID)
-	a.postNotice(ctx, chatID, definition.Message(refusal))
+	a.postNotice(ctx, target, definition.Message(refusal))
 	return reason
 }
 
@@ -179,24 +179,24 @@ func (a *Adapter) forgetMeInvocation(text string) (command.Invocation, bool) {
 	return inv, true
 }
 
-func (a *Adapter) forgetMe(ctx context.Context, chatID int64, inv *command.Invocation, envelope *runtimeingress.IngressEnvelope) {
+func (a *Adapter) forgetMe(ctx context.Context, target destination, inv *command.Invocation, envelope *runtimeingress.IngressEnvelope) {
 	definition, _ := a.personaDefinition(envelope.AgentID)
 	if principal.ParseClass(envelope.PrincipalClass) == principal.ClassOwner {
-		a.postNotice(ctx, chatID, definition.Message(config.MessageNotPermitted))
+		a.postNotice(ctx, target, definition.Message(config.MessageNotPermitted))
 		return
 	}
 	if len(inv.Args) != 1 || !strings.EqualFold(inv.Args[0], command.ArgConfirm) {
-		a.postNotice(ctx, chatID, definition.Message(config.MessageForgetmeConfirm))
+		a.postNotice(ctx, target, definition.Message(config.MessageForgetmeConfirm))
 		return
 	}
 	if err := a.access.Erasure.Forget(ctx, envelope.PrincipalID); err != nil {
 		a.logger.WarnContext(ctx, "forgetme erasure failed", "component", "telegram")
 		return
 	}
-	a.postNotice(ctx, chatID, definition.Message(config.MessageForgetmeDone))
+	a.postNotice(ctx, target, definition.Message(config.MessageForgetmeDone))
 }
 
-func (a *Adapter) handoffHeld(ctx context.Context, chatID int64, text string, envelope *runtimeingress.IngressEnvelope) (held bool, reason dropReason) {
+func (a *Adapter) handoffHeld(ctx context.Context, target destination, text string, envelope *runtimeingress.IngressEnvelope) (held bool, reason dropReason) {
 	if a.access.Handoffs == nil || principal.ParseClass(envelope.PrincipalClass) == principal.ClassOwner {
 		return false, ""
 	}
@@ -213,11 +213,11 @@ func (a *Adapter) handoffHeld(ctx context.Context, chatID int64, text string, en
 			return true, dropHandoffForwardFailed
 		}
 		forward := "handoff · session " + envelope.ConversationID + "\n" + envelope.PrincipalID + ": " + status.TruncateRunes(strings.TrimSpace(text), handoffForwardRunes)
-		a.postNotice(ctx, ownerChat, forward)
+		a.postNotice(ctx, destination{chatID: ownerChat}, forward)
 		return true, ""
 	case access.HandoffStateExpired:
 		definition, _ := a.personaDefinition(envelope.AgentID)
-		a.postNotice(ctx, chatID, definition.Message(config.MessageHandoffClosed))
+		a.postNotice(ctx, target, definition.Message(config.MessageHandoffClosed))
 		return false, ""
 	default:
 		return false, ""
@@ -233,8 +233,8 @@ func (a *Adapter) ownerChatID() (int64, bool) {
 	return 0, false
 }
 
-func (a *Adapter) postNotice(ctx context.Context, chatID int64, text string) {
-	if chatID == 0 || strings.TrimSpace(text) == "" {
+func (a *Adapter) postNotice(ctx context.Context, target destination, text string) {
+	if target.chatID == 0 || strings.TrimSpace(text) == "" {
 		return
 	}
 	token, ok := a.botToken()
@@ -248,7 +248,7 @@ func (a *Adapter) postNotice(ctx context.Context, chatID int64, text string) {
 	}
 	call, cancel := context.WithTimeout(ctx, noticeTimeout)
 	defer cancel()
-	if _, err := a.bot.sendMessage(call, token, &sendMessageRequest{ChatID: chatID, Text: chunks[0]}); err != nil {
+	if _, err := a.bot.sendMessage(call, token, &sendMessageRequest{ChatID: target.chatID, MessageThreadID: target.threadID, Text: chunks[0]}); err != nil {
 		a.logger.WarnContext(ctx, "access notice delivery failed", "component", "telegram")
 	}
 }

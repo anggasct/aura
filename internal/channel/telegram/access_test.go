@@ -23,13 +23,34 @@ const (
 	publicUserID  = 555003
 )
 
+type scopeLog struct {
+	mu     sync.Mutex
+	scopes []auraagent.RouteScope
+}
+
+func (l *scopeLog) record(scope *auraagent.RouteScope) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.scopes = append(l.scopes, *scope)
+}
+
+func (l *scopeLog) recorded() []auraagent.RouteScope {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.scopes)
+}
+
 type accessRouter struct {
 	definition auraagent.Definition
 	public     bool
 	unrouted   map[string]bool
+	scopes     *scopeLog
 }
 
 func (r accessRouter) Resolve(scope *auraagent.RouteScope) (auraagent.RouteMatch, bool) {
+	if r.scopes != nil {
+		r.scopes.record(scope)
+	}
 	if r.unrouted[scope.UserID] {
 		return auraagent.RouteMatch{}, false
 	}
@@ -141,6 +162,7 @@ func (f *fakeEraser) erased() []string {
 
 type accessOpts struct {
 	allowed       []string
+	chats         []string
 	privateOff    bool
 	definition    auraagent.Definition
 	public        bool
@@ -150,6 +172,7 @@ type accessOpts struct {
 }
 
 type accessRig struct {
+	scopes  *scopeLog
 	h       *harness
 	adapter *Adapter
 	sink    *memorySink
@@ -171,6 +194,7 @@ func newAccessRig(t *testing.T, opts accessOpts) *accessRig {
 		Name:               "pocket",
 		BotTokenRef:        "env://" + testTokenEnv,
 		AllowedUserIDs:     opts.allowed,
+		AllowedChatIDs:     opts.chats,
 		AcceptPrivateChats: !opts.privateOff,
 	}
 	logger := slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -182,13 +206,13 @@ func newAccessRig(t *testing.T, opts accessOpts) *accessRig {
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	rig := &accessRig{h: h, adapter: adapter, sink: newMemorySink()}
+	rig := &accessRig{h: h, adapter: adapter, sink: newMemorySink(), scopes: &scopeLog{}}
 	unrouted := map[string]bool{}
 	for _, id := range opts.unrouted {
 		unrouted[id] = true
 	}
 	adapter.SetPrincipalResolver(owners)
-	adapter.SetPersonaRouter(accessRouter{definition: opts.definition, public: opts.public, unrouted: unrouted})
+	adapter.SetPersonaRouter(accessRouter{definition: opts.definition, public: opts.public, unrouted: unrouted, scopes: rig.scopes})
 	if !opts.withoutAccess {
 		adapter.SetAccess(&opts.settings)
 	}

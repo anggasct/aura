@@ -31,6 +31,8 @@ const (
 	ownerUserID  = 424242
 	strangerID   = 999001
 	testPersona  = "main"
+	testBotID    = 8100200
+	testBotName  = "aura_test_bot"
 )
 
 type botCall struct {
@@ -54,11 +56,13 @@ type fakeBotAPI struct {
 	nextID  int64
 	polled  chan int64
 	hold    bool
+	meDown  bool
+	meName  string
 }
 
 func newFakeBotAPI(t *testing.T) *fakeBotAPI {
 	t.Helper()
-	api := &fakeBotAPI{t: t, nextID: 700, polled: make(chan int64, 64)}
+	api := &fakeBotAPI{t: t, nextID: 700, polled: make(chan int64, 64), meName: testBotName}
 	api.srv = httptest.NewServer(http.HandlerFunc(api.serve))
 	t.Cleanup(api.srv.Close)
 	return api
@@ -117,6 +121,15 @@ func (f *fakeBotAPI) serve(w http.ResponseWriter, r *http.Request) {
 			batch = []update{}
 		}
 		writeOK(w, batch)
+	case "getMe":
+		f.mu.Lock()
+		down, name := f.meDown, f.meName
+		f.mu.Unlock()
+		if down {
+			writeFailure(w, http.StatusInternalServerError, "unavailable", 0)
+			return
+		}
+		writeOK(w, map[string]any{"id": testBotID, "is_bot": true, "username": name})
 	case "sendMessage":
 		if rejection := htmlRejection(body); rejection != "" {
 			writeFailure(w, http.StatusBadRequest, rejection, 0)
@@ -263,6 +276,12 @@ func (f *fakeBotAPI) queue(batch ...update) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.batches = append(f.batches, batch)
+}
+
+func (f *fakeBotAPI) setMe(down bool, name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.meDown, f.meName = down, name
 }
 
 func (f *fakeBotAPI) failNext(reply func(w http.ResponseWriter) bool) {

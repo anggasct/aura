@@ -157,6 +157,34 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 			yaml: account("        allowed_user_ids:\n          - 7\n"),
 			want: "entries must be quoted strings",
 		},
+		"unquoted allowed chat id": {
+			yaml: account("        allowed_chat_ids:\n          - -100\n"),
+			want: "entries must be quoted strings",
+		},
+		"allowed chat ids not a sequence": {
+			yaml: account("        allowed_chat_ids: \"-100\"\n"),
+			want: "allowed_chat_ids must be a sequence",
+		},
+		"positive allowed chat id": {
+			yaml: account("        allowed_chat_ids:\n          - \"42\"\n"),
+			want: "is not a negative decimal telegram group chat id",
+		},
+		"zero allowed chat id": {
+			yaml: account("        allowed_chat_ids:\n          - \"0\"\n"),
+			want: "is not a negative decimal telegram group chat id",
+		},
+		"non numeric allowed chat id": {
+			yaml: account("        allowed_chat_ids:\n          - \"@group\"\n"),
+			want: "is not a negative decimal telegram group chat id",
+		},
+		"empty allowed chat id": {
+			yaml: account("        allowed_chat_ids:\n          - \"\"\n"),
+			want: "must not contain empty ids",
+		},
+		"duplicate allowed chat id": {
+			yaml: account("        allowed_chat_ids:\n          - \"-100\"\n          - \"-100\"\n"),
+			want: "is configured more than once",
+		},
 		"allowed user ids not a sequence": {
 			yaml: account("        allowed_user_ids: \"7\"\n"),
 			want: "allowed_user_ids must be a sequence",
@@ -206,12 +234,21 @@ func TestLoad_TelegramBindingsInvalid(t *testing.T) {
 		yaml string
 		want string
 	}{
-		"unknown account":    {yaml: base + "    account: other\n    user_id: \"42\"\n", want: "not a configured channels.telegram.accounts name"},
-		"discord account":    {yaml: "version: 1\nchannels:\n  discord:\n    accounts:\n      - name: home\n        bot_token_ref: env://D\nbindings:\n  - persona: main\n    channel: telegram\n    account: home\n    user_id: \"42\"\n", want: "not a configured channels.telegram.accounts name"},
-		"missing user":       {yaml: base + "    account: pocket\n", want: "must set user_id"},
-		"negative user":      {yaml: base + "    account: pocket\n    user_id: \"-42\"\n", want: "not a positive decimal telegram user id"},
-		"discord-only field": {yaml: base + "    account: pocket\n    user_id: \"42\"\n    guild_id: \"1\"\n", want: "by user_id only"},
-		"unknown channel":    {yaml: "version: 1\nbindings:\n  - persona: main\n    channel: slack\n    account: x\n    user_id: \"42\"\n", want: "is not supported"},
+		"unknown account":     {yaml: base + "    account: other\n    user_id: \"42\"\n", want: "not a configured channels.telegram.accounts name"},
+		"discord account":     {yaml: "version: 1\nchannels:\n  discord:\n    accounts:\n      - name: home\n        bot_token_ref: env://D\nbindings:\n  - persona: main\n    channel: telegram\n    account: home\n    user_id: \"42\"\n", want: "not a configured channels.telegram.accounts name"},
+		"missing match":       {yaml: base + "    account: pocket\n", want: "must set chat_id or user_id"},
+		"negative user":       {yaml: base + "    account: pocket\n    user_id: \"-42\"\n", want: "not a positive decimal telegram user id"},
+		"discord-only field":  {yaml: base + "    account: pocket\n    user_id: \"42\"\n    guild_id: \"1\"\n", want: "by chat_id, thread_id and user_id only"},
+		"channel id field":    {yaml: base + "    account: pocket\n    chat_id: \"-100\"\n    channel_id: \"1\"\n", want: "by chat_id, thread_id and user_id only"},
+		"thread without chat": {yaml: base + "    account: pocket\n    user_id: \"42\"\n    thread_id: \"5\"\n", want: "thread_id requires chat_id"},
+		"positive chat":       {yaml: base + "    account: pocket\n    chat_id: \"42\"\n", want: "not a negative decimal telegram group chat id"},
+		"non numeric chat":    {yaml: base + "    account: pocket\n    chat_id: \"-abc\"\n", want: "not a negative decimal telegram group chat id"},
+		"zero chat":           {yaml: base + "    account: pocket\n    chat_id: \"0\"\n", want: "not a negative decimal telegram group chat id"},
+		"padded chat":         {yaml: base + "    account: pocket\n    chat_id: \"-0100\"\n", want: "not a negative decimal telegram group chat id"},
+		"non numeric thread":  {yaml: base + "    account: pocket\n    chat_id: \"-100\"\n    thread_id: \"general\"\n", want: "not a positive decimal telegram topic id"},
+		"negative thread":     {yaml: base + "    account: pocket\n    chat_id: \"-100\"\n    thread_id: \"-5\"\n", want: "not a positive decimal telegram topic id"},
+		"duplicate chat":      {yaml: base + "    account: pocket\n    chat_id: \"-100\"\n  - persona: main\n    channel: telegram\n    account: pocket\n    chat_id: \"-100\"\n", want: "same match fields"},
+		"unknown channel":     {yaml: "version: 1\nbindings:\n  - persona: main\n    channel: slack\n    account: x\n    user_id: \"42\"\n", want: "is not supported"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -280,5 +317,74 @@ func TestLoad_TelegramOwnerOnlyAccountKeepsPrivateChatsOn(t *testing.T) {
 	account := res.Config.Channels.Telegram.Accounts[0]
 	if !account.AcceptPrivateChats || len(account.AllowedUserIDs) != 0 {
 		t.Errorf("account = %+v, want the step 2 shape: private chats on, no allowlist", account)
+	}
+}
+
+func TestLoad_TelegramGroupKeys(t *testing.T) {
+	res, err := Load(writeDiscordConfig(t, `version: 1
+`+telegramOwner+`channels:
+  telegram:
+    enabled: true
+    accounts:
+      - name: pocket
+        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN
+        allowed_chat_ids:
+          - "-1001234567890"
+          - "-42"
+      - name: spare
+        bot_token_ref: env://AURA_TELEGRAM_SPARE
+bindings:
+  - persona: main
+    channel: telegram
+    account: pocket
+    chat_id: "-1001234567890"
+  - persona: main
+    channel: telegram
+    account: pocket
+    chat_id: "-1001234567890"
+    thread_id: "5"
+  - persona: main
+    channel: telegram
+    account: pocket
+    chat_id: "-1001234567890"
+    user_id: "7"
+  - persona: main
+    channel: telegram
+    account: pocket
+    user_id: "7"
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	accounts := res.Config.Channels.Telegram.Accounts
+	if got := accounts[0].AllowedChatIDs; len(got) != 2 || got[0] != "-1001234567890" || got[1] != "-42" {
+		t.Errorf("allowed chat ids = %v", got)
+	}
+	if got := accounts[1].AllowedChatIDs; len(got) != 0 {
+		t.Errorf("account without the key serves groups: %v", got)
+	}
+	if len(res.Config.Bindings) != 4 {
+		t.Errorf("bindings = %d, want 4", len(res.Config.Bindings))
+	}
+}
+
+func TestLoad_ChatIDBindingIsTelegramOnly(t *testing.T) {
+	path := writeDiscordConfig(t, bindingAccounts+`bindings:
+  - persona: engineer
+    channel: discord
+    account: home
+    channel_id: "123"
+    chat_id: "-100"
+`)
+	_, err := Load(path)
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeBindingInvalid || !strings.Contains(err.Error(), "chat_id is only valid on telegram bindings") {
+		t.Fatalf("Load error = %v, want %s naming chat_id", err, ErrorCodeBindingInvalid)
+	}
+}
+
+func TestLoad_TelegramChatBindingMustBeQuoted(t *testing.T) {
+	_, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  telegram:\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\nbindings:\n  - persona: main\n    channel: telegram\n    account: pocket\n    chat_id: -100\n"))
+	if err == nil || !strings.Contains(err.Error(), "bindings[0].chat_id must be a quoted string") {
+		t.Fatalf("Load error = %v, want a quoted-string shape error", err)
 	}
 }

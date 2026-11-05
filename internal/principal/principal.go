@@ -86,8 +86,20 @@ func ParseIdentity(raw string) (channel, externalID string, err error) {
 }
 
 func IsTelegramUserID(id string) bool {
+	return isCanonicalInt64(id, func(value int64) bool { return value > 0 })
+}
+
+func IsTelegramTopicID(id string) bool {
+	return isCanonicalInt64(id, func(value int64) bool { return value > 0 })
+}
+
+func IsTelegramGroupChatID(id string) bool {
+	return isCanonicalInt64(id, func(value int64) bool { return value < 0 })
+}
+
+func isCanonicalInt64(id string, admitted func(int64) bool) bool {
 	value, err := strconv.ParseInt(id, 10, 64)
-	return err == nil && value > 0 && strconv.FormatInt(value, 10) == id
+	return err == nil && admitted(value) && strconv.FormatInt(value, 10) == id
 }
 
 func isSnowflake(id string) bool {

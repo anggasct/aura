@@ -11,6 +11,7 @@ const (
 	ScoreUser           = 16
 	ScoreThread         = 8
 	ScoreChannel        = 4
+	ScoreChat           = ScoreChannel
 	ScoreGuild          = 2
 	ScoreAccountDefault = 1
 )
@@ -22,6 +23,7 @@ type RouteScope struct {
 	Account   string
 	GuildID   string
 	ChannelID string
+	ChatID    string
 	ThreadID  string
 	UserID    string
 }
@@ -191,6 +193,7 @@ func bindingScore(binding *config.Binding, scope *RouteScope) (int, bool) {
 		{binding.UserID, scope.UserID, ScoreUser},
 		{binding.ThreadID, scope.ThreadID, ScoreThread},
 		{binding.ChannelID, scope.ChannelID, ScoreChannel},
+		{binding.ChatID, scope.ChatID, ScoreChat},
 		{binding.GuildID, scope.GuildID, ScoreGuild},
 	} {
 		if field.want == "" {

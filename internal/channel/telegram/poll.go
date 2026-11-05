@@ -25,25 +25,29 @@ const chatTypePrivate = "private"
 type replyReference struct {
 	ChatID    int64 `json:"chat_id"`
 	MessageID int64 `json:"message_id"`
+	ThreadID  int64 `json:"message_thread_id,omitempty"`
 }
 
-func (a *Adapter) pollLoop(ctx context.Context) error {
+func (a *Adapter) pollLoop(ctx context.Context) {
 	attempt := 0
 	for {
 		err := a.pollOnce(ctx)
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		default:
 		}
 		if err == nil {
+			if attempt > 0 {
+				a.refreshIdentity()
+			}
 			attempt = 0
 			continue
 		}
 		a.markFault(classifyFault(err))
 		a.logger.WarnContext(ctx, "telegram poll failed", "component", "telegram", "account", a.account.Name, "error", err)
 		if !sleepContext(ctx, a.retryDelay(attempt, err)) {
-			return nil
+			return
 		}
 		attempt++
 	}
@@ -106,7 +110,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 	if !ok {
 		return nil
 	}
-	if reason := a.budgetDrop(ctx, msg.Chat.ID, envelope); reason != "" {
+	if reason := a.budgetDrop(ctx, msg.destination(), envelope); reason != "" {
 		a.drop(ctx, messageScope(msg), reason, true)
 		return nil
 	}
@@ -115,7 +119,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 		return &Error{Code: ErrorCodeIntakeFailed, Detail: "conversation session is not resolvable", Cause: err}
 	}
 	envelope.ConversationID = active
-	if held, reason := a.handoffHeld(ctx, msg.Chat.ID, msg.Text, envelope); held {
+	if held, reason := a.handoffHeld(ctx, msg.destination(), envelope.Parts[0].Text, envelope); held {
 		if reason != "" {
 			a.drop(ctx, messageScope(msg), reason, true)
 		}
@@ -150,12 +154,22 @@ func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.Ingr
 	case msg.From.IsBot:
 		a.drop(ctx, scope, dropAuthorBot, false)
 		return nil, nil, false
-	case msg.Chat.Type != chatTypePrivate:
-		a.drop(ctx, scope, dropChatNotSupported, false)
+	}
+	if reason := a.chatDrop(msg); reason != "" {
+		a.drop(ctx, scope, reason, false)
 		return nil, nil, false
-	case strings.TrimSpace(msg.Text) == "":
+	}
+	if strings.TrimSpace(msg.Text) == "" {
 		a.drop(ctx, scope, dropEmptyContent, false)
 		return nil, nil, false
+	}
+	text := msg.Text
+	if msg.isGroup() {
+		var reason dropReason
+		if text, reason = a.groupText(msg); reason != "" {
+			a.drop(ctx, scope, reason, false)
+			return nil, nil, false
+		}
 	}
 	userID := strconv.FormatInt(msg.From.ID, 10)
 	reach := a.authorAccess(ctx)
@@ -169,11 +183,11 @@ func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.Ingr
 		a.drop(ctx, scope, dropAuthorNotAllowed, false)
 		return nil, nil, false
 	}
-	if class != principal.ClassOwner && !a.account.AcceptPrivateChats {
+	if !msg.isGroup() && class != principal.ClassOwner && !a.account.AcceptPrivateChats {
 		a.drop(ctx, scope, dropPrivateChatsDisabled, true)
 		return nil, nil, false
 	}
-	persona, routed := a.routePersona(userID)
+	persona, routed := a.routePersona(userID, msg)
 	if !routed {
 		a.logger.DebugContext(ctx, "persona unresolved", "component", "telegram", "account", a.account.Name)
 		a.drop(ctx, scope, dropPersonaUnrouted, true)
@@ -187,13 +201,17 @@ func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.Ingr
 		a.drop(ctx, scope, dropAudience, true)
 		return nil, nil, false
 	}
-	if !a.personaEvaluated(ctx, msg.Chat.ID, persona, class) {
+	if !a.personaEvaluated(ctx, msg.destination(), persona, class) {
 		a.drop(ctx, scope, dropPersonaEvalMissing, true)
 		return nil, nil, false
 	}
-	reference, err := json.Marshal(replyReference{ChatID: msg.Chat.ID, MessageID: msg.MessageID})
+	reference, err := json.Marshal(replyReference{ChatID: msg.Chat.ID, MessageID: msg.MessageID, ThreadID: msg.topicID()})
 	if err != nil {
 		return nil, nil, false
+	}
+	conversation := "chat:" + strconv.FormatInt(msg.Chat.ID, 10)
+	if msg.isGroup() {
+		conversation = a.groupConversation(persona, msg, principalID, class)
 	}
 	envelope := &runtimeingress.IngressEnvelope{
 		Source:         a.source(),
@@ -201,27 +219,63 @@ func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.Ingr
 		ExternalID:     "update:" + strconv.FormatInt(item.UpdateID, 10),
 		PrincipalID:    principalID,
 		PrincipalClass: string(class),
-		ConversationID: runtimeingress.SessionKey(persona, a.source(), "chat:"+strconv.FormatInt(msg.Chat.ID, 10)),
+		ConversationID: runtimeingress.SessionKey(persona, a.source(), conversation),
 		ReplyContext:   reference,
-		Parts:          []runtimeingress.InputPart{{Text: msg.Text}},
+		Parts:          []runtimeingress.InputPart{{Text: text}},
 		ReceivedAt:     time.Now().UTC(),
 	}
-	if inv, isForgetMe := a.forgetMeInvocation(msg.Text); isForgetMe {
-		a.forgetMe(ctx, msg.Chat.ID, &inv, envelope)
+	if inv, isForgetMe := a.forgetMeInvocation(text); isForgetMe {
+		a.forgetMe(ctx, msg.destination(), &inv, envelope)
 		return nil, nil, false
 	}
 	return envelope, msg, true
 }
 
-func (a *Adapter) routePersona(userID string) (string, bool) {
+func (a *Adapter) chatDrop(msg *message) dropReason {
+	switch {
+	case msg.Chat.Type == chatTypePrivate:
+		return ""
+	case !msg.isGroup() || len(a.account.AllowedChatIDs) == 0:
+		return dropChatNotSupported
+	case !a.chatAllowed(msg.Chat.ID):
+		return dropChatNotAllowed
+	default:
+		return ""
+	}
+}
+
+func (a *Adapter) groupText(msg *message) (string, dropReason) {
+	self, known := a.selfIdentity()
+	if !known {
+		return "", dropBotIdentityUnknown
+	}
+	text, addressed := a.groupAddressing(msg, self)
+	switch {
+	case !addressed:
+		return "", dropNotMentioned
+	case strings.TrimSpace(text) == "":
+		return "", dropEmptyContent
+	default:
+		return text, ""
+	}
+}
+
+func (a *Adapter) routePersona(userID string, msg *message) (string, bool) {
 	if a.router == nil {
 		return "", false
 	}
-	match, ok := a.router.Resolve(&auraagent.RouteScope{
+	scope := &auraagent.RouteScope{
 		Channel: config.BindingChannelTelegram,
 		Account: a.account.Name,
 		UserID:  userID,
-	})
+	}
+	if msg.isGroup() {
+		scope.ChatID = strconv.FormatInt(msg.Chat.ID, 10)
+		if topic := msg.topicID(); topic > 0 {
+			scope.ThreadID = strconv.FormatInt(topic, 10)
+		}
+	}
+	match, ok := a.router.Resolve(scope)
 	if !ok {
 		return "", false
 	}
