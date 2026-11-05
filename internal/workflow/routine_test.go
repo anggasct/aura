@@ -23,15 +23,27 @@ func TestRoutineIDsAreSlugsOfValidNames(t *testing.T) {
 
 func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	tools := &fakeToolRunner{}
-	interpreter, _, disk := serialTestSetup(t, tools)
-	generated := NormalizeProposal(toolSpec("x"), "prop_r")
+	interpreter, fake, disk := serialTestSetup(t, tools)
+	proposed := toolSpec("x")
+	proposed.Steps = append(proposed.Steps, StepSpec{ID: "gate", DependsOn: []string{"read"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second})
+	generated := NormalizeProposal(proposed, "prop_r")
 	loadAll(t, interpreter, generated, threeToolSteps("defined", SourceDefined))
 	run, err := interpreter.Start(context.Background(), generated.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	waitForRunStatus(t, disk, run.ID, RunSuspended, 2*time.Second)
 	if _, err := interpreter.SaveRoutine(context.Background(), run.ID, "Weekly report"); !hasCode(err, ErrorCodeRoutineInvalid) {
-		t.Fatalf("saving an unfinished run = %v", err)
+		t.Fatalf("saving a suspended run = %v", err)
+	}
+	for deadline := time.Now().Add(2 * time.Second); ; {
+		if err := fake.Signal(context.Background(), durable.RunRef{Key: run.DurableKey}, "approval.gate", []byte(`{"decision":"approve"}`)); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the gate approval never reached a receptive run")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	waitForRunStatus(t, disk, run.ID, RunSucceeded, 5*time.Second)
 	first, err := interpreter.SaveRoutine(context.Background(), run.ID, "Weekly report")
