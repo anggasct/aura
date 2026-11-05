@@ -22,7 +22,8 @@ func TestRoutineIDsAreSlugsOfValidNames(t *testing.T) {
 }
 
 func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
-	tools := &fakeToolRunner{}
+	release := make(chan struct{})
+	tools := &fakeToolRunner{gate: release}
 	interpreter, _, disk := serialTestSetup(t, tools)
 	generated := NormalizeProposal(toolSpec("x"), "prop_r")
 	loadAll(t, interpreter, generated, threeToolSteps("defined", SourceDefined))
@@ -33,6 +34,7 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	if _, err := interpreter.SaveRoutine(context.Background(), run.ID, "Weekly report"); !hasCode(err, ErrorCodeRoutineInvalid) {
 		t.Fatalf("saving an unfinished run = %v", err)
 	}
+	close(release)
 	waitForRunStatus(t, disk, run.ID, RunSucceeded, 5*time.Second)
 	first, err := interpreter.SaveRoutine(context.Background(), run.ID, "Weekly report")
 	if err != nil || first.ID != "routine_weekly_report" || first.Version != 1 || first.Name != "Weekly report" || first.Source != SourceGenerated {

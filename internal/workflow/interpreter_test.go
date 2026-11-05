@@ -50,12 +50,20 @@ type fakeToolRunner struct {
 	mu     sync.Mutex
 	called []string
 	output func(toolID string) json.RawMessage
+	gate   chan struct{}
 }
 
 func (f *fakeToolRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
 	f.mu.Lock()
 	f.called = append(f.called, toolID)
 	f.mu.Unlock()
+	if f.gate != nil {
+		select {
+		case <-f.gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if f.output != nil {
 		return f.output(toolID), nil
 	}
