@@ -845,6 +845,10 @@ func validateTelegramShapes(doc *yamlv3.Node) error {
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 				return fmt.Errorf("channels.telegram.min_edit_interval must be a duration string at line %d", valueNode.Line)
 			}
+		case "max_attachment_bytes":
+			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
+				return fmt.Errorf("channels.telegram.max_attachment_bytes must be an integer at line %d", valueNode.Line)
+			}
 		}
 	}
 	return nil
@@ -2708,6 +2712,9 @@ func applyTelegramDefaults(cfg *Config, doc *yamlv3.Node, defaults *Telegram) {
 	if telegram.MinEditInterval == 0 && !configValuePresent(doc, "channels", "telegram", "min_edit_interval") && !envValuePresent("channels.telegram.min_edit_interval") {
 		telegram.MinEditInterval = defaults.MinEditInterval
 	}
+	if telegram.MaxAttachmentBytes == 0 && !configValuePresent(doc, "channels", "telegram", "max_attachment_bytes") && !envValuePresent("channels.telegram.max_attachment_bytes") {
+		telegram.MaxAttachmentBytes = defaults.MaxAttachmentBytes
+	}
 	accountsNode := nestedValue(doc, "channels", "telegram", "accounts")
 	for i := range telegram.Accounts {
 		if !telegram.Accounts[i].AcceptPrivateChats && !sequenceItemHasKey(accountsNode, i, "accept_private_chats") {
@@ -3507,6 +3514,9 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 	editInterval := time.Duration(telegram.MinEditInterval)
 	if editInterval < telegramMinEditFloor || editInterval > telegramMinEditCeiling {
 		problems = append(problems, fmt.Errorf("channels.telegram.min_edit_interval must be between %s and %s", telegramMinEditFloor, telegramMinEditCeiling))
+	}
+	if telegram.MaxAttachmentBytes < 1 || telegram.MaxAttachmentBytes > TelegramMaxAttachmentBytes {
+		problems = append(problems, fmt.Errorf("channels.telegram.max_attachment_bytes must be between 1 and %d", TelegramMaxAttachmentBytes))
 	}
 	if err := errors.Join(problems...); err != nil {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}

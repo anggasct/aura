@@ -19,6 +19,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/channel/media"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
@@ -267,9 +268,9 @@ func testPersonaRouter(t *testing.T, cfg *config.Discord, bindings []config.Bind
 	return router
 }
 
-func newRoutedTestAdapter(t *testing.T, cfg *config.Discord, resumes ResumeStore, effects EffectRunner, media MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
+func newRoutedTestAdapter(t *testing.T, cfg *config.Discord, resumes ResumeStore, effects EffectRunner, artifacts MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
 	t.Helper()
-	adapter, err := New(cfg, &cfg.Accounts[0], resumes, effects, media, sessions, logger)
+	adapter, err := New(cfg, &cfg.Accounts[0], resumes, effects, artifacts, sessions, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -426,16 +427,16 @@ type fakeMediaStore struct {
 	puts int
 }
 
-func (s *fakeMediaStore) Put(ctx context.Context, content io.Reader, meta *ArtifactMeta) (ArtifactReceipt, error) {
+func (s *fakeMediaStore) Put(ctx context.Context, content io.Reader, meta *media.Meta) (media.Receipt, error) {
 	body, err := io.ReadAll(io.LimitReader(content, 1<<26))
 	if err != nil {
-		return ArtifactReceipt{}, err
+		return media.Receipt{}, err
 	}
 	sum := sha256.Sum256(body)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.puts++
-	return ArtifactReceipt{
+	return media.Receipt{
 		RefID:     "ref-" + hex.EncodeToString(sum[:])[:12],
 		Digest:    hex.EncodeToString(sum[:]),
 		SizeBytes: int64(len(body)),

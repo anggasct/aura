@@ -19,6 +19,7 @@ import (
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/vision"
 )
 
 const (
@@ -105,6 +106,11 @@ type Adapter struct {
 	state      atomic.Int32
 	fault      atomic.Value
 
+	artifacts    MediaStore
+	images       atomic.Pointer[vision.Service]
+	ledger       UpdateLedger
+	mediaTimeout time.Duration
+
 	identity        atomic.Pointer[botIdentity]
 	identityRefresh chan struct{}
 
@@ -167,6 +173,7 @@ func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorSt
 		targets:    map[string]approvalTarget{},
 
 		identityRefresh: make(chan struct{}, 1),
+		mediaTimeout:    defaultMediaTimeout,
 	}
 	adapter.state.Store(int32(stateDown))
 	adapter.fault.Store(faultNone)

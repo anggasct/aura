@@ -93,3 +93,48 @@ func TestDedupeAcceptRejectsBadKey(t *testing.T) {
 		t.Fatal("nil accepted event accepted")
 	}
 }
+
+func TestDedupeClaimedReportsLiveKeysOnly(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	dedupe := NewDedupeStore(db)
+
+	claimed, err := dedupe.Claimed(ctx, "telegram", "ext-1")
+	if err != nil || claimed {
+		t.Fatalf("Claimed before accept = (%v, %v), want (false, nil)", claimed, err)
+	}
+	live := newEvent("session-1", 1)
+	live.TurnID = "turn-1"
+	live.Kind = "turn.accepted"
+	if _, _, err := dedupe.Accept(ctx, "telegram", "ext-1", time.Now().Add(time.Hour), &live); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	expired := newEvent("session-1", 2)
+	expired.TurnID = "turn-2"
+	expired.Kind = "turn.accepted"
+	if _, _, err := dedupe.Accept(ctx, "telegram", "ext-2", time.Now().Add(-time.Hour), &expired); err != nil {
+		t.Fatalf("Accept expired: %v", err)
+	}
+	cases := []struct {
+		name       string
+		source     string
+		externalID string
+		want       bool
+	}{
+		{name: "live key", source: "telegram", externalID: "ext-1", want: true},
+		{name: "expired key", source: "telegram", externalID: "ext-2", want: false},
+		{name: "other source", source: "discord", externalID: "ext-1", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := dedupe.Claimed(ctx, tc.source, tc.externalID)
+			if err != nil || got != tc.want {
+				t.Errorf("Claimed = (%v, %v), want (%v, nil)", got, err, tc.want)
+			}
+		})
+	}
+	if _, err := dedupe.Claimed(ctx, "", "ext-1"); err == nil {
+		t.Error("Claimed with an empty source succeeded")
+	}
+}

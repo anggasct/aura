@@ -121,7 +121,7 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *message, reach authorAcce
 	if a.access.Pairing == nil || msg.Chat.Type != chatTypePrivate || !a.account.AcceptPrivateChats {
 		return false
 	}
-	if msg.From == nil || msg.From.IsBot || msg.From.ID <= 0 || strings.TrimSpace(msg.Text) == "" {
+	if msg.From == nil || msg.From.IsBot || msg.From.ID <= 0 || !msg.hasContent() {
 		return false
 	}
 	userID := strconv.FormatInt(msg.From.ID, 10)

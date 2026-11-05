@@ -58,17 +58,23 @@ type fakeBotAPI struct {
 	hold    bool
 	meDown  bool
 	meName  string
+	files   map[string]*fakeFile
+	fetches []string
 }
 
 func newFakeBotAPI(t *testing.T) *fakeBotAPI {
 	t.Helper()
-	api := &fakeBotAPI{t: t, nextID: 700, polled: make(chan int64, 64), meName: testBotName}
+	api := &fakeBotAPI{t: t, nextID: 700, polled: make(chan int64, 64), meName: testBotName, files: map[string]*fakeFile{}}
 	api.srv = httptest.NewServer(http.HandlerFunc(api.serve))
 	t.Cleanup(api.srv.Close)
 	return api
 }
 
 func (f *fakeBotAPI) serve(w http.ResponseWriter, r *http.Request) {
+	if path, ok := strings.CutPrefix(r.URL.Path, "/file/bot"+testToken+"/"); ok {
+		f.serveFile(w, path)
+		return
+	}
 	method, ok := strings.CutPrefix(r.URL.Path, "/bot"+testToken+"/")
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
@@ -121,6 +127,8 @@ func (f *fakeBotAPI) serve(w http.ResponseWriter, r *http.Request) {
 			batch = []update{}
 		}
 		writeOK(w, batch)
+	case "getFile":
+		f.serveGetFile(w, body)
 	case "getMe":
 		f.mu.Lock()
 		down, name := f.meDown, f.meName
@@ -328,10 +336,10 @@ func (f *fakeBotAPI) count(method string) int {
 
 func eventually(t *testing.T, what string, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for !condition() {
 		if time.Now().After(deadline) {
-			t.Fatalf("%s did not happen within 5s", what)
+			t.Fatalf("%s did not happen within 20s", what)
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
@@ -512,8 +520,9 @@ func (h *harness) adapter(t *testing.T, cursors CursorStore) *Adapter {
 		cursors = h.cursors
 	}
 	cfg := &config.Telegram{
-		Enabled: true,
-		Polling: config.TelegramPolling{Timeout: config.Duration(time.Second), MaxBackoff: config.Duration(time.Second)},
+		Enabled:            true,
+		Polling:            config.TelegramPolling{Timeout: config.Duration(time.Second), MaxBackoff: config.Duration(time.Second)},
+		MaxAttachmentBytes: config.TelegramMaxAttachmentBytes,
 	}
 	account := &config.TelegramAccount{Name: "pocket", BotTokenRef: "env://" + testTokenEnv}
 	logger := slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))

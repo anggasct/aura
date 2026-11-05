@@ -23,6 +23,47 @@ func TestLoad_TelegramDefaults(t *testing.T) {
 	if telegram.MinEditInterval != Duration(2*time.Second) {
 		t.Errorf("min_edit_interval = %v, want 2s", telegram.MinEditInterval)
 	}
+	if telegram.MaxAttachmentBytes != 20971520 {
+		t.Errorf("max_attachment_bytes = %d, want 20971520", telegram.MaxAttachmentBytes)
+	}
+}
+
+func TestLoad_TelegramMaxAttachmentBytes(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    int64
+		wantErr string
+		invalid bool
+	}{
+		{name: "lower bound", value: "1", want: 1},
+		{name: "typical", value: "1048576", want: 1048576},
+		{name: "upper bound", value: "20971520", want: 20971520},
+		{name: "above the bot api limit", value: "20971521", wantErr: "max_attachment_bytes must be between 1 and 20971520", invalid: true},
+		{name: "zero", value: "0", wantErr: "max_attachment_bytes must be between 1 and 20971520", invalid: true},
+		{name: "negative", value: "-5", wantErr: "max_attachment_bytes must be between 1 and 20971520", invalid: true},
+		{name: "not an integer", value: "\"20MB\"", wantErr: "max_attachment_bytes must be an integer"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  telegram:\n    max_attachment_bytes: "+tc.value+"\n"))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load error = %v, want it to mention %q", err, tc.wantErr)
+				}
+				if code, ok := CodeOf(err); tc.invalid && (!ok || code != ErrorCodeConfigInvalid) {
+					t.Errorf("error code = %q, want %q", code, ErrorCodeConfigInvalid)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := res.Config.Channels.Telegram.MaxAttachmentBytes; got != tc.want {
+				t.Errorf("max_attachment_bytes = %d, want %d", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestLoad_TelegramMinEditIntervalOverride(t *testing.T) {

@@ -245,10 +245,11 @@ type DiscordAccount struct {
 }
 
 type Telegram struct {
-	Enabled         bool              `koanf:"enabled" yaml:"enabled"`
-	Accounts        []TelegramAccount `koanf:"accounts" yaml:"accounts"`
-	Polling         TelegramPolling   `koanf:"polling" yaml:"polling"`
-	MinEditInterval Duration          `koanf:"min_edit_interval" yaml:"min_edit_interval"`
+	Enabled            bool              `koanf:"enabled" yaml:"enabled"`
+	Accounts           []TelegramAccount `koanf:"accounts" yaml:"accounts"`
+	Polling            TelegramPolling   `koanf:"polling" yaml:"polling"`
+	MinEditInterval    Duration          `koanf:"min_edit_interval" yaml:"min_edit_interval"`
+	MaxAttachmentBytes int64             `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
 }
 
 type TelegramAccount struct {
@@ -259,6 +260,8 @@ type TelegramAccount struct {
 	AllowedChatIDs     []string `koanf:"allowed_chat_ids" yaml:"allowed_chat_ids"`
 	AcceptPrivateChats bool     `koanf:"accept_private_chats" yaml:"accept_private_chats"`
 }
+
+const TelegramMaxAttachmentBytes int64 = 20971520
 
 type TelegramPolling struct {
 	Timeout    Duration `koanf:"timeout" yaml:"timeout"`
@@ -928,7 +931,8 @@ func Default() Config {
 					Timeout:    Duration(30 * time.Second),
 					MaxBackoff: Duration(time.Minute),
 				},
-				MinEditInterval: Duration(2 * time.Second),
+				MinEditInterval:    Duration(2 * time.Second),
+				MaxAttachmentBytes: TelegramMaxAttachmentBytes,
 			},
 		},
 		Broadcast: Broadcast{

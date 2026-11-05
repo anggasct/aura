@@ -2,12 +2,9 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -118,31 +115,6 @@ func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ow
 	return err
 }
 
-type discordMediaStore struct {
-	store store.ArtifactStore
-}
-
-func (s *discordMediaStore) Put(ctx context.Context, content io.Reader, meta *discord.ArtifactMeta) (discord.ArtifactReceipt, error) {
-	if s.store == nil || meta == nil {
-		return discord.ArtifactReceipt{}, nil
-	}
-	var raw [8]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return discord.ArtifactReceipt{}, err
-	}
-	ref, err := s.store.Put(ctx, content, &store.ArtifactMetadata{
-		ID:        "art-" + hex.EncodeToString(raw[:]),
-		SessionID: meta.SessionID,
-		Filename:  meta.Filename,
-		MediaType: meta.MediaType,
-		Metadata:  meta.Extra,
-	})
-	if err != nil {
-		return discord.ArtifactReceipt{}, err
-	}
-	return discord.ArtifactReceipt{RefID: ref.ID, Digest: ref.BlobDigest, SizeBytes: ref.SizeBytes}, nil
-}
-
 type discordAdapters []*discord.Adapter
 
 func (adapters discordAdapters) Check(ctx context.Context) []health.Finding {
@@ -215,7 +187,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 	if cfg.Channels.Telegram.Enabled {
 		adapters := make(telegramAdapters, 0, len(cfg.Channels.Telegram.Accounts))
 		for i := range cfg.Channels.Telegram.Accounts {
-			adapter, err := newTelegramAdapter(cfg, &cfg.Channels.Telegram.Accounts[i], db, logger)
+			adapter, err := newTelegramAdapter(cfg, &cfg.Channels.Telegram.Accounts[i], db, artifactRoot, logger)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -252,7 +224,7 @@ func newDiscordAdapter(cfg *config.Config, account *config.DiscordAccount, db *s
 	adapter, err := discord.New(&cfg.Channels.Discord, account, &discordResumeStore{
 		store:    store.NewChannelResumeStore(db),
 		instance: account.Name,
-	}, executor, &discordMediaStore{
+	}, executor, &channelMediaStore{
 		store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
 	}, &discordSessionEnsurer{sessions: store.NewSessionService(db)}, logger)
 	if err != nil {
