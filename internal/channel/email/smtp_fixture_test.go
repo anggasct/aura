@@ -266,7 +266,7 @@ func (s *fakeSMTP) serve(raw net.Conn, behavior *smtpBehavior, connection *smtpC
 			if behavior.certificate != nil {
 				certificate = *behavior.certificate
 			}
-			config := &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}
+			tlsConfig := &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}
 			switch behavior.handshake {
 			case "garbage":
 				_, _ = conn.Write([]byte("this is not a tls record\r\n"))
@@ -275,10 +275,10 @@ func (s *fakeSMTP) serve(raw net.Conn, behavior *smtpBehavior, connection *smtpC
 				<-s.done
 				return
 			case "alert":
-				config.MinVersion = tls.VersionTLS10
-				config.MaxVersion = tls.VersionTLS10
+				tlsConfig.MinVersion = tls.VersionTLS10
+				tlsConfig.MaxVersion = tls.VersionTLS10
 			}
-			secured := tls.Server(conn, config)
+			secured := tls.Server(conn, tlsConfig)
 			if err := secured.HandshakeContext(s.t.Context()); err != nil {
 				return
 			}
