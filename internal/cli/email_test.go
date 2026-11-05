@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"iter"
 	"log/slog"
@@ -229,7 +230,7 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	}
 	passEvals(t, db, registry, "desk")
 	model := &countingModel{turns: make(chan struct{}, 16)}
-	name := "email-model-" + strings.ReplaceAll(t.Name(), "/", "-")
+	name := fmt.Sprintf("email-model-%d", personaEvalModelSeq.Add(1))
 	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return model, nil })
 	events := store.NewEventStore(db)
 	executor, err := runtimeadk.NewADKExecutor("aura", name, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
@@ -304,11 +305,20 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("model requests = %d, want 2 (a repeated Message-ID must not run a second turn)", len(requests))
 	}
-	if text := contentText(requests[0]); !strings.Contains(text, "what is on my calendar?") || !strings.Contains(text, "Subject: owner question") {
-		t.Errorf("owner turn input = %q", text)
+	var ownerInputs, friendInputs int
+	for _, request := range requests {
+		text := contentText(request)
+		switch {
+		case strings.Contains(text, "what is on my calendar?") && strings.Contains(text, "Subject: owner question"):
+			ownerInputs++
+		case strings.Contains(text, "can you send the notes?") && strings.Contains(text, "Subject: friend question"):
+			friendInputs++
+		default:
+			t.Errorf("unexpected turn input = %q", text)
+		}
 	}
-	if text := contentText(requests[1]); !strings.Contains(text, "can you send the notes?") {
-		t.Errorf("trusted turn input = %q", text)
+	if ownerInputs != 1 || friendInputs != 1 {
+		t.Errorf("owner turns = %d, trusted turns = %d, want one of each", ownerInputs, friendInputs)
 	}
 
 	owned := map[string]string{}
