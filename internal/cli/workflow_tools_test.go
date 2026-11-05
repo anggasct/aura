@@ -28,7 +28,9 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolContro
 	t.Helper()
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
 	runs := workflow.NewStore(db)
-	interpreter := workflow.NewInterpreter(runs, durable.NewFake(), &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
+	fake := durable.NewFake()
+	t.Cleanup(fake.Close)
+	interpreter := workflow.NewInterpreter(runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
 	deps := workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), EffectfulTools: toolsbuiltin.EffectfulToolNames()}
 	for _, spec := range []*workflow.Spec{waitingSpec("book_visit", "Book a visit"), waitingSpec("refund", "Issue a refund")} {
 		if err := interpreter.Load(t.Context(), spec, deps); err != nil {
