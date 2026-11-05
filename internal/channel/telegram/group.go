@@ -102,10 +102,12 @@ func (a *Adapter) refreshIdentity() {
 }
 
 func (a *Adapter) groupAddressing(msg *message, self botIdentity) (string, bool) {
-	units := utf16.Encode([]rune(msg.Text))
+	body := msg.body()
+	entities := msg.bodyEntities()
+	units := utf16.Encode([]rune(body))
 	var cuts []textCut
-	for i := range msg.Entities {
-		entity := &msg.Entities[i]
+	for i := range entities {
+		entity := &entities[i]
 		if entity.Offset < 0 || entity.Length <= 0 || entity.Offset+entity.Length > len(units) {
 			continue
 		}
@@ -132,7 +134,7 @@ func (a *Adapter) groupAddressing(msg *message, self botIdentity) (string, bool)
 		addressed = true
 	}
 	if len(cuts) == 0 {
-		return msg.Text, addressed
+		return body, addressed
 	}
 	return strings.TrimSpace(applyCuts(units, cuts)), addressed
 }

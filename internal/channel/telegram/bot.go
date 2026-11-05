@@ -161,6 +161,15 @@ type message struct {
 	Chat              chat                `json:"chat"`
 	Text              string              `json:"text"`
 	Entities          []messageEntity     `json:"entities,omitempty"`
+	Caption           string              `json:"caption,omitempty"`
+	CaptionEntities   []messageEntity     `json:"caption_entities,omitempty"`
+	Photo             []mediaFile         `json:"photo,omitempty"`
+	Document          *mediaFile          `json:"document,omitempty"`
+	Audio             *mediaFile          `json:"audio,omitempty"`
+	Voice             *mediaFile          `json:"voice,omitempty"`
+	Video             *mediaFile          `json:"video,omitempty"`
+	VideoNote         *mediaFile          `json:"video_note,omitempty"`
+	Animation         *mediaFile          `json:"animation,omitempty"`
 	ReplyTo           *message            `json:"reply_to_message,omitempty"`
 	ThreadID          int64               `json:"message_thread_id,omitempty"`
 	IsTopicMessage    bool                `json:"is_topic_message,omitempty"`
@@ -168,6 +177,15 @@ type message struct {
 }
 
 type forumTopicCreation struct{}
+
+type mediaFile struct {
+	FileID   string `json:"file_id"`
+	FileSize int64  `json:"file_size,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+	FileName string `json:"file_name,omitempty"`
+	Width    int    `json:"width,omitempty"`
+	Height   int    `json:"height,omitempty"`
+}
 
 type messageEntity struct {
 	Type   string `json:"type"`
@@ -214,6 +232,15 @@ type inlineKeyboard struct {
 type inlineButton struct {
 	Text         string `json:"text"`
 	CallbackData string `json:"callback_data"`
+}
+
+type getFileRequest struct {
+	FileID string `json:"file_id"`
+}
+
+type fileInfo struct {
+	FileSize int64  `json:"file_size"`
+	FilePath string `json:"file_path"`
 }
 
 type answerCallbackRequest struct {

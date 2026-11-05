@@ -192,8 +192,9 @@ func assembleRig(t *testing.T, h *harness, opts accessOpts, cursors CursorStore,
 		opts.definition = auraagent.Definition{ID: testPersona, Name: "Main", Audience: config.AudiencePublic}
 	}
 	cfg := &config.Telegram{
-		Enabled: true,
-		Polling: config.TelegramPolling{Timeout: config.Duration(time.Second), MaxBackoff: config.Duration(time.Second)},
+		Enabled:            true,
+		Polling:            config.TelegramPolling{Timeout: config.Duration(time.Second), MaxBackoff: config.Duration(time.Second)},
+		MaxAttachmentBytes: config.TelegramMaxAttachmentBytes,
 	}
 	account := &config.TelegramAccount{
 		Name:               "pocket",

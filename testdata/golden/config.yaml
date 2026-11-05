@@ -222,3 +222,4 @@ channels:
       timeout: 30s
       max_backoff: 1m0s
     min_edit_interval: 2s
+    max_attachment_bytes: 20971520

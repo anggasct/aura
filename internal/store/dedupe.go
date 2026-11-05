@@ -10,6 +10,7 @@ import (
 
 type DedupeStore interface {
 	Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *RuntimeEvent) (originalTurnID string, created bool, err error)
+	Claimed(ctx context.Context, source, externalID string) (bool, error)
 	ListTurnEvents(ctx context.Context, turnID string) ([]RuntimeEvent, error)
 }
 
@@ -75,6 +76,24 @@ func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID strin
 		return "", false, classifyBusy(fmt.Errorf("commit dedupe accept: %w", err))
 	}
 	return accepted.TurnID, true, nil
+}
+
+func (s *sqliteDedupeStore) Claimed(ctx context.Context, source, externalID string) (bool, error) {
+	if source == "" || externalID == "" {
+		return false, Errorf(ErrorCodeInvalidArgument, "dedupe key must have a source and an external id")
+	}
+	var expiresAtRaw string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT expires_at FROM ingress_dedupe WHERE source = ? AND external_id = ?`,
+		source, externalID,
+	).Scan(&expiresAtRaw)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("read dedupe key: %w", err)
+	}
+	return expiresAtRaw >= formatTime(time.Now().UTC()), nil
 }
 
 func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, turnID string) ([]RuntimeEvent, error) {

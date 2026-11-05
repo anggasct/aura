@@ -13,6 +13,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/approval"
+	"github.com/anggasct/aura/internal/channel/media"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
@@ -24,9 +25,10 @@ const pollGrace = 10 * time.Second
 const chatTypePrivate = "private"
 
 type replyReference struct {
-	ChatID    int64 `json:"chat_id"`
-	MessageID int64 `json:"message_id"`
-	ThreadID  int64 `json:"message_thread_id,omitempty"`
+	ChatID    int64                   `json:"chat_id"`
+	MessageID int64                   `json:"message_id"`
+	ThreadID  int64                   `json:"message_thread_id,omitempty"`
+	Artifacts []media.ArtifactSummary `json:"artifacts,omitempty"`
 }
 
 func (a *Adapter) pollLoop(ctx context.Context) {
@@ -152,6 +154,12 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return &Error{Code: ErrorCodeIntakeFailed, Detail: "session is not ensurable", Cause: err}
 	}
+	if msg.hasMedia() {
+		proceed, err := a.stageMedia(ctx, msg, envelope)
+		if err != nil || !proceed {
+			return err
+		}
+	}
 	if _, err := a.sink.Accept(ctx, envelope); err != nil {
 		if retryableIntake(err) {
 			return &Error{Code: ErrorCodeIntakeFailed, Detail: "runtime did not accept the update", Cause: err}
@@ -183,11 +191,11 @@ func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.Ingr
 		a.drop(ctx, scope, reason, false)
 		return nil, nil, false
 	}
-	if strings.TrimSpace(msg.Text) == "" {
+	if !msg.hasContent() {
 		a.drop(ctx, scope, dropEmptyContent, false)
 		return nil, nil, false
 	}
-	text := msg.Text
+	text := msg.body()
 	if msg.isGroup() {
 		var reason dropReason
 		if text, reason = a.groupText(msg); reason != "" {
@@ -273,7 +281,7 @@ func (a *Adapter) groupText(msg *message) (string, dropReason) {
 	switch {
 	case !addressed:
 		return "", dropNotMentioned
-	case strings.TrimSpace(text) == "":
+	case strings.TrimSpace(text) == "" && !msg.hasMedia():
 		return "", dropEmptyContent
 	default:
 		return text, ""
