@@ -2,7 +2,6 @@ package discord
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -20,43 +19,28 @@ const (
 	handoffForwardRunes = 1500
 )
 
-var ErrNoHandoffTarget = errors.New("discord: session has no known requester on this account")
-
 type HandoffGate = access.HandoffGate
 
-type HandoffTarget struct {
-	Account   string
-	ChannelID string
-}
-
-func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (HandoffTarget, error) {
+func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (access.HandoffTarget, error) {
 	binding, ok := a.lookupTarget(sessionID)
 	if !ok {
-		return HandoffTarget{}, ErrNoHandoffTarget
+		return access.HandoffTarget{}, access.ErrNoHandoffTarget
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
-		return HandoffTarget{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return access.HandoffTarget{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	dm, err := a.ownerDM(ctx, token)
 	if err != nil {
-		return HandoffTarget{}, err
+		return access.HandoffTarget{}, err
 	}
 	definition, _ := a.personaDefinition(binding.persona)
-	lines := []string{
-		"handoff requested",
-		"persona: " + personaLabel(&definition),
-		"session: " + sessionID,
-		"principal: " + binding.principal,
-		"reason: " + status.TruncateRunes(strings.TrimSpace(reason), handoffForwardRunes),
-		"reply: aura reply " + sessionID + " <text>",
-		"release: aura handoff release " + sessionID,
-	}
-	if err := sendText(ctx, a.httpClient, a.restBase, token, dm, strings.Join(lines, "\n")); err != nil {
-		return HandoffTarget{}, err
+	notice := access.HandoffOwnerNotice(personaLabel(&definition), sessionID, binding.principal, reason)
+	if err := sendText(ctx, a.httpClient, a.restBase, token, dm, notice); err != nil {
+		return access.HandoffTarget{}, err
 	}
 	a.postNotice(ctx, token, binding.channelID, definition.Message(config.MessageHandoffOpen))
-	return HandoffTarget{Account: a.account.Name, ChannelID: binding.channelID}, nil
+	return access.HandoffTarget{Channel: principal.ChannelDiscord, Account: a.account.Name, ChannelID: binding.channelID}, nil
 }
 
 func (a *Adapter) ownerDM(ctx context.Context, token string) (string, error) {
@@ -118,10 +102,10 @@ func DeliverText(ctx context.Context, account *config.DiscordAccount, channelID,
 	return sendText(ctx, &http.Client{Timeout: restTimeout}, discordRestBase, token, channelID, text)
 }
 
-func (a *Adapter) ReplyTarget(sessionID string) (HandoffTarget, bool) {
+func (a *Adapter) ReplyTarget(sessionID string) (access.HandoffTarget, bool) {
 	binding, ok := a.lookupTarget(sessionID)
 	if !ok || binding.channelID == "" {
-		return HandoffTarget{}, false
+		return access.HandoffTarget{}, false
 	}
-	return HandoffTarget{Account: a.account.Name, ChannelID: binding.channelID}, true
+	return access.HandoffTarget{Channel: principal.ChannelDiscord, Account: a.account.Name, ChannelID: binding.channelID}, true
 }

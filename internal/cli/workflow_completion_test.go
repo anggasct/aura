@@ -9,7 +9,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -18,10 +18,10 @@ import (
 )
 
 type fixedTarget struct {
-	sessions map[string]discord.HandoffTarget
+	sessions map[string]access.HandoffTarget
 }
 
-func (f fixedTarget) ReplyTarget(sessionID string) (discord.HandoffTarget, bool) {
+func (f fixedTarget) ReplyTarget(sessionID string) (access.HandoffTarget, bool) {
 	target, ok := f.sessions[sessionID]
 	return target, ok
 }
@@ -40,7 +40,7 @@ func completionFixture(t *testing.T) *completionHarness {
 	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: visitor.SessionID, OwnerID: visitor.PrincipalID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	controller.targets = []replyTargeter{fixedTarget{sessions: map[string]discord.HandoffTarget{visitor.SessionID: {Account: "front", ChannelID: "333"}}}}
+	controller.targets = []replyTargeter{fixedTarget{sessions: map[string]access.HandoffTarget{visitor.SessionID: {Channel: "discord", Account: "front", ChannelID: "333"}, "lobby/telegram:pocket/chat:5": {Channel: "telegram", Account: "pocket", ChannelID: "5"}}}}
 	registry, err := auraagent.Build([]config.AgentDefinition{{
 		ID: "lobby", Name: "Lobby", Description: "front desk", Instructions: "You help visitors.", Audience: config.AudiencePublic,
 		Workflows: []string{"book_visit"}, Messages: map[string]string{config.MessageWorkflowSucceeded: "Selesai: {goal}"},
@@ -104,6 +104,18 @@ func TestWorkflowStartRecordsTheReplyTarget(t *testing.T) {
 	}
 	if run, err := controller.runs.Run(t.Context(), stranger.RunID); err != nil || run.Origin.ReplyChannelID != "" {
 		t.Fatalf("a session without a known channel got a reply target: %+v, %v", run.Origin, err)
+	}
+}
+
+func TestWorkflowStartIgnoresReplyTargetsOfOtherChannels(t *testing.T) {
+	controller := completionFixture(t).controller
+	telegramCaller := &toolsbuiltin.WorkflowCaller{SessionID: "lobby/telegram:pocket/chat:5", PrincipalID: "telegram:5", PrincipalClass: principal.ClassPublic, AgentID: "lobby"}
+	started, err := controller.Start(t.Context(), telegramCaller, "book_visit", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run, err := controller.runs.Run(t.Context(), started.RunID); err != nil || run.Origin.ReplyAccount != "" || run.Origin.ReplyChannelID != "" {
+		t.Fatalf("a telegram session got a discord reply target: %+v, %v", run.Origin, err)
 	}
 }
 

@@ -18,6 +18,7 @@ const (
 	ErrorCodeDeliveryFailed      ErrorCode = "delivery_failed"
 	ErrorCodeApprovalUnavailable ErrorCode = "approval_unavailable"
 	ErrorCodeApprovalTimeout     ErrorCode = "approval_timeout"
+	ErrorCodeHandoffUnavailable  ErrorCode = "handoff_unavailable"
 	ErrorCodeAttachmentRejected  ErrorCode = "attachment_rejected"
 )
 

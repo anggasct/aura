@@ -2,7 +2,10 @@ package access
 
 import (
 	"context"
+	"errors"
+	"strings"
 
+	"github.com/anggasct/aura/internal/channel/status"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 )
@@ -55,6 +58,15 @@ type HandoffGate interface {
 	Check(ctx context.Context, sessionID string) (string, error)
 }
 
+var ErrNoHandoffTarget = errors.New("channel: session has no known requester on this account")
+
+type HandoffTarget struct {
+	Channel   string
+	Account   string
+	ChannelID string
+	ThreadID  string
+}
+
 const (
 	DropAuthorBot          = "author_bot"
 	DropEmptyContent       = "empty_content"
@@ -74,4 +86,18 @@ func BudgetDropReason(refusal string) string {
 		return DropRateLimited
 	}
 	return DropBudgetExhausted
+}
+
+const handoffReasonRunes = 1500
+
+func HandoffOwnerNotice(personaLabel, sessionID, principalID, reason string) string {
+	return strings.Join([]string{
+		"handoff requested",
+		"persona: " + personaLabel,
+		"session: " + sessionID,
+		"principal: " + principalID,
+		"reason: " + status.TruncateRunes(strings.TrimSpace(reason), handoffReasonRunes),
+		"reply: aura reply " + sessionID + " <text>",
+		"release: aura handoff release " + sessionID,
+	}, "\n")
 }

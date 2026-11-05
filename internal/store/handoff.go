@@ -14,13 +14,20 @@ const (
 	HandoffExpired = "expired"
 )
 
+const (
+	HandoffChannelDiscord  = "discord"
+	HandoffChannelTelegram = "telegram"
+)
+
 type Handoff struct {
 	SessionID      string
 	Reason         string
 	PrincipalID    string
 	AgentID        string
 	Account        string
+	Channel        string
 	ReplyChannelID string
+	ReplyThreadID  string
 	OpenedAt       time.Time
 	ReleasedAt     time.Time
 }
@@ -41,21 +48,31 @@ func NewHandoffStore(db *sql.DB) HandoffStore {
 	return &sqliteHandoffStore{db: db}
 }
 
-const handoffColumns = `session_id, reason, principal_id, agent_id, account, reply_channel_id, opened_at, COALESCE(released_at, '')`
+const handoffColumns = `session_id, reason, principal_id, agent_id, account, channel, reply_channel_id, reply_thread_id, opened_at, COALESCE(released_at, '')`
 
 func (s *sqliteHandoffStore) Open(ctx context.Context, handoff *Handoff) error {
-	if handoff == nil || handoff.SessionID == "" || handoff.Reason == "" {
-		return errors.New("open handoff: session and reason are required")
+	if handoff == nil {
+		return errNilArgument("handoff")
+	}
+	if handoff.SessionID == "" || handoff.Reason == "" {
+		return &Error{Code: ErrorCodeInvalidArgument, Detail: "open handoff: session and reason are required"}
+	}
+	if handoff.Channel != HandoffChannelDiscord && handoff.Channel != HandoffChannelTelegram {
+		return &Error{Code: ErrorCodeInvalidArgument, Detail: "open handoff: channel must be discord or telegram"}
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_handoff (session_id, reason, principal_id, agent_id, account, reply_channel_id, opened_at, released_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+		INSERT INTO session_handoff (session_id, reason, principal_id, agent_id, account, channel, reply_channel_id, reply_thread_id, opened_at, released_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 		ON CONFLICT(session_id) DO UPDATE SET
 			reason = excluded.reason, principal_id = excluded.principal_id, agent_id = excluded.agent_id,
-			account = excluded.account, reply_channel_id = excluded.reply_channel_id,
-			opened_at = excluded.opened_at, released_at = NULL`,
-		handoff.SessionID, handoff.Reason, handoff.PrincipalID, handoff.AgentID, handoff.Account, handoff.ReplyChannelID, formatTime(handoff.OpenedAt))
+			account = excluded.account, channel = excluded.channel, reply_channel_id = excluded.reply_channel_id,
+			reply_thread_id = excluded.reply_thread_id, opened_at = excluded.opened_at, released_at = NULL`,
+		handoff.SessionID, handoff.Reason, handoff.PrincipalID, handoff.AgentID, handoff.Account, handoff.Channel,
+		handoff.ReplyChannelID, handoff.ReplyThreadID, formatTime(handoff.OpenedAt))
 	if err != nil {
+		if isConstraintCheck(err) {
+			return codedError(ErrorCodeInvalidArgument, "open handoff: a column value violates its constraint", err)
+		}
 		return classifyBusy(fmt.Errorf("open handoff: %w", err))
 	}
 	return nil
@@ -122,7 +139,7 @@ func (s *sqliteHandoffStore) ListOpen(ctx context.Context) ([]Handoff, error) {
 func scanHandoff(row rowScanner) (Handoff, error) {
 	var handoff Handoff
 	var openedAt, releasedAt string
-	if err := row.Scan(&handoff.SessionID, &handoff.Reason, &handoff.PrincipalID, &handoff.AgentID, &handoff.Account, &handoff.ReplyChannelID, &openedAt, &releasedAt); err != nil {
+	if err := row.Scan(&handoff.SessionID, &handoff.Reason, &handoff.PrincipalID, &handoff.AgentID, &handoff.Account, &handoff.Channel, &handoff.ReplyChannelID, &handoff.ReplyThreadID, &openedAt, &releasedAt); err != nil {
 		return Handoff{}, err
 	}
 	opened, err := parseTime(openedAt)

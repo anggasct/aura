@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/channel/discord"
 	"github.com/anggasct/aura/internal/workflow"
 )
@@ -50,8 +51,8 @@ func (f *fakeOfferer) waitAttempts(t *testing.T, count int) {
 	t.Fatalf("timed out waiting for %d card offers", count)
 }
 
-func (f *fakeOfferer) ReplyTarget(sessionID string) (discord.HandoffTarget, bool) {
-	return discord.HandoffTarget{Account: "front", ChannelID: "333"}, f.sessions[sessionID]
+func (f *fakeOfferer) ReplyTarget(sessionID string) (access.HandoffTarget, bool) {
+	return access.HandoffTarget{Channel: "discord", Account: "front", ChannelID: "333"}, f.sessions[sessionID]
 }
 
 func TestProposalCardsOfferTheBoundAccountAndDecideThroughTheCLIPath(t *testing.T) {
