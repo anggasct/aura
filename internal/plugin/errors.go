@@ -3,6 +3,8 @@ package plugin
 import (
 	"errors"
 	"fmt"
+
+	"github.com/anggasct/aura/internal/plugin/auth"
 )
 
 type ErrorCode string
@@ -22,6 +24,8 @@ const (
 	ErrDrift              ErrorCode = "plugin_drift"
 	ErrInvalidArgument    ErrorCode = "plugin_invalid_argument"
 	ErrStorage            ErrorCode = "plugin_storage_unavailable"
+	ErrAuthRequired       ErrorCode = ErrorCode(auth.ErrRequired)
+	ErrAuthFailed         ErrorCode = ErrorCode(auth.ErrFailed)
 )
 
 type Error struct {

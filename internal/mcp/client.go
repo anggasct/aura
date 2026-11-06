@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -28,6 +29,7 @@ type Client struct {
 	apiClient        *http.Client
 	endpointPolicy   EndpointPolicy
 	secretResolver   SecretResolver
+	authorizer       RequestAuthorizer
 	oauthFetch       sdkauth.AuthorizationCodeFetcher
 	observer         Observer
 	sessionStarter   SessionStarter
@@ -274,6 +276,16 @@ func (c *Client) streamableTransport(ctx context.Context) (sdk.Transport, error)
 		},
 	}
 	var handler *sdkauth.AuthorizationCodeHandler
+	if c.authorizer != nil {
+		if c.cfg.Auth != nil {
+			return nil, Errorf(ErrConfigInvalid, "server %q declares both a request authorizer and configured auth", c.cfg.Name)
+		}
+		origin, err := url.Parse(c.cfg.URL)
+		if err != nil {
+			return nil, Errorf(ErrConfigInvalid, "server %q url is not valid", c.cfg.Name)
+		}
+		capped.next = &authorizerTransport{next: roundTripper, authorizer: c.authorizer, origin: origin}
+	}
 	if c.cfg.Auth != nil {
 		if c.cfg.Auth.Static != nil && c.cfg.Auth.OAuth != nil {
 			return nil, Errorf(ErrConfigInvalid, "server %q declares both static and oauth auth", c.cfg.Name)
@@ -383,6 +395,11 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 		}
 		if isResponseTooLarge(err) {
 			err := Errorf(ErrMessageTooLarge, "tool listing exceeds the configured message bound")
+			c.observeFailure(ctx, start, version, "", err)
+			return nil, err
+		}
+		if isAuthorizationFailure(err) {
+			err := Wrap(ErrAuthRequired, err, "list tools request was not authorized")
 			c.observeFailure(ctx, start, version, "", err)
 			return nil, err
 		}
@@ -505,6 +522,11 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 		}
 		if isResponseTooLarge(err) {
 			err := Errorf(ErrMessageTooLarge, "tool result exceeds the configured message bound")
+			c.observeFailure(ctx, start, version, toolName, err)
+			return nil, err
+		}
+		if isAuthorizationFailure(err) {
+			err := Wrap(ErrAuthRequired, err, "tool call was not authorized")
 			c.observeFailure(ctx, start, version, toolName, err)
 			return nil, err
 		}

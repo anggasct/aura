@@ -14,6 +14,7 @@ import (
 const (
 	HealthCheckID         = "plugin"
 	RemediationReview     = "review-plugin"
+	RemediationLogin      = "login-plugin"
 	maxDriftNamesReported = 5
 )
 
@@ -21,6 +22,7 @@ type RuntimeStatus struct {
 	ID      string
 	Running bool
 	Drift   []string
+	Auth    ErrorCode
 }
 
 type DriftItem struct {
@@ -66,7 +68,7 @@ type CheckerOptions struct {
 	Registry Registry
 	Desired  *config.Plugins
 	Held     []Held
-	Runtime  func() []RuntimeStatus
+	Runtime  func(ctx context.Context) []RuntimeStatus
 	Now      func() time.Time
 }
 
@@ -74,7 +76,7 @@ type Checker struct {
 	registry Registry
 	desired  *config.Plugins
 	held     []Held
-	runtime  func() []RuntimeStatus
+	runtime  func(ctx context.Context) []RuntimeStatus
 	now      func() time.Time
 }
 
@@ -89,6 +91,13 @@ func NewChecker(opts *CheckerOptions) (*Checker, error) {
 	return &Checker{registry: opts.Registry, desired: opts.Desired, held: slices.Clone(opts.Held), runtime: opts.Runtime, now: now}, nil
 }
 
+func remediationFor(code ErrorCode) string {
+	if code == ErrAuthRequired || code == ErrAuthFailed {
+		return RemediationLogin
+	}
+	return RemediationReview
+}
+
 func (c *Checker) finding(code ErrorCode, scope string, status health.Status, detail string, at time.Time) health.Finding {
 	return health.Finding{
 		ID:          string(code) + ":" + scope,
@@ -98,7 +107,7 @@ func (c *Checker) finding(code ErrorCode, scope string, status health.Status, de
 		Status:      status,
 		Severity:    health.SeverityFor(status),
 		Detail:      detail,
-		Remediation: RemediationReview,
+		Remediation: remediationFor(code),
 		CheckedAt:   at,
 		FirstSeen:   at,
 		LastSeen:    at,
@@ -119,7 +128,11 @@ func (c *Checker) Check(ctx context.Context) []health.Finding {
 		findings = append(findings, c.finding(held.Code, held.ID, status, "plugin "+held.ID+" is kept off: "+held.Detail, at))
 	}
 	if c.runtime != nil {
-		for _, status := range c.runtime() {
+		for _, status := range c.runtime(ctx) {
+			if status.Auth != "" {
+				findings = append(findings, c.finding(status.Auth, status.ID, health.StatusDegraded,
+					"plugin "+status.ID+" has no usable authorization; run aura plugin login and restart", at))
+			}
 			if len(status.Drift) == 0 {
 				continue
 			}

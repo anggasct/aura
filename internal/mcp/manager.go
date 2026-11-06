@@ -255,13 +255,17 @@ func (m *Manager) startServer(ctx context.Context, target *startTarget, transpor
 		}
 	}
 
-	client, err := NewClient(serverCfg, m.logger,
+	options := []ClientOption{
 		WithHTTPClient(m.httpClient),
 		WithEndpointPolicy(m.endpointPolicy),
 		WithSecretResolver(m.secretResolver),
 		WithSessionStarter(m.sessionStarter),
 		WithObserver(m.observer),
-	)
+	}
+	if target.plugin != nil {
+		options = append(options, WithRequestAuthorizer(target.plugin.Authorizer))
+	}
+	client, err := NewClient(serverCfg, m.logger, options...)
 	if err != nil {
 		return err
 	}

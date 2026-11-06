@@ -341,6 +341,14 @@ linters:
         text: G117
         path: internal/mcp/persist\.go
 
+      # Serializing the plugin OAuth token is this file's purpose: it is
+      # persisted to the 0600 owner-only plugin namespace and never enters
+      # logs, errors or model-visible output, which the auth tests enforce.
+      - linters:
+          - gosec
+        text: G117
+        path: internal/plugin/auth/store\.go
+
       # Launching the configured durable runtime binary is the supervisor's
       # purpose; the path is operator-configured and resolution fails closed
       # when the binary is absent or not executable.
