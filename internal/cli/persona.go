@@ -11,6 +11,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
@@ -34,6 +35,14 @@ func (p registryPersonas) Fingerprint(agentID string) (runtime.PersonaFingerprin
 		ToolsSHA256: fingerprint.ToolsSHA256,
 		ModelRoute:  fingerprint.ModelRoute,
 	}, true
+}
+
+func (p registryPersonas) Knowledge(agentID string, class principal.Class) []string {
+	definition, ok := p.registry.Lookup(agentID)
+	if !ok {
+		return nil
+	}
+	return definition.KnowledgeFor(class)
 }
 
 func personaTurnHook(recorder *telemetry.PersonaRecorder) postTurnHook {

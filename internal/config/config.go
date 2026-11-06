@@ -776,6 +776,10 @@ type AgentDefinition struct {
 	Evals           AgentEvals        `koanf:"evals" yaml:"evals,omitempty"`
 	Workflows       []string          `koanf:"workflows" yaml:"workflows,omitempty"`
 	Plugins         []string          `koanf:"plugins" yaml:"plugins,omitempty"`
+
+	Knowledge          []string `koanf:"knowledge" yaml:"knowledge,omitempty"`
+	PrincipalKnowledge []string `koanf:"principal_knowledge" yaml:"principal_knowledge,omitempty"`
+	PublicKnowledge    []string `koanf:"public_knowledge" yaml:"public_knowledge,omitempty"`
 }
 
 type AgentEvals struct {

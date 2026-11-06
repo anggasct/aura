@@ -44,6 +44,7 @@ type TurnRequest struct {
 	Persona          *PersonaFingerprint
 	Skill            *SkillPin
 	StreamPartial    bool
+	Knowledge        []string
 }
 
 type SkillPin = runtimeingress.SkillPin
@@ -67,6 +68,7 @@ type PersonaFingerprint struct {
 
 type Personas interface {
 	Fingerprint(agentID string) (PersonaFingerprint, bool)
+	Knowledge(agentID string, class principal.Class) []string
 }
 
 type acceptedPayload struct {

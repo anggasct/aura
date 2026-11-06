@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/principal"
 )
 
 var validTools = []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}
@@ -504,5 +505,77 @@ func TestEvalDigestCoversTheWorkflowAllowlist(t *testing.T) {
 	first.Workflows[0] = "mutated"
 	if second, _ := registry.Lookup("lobby"); len(second.Workflows) != 1 || second.Workflows[0] != "book_visit" {
 		t.Fatalf("lookup shares the allowlist: %v", second.Workflows)
+	}
+}
+
+func TestKnowledgeForFollowsTheClassAndFailsClosed(t *testing.T) {
+	definition := Definition{
+		ID: "lobby", Knowledge: []string{"support", "hr-docs"}, PrincipalKnowledge: []string{"support"}, PublicKnowledge: []string{"faq"},
+	}
+	tests := map[string]struct {
+		class principal.Class
+		want  []string
+	}{
+		"owner":   {class: principal.ClassOwner, want: []string{"support", "hr-docs"}},
+		"trusted": {class: principal.ClassTrusted, want: []string{"support"}},
+		"public":  {class: principal.ClassPublic, want: []string{"faq"}},
+		"empty":   {class: "", want: nil},
+		"unknown": {class: "admin", want: nil},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := definition.KnowledgeFor(test.class)
+			if !slices.Equal(got, test.want) {
+				t.Errorf("KnowledgeFor(%q) = %v, want %v", test.class, got, test.want)
+			}
+			if len(got) > 0 {
+				got[0] = "mutated"
+				if again := definition.KnowledgeFor(test.class); again[0] == "mutated" {
+					t.Error("KnowledgeFor shares its backing array")
+				}
+			}
+		})
+	}
+}
+
+func TestKnowledgeListsReachTheRegistryCopyAndTheEvalDigestButNotTheFingerprint(t *testing.T) {
+	registry, err := Build([]config.AgentDefinition{{
+		ID: "lobby", Description: "d", Instructions: "x",
+		Knowledge: []string{"support", "faq"}, PrincipalKnowledge: []string{"faq"}, PublicKnowledge: []string{"faq"},
+	}}, validTools, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := registry.Lookup("lobby")
+	if !slices.Equal(first.Knowledge, []string{"support", "faq"}) || !slices.Equal(first.PrincipalKnowledge, []string{"faq"}) || !slices.Equal(first.PublicKnowledge, []string{"faq"}) {
+		t.Fatalf("definition lists = %v %v %v", first.Knowledge, first.PrincipalKnowledge, first.PublicKnowledge)
+	}
+	first.Knowledge[0], first.PrincipalKnowledge[0], first.PublicKnowledge[0] = "x", "x", "x"
+	second, _ := registry.Lookup("lobby")
+	if second.Knowledge[0] != "support" || second.PrincipalKnowledge[0] != "faq" || second.PublicKnowledge[0] != "faq" {
+		t.Fatalf("lookup shares the lists: %v %v %v", second.Knowledge, second.PrincipalKnowledge, second.PublicKnowledge)
+	}
+
+	base := Definition{ID: "lobby", Instructions: "You help visitors.", Tools: []string{"read_file"}}
+	withEmpty := base
+	withEmpty.Knowledge = []string{}
+	if base.EvalDigest() != withEmpty.EvalDigest() {
+		t.Fatal("an empty list changed the digest of a persona without knowledge")
+	}
+	owner, trusted, public := base, base, base
+	owner.Knowledge = []string{"faq", "support"}
+	trusted.PrincipalKnowledge = []string{"faq", "support"}
+	public.PublicKnowledge = []string{"faq", "support"}
+	reordered := base
+	reordered.Knowledge = []string{"support", "faq"}
+	digests := map[string]bool{base.EvalDigest(): true, owner.EvalDigest(): true, trusted.EvalDigest(): true, public.EvalDigest(): true}
+	if len(digests) != 4 {
+		t.Fatal("each list must re-gate the persona separately")
+	}
+	if owner.EvalDigest() != reordered.EvalDigest() {
+		t.Fatal("list order changed the digest")
+	}
+	if base.Fingerprint() != owner.Fingerprint() || base.Fingerprint() != public.Fingerprint() {
+		t.Fatal("knowledge lists changed the persona fingerprint")
 	}
 }

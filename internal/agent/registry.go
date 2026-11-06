@@ -145,6 +145,10 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mcpS
 		EvalDir:         override.Evals.Dir,
 		Workflows:       slices.Clone(override.Workflows),
 		Plugins:         slices.Clone(override.Plugins),
+
+		Knowledge:          slices.Clone(override.Knowledge),
+		PrincipalKnowledge: slices.Clone(override.PrincipalKnowledge),
+		PublicKnowledge:    slices.Clone(override.PublicKnowledge),
 	}
 	if behavior := override.Evals.Behavior; behavior != nil {
 		definition.EvalBehavior = &EvalBehavior{

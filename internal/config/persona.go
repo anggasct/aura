@@ -131,6 +131,9 @@ func validatePersonaAccess(cfg *Config) error {
 		if err := validatePluginList(field, definition.Plugins); err != nil {
 			return err
 		}
+		if err := validatePersonaKnowledge(field, definition); err != nil {
+			return err
+		}
 		if timeout := time.Duration(definition.ApprovalTimeout); timeout != 0 && (timeout < MinApprovalTimeout || timeout > MaxApprovalTimeout) {
 			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".approval_timeout must be between 1m and 24h"}
 		}

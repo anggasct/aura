@@ -36,6 +36,7 @@ type Descriptor struct {
 	Persona        *runtime.PersonaFingerprint `json:"persona_fingerprint,omitempty"`
 	Skill          *runtime.SkillPin           `json:"skill,omitempty"`
 	StreamPartial  bool                        `json:"stream_partial,omitempty"`
+	Knowledge      []string                    `json:"knowledge,omitempty"`
 }
 
 type QueuedTurn struct {

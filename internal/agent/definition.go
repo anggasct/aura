@@ -35,6 +35,10 @@ type Definition struct {
 	Workflows       []string
 	Plugins         []string
 	EvalBehavior    *EvalBehavior
+
+	Knowledge          []string
+	PrincipalKnowledge []string
+	PublicKnowledge    []string
 }
 
 const (
@@ -84,6 +88,19 @@ func (d *Definition) ToolCeiling(class principal.Class) (tools []string, restric
 		return slices.Clone(d.PublicTools), true
 	default:
 		return slices.Clone(d.PrincipalTools), true
+	}
+}
+
+func (d *Definition) KnowledgeFor(class principal.Class) []string {
+	switch class {
+	case principal.ClassOwner:
+		return slices.Clone(d.Knowledge)
+	case principal.ClassTrusted:
+		return slices.Clone(d.PrincipalKnowledge)
+	case principal.ClassPublic:
+		return slices.Clone(d.PublicKnowledge)
+	default:
+		return nil
 	}
 }
 
@@ -159,6 +176,15 @@ func (d *Definition) EvalDigest() string {
 	if len(d.Plugins) > 0 {
 		canonical += "\nplugins=" + sorted(d.Plugins)
 	}
+	if len(d.Knowledge) > 0 {
+		canonical += "\nknowledge=" + sorted(d.Knowledge)
+	}
+	if len(d.PrincipalKnowledge) > 0 {
+		canonical += "\nprincipal_knowledge=" + sorted(d.PrincipalKnowledge)
+	}
+	if len(d.PublicKnowledge) > 0 {
+		canonical += "\npublic_knowledge=" + sorted(d.PublicKnowledge)
+	}
 	return sha256Hex(canonical)
 }
 
@@ -194,6 +220,10 @@ func (d *Definition) clone() Definition {
 		Workflows:       slices.Clone(d.Workflows),
 		Plugins:         slices.Clone(d.Plugins),
 		EvalBehavior:    d.EvalBehavior.clone(),
+
+		Knowledge:          slices.Clone(d.Knowledge),
+		PrincipalKnowledge: slices.Clone(d.PrincipalKnowledge),
+		PublicKnowledge:    slices.Clone(d.PublicKnowledge),
 	}
 }
 
