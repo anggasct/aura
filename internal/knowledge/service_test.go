@@ -201,6 +201,17 @@ func TestAddFileWritesNormalizedChunksAndRecordsTheOwnerAction(t *testing.T) {
 	}
 }
 
+func TestAddRefusesASourceWithHeadingsOnly(t *testing.T) {
+	fixture := newFixture(t)
+	_, err := fixture.service.Add(t.Context(), "support", writeSource(t, "Empty.md", []byte("# Refunds\n## Returns\n")))
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeSourceUnsupported {
+		t.Fatalf("err = %v, want %s", err, ErrorCodeSourceUnsupported)
+	}
+	if len(fixture.store.writes) != 0 {
+		t.Fatalf("writes = %d, want 0", len(fixture.store.writes))
+	}
+}
+
 func TestAddDigestIgnoresHiddenCharactersAndFollowsContent(t *testing.T) {
 	fixture := newFixture(t)
 	plain := writeSource(t, "a.md", []byte("same text"))

@@ -232,6 +232,9 @@ func (s *Service) ingest(ctx context.Context, action, collection, source string,
 	if exceeded {
 		return IngestResult{}, Errorf(ErrorCodeCapExceeded, "source exceeds %d chunks", MaxChunksPerSource)
 	}
+	if len(chunks) == 0 {
+		return IngestResult{}, Errorf(ErrorCodeSourceUnsupported, "source has no readable text")
+	}
 	sum := sha256.Sum256([]byte(text))
 	written, err := s.store.ReplaceSource(ctx, &SourceWrite{
 		Collection:    collection,
