@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/vision"
 )
 
 const (
@@ -494,6 +495,7 @@ type harnessOptions struct {
 	handoffs access.HandoffGate
 	erasure  access.PrincipalEraser
 	media    MediaStore
+	vision   *vision.Service
 	route    *approval.OwnerRoute
 	notifier HandoffNotifier
 	owners   []string
@@ -567,6 +569,9 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	adapter.SetAccess(&AccessSettings{Budgets: opts.budgets, Evals: opts.evals, Handoffs: opts.handoffs, Erasure: opts.erasure})
 	adapter.SetOwnerRoute(opts.route)
 	adapter.SetHandoffNotifier(opts.notifier)
+	if opts.vision != nil {
+		adapter.SetVisionService(opts.vision)
+	}
 	if opts.media != nil {
 		adapter.SetMediaStore(opts.media)
 	}
