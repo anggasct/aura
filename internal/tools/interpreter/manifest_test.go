@@ -2,6 +2,7 @@ package interpreter
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,31 @@ func TestManifestAccessorsReturnCopies(t *testing.T) {
 	}
 	if _, ok := manifest.Lookup("ruby"); ok {
 		t.Fatal("Lookup found a runtime that is not pinned")
+	}
+}
+
+func TestDefaultManifestEnvironmentEntriesAreEffective(t *testing.T) {
+	manifest, err := DefaultManifest()
+	if err != nil {
+		t.Fatalf("DefaultManifest: %v", err)
+	}
+	for _, runtime := range manifest.Runtimes() {
+		if !slices.Contains(runtime.Argv, "-I") {
+			continue
+		}
+		for key := range runtime.Environment {
+			if strings.HasPrefix(key, "PYTHON") {
+				t.Errorf("runtime %q pins -I (implies -E) but records ignored environment key %s", runtime.ID, key)
+			}
+		}
+	}
+	python, ok := manifest.Lookup("python")
+	if !ok {
+		t.Fatal("python runtime is not pinned")
+	}
+	utf8Index := slices.Index(python.Argv, "-X")
+	if utf8Index < 0 || utf8Index+1 >= len(python.Argv) || python.Argv[utf8Index+1] != "utf8" {
+		t.Errorf("python argv %v does not enable UTF-8 mode with -X utf8", python.Argv)
 	}
 }
 
