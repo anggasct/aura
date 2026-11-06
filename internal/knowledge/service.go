@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,6 +24,9 @@ const (
 	ActionAdd     = "add"
 	ActionRefresh = "refresh"
 	ActionRemove  = "remove"
+
+	ActionEmbed    = "embed"
+	ActionEmbedOff = "embed_off"
 )
 
 type HTMLReducer func(ctx context.Context, source []byte, maxBytes int64) (markdown string, truncated bool, err error)
@@ -107,21 +111,27 @@ type ActionSink interface {
 }
 
 type Deps struct {
-	Store   Store
-	Secrets SecretSource
-	Reducer HTMLReducer
-	HTTP    HTTPDoer
-	Actions ActionSink
-	Now     func() time.Time
+	Store     Store
+	Secrets   SecretSource
+	Reducer   HTMLReducer
+	HTTP      HTTPDoer
+	Actions   ActionSink
+	Vectors   EmbeddingStore
+	Embedder  Embedder
+	Embedding *EmbeddingSettings
+	Now       func() time.Time
 }
 
 type Service struct {
-	store   Store
-	secrets SecretSource
-	reducer HTMLReducer
-	http    HTTPDoer
-	actions ActionSink
-	now     func() time.Time
+	store     Store
+	secrets   SecretSource
+	reducer   HTMLReducer
+	http      HTTPDoer
+	actions   ActionSink
+	vectors   EmbeddingStore
+	embedder  Embedder
+	embedding *EmbeddingSettings
+	now       func() time.Time
 }
 
 func NewService(deps *Deps) (*Service, error) {
@@ -135,7 +145,13 @@ func NewService(deps *Deps) (*Service, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{store: deps.Store, secrets: deps.Secrets, reducer: deps.Reducer, http: deps.HTTP, actions: deps.Actions, now: now}, nil
+	if deps.Embedding != nil && !deps.Embedding.valid() {
+		return nil, Errorf(ErrorCodeInvalidArgument, "embedding settings need a fingerprint, destination, dimensions and batch size")
+	}
+	return &Service{
+		store: deps.Store, secrets: deps.Secrets, reducer: deps.Reducer, http: deps.HTTP, actions: deps.Actions,
+		vectors: deps.Vectors, embedder: deps.Embedder, embedding: deps.Embedding, now: now,
+	}, nil
 }
 
 func ValidCollectionID(id string) bool {
@@ -154,6 +170,7 @@ type IngestResult struct {
 	Kind       string
 	URI        string
 	Label      string
+	Embedding  EmbedOutcome
 	WriteResult
 }
 
@@ -164,7 +181,13 @@ func (s *Service) Add(ctx context.Context, collection, source string) (IngestRes
 	if strings.TrimSpace(source) == "" {
 		return IngestResult{}, Errorf(ErrorCodeInvalidArgument, "source must not be empty")
 	}
-	return s.ingest(ctx, ActionAdd, collection, source, isURLReference(source))
+	result, err := s.ingest(ctx, ActionAdd, collection, source, isURLReference(source))
+	if result.SourceID == "" || result.Status == StatusUnchanged {
+		return result, err
+	}
+	outcome, embedErr := s.embedAfterWrite(ctx, collection)
+	result.Embedding = outcome
+	return result, errors.Join(err, embedErr)
 }
 
 func isURLReference(source string) bool {
@@ -194,6 +217,14 @@ func (s *Service) Refresh(ctx context.Context, collection, source string) ([]Ing
 			continue
 		}
 		results = append(results, result)
+	}
+	changed := slices.ContainsFunc(results, func(result IngestResult) bool { return result.Status != StatusUnchanged })
+	if changed {
+		outcome, embedErr := s.embedAfterWrite(ctx, collection)
+		for i := range results {
+			results[i].Embedding = outcome
+		}
+		failures = append(failures, embedErr)
 	}
 	return results, errors.Join(failures...)
 }
