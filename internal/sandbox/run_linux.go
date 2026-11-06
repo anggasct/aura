@@ -308,6 +308,7 @@ func observed(result *Result, stdout, stderr *limitedBuffer, cmd *exec.Cmd, even
 		result.CPUTime = state.UserTime() + state.SystemTime()
 		if status, ok := state.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 			result.Signal = int(status.Signal())
+			result.ExitCode = -1
 		}
 	}
 	return *result

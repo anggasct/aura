@@ -392,6 +392,7 @@ func TestObservedResultFields(t *testing.T) {
 		{name: "clean exit", script: "exit 0", want: Result{}},
 		{name: "exit code", script: "exit 3", want: Result{ExitCode: 3}},
 		{name: "signal death", script: "kill -KILL $$", want: Result{ExitCode: -1, Signal: int(syscall.SIGKILL)}},
+		{name: "policy signal death", script: "kill -31 $$", want: Result{ExitCode: -1, Signal: int(syscall.SIGSYS)}},
 		{name: "oom kill", script: "exit 0", events: cgroupEvents{oomKills: 1}, want: Result{OOMKilled: true}},
 		{name: "pid limit", script: "exit 0", events: cgroupEvents{pidsMax: 2}, want: Result{PidsLimited: true}},
 		{name: "disk and file limits", script: "exit 0", end: runEnd{diskLimited: true, fileLimited: true}, want: Result{DiskLimited: true, FileLimited: true}},
@@ -412,7 +413,7 @@ func TestObservedResultFields(t *testing.T) {
 		stdout, stderr := limitedBuffer{limit: 4}, limitedBuffer{}
 		_, _ = stdout.Write([]byte("abcdefgh"))
 		got := terminatedResult(&stdout, &stderr, cmd, cgroupEvents{}, runEnd{terminated: true, timedOut: true})
-		if !got.Terminated || !got.TimedOut || !got.StdoutTruncated || got.StderrTruncated || !got.Truncated || got.Stdout != "abcd" || got.Signal != int(syscall.SIGKILL) {
+		if !got.Terminated || !got.TimedOut || !got.StdoutTruncated || got.StderrTruncated || !got.Truncated || got.Stdout != "abcd" || got.Signal != int(syscall.SIGKILL) || got.ExitCode != -1 {
 			t.Fatalf("result = %+v", got)
 		}
 	})
@@ -420,7 +421,7 @@ func TestObservedResultFields(t *testing.T) {
 		cmd, _ := run(t, "kill -KILL $$")
 		var stdout, stderr limitedBuffer
 		got := terminatedResult(&stdout, &stderr, cmd, cgroupEvents{}, runEnd{terminated: true})
-		if !got.Terminated || got.TimedOut {
+		if !got.Terminated || got.TimedOut || got.ExitCode != -1 {
 			t.Fatalf("result = %+v", got)
 		}
 	})
