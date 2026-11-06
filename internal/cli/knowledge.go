@@ -27,12 +27,19 @@ func newKnowledgeService(cfg *config.Config, db *sql.DB, resolver egress.Resolve
 	if db == nil {
 		return nil, errors.New("knowledge database must not be nil")
 	}
+	wiring, err := newKnowledgeEmbedding(cfg, resolver)
+	if err != nil {
+		return nil, err
+	}
 	return knowledge.NewService(&knowledge.Deps{
-		Store:   &knowledgeStore{store: store.NewKBStore(db)},
-		Secrets: &knowledgeSecrets{cfg: cfg},
-		Reducer: toolsbuiltin.ReduceHTML,
-		HTTP:    newKnowledgeHTTPClient(resolver),
-		Actions: &knowledgeActions{db: db},
+		Store:     &knowledgeStore{store: store.NewKBStore(db)},
+		Secrets:   &knowledgeSecrets{cfg: cfg},
+		Reducer:   toolsbuiltin.ReduceHTML,
+		HTTP:      newKnowledgeHTTPClient(resolver),
+		Actions:   &knowledgeActions{db: db},
+		Vectors:   &knowledgeVectors{store: store.NewKBEmbeddingStore(db)},
+		Embedder:  wiring.embedder,
+		Embedding: wiring.settings,
 	})
 }
 
@@ -127,6 +134,8 @@ func translateKnowledgeStoreError(err error) error {
 	switch code {
 	case store.ErrorCodeKBCapExceeded:
 		return knowledge.Errorf(knowledge.ErrorCodeCapExceeded, "chunk cap would be exceeded")
+	case store.ErrorCodeKBEmbeddingStale:
+		return knowledge.Errorf(knowledge.ErrorCodeEmbeddingFailed, "the collection or its opt-in changed while vectors were computed; rerun to resume")
 	case store.ErrorCodeKBSourceNotFound:
 		return knowledge.Errorf(knowledge.ErrorCodeSourceNotFound, "source does not exist in the collection")
 	default:

@@ -117,6 +117,13 @@ func additionalConfiguredSecrets(cfg *config.Config) []configuredSecret {
 	if ref := parseSecretRef(cfg.Telemetry.CredentialRef); ref.Env != "" || ref.File != "" {
 		secrets = append(secrets, referenceSecret("telemetry_credential", ref))
 	}
+	if embeddingConfig := configuredEmbedding(cfg); embeddingConfig != nil {
+		if ref := parseSecretRef(embeddingConfig.CredentialRef); ref.Env != "" || ref.File != "" {
+			entry := referenceSecret("knowledge_embedding_credential", ref)
+			entry.optional = true
+			secrets = append(secrets, entry)
+		}
+	}
 	if cfg.MCP != nil {
 		for i := range cfg.MCP.Servers {
 			server := &cfg.MCP.Servers[i]

@@ -18,6 +18,7 @@ const digestPrefixLength = 12
 
 var knowledgeRemovalNotes = []string{
 	"not removed: earlier replies, recorded tool results, the durable runtime journal and older backups may still hold copies",
+	"not removed: copies an embedding provider holds under its own terms, and vectors a running server keeps in memory until its next retrieval or restart",
 	"raw database pages can keep fragments until the database is vacuumed",
 }
 
@@ -32,6 +33,7 @@ func newKBCmd(gf *globalFlags) *cobra.Command {
 		newKBShowCmd(gf),
 		newKBRemoveCmd(gf),
 		newKBRefreshCmd(gf),
+		newKBEmbedCmd(gf),
 		newKBCheckCmd(gf),
 	)
 	return cmd
@@ -64,7 +66,8 @@ func newKBAddCmd(gf *globalFlags) *cobra.Command {
 					logger.InfoContext(ctx, "knowledge source ingested",
 						"component", "knowledge", "operation", "add", "collection", result.Collection,
 						"status", result.Status, "chunks", result.Chunks)
-					if writeErr := writeProfileLines(cmd, []string{ingestLine(&result)}); writeErr != nil {
+					lines := append([]string{ingestLine(&result)}, embedOutcomeLines(args[0], result.Embedding)...)
+					if writeErr := writeProfileLines(cmd, lines); writeErr != nil {
 						return writeErr
 					}
 				}
@@ -202,6 +205,9 @@ func newKBRefreshCmd(gf *globalFlags) *cobra.Command {
 						"component", "knowledge", "operation", "refresh", "collection", results[i].Collection,
 						"status", results[i].Status, "chunks", results[i].Chunks)
 					lines = append(lines, ingestLine(&results[i]))
+				}
+				if len(results) > 0 {
+					lines = append(lines, embedOutcomeLines(args[0], results[0].Embedding)...)
 				}
 				if len(lines) > 0 {
 					if writeErr := writeProfileLines(cmd, lines); writeErr != nil {
