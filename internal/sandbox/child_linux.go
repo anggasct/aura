@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 
 	"golang.org/x/sys/unix"
 )
@@ -14,6 +15,7 @@ import (
 const childInitFailedExit = 126
 
 type childConfig struct {
+	Profile        Profile  `json:"profile"`
 	WorkingDir     string   `json:"working_dir"`
 	ReadOnlyPaths  []string `json:"read_only_paths"`
 	ReadWritePaths []string `json:"read_write_paths"`
@@ -24,6 +26,7 @@ type childConfig struct {
 }
 
 func RunChild() int {
+	runtime.LockOSThread()
 	cfg, err := readChildConfig()
 	if err != nil {
 		reportChildInit(err)
@@ -64,11 +67,14 @@ func setupChild(cfg *childConfig) error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("set no_new_privs: %w", err)
 	}
-	spec := &Spec{WorkingDir: cfg.WorkingDir, ReadOnlyPaths: cfg.ReadOnlyPaths, ReadWritePaths: cfg.ReadWritePaths}
+	spec := &Spec{Profile: cfg.Profile, WorkingDir: cfg.WorkingDir, ReadOnlyPaths: cfg.ReadOnlyPaths, ReadWritePaths: cfg.ReadWritePaths}
+	if err := spec.Profile.validate(); err != nil {
+		return err
+	}
 	if err := applyLandlock(spec); err != nil {
 		return err
 	}
-	return applySeccomp()
+	return applySeccomp(cfg.Profile)
 }
 
 func reportChildInit(err error) {
@@ -79,7 +85,7 @@ func reportChildInit(err error) {
 }
 
 func closeExtraFds() error {
-	if err := unix.CloseRange(5, ^uint(0), 0); err != nil {
+	if err := unix.CloseRange(5, ^uint(0), unix.CLOSE_RANGE_CLOEXEC); err != nil {
 		return fmt.Errorf("close extra fds: %w", err)
 	}
 	return nil

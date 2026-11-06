@@ -23,7 +23,7 @@ import (
 )
 
 func TestFormatSandboxStatusAvailable(t *testing.T) {
-	all := sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}
+	all := sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}
 	text, available := formatSandboxStatus(all, nil)
 	if !available || text != "sandbox: available" {
 		t.Fatalf("got %q available=%v", text, available)
@@ -70,7 +70,7 @@ func TestStatusCmdReportsMissingPrimitive(t *testing.T) {
 
 func TestStatusCmdAvailableExitsClean(t *testing.T) {
 	negotiate := func() (sandbox.Primitives, error) {
-		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
 	}
 	cmd := newStatusCmdForTest(t, negotiate, true)
 	var out bytes.Buffer
@@ -147,7 +147,7 @@ func seedHealthyStorage(t *testing.T, dataRoot string) {
 
 func TestStatusOfflineDeterministicOutputAndExitCodes(t *testing.T) {
 	negotiate := func() (sandbox.Primitives, error) {
-		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
 	}
 	cmd := newStatusCmdForTest(t, negotiate, false)
 	var out bytes.Buffer
@@ -168,7 +168,7 @@ func TestStatusOfflineDeterministicOutputAndExitCodes(t *testing.T) {
 
 func TestStatusJSONEncodesContract(t *testing.T) {
 	negotiate := func() (sandbox.Primitives, error) {
-		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
 	}
 	dataRoot := t.TempDir()
 	seedHealthyStorage(t, dataRoot)
@@ -224,7 +224,7 @@ func TestDoctorFiltersByCheck(t *testing.T) {
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
 	negotiate := func() (sandbox.Primitives, error) {
-		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
 	}
 	registry, err := buildHealthRegistry(&cfg, nil, sandboxSupport(negotiate), pinnedProcessProbe)
 	if err != nil {
@@ -330,7 +330,7 @@ func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadO
 	cmd.SetOut(&out)
 	cmd.SetContext(t.Context())
 	runErr := runStatus(cmd, loaded.Config, loaded.CapabilityReport, func() (sandbox.Primitives, error) {
-		return sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
 	}, true, false, pinnedProcessProbe)
 	return cmd, out.String(), runErr
 }

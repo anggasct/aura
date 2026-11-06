@@ -7,6 +7,7 @@ import (
 )
 
 type SessionRequest struct {
+	Profile         Profile
 	RequestID       string
 	PrincipalID     string
 	SessionID       string
@@ -55,7 +56,7 @@ func (r *SessionRequest) validate() error {
 	if r.SetupTimeout < 0 {
 		return Errorf(ErrorCodeInvalidArgument, "setup timeout must not be negative")
 	}
-	return nil
+	return r.Profile.validate()
 }
 
 func (r *SessionRequest) spec() *Spec {
@@ -64,6 +65,7 @@ func (r *SessionRequest) spec() *Spec {
 		environment = append(environment, key+"="+value)
 	}
 	return &Spec{
+		Profile:        r.Profile,
 		WorkingDir:     r.WorkingDir,
 		ReadOnlyPaths:  sortedClone(r.ReadOnlyPaths),
 		ReadWritePaths: sortedClone(r.ReadWritePaths),

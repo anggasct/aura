@@ -18,7 +18,7 @@ import (
 
 func cliWithoutDelegation() (sandbox.Primitives, error) {
 	return sandbox.Primitives{
-		UserNamespace: true, Seccomp: true, Landlock: true, ProcessGroups: true,
+		UserNamespace: true, PidNamespace: true, Seccomp: true, Landlock: true, ProcessGroups: true,
 		CgroupDetail: "no delegated cgroup for sandbox bounds in paseo.service: run aura server under a systemd unit with Delegate=yes",
 	}, nil
 }
@@ -128,11 +128,19 @@ func TestSandboxSupportNamesCgroupRoot(t *testing.T) {
 		{
 			name: "delegated",
 			have: sandbox.Primitives{
-				UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true,
+				UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true,
 				CgroupDetail: "cgroup_root=aura.service mode=self_leaf",
 			},
 			supported: true,
 			want:      "all containment primitives available (cgroup_root=aura.service mode=self_leaf)",
+		},
+		{
+			name: "no pid namespace",
+			have: sandbox.Primitives{
+				UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true,
+			},
+			supported: false,
+			want:      "missing: pid_namespace",
 		},
 		{
 			name:      "not delegated",

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"runtime"
@@ -21,6 +22,7 @@ func negotiate() (Primitives, error) {
 	cgroupV2, cgroupDetail := cgroupV2Available()
 	return Primitives{
 		UserNamespace: usernsAvailable(),
+		PidNamespace:  pidNamespaceAvailable(os.DirFS(procRoot)),
 		Seccomp:       seccompAvailable(),
 		CgroupV2:      cgroupV2,
 		Landlock:      landlockAvailable(),
@@ -44,6 +46,20 @@ func usernsAvailable() bool {
 		}
 	}
 	return usernsSyscallPermitted()
+}
+
+const procRoot = "/proc"
+
+func pidNamespaceAvailable(proc fs.FS) bool {
+	if _, err := fs.Stat(proc, "self/ns/pid"); err != nil {
+		return false
+	}
+	data, err := fs.ReadFile(proc, "sys/user/max_pid_namespaces")
+	if err != nil {
+		return false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	return err == nil && n > 0
 }
 
 func usernsSyscallPermitted() bool {
@@ -101,7 +117,7 @@ func resolveExecutable(command string) (string, error) {
 func childSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		Setpgid:     true,
-		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET,
+		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWNET,
 		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
 		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
 	}
@@ -119,8 +135,13 @@ func runWithCgroups(ctx context.Context, cgroups *cgroupHost, spec *Spec, comman
 	if err != nil {
 		return Result{}, err
 	}
+	spec, scratch, err := withScratch(spec)
+	if err != nil {
+		return Result{}, err
+	}
+	defer removeScratch(scratch)
 	payload, err := json.Marshal(childConfig{
-		WorkingDir: spec.WorkingDir, ReadOnlyPaths: spec.ReadOnlyPaths, ReadWritePaths: spec.ReadWritePaths,
+		Profile: spec.Profile, WorkingDir: spec.WorkingDir, ReadOnlyPaths: spec.ReadOnlyPaths, ReadWritePaths: spec.ReadWritePaths,
 		AllowEnv: spec.AllowEnv, Limits: spec.Limits, Command: resolved, Args: args,
 	})
 	if err != nil {

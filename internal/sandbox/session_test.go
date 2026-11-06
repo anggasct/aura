@@ -113,6 +113,7 @@ func TestValidateSessionGrantResolution(t *testing.T) {
 		"capability": func(r *SessionRequest) { r.Capabilities = []string{"tool.exec.other"} },
 		"env":        func(r *SessionRequest) { r.Environment["EXTRA"] = "v" },
 		"limit":      func(r *SessionRequest) { r.Limits.MemoryBytes = 32 << 20 },
+		"profile":    func(r *SessionRequest) { r.Profile = ProfileConnector },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {

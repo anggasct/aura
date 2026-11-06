@@ -12,6 +12,7 @@ import (
 )
 
 type SandboxRequest struct {
+	Profile         Profile
 	RequestID       string
 	PrincipalID     string
 	SessionID       string
@@ -29,6 +30,7 @@ type SandboxRequest struct {
 }
 
 type boundContract struct {
+	Profile        Profile  `json:"profile,omitempty"`
 	Executable     string   `json:"executable"`
 	Arguments      []string `json:"arguments"`
 	WorkingDir     string   `json:"working_dir"`
@@ -50,6 +52,7 @@ func DigestPayload(req *SandboxRequest) (json.RawMessage, error) {
 	}
 	environment = sortedClone(environment)
 	payload, err := json.Marshal(boundContract{
+		Profile:        req.Profile,
 		Executable:     req.Executable,
 		Arguments:      req.Arguments,
 		WorkingDir:     req.WorkingDir,
@@ -194,6 +197,7 @@ func specFromRequest(req *SandboxRequest) *Spec {
 		environment = append(environment, key+"="+value)
 	}
 	return &Spec{
+		Profile:        req.Profile,
 		WorkingDir:     req.WorkingDir,
 		ReadOnlyPaths:  sortedClone(req.ReadOnlyPaths),
 		ReadWritePaths: sortedClone(req.ReadWritePaths),
@@ -207,6 +211,7 @@ func sessionContract(req *SessionRequest) (*SandboxRequest, error) {
 		return nil, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
 	}
 	return &SandboxRequest{
+		Profile:         req.Profile,
 		RequestID:       req.RequestID,
 		PrincipalID:     req.PrincipalID,
 		SessionID:       req.SessionID,
