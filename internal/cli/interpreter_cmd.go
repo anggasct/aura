@@ -17,8 +17,9 @@ import (
 type configLoader func(path string) (config.LoadResult, error)
 
 type interpreterDeps struct {
-	load     configLoader
-	manifest func() (*interpreter.Manifest, error)
+	load              configLoader
+	manifest          func() (*interpreter.Manifest, error)
+	platformSupported func() bool
 }
 
 func newInterpreterCmd(gf *globalFlags, deps interpreterDeps) *cobra.Command {
@@ -45,7 +46,7 @@ func withInterpreter(cmd *cobra.Command, gf *globalFlags, deps interpreterDeps, 
 		return err
 	}
 	logConfigResult(cmd.Context(), logger, &result)
-	if err := requireInterpreterCapability(result.CapabilityReport); err != nil {
+	if err := requireInterpreterCapability(result.CapabilityReport, deps.platformSupported()); err != nil {
 		return err
 	}
 	manifest, err := deps.manifest()
@@ -59,15 +60,13 @@ func withInterpreter(cmd *cobra.Command, gf *globalFlags, deps interpreterDeps, 
 	return fn(cmd.Context(), logger, store)
 }
 
-func requireInterpreterCapability(report capability.Report) error {
+func requireInterpreterCapability(report capability.Report, platformSupported bool) error {
 	status, ok := report.Status(codeInterpreterCapability)
-	switch {
-	case !ok || !status.Compiled:
+	if !ok || !status.Compiled {
 		return &capability.Error{Code: capability.ErrorCodeCapabilityUnavailable, Capability: codeInterpreterCapability, Detail: "capability is absent from this artifact"}
-	case status.MissingDependency != "":
-		return &capability.Error{Code: capability.ErrorCodeDependencyMissing, Capability: codeInterpreterCapability, Detail: "required dependency " + status.MissingDependency + " is missing; it needs linux/amd64 and a working sandbox, see aura status"}
-	case !status.Available:
-		return &capability.Error{Code: capability.ErrorCodeCapabilityUnavailable, Capability: codeInterpreterCapability, Detail: status.UnavailableReason}
+	}
+	if !platformSupported {
+		return &capability.Error{Code: capability.ErrorCodeCapabilityUnavailable, Capability: codeInterpreterCapability, Detail: "runtimes need linux/amd64"}
 	}
 	return nil
 }

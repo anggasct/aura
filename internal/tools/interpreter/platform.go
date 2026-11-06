@@ -16,6 +16,10 @@ func Supported(goos, goarch string) bool {
 	return goos == SupportedOS && goarch == SupportedArch
 }
 
+func HostSupported() bool {
+	return Supported(runtime.GOOS, runtime.GOARCH)
+}
+
 func Dependencies(goos, goarch string, base capability.Dependencies) capability.Dependencies {
 	out := make(capability.Dependencies, len(base)+1)
 	maps.Copy(out, base)

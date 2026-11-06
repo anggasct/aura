@@ -122,7 +122,8 @@ func newInterpreterRig(t *testing.T, build capability.Build, dependencies capabi
 		load: func(path string) (config.LoadResult, error) {
 			return config.LoadWithOptions(path, config.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
 		},
-		manifest: func() (*interpreter.Manifest, error) { return rig.manifest, nil },
+		manifest:          func() (*interpreter.Manifest, error) { return rig.manifest, nil },
+		platformSupported: func() bool { return true },
 	}
 	t.Cleanup(func() { makeInterpreterTreeRemovable(t, rig.dataRoot) })
 	return rig
@@ -295,11 +296,12 @@ func TestInterpreterCommandsNeedTheCapability(t *testing.T) {
 		profile      string
 		compiled     []string
 		dependencies capability.Dependencies
+		platform     bool
 		wantCode     capability.ErrorCode
 	}{
-		{"core build", "core", nil, contained, capability.ErrorCodeCapabilityUnavailable},
-		{"exec-linux without the capability compiled", "exec-linux", nil, contained, capability.ErrorCodeCapabilityUnavailable},
-		{"unsupported platform", "exec-linux", []string{"code-interpreter"}, contained, capability.ErrorCodeDependencyMissing},
+		{"core build", "core", nil, contained, true, capability.ErrorCodeCapabilityUnavailable},
+		{"exec-linux without the capability compiled", "exec-linux", nil, contained, true, capability.ErrorCodeCapabilityUnavailable},
+		{"unsupported platform", "exec-linux", []string{"code-interpreter"}, contained, false, capability.ErrorCodeCapabilityUnavailable},
 	}
 	for _, tc := range cases {
 		build, err := capability.NewBuild(tc.profile, tc.compiled, "linux")
@@ -309,6 +311,7 @@ func TestInterpreterCommandsNeedTheCapability(t *testing.T) {
 		for _, args := range [][]string{{"list"}, {"install", "python", "--archive", "x.tar.gz"}, {"remove", "python", "--apply"}} {
 			t.Run(tc.name+"/"+args[0], func(t *testing.T) {
 				rig := newInterpreterRig(t, build, tc.dependencies)
+				rig.deps.platformSupported = func() bool { return tc.platform }
 				_, err := rig.run(t, args...)
 				if code, ok := capability.CodeOf(err); !ok || code != tc.wantCode {
 					t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, code, ok, tc.wantCode)
@@ -318,6 +321,17 @@ func TestInterpreterCommandsNeedTheCapability(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestInterpreterCommandsWorkWithoutAContainedSandbox(t *testing.T) {
+	build, err := capability.NewBuild("exec-linux", []string{"code-interpreter"}, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rig := newInterpreterRig(t, build, capability.Dependencies{})
+	if out, err := rig.run(t, "list"); err != nil || !strings.Contains(out, "python") {
+		t.Fatalf("list = %q, %v", out, err)
 	}
 }
 
