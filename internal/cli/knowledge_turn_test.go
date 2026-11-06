@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	goruntime "runtime"
 	"testing"
 	"time"
 
@@ -325,6 +326,9 @@ type kbSearchRig struct {
 
 func newKBSearchRig(t *testing.T) *kbSearchRig {
 	t.Helper()
+	if goruntime.GOOS != "linux" {
+		t.Skip("builtin tool executor requires Linux")
+	}
 	rig := newKnowledgeTurnRig(t)
 	_, artifactRoot, _, err := storagePaths(rig.cfg)
 	if err != nil {
