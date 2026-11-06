@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	goruntime "runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	goruntime "runtime"
 	"testing"
 	"time"
 
