@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -110,6 +111,8 @@ type AccessPolicy interface {
 	StandingGrant(ctx context.Context, principalID, agentID, toolName, server string) (bool, error)
 }
 
+type ApprovalGuard func(ctx context.Context, request *ToolRequest) (required bool, err error)
+
 type Options struct {
 	Policy               approval.Policy
 	Adapters             map[string]Adapter
@@ -120,6 +123,7 @@ type Options struct {
 	Observer             Observer
 	ApprovalDecider      ApprovalDecider
 	Access               AccessPolicy
+	ApprovalGuards       map[string]ApprovalGuard
 }
 
 type Broker struct {
@@ -134,6 +138,7 @@ type Broker struct {
 	observer             Observer
 	decider              ApprovalDecider
 	access               AccessPolicy
+	guards               map[string]ApprovalGuard
 }
 
 func New(options *Options) (*Broker, error) {
@@ -168,6 +173,7 @@ func New(options *Options) (*Broker, error) {
 		observer:             options.Observer,
 		decider:              options.ApprovalDecider,
 		access:               options.Access,
+		guards:               maps.Clone(options.ApprovalGuards),
 	}, nil
 }
 
@@ -341,7 +347,12 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		policyOutcome = PolicyOutcomeDeny
 		return ToolResult{}, err
 	}
-	if class != principal.ClassOwner && definition.Effectful && decision.Outcome == approval.OutcomeAllow {
+	guarded, err := b.guardRequires(ctx, &canonical)
+	if err != nil {
+		policyOutcome = PolicyOutcomeDeny
+		return ToolResult{}, err
+	}
+	if (guarded || (class != principal.ClassOwner && definition.Effectful)) && decision.Outcome == approval.OutcomeAllow {
 		decision.Outcome = approval.OutcomeRequireApproval
 		policyOutcome = decision.Outcome
 	}
@@ -357,7 +368,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	approvalExpiry := absoluteApprovalExpiry(canonical.Deadline)
 	grant := canonical.Approval
 	standing := false
-	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && class == principal.ClassTrusted {
+	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && class == principal.ClassTrusted && !guarded {
 		standing, err = b.standingGrant(ctx, &canonical, definition.Server)
 		if err != nil {
 			approvalState = ApprovalRejected
@@ -673,6 +684,18 @@ func (b *Broker) enforceToolTier(request *ToolRequest, class principal.Class, de
 		return errorf(ResultToolTierDenied, "tool %q is not available to %s principals", request.ToolName, class)
 	}
 	return nil
+}
+
+func (b *Broker) guardRequires(ctx context.Context, request *ToolRequest) (bool, error) {
+	guard := b.guards[request.ToolName]
+	if guard == nil {
+		return false, nil
+	}
+	required, err := guard(ctx, request)
+	if err != nil {
+		return false, errorf(ResultPolicyDenied, "tool %q approval guard failed closed", request.ToolName)
+	}
+	return required, nil
 }
 
 func (b *Broker) standingGrant(ctx context.Context, request *ToolRequest, server string) (bool, error) {

@@ -40,6 +40,7 @@ type ADKExecutor struct {
 	broker            runtime.ToolBroker
 	tools             []tool.Tool
 	optIn             map[string]bool
+	channelTools      map[string]string
 	externalServers   map[string]string
 	logger            *slog.Logger
 	builtins          BuiltinToolExecutor
@@ -165,10 +166,14 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 		e.builtins = executor
 		e.tools = tools
 		e.optIn = map[string]bool{}
+		e.channelTools = map[string]string{}
 		e.externalServers = map[string]string{}
 		for i := range definitions {
 			if definitions[i].OptIn {
 				e.optIn[definitions[i].Name] = true
+			}
+			if channel := auratools.ChannelOf(definitions[i].Name); channel != "" {
+				e.channelTools[definitions[i].Name] = channel
 			}
 			if definitions[i].Server != "" {
 				e.externalServers[definitions[i].Name] = definitions[i].Server
@@ -255,7 +260,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 				recallAttached = true
 			}
 		}
-		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, recallAttached, x.ownerContextFor(req), turnContext{profile: x.profileContextFor(runCtx, req), skills: x.skillContextFor(runCtx, req)})
+		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, req.Origin, recallAttached, x.ownerContextFor(req), turnContext{profile: x.profileContextFor(runCtx, req), skills: x.skillContextFor(runCtx, req)})
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
@@ -367,7 +372,7 @@ func (x *ADKExecutor) agentName(definition *auraagent.Definition) string {
 	return cmp.Or(definition.Name, x.appName)
 }
 
-func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, class principal.Class, recallAttached bool, ownerContext string, extra turnContext) (*runner.Runner, error) {
+func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, class principal.Class, origin runtime.Origin, recallAttached bool, ownerContext string, extra turnContext) (*runner.Runner, error) {
 	model, err := x.resolveModel(ctx, definition)
 	if err != nil {
 		return nil, err
@@ -387,7 +392,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition, class), x.beforeTool, recallAttached, ownerContext, extra)
+	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition, class, origin), x.beforeTool, recallAttached, ownerContext, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -568,7 +573,7 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 	return model, nil
 }
 
-func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class) []tool.Tool {
+func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin runtime.Origin) []tool.Tool {
 	allowed := definition.Tools
 	if class != "" {
 		ceiling, restricted := definition.ToolCeiling(class)
@@ -588,7 +593,11 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 			}
 			continue
 		}
-		if x.optIn[t.Name()] && (!listed || class == "" || class == principal.ClassOwner) {
+		channel := x.channelTools[t.Name()]
+		if channel != "" && !originOnChannel(origin, channel) {
+			continue
+		}
+		if x.optIn[t.Name()] && (!listed || class == "" || (class == principal.ClassOwner && channel == "")) {
 			continue
 		}
 		if !listed || slices.Contains(allowed, t.Name()) {
@@ -596,6 +605,11 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 		}
 	}
 	return filtered
+}
+
+func originOnChannel(origin runtime.Origin, channel string) bool {
+	head, _, found := strings.Cut(string(origin), ":")
+	return found && head == channel
 }
 
 func exposesExternalTool(definition *auraagent.Definition, class principal.Class, toolName, server string) bool {

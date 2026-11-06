@@ -8,8 +8,8 @@ import (
 
 func TestBuiltinsExposeVersionedSchemas(t *testing.T) {
 	definitions := Builtins()
-	if len(definitions) != 13 {
-		t.Fatalf("built-in definitions = %d, want 13", len(definitions))
+	if len(definitions) != 14 {
+		t.Fatalf("built-in definitions = %d, want 14", len(definitions))
 	}
 	for _, definition := range definitions {
 		var schema map[string]any
@@ -67,6 +67,49 @@ func TestListsToolMatchesExactNamesAndServerEntries(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if got := ListsTool(tc.entries, tc.name, tc.server); got != tc.want {
 				t.Fatalf("ListsTool(%v, %q, %q) = %v, want %v", tc.entries, tc.name, tc.server, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEmailSendValidation(t *testing.T) {
+	definition := DefinitionsByKey()[EmailSendToolName+"@"+Version]
+	if !definition.Effectful || !definition.OptIn || ChannelOf(EmailSendToolName) != EmailChannel || ChannelOf("read_file") != "" {
+		t.Fatalf("definition = %+v, want effectful, opt-in and bound to the email channel", definition)
+	}
+	cases := []struct {
+		name    string
+		raw     string
+		want    string
+		wantErr bool
+	}{
+		{name: "one plain address", raw: `{"to":"bob@example.net","subject":"Hi","body":"text"}`, want: `{"body":"text","subject":"Hi","to":"bob@example.net"}`},
+		{name: "address is lowercased and trimmed", raw: `{"to":" Bob@Example.NET ","subject":"Hi","body":"text"}`, want: `{"body":"text","subject":"Hi","to":"bob@example.net"}`},
+		{name: "display name form", raw: `{"to":"Bob <bob@example.net>","subject":"Hi","body":"text"}`, wantErr: true},
+		{name: "two recipients", raw: `{"to":"a@example.net,b@example.net","subject":"Hi","body":"text"}`, wantErr: true},
+		{name: "recipient list separated by space", raw: `{"to":"a@example.net b@example.net","subject":"Hi","body":"text"}`, wantErr: true},
+		{name: "header injection in the recipient", raw: `{"to":"a@example.net\r\nBcc: x@evil.example","subject":"Hi","body":"text"}`, wantErr: true},
+		{name: "not an address", raw: `{"to":"bob","subject":"Hi","body":"text"}`, wantErr: true},
+		{name: "empty subject", raw: `{"to":"bob@example.net","subject":"","body":"text"}`, wantErr: true},
+		{name: "empty body", raw: `{"to":"bob@example.net","subject":"Hi","body":""}`, wantErr: true},
+		{name: "missing body", raw: `{"to":"bob@example.net","subject":"Hi"}`, wantErr: true},
+		{name: "cc is not an argument", raw: `{"to":"bob@example.net","subject":"Hi","body":"text","cc":"c@example.net"}`, wantErr: true},
+		{name: "subject at the bound", raw: `{"to":"bob@example.net","subject":"` + strings.Repeat("s", MaxEmailSubjectBytes) + `","body":"text"}`, want: `{"body":"text","subject":"` + strings.Repeat("s", MaxEmailSubjectBytes) + `","to":"bob@example.net"}`},
+		{name: "subject over the bound", raw: `{"to":"bob@example.net","subject":"` + strings.Repeat("s", MaxEmailSubjectBytes+1) + `","body":"text"}`, wantErr: true},
+		{name: "body over the bound", raw: `{"to":"bob@example.net","subject":"Hi","body":"` + strings.Repeat("b", MaxEmailBodyBytes+1) + `"}`, wantErr: true},
+		{name: "non string recipient", raw: `{"to":["bob@example.net"],"subject":"Hi","body":"text"}`, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := definition.Validate(json.RawMessage(tc.raw))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Validate accepted %s", tc.raw)
+				}
+				return
+			}
+			if err != nil || string(got) != tc.want {
+				t.Fatalf("Validate = %s, %v; want %s", got, err, tc.want)
 			}
 		})
 	}

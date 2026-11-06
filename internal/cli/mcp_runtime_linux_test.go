@@ -763,7 +763,7 @@ func TestConfigsWithoutMCPServersAreUnchanged(t *testing.T) {
 			if mcpServersConfigured(&harness.cfg) {
 				t.Fatal("a config without enabled servers reports mcp servers")
 			}
-			wantTools := []string{"exec", "handoff_to_owner", "list_dir", "read_file", "web_fetch", "web_search", "workflow_cancel", "workflow_list", "workflow_propose", "workflow_save_routine", "workflow_start", "workflow_status", "write_file"}
+			wantTools := []string{"email_send", "exec", "handoff_to_owner", "list_dir", "read_file", "web_fetch", "web_search", "workflow_cancel", "workflow_list", "workflow_propose", "workflow_save_routine", "workflow_start", "workflow_status", "write_file"}
 			if got := harness.toolNames(); !slices.Equal(got, wantTools) {
 				t.Fatalf("broker tools = %v, want %v", got, wantTools)
 			}
