@@ -178,6 +178,7 @@ type mcpHarness struct {
 	db       *sql.DB
 	executor *toolsbuiltin.Executor
 	prompts  []string
+	shown    []string
 	approve  bool
 	sequence uint64
 	mu       sync.Mutex
@@ -214,6 +215,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 		harness.mu.Lock()
 		defer harness.mu.Unlock()
 		harness.prompts = append(harness.prompts, prompt.ToolName)
+		harness.shown = append(harness.shown, prompt.Arguments)
 		return harness.approve, nil
 	}, policy)
 	if err != nil {
@@ -272,6 +274,12 @@ func (h *mcpHarness) toolNames() []string {
 		names = append(names, definitions[i].Name)
 	}
 	return names
+}
+
+func (h *mcpHarness) promptedArguments() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.shown)
 }
 
 func (h *mcpHarness) promptedTools() []string {
