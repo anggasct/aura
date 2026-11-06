@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"sync/atomic"
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
 	"github.com/anggasct/aura/internal/tools"
 	"github.com/anggasct/aura/internal/tools/codeexec"
@@ -47,24 +49,47 @@ func (e *Executor) SetCodeRunner(runner CodeRunner) {
 	e.code.runner.Store(&runner)
 }
 
+func (e *Executor) Artifacts() store.ArtifactStore {
+	return e.artifacts
+}
+
 func codeKey() string {
 	return tools.CodeExecuteToolName + "@" + tools.Version
 }
 
 type CodeOptions struct {
-	Store    *interpreter.Store
-	Verified *interpreter.VerifiedSet
-	RunRoot  string
-	Limits   *config.Interpreter
+	Store     *interpreter.Store
+	Verified  *interpreter.VerifiedSet
+	Artifacts store.ArtifactStore
+	RunRoot   string
+	Limits    *config.Interpreter
 }
 
 func NewCodeRunner(options *CodeOptions) (*codeexec.Runner, error) {
-	if options == nil || options.Limits == nil {
-		return nil, errors.New("code runner options and limits are required")
+	if options == nil || options.Limits == nil || options.Artifacts == nil {
+		return nil, errors.New("code runner options, limits and artifact store are required")
 	}
 	return codeexec.NewRunner(&codeexec.Options{
-		Store: options.Store, Verified: options.Verified, RunRoot: options.RunRoot, Limits: codeLimits(options.Limits),
+		Store: options.Store, Verified: options.Verified, Artifacts: codeArtifacts{store: options.Artifacts},
+		RunRoot: options.RunRoot, Limits: codeLimits(options.Limits),
 	})
+}
+
+type codeArtifacts struct {
+	store store.ArtifactStore
+}
+
+func (a codeArtifacts) Put(ctx context.Context, content io.Reader, meta *codeexec.ArtifactMeta) (codeexec.ArtifactReceipt, error) {
+	ref, err := a.store.Put(ctx, content, &store.ArtifactMetadata{
+		ID: meta.ID, SessionID: meta.SessionID, Filename: meta.Filename, MediaType: meta.MediaType, Metadata: meta.Metadata,
+	})
+	if err != nil {
+		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+			return codeexec.ArtifactReceipt{}, codeexec.Errorf(codeexec.ErrorCodeArtifactQuota, "the artifact store quota is exhausted")
+		}
+		return codeexec.ArtifactReceipt{}, errors.New("the artifact store refused the artifact")
+	}
+	return codeexec.ArtifactReceipt{ID: ref.ID, Digest: ref.BlobDigest, SizeBytes: ref.SizeBytes}, nil
 }
 
 func codeLimits(limits *config.Interpreter) codeexec.Limits {
@@ -78,5 +103,6 @@ func codeLimits(limits *config.Interpreter) codeexec.Limits {
 		MaxProcesses:   int64(limits.MaxProcesses),
 		MaxRunDirBytes: int64(limits.MaxRunDirBytes),
 		MaxFileBytes:   int64(min(limits.MaxArtifactBytes, limits.MaxRunDirBytes)),
+		MaxOutputFiles: int64(limits.MaxOutputFiles),
 	}
 }

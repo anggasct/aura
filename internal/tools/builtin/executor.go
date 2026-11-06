@@ -35,6 +35,7 @@ type Executor struct {
 	workflows *workflowHolder
 	knowledge *knowledgeHolder
 	code      *codeHolder
+	artifacts store.ArtifactStore
 	host      []string
 }
 
@@ -86,11 +87,12 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 		return nil, err
 	}
 	host := capabilities.Active()
+	artifacts := store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))
 	brokerOptions := &toolbroker.Options{
 		Adapters:             adapters,
 		Secrets:              configuredToolSecrets(cfg),
 		MaxInlineResultBytes: cfg.Tools.MaxInlineResultBytes,
-		Artifacts:            store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
+		Artifacts:            artifacts,
 		Effects:              effects,
 		Observer:             observer,
 		ApprovalDecider:      decider,
@@ -106,7 +108,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows, knowledge: knowledge, code: code, host: host}, nil
+	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows, knowledge: knowledge, code: code, artifacts: artifacts, host: host}, nil
 }
 
 func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {

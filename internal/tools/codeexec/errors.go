@@ -12,6 +12,7 @@ const (
 	ErrorCodeInvalidArgument ErrorCode = "invalid_argument"
 	ErrorCodeUnavailable     ErrorCode = "runtime_unavailable"
 	ErrorCodeRunFailed       ErrorCode = "run_failed"
+	ErrorCodeArtifactQuota   ErrorCode = "artifact_quota"
 )
 
 type Error struct {

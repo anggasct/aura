@@ -196,7 +196,7 @@ func TestLiveRunsDoNotShareState(t *testing.T) {
 		"python":     "import os\nprint(sorted(os.listdir('.')), os.environ.get('LEAK'))",
 		"javascript": "console.log(require('fs').readdirSync('.').sort(), process.env.LEAK)",
 	}
-	wantSecond := map[string]string{"python": "['main.py'] None", "javascript": "[ 'main.js' ] undefined"}
+	wantSecond := map[string]string{"python": "['main.py', 'output'] None", "javascript": "[ 'main.js', 'output' ] undefined"}
 	for runtime := range first {
 		t.Run(runtime, func(t *testing.T) {
 			host.execute(t, host.runner, runtime, first[runtime], "")
@@ -237,7 +237,7 @@ func TestLiveTamperedBundleIsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := NewRunner(&Options{Store: host.store, Verified: set, RunRoot: filepath.Join(host.data, "runs"), Limits: liveLimits()})
+	runner, err := NewRunner(&Options{Store: host.store, Verified: set, Artifacts: &memorySink{}, RunRoot: filepath.Join(host.data, "runs"), Limits: liveLimits()})
 	if err != nil {
 		t.Fatal(err)
 	}

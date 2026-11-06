@@ -8,15 +8,15 @@ import (
 )
 
 type encodedResult struct {
-	ResultClass     ResultClass `json:"result_class"`
-	ExitCode        int         `json:"exit_code"`
-	Signal          int         `json:"signal"`
-	DurationMS      int64       `json:"duration_ms"`
-	Artifacts       []string    `json:"artifacts"`
-	StdoutTruncated bool        `json:"stdout_truncated"`
-	StderrTruncated bool        `json:"stderr_truncated"`
-	Stdout          string      `json:"stdout"`
-	Stderr          string      `json:"stderr"`
+	ResultClass     ResultClass     `json:"result_class"`
+	ExitCode        int             `json:"exit_code"`
+	Signal          int             `json:"signal"`
+	DurationMS      int64           `json:"duration_ms"`
+	Artifacts       []ArtifactEntry `json:"artifacts"`
+	StdoutTruncated bool            `json:"stdout_truncated"`
+	StderrTruncated bool            `json:"stderr_truncated"`
+	Stdout          string          `json:"stdout"`
+	Stderr          string          `json:"stderr"`
 }
 
 func encodeBounded(outcome *Outcome, limits *Limits, maxBytes int64) (json.RawMessage, error) {
@@ -26,7 +26,7 @@ func encodeBounded(outcome *Outcome, limits *Limits, maxBytes int64) (json.RawMe
 	result := encodedResult{
 		ResultClass: outcome.Class, ExitCode: outcome.ExitCode, Signal: outcome.Signal,
 		DurationMS:      outcome.Duration.Milliseconds(),
-		Artifacts:       []string{},
+		Artifacts:       append([]ArtifactEntry{}, outcome.Artifacts...),
 		StdoutTruncated: outcome.StdoutTruncated, StderrTruncated: outcome.StderrTruncated,
 	}
 	var cut bool

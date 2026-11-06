@@ -19,9 +19,10 @@ const (
 )
 
 type arguments struct {
-	Runtime string `json:"runtime"`
-	Source  string `json:"source"`
-	Stdin   string `json:"stdin"`
+	Runtime     string   `json:"runtime"`
+	Source      string   `json:"source"`
+	Stdin       string   `json:"stdin"`
+	OutputFiles []string `json:"output_files"`
 }
 
 func (r *Runner) Adapter() toolbroker.Adapter {
@@ -38,6 +39,9 @@ func (r *Runner) ArgumentCheck(raw json.RawMessage) error {
 	}
 	if int64(len(args.Stdin)) > r.limits.MaxStdinBytes {
 		return Errorf(ErrorCodeInvalidArgument, "argument %q must be at most %d bytes", "stdin", r.limits.MaxStdinBytes)
+	}
+	if err := tools.ValidateCodeOutputFiles(args.OutputFiles, int(r.limits.MaxOutputFiles)); err != nil {
+		return Errorf(ErrorCodeInvalidArgument, "%v", err)
 	}
 	return nil
 }
@@ -75,7 +79,8 @@ func (r *Runner) adapt(ctx context.Context, request *toolbroker.ToolRequest, con
 		runCtx, cancel = context.WithDeadline(ctx, request.Deadline)
 		defer cancel()
 	}
-	outcome, err := r.Execute(runCtx, &Request{Runtime: args.Runtime, Source: args.Source, Stdin: args.Stdin, Timeout: constraints.Timeout})
+	outcome, err := r.Execute(runCtx, &Request{Runtime: args.Runtime, Source: args.Source, Stdin: args.Stdin,
+		SessionID: request.SessionID, RequestID: request.RequestID, OutputFiles: args.OutputFiles, Timeout: constraints.Timeout})
 	if err != nil {
 		return toolbroker.ToolResult{}, notPerformed(runCtx, err)
 	}

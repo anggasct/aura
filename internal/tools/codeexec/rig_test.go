@@ -81,6 +81,7 @@ func (s *stubSandbox) last(t *testing.T) stubCall {
 type rig struct {
 	runner  *Runner
 	stub    *stubSandbox
+	sink    *memorySink
 	data    string
 	runRoot string
 	store   *interpreter.Store
@@ -90,7 +91,7 @@ type rig struct {
 func rigLimits() Limits {
 	return Limits{
 		Timeout: 10 * time.Second, MaxSourceBytes: 1 << 10, MaxStdinBytes: 1 << 10, MaxStdoutBytes: 1 << 10, MaxStderrBytes: 1 << 10,
-		MaxMemoryBytes: 256 << 20, MaxProcesses: 32, MaxRunDirBytes: 8 << 20, MaxFileBytes: 4 << 20,
+		MaxMemoryBytes: 256 << 20, MaxProcesses: 32, MaxRunDirBytes: 8 << 20, MaxFileBytes: 4 << 20, MaxOutputFiles: 4,
 	}
 }
 
@@ -219,13 +220,14 @@ func newRigWith(t *testing.T, change func(*Limits), runtimes []rigRuntime) *rig 
 		change(&limits)
 	}
 	runRoot := filepath.Join(data, "runs")
-	runner, err := NewRunner(&Options{Store: store, Verified: set, RunRoot: runRoot, Limits: limits})
+	sink := &memorySink{}
+	runner, err := NewRunner(&Options{Store: store, Verified: set, Artifacts: sink, RunRoot: runRoot, Limits: limits})
 	if err != nil {
 		t.Fatal(err)
 	}
 	stub := &stubSandbox{}
 	runner.sandbox = stub.run
-	return &rig{runner: runner, stub: stub, data: data, runRoot: runRoot, store: store, set: set}
+	return &rig{runner: runner, stub: stub, sink: sink, data: data, runRoot: runRoot, store: store, set: set}
 }
 
 func (r *rig) runDirs(t *testing.T) []string {

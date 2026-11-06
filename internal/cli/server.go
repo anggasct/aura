@@ -265,7 +265,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := interpreterRun.enableExecution(cfg); err != nil {
+				if err := interpreterRun.enableExecution(ctx, cfg, builtin.Artifacts(), logger); err != nil {
 					return err
 				}
 				interpreterRun.attach(builtin)
