@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -13,33 +14,73 @@ func isHTML(contentType string) bool {
 	return contentType == "text/html" || contentType == "application/xhtml+xml"
 }
 
-func htmlToMarkdown(source []byte, maxBytes int64) (string, bool) {
-	node, err := html.Parse(bytes.NewReader(source))
-	if err != nil {
-		return string(source), false
+const cancelCheckInterval = 256
+
+func htmlToMarkdown(ctx context.Context, source []byte, maxBytes int64) (markdown string, truncated bool, err error) {
+	if cancelled := ctx.Err(); cancelled != nil {
+		return "", false, cancelled
+	}
+	reader := bytes.NewReader(source)
+	node, parseErr := html.Parse(readerFunc(func(buffer []byte) (int, error) {
+		if cancelled := ctx.Err(); cancelled != nil {
+			return 0, cancelled
+		}
+		return reader.Read(buffer)
+	}))
+	if cancelled := ctx.Err(); cancelled != nil {
+		return "", false, cancelled
+	}
+	if parseErr != nil {
+		return "", false, errorf(ErrorCodeHTMLParseFailed, "html document could not be parsed")
 	}
 	renderer := &markdownRenderer{}
-	renderer.renderChildren(node)
-	rendered := strings.TrimSpace(compactBlankLines(renderer.builder.String()))
-	truncated := int64(len(rendered)) > maxBytes
-	if truncated {
-		rendered = rendered[:maxBytes]
+	renderer.renderChildren(ctx, node)
+	if renderer.err != nil {
+		return "", false, renderer.err
 	}
-	return rendered, truncated
+	markdown = strings.ToValidUTF8(strings.TrimSpace(compactBlankLines(string(renderer.out))), "\uFFFD")
+	if cancelled := ctx.Err(); cancelled != nil {
+		return "", false, cancelled
+	}
+	if int64(len(markdown)) > maxBytes {
+		return markdown[:runeBoundary(markdown, maxBytes)], true, nil
+	}
+	return markdown, false, nil
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(buffer []byte) (int, error) { return f(buffer) }
+
+func runeBoundary(text string, limit int64) int {
+	cut := int(limit)
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return cut
 }
 
 type markdownRenderer struct {
-	builder          strings.Builder
+	out              []byte
 	afterInlineClose bool
+	visited          int
+	err              error
 }
 
-func (r *markdownRenderer) renderChildren(node *html.Node) {
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		r.renderNode(child)
+func (r *markdownRenderer) renderChildren(ctx context.Context, node *html.Node) {
+	for child := node.FirstChild; child != nil && r.err == nil; child = child.NextSibling {
+		r.renderNode(ctx, child)
 	}
 }
 
-func (r *markdownRenderer) renderNode(node *html.Node) {
+func (r *markdownRenderer) renderNode(ctx context.Context, node *html.Node) {
+	r.visited++
+	if r.visited%cancelCheckInterval == 0 {
+		if err := ctx.Err(); err != nil {
+			r.err = err
+			return
+		}
+	}
 	switch node.Type {
 	case html.CommentNode, html.DoctypeNode:
 		return
@@ -48,69 +89,70 @@ func (r *markdownRenderer) renderNode(node *html.Node) {
 		return
 	case html.ElementNode:
 	default:
-		r.renderChildren(node)
+		r.renderChildren(ctx, node)
+		return
+	}
+	if droppedElement(node) {
 		return
 	}
 	switch node.Data {
-	case "script", "style", "noscript", "template", "head", "title", "meta", "link", "iframe", "svg", "canvas", "object", "embed":
-		return
 	case "h1", "h2", "h3", "h4", "h5", "h6":
 		r.ensureBlock()
-		r.builder.WriteString(strings.Repeat("#", int(node.Data[1]-'0')) + " ")
-		r.renderChildren(node)
+		r.write(strings.Repeat("#", int(node.Data[1]-'0')) + " ")
+		r.renderChildren(ctx, node)
 		r.ensureBlock()
 	case "p", "div", "section", "article", "header", "footer", "nav", "aside", "main", "figure", "figcaption", "dd", "dt", "summary", "form", "fieldset":
 		r.ensureBlock()
-		r.renderChildren(node)
+		r.renderChildren(ctx, node)
 		r.ensureBlock()
 	case "br":
-		r.builder.WriteString("\n")
+		r.write("\n")
 	case "hr":
 		r.ensureBlock()
-		r.builder.WriteString("---")
+		r.write("---")
 		r.ensureBlock()
 	case "ul", "ol", "dl":
 		r.ensureBlock()
-		r.renderChildren(node)
+		r.renderChildren(ctx, node)
 		r.ensureBlock()
 	case "li":
 		r.ensureLine()
-		r.builder.WriteString("- ")
-		r.renderChildren(node)
-		r.builder.WriteString("\n")
+		r.write("- ")
+		r.renderChildren(ctx, node)
+		r.write("\n")
 	case "blockquote":
 		r.ensureBlock()
-		r.builder.WriteString("> ")
-		r.renderChildren(node)
+		r.write("> ")
+		r.renderChildren(ctx, node)
 		r.ensureBlock()
 	case "pre":
 		r.ensureBlock()
-		r.builder.WriteString("```\n")
+		r.write("```\n")
 		r.writeRawText(node)
-		r.builder.WriteString("\n```")
+		r.write("\n```")
 		r.ensureBlock()
 	case "code":
 		r.openInline("`")
-		r.renderChildren(node)
+		r.renderChildren(ctx, node)
 		r.closeInline("`")
 	case "strong", "b":
 		r.openInline("**")
-		r.renderChildren(node)
+		r.renderChildren(ctx, node)
 		r.closeInline("**")
 	case "em", "i":
 		r.openInline("*")
-		r.renderChildren(node)
+		r.renderChildren(ctx, node)
 		r.closeInline("*")
 	case "a":
 		r.openInline("[")
-		r.renderChildren(node)
+		r.renderChildren(ctx, node)
 		r.closeInline("]")
 		if href := attribute(node, "href"); href != "" {
-			r.builder.WriteString("(" + href + ")")
+			r.write("(" + href + ")")
 			r.afterInlineClose = true
 		}
 	default:
-		r.renderChildren(node)
+		r.renderChildren(ctx, node)
 	}
 }
 
@@ -118,35 +160,36 @@ func (r *markdownRenderer) text(text string) {
 	collapsed := strings.Join(strings.Fields(text), " ")
 	if collapsed == "" {
 		if text != "" && r.afterInlineClose && !r.endsWithSpace() {
-			r.builder.WriteString(" ")
+			r.write(" ")
 			r.afterInlineClose = false
 		}
 		return
 	}
 	if r.afterInlineClose && !r.endsWithSpace() && startsWithWord(collapsed) {
-		r.builder.WriteString(" ")
+		r.write(" ")
 	}
 	r.afterInlineClose = false
-	r.builder.WriteString(collapsed)
-	r.builder.WriteString(" ")
+	r.write(collapsed)
+	r.write(" ")
 }
 
 func (r *markdownRenderer) openInline(marker string) {
 	r.afterInlineClose = false
-	r.builder.WriteString(marker)
+	r.write(marker)
 }
 
 func (r *markdownRenderer) closeInline(marker string) {
-	trimmed := strings.TrimRight(r.builder.String(), " ")
-	r.builder.Reset()
-	r.builder.WriteString(trimmed)
-	r.builder.WriteString(marker)
+	r.out = bytes.TrimRight(r.out, " ")
+	r.write(marker)
 	r.afterInlineClose = true
 }
 
 func (r *markdownRenderer) writeRawText(node *html.Node) {
 	if node.Type == html.TextNode {
-		r.builder.WriteString(node.Data)
+		r.write(node.Data)
+		return
+	}
+	if node.Type == html.ElementNode && droppedElement(node) {
 		return
 	}
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
@@ -154,34 +197,33 @@ func (r *markdownRenderer) writeRawText(node *html.Node) {
 	}
 }
 
-func (r *markdownRenderer) body() string { return r.builder.String() }
+func (r *markdownRenderer) write(text string) { r.out = append(r.out, text...) }
 
 func (r *markdownRenderer) endsWithSpace() bool {
-	return strings.HasSuffix(r.body(), " ") || strings.HasSuffix(r.body(), "\n")
+	return bytes.HasSuffix(r.out, []byte(" ")) || bytes.HasSuffix(r.out, []byte("\n"))
 }
 
 func (r *markdownRenderer) ensureBlock() {
-	if r.builder.Len() == 0 {
+	if len(r.out) == 0 {
 		return
 	}
 	r.afterInlineClose = false
-	body := r.body()
-	if strings.HasSuffix(body, "\n\n") {
+	if bytes.HasSuffix(r.out, []byte("\n\n")) {
 		return
 	}
-	if strings.HasSuffix(body, "\n") {
-		r.builder.WriteString("\n")
+	if bytes.HasSuffix(r.out, []byte("\n")) {
+		r.write("\n")
 		return
 	}
-	r.builder.WriteString("\n\n")
+	r.write("\n\n")
 }
 
 func (r *markdownRenderer) ensureLine() {
 	r.afterInlineClose = false
-	if r.builder.Len() == 0 || strings.HasSuffix(r.body(), "\n") {
+	if len(r.out) == 0 || bytes.HasSuffix(r.out, []byte("\n")) {
 		return
 	}
-	r.builder.WriteString("\n")
+	r.write("\n")
 }
 
 func startsWithWord(text string) bool {
