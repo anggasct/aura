@@ -52,6 +52,7 @@ var migrations = []migration{
 	{version: 34, sql: handoffHTTPChannelSchemaSQL},
 	{version: 35, sql: emailCursorSchemaSQL},
 	{version: 36, sql: handoffEmailChannelSchemaSQL},
+	{version: 37, sql: pluginRegistrySchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -837,3 +838,32 @@ func checksumOf(sqlText string) string {
 	sum := sha256.Sum256([]byte(sqlText))
 	return hex.EncodeToString(sum[:])
 }
+
+const pluginRegistrySchemaSQL = `
+CREATE TABLE plugin (
+    id               TEXT PRIMARY KEY,
+    state            TEXT NOT NULL CHECK (state IN ('quarantined','active','disabled')),
+    version          TEXT NOT NULL,
+    approved_version TEXT,
+    updated_at       TEXT NOT NULL
+);
+
+CREATE TABLE plugin_version (
+    plugin_id     TEXT NOT NULL REFERENCES plugin(id) ON DELETE CASCADE,
+    version       TEXT NOT NULL,
+    digest        TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    installed_at  TEXT NOT NULL,
+    PRIMARY KEY (plugin_id, version)
+);
+
+CREATE TABLE plugin_grant (
+    plugin_id   TEXT NOT NULL REFERENCES plugin(id) ON DELETE CASCADE,
+    surface     TEXT NOT NULL CHECK (surface IN ('tool','capability','egress','secret')),
+    value       TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    PRIMARY KEY (plugin_id, surface, value)
+);
+`
