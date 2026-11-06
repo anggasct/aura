@@ -57,6 +57,8 @@ const (
 	ErrorCodePluginConflict            ErrorCode = "plugin_conflict"
 	ErrorCodePluginNotFound            ErrorCode = "plugin_not_found"
 	ErrorCodePluginInvalid             ErrorCode = "plugin_invalid"
+	ErrorCodeKBCapExceeded             ErrorCode = "kb_cap_exceeded"
+	ErrorCodeKBSourceNotFound          ErrorCode = "kb_source_not_found"
 )
 
 type Error struct {

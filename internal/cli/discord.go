@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -267,80 +266,9 @@ func newDiscordAdapter(cfg *config.Config, account *config.DiscordAccount, db *s
 
 func buildSecretVault(cfg *config.Config) *secret.Vault {
 	vault := secret.New()
-	for i := range cfg.Channels.Discord.Accounts {
-		account := &cfg.Channels.Discord.Accounts[i]
-		if ref := parseSecretRef(account.BotTokenRef); ref.Env != "" {
-			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
-				vault.Set("discord_bot_token_"+account.Name, val)
-			}
-		}
-	}
-	for i := range cfg.Channels.Email.Accounts {
-		account := &cfg.Channels.Email.Accounts[i]
-		if ref := parseSecretRef(account.IMAP.PasswordRef); ref.Env != "" || ref.File != "" {
-			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
-				vault.Set("email_imap_password_"+account.Name, val)
-			}
-		}
-		if ref := parseSecretRef(account.SMTP.PasswordRef); ref.Env != "" || ref.File != "" {
-			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
-				vault.Set("email_smtp_password_"+account.Name, val)
-			}
-		}
-	}
-	for i := range cfg.Channels.Telegram.Accounts {
-		account := &cfg.Channels.Telegram.Accounts[i]
-		if ref := parseSecretRef(account.BotTokenRef); ref.Env != "" || ref.File != "" {
-			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
-				vault.Set("telegram_bot_token_"+account.Name, val)
-			}
-		}
-		if ref := parseSecretRef(account.WebhookSecretRef); ref.Env != "" || ref.File != "" {
-			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
-				vault.Set("telegram_webhook_secret_"+account.Name, val)
-			}
-		}
-	}
-	if cfg.Sync != nil {
-		if ref := parseSecretRef(cfg.Sync.TransportSecretRef); ref.Env != "" {
-			if val, err := ref.Resolve(); err == nil && strings.TrimSpace(val) != "" {
-				vault.Set("sync_transport_secret", val)
-			}
-		}
-	}
-	for _, key := range cfg.Webhook.Keys {
-		if key.SecretEnv != "" {
-			if val, ok := os.LookupEnv(key.SecretEnv); ok && strings.TrimSpace(val) != "" {
-				vault.Set("webhook_"+key.ID, val)
-			}
-		}
-	}
-	for name := range cfg.Models.Definitions {
-		def := cfg.Models.Definitions[name]
-		if def.APIKeyEnv != "" {
-			if val, ok := os.LookupEnv(def.APIKeyEnv); ok && strings.TrimSpace(val) != "" {
-				vault.Set("model_"+def.Provider, val)
-			}
-		}
-		if def.APIKeyFile != "" {
-			if data, err := os.ReadFile(def.APIKeyFile); err == nil {
-				if val := strings.TrimSpace(string(data)); val != "" {
-					vault.Set("model_"+def.Provider, val)
-				}
-			}
-		}
-	}
-	for name, preset := range cfg.Models.Providers {
-		for hname, hval := range preset.Headers {
-			if strings.TrimSpace(hval) == "" {
-				continue
-			}
-			if strings.Contains(strings.ToLower(hname), "authorization") ||
-				strings.Contains(strings.ToLower(hname), "api") ||
-				strings.Contains(strings.ToLower(hname), "token") ||
-				strings.Contains(strings.ToLower(hname), "secret") {
-				vault.Set("provider_header_"+name+"_"+hname, hval)
-			}
+	for _, entry := range configuredSecrets(cfg) {
+		if value, err := entry.resolve(); err == nil && strings.TrimSpace(value) != "" {
+			vault.Set(entry.name, value)
 		}
 	}
 	return vault
