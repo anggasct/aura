@@ -20,6 +20,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
@@ -222,7 +223,7 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 		gates:  map[string]string{},
 		dir:    t.TempDir(),
 	}
-	broker, err := toolbroker.New(&toolbroker.Options{})
+	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("new broker: %v", err)
 	}

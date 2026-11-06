@@ -126,6 +126,7 @@ type Options struct {
 	Access               AccessPolicy
 	ApprovalGuards       map[string]ApprovalGuard
 	ApprovalReachable    func(sessionID string) bool
+	HostCapabilities     []string
 }
 
 type Broker struct {
@@ -162,7 +163,7 @@ func New(options *Options) (*Broker, error) {
 	}
 	engine, err := approval.NewEngine(policy, func(context.Context, approval.ToolRequest, approval.Constraints) (approval.ToolResult, error) {
 		return approval.ToolResult{}, errors.New("toolbroker: direct approval handler is unavailable")
-	})
+	}, options.HostCapabilities)
 	if err != nil {
 		return nil, err
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/tools"
@@ -34,7 +35,7 @@ func newTaintBroker(t *testing.T, reachable func(sessionID string) bool, access 
 		adapters[name+"@v1"] = adapter(name)
 	}
 	broker, err := New(&Options{
-		Effects:  newBrokerEffectExecutor(t),
+		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: adapters,
 		ApprovalDecider: func(context.Context, *ApprovalPrompt) (bool, error) {
 			harness.prompts++

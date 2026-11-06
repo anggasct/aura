@@ -237,7 +237,11 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec) *stepUp
 	}
 	output, err := runner.Invoke(ctx, *step.Executor.ToolID, toolArguments(step))
 	if err != nil {
-		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr()}
+		code := ErrorCodeStepFailed
+		if coded, ok := CodeOf(err); ok {
+			code = coded
+		}
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(code), Detail: err.Error(), EndedAt: nowPtr()}
 	}
 	return &stepUpdate{Status: StepSucceeded, Output: []byte(output), EndedAt: nowPtr()}
 }

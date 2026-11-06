@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/store"
@@ -52,7 +53,7 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dataRoot
 	published := 0
-	executor, err := New(&cfg, db, dataRoot, nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
+	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 		return true, nil
 	}, nil)
 	if err != nil {

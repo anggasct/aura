@@ -347,6 +347,12 @@ func collectCutoff(before string) (time.Time, error) {
 }
 
 func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *slog.Logger, *config.Config, *sql.DB) error) error {
+	return withLoadedStorage(cmd, gf, needDB, func(ctx context.Context, logger *slog.Logger, result *config.LoadResult, db *sql.DB) error {
+		return fn(ctx, logger, result.Config, db)
+	})
+}
+
+func withLoadedStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *slog.Logger, *config.LoadResult, *sql.DB) error) error {
 	result, err := config.Load(gf.configPath)
 	if err != nil {
 		return err
@@ -366,5 +372,5 @@ func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(conte
 		}
 		defer func() { _ = opened.Close() }()
 	}
-	return fn(cmd.Context(), logger, cfg, opened)
+	return fn(cmd.Context(), logger, &result, opened)
 }

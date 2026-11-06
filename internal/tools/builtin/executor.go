@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/runtime"
@@ -33,6 +34,7 @@ type Executor struct {
 	emails    *emailHolder
 	workflows *workflowHolder
 	knowledge *knowledgeHolder
+	host      []string
 }
 
 type effectPublisherFunc func(*store.RuntimeEvent)
@@ -52,7 +54,7 @@ func WithApprovalReachable(reachable func(sessionID string) bool) Option {
 	return func(options *toolbroker.Options) { options.ApprovalReachable = reachable }
 }
 
-func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider, access toolbroker.AccessPolicy, opts ...Option) (*Executor, error) {
+func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capability.Report, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider, access toolbroker.AccessPolicy, opts ...Option) (*Executor, error) {
 	if cfg == nil || cfg.Tools == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -81,6 +83,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 	if err != nil {
 		return nil, err
 	}
+	host := capabilities.Active()
 	brokerOptions := &toolbroker.Options{
 		Adapters:             adapters,
 		Secrets:              configuredToolSecrets(cfg),
@@ -91,6 +94,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 		ApprovalDecider:      decider,
 		Access:               access,
 		ApprovalGuards:       map[string]toolbroker.ApprovalGuard{tools.EmailSendToolName: emails.guard},
+		HostCapabilities:     host,
 	}
 	for _, apply := range opts {
 		apply(brokerOptions)
@@ -99,7 +103,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows, knowledge: knowledge}, nil
+	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows, knowledge: knowledge, host: host}, nil
 }
 
 func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {
@@ -223,6 +227,9 @@ func (e *Executor) Definitions() []runtimeadk.BuiltinToolDefinition {
 	result := make([]runtimeadk.BuiltinToolDefinition, 0, len(definitions))
 	for i := range definitions {
 		definition := &definitions[i]
+		if !e.offers(definition) {
+			continue
+		}
 		description := "Aura built-in " + definition.Name + " tool"
 		plugin := ""
 		if definition.Server != "" {
@@ -244,6 +251,15 @@ func (e *Executor) Definitions() []runtimeadk.BuiltinToolDefinition {
 		})
 	}
 	return result
+}
+
+func (e *Executor) offers(definition *tools.Definition) bool {
+	for _, required := range definition.RequiredCapabilities {
+		if !slices.Contains(e.host, required) {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *Executor) Evaluate(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error) {

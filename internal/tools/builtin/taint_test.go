@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -20,7 +21,7 @@ func TestExecutorForwardsTheTaintFlagToTheBroker(t *testing.T) {
 	cfg.Tools.Workspace = t.TempDir()
 	cfg.Storage.Path = t.TempDir()
 	decisions := 0
-	executor, err := New(&cfg, db, cfg.Storage.Path, nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
+	executor, err := New(&cfg, db, cfg.Storage.Path, capabilitytest.All(t), nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 		decisions++
 		return false, nil
 	}, nil, WithApprovalReachable(func(sessionID string) bool { return sessionID == "reachable" }))

@@ -15,6 +15,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/effect"
 	gatewaywebhook "github.com/anggasct/aura/internal/gateway/webhook"
@@ -92,7 +93,6 @@ func (r *brokerToolRunner) Invoke(ctx context.Context, toolID string, args json.
 	request := &toolbroker.ToolRequest{
 		RequestID: id, TurnID: "turn-proof", SessionID: "session-proof", PrincipalID: "owner-1",
 		ToolName: toolID, ToolVersion: "v1", Arguments: args,
-		Capabilities:    []string{"repository.write"},
 		Trust:           approval.TrustTrustedConfiguration,
 		IdempotencyKey:  "proof/" + id,
 		EventSequence:   uint64(n),
@@ -205,7 +205,7 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 	db := liveTestDB(t)
 	disk := workflow.NewStore(db)
 	executor := proofEffectExecutor(t, db)
-	broker, err := toolbroker.New(&toolbroker.Options{Effects: executor})
+	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t), Effects: executor})
 	if err != nil {
 		t.Fatalf("new broker: %v", err)
 	}

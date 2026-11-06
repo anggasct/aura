@@ -175,8 +175,8 @@ func TestDefinitionsCarryBrokerContract(t *testing.T) {
 		if !definition.RequiresApproval || !definition.Effectful {
 			t.Errorf("%s requires approval and effect handling, got %+v", definition.Name, definition)
 		}
-		if len(definition.RequiredCapabilities) == 0 {
-			t.Errorf("%s carries no capabilities", definition.Name)
+		if len(definition.RequiredCapabilities) != 0 {
+			t.Errorf("%s requires capabilities %v that no host can provide", definition.Name, definition.RequiredCapabilities)
 		}
 	}
 	for _, name := range []string{ToolCreatePR, ToolMerge, ToolComment} {

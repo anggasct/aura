@@ -451,25 +451,27 @@ func ToolNames() []string {
 }
 
 func Definitions() []tools.Definition {
-	capabilities := []string{"repository.write"}
 	return []tools.Definition{
 		{
 			Name: ToolCreatePR, Version: ToolVersion,
-			Schema:               fieldSchema([]string{"title", "head", "base"}, []string{"body"}, nil),
-			Validator:            fieldValidator([]string{"title", "head", "base"}, []string{"body"}, nil),
-			RequiredCapabilities: capabilities, RequiresApproval: true, Effectful: true,
+			Schema:           fieldSchema([]string{"title", "head", "base"}, []string{"body"}, nil),
+			Validator:        fieldValidator([]string{"title", "head", "base"}, []string{"body"}, nil),
+			RequiresApproval: true,
+			Effectful:        true,
 		},
 		{
 			Name: ToolMerge, Version: ToolVersion,
-			Schema:               fieldSchema(nil, []string{"merge_method"}, []string{"number"}),
-			Validator:            fieldValidator(nil, []string{"merge_method"}, []string{"number"}),
-			RequiredCapabilities: capabilities, RequiresApproval: true, Effectful: true,
+			Schema:           fieldSchema(nil, []string{"merge_method"}, []string{"number"}),
+			Validator:        fieldValidator(nil, []string{"merge_method"}, []string{"number"}),
+			RequiresApproval: true,
+			Effectful:        true,
 		},
 		{
 			Name: ToolComment, Version: ToolVersion,
-			Schema:               fieldSchema([]string{"body"}, nil, []string{"number"}),
-			Validator:            fieldValidator([]string{"body"}, nil, []string{"number"}),
-			RequiredCapabilities: capabilities, RequiresApproval: true, Effectful: true,
+			Schema:           fieldSchema([]string{"body"}, nil, []string{"number"}),
+			Validator:        fieldValidator([]string{"body"}, nil, []string{"number"}),
+			RequiresApproval: true,
+			Effectful:        true,
 		},
 	}
 }

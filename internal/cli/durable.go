@@ -178,9 +178,9 @@ func durableRuntimeForConfig(cfg *config.Config, logger *slog.Logger) (durable.R
 	return durable.NewFake(), nil
 }
 
-func buildDurableListener(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger, engine *runtimeengine.Engine) (*durableListener, error) {
-	durableCfg := cfg.Durable
-	interpreter, err := buildWorkflowInterpreterWithDB(ctx, cfg, db, logger)
+func buildDurableListener(ctx context.Context, result *config.LoadResult, db *sql.DB, logger *slog.Logger, engine *runtimeengine.Engine) (*durableListener, error) {
+	durableCfg := result.Config.Durable
+	interpreter, err := buildWorkflowInterpreterWithDB(ctx, result, db, logger)
 	if err != nil {
 		return nil, err
 	}

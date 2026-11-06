@@ -3,6 +3,7 @@ package capability
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 type ErrorCode string
@@ -40,12 +41,16 @@ func newError(code ErrorCode, capability, detail string) error {
 }
 
 func IsHealthState(err error) bool {
+	return onlyCodes(err, ErrorCodeCapabilityUnavailable, ErrorCodeDependencyMissing)
+}
+
+func IsMissingDependency(err error) bool {
+	return onlyCodes(err, ErrorCodeDependencyMissing)
+}
+
+func onlyCodes(err error, codes ...ErrorCode) bool {
 	if err == nil {
 		return false
-	}
-	var typed *Error
-	if errors.As(err, &typed) {
-		return healthStateCode(typed.Code)
 	}
 	var joined interface{ Unwrap() []error }
 	if errors.As(err, &joined) {
@@ -54,15 +59,15 @@ func IsHealthState(err error) bool {
 			return false
 		}
 		for _, part := range parts {
-			if !IsHealthState(part) {
+			if !onlyCodes(part, codes...) {
 				return false
 			}
 		}
 		return true
 	}
+	var typed *Error
+	if errors.As(err, &typed) {
+		return slices.Contains(codes, typed.Code)
+	}
 	return false
-}
-
-func healthStateCode(code ErrorCode) bool {
-	return code == ErrorCodeCapabilityUnavailable || code == ErrorCodeDependencyMissing
 }

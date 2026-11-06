@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/principal"
 )
 
@@ -77,7 +78,7 @@ func TestApprovalGuardsAreCopiedAtConstruction(t *testing.T) {
 	guards := map[string]ApprovalGuard{"email_send": guardReturning(true, nil)}
 	calls := 0
 	broker, err := New(&Options{
-		Effects:        newBrokerEffectExecutor(t),
+		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		ApprovalGuards: guards,
 		Adapters: map[string]Adapter{
 			"email_send@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {

@@ -169,7 +169,7 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			logConfigResult(ctx, logger, &result)
-			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, cfg, logger)
+			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
 			if err != nil {
 				return err
 			}
@@ -192,20 +192,21 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func buildWorkflowInterpreter(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*workflow.Interpreter, func(), error) {
-	db, err := openStorage(ctx, cfg)
+func buildWorkflowInterpreter(ctx context.Context, result *config.LoadResult, logger *slog.Logger) (*workflow.Interpreter, func(), error) {
+	db, err := openStorage(ctx, result.Config)
 	if err != nil {
 		return nil, nil, err
 	}
 	closeStorage := func() { _ = db.Close() }
-	interpreter, err := buildWorkflowInterpreterWithDB(ctx, cfg, db, logger)
+	interpreter, err := buildWorkflowInterpreterWithDB(ctx, result, db, logger)
 	if err != nil {
 		return nil, closeStorage, err
 	}
 	return interpreter, closeStorage, nil
 }
 
-func buildWorkflowInterpreterWithDB(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger) (*workflow.Interpreter, error) {
+func buildWorkflowInterpreterWithDB(ctx context.Context, result *config.LoadResult, db *sql.DB, logger *slog.Logger) (*workflow.Interpreter, error) {
+	cfg := result.Config
 	definitionsDir := workflowDefinitionsDir(cfg)
 	specs, err := workflow.LoadDefinitionsDir(definitionsDir)
 	if err != nil {
@@ -226,7 +227,7 @@ func buildWorkflowInterpreterWithDB(ctx context.Context, cfg *config.Config, db 
 		options.GeneratedBudget = workflow.Budget{MaxSteps: cfg.Workflows.Generated.MaxSteps, MaxTokens: cfg.Workflows.Generated.MaxTokens}
 	}
 	if cfg.Tools != nil {
-		tools, err := newWorkflowToolRunner(cfg, db, logger)
+		tools, err := newWorkflowToolRunner(result, db, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -285,7 +286,7 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 			sessionID, "workflow", now, now,
 		)
 	}
-	return r.executor.Execute(ctx, &runtimeadk.BuiltinToolRequest{
+	output, err := r.executor.Execute(ctx, &runtimeadk.BuiltinToolRequest{
 		RequestID:       reqID,
 		SessionID:       sessionID,
 		TurnID:          turnID,
@@ -300,9 +301,14 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 		Capabilities:    slices.Clone(r.caps[toolID]),
 		Trust:           string(approval.TrustTrustedConfiguration),
 	})
+	if code, ok := toolbroker.CodeOf(err); ok && code == toolbroker.ResultCapabilityUnavailable {
+		return nil, &workflow.Error{Code: workflow.ErrorCodeCapabilityUnavailable, Detail: "tool " + toolID + " needs a capability this host does not provide"}
+	}
+	return output, err
 }
 
-func newWorkflowToolRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger) (workflow.ToolRunner, error) {
+func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, logger *slog.Logger) (workflow.ToolRunner, error) {
+	cfg := result.Config
 	_, artifactRoot, _, err := storagePaths(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("resolve tool artifact root: %w", err)
@@ -310,7 +316,7 @@ func newWorkflowToolRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	executor, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, workflowApprovalDecider, nil)
+	executor, err := toolsbuiltin.New(cfg, db, artifactRoot, result.CapabilityReport, logger, nil, workflowApprovalDecider, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build builtin tool executor: %w", err)
 	}
@@ -458,7 +464,7 @@ func newWorkflowCancelCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			logConfigResult(ctx, logger, &result)
-			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, cfg, logger)
+			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
 			if err != nil {
 				return err
 			}
@@ -498,7 +504,7 @@ func newWorkflowApproveCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			logConfigResult(ctx, logger, &result)
-			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, cfg, logger)
+			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
 			if err != nil {
 				return err
 			}
@@ -549,7 +555,7 @@ func newWorkflowSignalCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			logConfigResult(ctx, logger, &result)
-			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, cfg, logger)
+			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
 			if err != nil {
 				return err
 			}

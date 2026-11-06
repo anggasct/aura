@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 )
 
 func TestRegisteredSecretsAreRedactedFromOutputsAndErrors(t *testing.T) {
@@ -43,7 +44,7 @@ func TestRegisteredSecretsAreRedactedFromOutputsAndErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			broker, err := New(&Options{
-				Effects:  newBrokerEffectExecutor(t),
+				HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 				Adapters: map[string]Adapter{"read_file@v1": tc.adapter},
 			})
 			if err != nil {
@@ -68,7 +69,7 @@ func TestRegisteredSecretsAreRedactedFromOutputsAndErrors(t *testing.T) {
 
 func TestSecretRegistrationIsSafeUnderConcurrentExecution(t *testing.T) {
 	broker, err := New(&Options{
-		Effects: newBrokerEffectExecutor(t),
+		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: map[string]Adapter{"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 			return ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
 		}},

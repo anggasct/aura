@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/durable"
 )
 
@@ -43,7 +44,7 @@ func parkBroker(t *testing.T, approve bool) (backend *durable.Fake, sink *record
 	policy.Rules["read_file"] = readRule
 	var calls int
 	broker, err := New(&Options{
-		Policy: policy,
+		HostCapabilities: capabilitytest.Host(t), Policy: policy,
 		Adapters: map[string]Adapter{
 			"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				calls++
@@ -148,7 +149,7 @@ func TestBrokerDurableParkReplaysDeterministically(t *testing.T) {
 	policy.Rules["read_file"] = readRule
 	var calls int
 	broker, err := New(&Options{
-		Policy: policy,
+		HostCapabilities: capabilitytest.Host(t), Policy: policy,
 		Adapters: map[string]Adapter{
 			"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				calls++

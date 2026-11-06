@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -37,7 +38,7 @@ func TestBrokerEffectfulToolUsesDurableLifecycle(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
 	broker, err := New(&Options{
-		Effects: executor,
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				calls++
@@ -85,7 +86,7 @@ func TestBrokerEffectfulFailureSettlesByWhetherTheEffectWasPerformed(t *testing.
 			executor := newBrokerEffectExecutor(t)
 			calls := 0
 			broker, err := New(&Options{
-				Effects: executor,
+				HostCapabilities: capabilitytest.Host(t), Effects: executor,
 				Adapters: map[string]Adapter{
 					"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 						calls++

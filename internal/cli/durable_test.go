@@ -110,7 +110,7 @@ func TestBuildDurableListenerExternalUnreachableFailsClosed(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	listener, err := buildDurableListener(t.Context(), &cfg, db, nil, nil)
+	listener, err := buildDurableListener(t.Context(), loadResultWithAll(t, &cfg), db, nil, nil)
 	if err != nil {
 		t.Fatalf("buildDurableListener: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestExternalListenerRegistersItsHandlerURL(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	listener, err := buildDurableListener(t.Context(), &cfg, db, slog.New(slog.DiscardHandler), nil)
+	listener, err := buildDurableListener(t.Context(), loadResultWithAll(t, &cfg), db, slog.New(slog.DiscardHandler), nil)
 	if err != nil {
 		t.Fatalf("buildDurableListener: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestEndpointCancelledAroundItsBindStopsCleanly(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	for name, delay := range map[string]time.Duration{"before start": -1, "right after start": 0, "after bind": 50 * time.Millisecond} {
 		t.Run(name, func(t *testing.T) {
-			listener, err := buildDurableListener(t.Context(), &cfg, db, slog.New(slog.DiscardHandler), nil)
+			listener, err := buildDurableListener(t.Context(), loadResultWithAll(t, &cfg), db, slog.New(slog.DiscardHandler), nil)
 			if err != nil {
 				t.Fatalf("buildDurableListener: %v", err)
 			}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -38,7 +39,7 @@ func TestBrokerConformance(t *testing.T) {
 	t.Setenv("GITHUB_TEST_TOKEN", "test-token")
 	server := stubGitHubAPI(t)
 	executor := brokerEffectExecutor(t)
-	broker, err := toolbroker.New(&toolbroker.Options{Effects: executor})
+	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t), Effects: executor})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -59,7 +60,6 @@ func TestBrokerConformance(t *testing.T) {
 		RequestID: "request-1", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: ToolCreatePR, ToolVersion: ToolVersion,
 		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential_ref":"env://GITHUB_TEST_TOKEN"}`),
-		Capabilities:   []string{"repository.write"},
 		Trust:          approval.TrustTrustedConfiguration,
 		IdempotencyKey: "idempotency-1",
 		EventSequence:  1,
@@ -95,9 +95,9 @@ func TestBrokerConformance(t *testing.T) {
 	}
 }
 
-func TestBrokerDeniesWithoutCapability(t *testing.T) {
+func TestBrokerDeniesARequestClaimingACapabilityTheHostLacks(t *testing.T) {
 	executor := brokerEffectExecutor(t)
-	broker, err := toolbroker.New(&toolbroker.Options{Effects: executor})
+	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t), Effects: executor})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -108,13 +108,13 @@ func TestBrokerDeniesWithoutCapability(t *testing.T) {
 		RequestID: "request-2", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: ToolCreatePR, ToolVersion: ToolVersion,
 		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"t","head":"h","base":"b","credential_ref":"env://GITHUB_TEST_TOKEN"}`),
-		Capabilities:   []string{"repository.read"},
+		Capabilities:   []string{"repository.write"},
 		Trust:          approval.TrustTrustedConfiguration,
 		IdempotencyKey: "idempotency-2",
 	}
-	decision, err := broker.Evaluate(context.Background(), request)
-	if err == nil || !strings.Contains(err.Error(), "repository.write") {
-		t.Errorf("Evaluate without capability = %+v, %v; want capability rejection", decision, err)
+	_, err = broker.Evaluate(context.Background(), request)
+	if code, ok := approval.CodeOf(err); !ok || code != approval.ErrorCodeCapabilityUnavailable {
+		t.Errorf("Evaluate claiming an unregistered capability error = %v, want capability_unavailable", err)
 	}
 }
 

@@ -3,12 +3,11 @@ package cli
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
-	"slices"
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/health"
@@ -30,7 +29,7 @@ type mcpRuntimeOptions struct {
 	Broker         *toolbroker.Broker
 	Logger         *slog.Logger
 	Recorder       *telemetry.MCPRecorder
-	Capabilities   []health.CapabilityStatus
+	Capabilities   capability.Report
 	SessionStarter mcp.SessionStarter
 	Resolver       egress.Resolver
 	TrustPath      string
@@ -81,7 +80,7 @@ func startMCPRuntime(ctx context.Context, opts *mcpRuntimeOptions) (*mcpRuntime,
 		SessionStarter:    starter,
 		Observer:          mcpRecorderObserver(opts.Recorder),
 		Logger:            opts.Logger,
-		CapabilityChecker: mcpCapabilityChecker(opts.Capabilities),
+		CapabilityChecker: opts.Capabilities.Require,
 	})
 	if err != nil {
 		return nil, err
@@ -113,18 +112,6 @@ func startMCPRuntime(ctx context.Context, opts *mcpRuntimeOptions) (*mcpRuntime,
 	return runtime, nil
 }
 
-func mcpCapabilityChecker(statuses []health.CapabilityStatus) func([]string) error {
-	return func(required []string) error {
-		for _, name := range required {
-			index := slices.IndexFunc(statuses, func(status health.CapabilityStatus) bool { return status.Name == name })
-			if index >= 0 && !statuses[index].Available {
-				return fmt.Errorf("capability %q is unavailable on this host", name)
-			}
-		}
-		return nil
-	}
-}
-
 func (r *mcpRuntime) warnUnexposedPersonaTools(ctx context.Context, logger *slog.Logger, personas []auraagent.Definition) {
 	if r == nil {
 		return
@@ -141,7 +128,7 @@ func (r *mcpRuntime) warnUnexposedPersonaTools(ctx context.Context, logger *slog
 	}
 }
 
-func startConfiguredMCP(ctx context.Context, cfg *config.Config, broker *toolbroker.Broker, logger *slog.Logger, meters metric.MeterProvider, capabilities []health.CapabilityStatus, personas []auraagent.Definition, plugins []mcp.PluginServer) (*mcpRuntime, error) {
+func startConfiguredMCP(ctx context.Context, cfg *config.Config, broker *toolbroker.Broker, logger *slog.Logger, meters metric.MeterProvider, capabilities capability.Report, personas []auraagent.Definition, plugins []mcp.PluginServer) (*mcpRuntime, error) {
 	recorder, err := telemetry.NewMCPRecorder(meters)
 	if err != nil {
 		return nil, err

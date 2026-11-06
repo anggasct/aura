@@ -17,12 +17,13 @@ type Handler func(ctx context.Context, request ToolRequest, constraints Constrai
 type Engine struct {
 	policy  Policy
 	handler Handler
+	host    map[string]struct{}
 	now     func() time.Time
 	mu      sync.RWMutex
 	nonces  map[string]time.Time // nonce -> expiry; consumed on Execute
 }
 
-func NewEngine(policy Policy, handler Handler) (*Engine, error) {
+func NewEngine(policy Policy, handler Handler, hostCapabilities []string) (*Engine, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("approval: invalid policy: %w", err)
 	}
@@ -35,9 +36,14 @@ func NewEngine(policy Policy, handler Handler) (*Engine, error) {
 	}
 	policyCopy := policy
 	policyCopy.Rules = clonedRules
+	host := make(map[string]struct{}, len(hostCapabilities))
+	for _, name := range hostCapabilities {
+		host[name] = struct{}{}
+	}
 	return &Engine{
 		policy:  policyCopy,
 		handler: handler,
+		host:    host,
 		now:     time.Now,
 		nonces:  map[string]time.Time{},
 	}, nil
@@ -95,8 +101,13 @@ func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecisi
 		return PolicyDecision{}, Errorf(ErrorCodePolicyDenied, "tool %q is not allowed for trust label %q", request.ToolName, request.Trust)
 	}
 	for _, required := range rule.RequiredCapabilities {
-		if !slices.Contains(request.Capabilities, required) {
+		if _, ok := e.host[required]; !ok {
 			return PolicyDecision{}, Errorf(ErrorCodeCapabilityUnavailable, "tool %q requires capability %q", request.ToolName, required)
+		}
+	}
+	for _, claimed := range request.Capabilities {
+		if _, ok := e.host[claimed]; !ok {
+			return PolicyDecision{}, Errorf(ErrorCodeCapabilityUnavailable, "tool %q request claims capability %q", request.ToolName, claimed)
 		}
 	}
 	if err := ctx.Err(); err != nil {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/toolbroker"
@@ -25,7 +26,7 @@ func TestDefinitionsCarryTheApprovedPluginDescription(t *testing.T) {
 	cfg.Tools.Workspace = t.TempDir()
 	dataRoot := t.TempDir()
 	cfg.Storage.Path = dataRoot
-	executor, err := New(&cfg, db, dataRoot, nil, nil, nil, nil)
+	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

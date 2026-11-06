@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/store"
@@ -38,7 +39,7 @@ func newEffectBroker(t *testing.T) *toolbroker.Broker {
 		t.Fatalf("NewExecutor(): %v", err)
 	}
 	broker, err := toolbroker.New(&toolbroker.Options{
-		Effects: effects,
+		HostCapabilities: capabilitytest.Host(t), Effects: effects,
 		ApprovalDecider: func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 			return true, nil
 		},
@@ -280,7 +281,7 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 func TestManagerRejectsUnapprovedStdioCommandBeforeSpawn(t *testing.T) {
 	ctx := t.Context()
 
-	broker, err := toolbroker.New(&toolbroker.Options{})
+	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("toolbroker.New failed: %v", err)
 	}
@@ -409,7 +410,7 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 
 func TestManagerCapabilityCheckFailure(t *testing.T) {
 	ctx := t.Context()
-	broker, err := toolbroker.New(&toolbroker.Options{})
+	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +513,7 @@ func TestManagerFailedConnectClosesClient(t *testing.T) {
 		RequestTimeout: config.Duration(10 * time.Second),
 		MaxMessageSize: 1024 * 1024,
 	}
-	broker, err := toolbroker.New(&toolbroker.Options{})
+	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

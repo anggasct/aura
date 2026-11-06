@@ -9,8 +9,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/egress"
-	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/mcp"
 	"github.com/anggasct/aura/internal/plugin"
 	"github.com/anggasct/aura/internal/plugin/connector"
@@ -21,7 +21,7 @@ import (
 type connectorRuntimeOptions struct {
 	Broker       *toolbroker.Broker
 	Logger       *slog.Logger
-	Capabilities []health.CapabilityStatus
+	Capabilities capability.Report
 	Starter      mcp.SessionStarter
 	HTTPClient   *http.Client
 	Plugins      []connector.Config
@@ -79,7 +79,7 @@ func startConnectorPlugins(ctx context.Context, opts *connectorRuntimeOptions) (
 		Starter:           connectorStarter{inner: starter},
 		HTTPClient:        client,
 		Validator:         mcp.MakeValidator,
-		CapabilityChecker: mcpCapabilityChecker(opts.Capabilities),
+		CapabilityChecker: opts.Capabilities.Require,
 		Logger:            opts.Logger,
 	})
 	if err != nil {

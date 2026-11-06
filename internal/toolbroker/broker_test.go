@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/tools"
 )
 
@@ -26,7 +27,7 @@ func brokerRequest(name, arguments string, capabilities ...string) *ToolRequest 
 }
 
 func TestBrokerExposesAllBuiltins(t *testing.T) {
-	broker, err := New(&Options{})
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestBrokerExposesAllBuiltins(t *testing.T) {
 
 func TestBrokerRejectsUnknownArgumentsBeforeAdapter(t *testing.T) {
 	calls := 0
-	broker, err := New(&Options{Adapters: map[string]Adapter{
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 		"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 			calls++
 			return ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
@@ -56,7 +57,7 @@ func TestBrokerRejectsUnknownArgumentsBeforeAdapter(t *testing.T) {
 }
 
 func TestBrokerReportsMissingExecCapability(t *testing.T) {
-	broker, err := New(&Options{Adapters: map[string]Adapter{
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 		"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 			t.Fatal("exec adapter reached without exec-linux capability")
 			return ToolResult{}, nil
@@ -74,7 +75,7 @@ func TestBrokerReportsMissingExecCapability(t *testing.T) {
 func TestBrokerObserverReceivesMetadataOnly(t *testing.T) {
 	var observations []Observation
 	broker, err := New(&Options{
-		Adapters: map[string]Adapter{
+		HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 			"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				return ToolResult{Output: json.RawMessage(`{"content":"untrusted"}`)}, nil
 			},
@@ -95,7 +96,7 @@ func TestBrokerObserverReceivesMetadataOnly(t *testing.T) {
 
 func TestBrokerBindsExactApprovalAndReturnsUntrustedResult(t *testing.T) {
 	broker, err := New(&Options{
-		Effects: newBrokerEffectExecutor(t),
+		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: map[string]Adapter{
 			"exec@v1": func(_ context.Context, request *ToolRequest, _ approval.Constraints) (ToolResult, error) {
 				return ToolResult{Output: json.RawMessage(`{"command":"secret-value"}`)}, nil
@@ -139,7 +140,7 @@ func classOf(err error) ResultClass {
 }
 
 func TestBrokerRegisterAndUnregisterTool(t *testing.T) {
-	broker, err := New(&Options{})
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

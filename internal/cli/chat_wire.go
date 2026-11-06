@@ -156,14 +156,15 @@ func shouldUseTTY(present chatPresentation, inTTY, outTTY bool) bool {
 	return inTTY && outTTY
 }
 
-func runChat(ctx context.Context, cfg *config.Config, configPath string, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID, persona string, present chatPresentation) error {
+func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID, persona string, present chatPresentation) error {
+	cfg := result.Config
 	db, err := openStorage(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
 
-	prices, err := openPriceRegistry(ctx, logger, cfg, configPath, "")
+	prices, err := openPriceRegistry(ctx, logger, cfg, result.Path, "")
 	if err != nil {
 		return err
 	}
@@ -215,7 +216,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		if err != nil {
 			return err
 		}
-		builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, approvalDeciderFor(approvals), nil,
+		builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, result.CapabilityReport, logger, nil, approvalDeciderFor(approvals), nil,
 			toolsbuiltin.WithApprovalReachable(terminalApprovalReachable(approvals)))
 		if err != nil {
 			return err

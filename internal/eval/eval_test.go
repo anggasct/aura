@@ -55,7 +55,7 @@ func TestAdversarialCorpusIsDenied(t *testing.T) {
 	handler := func(context.Context, approval.ToolRequest, approval.Constraints) (approval.ToolResult, error) {
 		return approval.ToolResult{}, nil
 	}
-	broker, err := approval.NewEngine(policy, handler)
+	broker, err := approval.NewEngine(policy, handler, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestAuthorizedRequestIsAllowed(t *testing.T) {
 	handler := func(context.Context, approval.ToolRequest, approval.Constraints) (approval.ToolResult, error) {
 		return approval.ToolResult{}, nil
 	}
-	broker, err := approval.NewEngine(policy, handler)
+	broker, err := approval.NewEngine(policy, handler, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}

@@ -54,6 +54,30 @@ func (r Report) Status(name string) (Status, bool) {
 	return Status{}, false
 }
 
+func (r Report) Active() []string {
+	active := make([]string, 0, len(r.statuses))
+	for _, status := range r.statuses {
+		if status.Available && status.Enabled {
+			active = append(active, status.Name)
+		}
+	}
+	return active
+}
+
+func (r Report) Require(names []string) error {
+	var problems []error
+	for _, name := range names {
+		status, known := r.Status(name)
+		switch {
+		case !known:
+			problems = append(problems, newError(ErrorCodeCapabilityUnknown, name, "capability is not registered"))
+		case !status.Available:
+			problems = append(problems, newError(ErrorCodeCapabilityUnavailable, name, "capability is unavailable on this host"))
+		}
+	}
+	return errors.Join(problems...)
+}
+
 type Registry struct {
 	definitions map[string]Definition
 }

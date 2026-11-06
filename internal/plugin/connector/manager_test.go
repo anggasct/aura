@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -53,7 +54,7 @@ func newManagerFixture(t *testing.T, build func(api *fakeAPI) func(index int) fu
 	}
 	f := &managerFixture{t: t, api: newFakeAPI(t), executor: executor, approve: true}
 	f.broker, err = toolbroker.New(&toolbroker.Options{
-		Effects: executor,
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		ApprovalDecider: func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
@@ -527,7 +528,7 @@ func TestNewManagerRejectsUnusableConfiguration(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			broker, err := toolbroker.New(&toolbroker.Options{})
+			broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
 			if err != nil {
 				t.Fatalf("toolbroker.New: %v", err)
 			}

@@ -9,6 +9,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -58,7 +59,7 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testi
 			if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: sessionID, OwnerID: "telegram:5", AgentID: auraagent.DefaultID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 				t.Fatalf("Create session: %v", err)
 			}
-			executor, err := toolsbuiltin.New(&cfg, db, t.TempDir(), slog.New(slog.DiscardHandler), nil, decider, telegramOriginAccess{})
+			executor, err := toolsbuiltin.New(&cfg, db, t.TempDir(), capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, telegramOriginAccess{})
 			if err != nil {
 				t.Fatalf("toolsbuiltin.New: %v", err)
 			}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -14,7 +15,7 @@ import (
 func observingBroker(t *testing.T, observations *[]Observation, observerCtxs *[]context.Context, adapters map[string]Adapter) *Broker {
 	t.Helper()
 	broker, err := New(&Options{
-		Adapters: adapters,
+		HostCapabilities: capabilitytest.Host(t), Adapters: adapters,
 		Observer: func(ctx context.Context, observation Observation) {
 			*observations = append(*observations, observation)
 			*observerCtxs = append(*observerCtxs, ctx)
@@ -47,7 +48,7 @@ func TestBrokerObservationCarriesPolicyApprovalExecutorMetadata(t *testing.T) {
 	readRule.RequiresApproval = true
 	policy.Rules["read_file"] = readRule
 	broker, err := New(&Options{
-		Policy: policy,
+		HostCapabilities: capabilitytest.Host(t), Policy: policy,
 		Adapters: map[string]Adapter{
 			"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				return ToolResult{Output: []byte(`{"content":"x"}`)}, nil

@@ -23,6 +23,7 @@ import (
 	"google.golang.org/genai"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/channel/email"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
@@ -224,7 +225,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	name := fmt.Sprintf("email-access-%d", personaEvalModelSeq.Add(1))
 	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return h.model, nil })
 	decider := channelApprovalDecider(approvalChannels(approvers, route))
-	builtin, err := toolsbuiltin.New(cfg, db, h.artifacts, slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil))
+	builtin, err := toolsbuiltin.New(cfg, db, h.artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil))
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}
