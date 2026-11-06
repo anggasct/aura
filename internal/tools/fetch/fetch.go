@@ -130,7 +130,7 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 		body = body[:options.MaxDecodedBytes]
 	}
 	if isHTML(contentType) {
-		converted, convertedTruncated, err := htmlToMarkdown(runCtx, body, options.MaxDecodedBytes)
+		converted, convertedTruncated, err := HTMLToMarkdown(runCtx, body, options.MaxDecodedBytes)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}

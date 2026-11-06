@@ -14,9 +14,9 @@ import (
 
 func reduce(t *testing.T, source string, maxBytes int64) (string, bool) {
 	t.Helper()
-	rendered, truncated, err := htmlToMarkdown(context.Background(), []byte(source), maxBytes)
+	rendered, truncated, err := HTMLToMarkdown(context.Background(), []byte(source), maxBytes)
 	if err != nil {
-		t.Fatalf("htmlToMarkdown: %v", err)
+		t.Fatalf("HTMLToMarkdown: %v", err)
 	}
 	return rendered, truncated
 }
@@ -91,7 +91,7 @@ func TestHTMLToMarkdownFailsClosedOnOverDeepDocument(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rendered, truncated, err := htmlToMarkdown(context.Background(), []byte(tc.source), 1<<20)
+			rendered, truncated, err := HTMLToMarkdown(context.Background(), []byte(tc.source), 1<<20)
 			if code, ok := CodeOf(err); !ok || code != ErrorCodeHTMLParseFailed {
 				t.Fatalf("err = %v, want %s", err, ErrorCodeHTMLParseFailed)
 			}
@@ -147,13 +147,13 @@ func TestHTMLToMarkdownStopsOnCancelledContext(t *testing.T) {
 	source := []byte(strings.Repeat(`<a href="https://example.com/x">link</a>`, 20000))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	rendered, truncated, err := htmlToMarkdown(ctx, source, 1<<20)
+	rendered, truncated, err := HTMLToMarkdown(ctx, source, 1<<20)
 	if !errors.Is(err, context.Canceled) || rendered != "" || truncated {
-		t.Fatalf("htmlToMarkdown = %q, %v, %v; want context.Canceled and no content", rendered, truncated, err)
+		t.Fatalf("HTMLToMarkdown = %q, %v, %v; want context.Canceled and no content", rendered, truncated, err)
 	}
 	expired, expire := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer expire()
-	if _, _, err := htmlToMarkdown(expired, source, 1<<20); !errors.Is(err, context.DeadlineExceeded) {
+	if _, _, err := HTMLToMarkdown(expired, source, 1<<20); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want context.DeadlineExceeded", err)
 	}
 }
@@ -198,8 +198,8 @@ func TestHTMLToMarkdownRendersInLinearTime(t *testing.T) {
 		best := time.Duration(1<<63 - 1)
 		for range 3 {
 			start := time.Now()
-			if _, _, err := htmlToMarkdown(context.Background(), source, 1<<30); err != nil {
-				t.Fatalf("htmlToMarkdown: %v", err)
+			if _, _, err := HTMLToMarkdown(context.Background(), source, 1<<30); err != nil {
+				t.Fatalf("HTMLToMarkdown: %v", err)
 			}
 			if elapsed := time.Since(start); elapsed < best {
 				best = elapsed
@@ -280,7 +280,7 @@ func FuzzHTMLToMarkdown(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, source []byte, limit uint16) {
 		maxBytes := int64(limit) + 1
-		rendered, truncated, err := htmlToMarkdown(context.Background(), source, maxBytes)
+		rendered, truncated, err := HTMLToMarkdown(context.Background(), source, maxBytes)
 		if err != nil {
 			if rendered != "" || truncated {
 				t.Fatalf("failed reduction returned content: %q", rendered)

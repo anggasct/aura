@@ -16,7 +16,7 @@ func isHTML(contentType string) bool {
 
 const cancelCheckInterval = 256
 
-func htmlToMarkdown(ctx context.Context, source []byte, maxBytes int64) (markdown string, truncated bool, err error) {
+func HTMLToMarkdown(ctx context.Context, source []byte, maxBytes int64) (markdown string, truncated bool, err error) {
 	if cancelled := ctx.Err(); cancelled != nil {
 		return "", false, cancelled
 	}
