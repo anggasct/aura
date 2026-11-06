@@ -21,24 +21,42 @@ type ErasureCounts struct {
 	StandingGrants  int
 	PairingRequests int
 	UsageLinks      int
+	EmailEffects    int
 	Blobs           int
 }
+
+const (
+	emailEffectMatch = `substr(?1, 1, 6) = 'email:' AND json_valid(request_json) AND (
+		(provider = 'email' AND lower(json_extract(request_json, '$.to')) = substr(?1, 7))
+		OR (provider = 'builtin-tools' AND operation = 'email_send' AND lower(json_extract(request_json, '$.arguments.to')) = substr(?1, 7)))`
+
+	emailEffectIDs = `SELECT id FROM effect_intent WHERE ` + emailEffectMatch
+
+	ownedEffectIDs = `SELECT id FROM effect_intent WHERE session_id IN (SELECT id FROM session WHERE owner_id = ?1)`
+)
 
 type erasureTarget struct {
 	field *int
 	count string
-	erase string
+	erase []string
 	grant bool
 }
 
 func (c *ErasureCounts) targets() []erasureTarget {
 	return []erasureTarget{
-		{field: &c.MemoryDocuments, count: `SELECT COUNT(*) FROM memory_document WHERE owner_id = ?`, erase: `DELETE FROM memory_document WHERE owner_id = ?`},
-		{field: &c.Sessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ?`, erase: `DELETE FROM session WHERE owner_id = ?`},
-		{field: &c.Grants, count: `SELECT COUNT(*) FROM principal_grant WHERE principal_id = ?`, erase: `DELETE FROM principal_grant WHERE principal_id = ?`, grant: true},
-		{field: &c.StandingGrants, count: `SELECT COUNT(*) FROM standing_grant WHERE principal_id = ?`, erase: `DELETE FROM standing_grant WHERE principal_id = ?`},
-		{field: &c.PairingRequests, count: `SELECT COUNT(*) FROM pairing_request WHERE principal_id = ?`, erase: `DELETE FROM pairing_request WHERE principal_id = ?`},
-		{field: &c.UsageLinks, count: `SELECT COUNT(*) FROM usage_reservation WHERE principal_id = ?`, erase: `UPDATE usage_reservation SET principal_id = NULL WHERE principal_id = ?`},
+		{field: &c.EmailEffects, count: `SELECT COUNT(*) FROM effect_intent WHERE ` + emailEffectMatch, erase: []string{
+			`DELETE FROM effect_approval WHERE intent_id IN (` + emailEffectIDs + `)`,
+			`DELETE FROM effect_intent WHERE id IN (` + emailEffectIDs + `)`,
+		}},
+		{field: &c.MemoryDocuments, count: `SELECT COUNT(*) FROM memory_document WHERE owner_id = ?`, erase: []string{`DELETE FROM memory_document WHERE owner_id = ?`}},
+		{field: &c.Sessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ?`, erase: []string{
+			`DELETE FROM effect_approval WHERE intent_id IN (` + ownedEffectIDs + `)`,
+			`DELETE FROM session WHERE owner_id = ?`,
+		}},
+		{field: &c.Grants, count: `SELECT COUNT(*) FROM principal_grant WHERE principal_id = ?`, erase: []string{`DELETE FROM principal_grant WHERE principal_id = ?`}, grant: true},
+		{field: &c.StandingGrants, count: `SELECT COUNT(*) FROM standing_grant WHERE principal_id = ?`, erase: []string{`DELETE FROM standing_grant WHERE principal_id = ?`}},
+		{field: &c.PairingRequests, count: `SELECT COUNT(*) FROM pairing_request WHERE principal_id = ?`, erase: []string{`DELETE FROM pairing_request WHERE principal_id = ?`}},
+		{field: &c.UsageLinks, count: `SELECT COUNT(*) FROM usage_reservation WHERE principal_id = ?`, erase: []string{`UPDATE usage_reservation SET principal_id = NULL WHERE principal_id = ?`}},
 	}
 }
 
@@ -65,8 +83,10 @@ func ErasePrincipal(ctx context.Context, db *sql.DB, principalID string, apply b
 		if !apply || *target.field == 0 {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, target.erase, principalID); err != nil {
-			return counts, classifyBusy(fmt.Errorf("erase principal data: %w", err))
+		for _, statement := range target.erase {
+			if _, err := tx.ExecContext(ctx, statement, principalID); err != nil {
+				return counts, classifyBusy(fmt.Errorf("erase principal data: %w", err))
+			}
 		}
 	}
 	if !apply {
