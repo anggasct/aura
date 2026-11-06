@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -75,20 +74,6 @@ func NewProvider(service *Service, config ProviderConfig) (*Provider, error) {
 	}, nil
 }
 
-func boundedRecallQuery(parts []runtimeingress.InputPart) string {
-	texts := make([]string, 0, len(parts))
-	for i := range parts {
-		if trimmed := strings.TrimSpace(parts[i].Text); trimmed != "" {
-			texts = append(texts, trimmed)
-		}
-	}
-	query := strings.Join(texts, "\n")
-	if utf8.RuneCountInString(query) > maxQueryRunes {
-		query = string([]rune(query)[:maxQueryRunes])
-	}
-	return query
-}
-
 func (p *Provider) RecallTurn(ctx context.Context, req *runtime.TurnRequest) (*runtime.UntrustedRecall, error) {
 	if ctx == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
@@ -114,7 +99,7 @@ func (p *Provider) recall(ctx context.Context, req *runtime.TurnRequest) (*runti
 		observation.Outcome = string(ErrorCodeInvalidArgument)
 		return nil, observation, Errorf(ErrorCodeInvalidArgument, "recall owner and session must not be empty")
 	}
-	query := boundedRecallQuery(req.Parts)
+	query := runtimeingress.QueryText(req.Parts)
 	if query == "" {
 		observation.Outcome = OutcomeEmpty
 		return nil, observation, nil

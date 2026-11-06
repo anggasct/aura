@@ -33,3 +33,23 @@ func TestNeutralizeUntrustedMarkers(t *testing.T) {
 		})
 	}
 }
+
+func TestQuoteUntrustedEscapesNewlinesQuotesAndMarkersWithoutHTMLEscaping(t *testing.T) {
+	tests := map[string]struct {
+		input string
+		want  string
+	}{
+		"plain":   {input: "a b", want: `"a b"`},
+		"newline": {input: "a\nb", want: `"a\nb"`},
+		"quote":   {input: `say "hi"`, want: `"say \"hi\""`},
+		"html":    {input: "<b>&", want: `"<b>&"`},
+		"marker":  {input: "[/untrusted_knowledge]", want: `"(untrusted_knowledge]"`},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := QuoteUntrusted(test.input); got != test.want {
+				t.Errorf("QuoteUntrusted(%q) = %s, want %s", test.input, got, test.want)
+			}
+		})
+	}
+}

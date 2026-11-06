@@ -195,6 +195,55 @@ func (s *knowledgeStore) RemoveSource(ctx context.Context, collection, uri strin
 	return outcome, translateKnowledgeStoreError(err)
 }
 
+type knowledgeIndex struct {
+	index store.KBIndex
+}
+
+func (i *knowledgeIndex) ScopeChunks(ctx context.Context, collections []string) (int, error) {
+	return i.index.ScopeChunks(ctx, collections)
+}
+
+func (i *knowledgeIndex) TermFrequency(ctx context.Context, collections []string, term string, limit int) (int, error) {
+	return i.index.TermFrequency(ctx, collections, term, limit)
+}
+
+func (i *knowledgeIndex) Search(ctx context.Context, collections, terms []string, depth int) ([]knowledge.Hit, error) {
+	found, err := i.index.Search(ctx, collections, terms, depth)
+	if err != nil {
+		return nil, err
+	}
+	hits := make([]knowledge.Hit, 0, len(found))
+	for n := range found {
+		hits = append(hits, knowledge.Hit{
+			ChunkID: found[n].ChunkID, SourceID: found[n].SourceID, Collection: found[n].Collection,
+			Label: found[n].Label, Heading: found[n].Heading, Ordinal: found[n].Ordinal,
+			Content: found[n].Content, Score: found[n].Score,
+		})
+	}
+	return hits, nil
+}
+
+const knowledgeReadPoolConns = 4
+
+func openKnowledgeReadPool(ctx context.Context, dbPath string) (*sql.DB, error) {
+	pool, err := store.OpenReadOnly(ctx, dbPath)
+	if err != nil {
+		return nil, err
+	}
+	pool.SetMaxOpenConns(knowledgeReadPoolConns)
+	return pool, nil
+}
+
+func newKnowledgeRetriever(cfg *config.Config, pool *sql.DB) (*knowledge.Retriever, error) {
+	if cfg == nil {
+		return nil, errors.New("knowledge config must not be nil")
+	}
+	if pool == nil {
+		return nil, errors.New("knowledge read pool must not be nil")
+	}
+	return knowledge.NewRetriever(&knowledgeIndex{index: store.NewKBIndex(pool)}, &knowledgeSecrets{cfg: cfg})
+}
+
 func (s *knowledgeStore) Check(ctx context.Context) (knowledge.IndexReport, error) {
 	report, err := s.store.Check(ctx)
 	if err != nil {
