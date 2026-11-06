@@ -42,6 +42,7 @@ type ADKExecutor struct {
 	optIn             map[string]bool
 	channelTools      map[string]string
 	externalServers   map[string]string
+	pluginTools       map[string]string
 	logger            *slog.Logger
 	builtins          BuiltinToolExecutor
 	toolSeq           toolSequence
@@ -168,6 +169,7 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 		e.optIn = map[string]bool{}
 		e.channelTools = map[string]string{}
 		e.externalServers = map[string]string{}
+		e.pluginTools = map[string]string{}
 		for i := range definitions {
 			if definitions[i].OptIn {
 				e.optIn[definitions[i].Name] = true
@@ -177,6 +179,9 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 			}
 			if definitions[i].Server != "" {
 				e.externalServers[definitions[i].Name] = definitions[i].Server
+			}
+			if definitions[i].Plugin != "" {
+				e.pluginTools[definitions[i].Name] = definitions[i].Plugin
 			}
 		}
 		return nil
@@ -587,6 +592,12 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 	listed := len(allowed) > 0
 	filtered := make([]tool.Tool, 0, len(x.tools))
 	for _, t := range x.tools {
+		if plugin, owned := x.pluginTools[t.Name()]; owned {
+			if exposesPluginTool(definition, class, t.Name(), plugin) {
+				filtered = append(filtered, t)
+			}
+			continue
+		}
 		if server, external := x.externalServers[t.Name()]; external {
 			if exposesExternalTool(definition, class, t.Name(), server) {
 				filtered = append(filtered, t)
@@ -623,6 +634,17 @@ func exposesExternalTool(definition *auraagent.Definition, class principal.Class
 		}
 	}
 	return auratools.ListsTool(allowed, toolName, server)
+}
+
+func exposesPluginTool(definition *auraagent.Definition, class principal.Class, toolName, plugin string) bool {
+	if class == principal.ClassPublic || !definition.ListsPlugin(plugin) {
+		return false
+	}
+	if class == "" {
+		return true
+	}
+	ceiling, restricted := definition.ToolCeiling(class)
+	return !restricted || auratools.ListsPluginTool(ceiling, toolName, plugin)
 }
 
 func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string, extra turnContext) (agent.Agent, error) {
