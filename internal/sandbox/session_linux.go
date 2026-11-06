@@ -85,7 +85,7 @@ func launchSession(ctx context.Context, cgroups *cgroupHost, req *SessionRequest
 		_ = stdinW.Close()
 		return nil, Errorf(ErrorCodeSandboxInitFailed, "stdout pipe: %v", err)
 	}
-	created, err := cgroups.newCgroup(spec.Limits)
+	created, err := cgroups.newCgroup(&spec.Limits)
 	if err != nil {
 		closeAll(configR, configW, errR, errW, stdinR, stdinW, stdoutR, stdoutW)
 		return nil, err

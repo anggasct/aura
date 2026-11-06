@@ -34,8 +34,43 @@ func landlockWriteMask(abiVersion int) uint64 {
 	return uint64(m)
 }
 
-func landlockRuntimeRoots() []string {
-	candidates := []string{"/usr", "/lib", "/lib64", "/bin", "/sbin"}
+const landlockFileRights = unix.LANDLOCK_ACCESS_FS_EXECUTE |
+	unix.LANDLOCK_ACCESS_FS_READ_FILE |
+	unix.LANDLOCK_ACCESS_FS_WRITE_FILE |
+	unix.LANDLOCK_ACCESS_FS_TRUNCATE
+
+func baseRuntimeRoots() []string {
+	return []string{"/usr", "/lib", "/lib64", "/bin", "/sbin"}
+}
+
+func interpreterRuntimeRoots() []string {
+	return []string{"/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib64", "/lib64"}
+}
+
+type landlockFileRule struct {
+	path   string
+	access uint64
+}
+
+func landlockDeviceRules(profile Profile, abiVersion int) []landlockFileRule {
+	if profile != ProfileInterpreter {
+		return nil
+	}
+	null := uint64(unix.LANDLOCK_ACCESS_FS_READ_FILE | unix.LANDLOCK_ACCESS_FS_WRITE_FILE)
+	if abiVersion >= 3 {
+		null |= unix.LANDLOCK_ACCESS_FS_TRUNCATE
+	}
+	return []landlockFileRule{
+		{path: "/dev/urandom", access: unix.LANDLOCK_ACCESS_FS_READ_FILE},
+		{path: "/dev/null", access: null},
+	}
+}
+
+func landlockRuntimeRoots(profile Profile) []string {
+	candidates := baseRuntimeRoots()
+	if profile == ProfileInterpreter {
+		candidates = interpreterRuntimeRoots()
+	}
 	var roots []string
 	for _, c := range candidates {
 		if info, err := os.Stat(c); err == nil && info.IsDir() {
@@ -43,6 +78,10 @@ func landlockRuntimeRoots() []string {
 		}
 	}
 	return roots
+}
+
+func landlockFileAccess(access uint64) uint64 {
+	return access & uint64(landlockFileRights)
 }
 
 func landlockABI() (int, error) {
@@ -75,8 +114,13 @@ func applyLandlock(spec *Spec) error {
 	}
 	defer func() { _ = unix.Close(int(ruleset)) }()
 
-	for _, root := range landlockRuntimeRoots() {
+	for _, root := range landlockRuntimeRoots(spec.Profile) {
 		if err := addLandlockRule(int(ruleset), root, landlockReadMask); err != nil {
+			return err
+		}
+	}
+	for _, rule := range landlockDeviceRules(spec.Profile, abi) {
+		if err := addLandlockRule(int(ruleset), rule.path, rule.access); err != nil {
 			return err
 		}
 	}
@@ -110,6 +154,13 @@ func addLandlockRule(ruleset int, path string, access uint64) error {
 		return Errorf(ErrorCodeSandboxInitFailed, "open %s for landlock: %v", path, err)
 	}
 	defer func() { _ = unix.Close(fd) }()
+	var info unix.Stat_t
+	if err := unix.Fstat(fd, &info); err != nil {
+		return Errorf(ErrorCodeSandboxInitFailed, "stat %s for landlock: %v", path, err)
+	}
+	if info.Mode&unix.S_IFMT != unix.S_IFDIR {
+		access = landlockFileAccess(access)
+	}
 	pb := landlockPathBeneathAttr{allowedAccess: access, parentFd: int32(fd)}
 	if _, _, errno := unix.Syscall(unix.SYS_LANDLOCK_ADD_RULE, uintptr(ruleset), unix.LANDLOCK_RULE_PATH_BENEATH, uintptr(unsafe.Pointer(&pb))); errno != 0 {
 		return Errorf(ErrorCodeSandboxInitFailed, "landlock add_rule %s: %v", path, errno)

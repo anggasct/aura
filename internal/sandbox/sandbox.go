@@ -64,6 +64,9 @@ type Limits struct {
 	MaxCoreSize    int64         `json:"max_core_size"`
 	FileBytes      int64         `json:"file_bytes"`
 	Timeout        time.Duration `json:"timeout"`
+
+	NoProcessRlimit bool  `json:"no_process_rlimit"`
+	RunDirBytes     int64 `json:"run_dir_bytes"`
 }
 
 type Spec struct {
@@ -73,6 +76,7 @@ type Spec struct {
 	ReadWritePaths []string
 	AllowEnv       []string
 	AllowNetwork   bool
+	Stdin          []byte
 	Limits         Limits
 }
 
@@ -83,16 +87,28 @@ func (s *Spec) validate() error {
 	if s.Limits.Timeout <= 0 {
 		return Errorf(ErrorCodeInvalidArgument, "timeout must be positive")
 	}
-	return s.Profile.validate()
+	if err := s.Profile.validate(); err != nil {
+		return err
+	}
+	return s.Profile.requireLimits(&s.Limits)
 }
 
 type Result struct {
-	ExitCode   int
-	Output     string
-	Stdout     string
-	Stderr     string
-	Terminated bool
-	Truncated  bool
+	ExitCode        int
+	Signal          int
+	Output          string
+	Stdout          string
+	Stderr          string
+	Terminated      bool
+	TimedOut        bool
+	Truncated       bool
+	StdoutTruncated bool
+	StderrTruncated bool
+	OOMKilled       bool
+	PidsLimited     bool
+	DiskLimited     bool
+	FileLimited     bool
+	CPUTime         time.Duration
 }
 
 func Run(ctx context.Context, spec *Spec, command string, args ...string) (Result, error) {
