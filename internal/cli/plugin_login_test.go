@@ -151,6 +151,9 @@ func TestPluginLoginAndLogoutLifecycle(t *testing.T) {
 	if err := runPluginCommandIn(t, cfg, strings.NewReader(""), logout, "logout", "mailer"); err != nil || !strings.Contains(logout.String(), "logged out mailer") {
 		t.Fatalf("logout = %q, %v", logout.String(), err)
 	}
+	if accessEventCount(t, cfg, accessActionPluginLogin) != 1 || accessEventCount(t, cfg, accessActionPluginLogout) != 1 {
+		t.Fatalf("login events = %d logout events = %d, want one each", accessEventCount(t, cfg, accessActionPluginLogin), accessEventCount(t, cfg, accessActionPluginLogout))
+	}
 	if _, err := os.Stat(namespace); !os.IsNotExist(err) {
 		t.Fatalf("namespace after logout: %v", err)
 	}

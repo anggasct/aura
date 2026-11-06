@@ -351,6 +351,9 @@ func newPluginLoginCmd(gf *globalFlags) *cobra.Command {
 			if err := service.Login(cmd.Context(), args[0], opts); err != nil {
 				return err
 			}
+			if err := recordAccessAction(cmd.Context(), db, &accessAction{Action: accessActionPluginLogin, Plugin: args[0]}, args[0], time.Now()); err != nil {
+				return err
+			}
 			return writeChildLines(cmd, []string{fmt.Sprintf("logged in %s; %s", args[0], pluginRestartNotice)})
 		},
 	}
@@ -370,6 +373,9 @@ func newPluginLogoutCmd(gf *globalFlags) *cobra.Command {
 			}
 			defer func() { _ = db.Close() }()
 			if err := service.Logout(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+			if err := recordAccessAction(cmd.Context(), db, &accessAction{Action: accessActionPluginLogout, Plugin: args[0]}, args[0], time.Now()); err != nil {
 				return err
 			}
 			return writeChildLines(cmd, []string{fmt.Sprintf("logged out %s; %s", args[0], pluginRestartNotice)})

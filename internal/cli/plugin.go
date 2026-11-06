@@ -25,6 +25,8 @@ const (
 	accessActionPluginApprove = "plugin_approve"
 	accessActionPluginDisable = "plugin_disable"
 	accessActionPluginRemove  = "plugin_remove"
+	accessActionPluginLogin   = "plugin_login"
+	accessActionPluginLogout  = "plugin_logout"
 )
 
 type discardRedactor struct{}
