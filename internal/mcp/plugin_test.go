@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/store"
@@ -33,7 +34,7 @@ func countingBroker(t *testing.T, prompts *int) *toolbroker.Broker {
 		t.Fatalf("NewExecutor(): %v", err)
 	}
 	broker, err := toolbroker.New(&toolbroker.Options{
-		Effects: effects,
+		HostCapabilities: capabilitytest.Host(t), Effects: effects,
 		ApprovalDecider: func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 			*prompts++
 			return true, nil
@@ -48,7 +49,7 @@ func countingBroker(t *testing.T, prompts *int) *toolbroker.Broker {
 func pluginServer(id string, approved ...string) PluginServer {
 	cfg := startableStdioConfig(id)
 	cfg.Name = id
-	cfg.Capabilities = []string{"network"}
+	cfg.Capabilities = []string{"public-web"}
 	plugin := PluginServer{ID: id, Server: cfg}
 	for _, name := range approved {
 		plugin.Tools = append(plugin.Tools, PluginTool{Name: name, Description: "approved text for " + name})
@@ -161,7 +162,7 @@ func TestPluginToolsNeverLoosenBrokerPolicy(t *testing.T) {
 	owner := withEffectIdentity(&toolbroker.ToolRequest{
 		RequestID: "r1", TurnID: "t1", SessionID: "session-1", PrincipalID: "principal-1",
 		ToolName: "plugin_weather_forecast", ToolVersion: "v1", Arguments: json.RawMessage(`{}`),
-		Capabilities: []string{"network"}, Trust: approval.TrustOwnerInput,
+		Capabilities: []string{"public-web"}, Trust: approval.TrustOwnerInput,
 	}, "plugin-owner-1")
 	if _, err := broker.Execute(t.Context(), owner); err != nil {
 		t.Fatalf("owner call: %v", err)
@@ -173,7 +174,7 @@ func TestPluginToolsNeverLoosenBrokerPolicy(t *testing.T) {
 		request := withEffectIdentity(&toolbroker.ToolRequest{
 			RequestID: "r-" + class, TurnID: "t1", SessionID: "session-1", PrincipalID: "principal-1",
 			ToolName: "plugin_weather_forecast", ToolVersion: "v1", Arguments: json.RawMessage(`{}`),
-			Capabilities: []string{"network"}, Trust: approval.TrustOwnerInput,
+			Capabilities: []string{"public-web"}, Trust: approval.TrustOwnerInput,
 		}, "plugin-"+class)
 		request.PrincipalClass = "trusted"
 		if class == "public" {

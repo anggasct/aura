@@ -17,6 +17,8 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/mcp"
@@ -177,6 +179,7 @@ type mcpHarness struct {
 	cfg      config.Config
 	db       *sql.DB
 	executor *toolsbuiltin.Executor
+	report   capability.Report
 	prompts  []string
 	shown    []string
 	approve  bool
@@ -203,7 +206,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	harness := &mcpHarness{cfg: config.Default(), db: db, approve: true}
+	harness := &mcpHarness{cfg: config.Default(), db: db, report: capabilitytest.All(t), approve: true}
 	harness.cfg.Tools.Workspace = t.TempDir()
 	harness.cfg.Storage.Path = dataRoot
 	harness.cfg.MCP = &config.MCP{Servers: servers}
@@ -211,7 +214,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	if access != nil {
 		policy = access(db)
 	}
-	executor, err := toolsbuiltin.New(&harness.cfg, db, dataRoot, slog.New(slog.DiscardHandler), nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+	executor, err := toolsbuiltin.New(&harness.cfg, db, dataRoot, harness.report, slog.New(slog.DiscardHandler), nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 		harness.mu.Lock()
 		defer harness.mu.Unlock()
 		harness.prompts = append(harness.prompts, prompt.ToolName)
@@ -235,6 +238,7 @@ func (h *mcpHarness) start(t *testing.T, starter mcp.SessionStarter) *mcpRuntime
 		Config:         &h.cfg,
 		Broker:         h.executor.Broker(),
 		Logger:         slog.New(slog.DiscardHandler),
+		Capabilities:   h.report,
 		SessionStarter: starter,
 		TrustPath:      trustPath,
 	})
@@ -300,7 +304,7 @@ func (h *mcpHarness) callToolAs(ctx context.Context, name, id string, class prin
 	_, err := h.executor.Execute(ctx, &runtimeadk.BuiltinToolRequest{
 		RequestID: id, TurnID: "turn-" + id, SessionID: "session-1", PrincipalID: "owner-1", PrincipalClass: class, AgentID: agentID,
 		ToolName: name, ToolVersion: "v1", Arguments: json.RawMessage(`{}`),
-		Capabilities: []string{"fs.read"}, Trust: string(approval.TrustDerivedUntrusted),
+		Capabilities: []string{"public-web"}, Trust: string(approval.TrustDerivedUntrusted),
 		IdempotencyKey: "key-" + id, EventSequence: sequence, EventInvocation: "inv-" + id, EventBranch: "main", EventAuthor: "agent",
 	})
 	return err
@@ -313,7 +317,7 @@ func mcpTestServer(name string) config.MCPServer {
 		Command:        "/opt/mcp/" + name,
 		Args:           []string{"--stdio"},
 		Environment:    map[string]string{"MODE": "test"},
-		Capabilities:   []string{"fs.read"},
+		Capabilities:   []string{"public-web"},
 		StartupTimeout: config.Duration(5 * time.Second),
 		RequestTimeout: config.Duration(5 * time.Second),
 		MaxMessageSize: 1 << 20,
@@ -584,16 +588,33 @@ func TestMCPRuntimeRequiresInputs(t *testing.T) {
 	}
 }
 
-func TestMCPCapabilityCheckerRejectsUnavailableProfileCapabilities(t *testing.T) {
-	check := mcpCapabilityChecker([]health.CapabilityStatus{
-		{Name: "workspace-read", Available: true},
-		{Name: "exec-linux", Available: false},
-	})
-	if err := check([]string{"workspace-read", "fs.read"}); err != nil {
-		t.Errorf("available and free-form labels rejected: %v", err)
+func TestMCPServerDeclaringACapabilityOutsideTheRegistryRegistersNoTools(t *testing.T) {
+	server := mcpTestServer("docs")
+	server.Capabilities = []string{"fs.read"}
+	harness := newMCPHarness(t, []config.MCPServer{server})
+	harness.approveServer(t, "docs")
+	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
+	started := harness.start(t, starter)
+
+	if starter.started("docs") != 0 {
+		t.Fatalf("sessions started = %d, want the server refused before any session", starter.started("docs"))
 	}
-	if err := check([]string{"exec-linux"}); err == nil {
-		t.Error("unavailable profile capability accepted")
+	if slices.Contains(harness.toolNames(), "mcp_docs_ping") {
+		t.Fatalf("broker tools = %v, want no tool from a server with an unregistered capability", harness.toolNames())
+	}
+	statuses := started.manager.Statuses()
+	if len(statuses) != 1 || statuses[0].Code != mcp.ErrCapabilityUnavailable {
+		t.Fatalf("statuses = %+v, want the server marked capability_unavailable", statuses)
+	}
+}
+
+func TestMCPCapabilityCheckerRejectsCapabilitiesOutsideTheRegistry(t *testing.T) {
+	check := capabilitytest.Report(t, "workspace-read").Require
+	if err := check([]string{"workspace-read"}); err != nil {
+		t.Errorf("available capability rejected: %v", err)
+	}
+	if err := check([]string{"fs.read"}); err == nil {
+		t.Error("capability outside the registry accepted")
 	}
 }
 

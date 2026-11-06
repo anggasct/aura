@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/knowledge"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
@@ -33,7 +34,7 @@ func newKBSearchRig(t *testing.T) *kbSearchRig {
 	if err != nil {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
-	builtin, err := toolsbuiltin.New(rig.cfg, rig.db, artifactRoot, slog.New(slog.DiscardHandler), nil, nil, newAccessPolicy(registry, rig.db, nil))
+	builtin, err := toolsbuiltin.New(rig.cfg, rig.db, artifactRoot, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, nil, newAccessPolicy(registry, rig.db, nil))
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}

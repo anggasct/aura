@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/tools"
 )
 
@@ -17,7 +18,7 @@ func TestBrokerApprovalDeciderAcceptExecutes(t *testing.T) {
 	calls := 0
 	var approvals []string
 	broker, err := New(&Options{
-		Effects: executor,
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				calls++
@@ -52,7 +53,7 @@ func TestBrokerApprovalDeciderReturnsPastDeadlineFailsClosed(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
 	broker, err := New(&Options{
-		Effects: executor,
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				calls++
@@ -83,7 +84,7 @@ func TestBrokerApprovalDeciderRejectBlocksExecution(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
 	broker, err := New(&Options{
-		Effects: executor,
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				calls++
@@ -110,7 +111,7 @@ func TestBrokerApprovalDeciderRejectBlocksExecution(t *testing.T) {
 func TestBrokerApprovalDeciderErrorFailsClosed(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	broker, err := New(&Options{
-		Effects: executor,
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				t.Fatal("adapter must not run when the decider errors")
@@ -136,7 +137,7 @@ func TestBrokerApprovalPromptCarriesCanonicalScope(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	var prompted *ApprovalPrompt
 	broker, err := New(&Options{
-		Effects: executor,
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				return ToolResult{Output: json.RawMessage(`{}`)}, nil
@@ -183,7 +184,7 @@ func TestBrokerApprovalPromptBoundsDisplayArguments(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	var prompted *ApprovalPrompt
 	broker, err := New(&Options{
-		Effects: executor,
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				return ToolResult{Output: json.RawMessage(`{}`)}, nil
@@ -215,7 +216,7 @@ func TestBrokerApprovedGrantIsOneShot(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
 	broker, err := New(&Options{
-		Effects: executor,
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				calls++

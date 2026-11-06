@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/toolbroker"
 )
 
@@ -173,7 +174,7 @@ func TestToolSpanIsChildOfTurnSpanThroughBroker(t *testing.T) {
 		})
 	})
 	broker, err := toolbroker.New(&toolbroker.Options{
-		Adapters: map[string]toolbroker.Adapter{
+		HostCapabilities: capabilitytest.Host(t), Adapters: map[string]toolbroker.Adapter{
 			"list_dir@v1": func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
 				return toolbroker.ToolResult{Output: []byte(`{"entries":[]}`)}, nil
 			},

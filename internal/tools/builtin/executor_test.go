@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/runtime/adk"
 	"github.com/anggasct/aura/internal/store"
@@ -35,7 +36,7 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 	dataRoot := filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
 	cfg.Storage.Path = dataRoot
 	var observations []toolbroker.Observation
-	executor, err := New(&cfg, db, dataRoot, nil, func(_ context.Context, observation toolbroker.Observation) {
+	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, func(_ context.Context, observation toolbroker.Observation) {
 		observations = append(observations, observation)
 	}, nil, nil)
 	if err != nil {
@@ -102,7 +103,7 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	cfg.Tools.MaxInlineResultBytes = 256
 	dataRoot := filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
 	cfg.Storage.Path = dataRoot
-	executor, err := New(&cfg, db, dataRoot, nil, nil, nil, nil)
+	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	cfg.Tools.MaxInlineResultBytes = 512
 	cfg.Storage.Path = dataRoot
 	var prompted *toolbroker.ApprovalPrompt
-	executor, err := New(&cfg, db, dataRoot, nil, nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 		prompted = prompt
 		return false, nil
 	}, nil)
@@ -204,7 +205,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 		t.Fatalf("approval prompt leaked configured secret: %+v", prompted)
 	}
 
-	diagnosticExecutor, err := New(&cfg, db, dataRoot, nil, nil, func(_ context.Context, _ *toolbroker.ApprovalPrompt) (bool, error) {
+	diagnosticExecutor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, func(_ context.Context, _ *toolbroker.ApprovalPrompt) (bool, error) {
 		return false, errors.New("approval surface failed: " + canary)
 	}, nil)
 	if err != nil {

@@ -162,7 +162,7 @@ func TestChatRejectsUnknownPersona(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	err = runChat(t.Context(), result.Config, path, slog.New(slog.DiscardHandler), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "", "ghost", chatPresentation{plain: true})
+	err = runChat(t.Context(), &result, slog.New(slog.DiscardHandler), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "", "ghost", chatPresentation{plain: true})
 	if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodePersonaNotFound {
 		t.Fatalf("chat --persona ghost error = %v, want persona_not_found", err)
 	}

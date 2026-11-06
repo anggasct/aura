@@ -116,12 +116,12 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 }
 
 func withProposalInterpreter(cmd *cobra.Command, gf *globalFlags, fn func(ctx context.Context, cfg *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store) error) error {
-	return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, db *sql.DB) error {
-		interpreter, err := buildWorkflowInterpreterWithDB(ctx, cfg, db, logger)
+	return withLoadedStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, result *config.LoadResult, db *sql.DB) error {
+		interpreter, err := buildWorkflowInterpreterWithDB(ctx, result, db, logger)
 		if err != nil {
 			return err
 		}
-		return fn(ctx, cfg, interpreter, workflow.NewStore(db))
+		return fn(ctx, result.Config, interpreter, workflow.NewStore(db))
 	})
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,8 @@ func testPolicy() Policy {
 	}
 }
 
+var testHostCapabilities = []string{"file-read", "exec", "web"}
+
 func testRequest(tool string) ToolRequest {
 	return ToolRequest{
 		RequestID:      "req-1",
@@ -56,7 +59,7 @@ func newTestEngine(t *testing.T) *Engine {
 	t.Helper()
 	engine, err := NewEngine(testPolicy(), func(_ context.Context, request ToolRequest, constraints Constraints) (ToolResult, error) {
 		return ToolResult{ToolName: request.ToolName, Output: json.RawMessage(`{"ok":true}`)}, nil
-	})
+	}, testHostCapabilities)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
@@ -110,13 +113,58 @@ func TestEvaluateTrustRestriction(t *testing.T) {
 	}
 }
 
-func TestEvaluateMissingCapability(t *testing.T) {
-	engine := newTestEngine(t)
+func TestEvaluateChecksTheHostCapabilitySet(t *testing.T) {
+	handler := func(context.Context, ToolRequest, Constraints) (ToolResult, error) { return ToolResult{}, nil }
+	cases := []struct {
+		name      string
+		host      []string
+		tool      string
+		claimed   []string
+		wantAllow bool
+	}{
+		{name: "host holds the required capability", host: []string{"file-read"}, tool: "read_file", claimed: []string{"file-read"}, wantAllow: true},
+		{name: "request claims nothing", host: []string{"file-read"}, tool: "read_file", claimed: nil, wantAllow: true},
+		{name: "host has no capabilities", host: nil, tool: "read_file", claimed: []string{"file-read"}},
+		{name: "host lacks the required capability while the request claims it", host: []string{"exec"}, tool: "read_file", claimed: []string{"file-read"}},
+		{name: "host lacks the required capability and the request claims nothing", host: []string{"exec"}, tool: "read_file", claimed: nil},
+		{name: "request claims a capability the host lacks", host: []string{"file-read"}, tool: "read_file", claimed: []string{"file-read", "exec"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, err := NewEngine(testPolicy(), handler, tc.host)
+			if err != nil {
+				t.Fatalf("NewEngine: %v", err)
+			}
+			request := testRequest(tc.tool)
+			request.Capabilities = tc.claimed
+			decision, err := engine.Evaluate(context.Background(), &request)
+			if tc.wantAllow {
+				if err != nil || decision.Outcome != OutcomeAllow {
+					t.Fatalf("Evaluate = %+v, %v; want allow", decision, err)
+				}
+				return
+			}
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeCapabilityUnavailable {
+				t.Fatalf("CodeOf(%v) = %q, %v; want capability_unavailable", err, code, ok)
+			}
+			if _, err := engine.Grant(context.Background(), &request, time.Minute); err == nil {
+				t.Fatal("Grant succeeded for a request the host cannot satisfy")
+			}
+		})
+	}
+}
+
+func TestEngineDoesNotAliasTheHostCapabilitySlice(t *testing.T) {
+	host := []string{"file-read"}
+	engine, err := NewEngine(testPolicy(), func(context.Context, ToolRequest, Constraints) (ToolResult, error) { return ToolResult{}, nil }, host)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	host[0] = "other"
 	request := testRequest("read_file")
-	request.Capabilities = nil
-	_, err := engine.Evaluate(context.Background(), &request)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeCapabilityUnavailable {
-		t.Fatalf("CodeOf(%v) = %q, %v; want capability_unavailable", err, code, ok)
+	request.Capabilities = []string{"file-read"}
+	if _, err := engine.Evaluate(context.Background(), &request); err != nil {
+		t.Fatalf("Evaluate after the caller mutated its slice: %v", err)
 	}
 }
 
@@ -135,7 +183,7 @@ func TestApprovalOperationsRejectNilContext(t *testing.T) {
 	engine, err := NewEngine(testPolicy(), func(_ context.Context, request ToolRequest, _ Constraints) (ToolResult, error) {
 		handlerCalls++
 		return ToolResult{ToolName: request.ToolName}, nil
-	})
+	}, testHostCapabilities)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
@@ -280,7 +328,7 @@ func TestExecuteRejectsConstraintMutations(t *testing.T) {
 	engine, err := NewEngine(testPolicy(), func(_ context.Context, request ToolRequest, _ Constraints) (ToolResult, error) {
 		handlerCalls++
 		return ToolResult{ToolName: request.ToolName}, nil
-	})
+	}, testHostCapabilities)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
@@ -329,7 +377,10 @@ func TestExecuteRejectsTamperedArguments(t *testing.T) {
 }
 
 func TestExecuteRejectsCapabilityChange(t *testing.T) {
-	engine := newTestEngine(t)
+	engine, err := NewEngine(testPolicy(), func(context.Context, ToolRequest, Constraints) (ToolResult, error) { return ToolResult{}, nil }, append(slices.Clone(testHostCapabilities), "sys-admin"))
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
 	request := testRequest("read_file")
 	grant, err := engine.Grant(context.Background(), &request, time.Minute)
 	if err != nil {
@@ -420,7 +471,7 @@ func TestPolicyValidateReportsEveryRule(t *testing.T) {
 }
 
 func TestNewEngineRejectsNilHandler(t *testing.T) {
-	if _, err := NewEngine(testPolicy(), nil); err == nil {
+	if _, err := NewEngine(testPolicy(), nil, testHostCapabilities); err == nil {
 		t.Fatal("expected nil handler to be rejected")
 	}
 }
@@ -456,7 +507,7 @@ func TestHandlerReceivesConstraints(t *testing.T) {
 	engine, err := NewEngine(testPolicy(), func(_ context.Context, request ToolRequest, constraints Constraints) (ToolResult, error) {
 		got = constraints
 		return ToolResult{ToolName: request.ToolName}, nil
-	})
+	}, testHostCapabilities)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}

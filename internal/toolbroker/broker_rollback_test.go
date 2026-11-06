@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/tools"
 )
 
 func TestBrokerRegisterRuleFailureLeavesNoResidue(t *testing.T) {
-	broker, err := New(&Options{})
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

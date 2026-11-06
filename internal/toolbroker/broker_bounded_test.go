@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -30,7 +31,7 @@ func oversizedOutput(size int) json.RawMessage {
 }
 
 func TestBrokerMapsEgressDenialToPolicyDenied(t *testing.T) {
-	broker, err := New(&Options{Adapters: map[string]Adapter{
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 		"web_fetch@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 			return ToolResult{}, egress.Errorf(egress.ErrorCodeEgressDenied, "loopback address 127.0.0.1")
 		},
@@ -85,7 +86,7 @@ func TestBrokerPreservesAdapterResultClasses(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			broker, err := New(&Options{
-				Adapters: map[string]Adapter{
+				HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 					tc.tool + "@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 						return ToolResult{}, tc.adapterErr
 					},
@@ -111,7 +112,7 @@ func TestBrokerPreservesAdapterResultClasses(t *testing.T) {
 
 func TestBrokerRedactsAdapterErrorDetail(t *testing.T) {
 	broker, err := New(&Options{
-		Adapters: map[string]Adapter{
+		HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 			"web_search@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				return ToolResult{}, errorf(ResultExecutionFailed, "provider rejected token search-secret")
 			},
@@ -135,7 +136,7 @@ func TestBrokerRedactsAdapterErrorDetail(t *testing.T) {
 
 func TestBrokerOversizedOutputReturnsDecodableTruncationEnvelope(t *testing.T) {
 	output := oversizedOutput(8192)
-	broker, err := New(&Options{Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096})
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestBrokerOversizedOutputSpillsToArtifact(t *testing.T) {
 		t.Fatalf("seed session: %v", err)
 	}
 	artifacts := store.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 1<<20)
-	broker, err := New(&Options{Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096, Artifacts: artifacts})
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096, Artifacts: artifacts})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

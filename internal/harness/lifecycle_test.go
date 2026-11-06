@@ -336,7 +336,7 @@ func TestRunnerUsesApprovalAuthorityForCrossRunnerNonceConsumption(t *testing.T)
 		},
 	}, func(context.Context, approval.ToolRequest, approval.Constraints) (approval.ToolResult, error) {
 		return approval.ToolResult{}, nil
-	})
+	}, []string{testRequest().Capability})
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}

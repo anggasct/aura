@@ -335,7 +335,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 func TestNewWorkflowToolRunnerPropagatesConstructionErrors(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
-	if _, err := newWorkflowToolRunner(&config.Config{Tools: &config.Tools{}}, nil, nil); err == nil {
+	if _, err := newWorkflowToolRunner(loadResultWithAll(t, &config.Config{Tools: &config.Tools{}}), nil, nil); err == nil {
 		t.Fatal("tool runner construction swallowed the storage path failure")
 	} else if !strings.Contains(err.Error(), "cannot resolve data directory") {
 		t.Fatalf("error = %v, want the data directory cause", err)
@@ -344,7 +344,7 @@ func TestNewWorkflowToolRunnerPropagatesConstructionErrors(t *testing.T) {
 		Tools:   &config.Tools{Workspace: t.TempDir()},
 		Storage: config.Storage{Path: t.TempDir()},
 	}
-	if _, err := newWorkflowToolRunner(cfg, nil, nil); err == nil {
+	if _, err := newWorkflowToolRunner(loadResultWithAll(t, cfg), nil, nil); err == nil {
 		t.Fatal("tool runner construction swallowed the executor failure")
 	} else if !strings.Contains(err.Error(), "storage database is required") {
 		t.Fatalf("error = %v, want the executor cause", err)
@@ -390,7 +390,7 @@ func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, s
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	runner, err := newWorkflowToolRunner(&cfg, db, slog.Default())
+	runner, err := newWorkflowToolRunner(loadResultWithAll(t, &cfg), db, slog.Default())
 	if err != nil {
 		t.Fatalf("newWorkflowToolRunner: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestBuildWorkflowInterpreterEmitsWarningOnStatusPersistFailure(t *testing.T
 	buf := &syncBuffer{}
 	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, result.Config, logger)
+	interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
 	if err != nil {
 		t.Fatalf("buildWorkflowInterpreter: %v", err)
 	}

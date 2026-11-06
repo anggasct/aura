@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -21,7 +22,7 @@ func TestBuiltinToolExecutorFailsClosedWithoutLinux(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tools.Workspace = t.TempDir()
 	cfg.Storage.Path = t.TempDir()
-	_, err = New(&cfg, db, cfg.Storage.Path, nil, nil, nil, nil)
+	_, err = New(&cfg, db, cfg.Storage.Path, capabilitytest.All(t), nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("New succeeded on a platform without race-safe filesystem access")
 	}

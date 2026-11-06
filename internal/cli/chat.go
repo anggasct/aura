@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"context"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/logging"
 )
@@ -29,10 +32,10 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			logConfigResult(ctx, logger, &result)
-			if result.CapabilityStateError != nil {
-				return result.CapabilityStateError
+			if err := chatCapabilityGate(ctx, logger, &result); err != nil {
+				return err
 			}
-			return runChat(ctx, cfg, result.Path, logger, os.Stdin, os.Stdout, os.Stderr, sessionID, persona, chatPresentation{
+			return runChat(ctx, &result, logger, os.Stdin, os.Stdout, os.Stderr, sessionID, persona, chatPresentation{
 				plain:   plain,
 				noColor: os.Getenv("NO_COLOR") != "",
 			})
@@ -42,4 +45,18 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 	cmd.Flags().String("session", "", "resume an existing session")
 	cmd.Flags().String("persona", "", "run turns as this persona (default main; a resumed session keeps its own)")
 	return cmd
+}
+
+func chatCapabilityGate(ctx context.Context, logger *slog.Logger, result *config.LoadResult) error {
+	if result.CapabilityStateError == nil {
+		return nil
+	}
+	if !capability.IsMissingDependency(result.CapabilityStateError) {
+		return result.CapabilityStateError
+	}
+	logger.WarnContext(ctx, "capability dependency is missing; tools that need it are not offered",
+		"component", "chat",
+		"error", result.CapabilityStateError,
+	)
+	return nil
 }

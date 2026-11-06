@@ -129,7 +129,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			emailMailboxes := wireEmailOwnerAccess(channelAdapters, ownerRoute, approvalAdapters)
 			approvalTargets := approvalChannels(approvalAdapters, ownerRoute)
 			approvalDecider := channelApprovalDecider(approvalTargets)
-			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder),
+			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, result.CapabilityReport, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder),
 				toolsbuiltin.WithApprovalReachable(channelApprovalReachable(approvalTargets)))
 			if err != nil {
 				return err
@@ -147,7 +147,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			plugins.warnUnavailablePlugins(ctx, logger, agentRegistry.Definitions())
 			if connectorPlugins := plugins.connectorPlugins(); len(connectorPlugins) > 0 {
 				connectors, err := startConnectorPlugins(ctx, &connectorRuntimeOptions{
-					Broker: builtin.Broker(), Logger: logger, Capabilities: mapCapabilityStatuses(result.CapabilityReport), Plugins: connectorPlugins,
+					Broker: builtin.Broker(), Logger: logger, Capabilities: result.CapabilityReport, Plugins: connectorPlugins,
 				})
 				if err != nil {
 					return err
@@ -163,7 +163,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			var mcpServers *mcpRuntime
 			if mcpServersConfigured(cfg) || len(plugins.mcpPlugins()) > 0 {
-				mcpServers, err = startConfiguredMCP(ctx, cfg, builtin.Broker(), logger, pipeline.MeterProvider(), mapCapabilityStatuses(result.CapabilityReport), agentRegistry.Definitions(), plugins.mcpPlugins())
+				mcpServers, err = startConfiguredMCP(ctx, cfg, builtin.Broker(), logger, pipeline.MeterProvider(), result.CapabilityReport, agentRegistry.Definitions(), plugins.mcpPlugins())
 				if err != nil {
 					return err
 				}
@@ -398,7 +398,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			if cfg.Durable != nil && cfg.Durable.Enabled {
-				durableListener, err := buildDurableListener(ctx, cfg, db, logger, runtimeEngine)
+				durableListener, err := buildDurableListener(ctx, &result, db, logger, runtimeEngine)
 				if err != nil {
 					return err
 				}

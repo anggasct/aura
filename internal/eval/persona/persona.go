@@ -273,14 +273,16 @@ func (definitionPolicy) StandingGrant(context.Context, string, string, string, s
 
 func newBroker(definition *auraagent.Definition, decider toolbroker.ApprovalDecider, effects *effect.Executor) (*toolbroker.Broker, error) {
 	adapters := map[string]toolbroker.Adapter{}
+	var catalogCapabilities []string
 	listed := tools.Builtins()
 	for i := range listed {
 		builtin := &listed[i]
+		catalogCapabilities = append(catalogCapabilities, builtin.RequiredCapabilities...)
 		adapters[builtin.Key()] = func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
 			return toolbroker.ToolResult{Class: toolbroker.ResultOK, Output: json.RawMessage(`{}`)}, nil
 		}
 	}
-	return toolbroker.New(&toolbroker.Options{Adapters: adapters, ApprovalDecider: decider, Access: definitionPolicy{definition: definition}, Effects: effects})
+	return toolbroker.New(&toolbroker.Options{Adapters: adapters, ApprovalDecider: decider, Access: definitionPolicy{definition: definition}, Effects: effects, HostCapabilities: catalogCapabilities})
 }
 
 func WithEvalDB[T any](ctx context.Context, principalID string, fn func(db *sql.DB) (T, error)) (T, error) {

@@ -70,7 +70,7 @@ func TestIntegrationMCPStdioServerInsideTheSandboxSession(t *testing.T) {
 	server.Command = fixture
 	server.Args = nil
 	server.Environment = nil
-	server.Capabilities = []string{"fs.read"}
+	server.Capabilities = []string{"public-web"}
 	server.StartupTimeout = config.Duration(30 * time.Second)
 	server.RequestTimeout = config.Duration(integrationRequestTimeout)
 

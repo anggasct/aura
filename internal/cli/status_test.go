@@ -291,7 +291,7 @@ func TestStatusUsesBuiltinCapabilityRegistry(t *testing.T) {
 	}
 }
 
-func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadOptions) (*cobra.Command, string, error) {
+func loadCapabilityConfig(t *testing.T, enabled []string, options config.LoadOptions) config.LoadResult {
 	t.Helper()
 	dir := t.TempDir()
 	dataRoot := t.TempDir()
@@ -325,6 +325,12 @@ func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadO
 	if err != nil {
 		t.Fatalf("config.LoadWithOptions: %v", err)
 	}
+	return loaded
+}
+
+func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadOptions) (*cobra.Command, string, error) {
+	t.Helper()
+	loaded := loadCapabilityConfig(t, enabled, options)
 	cmd := &cobra.Command{Use: "status"}
 	var out strings.Builder
 	cmd.SetOut(&out)

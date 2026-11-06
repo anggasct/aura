@@ -64,7 +64,7 @@ func mintTestGrant(t *testing.T, policyVersion string, ttl time.Duration, req *S
 	engine, err := approval.NewEngine(approval.Policy{
 		Version: policyVersion,
 		Rules:   map[string]approval.Rule{req.ToolName: {ToolName: req.ToolName, RequiresApproval: true}},
-	}, handler)
+	}, handler, req.Capabilities)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}

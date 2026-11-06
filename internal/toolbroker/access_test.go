@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/tools"
 )
@@ -55,7 +56,7 @@ func newAccessBroker(t *testing.T, access AccessPolicy) *accessBroker {
 		}
 	}
 	broker, err := New(&Options{
-		Effects: newBrokerEffectExecutor(t),
+		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: map[string]Adapter{
 			"exec@v1":      adapter("exec"),
 			"read_file@v1": adapter("read_file"),
