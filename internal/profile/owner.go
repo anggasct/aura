@@ -212,8 +212,7 @@ func sanitizeContextValue(value string) string {
 		}
 		return r
 	}, strings.TrimSpace(value))
-	cleaned = strings.ReplaceAll(cleaned, runtime.ProfileEvidenceStart, "")
-	return strings.ReplaceAll(cleaned, runtime.ProfileEvidenceEnd, "")
+	return runtime.NeutralizeUntrustedMarkers(cleaned)
 }
 
 func (p *ContextPart) Render() string {

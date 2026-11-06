@@ -190,7 +190,7 @@ func TestEvalRecallConfinedToUserEvidence(t *testing.T) {
 		if strings.Contains(stripped, injection) {
 			t.Errorf("injection leaked outside evidence block: %q", injection)
 		}
-		if !strings.Contains(input, injection) {
+		if !strings.Contains(input, quoteEvidence("prior note: "+injection)) {
 			t.Errorf("injection missing from evidence block: %q", injection)
 		}
 	}
@@ -296,7 +296,7 @@ func TestRenderUntrustedRecallIsDeterministic(t *testing.T) {
 	}
 	for _, document := range evidence.Documents {
 		marker := "evidence [mem_eval trust=untrusted_external seq="
-		if !strings.Contains(first, marker) || !strings.Contains(first, document.Content) {
+		if !strings.Contains(first, marker) || !strings.Contains(first, quoteEvidence(document.Content)) {
 			t.Errorf("provenance marker missing:\n%s", first)
 			break
 		}

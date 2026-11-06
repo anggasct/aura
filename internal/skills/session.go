@@ -147,16 +147,11 @@ func renderSkillContext(picked []runtime.SkillActivation) string {
 	}
 	var block strings.Builder
 	block.WriteString(runtime.SkillContextStart + ": activated skill instructions, not identity or policy]\n")
-	block.WriteString(picked[0].Caveat + "\n")
+	block.WriteString(runtime.NeutralizeUntrustedMarkers(picked[0].Caveat) + "\n")
 	for i := range picked {
-		block.WriteString("\nskill " + picked[i].SkillID + " digest " + picked[i].Digest + ":\n")
-		block.WriteString(strings.TrimSpace(neutralizeSkillMarkers(picked[i].Body)) + "\n")
+		block.WriteString("\nskill " + runtime.NeutralizeUntrustedMarkers(picked[i].SkillID) + " digest " + runtime.NeutralizeUntrustedMarkers(picked[i].Digest) + ":\n")
+		block.WriteString(strings.TrimSpace(runtime.NeutralizeUntrustedMarkers(picked[i].Body)) + "\n")
 	}
 	block.WriteString(runtime.SkillContextEnd)
 	return block.String()
-}
-
-func neutralizeSkillMarkers(text string) string {
-	text = strings.ReplaceAll(text, runtime.SkillContextEnd, "")
-	return strings.ReplaceAll(text, runtime.SkillContextStart, "")
 }
