@@ -280,7 +280,7 @@ func TestStatusUsesBuiltinCapabilityRegistry(t *testing.T) {
 		names = append(names, s.Name)
 	}
 	slices.Sort(names)
-	want := []string{"exec-linux", "provider-search", "public-web", "workspace-read", "workspace-write"}
+	want := []string{"code-interpreter", "exec-linux", "provider-search", "public-web", "workspace-read", "workspace-write"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("capability statuses = %v, want %v", names, want)
 	}

@@ -107,6 +107,8 @@ fuzz-smoke:
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzEventPayload FUZZ_PKG=./internal/store/
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzConfigDecode FUZZ_PKG=./internal/config/
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzHTMLToMarkdown FUZZ_PKG=./internal/tools/fetch/
+	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzParseManifest FUZZ_PKG=./internal/tools/interpreter/
+	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzExtractArchive FUZZ_PKG=./internal/tools/interpreter/
 
 # The fuzzer can report the end of its own time budget as
 # "context deadline exceeded" instead of a clean pass. Retry only that

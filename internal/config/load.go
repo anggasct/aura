@@ -29,6 +29,7 @@ import (
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
 const (
@@ -141,7 +142,7 @@ func Load(path string) (LoadResult, error) {
 	if err != nil {
 		return LoadResult{}, fmt.Errorf("config: %w", err)
 	}
-	return LoadWithOptions(path, LoadOptions{Build: build, Registry: registry, Dependencies: sandbox.CapabilityDependencies()})
+	return LoadWithOptions(path, LoadOptions{Build: build, Registry: registry, Dependencies: interpreter.HostDependencies(sandbox.CapabilityDependencies())})
 }
 
 func LoadWithOptions(path string, options LoadOptions) (LoadResult, error) {
