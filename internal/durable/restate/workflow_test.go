@@ -30,51 +30,36 @@ func (panickingStateWriter) setState(durable.RunState, string) { panic("journal 
 func (panickingStateWriter) key() string { return "test-key" }
 
 func TestFailRegisteredRunLogsTheCauseBeforeWritingState(t *testing.T) {
-	cases := []struct {
-		name   string
-		cancel bool
-	}{
-		{name: "failed run"},
-		{name: "cancelled run", cancel: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			if tc.cancel {
-				cancel()
-			}
-			var logs bytes.Buffer
-			logger := slog.New(slog.NewTextHandler(&logs, nil))
-			defer func() {
-				if recover() == nil {
-					t.Fatal("state writer did not panic")
-				}
-				if !strings.Contains(logs.String(), "error=boom") {
-					t.Fatalf("logs = %q, want the cause", logs.String())
-				}
-			}()
-			_, _ = failRegisteredRun(ctx, logger, panickingStateWriter{}, errors.New("boom"))
-		})
-	}
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	defer func() {
+		if recover() == nil {
+			t.Fatal("state writer did not panic")
+		}
+		if !strings.Contains(logs.String(), "error=boom") {
+			t.Fatalf("logs = %q, want the cause", logs.String())
+		}
+	}()
+	_, _ = failRegisteredRun(context.Background(), logger, panickingStateWriter{}, errors.New("boom"))
 }
 
-func TestFailRegisteredRunCancelledJournalsCancelled(t *testing.T) {
+func TestFailRegisteredRunInterruptedLeavesTheJournalUntouched(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	writer := &recordingStateWriter{}
-	out, err := failRegisteredRun(ctx, slog.New(slog.DiscardHandler), writer, errors.New("boom"))
+	var logs bytes.Buffer
+	out, err := failRegisteredRun(ctx, slog.New(slog.NewTextHandler(&logs, nil)), writer, errors.New("boom"))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
-	if out.State != string(durable.RunCancelled) || out.Detail != "boom" {
-		t.Fatalf("output = %+v, want cancelled/boom", out)
+	if out != (runOutput{}) {
+		t.Fatalf("output = %+v, want empty", out)
 	}
-	if len(writer.states) != 1 || writer.states[0] != durable.RunCancelled {
-		t.Fatalf("journaled states = %v, want [cancelled]", writer.states)
+	if len(writer.states) != 0 {
+		t.Fatalf("journaled states = %v, want none", writer.states)
 	}
-	if len(writer.details) != 1 || writer.details[0] != "boom" {
-		t.Fatalf("journaled details = %v, want [boom]", writer.details)
+	if !strings.Contains(logs.String(), "error=boom") {
+		t.Fatalf("logs = %q, want the cause", logs.String())
 	}
 }
 
