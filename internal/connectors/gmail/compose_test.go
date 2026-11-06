@@ -74,6 +74,9 @@ func TestSendBuildsAMessageWithCorrectMIME(t *testing.T) {
 					t.Fatalf("header %s must not be set: %v", name, header)
 				}
 			}
+			if _, err := header.Date(); err != nil {
+				t.Fatalf("Date = %q: %v", header.Get("Date"), err)
+			}
 			if header.Get("Message-ID") != deriveMessageID("key-1") || !validMessageID(header.Get("Message-ID")) {
 				t.Fatalf("Message-ID = %q", header.Get("Message-ID"))
 			}

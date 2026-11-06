@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"strings"
+	"time"
 )
 
 const (
@@ -37,6 +38,7 @@ func (m *outgoing) encode() ([]byte, error) {
 		out.WriteString(foldList("Cc", m.cc, ",") + crlf)
 	}
 	out.WriteString(subjectHeader(m.subject) + crlf)
+	out.WriteString("Date: " + time.Now().UTC().Format(time.RFC1123Z) + crlf)
 	out.WriteString("Message-ID: " + m.messageID + crlf)
 	if m.inReplyTo != "" {
 		out.WriteString("In-Reply-To: " + m.inReplyTo + crlf)
