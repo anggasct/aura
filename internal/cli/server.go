@@ -36,10 +36,11 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 		Short: "Start the daemon with all listeners",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			result, err := config.Load(gf.configPath)
+			startup, err := prepareHostThenLoad(gf.configPath, sandbox.PrepareHost, config.Load)
 			if err != nil {
 				return err
 			}
+			result := startup.config
 			cfg := result.Config
 			level, format := resolveLogging(cmd, cfg)
 			logger, err := logging.Setup(level, format, os.Stderr)
@@ -47,10 +48,10 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			logConfigResult(ctx, logger, &result)
+			logSandboxHost(ctx, logger, startup.host, startup.hostErr)
 			if result.CapabilityStateError != nil {
 				return result.CapabilityStateError
 			}
-			prepareSandboxHost(ctx, logger, sandbox.PrepareHost)
 			db, err := openStorage(ctx, cfg)
 			if err != nil {
 				return err
@@ -467,8 +468,22 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 	}
 }
 
-func prepareSandboxHost(ctx context.Context, logger *slog.Logger, prepare func() (sandbox.HostPreparation, error)) {
-	prepared, err := prepare()
+type serverStartup struct {
+	config  config.LoadResult
+	host    sandbox.HostPreparation
+	hostErr error
+}
+
+func prepareHostThenLoad(path string, prepare func() (sandbox.HostPreparation, error), load func(string) (config.LoadResult, error)) (serverStartup, error) {
+	host, hostErr := prepare()
+	result, err := load(path)
+	if err != nil {
+		return serverStartup{}, err
+	}
+	return serverStartup{config: result, host: host, hostErr: hostErr}, nil
+}
+
+func logSandboxHost(ctx context.Context, logger *slog.Logger, prepared sandbox.HostPreparation, err error) {
 	if err != nil {
 		logger.WarnContext(ctx, "sandbox host not prepared", "component", "sandbox", "error", err)
 		return
