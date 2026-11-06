@@ -249,6 +249,14 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		executorOpts = append(executorOpts, runtimeadk.WithSkillContext(skillRuntime.context))
 		skillRenderer = skillRuntime.context
 	}
+	kbRuntime, kbEnabled, err := buildKnowledgeRuntime(ctx, cfg, registry)
+	if err != nil {
+		return err
+	}
+	if kbEnabled {
+		defer kbRuntime.close()
+		executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
+	}
 	executor, err := runtimeadk.NewADKExecutor(
 		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,
 	)

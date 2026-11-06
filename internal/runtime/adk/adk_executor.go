@@ -55,6 +55,7 @@ type ADKExecutor struct {
 	ownerContext      string
 	profile           ProfileContextProvider
 	skills            SkillContextProvider
+	knowledge         KnowledgeContextProvider
 }
 
 type RecallProvider interface {
@@ -265,10 +266,26 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 				recallAttached = true
 			}
 		}
-		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, req.Origin, recallAttached, x.ownerContextFor(req), turnContext{profile: x.profileContextFor(runCtx, req), skills: x.skillContextFor(runCtx, req)})
+		knowledgeTurn, knowledgeRan := x.knowledgeContextFor(runCtx, req)
+		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, req.Origin, recallAttached, x.ownerContextFor(req), turnContext{
+			profile:           x.profileContextFor(runCtx, req),
+			skills:            x.skillContextFor(runCtx, req),
+			knowledge:         knowledgeTurn.Block,
+			knowledgeAttached: len(req.Knowledge) > 0,
+		})
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
+		}
+		if knowledgeRan {
+			retrieved, eventErr := knowledgeRetrievedEvent(&knowledgeTurn)
+			if eventErr != nil {
+				yield(store.RuntimeEvent{}, eventErr)
+				return
+			}
+			if !yield(retrieved, nil) {
+				return
+			}
 		}
 
 		content, err := contentFromParts(req)
@@ -343,8 +360,10 @@ func (x *ADKExecutor) profileContextFor(ctx context.Context, req *runtime.TurnRe
 }
 
 type turnContext struct {
-	profile string
-	skills  string
+	profile           string
+	skills            string
+	knowledge         string
+	knowledgeAttached bool
 }
 
 func (x *ADKExecutor) skillContextFor(ctx context.Context, req *runtime.TurnRequest) string {
@@ -658,6 +677,9 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 	if recallAttached {
 		instruction = strings.TrimSpace(instruction) + "\n\n" + recallEvidenceCaveat
 	}
+	if extra.knowledgeAttached {
+		instruction = strings.TrimSpace(instruction) + "\n\n" + knowledgeCaveat
+	}
 	instruction = appendStatusProtocol(instruction)
 	var beforeModel []llmagent.BeforeModelCallback
 	if extra.profile != "" {
@@ -665,6 +687,9 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 	}
 	if extra.skills != "" {
 		beforeModel = append(beforeModel, withUntrustedContextPart(extra.skills))
+	}
+	if extra.knowledge != "" {
+		beforeModel = append(beforeModel, withUntrustedContextPart(extra.knowledge))
 	}
 	return llmagent.New(llmagent.Config{
 		Name:                 name,

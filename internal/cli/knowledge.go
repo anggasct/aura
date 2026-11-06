@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/egress"
 	"github.com/anggasct/aura/internal/knowledge"
@@ -242,6 +243,53 @@ func newKnowledgeRetriever(cfg *config.Config, pool *sql.DB) (*knowledge.Retriev
 		return nil, errors.New("knowledge read pool must not be nil")
 	}
 	return knowledge.NewRetriever(&knowledgeIndex{index: store.NewKBIndex(pool)}, &knowledgeSecrets{cfg: cfg})
+}
+
+type knowledgeRuntime struct {
+	retriever *knowledge.Retriever
+	provider  *knowledge.ContextProvider
+	pool      *sql.DB
+}
+
+func (r *knowledgeRuntime) close() {
+	if r != nil && r.pool != nil {
+		_ = r.pool.Close()
+	}
+}
+
+func personasListKnowledge(registry *auraagent.Registry) bool {
+	definitions := registry.Definitions()
+	for i := range definitions {
+		if len(definitions[i].Knowledge) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func buildKnowledgeRuntime(ctx context.Context, cfg *config.Config, registry *auraagent.Registry) (rt *knowledgeRuntime, enabled bool, err error) {
+	if !personasListKnowledge(registry) {
+		return nil, false, nil
+	}
+	dbPath, _, _, err := storagePaths(cfg)
+	if err != nil {
+		return nil, false, err
+	}
+	pool, err := openKnowledgeReadPool(ctx, dbPath)
+	if err != nil {
+		return nil, false, err
+	}
+	retriever, err := newKnowledgeRetriever(cfg, pool)
+	if err != nil {
+		_ = pool.Close()
+		return nil, false, err
+	}
+	provider, err := knowledge.NewContextProvider(retriever)
+	if err != nil {
+		_ = pool.Close()
+		return nil, false, err
+	}
+	return &knowledgeRuntime{retriever: retriever, provider: provider, pool: pool}, true, nil
 }
 
 func (s *knowledgeStore) Check(ctx context.Context) (knowledge.IndexReport, error) {

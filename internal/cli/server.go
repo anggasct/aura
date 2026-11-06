@@ -242,6 +242,14 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				skillRenderer = skillRuntime.context
 				skillCommands = skillRuntime.bridge
 			}
+			kbRuntime, kbEnabled, err := buildKnowledgeRuntime(ctx, cfg, agentRegistry)
+			if err != nil {
+				return err
+			}
+			if kbEnabled {
+				defer kbRuntime.close()
+				executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
+			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
 				executorOpts...,

@@ -91,6 +91,12 @@ type UntrustedDocument struct {
 	Content      string
 }
 
+type KnowledgeEvidence struct {
+	Block     string
+	ChunkIDs  []string
+	Retrieved int
+}
+
 type UntrustedRecall struct {
 	Query     string
 	Summary   string
