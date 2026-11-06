@@ -78,7 +78,7 @@ func pngFixture(t *testing.T) []byte {
 }
 
 func TestAttachments_VisionService(t *testing.T) {
-	image := pngFixture(t)
+	photo := pngFixture(t)
 	cases := []struct {
 		name        string
 		attachments []testAttachment
@@ -88,10 +88,10 @@ func TestAttachments_VisionService(t *testing.T) {
 		wantVision  int
 		wantPlain   []string
 	}{
-		{name: "an image goes through the vision intake", attachments: []testAttachment{{filename: "photo.png", mediaType: "image/png", content: image}}, wantImages: 1, wantVision: 2},
+		{name: "an image goes through the vision intake", attachments: []testAttachment{{filename: "photo.png", mediaType: "image/png", content: photo}}, wantImages: 1, wantVision: 2},
 		{name: "a pdf still takes the plain artifact path", attachments: []testAttachment{{filename: "a.pdf", mediaType: "application/pdf", content: []byte("%PDF-1.4")}}, wantPlain: []string{"a.pdf"}},
-		{name: "an image and a pdf each take their own path", attachments: []testAttachment{{filename: "photo.png", mediaType: "image/png", content: image}, {filename: "a.pdf", mediaType: "application/pdf", content: []byte("%PDF-1.4")}}, wantImages: 1, wantVision: 2, wantPlain: []string{"a.pdf"}},
-		{name: "an intake failure drops the mail", attachments: []testAttachment{{filename: "photo.png", mediaType: "image/png", content: image}}, visionFail: errBoom, wantDrop: "attachment_failed"},
+		{name: "an image and a pdf each take their own path", attachments: []testAttachment{{filename: "photo.png", mediaType: "image/png", content: photo}, {filename: "a.pdf", mediaType: "application/pdf", content: []byte("%PDF-1.4")}}, wantImages: 1, wantVision: 2, wantPlain: []string{"a.pdf"}},
+		{name: "an intake failure drops the mail", attachments: []testAttachment{{filename: "photo.png", mediaType: "image/png", content: photo}}, visionFail: errBoom, wantDrop: "attachment_failed"},
 		{name: "bytes that are not an image drop the mail", attachments: []testAttachment{{filename: "fake.png", mediaType: "image/png", content: []byte("not a png at all")}}, wantDrop: "attachment_failed"},
 	}
 	for _, tc := range cases {
