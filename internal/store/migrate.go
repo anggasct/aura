@@ -51,6 +51,7 @@ var migrations = []migration{
 	{version: 33, sql: channelKeySchemaSQL},
 	{version: 34, sql: handoffHTTPChannelSchemaSQL},
 	{version: 35, sql: emailCursorSchemaSQL},
+	{version: 36, sql: handoffEmailChannelSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -718,6 +719,26 @@ INSERT INTO session_handoff_v34 (session_id, reason, opened_at, released_at, pri
 SELECT session_id, reason, opened_at, released_at, principal_id, agent_id, account, reply_channel_id, channel, reply_thread_id FROM session_handoff;
 DROP TABLE session_handoff;
 ALTER TABLE session_handoff_v34 RENAME TO session_handoff;
+CREATE INDEX session_handoff_open_idx ON session_handoff(released_at, opened_at);
+`
+
+const handoffEmailChannelSchemaSQL = `
+CREATE TABLE session_handoff_v36 (
+    session_id       TEXT PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+    reason           TEXT NOT NULL,
+    opened_at        TEXT NOT NULL,
+    released_at      TEXT,
+    principal_id     TEXT NOT NULL DEFAULT '',
+    agent_id         TEXT NOT NULL DEFAULT '',
+    account          TEXT NOT NULL DEFAULT '',
+    reply_channel_id TEXT NOT NULL DEFAULT '',
+    channel          TEXT NOT NULL DEFAULT 'discord' CHECK (channel IN ('discord','telegram','http','email')),
+    reply_thread_id  TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO session_handoff_v36 (session_id, reason, opened_at, released_at, principal_id, agent_id, account, reply_channel_id, channel, reply_thread_id)
+SELECT session_id, reason, opened_at, released_at, principal_id, agent_id, account, reply_channel_id, channel, reply_thread_id FROM session_handoff;
+DROP TABLE session_handoff;
+ALTER TABLE session_handoff_v36 RENAME TO session_handoff;
 CREATE INDEX session_handoff_open_idx ON session_handoff(released_at, opened_at);
 `
 
