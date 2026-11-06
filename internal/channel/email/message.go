@@ -24,9 +24,10 @@ const (
 	messageIDDigestChars  = 32
 	replyPrefix           = "re:"
 	noSubjectReply        = "Re:"
+	noSubject             = "(no subject)"
 )
 
-type replyMessage struct {
+type outboundMessage struct {
 	From       string
 	To         string
 	Subject    string
@@ -35,9 +36,10 @@ type replyMessage struct {
 	References []string
 	Body       string
 	Date       time.Time
+	Fresh      bool
 }
 
-func replyMessageID(base, domain string) string {
+func outboundMessageID(base, domain string) string {
 	sum := sha256.Sum256([]byte(base))
 	return "aura." + hex.EncodeToString(sum[:])[:messageIDDigestChars] + "@" + domain
 }
@@ -56,6 +58,28 @@ func replySubject(original string) string {
 		return noSubjectReply
 	}
 	return "Re: " + truncateUTF8(subject, maxReplySubjectBytes)
+}
+
+func freshSubject(original string) string {
+	subject := truncateUTF8(singleLine(original), maxReplySubjectBytes)
+	if subject == "" {
+		return noSubject
+	}
+	return subject
+}
+
+func (m *outboundMessage) subjectLine() string {
+	if m.Fresh {
+		return freshSubject(m.Subject)
+	}
+	return replySubject(m.Subject)
+}
+
+func (m *outboundMessage) autoSubmitted() string {
+	if m.Fresh {
+		return "auto-generated"
+	}
+	return "auto-replied"
 }
 
 func replyBody(texts []string) string {
@@ -79,7 +103,7 @@ func cleanBody(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func (m *replyMessage) render() ([]byte, error) {
+func (m *outboundMessage) render() ([]byte, error) {
 	if !principal.IsPlainEmailAddress(m.From) || !principal.IsPlainEmailAddress(m.To) || !headerSafeID(m.MessageID) {
 		return nil, Errorf(ErrorCodeMessageInvalid, "reply envelope or message id is not well formed")
 	}
@@ -95,7 +119,7 @@ func (m *replyMessage) render() ([]byte, error) {
 	field("Date", m.Date.UTC().Format(time.RFC1123Z))
 	field("From", m.From)
 	field("To", m.To)
-	field("Subject", encodeHeaderText(replySubject(m.Subject)))
+	field("Subject", encodeHeaderText(m.subjectLine()))
 	field("Message-ID", "<"+m.MessageID+">")
 	if headerSafeID(m.InReplyTo) {
 		field("In-Reply-To", "<"+m.InReplyTo+">")
@@ -103,7 +127,7 @@ func (m *replyMessage) render() ([]byte, error) {
 	if references := boundedReferences(m.References); len(references) > 0 {
 		field("References", "<"+strings.Join(references, ">\r\n <")+">")
 	}
-	field("Auto-Submitted", "auto-replied")
+	field("Auto-Submitted", m.autoSubmitted())
 	field("MIME-Version", "1.0")
 	field("Content-Type", "text/plain; charset=utf-8")
 	field("Content-Transfer-Encoding", encoding)

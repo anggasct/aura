@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/principal"
@@ -15,6 +16,7 @@ import (
 const (
 	ProviderName       = "email"
 	OpSendReply        = "send_reply"
+	OpSendMessage      = "send_message"
 	sendMaxAttempts    = 3
 	maxDeliverInflight = 4
 	safeCodePrefix     = "email_"
@@ -64,7 +66,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	defer func() { <-a.deliverSem }()
 	base := keyBase(req)
 	operation := a.operationFor(&target, base, body)
-	messageID, err := a.executeSend(ctx, req, base, &operation)
+	messageID, err := a.executeSend(ctx, &sendAttempt{session: req.ConversationID, operation: OpSendReply, base: base}, &operation)
 	if err != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
@@ -79,7 +81,7 @@ func (a *Adapter) operationFor(target *replyReference, base, body string) sendOp
 	operation := sendOperation{
 		To:         target.Sender,
 		Subject:    replySubject(target.Subject),
-		MessageID:  replyMessageID(base, domainOf(a.account.Address)),
+		MessageID:  outboundMessageID(base, domainOf(a.account.Address)),
 		References: boundedReferences(target.References),
 		Body:       body,
 	}
@@ -90,16 +92,23 @@ func (a *Adapter) operationFor(target *replyReference, base, body string) sendOp
 	return operation
 }
 
-func (a *Adapter) executeSend(ctx context.Context, req *runtimechannelhost.DeliveryRequest, base string, operation *sendOperation) (string, error) {
+type sendAttempt struct {
+	session   string
+	operation string
+	base      string
+	bind      string
+}
+
+func (a *Adapter) executeSend(ctx context.Context, attempt *sendAttempt, operation *sendOperation) (string, error) {
 	request, err := json.Marshal(operation)
 	if err != nil {
 		return "", Errorf(ErrorCodeMessageInvalid, "send request is not serializable")
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
-		SessionID:      req.ConversationID,
-		IdempotencyKey: idempotencyKey(base, req.ConversationID, operation),
+		SessionID:      attempt.session,
+		IdempotencyKey: idempotencyKey(attempt.base, attempt.session, attempt.bind, operation),
 		Provider:       ProviderName,
-		Operation:      OpSendReply,
+		Operation:      attempt.operation,
 		Classification: effect.ClassificationEffectful,
 		Request:        request,
 		EventKind:      effect.EventKindChannelRequested,
@@ -125,9 +134,9 @@ func keyBase(req *runtimechannelhost.DeliveryRequest) string {
 	return "anon:" + req.IdempotencyKey
 }
 
-func idempotencyKey(base, session string, operation *sendOperation) string {
+func idempotencyKey(base, session, bind string, operation *sendOperation) string {
 	body := sha256.Sum256([]byte(operation.Body))
-	sum := sha256.Sum256([]byte(base + "|" + session + "|" + operation.InReplyTo + "|" + hex.EncodeToString(body[:])))
+	sum := sha256.Sum256([]byte(base + "|" + session + "|" + operation.InReplyTo + "|" + hex.EncodeToString(body[:]) + bind))
 	return ProviderName + ":" + base + ":" + hex.EncodeToString(sum[:])[:keyDigestChars]
 }
 
@@ -157,14 +166,14 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 	if invocation == nil {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "invocation must not be nil")
 	}
-	if invocation.Operation != OpSendReply {
+	if invocation.Operation != OpSendReply && invocation.Operation != OpSendMessage {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "unsupported effect operation")
 	}
 	var operation sendOperation
 	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
 		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is not decodable")
 	}
-	raw, err := a.renderOperation(&operation)
+	raw, err := a.renderOperation(&operation, invocation.Operation == OpSendMessage)
 	if err != nil {
 		outcome, _ := failureOutcome(err)
 		return outcome, nil
@@ -172,11 +181,11 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 	return a.submit(ctx, &Submission{From: a.account.Address, To: operation.To, Message: raw}, operation.MessageID)
 }
 
-func (a *Adapter) renderOperation(operation *sendOperation) ([]byte, error) {
+func (a *Adapter) renderOperation(operation *sendOperation, fresh bool) ([]byte, error) {
 	if !a.recipientAllowed(operation.To) {
 		return nil, Errorf(ErrorCodeMessageInvalid, "recipient is not usable")
 	}
-	message := replyMessage{
+	message := outboundMessage{
 		From:       a.account.Address,
 		To:         operation.To,
 		Subject:    operation.Subject,
@@ -185,35 +194,45 @@ func (a *Adapter) renderOperation(operation *sendOperation) ([]byte, error) {
 		References: operation.References,
 		Body:       operation.Body,
 		Date:       a.now(),
+		Fresh:      fresh,
 	}
 	return message.render()
 }
 
 func (a *Adapter) submit(ctx context.Context, submission *Submission, messageID string) (effect.Outcome, error) {
+	outcome, failed := attemptSubmit(ctx, a.mailer, submission, messageID, a.retryDelay)
+	switch {
+	case outcome.Succeeded:
+		a.smtpFault.Store(faultNone)
+	case failed != "":
+		a.noteSubmitFailure(failed)
+	}
+	return outcome, nil
+}
+
+func attemptSubmit(ctx context.Context, mailer Mailer, submission *Submission, messageID string, delay func(attempt int) time.Duration) (outcome effect.Outcome, failed ErrorCode) {
 	var last ErrorCode
 	for attempt := range sendMaxAttempts {
-		if attempt > 0 && !sleepContext(ctx, a.retryDelay(attempt-1)) {
-			return effect.Outcome{SafeErrorCode: faultCancelled}, nil
+		if attempt > 0 && !sleepContext(ctx, delay(attempt-1)) {
+			return effect.Outcome{SafeErrorCode: faultCancelled}, ""
 		}
-		err := a.mailer.Submit(ctx, submission)
+		err := mailer.Submit(ctx, submission)
 		if err == nil {
-			a.smtpFault.Store(faultNone)
-			return successOutcome(messageID), nil
+			return successOutcome(messageID), ""
 		}
-		outcome, code := failureOutcome(err)
-		if outcome.Ambiguous {
-			return outcome, nil
+		result, code := failureOutcome(err)
+		if result.Ambiguous {
+			return result, ""
 		}
 		last = code
 		if cancelled(ctx) {
-			return effect.Outcome{SafeErrorCode: faultCancelled}, nil
+			return effect.Outcome{SafeErrorCode: faultCancelled}, ""
 		}
 		if !retryable(code) {
 			break
 		}
 	}
-	a.noteSubmitFailure(last)
-	return effect.Outcome{SafeErrorCode: safeCodePrefix + string(last)}, nil
+	return effect.Outcome{SafeErrorCode: safeCodePrefix + string(last)}, last
 }
 
 func cancelled(ctx context.Context) bool {
