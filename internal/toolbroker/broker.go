@@ -131,6 +131,7 @@ type Broker struct {
 	definitions          map[string]*tools.Definition
 	engine               *approval.Engine
 	adapters             map[string]Adapter
+	secretMu             sync.RWMutex
 	secrets              []string
 	maxInlineResultBytes int64
 	artifacts            store.ArtifactStore
@@ -198,6 +199,23 @@ func DefaultPolicy() approval.Policy {
 		}
 	}
 	return approval.Policy{Version: "builtin-tools-v1", Rules: rules}
+}
+
+func (b *Broker) RegisterSecret(value string) {
+	if value == "" {
+		return
+	}
+	b.secretMu.Lock()
+	defer b.secretMu.Unlock()
+	if !slices.Contains(b.secrets, value) {
+		b.secrets = append(b.secrets, value)
+	}
+}
+
+func (b *Broker) secretValues() []string {
+	b.secretMu.RLock()
+	defer b.secretMu.RUnlock()
+	return slices.Clone(b.secrets)
 }
 
 func (b *Broker) Definitions() []tools.Definition {
@@ -400,7 +418,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return ToolResult{}, errorf(ResultDeadlineExceeded, "tool request ended: %v", err)
 				}
-				return ToolResult{}, errorf(ResultPolicyDenied, "tool %q approval failed closed: %s", key, redact([]byte(err.Error()), b.secrets))
+				return ToolResult{}, errorf(ResultPolicyDenied, "tool %q approval failed closed: %s", key, redact([]byte(err.Error()), b.secretValues()))
 			}
 			if !accepted {
 				approvalState = ApprovalRejected
@@ -455,7 +473,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			return ToolResult{}, errorf(ResultDeadlineExceeded, "tool request ended: %v", err)
 		}
 		if code, ok := CodeOf(err); ok && code.stable() {
-			return ToolResult{}, errorf(code, "%s", redact([]byte(err.Error()), b.secrets))
+			return ToolResult{}, errorf(code, "%s", redact([]byte(err.Error()), b.secretValues()))
 		}
 		if code, ok := sandbox.CodeOf(err); ok {
 			switch code {
@@ -473,12 +491,12 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		if contextError(ctx, canonical.Deadline) != nil {
 			return ToolResult{}, contextError(ctx, canonical.Deadline)
 		}
-		return ToolResult{}, errorf(ResultExecutionFailed, "tool %q failed: %s", key, redact([]byte(err.Error()), b.secrets))
+		return ToolResult{}, errorf(ResultExecutionFailed, "tool %q failed: %s", key, redact([]byte(err.Error()), b.secretValues()))
 	}
 	result.ToolName = canonical.ToolName
 	result.ToolVersion = canonical.ToolVersion
 	result.Untrusted = true
-	result.Output = redact(result.Output, b.secrets)
+	result.Output = redact(result.Output, b.secretValues())
 	if result.Class == "" {
 		result.Class = ResultOK
 	}
@@ -741,7 +759,7 @@ func absoluteApprovalExpiry(deadline time.Time) time.Time {
 }
 
 func (b *Broker) buildApprovalPrompt(request *ToolRequest, decision approval.PolicyDecision, expiresAt time.Time) *ApprovalPrompt {
-	display := redact(request.Arguments, b.secrets)
+	display := redact(request.Arguments, b.secretValues())
 	if len(display) > maxApprovalDisplayBytes {
 		display = truncateDisplay(display, maxApprovalDisplayBytes)
 	}

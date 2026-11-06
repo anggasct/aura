@@ -46,8 +46,11 @@ backend:
 		t.Fatalf("ParseManifest: %v", err)
 	}
 	server := manifest.ServerConfig("/data/plugins/remote-notes/0.3.1")
-	if server.Auth == nil || server.Auth.Static == nil || server.Auth.Static.CredentialRef != "env://NOTES_TOKEN" || server.URL != "https://notes.example.com/mcp" {
+	if server.Auth != nil || server.URL != "https://notes.example.com/mcp" {
 		t.Fatalf("server = %+v", server)
+	}
+	if spec := manifest.AuthSpec("fp"); spec.Kind != AuthStaticSecret || spec.SecretRef != "env://NOTES_TOKEN" || spec.Header != "Authorization" || spec.Fingerprint != "fp" {
+		t.Fatalf("auth spec = %+v", spec)
 	}
 	if server.MaxMessageSize != 512<<10 || time.Duration(server.RequestTimeout) != 15*time.Second {
 		t.Fatalf("server limits = %+v", server)

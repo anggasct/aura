@@ -15,7 +15,17 @@ type SecretResolver interface {
 	ResolveSecret(ctx context.Context, ref string) (string, error)
 }
 
+type RequestAuthorizer interface {
+	Authorize(ctx context.Context, req *http.Request) error
+}
+
 type ClientOption func(*Client)
+
+func WithRequestAuthorizer(authorizer RequestAuthorizer) ClientOption {
+	return func(c *Client) {
+		c.authorizer = authorizer
+	}
+}
 
 func WithHTTPClient(client *http.Client) ClientOption {
 	return func(c *Client) {

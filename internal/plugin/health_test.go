@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -72,7 +73,7 @@ func TestCheckerReportsHeldToolDriftAndDesiredDrift(t *testing.T) {
 	checker := newCheckerForTest(t, env, &CheckerOptions{
 		Held:    []Held{{ID: "mail", Code: ErrTampered, Detail: "bundle changed"}, {ID: "calendar", Code: ErrSurfacePending, Detail: "capability network is waiting for review"}},
 		Desired: &config.Plugins{Desired: []config.PluginDesired{{ID: "weather", Version: "1.0.0", Enabled: false}}},
-		Runtime: func() []RuntimeStatus {
+		Runtime: func(context.Context) []RuntimeStatus {
 			return []RuntimeStatus{
 				{ID: "weather", Running: true, Drift: []string{"export_all", "bad name!"}},
 				{ID: "quiet", Running: true},
@@ -108,7 +109,7 @@ func TestCheckerReportsUpWhenEverythingMatches(t *testing.T) {
 	env.approve("weather", env.install(baseManifest, serverFiles()))
 	checker := newCheckerForTest(t, env, &CheckerOptions{
 		Desired: &config.Plugins{Desired: []config.PluginDesired{{ID: "weather", Version: "1.0.0", Enabled: true}}},
-		Runtime: func() []RuntimeStatus { return []RuntimeStatus{{ID: "weather", Running: true}} },
+		Runtime: func(context.Context) []RuntimeStatus { return []RuntimeStatus{{ID: "weather", Running: true}} },
 	})
 	findings := checker.Check(t.Context())
 	if len(findings) != 1 || findings[0].Status != health.StatusUp || findings[0].Code != "ok" {

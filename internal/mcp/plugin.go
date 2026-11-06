@@ -18,9 +18,10 @@ type PluginTool struct {
 }
 
 type PluginServer struct {
-	ID     string
-	Server config.MCPServer
-	Tools  []PluginTool
+	ID         string
+	Server     config.MCPServer
+	Authorizer RequestAuthorizer
+	Tools      []PluginTool
 }
 
 type PluginStatus struct {
@@ -55,7 +56,7 @@ func (p *PluginServer) approvedDescription(tool string) string {
 }
 
 func clonePluginServer(plugin *PluginServer) PluginServer {
-	return PluginServer{ID: plugin.ID, Server: plugin.Server, Tools: slices.Clone(plugin.Tools)}
+	return PluginServer{ID: plugin.ID, Server: plugin.Server, Authorizer: plugin.Authorizer, Tools: slices.Clone(plugin.Tools)}
 }
 
 func clonePluginServers(plugins []PluginServer) []PluginServer {

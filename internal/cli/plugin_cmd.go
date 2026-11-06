@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/plugin"
+	"github.com/anggasct/aura/internal/plugin/auth"
 )
 
 const pluginRestartNotice = "takes effect at the next server start"
@@ -27,6 +29,8 @@ func newPluginCmd(gf *globalFlags) *cobra.Command {
 		newPluginApproveCmd(gf),
 		newPluginDisableCmd(gf),
 		newPluginRemoveCmd(gf),
+		newPluginLoginCmd(gf),
+		newPluginLogoutCmd(gf),
 	)
 	return cmd
 }
@@ -40,7 +44,7 @@ func openPluginService(cmd *cobra.Command, gf *globalFlags) (*plugin.Service, *s
 	if err != nil {
 		return nil, nil, err
 	}
-	service, err := newPluginService(result.Config, db)
+	service, err := newPluginService(result.Config, db, discardRedactor{})
 	if err != nil {
 		_ = db.Close()
 		return nil, nil, err
@@ -166,7 +170,7 @@ func reviewLines(review *plugin.Review) []string {
 		"Digest: " + review.Digest,
 		"Description: " + review.Description,
 		fmt.Sprintf("Backend: %s %s", review.Backend.Kind, backendTarget(&review.Backend)),
-		"Auth: " + authSummary(review.Auth),
+		"Auth: " + authSummary(&review.Auth),
 		"Capabilities: " + dashIfEmpty(strings.Join(review.Capabilities, ", ")),
 		"Egress: " + dashIfEmpty(strings.Join(review.Egress, ", ")),
 	}
@@ -204,11 +208,23 @@ func backendTarget(backend *plugin.BackendSummary) string {
 	return strings.TrimSpace(backend.Command + " " + strings.Join(backend.Args, " "))
 }
 
-func authSummary(auth plugin.Auth) string {
-	if auth.Kind == "" || auth.Kind == "none" {
+func authSummary(spec *plugin.Auth) string {
+	switch spec.Kind {
+	case "", plugin.AuthNone:
 		return "none"
+	case plugin.AuthOAuth2:
+		return fmt.Sprintf("oauth2 (authorize %s, token %s, scopes %s, redirect %s, client id secret %s, client secret secret %s)",
+			spec.AuthorizeURL, spec.TokenURL, strings.Join(sortedStrings(spec.Scopes), " "), spec.RedirectURI,
+			spec.ClientIDSecret, dashIfEmpty(spec.ClientSecretSecret))
+	default:
+		return fmt.Sprintf("%s (secret %s)", spec.Kind, spec.Secret)
 	}
-	return fmt.Sprintf("%s (secret %s)", auth.Kind, auth.Secret)
+}
+
+func sortedStrings(values []string) []string {
+	out := slices.Clone(values)
+	slices.Sort(out)
+	return out
 }
 
 func newPluginReviewCmd(gf *globalFlags) *cobra.Command {
@@ -306,4 +322,57 @@ func newPluginRemoveCmd(gf *globalFlags) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&apply, "apply", false, "perform the removal")
 	return cmd
+}
+
+func newPluginLoginCmd(gf *globalFlags) *cobra.Command {
+	var paste bool
+	cmd := &cobra.Command{
+		Use:   "login <plugin>",
+		Short: "Authorize an active oauth2 plugin and store its token",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			service, db, err := openPluginService(cmd, gf)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+			out := cmd.OutOrStdout()
+			opts := &auth.LoginOptions{
+				Paste: paste,
+				Input: cmd.InOrStdin(),
+				Prompt: func(authorizeURL string) {
+					if paste {
+						_, _ = fmt.Fprintf(out, "Open this URL, approve access, then paste the URL your browser is redirected to:\n%s\n", authorizeURL)
+						return
+					}
+					_, _ = fmt.Fprintf(out, "Open this URL to approve access; this command waits up to %s for the callback:\n%s\n", auth.LoginTimeout, authorizeURL)
+				},
+			}
+			if err := service.Login(cmd.Context(), args[0], opts); err != nil {
+				return err
+			}
+			return writeChildLines(cmd, []string{fmt.Sprintf("logged in %s; %s", args[0], pluginRestartNotice)})
+		},
+	}
+	cmd.Flags().BoolVar(&paste, "paste", false, "read the redirected url from standard input instead of listening on the redirect address")
+	return cmd
+}
+
+func newPluginLogoutCmd(gf *globalFlags) *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout <plugin>",
+		Short: "Delete the stored token of a plugin",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			service, db, err := openPluginService(cmd, gf)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = db.Close() }()
+			if err := service.Logout(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+			return writeChildLines(cmd, []string{fmt.Sprintf("logged out %s; %s", args[0], pluginRestartNotice)})
+		},
+	}
 }

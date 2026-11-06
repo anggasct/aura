@@ -19,6 +19,7 @@ import (
 	yamlv3 "gopkg.in/yaml.v3"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/plugin/auth"
 	"github.com/anggasct/aura/internal/tools"
 )
 
@@ -32,15 +33,18 @@ const (
 
 	BackendMCP = "mcp"
 
-	AuthNone         = "none"
-	AuthStaticSecret = "static_secret"
+	AuthNone         = auth.KindNone
+	AuthStaticSecret = auth.KindStaticSecret
+	AuthOAuth2       = auth.KindOAuth2
 
 	maxNameRunes         = 64
 	maxDescriptionBytes  = 1024
 	maxCapabilities      = 16
 	maxTools             = 64
 	maxEgress            = 32
-	maxSecrets           = 1
+	maxSecrets           = 2
+	maxScopes            = 32
+	maxURLBytes          = 2048
 	maxArgs              = 64
 	maxArgBytes          = 1024
 	maxCommandBytes      = 512
@@ -55,6 +59,7 @@ var (
 	envNamePattern    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 	hostPattern       = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$`)
 	headerPattern     = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+	scopePattern      = regexp.MustCompile(`^[\x21\x23-\x5B\x5D-\x7E]{1,128}$`)
 )
 
 type Manifest struct {
@@ -83,9 +88,19 @@ type Secret struct {
 }
 
 type Auth struct {
-	Kind   string `yaml:"kind" json:"kind"`
-	Secret string `yaml:"secret" json:"secret"`
-	Header string `yaml:"header" json:"header"`
+	Kind               string   `yaml:"kind" json:"kind"`
+	Secret             string   `yaml:"secret" json:"secret"`
+	Header             string   `yaml:"header" json:"header"`
+	AuthorizeURL       string   `yaml:"authorize_url" json:"authorize_url,omitempty"`
+	TokenURL           string   `yaml:"token_url" json:"token_url,omitempty"`
+	Scopes             []string `yaml:"scopes" json:"scopes,omitempty"`
+	RedirectURI        string   `yaml:"redirect_uri" json:"redirect_uri,omitempty"`
+	ClientIDSecret     string   `yaml:"client_id_secret" json:"client_id_secret,omitempty"`
+	ClientSecretSecret string   `yaml:"client_secret_secret" json:"client_secret_secret,omitempty"`
+}
+
+func (a *Auth) oauth2FieldsSet() bool {
+	return a.AuthorizeURL != "" || a.TokenURL != "" || len(a.Scopes) > 0 || a.RedirectURI != "" || a.ClientIDSecret != "" || a.ClientSecretSecret != ""
 }
 
 type Backend struct {
@@ -328,8 +343,8 @@ func (m *Manifest) validateSecretsAndAuth(found *problems) {
 	}
 	switch m.Auth.Kind {
 	case AuthNone:
-		if len(m.Secrets) > 0 || m.Auth.Secret != "" || m.Auth.Header != "" {
-			found.add("auth.kind none takes no secret or header")
+		if len(m.Secrets) > 0 || m.Auth.Secret != "" || m.Auth.Header != "" || m.Auth.oauth2FieldsSet() {
+			found.add("auth.kind none takes no secret, header or oauth2 field")
 		}
 	case AuthStaticSecret:
 		if len(m.Secrets) != 1 || m.Auth.Secret != m.Secrets[0].Name {
@@ -338,11 +353,102 @@ func (m *Manifest) validateSecretsAndAuth(found *problems) {
 		if m.Auth.Header != "" && !headerPattern.MatchString(m.Auth.Header) {
 			found.add("auth.header must be a header name")
 		}
+		if m.Auth.oauth2FieldsSet() {
+			found.add("auth.kind static_secret takes no oauth2 field")
+		}
 		if m.Backend.Transport != config.MCPTransportStreamableHTTP {
 			found.add("auth.kind static_secret needs the streamable_http transport")
 		}
+	case AuthOAuth2:
+		m.validateOAuth2(found)
 	default:
-		found.add("auth.kind must be %s or %s", AuthNone, AuthStaticSecret)
+		found.add("auth.kind must be %s, %s or %s", AuthNone, AuthStaticSecret, AuthOAuth2)
+	}
+}
+
+func (m *Manifest) validateOAuth2(found *problems) {
+	oauth := &m.Auth
+	if oauth.Secret != "" || oauth.Header != "" {
+		found.add("auth.kind oauth2 takes no secret or header")
+	}
+	if m.Backend.Transport != config.MCPTransportStreamableHTTP {
+		found.add("auth.kind oauth2 needs the streamable_http transport")
+	}
+	validateAuthURL(found, "auth.authorize_url", oauth.AuthorizeURL)
+	if token := validateAuthURL(found, "auth.token_url", oauth.TokenURL); token != nil && !egressListed(m.Egress, token) {
+		found.add("auth.token_url host must be listed in egress")
+	}
+	m.validateScopes(found)
+	validateRedirectURI(found, oauth.RedirectURI)
+	declared := map[string]bool{}
+	for i := range m.Secrets {
+		declared[m.Secrets[i].Name] = true
+	}
+	if oauth.ClientIDSecret == "" || !declared[oauth.ClientIDSecret] {
+		found.add("auth.client_id_secret must name a declared secret")
+	}
+	if oauth.ClientSecretSecret != "" && (!declared[oauth.ClientSecretSecret] || oauth.ClientSecretSecret == oauth.ClientIDSecret) {
+		found.add("auth.client_secret_secret must name another declared secret")
+	}
+	wanted := 1
+	if oauth.ClientSecretSecret != "" {
+		wanted = 2
+	}
+	if len(m.Secrets) != wanted {
+		found.add("secrets must declare exactly the oauth2 client secrets")
+	}
+}
+
+func validateAuthURL(found *problems, field, raw string) *url.URL {
+	parsed, err := url.Parse(raw)
+	switch {
+	case raw == "" || len(raw) > maxURLBytes || err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "":
+		found.add("%s must be an https url without credentials or fragment", field)
+		return nil
+	case parsed.Scheme == "http" && !config.IsLoopbackBaseURL(raw), parsed.Scheme != "https" && parsed.Scheme != "http":
+		found.add("%s must use https, or http on a loopback address", field)
+		return nil
+	}
+	return parsed
+}
+
+func egressListed(egress []string, target *url.URL) bool {
+	return slices.Contains(egress, strings.ToLower(target.Host)) || slices.Contains(egress, strings.ToLower(target.Hostname()))
+}
+
+func (m *Manifest) validateScopes(found *problems) {
+	scopes := m.Auth.Scopes
+	if len(scopes) == 0 || len(scopes) > maxScopes {
+		found.add("auth.scopes must list between 1 and %d scopes", maxScopes)
+	}
+	seen := map[string]bool{}
+	for _, scope := range scopes {
+		if !scopePattern.MatchString(scope) {
+			found.add("auth.scopes entries must be printable ascii scope tokens without spaces, quotes or backslashes")
+			continue
+		}
+		if seen[scope] {
+			found.add("auth.scopes lists an entry twice")
+		}
+		seen[scope] = true
+	}
+}
+
+func validateRedirectURI(found *problems, raw string) {
+	parsed, err := url.Parse(raw)
+	if raw == "" || len(raw) > maxURLBytes || err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || parsed.ForceQuery || !strings.HasPrefix(parsed.Path, "/") {
+		found.add("auth.redirect_uri must be an exact url with a path, without credentials, query or fragment")
+		return
+	}
+	switch parsed.Scheme {
+	case "https":
+	case "http":
+		port, portErr := strconv.Atoi(parsed.Port())
+		if parsed.Hostname() != "127.0.0.1" || portErr != nil || port < 1 || port > 65535 || strconv.Itoa(port) != parsed.Port() {
+			found.add("auth.redirect_uri over http must be http://127.0.0.1:<port>/<path> with an explicit port")
+		}
+	default:
+		found.add("auth.redirect_uri must use https or http://127.0.0.1:<port>/<path>")
 	}
 }
 
@@ -411,8 +517,7 @@ func (m *Manifest) validateBackendURL(found *problems) {
 		found.add("backend.url must be an http(s) url without credentials")
 		return
 	}
-	host := strings.ToLower(parsed.Host)
-	if !slices.Contains(m.Egress, host) && !slices.Contains(m.Egress, strings.ToLower(parsed.Hostname())) {
+	if !egressListed(m.Egress, parsed) {
 		found.add("backend.url host must be listed in egress")
 	}
 }
@@ -435,9 +540,6 @@ func (m *Manifest) ServerConfig(bundleRoot string) config.MCPServer {
 	capabilities := slices.Clone(m.Capabilities)
 	slices.Sort(capabilities)
 	server.Capabilities = capabilities
-	if m.Auth.Kind == AuthStaticSecret && len(m.Secrets) == 1 {
-		server.Auth = &config.MCPAuth{Static: &config.MCPStaticAuth{Header: m.Auth.Header, CredentialRef: m.Secrets[0].Ref}}
-	}
 	config.ApplyMCPServerDefaults(&server)
 	return server
 }
@@ -480,6 +582,7 @@ func (m *Manifest) normalized() Manifest {
 	out.Egress = sortedCopy(m.Egress)
 	out.Tools = slices.Clone(m.Tools)
 	slices.SortFunc(out.Tools, func(a, b Tool) int { return strings.Compare(a.Name, b.Name) })
+	out.Auth.Scopes = sortedScopes(m.Auth.Scopes)
 	out.Secrets = slices.Clone(m.Secrets)
 	slices.SortFunc(out.Secrets, func(a, b Secret) int { return strings.Compare(a.Name, b.Name) })
 	out.Backend.StartupTimeout = canonicalDuration(m.Backend.StartupTimeout)
@@ -491,6 +594,39 @@ func (m *Manifest) normalized() Manifest {
 		out.Backend.Args = []string{}
 	}
 	return out
+}
+
+func sortedScopes(scopes []string) []string {
+	if len(scopes) == 0 {
+		return nil
+	}
+	return sortedCopy(scopes)
+}
+
+func (m *Manifest) secretRef(name string) string {
+	for i := range m.Secrets {
+		if m.Secrets[i].Name == name {
+			return m.Secrets[i].Ref
+		}
+	}
+	return ""
+}
+
+func (m *Manifest) AuthSpec(fingerprint string) auth.Spec {
+	spec := auth.Spec{PluginID: m.ID, Kind: m.Auth.Kind, Fingerprint: fingerprint}
+	switch m.Auth.Kind {
+	case AuthStaticSecret:
+		spec.Header = m.Auth.Header
+		spec.SecretRef = m.secretRef(m.Auth.Secret)
+	case AuthOAuth2:
+		spec.AuthorizeURL = m.Auth.AuthorizeURL
+		spec.TokenURL = m.Auth.TokenURL
+		spec.RedirectURI = m.Auth.RedirectURI
+		spec.Scopes = sortedScopes(m.Auth.Scopes)
+		spec.ClientIDRef = m.secretRef(m.Auth.ClientIDSecret)
+		spec.ClientSecretRef = m.secretRef(m.Auth.ClientSecretSecret)
+	}
+	return spec
 }
 
 func canonicalDuration(text string) string {

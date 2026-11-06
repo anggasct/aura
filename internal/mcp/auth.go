@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -85,6 +86,45 @@ func (t *staticAuthTransport) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 func (t *staticAuthTransport) CloseIdleConnections() {
+	if closer, ok := t.next.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
+type authorizerTransport struct {
+	next       http.RoundTripper
+	authorizer RequestAuthorizer
+	origin     *url.URL
+}
+
+type authorizationError struct {
+	err error
+}
+
+func (e *authorizationError) Error() string { return e.err.Error() }
+
+func (e *authorizationError) Unwrap() error { return e.err }
+
+func isAuthorizationFailure(err error) bool {
+	var target *authorizationError
+	return errors.As(err, &target)
+}
+
+func (t *authorizerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil {
+		return nil, Errorf(ErrConfigInvalid, "request must not be nil")
+	}
+	out := req.Clone(req.Context())
+	if !sameOrigin(out.URL, t.origin) {
+		return t.next.RoundTrip(out)
+	}
+	if err := t.authorizer.Authorize(req.Context(), out); err != nil {
+		return nil, &authorizationError{err: err}
+	}
+	return t.next.RoundTrip(out)
+}
+
+func (t *authorizerTransport) CloseIdleConnections() {
 	if closer, ok := t.next.(interface{ CloseIdleConnections() }); ok {
 		closer.CloseIdleConnections()
 	}

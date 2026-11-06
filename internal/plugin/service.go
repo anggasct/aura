@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/plugin/auth"
 	"github.com/anggasct/aura/internal/tools"
 )
 
@@ -21,19 +22,21 @@ const (
 
 type Options struct {
 	Registry Registry
+	Auth     *auth.Registry
 	Dir      string
 	Now      func() time.Time
 }
 
 type Service struct {
 	registry Registry
+	auth     *auth.Registry
 	dir      string
 	now      func() time.Time
 }
 
 func NewService(opts *Options) (*Service, error) {
-	if opts == nil || opts.Registry == nil {
-		return nil, Errorf(ErrInvalidArgument, "a registry is required")
+	if opts == nil || opts.Registry == nil || opts.Auth == nil {
+		return nil, Errorf(ErrInvalidArgument, "a registry and an auth registry are required")
 	}
 	if !filepath.IsAbs(opts.Dir) {
 		return nil, Errorf(ErrInvalidArgument, "the plugin directory must be absolute")
@@ -42,7 +45,7 @@ func NewService(opts *Options) (*Service, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{registry: opts.Registry, dir: filepath.Clean(opts.Dir), now: now}, nil
+	return &Service{registry: opts.Registry, auth: opts.Auth, dir: filepath.Clean(opts.Dir), now: now}, nil
 }
 
 type InstallResult struct {
@@ -420,6 +423,46 @@ func (s *Service) Disable(ctx context.Context, id string) error {
 	return s.registry.SetState(ctx, id, StateDisabled, s.now().UTC())
 }
 
+func (s *Service) Login(ctx context.Context, id string, opts *auth.LoginOptions) error {
+	if ctx == nil || !config.ValidPluginID(id) || opts == nil {
+		return Errorf(ErrInvalidArgument, "a valid plugin id and login options are required")
+	}
+	record, err := s.registry.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if record.State != StateActive {
+		return Errorf(ErrSurfacePending, "the plugin must be approved and active before it can log in")
+	}
+	plugins, err := s.openPlugins()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = plugins.Close() }()
+	active, err := s.activate(ctx, plugins, &record)
+	if err != nil {
+		return err
+	}
+	interactive, ok := active.Auth.(auth.Interactive)
+	if !ok {
+		return Errorf(ErrInvalidArgument, "the plugin's auth needs no login")
+	}
+	return interactive.Login(ctx, opts)
+}
+
+func (s *Service) Logout(ctx context.Context, id string) error {
+	if ctx == nil || !config.ValidPluginID(id) {
+		return Errorf(ErrInvalidArgument, "a valid plugin id is required")
+	}
+	if _, err := s.registry.Get(ctx, id); err != nil {
+		return err
+	}
+	if err := s.auth.Erase(id); err != nil {
+		return Wrap(ErrStorage, err, "the plugin secrets cannot be erased")
+	}
+	return nil
+}
+
 type RemovePlan struct {
 	ID              string
 	State           string
@@ -450,6 +493,9 @@ func (s *Service) Remove(ctx context.Context, id string, apply bool) (*RemovePla
 	defer func() { _ = plugins.Close() }()
 	if err := plugins.RemoveAll(id); err != nil {
 		return nil, Wrap(ErrStorage, err, "the bundle cannot be removed")
+	}
+	if err := s.auth.Erase(id); err != nil {
+		return nil, Wrap(ErrStorage, err, "the plugin secrets cannot be erased")
 	}
 	plan.Applied = true
 	return plan, nil

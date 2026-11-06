@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/plugin/auth"
 )
 
 const baseManifest = `api_version: aura.plugin/v1
@@ -148,18 +151,67 @@ func (r *memoryRegistry) Remove(_ context.Context, id string) error {
 	return nil
 }
 
+type fakeSecrets struct {
+	mu     sync.Mutex
+	values map[string]string
+}
+
+func (f *fakeSecrets) ResolveSecret(_ context.Context, ref string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	value, ok := f.values[ref]
+	if !ok {
+		return "", Errorf(ErrInvalidArgument, "unknown ref")
+	}
+	return value, nil
+}
+
+func (f *fakeSecrets) set(ref, value string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.values[ref] = value
+}
+
+type recordingRedactor struct {
+	mu     sync.Mutex
+	values []string
+}
+
+func (r *recordingRedactor) RegisterSecret(value string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.values = append(r.values, value)
+}
+
+func (r *recordingRedactor) has(value string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Contains(r.values, value)
+}
+
 type testEnv struct {
 	t        *testing.T
 	registry *memoryRegistry
 	service  *Service
 	dir      string
+	authDir  string
+	secrets  *fakeSecrets
+	redactor *recordingRedactor
 	clock    time.Time
 }
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	env := &testEnv{t: t, registry: newMemoryRegistry(), dir: filepath.Join(t.TempDir(), "plugins"), clock: time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)}
-	service, err := NewService(&Options{Registry: env.registry, Dir: env.dir, Now: func() time.Time { return env.clock }})
+	root := t.TempDir()
+	env := &testEnv{
+		t: t, registry: newMemoryRegistry(), dir: filepath.Join(root, "plugins"), authDir: filepath.Join(root, "plugin-secrets"),
+		secrets: &fakeSecrets{values: map[string]string{}}, redactor: &recordingRedactor{}, clock: time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC),
+	}
+	authRegistry, err := auth.NewRegistry(&auth.Options{Dir: env.authDir, Secrets: env.secrets, HTTPClient: http.DefaultClient, Redactor: env.redactor})
+	if err != nil {
+		t.Fatalf("auth.NewRegistry: %v", err)
+	}
+	service, err := NewService(&Options{Registry: env.registry, Auth: authRegistry, Dir: env.dir, Now: func() time.Time { return env.clock }})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}

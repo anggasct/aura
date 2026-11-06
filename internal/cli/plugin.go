@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"slices"
 	"time"
@@ -13,18 +14,24 @@ import (
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/mcp"
 	"github.com/anggasct/aura/internal/plugin"
+	"github.com/anggasct/aura/internal/plugin/auth"
 	"github.com/anggasct/aura/internal/store"
 )
 
 const (
-	pluginDirName = "plugins"
+	pluginDirName        = "plugins"
+	pluginSecretsDirName = "plugin-secrets"
 
 	accessActionPluginApprove = "plugin_approve"
 	accessActionPluginDisable = "plugin_disable"
 	accessActionPluginRemove  = "plugin_remove"
 )
 
-func pluginDirectory(cfg *config.Config) (string, error) {
+type discardRedactor struct{}
+
+func (discardRedactor) RegisterSecret(string) {}
+
+func pluginDirectory(cfg *config.Config, name string) (string, error) {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return "", err
@@ -33,15 +40,51 @@ func pluginDirectory(cfg *config.Config) (string, error) {
 	if err != nil {
 		return "", plugin.Wrap(plugin.ErrStorage, err, "the data directory cannot be resolved")
 	}
-	return filepath.Join(absolute, pluginDirName), nil
+	return filepath.Join(absolute, name), nil
 }
 
-func newPluginService(cfg *config.Config, db *sql.DB) (*plugin.Service, error) {
-	dir, err := pluginDirectory(cfg)
+func newPluginAuth(cfg *config.Config, redactor auth.Redactor) (*auth.Registry, error) {
+	dir, err := pluginDirectory(cfg, pluginSecretsDirName)
 	if err != nil {
 		return nil, err
 	}
-	return plugin.NewService(&plugin.Options{Registry: &storePluginRegistry{plugins: store.NewPluginStore(db)}, Dir: dir})
+	return auth.NewRegistry(&auth.Options{Dir: dir, Secrets: mcpSecretResolver{}, HTTPClient: pluginHTTPClient(mcpHTTPClient(nil)), Redactor: redactor})
+}
+
+type loopbackAwareTransport struct {
+	loopback http.RoundTripper
+	external http.RoundTripper
+}
+
+func (t *loopbackAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req != nil && req.URL != nil && config.IsLoopbackBaseURL(req.URL.String()) {
+		return t.loopback.RoundTrip(req)
+	}
+	return t.external.RoundTrip(req)
+}
+
+func (t *loopbackAwareTransport) CloseIdleConnections() {
+	for _, next := range []http.RoundTripper{t.loopback, t.external} {
+		if closer, ok := next.(interface{ CloseIdleConnections() }); ok {
+			closer.CloseIdleConnections()
+		}
+	}
+}
+
+func pluginHTTPClient(external *http.Client) *http.Client {
+	return &http.Client{Transport: &loopbackAwareTransport{loopback: http.DefaultTransport, external: external.Transport}}
+}
+
+func newPluginService(cfg *config.Config, db *sql.DB, redactor auth.Redactor) (*plugin.Service, error) {
+	dir, err := pluginDirectory(cfg, pluginDirName)
+	if err != nil {
+		return nil, err
+	}
+	authRegistry, err := newPluginAuth(cfg, redactor)
+	if err != nil {
+		return nil, err
+	}
+	return plugin.NewService(&plugin.Options{Registry: &storePluginRegistry{plugins: store.NewPluginStore(db)}, Auth: authRegistry, Dir: dir})
 }
 
 type storePluginRegistry struct {
@@ -155,8 +198,8 @@ type pluginRuntime struct {
 	installed int
 }
 
-func planPlugins(ctx context.Context, cfg *config.Config, db *sql.DB) (*pluginRuntime, error) {
-	service, err := newPluginService(cfg, db)
+func planPlugins(ctx context.Context, cfg *config.Config, db *sql.DB, redactor auth.Redactor) (*pluginRuntime, error) {
+	service, err := newPluginService(cfg, db, redactor)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +221,7 @@ func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {
 	servers := make([]mcp.PluginServer, 0, len(r.plan.Active))
 	for i := range r.plan.Active {
 		active := &r.plan.Active[i]
-		server := mcp.PluginServer{ID: active.ID, Server: active.Server}
+		server := mcp.PluginServer{ID: active.ID, Server: active.Server, Authorizer: active.Auth}
 		for _, tool := range active.Tools {
 			server.Tools = append(server.Tools, mcp.PluginTool{Name: tool.Name, Description: tool.Description})
 		}
@@ -191,13 +234,16 @@ func (r *pluginRuntime) healthCheck(cfg *config.Config, db *sql.DB, mcpServers *
 	if r == nil || (cfg.Plugins == nil && r.installed == 0) {
 		return health.RegisteredCheck{}, false, nil
 	}
-	var source func() []plugin.RuntimeStatus
+	var source func(context.Context) []plugin.RuntimeStatus
 	if mcpServers != nil {
-		source = func() []plugin.RuntimeStatus {
+		source = func(ctx context.Context) []plugin.RuntimeStatus {
 			statuses := mcpServers.manager.PluginStatuses()
 			out := make([]plugin.RuntimeStatus, 0, len(statuses))
 			for i := range statuses {
-				out = append(out, plugin.RuntimeStatus{ID: statuses[i].ID, Running: statuses[i].Code == "" && statuses[i].Connected, Drift: statuses[i].Drift})
+				out = append(out, plugin.RuntimeStatus{
+					ID: statuses[i].ID, Running: statuses[i].Code == "" && statuses[i].Connected, Drift: statuses[i].Drift,
+					Auth: r.authStatus(ctx, statuses[i].ID),
+				})
 			}
 			return out
 		}
@@ -217,6 +263,15 @@ func (r *pluginRuntime) healthCheck(cfg *config.Config, db *sql.DB, mcpServers *
 		Timeout:     time.Duration(cfg.Health.CheckTimeout),
 		Remediation: plugin.RemediationReview,
 	}, true, nil
+}
+
+func (r *pluginRuntime) authStatus(ctx context.Context, id string) plugin.ErrorCode {
+	for i := range r.plan.Active {
+		if r.plan.Active[i].ID == id {
+			return r.plan.Active[i].AuthStatus(ctx)
+		}
+	}
+	return ""
 }
 
 func (r *pluginRuntime) warnUnavailablePlugins(ctx context.Context, logger *slog.Logger, personas []auraagent.Definition) {

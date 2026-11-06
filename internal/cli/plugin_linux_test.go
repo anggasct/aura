@@ -16,7 +16,7 @@ import (
 
 func installApprovedCLIPlugin(t *testing.T, h *mcpHarness, manifest string) *plugin.Service {
 	t.Helper()
-	service, err := newPluginService(&h.cfg, h.db)
+	service, err := newPluginService(&h.cfg, h.db, discardRedactor{})
 	if err != nil {
 		t.Fatalf("newPluginService: %v", err)
 	}
@@ -49,7 +49,7 @@ func (h *mcpHarness) startPlugins(t *testing.T, starter mcp.SessionStarter, plug
 func TestPluginRuntimeExposesOnlyApprovedToolsOfAnApprovedPlugin(t *testing.T) {
 	h := newMCPHarness(t, nil)
 	installApprovedCLIPlugin(t, h, cliPluginManifest)
-	plugins, err := planPlugins(t.Context(), &h.cfg, h.db)
+	plugins, err := planPlugins(t.Context(), &h.cfg, h.db, discardRedactor{})
 	if err != nil {
 		t.Fatalf("planPlugins: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestPluginRuntimeExposesOnlyApprovedToolsOfAnApprovedPlugin(t *testing.T) {
 func TestPluginToolsAreDeniedToPublicAndUnlistedPrincipals(t *testing.T) {
 	h := newMCPHarness(t, nil)
 	installApprovedCLIPlugin(t, h, cliPluginManifest)
-	plugins, err := planPlugins(t.Context(), &h.cfg, h.db)
+	plugins, err := planPlugins(t.Context(), &h.cfg, h.db, discardRedactor{})
 	if err != nil {
 		t.Fatalf("planPlugins: %v", err)
 	}
@@ -98,14 +98,14 @@ func TestPluginToolsAreDeniedToPublicAndUnlistedPrincipals(t *testing.T) {
 func TestPlanPluginsKeepsATamperedBundleOff(t *testing.T) {
 	h := newMCPHarness(t, nil)
 	installApprovedCLIPlugin(t, h, cliPluginManifest)
-	dir, err := pluginDirectory(&h.cfg)
+	dir, err := pluginDirectory(&h.cfg, pluginDirName)
 	if err != nil {
 		t.Fatalf("pluginDirectory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "demo", "1.0.0", "server"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
 		t.Fatalf("tamper: %v", err)
 	}
-	plugins, err := planPlugins(t.Context(), &h.cfg, h.db)
+	plugins, err := planPlugins(t.Context(), &h.cfg, h.db, discardRedactor{})
 	if err != nil {
 		t.Fatalf("planPlugins: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestPlanPluginsKeepsATamperedBundleOff(t *testing.T) {
 
 func TestPlanPluginsWithoutPluginsIsEmptyAndRegistersNoCheck(t *testing.T) {
 	h := newMCPHarness(t, nil)
-	plugins, err := planPlugins(t.Context(), &h.cfg, h.db)
+	plugins, err := planPlugins(t.Context(), &h.cfg, h.db, discardRedactor{})
 	if err != nil {
 		t.Fatalf("planPlugins: %v", err)
 	}
@@ -165,7 +165,7 @@ backend:
 func TestPluginReviewShowsSecretReferencesNeverValues(t *testing.T) {
 	h := newMCPHarness(t, nil)
 	t.Setenv("AURA_TEST_PLUGIN_TOKEN", "super-secret-value")
-	service, err := newPluginService(&h.cfg, h.db)
+	service, err := newPluginService(&h.cfg, h.db, discardRedactor{})
 	if err != nil {
 		t.Fatalf("newPluginService: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestPluginReviewShowsSecretReferencesNeverValues(t *testing.T) {
 
 func TestPluginInstallRejectsAnInlineSecretWithoutEchoingIt(t *testing.T) {
 	h := newMCPHarness(t, nil)
-	service, err := newPluginService(&h.cfg, h.db)
+	service, err := newPluginService(&h.cfg, h.db, discardRedactor{})
 	if err != nil {
 		t.Fatalf("newPluginService: %v", err)
 	}

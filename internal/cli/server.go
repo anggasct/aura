@@ -136,7 +136,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			builtin.SetHandoffOpener(newHandoffService(db, notifiers))
 			builtin.SetEmailOutbox(&emailOutbox{adapters: emailMailboxes})
-			plugins, err := planPlugins(ctx, cfg, db)
+			plugins, err := planPlugins(ctx, cfg, db, builtin.Broker())
 			if err != nil {
 				return err
 			}
