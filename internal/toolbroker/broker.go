@@ -670,7 +670,7 @@ func (b *Broker) enforceToolTier(request *ToolRequest, class principal.Class, de
 	if class == principal.ClassOwner {
 		return nil
 	}
-	if class == principal.ClassPublic && definition.Server != "" {
+	if class == principal.ClassPublic && (definition.Server != "" || definition.Plugin != nil) {
 		return errorf(ResultToolTierDenied, "tool %q is not available to public principals", request.ToolName)
 	}
 	if class == principal.ClassPublic && definition.Effectful {
@@ -680,10 +680,17 @@ func (b *Broker) enforceToolTier(request *ToolRequest, class principal.Class, de
 		return errorf(ResultToolTierDenied, "tool %q is not available to %s principals", request.ToolName, class)
 	}
 	ceiling, known := b.access.ToolCeiling(request.AgentID, class)
-	if !known || !tools.ListsTool(ceiling, request.ToolName, definition.Server) {
+	if !known || !listsInCeiling(ceiling, request.ToolName, definition) {
 		return errorf(ResultToolTierDenied, "tool %q is not available to %s principals", request.ToolName, class)
 	}
 	return nil
+}
+
+func listsInCeiling(ceiling []string, name string, definition *tools.Definition) bool {
+	if definition.Plugin != nil {
+		return tools.ListsPluginTool(ceiling, name, definition.Plugin.ID)
+	}
+	return tools.ListsTool(ceiling, name, definition.Server)
 }
 
 func (b *Broker) guardRequires(ctx context.Context, request *ToolRequest) (bool, error) {

@@ -103,6 +103,11 @@ func newAgentsShowCmd(gf *globalFlags) *cobra.Command {
 			if err := write("Capabilities: %s\n", orNone(strings.Join(definition.Capabilities, ", "))); err != nil {
 				return err
 			}
+			if len(definition.Plugins) > 0 {
+				if err := write("Plugins: %s\n", strings.Join(definition.Plugins, ", ")); err != nil {
+					return err
+				}
+			}
 			if definition.Limits.TurnTimeout > 0 {
 				return write("Turn timeout: %s\n", definition.Limits.TurnTimeout)
 			}

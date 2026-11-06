@@ -22,6 +22,7 @@ type BuiltinToolDefinition struct {
 	Name                 string
 	Version              string
 	Server               string
+	Plugin               string
 	Description          string
 	Schema               json.RawMessage
 	RequiredCapabilities []string
@@ -87,7 +88,8 @@ func buildBuiltinTools(definitions []BuiltinToolDefinition) ([]tool.Tool, error)
 	}
 	tools := make([]tool.Tool, 0, len(definitions))
 	seen := make(map[string]struct{}, len(definitions))
-	for _, definition := range definitions {
+	for i := range definitions {
+		definition := &definitions[i]
 		if definition.Name == "" || definition.Version == "" {
 			return nil, invalidArgument("builtin tool name and version must not be empty")
 		}

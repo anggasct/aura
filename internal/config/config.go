@@ -27,6 +27,7 @@ type Config struct {
 	Workflows    *Workflows            `koanf:"workflows" yaml:"workflows,omitempty"`
 	Durable      *Durable              `koanf:"durable" yaml:"durable,omitempty"`
 	MCP          *MCP                  `koanf:"mcp" yaml:"mcp,omitempty"`
+	Plugins      *Plugins              `koanf:"plugins" yaml:"plugins,omitempty"`
 	Server       Server                `koanf:"server" yaml:"server"`
 	Logging      Logging               `koanf:"logging" yaml:"logging"`
 	Models       Models                `koanf:"models" yaml:"models"`
@@ -774,6 +775,7 @@ type AgentDefinition struct {
 	GroupContext    string            `koanf:"group_context" yaml:"group_context,omitempty"`
 	Evals           AgentEvals        `koanf:"evals" yaml:"evals,omitempty"`
 	Workflows       []string          `koanf:"workflows" yaml:"workflows,omitempty"`
+	Plugins         []string          `koanf:"plugins" yaml:"plugins,omitempty"`
 }
 
 type AgentEvals struct {

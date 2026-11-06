@@ -35,6 +35,7 @@ type ManagerOptions struct {
 	Observer          Observer
 	Logger            *slog.Logger
 	CapabilityChecker func([]string) error
+	Plugins           []PluginServer
 }
 
 type Manager struct {
@@ -53,6 +54,8 @@ type Manager struct {
 	toolOwners        map[string]string
 	failures          map[string]ErrorCode
 	customTransports  map[string]sdk.Transport
+	plugins           []PluginServer
+	pluginDrift       map[string][]string
 	mu                sync.Mutex
 	closed            bool
 }
@@ -96,6 +99,9 @@ func NewManager(opts *ManagerOptions) (*Manager, error) {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+	if err := validatePluginServers(opts.Plugins, opts.Config); err != nil {
+		return nil, err
+	}
 
 	return &Manager{
 		cfg:               opts.Config,
@@ -113,6 +119,8 @@ func NewManager(opts *ManagerOptions) (*Manager, error) {
 		toolOwners:        make(map[string]string),
 		failures:          make(map[string]ErrorCode),
 		customTransports:  make(map[string]sdk.Transport),
+		plugins:           clonePluginServers(opts.Plugins),
+		pluginDrift:       make(map[string][]string),
 	}, nil
 }
 
@@ -185,18 +193,28 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.mu.Unlock()
 		return Errorf(ErrServerUnavailable, "manager is closed")
 	}
-	servers := slices.Clone(m.cfg.Servers)
+	targets := make([]startTarget, 0, len(m.cfg.Servers)+len(m.plugins))
+	for i := range m.cfg.Servers {
+		server := m.cfg.Servers[i]
+		targets = append(targets, startTarget{key: server.Name, server: &server})
+	}
+	for i := range m.plugins {
+		plugin := clonePluginServer(&m.plugins[i])
+		server := plugin.Server
+		server.Name = pluginServerName(plugin.ID)
+		targets = append(targets, startTarget{key: pluginKey(plugin.ID), server: &server, plugin: &plugin})
+	}
 	transports := maps.Clone(m.customTransports)
 	m.mu.Unlock()
 
-	errs := make([]error, len(servers))
+	errs := make([]error, len(targets))
 	var group errgroup.Group
 	group.SetLimit(startConcurrency)
-	for i := range servers {
+	for i := range targets {
 		group.Go(func() error {
-			serverCfg := &servers[i]
-			err := m.startServer(ctx, serverCfg, transports[serverCfg.Name])
-			m.recordOutcome(ctx, serverCfg.Name, err)
+			target := &targets[i]
+			err := m.startServer(ctx, target, transports[target.key])
+			m.recordOutcome(ctx, target.key, err)
 			errs[i] = err
 			return nil
 		})
@@ -223,23 +241,18 @@ func (m *Manager) recordOutcome(ctx context.Context, serverName string, err erro
 	)
 }
 
-func (m *Manager) startServer(ctx context.Context, serverCfg *config.MCPServer, transport sdk.Transport) error {
+func (m *Manager) startServer(ctx context.Context, target *startTarget, transport sdk.Transport) error {
+	serverCfg := target.server
 	if m.capabilityChecker != nil && len(serverCfg.Capabilities) > 0 {
 		if err := m.capabilityChecker(serverCfg.Capabilities); err != nil {
 			return Wrap(ErrCapabilityUnavailable, err, "server "+serverCfg.Name+": required capabilities unavailable")
 		}
 	}
 
-	configDigest, err := ComputeConfigDigest(serverCfg)
-	if err != nil {
-		return err
-	}
-	approved, err := m.trustRegistry.IsConfigTrusted(ctx, serverCfg.Name, configDigest)
-	if err != nil {
-		return Errorf(ErrTrustRequired, "server %q trust registry is unavailable", serverCfg.Name)
-	}
-	if !approved {
-		return Errorf(ErrTrustRequired, "server %q requires owner approval before it is started", serverCfg.Name)
+	if target.plugin == nil {
+		if err := m.requireConfigTrust(ctx, serverCfg); err != nil {
+			return err
+		}
 	}
 
 	client, err := NewClient(serverCfg, m.logger,
@@ -261,12 +274,15 @@ func (m *Manager) startServer(ctx context.Context, serverCfg *config.MCPServer, 
 		_ = client.Close(ctx)
 		return err
 	}
-	if err := m.pinToolSurface(ctx, serverCfg, discovered); err != nil {
+	var drift []string
+	if target.plugin != nil {
+		discovered, drift = splitApprovedTools(discovered, target.plugin.Tools)
+	} else if err := m.pinToolSurface(ctx, serverCfg, discovered); err != nil {
 		_ = client.Close(ctx)
 		return err
 	}
 
-	registered, err := m.registerTools(ctx, client, serverCfg, discovered)
+	registered, err := m.registerTools(ctx, client, target, discovered)
 	if err != nil {
 		_ = client.Close(ctx)
 		return err
@@ -279,11 +295,14 @@ func (m *Manager) startServer(ctx context.Context, serverCfg *config.MCPServer, 
 		_ = client.Close(ctx)
 		return Errorf(ErrServerUnavailable, "manager is closed")
 	}
-	previous := m.clients[serverCfg.Name]
-	previousTools := m.registeredTools[serverCfg.Name]
-	m.clients[serverCfg.Name] = client
-	m.registeredTools[serverCfg.Name] = registered
-	delete(m.failures, serverCfg.Name)
+	previous := m.clients[target.key]
+	previousTools := m.registeredTools[target.key]
+	m.clients[target.key] = client
+	m.registeredTools[target.key] = registered
+	delete(m.failures, target.key)
+	if target.plugin != nil {
+		m.pluginDrift[target.plugin.ID] = drift
+	}
 	m.mu.Unlock()
 	if previous != nil {
 		m.unregisterStale(previousTools, registered)
@@ -292,9 +311,31 @@ func (m *Manager) startServer(ctx context.Context, serverCfg *config.MCPServer, 
 
 	m.logger.InfoContext(ctx, "server tools registered",
 		"component", "mcp_manager",
-		"server", serverCfg.Name,
+		"server", target.key,
 		"tool_count", len(registered),
 	)
+	if len(drift) > 0 {
+		m.logger.WarnContext(ctx, "plugin offers tools it was not approved for",
+			"component", "mcp_manager",
+			"server", target.key,
+			"hidden_count", len(drift),
+		)
+	}
+	return nil
+}
+
+func (m *Manager) requireConfigTrust(ctx context.Context, serverCfg *config.MCPServer) error {
+	configDigest, err := ComputeConfigDigest(serverCfg)
+	if err != nil {
+		return err
+	}
+	approved, err := m.trustRegistry.IsConfigTrusted(ctx, serverCfg.Name, configDigest)
+	if err != nil {
+		return Errorf(ErrTrustRequired, "server %q trust registry is unavailable", serverCfg.Name)
+	}
+	if !approved {
+		return Errorf(ErrTrustRequired, "server %q requires owner approval before it is started", serverCfg.Name)
+	}
 	return nil
 }
 
@@ -331,23 +372,29 @@ func (m *Manager) pinToolSurface(ctx context.Context, serverCfg *config.MCPServe
 	return nil
 }
 
-func (m *Manager) registerTools(ctx context.Context, client *Client, serverCfg *config.MCPServer, discovered []DiscoveredTool) ([]string, error) {
+func (m *Manager) registerTools(ctx context.Context, client *Client, target *startTarget, discovered []DiscoveredTool) ([]string, error) {
+	serverCfg := target.server
 	registered := make([]string, 0, len(discovered))
 	for i := range discovered {
 		tool := &discovered[i]
 		namespaced := FormatToolName(serverCfg.Name, tool.Name)
+		var pluginRef *tools.PluginRef
+		if target.plugin != nil {
+			namespaced = tools.PluginToolWireName(target.plugin.ID, tool.Name)
+			pluginRef = &tools.PluginRef{ID: target.plugin.ID, Description: target.plugin.approvedDescription(tool.Name)}
+		}
 		if len(namespaced) > maxExposedToolNameSize {
 			m.logger.WarnContext(ctx, "tool skipped because its exposed name is too long",
 				"component", "mcp_manager",
-				"server", serverCfg.Name,
+				"server", target.key,
 				"tool", tool.Name,
 			)
 			continue
 		}
-		if !m.claimToolName(namespaced, serverCfg.Name) {
+		if !m.claimToolName(namespaced, target.key) {
 			m.logger.WarnContext(ctx, "tool skipped because another server provides the same exposed name",
 				"component", "mcp_manager",
-				"server", serverCfg.Name,
+				"server", target.key,
 				"tool", tool.Name,
 			)
 			continue
@@ -359,7 +406,8 @@ func (m *Manager) registerTools(ctx context.Context, client *Client, serverCfg *
 		def := tools.Definition{
 			Name:                 namespaced,
 			Version:              toolVersion,
-			Server:               serverCfg.Name,
+			Server:               serverNameFor(target),
+			Plugin:               pluginRef,
 			Schema:               schema,
 			RequiredCapabilities: slices.Clone(serverCfg.Capabilities),
 			RequiresApproval:     true,
@@ -390,6 +438,13 @@ func (m *Manager) registerTools(ctx context.Context, client *Client, serverCfg *
 		registered = append(registered, namespaced)
 	}
 	return registered, nil
+}
+
+func serverNameFor(target *startTarget) string {
+	if target.plugin != nil {
+		return ""
+	}
+	return target.server.Name
 }
 
 func (m *Manager) claimToolName(namespaced, serverName string) bool {

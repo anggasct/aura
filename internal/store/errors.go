@@ -54,6 +54,9 @@ const (
 	ErrorCodeAPIKeyConflict            ErrorCode = "apikey_conflict"
 	ErrorCodeAPIKeyNotFound            ErrorCode = "apikey_not_found"
 	ErrorCodeAPIKeyInvalid             ErrorCode = "apikey_invalid"
+	ErrorCodePluginConflict            ErrorCode = "plugin_conflict"
+	ErrorCodePluginNotFound            ErrorCode = "plugin_not_found"
+	ErrorCodePluginInvalid             ErrorCode = "plugin_invalid"
 )
 
 type Error struct {

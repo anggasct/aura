@@ -34,11 +34,13 @@ type mcpRuntimeOptions struct {
 	SessionStarter mcp.SessionStarter
 	Resolver       egress.Resolver
 	TrustPath      string
+	Plugins        []mcp.PluginServer
 }
 
 type mcpRuntime struct {
-	manager *mcp.Manager
-	check   health.RegisteredCheck
+	manager  *mcp.Manager
+	check    health.RegisteredCheck
+	hasCheck bool
 }
 
 func (r *mcpRuntime) Close(ctx context.Context) error {
@@ -53,8 +55,12 @@ func startMCPRuntime(ctx context.Context, opts *mcpRuntimeOptions) (*mcpRuntime,
 		return nil, errors.New("mcp runtime requires configuration, a tool broker and a logger")
 	}
 	servers := configuredMCPServers(opts.Config)
-	if len(servers) == 0 {
-		return nil, errors.New("no mcp servers are configured")
+	if len(servers) == 0 && len(opts.Plugins) == 0 {
+		return nil, errors.New("no mcp servers or plugins are configured")
+	}
+	mcpConfig := opts.Config.MCP
+	if mcpConfig == nil {
+		mcpConfig = &config.MCP{}
 	}
 	registry, err := mcp.NewFileTrustRegistry(opts.TrustPath)
 	if err != nil {
@@ -65,7 +71,8 @@ func startMCPRuntime(ctx context.Context, opts *mcpRuntimeOptions) (*mcpRuntime,
 		starter = newMCPSessionStarter(sandbox.Start)
 	}
 	manager, err := mcp.NewManager(&mcp.ManagerOptions{
-		Config:            opts.Config.MCP,
+		Config:            mcpConfig,
+		Plugins:           opts.Plugins,
 		Broker:            opts.Broker,
 		TrustRegistry:     registry,
 		HTTPClient:        mcpHTTPClient(opts.Resolver),
@@ -93,15 +100,17 @@ func startMCPRuntime(ctx context.Context, opts *mcpRuntimeOptions) (*mcpRuntime,
 		"running", running,
 		"degraded", len(statuses)-running,
 	)
-	return &mcpRuntime{
-		manager: manager,
-		check: health.RegisteredCheck{
+	runtime := &mcpRuntime{manager: manager}
+	if len(servers) > 0 {
+		runtime.check = health.RegisteredCheck{
 			ID:          mcpHealthCheckID,
 			Checker:     mcp.NewServerChecker(servers, manager.Statuses),
 			Timeout:     time.Duration(opts.Config.Health.CheckTimeout),
 			Remediation: mcp.RemediationReviewServer,
-		},
-	}, nil
+		}
+		runtime.hasCheck = true
+	}
+	return runtime, nil
 }
 
 func mcpCapabilityChecker(statuses []health.CapabilityStatus) func([]string) error {
@@ -132,7 +141,7 @@ func (r *mcpRuntime) warnUnexposedPersonaTools(ctx context.Context, logger *slog
 	}
 }
 
-func startConfiguredMCP(ctx context.Context, cfg *config.Config, broker *toolbroker.Broker, logger *slog.Logger, meters metric.MeterProvider, capabilities []health.CapabilityStatus, personas []auraagent.Definition) (*mcpRuntime, error) {
+func startConfiguredMCP(ctx context.Context, cfg *config.Config, broker *toolbroker.Broker, logger *slog.Logger, meters metric.MeterProvider, capabilities []health.CapabilityStatus, personas []auraagent.Definition, plugins []mcp.PluginServer) (*mcpRuntime, error) {
 	recorder, err := telemetry.NewMCPRecorder(meters)
 	if err != nil {
 		return nil, err
@@ -148,6 +157,7 @@ func startConfiguredMCP(ctx context.Context, cfg *config.Config, broker *toolbro
 		Recorder:     recorder,
 		Capabilities: capabilities,
 		TrustPath:    trustPath,
+		Plugins:      plugins,
 	})
 	if err != nil {
 		return nil, err

@@ -237,6 +237,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateMCP(cfg.MCP); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validatePlugins(cfg.Plugins); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateWebhook(&cfg.Webhook, cfg.Health.Listen); err != nil {
 		return LoadResult{}, err
 	}
@@ -431,6 +434,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateMCPShapes(doc); err != nil {
+		return err
+	}
+	if err := validatePluginsShapes(doc); err != nil {
 		return err
 	}
 	if err := validateWebhookShapes(doc); err != nil {
@@ -1611,7 +1617,7 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 		return fmt.Errorf("agents.definitions must be a list at line %d", definitionsNode.Line)
 	}
 	stringFields := []string{"id", "name", "description", "instructions", "soul_file", "model_route", "memory_scope", "audience", "approval_timeout", "group_context"}
-	listFields := []string{"tools", "capabilities", "principal_tools", "public_tools", "workflows"}
+	listFields := []string{"tools", "capabilities", "principal_tools", "public_tools", "workflows", "plugins"}
 	for index, item := range definitionsNode.Content {
 		if item.Kind != yamlv3.MappingNode {
 			return fmt.Errorf("agents.definitions entries must be mappings at line %d", item.Line)
@@ -3179,86 +3185,92 @@ func validateMCP(m *MCP) error {
 			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("duplicate mcp server name %q", s.Name)}
 		}
 		seen[s.Name] = struct{}{}
+		if err := ValidateMCPServer(s, fmt.Sprintf("mcp.servers[%s]", s.Name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-		switch s.Transport {
-		case "stdio":
-			if s.Command == "" {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].command is required for stdio transport", s.Name)}
-			}
-			if !filepath.IsAbs(s.Command) {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].command must be an absolute path", s.Name)}
-			}
-			if s.URL != "" {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url is not allowed for stdio transport", s.Name)}
-			}
-			if s.Auth != nil {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth is not allowed for stdio transport", s.Name)}
-			}
-		case "streamable_http":
-			if s.URL == "" {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url is required for streamable_http transport", s.Name)}
-			}
-			if s.Command != "" || len(s.Args) > 0 {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].command/args are not allowed for streamable_http transport", s.Name)}
-			}
-			if err := ValidateBaseURL(s.URL); err != nil {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url invalid: %v", s.Name, err)}
-			}
-		case "legacy_sse":
-			if !s.CompatibilityAck {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s] legacy_sse requires compatibility_ack: true", s.Name)}
-			}
-			if s.URL == "" {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url is required for legacy_sse transport", s.Name)}
-			}
-			if err := ValidateBaseURL(s.URL); err != nil {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].url invalid: %v", s.Name, err)}
-			}
-		default:
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].transport must be stdio, streamable_http, or legacy_sse", s.Name)}
+func ValidateMCPServer(s *MCPServer, field string) error {
+	switch s.Transport {
+	case "stdio":
+		if s.Command == "" {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".command is required for stdio transport"}
 		}
-
-		if s.StartupTimeout < 0 {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].startup_timeout must not be negative", s.Name)}
+		if !filepath.IsAbs(s.Command) {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".command must be an absolute path"}
 		}
-		if s.RequestTimeout < 0 {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].request_timeout must not be negative", s.Name)}
+		if s.URL != "" {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".url is not allowed for stdio transport"}
 		}
-		if s.ConnectTimeout < 0 {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].connect_timeout must not be negative", s.Name)}
-		}
-		if s.MaxMessageSize < 0 {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].max_message_size must not be negative", s.Name)}
-		}
-
-		if s.Restart != nil {
-			if s.Restart.MaxAttempts < 0 {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].restart.max_attempts must not be negative", s.Name)}
-			}
-			if s.Restart.Window < 0 {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].restart.window must not be negative", s.Name)}
-			}
-		}
-
 		if s.Auth != nil {
-			if s.Auth.OAuth != nil && s.Auth.Static != nil {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth must declare either oauth or static, not both", s.Name)}
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth is not allowed for stdio transport"}
+		}
+	case "streamable_http":
+		if s.URL == "" {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".url is required for streamable_http transport"}
+		}
+		if s.Command != "" || len(s.Args) > 0 {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".command/args are not allowed for streamable_http transport"}
+		}
+		if err := ValidateBaseURL(s.URL); err != nil {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.url invalid: %v", field, err)}
+		}
+	case "legacy_sse":
+		if !s.CompatibilityAck {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " legacy_sse requires compatibility_ack: true"}
+		}
+		if s.URL == "" {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".url is required for legacy_sse transport"}
+		}
+		if err := ValidateBaseURL(s.URL); err != nil {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.url invalid: %v", field, err)}
+		}
+	default:
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".transport must be stdio, streamable_http, or legacy_sse"}
+	}
+
+	if s.StartupTimeout < 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".startup_timeout must not be negative"}
+	}
+	if s.RequestTimeout < 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".request_timeout must not be negative"}
+	}
+	if s.ConnectTimeout < 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".connect_timeout must not be negative"}
+	}
+	if s.MaxMessageSize < 0 {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".max_message_size must not be negative"}
+	}
+
+	if s.Restart != nil {
+		if s.Restart.MaxAttempts < 0 {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".restart.max_attempts must not be negative"}
+		}
+		if s.Restart.Window < 0 {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".restart.window must not be negative"}
+		}
+	}
+
+	if s.Auth != nil {
+		if s.Auth.OAuth != nil && s.Auth.Static != nil {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth must declare either oauth or static, not both"}
+		}
+		if s.Auth.OAuth == nil && s.Auth.Static == nil {
+			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth must declare either oauth or static"}
+		}
+		if s.Auth.OAuth != nil {
+			if s.Auth.OAuth.ClientIDEnv == "" {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth.oauth.client_id_env is required"}
 			}
-			if s.Auth.OAuth == nil && s.Auth.Static == nil {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth must declare either oauth or static", s.Name)}
+			if s.Auth.OAuth.ClientSecretEnv == "" {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth.oauth.client_secret_env is required"}
 			}
-			if s.Auth.OAuth != nil {
-				if s.Auth.OAuth.ClientIDEnv == "" {
-					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth.oauth.client_id_env is required", s.Name)}
-				}
-				if s.Auth.OAuth.ClientSecretEnv == "" {
-					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth.oauth.client_secret_env is required", s.Name)}
-				}
-			}
-			if s.Auth.Static != nil {
-				if s.Auth.Static.CredentialRef == "" {
-					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%s].auth.static.credential_ref is required", s.Name)}
-				}
+		}
+		if s.Auth.Static != nil {
+			if s.Auth.Static.CredentialRef == "" {
+				return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth.static.credential_ref is required"}
 			}
 		}
 	}
@@ -3270,19 +3282,22 @@ func applyMCPDefaults(cfg *Config, _ *yamlv3.Node) {
 		return
 	}
 	for i := range cfg.MCP.Servers {
-		s := &cfg.MCP.Servers[i]
-		if s.StartupTimeout == 0 {
-			s.StartupTimeout = Duration(10 * time.Second)
-		}
-		if s.RequestTimeout == 0 {
-			s.RequestTimeout = Duration(30 * time.Second)
-		}
-		if s.MaxMessageSize == 0 {
-			s.MaxMessageSize = 1024 * 1024
-		}
-		if s.Transport == "streamable_http" && s.ConnectTimeout == 0 {
-			s.ConnectTimeout = Duration(10 * time.Second)
-		}
+		ApplyMCPServerDefaults(&cfg.MCP.Servers[i])
+	}
+}
+
+func ApplyMCPServerDefaults(s *MCPServer) {
+	if s.StartupTimeout == 0 {
+		s.StartupTimeout = Duration(10 * time.Second)
+	}
+	if s.RequestTimeout == 0 {
+		s.RequestTimeout = Duration(30 * time.Second)
+	}
+	if s.MaxMessageSize == 0 {
+		s.MaxMessageSize = 1024 * 1024
+	}
+	if s.Transport == "streamable_http" && s.ConnectTimeout == 0 {
+		s.ConnectTimeout = Duration(10 * time.Second)
 	}
 }
 

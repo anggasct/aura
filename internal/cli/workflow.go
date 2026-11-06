@@ -318,8 +318,9 @@ func newWorkflowToolRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger) 
 		return nil, fmt.Errorf("register github tools: %w", err)
 	}
 	caps := make(map[string][]string)
-	for _, def := range executor.Definitions() {
-		caps[def.Name] = slices.Clone(def.RequiredCapabilities)
+	definitions := executor.Definitions()
+	for i := range definitions {
+		caps[definitions[i].Name] = slices.Clone(definitions[i].RequiredCapabilities)
 	}
 	return &workflowToolRunner{executor: executor, db: db, caps: caps}, nil
 }

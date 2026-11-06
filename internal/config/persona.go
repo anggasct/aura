@@ -128,6 +128,9 @@ func validatePersonaAccess(cfg *Config) error {
 		if sorted := slices.Sorted(slices.Values(definition.Workflows)); len(slices.Compact(sorted)) != len(definition.Workflows) {
 			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".workflows must not list a workflow twice"}
 		}
+		if err := validatePluginList(field, definition.Plugins); err != nil {
+			return err
+		}
 		if timeout := time.Duration(definition.ApprovalTimeout); timeout != 0 && (timeout < MinApprovalTimeout || timeout > MaxApprovalTimeout) {
 			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".approval_timeout must be between 1m and 24h"}
 		}

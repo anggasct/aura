@@ -267,8 +267,9 @@ func (h *mcpHarness) approveServer(t *testing.T, name string) {
 
 func (h *mcpHarness) toolNames() []string {
 	var names []string
-	for _, definition := range h.executor.Definitions() {
-		names = append(names, definition.Name)
+	definitions := h.executor.Definitions()
+	for i := range definitions {
+		names = append(names, definitions[i].Name)
 	}
 	return names
 }
