@@ -379,3 +379,33 @@ func TestValidateRejectsSpecialPurposeRanges(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateLiteralDestinationRejectsNonPublicLiteralsAndNames(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		ok   bool
+	}{
+		{"public ipv4", "https://203.0.113.5/v1", true},
+		{"public ipv6", "https://[2606:4700::1111]/v1", true},
+		{"loopback", "https://127.0.0.1/v1", false},
+		{"ipv6 loopback", "https://[::1]/v1", false},
+		{"private", "https://10.0.0.5/v1", false},
+		{"link local metadata", "https://169.254.169.254/v1", false},
+		{"hostname", "https://api.example.com/v1", false},
+		{"plain http", "http://203.0.113.5/v1", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateLiteralDestination(tc.raw)
+			if tc.ok != (err == nil) {
+				t.Fatalf("ValidateLiteralDestination(%q) = %v, want ok=%v", tc.raw, err, tc.ok)
+			}
+			if err != nil {
+				if code, coded := CodeOf(err); !coded || code != ErrorCodeEgressDenied {
+					t.Fatalf("error = %v, want egress_denied", err)
+				}
+			}
+		})
+	}
+}

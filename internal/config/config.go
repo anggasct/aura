@@ -49,6 +49,7 @@ type Config struct {
 	Access       *Access               `koanf:"access" yaml:"access,omitempty"`
 	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
 	Vision       *Vision               `koanf:"vision" yaml:"vision,omitempty"`
+	Knowledge    *Knowledge            `koanf:"knowledge" yaml:"knowledge,omitempty"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 	Bindings     []Binding             `koanf:"bindings" yaml:"bindings,omitempty"`
 }
