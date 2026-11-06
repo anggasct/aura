@@ -214,3 +214,31 @@ func TestRegistryCopiesDefinitionProfiles(t *testing.T) {
 		t.Fatalf("Resolve after caller mutation: %v", err)
 	}
 }
+
+func TestBuiltinRegistryDefinesCodeInterpreter(t *testing.T) {
+	registry, err := BuiltinRegistry()
+	if err != nil {
+		t.Fatalf("BuiltinRegistry: %v", err)
+	}
+	definition, ok := registry.definitions["code-interpreter"]
+	if !ok {
+		t.Fatal("code-interpreter is not registered")
+	}
+	if !definition.Effectful || definition.Dependency != DependencyInterpreterRuntime {
+		t.Errorf("definition = %+v, want effectful with the interpreter-runtime dependency", definition)
+	}
+	if !slices.Equal(definition.Profiles, []Profile{ProfileExecLinux, ProfileNativeLinux}) {
+		t.Errorf("profiles = %v, want exec-linux and native-linux only", definition.Profiles)
+	}
+	for _, profile := range []Profile{ProfileCore, ProfileBrowserLinux} {
+		build, err := NewBuild(string(profile), []string{"code-interpreter"}, "linux")
+		if err != nil {
+			t.Fatalf("NewBuild(%s): %v", profile, err)
+		}
+		report, resolveErr := registry.Resolve(build, []string{"code-interpreter"}, Dependencies{DependencyInterpreterRuntime: true})
+		requireErrorCode(t, resolveErr, ErrorCodeCapabilityUnavailable)
+		if status, _ := report.Status("code-interpreter"); status.Available {
+			t.Errorf("code-interpreter is available in profile %s", profile)
+		}
+	}
+}

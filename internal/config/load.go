@@ -29,6 +29,7 @@ import (
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/sandbox"
 	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
 const (
@@ -141,7 +142,7 @@ func Load(path string) (LoadResult, error) {
 	if err != nil {
 		return LoadResult{}, fmt.Errorf("config: %w", err)
 	}
-	return LoadWithOptions(path, LoadOptions{Build: build, Registry: registry, Dependencies: sandbox.CapabilityDependencies()})
+	return LoadWithOptions(path, LoadOptions{Build: build, Registry: registry, Dependencies: interpreter.HostDependencies(sandbox.CapabilityDependencies())})
 }
 
 func LoadWithOptions(path string, options LoadOptions) (LoadResult, error) {
@@ -205,6 +206,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	if err := validateKnowledge(cfg.Knowledge); err != nil {
+		return LoadResult{}, err
+	}
+	if err := validateInterpreter(&cfg.Interpreter); err != nil {
 		return LoadResult{}, err
 	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
@@ -494,6 +498,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateKnowledgeShapes(doc); err != nil {
+		return err
+	}
+	if err := validateInterpreterShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -2358,6 +2365,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applySyncDefaults(cfg, doc)
 	applyVisionDefaults(cfg, doc)
 	applyKnowledgeDefaults(cfg, doc)
+	applyInterpreterDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	applyTelegramDefaults(cfg, doc, &defaults.Channels.Telegram)
 	applyEmailDefaults(cfg, doc, &defaults.Channels.Email)

@@ -27,6 +27,7 @@ import (
 	"github.com/anggasct/aura/internal/telemetry"
 	"github.com/anggasct/aura/internal/toolbroker"
 	"github.com/anggasct/aura/internal/tools/builtin"
+	"github.com/anggasct/aura/internal/tools/interpreter"
 	"github.com/anggasct/aura/internal/workflow"
 )
 
@@ -254,6 +255,18 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				kbRuntime.attachSearch(builtin)
 				executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
 			}
+			var interpreterRun *interpreterRuntime
+			if interpreterEnabled(result.CapabilityReport) {
+				interpreterManifest, err := interpreter.DefaultManifest()
+				if err != nil {
+					return err
+				}
+				interpreterRun, err = newInterpreterRuntime(cfg, interpreterManifest)
+				if err != nil {
+					return err
+				}
+				healthChecks = append(slices.Clone(healthChecks), interpreterRun.check(cfg))
+			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
 				executorOpts...,
@@ -451,6 +464,9 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				sweeps.Go(func() {
 					newWorkflowCompletionNotifier(cfg, db, agentRegistry, logger).run(sweepCtx, workflowCompletionInterval)
 				})
+			}
+			if interpreterRun != nil {
+				sweeps.Go(func() { interpreterRun.run(sweepCtx, logger) })
 			}
 			sweeps.Go(func() {
 				runPersonaEvalSchedules(sweepCtx, result.Path, db, agentRegistry, behaviorModels{defaultModel: modelDefinition.Model, route: routeModel}, logger, wallEvalClock)

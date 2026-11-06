@@ -90,7 +90,11 @@ func runStatus(cmd *cobra.Command, cfg *config.Config, report capability.Report,
 	ctx := cmd.Context()
 	live, liveReachable := liveReadiness(ctx, offline, cfg.Health.Listen)
 	daemon := daemonSandboxState(live, liveReachable)
-	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), statusSandboxSupport(daemon, negotiate), processProbe)
+	interpreterChecks, err := interpreterStatusChecks(cfg, report)
+	if err != nil {
+		return &exitCodeError{code: exitCommand, err: err}
+	}
+	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), statusSandboxSupport(daemon, negotiate), processProbe, interpreterChecks...)
 	if err != nil {
 		return &exitCodeError{code: exitCommand, err: err}
 	}

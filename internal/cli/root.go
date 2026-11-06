@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
 type usageError struct {
@@ -52,7 +53,7 @@ func newRootCmd() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newSkillsCmd(gf), newProfileCmd(gf), newMemoryCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newReplyCmd(gf), newHandoffCmd(gf), newWorkflowCmd(gf), newDurableCmd(gf), newBroadcastCmd(gf), newScheduleCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newMCPCmd(gf), newPluginCmd(gf), newAPIKeyCmd(gf), newKBCmd(gf))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newSkillsCmd(gf), newProfileCmd(gf), newMemoryCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newReplyCmd(gf), newHandoffCmd(gf), newWorkflowCmd(gf), newDurableCmd(gf), newBroadcastCmd(gf), newScheduleCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newMCPCmd(gf), newPluginCmd(gf), newAPIKeyCmd(gf), newKBCmd(gf), newInterpreterCmd(gf, interpreterDeps{load: config.Load, manifest: interpreter.DefaultManifest, platformSupported: interpreter.HostSupported}))
 	return root
 }
 

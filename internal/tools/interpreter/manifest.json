@@ -1,0 +1,37 @@
+{
+  "runtimes": [
+    {
+      "id": "python",
+      "version": "3.12.16+20261026",
+      "archive": "cpython-3.12.16+20261026-x86_64-unknown-linux-gnu-install_only.tar.gz",
+      "sha256": "6a79e922e50006b601f29e688407659da1c2b86ebcd4e9c7254cf234be8b89de",
+      "executable": "python/bin/python3.12",
+      "argv": ["{executable}", "-I", "-B", "-X", "utf8", "{source}"]
+    },
+    {
+      "id": "javascript",
+      "version": "26.13.0",
+      "archive": "node-v26.13.0-linux-x64.tar.gz",
+      "sha256": "5848553868b402d3fabb5b09270649977780a390f832155721025a08b5104455",
+      "executable": "node-v26.13.0-linux-x64/bin/node",
+      "argv": ["{executable}", "{source}"],
+      "environment": {
+        "OPENSSL_CONF": "/dev/null"
+      }
+    },
+    {
+      "id": "go",
+      "version": "1.27.3",
+      "archive": "go1.27.3.linux-amd64.tar.gz",
+      "sha256": "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40",
+      "executable": "go/bin/go",
+      "argv": ["{executable}", "run", "{source}"],
+      "environment": {
+        "CGO_ENABLED": "0",
+        "GOFLAGS": "-mod=mod",
+        "GOPROXY": "off",
+        "GOTOOLCHAIN": "local"
+      }
+    }
+  ]
+}
