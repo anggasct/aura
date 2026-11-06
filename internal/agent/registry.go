@@ -145,6 +145,10 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mcpS
 		EvalDir:         override.Evals.Dir,
 		Workflows:       slices.Clone(override.Workflows),
 		Plugins:         slices.Clone(override.Plugins),
+
+		Knowledge:          slices.Clone(override.Knowledge),
+		PrincipalKnowledge: slices.Clone(override.PrincipalKnowledge),
+		PublicKnowledge:    slices.Clone(override.PublicKnowledge),
 	}
 	if behavior := override.Evals.Behavior; behavior != nil {
 		definition.EvalBehavior = &EvalBehavior{
@@ -225,6 +229,8 @@ func validateToolCeilings(definition *Definition, field string, knownTools, mcpS
 	available := definition.Tools
 	if len(available) == 0 {
 		available = knownTools
+	} else if len(definition.Knowledge) > 0 && !slices.Contains(available, tools.KBSearchToolName) {
+		available = append(slices.Clone(available), tools.KBSearchToolName)
 	}
 	for _, tool := range definition.PrincipalTools {
 		if tools.IsPluginEntry(tool) {

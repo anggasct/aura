@@ -549,6 +549,7 @@ func (e *Engine) stampPersona(req *runtime.TurnRequest) error {
 		return codedError(runtime.ErrorCodePersonaNotFound, fmt.Sprintf("persona %q is not registered", req.AgentID), nil)
 	}
 	req.Persona = &fingerprint
+	req.Knowledge = e.cfg.Personas.Knowledge(req.AgentID, req.PrincipalClass)
 	return nil
 }
 

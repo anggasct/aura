@@ -78,6 +78,10 @@ const (
 	MaxEmailSubjectBytes = 160
 	MaxEmailBodyBytes    = 65536
 
+	KBSearchToolName       = "kb_search"
+	MaxKBSearchQueryRunes  = 500
+	MaxKBSearchResultLimit = 10
+
 	WorkflowListToolName        = "workflow_list"
 	WorkflowStartToolName       = "workflow_start"
 	WorkflowStatusToolName      = "workflow_status"
@@ -98,8 +102,13 @@ type Definition struct {
 	RequiresApproval     bool
 	Effectful            bool
 	OptIn                bool
+	ExternalSink         bool
 	Display              []string
 	Validator            func(raw json.RawMessage) (json.RawMessage, error)
+}
+
+func (d *Definition) IsExternalSink() bool {
+	return d.ExternalSink || d.Server != "" || d.Plugin != nil
 }
 
 func (d *Definition) Key() string {
@@ -226,6 +235,24 @@ func (d *Definition) validate(raw json.RawMessage) (json.RawMessage, error) {
 		}
 	case EmailSendToolName:
 		return validateEmailSend(value)
+	case KBSearchToolName:
+		if err := rejectUnknown(value, "query", "limit"); err != nil {
+			return nil, err
+		}
+		if err := validateString(value, "query"); err != nil {
+			return nil, err
+		}
+		if query, _ := value["query"].(string); utf8.RuneCountInString(query) > MaxKBSearchQueryRunes {
+			return nil, fmt.Errorf("argument %q must be at most %d characters", "query", MaxKBSearchQueryRunes)
+		}
+		if err := validateOptionalInteger(value, "limit", 1); err != nil {
+			return nil, err
+		}
+		if limit, ok := value["limit"].(json.Number); ok {
+			if n, _ := limit.Int64(); n > MaxKBSearchResultLimit {
+				return nil, fmt.Errorf("argument %q must be at most %d", "limit", MaxKBSearchResultLimit)
+			}
+		}
 	case "web_search":
 		if err := rejectUnknown(value, "query", "max_results"); err != nil {
 			return nil, err
@@ -248,14 +275,15 @@ func Builtins() []Definition {
 		{Name: "read_file", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/read_file/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"max_bytes":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-read"}},
 		{Name: "write_file", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/write_file/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"content":{"type":"string"},"overwrite":{"type":"boolean"}},"required":["path","content"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-write"}, RequiresApproval: true, Effectful: true},
 		{Name: "list_dir", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/list_dir/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"recursive":{"type":"boolean"}},"required":["path"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-read"}},
-		{Name: "web_fetch", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_fetch/v1","type":"object","properties":{"url":{"type":"string","format":"uri","minLength":1}},"required":["url"],"additionalProperties":false}`), RequiredCapabilities: []string{"public-web"}},
-		{Name: "web_search", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1},"max_results":{"type":"integer","minimum":1}},"required":["query"],"additionalProperties":false}`), RequiredCapabilities: []string{"provider-search"}},
+		{Name: "web_fetch", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_fetch/v1","type":"object","properties":{"url":{"type":"string","format":"uri","minLength":1}},"required":["url"],"additionalProperties":false}`), RequiredCapabilities: []string{"public-web"}, ExternalSink: true},
+		{Name: "web_search", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1},"max_results":{"type":"integer","minimum":1}},"required":["query"],"additionalProperties":false}`), RequiredCapabilities: []string{"provider-search"}, ExternalSink: true},
+		{Name: KBSearchToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/kb_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":500},"limit":{"type":"integer","minimum":1,"maximum":10}},"required":["query"],"additionalProperties":false}`)},
 		{Name: HandoffToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/handoff_to_owner/v1","type":"object","properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"],"additionalProperties":false}`), OptIn: true},
 		{Name: EmailSendToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/email_send/v1","type":"object","properties":{"to":{"type":"string","minLength":3,"maxLength":254},"subject":{"type":"string","minLength":1,"maxLength":160},"body":{"type":"string","minLength":1,"maxLength":65536}},"required":["to","subject","body"],"additionalProperties":false}`), Effectful: true, OptIn: true},
 		{Name: WorkflowListToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_list/v1","type":"object","properties":{},"additionalProperties":false}`), OptIn: true},
-		{Name: WorkflowStartToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_start/v1","type":"object","properties":{"id":{"type":"string","minLength":1},"objective":{"type":"string","maxLength":2000}},"required":["id"],"additionalProperties":false}`), OptIn: true},
+		{Name: WorkflowStartToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_start/v1","type":"object","properties":{"id":{"type":"string","minLength":1},"objective":{"type":"string","maxLength":2000}},"required":["id"],"additionalProperties":false}`), OptIn: true, ExternalSink: true},
 		{Name: WorkflowStatusToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_status/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true},
-		{Name: WorkflowProposeToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_propose/v1","type":"object","properties":{"spec":{"type":"object","properties":{"goal":{"type":"string","minLength":1},"steps":{"type":"array","minItems":1}},"required":["goal","steps"]}},"required":["spec"],"additionalProperties":false}`), OptIn: true},
+		{Name: WorkflowProposeToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_propose/v1","type":"object","properties":{"spec":{"type":"object","properties":{"goal":{"type":"string","minLength":1},"steps":{"type":"array","minItems":1}},"required":["goal","steps"]}},"required":["spec"],"additionalProperties":false}`), OptIn: true, ExternalSink: true},
 		{Name: WorkflowSaveRoutineToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_save_routine/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1,"maxLength":64}},"required":["run_id","name"],"additionalProperties":false}`), OptIn: true},
 		{Name: WorkflowCancelToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_cancel/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true},
 	}

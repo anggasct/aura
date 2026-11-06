@@ -47,6 +47,8 @@ type BuiltinToolRequest struct {
 	EventInvocation string
 	EventBranch     string
 	EventAuthor     string
+	Knowledge       []string
+	Tainted         bool
 }
 
 type BuiltinToolExecutor interface {
@@ -71,10 +73,11 @@ type turnAccess struct {
 	principalID string
 	class       principal.Class
 	agentID     string
+	knowledge   []string
 }
 
-func withTurnAccess(ctx context.Context, principalID string, class principal.Class, agentID string) context.Context {
-	return context.WithValue(ctx, turnAccessContextKey{}, turnAccess{principalID: principalID, class: class, agentID: agentID})
+func withTurnAccess(ctx context.Context, principalID string, class principal.Class, agentID string, knowledge []string) context.Context {
+	return context.WithValue(ctx, turnAccessContextKey{}, turnAccess{principalID: principalID, class: class, agentID: agentID, knowledge: slices.Clone(knowledge)})
 }
 
 func turnAccessFromContext(ctx context.Context) turnAccess {

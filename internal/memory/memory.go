@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/runtime/ingress"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 	defaultTokenBudget  = 2000
 	hardMaxDocuments    = 50
 	hardMaxTokenBudget  = 8000
-	maxQueryRunes       = 500
+	maxQueryRunes       = runtimeingress.MaxQueryRunes
 	maxContentBytes     = 1 << 16
 )
 

@@ -8,8 +8,8 @@ import (
 
 func TestBuiltinsExposeVersionedSchemas(t *testing.T) {
 	definitions := Builtins()
-	if len(definitions) != 14 {
-		t.Fatalf("built-in definitions = %d, want 14", len(definitions))
+	if len(definitions) != 15 {
+		t.Fatalf("built-in definitions = %d, want 15", len(definitions))
 	}
 	for _, definition := range definitions {
 		var schema map[string]any
@@ -112,5 +112,42 @@ func TestEmailSendValidation(t *testing.T) {
 				t.Fatalf("Validate = %s, %v; want %s", got, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestKBSearchValidationIsStrictAndBounded(t *testing.T) {
+	definition := DefinitionsByKey()["kb_search@v1"]
+	if definition == nil || definition.OptIn || definition.Effectful || definition.RequiresApproval {
+		t.Fatalf("kb_search definition = %+v, want a plain read-tier tool", definition)
+	}
+	got, err := definition.Validate(json.RawMessage(`{"query":"refund policy","limit":10}`))
+	if err != nil || string(got) != `{"limit":10,"query":"refund policy"}` {
+		t.Fatalf("Validate = %s, %v", got, err)
+	}
+	valid := []string{`{"query":"refunds"}`, `{"query":"refunds","limit":1}`, `{"query":"` + strings.Repeat("a", MaxKBSearchQueryRunes) + `"}`}
+	for _, raw := range valid {
+		if _, err := definition.Validate(json.RawMessage(raw)); err != nil {
+			t.Errorf("Validate(%.60s) = %v", raw, err)
+		}
+	}
+	invalid := map[string]string{
+		"empty query":       `{"query":""}`,
+		"missing query":     `{"limit":3}`,
+		"long query":        `{"query":"` + strings.Repeat("a", MaxKBSearchQueryRunes+1) + `"}`,
+		"zero limit":        `{"query":"x","limit":0}`,
+		"limit over max":    `{"query":"x","limit":11}`,
+		"fractional limit":  `{"query":"x","limit":2.5}`,
+		"string limit":      `{"query":"x","limit":"3"}`,
+		"collections":       `{"query":"x","collections":["secret"]}`,
+		"scope":             `{"query":"x","scope":["secret"]}`,
+		"collection":        `{"query":"x","collection":"secret"}`,
+		"duplicate keys":    `{"query":"x","query":"y"}`,
+		"not an object":     `"x"`,
+		"trailing document": `{"query":"x"} {"query":"y"}`,
+	}
+	for name, raw := range invalid {
+		if _, err := definition.Validate(json.RawMessage(raw)); err == nil {
+			t.Errorf("%s: Validate(%.60s) accepted invalid arguments", name, raw)
+		}
 	}
 }

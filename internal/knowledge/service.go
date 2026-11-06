@@ -6,9 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/config"
 )
 
 const (
@@ -23,8 +24,6 @@ const (
 	ActionRefresh = "refresh"
 	ActionRemove  = "remove"
 )
-
-var collectionIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,47}$`)
 
 type HTMLReducer func(ctx context.Context, source []byte, maxBytes int64) (markdown string, truncated bool, err error)
 
@@ -140,12 +139,12 @@ func NewService(deps *Deps) (*Service, error) {
 }
 
 func ValidCollectionID(id string) bool {
-	return collectionIDPattern.MatchString(id)
+	return config.ValidKnowledgeCollectionID(id)
 }
 
 func requireCollection(id string) error {
 	if !ValidCollectionID(id) {
-		return Errorf(ErrorCodeCollectionInvalid, "collection id must match %s", collectionIDPattern.String())
+		return Errorf(ErrorCodeCollectionInvalid, "collection id must match %s", config.KnowledgeCollectionIDPattern)
 	}
 	return nil
 }

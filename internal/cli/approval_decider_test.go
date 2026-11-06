@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channel/approval"
+	"github.com/anggasct/aura/internal/channel/terminal"
 	"github.com/anggasct/aura/internal/toolbroker"
 )
 
@@ -102,5 +103,38 @@ func TestChannelApprovalDeciderFailsClosed(t *testing.T) {
 	decider := channelApprovalDecider([]approvalChannel{&fakeApprovalChannel{}})
 	if accepted, err := decider(t.Context(), nil); accepted || err == nil {
 		t.Errorf("decider(nil) = %v, %v; want a denial with an error", accepted, err)
+	}
+}
+
+func TestChannelApprovalReachableMirrorsTheDeciderRouting(t *testing.T) {
+	discordLike := &fakeApprovalChannel{sessions: map[string]bool{"main/discord:owner/dm:1": true}}
+	telegramLike := &fakeApprovalChannel{sessions: map[string]bool{"main/telegram:pocket/chat:2": true}}
+	channels := []approvalChannel{discordLike, telegramLike}
+	reachable := channelApprovalReachable(channels)
+	for session, want := range map[string]bool{
+		"main/discord:owner/dm:1":     true,
+		"main/telegram:pocket/chat:2": true,
+		"main/other/chat:3":           false,
+		"":                            false,
+	} {
+		if got := reachable(session); got != want {
+			t.Errorf("reachable(%q) = %t, want %t", session, got, want)
+		}
+	}
+	if len(discordLike.prompts)+len(telegramLike.prompts) != 0 {
+		t.Error("asking whether a session is reachable must never prompt anyone")
+	}
+	if channelApprovalReachable(nil) != nil {
+		t.Error("no channels must give a nil reachability, which the broker treats as unreachable")
+	}
+}
+
+func TestTerminalApprovalReachableOnlyWhenTheBridgeExists(t *testing.T) {
+	if terminalApprovalReachable(nil) != nil {
+		t.Error("a chat without an approval bridge must be unreachable")
+	}
+	reachable := terminalApprovalReachable(terminal.NewApprovalBridge())
+	if reachable == nil || !reachable("any-session") {
+		t.Error("a TTY chat with the approval bridge must be reachable for every session")
 	}
 }

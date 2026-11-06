@@ -125,8 +125,10 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				}
 			}
 			emailMailboxes := wireEmailOwnerAccess(channelAdapters, ownerRoute, approvalAdapters)
-			approvalDecider := channelApprovalDecider(approvalChannels(approvalAdapters, ownerRoute))
-			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder))
+			approvalTargets := approvalChannels(approvalAdapters, ownerRoute)
+			approvalDecider := channelApprovalDecider(approvalTargets)
+			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder),
+				toolsbuiltin.WithApprovalReachable(channelApprovalReachable(approvalTargets)))
 			if err != nil {
 				return err
 			}
@@ -241,6 +243,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				executorOpts = append(executorOpts, runtimeadk.WithSkillContext(skillRuntime.context))
 				skillRenderer = skillRuntime.context
 				skillCommands = skillRuntime.bridge
+			}
+			kbRuntime, kbEnabled, err := buildKnowledgeRuntime(ctx, cfg, agentRegistry)
+			if err != nil {
+				return err
+			}
+			if kbEnabled {
+				defer kbRuntime.close()
+				kbRuntime.attachSearch(builtin)
+				executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
 			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
 				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,

@@ -44,6 +44,7 @@ type TurnRequest struct {
 	Persona          *PersonaFingerprint
 	Skill            *SkillPin
 	StreamPartial    bool
+	Knowledge        []string
 }
 
 type SkillPin = runtimeingress.SkillPin
@@ -67,6 +68,7 @@ type PersonaFingerprint struct {
 
 type Personas interface {
 	Fingerprint(agentID string) (PersonaFingerprint, bool)
+	Knowledge(agentID string, class principal.Class) []string
 }
 
 type acceptedPayload struct {
@@ -89,6 +91,12 @@ type UntrustedDocument struct {
 	Content      string
 }
 
+type KnowledgeEvidence struct {
+	Block     string
+	ChunkIDs  []string
+	Retrieved int
+}
+
 type UntrustedRecall struct {
 	Query     string
 	Summary   string
@@ -109,6 +117,8 @@ const (
 	EventKindTurnFailed       = "turn.failed"
 	EventKindTurnCancelled    = "turn.cancelled"
 	EventKindSkillActivated   = "skill.activated.v1"
+
+	EventKindKnowledgeRetrieved = "kb.retrieved.v1"
 )
 
 const AuthorSystem = "system"
@@ -139,6 +149,9 @@ const (
 
 	SkillContextStart = "[untrusted_skill_context"
 	SkillContextEnd   = "[/untrusted_skill_context]"
+
+	KnowledgeContextStart = "[untrusted_knowledge"
+	KnowledgeContextEnd   = "[/untrusted_knowledge]"
 )
 
 type AgentRuntime interface {

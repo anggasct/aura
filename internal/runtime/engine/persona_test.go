@@ -9,6 +9,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
 	"github.com/anggasct/aura/internal/store"
@@ -48,6 +49,8 @@ func (s stubPersonas) Fingerprint(agentID string) (runtime.PersonaFingerprint, b
 	fingerprint, ok := s[agentID]
 	return fingerprint, ok
 }
+
+func (s stubPersonas) Knowledge(string, principal.Class) []string { return nil }
 
 func personaFixture(agentID, soul string) runtime.PersonaFingerprint {
 	return runtime.PersonaFingerprint{AgentID: agentID, SoulSHA256: soul, ToolsSHA256: "tools-" + agentID, ModelRoute: "primary"}

@@ -198,6 +198,14 @@ func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilitySta
 			Remediation: health.RemediationReconcileState,
 		},
 	)
+	if len(configuredKnowledgeScopes(cfg)) > 0 {
+		checks = append(checks, health.RegisteredCheck{
+			ID:          health.ComponentKnowledge,
+			Checker:     health.KnowledgeChecker{Scopes: knowledgeScopeReader(cfg, dbPath), Limit: health.KnowledgeScopeChunkLimit},
+			Timeout:     checkTimeout,
+			Remediation: health.RemediationReviewKnowledge,
+		})
+	}
 	return health.NewRegistry(append(checks, extra...)...)
 }
 

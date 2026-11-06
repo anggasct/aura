@@ -55,6 +55,7 @@ type ADKExecutor struct {
 	ownerContext      string
 	profile           ProfileContextProvider
 	skills            SkillContextProvider
+	knowledge         KnowledgeContextProvider
 }
 
 type RecallProvider interface {
@@ -232,7 +233,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 			yield(store.RuntimeEvent{}, err)
 			return
 		}
-		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req.PrincipalID, req.PrincipalClass, definition.ID)
+		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req.PrincipalID, req.PrincipalClass, definition.ID, req.Knowledge)
 		if req.SessionID != "" {
 			runCtx = auramodel.WithSessionID(runCtx, req.SessionID)
 		}
@@ -265,10 +266,26 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *runtime.TurnRequest) ite
 				recallAttached = true
 			}
 		}
-		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, req.Origin, recallAttached, x.ownerContextFor(req), turnContext{profile: x.profileContextFor(runCtx, req), skills: x.skillContextFor(runCtx, req)})
+		knowledgeTurn, knowledgeRan := x.knowledgeContextFor(runCtx, req)
+		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, req.Origin, recallAttached, x.ownerContextFor(req), turnContext{
+			profile:        x.profileContextFor(runCtx, req),
+			skills:         x.skillContextFor(runCtx, req),
+			knowledge:      knowledgeTurn.Block,
+			knowledgeScope: req.Knowledge,
+		})
 		if err != nil {
 			yield(store.RuntimeEvent{}, err)
 			return
+		}
+		if knowledgeRan {
+			retrieved, eventErr := knowledgeRetrievedEvent(&knowledgeTurn)
+			if eventErr != nil {
+				yield(store.RuntimeEvent{}, eventErr)
+				return
+			}
+			if !yield(retrieved, nil) {
+				return
+			}
 		}
 
 		content, err := contentFromParts(req)
@@ -343,8 +360,10 @@ func (x *ADKExecutor) profileContextFor(ctx context.Context, req *runtime.TurnRe
 }
 
 type turnContext struct {
-	profile string
-	skills  string
+	profile        string
+	skills         string
+	knowledge      string
+	knowledgeScope []string
 }
 
 func (x *ADKExecutor) skillContextFor(ctx context.Context, req *runtime.TurnRequest) string {
@@ -397,7 +416,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition, class, origin), x.beforeTool, recallAttached, ownerContext, extra)
+	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition, class, origin, extra.knowledgeScope), x.beforeTool, recallAttached, ownerContext, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -469,6 +488,8 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		PrincipalID:     actx.UserID(),
 		PrincipalClass:  access.class,
 		AgentID:         access.agentID,
+		Knowledge:       slices.Clone(access.knowledge),
+		Tainted:         len(access.knowledge) > 0,
 		ToolName:        definition.Name,
 		ToolVersion:     definition.Version,
 		Arguments:       raw,
@@ -578,7 +599,7 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 	return model, nil
 }
 
-func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin runtime.Origin) []tool.Tool {
+func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin runtime.Origin, knowledge []string) []tool.Tool {
 	allowed := definition.Tools
 	if class != "" {
 		ceiling, restricted := definition.ToolCeiling(class)
@@ -604,6 +625,12 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 			}
 			continue
 		}
+		if t.Name() == auratools.KBSearchToolName {
+			if exposesKnowledgeSearch(class, allowed, knowledge) {
+				filtered = append(filtered, t)
+			}
+			continue
+		}
 		channel := x.channelTools[t.Name()]
 		if channel != "" && !originOnChannel(origin, channel) {
 			continue
@@ -616,6 +643,13 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 		}
 	}
 	return filtered
+}
+
+func exposesKnowledgeSearch(class principal.Class, allowed, knowledge []string) bool {
+	if len(knowledge) == 0 {
+		return false
+	}
+	return class == principal.ClassOwner || slices.Contains(allowed, auratools.KBSearchToolName)
 }
 
 func originOnChannel(origin runtime.Origin, channel string) bool {
@@ -658,6 +692,9 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 	if recallAttached {
 		instruction = strings.TrimSpace(instruction) + "\n\n" + recallEvidenceCaveat
 	}
+	if len(extra.knowledgeScope) > 0 {
+		instruction = strings.TrimSpace(instruction) + "\n\n" + knowledgeCaveat
+	}
 	instruction = appendStatusProtocol(instruction)
 	var beforeModel []llmagent.BeforeModelCallback
 	if extra.profile != "" {
@@ -665,6 +702,9 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 	}
 	if extra.skills != "" {
 		beforeModel = append(beforeModel, withUntrustedContextPart(extra.skills))
+	}
+	if extra.knowledge != "" {
+		beforeModel = append(beforeModel, withUntrustedContextPart(extra.knowledge))
 	}
 	return llmagent.New(llmagent.Config{
 		Name:                 name,

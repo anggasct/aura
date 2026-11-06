@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/anggasct/aura/internal/durable"
@@ -44,6 +45,7 @@ func turnDescriptorFromRequest(req *runtime.TurnRequest) runtimesessions.Descrip
 		Persona:        req.Persona,
 		Skill:          req.Skill,
 		StreamPartial:  req.StreamPartial,
+		Knowledge:      slices.Clone(req.Knowledge),
 	}
 }
 
@@ -68,6 +70,7 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *runtime.TurnRe
 		Persona:        desc.Persona,
 		Skill:          desc.Skill,
 		StreamPartial:  desc.StreamPartial,
+		Knowledge:      slices.Clone(desc.Knowledge),
 	}
 }
 
