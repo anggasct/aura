@@ -156,3 +156,34 @@ func TestLivePinnedTurnFailsOnTransientRender(t *testing.T) {
 		t.Fatalf("follow-up terminal = %q, want the session released", after[len(after)-1].Kind)
 	}
 }
+
+func TestLiveHandlerContextCancelledMidTurnReplaysCleanly(t *testing.T) {
+	binary := liveRestateBinary(t)
+	model := &liveScriptModel{steps: []liveModelStep{{tool: "tool-a"}, {text: "done"}}}
+	rig := startLiveTurnRig(t, binary, model, []liveToolDef{{name: "tool-a"}})
+	entered := filepath.Join(t.TempDir(), "tool-a-entered")
+	release := filepath.Join(t.TempDir(), "tool-a-release")
+	rig.tools.gates["tool-a:entered"] = entered
+	rig.tools.gates["tool-a"] = release
+
+	streamDone := make(chan struct{})
+	go func() {
+		defer close(streamDone)
+		for range rig.engine.Run(context.Background(), liveTurnRequest("turn-cancelled-ctx")) {
+		}
+	}()
+	rig.waitFile(entered, 90*time.Second)
+	rig.endpoint.cancelInflight()
+	if err := os.WriteFile(release, []byte("go"), 0o600); err != nil {
+		t.Fatalf("write release flag: %v", err)
+	}
+	events := rig.waitTerminal("turn-cancelled-ctx", 60*time.Second)
+	if last := events[len(events)-1]; last.Kind != runtime.EventKindTurnCompleted {
+		t.Fatalf("terminal = %q, want turn.completed", last.Kind)
+	}
+	select {
+	case <-streamDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("stream never terminated")
+	}
+}
