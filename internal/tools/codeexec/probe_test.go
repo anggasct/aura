@@ -3,6 +3,7 @@ package codeexec
 import (
 	"errors"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/anggasct/aura/internal/sandbox"
@@ -22,7 +23,7 @@ func TestProbeAcceptsOnlyThePinnedVersion(t *testing.T) {
 		{name: "another patch release", runtime: "python", result: sandbox.Result{Stdout: "3.12.15\n"}, wantErr: func(err error) bool { return hasErrorCode(err, ErrorCodeUnavailable) }},
 		{name: "no output", runtime: "python", wantErr: func(err error) bool { return hasErrorCode(err, ErrorCodeUnavailable) }},
 		{name: "non-zero exit", runtime: "python", result: sandbox.Result{Stdout: "3.12.16\n", ExitCode: 1}, wantErr: func(err error) bool { return hasErrorCode(err, ErrorCodeUnavailable) }},
-		{name: "killed by the filter", runtime: "javascript", result: sandbox.Result{Stdout: "26.13.0\n", ExitCode: -1, Signal: 31}, wantErr: func(err error) bool { return hasErrorCode(err, ErrorCodeUnavailable) }},
+		{name: "killed by the filter", runtime: "javascript", result: sandbox.Result{Stdout: "26.13.0\n", ExitCode: -1, Signal: int(syscall.SIGSYS)}, wantErr: func(err error) bool { return hasErrorCode(err, ErrorCodeUnavailable) }},
 		{name: "timeout", runtime: "python", result: sandbox.Result{Terminated: true, TimedOut: true, Stdout: "3.12.16\n"}, wantErr: func(err error) bool { return hasErrorCode(err, ErrorCodeUnavailable) }},
 		{name: "sandbox failure", runtime: "python", err: errors.New("no cgroup"), wantErr: func(err error) bool { return hasErrorCode(err, ErrorCodeRunFailed) }},
 		{name: "go has no probe", runtime: "go", wantErr: func(err error) bool { return errors.Is(err, interpreter.ErrProbeUnsupported) }},

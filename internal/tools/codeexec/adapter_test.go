@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -116,7 +117,7 @@ func TestAdapterMapsResultClassesToBrokerClasses(t *testing.T) {
 	}{
 		{"failure exit", sandbox.Result{ExitCode: 1}, toolbroker.ResultExecutionFailed, "exit_nonzero"},
 		{"timeout", sandbox.Result{Terminated: true, TimedOut: true}, toolbroker.ResultDeadlineExceeded, "timeout"},
-		{"policy kill", sandbox.Result{ExitCode: -1, Signal: 31}, toolbroker.ResultPolicyDenied, "policy_denied"},
+		{"policy kill", sandbox.Result{ExitCode: -1, Signal: int(syscall.SIGSYS)}, toolbroker.ResultPolicyDenied, "policy_denied"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
