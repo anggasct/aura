@@ -8,7 +8,7 @@ import (
 	"github.com/anggasct/aura/internal/approval"
 )
 
-func (r *Registry) record(ctx context.Context, req *SandboxRequest, grant *approval.ApprovalGrant, result Result, runErr error, duration time.Duration) {
+func (r *Registry) record(ctx context.Context, req *SandboxRequest, grant *approval.ApprovalGrant, result *Result, runErr error, duration time.Duration) {
 	r.logger.LogAttrs(ctx, slog.LevelInfo, "sandbox run",
 		slog.String("request_id", req.RequestID),
 		slog.String("executable", req.Executable),
@@ -42,7 +42,7 @@ func (r *Registry) recordDenied(ctx context.Context, req *SandboxRequest, err er
 	)
 }
 
-func classifyResult(result Result, runErr error) string {
+func classifyResult(result *Result, runErr error) string {
 	if runErr != nil {
 		if code, ok := CodeOf(runErr); ok {
 			return string(code)

@@ -34,6 +34,7 @@ type Executor struct {
 	emails    *emailHolder
 	workflows *workflowHolder
 	knowledge *knowledgeHolder
+	code      *codeHolder
 	host      []string
 }
 
@@ -71,7 +72,8 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 	emails := &emailHolder{}
 	workflows := &workflowHolder{}
 	knowledge := &knowledgeHolder{}
-	adapters, err := builtinAdapters(cfg.Tools, handoff, emails, workflows, knowledge)
+	code := &codeHolder{}
+	adapters, err := builtinAdapters(cfg.Tools, handoff, emails, workflows, knowledge, code)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +97,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 		Access:               access,
 		ApprovalGuards:       map[string]toolbroker.ApprovalGuard{tools.EmailSendToolName: emails.guard},
 		HostCapabilities:     host,
+		ArgumentChecks:       map[string]toolbroker.ArgumentCheck{codeKey(): code.check},
 	}
 	for _, apply := range opts {
 		apply(brokerOptions)
@@ -103,7 +106,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows, knowledge: knowledge, host: host}, nil
+	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows, knowledge: knowledge, code: code, host: host}, nil
 }
 
 func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {
@@ -120,7 +123,7 @@ func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error
 	return effect.NewExecutor(journal)
 }
 
-func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *emailHolder, workflows *workflowHolder, knowledge *knowledgeHolder) (map[string]toolbroker.Adapter, error) {
+func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *emailHolder, workflows *workflowHolder, knowledge *knowledgeHolder, code *codeHolder) (map[string]toolbroker.Adapter, error) {
 	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -163,6 +166,7 @@ func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *ema
 	adapters[tools.HandoffToolName+"@"+tools.Version] = handoff.adapter
 	adapters[tools.EmailSendToolName+"@"+tools.Version] = emails.adapter
 	adapters[tools.KBSearchToolName+"@"+tools.Version] = knowledge.adapter
+	adapters[codeKey()] = code.adapter
 	maps.Copy(adapters, workflows.adapters())
 	return adapters, nil
 }

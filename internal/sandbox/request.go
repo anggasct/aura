@@ -187,7 +187,7 @@ func (r *Registry) Execute(ctx context.Context, req *SandboxRequest) (Result, er
 	spec := specFromRequest(req)
 	start := r.now()
 	result, runErr := Run(ctx, spec, req.Executable, req.Arguments...)
-	r.record(ctx, req, &grant, result, runErr, r.now().Sub(start))
+	r.record(ctx, req, &grant, &result, runErr, r.now().Sub(start))
 	return result, runErr
 }
 

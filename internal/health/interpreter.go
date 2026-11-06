@@ -15,6 +15,8 @@ const (
 	InterpreterRuntimeAbsent    = "absent"
 	InterpreterRuntimeInvalid   = "invalid"
 	InterpreterRuntimePending   = "pending"
+
+	InterpreterReasonProbeFailed = "probe_failed"
 )
 
 type InterpreterRuntime struct {
@@ -54,6 +56,11 @@ func interpreterRuntimeFinding(runtime *InterpreterRuntime, now time.Time) Findi
 		code, status, remediation = "interpreter_runtime_absent", StatusDegraded, RemediationInstallInterpreter
 		detail = fmt.Sprintf("%s is not installed; interpreter runs for it are refused until aura interpreter install %s runs", label, runtime.Runtime)
 	case InterpreterRuntimeInvalid:
+		if runtime.Reason == InterpreterReasonProbeFailed {
+			code, status = "interpreter_runtime_probe_failed", StatusDegraded
+			detail = label + " is installed and its files match, but its version probe failed in the sandbox; interpreter runs for it are refused"
+			break
+		}
 		code, status, remediation = "interpreter_runtime_invalid", StatusDegraded, RemediationInstallInterpreter
 		detail = fmt.Sprintf("%s failed verification (%s); interpreter runs for it are refused until it is removed and installed again", label, runtime.Reason)
 	default:

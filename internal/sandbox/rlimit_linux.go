@@ -12,10 +12,14 @@ type rlimitSetting struct {
 	hard     uint64
 }
 
-func computeRlimits(limits Limits) []rlimitSetting {
+func computeRlimits(profile Profile, limits *Limits) []rlimitSetting {
 	var out []rlimitSetting
 	if cpu := uint64(limits.CPUTime.Seconds()); cpu > 0 {
-		out = append(out, rlimitSetting{unix.RLIMIT_CPU, cpu, cpu})
+		hard := cpu
+		if profile == ProfileInterpreter {
+			hard = cpu + 1
+		}
+		out = append(out, rlimitSetting{unix.RLIMIT_CPU, cpu, hard})
 	}
 	if limits.FileBytes > 0 {
 		out = append(out, rlimitSetting{unix.RLIMIT_FSIZE, uint64(limits.FileBytes), uint64(limits.FileBytes)})
@@ -23,15 +27,15 @@ func computeRlimits(limits Limits) []rlimitSetting {
 	if limits.MaxOpenFiles > 0 {
 		out = append(out, rlimitSetting{unix.RLIMIT_NOFILE, uint64(limits.MaxOpenFiles), uint64(limits.MaxOpenFiles)})
 	}
-	if limits.MaxProcesses > 0 {
+	if limits.MaxProcesses > 0 && !limits.NoProcessRlimit {
 		out = append(out, rlimitSetting{unix.RLIMIT_NPROC, uint64(limits.MaxProcesses), uint64(limits.MaxProcesses)})
 	}
 	out = append(out, rlimitSetting{unix.RLIMIT_CORE, uint64(limits.MaxCoreSize), uint64(limits.MaxCoreSize)})
 	return out
 }
 
-func applyRlimits(limits Limits) error {
-	for _, r := range computeRlimits(limits) {
+func applyRlimits(profile Profile, limits *Limits) error {
+	for _, r := range computeRlimits(profile, limits) {
 		if err := unix.Setrlimit(r.resource, &unix.Rlimit{Cur: r.soft, Max: r.hard}); err != nil {
 			return Errorf(ErrorCodeSandboxInitFailed, "setrlimit %d: %v", r.resource, err)
 		}

@@ -206,7 +206,7 @@ func TestTelemetryRedactsSecrets(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	result := Result{Output: "out-SECRET-007", ExitCode: 0}
-	registry.record(context.Background(), req, &grant, result, nil, 5*time.Millisecond)
+	registry.record(context.Background(), req, &grant, &result, nil, 5*time.Millisecond)
 
 	got := buf.String()
 	for _, field := range []string{"request_id", "executable", "tool", "result_code", "duration", "memory_bytes", "truncated"} {

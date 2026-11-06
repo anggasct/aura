@@ -90,8 +90,8 @@ func TestExecutorOffersOnlyToolsWhoseCapabilityIsActive(t *testing.T) {
 		{name: "exec", enabled: []string{"exec-linux"}, gated: []string{"exec"}},
 		{name: "public web", enabled: []string{"public-web"}, gated: []string{"web_fetch"}},
 		{name: "provider search", enabled: []string{"provider-search"}, gated: []string{"web_search"}},
-		{name: "code interpreter gates no builtin tool", enabled: []string{"code-interpreter"}, gated: nil},
-		{name: "everything", enabled: []string{"exec-linux", "workspace-read", "workspace-write", "public-web", "provider-search"}, gated: []string{"exec", "list_dir", "read_file", "web_fetch", "web_search", "write_file"}},
+		{name: "code interpreter", enabled: []string{"code-interpreter"}, gated: []string{"code_execute"}},
+		{name: "everything", enabled: []string{"exec-linux", "workspace-read", "workspace-write", "public-web", "provider-search", "code-interpreter"}, gated: []string{"code_execute", "exec", "list_dir", "read_file", "web_fetch", "web_search", "write_file"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -129,10 +129,10 @@ func TestExecutorOmitsEnabledCapabilitiesThatAreNotAvailable(t *testing.T) {
 }
 
 func TestStaticCatalogIgnoresTheCapabilitySet(t *testing.T) {
-	if got, want := len(DefinitionNames()), 15; got != want {
+	if got, want := len(DefinitionNames()), 16; got != want {
 		t.Fatalf("DefinitionNames() = %d names, want %d", got, want)
 	}
-	if got, want := len(CatalogDefinitions()), 15; got != want {
+	if got, want := len(CatalogDefinitions()), 16; got != want {
 		t.Fatalf("CatalogDefinitions() = %d entries, want %d", got, want)
 	}
 }
@@ -150,6 +150,7 @@ func TestDirectCallsToUnavailableToolsAreDeniedWithoutEffect(t *testing.T) {
 		{tool: "write_file", arguments: `{"path":"written.txt","content":"x"}`, capability: "workspace-write", effect: markerExists("written.txt")},
 		{tool: "web_fetch", arguments: `{"url":"https://example.com"}`, capability: "public-web"},
 		{tool: "web_search", arguments: `{"query":"aura"}`, capability: "provider-search"},
+		{tool: "code_execute", arguments: `{"runtime":"python","source":"open('marker', 'w')"}`, capability: "code-interpreter", effect: markerExists("marker")},
 	}
 	for _, tc := range cases {
 		reports := map[string]capability.Report{

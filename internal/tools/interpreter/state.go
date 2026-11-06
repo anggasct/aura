@@ -23,6 +23,7 @@ const (
 	ReasonTreeUnreadable    Reason = "tree_unreadable"
 	ReasonTreeUnsafe        Reason = "tree_unsafe"
 	ReasonExecutableMissing Reason = "executable_missing"
+	ReasonProbeFailed       Reason = "probe_failed"
 )
 
 type Verification struct {

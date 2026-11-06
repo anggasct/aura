@@ -259,7 +259,7 @@ type cgroup struct {
 	name string
 }
 
-func (h *cgroupHost) newCgroup(limits Limits) (cgroup, error) {
+func (h *cgroupHost) newCgroup(limits *Limits) (cgroup, error) {
 	root, err := h.resolve()
 	if err != nil {
 		return cgroup{}, Errorf(ErrorCodeSandboxInitFailed, "resolve sandbox cgroup root: %v", err)
@@ -276,7 +276,7 @@ func (h *cgroupHost) newCgroup(limits Limits) (cgroup, error) {
 	return cg, nil
 }
 
-func (c cgroup) apply(limits Limits) error {
+func (c cgroup) apply(limits *Limits) error {
 	var problems []error
 	if limits.MemoryBytes > 0 {
 		problems = append(problems,
@@ -291,6 +291,44 @@ func (c cgroup) apply(limits Limits) error {
 		return Errorf(ErrorCodeSandboxInitFailed, "write cgroup limits: %v", err)
 	}
 	return nil
+}
+
+func (c cgroup) killAsGroup() error {
+	if err := c.writeFile("memory.oom.group", "1"); err != nil {
+		return Errorf(ErrorCodeSandboxInitFailed, "write cgroup limits: %v", pathlessCause(err))
+	}
+	return nil
+}
+
+type cgroupEvents struct {
+	oomKills int64
+	pidsMax  int64
+}
+
+func (c cgroup) events() cgroupEvents {
+	return cgroupEvents{
+		oomKills: c.counter("memory.events", "oom_kill"),
+		pidsMax:  c.counter("pids.events", "max"),
+	}
+}
+
+func (c cgroup) counter(file, key string) int64 {
+	data, err := c.host.tree.ReadFile(path.Join(c.name, file))
+	if err != nil {
+		return 0
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		name, value, found := strings.Cut(line, " ")
+		if !found || name != key {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || n < 0 {
+			return 0
+		}
+		return n
+	}
+	return 0
 }
 
 func (c cgroup) attach(pid int) error {

@@ -61,7 +61,7 @@ func setupChild(cfg *childConfig) error {
 	if err := closeExtraFds(); err != nil {
 		return err
 	}
-	if err := applyRlimits(cfg.Limits); err != nil {
+	if err := applyRlimits(cfg.Profile, &cfg.Limits); err != nil {
 		return err
 	}
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {

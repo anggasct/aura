@@ -265,6 +265,10 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if err := interpreterRun.enableExecution(cfg); err != nil {
+					return err
+				}
+				interpreterRun.attach(builtin)
 				healthChecks = append(slices.Clone(healthChecks), interpreterRun.check(cfg))
 			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(

@@ -66,6 +66,21 @@ func (s *Store) Manifest() *Manifest {
 	return s.manifest
 }
 
+type Bundle struct {
+	Runtime    Runtime
+	Dir        string
+	Executable string
+}
+
+func (s *Store) Bundle(id string) (Bundle, error) {
+	runtime, err := s.lookup(id)
+	if err != nil {
+		return Bundle{}, err
+	}
+	dir := filepath.Join(s.runtimesPath(), runtime.ID, runtime.Version, bundleDirName)
+	return Bundle{Runtime: runtime, Dir: dir, Executable: filepath.Join(dir, filepath.FromSlash(runtime.Executable))}, nil
+}
+
 func (s *Store) runtimesPath() string {
 	return filepath.Join(s.dataRoot, runtimesDirName)
 }

@@ -3,6 +3,7 @@ package toolbroker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -31,8 +32,8 @@ func TestBrokerExposesAllBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if got := len(broker.Definitions()); got != 15 {
-		t.Fatalf("Definitions = %d, want 15", got)
+	if got := len(broker.Definitions()); got != 16 {
+		t.Fatalf("Definitions = %d, want 16", got)
 	}
 }
 
@@ -191,5 +192,69 @@ func TestBrokerRegisterAndUnregisterTool(t *testing.T) {
 	_, err = broker.Execute(t.Context(), req)
 	if err == nil {
 		t.Fatal("expected execute to fail after unregistering tool")
+	}
+}
+
+func TestBrokerRunsTheToolArgumentCheckBeforeAnyEffect(t *testing.T) {
+	cases := []struct {
+		name      string
+		check     ArgumentCheck
+		wantClass ResultClass
+		wantCalls int
+	}{
+		{"check passes", func(json.RawMessage) error { return nil }, ResultOK, 1},
+		{"check rejects", func(json.RawMessage) error { return errors.New("source is too long") }, ResultInvalidArgument, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls, checked := 0, 0
+			broker, err := New(&Options{
+				HostCapabilities: capabilitytest.Host(t),
+				Adapters: map[string]Adapter{"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+					calls++
+					return ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
+				}},
+				ArgumentChecks: map[string]ArgumentCheck{"read_file@v1": func(arguments json.RawMessage) error {
+					checked++
+					if !json.Valid(arguments) {
+						t.Errorf("the check received malformed arguments: %s", arguments)
+					}
+					return tc.check(arguments)
+				}},
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			_, err = broker.Execute(context.Background(), brokerRequest("read_file", `{"path":"note.txt"}`, "workspace-read"))
+			if class := classOf(err); tc.wantClass != ResultOK && class != tc.wantClass {
+				t.Fatalf("error class = %q, want %q (%v)", class, tc.wantClass, err)
+			}
+			if tc.wantClass == ResultOK && err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if checked != 1 || calls != tc.wantCalls {
+				t.Fatalf("checks = %d, adapter calls = %d; want 1 and %d", checked, calls, tc.wantCalls)
+			}
+		})
+	}
+}
+
+func TestBrokerSkipsTheArgumentCheckOfOtherTools(t *testing.T) {
+	checked := 0
+	broker, err := New(&Options{
+		HostCapabilities: capabilitytest.Host(t),
+		Adapters: map[string]Adapter{"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+			return ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
+		}},
+		ArgumentChecks: map[string]ArgumentCheck{"exec@v1": func(json.RawMessage) error { checked++; return errors.New("never") }},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := broker.Execute(context.Background(), brokerRequest("read_file", `{"path":"note.txt"}`, "workspace-read")); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if checked != 0 {
+		t.Fatalf("a check for another tool ran %d times", checked)
 	}
 }

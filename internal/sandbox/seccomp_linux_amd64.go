@@ -113,6 +113,47 @@ func sharedRules() []seccompRule {
 	}
 }
 
+func metadataSyscalls() []int {
+	return []int{
+		unix.SYS_CHMOD, unix.SYS_FCHMOD, unix.SYS_FCHMODAT, unix.SYS_FCHMODAT2,
+		unix.SYS_CHOWN, unix.SYS_FCHOWN, unix.SYS_LCHOWN, unix.SYS_FCHOWNAT,
+		unix.SYS_UTIME, unix.SYS_UTIMES, unix.SYS_FUTIMESAT, unix.SYS_UTIMENSAT,
+	}
+}
+
+func interpreterAdditions() []int {
+	return []int{
+		unix.SYS_CAPGET, unix.SYS_EPOLL_PWAIT, unix.SYS_EVENTFD2, unix.SYS_GETSOCKNAME, unix.SYS_GETPEERNAME, unix.SYS_GETSOCKOPT,
+		unix.SYS_SCHED_GETSCHEDULER, unix.SYS_SCHED_GETPARAM,
+		unix.SYS_SENDTO, unix.SYS_RECVFROM,
+		unix.SYS_MKDIR, unix.SYS_RMDIR, unix.SYS_UNLINK, unix.SYS_UNLINKAT,
+		unix.SYS_RENAME, unix.SYS_RENAMEAT, unix.SYS_RENAMEAT2,
+		unix.SYS_FSYNC, unix.SYS_SENDFILE, unix.SYS_TGKILL,
+	}
+}
+
+func failAll(errno syscall.Errno, calls ...int) []seccompRule {
+	rules := make([]seccompRule, 0, len(calls))
+	for _, nr := range calls {
+		rules = append(rules, failWith(nr, errno))
+	}
+	return rules
+}
+
+func interpreterProfile() seccompProfile {
+	allow := slices.DeleteFunc(baseSyscalls(), func(nr int) bool { return slices.Contains(metadataSyscalls(), nr) })
+	allow = append(allow, interpreterAdditions()...)
+	rules := append(sharedRules(),
+		allowWhen(unix.SYS_CLONE, maskClear(0, seccompNamespaceFlags)),
+		failWith(unix.SYS_PRCTL, syscall.EPERM),
+		allowWhen(unix.SYS_SOCKETPAIR, argEquals(0, unix.AF_UNIX)),
+	)
+	rules = append(rules, failAll(syscall.EACCES, unix.SYS_SOCKET, unix.SYS_CONNECT, unix.SYS_BIND)...)
+	rules = append(rules, failAll(syscall.ENOSYS, unix.SYS_IO_URING_SETUP, unix.SYS_PIDFD_OPEN, unix.SYS_PIDFD_SEND_SIGNAL)...)
+	rules = append(rules, failAll(syscall.EPERM, metadataSyscalls()...)...)
+	return seccompProfile{allow: allow, rules: rules}
+}
+
 func buildProfile(profile Profile, pid uint32) (seccompProfile, error) {
 	switch profile {
 	case ProfileBase:
@@ -131,6 +172,8 @@ func buildProfile(profile Profile, pid uint32) (seccompProfile, error) {
 			allowWhen(unix.SYS_TGKILL, argEquals(0, pid)),
 		)
 		return seccompProfile{allow: allow, rules: rules}, nil
+	case ProfileInterpreter:
+		return interpreterProfile(), nil
 	default:
 		return seccompProfile{}, Errorf(ErrorCodeInvalidArgument, "unknown sandbox profile")
 	}

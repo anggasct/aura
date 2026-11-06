@@ -11,14 +11,14 @@ import (
 
 func TestComputeRlimits(t *testing.T) {
 	t.Run("zero fields leave resources unlimited except core", func(t *testing.T) {
-		got := computeRlimits(Limits{})
+		got := computeRlimits(ProfileBase, &Limits{})
 		if len(got) != 1 || got[0].resource != unix.RLIMIT_CORE || got[0].soft != 0 || got[0].hard != 0 {
-			t.Fatalf("computeRlimits(Limits{}) = %+v, want only RLIMIT_CORE=0", got)
+			t.Fatalf("computeRlimits(ProfileBase, &Limits{}) = %+v, want only RLIMIT_CORE=0", got)
 		}
 	})
 
 	t.Run("every bound maps to the matching resource", func(t *testing.T) {
-		got := computeRlimits(Limits{
+		got := computeRlimits(ProfileBase, &Limits{
 			CPUTime:      30 * time.Second,
 			FileBytes:    1 << 20,
 			MaxOpenFiles: 128,

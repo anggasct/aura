@@ -233,7 +233,7 @@ func TestCgroupRootNeverMigratesOutsideServer(t *testing.T) {
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxUnavailable {
 		t.Fatalf("available = %v, want sandbox_unavailable", err)
 	}
-	if _, err := host.newCgroup(Limits{MemoryBytes: 1 << 20}); err == nil {
+	if _, err := host.newCgroup(&Limits{MemoryBytes: 1 << 20}); err == nil {
 		t.Fatal("newCgroup succeeded on an undelegated cgroup")
 	}
 	if len(tree.writes) != 0 {
@@ -283,7 +283,7 @@ func TestNewCgroupCreatesUnderResolvedRoot(t *testing.T) {
 	if _, err := host.prepare(); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
-	cg, err := host.newCgroup(Limits{MemoryBytes: 2 << 20, MaxProcesses: 8})
+	cg, err := host.newCgroup(&Limits{MemoryBytes: 2 << 20, MaxProcesses: 8})
 	if err != nil {
 		t.Fatalf("newCgroup: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestNewCgroupCreatesUnderResolvedRoot(t *testing.T) {
 
 func TestNewCgroupFailsClosedWithoutDelegatedRoot(t *testing.T) {
 	host, tree := newFixture(t, fixtureOwn, undelegatedUnit(strconv.Itoa(fixturePID)))
-	_, err := host.newCgroup(Limits{MemoryBytes: 2 << 20, MaxProcesses: 8})
+	_, err := host.newCgroup(&Limits{MemoryBytes: 2 << 20, MaxProcesses: 8})
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
 		t.Fatalf("newCgroup = %v, want sandbox_init_failed", err)
 	}
@@ -321,7 +321,7 @@ func TestNewCgroupFailsClosedWithoutDelegatedRoot(t *testing.T) {
 func TestCgroupLimitsAppliedOrFailsClosed(t *testing.T) {
 	host := hostCgroups()
 	if _, err := host.available(); err != nil {
-		_, err := host.newCgroup(Limits{MemoryBytes: 1 << 20, MaxProcesses: 4})
+		_, err := host.newCgroup(&Limits{MemoryBytes: 1 << 20, MaxProcesses: 4})
 		if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
 			t.Fatalf("newCgroup without delegated controllers = %v, want sandbox_init_failed", err)
 		}
@@ -329,7 +329,7 @@ func TestCgroupLimitsAppliedOrFailsClosed(t *testing.T) {
 		return
 	}
 
-	cg, err := host.newCgroup(Limits{MemoryBytes: 2 << 20, MaxProcesses: 8})
+	cg, err := host.newCgroup(&Limits{MemoryBytes: 2 << 20, MaxProcesses: 8})
 	if err != nil {
 		t.Fatalf("newCgroup: %v", err)
 	}

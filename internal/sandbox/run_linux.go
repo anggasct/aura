@@ -135,6 +135,9 @@ func runWithCgroups(ctx context.Context, cgroups *cgroupHost, spec *Spec, comman
 	if err != nil {
 		return Result{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, Errorf(ErrorCodeSandboxUnavailable, "start child: %v", err)
+	}
 	spec, scratch, err := withScratch(spec)
 	if err != nil {
 		return Result{}, err
@@ -158,7 +161,12 @@ func runWithCgroups(ctx context.Context, cgroups *cgroupHost, spec *Spec, comman
 		return Result{}, Errorf(ErrorCodeSandboxInitFailed, "error pipe: %v", err)
 	}
 
-	cg, err := cgroups.newCgroup(spec.Limits)
+	cg, err := cgroups.newCgroup(&spec.Limits)
+	if err == nil && spec.Profile == ProfileInterpreter {
+		if err = cg.killAsGroup(); err != nil {
+			_ = cg.destroy()
+		}
+	}
 	if err != nil {
 		_ = configR.Close()
 		_ = configW.Close()
@@ -167,11 +175,14 @@ func runWithCgroups(ctx context.Context, cgroups *cgroupHost, spec *Spec, comman
 		return Result{}, err
 	}
 
-	cmd := exec.CommandContext(ctx, "/proc/self/exe", ChildSentinel)
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), "/proc/self/exe", ChildSentinel)
 	cmd.Dir = spec.WorkingDir
 	cmd.Env = append([]string(nil), spec.AllowEnv...)
 	cmd.ExtraFiles = []*os.File{configR, errW}
 	cmd.SysProcAttr = childSysProcAttr()
+	if len(spec.Stdin) > 0 {
+		cmd.Stdin = bytes.NewReader(spec.Stdin)
+	}
 	var stdout, stderr limitedBuffer
 	if spec.Limits.MaxOutputBytes > 0 {
 		stdout.limit = spec.Limits.MaxOutputBytes
@@ -213,48 +224,94 @@ func runWithCgroups(ctx context.Context, cgroups *cgroupHost, spec *Spec, comman
 			initErrCh <- nil
 		}
 	}()
-
-	buildResult := func(waitErr error) Result {
-		out := strings.TrimRight(stdout.String(), "\n")
-		errOut := strings.TrimRight(stderr.String(), "\n")
-		result := Result{Output: strings.TrimRight(out+errOut, "\n"), Stdout: out, Stderr: errOut, Truncated: stdout.truncated || stderr.truncated}
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
-			result.ExitCode = exitErr.ExitCode()
-		}
-		return result
+	var watcher *runDirWatcher
+	var diskExceeded <-chan struct{}
+	if spec.Limits.RunDirBytes > 0 {
+		watcher = startRunDirWatcher(ctx, spec.WorkingDir, spec.Limits.RunDirBytes)
+		diskExceeded = watcher.exceeded
 	}
 
+	var end runEnd
+	var waitErr error
 	select {
-	case waitErr := <-waitDone:
-		initErr := <-initErrCh // child exit closed the err pipe, so the reader has finished
-		_ = cg.destroy()
-		if initErr != nil {
-			return Result{}, initErr
-		}
-		if waitErr != nil && !isExitErr(waitErr) {
-			return Result{}, waitErr
-		}
-		return buildResult(waitErr), nil
+	case waitErr = <-waitDone:
 	case <-timeout.C:
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-waitDone
-		initErr := <-initErrCh
-		_ = cg.destroy()
-		if initErr != nil {
-			return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, initErr
-		}
-		return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, nil
+		end = runEnd{terminated: true, timedOut: true}
 	case <-ctx.Done():
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-waitDone
-		initErr := <-initErrCh
-		_ = cg.destroy()
-		if initErr != nil {
-			return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, initErr
-		}
-		return Result{Terminated: true, Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(), Truncated: stdout.truncated || stderr.truncated}, nil
+		end = runEnd{terminated: true}
+	case <-diskExceeded:
+		end = runEnd{terminated: true, diskLimited: true}
 	}
+	if end.terminated {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		waitErr = <-waitDone
+	}
+	initErr := <-initErrCh
+	events := cg.events()
+	_ = cg.destroy()
+	if watcher != nil {
+		watcher.stop()
+		usage := measureRunDir(context.WithoutCancel(ctx), spec.WorkingDir, defaultRunDirBounds())
+		end.diskLimited = end.diskLimited || usage.exceeds(spec.Limits.RunDirBytes)
+		end.fileLimited = spec.Limits.FileBytes > 0 && usage.largest >= spec.Limits.FileBytes
+	}
+	if initErr != nil {
+		if end.terminated {
+			return terminatedResult(&stdout, &stderr, cmd, events, end), initErr
+		}
+		return Result{}, initErr
+	}
+	if end.terminated {
+		return terminatedResult(&stdout, &stderr, cmd, events, end), nil
+	}
+	if waitErr != nil && !isExitErr(waitErr) {
+		return Result{}, waitErr
+	}
+	return exitedResult(&stdout, &stderr, cmd, events, end, waitErr), nil
+}
+
+type runEnd struct {
+	terminated  bool
+	timedOut    bool
+	diskLimited bool
+	fileLimited bool
+}
+
+func terminatedResult(stdout, stderr *limitedBuffer, cmd *exec.Cmd, events cgroupEvents, end runEnd) Result {
+	result := Result{
+		Stdout: stdout.String(), Stderr: stderr.String(), Output: stdout.String() + stderr.String(),
+		Terminated: true, TimedOut: end.timedOut,
+	}
+	return observed(&result, stdout, stderr, cmd, events, end)
+}
+
+func exitedResult(stdout, stderr *limitedBuffer, cmd *exec.Cmd, events cgroupEvents, end runEnd, waitErr error) Result {
+	out := strings.TrimRight(stdout.String(), "\n")
+	errOut := strings.TrimRight(stderr.String(), "\n")
+	result := Result{Output: strings.TrimRight(out+errOut, "\n"), Stdout: out, Stderr: errOut}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		result.ExitCode = exitErr.ExitCode()
+	}
+	return observed(&result, stdout, stderr, cmd, events, end)
+}
+
+func observed(result *Result, stdout, stderr *limitedBuffer, cmd *exec.Cmd, events cgroupEvents, end runEnd) Result {
+	result.StdoutTruncated = stdout.truncated
+	result.StderrTruncated = stderr.truncated
+	result.Truncated = stdout.truncated || stderr.truncated
+	result.OOMKilled = events.oomKills > 0
+	result.PidsLimited = events.pidsMax > 0
+	result.DiskLimited = end.diskLimited
+	result.FileLimited = end.fileLimited
+	if state := cmd.ProcessState; state != nil {
+		result.CPUTime = state.UserTime() + state.SystemTime()
+		if status, ok := state.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			result.Signal = int(status.Signal())
+			result.ExitCode = -1
+		}
+	}
+	return *result
 }
 
 func isExitErr(err error) bool {
