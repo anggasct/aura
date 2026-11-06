@@ -216,14 +216,14 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 	if cfg.Channels.Email.Enabled {
 		adapters := make(emailAdapters, 0, len(cfg.Channels.Email.Accounts))
 		for i := range cfg.Channels.Email.Accounts {
-			adapter, err := newEmailAdapter(cfg, &cfg.Channels.Email.Accounts[i], db, logger)
+			adapter, err := newEmailAdapter(cfg, &cfg.Channels.Email.Accounts[i], db, artifactRoot, logger)
 			if err != nil {
 				return nil, nil, nil, err
 			}
 			adapter.SetPrincipalResolver(owners)
 			adapter.SetPersonaRouter(router)
 			settings := discordAccessSettings(cfg, db, accessRecorder)
-			adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals})
+			adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
 			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
 				recorder.Admitted(ctx, string(class), principal.ChannelEmail)
 			})

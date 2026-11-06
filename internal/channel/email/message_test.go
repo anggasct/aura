@@ -17,8 +17,8 @@ import (
 
 var replyDate = time.Date(2026, time.November, 5, 9, 30, 0, 0, time.UTC)
 
-func baseReply() replyMessage {
-	return replyMessage{
+func baseReply() outboundMessage {
+	return outboundMessage{
 		From:       testAddress,
 		To:         ownerAddress,
 		Subject:    "Plan the week",
@@ -30,7 +30,7 @@ func baseReply() replyMessage {
 	}
 }
 
-func renderMessage(t *testing.T, reply *replyMessage) (parsed *mail.Message, raw []byte) {
+func renderMessage(t *testing.T, reply *outboundMessage) (parsed *mail.Message, raw []byte) {
 	t.Helper()
 	raw, err := reply.render()
 	if err != nil {
@@ -160,16 +160,16 @@ func TestRender_HeaderInjectionNeverReachesTheWire(t *testing.T) {
 }
 
 func TestRender_RejectsUnsafeEnvelopeAndIdentifiers(t *testing.T) {
-	cases := map[string]func(*replyMessage){
-		"recipient with a line break": func(m *replyMessage) { m.To = "owner@example.com\r\nBcc: x@evil.example" },
-		"recipient with an angle":     func(m *replyMessage) { m.To = "a>b@example.com" },
-		"recipient list":              func(m *replyMessage) { m.To = "a@example.com,b@example.com" },
-		"empty recipient":             func(m *replyMessage) { m.To = "" },
-		"sender with a line break":    func(m *replyMessage) { m.From = "aura@example.com\r\nBcc: x@evil.example" },
-		"message id with a space":     func(m *replyMessage) { m.MessageID = "a b@example.com" },
-		"empty message id":            func(m *replyMessage) { m.MessageID = "" },
-		"empty body":                  func(m *replyMessage) { m.Body = " \n\t " },
-		"body of control characters":  func(m *replyMessage) { m.Body = "\x00\x01\x02" },
+	cases := map[string]func(*outboundMessage){
+		"recipient with a line break": func(m *outboundMessage) { m.To = "owner@example.com\r\nBcc: x@evil.example" },
+		"recipient with an angle":     func(m *outboundMessage) { m.To = "a>b@example.com" },
+		"recipient list":              func(m *outboundMessage) { m.To = "a@example.com,b@example.com" },
+		"empty recipient":             func(m *outboundMessage) { m.To = "" },
+		"sender with a line break":    func(m *outboundMessage) { m.From = "aura@example.com\r\nBcc: x@evil.example" },
+		"message id with a space":     func(m *outboundMessage) { m.MessageID = "a b@example.com" },
+		"empty message id":            func(m *outboundMessage) { m.MessageID = "" },
+		"empty body":                  func(m *outboundMessage) { m.Body = " \n\t " },
+		"body of control characters":  func(m *outboundMessage) { m.Body = "\x00\x01\x02" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -294,11 +294,11 @@ func TestReplyBody_JoinsPartsAndBoundsTheSize(t *testing.T) {
 }
 
 func TestReplyMessageID_IsDeterministicFromTheEffectAndDomain(t *testing.T) {
-	first := replyMessageID("turn-1", "example.com")
-	if first != replyMessageID("turn-1", "example.com") {
+	first := outboundMessageID("turn-1", "example.com")
+	if first != outboundMessageID("turn-1", "example.com") {
 		t.Error("the same effect produced two ids")
 	}
-	if first == replyMessageID("turn-2", "example.com") {
+	if first == outboundMessageID("turn-2", "example.com") {
 		t.Error("two effects share an id")
 	}
 	if !strings.HasSuffix(first, "@example.com") || !headerSafeID(first) {

@@ -13,11 +13,13 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/vision"
 )
 
 const (
@@ -393,6 +395,10 @@ func (r fakeRouter) Resolve(scope *auraagent.RouteScope) (auraagent.RouteMatch, 
 	return auraagent.RouteMatch{Persona: r.definition.ID, Score: auraagent.ScoreAccountDefault, Binding: auraagent.AccountDefaultBinding}, true
 }
 
+func (r fakeRouter) ServesPublic(channel, account string) bool {
+	return channel == config.BindingChannelEmail && account == testAccount && r.definition.Audience == config.AudiencePublic
+}
+
 func (r fakeRouter) Persona(id string) (auraagent.Definition, bool) {
 	if id != r.definition.ID {
 		return auraagent.Definition{}, false
@@ -486,6 +492,12 @@ type harnessOptions struct {
 	audience string
 	budgets  access.BudgetGate
 	evals    access.EvalGate
+	handoffs access.HandoffGate
+	erasure  access.PrincipalEraser
+	media    MediaStore
+	vision   *vision.Service
+	route    *approval.OwnerRoute
+	notifier HandoffNotifier
 	owners   []string
 	mailbox  *fakeMailbox
 	mailer   Mailer
@@ -554,7 +566,15 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	}
 	adapter.SetPrincipalResolver(owners)
 	adapter.SetPersonaRouter(fakeRouter{definition: auraagent.Definition{ID: testPersona, Audience: audience}})
-	adapter.SetAccess(&AccessSettings{Budgets: opts.budgets, Evals: opts.evals})
+	adapter.SetAccess(&AccessSettings{Budgets: opts.budgets, Evals: opts.evals, Handoffs: opts.handoffs, Erasure: opts.erasure})
+	adapter.SetOwnerRoute(opts.route)
+	adapter.SetHandoffNotifier(opts.notifier)
+	if opts.vision != nil {
+		adapter.SetVisionService(opts.vision)
+	}
+	if opts.media != nil {
+		adapter.SetMediaStore(opts.media)
+	}
 	adapter.retryBase = time.Millisecond
 	adapter.retryCap = 5 * time.Millisecond
 	h := &harness{t: t, cfg: cfg, account: account, logger: logger, adapter: adapter, mailer: mailer, db: db, mailbox: mailbox, sink: newCaptureSink(), cursors: cursors, sessions: sessions, logs: logs, done: make(chan struct{})}

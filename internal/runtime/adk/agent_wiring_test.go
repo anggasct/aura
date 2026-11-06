@@ -135,11 +135,11 @@ func TestResolveDefinitionPassesRequestedID(t *testing.T) {
 
 func TestToolsForNarrowsToDeclaredTools(t *testing.T) {
 	executor := &ADKExecutor{tools: []tool.Tool{namedToolStub{name: "read_file"}, namedToolStub{name: "web_fetch"}}}
-	narrowed := executor.toolsFor(&auraagent.Definition{Tools: []string{"web_fetch"}}, principal.ClassOwner)
+	narrowed := executor.toolsFor(&auraagent.Definition{Tools: []string{"web_fetch"}}, principal.ClassOwner, "")
 	if len(narrowed) != 1 || narrowed[0].Name() != "web_fetch" {
 		t.Fatalf("tools = %v, want only web_fetch", narrowed)
 	}
-	full := executor.toolsFor(&auraagent.Definition{}, principal.ClassOwner)
+	full := executor.toolsFor(&auraagent.Definition{}, principal.ClassOwner, "")
 	if len(full) != 2 {
 		t.Fatalf("tools = %d, want the full set when no tools are declared", len(full))
 	}
@@ -233,7 +233,47 @@ func TestToolsForOffersOptInToolsOnlyWhenListedForNonOwners(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := names(executor.toolsFor(tc.definition, tc.class)); !slices.Equal(got, tc.want) {
+			if got := names(executor.toolsFor(tc.definition, tc.class, "")); !slices.Equal(got, tc.want) {
+				t.Fatalf("tools = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestToolsForOffersChannelBoundToolsOnlyOnTheirChannel(t *testing.T) {
+	executor := &ADKExecutor{
+		tools:        []tool.Tool{namedToolStub{name: "read_file"}, namedToolStub{name: "email_send"}},
+		optIn:        map[string]bool{"email_send": true},
+		channelTools: map[string]string{"email_send": "email"},
+	}
+	names := func(tools []tool.Tool) []string {
+		out := make([]string, 0, len(tools))
+		for _, t := range tools {
+			out = append(out, t.Name())
+		}
+		return out
+	}
+	listed := &auraagent.Definition{
+		Tools: []string{"read_file", "email_send"}, PrincipalTools: []string{"read_file", "email_send"},
+	}
+	cases := map[string]struct {
+		definition *auraagent.Definition
+		class      principal.Class
+		origin     auraruntime.Origin
+		want       []string
+	}{
+		"owner on an email turn gets the listed tool":           {listed, principal.ClassOwner, "email:work", []string{"read_file", "email_send"}},
+		"trusted on an email turn gets the listed tool":         {listed, principal.ClassTrusted, "email:work", []string{"read_file", "email_send"}},
+		"owner on a discord turn never gets it":                 {listed, principal.ClassOwner, "discord:main", []string{"read_file"}},
+		"trusted on a telegram turn never gets it":              {listed, principal.ClassTrusted, "telegram:pocket", []string{"read_file"}},
+		"turns without an origin never get it":                  {listed, principal.ClassOwner, "", []string{"read_file"}},
+		"an origin that only starts with the channel is no hit": {listed, principal.ClassOwner, "emailer:work", []string{"read_file"}},
+		"an unlisted tool stays hidden on the email channel":    {&auraagent.Definition{Tools: []string{"read_file"}}, principal.ClassOwner, "email:work", []string{"read_file"}},
+		"implicit full set skips the opt-in tool":               {&auraagent.Definition{}, principal.ClassOwner, "email:work", []string{"read_file"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := names(executor.toolsFor(tc.definition, tc.class, tc.origin)); !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
 		})
@@ -283,7 +323,7 @@ func TestToolsForExposesExternalToolsOnlyToListedOwnerPersonas(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := names(executor.toolsFor(tc.definition, tc.class)); !slices.Equal(got, tc.want) {
+			if got := names(executor.toolsFor(tc.definition, tc.class, "")); !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
 		})

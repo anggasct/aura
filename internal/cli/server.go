@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/httpchat"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
@@ -117,23 +117,25 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var httpApprovals *httpchat.Approvals
-			if cfg.Channels.HTTP.Enabled {
-				httpApprovals, err = newHTTPApprovals(approvalAdapters, accessRecorder.ApprovalRouted)
+			var ownerRoute *approval.OwnerRoute
+			if cfg.Channels.HTTP.Enabled || cfg.Channels.Email.Enabled {
+				ownerRoute, err = newOwnerRoute(approvalAdapters, accessRecorder.ApprovalRouted)
 				if err != nil {
 					return err
 				}
 			}
-			approvalDecider := channelApprovalDecider(approvalChannels(approvalAdapters, httpApprovals))
+			emailMailboxes := wireEmailOwnerAccess(channelAdapters, ownerRoute, approvalAdapters)
+			approvalDecider := channelApprovalDecider(approvalChannels(approvalAdapters, ownerRoute))
 			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder))
 			if err != nil {
 				return err
 			}
 			notifiers := handoffNotifiers(channelAdapters)
-			if httpApprovals != nil {
-				notifiers = append(notifiers, newHTTPHandoffNotifier(httpApprovals, approvalAdapters))
+			if cfg.Channels.HTTP.Enabled {
+				notifiers = append(notifiers, newHTTPHandoffNotifier(ownerRoute, approvalAdapters))
 			}
 			builtin.SetHandoffOpener(newHandoffService(db, notifiers))
+			builtin.SetEmailOutbox(&emailOutbox{adapters: emailMailboxes})
 			var mcpServers *mcpRuntime
 			if mcpServersConfigured(cfg) {
 				mcpServers, err = startConfiguredMCP(ctx, cfg, builtin.Broker(), logger, pipeline.MeterProvider(), mapCapabilityStatuses(result.CapabilityReport), agentRegistry.Definitions())
@@ -326,7 +328,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			healthChecks = append(slices.Clone(healthChecks), personaEvalCheck(cfg, agentRegistry, db))
-			httpChat, httpChatChecks, err := buildHTTPChat(cfg, db, runtimeEngine, agentRegistry, accessRecorder, httpApprovals, logger)
+			httpChat, httpChatChecks, err := buildHTTPChat(cfg, db, runtimeEngine, agentRegistry, accessRecorder, ownerRoute, logger)
 			if err != nil {
 				return err
 			}

@@ -17,6 +17,9 @@ const (
 	dropMessageMalformed      dropReason = "message_malformed"
 	dropMessageUnavailable    dropReason = "message_unavailable"
 	dropIntakeRejected        dropReason = "intake_rejected"
+	dropAttachmentFailed      dropReason = "attachment_failed"
+	dropHandoffHeld           dropReason = "handoff_held"
+	dropHandoffCheckFailed    dropReason = "handoff_check_failed"
 	dropAuthorNotAllowed      dropReason = access.DropAuthorNotAllowed
 	dropEmptyContent          dropReason = access.DropEmptyContent
 	dropPersonaUnrouted       dropReason = access.DropPersonaUnrouted

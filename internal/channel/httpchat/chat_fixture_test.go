@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
@@ -232,7 +233,7 @@ type chatFixtureOptions struct {
 	maxBytes    int
 	audience    string
 	backend     runtime.AgentRuntime
-	approvals   *Approvals
+	approvals   *approval.OwnerRoute
 	answers     func(events []store.RuntimeEvent) []string
 }
 

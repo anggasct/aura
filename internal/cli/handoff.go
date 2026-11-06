@@ -16,6 +16,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channel/email"
 	"github.com/anggasct/aura/internal/channel/telegram"
 	"github.com/anggasct/aura/internal/config"
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
@@ -32,6 +33,7 @@ const (
 var (
 	deliverText         = discord.DeliverText
 	deliverTelegramText = telegram.DeliverText
+	deliverEmailText    = email.DeliverText
 )
 
 type handoffNotifier interface {
@@ -114,6 +116,15 @@ func telegramAccount(cfg *config.Config, name string) (*config.TelegramAccount, 
 	return nil, false
 }
 
+func emailAccount(cfg *config.Config, name string) (*config.EmailAccount, bool) {
+	for i := range cfg.Channels.Email.Accounts {
+		if cfg.Channels.Email.Accounts[i].Name == name {
+			return &cfg.Channels.Email.Accounts[i], true
+		}
+	}
+	return nil, false
+}
+
 func deliverToHandoff(ctx context.Context, cfg *config.Config, handoff *store.Handoff, text string) error {
 	switch handoff.Channel {
 	case store.HandoffChannelTelegram:
@@ -124,6 +135,12 @@ func deliverToHandoff(ctx context.Context, cfg *config.Config, handoff *store.Ha
 		return deliverTelegramText(ctx, account, handoff.ReplyChannelID, handoff.ReplyThreadID, text)
 	case store.HandoffChannelHTTP:
 		return nil
+	case store.HandoffChannelEmail:
+		account, ok := emailAccount(cfg, handoff.Account)
+		if !ok {
+			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", handoff.Account)}
+		}
+		return deliverEmailText(ctx, account, &email.TextReply{To: handoff.ReplyChannelID, Thread: email.ParseThreadReference(handoff.ReplyThreadID), Text: text})
 	case store.HandoffChannelDiscord:
 		account, ok := discordAccount(cfg, handoff.Account)
 		if !ok {

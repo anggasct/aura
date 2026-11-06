@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/principal"
 )
 
 const MCPToolPrefix = "mcp_"
@@ -31,6 +33,12 @@ func ListsTool(entries []string, name, server string) bool {
 const (
 	Version         = "v1"
 	HandoffToolName = "handoff_to_owner"
+
+	EmailSendToolName = "email_send"
+	EmailChannel      = "email"
+
+	MaxEmailSubjectBytes = 160
+	MaxEmailBodyBytes    = 65536
 
 	WorkflowListToolName        = "workflow_list"
 	WorkflowStartToolName       = "workflow_start"
@@ -165,6 +173,8 @@ func (d *Definition) Validate(raw json.RawMessage) (json.RawMessage, error) {
 		if err := validateString(value, "reason"); err != nil {
 			return nil, err
 		}
+	case EmailSendToolName:
+		return validateEmailSend(value)
 	case "web_search":
 		if err := rejectUnknown(value, "query", "max_results"); err != nil {
 			return nil, err
@@ -190,6 +200,7 @@ func Builtins() []Definition {
 		{Name: "web_fetch", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_fetch/v1","type":"object","properties":{"url":{"type":"string","format":"uri","minLength":1}},"required":["url"],"additionalProperties":false}`), RequiredCapabilities: []string{"public-web"}},
 		{Name: "web_search", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1},"max_results":{"type":"integer","minimum":1}},"required":["query"],"additionalProperties":false}`), RequiredCapabilities: []string{"provider-search"}},
 		{Name: HandoffToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/handoff_to_owner/v1","type":"object","properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"],"additionalProperties":false}`), OptIn: true},
+		{Name: EmailSendToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/email_send/v1","type":"object","properties":{"to":{"type":"string","minLength":3,"maxLength":254},"subject":{"type":"string","minLength":1,"maxLength":160},"body":{"type":"string","minLength":1,"maxLength":65536}},"required":["to","subject","body"],"additionalProperties":false}`), Effectful: true, OptIn: true},
 		{Name: WorkflowListToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_list/v1","type":"object","properties":{},"additionalProperties":false}`), OptIn: true},
 		{Name: WorkflowStartToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_start/v1","type":"object","properties":{"id":{"type":"string","minLength":1},"objective":{"type":"string","maxLength":2000}},"required":["id"],"additionalProperties":false}`), OptIn: true},
 		{Name: WorkflowStatusToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_status/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true},
@@ -197,6 +208,32 @@ func Builtins() []Definition {
 		{Name: WorkflowSaveRoutineToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_save_routine/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1,"maxLength":64}},"required":["run_id","name"],"additionalProperties":false}`), OptIn: true},
 		{Name: WorkflowCancelToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_cancel/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true},
 	}
+}
+
+func validateEmailSend(value map[string]any) (json.RawMessage, error) {
+	if err := rejectUnknown(value, "to", "subject", "body"); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"to", "subject", "body"} {
+		if err := validateString(value, key); err != nil {
+			return nil, err
+		}
+	}
+	rawTo, _ := value["to"].(string)
+	subject, _ := value["subject"].(string)
+	body, _ := value["body"].(string)
+	to := strings.ToLower(strings.TrimSpace(rawTo))
+	if !principal.IsPlainEmailAddress(to) {
+		return nil, fmt.Errorf("argument %q must be exactly one plain email address", "to")
+	}
+	value["to"] = to
+	if len(subject) > MaxEmailSubjectBytes {
+		return nil, fmt.Errorf("argument %q must be at most %d bytes", "subject", MaxEmailSubjectBytes)
+	}
+	if len(body) > MaxEmailBodyBytes {
+		return nil, fmt.Errorf("argument %q must be at most %d bytes", "body", MaxEmailBodyBytes)
+	}
+	return json.Marshal(value)
 }
 
 func decodeObject(raw json.RawMessage) (map[string]any, error) {
@@ -297,6 +334,13 @@ func DefinitionsByKey() map[string]*Definition {
 		result[definitionCopy.Key()] = &definitionCopy
 	}
 	return result
+}
+
+func ChannelOf(name string) string {
+	if name == EmailSendToolName {
+		return EmailChannel
+	}
+	return ""
 }
 
 func EffectTier(name string) bool {

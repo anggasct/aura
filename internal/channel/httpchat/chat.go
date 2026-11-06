@@ -55,7 +55,7 @@ type ChatOptions struct {
 	Budgets            access.BudgetGate
 	Evals              access.EvalGate
 	Handoffs           access.HandoffGate
-	Approvals          *Approvals
+	Approvals          *approval.OwnerRoute
 	Denied             func(ctx context.Context, reason string)
 	AnswerTexts        func(events []store.RuntimeEvent) []string
 	MaxHistoryMessages int
@@ -71,7 +71,7 @@ type Chat struct {
 	budgets     access.BudgetGate
 	evals       access.EvalGate
 	handoffs    access.HandoffGate
-	approvals   *Approvals
+	approvals   *approval.OwnerRoute
 	denied      func(ctx context.Context, reason string)
 	answerTexts func(events []store.RuntimeEvent) []string
 	maxMessages int
@@ -171,7 +171,7 @@ func (c *Chat) ServeChat(w http.ResponseWriter, r *http.Request, call *Call) {
 		Parts:          []runtimeingress.InputPart{{Text: request.final().text}},
 		AgentID:        caller.PersonaID,
 	}
-	release := c.approvals.hold(sessionID, &approval.Requester{Principal: caller.ID, Class: caller.Class, Persona: caller.PersonaID})
+	release := c.approvals.Hold(sessionID, &approval.Requester{Principal: caller.ID, Class: caller.Class, Persona: caller.PersonaID})
 	defer release()
 	if !continuing {
 		turn.UntrustedContext = boundedHistory(request.preceding(), c.maxMessages, c.maxBytes)

@@ -67,9 +67,9 @@ func newHandoffHTTPHarness(t *testing.T, build func(log *askLog) []approvalAdapt
 	passEvals(t, db, registry, "lobby", "staff")
 	log := &askLog{}
 	adapters := build(log)
-	approvals, err := newHTTPApprovals(adapters, (&routedResults{}).observe)
+	approvals, err := newOwnerRoute(adapters, (&routedResults{}).observe)
 	if err != nil {
-		t.Fatalf("newHTTPApprovals: %v", err)
+		t.Fatalf("newOwnerRoute: %v", err)
 	}
 	service := newHandoffService(db, []handoffNotifier{newHTTPHandoffNotifier(approvals, adapters)})
 	backend := &handoffTurnRuntime{opener: service}

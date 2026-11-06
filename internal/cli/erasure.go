@@ -29,6 +29,7 @@ func erasureLines(counts *store.ErasureCounts) []string {
 		fmt.Sprintf("standing_grants: %d", counts.StandingGrants),
 		fmt.Sprintf("pairing_requests: %d", counts.PairingRequests),
 		fmt.Sprintf("usage_links: %d", counts.UsageLinks),
+		fmt.Sprintf("email_effects: %d", counts.EmailEffects),
 	}
 }
 

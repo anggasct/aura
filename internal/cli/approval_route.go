@@ -5,7 +5,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/channel/discord"
-	"github.com/anggasct/aura/internal/channel/httpchat"
 	"github.com/anggasct/aura/internal/channel/telegram"
 )
 
@@ -29,7 +28,7 @@ type ownerApprovalRouter struct {
 	routed    func(ctx context.Context, result string)
 }
 
-var _ httpchat.OwnerApprover = (*ownerApprovalRouter)(nil)
+var _ approval.OwnerApprover = (*ownerApprovalRouter)(nil)
 
 func (r *ownerApprovalRouter) DecideForOwner(ctx context.Context, prompt *approval.Prompt, requester *approval.Requester) (bool, error) {
 	if len(r.approvers) == 0 {
@@ -74,21 +73,21 @@ func approvalUnavailable(err error) bool {
 	return ok && code == telegram.ErrorCodeApprovalUnavailable
 }
 
-func newHTTPApprovals(adapters []approvalAdapter, routed func(ctx context.Context, result string)) (*httpchat.Approvals, error) {
+func newOwnerRoute(adapters []approvalAdapter, routed func(ctx context.Context, result string)) (*approval.OwnerRoute, error) {
 	approvers := make([]ownerApprover, 0, len(adapters))
 	for _, adapter := range adapters {
 		approvers = append(approvers, adapter)
 	}
-	return httpchat.NewApprovals(&ownerApprovalRouter{approvers: approvers, routed: routed})
+	return approval.NewOwnerRoute(&ownerApprovalRouter{approvers: approvers, routed: routed})
 }
 
-func approvalChannels(adapters []approvalAdapter, httpApprovals *httpchat.Approvals) []approvalChannel {
+func approvalChannels(adapters []approvalAdapter, ownerRoute *approval.OwnerRoute) []approvalChannel {
 	channels := make([]approvalChannel, 0, len(adapters)+1)
 	for _, adapter := range adapters {
 		channels = append(channels, adapter)
 	}
-	if httpApprovals != nil {
-		channels = append(channels, httpApprovals)
+	if ownerRoute != nil {
+		channels = append(channels, ownerRoute)
 	}
 	return channels
 }

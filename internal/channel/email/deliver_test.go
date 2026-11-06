@@ -146,7 +146,7 @@ func TestDeliver_RepliesToTheAuthenticatedSenderOncePerIntent(t *testing.T) {
 		t.Fatalf("server received %d messages, want 1", len(mails))
 	}
 	parsed := parseReceived(t, mails[0])
-	wantID := replyMessageID("turn-1", "example.com")
+	wantID := outboundMessageID("turn-1", "example.com")
 	want := map[string]string{
 		"From":           testAddress,
 		"To":             ownerAddress,
@@ -254,7 +254,7 @@ func prepareLikeDeliver(t *testing.T, f *deliveryFixture, journal *effect.Journa
 	}
 	intent, err := journal.Prepare(t.Context(), &effect.PrepareRequest{
 		SessionID:      req.ConversationID,
-		IdempotencyKey: idempotencyKey(keyBase(req), req.ConversationID, &operation),
+		IdempotencyKey: idempotencyKey(keyBase(req), req.ConversationID, "", &operation),
 		Provider:       ProviderName,
 		Operation:      OpSendReply,
 		Classification: effect.ClassificationEffectful,

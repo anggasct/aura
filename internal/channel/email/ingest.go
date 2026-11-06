@@ -8,6 +8,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/media"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
@@ -15,11 +16,14 @@ import (
 )
 
 type replyReference struct {
-	MessageID  string   `json:"message_id"`
-	Sender     string   `json:"sender"`
-	Subject    string   `json:"subject"`
-	References []string `json:"references,omitempty"`
+	MessageID  string                  `json:"message_id"`
+	Sender     string                  `json:"sender"`
+	Subject    string                  `json:"subject"`
+	References []string                `json:"references,omitempty"`
+	Artifacts  []media.ArtifactSummary `json:"artifacts,omitempty"`
 }
+
+const attachmentOnlyText = "[attachment]"
 
 type admission struct {
 	messageID string
@@ -100,7 +104,7 @@ func (a *Adapter) fetchFailure(ctx context.Context, uid uint32, err error) error
 
 func (a *Adapter) admit(ctx context.Context, sender string, found *admission) dropReason {
 	allowlisted := slices.Contains(a.account.AllowedSenders, sender)
-	principalID, class, known := a.owners.Resolve(principal.ChannelEmail, sender, allowlisted, false)
+	principalID, class, known := a.owners.Resolve(principal.ChannelEmail, sender, allowlisted, a.servesPublic())
 	if !known {
 		return dropAuthorNotAllowed
 	}
@@ -189,10 +193,47 @@ func (a *Adapter) deliverToRuntime(ctx context.Context, session Session, info Me
 		a.drop(ctx, info.UID, dropMessageMalformed, false)
 		return nil
 	}
+	if inv, isForgetMe := a.forgetMeRequest(body); isForgetMe {
+		a.forgetMe(ctx, &inv, found)
+		return nil
+	}
+	if reason := a.handoffDrop(ctx, found); reason != "" {
+		a.drop(ctx, info.UID, reason, true)
+		return nil
+	}
+	stage, err := stageAttachments(raw, a.cfg.MaxAttachmentBytes)
+	if err != nil {
+		a.logger.WarnContext(ctx, "email attachment staging failed", "component", "email", "account", a.account.Name)
+		a.drop(ctx, info.UID, dropAttachmentFailed, true)
+		return nil
+	}
+	defer stage.discard()
 	text := turnInput(found.subject, body)
-	if text == "" {
+	if text == "" && len(stage.items) == 0 {
 		a.drop(ctx, info.UID, dropEmptyContent, false)
 		return nil
+	}
+	if err := a.sessions.EnsureSession(ctx, found.session, found.principal, found.persona); err != nil {
+		return &Error{Code: ErrorCodeIntakeFailed, Detail: "session is not ensurable", Cause: err}
+	}
+	summaries, images, err := a.storeAttachments(ctx, stage, found)
+	if err == nil && len(summaries) > 0 {
+		err = attachArtifacts(found, summaries)
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		a.logger.WarnContext(ctx, "email attachment intake failed", "component", "email", "account", a.account.Name)
+		a.drop(ctx, info.UID, dropAttachmentFailed, true)
+		return nil
+	}
+	parts := []runtimeingress.InputPart{{Text: text}}
+	if text == "" {
+		parts[0].Text = attachmentOnlyText
+	}
+	for _, image := range images {
+		parts = append(parts, runtimeingress.InputPart{Image: image})
 	}
 	envelope := &runtimeingress.IngressEnvelope{
 		Source:         a.source(),
@@ -202,12 +243,10 @@ func (a *Adapter) deliverToRuntime(ctx context.Context, session Session, info Me
 		PrincipalClass: string(found.class),
 		ConversationID: found.session,
 		ReplyContext:   found.reply,
-		Parts:          []runtimeingress.InputPart{{Text: text}},
+		Parts:          parts,
 		ReceivedAt:     time.Now().UTC(),
 	}
-	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
-		return &Error{Code: ErrorCodeIntakeFailed, Detail: "session is not ensurable", Cause: err}
-	}
+	a.rememberSession(found)
 	if _, err := a.sink.Accept(ctx, envelope); err != nil {
 		if retryableIntake(err) {
 			return &Error{Code: ErrorCodeIntakeFailed, Detail: "runtime did not accept the message", Cause: err}

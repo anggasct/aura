@@ -22,6 +22,8 @@ const (
 	ErrorCodeSubmissionRejected     ErrorCode = "submission_rejected"
 	ErrorCodeSubmissionDeferred     ErrorCode = "submission_deferred"
 	ErrorCodeMessageInvalid         ErrorCode = "message_invalid"
+	ErrorCodeHandoffUnavailable     ErrorCode = "handoff_unavailable"
+	ErrorCodeAttachmentRejected     ErrorCode = "attachment_rejected"
 )
 
 type Error struct {

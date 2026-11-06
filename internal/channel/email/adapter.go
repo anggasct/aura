@@ -10,6 +10,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/health"
@@ -17,6 +18,7 @@ import (
 	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/vision"
 )
 
 const (
@@ -92,11 +94,14 @@ type Sessions interface {
 type PersonaRouter interface {
 	Resolve(scope *auraagent.RouteScope) (auraagent.RouteMatch, bool)
 	Persona(id string) (auraagent.Definition, bool)
+	ServesPublic(channel, account string) bool
 }
 
 type AccessSettings struct {
-	Budgets access.BudgetGate
-	Evals   access.EvalGate
+	Budgets  access.BudgetGate
+	Evals    access.EvalGate
+	Handoffs access.HandoffGate
+	Erasure  access.PrincipalEraser
 }
 
 type Adapter struct {
@@ -112,6 +117,11 @@ type Adapter struct {
 	admitted  func(ctx context.Context, class principal.Class)
 	dropped   func(ctx context.Context, reason string)
 	access    AccessSettings
+	approvals *approval.OwnerRoute
+	notifier  HandoffNotifier
+	artifacts MediaStore
+	images    atomic.Pointer[vision.Service]
+	targets   sessionTargets
 	logger    *slog.Logger
 	sink      runtimeingress.IngressSink
 	retryBase time.Duration

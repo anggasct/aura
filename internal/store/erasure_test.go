@@ -119,3 +119,99 @@ func TestErasePrincipalCanKeepGrantsAndRefusesTheOwner(t *testing.T) {
 		}
 	}
 }
+
+func seedEmailEffect(t *testing.T, db *sql.DB, id, session, provider, operation, request string) {
+	t.Helper()
+	const at = "2026-11-06T09:00:00Z"
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO effect_intent (id, session_id, turn_id, tool_call_id, idempotency_key, provider, operation, classification, state, request_digest, request_json, prepared_at, updated_at)
+		VALUES (?, ?, 'turn-1', ?, ?, ?, ?, 'effectful', 'succeeded', 'digest', ?, ?, ?)`, id, session, id, "key-"+id, provider, operation, request, at, at); err != nil {
+		t.Fatalf("seed effect %s: %v", id, err)
+	}
+}
+
+func TestErasePrincipalRemovesEmailEffectsAddressedToThePrincipal(t *testing.T) {
+	const (
+		alice        = "email:alice@example.com"
+		aliceSession = "lobby/email:desk/thread:aaaaaaaaaaaaaaaaaaaaaaaaaa"
+		ownerSession = "main/email:desk/thread:bbbbbbbbbbbbbbbbbbbbbbbbbb"
+	)
+	cases := []struct {
+		name  string
+		apply bool
+		want  int
+	}{
+		{name: "dry run counts and keeps every row", apply: false, want: 3},
+		{name: "apply removes every row addressed to the principal", apply: true, want: 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDB(t)
+			seedPersonaSession(t, db, aliceSession, alice, "lobby")
+			seedPersonaSession(t, db, ownerSession, "local-owner", "main")
+			seedEmailEffect(t, db, "reply-alice", aliceSession, "email", "send_reply", `{"to":"alice@example.com","subject":"Re: hi","body":"hello alice"}`)
+			seedEmailEffect(t, db, "fresh-alice", ownerSession, "email", "send_message", `{"to":"Alice@Example.com","subject":"news","body":"for alice"}`)
+			seedEmailEffect(t, db, "tool-alice", ownerSession, "builtin-tools", "email_send", `{"tool_name":"email_send","arguments":{"to":"alice@example.com","subject":"news","body":"for alice"}}`)
+			seedEmailEffect(t, db, "fresh-bob", ownerSession, "email", "send_message", `{"to":"bob@example.com","subject":"news","body":"for bob"}`)
+			seedEmailEffect(t, db, "tool-other", ownerSession, "builtin-tools", "write_file", `{"tool_name":"write_file","arguments":{"to":"alice@example.com"}}`)
+			if _, err := db.ExecContext(t.Context(), `INSERT INTO effect_approval (id, intent_id, action, request_digest, owner_id, reason, token_hash, issued_at, expires_at)
+				VALUES ('ap-1', 'fresh-alice', 'mark_succeeded', 'digest', 'local-owner', 'reconcile', 'hash-1', '2026-11-06T09:00:00Z', '2026-11-06T10:00:00Z')`); err != nil {
+				t.Fatalf("seed approval: %v", err)
+			}
+			counts, err := ErasePrincipal(t.Context(), db, alice, tc.apply, ErasureOptions{})
+			if err != nil {
+				t.Fatalf("ErasePrincipal: %v", err)
+			}
+			if counts.EmailEffects != tc.want {
+				t.Errorf("EmailEffects = %d, want %d", counts.EmailEffects, tc.want)
+			}
+			held := countRows(t, db, `SELECT COUNT(*) FROM effect_intent WHERE request_json LIKE '%alice@%' OR request_json LIKE '%Alice@%'`)
+			if tc.apply && held != 1 {
+				t.Errorf("rows still naming the principal = %d, want only the unrelated write_file row", held)
+			}
+			if !tc.apply && held != 4 {
+				t.Errorf("rows naming the principal after a dry run = %d, want 4", held)
+			}
+			if got := countRows(t, db, `SELECT COUNT(*) FROM effect_intent WHERE id = 'fresh-bob'`); got != 1 {
+				t.Errorf("another recipient's effect rows = %d, want 1", got)
+			}
+			if tc.apply {
+				if got := countRows(t, db, `SELECT COUNT(*) FROM effect_approval`); got != 0 {
+					t.Errorf("effect approvals left = %d, want 0", got)
+				}
+				if got := countRows(t, db, `SELECT COUNT(*) FROM session WHERE owner_id = ?`, alice); got != 0 {
+					t.Errorf("principal sessions left = %d, want 0", got)
+				}
+			}
+		})
+	}
+}
+
+func TestErasePrincipalIgnoresEmailEffectsForOtherChannels(t *testing.T) {
+	db := newTestDB(t)
+	seedPersonaSession(t, db, "main/email:desk/thread:cccccccccccccccccccccccccc", "local-owner", "main")
+	seedEmailEffect(t, db, "fresh-alice", "main/email:desk/thread:cccccccccccccccccccccccccc", "email", "send_message", `{"to":"alice@example.com"}`)
+	counts, err := ErasePrincipal(t.Context(), db, "discord:601", true, ErasureOptions{})
+	if err != nil || counts.EmailEffects != 0 {
+		t.Fatalf("ErasePrincipal = %+v, %v; want no email effects touched", counts, err)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM effect_intent`); got != 1 {
+		t.Errorf("effect rows = %d, want 1", got)
+	}
+}
+
+func TestErasePrincipalSucceedsWhenAnOwnedEffectHasAnOperatorApproval(t *testing.T) {
+	db := newTestDB(t)
+	const session = "lobby/email:desk/thread:dddddddddddddddddddddddddd"
+	seedPersonaSession(t, db, session, "email:carol@example.com", "lobby")
+	seedEmailEffect(t, db, "reply-carol", session, "email", "send_reply", `{"to":"carol@example.com"}`)
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO effect_approval (id, intent_id, action, request_digest, owner_id, reason, token_hash, issued_at, expires_at)
+		VALUES ('ap-2', 'reply-carol', 'mark_failed', 'digest', 'local-owner', 'reconcile', 'hash-2', '2026-11-06T09:00:00Z', '2026-11-06T10:00:00Z')`); err != nil {
+		t.Fatalf("seed approval: %v", err)
+	}
+	if _, err := ErasePrincipal(t.Context(), db, "email:carol@example.com", true, ErasureOptions{}); err != nil {
+		t.Fatalf("ErasePrincipal: %v", err)
+	}
+	if got := countRows(t, db, `SELECT (SELECT COUNT(*) FROM effect_intent) + (SELECT COUNT(*) FROM effect_approval)`); got != 0 {
+		t.Errorf("effect rows left = %d, want 0", got)
+	}
+}

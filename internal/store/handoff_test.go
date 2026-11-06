@@ -213,3 +213,59 @@ func TestHandoffHTTPChannelMigrationKeepsRowsAndAcceptsHTTP(t *testing.T) {
 		t.Fatalf("handoff survived its session: found=%v err=%v", found, err)
 	}
 }
+
+func TestHandoffEmailChannelMigrationKeepsRowsAndAcceptsEmail(t *testing.T) {
+	ctx := t.Context()
+	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), len(migrations)-1)
+	seeded := []struct {
+		session, channel, account, replyChannel, replyThread string
+		released                                             any
+	}{
+		{"lobby/discord:owner/dm:601", "discord", "owner", "4400", "", nil},
+		{"lobby/telegram:pocket/chat:555001", "telegram", "pocket", "-1001234567890", "77", "2026-11-05T10:00:00Z"},
+		{"lobby/http/abcdefghijkl/token", "http", "abcdefghijkl", "", "", nil},
+	}
+	for _, row := range seeded {
+		seedPersonaSession(t, db, row.session, "owner-1", "lobby")
+		if _, err := db.ExecContext(ctx, `INSERT INTO session_handoff (session_id, reason, opened_at, released_at, principal_id, agent_id, account, channel, reply_channel_id, reply_thread_id) VALUES (?, 'refund', '2026-11-05T09:00:00Z', ?, 'owner-1', 'lobby', ?, ?, ?, ?)`,
+			row.session, row.released, row.account, row.channel, row.replyChannel, row.replyThread); err != nil {
+			t.Fatalf("seed %s handoff: %v", row.channel, err)
+		}
+	}
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	handoffs := NewHandoffStore(db)
+	for _, row := range seeded {
+		t.Run(row.channel, func(t *testing.T) {
+			got, found, err := handoffs.Get(ctx, row.session)
+			if err != nil || !found {
+				t.Fatalf("Get = %+v, %v, %v", got, found, err)
+			}
+			if got.Channel != row.channel || got.Account != row.account || got.ReplyChannelID != row.replyChannel || got.ReplyThreadID != row.replyThread || got.Reason != "refund" || got.PrincipalID != "owner-1" || got.AgentID != "lobby" || (got.ReleasedAt.IsZero() != (row.released == nil)) {
+				t.Fatalf("migrated handoff = %+v", got)
+			}
+		})
+	}
+	var indexes int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'session_handoff_open_idx' AND tbl_name = 'session_handoff'`).Scan(&indexes); err != nil || indexes != 1 {
+		t.Fatalf("open index count = %d, %v; want 1", indexes, err)
+	}
+	emailSession := "lobby/email:desk/thread:abcdefghijklmnopqrstuvwxyz"
+	seedPersonaSession(t, db, emailSession, "email:alice@example.com", "lobby")
+	if err := handoffs.Open(ctx, &Handoff{SessionID: emailSession, Reason: "refund", PrincipalID: "email:alice@example.com", AgentID: "lobby", Account: "desk", Channel: HandoffChannelEmail, ReplyChannelID: "alice@example.com", OpenedAt: time.Now()}); err != nil {
+		t.Fatalf("Open email handoff after migration: %v", err)
+	}
+	if got, found, err := handoffs.Get(ctx, emailSession); err != nil || !found || got.Channel != HandoffChannelEmail || got.ReplyChannelID != "alice@example.com" {
+		t.Fatalf("Get email handoff = %+v, %v, %v", got, found, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE session_handoff SET channel = 'slack' WHERE session_id = ?`, emailSession); !isConstraintCheck(err) {
+		t.Fatalf("update to an unknown channel err = %v, want a check violation", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM session WHERE id = ?`, emailSession); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+	if _, found, err := handoffs.Get(ctx, emailSession); err != nil || found {
+		t.Fatalf("handoff survived its session: found=%v err=%v", found, err)
+	}
+}
