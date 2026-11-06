@@ -21,9 +21,10 @@ var (
 	}
 	hiddenTags = map[string]bool{
 		"script": true, "style": true, "head": true, "title": true, "template": true, "noscript": true,
-		"iframe": true, "object": true, "embed": true, "svg": true, "math": true,
+		"iframe": true, "object": true, "embed": true, "svg": true, "math": true, "textarea": true,
 	}
-	blockTags = map[string]bool{
+	foreignTags = map[string]bool{"svg": true, "math": true}
+	blockTags   = map[string]bool{
 		"br": true, "p": true, "div": true, "li": true, "ul": true, "ol": true, "tr": true, "table": true,
 		"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true, "blockquote": true,
 		"pre": true, "hr": true, "section": true, "article": true, "header": true, "footer": true,
@@ -84,7 +85,8 @@ func (r *reducer) start(tokens *html.Tokenizer, name string, hasAttr, selfClosin
 	if blockTags[name] && r.hidden == 0 {
 		r.newline()
 	}
-	if voidTags[name] || selfClosing || (!hide && r.hidden == 0) {
+	closed := selfClosing && (!hide || foreignTags[name])
+	if voidTags[name] || closed || (!hide && r.hidden == 0) {
 		return true
 	}
 	if len(r.stack) >= maxHTMLDepth {
@@ -156,6 +158,9 @@ func hiddenElement(name string, attrs map[string]string) bool {
 	if _, present := attrs["hidden"]; present {
 		return true
 	}
+	if strings.EqualFold(strings.TrimSpace(attrs["aria-hidden"]), "true") {
+		return true
+	}
 	if name == "input" && strings.EqualFold(strings.TrimSpace(attrs["type"]), "hidden") {
 		return true
 	}
@@ -184,7 +189,7 @@ func hiddenStyle(style string) bool {
 				return true
 			}
 		case "opacity":
-			if number, err := strconv.ParseFloat(value, 64); err == nil && number == 0 {
+			if number, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 64); err == nil && number == 0 {
 				return true
 			}
 		case "font-size":
