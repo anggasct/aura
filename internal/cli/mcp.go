@@ -89,9 +89,7 @@ func translateSessionError(err error) error {
 	}
 }
 
-func newMCPSessionStarter(
-	start func(ctx context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error),
-) mcp.SessionStarter {
+func newMCPSessionStarter(start sandboxSessionStart) mcp.SessionStarter {
 	return mcpSessionStarterFunc(func(ctx context.Context, req *mcp.ContainedSessionRequest) (mcp.ContainedSession, error) {
 		if req == nil {
 			return nil, mcp.Errorf(mcp.ErrConfigInvalid, "session request must not be nil")
