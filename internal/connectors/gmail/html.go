@@ -24,7 +24,7 @@ var (
 		"iframe": true, "object": true, "embed": true, "svg": true, "math": true, "textarea": true,
 	}
 	foreignTags = map[string]bool{"svg": true, "math": true}
-	blockTags = map[string]bool{
+	blockTags   = map[string]bool{
 		"br": true, "p": true, "div": true, "li": true, "ul": true, "ol": true, "tr": true, "table": true,
 		"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true, "blockquote": true,
 		"pre": true, "hr": true, "section": true, "article": true, "header": true, "footer": true,
