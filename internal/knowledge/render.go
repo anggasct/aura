@@ -82,6 +82,7 @@ type SearchResult struct {
 type SearchOutput struct {
 	Results   []SearchResult `json:"results"`
 	Truncated bool           `json:"truncated"`
+	Mode      string         `json:"mode"`
 }
 
 func ShapeSearch(hits []Hit, limit int) SearchOutput {

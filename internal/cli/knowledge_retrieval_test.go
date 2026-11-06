@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/knowledge"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -47,7 +49,7 @@ func (r *kbRetrievalRig) add(t *testing.T, collection, name, content string) {
 
 func (r *kbRetrievalRig) search(t *testing.T, scope []string, query string) []knowledge.Hit {
 	t.Helper()
-	hits, err := r.retriever.Search(t.Context(), scope, query, knowledge.SearchDepth)
+	hits, err := ownerSearch(t.Context(), r.retriever, scope, query, knowledge.SearchDepth)
 	if err != nil {
 		t.Fatalf("Search(%q): %v", query, err)
 	}
@@ -141,7 +143,7 @@ func TestKnowledgeSearchFailsClosedWhenASecretReferenceIsUnresolvable(t *testing
 	rig := newKBRetrievalRig(t)
 	rig.add(t, "support", "policy.md", "Refunds are issued within thirty days.")
 	rig.cfg.Webhook.Keys = []config.WebhookKey{{ID: "late", SecretEnv: "KB_TEST_UNSET_RETRIEVAL_SECRET"}}
-	hits, err := rig.retriever.Search(t.Context(), []string{"support"}, "refund", knowledge.SearchDepth)
+	hits, err := ownerSearch(t.Context(), rig.retriever, []string{"support"}, "refund", knowledge.SearchDepth)
 	if code, ok := knowledge.CodeOf(err); !ok || code != knowledge.ErrorCodeSecretUnavailable || len(hits) != 0 {
 		t.Fatalf("hits = %v, error = %v", hits, err)
 	}
@@ -177,4 +179,9 @@ func TestKnowledgeSearchFindsTheRefundChunkInAHundredThousandChunkCollection(t *
 	if len(hits) != 1 || hits[0].Label != "policy.md" || !strings.Contains(hits[0].Content, "refunds") {
 		t.Fatalf("hits = %+v", hits)
 	}
+}
+
+func ownerSearch(ctx context.Context, r *knowledge.Retriever, scope []string, query string, depth int) ([]knowledge.Hit, error) {
+	found, err := r.Search(ctx, &knowledge.SearchRequest{Scope: scope, Query: query, Depth: depth, Class: principal.ClassOwner})
+	return found.Hits, err
 }

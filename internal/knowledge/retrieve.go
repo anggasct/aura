@@ -5,10 +5,14 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/anggasct/aura/internal/principal"
 )
 
 const (
@@ -42,27 +46,100 @@ type Index interface {
 	Search(ctx context.Context, collections []string, terms []string, depth int) ([]Hit, error)
 }
 
+type VectorConfig struct {
+	Index    VectorIndex
+	Embedder Embedder
+	Settings *EmbeddingSettings
+}
+
+type RetrieverOption func(*Retriever) error
+
+func WithVectors(cfg *VectorConfig) RetrieverOption {
+	return func(r *Retriever) error {
+		if cfg == nil || cfg.Index == nil || cfg.Embedder == nil || cfg.Settings == nil || !cfg.Settings.valid() {
+			return Errorf(ErrorCodeInvalidArgument, "vector retrieval needs an index, an embedder and valid settings")
+		}
+		r.vectors = &vectorPath{index: cfg.Index, embedder: cfg.Embedder, settings: cfg.Settings, timeout: QueryEmbedTimeout}
+		return nil
+	}
+}
+
+func WithEmbedTimeout(timeout time.Duration) RetrieverOption {
+	return func(r *Retriever) error {
+		if r.vectors == nil || timeout <= 0 {
+			return Errorf(ErrorCodeInvalidArgument, "an embed timeout needs vector retrieval and a positive duration")
+		}
+		r.vectors.timeout = timeout
+		return nil
+	}
+}
+
 type Retriever struct {
 	index   Index
 	secrets SecretSource
+	vectors *vectorPath
 }
 
-func NewRetriever(index Index, secrets SecretSource) (*Retriever, error) {
+func NewRetriever(index Index, secrets SecretSource, opts ...RetrieverOption) (*Retriever, error) {
 	if index == nil || secrets == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "index and secrets are required")
 	}
-	return &Retriever{index: index, secrets: secrets}, nil
+	retriever := &Retriever{index: index, secrets: secrets}
+	for _, opt := range opts {
+		if err := opt(retriever); err != nil {
+			return nil, err
+		}
+	}
+	return retriever, nil
 }
 
-func (r *Retriever) Search(ctx context.Context, scope []string, query string, depth int) ([]Hit, error) {
-	collections, err := validScope(scope)
+type SearchRequest struct {
+	Scope []string
+	Query string
+	Depth int
+	Class principal.Class
+}
+
+type Retrieval struct {
+	Hits []Hit
+	Mode string
+}
+
+func (r *Retriever) Search(ctx context.Context, request *SearchRequest) (Retrieval, error) {
+	if request == nil {
+		return Retrieval{}, Errorf(ErrorCodeInvalidArgument, "search request must not be nil")
+	}
+	collections, err := validScope(request.Scope)
 	if err != nil {
-		return nil, err
+		return Retrieval{}, err
 	}
-	if depth <= 0 || depth > SearchDepth {
-		return nil, Errorf(ErrorCodeInvalidArgument, "depth must be between 1 and %d", SearchDepth)
+	if request.Depth <= 0 || request.Depth > SearchDepth {
+		return Retrieval{}, Errorf(ErrorCodeInvalidArgument, "depth must be between 1 and %d", SearchDepth)
 	}
-	terms := QueryTerms(query)
+	vault := &vaultSnapshot{source: r.secrets}
+	var lexical []Hit
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		found, err := r.lexicalHits(groupCtx, collections, QueryTerms(request.Query))
+		lexical = found
+		return err
+	})
+	semantic, mode := r.vectors.search(groupCtx, collections, request, vault)
+	if err := group.Wait(); err != nil {
+		return Retrieval{}, err
+	}
+	hits := lexical
+	if mode == ModeHybrid {
+		hits = Fuse(lexical, semantic)
+	}
+	screened, err := r.screen(ctx, hits, collections, vault)
+	if err != nil {
+		return Retrieval{}, err
+	}
+	return Retrieval{Hits: screened[:min(len(screened), request.Depth)], Mode: mode}, nil
+}
+
+func (r *Retriever) lexicalHits(ctx context.Context, collections, terms []string) ([]Hit, error) {
 	if len(terms) == 0 {
 		return nil, nil
 	}
@@ -70,11 +147,19 @@ func (r *Retriever) Search(ctx context.Context, scope []string, query string, de
 	if err != nil || len(chosen) == 0 {
 		return nil, err
 	}
-	hits, err := r.index.Search(ctx, collections, chosen, depth)
-	if err != nil {
-		return nil, err
-	}
-	return r.screen(ctx, hits, collections)
+	return r.index.Search(ctx, collections, chosen, SearchDepth)
+}
+
+type vaultSnapshot struct {
+	source SecretSource
+	once   sync.Once
+	screen SecretScreen
+	err    error
+}
+
+func (v *vaultSnapshot) get(ctx context.Context) (SecretScreen, error) {
+	v.once.Do(func() { v.screen, v.err = v.source.Snapshot(ctx) })
+	return v.screen, v.err
 }
 
 func validScope(scope []string) ([]string, error) {
@@ -160,11 +245,11 @@ func (r *Retriever) chooseTerms(ctx context.Context, collections, terms []string
 	return chosen, nil
 }
 
-func (r *Retriever) screen(ctx context.Context, hits []Hit, collections []string) ([]Hit, error) {
+func (r *Retriever) screen(ctx context.Context, hits []Hit, collections []string, snapshot *vaultSnapshot) ([]Hit, error) {
 	if len(hits) == 0 {
 		return nil, nil
 	}
-	vault, err := r.secrets.Snapshot(ctx)
+	vault, err := snapshot.get(ctx)
 	if err != nil {
 		return nil, Errorf(ErrorCodeSecretUnavailable, "a configured secret reference could not be resolved")
 	}

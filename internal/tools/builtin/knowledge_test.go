@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/toolbroker"
 )
 
@@ -15,14 +16,15 @@ type recordingSearcher struct {
 	scope  []string
 	query  string
 	limit  int
+	class  principal.Class
 	calls  int
 	output json.RawMessage
 	err    error
 }
 
-func (s *recordingSearcher) SearchKnowledge(_ context.Context, scope []string, query string, limit int) (json.RawMessage, error) {
+func (s *recordingSearcher) SearchKnowledge(_ context.Context, scope []string, query string, limit int, class principal.Class) (json.RawMessage, error) {
 	s.calls++
-	s.scope, s.query, s.limit = slices.Clone(scope), query, limit
+	s.scope, s.query, s.limit, s.class = slices.Clone(scope), query, limit, class
 	return s.output, s.err
 }
 
@@ -73,7 +75,7 @@ func TestKnowledgeAdapterReturnsNothingForAnEmptyScope(t *testing.T) {
 	holder := &knowledgeHolder{}
 	holder.searcher.Store(func() *KnowledgeSearcher { var s KnowledgeSearcher = searcher; return &s }())
 	result, err := holder.adapter(t.Context(), knowledgeToolRequest(`{"query":"refund"}`), approval.Constraints{})
-	if err != nil || string(result.Output) != `{"results":[],"truncated":false}` || searcher.calls != 0 {
+	if err != nil || string(result.Output) != `{"results":[],"truncated":false,"mode":"lexical"}` || searcher.calls != 0 {
 		t.Fatalf("result = %s, %v, searcher calls = %d, want an empty answer without searching", result.Output, err, searcher.calls)
 	}
 }
@@ -113,4 +115,28 @@ func TestSetKnowledgeSearcherIgnoresNil(t *testing.T) {
 func isClass(err error, class toolbroker.ResultClass) bool {
 	got, ok := toolbroker.CodeOf(err)
 	return ok && got == class
+}
+
+func TestKnowledgeAdapterPassesTheRequestClassWithoutDefaultingIt(t *testing.T) {
+	tests := map[string]principal.Class{
+		"owner":   principal.ClassOwner,
+		"trusted": principal.ClassTrusted,
+		"public":  principal.ClassPublic,
+		"empty":   "",
+	}
+	for name, class := range tests {
+		t.Run(name, func(t *testing.T) {
+			searcher := &recordingSearcher{output: json.RawMessage(`{}`)}
+			holder := &knowledgeHolder{}
+			holder.searcher.Store(func() *KnowledgeSearcher { var s KnowledgeSearcher = searcher; return &s }())
+			request := knowledgeToolRequest(`{"query":"refund"}`, "faq")
+			request.PrincipalClass = class
+			if _, err := holder.adapter(t.Context(), request, approval.Constraints{}); err != nil {
+				t.Fatalf("adapter: %v", err)
+			}
+			if searcher.class != class {
+				t.Errorf("searcher saw class %q, want %q", searcher.class, class)
+			}
+		})
+	}
 }

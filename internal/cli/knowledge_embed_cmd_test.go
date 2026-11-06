@@ -46,6 +46,7 @@ type embeddingProvider struct {
 	failCall  int
 	badShape  bool
 	onRequest func(n int)
+	vectorFor func(input string, width int) []float64
 }
 
 func newEmbeddingProvider(t *testing.T, dims int) *embeddingProvider {
@@ -68,7 +69,7 @@ func (p *embeddingProvider) serve(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	p.calls = append(p.calls, call)
 	number := len(p.calls)
-	failCall, badShape, dims, hook := p.failCall, p.badShape, p.dims, p.onRequest
+	failCall, badShape, dims, hook, vectorFor := p.failCall, p.badShape, p.dims, p.onRequest, p.vectorFor
 	p.mu.Unlock()
 	if hook != nil {
 		hook(number)
@@ -83,7 +84,11 @@ func (p *embeddingProvider) serve(w http.ResponseWriter, r *http.Request) {
 		if badShape {
 			width = dims - 1
 		}
-		items = append(items, providerItem{Object: "embedding", Index: i, Embedding: providerVector(input, width)})
+		vector := providerVector(input, width)
+		if vectorFor != nil {
+			vector = vectorFor(input, width)
+		}
+		items = append(items, providerItem{Object: "embedding", Index: i, Embedding: vector})
 	}
 	body, err := json.Marshal(providerList{Object: "list", Data: items})
 	if err != nil {

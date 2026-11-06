@@ -49,6 +49,7 @@ type knowledgeJournal struct {
 	ChunkIDs   []string        `json:"chunk_ids"`
 	Counts     knowledgeCounts `json:"counts"`
 	DurationMS int64           `json:"duration_ms"`
+	Mode       string          `json:"mode,omitempty"`
 	Outcome    string          `json:"outcome"`
 }
 
@@ -56,6 +57,7 @@ type knowledgeRetrievedPayload struct {
 	ChunkIDs   []string        `json:"chunk_ids"`
 	Counts     knowledgeCounts `json:"counts"`
 	DurationMS int64           `json:"duration_ms"`
+	Mode       string          `json:"mode,omitempty"`
 	Outcome    string          `json:"outcome"`
 }
 
@@ -99,6 +101,7 @@ func (x *ADKExecutor) retrieveKnowledge(ctx context.Context, req *runtime.TurnRe
 		Block:    strings.TrimSpace(evidence.Block),
 		ChunkIDs: evidence.ChunkIDs,
 		Counts:   knowledgeCounts{Retrieved: evidence.Retrieved, Rendered: len(evidence.ChunkIDs)},
+		Mode:     evidence.Mode,
 	}
 	switch {
 	case err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(budgeted.Err(), context.DeadlineExceeded)):
@@ -108,7 +111,7 @@ func (x *ADKExecutor) retrieveKnowledge(ctx context.Context, req *runtime.TurnRe
 		journal = knowledgeJournal{Outcome: knowledgeOutcomeError}
 		x.logger.WarnContext(ctx, "knowledge context unavailable", "component", "knowledge", "error", err, "turn_id", req.TurnID)
 	case journal.Block == "":
-		journal = knowledgeJournal{Outcome: knowledgeOutcomeEmpty, Counts: knowledgeCounts{Retrieved: evidence.Retrieved}}
+		journal = knowledgeJournal{Outcome: knowledgeOutcomeEmpty, Counts: knowledgeCounts{Retrieved: evidence.Retrieved}, Mode: evidence.Mode}
 	default:
 		journal.Outcome = knowledgeOutcomeOK
 	}
@@ -125,7 +128,7 @@ func (x *ADKExecutor) retrieveKnowledge(ctx context.Context, req *runtime.TurnRe
 
 func knowledgeRetrievedEvent(journal *knowledgeJournal) (store.RuntimeEvent, error) {
 	payload, err := json.Marshal(knowledgeRetrievedPayload{
-		ChunkIDs: journal.ChunkIDs, Counts: journal.Counts, DurationMS: journal.DurationMS, Outcome: journal.Outcome,
+		ChunkIDs: journal.ChunkIDs, Counts: journal.Counts, DurationMS: journal.DurationMS, Mode: journal.Mode, Outcome: journal.Outcome,
 	})
 	if err != nil {
 		return store.RuntimeEvent{}, codedError(runtime.ErrorCodeRuntimeInternal, "failed to encode the knowledge retrieval event", err)

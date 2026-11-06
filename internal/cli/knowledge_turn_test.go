@@ -79,11 +79,20 @@ func (c knowledgeCapture) joined() string { return strings.Join(c.texts, "\n") }
 
 type knowledgeTurnRig struct {
 	*kbRetrievalRig
-	engine *runtimeengine.Engine
-	model  *knowledgeCapturingModel
+	engine   *runtimeengine.Engine
+	model    *knowledgeCapturingModel
+	dbPath   string
+	cfgPath  string
+	vectors  *knowledgeVectorRuntime
+	provider *embeddingProvider
 }
 
 func newKnowledgeTurnRig(t *testing.T) *knowledgeTurnRig {
+	t.Helper()
+	return newKnowledgeTurnRigWith(t, "", nil)
+}
+
+func newKnowledgeTurnRigWith(t *testing.T, extraYAML string, fake *embeddingProvider) *knowledgeTurnRig {
 	t.Helper()
 	t.Setenv("AURA_TEST_MODEL_KEY", "kb-turn-test-model-key-value")
 	path := writeAgentsConfig(t, `storage:
@@ -106,14 +115,19 @@ agents:
     - id: plain
       description: No knowledge
       instructions: Chat.
-`)
+`+extraYAML)
 	cfg, db, dbPath := kbTestStorage(t, path)
 	pool, err := openKnowledgeReadPool(t.Context(), dbPath)
 	if err != nil {
 		t.Fatalf("openKnowledgeReadPool: %v", err)
 	}
 	t.Cleanup(func() { _ = pool.Close() })
-	retriever, err := newKnowledgeRetriever(cfg, pool)
+	vectors, _, err := startKnowledgeVectors(t.Context(), cfg, pool, dbPath)
+	if err != nil {
+		t.Fatalf("startKnowledgeVectors: %v", err)
+	}
+	t.Cleanup(vectors.close)
+	retriever, err := newKnowledgeRetriever(cfg, pool, vectors.options()...)
 	if err != nil {
 		t.Fatalf("newKnowledgeRetriever: %v", err)
 	}
@@ -124,6 +138,10 @@ agents:
 	rig := &knowledgeTurnRig{
 		kbRetrievalRig: &kbRetrievalRig{cfg: cfg, db: db, retriever: retriever, service: service},
 		model:          &knowledgeCapturingModel{},
+		dbPath:         dbPath,
+		cfgPath:        path,
+		vectors:        vectors,
+		provider:       fake,
 	}
 	name := fmt.Sprintf("knowledge-capturing-model-%d", knowledgeModelSeq.Add(1))
 	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return rig.model, nil })

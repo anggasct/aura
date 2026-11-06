@@ -37,6 +37,7 @@ type EmbeddingSettings struct {
 	Model         string
 	Dimensions    int
 	BatchSize     int
+	MaxMemory     int64
 	PublicQueries bool
 }
 

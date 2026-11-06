@@ -92,3 +92,78 @@ func TestKnowledgeEmbeddingCheckerIsUnknownWhenStateFails(t *testing.T) {
 		})
 	}
 }
+
+func TestKnowledgeEmbeddingCheckerReportsVectorMemoryAgainstTheLimit(t *testing.T) {
+	const mebibyte = 1 << 20
+	tests := map[string]struct {
+		state      KnowledgeEmbeddingState
+		wantScopes map[string]string
+		wantMemory string
+	}{
+		"everything fits": {
+			state: KnowledgeEmbeddingState{Configured: true, Available: true, MaxMemory: 256 * mebibyte, Collections: []KnowledgeEmbeddingCollection{
+				{Collection: "a", Chunks: 2, Covered: 2, Bytes: 100 * mebibyte},
+				{Collection: "b", Chunks: 2, Covered: 2, Bytes: 100 * mebibyte},
+			}},
+			wantScopes: map[string]string{"a": "ok", "b": "ok"},
+			wantMemory: "ok",
+		},
+		"together they exceed the limit": {
+			state: KnowledgeEmbeddingState{Configured: true, Available: true, MaxMemory: 256 * mebibyte, Collections: []KnowledgeEmbeddingCollection{
+				{Collection: "a", Chunks: 2, Covered: 2, Bytes: 150 * mebibyte},
+				{Collection: "b", Chunks: 2, Covered: 2, Bytes: 150 * mebibyte},
+			}},
+			wantScopes: map[string]string{"a": "ok", "b": "ok"},
+			wantMemory: "kb_memory_limit",
+		},
+		"one collection alone exceeds the limit": {
+			state: KnowledgeEmbeddingState{Configured: true, Available: true, MaxMemory: 256 * mebibyte, Collections: []KnowledgeEmbeddingCollection{
+				{Collection: "small", Chunks: 2, Covered: 2, Bytes: 10 * mebibyte},
+				{Collection: "huge", Chunks: 2, Covered: 2, Bytes: 390 * mebibyte},
+			}},
+			wantScopes: map[string]string{"small": "ok", "huge": "kb_memory_limit"},
+			wantMemory: "kb_memory_limit",
+		},
+		"partial and stale collections do not count": {
+			state: KnowledgeEmbeddingState{Configured: true, Available: true, MaxMemory: 256 * mebibyte, Collections: []KnowledgeEmbeddingCollection{
+				{Collection: "ready", Chunks: 2, Covered: 2, Bytes: 10 * mebibyte},
+				{Collection: "half", Chunks: 2, Covered: 1, Bytes: 900 * mebibyte},
+				{Collection: "moved", Chunks: 2, Covered: 2, Stale: true, Bytes: 900 * mebibyte},
+			}},
+			wantScopes: map[string]string{"ready": "ok", "half": "partial", "moved": "kb_reembed_required"},
+			wantMemory: "ok",
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			byScope := map[string]Finding{}
+			for _, f := range (KnowledgeEmbeddingChecker{State: embeddingState(test.state, nil)}).Check(t.Context()) {
+				byScope[f.Scope] = f
+			}
+			for scope, code := range test.wantScopes {
+				if byScope[scope].Code != code {
+					t.Errorf("%s = %+v, want code %s", scope, byScope[scope], code)
+				}
+			}
+			memory := byScope["vector_memory"]
+			if memory.Code != test.wantMemory || !strings.Contains(memory.Detail, "max_memory") {
+				t.Errorf("vector_memory = %+v, want code %s", memory, test.wantMemory)
+			}
+			if test.wantMemory != "ok" && (memory.Status != StatusDegraded || memory.Remediation != RemediationEmbedKnowledge) {
+				t.Errorf("an over-limit report is not degraded: %+v", memory)
+			}
+		})
+	}
+}
+
+func TestKnowledgeEmbeddingCheckerReportsNoMemoryLineWithoutReadyCollections(t *testing.T) {
+	findings := KnowledgeEmbeddingChecker{State: embeddingState(KnowledgeEmbeddingState{
+		Configured: true, Available: true, MaxMemory: 1 << 20,
+		Collections: []KnowledgeEmbeddingCollection{{Collection: "half", Chunks: 2, Covered: 1, Bytes: 5}},
+	}, nil)}.Check(t.Context())
+	for _, f := range findings {
+		if f.Scope == "vector_memory" {
+			t.Errorf("unexpected memory finding %+v", f)
+		}
+	}
+}

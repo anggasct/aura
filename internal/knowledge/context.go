@@ -25,14 +25,14 @@ func (p *ContextProvider) KnowledgeContext(ctx context.Context, req *runtime.Tur
 	if len(req.Knowledge) == 0 {
 		return runtime.KnowledgeEvidence{}, nil
 	}
-	query := runtimeingress.QueryText(req.Parts)
+	query := runtimeingress.JoinedText(req.Parts)
 	if query == "" {
 		return runtime.KnowledgeEvidence{}, nil
 	}
-	hits, err := p.retriever.Search(ctx, req.Knowledge, query, SearchDepth)
+	found, err := p.retriever.Search(ctx, &SearchRequest{Scope: req.Knowledge, Query: query, Depth: SearchDepth, Class: req.PrincipalClass})
 	if err != nil {
 		return runtime.KnowledgeEvidence{}, err
 	}
-	rendered := RenderContext(SelectContext(hits))
-	return runtime.KnowledgeEvidence{Block: rendered.Block, ChunkIDs: rendered.ChunkIDs, Retrieved: len(hits)}, nil
+	rendered := RenderContext(SelectContext(found.Hits))
+	return runtime.KnowledgeEvidence{Block: rendered.Block, ChunkIDs: rendered.ChunkIDs, Retrieved: len(found.Hits), Mode: found.Mode}, nil
 }

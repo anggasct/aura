@@ -244,32 +244,37 @@ func openKnowledgeReadPool(ctx context.Context, dbPath string) (*sql.DB, error) 
 	return pool, nil
 }
 
-func newKnowledgeRetriever(cfg *config.Config, pool *sql.DB) (*knowledge.Retriever, error) {
+func newKnowledgeRetriever(cfg *config.Config, pool *sql.DB, opts ...knowledge.RetrieverOption) (*knowledge.Retriever, error) {
 	if cfg == nil {
 		return nil, errors.New("knowledge config must not be nil")
 	}
 	if pool == nil {
 		return nil, errors.New("knowledge read pool must not be nil")
 	}
-	return knowledge.NewRetriever(&knowledgeIndex{index: store.NewKBIndex(pool)}, &knowledgeSecrets{cfg: cfg})
+	return knowledge.NewRetriever(&knowledgeIndex{index: store.NewKBIndex(pool)}, &knowledgeSecrets{cfg: cfg}, opts...)
 }
 
 type knowledgeRuntime struct {
 	retriever *knowledge.Retriever
 	provider  *knowledge.ContextProvider
 	pool      *sql.DB
+	vectors   *knowledgeVectorRuntime
 }
 
 type knowledgeToolSearcher struct {
 	retriever *knowledge.Retriever
 }
 
-func (s *knowledgeToolSearcher) SearchKnowledge(ctx context.Context, scope []string, query string, limit int) (json.RawMessage, error) {
-	hits, err := s.retriever.Search(ctx, scope, query, knowledge.SearchDepth)
+func (s *knowledgeToolSearcher) SearchKnowledge(ctx context.Context, scope []string, query string, limit int, class principal.Class) (json.RawMessage, error) {
+	budgeted, cancel := context.WithTimeout(ctx, knowledge.RetrievalBudget)
+	defer cancel()
+	found, err := s.retriever.Search(budgeted, &knowledge.SearchRequest{Scope: scope, Query: query, Depth: knowledge.SearchDepth, Class: class})
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(knowledge.ShapeSearch(hits, limit))
+	output := knowledge.ShapeSearch(found.Hits, limit)
+	output.Mode = found.Mode
+	return json.Marshal(output)
 }
 
 func (r *knowledgeRuntime) attachSearch(builtin *toolsbuiltin.Executor) {
@@ -280,7 +285,11 @@ func (r *knowledgeRuntime) attachSearch(builtin *toolsbuiltin.Executor) {
 }
 
 func (r *knowledgeRuntime) close() {
-	if r != nil && r.pool != nil {
+	if r == nil {
+		return
+	}
+	r.vectors.close()
+	if r.pool != nil {
 		_ = r.pool.Close()
 	}
 }
@@ -307,17 +316,24 @@ func buildKnowledgeRuntime(ctx context.Context, cfg *config.Config, registry *au
 	if err != nil {
 		return nil, false, err
 	}
-	retriever, err := newKnowledgeRetriever(cfg, pool)
+	vectors, _, err := startKnowledgeVectors(ctx, cfg, pool, dbPath)
 	if err != nil {
+		_ = pool.Close()
+		return nil, false, err
+	}
+	retriever, err := newKnowledgeRetriever(cfg, pool, vectors.options()...)
+	if err != nil {
+		vectors.close()
 		_ = pool.Close()
 		return nil, false, err
 	}
 	provider, err := knowledge.NewContextProvider(retriever)
 	if err != nil {
+		vectors.close()
 		_ = pool.Close()
 		return nil, false, err
 	}
-	return &knowledgeRuntime{retriever: retriever, provider: provider, pool: pool}, true, nil
+	return &knowledgeRuntime{retriever: retriever, provider: provider, pool: pool, vectors: vectors}, true, nil
 }
 
 func (s *knowledgeStore) Check(ctx context.Context) (knowledge.IndexReport, error) {

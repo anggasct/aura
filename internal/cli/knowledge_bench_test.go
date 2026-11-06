@@ -73,7 +73,7 @@ func BenchmarkKnowledgeSearchLargeScope(b *testing.B) {
 		terms = append(terms, fmt.Sprintf("t%02d", term))
 	}
 	query := strings.Join(terms, " ")
-	if _, err := retriever.Search(b.Context(), []string{"bench"}, query, knowledge.SearchDepth); err != nil {
+	if _, err := ownerSearch(b.Context(), retriever, []string{"bench"}, query, knowledge.SearchDepth); err != nil {
 		b.Fatalf("warm-up Search: %v", err)
 	}
 
@@ -81,7 +81,7 @@ func BenchmarkKnowledgeSearchLargeScope(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		started := time.Now()
-		hits, err := retriever.Search(b.Context(), []string{"bench"}, query, knowledge.SearchDepth)
+		hits, err := ownerSearch(b.Context(), retriever, []string{"bench"}, query, knowledge.SearchDepth)
 		took := time.Since(started)
 		if err != nil || len(hits) == 0 {
 			b.Fatalf("Search = %d hits, %v", len(hits), err)
