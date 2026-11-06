@@ -73,8 +73,8 @@ func validateEmailAccountShapes(accountsNode *yamlv3.Node) error {
 				if err := quotedStringSequence(field+"."+key, value); err != nil {
 					return err
 				}
-			case "imap":
-				if err := validateEmailIMAPShape(field+".imap", value); err != nil {
+			case "imap", "smtp":
+				if err := validateEmailEndpointShape(field+"."+key, value); err != nil {
 					return err
 				}
 			}
@@ -83,7 +83,7 @@ func validateEmailAccountShapes(accountsNode *yamlv3.Node) error {
 	return nil
 }
 
-func validateEmailIMAPShape(field string, node *yamlv3.Node) error {
+func validateEmailEndpointShape(field string, node *yamlv3.Node) error {
 	if node.Kind != yamlv3.MappingNode {
 		return fmt.Errorf("%s must be a mapping at line %d", field, node.Line)
 	}
@@ -115,12 +115,16 @@ func applyEmailDefaults(cfg *Config, doc *yamlv3.Node, defaults *Email) {
 	accountsNode := nestedValue(doc, "channels", "email", "accounts")
 	for i := range email.Accounts {
 		imap := &email.Accounts[i].IMAP
+		smtp := &email.Accounts[i].SMTP
 		var item *yamlv3.Node
 		if accountsNode != nil && accountsNode.Kind == yamlv3.SequenceNode && i < len(accountsNode.Content) {
 			item = accountsNode.Content[i]
 		}
 		if imap.Port == 0 && !emailItemHasKey(item, "imap", "port") {
 			imap.Port = EmailDefaultIMAPPort
+		}
+		if smtp.Port == 0 && !emailItemHasKey(item, "smtp", "port") {
+			smtp.Port = EmailDefaultSMTPPort
 		}
 		if imap.Folder == "" && !emailItemHasKey(item, "imap", "folder") {
 			imap.Folder = EmailDefaultFolder
@@ -152,7 +156,7 @@ func validateEmail(email *Email, owner *Owner) error {
 		default:
 			names[account.Name] = true
 		}
-		problems = append(problems, emailAccountProblems(field, account)...)
+		problems = append(problems, emailAccountProblems(field, account, email.Enabled)...)
 	}
 	if email.Enabled && len(email.Accounts) == 0 {
 		problems = append(problems, errors.New("channels.email.enabled requires at least one channels.email.accounts entry"))
@@ -174,18 +178,21 @@ func validateEmail(email *Email, owner *Owner) error {
 	return nil
 }
 
-func emailAccountProblems(field string, account *EmailAccount) []error {
+func emailAccountProblems(field string, account *EmailAccount, enabled bool) []error {
 	var problems []error
 	if account.Persona == "" {
 		problems = append(problems, fmt.Errorf("%s.persona must not be empty", field))
 	}
-	if !principal.IsEmailAddress(account.Address) {
+	if !principal.IsPlainEmailAddress(account.Address) {
 		problems = append(problems, fmt.Errorf("%s.address must be a lowercase mailbox address", field))
 	}
 	if !emailHostName(account.AuthservID) {
 		problems = append(problems, fmt.Errorf("%s.authserv_id must be the receiving server's host name", field))
 	}
 	problems = append(problems, emailIMAPProblems(field+".imap", &account.IMAP)...)
+	if enabled || account.SMTP.Host != "" || account.SMTP.Username != "" || account.SMTP.PasswordRef != "" {
+		problems = append(problems, emailSMTPProblems(field+".smtp", &account.SMTP)...)
+	}
 	seen := make(map[string]bool, len(account.AllowedSenders))
 	for _, sender := range account.AllowedSenders {
 		switch {
@@ -201,28 +208,37 @@ func emailAccountProblems(field string, account *EmailAccount) []error {
 }
 
 func emailIMAPProblems(field string, imap *EmailIMAP) []error {
-	var problems []error
-	if !emailHostName(imap.Host) {
-		problems = append(problems, fmt.Errorf("%s.host must be a host name", field))
-	}
-	if imap.Port < 1 || imap.Port > emailMaxPort {
-		problems = append(problems, fmt.Errorf("%s.port must be between 1 and %d", field, emailMaxPort))
-	}
-	if !emailPlainText(imap.Username, emailMaxUsernameBytes) {
-		problems = append(problems, fmt.Errorf("%s.username must be a single line of at most %d bytes", field, emailMaxUsernameBytes))
-	}
-	switch {
-	case imap.PasswordRef == "":
-		problems = append(problems, fmt.Errorf("%s.password_ref must not be empty", field))
-	case !secretReferenceShaped(imap.PasswordRef):
-		problems = append(problems, fmt.Errorf("%s.password_ref must use env:// or file://", field))
-	}
+	problems := emailEndpointProblems(field, imap.Host, imap.Port, imap.Username, imap.PasswordRef)
 	if !emailPlainText(imap.Folder, emailMaxFolderBytes) {
 		problems = append(problems, fmt.Errorf("%s.folder must be a single line of at most %d bytes", field, emailMaxFolderBytes))
 	}
 	interval := time.Duration(imap.PollInterval)
 	if interval < EmailMinPollInterval || interval > EmailMaxPollInterval {
 		problems = append(problems, fmt.Errorf("%s.poll_interval must be between %s and %s", field, EmailMinPollInterval, EmailMaxPollInterval))
+	}
+	return problems
+}
+
+func emailSMTPProblems(field string, smtp *EmailSMTP) []error {
+	return emailEndpointProblems(field, smtp.Host, smtp.Port, smtp.Username, smtp.PasswordRef)
+}
+
+func emailEndpointProblems(field, host string, port int, username, passwordRef string) []error {
+	var problems []error
+	if !emailHostName(host) {
+		problems = append(problems, fmt.Errorf("%s.host must be a host name", field))
+	}
+	if port < 1 || port > emailMaxPort {
+		problems = append(problems, fmt.Errorf("%s.port must be between 1 and %d", field, emailMaxPort))
+	}
+	if !emailPlainText(username, emailMaxUsernameBytes) {
+		problems = append(problems, fmt.Errorf("%s.username must be a single line of at most %d bytes", field, emailMaxUsernameBytes))
+	}
+	switch {
+	case passwordRef == "":
+		problems = append(problems, fmt.Errorf("%s.password_ref must not be empty", field))
+	case !secretReferenceShaped(passwordRef):
+		problems = append(problems, fmt.Errorf("%s.password_ref must use env:// or file://", field))
 	}
 	return problems
 }

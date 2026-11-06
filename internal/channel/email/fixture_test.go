@@ -3,6 +3,7 @@ package email
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"strings"
@@ -13,8 +14,10 @@ import (
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/access"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/principal"
 	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const (
@@ -414,9 +417,57 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
+type fakeMailer struct {
+	mu          sync.Mutex
+	results     []error
+	submissions []Submission
+}
+
+func (m *fakeMailer) fail(errs ...error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.results = append(m.results, errs...)
+}
+
+func (m *fakeMailer) Submit(_ context.Context, submission *Submission) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.submissions = append(m.submissions, *submission)
+	if len(m.results) == 0 {
+		return nil
+	}
+	err := m.results[0]
+	m.results = m.results[1:]
+	return err
+}
+
+func (m *fakeMailer) sent() []Submission {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]Submission(nil), m.submissions...)
+}
+
+func newEffects(t *testing.T, db *sql.DB) *effect.Executor {
+	t.Helper()
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+	if err != nil {
+		t.Fatalf("NewJournal: %v", err)
+	}
+	executor, err := effect.NewExecutor(journal)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	return executor
+}
+
 type harness struct {
 	t        *testing.T
+	cfg      *config.Email
+	account  *config.EmailAccount
+	logger   *slog.Logger
 	adapter  *Adapter
+	mailer   Mailer
+	db       *sql.DB
 	mailbox  *fakeMailbox
 	sink     *captureSink
 	cursors  *memoryCursors
@@ -437,6 +488,8 @@ type harnessOptions struct {
 	evals    access.EvalGate
 	owners   []string
 	mailbox  *fakeMailbox
+	mailer   Mailer
+	db       *sql.DB
 	cursors  *memoryCursors
 	sessions *memorySessions
 }
@@ -475,7 +528,15 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	}
 	logs := &lockedBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	adapter, err := New(cfg, account, mailbox, cursors, sessions, logger)
+	mailer := opts.mailer
+	if mailer == nil {
+		mailer = &fakeMailer{}
+	}
+	db := opts.db
+	if db == nil {
+		db = storetest.OpenMigrated(t)
+	}
+	adapter, err := New(cfg, account, mailbox, mailer, cursors, newEffects(t, db), sessions, logger)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -496,7 +557,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	adapter.SetAccess(&AccessSettings{Budgets: opts.budgets, Evals: opts.evals})
 	adapter.retryBase = time.Millisecond
 	adapter.retryCap = 5 * time.Millisecond
-	h := &harness{t: t, adapter: adapter, mailbox: mailbox, sink: newCaptureSink(), cursors: cursors, sessions: sessions, logs: logs, done: make(chan struct{})}
+	h := &harness{t: t, cfg: cfg, account: account, logger: logger, adapter: adapter, mailer: mailer, db: db, mailbox: mailbox, sink: newCaptureSink(), cursors: cursors, sessions: sessions, logs: logs, done: make(chan struct{})}
 	adapter.SetDropObserver(func(_ context.Context, reason string) {
 		h.mu.Lock()
 		defer h.mu.Unlock()

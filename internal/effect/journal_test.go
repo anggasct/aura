@@ -597,3 +597,49 @@ func TestTransition_ConcurrentStartSucceedSerializes(t *testing.T) {
 		t.Fatalf("receipt rows = %d, want 1", receiptCount)
 	}
 }
+
+func TestRecoverProvider_ClaimsOnlyThatProvider(t *testing.T) {
+	j, _ := newTestJournal(t)
+	ctx := context.Background()
+	mine := validPrepare(1)
+	mine.Provider = "email"
+	other := validPrepare(2)
+	mustStart(t, j, mustPrepare(t, j, mine).ID)
+	mustStart(t, j, mustPrepare(t, j, other).ID)
+	prepared := validPrepare(3)
+	prepared.Provider = "email"
+	mustPrepare(t, j, prepared)
+
+	report, err := j.RecoverProvider(ctx, "email")
+	if err != nil {
+		t.Fatalf("RecoverProvider: %v", err)
+	}
+	if report.Scanned != 1 || report.Claimed != 1 {
+		t.Fatalf("report = %+v, want one scanned and one claimed", report)
+	}
+	states := map[string]State{}
+	intents, err := j.ListByState(ctx, StateStarted, 0)
+	if err != nil {
+		t.Fatalf("ListByState: %v", err)
+	}
+	for i := range intents {
+		states[intents[i].Provider] = intents[i].State
+	}
+	if states["telegram"] != StateStarted || len(intents) != 1 {
+		t.Errorf("started intents = %+v, want only the telegram one left", states)
+	}
+	unknown, err := j.ListByState(ctx, StateUnknown, 0)
+	if err != nil || len(unknown) != 1 || unknown[0].Provider != "email" {
+		t.Errorf("unknown intents = %+v (%v), want the email intent", unknown, err)
+	}
+	again, err := j.RecoverProvider(ctx, "email")
+	if err != nil || again.Claimed != 0 {
+		t.Errorf("second recovery = %+v (%v), want nothing to claim", again, err)
+	}
+}
+
+func TestRecoverProvider_RejectsAnEmptyProvider(t *testing.T) {
+	j, _ := newTestJournal(t)
+	_, err := j.RecoverProvider(context.Background(), "")
+	assertCode(t, err, ErrorCodeInvalidArgument)
+}

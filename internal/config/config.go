@@ -309,6 +309,7 @@ type TelegramPolling struct {
 const (
 	EmailMaxAttachmentBytes  int64 = 20971520
 	EmailDefaultIMAPPort           = 993
+	EmailDefaultSMTPPort           = 587
 	EmailDefaultFolder             = "INBOX"
 	EmailDefaultPollInterval       = time.Minute
 	EmailMinPollInterval           = 10 * time.Second
@@ -326,8 +327,16 @@ type EmailAccount struct {
 	Persona        string    `koanf:"persona" yaml:"persona"`
 	Address        string    `koanf:"address" yaml:"address"`
 	IMAP           EmailIMAP `koanf:"imap" yaml:"imap"`
+	SMTP           EmailSMTP `koanf:"smtp" yaml:"smtp"`
 	AuthservID     string    `koanf:"authserv_id" yaml:"authserv_id"`
 	AllowedSenders []string  `koanf:"allowed_senders" yaml:"allowed_senders"`
+}
+
+type EmailSMTP struct {
+	Host        string `koanf:"host" yaml:"host"`
+	Port        int    `koanf:"port" yaml:"port"`
+	Username    string `koanf:"username" yaml:"username"`
+	PasswordRef string `koanf:"password_ref" yaml:"password_ref"`
 }
 
 type EmailIMAP struct {

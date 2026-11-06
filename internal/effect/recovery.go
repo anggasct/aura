@@ -40,12 +40,27 @@ type RecoveryReport struct {
 }
 
 func (j *Journal) Recover(ctx context.Context) (RecoveryReport, error) {
+	return j.recoverStarted(ctx, "")
+}
+
+func (j *Journal) RecoverProvider(ctx context.Context, provider string) (RecoveryReport, error) {
+	if provider == "" {
+		return RecoveryReport{}, codedError(ErrorCodeInvalidArgument, "effect: provider must not be empty", nil)
+	}
+	return j.recoverStarted(ctx, provider)
+}
+
+func (j *Journal) recoverStarted(ctx context.Context, provider string) (RecoveryReport, error) {
 	started, err := j.ListByState(ctx, StateStarted, 0)
 	if err != nil {
 		return RecoveryReport{}, err
 	}
-	report := RecoveryReport{Scanned: len(started)}
+	var report RecoveryReport
 	for i := range started {
+		if provider != "" && started[i].Provider != provider {
+			continue
+		}
+		report.Scanned++
 		claimed, err := j.Claim(ctx, started[i].ID)
 		if err != nil {
 			return report, err

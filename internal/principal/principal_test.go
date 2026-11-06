@@ -255,6 +255,38 @@ func TestParseIdentityEmailAddress(t *testing.T) {
 	}
 }
 
+func TestIsPlainEmailAddress(t *testing.T) {
+	cases := map[string]struct {
+		addr string
+		want bool
+	}{
+		"plain address":          {addr: "owner@example.com", want: true},
+		"plus tag and dot":       {addr: "first.last+tag@mail.example.com", want: true},
+		"single label domain":    {addr: "owner@localhost", want: true},
+		"unicode local part":     {addr: "émile@example.com"},
+		"unicode domain":         {addr: "owner@exämple.com"},
+		"angle bracket":          {addr: "a>b@example.com"},
+		"quote":                  {addr: "\"a\"@example.com"},
+		"comma":                  {addr: "a,b@example.com"},
+		"leading dot":            {addr: ".a@example.com"},
+		"consecutive dots":       {addr: "a..b@example.com"},
+		"trailing dot in domain": {addr: "a@example.com."},
+		"hyphen led label":       {addr: "a@-example.com"},
+		"underscore in domain":   {addr: "a@exa_mple.com"},
+		"uppercase":              {addr: "Owner@example.com"},
+		"over the local bound":   {addr: strings.Repeat("a", 65) + "@example.com"},
+		"over the label bound":   {addr: "a@" + strings.Repeat("b", 64) + ".com"},
+		"no at sign":             {addr: "owner.example.com"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := IsPlainEmailAddress(tc.addr); got != tc.want {
+				t.Fatalf("IsPlainEmailAddress(%q) = %v, want %v", tc.addr, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolverEmailOwnerIdentity(t *testing.T) {
 	owners, err := NewResolver([]string{"email:owner@example.com", "discord:42"})
 	if err != nil {
