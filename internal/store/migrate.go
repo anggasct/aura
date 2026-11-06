@@ -55,6 +55,7 @@ var migrations = []migration{
 	{version: 37, sql: pluginRegistrySchemaSQL},
 	{version: 38, sql: memoryNonOwnerTrustSchemaSQL},
 	{version: 39, sql: knowledgeBaseSchemaSQL},
+	{version: 40, sql: knowledgeEmbeddingSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -803,6 +804,16 @@ CREATE TRIGGER kb_chunk_fts_update AFTER UPDATE OF content, heading, scope ON kb
     INSERT INTO kb_chunk_fts(rowid, content, heading, scope) VALUES (new.rowid, new.content, new.heading, new.scope);
 END;
 INSERT INTO kb_chunk_fts(kb_chunk_fts, rank) VALUES ('secure-delete', 1);
+`
+
+const knowledgeEmbeddingSchemaSQL = `
+ALTER TABLE kb_collection ADD COLUMN embedding_fingerprint TEXT;
+CREATE TABLE kb_embedding (
+    chunk_rowid INTEGER PRIMARY KEY REFERENCES kb_chunk(rowid) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    vector BLOB NOT NULL
+);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {
