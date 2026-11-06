@@ -10,6 +10,7 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,9 +33,10 @@ import (
 )
 
 type liveScriptModel struct {
-	mu    sync.Mutex
-	calls int
-	steps []liveModelStep
+	mu       sync.Mutex
+	calls    int
+	steps    []liveModelStep
+	requests []string
 }
 
 type liveModelStep struct {
@@ -44,11 +46,21 @@ type liveModelStep struct {
 
 func (m *liveScriptModel) Name() string { return "live-script-model" }
 
-func (m *liveScriptModel) GenerateContent(_ context.Context, _ *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+func (m *liveScriptModel) GenerateContent(_ context.Context, req *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		var seen strings.Builder
+		if req != nil {
+			for _, content := range req.Contents {
+				for _, part := range content.Parts {
+					seen.WriteString(part.Text)
+					seen.WriteString("\n")
+				}
+			}
+		}
 		m.mu.Lock()
 		m.calls++
 		call := m.calls
+		m.requests = append(m.requests, seen.String())
 		m.mu.Unlock()
 		var parts []*genai.Part
 		if call <= len(m.steps) && m.steps[call-1].tool != "" {
@@ -74,6 +86,12 @@ func (m *liveScriptModel) GenerateContent(_ context.Context, _ *adkmodel.LLMRequ
 			},
 		}, nil)
 	}
+}
+
+func (m *liveScriptModel) seenRequests() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.requests...)
 }
 
 func (m *liveScriptModel) callCount() int {
@@ -184,8 +202,9 @@ type liveTurnRig struct {
 }
 
 type liveSkillWiring struct {
-	renderer runtimeengine.SkillRenderer
-	context  runtimeadk.SkillContextProvider
+	renderer  runtimeengine.SkillRenderer
+	context   runtimeadk.SkillContextProvider
+	knowledge runtimeadk.KnowledgeContextProvider
 }
 
 func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolDefs []liveToolDef, skills ...liveSkillWiring) *liveTurnRig {
@@ -237,8 +256,13 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 	executorOpts := []runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(counting)}
 	var renderer runtimeengine.SkillRenderer
 	for _, wiring := range skills {
-		executorOpts = append(executorOpts, runtimeadk.WithSkillContext(wiring.context))
-		renderer = wiring.renderer
+		if wiring.context != nil {
+			executorOpts = append(executorOpts, runtimeadk.WithSkillContext(wiring.context))
+			renderer = wiring.renderer
+		}
+		if wiring.knowledge != nil {
+			executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(wiring.knowledge))
+		}
 	}
 	executor, err := runtimeadk.NewADKExecutor("aura", modelName, store.NewSessionService(db), events, counting, nil, nil, executorOpts...)
 	if err != nil {
