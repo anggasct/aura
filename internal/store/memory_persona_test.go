@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/anggasct/aura/internal/principal"
 )
 
 func seedPersonaSession(t *testing.T, db *sql.DB, sessionID, ownerID, agentID string) {
@@ -111,5 +113,49 @@ func TestMemoryPersonaMigrationBackfillsFromSession(t *testing.T) {
 	var index string
 	if err := db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'memory_document_owner_agent_idx'`).Scan(&index); err != nil {
 		t.Fatalf("persona index missing: %v", err)
+	}
+}
+
+func TestMemoryNonOwnerTrustMigrationRelabelsOnlyNonOwnerInput(t *testing.T) {
+	ctx := t.Context()
+	before := slices.IndexFunc(migrations, func(m migration) bool { return m.sql == memoryNonOwnerTrustSchemaSQL })
+	if before < 0 {
+		t.Fatal("non-owner trust migration not registered")
+	}
+	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), before)
+	rows := []struct{ id, owner, trust, want string }{
+		{"mem-owner", principal.OwnerID, "owner_input", "owner_input"},
+		{"mem-public", "http:abcdefabcdef", "owner_input", "untrusted_external"},
+		{"mem-trusted", "telegram:42", "owner_input", "untrusted_external"},
+		{"mem-legacy", "ubuntu", "owner_input", "untrusted_external"},
+		{"mem-derived", "http:abcdefabcdef", "derived_untrusted", "derived_untrusted"},
+		{"mem-external", principal.OwnerID, "untrusted_external", "untrusted_external"},
+	}
+	for _, row := range rows {
+		session := "sess-" + row.id
+		seedPersonaSession(t, db, session, row.owner, "main")
+		if _, err := db.ExecContext(ctx, `INSERT INTO memory_document (id, owner_id, session_id, kind, source_from_sequence, source_to_sequence, content, trust_label, created_at) VALUES (?, ?, ?, 'event_text', 1, 1, 'nightly backup text', ?, '2026-09-12T12:00:00Z')`,
+			row.id, row.owner, session, row.trust); err != nil {
+			t.Fatalf("seed %s: %v", row.id, err)
+		}
+	}
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	s := NewMemoryStore(db)
+	for _, row := range rows {
+		t.Run(row.id, func(t *testing.T) {
+			document, found, err := s.GetDocument(ctx, row.id)
+			if err != nil || !found {
+				t.Fatalf("GetDocument = %v, %v", found, err)
+			}
+			if document.TrustLabel != row.want {
+				t.Errorf("trust_label = %q, want %q", document.TrustLabel, row.want)
+			}
+		})
+	}
+	hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "http:abcdefabcdef", Terms: "nightly", Limit: 10})
+	if err != nil || len(hits) != 2 {
+		t.Fatalf("search after migration = %d hits, %v; want 2", len(hits), err)
 	}
 }

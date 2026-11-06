@@ -225,6 +225,51 @@ func TestMemoryHookProjectsAndPurges(t *testing.T) {
 	}
 }
 
+func TestMemoryHookLabelsUserInputByPrincipal(t *testing.T) {
+	cases := []struct {
+		name      string
+		principal string
+		trust     string
+	}{
+		{"owner", principal.OwnerID, "owner_input"},
+		{"public", "http:abcdefabcdef", "untrusted_external"},
+		{"trusted", "telegram:42", "untrusted_external"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := newMemoryTestDB(t)
+			sessions := store.NewSessionService(db)
+			if err := sessions.Create(ctx, &store.Session{ID: "sess-1", OwnerID: tc.principal, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+			service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{})
+			if err != nil {
+				t.Fatalf("NewService(): %v", err)
+			}
+			hook := buildMemoryHook(service, nil, nil, nil)
+			req := hookTurnRequest()
+			req.PrincipalID = tc.principal
+			events := []store.RuntimeEvent{{
+				ID: "ev-hook-1", SessionID: "sess-1", Sequence: 1, TurnID: "turn-1", Author: "user",
+				Kind: store.EventKindADK, SchemaVersion: 1,
+				Payload:   journalPayload(t, "user", "the nightly backup finished cleanly"),
+				CreatedAt: time.Now().UTC(),
+			}}
+			if err := hook(ctx, req, events); err != nil {
+				t.Fatalf("hook(): %v", err)
+			}
+			hits, err := store.NewMemoryStore(db).Search(ctx, &store.MemoryQuery{OwnerID: tc.principal, SessionID: "sess-1", Terms: "nightly backup", Limit: 10})
+			if err != nil || len(hits) != 1 {
+				t.Fatalf("hits = %d, %v; want 1", len(hits), err)
+			}
+			if hits[0].TrustLabel != tc.trust {
+				t.Errorf("trust_label = %q, want %q", hits[0].TrustLabel, tc.trust)
+			}
+		})
+	}
+}
+
 type stubRangeSummarizer struct {
 	text  string
 	calls int
