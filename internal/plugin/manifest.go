@@ -31,7 +31,8 @@ const (
 	TierRead   = "read"
 	TierEffect = "effect"
 
-	BackendMCP = "mcp"
+	BackendMCP       = "mcp"
+	BackendConnector = "connector"
 
 	AuthNone         = auth.KindNone
 	AuthStaticSecret = auth.KindStaticSecret
@@ -129,7 +130,7 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	if err := yamlv3.Unmarshal(data, &probe); err != nil {
 		return nil, Errorf(ErrManifestInvalid, "the manifest is not valid yaml")
 	}
-	if kind, isString := probe.Backend.Kind.(string); isString && kind != "" && kind != BackendMCP {
+	if kind, isString := probe.Backend.Kind.(string); isString && kind != "" && kind != BackendMCP && kind != BackendConnector {
 		return nil, Errorf(ErrBackendUnsupported, "backend kind %q is not supported", boundedText(kind))
 	}
 	decoder := yamlv3.NewDecoder(bytes.NewReader(data))
@@ -356,8 +357,8 @@ func (m *Manifest) validateSecretsAndAuth(found *problems) {
 		if m.Auth.oauth2FieldsSet() {
 			found.add("auth.kind static_secret takes no oauth2 field")
 		}
-		if m.Backend.Transport != config.MCPTransportStreamableHTTP {
-			found.add("auth.kind static_secret needs the streamable_http transport")
+		if !m.backendCarriesAuth() {
+			found.add("auth.kind static_secret needs the streamable_http transport or the connector backend")
 		}
 	case AuthOAuth2:
 		m.validateOAuth2(found)
@@ -371,8 +372,8 @@ func (m *Manifest) validateOAuth2(found *problems) {
 	if oauth.Secret != "" || oauth.Header != "" {
 		found.add("auth.kind oauth2 takes no secret or header")
 	}
-	if m.Backend.Transport != config.MCPTransportStreamableHTTP {
-		found.add("auth.kind oauth2 needs the streamable_http transport")
+	if !m.backendCarriesAuth() {
+		found.add("auth.kind oauth2 needs the streamable_http transport or the connector backend")
 	}
 	validateAuthURL(found, "auth.authorize_url", oauth.AuthorizeURL)
 	if token := validateAuthURL(found, "auth.token_url", oauth.TokenURL); token != nil && !egressListed(m.Egress, token) {
@@ -452,10 +453,14 @@ func validateRedirectURI(found *problems, raw string) {
 	}
 }
 
+func (m *Manifest) backendCarriesAuth() bool {
+	return m.Backend.Kind == BackendConnector || m.Backend.Transport == config.MCPTransportStreamableHTTP
+}
+
 func (m *Manifest) validateBackend(found *problems) {
 	backend := &m.Backend
-	if backend.Kind != BackendMCP {
-		found.add("backend.kind must be %s", BackendMCP)
+	if backend.Kind != BackendMCP && backend.Kind != BackendConnector {
+		found.add("backend.kind must be %s or %s", BackendMCP, BackendConnector)
 		return
 	}
 	var local problems
@@ -468,22 +473,13 @@ func (m *Manifest) validateBackend(found *problems) {
 			break
 		}
 	}
-	switch backend.Transport {
-	case config.MCPTransportStdio:
-		if !validBundleCommand(backend.Command) {
-			local.add("backend.command must be a relative path inside the bundle")
-		}
-		if backend.URL != "" {
-			local.add("backend.url is not allowed for the stdio transport")
-		}
-	case config.MCPTransportStreamableHTTP:
-		m.validateBackendURL(&local)
-	default:
-		local.add("backend.transport must be %s or %s", config.MCPTransportStdio, config.MCPTransportStreamableHTTP)
+	if backend.Kind == BackendConnector {
+		m.validateConnectorTransport(&local)
+	} else {
+		m.validateMCPTransport(&local)
 	}
-	for _, field := range []struct{ name, value string }{
-		{"startup_timeout", backend.StartupTimeout}, {"request_timeout", backend.RequestTimeout}, {"connect_timeout", backend.ConnectTimeout},
-	} {
+	timeouts := []struct{ name, value string }{{"startup_timeout", backend.StartupTimeout}, {"request_timeout", backend.RequestTimeout}, {"connect_timeout", backend.ConnectTimeout}}
+	for _, field := range timeouts {
 		if !validDuration(field.value) {
 			local.add("backend.%s must be a non-negative duration", field.name)
 		}
@@ -498,6 +494,33 @@ func (m *Manifest) validateBackend(found *problems) {
 		}
 	}
 	*found = append(*found, local...)
+}
+
+func (m *Manifest) validateConnectorTransport(local *problems) {
+	backend := &m.Backend
+	if !validBundleCommand(backend.Command) {
+		local.add("backend.command must be a relative path inside the bundle")
+	}
+	if backend.Transport != "" || backend.URL != "" || backend.ConnectTimeout != "" {
+		local.add("backend.transport, backend.url and backend.connect_timeout are not allowed for the connector kind")
+	}
+}
+
+func (m *Manifest) validateMCPTransport(local *problems) {
+	backend := &m.Backend
+	switch backend.Transport {
+	case config.MCPTransportStdio:
+		if !validBundleCommand(backend.Command) {
+			local.add("backend.command must be a relative path inside the bundle")
+		}
+		if backend.URL != "" {
+			local.add("backend.url is not allowed for the stdio transport")
+		}
+	case config.MCPTransportStreamableHTTP:
+		m.validateBackendURL(local)
+	default:
+		local.add("backend.transport must be %s or %s", config.MCPTransportStdio, config.MCPTransportStreamableHTTP)
+	}
 }
 
 func validBundleCommand(command string) bool {
@@ -536,6 +559,9 @@ func (m *Manifest) ServerConfig(bundleRoot string) config.MCPServer {
 	}
 	if backend.Command != "" {
 		server.Command = filepath.Join(bundleRoot, filepath.Clean(backend.Command))
+	}
+	if backend.Kind == BackendConnector {
+		server.Transport = config.MCPTransportStdio
 	}
 	capabilities := slices.Clone(m.Capabilities)
 	slices.Sort(capabilities)

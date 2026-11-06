@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/anggasct/aura/internal/plugin/auth"
+	"github.com/anggasct/aura/internal/plugin/connector"
 )
 
 type ErrorCode string
@@ -24,6 +25,7 @@ const (
 	ErrDrift              ErrorCode = "plugin_drift"
 	ErrInvalidArgument    ErrorCode = "plugin_invalid_argument"
 	ErrStorage            ErrorCode = "plugin_storage_unavailable"
+	ErrBackendUnavailable ErrorCode = ErrorCode(connector.ErrBackendUnavailable)
 	ErrAuthRequired       ErrorCode = ErrorCode(auth.ErrRequired)
 	ErrAuthFailed         ErrorCode = ErrorCode(auth.ErrFailed)
 )

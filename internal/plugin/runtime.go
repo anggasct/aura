@@ -21,9 +21,12 @@ type ApprovedTool struct {
 type Active struct {
 	ID      string
 	Version string
+	Kind    string
+	Root    string
 	Server  config.MCPServer
 	Auth    auth.Strategy
 	Tools   []ApprovedTool
+	Egress  []string
 }
 
 type Held struct {
@@ -141,11 +144,19 @@ func (s *Service) activate(ctx context.Context, plugins *os.Root, record *Record
 	if err != nil {
 		return nil, Errorf(ErrSurfacePending, "the auth strategy cannot be built")
 	}
+	root := filepath.Join(s.dir, record.ID, record.Version)
 	active := &Active{
 		ID:      record.ID,
 		Version: record.Version,
-		Server:  manifest.ServerConfig(filepath.Join(s.dir, record.ID, record.Version)),
+		Kind:    manifest.Backend.Kind,
+		Root:    root,
+		Server:  manifest.ServerConfig(root),
 		Auth:    strategy,
+	}
+	for _, host := range sortedCopy(manifest.Egress) {
+		if granted[GrantKey{SurfaceEgress, host}] == ValueFingerprint(SurfaceEgress, host) {
+			active.Egress = append(active.Egress, host)
+		}
 	}
 	normalized := manifest.normalized()
 	for i := range normalized.Tools {
@@ -168,13 +179,11 @@ func requiredPending(manifest *Manifest, granted map[GrantKey]string) string {
 			return "secret " + manifest.Secrets[i].Name
 		}
 	}
-	if manifest.Backend.Transport == config.MCPTransportStreamableHTTP {
-		if !egressGranted(manifest.Backend.URL, granted) {
-			return "egress for the backend url"
-		}
-		if manifest.Auth.Kind == AuthOAuth2 && !egressGranted(manifest.Auth.TokenURL, granted) {
-			return "egress for the token url"
-		}
+	if manifest.Backend.Transport == config.MCPTransportStreamableHTTP && !egressGranted(manifest.Backend.URL, granted) {
+		return "egress for the backend url"
+	}
+	if manifest.Auth.Kind == AuthOAuth2 && !egressGranted(manifest.Auth.TokenURL, granted) {
+		return "egress for the token url"
 	}
 	return ""
 }

@@ -125,3 +125,14 @@ func TestNewCheckerRequiresARegistry(t *testing.T) {
 		t.Fatalf("NewChecker(nil) error = %v", err)
 	}
 }
+
+func TestCheckerReportsABackendThatCannotRun(t *testing.T) {
+	env := newTestEnv(t)
+	checker := newCheckerForTest(t, env, &CheckerOptions{Runtime: func(context.Context) []RuntimeStatus {
+		return []RuntimeStatus{{ID: "mailer", Backend: ErrBackendUnavailable}, {ID: "weather", Running: true}}
+	}})
+	findings := checker.Check(t.Context())
+	if len(findings) != 1 || findings[0].Code != string(ErrBackendUnavailable) || findings[0].Scope != "mailer" || findings[0].Status != health.StatusDegraded || findings[0].Remediation != RemediationReview {
+		t.Fatalf("findings = %+v", findings)
+	}
+}

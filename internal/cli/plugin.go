@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/mcp"
 	"github.com/anggasct/aura/internal/plugin"
 	"github.com/anggasct/aura/internal/plugin/auth"
+	"github.com/anggasct/aura/internal/plugin/connector"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -195,9 +196,10 @@ func fromStorePlugin(row *store.Plugin) plugin.Record {
 }
 
 type pluginRuntime struct {
-	service   *plugin.Service
-	plan      *plugin.Plan
-	installed int
+	service    *plugin.Service
+	plan       *plugin.Plan
+	installed  int
+	connectors *connector.Manager
 }
 
 func planPlugins(ctx context.Context, cfg *config.Config, db *sql.DB, redactor auth.Redactor) (*pluginRuntime, error) {
@@ -223,6 +225,9 @@ func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {
 	servers := make([]mcp.PluginServer, 0, len(r.plan.Active))
 	for i := range r.plan.Active {
 		active := &r.plan.Active[i]
+		if active.Kind != plugin.BackendMCP {
+			continue
+		}
 		server := mcp.PluginServer{ID: active.ID, Server: active.Server, Authorizer: active.Auth}
 		for _, tool := range active.Tools {
 			server.Tools = append(server.Tools, mcp.PluginTool{Name: tool.Name, Description: tool.Description})
@@ -237,17 +242,9 @@ func (r *pluginRuntime) healthCheck(cfg *config.Config, db *sql.DB, mcpServers *
 		return health.RegisteredCheck{}, false, nil
 	}
 	var source func(context.Context) []plugin.RuntimeStatus
-	if mcpServers != nil {
+	if mcpServers != nil || r.connectors != nil {
 		source = func(ctx context.Context) []plugin.RuntimeStatus {
-			statuses := mcpServers.manager.PluginStatuses()
-			out := make([]plugin.RuntimeStatus, 0, len(statuses))
-			for i := range statuses {
-				out = append(out, plugin.RuntimeStatus{
-					ID: statuses[i].ID, Running: statuses[i].Code == "" && statuses[i].Connected, Drift: statuses[i].Drift,
-					Auth: r.authStatus(ctx, statuses[i].ID),
-				})
-			}
-			return out
+			return r.runtimeStatuses(ctx, mcpServers)
 		}
 	}
 	checker, err := plugin.NewChecker(&plugin.CheckerOptions{
@@ -265,6 +262,27 @@ func (r *pluginRuntime) healthCheck(cfg *config.Config, db *sql.DB, mcpServers *
 		Timeout:     time.Duration(cfg.Health.CheckTimeout),
 		Remediation: plugin.RemediationReview,
 	}, true, nil
+}
+
+func (r *pluginRuntime) runtimeStatuses(ctx context.Context, mcpServers *mcpRuntime) []plugin.RuntimeStatus {
+	var out []plugin.RuntimeStatus
+	if mcpServers != nil {
+		for _, status := range mcpServers.manager.PluginStatuses() {
+			out = append(out, plugin.RuntimeStatus{
+				ID: status.ID, Running: status.Code == "" && status.Connected, Drift: status.Drift,
+				Auth: r.authStatus(ctx, status.ID),
+			})
+		}
+	}
+	if r.connectors != nil {
+		for _, status := range r.connectors.Statuses() {
+			out = append(out, plugin.RuntimeStatus{
+				ID: status.ID, Running: status.Code == "", Drift: status.Drift,
+				Auth: r.authStatus(ctx, status.ID), Backend: plugin.ErrorCode(status.Code),
+			})
+		}
+	}
+	return out
 }
 
 func (r *pluginRuntime) authStatus(ctx context.Context, id string) plugin.ErrorCode {

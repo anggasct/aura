@@ -238,6 +238,9 @@ func Inspect(root *os.Root) (*Inspection, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := requireConnectorExecutable(manifest, found); err != nil {
+		return nil, err
+	}
 	files := make([]treeFile, 0, len(found.Files))
 	for _, file := range found.Files {
 		if file.Path != ManifestFile {
@@ -265,6 +268,19 @@ func Inspect(root *os.Root) (*Inspection, error) {
 		return nil, err
 	}
 	return &Inspection{Manifest: manifest, BundleSHA256: bundleSum, Digest: digest, Files: len(files), Bytes: bytes}, nil
+}
+
+func requireConnectorExecutable(manifest *Manifest, found *tree) error {
+	if manifest.Backend.Kind != BackendConnector {
+		return nil
+	}
+	command := path.Clean(manifest.Backend.Command)
+	for _, file := range found.Files {
+		if file.Path == command && file.Exec {
+			return nil
+		}
+	}
+	return Errorf(ErrManifestInvalid, "backend.command must be an executable file inside the bundle")
 }
 
 func computeDigest(manifest *Manifest, bundleSum string) (string, error) {
