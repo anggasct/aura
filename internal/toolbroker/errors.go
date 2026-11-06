@@ -59,3 +59,23 @@ func errorf(class ResultClass, format string, args ...any) error {
 func Errorf(class ResultClass, format string, args ...any) error {
 	return errorf(class, format, args...)
 }
+
+type NotPerformedError struct {
+	Code string
+	Err  error
+}
+
+func (e *NotPerformedError) Error() string {
+	if e.Err == nil {
+		return e.Code
+	}
+	return e.Err.Error()
+}
+
+func (e *NotPerformedError) Unwrap() error {
+	return e.Err
+}
+
+func NotPerformed(code string, err error) error {
+	return &NotPerformedError{Code: code, Err: err}
+}

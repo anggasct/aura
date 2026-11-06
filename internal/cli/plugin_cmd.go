@@ -213,12 +213,19 @@ func authSummary(spec *plugin.Auth) string {
 	case "", plugin.AuthNone:
 		return "none"
 	case plugin.AuthOAuth2:
-		return fmt.Sprintf("oauth2 (authorize %s, token %s, scopes %s, redirect %s, client id secret %s, client secret secret %s)",
+		return fmt.Sprintf("oauth2 (authorize %s, token %s, scopes %s, redirect %s, client id secret %s, client secret secret %s%s)",
 			spec.AuthorizeURL, spec.TokenURL, strings.Join(sortedStrings(spec.Scopes), " "), spec.RedirectURI,
-			spec.ClientIDSecret, dashIfEmpty(spec.ClientSecretSecret))
+			spec.ClientIDSecret, dashIfEmpty(spec.ClientSecretSecret), authHostsSummary(spec.Hosts))
 	default:
-		return fmt.Sprintf("%s (secret %s)", spec.Kind, spec.Secret)
+		return fmt.Sprintf("%s (secret %s%s)", spec.Kind, spec.Secret, authHostsSummary(spec.Hosts))
 	}
+}
+
+func authHostsSummary(hosts []string) string {
+	if len(hosts) == 0 {
+		return ""
+	}
+	return ", credential sent to " + strings.Join(sortedStrings(hosts), ", ")
 }
 
 func sortedStrings(values []string) []string {

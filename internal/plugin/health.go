@@ -23,6 +23,7 @@ type RuntimeStatus struct {
 	Running bool
 	Drift   []string
 	Auth    ErrorCode
+	Backend ErrorCode
 }
 
 type DriftItem struct {
@@ -132,6 +133,10 @@ func (c *Checker) Check(ctx context.Context) []health.Finding {
 			if status.Auth != "" {
 				findings = append(findings, c.finding(status.Auth, status.ID, health.StatusDegraded,
 					"plugin "+status.ID+" has no usable authorization; run aura plugin login and restart", at))
+			}
+			if status.Backend != "" {
+				findings = append(findings, c.finding(status.Backend, status.ID, health.StatusDegraded,
+					"plugin "+status.ID+" is kept off: its backend cannot run on this host", at))
 			}
 			if len(status.Drift) == 0 {
 				continue

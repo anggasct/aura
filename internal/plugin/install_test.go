@@ -86,7 +86,7 @@ func TestInstallStopsBeforeAnyCopyOnABadManifest(t *testing.T) {
 		{"parser error", "a: [", ErrManifestInvalid},
 		{"schema error", replaceOnce(t, baseManifest, "id: weather", "id: ../weather"), ErrManifestInvalid},
 		{"oversize", baseManifest + "# " + strings.Repeat("x", MaxManifestBytes) + "\n", ErrManifestTooLarge},
-		{"unsupported backend", replaceOnce(t, baseManifest, "kind: mcp", "kind: connector"), ErrBackendUnsupported},
+		{"unsupported backend", replaceOnce(t, baseManifest, "kind: mcp", "kind: script"), ErrBackendUnsupported},
 		{"missing manifest", "", ErrManifestInvalid},
 	}
 	for _, tc := range cases {

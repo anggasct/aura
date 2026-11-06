@@ -108,12 +108,11 @@ func TestParseManifestRejects(t *testing.T) {
 			text := replaceOnce(t, baseManifest, "secrets: []", "secrets:\n  - name: token\n    ref: env://TOKEN")
 			return replaceOnce(t, text, "kind: none", "kind: static_secret\n  secret: token")
 		}, ErrManifestInvalid},
-		{"backend connector", func(t *testing.T) string { return replaceOnce(t, baseManifest, "kind: mcp", "kind: connector") }, ErrBackendUnsupported},
 		{"backend script", func(t *testing.T) string { return replaceOnce(t, baseManifest, "kind: mcp", "kind: script") }, ErrBackendUnsupported},
 		{"backend browser", func(t *testing.T) string { return replaceOnce(t, baseManifest, "kind: mcp", "kind: browser") }, ErrBackendUnsupported},
 		{"backend unknown kind", func(t *testing.T) string { return replaceOnce(t, baseManifest, "kind: mcp", "kind: wasm") }, ErrBackendUnsupported},
-		{"backend connector with its own fields", func(t *testing.T) string {
-			return replaceOnce(t, baseManifest, "  kind: mcp\n  transport: stdio\n  command: ./server\n  args: [--quiet]\n", "  kind: connector\n  rpc: v1\n")
+		{"backend script with its own fields", func(t *testing.T) string {
+			return replaceOnce(t, baseManifest, "  kind: mcp\n  transport: stdio\n  command: ./server\n  args: [--quiet]\n", "  kind: script\n  rpc: v1\n")
 		}, ErrBackendUnsupported},
 		{"backend missing", func(t *testing.T) string { return strings.Split(baseManifest, "backend:")[0] }, ErrManifestInvalid},
 		{"absolute command", func(t *testing.T) string {

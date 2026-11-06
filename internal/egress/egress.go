@@ -170,10 +170,29 @@ func (d PinnedDialer) DialContext(ctx context.Context, network, address string) 
 type validatingTransport struct {
 	resolver Resolver
 	next     http.RoundTripper
+	target   func(*url.URL) string
+}
+
+func fullTarget(target *url.URL) string {
+	return target.String()
+}
+
+func originTarget(target *url.URL) string {
+	origin := *target
+	origin.RawQuery = ""
+	origin.ForceQuery = false
+	return origin.String()
+}
+
+func (t *validatingTransport) destination(target *url.URL) string {
+	if t.target == nil {
+		return fullTarget(target)
+	}
+	return t.target(target)
 }
 
 func (t *validatingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	destination, err := Validate(req.Context(), req.URL.String(), t.resolver)
+	destination, err := Validate(req.Context(), t.destination(req.URL), t.resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +206,14 @@ func (t *validatingTransport) CloseIdleConnections() {
 }
 
 func NewClient(resolver Resolver) *http.Client {
+	return newClient(resolver, fullTarget)
+}
+
+func NewAPIClient(resolver Resolver) *http.Client {
+	return newClient(resolver, originTarget)
+}
+
+func newClient(resolver Resolver, target func(*url.URL) string) *http.Client {
 	if resolver == nil {
 		resolver = systemResolver{}
 	}
@@ -194,9 +221,9 @@ func NewClient(resolver Resolver) *http.Client {
 		DialContext: PinnedDialer{Resolver: resolver}.DialContext,
 	}
 	return &http.Client{
-		Transport: &validatingTransport{resolver: resolver, next: pinned},
+		Transport: &validatingTransport{resolver: resolver, next: pinned, target: target},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if _, err := Validate(req.Context(), req.URL.String(), resolver); err != nil {
+			if _, err := Validate(req.Context(), target(req.URL), resolver); err != nil {
 				return err
 			}
 			if len(via) > 0 {

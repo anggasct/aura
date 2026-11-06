@@ -31,7 +31,8 @@ const (
 	TierRead   = "read"
 	TierEffect = "effect"
 
-	BackendMCP = "mcp"
+	BackendMCP       = "mcp"
+	BackendConnector = "connector"
 
 	AuthNone         = auth.KindNone
 	AuthStaticSecret = auth.KindStaticSecret
@@ -97,6 +98,7 @@ type Auth struct {
 	RedirectURI        string   `yaml:"redirect_uri" json:"redirect_uri,omitempty"`
 	ClientIDSecret     string   `yaml:"client_id_secret" json:"client_id_secret,omitempty"`
 	ClientSecretSecret string   `yaml:"client_secret_secret" json:"client_secret_secret,omitempty"`
+	Hosts              []string `yaml:"hosts" json:"hosts,omitempty"`
 }
 
 func (a *Auth) oauth2FieldsSet() bool {
@@ -129,7 +131,7 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	if err := yamlv3.Unmarshal(data, &probe); err != nil {
 		return nil, Errorf(ErrManifestInvalid, "the manifest is not valid yaml")
 	}
-	if kind, isString := probe.Backend.Kind.(string); isString && kind != "" && kind != BackendMCP {
+	if kind, isString := probe.Backend.Kind.(string); isString && kind != "" && kind != BackendMCP && kind != BackendConnector {
 		return nil, Errorf(ErrBackendUnsupported, "backend kind %q is not supported", boundedText(kind))
 	}
 	decoder := yamlv3.NewDecoder(bytes.NewReader(data))
@@ -356,13 +358,59 @@ func (m *Manifest) validateSecretsAndAuth(found *problems) {
 		if m.Auth.oauth2FieldsSet() {
 			found.add("auth.kind static_secret takes no oauth2 field")
 		}
-		if m.Backend.Transport != config.MCPTransportStreamableHTTP {
-			found.add("auth.kind static_secret needs the streamable_http transport")
+		if !m.backendCarriesAuth() {
+			found.add("auth.kind static_secret needs the streamable_http transport or the connector backend")
 		}
 	case AuthOAuth2:
 		m.validateOAuth2(found)
 	default:
 		found.add("auth.kind must be %s, %s or %s", AuthNone, AuthStaticSecret, AuthOAuth2)
+	}
+	m.validateAuthHosts(found)
+}
+
+func normalizedEgressEntry(entry string) string {
+	entry = strings.ToLower(entry)
+	if !strings.Contains(entry, ":") {
+		entry += ":443"
+	}
+	return entry
+}
+
+func (m *Manifest) validateAuthHosts(found *problems) {
+	hosts := m.Auth.Hosts
+	carriesCredentials := m.Backend.Kind == BackendConnector && (m.Auth.Kind == AuthStaticSecret || m.Auth.Kind == AuthOAuth2)
+	switch {
+	case !carriesCredentials:
+		if len(hosts) > 0 {
+			found.add("auth.hosts applies only to a connector backend with static_secret or oauth2 auth")
+		}
+		return
+	case len(hosts) == 0:
+		found.add("auth.hosts must list the egress hosts that receive the credential")
+		return
+	case len(hosts) > maxEgress:
+		found.add("auth.hosts lists more than %d entries", maxEgress)
+		return
+	}
+	listed := make(map[string]bool, len(m.Egress))
+	for _, entry := range m.Egress {
+		listed[normalizedEgressEntry(entry)] = true
+	}
+	seen := map[string]bool{}
+	for _, host := range hosts {
+		if !validEgressEntry(host) {
+			found.add("auth.hosts entries must be a lowercase host or host:port without wildcards")
+			continue
+		}
+		normalized := normalizedEgressEntry(host)
+		if !listed[normalized] {
+			found.add("auth.hosts entries must be listed in egress")
+		}
+		if seen[normalized] {
+			found.add("auth.hosts lists an entry twice")
+		}
+		seen[normalized] = true
 	}
 }
 
@@ -371,8 +419,8 @@ func (m *Manifest) validateOAuth2(found *problems) {
 	if oauth.Secret != "" || oauth.Header != "" {
 		found.add("auth.kind oauth2 takes no secret or header")
 	}
-	if m.Backend.Transport != config.MCPTransportStreamableHTTP {
-		found.add("auth.kind oauth2 needs the streamable_http transport")
+	if !m.backendCarriesAuth() {
+		found.add("auth.kind oauth2 needs the streamable_http transport or the connector backend")
 	}
 	validateAuthURL(found, "auth.authorize_url", oauth.AuthorizeURL)
 	if token := validateAuthURL(found, "auth.token_url", oauth.TokenURL); token != nil && !egressListed(m.Egress, token) {
@@ -452,10 +500,14 @@ func validateRedirectURI(found *problems, raw string) {
 	}
 }
 
+func (m *Manifest) backendCarriesAuth() bool {
+	return m.Backend.Kind == BackendConnector || m.Backend.Transport == config.MCPTransportStreamableHTTP
+}
+
 func (m *Manifest) validateBackend(found *problems) {
 	backend := &m.Backend
-	if backend.Kind != BackendMCP {
-		found.add("backend.kind must be %s", BackendMCP)
+	if backend.Kind != BackendMCP && backend.Kind != BackendConnector {
+		found.add("backend.kind must be %s or %s", BackendMCP, BackendConnector)
 		return
 	}
 	var local problems
@@ -468,22 +520,13 @@ func (m *Manifest) validateBackend(found *problems) {
 			break
 		}
 	}
-	switch backend.Transport {
-	case config.MCPTransportStdio:
-		if !validBundleCommand(backend.Command) {
-			local.add("backend.command must be a relative path inside the bundle")
-		}
-		if backend.URL != "" {
-			local.add("backend.url is not allowed for the stdio transport")
-		}
-	case config.MCPTransportStreamableHTTP:
-		m.validateBackendURL(&local)
-	default:
-		local.add("backend.transport must be %s or %s", config.MCPTransportStdio, config.MCPTransportStreamableHTTP)
+	if backend.Kind == BackendConnector {
+		m.validateConnectorTransport(&local)
+	} else {
+		m.validateMCPTransport(&local)
 	}
-	for _, field := range []struct{ name, value string }{
-		{"startup_timeout", backend.StartupTimeout}, {"request_timeout", backend.RequestTimeout}, {"connect_timeout", backend.ConnectTimeout},
-	} {
+	timeouts := []struct{ name, value string }{{"startup_timeout", backend.StartupTimeout}, {"request_timeout", backend.RequestTimeout}, {"connect_timeout", backend.ConnectTimeout}}
+	for _, field := range timeouts {
 		if !validDuration(field.value) {
 			local.add("backend.%s must be a non-negative duration", field.name)
 		}
@@ -498,6 +541,33 @@ func (m *Manifest) validateBackend(found *problems) {
 		}
 	}
 	*found = append(*found, local...)
+}
+
+func (m *Manifest) validateConnectorTransport(local *problems) {
+	backend := &m.Backend
+	if !validBundleCommand(backend.Command) {
+		local.add("backend.command must be a relative path inside the bundle")
+	}
+	if backend.Transport != "" || backend.URL != "" || backend.ConnectTimeout != "" {
+		local.add("backend.transport, backend.url and backend.connect_timeout are not allowed for the connector kind")
+	}
+}
+
+func (m *Manifest) validateMCPTransport(local *problems) {
+	backend := &m.Backend
+	switch backend.Transport {
+	case config.MCPTransportStdio:
+		if !validBundleCommand(backend.Command) {
+			local.add("backend.command must be a relative path inside the bundle")
+		}
+		if backend.URL != "" {
+			local.add("backend.url is not allowed for the stdio transport")
+		}
+	case config.MCPTransportStreamableHTTP:
+		m.validateBackendURL(local)
+	default:
+		local.add("backend.transport must be %s or %s", config.MCPTransportStdio, config.MCPTransportStreamableHTTP)
+	}
 }
 
 func validBundleCommand(command string) bool {
@@ -536,6 +606,9 @@ func (m *Manifest) ServerConfig(bundleRoot string) config.MCPServer {
 	}
 	if backend.Command != "" {
 		server.Command = filepath.Join(bundleRoot, filepath.Clean(backend.Command))
+	}
+	if backend.Kind == BackendConnector {
+		server.Transport = config.MCPTransportStdio
 	}
 	capabilities := slices.Clone(m.Capabilities)
 	slices.Sort(capabilities)
@@ -583,6 +656,7 @@ func (m *Manifest) normalized() Manifest {
 	out.Tools = slices.Clone(m.Tools)
 	slices.SortFunc(out.Tools, func(a, b Tool) int { return strings.Compare(a.Name, b.Name) })
 	out.Auth.Scopes = sortedScopes(m.Auth.Scopes)
+	out.Auth.Hosts = sortedScopes(m.Auth.Hosts)
 	out.Secrets = slices.Clone(m.Secrets)
 	slices.SortFunc(out.Secrets, func(a, b Secret) int { return strings.Compare(a.Name, b.Name) })
 	out.Backend.StartupTimeout = canonicalDuration(m.Backend.StartupTimeout)

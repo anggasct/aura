@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -272,5 +273,48 @@ func TestValidateRequiresHTTPS(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "https is required") {
 		t.Fatalf("error should name the https requirement: %v", err)
+	}
+}
+
+func TestAPIClientAllowsQueriesButStillValidatesTheHost(t *testing.T) {
+	resolver := staticResolver{
+		"public.example":   {mustParseIP(t, "93.184.216.34")},
+		"internal.example": {mustParseIP(t, "10.0.0.5")},
+	}
+	reached := 0
+	next := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		reached++
+		return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody, Request: req}, nil
+	})
+	cases := []struct {
+		name    string
+		target  func(*url.URL) string
+		raw     string
+		allowed bool
+	}{
+		{"api client with query", originTarget, "https://public.example/list?q=a&page=2", true},
+		{"api client with empty query marker", originTarget, "https://public.example/list?", true},
+		{"api client with private host and query", originTarget, "https://internal.example/list?q=a", false},
+		{"full client with query", fullTarget, "https://public.example/list?q=a", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reached = 0
+			transport := &validatingTransport{resolver: resolver, next: next, target: tc.target}
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, tc.raw, http.NoBody)
+			resp, err := transport.RoundTrip(req)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			if tc.allowed {
+				if err != nil || reached != 1 {
+					t.Fatalf("RoundTrip(%q) = %v, reached %d, want it to pass", tc.raw, err, reached)
+				}
+				return
+			}
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied || reached != 0 {
+				t.Fatalf("RoundTrip(%q) = %v, reached %d, want egress_denied", tc.raw, err, reached)
+			}
+		})
 	}
 }

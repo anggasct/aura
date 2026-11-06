@@ -141,6 +141,22 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			plugins.warnUnavailablePlugins(ctx, logger, agentRegistry.Definitions())
+			if connectorPlugins := plugins.connectorPlugins(); len(connectorPlugins) > 0 {
+				connectors, err := startConnectorPlugins(ctx, &connectorRuntimeOptions{
+					Broker: builtin.Broker(), Logger: logger, Capabilities: mapCapabilityStatuses(result.CapabilityReport), Plugins: connectorPlugins,
+				})
+				if err != nil {
+					return err
+				}
+				plugins.connectors = connectors
+				defer func() {
+					closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
+					defer cancel()
+					if err := connectors.Close(closeCtx); err != nil {
+						logger.WarnContext(closeCtx, "connector plugin shutdown", "component", "plugin_connector", "error", err)
+					}
+				}()
+			}
 			var mcpServers *mcpRuntime
 			if mcpServersConfigured(cfg) || len(plugins.mcpPlugins()) > 0 {
 				mcpServers, err = startConfiguredMCP(ctx, cfg, builtin.Broker(), logger, pipeline.MeterProvider(), mapCapabilityStatuses(result.CapabilityReport), agentRegistry.Definitions(), plugins.mcpPlugins())

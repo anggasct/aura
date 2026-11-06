@@ -3,6 +3,7 @@ package toolbroker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -67,5 +68,58 @@ func TestBrokerEffectfulToolUsesDurableLifecycle(t *testing.T) {
 	}
 	if len(intents) != 1 || intents[0].Operation != "exec" || intents[0].Classification != effect.ClassificationEffectful {
 		t.Fatalf("succeeded intents = %+v", intents)
+	}
+}
+
+func TestBrokerEffectfulFailureSettlesByWhetherTheEffectWasPerformed(t *testing.T) {
+	cases := []struct {
+		name      string
+		failure   error
+		wantState effect.State
+	}{
+		{"plain adapter error settles unknown", errors.New("transport broke"), effect.StateUnknown},
+		{"not performed settles failed", NotPerformed("backend_unavailable", Errorf(ResultExecutionFailed, "backend unavailable")), effect.StateFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			executor := newBrokerEffectExecutor(t)
+			calls := 0
+			broker, err := New(&Options{
+				Effects: executor,
+				Adapters: map[string]Adapter{
+					"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+						calls++
+						return ToolResult{}, tc.failure
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			request := brokerRequest("exec", `{"command":["true"]}`, "exec-linux")
+			request.EventSequence = 1
+			grant, err := broker.Grant(context.Background(), request, time.Minute)
+			if err != nil {
+				t.Fatalf("Grant: %v", err)
+			}
+			request.Approval = &grant
+			_, err = broker.Execute(context.Background(), request)
+			if class, ok := CodeOf(err); !ok || class != ResultExecutionFailed {
+				t.Fatalf("Execute error = %v, want execution_failed", err)
+			}
+			if calls != 1 {
+				t.Fatalf("adapter calls = %d, want exactly one attempt", calls)
+			}
+			intents, err := executor.Journal().ListByState(context.Background(), tc.wantState, 0)
+			if err != nil {
+				t.Fatalf("list intents: %v", err)
+			}
+			if len(intents) != 1 {
+				t.Fatalf("intents in %s = %d, want 1", tc.wantState, len(intents))
+			}
+			if tc.wantState == effect.StateFailed && intents[0].SafeErrorCode != "backend_unavailable" {
+				t.Fatalf("safe error code = %q", intents[0].SafeErrorCode)
+			}
+		})
 	}
 }

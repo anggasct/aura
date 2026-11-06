@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/plugin"
 )
 
 const cliPluginManifest = `api_version: aura.plugin/v1
@@ -188,6 +190,29 @@ func TestPluginInstallRejectsBadBundlesWithoutCopying(t *testing.T) {
 			}
 			if out, _ := runPluginCommand(t, cfg, "list"); strings.TrimSpace(out) != "no plugins installed" {
 				t.Fatalf("rejected install registered a plugin: %q", out)
+			}
+		})
+	}
+}
+
+func TestReviewPrintsTheHostsThatReceiveTheCredential(t *testing.T) {
+	cases := []struct {
+		name string
+		auth plugin.Auth
+		want string
+	}{
+		{"static secret", plugin.Auth{Kind: plugin.AuthStaticSecret, Secret: "token", Hosts: []string{"b.mail.example:8443", "api.mail.example"}}, "Auth: static_secret (secret token, credential sent to api.mail.example, b.mail.example:8443)"},
+		{"oauth2", plugin.Auth{Kind: plugin.AuthOAuth2, AuthorizeURL: "https://auth.mail.example/a", TokenURL: "https://auth.mail.example/t", Scopes: []string{"mail.read"}, RedirectURI: "https://aura.example/cb", ClientIDSecret: "client_id", Hosts: []string{"api.mail.example"}}, "credential sent to api.mail.example)"},
+		{"none", plugin.Auth{Kind: plugin.AuthNone}, "Auth: none"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			text := strings.Join(reviewLines(&plugin.Review{ID: "mailer", Auth: tc.auth}), "\n")
+			if !strings.Contains(text, tc.want) {
+				t.Fatalf("review output = %q, want it to contain %q", text, tc.want)
+			}
+			if tc.auth.Kind == plugin.AuthNone && strings.Contains(text, "credential sent") {
+				t.Fatalf("review output = %q", text)
 			}
 		})
 	}
