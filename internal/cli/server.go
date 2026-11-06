@@ -136,9 +136,14 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			builtin.SetHandoffOpener(newHandoffService(db, notifiers))
 			builtin.SetEmailOutbox(&emailOutbox{adapters: emailMailboxes})
+			plugins, err := planPlugins(ctx, cfg, db)
+			if err != nil {
+				return err
+			}
+			plugins.warnUnavailablePlugins(ctx, logger, agentRegistry.Definitions())
 			var mcpServers *mcpRuntime
-			if mcpServersConfigured(cfg) {
-				mcpServers, err = startConfiguredMCP(ctx, cfg, builtin.Broker(), logger, pipeline.MeterProvider(), mapCapabilityStatuses(result.CapabilityReport), agentRegistry.Definitions())
+			if mcpServersConfigured(cfg) || len(plugins.mcpPlugins()) > 0 {
+				mcpServers, err = startConfiguredMCP(ctx, cfg, builtin.Broker(), logger, pipeline.MeterProvider(), mapCapabilityStatuses(result.CapabilityReport), agentRegistry.Definitions(), plugins.mcpPlugins())
 				if err != nil {
 					return err
 				}
@@ -190,8 +195,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			var profileHook postTurnHook
 			healthChecks := channelChecks
-			if mcpServers != nil {
+			if mcpServers != nil && mcpServers.hasCheck {
 				healthChecks = append(slices.Clone(healthChecks), mcpServers.check)
+			}
+			pluginCheck, pluginChecked, err := plugins.healthCheck(cfg, db, mcpServers)
+			if err != nil {
+				return err
+			}
+			if pluginChecked {
+				healthChecks = append(slices.Clone(healthChecks), pluginCheck)
 			}
 			if cfg.Profile != nil && cfg.Profile.Enabled {
 				profileRuntime, err := buildProfileRuntime(ctx, cfg, db, pipeline.MeterProvider(), logger)

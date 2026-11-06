@@ -97,6 +97,8 @@ type accessAction struct {
 	Persona   string `json:"agent_id,omitempty"`
 	Tool      string `json:"tool_name,omitempty"`
 	Account   string `json:"account,omitempty"`
+	Plugin    string `json:"plugin_id,omitempty"`
+	Version   string `json:"plugin_version,omitempty"`
 	Channel   string `json:"channel,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 	At        string `json:"at"`

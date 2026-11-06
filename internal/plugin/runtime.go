@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/anggasct/aura/internal/config"
@@ -42,12 +43,15 @@ func (s *Service) Plan(ctx context.Context) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	plan := &Plan{}
+	if !slices.ContainsFunc(records, func(record Record) bool { return record.State == StateActive }) {
+		return plan, nil
+	}
 	plugins, err := s.openPlugins()
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = plugins.Close() }()
-	plan := &Plan{}
 	for i := range records {
 		record := &records[i]
 		if record.State != StateActive {
