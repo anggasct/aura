@@ -25,3 +25,17 @@ func TestQueryTextJoinsTrimmedTextPartsAndBoundsTheRunes(t *testing.T) {
 		})
 	}
 }
+
+func TestJoinedTextKeepsEveryRuneThatQueryTextBounds(t *testing.T) {
+	long := strings.Repeat("é", MaxQueryRunes+40)
+	parts := []InputPart{{Text: " first "}, {Text: long}}
+	if got, want := JoinedText(parts), "first\n"+long; got != want {
+		t.Errorf("JoinedText kept %d runes, want %d", len([]rune(got)), len([]rune(want)))
+	}
+	if got := QueryText(parts); len([]rune(got)) != MaxQueryRunes || !strings.HasPrefix(got, "first\n") {
+		t.Errorf("QueryText = %d runes, want %d", len([]rune(got)), MaxQueryRunes)
+	}
+	if got := JoinedText(nil); got != "" {
+		t.Errorf("JoinedText(nil) = %q", got)
+	}
+}

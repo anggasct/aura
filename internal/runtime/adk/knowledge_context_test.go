@@ -438,3 +438,53 @@ func TestBuiltinToolRequestIsUntaintedWithoutAStampedList(t *testing.T) {
 		t.Fatalf("builtin requests = %+v, want an untainted call", builtin.requests)
 	}
 }
+
+func TestKnowledgeModeIsReportedInTheEventAndSurvivesAReplay(t *testing.T) {
+	for _, mode := range []string{"lexical", "hybrid", "lexical_fallback"} {
+		t.Run(mode, func(t *testing.T) {
+			provider := okKnowledge()
+			provider.evidence.Mode = mode
+			executor, _ := newKnowledgeExecutor(t, &capturingModel{answer: "done", tokens: 1}, provider)
+			events := drainTurn(t, executor, knowledgeTurnRequest("support"))
+			found := retrievedEvents(events)
+			if len(found) != 1 {
+				t.Fatalf("retrieved events = %d", len(found))
+			}
+			if got := decodeRetrieved(t, &found[0]); got.Mode != mode || got.Outcome != knowledgeOutcomeOK {
+				t.Errorf("event mode %q outcome %q, want %q and ok", got.Mode, got.Outcome, mode)
+			}
+
+			inv := &journalInvocation{}
+			req := knowledgeTurnRequest("support")
+			first, _ := executor.knowledgeContextFor(durable.WithTurnScope(t.Context(), durable.NewTurnScope(inv)), req)
+			provider.mu.Lock()
+			provider.evidence.Mode = "changed"
+			provider.mu.Unlock()
+			replayed, _ := executor.knowledgeContextFor(durable.WithTurnScope(t.Context(), durable.NewTurnScope(inv)), req)
+			if first.Mode != mode || replayed.Mode != mode {
+				t.Errorf("first mode %q, replayed mode %q, want the journaled %q", first.Mode, replayed.Mode, mode)
+			}
+		})
+	}
+}
+
+func TestKnowledgeModeIsOmittedWhenRetrievalFailed(t *testing.T) {
+	provider := &stubKnowledgeContext{err: errors.New("store busy")}
+	executor, _ := newKnowledgeExecutor(t, &capturingModel{answer: "done", tokens: 1}, provider)
+	events := drainTurn(t, executor, knowledgeTurnRequest("support"))
+	found := retrievedEvents(events)
+	if len(found) != 1 {
+		t.Fatalf("retrieved events = %d", len(found))
+	}
+	if got := decodeRetrieved(t, &found[0]); got.Mode != "" || got.Outcome != knowledgeOutcomeError {
+		t.Errorf("payload = %+v, want no mode on a failed retrieval", got)
+	}
+}
+
+func TestKnowledgeJournalWrittenBeforeModeExistedStillDecodes(t *testing.T) {
+	fallback := knowledgeJournal{ChunkIDs: []string{}, Outcome: knowledgeOutcomeError}
+	got := decodeKnowledgeJournal([]byte(`{"block":"b","chunk_ids":["c"],"counts":{"retrieved":1,"rendered":1},"duration_ms":3,"outcome":"ok"}`), &fallback)
+	if got.Block != "b" || got.Outcome != knowledgeOutcomeOK || got.Mode != "" {
+		t.Errorf("decoded = %+v", got)
+	}
+}

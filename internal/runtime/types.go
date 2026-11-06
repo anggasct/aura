@@ -95,6 +95,7 @@ type KnowledgeEvidence struct {
 	Block     string
 	ChunkIDs  []string
 	Retrieved int
+	Mode      string
 }
 
 type UntrustedRecall struct {
