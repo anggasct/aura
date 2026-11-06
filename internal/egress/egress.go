@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -50,6 +52,37 @@ func (systemResolver) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 var cloudMetadataIPs = []net.IP{
 	net.ParseIP("169.254.169.254"),
 	net.ParseIP("169.254.169.253"),
+}
+
+var specialPurposePrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.31.196.0/24"),
+	netip.MustParsePrefix("192.52.193.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("192.175.48.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/96"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("100:0:0:1::/64"),
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("2620:4f:8000::/48"),
+	netip.MustParsePrefix("5f00::/16"),
+	netip.MustParsePrefix("fec0::/10"),
+}
+
+func isSpecialPurpose(ip net.IP) bool {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	addr = addr.Unmap()
+	return slices.ContainsFunc(specialPurposePrefixes, func(prefix netip.Prefix) bool { return prefix.Contains(addr) })
 }
 
 type Destination struct {
@@ -143,6 +176,8 @@ func rejectIP(ip net.IP) error {
 		return fmt.Errorf("unspecified address %s", ip)
 	case ip.IsMulticast():
 		return fmt.Errorf("multicast address %s", ip)
+	case isSpecialPurpose(ip):
+		return fmt.Errorf("special-purpose address %s", ip)
 	}
 	return nil
 }
