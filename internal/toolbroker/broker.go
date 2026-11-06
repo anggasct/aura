@@ -598,6 +598,7 @@ type effectInvocation struct {
 	constraints approval.Constraints
 	result      ToolResult
 	invoked     bool
+	notDone     error
 }
 
 func (i *effectInvocation) SupportsIdempotency() bool { return false }
@@ -605,6 +606,11 @@ func (i *effectInvocation) SupportsIdempotency() bool { return false }
 func (i *effectInvocation) Invoke(ctx context.Context, _ *effect.Invocation) (effect.Outcome, error) {
 	result, err := i.adapter(ctx, i.request, i.constraints)
 	if err != nil {
+		var notPerformed *NotPerformedError
+		if errors.As(err, &notPerformed) {
+			i.notDone = err
+			return effect.Outcome{SafeErrorCode: notPerformed.Code}, nil
+		}
 		return effect.Outcome{}, err
 	}
 	i.result = result
@@ -647,6 +653,9 @@ func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constr
 	}, invocation)
 	if err != nil {
 		return ToolResult{}, err
+	}
+	if invocation.notDone != nil && intent.State == effect.StateFailed {
+		return ToolResult{}, invocation.notDone
 	}
 	if intent.State != effect.StateSucceeded {
 		return ToolResult{}, errorf(ResultExecutionFailed, "effectful tool settled as %s", intent.State)
