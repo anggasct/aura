@@ -6,16 +6,17 @@ import (
 	"sync/atomic"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/toolbroker"
 	"github.com/anggasct/aura/internal/tools"
 )
 
 const defaultKnowledgeSearchLimit = 5
 
-var emptyKnowledgeSearch = json.RawMessage(`{"results":[],"truncated":false}`)
+var emptyKnowledgeSearch = json.RawMessage(`{"results":[],"truncated":false,"mode":"lexical"}`)
 
 type KnowledgeSearcher interface {
-	SearchKnowledge(ctx context.Context, scope []string, query string, limit int) (json.RawMessage, error)
+	SearchKnowledge(ctx context.Context, scope []string, query string, limit int, class principal.Class) (json.RawMessage, error)
 }
 
 type knowledgeHolder struct {
@@ -44,7 +45,7 @@ func (h *knowledgeHolder) adapter(ctx context.Context, request *toolbroker.ToolR
 	if args.Limit != nil {
 		limit = min(max(*args.Limit, 1), tools.MaxKBSearchResultLimit)
 	}
-	output, err := (*searcher).SearchKnowledge(ctx, request.Knowledge, args.Query, limit)
+	output, err := (*searcher).SearchKnowledge(ctx, request.Knowledge, args.Query, limit, request.PrincipalClass)
 	if err != nil {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultCapabilityUnavailable, "knowledge search failed")
 	}

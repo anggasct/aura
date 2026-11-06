@@ -111,7 +111,7 @@ func newKnowledgeEmbedding(cfg *config.Config, resolver egress.Resolver) (knowle
 	wiring := knowledgeEmbeddingWiring{settings: &knowledge.EmbeddingSettings{
 		Fingerprint: fingerprint, Destination: endpoint.Authority(), Loopback: endpoint.Loopback,
 		Model: embeddingConfig.Model, Dimensions: embeddingConfig.Dimensions, BatchSize: embeddingConfig.BatchSize,
-		PublicQueries: embeddingConfig.PublicQueries,
+		MaxMemory: int64(embeddingConfig.MaxMemory), PublicQueries: embeddingConfig.PublicQueries,
 	}}
 	credential, resolved := resolveEmbeddingCredential(embeddingConfig.CredentialRef)
 	if !resolved {
@@ -129,6 +129,7 @@ func knowledgeEmbeddingReader(cfg *config.Config, dbPath string) func(ctx contex
 	return func(ctx context.Context) (health.KnowledgeEmbeddingState, error) {
 		var state health.KnowledgeEmbeddingState
 		fingerprint := ""
+		dimensions := 0
 		if embeddingConfig := configuredEmbedding(cfg); embeddingConfig != nil {
 			computed, err := embedding.Fingerprint(embeddingConfig)
 			if err != nil {
@@ -137,6 +138,8 @@ func knowledgeEmbeddingReader(cfg *config.Config, dbPath string) func(ctx contex
 			fingerprint = computed
 			_, state.Available = resolveEmbeddingCredential(embeddingConfig.CredentialRef)
 			state.Configured = true
+			state.MaxMemory = int64(embeddingConfig.MaxMemory)
+			dimensions = embeddingConfig.Dimensions
 		}
 		if _, err := os.Stat(dbPath); err != nil {
 			return health.KnowledgeEmbeddingState{}, err
@@ -158,6 +161,7 @@ func knowledgeEmbeddingReader(cfg *config.Config, dbPath string) func(ctx contex
 			state.Collections = append(state.Collections, health.KnowledgeEmbeddingCollection{
 				Collection: coverage[i].Collection, Chunks: coverage[i].Chunks, Covered: coverage[i].Covered,
 				Stale: state.Configured && coverage[i].Fingerprint != fingerprint,
+				Bytes: knowledge.VectorBytes(coverage[i].Chunks, dimensions),
 			})
 		}
 		return state, nil

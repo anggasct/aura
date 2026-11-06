@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/anggasct/aura/internal/principal"
 )
 
 type fakeIndex struct {
@@ -105,7 +107,7 @@ func TestSearchChoosesTheRarestTermsInsideTheBudget(t *testing.T) {
 	index := &fakeIndex{chunks: 10, counts: counts, hits: []Hit{{ChunkID: "c1", Collection: "support"}}}
 	retriever, _ := newRetriever(t, index, nil)
 
-	hits, err := retriever.Search(t.Context(), []string{"support"}, strings.Join(append(words, "absent", "huge"), " "), SearchDepth)
+	hits, err := ownerSearch(t.Context(), retriever, []string{"support"}, strings.Join(append(words, "absent", "huge"), " "), SearchDepth)
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("Search = %v, %v", hits, err)
 	}
@@ -126,7 +128,7 @@ func TestSearchChoosesTheRarestTermsInsideTheBudget(t *testing.T) {
 func TestSearchDropsTermsAboveTenPercentOfALargeScope(t *testing.T) {
 	index := &fakeIndex{chunks: 500000, counts: map[string]int{"common": 60000, "rare": 20000, "mid": 15000}, hits: []Hit{{ChunkID: "c1", Collection: "support"}}}
 	retriever, _ := newRetriever(t, index, nil)
-	if _, err := retriever.Search(t.Context(), []string{"support"}, "common rare mid", SearchDepth); err != nil {
+	if _, err := ownerSearch(t.Context(), retriever, []string{"support"}, "common rare mid", SearchDepth); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	if want := []string{"mid"}; !reflect.DeepEqual(index.searchTerms[0], want) {
@@ -142,7 +144,7 @@ func TestSearchDropsTermsAboveTenPercentOfALargeScope(t *testing.T) {
 func TestSearchKeepsTheSingleRarestTermEvenWhenItAloneExceedsTheCountSum(t *testing.T) {
 	index := &fakeIndex{chunks: 1000000, counts: map[string]int{"alpha": 40000, "beta": 45000}, hits: []Hit{{ChunkID: "c1", Collection: "support"}}}
 	retriever, _ := newRetriever(t, index, nil)
-	if _, err := retriever.Search(t.Context(), []string{"support"}, "beta alpha", SearchDepth); err != nil {
+	if _, err := ownerSearch(t.Context(), retriever, []string{"support"}, "beta alpha", SearchDepth); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	if want := []string{"alpha"}; !reflect.DeepEqual(index.searchTerms[0], want) {
@@ -153,7 +155,7 @@ func TestSearchKeepsTheSingleRarestTermEvenWhenItAloneExceedsTheCountSum(t *test
 func TestSearchBreaksCountTiesByTerm(t *testing.T) {
 	index := &fakeIndex{chunks: 10, counts: map[string]int{"delta": 4, "alpha": 4, "charlie": 4, "bravo": 4}, hits: []Hit{{ChunkID: "c1", Collection: "support"}}}
 	retriever, _ := newRetriever(t, index, nil)
-	if _, err := retriever.Search(t.Context(), []string{"support"}, "delta charlie bravo alpha", SearchDepth); err != nil {
+	if _, err := ownerSearch(t.Context(), retriever, []string{"support"}, "delta charlie bravo alpha", SearchDepth); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	if want := []string{"alpha", "bravo", "charlie", "delta"}; !reflect.DeepEqual(index.searchTerms[0], want) {
@@ -175,7 +177,7 @@ func TestSearchWithNoUsableTermsIsEmptyNotAnError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			index := &fakeIndex{chunks: 10, counts: test.counts, hits: []Hit{{ChunkID: "c1", Collection: "support"}}}
 			retriever, secrets := newRetriever(t, index, nil)
-			hits, err := retriever.Search(t.Context(), []string{"support"}, test.query, SearchDepth)
+			hits, err := ownerSearch(t.Context(), retriever, []string{"support"}, test.query, SearchDepth)
 			if err != nil || len(hits) != 0 {
 				t.Fatalf("Search = %v, %v", hits, err)
 			}
@@ -189,7 +191,7 @@ func TestSearchWithNoUsableTermsIsEmptyNotAnError(t *testing.T) {
 func TestSearchPassesTheWholeScopeAndRejectsBadScopes(t *testing.T) {
 	index := &fakeIndex{chunks: 10, counts: map[string]int{"refund": 1}, hits: []Hit{{ChunkID: "c1", Collection: "support"}}}
 	retriever, _ := newRetriever(t, index, nil)
-	if _, err := retriever.Search(t.Context(), []string{"support", "hr-docs", "support"}, "refund", SearchDepth); err != nil {
+	if _, err := ownerSearch(t.Context(), retriever, []string{"support", "hr-docs", "support"}, "refund", SearchDepth); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	for _, scope := range index.scopes {
@@ -199,14 +201,14 @@ func TestSearchPassesTheWholeScopeAndRejectsBadScopes(t *testing.T) {
 	}
 	for name, scope := range map[string][]string{"none": nil, "invalid": {"Bad Id"}, "empty": {""}} {
 		t.Run(name, func(t *testing.T) {
-			_, err := retriever.Search(t.Context(), scope, "refund", SearchDepth)
+			_, err := ownerSearch(t.Context(), retriever, scope, "refund", SearchDepth)
 			if code, ok := CodeOf(err); !ok || (code != ErrorCodeInvalidArgument && code != ErrorCodeCollectionInvalid) {
 				t.Errorf("error = %v", err)
 			}
 		})
 	}
 	for _, depth := range []int{0, -1, SearchDepth + 1} {
-		if _, err := retriever.Search(t.Context(), []string{"support"}, "refund", depth); err == nil {
+		if _, err := ownerSearch(t.Context(), retriever, []string{"support"}, "refund", depth); err == nil {
 			t.Errorf("depth %d accepted", depth)
 		}
 	}
@@ -221,7 +223,7 @@ func TestSearchDropsHitsOutsideTheScopeAndVaultMatches(t *testing.T) {
 		{ChunkID: "label", Collection: "support", Label: "vault-secret-value", Content: "refund"},
 	}}
 	retriever, _ := newRetriever(t, index, fakeVault{values: []string{"vault-secret-value"}})
-	hits, err := retriever.Search(t.Context(), []string{"support"}, "refund", SearchDepth)
+	hits, err := ownerSearch(t.Context(), retriever, []string{"support"}, "refund", SearchDepth)
 	if err != nil || len(hits) != 1 || hits[0].ChunkID != "kept" {
 		t.Fatalf("hits = %+v, %v", hits, err)
 	}
@@ -234,7 +236,7 @@ func TestSearchFailsClosedWhenTheVaultCannotBeResolved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRetriever: %v", err)
 	}
-	hits, err := retriever.Search(t.Context(), []string{"support"}, "refund", SearchDepth)
+	hits, err := ownerSearch(t.Context(), retriever, []string{"support"}, "refund", SearchDepth)
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeSecretUnavailable || len(hits) != 0 {
 		t.Fatalf("hits = %v, error = %v", hits, err)
 	}
@@ -243,7 +245,7 @@ func TestSearchFailsClosedWhenTheVaultCannotBeResolved(t *testing.T) {
 func TestSearchSurfacesIndexErrors(t *testing.T) {
 	boom := errors.New("index down")
 	retriever, _ := newRetriever(t, &fakeIndex{err: boom}, nil)
-	if _, err := retriever.Search(t.Context(), []string{"support"}, "refund", SearchDepth); !errors.Is(err, boom) {
+	if _, err := ownerSearch(t.Context(), retriever, []string{"support"}, "refund", SearchDepth); !errors.Is(err, boom) {
 		t.Errorf("error = %v, want index error", err)
 	}
 }
@@ -255,4 +257,9 @@ func TestNewRetrieverRequiresItsDependencies(t *testing.T) {
 	if _, err := NewRetriever(&fakeIndex{}, nil); err == nil {
 		t.Error("nil secrets accepted")
 	}
+}
+
+func ownerSearch(ctx context.Context, r *Retriever, scope []string, query string, depth int) ([]Hit, error) {
+	found, err := r.Search(ctx, &SearchRequest{Scope: scope, Query: query, Depth: depth, Class: principal.ClassOwner})
+	return found.Hits, err
 }
