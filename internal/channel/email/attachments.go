@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -43,8 +44,8 @@ func (s *attachmentStage) discard() {
 func stageAttachments(raw []byte, limit int64) (*attachmentStage, error) {
 	stage := &attachmentStage{limit: limit}
 	entity, err := message.Read(bytes.NewReader(raw))
-	if entity == nil || (err != nil && !message.IsUnknownCharset(err) && !message.IsUnknownEncoding(err)) {
-		return stage, nil
+	if entity == nil || !tolerableMIMEError(err) {
+		return nil, &Error{Code: ErrorCodeAttachmentRejected, Detail: "message structure is not readable", Cause: err}
 	}
 	stage.walk(entity, 0)
 	if stage.err != nil {
@@ -54,18 +55,27 @@ func stageAttachments(raw []byte, limit int64) (*attachmentStage, error) {
 	return stage, nil
 }
 
+func tolerableMIMEError(err error) bool {
+	return err == nil || message.IsUnknownCharset(err) || message.IsUnknownEncoding(err)
+}
+
 func (s *attachmentStage) walk(entity *message.Entity, depth int) {
-	if s.err != nil || depth > maxMIMEDepth || s.seen >= maxMIMEParts {
+	if s.err != nil {
+		return
+	}
+	if depth > maxMIMEDepth || s.seen >= maxMIMEParts {
+		s.err = Errorf(ErrorCodeAttachmentRejected, "message structure is deeper or wider than supported")
 		return
 	}
 	s.seen++
 	if reader := entity.MultipartReader(); reader != nil {
 		for s.err == nil {
 			child, err := reader.NextPart()
-			if child == nil {
+			if errors.Is(err, io.EOF) && child == nil {
 				return
 			}
-			if err != nil && !message.IsUnknownCharset(err) && !message.IsUnknownEncoding(err) {
+			if child == nil || !tolerableMIMEError(err) {
+				s.err = &Error{Code: ErrorCodeAttachmentRejected, Detail: "message structure is not readable", Cause: err}
 				return
 			}
 			s.walk(child, depth+1)
