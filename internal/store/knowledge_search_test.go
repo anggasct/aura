@@ -189,10 +189,6 @@ func TestKBIndexCountsScopesAndSizes(t *testing.T) {
 			}
 		})
 	}
-	sizes, err := index.ScopeSizes(t.Context())
-	if err != nil || sizes["support"] != 3 || sizes["other"] != 1 || len(sizes) != 2 {
-		t.Errorf("ScopeSizes = %v, %v", sizes, err)
-	}
 }
 
 func TestKBIndexRejectsInvalidInput(t *testing.T) {
@@ -233,5 +229,24 @@ func TestKBIndexRejectsInvalidInput(t *testing.T) {
 	nilIndex := &sqliteKBIndex{}
 	if _, err := nilIndex.ScopeChunks(t.Context(), []string{"a"}); err == nil {
 		t.Error("nil db accepted")
+	}
+}
+
+func TestKBIndexPresentReportsAPreKnowledgeDatabase(t *testing.T) {
+	db := newTestDB(t)
+	present, err := KBIndexPresent(t.Context(), db)
+	if err != nil || !present {
+		t.Fatalf("migrated database: present = %t, %v", present, err)
+	}
+	for _, drop := range []string{"DROP TABLE kb_chunk_fts", "DROP TABLE kb_chunk", "DROP TABLE kb_source", "DROP TABLE kb_collection"} {
+		if _, err := db.ExecContext(t.Context(), drop); err != nil {
+			t.Fatalf("%s: %v", drop, err)
+		}
+		if present, err := KBIndexPresent(t.Context(), db); err != nil || present {
+			t.Fatalf("after %q: present = %t, %v", drop, present, err)
+		}
+	}
+	if _, err := KBIndexPresent(t.Context(), nil); err == nil {
+		t.Error("nil database accepted")
 	}
 }

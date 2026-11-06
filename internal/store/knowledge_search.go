@@ -29,7 +29,6 @@ type KBIndex interface {
 	ScopeChunks(ctx context.Context, collections []string) (int, error)
 	TermFrequency(ctx context.Context, collections []string, term string, limit int) (int, error)
 	Search(ctx context.Context, collections []string, terms []string, depth int) ([]KBHit, error)
-	ScopeSizes(ctx context.Context) (map[string]int, error)
 }
 
 type sqliteKBIndex struct {
@@ -161,27 +160,15 @@ func (s *sqliteKBIndex) Search(ctx context.Context, collections, terms []string,
 	return hits, nil
 }
 
-func (s *sqliteKBIndex) ScopeSizes(ctx context.Context) (map[string]int, error) {
-	if s.db == nil {
-		return nil, errNilArgument("db")
+func KBIndexPresent(ctx context.Context, db *sql.DB) (bool, error) {
+	if db == nil {
+		return false, errNilArgument("db")
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT s.collection, count(c.rowid) FROM kb_source s JOIN kb_chunk c ON c.source_id = s.id GROUP BY s.collection`)
+	var tables int
+	err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM sqlite_master WHERE name IN ('kb_collection', 'kb_source', 'kb_chunk', 'kb_chunk_fts')`).Scan(&tables)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("size knowledge scopes: %w", err))
+		return false, classifyBusy(fmt.Errorf("probe knowledge tables: %w", err))
 	}
-	defer func() { _ = rows.Close() }()
-	sizes := map[string]int{}
-	for rows.Next() {
-		var collection string
-		var count int
-		if err := rows.Scan(&collection, &count); err != nil {
-			return nil, fmt.Errorf("scan knowledge scope size: %w", err)
-		}
-		sizes[collection] = count
-	}
-	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("size knowledge scopes: %w", err))
-	}
-	return sizes, nil
+	return tables == 4, nil
 }
