@@ -1,9 +1,11 @@
 package restate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/anggasct/aura/internal/durable"
@@ -20,6 +22,42 @@ func (r *recordingStateWriter) setState(state durable.RunState, detail string) {
 }
 
 func (r *recordingStateWriter) key() string { return "test-key" }
+
+type panickingStateWriter struct{}
+
+func (panickingStateWriter) setState(durable.RunState, string) { panic("journal mismatch") }
+
+func (panickingStateWriter) key() string { return "test-key" }
+
+func TestFailRegisteredRunLogsTheCauseBeforeWritingState(t *testing.T) {
+	cases := []struct {
+		name   string
+		cancel bool
+	}{
+		{name: "failed run"},
+		{name: "cancelled run", cancel: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancel {
+				cancel()
+			}
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&logs, nil))
+			defer func() {
+				if recover() == nil {
+					t.Fatal("state writer did not panic")
+				}
+				if !strings.Contains(logs.String(), "error=boom") {
+					t.Fatalf("logs = %q, want the cause", logs.String())
+				}
+			}()
+			_, _ = failRegisteredRun(ctx, logger, panickingStateWriter{}, errors.New("boom"))
+		})
+	}
+}
 
 func TestFailRegisteredRunCancelledJournalsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
