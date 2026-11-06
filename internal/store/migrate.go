@@ -54,6 +54,7 @@ var migrations = []migration{
 	{version: 36, sql: handoffEmailChannelSchemaSQL},
 	{version: 37, sql: pluginRegistrySchemaSQL},
 	{version: 38, sql: memoryNonOwnerTrustSchemaSQL},
+	{version: 39, sql: knowledgeBaseSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -751,6 +752,57 @@ ALTER TABLE usage_reservation ADD COLUMN reserved_tokens INTEGER NOT NULL DEFAUL
 const memoryNonOwnerTrustSchemaSQL = `
 UPDATE memory_document SET trust_label = 'untrusted_external'
     WHERE trust_label = 'owner_input' AND owner_id <> 'local-owner';
+`
+
+const knowledgeBaseSchemaSQL = `
+CREATE TABLE kb_collection (
+    id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE kb_source (
+    rowid INTEGER PRIMARY KEY,
+    id TEXT UNIQUE NOT NULL,
+    collection TEXT NOT NULL REFERENCES kb_collection(id),
+    kind TEXT NOT NULL CHECK (kind IN ('file','url')),
+    uri TEXT NOT NULL,
+    label TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    ingest_version INTEGER NOT NULL,
+    ingested_at TEXT NOT NULL,
+    UNIQUE (collection, uri)
+);
+CREATE TABLE kb_chunk (
+    rowid INTEGER PRIMARY KEY,
+    id TEXT UNIQUE NOT NULL,
+    source_id TEXT NOT NULL REFERENCES kb_source(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    heading TEXT,
+    content TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    UNIQUE (source_id, ordinal)
+);
+CREATE INDEX kb_chunk_source_idx ON kb_chunk(source_id);
+CREATE VIRTUAL TABLE kb_chunk_fts USING fts5(
+    content,
+    heading,
+    scope,
+    content='kb_chunk',
+    content_rowid='rowid',
+    tokenize='porter unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER kb_chunk_fts_insert AFTER INSERT ON kb_chunk BEGIN
+    INSERT INTO kb_chunk_fts(rowid, content, heading, scope) VALUES (new.rowid, new.content, new.heading, new.scope);
+END;
+CREATE TRIGGER kb_chunk_fts_delete AFTER DELETE ON kb_chunk BEGIN
+    INSERT INTO kb_chunk_fts(kb_chunk_fts, rowid, content, heading, scope) VALUES ('delete', old.rowid, old.content, old.heading, old.scope);
+END;
+CREATE TRIGGER kb_chunk_fts_update AFTER UPDATE OF content, heading, scope ON kb_chunk BEGIN
+    INSERT INTO kb_chunk_fts(kb_chunk_fts, rowid, content, heading, scope) VALUES ('delete', old.rowid, old.content, old.heading, old.scope);
+    INSERT INTO kb_chunk_fts(rowid, content, heading, scope) VALUES (new.rowid, new.content, new.heading, new.scope);
+END;
+INSERT INTO kb_chunk_fts(kb_chunk_fts, rank) VALUES ('secure-delete', 1);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {
