@@ -331,6 +331,7 @@ func loadCapabilityConfig(t *testing.T, enabled []string, options config.LoadOpt
 func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadOptions) (*cobra.Command, string, error) {
 	t.Helper()
 	loaded := loadCapabilityConfig(t, enabled, options)
+	ignoreHostDiskHeadroom(loaded.Config)
 	cmd := &cobra.Command{Use: "status"}
 	var out strings.Builder
 	cmd.SetOut(&out)
