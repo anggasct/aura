@@ -208,6 +208,17 @@ vision:
   detail: auto
   transform_version: v1
   max_transform_memory_bytes: 256MiB
+interpreter:
+  timeout: 30s
+  max_source_bytes: 256KiB
+  max_stdin_bytes: 1MiB
+  max_stdout_bytes: 64KiB
+  max_stderr_bytes: 64KiB
+  max_output_files: 16
+  max_artifact_bytes: 32MiB
+  max_memory_bytes: 512MiB
+  max_processes: 64
+  max_run_dir_bytes: 256MiB
 channels:
   discord:
     enabled: false

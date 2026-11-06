@@ -50,6 +50,7 @@ type Config struct {
 	Sync         *Sync                 `koanf:"sync" yaml:"sync,omitempty"`
 	Vision       *Vision               `koanf:"vision" yaml:"vision,omitempty"`
 	Knowledge    *Knowledge            `koanf:"knowledge" yaml:"knowledge,omitempty"`
+	Interpreter  Interpreter           `koanf:"interpreter" yaml:"interpreter"`
 	Channels     Channels              `koanf:"channels" yaml:"channels"`
 	Bindings     []Binding             `koanf:"bindings" yaml:"bindings,omitempty"`
 }
@@ -1096,6 +1097,7 @@ func Default() Config {
 			PurgeInterval:        Duration(1 * time.Hour),
 			PurgeLimit:           100,
 		},
+		Interpreter: DefaultInterpreter(),
 		Skills: &Skills{
 			Enabled:                 true,
 			Roots:                   []string{"/srv/aura/skills"},
