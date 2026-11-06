@@ -18,6 +18,7 @@ type fakeStore struct {
 	removed   []string
 	removeErr error
 	applied   bool
+	unchanged bool
 }
 
 func (s *fakeStore) ReplaceSource(_ context.Context, write *SourceWrite) (WriteResult, error) {
@@ -25,6 +26,9 @@ func (s *fakeStore) ReplaceSource(_ context.Context, write *SourceWrite) (WriteR
 		return WriteResult{}, s.writeErr
 	}
 	s.writes = append(s.writes, *write)
+	if s.unchanged {
+		return WriteResult{Status: StatusUnchanged, SourceID: "kbs_1", Chunks: len(write.Chunks), ChunksKept: len(write.Chunks)}, nil
+	}
 	return WriteResult{Status: StatusAdded, SourceID: "kbs_1", Chunks: len(write.Chunks), ChunksAdded: len(write.Chunks)}, nil
 }
 

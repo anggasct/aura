@@ -206,6 +206,14 @@ func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilitySta
 			Remediation: health.RemediationReviewKnowledge,
 		})
 	}
+	if len(configuredKnowledgeScopes(cfg)) > 0 || configuredEmbedding(cfg) != nil {
+		checks = append(checks, health.RegisteredCheck{
+			ID:          health.ComponentKnowledgeEmbedding,
+			Checker:     health.KnowledgeEmbeddingChecker{State: knowledgeEmbeddingReader(cfg, dbPath)},
+			Timeout:     checkTimeout,
+			Remediation: health.RemediationEmbedKnowledge,
+		})
+	}
 	return health.NewRegistry(append(checks, extra...)...)
 }
 

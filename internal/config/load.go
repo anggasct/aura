@@ -204,6 +204,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := validateVision(cfg.Vision, options.Build.Profile()); err != nil {
 		return LoadResult{}, err
 	}
+	if err := validateKnowledge(cfg.Knowledge); err != nil {
+		return LoadResult{}, err
+	}
 	if err := validateRuntime(cfg.Runtime); err != nil {
 		return LoadResult{}, err
 	}
@@ -488,6 +491,9 @@ func validate(data []byte) error {
 		return err
 	}
 	if err := validateVisionShapes(doc); err != nil {
+		return err
+	}
+	if err := validateKnowledgeShapes(doc); err != nil {
 		return err
 	}
 	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
@@ -2351,6 +2357,7 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyAccessDefaults(cfg, doc)
 	applySyncDefaults(cfg, doc)
 	applyVisionDefaults(cfg, doc)
+	applyKnowledgeDefaults(cfg, doc)
 	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
 	applyTelegramDefaults(cfg, doc, &defaults.Channels.Telegram)
 	applyEmailDefaults(cfg, doc, &defaults.Channels.Email)

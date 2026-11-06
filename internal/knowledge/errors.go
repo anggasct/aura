@@ -21,6 +21,10 @@ const (
 	ErrorCodeCollectionInvalid ErrorCode = "kb_collection_invalid"
 	ErrorCodeSourceNotFound    ErrorCode = "kb_source_not_found"
 	ErrorCodeIndexDamaged      ErrorCode = "kb_index_damaged"
+
+	ErrorCodeEmbeddingUnavailable ErrorCode = "kb_embedding_unavailable"
+	ErrorCodeEmbeddingFailed      ErrorCode = "kb_embedding_failed"
+	ErrorCodeReembedRequired      ErrorCode = "kb_reembed_required"
 )
 
 type Error struct {

@@ -159,6 +159,24 @@ func Validate(ctx context.Context, raw string, resolver Resolver) (Destination, 
 	return Destination{Host: host, IP: ips[0]}, nil
 }
 
+func ValidateLiteralDestination(raw string) error {
+	if err := ValidateDestinationShape(raw); err != nil {
+		return err
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return Errorf(ErrorCodeEgressDenied, "invalid destination %q", raw)
+	}
+	ip := net.ParseIP(u.Hostname())
+	if ip == nil {
+		return Errorf(ErrorCodeEgressDenied, "destination host is not a literal address")
+	}
+	if err := rejectIP(ip); err != nil {
+		return Errorf(ErrorCodeEgressDenied, "%v", err)
+	}
+	return nil
+}
+
 func rejectIP(ip net.IP) error {
 	for _, blocked := range cloudMetadataIPs {
 		if ip.Equal(blocked) {

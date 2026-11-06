@@ -59,6 +59,7 @@ const (
 	ErrorCodePluginInvalid             ErrorCode = "plugin_invalid"
 	ErrorCodeKBCapExceeded             ErrorCode = "kb_cap_exceeded"
 	ErrorCodeKBSourceNotFound          ErrorCode = "kb_source_not_found"
+	ErrorCodeKBEmbeddingStale          ErrorCode = "kb_embedding_stale"
 )
 
 type Error struct {

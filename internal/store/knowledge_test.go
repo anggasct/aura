@@ -57,7 +57,7 @@ func kbCheckClean(t *testing.T, kb KBStore) {
 	}
 }
 
-func TestKnowledgeSchemaIsVersion39WithSecureDeletePorterAndScope(t *testing.T) {
+func TestKnowledgeSchemaHasSecureDeletePorterAndScope(t *testing.T) {
 	db := newTestDB(t)
 	ctx := t.Context()
 	for _, name := range []string{"kb_collection", "kb_source", "kb_chunk", "kb_chunk_fts"} {
