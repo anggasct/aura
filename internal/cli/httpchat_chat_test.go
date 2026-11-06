@@ -357,7 +357,7 @@ func TestHTTPChatRunsTurnsThroughTheRealRuntime(t *testing.T) {
 		t.Error("the persona instructions do not warn about the attached untrusted transcript")
 	}
 	user := contentText(request)
-	for _, want := range []string{"what are your hours?", "[untrusted recall evidence", `role=system text="` + injectedSystemText + `"`, `role=user text="earlier question"`} {
+	for _, want := range []string{"what are your hours?", "[untrusted recall evidence", `role=system text=\"` + injectedSystemText + `\"`, `role=user text=\"earlier question\"`} {
 		if !strings.Contains(user, want) {
 			t.Errorf("model input lacks %q:\n%s", want, user)
 		}
