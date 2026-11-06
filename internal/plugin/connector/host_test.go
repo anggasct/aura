@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -393,5 +394,73 @@ func TestOutputBound(t *testing.T) {
 				t.Fatal("session left open")
 			}
 		})
+	}
+}
+
+func TestCredentialGoesOnlyToTheHostsThePluginDeclaredForIt(t *testing.T) {
+	primary := newFakeAPI(t)
+	secondary := newFakeAPI(t)
+	cases := []struct {
+		name     string
+		target   func() string
+		wantAuth string
+		wantHit  *fakeAPI
+	}{
+		{"auth host", func() string { return primary.url("/v1/messages") }, "Bearer " + testToken, primary},
+		{"second approved host", func() string { return secondary.url("/v1/files") }, "", secondary},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := tc.wantHit.count()
+			starter := newStarter(func(int) func(map[string]any) (any, error) {
+				return oneRequest(http.MethodGet, tc.target(), map[string]string{"Authorization": "Bearer evil"}, nil)
+			})
+			strategy := &bearerAuth{token: testToken}
+			cfg := testConfig(primary, strategy)
+			cfg.Egress = append(cfg.Egress, secondary.host())
+			cfg.AuthHosts = []string{primary.host()}
+			h := newHost(&cfg, starter, primary.client(), slog.New(slog.DiscardHandler))
+			if _, fail := invokeTool(t, h, readTool(h)); fail != nil {
+				t.Fatalf("invoke: %v", fail)
+			}
+			seen := tc.wantHit.requests()
+			if len(seen) != before+1 {
+				t.Fatalf("the target saw %d requests, want %d", len(seen), before+1)
+			}
+			if got := seen[before].Header.Get("Authorization"); got != tc.wantAuth {
+				t.Fatalf("authorization = %q, want %q", got, tc.wantAuth)
+			}
+			wantCalls := int64(0)
+			if tc.wantAuth != "" {
+				wantCalls = 1
+			}
+			if strategy.calls.Load() != wantCalls {
+				t.Fatalf("the strategy was asked %d times, want %d", strategy.calls.Load(), wantCalls)
+			}
+		})
+	}
+}
+
+func TestAuthHostsMatchLikeEgressEntries(t *testing.T) {
+	cfg := Config{AuthHosts: []string{"API.Mail.Example", "files.mail.example:8443"}}
+	h := &host{credited: egressSet(cfg.AuthHosts)}
+	cases := map[string]bool{
+		"https://api.mail.example/x":           true,
+		"https://api.mail.example:443/x":       true,
+		"https://API.MAIL.EXAMPLE/x":           true,
+		"https://api.mail.example:8443/x":      false,
+		"https://files.mail.example:8443/x":    true,
+		"https://files.mail.example/x":         false,
+		"https://other.mail.example/x":         false,
+		"https://api.mail.example.evil.test/x": false,
+	}
+	for raw, want := range cases {
+		target, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse %s: %v", raw, err)
+		}
+		if got := h.credentialHost(target); got != want {
+			t.Errorf("credentialHost(%s) = %v, want %v", raw, got, want)
+		}
 	}
 }

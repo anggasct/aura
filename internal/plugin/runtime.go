@@ -27,6 +27,8 @@ type Active struct {
 	Auth    auth.Strategy
 	Tools   []ApprovedTool
 	Egress  []string
+
+	AuthHosts []string
 }
 
 type Held struct {
@@ -159,6 +161,7 @@ func (s *Service) activate(ctx context.Context, plugins *os.Root, record *Record
 		}
 	}
 	normalized := manifest.normalized()
+	active.AuthHosts = slices.Clone(normalized.Auth.Hosts)
 	for i := range normalized.Tools {
 		tool := &normalized.Tools[i]
 		if granted[GrantKey{SurfaceTool, tool.Name}] == ToolFingerprint(tool) {

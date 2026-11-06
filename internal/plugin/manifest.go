@@ -98,6 +98,7 @@ type Auth struct {
 	RedirectURI        string   `yaml:"redirect_uri" json:"redirect_uri,omitempty"`
 	ClientIDSecret     string   `yaml:"client_id_secret" json:"client_id_secret,omitempty"`
 	ClientSecretSecret string   `yaml:"client_secret_secret" json:"client_secret_secret,omitempty"`
+	Hosts              []string `yaml:"hosts" json:"hosts,omitempty"`
 }
 
 func (a *Auth) oauth2FieldsSet() bool {
@@ -365,6 +366,52 @@ func (m *Manifest) validateSecretsAndAuth(found *problems) {
 	default:
 		found.add("auth.kind must be %s, %s or %s", AuthNone, AuthStaticSecret, AuthOAuth2)
 	}
+	m.validateAuthHosts(found)
+}
+
+func normalizedEgressEntry(entry string) string {
+	entry = strings.ToLower(entry)
+	if !strings.Contains(entry, ":") {
+		entry += ":443"
+	}
+	return entry
+}
+
+func (m *Manifest) validateAuthHosts(found *problems) {
+	hosts := m.Auth.Hosts
+	carriesCredentials := m.Backend.Kind == BackendConnector && (m.Auth.Kind == AuthStaticSecret || m.Auth.Kind == AuthOAuth2)
+	switch {
+	case !carriesCredentials:
+		if len(hosts) > 0 {
+			found.add("auth.hosts applies only to a connector backend with static_secret or oauth2 auth")
+		}
+		return
+	case len(hosts) == 0:
+		found.add("auth.hosts must list the egress hosts that receive the credential")
+		return
+	case len(hosts) > maxEgress:
+		found.add("auth.hosts lists more than %d entries", maxEgress)
+		return
+	}
+	listed := make(map[string]bool, len(m.Egress))
+	for _, entry := range m.Egress {
+		listed[normalizedEgressEntry(entry)] = true
+	}
+	seen := map[string]bool{}
+	for _, host := range hosts {
+		if !validEgressEntry(host) {
+			found.add("auth.hosts entries must be a lowercase host or host:port without wildcards")
+			continue
+		}
+		normalized := normalizedEgressEntry(host)
+		if !listed[normalized] {
+			found.add("auth.hosts entries must be listed in egress")
+		}
+		if seen[normalized] {
+			found.add("auth.hosts lists an entry twice")
+		}
+		seen[normalized] = true
+	}
 }
 
 func (m *Manifest) validateOAuth2(found *problems) {
@@ -609,6 +656,7 @@ func (m *Manifest) normalized() Manifest {
 	out.Tools = slices.Clone(m.Tools)
 	slices.SortFunc(out.Tools, func(a, b Tool) int { return strings.Compare(a.Name, b.Name) })
 	out.Auth.Scopes = sortedScopes(m.Auth.Scopes)
+	out.Auth.Hosts = sortedScopes(m.Auth.Hosts)
 	out.Secrets = slices.Clone(m.Secrets)
 	slices.SortFunc(out.Secrets, func(a, b Secret) int { return strings.Compare(a.Name, b.Name) })
 	out.Backend.StartupTimeout = canonicalDuration(m.Backend.StartupTimeout)

@@ -43,6 +43,14 @@ func (h *host) approvedHost(target *url.URL) bool {
 	return h.allowed[strings.ToLower(target.Hostname())+":"+port]
 }
 
+func (h *host) credentialHost(target *url.URL) bool {
+	port := target.Port()
+	if port == "" {
+		port = "443"
+	}
+	return h.credited[strings.ToLower(target.Hostname())+":"+port]
+}
+
 func requestHeaders(supplied map[string]string) (http.Header, *Error) {
 	if len(supplied) > maxHeaders {
 		return nil, invalid()
@@ -93,8 +101,10 @@ func (h *host) perform(callCtx, ctx context.Context, tool *Tool, state *callStat
 		return nil, invalid()
 	}
 	request.Header = headers
-	if err := h.cfg.Auth.Authorize(callCtx, request); err != nil {
-		return nil, authFailure(err)
+	if h.credentialHost(target) {
+		if err := h.cfg.Auth.Authorize(callCtx, request); err != nil {
+			return nil, authFailure(err)
+		}
 	}
 	response, err := h.client.Do(request)
 	if err != nil {
@@ -122,20 +132,20 @@ func (h *host) perform(callCtx, ctx context.Context, tool *Tool, state *callStat
 }
 
 func (h *host) transportFailure(ctx, callCtx context.Context, state *callState, mutating bool, err error) (*httpResultMessage, *Error) {
+	code, denied := egress.CodeOf(err)
+	denied = denied && code == egress.ErrorCodeEgressDenied
+	if mutating && !denied && !neverReachedTheServer(err) {
+		state.sent = true
+	}
 	switch {
 	case ctx.Err() != nil:
 		return nil, Wrap(ErrBackendUnavailable, ctx.Err(), "the call was cancelled")
 	case callCtx.Err() != nil:
 		return nil, Errorf(ErrRPCLimit, "the call exceeded its time limit")
-	}
-	if code, denied := egress.CodeOf(err); denied && code == egress.ErrorCodeEgressDenied {
+	case denied:
 		return httpDenied(state.id), nil
-	}
-	if !mutating {
+	case !mutating:
 		return &httpResultMessage{V: Version, Type: typeHTTPResult, Call: state.id, Error: httpErrorRequestFailed}, nil
-	}
-	if !neverReachedTheServer(err) {
-		state.sent = true
 	}
 	return nil, Errorf(ErrRequestFailed, "the request could not be completed")
 }

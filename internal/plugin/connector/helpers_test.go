@@ -279,13 +279,15 @@ func testConfig(api *fakeAPI, strategy bearerAuthLike, tools ...Tool) Config {
 		tools = []Tool{{Name: "search", Description: "Search mail."}, {Name: "send", Description: "Send mail.", Effect: true}}
 	}
 	egressHosts := []string{"api.mail.example"}
+	authHosts := []string{"api.mail.example"}
 	if api != nil {
 		egressHosts = append(egressHosts, api.host())
+		authHosts = append(authHosts, api.host())
 	}
 	return Config{
 		ID: "mailer", Executable: "/bundle/bin/connector", WorkingDir: "/bundle",
 		StartupTimeout: 5 * time.Second, RequestTimeout: 20 * time.Second, MaxMessageBytes: 1 << 20,
-		Egress: egressHosts, Tools: tools, Auth: strategy,
+		Egress: egressHosts, AuthHosts: authHosts, Tools: tools, Auth: strategy,
 	}
 }
 

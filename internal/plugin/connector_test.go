@@ -60,7 +60,14 @@ func connectorOAuthManifest(t *testing.T) string {
   token_url: https://auth.mail.example/token
   scopes: [mail.read]
   redirect_uri: http://127.0.0.1:8765/callback
-  client_id_secret: client_id`)
+  client_id_secret: client_id
+  hosts: [api.mail.example]`)
+}
+
+func connectorStaticManifest(t *testing.T) string {
+	t.Helper()
+	text := replaceOnce(t, connectorManifest, "secrets: []", "secrets:\n  - name: token\n    ref: env://MAILER_TOKEN")
+	return replaceOnce(t, text, "  kind: none", "  kind: static_secret\n  secret: token\n  hosts: [api.mail.example]")
 }
 
 func TestParseManifestAcceptsAConnectorBackend(t *testing.T) {
@@ -70,9 +77,12 @@ func TestParseManifestAcceptsAConnectorBackend(t *testing.T) {
 	}{
 		{"no auth", func(*testing.T) string { return connectorManifest }},
 		{"oauth2", connectorOAuthManifest},
-		{"static secret", func(t *testing.T) string {
-			text := replaceOnce(t, connectorManifest, "secrets: []", "secrets:\n  - name: token\n    ref: env://MAILER_TOKEN")
-			return replaceOnce(t, text, "  kind: none", "  kind: static_secret\n  secret: token")
+		{"static secret", connectorStaticManifest},
+		{"auth host written with the default port", func(t *testing.T) string {
+			return replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: [api.mail.example:443]")
+		}},
+		{"auth host with its own port", func(t *testing.T) string {
+			return replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: [uploads.mail.example:8443, api.mail.example]")
 		}},
 	}
 	for _, tc := range cases {
@@ -119,6 +129,33 @@ func TestParseManifestRejectsABadConnectorBackend(t *testing.T) {
 			return replaceOnce(t, connectorManifest, "request_timeout: 20s", "request_timeout: soon")
 		}},
 		{"unknown backend field", func(t *testing.T) string { return connectorManifest + "  rpc: v1\n" }},
+		{"oauth2 without auth hosts", func(t *testing.T) string {
+			return replaceOnce(t, connectorOAuthManifest(t), "\n  hosts: [api.mail.example]", "")
+		}},
+		{"oauth2 with empty auth hosts", func(t *testing.T) string {
+			return replaceOnce(t, connectorOAuthManifest(t), "hosts: [api.mail.example]", "hosts: []")
+		}},
+		{"static secret without auth hosts", func(t *testing.T) string {
+			return replaceOnce(t, connectorStaticManifest(t), "\n  hosts: [api.mail.example]", "")
+		}},
+		{"auth host not listed in egress", func(t *testing.T) string {
+			return replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: [other.mail.example]")
+		}},
+		{"auth host on another port than the egress entry", func(t *testing.T) string {
+			return replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: [api.mail.example:8443]")
+		}},
+		{"auth host listed twice after normalization", func(t *testing.T) string {
+			return replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: [api.mail.example, api.mail.example:443]")
+		}},
+		{"auth host with a wildcard", func(t *testing.T) string {
+			return replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: ['*.mail.example']")
+		}},
+		{"auth host in uppercase", func(t *testing.T) string {
+			return replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: [API.mail.example]")
+		}},
+		{"auth hosts without auth", func(t *testing.T) string {
+			return replaceOnce(t, connectorManifest, "  kind: none", "  kind: none\n  hosts: [api.mail.example]")
+		}},
 		{"oauth2 token host not listed", func(t *testing.T) string {
 			return replaceOnce(t, connectorOAuthManifest(t), "egress: [auth.mail.example, api.mail.example]", "egress: [api.mail.example]")
 		}},
@@ -213,5 +250,45 @@ func TestPlanOfAConnectorLeavesAWidenedEgressHostOut(t *testing.T) {
 	}
 	if len(plan.Active) != 1 || slices.Contains(plan.Active[0].Egress, "cdn.mail.example") {
 		t.Fatalf("plan = %+v", plan)
+	}
+}
+
+func TestAuthHostsBelongOnlyToAConnectorWithCredentials(t *testing.T) {
+	mcp := replaceOnce(t, baseManifest, "  kind: none", "  kind: none\n  hosts: [api.example.com]")
+	if _, err := ParseManifest([]byte(mcp)); !hasCode(err, ErrManifestInvalid) {
+		t.Fatalf("mcp manifest with auth hosts: %v, want %s", err, ErrManifestInvalid)
+	}
+}
+
+func TestChangingAuthHostsQuarantinesAndInvalidatesTheToken(t *testing.T) {
+	approved := mustSurface(t, connectorStaticManifest(t), "b")
+	widened := mustSurface(t, replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: [api.mail.example, uploads.mail.example:8443]"), "b")
+	diff := Compare(&approved, &widened)
+	if !diff.Quarantines() || !slices.ContainsFunc(diff.Restart, func(change Change) bool { return change.Surface == SurfaceAuth }) {
+		t.Fatalf("diff = %+v, want an auth restart", diff)
+	}
+	if approved.Auth == widened.Auth {
+		t.Fatal("the auth fingerprint ignores the auth hosts")
+	}
+	first, second := mustSurface(t, replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: [uploads.mail.example:8443, api.mail.example]"), "b"), widened
+	if first.Auth != second.Auth {
+		t.Fatal("the auth fingerprint depends on the order of the auth hosts")
+	}
+}
+
+func TestAConnectorPluginCarriesItsAuthHostsIntoTheActivePlan(t *testing.T) {
+	env := newTestEnv(t)
+	manifest := replaceOnce(t, connectorStaticManifest(t), "hosts: [api.mail.example]", "hosts: [uploads.mail.example:8443, api.mail.example]")
+	result := installConnector(t, env, manifest)
+	if _, err := env.service.Approve(t.Context(), "mailer", result.Digest[:MinDigestPrefix]); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	env.secrets.set("env://MAILER_TOKEN", "token-value")
+	plan, err := env.service.Plan(t.Context())
+	if err != nil || len(plan.Active) != 1 {
+		t.Fatalf("Plan = %+v, %v", plan, err)
+	}
+	if want := []string{"api.mail.example", "uploads.mail.example:8443"}; !slices.Equal(plan.Active[0].AuthHosts, want) {
+		t.Fatalf("auth hosts = %v, want %v", plan.Active[0].AuthHosts, want)
 	}
 }

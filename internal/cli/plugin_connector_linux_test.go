@@ -82,6 +82,7 @@ auth:
   redirect_uri: https://aura.example/oauth/callback
   client_id_secret: client_id
   client_secret_secret: client_secret
+  hosts: [API_HOST]
 backend:
   kind: connector
   command: ./bin/connector

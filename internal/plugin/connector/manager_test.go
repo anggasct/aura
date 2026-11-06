@@ -311,6 +311,61 @@ func TestEffectSettlesUnknownAfterTheRequestLeftAndIsNeverResent(t *testing.T) {
 	}
 }
 
+func TestEffectSettlesUnknownWhenTheRequestWasInFlightAtTimeoutOrCancel(t *testing.T) {
+	cases := []struct {
+		name   string
+		cancel bool
+	}{
+		{name: "the call times out"},
+		{name: "the caller cancels", cancel: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newManagerFixture(t, func(api *fakeAPI) func(int) func(map[string]any) (any, error) {
+				return func(int) func(map[string]any) (any, error) {
+					return func(in map[string]any) (any, error) {
+						switch kindOf(in) {
+						case "describe":
+							return describeReply("search", "send"), nil
+						case "invoke":
+							return httpReply(callOf(in), http.MethodPost, api.url("/v1/send"), nil, []byte("payload")), nil
+						}
+						return nil, errSessionGone
+					}
+				}
+			}, func(cfg *Config) { cfg.RequestTimeout = 400 * time.Millisecond })
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			f.api.mu.Lock()
+			f.api.handler = func(w http.ResponseWriter, r *http.Request) {
+				if tc.cancel {
+					cancel()
+				}
+				hangUntilAbandoned(w, r)
+			}
+			f.api.mu.Unlock()
+			f.start()
+			request := f.request("plugin_mailer_send", `{}`, principal.ClassOwner)
+			if _, err := f.broker.Execute(ctx, request); err == nil || !strings.Contains(err.Error(), "outcome is unknown") {
+				t.Fatalf("Execute error = %v, want an unknown outcome", err)
+			}
+			unsettled := len(f.intents(effect.StateUnknown)) + len(f.intents(effect.StateStarted))
+			if unsettled != 1 || len(f.intents(effect.StateFailed)) != 0 {
+				t.Fatalf("journal unsettled=%d failed=%d", unsettled, len(f.intents(effect.StateFailed)))
+			}
+			if !tc.cancel && len(f.intents(effect.StateUnknown)) != 1 {
+				t.Fatalf("journal unknown=%d, want 1", len(f.intents(effect.StateUnknown)))
+			}
+			if _, err := f.execute(request); err == nil {
+				t.Fatal("the replayed request succeeded")
+			}
+			if f.api.count() != 1 || f.invokePayloads() != 1 {
+				t.Fatalf("api requests = %d, invokes = %d: the effect was resent", f.api.count(), f.invokePayloads())
+			}
+		})
+	}
+}
+
 func TestEffectFailsNormallyWhenNoRequestLeft(t *testing.T) {
 	cases := []struct {
 		name    string

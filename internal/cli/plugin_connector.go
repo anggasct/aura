@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/anggasct/aura/internal/egress"
@@ -47,6 +48,7 @@ func (r *pluginRuntime) connectorPlugins() []connector.Config {
 			Capabilities:    append([]string(nil), active.Server.Capabilities...),
 			Egress:          append([]string(nil), active.Egress...),
 			Auth:            active.Auth,
+			AuthHosts:       slices.Clone(active.AuthHosts),
 		}
 		for _, tool := range active.Tools {
 			cfg.Tools = append(cfg.Tools, connector.Tool{Name: tool.Name, Description: tool.Description, Effect: tool.Tier == plugin.TierEffect})

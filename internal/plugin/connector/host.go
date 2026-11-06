@@ -54,6 +54,7 @@ type Config struct {
 	Egress          []string
 	Tools           []Tool
 	Auth            auth.Strategy
+	AuthHosts       []string
 }
 
 type call struct {
@@ -74,6 +75,7 @@ type host struct {
 	client    *http.Client
 	logger    *slog.Logger
 	allowed   map[string]bool
+	credited  map[string]bool
 	gate      chan struct{}
 	session   Session
 	lastStart time.Time
@@ -87,12 +89,13 @@ func newHost(cfg *Config, starter Starter, client *http.Client, logger *slog.Log
 	clone := *client
 	clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &host{
-		cfg:     *cfg,
-		starter: starter,
-		client:  &clone,
-		logger:  logger,
-		allowed: egressSet(cfg.Egress),
-		gate:    make(chan struct{}, 1),
+		cfg:      *cfg,
+		starter:  starter,
+		client:   &clone,
+		logger:   logger,
+		allowed:  egressSet(cfg.Egress),
+		credited: egressSet(cfg.AuthHosts),
+		gate:     make(chan struct{}, 1),
 	}
 }
 

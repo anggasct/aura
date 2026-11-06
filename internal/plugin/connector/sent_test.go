@@ -1,12 +1,18 @@
 package connector
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/anggasct/aura/internal/egress"
 )
+
+func hangUntilAbandoned(_ http.ResponseWriter, r *http.Request) {
+	<-r.Context().Done()
+}
 
 func hijackAndClose(w http.ResponseWriter, _ *http.Request) {
 	hijacker, ok := w.(http.Hijacker)
@@ -24,6 +30,8 @@ func TestRequestSentTracksWhetherAStateChangingRequestLeftTheHost(t *testing.T) 
 		tool     func(h *host) *Tool
 		program  func(api *fakeAPI) program
 		api      func(w http.ResponseWriter, r *http.Request)
+		timeout  time.Duration
+		cancel   bool
 		wantCode ErrorCode
 		wantSent bool
 		apiCalls int
@@ -70,6 +78,36 @@ func TestRequestSentTracksWhetherAStateChangingRequestLeftTheHost(t *testing.T) 
 			},
 			api:      hijackAndClose,
 			wantCode: ErrRequestFailed, wantSent: true, apiCalls: 1,
+		},
+		{
+			name: "post whose server hangs until the call times out",
+			tool: effectTool,
+			program: func(api *fakeAPI) program {
+				return oneRequest(http.MethodPost, api.url("/send"), nil, []byte("payload"))
+			},
+			api:      hangUntilAbandoned,
+			timeout:  300 * time.Millisecond,
+			wantCode: ErrRPCLimit, wantSent: true, apiCalls: 1,
+		},
+		{
+			name: "post cancelled by the caller mid request",
+			tool: effectTool,
+			program: func(api *fakeAPI) program {
+				return oneRequest(http.MethodPost, api.url("/send"), nil, []byte("payload"))
+			},
+			api:      hangUntilAbandoned,
+			cancel:   true,
+			wantCode: ErrBackendUnavailable, wantSent: true, apiCalls: 1,
+		},
+		{
+			name: "get whose server hangs until the call times out",
+			tool: effectTool,
+			program: func(api *fakeAPI) program {
+				return oneRequest(http.MethodGet, api.url("/lookup"), nil, nil)
+			},
+			api:      hangUntilAbandoned,
+			timeout:  300 * time.Millisecond,
+			wantCode: ErrRPCLimit, apiCalls: 1,
 		},
 		{
 			name: "post to a port nobody listens on",
@@ -139,13 +177,26 @@ func TestRequestSentTracksWhetherAStateChangingRequestLeftTheHost(t *testing.T) 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			api := newFakeAPI(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 			if tc.api != nil {
 				api.handler = tc.api
+			}
+			if tc.cancel {
+				handler := api.handler
+				api.handler = func(w http.ResponseWriter, r *http.Request) {
+					cancel()
+					handler(w, r)
+				}
 			}
 			starter := newStarter(func(int) func(map[string]any) (any, error) { return tc.program(api) })
 			h := newTestHost(t, api, starter, &bearerAuth{token: testToken})
 			h.allowed["127.0.0.1:1"] = true
-			_, fail := invokeTool(t, h, tc.tool(h))
+			if tc.timeout > 0 {
+				h.cfg.RequestTimeout = tc.timeout
+			}
+			tool := tc.tool(h)
+			_, fail := h.invoke(ctx, &call{tool: tool, arguments: []byte(`{"q":"hello"}`), idempotencyKey: "key-1"})
 			if tc.wantCode == "" {
 				if fail != nil {
 					t.Fatalf("invoke: %v", fail)
