@@ -450,3 +450,30 @@ func TestStatusReportsNonLinuxReasonForEffectfulCapability(t *testing.T) {
 		t.Fatalf("status output missing the OS reason:\n%s", output)
 	}
 }
+
+func TestStatusReportsInterpreterRuntimeStates(t *testing.T) {
+	build, err := capability.NewBuild("exec-linux", []string{"code-interpreter"}, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependencies := capability.Dependencies{capability.DependencyProcessContainment: true, capability.DependencyInterpreterRuntime: true}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"code-interpreter"}, config.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) || exitErr.code != exitDegraded {
+		t.Fatalf("runStatus error = %v, want a degraded exit", runErr)
+	}
+	for _, runtime := range []string{"python", "javascript", "go"} {
+		if !strings.Contains(output, "interpreter interpreter_runtime_absent") || !strings.Contains(output, "aura interpreter install "+runtime) {
+			t.Errorf("status output omits the absent %s runtime:\n%s", runtime, output)
+		}
+	}
+
+	_, output, _ = statusFromLoadedConfig(t, []string{}, config.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
+	if strings.Contains(output, "interpreter_runtime") {
+		t.Errorf("status reports interpreter runtimes while the capability is disabled:\n%s", output)
+	}
+}
