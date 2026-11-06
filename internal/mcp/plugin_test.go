@@ -74,7 +74,9 @@ func startPluginManager(t *testing.T, broker *toolbroker.Broker, servers []confi
 
 func pluginToolNames(broker *toolbroker.Broker) []string {
 	var names []string
-	for _, def := range broker.Definitions() {
+	listed := broker.Definitions()
+	for i := range listed {
+		def := &listed[i]
 		if def.Plugin != nil {
 			names = append(names, def.Name)
 		}
@@ -83,9 +85,11 @@ func pluginToolNames(broker *toolbroker.Broker) []string {
 }
 
 func toolDefinition(broker *toolbroker.Broker, name string) (tools.Definition, bool) {
-	for _, def := range broker.Definitions() {
+	listed := broker.Definitions()
+	for i := range listed {
+		def := &listed[i]
 		if def.Name == name {
-			return def, true
+			return *def, true
 		}
 	}
 	return tools.Definition{}, false
@@ -316,5 +320,61 @@ func TestPluginToolsWithAnOverlongWireNameAreSkipped(t *testing.T) {
 	}
 	if names := pluginToolNames(broker); len(names) != 0 {
 		t.Fatalf("plugin tools = %v", names)
+	}
+}
+
+func TestPluginToolWithADisplayNeedsAStrictSchemaOrIsHiddenAsDrift(t *testing.T) {
+	cases := []struct {
+		name    string
+		display []string
+		schema  string
+		exposed bool
+	}{
+		{"strict schema naming every field", []string{"to", "body"}, `{"type":"object","properties":{"to":{},"body":{},"cc":{}},"additionalProperties":false}`, true},
+		{"no display needs no strictness", nil, `{"type":"object"}`, true},
+		{"additional properties unset", []string{"to"}, `{"type":"object","properties":{"to":{}}}`, false},
+		{"additional properties allowed", []string{"to"}, `{"type":"object","properties":{"to":{}},"additionalProperties":true}`, false},
+		{"display names an undeclared field", []string{"to", "bcc"}, `{"type":"object","properties":{"to":{}},"additionalProperties":false}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var prompts int
+			broker := countingBroker(t, &prompts)
+			starter := &stubSessionStarter{session: &scriptedSession{toolNames: []string{"send"}, schemas: map[string]string{"send": tc.schema}}}
+			server := pluginServer("mailer", "send")
+			server.Tools[0].Display = tc.display
+			mgr := startPluginManager(t, broker, nil, starter, server)
+			if err := mgr.Start(t.Context()); err != nil {
+				t.Fatalf("Start(): %v", err)
+			}
+			definition, registered := toolDefinition(broker, "plugin_mailer_send")
+			if registered != tc.exposed {
+				t.Fatalf("registered = %v, want %v", registered, tc.exposed)
+			}
+			status := mgr.PluginStatuses()[0]
+			if tc.exposed {
+				if !slices.Equal(definition.Display, tc.display) || len(status.Drift) != 0 {
+					t.Fatalf("display = %v, drift = %v", definition.Display, status.Drift)
+				}
+				return
+			}
+			if !slices.Equal(status.Drift, []string{"send"}) || len(status.Tools) != 0 {
+				t.Fatalf("status = %+v, want the tool listed as drift", status)
+			}
+		})
+	}
+}
+
+func TestNewManagerRejectsInvalidPluginDisplayNames(t *testing.T) {
+	for name, display := range map[string][]string{"repeated": {"to", "to"}, "path": {"a.b"}, "empty": {""}} {
+		t.Run(name, func(t *testing.T) {
+			server := pluginServer("mailer", "send")
+			server.Tools[0].Display = display
+			var prompts int
+			_, err := NewManager(&ManagerOptions{Config: &config.MCP{}, Broker: countingBroker(t, &prompts), Plugins: []PluginServer{server}})
+			if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+				t.Fatalf("NewManager error = %v, want %s", err, ErrConfigInvalid)
+			}
+		})
 	}
 }

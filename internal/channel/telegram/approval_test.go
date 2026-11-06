@@ -12,12 +12,14 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+	"unicode/utf16"
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/effect"
 	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/tools/displaytest"
 )
 
 const (
@@ -316,6 +318,29 @@ func TestOwnerCardResolvesInTheSameChatAndTopic(t *testing.T) {
 				}
 				if rig.adapter.approvals.Len() != 0 {
 					t.Error("pending approval kept after the decision")
+				}
+			})
+		})
+	}
+}
+
+func TestOwnerCardShowsEveryScenarioOfTheApprovalDisplayWithinTheMessageLimit(t *testing.T) {
+	for _, scenario := range displaytest.Scenarios() {
+		t.Run(scenario.Name, func(t *testing.T) {
+			rig := newApprovalRig(t, accessOpts{})
+			synctest.Test(t, func(t *testing.T) {
+				rig.adapter.rememberTarget("session-1", ownerTarget(privateDest(ownerUserID)))
+				prompt := approvalPrompt("session-1", principal.OwnerID)
+				prompt.Arguments = scenario.Text(t)
+				result := rig.decide(t.Context(), prompt)
+				card := rig.mustCard(t, 1)
+				scenario.Check(t, card.text, false)
+				if units := len(utf16.Encode([]rune(card.text))); units > messageLimit {
+					t.Errorf("card is %d UTF-16 code units, Telegram accepts %d", units, messageLimit)
+				}
+				rig.press(t, "cb-1", ownerUserID, card, card.data(t, "Reject"))
+				if outcome, done := settled(result); !done || outcome.accepted {
+					t.Fatalf("decision = %+v (settled %v), want a rejection", outcome, done)
 				}
 			})
 		})

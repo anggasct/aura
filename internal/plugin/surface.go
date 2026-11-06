@@ -27,6 +27,7 @@ const (
 	DetailTierRaised         = "tier raised"
 	DetailTierLowered        = "tier lowered"
 	DetailDescriptionChanged = "description changed"
+	DetailDisplayChanged     = "approval display changed"
 	DetailRefChanged         = "reference changed"
 )
 
@@ -43,6 +44,7 @@ type Grant struct {
 type ToolSurface struct {
 	Tier        string
 	Description string
+	Display     []string
 	Fingerprint string
 }
 
@@ -81,7 +83,11 @@ func fingerprint(parts ...string) string {
 }
 
 func ToolFingerprint(tool *Tool) string {
-	return fingerprint(SurfaceTool, tool.Name, tool.Tier, tool.Description)
+	parts := []string{SurfaceTool, tool.Name, tool.Tier, tool.Description}
+	if len(tool.Display) > 0 {
+		parts = append(parts, "display", strings.Join(tool.Display, ","))
+	}
+	return fingerprint(parts...)
 }
 
 func ValueFingerprint(surface, value string) string {
@@ -119,7 +125,7 @@ func SurfaceOf(manifest *Manifest, bundleSHA256 string) (Surface, error) {
 	}
 	for i := range normalized.Tools {
 		tool := &normalized.Tools[i]
-		surface.Tools[tool.Name] = ToolSurface{Tier: tool.Tier, Description: tool.Description, Fingerprint: ToolFingerprint(tool)}
+		surface.Tools[tool.Name] = ToolSurface{Tier: tool.Tier, Description: tool.Description, Display: slices.Clone(tool.Display), Fingerprint: ToolFingerprint(tool)}
 	}
 	for _, capability := range normalized.Capabilities {
 		surface.Values[GrantKey{SurfaceCapability, capability}] = ValueFingerprint(SurfaceCapability, capability)
@@ -208,8 +214,10 @@ func toolChangeDetail(previous, next ToolSurface) string {
 		return DetailTierRaised
 	case tierRank(next.Tier) < tierRank(previous.Tier):
 		return DetailTierLowered
-	default:
+	case previous.Description != next.Description:
 		return DetailDescriptionChanged
+	default:
+		return DetailDisplayChanged
 	}
 }
 

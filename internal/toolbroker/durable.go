@@ -8,6 +8,7 @@ import (
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/durable"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/tools"
 )
 
 type ApprovalDecision struct {
@@ -16,16 +17,16 @@ type ApprovalDecision struct {
 }
 
 type ApprovalEvent struct {
-	ID          string          `json:"id"`
-	TurnID      string          `json:"turn_id"`
-	SessionID   string          `json:"session_id"`
-	PrincipalID string          `json:"principal_id"`
-	ToolName    string          `json:"tool_name"`
-	ToolVersion string          `json:"tool_version"`
-	Arguments   json.RawMessage `json:"arguments"`
-	ApprovalID  string          `json:"approval_id"`
-	ExpiresAt   time.Time       `json:"expires_at"`
-	CreatedAt   time.Time       `json:"created_at"`
+	ID          string    `json:"id"`
+	TurnID      string    `json:"turn_id"`
+	SessionID   string    `json:"session_id"`
+	PrincipalID string    `json:"principal_id"`
+	ToolName    string    `json:"tool_name"`
+	ToolVersion string    `json:"tool_version"`
+	Arguments   string    `json:"arguments"`
+	ApprovalID  string    `json:"approval_id"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type ApprovalEventSink interface {
@@ -133,7 +134,7 @@ func (b *Broker) grantDurableUntil(ctx context.Context, scope *durable.TurnScope
 	return grant, nil
 }
 
-func (b *Broker) parkForApproval(ctx context.Context, scope *durable.TurnScope, evalKey string, canonical *ToolRequest, approvalExpiry time.Time) (grant *approval.ApprovalGrant, err error) {
+func (b *Broker) parkForApproval(ctx context.Context, scope *durable.TurnScope, evalKey string, canonical *ToolRequest, definition *tools.Definition, approvalExpiry time.Time) (grant *approval.ApprovalGrant, err error) {
 	defer func() {
 		if recovered := durable.RecoveredPanic(); recovered != nil && err == nil {
 			err = recovered
@@ -163,7 +164,10 @@ func (b *Broker) parkForApproval(ctx context.Context, scope *durable.TurnScope, 
 	}
 	expiry := clock.Expiry.UTC()
 	observed := clock.Now.UTC()
-	prompt := b.buildApprovalPrompt(canonical, approval.PolicyDecision{Outcome: approval.OutcomeRequireApproval}, expiry)
+	prompt, err := b.buildApprovalPrompt(canonical, definition, approval.PolicyDecision{Outcome: approval.OutcomeRequireApproval}, expiry)
+	if err != nil {
+		return nil, err
+	}
 	event := ApprovalEvent{
 		ID:          "approval-" + canonical.TurnID + "-" + signal,
 		TurnID:      canonical.TurnID,
@@ -171,7 +175,7 @@ func (b *Broker) parkForApproval(ctx context.Context, scope *durable.TurnScope, 
 		PrincipalID: canonical.PrincipalID,
 		ToolName:    canonical.ToolName,
 		ToolVersion: canonical.ToolVersion,
-		Arguments:   json.RawMessage(prompt.Arguments),
+		Arguments:   prompt.Arguments,
 		ApprovalID:  addr,
 		ExpiresAt:   expiry,
 		CreatedAt:   observed,
@@ -243,11 +247,11 @@ func NewApprovalEventSink(events ApprovalEventStore, publish func(*store.Runtime
 
 func (s *approvalEventSink) EmitApprovalRequired(ctx context.Context, event *ApprovalEvent) error {
 	payload, err := json.Marshal(struct {
-		ApprovalID string          `json:"approval_id"`
-		ToolName   string          `json:"tool_name"`
-		Version    string          `json:"tool_version"`
-		Arguments  json.RawMessage `json:"arguments"`
-		ExpiresAt  string          `json:"expires_at"`
+		ApprovalID string `json:"approval_id"`
+		ToolName   string `json:"tool_name"`
+		Version    string `json:"tool_version"`
+		Arguments  string `json:"arguments"`
+		ExpiresAt  string `json:"expires_at"`
 	}{
 		ApprovalID: event.ApprovalID,
 		ToolName:   event.ToolName,

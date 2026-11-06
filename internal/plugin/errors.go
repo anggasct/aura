@@ -20,7 +20,7 @@ const (
 	ErrDigestMismatch     ErrorCode = "plugin_digest_mismatch"
 	ErrNotFound           ErrorCode = "plugin_not_found"
 	ErrTampered           ErrorCode = "plugin_tampered"
-	ErrToolDrift          ErrorCode = "plugin_tool_drift"
+	ErrToolDrift          ErrorCode = ErrorCode(connector.ErrToolDrift)
 	ErrSurfacePending     ErrorCode = "plugin_surface_pending"
 	ErrDrift              ErrorCode = "plugin_drift"
 	ErrInvalidArgument    ErrorCode = "plugin_invalid_argument"

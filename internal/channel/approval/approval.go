@@ -28,10 +28,9 @@ const (
 )
 
 const (
-	MaxPending   = 1024
-	MaxSeen      = 4096
-	FallbackTTL  = 5 * time.Minute
-	CardArgRunes = 1200
+	MaxPending  = 1024
+	MaxSeen     = 4096
+	FallbackTTL = 5 * time.Minute
 )
 
 const (
@@ -341,9 +340,6 @@ func RenderCard(prompt *Prompt, persona string, clean func(string) string) strin
 	if arguments == "" {
 		arguments = "{}"
 	}
-	if runes := []rune(arguments); len(runes) > CardArgRunes {
-		arguments = string(runes[:CardArgRunes]) + "...[truncated]"
-	}
 	var card strings.Builder
 	card.WriteString("approval required: " + clean(prompt.ToolName))
 	if prompt.ToolVersion != "" {
@@ -354,7 +350,11 @@ func RenderCard(prompt *Prompt, persona string, clean func(string) string) strin
 	}
 	card.WriteString("\nsession: " + clean(prompt.SessionID))
 	card.WriteString("\nprincipal: " + clean(prompt.PrincipalID))
-	card.WriteString("\narguments: " + arguments)
+	if strings.Contains(arguments, "\n") {
+		card.WriteString("\narguments:\n" + arguments)
+	} else {
+		card.WriteString("\narguments: " + arguments)
+	}
 	card.WriteString("\napprove exactly this request?")
 	return card.String()
 }

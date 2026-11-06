@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/durable"
@@ -180,7 +179,9 @@ func New(options *Options) (*Broker, error) {
 
 func DefaultPolicy() approval.Policy {
 	rules := make(map[string]approval.Rule)
-	for _, definition := range tools.Builtins() {
+	listed := tools.Builtins()
+	for i := range listed {
+		definition := &listed[i]
 		allowedTrust := []approval.TrustLabel{
 			approval.TrustOwnerInput,
 			approval.TrustTrustedConfiguration,
@@ -386,7 +387,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	approvalExpiry := absoluteApprovalExpiry(canonical.Deadline)
 	grant := canonical.Approval
 	standing := false
-	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && class == principal.ClassTrusted && !guarded {
+	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && class == principal.ClassTrusted && !guarded && !definition.FieldApproval() {
 		standing, err = b.standingGrant(ctx, &canonical, definition.Server)
 		if err != nil {
 			approvalState = ApprovalRejected
@@ -395,7 +396,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	}
 	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && !standing {
 		if scope, ok := durable.TurnScopeFrom(ctx); ok {
-			parked, err := b.parkForApproval(ctx, scope, evalKey, &canonical, approvalExpiry)
+			parked, err := b.parkForApproval(ctx, scope, evalKey, &canonical, definition, approvalExpiry)
 			if err != nil {
 				approvalState = ApprovalRejected
 				return ToolResult{}, err
@@ -412,7 +413,12 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		case standing:
 			approvalState = ApprovalStanding
 		case decision.Outcome == approval.OutcomeRequireApproval:
-			accepted, err := b.decider(ctx, b.buildApprovalPrompt(&canonical, decision, approvalExpiry))
+			prompt, err := b.buildApprovalPrompt(&canonical, definition, decision, approvalExpiry)
+			if err != nil {
+				approvalState = ApprovalRejected
+				return ToolResult{}, err
+			}
+			accepted, err := b.decider(ctx, prompt)
 			if err != nil {
 				approvalState = ApprovalRejected
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -682,8 +688,7 @@ func randomArtifactID() (string, error) {
 }
 
 const (
-	defaultApprovalTTL      = 5 * time.Minute
-	maxApprovalDisplayBytes = 2048
+	defaultApprovalTTL = 5 * time.Minute
 )
 
 func requestClass(request *ToolRequest) principal.Class {
@@ -767,10 +772,16 @@ func absoluteApprovalExpiry(deadline time.Time) time.Time {
 	return time.Now().Add(defaultApprovalTTL)
 }
 
-func (b *Broker) buildApprovalPrompt(request *ToolRequest, decision approval.PolicyDecision, expiresAt time.Time) *ApprovalPrompt {
-	display := redact(request.Arguments, b.secretValues())
-	if len(display) > maxApprovalDisplayBytes {
-		display = truncateDisplay(display, maxApprovalDisplayBytes)
+func (b *Broker) buildApprovalPrompt(request *ToolRequest, definition *tools.Definition, decision approval.PolicyDecision, expiresAt time.Time) (*ApprovalPrompt, error) {
+	secrets := b.secretValues()
+	display, err := definition.ApprovalText(request.Arguments, func(text string) string {
+		return string(redact([]byte(text), secrets))
+	})
+	if err != nil {
+		if code, coded := tools.CodeOf(err); coded && code == tools.ErrorCodeDisplayTooLarge {
+			return nil, errorf(ResultApprovalDisplayTooLarge, "tool %q arguments do not fit the approval display", request.ToolName)
+		}
+		return nil, errorf(ResultPolicyDenied, "tool %q approval display failed closed", request.ToolName)
 	}
 	return &ApprovalPrompt{
 		ToolName:       request.ToolName,
@@ -778,22 +789,14 @@ func (b *Broker) buildApprovalPrompt(request *ToolRequest, decision approval.Pol
 		SessionID:      request.SessionID,
 		TurnID:         request.TurnID,
 		PrincipalID:    request.PrincipalID,
-		Arguments:      string(display),
+		Arguments:      display,
 		Network:        decision.Constraints.AllowNetwork,
 		Timeout:        decision.Constraints.Timeout,
 		MaxOutputBytes: decision.Constraints.MaxOutputBytes,
 		PolicyVersion:  decision.PolicyVersion,
 		ReasonCode:     decision.ReasonCode,
 		ExpiresAt:      expiresAt,
-	}
-}
-
-func truncateDisplay(data []byte, limit int) []byte {
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(data[cut]) {
-		cut--
-	}
-	return append(data[:cut:cut], []byte("...[truncated]")...)
+	}, nil
 }
 
 func (b *Broker) canonicalRequest(request *ToolRequest) (ToolRequest, error) {

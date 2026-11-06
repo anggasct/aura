@@ -18,6 +18,8 @@ const (
 	ErrConnector          ErrorCode = "plugin_connector_error"
 	ErrRequestFailed      ErrorCode = "plugin_request_failed"
 	ErrConfigInvalid      ErrorCode = "plugin_connector_config_invalid"
+	ErrEffectNotPerformed ErrorCode = "plugin_effect_not_performed"
+	ErrToolDrift          ErrorCode = "plugin_tool_drift"
 	ErrAuthRequired       ErrorCode = ErrorCode(auth.ErrRequired)
 	ErrAuthFailed         ErrorCode = ErrorCode(auth.ErrFailed)
 	ErrAuthUnavailable    ErrorCode = ErrorCode(auth.ErrUnavailable)

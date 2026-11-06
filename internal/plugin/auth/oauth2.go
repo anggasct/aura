@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -37,8 +38,14 @@ func newOAuth2(r *Registry, spec *Spec) (Strategy, error) {
 	if spec.AuthorizeURL == "" || spec.TokenURL == "" || spec.RedirectURI == "" || len(spec.Scopes) == 0 || spec.ClientIDRef == "" || spec.Fingerprint == "" {
 		return nil, Errorf(ErrInvalid, "oauth2 needs endpoints, a redirect uri, scopes, a client id and a fingerprint")
 	}
+	for key, value := range spec.AuthorizeParams {
+		if !ValidAuthorizeParam(key, value) {
+			return nil, Errorf(ErrInvalid, "oauth2 allows only the access_type and prompt authorize parameters with known values")
+		}
+	}
 	cloned := *spec
 	cloned.Scopes = append([]string(nil), spec.Scopes...)
+	cloned.AuthorizeParams = maps.Clone(spec.AuthorizeParams)
 	return &oauth2Strategy{registry: r, spec: cloned, store: r.store(spec.PluginID)}, nil
 }
 

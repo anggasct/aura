@@ -16,6 +16,7 @@ type ApprovedTool struct {
 	Name        string
 	Description string
 	Tier        string
+	Display     []string
 }
 
 type Active struct {
@@ -165,7 +166,7 @@ func (s *Service) activate(ctx context.Context, plugins *os.Root, record *Record
 	for i := range normalized.Tools {
 		tool := &normalized.Tools[i]
 		if granted[GrantKey{SurfaceTool, tool.Name}] == ToolFingerprint(tool) {
-			active.Tools = append(active.Tools, ApprovedTool{Name: tool.Name, Description: tool.Description, Tier: tool.Tier})
+			active.Tools = append(active.Tools, ApprovedTool{Name: tool.Name, Description: tool.Description, Tier: tool.Tier, Display: slices.Clone(tool.Display)})
 		}
 	}
 	return active, nil

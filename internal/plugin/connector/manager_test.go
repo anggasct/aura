@@ -109,9 +109,10 @@ func (f *managerFixture) start() {
 
 func (f *managerFixture) toolNames() []string {
 	var names []string
-	for _, definition := range f.broker.Definitions() {
-		if strings.HasPrefix(definition.Name, "plugin_") {
-			names = append(names, definition.Name)
+	definitions := f.broker.Definitions()
+	for i := range definitions {
+		if strings.HasPrefix(definitions[i].Name, "plugin_") {
+			names = append(names, definitions[i].Name)
 		}
 	}
 	return names
@@ -178,6 +179,7 @@ func TestManagerRegistersApprovedToolsWithApprovedTextAndHidesDrift(t *testing.T
 			}
 		}
 	}, nil)
+	f.starter.scripted = true
 	f.start()
 	if names := f.toolNames(); !slices.Equal(names, []string{"plugin_mailer_search", "plugin_mailer_send"}) {
 		t.Fatalf("registered tools = %v", names)
@@ -481,6 +483,7 @@ func TestPluginThatCannotStartStaysOffWithBackendUnavailable(t *testing.T) {
 			}
 			f := newManagerFixture(t, build, func(cfg *Config) { cfg.Capabilities = []string{"network"} })
 			f.manager = f.newManager(t, []Config{f.cfg}, tc.capability)
+			f.starter.scripted = true
 			if tc.startError != nil {
 				f.starter.failures[0] = tc.startError
 			}

@@ -476,7 +476,9 @@ func Definitions() []tools.Definition {
 
 func Rules() []approval.Rule {
 	rules := make([]approval.Rule, 0, len(Definitions()))
-	for _, definition := range Definitions() {
+	listed := Definitions()
+	for i := range listed {
+		definition := &listed[i]
 		rules = append(rules, approval.Rule{
 			ToolName:             definition.Name,
 			ToolVersion:          definition.Version,

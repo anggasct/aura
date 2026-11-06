@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/anggasct/aura/internal/plugin/auth"
+	"github.com/anggasct/aura/internal/tools"
 )
 
 const RestartInterval = 5 * time.Second
@@ -40,6 +42,7 @@ type Tool struct {
 	Name        string
 	Description string
 	Effect      bool
+	Display     []string
 }
 
 type Config struct {
@@ -63,10 +66,19 @@ type call struct {
 	idempotencyKey string
 }
 
+type mutation int
+
+const (
+	mutationNone mutation = iota
+	mutationRefused
+	mutationAccepted
+)
+
 type callState struct {
-	id    string
-	steps int
-	sent  bool
+	id           string
+	steps        int
+	sent         bool
+	lastMutation mutation
 }
 
 type host struct {
@@ -78,6 +90,8 @@ type host struct {
 	credited  map[string]bool
 	gate      chan struct{}
 	session   Session
+	described []describedTool
+	agreed    []string
 	lastStart time.Time
 	closed    bool
 	alive     atomic.Bool
@@ -124,7 +138,7 @@ func (h *host) release() {
 	<-h.gate
 }
 
-func (h *host) ensureSession(ctx context.Context) (Session, *Error) {
+func (h *host) ensureSession(ctx, callCtx context.Context) (Session, *Error) {
 	if h.closed {
 		return nil, Errorf(ErrBackendUnavailable, "the connector is shut down")
 	}
@@ -135,7 +149,7 @@ func (h *host) ensureSession(ctx context.Context) (Session, *Error) {
 		return nil, Errorf(ErrBackendUnavailable, "the connector restarted too recently")
 	}
 	h.lastStart = time.Now()
-	session, err := h.starter.StartSession(context.WithoutCancel(ctx), &SessionRequest{
+	session, err := h.starter.StartSession(context.WithoutCancel(callCtx), &SessionRequest{
 		RequestID:      fmt.Sprintf("connector-%s-%d", h.cfg.ID, h.starts.Add(1)),
 		Name:           h.cfg.ID,
 		Executable:     h.cfg.Executable,
@@ -150,6 +164,17 @@ func (h *host) ensureSession(ctx context.Context) (Session, *Error) {
 	}
 	h.session = session
 	h.alive.Store(true)
+	raw, fail := h.exchange(ctx, callCtx, session, &describeMessage{V: Version, Type: typeDescribe, HostCapabilities: slices.Clone(hostCapabilities)})
+	var described *description
+	if fail == nil {
+		described, fail = decodeTools(raw)
+	}
+	if fail != nil {
+		h.drop(ctx)
+		return nil, fail
+	}
+	h.described = described.tools
+	h.agreed = agreedCapabilities(described.capabilities)
 	return session, nil
 }
 
@@ -208,19 +233,15 @@ func (h *host) describe(ctx context.Context) ([]describedTool, *Error) {
 		return nil, Wrap(ErrBackendUnavailable, err, "the connector is busy")
 	}
 	defer h.release()
-	session, fail := h.ensureSession(callCtx)
-	if fail != nil {
+	if _, fail := h.ensureSession(ctx, callCtx); fail != nil {
 		return nil, fail
 	}
-	raw, fail := h.exchange(ctx, callCtx, session, &describeMessage{V: Version, Type: typeDescribe})
-	if fail == nil {
-		var described []describedTool
-		if described, fail = decodeTools(raw); fail == nil {
-			return described, nil
-		}
-	}
-	h.drop(ctx)
-	return nil, fail
+	return slices.Clone(h.described), nil
+}
+
+func (h *host) describes(tool *Tool) bool {
+	index := slices.IndexFunc(h.described, func(described describedTool) bool { return described.Name == tool.Name })
+	return index >= 0 && tools.CheckDisplaySchema(tool.Display, h.described[index].InputSchema) == nil
 }
 
 func (h *host) invoke(ctx context.Context, request *call) (json.RawMessage, *Error) {
@@ -233,9 +254,13 @@ func (h *host) invoke(ctx context.Context, request *call) (json.RawMessage, *Err
 		return nil, Errorf(ErrRPCLimit, "the call exceeded its time limit")
 	}
 	defer h.release()
-	session, fail := h.ensureSession(callCtx)
+	session, fail := h.ensureSession(ctx, callCtx)
 	if fail != nil {
 		return nil, fail
+	}
+	if !h.describes(request.tool) {
+		h.drop(ctx)
+		return nil, Errorf(ErrToolDrift, "the connector no longer describes this tool as approved")
 	}
 	state := &callState{id: fmt.Sprintf("%s-%d", h.cfg.ID, h.calls.Add(1))}
 	arguments := request.arguments
@@ -256,6 +281,9 @@ func (h *host) invoke(ctx context.Context, request *call) (json.RawMessage, *Err
 		}
 		switch {
 		case parsed.result != nil:
+			if request.tool.Effect && state.lastMutation != mutationAccepted {
+				return nil, h.finish(state, Errorf(ErrEffectNotPerformed, "the connector ended an effect without a confirmed state-changing request"))
+			}
 			return parsed.result, nil
 		case parsed.http == nil:
 			return nil, h.finish(state, &Error{Code: ErrConnector, Reported: parsed.code})

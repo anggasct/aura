@@ -51,7 +51,7 @@ func (r *pluginRuntime) connectorPlugins() []connector.Config {
 			AuthHosts:       slices.Clone(active.AuthHosts),
 		}
 		for _, tool := range active.Tools {
-			cfg.Tools = append(cfg.Tools, connector.Tool{Name: tool.Name, Description: tool.Description, Effect: tool.Tier == plugin.TierEffect})
+			cfg.Tools = append(cfg.Tools, connector.Tool{Name: tool.Name, Description: tool.Description, Effect: tool.Tier == plugin.TierEffect, Display: slices.Clone(tool.Display)})
 		}
 		configs = append(configs, cfg)
 	}

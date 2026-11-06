@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/tools"
 )
 
 func TestBrokerApprovalDeciderAcceptExecutes(t *testing.T) {
@@ -202,7 +203,7 @@ func TestBrokerApprovalPromptBoundsDisplayArguments(t *testing.T) {
 	if _, err := broker.Execute(context.Background(), request); classOf(err) != ResultApprovalRequired {
 		t.Fatalf("Execute error = %v, want approval_required", err)
 	}
-	if prompted == nil || len(prompted.Arguments) > maxApprovalDisplayBytes+len("...[truncated]") {
+	if prompted == nil || len(prompted.Arguments) > tools.ApprovalDisplayLimit {
 		t.Fatalf("prompt arguments are not bounded: %d bytes", len(prompted.Arguments))
 	}
 	if !strings.HasSuffix(prompted.Arguments, "...[truncated]") {

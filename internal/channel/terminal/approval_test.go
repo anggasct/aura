@@ -6,10 +6,13 @@ import (
 	"io"
 	"iter"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/tools/displaytest"
 )
 
 type approvalRunner struct {
@@ -434,5 +437,21 @@ func TestApprovalBridgeSecondAskFailsClosedWhileServing(t *testing.T) {
 	secondCancel()
 	if err := <-second; err == nil {
 		t.Fatal("cancelled second ask must return an error")
+	}
+}
+
+func TestApprovalCardShowsEveryScenarioOfTheApprovalDisplay(t *testing.T) {
+	for _, width := range []int{0, 100, 200} {
+		for _, scenario := range displaytest.Scenarios() {
+			t.Run(scenario.Name+"/width "+strconv.Itoa(width), func(t *testing.T) {
+				card := testCard()
+				card.Arguments = scenario.Text(t)
+				rendered := renderApprovalCard(card, width)
+				scenario.Check(t, rendered, width > 0)
+				if !strings.Contains(rendered, "approve exactly this request?") {
+					t.Errorf("card lost its prompt:\n%s", rendered)
+				}
+			})
+		}
 	}
 }

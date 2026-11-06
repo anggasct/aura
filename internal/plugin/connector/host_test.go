@@ -36,7 +36,7 @@ func TestInvokeRunsARequestThroughTheHost(t *testing.T) {
 		t.Fatalf("accept = %q", got)
 	}
 	var invoke map[string]any
-	if err := decodeStrict(starter.session(0).payloads()[0], &invoke); err != nil {
+	if err := decodeStrict(starter.session(0).payloads()[1], &invoke); err != nil {
 		t.Fatalf("decode invoke: %v", err)
 	}
 	if invoke["v"] != Version || invoke["type"] != "invoke" || invoke["tool"] != "search" || invoke["idempotency_key"] != "key-1" || invoke["call"] == "" {
@@ -288,41 +288,24 @@ func TestRedirectIsReturnedToTheConnectorUnfollowed(t *testing.T) {
 	}
 }
 
-func TestResponseBodyBound(t *testing.T) {
-	cases := []struct {
-		name string
-		size int
-		want ErrorCode
-	}{
-		{"exactly the bound", maxBodyBytes, ""},
-		{"one byte over", maxBodyBytes + 1, ErrRPCLimit},
+func TestResponseBodyAtTheBoundIsDelivered(t *testing.T) {
+	api := newFakeAPI(t)
+	api.handler = func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, maxBodyBytes))
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			api := newFakeAPI(t)
-			api.handler = func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write(make([]byte, tc.size))
+	starter := newStarter(func(int) func(map[string]any) (any, error) {
+		return func(in map[string]any) (any, error) {
+			if kindOf(in) == "invoke" {
+				return httpReply(callOf(in), "GET", api.url("/x"), nil, nil), nil
 			}
-			starter := newStarter(func(int) func(map[string]any) (any, error) {
-				return func(in map[string]any) (any, error) {
-					if kindOf(in) == "invoke" {
-						return httpReply(callOf(in), "GET", api.url("/x"), nil, nil), nil
-					}
-					encoded, _ := in["body_b64"].(string)
-					return resultReply(callOf(in), map[string]any{"size": len(encoded)}), nil
-				}
-			})
-			h := newTestHost(t, api, starter, &bearerAuth{})
-			h.cfg.MaxMessageBytes = 1 << 10
-			_, fail := invokeTool(t, h, readTool(h))
-			if tc.want == "" {
-				if fail != nil {
-					t.Fatalf("invoke: %v", fail)
-				}
-				return
-			}
-			mustCode(t, fail, tc.want)
-		})
+			encoded, _ := in["body_b64"].(string)
+			return resultReply(callOf(in), map[string]any{"size": len(encoded)}), nil
+		}
+	})
+	h := newTestHost(t, api, starter, &bearerAuth{})
+	h.cfg.MaxMessageBytes = 1 << 10
+	if _, fail := invokeTool(t, h, readTool(h)); fail != nil {
+		t.Fatalf("invoke: %v", fail)
 	}
 }
 

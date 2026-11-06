@@ -17,13 +17,15 @@ import (
 )
 
 const (
-	httpErrorRequestFailed = "request_failed"
-	userAgent              = "aura-connector"
+	httpErrorRequestFailed    = "request_failed"
+	httpErrorResponseTooLarge = "response_too_large"
+	userAgent                 = "aura-connector"
 )
 
 var (
 	safeMethods    = []string{http.MethodGet, http.MethodHead}
 	allowedMethods = []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}
+	refusedStatus  = []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusRequestEntityTooLarge, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
 	returnedHeader = []string{"Content-Type", "Retry-After", "ETag"}
 	droppedHeaders = []string{
 		"Authorization", "Cookie", "Host", "Connection", "Keep-Alive", "Te", "Trailer",
@@ -111,13 +113,24 @@ func (h *host) perform(callCtx, ctx context.Context, tool *Tool, state *callStat
 		return h.transportFailure(ctx, callCtx, state, mutating, err)
 	}
 	defer func() { _ = response.Body.Close() }()
-	state.sent = state.sent || mutating
+	if mutating {
+		if fail := classifyMutation(state, response.StatusCode); fail != nil {
+			return nil, fail
+		}
+	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxBodyBytes+1))
 	switch {
+	case err != nil && mutating:
+		if fail := h.interrupted(ctx, callCtx); fail != nil {
+			return nil, fail
+		}
+		data = nil
 	case err != nil:
 		return h.transportFailure(ctx, callCtx, state, mutating, err)
+	case len(data) > maxBodyBytes && mutating:
+		data = nil
 	case len(data) > maxBodyBytes:
-		return nil, Errorf(ErrRPCLimit, "the response body exceeds the size bound")
+		return &httpResultMessage{V: Version, Type: typeHTTPResult, Call: state.id, Error: httpErrorResponseTooLarge}, nil
 	}
 	result := &httpResultMessage{V: Version, Type: typeHTTPResult, Call: state.id, Status: response.StatusCode, BodyB64: base64.StdEncoding.EncodeToString(data)}
 	for _, name := range returnedHeader {
@@ -131,17 +144,40 @@ func (h *host) perform(callCtx, ctx context.Context, tool *Tool, state *callStat
 	return result, nil
 }
 
+func classifyMutation(state *callState, status int) *Error {
+	switch {
+	case status >= 200 && status < 300:
+		state.sent = true
+		state.lastMutation = mutationAccepted
+		return nil
+	case slices.Contains(refusedStatus, status) && !state.sent:
+		state.lastMutation = mutationRefused
+		return nil
+	}
+	state.sent = true
+	return Errorf(ErrRequestFailed, "the outcome of the request cannot be confirmed")
+}
+
+func (h *host) interrupted(ctx, callCtx context.Context) *Error {
+	switch {
+	case ctx.Err() != nil:
+		return Wrap(ErrBackendUnavailable, ctx.Err(), "the call was cancelled")
+	case callCtx.Err() != nil:
+		return Errorf(ErrRPCLimit, "the call exceeded its time limit")
+	}
+	return nil
+}
+
 func (h *host) transportFailure(ctx, callCtx context.Context, state *callState, mutating bool, err error) (*httpResultMessage, *Error) {
 	code, denied := egress.CodeOf(err)
 	denied = denied && code == egress.ErrorCodeEgressDenied
 	if mutating && !denied && !neverReachedTheServer(err) {
 		state.sent = true
 	}
+	if fail := h.interrupted(ctx, callCtx); fail != nil {
+		return nil, fail
+	}
 	switch {
-	case ctx.Err() != nil:
-		return nil, Wrap(ErrBackendUnavailable, ctx.Err(), "the call was cancelled")
-	case callCtx.Err() != nil:
-		return nil, Errorf(ErrRPCLimit, "the call exceeded its time limit")
 	case denied:
 		return httpDenied(state.id), nil
 	case !mutating:

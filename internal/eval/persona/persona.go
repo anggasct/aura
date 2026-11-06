@@ -273,7 +273,9 @@ func (definitionPolicy) StandingGrant(context.Context, string, string, string, s
 
 func newBroker(definition *auraagent.Definition, decider toolbroker.ApprovalDecider, effects *effect.Executor) (*toolbroker.Broker, error) {
 	adapters := map[string]toolbroker.Adapter{}
-	for _, builtin := range tools.Builtins() {
+	listed := tools.Builtins()
+	for i := range listed {
+		builtin := &listed[i]
 		adapters[builtin.Key()] = func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
 			return toolbroker.ToolResult{Class: toolbroker.ResultOK, Output: json.RawMessage(`{}`)}, nil
 		}

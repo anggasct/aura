@@ -26,6 +26,7 @@ type blockReply struct{}
 type scriptedSession struct {
 	mu       sync.Mutex
 	handler  func(in map[string]any) (any, error)
+	scripted bool
 	received [][]byte
 	closed   atomic.Bool
 }
@@ -42,8 +43,11 @@ func (s *scriptedSession) Request(ctx context.Context, payload []byte) ([]byte, 
 	if err := json.Unmarshal(payload, &in); err != nil {
 		return nil, err
 	}
-	reply, err := handler(in)
-	if err != nil {
+	var reply any
+	var err error
+	if kindOf(in) == "describe" && !s.scripted {
+		reply = describeReply("search", "send")
+	} else if reply, err = handler(in); err != nil {
 		return nil, err
 	}
 	switch typed := reply.(type) {
@@ -69,6 +73,7 @@ func (s *scriptedSession) payloads() [][]byte {
 
 type scriptedStarter struct {
 	mu       sync.Mutex
+	scripted bool
 	handler  func(index int) func(in map[string]any) (any, error)
 	failures map[int]error
 	sessions []*scriptedSession
@@ -87,7 +92,7 @@ func (s *scriptedStarter) StartSession(_ context.Context, req *SessionRequest) (
 	if err := s.failures[index]; err != nil {
 		return nil, err
 	}
-	session := &scriptedSession{handler: s.handler(index)}
+	session := &scriptedSession{handler: s.handler(index), scripted: s.scripted}
 	s.sessions = append(s.sessions, session)
 	return session, nil
 }

@@ -98,7 +98,7 @@ func validateConfig(cfg *Config) error {
 	}
 	names := make(map[string]bool, len(cfg.Tools))
 	for i := range cfg.Tools {
-		if !toolNamePattern.MatchString(cfg.Tools[i].Name) || names[cfg.Tools[i].Name] {
+		if !toolNamePattern.MatchString(cfg.Tools[i].Name) || names[cfg.Tools[i].Name] || tools.ValidateDisplayNames(cfg.Tools[i].Display) != nil {
 			return errors.New("tool names must be valid and unique")
 		}
 		names[cfg.Tools[i].Name] = true
@@ -186,7 +186,8 @@ func (m *Manager) bringUp(ctx context.Context, e *entry) *Error {
 
 func splitApproved(described []describedTool, approved []Tool) (exposed []describedTool, drift []string) {
 	for i := range described {
-		if slices.ContainsFunc(approved, func(tool Tool) bool { return tool.Name == described[i].Name }) {
+		index := slices.IndexFunc(approved, func(tool Tool) bool { return tool.Name == described[i].Name })
+		if index >= 0 && tools.CheckDisplaySchema(approved[index].Display, described[i].InputSchema) == nil {
 			exposed = append(exposed, described[i])
 			continue
 		}
@@ -212,6 +213,7 @@ func (m *Manager) register(runner *host, cfg *Config, exposed []describedTool) (
 			Name:                 wire,
 			Version:              toolVersion,
 			Plugin:               &tools.PluginRef{ID: cfg.ID, Description: approved.Description},
+			Display:              slices.Clone(approved.Display),
 			Schema:               schema,
 			RequiredCapabilities: slices.Clone(cfg.Capabilities),
 			RequiresApproval:     approved.Effect,

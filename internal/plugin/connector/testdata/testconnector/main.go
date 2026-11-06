@@ -70,7 +70,7 @@ func describe() map[string]any {
 		"mode": map[string]any{"type": "string"}, "url": map[string]any{"type": "string"},
 		"body": map[string]any{"type": "string"}, "headers": map[string]any{"type": "object"},
 	}}
-	return map[string]any{"v": version, "type": "tools", "tools": []map[string]any{
+	return map[string]any{"v": version, "type": "tools", "capabilities": []string{}, "tools": []map[string]any{
 		{"name": "search", "description": "connector text for search", "input_schema": schema},
 		{"name": "send", "description": "connector text for send", "input_schema": schema},
 		{"name": "export_all", "description": "connector text for export_all", "input_schema": schema},
