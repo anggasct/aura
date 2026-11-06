@@ -33,6 +33,7 @@ type Definition struct {
 	GroupContext    string
 	EvalDir         string
 	Workflows       []string
+	Plugins         []string
 	EvalBehavior    *EvalBehavior
 }
 
@@ -86,6 +87,10 @@ func (d *Definition) ToolCeiling(class principal.Class) (tools []string, restric
 	}
 }
 
+func (d *Definition) ListsPlugin(plugin string) bool {
+	return slices.Contains(d.Plugins, plugin)
+}
+
 func (d *Definition) Message(key string) string {
 	if text, ok := d.Messages[key]; ok {
 		return text
@@ -112,10 +117,16 @@ type Fingerprint struct {
 func (d *Definition) Fingerprint() Fingerprint {
 	tools := slices.Clone(d.Tools)
 	slices.Sort(tools)
+	toolsText := strings.Join(tools, "\n")
+	if len(d.Plugins) > 0 {
+		plugins := slices.Clone(d.Plugins)
+		slices.Sort(plugins)
+		toolsText += "\nplugins=" + strings.Join(plugins, "\n")
+	}
 	return Fingerprint{
 		AgentID:     d.ID,
 		SoulSHA256:  sha256Hex(d.Instructions),
-		ToolsSHA256: sha256Hex(strings.Join(tools, "\n")),
+		ToolsSHA256: sha256Hex(toolsText),
 		ModelRoute:  d.ModelRoute,
 	}
 }
@@ -144,6 +155,9 @@ func (d *Definition) EvalDigest() string {
 	}, "\n")
 	if len(d.Workflows) > 0 {
 		canonical += "\nworkflows=" + sorted(d.Workflows)
+	}
+	if len(d.Plugins) > 0 {
+		canonical += "\nplugins=" + sorted(d.Plugins)
 	}
 	return sha256Hex(canonical)
 }
@@ -178,6 +192,7 @@ func (d *Definition) clone() Definition {
 		GroupContext:    d.GroupContext,
 		EvalDir:         d.EvalDir,
 		Workflows:       slices.Clone(d.Workflows),
+		Plugins:         slices.Clone(d.Plugins),
 		EvalBehavior:    d.EvalBehavior.clone(),
 	}
 }

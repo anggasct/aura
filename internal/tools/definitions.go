@@ -23,6 +23,39 @@ func MCPServerEntry(server string) string {
 	return MCPToolPrefix + server
 }
 
+const (
+	PluginToolPrefix     = "plugin_"
+	MaxPluginToolWireLen = 64
+)
+
+func IsPluginEntry(name string) bool {
+	return strings.HasPrefix(name, PluginToolPrefix)
+}
+
+func PluginEntry(plugin string) string {
+	return PluginToolPrefix + plugin
+}
+
+func PluginToolID(plugin, tool string) string {
+	return plugin + "." + tool
+}
+
+func PluginToolWireName(plugin, tool string) string {
+	return PluginToolPrefix + plugin + "_" + tool
+}
+
+func NamesPluginTool(entry, plugin string) bool {
+	prefix := PluginEntry(plugin) + "_"
+	return strings.HasPrefix(entry, prefix) && len(entry) > len(prefix)
+}
+
+func ListsPluginTool(entries []string, name, plugin string) bool {
+	if slices.Contains(entries, name) {
+		return true
+	}
+	return plugin != "" && slices.Contains(entries, PluginEntry(plugin))
+}
+
 func ListsTool(entries []string, name, server string) bool {
 	if slices.Contains(entries, name) {
 		return true
@@ -54,6 +87,8 @@ type Definition struct {
 	Name                 string
 	Version              string
 	Server               string
+	Plugin               string
+	Description          string
 	Schema               json.RawMessage
 	RequiredCapabilities []string
 	RequiresApproval     bool

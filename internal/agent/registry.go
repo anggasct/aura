@@ -144,6 +144,7 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mcpS
 		GroupContext:    cmp.Or(override.GroupContext, config.GroupContextPerPrincipal),
 		EvalDir:         override.Evals.Dir,
 		Workflows:       slices.Clone(override.Workflows),
+		Plugins:         slices.Clone(override.Plugins),
 	}
 	if behavior := override.Evals.Behavior; behavior != nil {
 		definition.EvalBehavior = &EvalBehavior{
@@ -226,11 +227,20 @@ func validateToolCeilings(definition *Definition, field string, knownTools, mcpS
 		available = knownTools
 	}
 	for _, tool := range definition.PrincipalTools {
+		if tools.IsPluginEntry(tool) {
+			if !namesListedPlugin(tool, definition.Plugins) {
+				return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.principal_tools: %q does not name a plugin the persona lists", field, tool))
+			}
+			continue
+		}
 		if !listedInTools(tool, available, mcpServers) {
 			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.principal_tools: %q is not one of the persona's tools", field, tool))
 		}
 	}
 	for _, tool := range definition.PublicTools {
+		if tools.IsPluginEntry(tool) {
+			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is a plugin tool and plugin tools are never available to public principals", field, tool))
+		}
 		if tools.IsMCPEntry(tool) {
 			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is an mcp tool and mcp tools are never available to public principals", field, tool))
 		}
@@ -268,6 +278,15 @@ func namesConfiguredMCPServer(entry string, servers []string) bool {
 	for _, server := range servers {
 		serverEntry := tools.MCPServerEntry(server)
 		if entry == serverEntry || (strings.HasPrefix(entry, serverEntry+"_") && len(entry) > len(serverEntry)+1) {
+			return true
+		}
+	}
+	return false
+}
+
+func namesListedPlugin(entry string, plugins []string) bool {
+	for _, plugin := range plugins {
+		if entry == tools.PluginEntry(plugin) || tools.NamesPluginTool(entry, plugin) {
 			return true
 		}
 	}
