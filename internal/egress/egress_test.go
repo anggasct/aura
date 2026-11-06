@@ -318,3 +318,50 @@ func TestAPIClientAllowsQueriesButStillValidatesTheHost(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRejectsSpecialPurposeRanges(t *testing.T) {
+	denied := map[string]string{
+		"this network":         "0.1.2.3",
+		"shared address space": "100.64.0.1",
+		"tailnet host":         "100.100.100.200",
+		"shared space end":     "100.127.255.254",
+		"ietf protocol":        "192.0.0.8",
+		"benchmarking":         "198.18.0.1",
+		"reserved":             "240.0.0.1",
+		"broadcast":            "255.255.255.255",
+		"mapped shared space":  "::ffff:100.64.0.1",
+		"ipv4 compatible":      "::a00:1",
+		"nat64":                "64:ff9b::a00:1",
+		"local nat64":          "64:ff9b:1::1",
+		"discard":              "100::1",
+		"teredo":               "2001:0:4136:e378::1",
+		"6to4":                 "2002:a00:1::1",
+	}
+	allowed := map[string]string{
+		"below shared space": "100.63.255.255",
+		"above shared space": "100.128.0.1",
+		"public ipv4":        "93.184.216.34",
+		"public ipv6":        "2606:2800:220:1::1",
+	}
+	for name, raw := range denied {
+		t.Run("denied "+name, func(t *testing.T) {
+			resolver := staticResolver{"target.example": {mustParseIP(t, raw)}}
+			if _, err := Validate(t.Context(), "https://target.example/x", resolver); err == nil {
+				t.Fatalf("Validate accepted %s", raw)
+			}
+			dialer := PinnedDialer{Resolver: resolver}
+			if conn, err := dialer.DialContext(t.Context(), "tcp", "target.example:443"); err == nil {
+				_ = conn.Close()
+				t.Fatalf("DialContext accepted %s", raw)
+			}
+		})
+	}
+	for name, raw := range allowed {
+		t.Run("allowed "+name, func(t *testing.T) {
+			resolver := staticResolver{"target.example": {mustParseIP(t, raw)}}
+			if _, err := Validate(t.Context(), "https://target.example/x", resolver); err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+		})
+	}
+}
