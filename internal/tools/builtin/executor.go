@@ -32,6 +32,7 @@ type Executor struct {
 	handoff   *handoffHolder
 	emails    *emailHolder
 	workflows *workflowHolder
+	knowledge *knowledgeHolder
 }
 
 type effectPublisherFunc func(*store.RuntimeEvent)
@@ -61,7 +62,8 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 	handoff := &handoffHolder{}
 	emails := &emailHolder{}
 	workflows := &workflowHolder{}
-	adapters, err := builtinAdapters(cfg.Tools, handoff, emails, workflows)
+	knowledge := &knowledgeHolder{}
+	adapters, err := builtinAdapters(cfg.Tools, handoff, emails, workflows, knowledge)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +89,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows}, nil
+	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows, knowledge: knowledge}, nil
 }
 
 func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {
@@ -104,7 +106,7 @@ func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error
 	return effect.NewExecutor(journal)
 }
 
-func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *emailHolder, workflows *workflowHolder) (map[string]toolbroker.Adapter, error) {
+func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *emailHolder, workflows *workflowHolder, knowledge *knowledgeHolder) (map[string]toolbroker.Adapter, error) {
 	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -146,6 +148,7 @@ func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *ema
 	adapters["web_search@v1"] = searchAdapter
 	adapters[tools.HandoffToolName+"@"+tools.Version] = handoff.adapter
 	adapters[tools.EmailSendToolName+"@"+tools.Version] = emails.adapter
+	adapters[tools.KBSearchToolName+"@"+tools.Version] = knowledge.adapter
 	maps.Copy(adapters, workflows.adapters())
 	return adapters, nil
 }
@@ -257,6 +260,7 @@ func (e *Executor) Execute(ctx context.Context, request *runtimeadk.BuiltinToolR
 		Deadline: request.Deadline, IdempotencyKey: request.IdempotencyKey,
 		EventSequence: request.EventSequence, EventInvocation: request.EventInvocation,
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
+		Knowledge: slices.Clone(request.Knowledge),
 	})
 	if err != nil {
 		return nil, err

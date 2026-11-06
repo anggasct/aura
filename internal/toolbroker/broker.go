@@ -45,6 +45,7 @@ type ToolRequest struct {
 	EventInvocation string
 	EventBranch     string
 	EventAuthor     string
+	Knowledge       []string
 }
 
 type ToolResult struct {

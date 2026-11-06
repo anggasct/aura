@@ -229,6 +229,8 @@ func validateToolCeilings(definition *Definition, field string, knownTools, mcpS
 	available := definition.Tools
 	if len(available) == 0 {
 		available = knownTools
+	} else if len(definition.Knowledge) > 0 && !slices.Contains(available, tools.KBSearchToolName) {
+		available = append(slices.Clone(available), tools.KBSearchToolName)
 	}
 	for _, tool := range definition.PrincipalTools {
 		if tools.IsPluginEntry(tool) {

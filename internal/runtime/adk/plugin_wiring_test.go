@@ -79,7 +79,7 @@ func TestToolsForExposesPluginToolsOnlyToPersonasListingThePlugin(t *testing.T) 
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := names(executor.toolsFor(tc.definition, tc.class, ""))
+			got := names(executor.toolsFor(tc.definition, tc.class, "", nil))
 			if !slices.Equal(got, tc.want) && (len(got) != 0 || len(tc.want) != 0) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}

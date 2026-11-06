@@ -251,6 +251,25 @@ type knowledgeRuntime struct {
 	pool      *sql.DB
 }
 
+type knowledgeToolSearcher struct {
+	retriever *knowledge.Retriever
+}
+
+func (s *knowledgeToolSearcher) SearchKnowledge(ctx context.Context, scope []string, query string, limit int) (json.RawMessage, error) {
+	hits, err := s.retriever.Search(ctx, scope, query, knowledge.SearchDepth)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(knowledge.ShapeSearch(hits, limit))
+}
+
+func (r *knowledgeRuntime) attachSearch(builtin *toolsbuiltin.Executor) {
+	if r == nil || builtin == nil {
+		return
+	}
+	builtin.SetKnowledgeSearcher(&knowledgeToolSearcher{retriever: r.retriever})
+}
+
 func (r *knowledgeRuntime) close() {
 	if r != nil && r.pool != nil {
 		_ = r.pool.Close()

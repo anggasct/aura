@@ -206,6 +206,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 	executorOpts = append(executorOpts, runtimeadk.WithBudgetLedger(turnLedger, "primary"), runtimeadk.WithAgentResolver(registry, routeModel), ownerContextOption(ctx, cfg.Owner, logger))
 	var memoryHook func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
 	var approvals *terminal.ApprovalBridge
+	var builtinTools *toolsbuiltin.Executor
 	if cfg.Tools != nil {
 		if useTTY {
 			approvals = terminal.NewApprovalBridge()
@@ -219,6 +220,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 			return err
 		}
 		broker = builtin
+		builtinTools = builtin
 		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
 	}
 	if cfg.Memory.Enabled {
@@ -255,6 +257,7 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 	}
 	if kbEnabled {
 		defer kbRuntime.close()
+		kbRuntime.attachSearch(builtinTools)
 		executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
 	}
 	executor, err := runtimeadk.NewADKExecutor(

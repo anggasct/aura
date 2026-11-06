@@ -135,11 +135,11 @@ func TestResolveDefinitionPassesRequestedID(t *testing.T) {
 
 func TestToolsForNarrowsToDeclaredTools(t *testing.T) {
 	executor := &ADKExecutor{tools: []tool.Tool{namedToolStub{name: "read_file"}, namedToolStub{name: "web_fetch"}}}
-	narrowed := executor.toolsFor(&auraagent.Definition{Tools: []string{"web_fetch"}}, principal.ClassOwner, "")
+	narrowed := executor.toolsFor(&auraagent.Definition{Tools: []string{"web_fetch"}}, principal.ClassOwner, "", nil)
 	if len(narrowed) != 1 || narrowed[0].Name() != "web_fetch" {
 		t.Fatalf("tools = %v, want only web_fetch", narrowed)
 	}
-	full := executor.toolsFor(&auraagent.Definition{}, principal.ClassOwner, "")
+	full := executor.toolsFor(&auraagent.Definition{}, principal.ClassOwner, "", nil)
 	if len(full) != 2 {
 		t.Fatalf("tools = %d, want the full set when no tools are declared", len(full))
 	}
@@ -233,7 +233,7 @@ func TestToolsForOffersOptInToolsOnlyWhenListedForNonOwners(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := names(executor.toolsFor(tc.definition, tc.class, "")); !slices.Equal(got, tc.want) {
+			if got := names(executor.toolsFor(tc.definition, tc.class, "", nil)); !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
 		})
@@ -273,7 +273,7 @@ func TestToolsForOffersChannelBoundToolsOnlyOnTheirChannel(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := names(executor.toolsFor(tc.definition, tc.class, tc.origin)); !slices.Equal(got, tc.want) {
+			if got := names(executor.toolsFor(tc.definition, tc.class, tc.origin, nil)); !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
 		})
@@ -323,7 +323,7 @@ func TestToolsForExposesExternalToolsOnlyToListedOwnerPersonas(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := names(executor.toolsFor(tc.definition, tc.class, "")); !slices.Equal(got, tc.want) {
+			if got := names(executor.toolsFor(tc.definition, tc.class, "", nil)); !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
 		})

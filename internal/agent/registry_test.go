@@ -7,6 +7,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/principal"
+	auratools "github.com/anggasct/aura/internal/tools"
 )
 
 var validTools = []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}
@@ -577,5 +578,26 @@ func TestKnowledgeListsReachTheRegistryCopyAndTheEvalDigestButNotTheFingerprint(
 	}
 	if base.Fingerprint() != owner.Fingerprint() || base.Fingerprint() != public.Fingerprint() {
 		t.Fatal("knowledge lists changed the persona fingerprint")
+	}
+}
+
+func TestToolCeilingsTreatKBSearchAsAvailableWhenThePersonaHasKnowledge(t *testing.T) {
+	tools := append(slices.Clone(validTools), auratools.KBSearchToolName)
+	base := config.AgentDefinition{
+		ID: "lobby", Description: "d", Instructions: "x", Audience: config.AudiencePublic,
+		Tools: []string{"read_file"}, PrincipalTools: []string{"kb_search"}, PublicTools: []string{"kb_search"},
+	}
+	withKnowledge := base
+	withKnowledge.Knowledge, withKnowledge.PrincipalKnowledge, withKnowledge.PublicKnowledge = []string{"faq"}, []string{"faq"}, []string{"faq"}
+	if _, err := Build([]config.AgentDefinition{withKnowledge}, tools, nil); err != nil {
+		t.Fatalf("persona with knowledge: %v", err)
+	}
+	if _, err := Build([]config.AgentDefinition{base}, tools, nil); err == nil {
+		t.Fatal("kb_search outside the tools list of a persona without knowledge accepted")
+	}
+	implicit := base
+	implicit.Tools = nil
+	if _, err := Build([]config.AgentDefinition{implicit}, tools, nil); err != nil {
+		t.Fatalf("implicit tool list: %v", err)
 	}
 }

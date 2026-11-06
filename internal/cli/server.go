@@ -248,6 +248,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			}
 			if kbEnabled {
 				defer kbRuntime.close()
+				kbRuntime.attachSearch(builtin)
 				executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
 			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(

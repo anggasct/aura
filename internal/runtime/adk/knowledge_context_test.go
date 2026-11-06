@@ -12,8 +12,13 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/durable"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
+	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
 	"github.com/anggasct/aura/internal/store"
+	auratools "github.com/anggasct/aura/internal/tools"
+
+	"google.golang.org/adk/v2/tool"
 )
 
 const knowledgeText = "REFUND-WINDOW-IS-THIRTY-DAYS"
@@ -326,5 +331,80 @@ func TestKnowledgeJournalRejectsUnknownFieldsAndFailsClosed(t *testing.T) {
 func TestWithKnowledgeContextRejectsNil(t *testing.T) {
 	if err := WithKnowledgeContext(nil)(&ADKExecutor{}); err == nil {
 		t.Fatal("nil provider accepted")
+	}
+}
+
+func TestToolsForOffersKnowledgeSearchOnlyWithAStampedList(t *testing.T) {
+	executor := &ADKExecutor{
+		tools: []tool.Tool{namedToolStub{name: "read_file"}, namedToolStub{name: auratools.KBSearchToolName}},
+	}
+	names := func(tools []tool.Tool) []string {
+		out := make([]string, 0, len(tools))
+		for _, t := range tools {
+			out = append(out, t.Name())
+		}
+		return out
+	}
+	listed := &auraagent.Definition{
+		Audience: "public", Tools: []string{"read_file", auratools.KBSearchToolName},
+		PrincipalTools: []string{"read_file", auratools.KBSearchToolName}, PublicTools: []string{auratools.KBSearchToolName},
+	}
+	explicitWithoutSearch := &auraagent.Definition{Tools: []string{"read_file"}, PrincipalTools: []string{"read_file"}, PublicTools: []string{}}
+	scope := []string{"support"}
+	cases := map[string]struct {
+		definition *auraagent.Definition
+		class      principal.Class
+		knowledge  []string
+		want       []string
+	}{
+		"owner with knowledge, implicit tools":     {&auraagent.Definition{}, principal.ClassOwner, scope, []string{"read_file", "kb_search"}},
+		"owner without knowledge":                  {&auraagent.Definition{}, principal.ClassOwner, nil, []string{"read_file"}},
+		"owner explicit list bypassed":             {explicitWithoutSearch, principal.ClassOwner, scope, []string{"read_file", "kb_search"}},
+		"owner explicit list without knowledge":    {explicitWithoutSearch, principal.ClassOwner, nil, []string{"read_file"}},
+		"trusted listed":                           {listed, principal.ClassTrusted, scope, []string{"read_file", "kb_search"}},
+		"trusted listed but no knowledge":          {listed, principal.ClassTrusted, nil, []string{"read_file"}},
+		"trusted not listed":                       {explicitWithoutSearch, principal.ClassTrusted, scope, []string{"read_file"}},
+		"public listed":                            {listed, principal.ClassPublic, scope, []string{"kb_search"}},
+		"public not listed":                        {explicitWithoutSearch, principal.ClassPublic, scope, nil},
+		"unclassified without knowledge":           {listed, "", nil, []string{"read_file"}},
+		"persona without knowledge, implicit list": {&auraagent.Definition{}, principal.ClassOwner, nil, []string{"read_file"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := names(executor.toolsFor(tc.definition, tc.class, "", tc.knowledge))
+			if len(got) != len(tc.want) || (len(got) > 0 && !slices.Equal(got, tc.want)) {
+				t.Fatalf("tools = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuiltinToolRequestCarriesTheStampedKnowledgeList(t *testing.T) {
+	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
+	modelName := registerFakeModel(t, model)
+	builtin := &fakeBuiltinExecutor{
+		definitions: []BuiltinToolDefinition{{
+			Name: "sample_tool", Version: "v1", Description: "sample",
+			Schema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}`),
+		}},
+		output: json.RawMessage(`{"ok":true}`),
+	}
+	db, sessions, events := newSessionTestDB(t)
+	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	mustCreateSession(t, db, "session-1")
+	req := &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", PrincipalClass: principal.ClassOwner,
+		Origin: runtime.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}}, Knowledge: []string{"faq", "support"},
+	}
+	for _, err := range executor.Execute(t.Context(), req) {
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	}
+	if len(builtin.requests) != 1 || !slices.Equal(builtin.requests[0].Knowledge, []string{"faq", "support"}) {
+		t.Fatalf("builtin requests = %+v, want the stamped list on the tool call", builtin.requests)
 	}
 }

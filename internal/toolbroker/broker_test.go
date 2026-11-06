@@ -30,8 +30,8 @@ func TestBrokerExposesAllBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if got := len(broker.Definitions()); got != 14 {
-		t.Fatalf("Definitions = %d, want 14", got)
+	if got := len(broker.Definitions()); got != 15 {
+		t.Fatalf("Definitions = %d, want 15", got)
 	}
 }
 
