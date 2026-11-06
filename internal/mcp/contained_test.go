@@ -20,6 +20,7 @@ type scriptedSession struct {
 	closed    int
 	onCall    func()
 	toolNames []string
+	schemas   map[string]string
 }
 
 func (s *scriptedSession) toolListJSON() string {
@@ -29,7 +30,11 @@ func (s *scriptedSession) toolListJSON() string {
 	}
 	entries := make([]string, 0, len(names))
 	for _, name := range names {
-		entries = append(entries, `{"name":"`+name+`","description":"`+name+` tool","inputSchema":{"type":"object"}}`)
+		schema := `{"type":"object"}`
+		if declared, ok := s.schemas[name]; ok {
+			schema = declared
+		}
+		entries = append(entries, `{"name":"`+name+`","description":"`+name+` tool","inputSchema":`+schema+`}`)
 	}
 	return "[" + strings.Join(entries, ",") + "]"
 }

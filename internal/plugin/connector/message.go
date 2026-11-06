@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"slices"
 	"unicode"
 )
 
@@ -29,18 +30,23 @@ const (
 	maxDescribedTools  = 64
 	maxDescriptionSize = 1024
 	maxSchemaBytes     = 64 << 10
+	maxCapabilities    = 32
 )
+
+var hostCapabilities = []string{}
 
 var (
 	reportedCodePattern = regexp.MustCompile(`^[a-z_]{1,48}$`)
 	headerNamePattern   = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 	toolNamePattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	capabilityPattern   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 	errTrailingData     = errors.New("trailing data after the message")
 )
 
 type describeMessage struct {
-	V    string `json:"v"`
-	Type string `json:"type"`
+	V                string   `json:"v"`
+	Type             string   `json:"type"`
+	HostCapabilities []string `json:"host_capabilities"`
 }
 
 type invokeMessage struct {
@@ -74,9 +80,15 @@ type describedTool struct {
 }
 
 type toolsMessage struct {
-	V     string          `json:"v"`
-	Type  string          `json:"type"`
-	Tools []describedTool `json:"tools"`
+	V            string          `json:"v"`
+	Type         string          `json:"type"`
+	Tools        []describedTool `json:"tools"`
+	Capabilities []string        `json:"capabilities"`
+}
+
+type description struct {
+	tools        []describedTool
+	capabilities []string
 }
 
 type httpMessage struct {
@@ -130,7 +142,7 @@ func invalid() *Error {
 	return Errorf(ErrRPCInvalid, "the connector sent a message that does not match the contract")
 }
 
-func decodeTools(raw []byte) ([]describedTool, *Error) {
+func decodeTools(raw []byte) (*description, *Error) {
 	kind, fail := peek(raw)
 	if fail != nil {
 		return nil, fail
@@ -141,6 +153,9 @@ func decodeTools(raw []byte) ([]describedTool, *Error) {
 	}
 	if len(message.Tools) > maxDescribedTools {
 		return nil, Errorf(ErrRPCInvalid, "the connector described too many tools")
+	}
+	if fail := checkCapabilities(message.Capabilities); fail != nil {
+		return nil, fail
 	}
 	seen := make(map[string]bool, len(message.Tools))
 	for i := range message.Tools {
@@ -153,7 +168,31 @@ func decodeTools(raw []byte) ([]describedTool, *Error) {
 		}
 		seen[tool.Name] = true
 	}
-	return message.Tools, nil
+	return &description{tools: message.Tools, capabilities: message.Capabilities}, nil
+}
+
+func checkCapabilities(names []string) *Error {
+	if len(names) > maxCapabilities {
+		return Errorf(ErrRPCInvalid, "the connector declared too many capabilities")
+	}
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if !capabilityPattern.MatchString(name) || seen[name] {
+			return Errorf(ErrRPCInvalid, "the connector declared a capability that is not valid")
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
+func agreedCapabilities(offered []string) []string {
+	agreed := make([]string, 0, len(offered))
+	for _, name := range offered {
+		if slices.Contains(hostCapabilities, name) {
+			agreed = append(agreed, name)
+		}
+	}
+	return agreed
 }
 
 func validSchemaObject(schema json.RawMessage) bool {

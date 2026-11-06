@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
@@ -58,6 +59,18 @@ type Spec struct {
 	Scopes          []string
 	ClientIDRef     string
 	ClientSecretRef string
+	AuthorizeParams map[string]string
+	AccessOnly      bool
+	Issuer          string
+}
+
+var authorizeParamValues = map[string][]string{
+	"access_type": {"offline", "online"},
+	"prompt":      {"consent", "select_account", "none"},
+}
+
+func ValidAuthorizeParam(key, value string) bool {
+	return slices.Contains(authorizeParamValues[key], value)
 }
 
 type Options struct {

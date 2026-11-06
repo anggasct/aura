@@ -265,6 +265,7 @@ type ReviewTool struct {
 	Name        string
 	Tier        string
 	Description string
+	Display     []string
 }
 
 type ReviewSecret struct {
@@ -316,7 +317,7 @@ func (s *Service) Review(ctx context.Context, id string) (*Review, error) {
 	normalized := manifest.normalized()
 	for i := range normalized.Tools {
 		tool := &normalized.Tools[i]
-		review.Tools = append(review.Tools, ReviewTool{ID: tools.PluginToolID(record.ID, tool.Name), Name: tool.Name, Tier: tool.Tier, Description: tool.Description})
+		review.Tools = append(review.Tools, ReviewTool{ID: tools.PluginToolID(record.ID, tool.Name), Name: tool.Name, Tier: tool.Tier, Description: tool.Description, Display: slices.Clone(tool.Display)})
 	}
 	for i := range normalized.Secrets {
 		review.Secrets = append(review.Secrets, ReviewSecret{Name: normalized.Secrets[i].Name, Ref: normalized.Secrets[i].Ref})

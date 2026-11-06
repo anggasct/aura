@@ -217,3 +217,33 @@ func TestReviewPrintsTheHostsThatReceiveTheCredential(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewPrintsTheApprovalDisplayAndTheOAuthLoginExtras(t *testing.T) {
+	oauth := plugin.Auth{
+		Kind: plugin.AuthOAuth2, AuthorizeURL: "https://auth.mail.example/a", TokenURL: "https://auth.mail.example/t",
+		Scopes: []string{"mail.read"}, RedirectURI: "http://127.0.0.1/cb", ClientIDSecret: "client_id", Hosts: []string{"api.mail.example"},
+		AuthorizeParams: map[string]string{"prompt": "consent", "access_type": "offline"}, Issuer: "https://auth.mail.example", AccessOnly: true,
+	}
+	review := &plugin.Review{
+		ID:   "mailer",
+		Auth: oauth,
+		Tools: []plugin.ReviewTool{
+			{ID: "plugin_mailer_send", Tier: "effect", Description: "Send mail.", Display: []string{"to", "subject", "body"}},
+			{ID: "plugin_mailer_search", Tier: "read", Description: "Search mail."},
+		},
+	}
+	text := strings.Join(reviewLines(review), "\n")
+	for _, want := range []string{
+		"approval shows, in order: to, subject, body",
+		"authorize params access_type=offline prompt=consent",
+		"issuer https://auth.mail.example",
+		"access only (no refresh token required)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("review output = %q, want it to contain %q", text, want)
+		}
+	}
+	if strings.Count(text, "approval shows") != 1 {
+		t.Fatalf("review output = %q, want the display line only for the tool that sets one", text)
+	}
+}

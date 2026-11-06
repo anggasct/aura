@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -78,9 +79,10 @@ type Manifest struct {
 }
 
 type Tool struct {
-	Name        string `yaml:"name" json:"name"`
-	Description string `yaml:"description" json:"description"`
-	Tier        string `yaml:"tier" json:"tier"`
+	Name        string   `yaml:"name" json:"name"`
+	Description string   `yaml:"description" json:"description"`
+	Tier        string   `yaml:"tier" json:"tier"`
+	Display     []string `yaml:"display" json:"display,omitempty"`
 }
 
 type Secret struct {
@@ -89,20 +91,23 @@ type Secret struct {
 }
 
 type Auth struct {
-	Kind               string   `yaml:"kind" json:"kind"`
-	Secret             string   `yaml:"secret" json:"secret"`
-	Header             string   `yaml:"header" json:"header"`
-	AuthorizeURL       string   `yaml:"authorize_url" json:"authorize_url,omitempty"`
-	TokenURL           string   `yaml:"token_url" json:"token_url,omitempty"`
-	Scopes             []string `yaml:"scopes" json:"scopes,omitempty"`
-	RedirectURI        string   `yaml:"redirect_uri" json:"redirect_uri,omitempty"`
-	ClientIDSecret     string   `yaml:"client_id_secret" json:"client_id_secret,omitempty"`
-	ClientSecretSecret string   `yaml:"client_secret_secret" json:"client_secret_secret,omitempty"`
-	Hosts              []string `yaml:"hosts" json:"hosts,omitempty"`
+	Kind               string            `yaml:"kind" json:"kind"`
+	Secret             string            `yaml:"secret" json:"secret"`
+	Header             string            `yaml:"header" json:"header"`
+	AuthorizeURL       string            `yaml:"authorize_url" json:"authorize_url,omitempty"`
+	TokenURL           string            `yaml:"token_url" json:"token_url,omitempty"`
+	Scopes             []string          `yaml:"scopes" json:"scopes,omitempty"`
+	RedirectURI        string            `yaml:"redirect_uri" json:"redirect_uri,omitempty"`
+	ClientIDSecret     string            `yaml:"client_id_secret" json:"client_id_secret,omitempty"`
+	ClientSecretSecret string            `yaml:"client_secret_secret" json:"client_secret_secret,omitempty"`
+	Hosts              []string          `yaml:"hosts" json:"hosts,omitempty"`
+	AuthorizeParams    map[string]string `yaml:"authorize_params" json:"authorize_params,omitempty"`
+	AccessOnly         bool              `yaml:"access_only" json:"access_only,omitempty"`
+	Issuer             string            `yaml:"issuer" json:"issuer,omitempty"`
 }
 
 func (a *Auth) oauth2FieldsSet() bool {
-	return a.AuthorizeURL != "" || a.TokenURL != "" || len(a.Scopes) > 0 || a.RedirectURI != "" || a.ClientIDSecret != "" || a.ClientSecretSecret != ""
+	return a.AuthorizeURL != "" || a.TokenURL != "" || len(a.Scopes) > 0 || a.RedirectURI != "" || a.ClientIDSecret != "" || a.ClientSecretSecret != "" || len(a.AuthorizeParams) > 0 || a.AccessOnly || a.Issuer != ""
 }
 
 type Backend struct {
@@ -285,6 +290,9 @@ func (m *Manifest) validateTools(found *problems) {
 		if tool.Tier != TierRead && tool.Tier != TierEffect {
 			found.add("%s.tier must be %s or %s", field, TierRead, TierEffect)
 		}
+		if err := tools.ValidateDisplayNames(tool.Display); err != nil {
+			found.add("%s.display must list at most %d unique argument names matching [A-Za-z_][A-Za-z0-9_-]{0,63}", field, tools.MaxDisplayFields)
+		}
 	}
 }
 
@@ -428,6 +436,12 @@ func (m *Manifest) validateOAuth2(found *problems) {
 	}
 	m.validateScopes(found)
 	validateRedirectURI(found, oauth.RedirectURI)
+	validateAuthorizeParams(found, oauth.AuthorizeParams)
+	if oauth.Issuer != "" {
+		if issuer := validateAuthURL(found, "auth.issuer", oauth.Issuer); issuer != nil && issuer.RawQuery != "" {
+			found.add("auth.issuer must not carry a query")
+		}
+	}
 	declared := map[string]bool{}
 	for i := range m.Secrets {
 		declared[m.Secrets[i].Name] = true
@@ -491,12 +505,28 @@ func validateRedirectURI(found *problems, raw string) {
 	switch parsed.Scheme {
 	case "https":
 	case "http":
-		port, portErr := strconv.Atoi(parsed.Port())
-		if parsed.Hostname() != "127.0.0.1" || portErr != nil || port < 1 || port > 65535 || strconv.Itoa(port) != parsed.Port() {
-			found.add("auth.redirect_uri over http must be http://127.0.0.1:<port>/<path> with an explicit port")
+		if parsed.Hostname() != "127.0.0.1" || strings.HasSuffix(parsed.Host, ":") || !validOptionalPort(parsed.Port()) {
+			found.add("auth.redirect_uri over http must be http://127.0.0.1[:<port>]/<path>")
 		}
 	default:
-		found.add("auth.redirect_uri must use https or http://127.0.0.1:<port>/<path>")
+		found.add("auth.redirect_uri must use https or http://127.0.0.1[:<port>]/<path>")
+	}
+}
+
+func validOptionalPort(port string) bool {
+	if port == "" {
+		return true
+	}
+	number, err := strconv.Atoi(port)
+	return err == nil && number >= 1 && number <= 65535 && strconv.Itoa(number) == port
+}
+
+func validateAuthorizeParams(found *problems, params map[string]string) {
+	for key, value := range params {
+		if !auth.ValidAuthorizeParam(key, value) {
+			found.add("auth.authorize_params allows only access_type (offline, online) and prompt (consent, select_account, none)")
+			return
+		}
 	}
 }
 
@@ -699,6 +729,9 @@ func (m *Manifest) AuthSpec(fingerprint string) auth.Spec {
 		spec.Scopes = sortedScopes(m.Auth.Scopes)
 		spec.ClientIDRef = m.secretRef(m.Auth.ClientIDSecret)
 		spec.ClientSecretRef = m.secretRef(m.Auth.ClientSecretSecret)
+		spec.AuthorizeParams = maps.Clone(m.Auth.AuthorizeParams)
+		spec.AccessOnly = m.Auth.AccessOnly
+		spec.Issuer = m.Auth.Issuer
 	}
 	return spec
 }

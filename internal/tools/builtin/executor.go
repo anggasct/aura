@@ -208,7 +208,8 @@ func configuredToolSecrets(cfg *config.Config) []string {
 func (e *Executor) Definitions() []runtimeadk.BuiltinToolDefinition {
 	definitions := e.broker.Definitions()
 	result := make([]runtimeadk.BuiltinToolDefinition, 0, len(definitions))
-	for _, definition := range definitions {
+	for i := range definitions {
+		definition := &definitions[i]
 		description := "Aura built-in " + definition.Name + " tool"
 		plugin := ""
 		if definition.Server != "" {

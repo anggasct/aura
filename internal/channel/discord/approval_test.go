@@ -2,8 +2,8 @@ package discord
 
 import (
 	"errors"
-	"github.com/anggasct/aura/internal/channel/approval"
 	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/tools/displaytest"
 
 	"context"
 	"encoding/json"
@@ -460,15 +460,32 @@ func TestApproval_ConcurrentClicksOneWins(t *testing.T) {
 	}
 }
 
-func TestRenderApprovalCardBoundsArguments(t *testing.T) {
+func TestRenderApprovalCardNeutralizesMentions(t *testing.T) {
 	prompt := testPrompt("dm:111", time.Now().Add(time.Minute))
-	prompt.Arguments = "@everyone " + strings.Repeat("x", approval.CardArgRunes+100)
+	prompt.Arguments = "@everyone " + strings.Repeat("x", 100)
 	card := renderApprovalCard(prompt, "")
 	if strings.Contains(card, "@everyone") {
 		t.Error("card preserves a mass mention")
 	}
-	if len([]rune(card)) > approval.CardArgRunes+512 {
-		t.Errorf("card runes = %d, want bounded arguments", len([]rune(card)))
+}
+
+func TestDecide_CardShowsEveryScenarioOfTheApprovalDisplayWithinTheMessageLimit(t *testing.T) {
+	for _, scenario := range displaytest.Scenarios() {
+		t.Run(scenario.Name, func(t *testing.T) {
+			stub := newApprovalStub(t)
+			adapter := newApprovalAdapter(t, stub, nil)
+			prompt := testPrompt("dm:111", time.Now().Add(time.Minute))
+			prompt.Arguments = scenario.Text(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			result := decideAsync(ctx, adapter, prompt)
+			content, _ := stub.waitPost(t, 20*time.Second).body["content"].(string)
+			cancel()
+			awaitDecide(t, result, 20*time.Second)
+			scenario.Check(t, content, false)
+			if runes := len([]rune(content)); runes > discordMessageLimit {
+				t.Errorf("card is %d characters, Discord accepts %d", runes, discordMessageLimit)
+			}
+		})
 	}
 }
 

@@ -230,7 +230,7 @@ func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {
 		}
 		server := mcp.PluginServer{ID: active.ID, Server: active.Server, Authorizer: active.Auth}
 		for _, tool := range active.Tools {
-			server.Tools = append(server.Tools, mcp.PluginTool{Name: tool.Name, Description: tool.Description})
+			server.Tools = append(server.Tools, mcp.PluginTool{Name: tool.Name, Description: tool.Description, Display: slices.Clone(tool.Display)})
 		}
 		servers = append(servers, server)
 	}

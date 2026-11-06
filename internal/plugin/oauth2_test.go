@@ -144,9 +144,6 @@ func TestParseManifestRejectsInvalidOAuth2(t *testing.T) {
 		{"redirect over http on another address", func(t *testing.T) string {
 			return replaceOnce(t, oauthManifest, "http://127.0.0.1:8765/callback", "http://10.0.0.5:8765/callback")
 		}},
-		{"redirect without a port", func(t *testing.T) string {
-			return replaceOnce(t, oauthManifest, "http://127.0.0.1:8765/callback", "http://127.0.0.1/callback")
-		}},
 		{"redirect with port zero", func(t *testing.T) string {
 			return replaceOnce(t, oauthManifest, "http://127.0.0.1:8765/callback", "http://127.0.0.1:0/callback")
 		}},

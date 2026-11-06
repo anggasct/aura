@@ -557,7 +557,9 @@ func startableStdioConfig(name string) config.MCPServer {
 }
 
 func brokerHasTool(broker *toolbroker.Broker, name string) bool {
-	for _, def := range broker.Definitions() {
+	listed := broker.Definitions()
+	for i := range listed {
+		def := &listed[i]
 		if def.Name == name {
 			return true
 		}

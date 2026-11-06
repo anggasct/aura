@@ -117,7 +117,11 @@ func renderApprovalCard(card *ApprovalCard, width int) string {
 	fmt.Fprintf(&b, "approval required: %s@%s\n", sanitizeText(card.ToolName), sanitizeText(card.ToolVersion))
 	fmt.Fprintf(&b, "  session: %s\n", sanitizeText(card.SessionID))
 	fmt.Fprintf(&b, "  principal: %s\n", sanitizeText(card.PrincipalID))
-	fmt.Fprintf(&b, "  arguments: %s\n", arguments)
+	if strings.Contains(arguments, "\n") {
+		fmt.Fprintf(&b, "  arguments:\n%s\n", indentLines(arguments, "    "))
+	} else {
+		fmt.Fprintf(&b, "  arguments: %s\n", arguments)
+	}
 	fmt.Fprintf(&b, "  effect: network=%t timeout=%s max_output_bytes=%d\n", card.Network, card.Timeout, card.MaxOutputBytes)
 	fmt.Fprintf(&b, "  policy: %s (%s)\n", sanitizeText(card.PolicyVersion), sanitizeText(card.ReasonCode))
 	if !card.ExpiresAt.IsZero() {
@@ -132,6 +136,14 @@ func renderApprovalCard(card *ApprovalCard, width int) string {
 	lines := make([]string, len(physical))
 	for i, line := range physical {
 		lines[i] = line.text
+	}
+	return strings.Join(lines, "\n")
+}
+
+func indentLines(text, prefix string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
 	}
 	return strings.Join(lines, "\n")
 }

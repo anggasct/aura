@@ -386,17 +386,15 @@ func TestPersonaLabel(t *testing.T) {
 	}
 }
 
-func TestRenderCardBoundsAndCleansArguments(t *testing.T) {
-	prompt := &Prompt{ToolName: "shell.exec", ToolVersion: "1", SessionID: "s", PrincipalID: "owner", Arguments: "SECRET " + strings.Repeat("x", CardArgRunes+100)}
+func TestRenderCardCleansArgumentsAndNeverTruncatesThem(t *testing.T) {
+	tail := strings.Repeat("x", 3000)
+	prompt := &Prompt{ToolName: "shell.exec", ToolVersion: "1", SessionID: "s", PrincipalID: "owner", Arguments: "SECRET " + tail}
 	card := RenderCard(prompt, "Team (team)", func(text string) string { return strings.ReplaceAll(text, "SECRET", "[clean]") })
 	if strings.Contains(card, "SECRET") || !strings.Contains(card, "[clean]") {
 		t.Error("card skipped the cleaner")
 	}
-	if len([]rune(card)) > CardArgRunes+512 {
-		t.Errorf("card runes = %d, want bounded arguments", len([]rune(card)))
-	}
-	if !strings.Contains(card, "...[truncated]") || !strings.Contains(card, "persona: Team (team)") {
-		t.Errorf("card = %q", card)
+	if !strings.Contains(card, tail) || strings.Contains(card, "truncated") || !strings.Contains(card, "persona: Team (team)") {
+		t.Errorf("card cut the arguments: %d bytes", len(card))
 	}
 	if RenderCard(nil, "", nil) != "" {
 		t.Error("nil prompt rendered a card")

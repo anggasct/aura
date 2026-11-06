@@ -98,6 +98,7 @@ type Definition struct {
 	RequiresApproval     bool
 	Effectful            bool
 	OptIn                bool
+	Display              []string
 	Validator            func(raw json.RawMessage) (json.RawMessage, error)
 }
 
@@ -106,6 +107,17 @@ func (d *Definition) Key() string {
 }
 
 func (d *Definition) Validate(raw json.RawMessage) (json.RawMessage, error) {
+	validated, err := d.validate(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectAmbiguousKeys(raw); err != nil {
+		return nil, err
+	}
+	return validated, nil
+}
+
+func (d *Definition) validate(raw json.RawMessage) (json.RawMessage, error) {
 	if d.Validator != nil {
 		return d.Validator(raw)
 	}
@@ -366,11 +378,11 @@ func validateOptionalInteger(value map[string]any, key string, minimum int64) er
 func DefinitionsByKey() map[string]*Definition {
 	definitions := Builtins()
 	result := make(map[string]*Definition, len(definitions))
-	for _, definition := range definitions {
+	for i := range definitions {
+		definition := &definitions[i]
 		definition.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
 		definition.Schema = slices.Clone(definition.Schema)
-		definitionCopy := definition
-		result[definitionCopy.Key()] = &definitionCopy
+		result[definition.Key()] = definition
 	}
 	return result
 }
@@ -383,9 +395,10 @@ func ChannelOf(name string) string {
 }
 
 func EffectTier(name string) bool {
-	for _, definition := range Builtins() {
-		if definition.Name == name {
-			return definition.Effectful
+	definitions := Builtins()
+	for i := range definitions {
+		if definitions[i].Name == name {
+			return definitions[i].Effectful
 		}
 	}
 	return true

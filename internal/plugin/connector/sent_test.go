@@ -216,17 +216,22 @@ func TestRequestSentTracksWhetherAStateChangingRequestLeftTheHost(t *testing.T) 
 
 func TestEgressClientGuardStillAppliesToAnApprovedHost(t *testing.T) {
 	api := newFakeAPI(t)
+	var told any
 	starter := newStarter(func(int) func(map[string]any) (any, error) {
-		return oneRequest(http.MethodPost, api.url("/send?draft=1"), nil, []byte("payload"))
+		return func(in map[string]any) (any, error) {
+			if kindOf(in) == "invoke" {
+				return httpReply(callOf(in), http.MethodPost, api.url("/send?draft=1"), nil, []byte("payload")), nil
+			}
+			told = in["error"]
+			return errorReply(callOf(in), "denied"), nil
+		}
 	})
 	cfg := testConfig(api, &bearerAuth{token: testToken})
 	h := newHost(&cfg, starter, egress.NewAPIClient(nil), slog.New(slog.DiscardHandler))
-	output, fail := invokeTool(t, h, effectTool(h))
-	if fail != nil {
-		t.Fatalf("invoke: %v", fail)
-	}
-	if decoded := decodeResultOutput(t, output); decoded["error"] != "egress_denied" {
-		t.Fatalf("connector was told %s, want egress_denied from the egress client", output)
+	_, fail := invokeTool(t, h, effectTool(h))
+	mustCode(t, fail, ErrConnector)
+	if fail.RequestSent || told != "egress_denied" {
+		t.Fatalf("sent = %v, connector was told %v, want egress_denied from the egress client", fail.RequestSent, told)
 	}
 	if api.count() != 0 {
 		t.Fatalf("the api saw %d requests through a guarded client", api.count())

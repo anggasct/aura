@@ -41,6 +41,8 @@ type Server struct {
 	verified      bool
 	lastForm      url.Values
 	lastAuth      string
+	lastQuery     url.Values
+	issuers       []string
 }
 
 func New(t *testing.T) *Server {
@@ -78,6 +80,18 @@ func (s *Server) DenyAuthorization() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deny = true
+}
+
+func (s *Server) SetCallbackIssuers(issuers ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.issuers = issuers
+}
+
+func (s *Server) LastAuthorizeQuery() url.Values {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastQuery
 }
 
 func (s *Server) QueueTokenResponse(status int, body string) {
@@ -163,8 +177,12 @@ func (s *Server) serveAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.lastQuery = query
 	values := target.Query()
 	values.Set("state", query.Get("state"))
+	for _, issuer := range s.issuers {
+		values.Add("iss", issuer)
+	}
 	if s.deny {
 		values.Set("error", "access_denied")
 		values.Set("error_description", PlantedBody)

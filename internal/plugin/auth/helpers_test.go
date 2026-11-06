@@ -69,6 +69,7 @@ type harness struct {
 	listener net.Listener
 	redirect string
 	now      time.Time
+	listen   func(ctx context.Context, address string) (net.Listener, error)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -95,7 +96,10 @@ func (h *harness) registry() *Registry {
 	h.t.Helper()
 	registry, err := NewRegistry(&Options{
 		Dir: h.dir, Secrets: h.secrets, HTTPClient: http.DefaultClient, Redactor: h.redactor, Now: func() time.Time { return h.now },
-		Listen: func(_ context.Context, address string) (net.Listener, error) {
+		Listen: func(ctx context.Context, address string) (net.Listener, error) {
+			if h.listen != nil {
+				return h.listen(ctx, address)
+			}
 			if address != h.listener.Addr().String() {
 				return nil, Errorf(ErrInvalid, "unexpected address")
 			}

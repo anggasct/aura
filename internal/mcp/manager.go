@@ -383,9 +383,11 @@ func (m *Manager) registerTools(ctx context.Context, client *Client, target *sta
 		tool := &discovered[i]
 		namespaced := FormatToolName(serverCfg.Name, tool.Name)
 		var pluginRef *tools.PluginRef
+		var display []string
 		if target.plugin != nil {
 			namespaced = tools.PluginToolWireName(target.plugin.ID, tool.Name)
 			pluginRef = &tools.PluginRef{ID: target.plugin.ID, Description: target.plugin.approvedDescription(tool.Name)}
+			display = target.plugin.approvedDisplay(tool.Name)
 		}
 		if len(namespaced) > maxExposedToolNameSize {
 			m.logger.WarnContext(ctx, "tool skipped because its exposed name is too long",
@@ -412,6 +414,7 @@ func (m *Manager) registerTools(ctx context.Context, client *Client, target *sta
 			Version:              toolVersion,
 			Server:               serverNameFor(target),
 			Plugin:               pluginRef,
+			Display:              display,
 			Schema:               schema,
 			RequiredCapabilities: slices.Clone(serverCfg.Capabilities),
 			RequiresApproval:     true,

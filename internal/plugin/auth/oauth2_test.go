@@ -296,7 +296,7 @@ func TestUnreadableTokenFilesCountAsNotLoggedIn(t *testing.T) {
 func TestExpiredTokenWithoutARefreshTokenNeedsANewLogin(t *testing.T) {
 	h := newHarness(t)
 	h.as.ExpireIn(1)
-	strategy := h.strategy(h.spec(nil))
+	strategy := h.strategy(h.spec(func(spec *Spec) { spec.AccessOnly = true }))
 	prompt := func(input *pastedInput) func(string) {
 		return func(raw string) {
 			input.url = h.as.Approve(raw) + "\n"

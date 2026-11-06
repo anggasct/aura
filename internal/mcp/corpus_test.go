@@ -83,7 +83,9 @@ func startHostileManager(ctx context.Context, t *testing.T, broker *toolbroker.B
 func brokerDefinitionsText(t *testing.T, broker *toolbroker.Broker) string {
 	t.Helper()
 	var surface strings.Builder
-	for _, def := range broker.Definitions() {
+	listed := broker.Definitions()
+	for i := range listed {
+		def := &listed[i]
 		surface.WriteString(def.Name)
 		surface.WriteString(string(def.Schema))
 		surface.WriteString(strings.Join(def.RequiredCapabilities, ","))

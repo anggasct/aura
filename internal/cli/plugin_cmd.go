@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -188,6 +189,9 @@ func reviewLines(review *plugin.Review) []string {
 		lines = append(lines, "Tools:")
 		for i := range review.Tools {
 			lines = append(lines, fmt.Sprintf("  %s [%s]: %s", review.Tools[i].ID, review.Tools[i].Tier, review.Tools[i].Description))
+			if len(review.Tools[i].Display) > 0 {
+				lines = append(lines, "    approval shows, in order: "+strings.Join(review.Tools[i].Display, ", "))
+			}
 		}
 	}
 	if review.Diff != nil {
@@ -213,12 +217,31 @@ func authSummary(spec *plugin.Auth) string {
 	case "", plugin.AuthNone:
 		return "none"
 	case plugin.AuthOAuth2:
-		return fmt.Sprintf("oauth2 (authorize %s, token %s, scopes %s, redirect %s, client id secret %s, client secret secret %s%s)",
+		return fmt.Sprintf("oauth2 (authorize %s, token %s, scopes %s, redirect %s, client id secret %s, client secret secret %s%s%s)",
 			spec.AuthorizeURL, spec.TokenURL, strings.Join(sortedStrings(spec.Scopes), " "), spec.RedirectURI,
-			spec.ClientIDSecret, dashIfEmpty(spec.ClientSecretSecret), authHostsSummary(spec.Hosts))
+			spec.ClientIDSecret, dashIfEmpty(spec.ClientSecretSecret), oauthExtrasSummary(spec), authHostsSummary(spec.Hosts))
 	default:
 		return fmt.Sprintf("%s (secret %s%s)", spec.Kind, spec.Secret, authHostsSummary(spec.Hosts))
 	}
+}
+
+func oauthExtrasSummary(spec *plugin.Auth) string {
+	var extras string
+	if len(spec.AuthorizeParams) > 0 {
+		keys := slices.Sorted(maps.Keys(spec.AuthorizeParams))
+		pairs := make([]string, 0, len(keys))
+		for _, key := range keys {
+			pairs = append(pairs, key+"="+spec.AuthorizeParams[key])
+		}
+		extras += ", authorize params " + strings.Join(pairs, " ")
+	}
+	if spec.Issuer != "" {
+		extras += ", issuer " + spec.Issuer
+	}
+	if spec.AccessOnly {
+		extras += ", access only (no refresh token required)"
+	}
+	return extras
 }
 
 func authHostsSummary(hosts []string) string {

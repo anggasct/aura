@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/tools"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -15,6 +16,7 @@ const (
 type PluginTool struct {
 	Name        string
 	Description string
+	Display     []string
 }
 
 type PluginServer struct {
@@ -55,8 +57,21 @@ func (p *PluginServer) approvedDescription(tool string) string {
 	return ""
 }
 
+func (p *PluginServer) approvedDisplay(tool string) []string {
+	for i := range p.Tools {
+		if p.Tools[i].Name == tool {
+			return slices.Clone(p.Tools[i].Display)
+		}
+	}
+	return nil
+}
+
 func clonePluginServer(plugin *PluginServer) PluginServer {
-	return PluginServer{ID: plugin.ID, Server: plugin.Server, Authorizer: plugin.Authorizer, Tools: slices.Clone(plugin.Tools)}
+	cloned := PluginServer{ID: plugin.ID, Server: plugin.Server, Authorizer: plugin.Authorizer, Tools: slices.Clone(plugin.Tools)}
+	for i := range cloned.Tools {
+		cloned.Tools[i].Display = slices.Clone(cloned.Tools[i].Display)
+	}
+	return cloned
 }
 
 func clonePluginServers(plugins []PluginServer) []PluginServer {
@@ -89,7 +104,7 @@ func validatePluginServers(plugins []PluginServer, cfg *config.MCP) error {
 		}
 		names := make(map[string]bool, len(plugin.Tools))
 		for _, tool := range plugin.Tools {
-			if tool.Name == "" || names[tool.Name] {
+			if tool.Name == "" || names[tool.Name] || tools.ValidateDisplayNames(tool.Display) != nil {
 				return Errorf(ErrConfigInvalid, "plugin %q lists an invalid tool", plugin.ID)
 			}
 			names[tool.Name] = true
@@ -100,7 +115,8 @@ func validatePluginServers(plugins []PluginServer, cfg *config.MCP) error {
 
 func splitApprovedTools(discovered []DiscoveredTool, approved []PluginTool) (exposed []DiscoveredTool, drift []string) {
 	for i := range discovered {
-		if slices.ContainsFunc(approved, func(tool PluginTool) bool { return tool.Name == discovered[i].Name }) {
+		index := slices.IndexFunc(approved, func(tool PluginTool) bool { return tool.Name == discovered[i].Name })
+		if index >= 0 && tools.CheckDisplaySchema(approved[index].Display, discovered[i].InputSchema) == nil {
 			exposed = append(exposed, discovered[i])
 			continue
 		}
