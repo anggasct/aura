@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 )
 
@@ -315,7 +316,7 @@ func (s *Service) StartPurgeLoop(ctx context.Context, interval time.Duration, li
 	}()
 }
 
-func trustFor(author, kind string) (approval.TrustLabel, bool) {
+func trustFor(ownerID, author, kind string) (approval.TrustLabel, bool) {
 	switch kind {
 	case "tool.completed":
 		return approval.TrustUntrustedExternal, true
@@ -324,7 +325,10 @@ func trustFor(author, kind string) (approval.TrustLabel, bool) {
 	case "adk_event":
 		switch author {
 		case "user":
-			return approval.TrustOwnerInput, true
+			if principal.ClassForPrincipal(ownerID) == principal.ClassOwner {
+				return approval.TrustOwnerInput, true
+			}
+			return approval.TrustUntrustedExternal, true
 		case "model", "assistant":
 			return approval.TrustDerivedUntrusted, true
 		case "":
@@ -445,7 +449,7 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	if err != nil {
 		return Document{}, false, err
 	}
-	trust, indexable := trustFor(event.Author, event.Kind)
+	trust, indexable := trustFor(ownerID, event.Author, event.Kind)
 	if !indexable {
 		return Document{}, false, nil
 	}

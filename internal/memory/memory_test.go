@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 )
 
@@ -401,21 +402,25 @@ func TestProjectEventTrustMapping(t *testing.T) {
 	now := time.Now().UTC()
 	cases := []struct {
 		name    string
+		owner   string
 		author  string
 		kind    string
 		text    string
 		trust   approval.TrustLabel
 		indexed bool
 	}{
-		{"owner input", "user", "adk_event", "deploy the nightly build", approval.TrustOwnerInput, true},
-		{"model text", "model", "adk_event", "the build passed", approval.TrustDerivedUntrusted, true},
-		{"tool output", "exec_tool", "adk_event", "file listing", approval.TrustUntrustedExternal, true},
-		{"completed message", "model", "message.completed", "done", approval.TrustDerivedUntrusted, true},
-		{"completed tool", "exec_tool", "tool.completed", "output", approval.TrustUntrustedExternal, true},
-		{"partial delta skipped", "model", "adk_event", "frag", "", false},
-		{"lifecycle skipped", "owner-1", "turn.accepted", "{}", "", false},
-		{"approval skipped", "owner-1", "approval.required", "{}", "", false},
-		{"unknown kind skipped", "user", "checkpoint.saved", "data", "", false},
+		{"owner input", principal.OwnerID, "user", "adk_event", "deploy the nightly build", approval.TrustOwnerInput, true},
+		{"public input", "http:abcdefabcdef", "user", "adk_event", "deploy the nightly build", approval.TrustUntrustedExternal, true},
+		{"trusted input", "telegram:42", "user", "adk_event", "deploy the nightly build", approval.TrustUntrustedExternal, true},
+		{"unknown principal input", "someone", "user", "adk_event", "deploy the nightly build", approval.TrustUntrustedExternal, true},
+		{"model text", principal.OwnerID, "model", "adk_event", "the build passed", approval.TrustDerivedUntrusted, true},
+		{"tool output", principal.OwnerID, "exec_tool", "adk_event", "file listing", approval.TrustUntrustedExternal, true},
+		{"completed message", principal.OwnerID, "model", "message.completed", "done", approval.TrustDerivedUntrusted, true},
+		{"completed tool", principal.OwnerID, "exec_tool", "tool.completed", "output", approval.TrustUntrustedExternal, true},
+		{"partial delta skipped", principal.OwnerID, "model", "adk_event", "frag", "", false},
+		{"lifecycle skipped", principal.OwnerID, principal.OwnerID, "turn.accepted", "{}", "", false},
+		{"approval skipped", principal.OwnerID, principal.OwnerID, "approval.required", "{}", "", false},
+		{"unknown kind skipped", principal.OwnerID, "user", "checkpoint.saved", "data", "", false},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -430,7 +435,7 @@ func TestProjectEventTrustMapping(t *testing.T) {
 				ID: "ev-" + tc.name, SessionID: "sess-1", Sequence: uint64(i + 1),
 				Author: tc.author, Kind: tc.kind, Payload: payload, CreatedAt: now,
 			}
-			document, indexed, err := service.ProjectEvent(t.Context(), "owner-1", event)
+			document, indexed, err := service.ProjectEvent(t.Context(), tc.owner, event)
 			if err != nil {
 				t.Fatalf("ProjectEvent(): %v", err)
 			}
@@ -453,6 +458,40 @@ func TestProjectEventTrustMapping(t *testing.T) {
 	}
 }
 
+func TestRecallLabelsNonOwnerInputUntrusted(t *testing.T) {
+	cases := []struct {
+		name  string
+		owner string
+		trust approval.TrustLabel
+	}{
+		{"owner", principal.OwnerID, approval.TrustOwnerInput},
+		{"public", "http:abcdefabcdef", approval.TrustUntrustedExternal},
+		{"trusted", "telegram:42", approval.TrustUntrustedExternal},
+		{"unknown", "someone", approval.TrustUntrustedExternal},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			service := testService()
+			event := &Event{
+				ID: "ev-1", SessionID: "sess-1", Sequence: 1, Author: "user", Kind: "adk_event",
+				Payload: adkPayload(t, "user", "the nightly backup finished", false), CreatedAt: time.Now().UTC(),
+			}
+			if _, _, err := service.ProjectEvent(t.Context(), tc.owner, event); err != nil {
+				t.Fatalf("ProjectEvent(): %v", err)
+			}
+			documents, err := service.Recall(t.Context(), &RecallRequest{
+				AgentIDs: mainPersona, OwnerID: tc.owner, SessionID: "sess-1", Query: "nightly backup",
+			})
+			if err != nil {
+				t.Fatalf("Recall(): %v", err)
+			}
+			if len(documents) != 1 || documents[0].Trust != tc.trust {
+				t.Fatalf("documents = %+v, want one with trust %q", documents, tc.trust)
+			}
+		})
+	}
+}
+
 func TestProjectEventExcludesSecretsAndBinary(t *testing.T) {
 	service := testService()
 	now := time.Now().UTC()
@@ -461,7 +500,7 @@ func TestProjectEventExcludesSecretsAndBinary(t *testing.T) {
 		Kind: "adk_event", Payload: adkPayload(t, "user", "the key is sk-live-canary do not share", false),
 		CreatedAt: now,
 	}
-	if _, indexed, err := service.ProjectEvent(t.Context(), "owner-1", leaky); err != nil {
+	if _, indexed, err := service.ProjectEvent(t.Context(), principal.OwnerID, leaky); err != nil {
 		t.Fatalf("ProjectEvent(): %v", err)
 	} else if indexed {
 		t.Error("secret-bearing event indexed")
@@ -471,7 +510,7 @@ func TestProjectEventExcludesSecretsAndBinary(t *testing.T) {
 		Kind: "adk_event", Payload: adkPayload(t, "user", "data\x00binary", false),
 		CreatedAt: now,
 	}
-	if _, indexed, err := service.ProjectEvent(t.Context(), "owner-1", binary); err != nil {
+	if _, indexed, err := service.ProjectEvent(t.Context(), principal.OwnerID, binary); err != nil {
 		t.Fatalf("ProjectEvent(): %v", err)
 	} else if indexed {
 		t.Error("binary event indexed")
@@ -481,7 +520,7 @@ func TestProjectEventExcludesSecretsAndBinary(t *testing.T) {
 		Kind: "adk_event", Payload: adkPayload(t, "user", strings.Repeat("x", maxContentBytes+1), false),
 		CreatedAt: now,
 	}
-	if _, indexed, err := service.ProjectEvent(t.Context(), "owner-1", oversize); err != nil {
+	if _, indexed, err := service.ProjectEvent(t.Context(), principal.OwnerID, oversize); err != nil {
 		t.Fatalf("ProjectEvent(): %v", err)
 	} else if indexed {
 		t.Error("oversize event indexed")
@@ -511,7 +550,7 @@ func TestProjectEventStripsRecallEvidence(t *testing.T) {
 		Kind: "adk_event", Payload: recallBearingPayload(t, "summarize my notes", evidence),
 		CreatedAt: now,
 	}
-	document, indexed, err := service.ProjectEvent(t.Context(), "owner-1", event)
+	document, indexed, err := service.ProjectEvent(t.Context(), principal.OwnerID, event)
 	if err != nil {
 		t.Fatalf("ProjectEvent(): %v", err)
 	}
@@ -535,7 +574,7 @@ func TestProjectEventStripsRecallEvidence(t *testing.T) {
 		Kind: "adk_event", Payload: recallBearingPayload(t, evidence),
 		CreatedAt: now,
 	}
-	if _, indexed, err := service.ProjectEvent(t.Context(), "owner-1", only); err != nil {
+	if _, indexed, err := service.ProjectEvent(t.Context(), principal.OwnerID, only); err != nil {
 		t.Fatalf("ProjectEvent(): %v", err)
 	} else if indexed {
 		t.Error("evidence-only event indexed")
@@ -545,19 +584,19 @@ func TestProjectEventStripsRecallEvidence(t *testing.T) {
 		Kind: "adk_event", Payload: recallBearingPayload(t, "summarize my notes"+runtime.RecallEvidenceStart+" dangling"),
 		CreatedAt: now,
 	}
-	if _, indexed, err := service.ProjectEvent(t.Context(), "owner-1", open); err != nil {
+	if _, indexed, err := service.ProjectEvent(t.Context(), principal.OwnerID, open); err != nil {
 		t.Fatalf("ProjectEvent(): %v", err)
 	} else if indexed {
 		t.Error("unclosed evidence event indexed")
 	}
-	rebuilt, err := service.RebuildSession(t.Context(), "owner-1", "sess-1", []*Event{event})
+	rebuilt, err := service.RebuildSession(t.Context(), principal.OwnerID, "sess-1", []*Event{event})
 	if err != nil {
 		t.Fatalf("RebuildSession(): %v", err)
 	}
 	if rebuilt != 1 {
 		t.Fatalf("rebuilt = %d, want 1", rebuilt)
 	}
-	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "summarize"})
+	recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "summarize"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -573,17 +612,17 @@ func TestProjectEventStripsRecallEvidence(t *testing.T) {
 
 func TestProjectEventValidation(t *testing.T) {
 	service := testService()
-	if _, _, err := service.ProjectEvent(t.Context(), "owner-1", nil); err == nil {
+	if _, _, err := service.ProjectEvent(t.Context(), principal.OwnerID, nil); err == nil {
 		t.Error("nil event accepted")
 	}
 	var nilCtx context.Context
-	if _, _, err := service.ProjectEvent(nilCtx, "owner-1", &Event{}); err == nil {
+	if _, _, err := service.ProjectEvent(nilCtx, principal.OwnerID, &Event{}); err == nil {
 		t.Error("nil context accepted")
 	}
 	if _, _, err := service.ProjectEvent(t.Context(), "", &Event{}); err == nil {
 		t.Error("empty owner accepted")
 	}
-	if _, _, err := service.ProjectEvent(t.Context(), "owner-1", &Event{SessionID: "s"}); err == nil {
+	if _, _, err := service.ProjectEvent(t.Context(), principal.OwnerID, &Event{SessionID: "s"}); err == nil {
 		t.Error("zero sequence accepted")
 	}
 }
@@ -597,7 +636,7 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 			ID: id, SessionID: "sess-1", Sequence: sequence, Author: "user",
 			Kind: "adk_event", Payload: adkPayload(t, "user", content, false), CreatedAt: now,
 		}
-		if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+		if _, _, err := service.ProjectEvent(t.Context(), principal.OwnerID, event); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
@@ -606,7 +645,7 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 	seed("ev-3", 3, "unrelated weather discussion")
 
 	first, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
-		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup",
+		OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "nightly backup",
 	})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
@@ -623,7 +662,7 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 		}
 	}
 	second, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
-		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup",
+		OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "nightly backup",
 	})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
@@ -632,13 +671,13 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 		t.Error("recall is not deterministic")
 	}
 	paged, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
-		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup", MaxDocuments: 1,
+		OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "nightly backup", MaxDocuments: 1,
 	})
 	if err != nil || len(paged) != 1 || paged[0].ID != first[0].ID {
 		t.Errorf("paged recall = %+v, %v", paged, err)
 	}
 	tiny, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
-		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup", TokenBudget: 4,
+		OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "nightly backup", TokenBudget: 4,
 	})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
@@ -647,14 +686,14 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 		t.Errorf("tiny budget returned %d documents, want strict fit", len(tiny))
 	}
 	if _, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
-		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup", MaxDocuments: 51,
+		OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "nightly backup", MaxDocuments: 51,
 	}); err == nil {
 		t.Error("over-max documents accepted")
 	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetInvalid {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 	if _, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
-		OwnerID: "owner-1", SessionID: "sess-1", Query: "",
+		OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "",
 	}); err == nil {
 		t.Error("empty query accepted")
 	}
@@ -672,24 +711,24 @@ func TestRebuildSessionIsEquivalent(t *testing.T) {
 	events := []*Event{
 		{ID: "ev-1", SessionID: "sess-1", Sequence: 1, Author: "user", Kind: "adk_event", Payload: adkPayload(t, "user", "first fact", false), CreatedAt: now},
 		{ID: "ev-2", SessionID: "sess-1", Sequence: 2, Author: "model", Kind: "adk_event", Payload: adkPayload(t, "model", "second fact", false), CreatedAt: now},
-		{ID: "ev-3", SessionID: "sess-1", Sequence: 3, Author: "owner-1", Kind: "turn.accepted", Payload: json.RawMessage(`{}`), CreatedAt: now},
+		{ID: "ev-3", SessionID: "sess-1", Sequence: 3, Author: principal.OwnerID, Kind: "turn.accepted", Payload: json.RawMessage(`{}`), CreatedAt: now},
 	}
-	count, err := service.RebuildSession(t.Context(), "owner-1", "sess-1", events)
+	count, err := service.RebuildSession(t.Context(), principal.OwnerID, "sess-1", events)
 	if err != nil {
 		t.Fatalf("RebuildSession(): %v", err)
 	}
 	if count != 2 {
 		t.Fatalf("rebuilt = %d, want 2", count)
 	}
-	before, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "fact"})
+	before, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "fact"})
 	if err != nil || len(before) != 2 {
 		t.Fatalf("recall = %d, %v", len(before), err)
 	}
-	again, err := service.RebuildSession(t.Context(), "owner-1", "sess-1", events)
+	again, err := service.RebuildSession(t.Context(), principal.OwnerID, "sess-1", events)
 	if err != nil || again != 2 {
 		t.Fatalf("second rebuild = %d, %v", again, err)
 	}
-	after, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-1", Query: "fact"})
+	after, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "fact"})
 	if err != nil {
 		t.Fatalf("Recall(): %v", err)
 	}
@@ -708,7 +747,7 @@ func TestWatermarkAndPurge(t *testing.T) {
 		ID: "ev-1", SessionID: "sess-1", Sequence: 5, Author: "user",
 		Kind: "adk_event", Payload: adkPayload(t, "user", "fact five", false), CreatedAt: now,
 	}
-	if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+	if _, _, err := service.ProjectEvent(t.Context(), principal.OwnerID, event); err != nil {
 		t.Fatalf("ProjectEvent(): %v", err)
 	}
 	mark, found, err := service.Watermark(t.Context(), "sess-1")
@@ -737,7 +776,7 @@ func TestRecallMultilingualContent(t *testing.T) {
 			ID: "ev-multi", SessionID: "sess-1", Sequence: uint64(i + 1), Author: "user",
 			Kind: "adk_event", Payload: adkPayload(t, "user", tc.content, false), CreatedAt: now,
 		}
-		if _, indexed, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+		if _, indexed, err := service.ProjectEvent(t.Context(), principal.OwnerID, event); err != nil {
 			t.Fatalf("ProjectEvent(%q): %v", tc.content, err)
 		} else if !indexed {
 			t.Fatalf("multilingual event skipped: %q", tc.content)
@@ -745,7 +784,7 @@ func TestRecallMultilingualContent(t *testing.T) {
 	}
 	for _, tc := range documents {
 		recalled, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
-			OwnerID: "owner-1", SessionID: "sess-1", Query: tc.query,
+			OwnerID: principal.OwnerID, SessionID: "sess-1", Query: tc.query,
 		})
 		if err != nil {
 			t.Fatalf("Recall(%q): %v", tc.query, err)
@@ -770,7 +809,7 @@ func TestProjectEventIgnoresSkillActivations(t *testing.T) {
 	}
 	for _, author := range []string{runtime.AuthorSystem, "user", "model"} {
 		event := &Event{ID: "ev-skill-" + author, SessionID: "sess-1", Sequence: 1, Author: author, Kind: runtime.EventKindSkillActivated, Payload: payload, CreatedAt: time.Now().UTC()}
-		document, indexed, err := service.ProjectEvent(t.Context(), "owner-1", event)
+		document, indexed, err := service.ProjectEvent(t.Context(), principal.OwnerID, event)
 		if err != nil {
 			t.Fatalf("ProjectEvent(): %v", err)
 		}

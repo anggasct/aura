@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/principal"
 	"github.com/anggasct/aura/internal/runtime"
 	"github.com/anggasct/aura/internal/runtime/ingress"
 )
@@ -38,7 +39,7 @@ func seedProviderDocument(t *testing.T, service *Service, session string, sequen
 		Author: "user", Kind: "adk_event",
 		Payload: adkPayload(t, "user", content, false), CreatedAt: time.Now().UTC(),
 	}
-	if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+	if _, _, err := service.ProjectEvent(t.Context(), principal.OwnerID, event); err != nil {
 		t.Fatalf("ProjectEvent(): %v", err)
 	}
 }
@@ -54,7 +55,7 @@ var testScopes = staticScopes{"main": {"main"}}
 
 func turnRequest(session, text string) *runtime.TurnRequest {
 	return &runtime.TurnRequest{
-		TurnID: "turn-1", SessionID: session, PrincipalID: "owner-1", AgentID: "main",
+		TurnID: "turn-1", SessionID: session, PrincipalID: principal.OwnerID, AgentID: "main",
 		Parts: []runtimeingress.InputPart{{Text: text}},
 	}
 }
@@ -131,7 +132,7 @@ func TestProviderScreensSecretsFromEvidence(t *testing.T) {
 	sink := &observationSink{}
 	service := providerService(t, store, sink)
 	store.records["mem_leak"] = StoredDocument{
-		ID: "mem_leak", OwnerID: "owner-1", AgentID: "main", SessionID: "sess-1", Kind: KindEventText,
+		ID: "mem_leak", OwnerID: principal.OwnerID, AgentID: "main", SessionID: "sess-1", Kind: KindEventText,
 		FromSequence: 1, ToSequence: 1, Content: "backup token sk-live-canary inside",
 		TrustLabel: string(approval.TrustOwnerInput), CreatedAt: time.Now().UTC(),
 	}

@@ -53,6 +53,7 @@ var migrations = []migration{
 	{version: 35, sql: emailCursorSchemaSQL},
 	{version: 36, sql: handoffEmailChannelSchemaSQL},
 	{version: 37, sql: pluginRegistrySchemaSQL},
+	{version: 38, sql: memoryNonOwnerTrustSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -745,6 +746,11 @@ CREATE INDEX session_handoff_open_idx ON session_handoff(released_at, opened_at)
 
 const reservationEstimateSchemaSQL = `
 ALTER TABLE usage_reservation ADD COLUMN reserved_tokens INTEGER NOT NULL DEFAULT 0 CHECK (reserved_tokens >= 0);
+`
+
+const memoryNonOwnerTrustSchemaSQL = `
+UPDATE memory_document SET trust_label = 'untrusted_external'
+    WHERE trust_label = 'owner_input' AND owner_id <> 'local-owner';
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

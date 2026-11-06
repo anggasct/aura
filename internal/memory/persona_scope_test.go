@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/principal"
 )
 
 func personaTurn(session, agentID, text string) *TurnRequestFixture {
@@ -24,7 +26,7 @@ func seedPersonaDocument(t *testing.T, service *Service, store *fakeDocumentStor
 		Author: "user", Kind: "adk_event",
 		Payload: adkPayload(t, "user", content, false), CreatedAt: time.Now().UTC().Add(-time.Minute),
 	}
-	if _, _, err := service.ProjectEvent(t.Context(), "owner-1", event); err != nil {
+	if _, _, err := service.ProjectEvent(t.Context(), principal.OwnerID, event); err != nil {
 		t.Fatalf("ProjectEvent(): %v", err)
 	}
 }
@@ -102,7 +104,7 @@ func TestRecallFailsClosedForUnregisteredPersona(t *testing.T) {
 	if code, ok := CodeOf(err); !ok || code != ErrorCodeQueryInvalid || evidence != nil {
 		t.Fatalf("RecallTurn = %+v, %v; want %s and no evidence", evidence, err, ErrorCodeQueryInvalid)
 	}
-	if _, err := service.Recall(t.Context(), &RecallRequest{OwnerID: "owner-1", SessionID: "main/discord:home/dm:1", Query: "nightly backup"}); err == nil {
+	if _, err := service.Recall(t.Context(), &RecallRequest{OwnerID: principal.OwnerID, SessionID: "main/discord:home/dm:1", Query: "nightly backup"}); err == nil {
 		t.Fatal("recall without readable personas searched owner-wide")
 	}
 	if _, err := NewProvider(service, ProviderConfig{}); err == nil {
