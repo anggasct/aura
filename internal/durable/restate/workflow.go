@@ -84,12 +84,11 @@ func (w workflowStateWriter) key() string { return restate.Key(w.ctx) }
 func failRegisteredRun(ctx context.Context, logger *slog.Logger, writer runStateWriter, err error) (runOutput, error) {
 	detail := err.Error()
 	if ctx.Err() != nil {
-		writer.setState(durable.RunCancelled, detail)
-		logger.InfoContext(ctx, "durable run cancelled", "key", writer.key())
-		return runOutput{State: string(durable.RunCancelled), Detail: detail}, ctx.Err()
+		logger.InfoContext(ctx, "durable run interrupted", "key", writer.key(), "error", err)
+		return runOutput{}, ctx.Err()
 	}
+	logger.WarnContext(ctx, "durable run failed", "key", writer.key(), "error", err)
 	writer.setState(durable.RunFailed, detail)
-	logger.InfoContext(ctx, "durable run failed", "key", writer.key())
 	return runOutput{State: string(durable.RunFailed), Detail: detail}, nil
 }
 func serveRun(ctx context.Context, registry *handlerRegistry, logger *slog.Logger, input runEnvelope) (runOutput, error) {
