@@ -1,0 +1,51 @@
+api_version: aura.plugin/v1
+id: gmail
+version: 0.1.0
+name: Gmail
+description: Search and read Gmail messages, and save drafts or send mail from the owner's mailbox. Every draft and send needs the owner's approval.
+capabilities: []
+tools:
+  - name: search
+    description: Search the mailbox with Gmail search syntax and list up to 15 matches with sender, subject, date and a snippet.
+    tier: read
+  - name: read
+    description: Read one message by id, with its headers, a text body of at most 64 KiB and its attachment names and sizes.
+    tier: read
+  - name: draft
+    description: Save a draft message in the mailbox, optionally as a reply to an existing message.
+    tier: effect
+    display: [to, cc, subject, reply_to_id, body]
+  - name: send
+    description: Send a message from the mailbox, optionally as a reply to an existing message.
+    tier: effect
+    display: [to, cc, subject, reply_to_id, body]
+egress:
+  - gmail.googleapis.com
+  - oauth2.googleapis.com
+secrets:
+  - name: client_id
+    ref: env://AURA_GMAIL_CLIENT_ID
+  - name: client_secret
+    ref: env://AURA_GMAIL_CLIENT_SECRET
+auth:
+  kind: oauth2
+  authorize_url: https://accounts.google.com/o/oauth2/v2/auth
+  token_url: https://oauth2.googleapis.com/token
+  issuer: https://accounts.google.com
+  scopes:
+    - https://www.googleapis.com/auth/gmail.readonly
+    - https://www.googleapis.com/auth/gmail.compose
+  redirect_uri: http://127.0.0.1:53682/callback
+  client_id_secret: client_id
+  client_secret_secret: client_secret
+  authorize_params:
+    access_type: offline
+    prompt: consent
+  hosts:
+    - gmail.googleapis.com
+backend:
+  kind: connector
+  command: ./bin/aura-connector-gmail
+  startup_timeout: 30s
+  request_timeout: 60s
+  max_message_size: 1MiB

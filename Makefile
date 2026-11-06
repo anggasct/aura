@@ -19,7 +19,7 @@ RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all test vet fmt-check lint refs-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
+.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -31,6 +31,12 @@ build-all:
 		echo "building $$os/$$arch"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-$$os-$$arch ./cmd/aura || exit 1; \
 	done
+
+plugin-gmail:
+	rm -rf dist/plugins/gmail
+	mkdir -p dist/plugins/gmail/bin
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w" -o dist/plugins/gmail/bin/aura-connector-gmail ./cmd/aura-connector-gmail
+	cp plugins/gmail/plugin.yaml dist/plugins/gmail/plugin.yaml
 
 test:
 	$(GO) test -v -race ./...
