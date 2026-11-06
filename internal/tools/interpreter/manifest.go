@@ -51,6 +51,29 @@ type Runtime struct {
 	Environment map[string]string `json:"environment"`
 }
 
+func (r *Runtime) Command(executable, source string) []string {
+	argv := make([]string, len(r.Argv))
+	for i, entry := range r.Argv {
+		switch entry {
+		case PlaceholderExecutable:
+			argv[i] = executable
+		case PlaceholderSource:
+			argv[i] = source
+		default:
+			argv[i] = entry
+		}
+	}
+	return argv
+}
+
+func (r *Runtime) EnvironmentEntries() []string {
+	entries := make([]string, 0, len(r.Environment))
+	for _, key := range slices.Sorted(maps.Keys(r.Environment)) {
+		entries = append(entries, key+"="+r.Environment[key])
+	}
+	return entries
+}
+
 func (r *Runtime) clone() Runtime {
 	out := *r
 	out.Argv = slices.Clone(r.Argv)

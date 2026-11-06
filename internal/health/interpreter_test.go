@@ -20,6 +20,7 @@ func TestInterpreterCheckerReportsEachRuntimeState(t *testing.T) {
 		{"installed", InterpreterRuntimeInstalled, "", "ok", StatusUp, RemediationNone, "files match the recorded digest"},
 		{"absent", InterpreterRuntimeAbsent, "", "interpreter_runtime_absent", StatusDegraded, RemediationInstallInterpreter, "aura interpreter install python"},
 		{"invalid", InterpreterRuntimeInvalid, "digest_mismatch", "interpreter_runtime_invalid", StatusDegraded, RemediationInstallInterpreter, "digest_mismatch"},
+		{"probe failed", InterpreterRuntimeInvalid, InterpreterReasonProbeFailed, "interpreter_runtime_probe_failed", StatusDegraded, RemediationNone, "version probe failed"},
 		{"pending", InterpreterRuntimePending, "", "interpreter_runtime_pending", StatusUnknown, RemediationNone, "not been verified"},
 		{"unknown state", "bogus", "", "interpreter_runtime_pending", StatusUnknown, RemediationNone, "not been verified"},
 	}
