@@ -35,6 +35,8 @@ const (
 	ErrorCodeRoutineInvalid       ErrorCode = "workflow_routine_invalid"
 )
 
+const ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"
+
 type Error struct {
 	Code   ErrorCode
 	Detail string

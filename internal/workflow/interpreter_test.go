@@ -49,12 +49,16 @@ type fakeToolRunner struct {
 	mu     sync.Mutex
 	called []string
 	output func(toolID string) json.RawMessage
+	err    error
 }
 
 func (f *fakeToolRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
 	f.mu.Lock()
 	f.called = append(f.called, toolID)
 	f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
 	if f.output != nil {
 		return f.output(toolID), nil
 	}
