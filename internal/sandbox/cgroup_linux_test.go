@@ -191,7 +191,7 @@ func TestPrepareHostFailsClosedWhenUnitShared(t *testing.T) {
 	if len(tree.writes) != 0 {
 		t.Fatalf("prepare wrote to a shared cgroup: %+v", tree.writes)
 	}
-	requireErr := Require(Primitives{UserNamespace: true, Seccomp: true, Landlock: true, ProcessGroups: true})
+	requireErr := Require(Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, Landlock: true, ProcessGroups: true})
 	if code, ok := CodeOf(requireErr); !ok || code != ErrorCodeSandboxUnavailable {
 		t.Fatalf("Require without cgroup v2 = %v, want sandbox_unavailable", requireErr)
 	}

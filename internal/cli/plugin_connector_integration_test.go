@@ -3,8 +3,10 @@
 package cli
 
 import (
+	"context"
 	"log/slog"
-	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/anggasct/aura/internal/principal"
@@ -12,24 +14,20 @@ import (
 )
 
 func TestIntegrationConnectorPluginRunsInsideTheSandboxWithoutANetwork(t *testing.T) {
-	script, err := os.ReadFile("testdata/connector-integration-helper.sh")
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
-	f := newConnectorFixtureWith(t, connectorNoAuthManifest, script, nil)
+	f := newConnectorFixtureWith(t, connectorNoAuthManifest, goTestConnector(t), nil)
 	plan, err := f.service.Plan(t.Context())
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
 	f.runtime = &pluginRuntime{service: f.service, plan: plan, installed: 1}
 	f.manager, err = startConnectorPlugins(t.Context(), &connectorRuntimeOptions{
-		Broker: f.h.executor.Broker(), Logger: slog.New(slog.DiscardHandler), Starter: newMCPSessionStarter(sandbox.Start),
+		Broker: f.h.executor.Broker(), Logger: slog.New(slog.DiscardHandler), Starter: newConnectorSessionStarter(sandbox.Start),
 		HTTPClient: f.api.server.Client(), Plugins: f.runtime.connectorPlugins(),
 	})
 	if err != nil {
 		t.Fatalf("startConnectorPlugins: %v", err)
 	}
-	t.Cleanup(func() { _ = f.manager.Close(t.Context()) })
+	t.Cleanup(func() { _ = f.manager.Close(context.WithoutCancel(t.Context())) })
 	if statuses := f.manager.Statuses(); len(statuses) != 1 || statuses[0].Code != "" || !statuses[0].Connected {
 		t.Fatalf("statuses = %+v", statuses)
 	}
@@ -45,8 +43,20 @@ func TestIntegrationConnectorPluginRunsInsideTheSandboxWithoutANetwork(t *testin
 	if err != nil {
 		t.Fatalf("env probe: %v", err)
 	}
-	if outputOf(t, env)["home"] != "unset" {
-		t.Fatalf("sandboxed connector environment = %s", env)
+	entries, ok := outputOf(t, env)["env"].([]any)
+	if !ok {
+		t.Fatalf("env probe output = %s", env)
+	}
+	var seen []string
+	for _, entry := range entries {
+		text, _ := entry.(string)
+		seen = append(seen, text)
+	}
+	if slices.ContainsFunc(seen, func(entry string) bool { return strings.HasPrefix(entry, "HOME=") }) {
+		t.Fatalf("sandboxed connector inherited HOME: %v", seen)
+	}
+	if !slices.ContainsFunc(seen, func(entry string) bool { return strings.HasPrefix(entry, "TMPDIR=") }) {
+		t.Fatalf("sandboxed connector environment = %v, want the scratch directory", seen)
 	}
 	if calls := f.api.recorded(); len(calls) != 1 || calls[0].Path != "/v1/messages" {
 		t.Fatalf("api saw %+v", calls)

@@ -61,7 +61,7 @@ func TestCompositionProfilesFailClosed(t *testing.T) {
 		MaxResultBytes: descriptor.MaxResultBytes,
 	}}
 	base := CompositionConfig{Runtime: compositionRuntime{}, Broker: compositionBroker{}}
-	allPrimitives := sandbox.Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}
+	allPrimitives := sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}
 	cases := []struct {
 		name string
 		cfg  CompositionConfig

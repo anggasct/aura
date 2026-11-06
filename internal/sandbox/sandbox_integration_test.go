@@ -20,7 +20,15 @@ func TestMain(m *testing.M) {
 	if IsChild(os.Args) {
 		os.Exit(RunChild())
 	}
-	os.Exit(m.Run())
+	buildDir, err := buildProbeBinary()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "build the probe connector:", err)
+		_ = os.RemoveAll(buildDir)
+		os.Exit(1)
+	}
+	code := m.Run()
+	_ = os.RemoveAll(buildDir)
+	os.Exit(code)
 }
 
 func baseSpec(t *testing.T) Spec {

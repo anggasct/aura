@@ -85,7 +85,14 @@ func applyLandlock(spec *Spec) error {
 			return err
 		}
 	}
-	for _, path := range append([]string{spec.WorkingDir}, spec.ReadWritePaths...) {
+	workingDirAccess := writeMask
+	if spec.Profile.workingDirReadOnly() {
+		workingDirAccess = landlockReadMask
+	}
+	if err := addLandlockRule(int(ruleset), spec.WorkingDir, workingDirAccess); err != nil {
+		return err
+	}
+	for _, path := range spec.ReadWritePaths {
 		if err := addLandlockRule(int(ruleset), path, writeMask); err != nil {
 			return err
 		}

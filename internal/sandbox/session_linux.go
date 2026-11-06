@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,12 +33,25 @@ func startSession(ctx context.Context, req *SessionRequest, spec *Spec) (*Sessio
 }
 
 func startSessionWithCgroups(ctx context.Context, cgroups *cgroupHost, req *SessionRequest, spec *Spec) (*Session, error) {
+	scoped, scratch, err := withScratch(spec)
+	if err != nil {
+		return nil, err
+	}
+	session, err := launchSession(ctx, cgroups, req, scoped, scratch)
+	if err != nil {
+		removeScratch(scratch)
+		return nil, err
+	}
+	return session, nil
+}
+
+func launchSession(ctx context.Context, cgroups *cgroupHost, req *SessionRequest, spec *Spec, scratch string) (*Session, error) {
 	resolved, err := resolveExecutable(req.Executable)
 	if err != nil {
 		return nil, err
 	}
 	payload, err := json.Marshal(childConfig{
-		WorkingDir: spec.WorkingDir, ReadOnlyPaths: spec.ReadOnlyPaths, ReadWritePaths: spec.ReadWritePaths,
+		Profile: spec.Profile, WorkingDir: spec.WorkingDir, ReadOnlyPaths: spec.ReadOnlyPaths, ReadWritePaths: spec.ReadWritePaths,
 		AllowEnv: spec.AllowEnv, Limits: spec.Limits, Command: resolved, Args: req.Arguments,
 	})
 	if err != nil {
@@ -71,22 +85,9 @@ func startSessionWithCgroups(ctx context.Context, cgroups *cgroupHost, req *Sess
 		_ = stdinW.Close()
 		return nil, Errorf(ErrorCodeSandboxInitFailed, "stdout pipe: %v", err)
 	}
-	stderrR, stderrW, err := os.Pipe()
-	if err != nil {
-		_ = configR.Close()
-		_ = configW.Close()
-		_ = errR.Close()
-		_ = errW.Close()
-		_ = stdinR.Close()
-		_ = stdinW.Close()
-		_ = stdoutR.Close()
-		_ = stdoutW.Close()
-		return nil, Errorf(ErrorCodeSandboxInitFailed, "stderr pipe: %v", err)
-	}
-
 	created, err := cgroups.newCgroup(spec.Limits)
 	if err != nil {
-		closeAll(configR, configW, errR, errW, stdinR, stdinW, stdoutR, stdoutW, stderrR, stderrW)
+		closeAll(configR, configW, errR, errW, stdinR, stdinW, stdoutR, stdoutW)
 		return nil, err
 	}
 	cg := &created
@@ -96,7 +97,6 @@ func startSessionWithCgroups(ctx context.Context, cgroups *cgroupHost, req *Sess
 	cmd.Env = append([]string(nil), spec.AllowEnv...)
 	cmd.Stdin = stdinR
 	cmd.Stdout = stdoutW
-	cmd.Stderr = stderrW
 	cmd.ExtraFiles = []*os.File{configR, errW}
 	cmd.SysProcAttr = childSysProcAttr()
 
@@ -107,7 +107,7 @@ func startSessionWithCgroups(ctx context.Context, cgroups *cgroupHost, req *Sess
 		cg:        cg,
 		stdin:     stdinW,
 		stdout:    stdoutR,
-		stderr:    stderrR,
+		scratch:   scratch,
 		reader:    bufio.NewReader(stdoutR),
 		reapDone:  make(chan struct{}),
 		brokenTap: make(chan struct{}),
@@ -117,7 +117,7 @@ func startSessionWithCgroups(ctx context.Context, cgroups *cgroupHost, req *Sess
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			<-ls.reapDone
 		}
-		closeAll(configR, configW, errR, errW, stdinR, stdinW, stdoutR, stdoutW, stderrR, stderrW)
+		closeAll(configR, configW, errR, errW, stdinR, stdinW, stdoutR, stdoutW)
 		_ = cg.destroy()
 		return nil, setupErr
 	}
@@ -135,7 +135,6 @@ func startSessionWithCgroups(ctx context.Context, cgroups *cgroupHost, req *Sess
 	_ = errW.Close()
 	_ = stdinR.Close()
 	_ = stdoutW.Close()
-	_ = stderrW.Close()
 
 	if err := cg.attach(ls.pid); err != nil {
 		return abort(Errorf(ErrorCodeSandboxInitFailed, "attach child to cgroup: %v", pathlessCause(err)))
@@ -168,7 +167,7 @@ type linuxSession struct {
 	cmd         *exec.Cmd
 	cg          *cgroup
 	stdin       *os.File
-	stderr      *os.File
+	scratch     string
 	stdout      *os.File
 	reader      *bufio.Reader
 	reapDone    chan struct{}
@@ -230,13 +229,18 @@ func (ls *linuxSession) close(_ context.Context) error {
 	}
 
 	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	grace := sessionCloseGrace
+	if sigtermDroppedByInit(pid) {
+		grace = 0
+	}
 	select {
 	case <-ls.reapDone:
-	case <-time.After(sessionCloseGrace):
+	case <-time.After(grace):
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		<-ls.reapDone
 	}
-	closeAll(ls.stdin, ls.stdout, ls.stderr)
+	closeAll(ls.stdin, ls.stdout)
+	removeScratch(ls.scratch)
 	ls.markBroken()
 	_ = ls.cg.destroy()
 	return nil
@@ -438,4 +442,28 @@ func isDeadline(err error) bool {
 func isOutputExceeded(err error) bool {
 	code, _ := CodeOf(err)
 	return code == ErrorCodeSandboxOutputExceeded
+}
+
+func sigtermDroppedByInit(pid int) bool {
+	status, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/status")
+	if err != nil {
+		return false
+	}
+	caught, okCaught := signalMask(string(status), "SigCgt:")
+	ignored, okIgnored := signalMask(string(status), "SigIgn:")
+	if !okCaught || !okIgnored {
+		return false
+	}
+	bit := uint64(1) << (syscall.SIGTERM - 1)
+	return caught&bit == 0 && ignored&bit == 0
+}
+
+func signalMask(status, field string) (uint64, bool) {
+	for line := range strings.SplitSeq(status, "\n") {
+		if value, found := strings.CutPrefix(line, field); found {
+			mask, err := strconv.ParseUint(strings.TrimSpace(value), 16, 64)
+			return mask, err == nil
+		}
+	}
+	return 0, false
 }

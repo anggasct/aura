@@ -122,6 +122,7 @@ func TestResolveMutationMatrix(t *testing.T) {
 		"path":       func(r *SandboxRequest) { r.ReadWritePaths = []string{t.TempDir()} },
 		"readonly":   func(r *SandboxRequest) { r.ReadOnlyPaths = []string{t.TempDir()} },
 		"limit":      func(r *SandboxRequest) { r.Limits.MemoryBytes = 32 << 20 },
+		"profile":    func(r *SandboxRequest) { r.Profile = ProfileConnector },
 		"timeout":    func(r *SandboxRequest) { r.Limits.Timeout = 10 * time.Second },
 		"principal":  func(r *SandboxRequest) { r.PrincipalID = "principal-2" },
 		"session":    func(r *SandboxRequest) { r.SessionID = "session-2" },

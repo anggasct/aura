@@ -67,6 +67,7 @@ type Limits struct {
 }
 
 type Spec struct {
+	Profile        Profile
 	WorkingDir     string
 	ReadOnlyPaths  []string
 	ReadWritePaths []string
@@ -82,7 +83,7 @@ func (s *Spec) validate() error {
 	if s.Limits.Timeout <= 0 {
 		return Errorf(ErrorCodeInvalidArgument, "timeout must be positive")
 	}
-	return nil
+	return s.Profile.validate()
 }
 
 type Result struct {
@@ -113,6 +114,7 @@ func Run(ctx context.Context, spec *Spec, command string, args ...string) (Resul
 
 type Primitives struct {
 	UserNamespace bool
+	PidNamespace  bool
 	Seccomp       bool
 	CgroupV2      bool
 	Landlock      bool
@@ -141,6 +143,9 @@ func MissingMandatory(have Primitives) []string {
 	var missing []string
 	if !have.UserNamespace {
 		missing = append(missing, "user_namespace")
+	}
+	if !have.PidNamespace {
+		missing = append(missing, "pid_namespace")
 	}
 	if !have.Landlock {
 		missing = append(missing, "landlock")

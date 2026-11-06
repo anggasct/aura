@@ -6,7 +6,7 @@ import (
 )
 
 func TestRequire(t *testing.T) {
-	allPresent := Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}
+	allPresent := Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}
 	if err := Require(allPresent); err != nil {
 		t.Fatalf("Require(all present) = %v, want nil", err)
 	}
@@ -16,11 +16,12 @@ func TestRequire(t *testing.T) {
 		have    Primitives
 		missing string
 	}{
-		{"user namespace absent", Primitives{Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, "user_namespace"},
-		{"landlock absent", Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, ProcessGroups: true}, "landlock"},
+		{"user namespace absent", Primitives{PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, "user_namespace"},
+		{"pid namespace absent", Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, "pid_namespace"},
+		{"landlock absent", Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, ProcessGroups: true}, "landlock"},
 		{"seccomp absent", Primitives{UserNamespace: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, "seccomp"},
-		{"cgroup v2 absent", Primitives{UserNamespace: true, Seccomp: true, Landlock: true, ProcessGroups: true}, "cgroup_v2"},
-		{"process groups absent", Primitives{UserNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true}, "process_groups"},
+		{"cgroup v2 absent", Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, Landlock: true, ProcessGroups: true}, "cgroup_v2"},
+		{"process groups absent", Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true}, "process_groups"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,7 +40,7 @@ func TestRequire(t *testing.T) {
 	if err == nil {
 		t.Fatal("Require(empty) = nil, want sandbox_unavailable")
 	}
-	for _, want := range []string{"user_namespace", "landlock", "seccomp", "cgroup_v2", "process_groups"} {
+	for _, want := range []string{"user_namespace", "pid_namespace", "landlock", "seccomp", "cgroup_v2", "process_groups"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Require(empty) error %q must name %q", err, want)
 		}

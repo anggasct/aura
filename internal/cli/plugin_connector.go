@@ -67,7 +67,7 @@ func startConnectorPlugins(ctx context.Context, opts *connectorRuntimeOptions) (
 	}
 	starter := opts.Starter
 	if starter == nil {
-		starter = newMCPSessionStarter(sandbox.Start)
+		starter = newConnectorSessionStarter(sandbox.Start)
 	}
 	client := opts.HTTPClient
 	if client == nil {
@@ -100,6 +100,26 @@ func startConnectorPlugins(ctx context.Context, opts *connectorRuntimeOptions) (
 		"degraded", len(statuses)-running,
 	)
 	return manager, nil
+}
+
+const (
+	connectorMemoryBytes  = 512 << 20
+	connectorMaxProcesses = 256
+	connectorMaxOpenFiles = 256
+	connectorFileBytes    = 64 << 20
+)
+
+type sandboxSessionStart func(ctx context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error)
+
+func newConnectorSessionStarter(start sandboxSessionStart) mcp.SessionStarter {
+	return newMCPSessionStarter(func(ctx context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error) {
+		req.Profile = sandbox.ProfileConnector
+		req.Limits.MemoryBytes = connectorMemoryBytes
+		req.Limits.MaxProcesses = connectorMaxProcesses
+		req.Limits.MaxOpenFiles = connectorMaxOpenFiles
+		req.Limits.FileBytes = connectorFileBytes
+		return start(ctx, req)
+	})
 }
 
 type connectorStarter struct {
