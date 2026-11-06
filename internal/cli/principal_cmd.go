@@ -62,6 +62,17 @@ func collectPrincipals(ctx context.Context, cfg *config.Config, db *sql.DB) (map
 			summary.access = append(summary.access, "allowlist:"+account.Name)
 		}
 	}
+	for i := range cfg.Channels.Email.Accounts {
+		account := &cfg.Channels.Email.Accounts[i]
+		for _, address := range account.AllowedSenders {
+			if owners.IsOwnerIdentity(principal.ChannelEmail, address) {
+				continue
+			}
+			summary := entry(principal.Namespaced(principal.ChannelEmail, address))
+			summary.class = principal.ClassTrusted
+			summary.access = append(summary.access, "allowlist:"+account.Name)
+		}
+	}
 	grants, err := store.NewPrincipalGrantStore(db).List(ctx)
 	if err != nil {
 		return nil, err
@@ -97,7 +108,7 @@ func collectPrincipals(ctx context.Context, cfg *config.Config, db *sql.DB) (map
 	delete(summaries, principal.OwnerID)
 	for id := range summaries {
 		channel, _, _ := strings.Cut(id, ":")
-		if channel != principal.ChannelDiscord && channel != principal.ChannelTelegram && channel != principal.ChannelHTTP {
+		if channel != principal.ChannelDiscord && channel != principal.ChannelTelegram && channel != principal.ChannelHTTP && channel != principal.ChannelEmail {
 			delete(summaries, id)
 		}
 	}

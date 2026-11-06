@@ -190,7 +190,7 @@ func (r *profileRuntime) ProfileContext(ctx context.Context, req *runtime.TurnRe
 
 func directOwnerOrigin(origin runtime.Origin) bool {
 	channel, _, _ := strings.Cut(string(origin), ":")
-	return origin == runtime.OriginTerminal || channel == principal.ChannelDiscord || channel == principal.ChannelTelegram
+	return origin == runtime.OriginTerminal || channel == principal.ChannelDiscord || channel == principal.ChannelTelegram || channel == principal.ChannelEmail
 }
 
 func profileJob(sessionID string, events []store.RuntimeEvent) (profile.Job, bool) {

@@ -297,9 +297,9 @@ func newApprovalHTTPHarness(t *testing.T, adapters []approvalAdapter, routed *ro
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
 	passEvals(t, db, registry, "lobby", "staff")
-	approvals, err := newHTTPApprovals(adapters, routed.observe)
+	approvals, err := newOwnerRoute(adapters, routed.observe)
 	if err != nil {
-		t.Fatalf("newHTTPApprovals: %v", err)
+		t.Fatalf("newOwnerRoute: %v", err)
 	}
 	decider := channelApprovalDecider(approvalChannels(adapters, approvals))
 	server, _, err := buildHTTPChat(cfg, db, decidingRuntime{decide: decider}, registry, nil, approvals, slog.New(slog.DiscardHandler))

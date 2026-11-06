@@ -63,7 +63,7 @@ func (o *ownerStub) leftWith() error {
 }
 
 type approvalProbe struct {
-	approvals *Approvals
+	approvals *approval.OwnerRoute
 	principal string
 	mu        sync.Mutex
 	turn      runtime.TurnRequest
@@ -100,11 +100,11 @@ func (p *approvalProbe) observed() (turn runtime.TurnRequest, held, accepted boo
 	return p.turn, p.held, p.accepted, p.err
 }
 
-func newApprovalFixture(t *testing.T, owner *ownerStub, probeOverride string) (*chatFixture, *approvalProbe, *Approvals) {
+func newApprovalFixture(t *testing.T, owner *ownerStub, probeOverride string) (*chatFixture, *approvalProbe, *approval.OwnerRoute) {
 	t.Helper()
-	approvals, err := NewApprovals(owner)
+	approvals, err := approval.NewOwnerRoute(owner)
 	if err != nil {
-		t.Fatalf("NewApprovals: %v", err)
+		t.Fatalf("NewOwnerRoute: %v", err)
 	}
 	probe := &approvalProbe{approvals: approvals, principal: probeOverride}
 	return newChatFixture(t, chatFixtureOptions{backend: probe, approvals: approvals}), probe, approvals
@@ -179,24 +179,6 @@ func TestApprovalsDenyWhenThePromptPrincipalIsNotTheRequester(t *testing.T) {
 	}
 }
 
-func TestApprovalsDenyUnregisteredSessions(t *testing.T) {
-	owner := &ownerStub{accept: true}
-	approvals, err := NewApprovals(owner)
-	if err != nil {
-		t.Fatalf("NewApprovals: %v", err)
-	}
-	if approvals.HoldsApprovalTarget("lobby/http/key/ended") {
-		t.Error("an unknown session is held")
-	}
-	accepted, err := approvals.Decide(t.Context(), &approval.Prompt{ToolName: "write_file", SessionID: "lobby/http/key/ended", PrincipalID: "http:key"})
-	if accepted || err != nil {
-		t.Errorf("Decide() = %v, %v; want a plain denial", accepted, err)
-	}
-	if calls := owner.recorded(); len(calls) != 0 {
-		t.Errorf("owner was asked for an unregistered session: %+v", calls)
-	}
-}
-
 func TestApprovalsPropagateTheOwnerApproverFailure(t *testing.T) {
 	failure := errors.New("owner did not answer")
 	owner := &ownerStub{err: failure}
@@ -211,63 +193,6 @@ func TestApprovalsPropagateTheOwnerApproverFailure(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "the tool was denied") {
 		t.Errorf("reply = %d %s, want the turn to finish with the tool denied", rec.Code, rec.Body.String())
 	}
-}
-
-func TestApprovalsRejectInvalidArguments(t *testing.T) {
-	approvals, err := NewApprovals(&ownerStub{})
-	if err != nil {
-		t.Fatalf("NewApprovals: %v", err)
-	}
-	var missing context.Context
-	valid := approval.Prompt{ToolName: "t", SessionID: "s", PrincipalID: "p"}
-	blank := approval.Prompt{ToolName: " ", SessionID: "s", PrincipalID: "p"}
-	cases := []struct {
-		name   string
-		decide func() (bool, error)
-	}{
-		{"nil context", func() (bool, error) { return approvals.Decide(missing, &valid) }},
-		{"nil prompt", func() (bool, error) { return approvals.Decide(t.Context(), nil) }},
-		{"blank tool", func() (bool, error) { return approvals.Decide(t.Context(), &blank) }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			accepted, err := tc.decide()
-			var coded *Error
-			if accepted || !errors.As(err, &coded) || coded.Code != ErrorCodeInvalidArgument {
-				t.Errorf("Decide() = %v, %v; want a denial with invalid_argument", accepted, err)
-			}
-		})
-	}
-	if _, err := NewApprovals(nil); err == nil {
-		t.Error("NewApprovals accepted a nil owner approver")
-	}
-}
-
-func TestApprovalsHoldASessionUntilEveryTurnReleasesIt(t *testing.T) {
-	approvals, err := NewApprovals(&ownerStub{})
-	if err != nil {
-		t.Fatalf("NewApprovals: %v", err)
-	}
-	requester := &approval.Requester{Principal: "http:key", Class: principal.ClassPublic, Persona: testPersona}
-	first := approvals.hold("s", requester)
-	second := approvals.hold("s", requester)
-	if got, ok := approvals.RequesterOf("s"); !ok || got != *requester {
-		t.Fatalf("RequesterOf during the turns = %+v, %v; want %+v", got, ok, *requester)
-	}
-	first()
-	first()
-	if !approvals.HoldsApprovalTarget("s") {
-		t.Fatal("releasing one turn twice dropped the other turn's session")
-	}
-	second()
-	if approvals.HoldsApprovalTarget("s") {
-		t.Fatal("the session stayed held after every turn released it")
-	}
-	if got, ok := approvals.RequesterOf("s"); ok {
-		t.Fatalf("RequesterOf after release = %+v, want none", got)
-	}
-	var absent *Approvals
-	absent.hold("s", requester)()
 }
 
 func TestStreamKeepaliveFlowsWhileTheOwnerDecides(t *testing.T) {
