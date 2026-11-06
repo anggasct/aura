@@ -46,7 +46,13 @@ func (e *Executor) SetEventPublisher(publish func(*store.RuntimeEvent)) {
 	e.journal.SetEventPublisher(effectPublisherFunc(publish))
 }
 
-func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider, access toolbroker.AccessPolicy) (*Executor, error) {
+type Option func(*toolbroker.Options)
+
+func WithApprovalReachable(reachable func(sessionID string) bool) Option {
+	return func(options *toolbroker.Options) { options.ApprovalReachable = reachable }
+}
+
+func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider, access toolbroker.AccessPolicy, opts ...Option) (*Executor, error) {
 	if cfg == nil || cfg.Tools == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -75,7 +81,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 	if err != nil {
 		return nil, err
 	}
-	broker, err := toolbroker.New(&toolbroker.Options{
+	brokerOptions := &toolbroker.Options{
 		Adapters:             adapters,
 		Secrets:              configuredToolSecrets(cfg),
 		MaxInlineResultBytes: cfg.Tools.MaxInlineResultBytes,
@@ -85,7 +91,11 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logge
 		ApprovalDecider:      decider,
 		Access:               access,
 		ApprovalGuards:       map[string]toolbroker.ApprovalGuard{tools.EmailSendToolName: emails.guard},
-	})
+	}
+	for _, apply := range opts {
+		apply(brokerOptions)
+	}
+	broker, err := toolbroker.New(brokerOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +270,7 @@ func (e *Executor) Execute(ctx context.Context, request *runtimeadk.BuiltinToolR
 		Deadline: request.Deadline, IdempotencyKey: request.IdempotencyKey,
 		EventSequence: request.EventSequence, EventInvocation: request.EventInvocation,
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
-		Knowledge: slices.Clone(request.Knowledge),
+		Knowledge: slices.Clone(request.Knowledge), Tainted: request.Tainted,
 	})
 	if err != nil {
 		return nil, err

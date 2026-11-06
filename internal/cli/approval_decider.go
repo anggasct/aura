@@ -43,3 +43,17 @@ func channelApprovalDecider(channels []approvalChannel) toolbroker.ApprovalDecid
 		return false, nil
 	}
 }
+
+func channelApprovalReachable(channels []approvalChannel) func(sessionID string) bool {
+	if len(channels) == 0 {
+		return nil
+	}
+	return func(sessionID string) bool {
+		for _, channel := range channels {
+			if channel.HoldsApprovalTarget(sessionID) {
+				return true
+			}
+		}
+		return false
+	}
+}

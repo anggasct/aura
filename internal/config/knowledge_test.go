@@ -67,3 +67,43 @@ func TestValidKnowledgeCollectionID(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_PersonaKnowledgeRejectsSinksInTheMatchingClassList(t *testing.T) {
+	tests := map[string]struct {
+		fields string
+		detail string
+	}{
+		"web_fetch for the public":      {fields: "      knowledge: [faq]\n      public_knowledge: [faq]\n      public_tools: [web_fetch]\n", detail: "public_tools lists \"web_fetch\""},
+		"web_search for the public":     {fields: "      knowledge: [faq]\n      public_knowledge: [faq]\n      public_tools: [kb_search, web_search]\n", detail: "public_tools lists \"web_search\""},
+		"workflow_start for the public": {fields: "      knowledge: [faq]\n      public_knowledge: [faq]\n      public_tools: [workflow_start]\n", detail: "public_tools lists \"workflow_start\""},
+		"workflow_propose for trusted":  {fields: "      knowledge: [faq]\n      principal_knowledge: [faq]\n      principal_tools: [workflow_propose]\n", detail: "principal_tools lists \"workflow_propose\""},
+		"web_fetch for trusted":         {fields: "      knowledge: [faq]\n      principal_knowledge: [faq]\n      principal_tools: [read_file, web_fetch]\n", detail: "principal_tools lists \"web_fetch\""},
+		"mcp server for trusted":        {fields: "      knowledge: [faq]\n      principal_knowledge: [faq]\n      principal_tools: [mcp_docs]\n", detail: "principal_tools lists \"mcp_docs\""},
+		"plugin for trusted":            {fields: "      knowledge: [faq]\n      principal_knowledge: [faq]\n      principal_tools: [plugin_weather]\n", detail: "principal_tools lists \"plugin_weather\""},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(writeDiscordConfig(t, personaKnowledgeConfig(test.fields)))
+			if err == nil || !strings.Contains(err.Error(), test.detail) {
+				t.Fatalf("error = %v, want detail %q", err, test.detail)
+			}
+		})
+	}
+}
+
+func TestLoad_PersonaKnowledgeAllowsSinksWhereTheClassHasNoKnowledge(t *testing.T) {
+	for name, fields := range map[string]string{
+		"owner knowledge only, sinks for trusted":     "      knowledge: [faq]\n      principal_tools: [web_fetch]\n",
+		"trusted knowledge, sink for public only":     "      knowledge: [faq]\n      principal_knowledge: [faq]\n      principal_tools: [read_file, kb_search]\n      public_tools: [web_search]\n",
+		"public knowledge, sink for trusted only":     "      knowledge: [faq]\n      public_knowledge: [faq]\n      public_tools: [kb_search]\n      principal_tools: [web_fetch]\n",
+		"no knowledge at all":                         "      public_tools: [web_fetch]\n      principal_tools: [web_fetch]\n",
+		"read tier tools beside class knowledge":      "      knowledge: [faq]\n      public_knowledge: [faq]\n      public_tools: [read_file, list_dir, kb_search]\n",
+		"owner tools keep sinks with owner knowledge": "      knowledge: [faq]\n      tools: [web_fetch, kb_search]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeDiscordConfig(t, personaKnowledgeConfig(fields))); err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+		})
+	}
+}

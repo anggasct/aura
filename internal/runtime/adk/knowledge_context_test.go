@@ -404,7 +404,37 @@ func TestBuiltinToolRequestCarriesTheStampedKnowledgeList(t *testing.T) {
 			t.Fatalf("Execute: %v", err)
 		}
 	}
-	if len(builtin.requests) != 1 || !slices.Equal(builtin.requests[0].Knowledge, []string{"faq", "support"}) {
-		t.Fatalf("builtin requests = %+v, want the stamped list on the tool call", builtin.requests)
+	if len(builtin.requests) != 1 || !slices.Equal(builtin.requests[0].Knowledge, []string{"faq", "support"}) || !builtin.requests[0].Tainted {
+		t.Fatalf("builtin requests = %+v, want the stamped list and the taint flag on the tool call", builtin.requests)
+	}
+}
+
+func TestBuiltinToolRequestIsUntaintedWithoutAStampedList(t *testing.T) {
+	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
+	modelName := registerFakeModel(t, model)
+	builtin := &fakeBuiltinExecutor{
+		definitions: []BuiltinToolDefinition{{
+			Name: "sample_tool", Version: "v1", Description: "sample",
+			Schema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}`),
+		}},
+		output: json.RawMessage(`{"ok":true}`),
+	}
+	db, sessions, events := newSessionTestDB(t)
+	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	mustCreateSession(t, db, "session-1")
+	req := &runtime.TurnRequest{
+		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", PrincipalClass: principal.ClassOwner,
+		Origin: runtime.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}},
+	}
+	for _, err := range executor.Execute(t.Context(), req) {
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	}
+	if len(builtin.requests) != 1 || builtin.requests[0].Tainted || len(builtin.requests[0].Knowledge) != 0 {
+		t.Fatalf("builtin requests = %+v, want an untainted call", builtin.requests)
 	}
 }

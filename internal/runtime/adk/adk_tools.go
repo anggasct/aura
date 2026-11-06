@@ -48,6 +48,7 @@ type BuiltinToolRequest struct {
 	EventBranch     string
 	EventAuthor     string
 	Knowledge       []string
+	Tainted         bool
 }
 
 type BuiltinToolExecutor interface {

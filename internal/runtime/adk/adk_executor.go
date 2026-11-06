@@ -489,6 +489,7 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		PrincipalClass:  access.class,
 		AgentID:         access.agentID,
 		Knowledge:       slices.Clone(access.knowledge),
+		Tainted:         len(access.knowledge) > 0,
 		ToolName:        definition.Name,
 		ToolVersion:     definition.Version,
 		Arguments:       raw,

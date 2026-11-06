@@ -125,8 +125,10 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				}
 			}
 			emailMailboxes := wireEmailOwnerAccess(channelAdapters, ownerRoute, approvalAdapters)
-			approvalDecider := channelApprovalDecider(approvalChannels(approvalAdapters, ownerRoute))
-			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder))
+			approvalTargets := approvalChannels(approvalAdapters, ownerRoute)
+			approvalDecider := channelApprovalDecider(approvalTargets)
+			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder),
+				toolsbuiltin.WithApprovalReachable(channelApprovalReachable(approvalTargets)))
 			if err != nil {
 				return err
 			}

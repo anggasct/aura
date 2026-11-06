@@ -46,6 +46,7 @@ type ToolRequest struct {
 	EventBranch     string
 	EventAuthor     string
 	Knowledge       []string
+	Tainted         bool
 }
 
 type ToolResult struct {
@@ -124,6 +125,7 @@ type Options struct {
 	ApprovalDecider      ApprovalDecider
 	Access               AccessPolicy
 	ApprovalGuards       map[string]ApprovalGuard
+	ApprovalReachable    func(sessionID string) bool
 }
 
 type Broker struct {
@@ -140,6 +142,7 @@ type Broker struct {
 	decider              ApprovalDecider
 	access               AccessPolicy
 	guards               map[string]ApprovalGuard
+	approvalReachable    func(sessionID string) bool
 }
 
 func New(options *Options) (*Broker, error) {
@@ -175,6 +178,7 @@ func New(options *Options) (*Broker, error) {
 		decider:              options.ApprovalDecider,
 		access:               options.Access,
 		guards:               maps.Clone(options.ApprovalGuards),
+		approvalReachable:    options.ApprovalReachable,
 	}, nil
 }
 
@@ -372,7 +376,8 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		policyOutcome = PolicyOutcomeDeny
 		return ToolResult{}, err
 	}
-	if (guarded || (class != principal.ClassOwner && definition.Effectful)) && decision.Outcome == approval.OutcomeAllow {
+	tainted := canonical.Tainted && definition.IsExternalSink()
+	if (guarded || tainted || (class != principal.ClassOwner && definition.Effectful)) && decision.Outcome == approval.OutcomeAllow {
 		decision.Outcome = approval.OutcomeRequireApproval
 		policyOutcome = decision.Outcome
 	}
@@ -388,7 +393,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	approvalExpiry := absoluteApprovalExpiry(canonical.Deadline)
 	grant := canonical.Approval
 	standing := false
-	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && class == principal.ClassTrusted && !guarded && !definition.FieldApproval() {
+	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && class == principal.ClassTrusted && !guarded && !canonical.Tainted && !definition.FieldApproval() {
 		standing, err = b.standingGrant(ctx, &canonical, definition.Server)
 		if err != nil {
 			approvalState = ApprovalRejected
@@ -396,6 +401,12 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 	}
 	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && !standing {
+		_, durableTurn := durable.TurnScopeFrom(ctx)
+		if canonical.Tainted && (durableTurn || !b.sessionReachable(canonical.SessionID)) {
+			policyOutcome = PolicyOutcomeDeny
+			approvalState = ApprovalMissing
+			return ToolResult{}, errorf(ResultKnowledgeSinkNoApprover, "tool %q needs approval on a turn with knowledge and nobody can be asked", key)
+		}
 		if scope, ok := durable.TurnScopeFrom(ctx); ok {
 			parked, err := b.parkForApproval(ctx, scope, evalKey, &canonical, definition, approvalExpiry)
 			if err != nil {
@@ -724,6 +735,10 @@ func listsInCeiling(ceiling []string, name string, definition *tools.Definition)
 		return tools.ListsPluginTool(ceiling, name, definition.Plugin.ID)
 	}
 	return tools.ListsTool(ceiling, name, definition.Server)
+}
+
+func (b *Broker) sessionReachable(sessionID string) bool {
+	return b.approvalReachable != nil && b.approvalReachable(sessionID)
 }
 
 func (b *Broker) guardRequires(ctx context.Context, request *ToolRequest) (bool, error) {

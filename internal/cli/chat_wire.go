@@ -215,7 +215,8 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 		if err != nil {
 			return err
 		}
-		builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, approvalDeciderFor(approvals), nil)
+		builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, logger, nil, approvalDeciderFor(approvals), nil,
+			toolsbuiltin.WithApprovalReachable(terminalApprovalReachable(approvals)))
 		if err != nil {
 			return err
 		}
@@ -319,6 +320,13 @@ func runChat(ctx context.Context, cfg *config.Config, configPath string, logger 
 	defer stopInterrupts()
 	console.SetInterrupts(interrupts)
 	return console.Run(ctx)
+}
+
+func terminalApprovalReachable(approvals *terminal.ApprovalBridge) func(sessionID string) bool {
+	if approvals == nil {
+		return nil
+	}
+	return func(string) bool { return true }
 }
 
 func approvalDeciderFor(approvals *terminal.ApprovalBridge) toolbroker.ApprovalDecider {
