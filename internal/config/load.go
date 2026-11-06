@@ -3282,19 +3282,22 @@ func applyMCPDefaults(cfg *Config, _ *yamlv3.Node) {
 		return
 	}
 	for i := range cfg.MCP.Servers {
-		s := &cfg.MCP.Servers[i]
-		if s.StartupTimeout == 0 {
-			s.StartupTimeout = Duration(10 * time.Second)
-		}
-		if s.RequestTimeout == 0 {
-			s.RequestTimeout = Duration(30 * time.Second)
-		}
-		if s.MaxMessageSize == 0 {
-			s.MaxMessageSize = 1024 * 1024
-		}
-		if s.Transport == "streamable_http" && s.ConnectTimeout == 0 {
-			s.ConnectTimeout = Duration(10 * time.Second)
-		}
+		ApplyMCPServerDefaults(&cfg.MCP.Servers[i])
+	}
+}
+
+func ApplyMCPServerDefaults(s *MCPServer) {
+	if s.StartupTimeout == 0 {
+		s.StartupTimeout = Duration(10 * time.Second)
+	}
+	if s.RequestTimeout == 0 {
+		s.RequestTimeout = Duration(30 * time.Second)
+	}
+	if s.MaxMessageSize == 0 {
+		s.MaxMessageSize = 1024 * 1024
+	}
+	if s.Transport == "streamable_http" && s.ConnectTimeout == 0 {
+		s.ConnectTimeout = Duration(10 * time.Second)
 	}
 }
 

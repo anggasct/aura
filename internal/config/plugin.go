@@ -99,10 +99,10 @@ func validatePluginList(field string, plugins []string) error {
 	seen := make(map[string]struct{}, len(plugins))
 	for _, id := range plugins {
 		if !ValidPluginID(id) {
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.plugins entries must be plugin ids", field)}
+			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".plugins entries must be plugin ids"}
 		}
 		if _, duplicate := seen[id]; duplicate {
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.plugins must not list a plugin twice", field)}
+			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".plugins must not list a plugin twice"}
 		}
 		seen[id] = struct{}{}
 	}

@@ -63,7 +63,7 @@ func TestLoad_PluginsDesiredIsParsed(t *testing.T) {
 }
 
 func TestPluginIdentifiersRejectPathShapes(t *testing.T) {
-	for _, id := range []string{"", "a", "Weather", "wea ther", "../x", "a/b", "a\\b", "weather\n", strings.Repeat("a", 49), "-weather", "1weather", "wea_ther"} {
+	for _, id := range []string{"", "a", "Weather", "we\tather", "../x", "a/b", "a\\b", "weather\n", strings.Repeat("a", 49), "-weather", "1weather", "we_x"} {
 		if ValidPluginID(id) {
 			t.Errorf("ValidPluginID(%q) = true", id)
 		}

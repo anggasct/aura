@@ -23,6 +23,11 @@ func MCPServerEntry(server string) string {
 	return MCPToolPrefix + server
 }
 
+type PluginRef struct {
+	ID          string
+	Description string
+}
+
 const (
 	PluginToolPrefix     = "plugin_"
 	MaxPluginToolWireLen = 64
@@ -87,8 +92,7 @@ type Definition struct {
 	Name                 string
 	Version              string
 	Server               string
-	Plugin               string
-	Description          string
+	Plugin               *PluginRef
 	Schema               json.RawMessage
 	RequiredCapabilities []string
 	RequiresApproval     bool
