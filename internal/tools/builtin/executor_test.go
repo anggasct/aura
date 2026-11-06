@@ -43,10 +43,10 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	definitions := executor.Definitions()
-	if len(definitions) != 15 {
-		t.Fatalf("builtin definitions = %d, want 15", len(definitions))
+	if len(definitions) != 16 {
+		t.Fatalf("builtin definitions = %d, want 16", len(definitions))
 	}
-	wantDefinitions := []string{"email_send@v1", "exec@v1", "handoff_to_owner@v1", "kb_search@v1", "list_dir@v1", "read_file@v1", "web_fetch@v1", "web_search@v1", "workflow_cancel@v1", "workflow_list@v1", "workflow_propose@v1", "workflow_save_routine@v1", "workflow_start@v1", "workflow_status@v1", "write_file@v1"}
+	wantDefinitions := []string{"code_execute@v1", "email_send@v1", "exec@v1", "handoff_to_owner@v1", "kb_search@v1", "list_dir@v1", "read_file@v1", "web_fetch@v1", "web_search@v1", "workflow_cancel@v1", "workflow_list@v1", "workflow_propose@v1", "workflow_save_routine@v1", "workflow_start@v1", "workflow_status@v1", "write_file@v1"}
 	for i, definition := range definitions {
 		if key := definition.Name + "@" + definition.Version; key != wantDefinitions[i] {
 			t.Errorf("definition[%d] = %q, want %q", i, key, wantDefinitions[i])

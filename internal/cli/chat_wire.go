@@ -224,6 +224,13 @@ func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger
 		broker = builtin
 		builtinTools = builtin
 		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
+		if interpreterEnabled(result.CapabilityReport) {
+			stopVerification, err := startChatInterpreter(ctx, cfg, builtin, logger)
+			if err != nil {
+				return err
+			}
+			defer stopVerification()
+		}
 	}
 	if cfg.Memory.Enabled {
 		memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, registry, logger, nil)

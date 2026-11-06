@@ -82,6 +82,8 @@ const (
 	MaxKBSearchQueryRunes  = 500
 	MaxKBSearchResultLimit = 10
 
+	CodeExecuteToolName = "code_execute"
+
 	WorkflowListToolName        = "workflow_list"
 	WorkflowStartToolName       = "workflow_start"
 	WorkflowStatusToolName      = "workflow_status"
@@ -235,6 +237,8 @@ func (d *Definition) validate(raw json.RawMessage) (json.RawMessage, error) {
 		}
 	case EmailSendToolName:
 		return validateEmailSend(value)
+	case CodeExecuteToolName:
+		return validateCodeExecute(value)
 	case KBSearchToolName:
 		if err := rejectUnknown(value, "query", "limit"); err != nil {
 			return nil, err
@@ -272,6 +276,7 @@ func (d *Definition) validate(raw json.RawMessage) (json.RawMessage, error) {
 func Builtins() []Definition {
 	return []Definition{
 		{Name: "exec", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/exec/v1","type":"object","properties":{"command":{"type":"array","items":{"type":"string"},"minItems":1},"shell":{"type":"boolean"}},"required":["command"],"additionalProperties":false}`), RequiredCapabilities: []string{"exec-linux"}, RequiresApproval: true, Effectful: true},
+		{Name: CodeExecuteToolName, Version: Version, Schema: codeExecuteSchema(), RequiredCapabilities: []string{"code-interpreter"}, RequiresApproval: true, Effectful: true},
 		{Name: "read_file", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/read_file/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"max_bytes":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-read"}},
 		{Name: "write_file", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/write_file/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"content":{"type":"string"},"overwrite":{"type":"boolean"}},"required":["path","content"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-write"}, RequiresApproval: true, Effectful: true},
 		{Name: "list_dir", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/list_dir/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"recursive":{"type":"boolean"}},"required":["path"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-read"}},

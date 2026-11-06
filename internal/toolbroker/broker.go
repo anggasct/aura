@@ -127,7 +127,10 @@ type Options struct {
 	ApprovalGuards       map[string]ApprovalGuard
 	ApprovalReachable    func(sessionID string) bool
 	HostCapabilities     []string
+	ArgumentChecks       map[string]ArgumentCheck
 }
+
+type ArgumentCheck func(arguments json.RawMessage) error
 
 type Broker struct {
 	mu                   sync.RWMutex
@@ -144,6 +147,7 @@ type Broker struct {
 	access               AccessPolicy
 	guards               map[string]ApprovalGuard
 	approvalReachable    func(sessionID string) bool
+	argumentChecks       map[string]ArgumentCheck
 }
 
 func New(options *Options) (*Broker, error) {
@@ -180,6 +184,7 @@ func New(options *Options) (*Broker, error) {
 		access:               options.Access,
 		guards:               maps.Clone(options.ApprovalGuards),
 		approvalReachable:    options.ApprovalReachable,
+		argumentChecks:       maps.Clone(options.ArgumentChecks),
 	}, nil
 }
 
@@ -829,6 +834,11 @@ func (b *Broker) canonicalRequest(request *ToolRequest) (ToolRequest, error) {
 	arguments, err := definition.Validate(request.Arguments)
 	if err != nil {
 		return ToolRequest{}, errorf(ResultInvalidArgument, "%v", err)
+	}
+	if check := b.argumentChecks[definition.Key()]; check != nil {
+		if err := check(arguments); err != nil {
+			return ToolRequest{}, errorf(ResultInvalidArgument, "%v", err)
+		}
 	}
 	canonical := *request
 	canonical.Arguments = arguments

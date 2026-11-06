@@ -3,23 +3,33 @@ package cli
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
+	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
 const (
 	codeInterpreterCapability = "code-interpreter"
 	interpreterVerifyTimeout  = time.Minute
+	interpreterRunsDirName    = "interpreter-runs"
 )
 
 type interpreterRuntime struct {
 	store    *interpreter.Store
 	set      *interpreter.VerifiedSet
 	verifier *interpreter.Verifier
+	runner   codeExecution
+}
+
+type codeExecution interface {
+	toolsbuiltin.CodeRunner
+	interpreter.Prober
 }
 
 func interpreterEnabled(report capability.Report) bool {
@@ -49,6 +59,53 @@ func newInterpreterRuntime(cfg *config.Config, manifest *interpreter.Manifest) (
 		return nil, err
 	}
 	return &interpreterRuntime{store: store, set: set, verifier: verifier}, nil
+}
+
+func (r *interpreterRuntime) enableExecution(cfg *config.Config) error {
+	dataRoot, err := resolveDataRoot(cfg)
+	if err != nil {
+		return err
+	}
+	runner, err := toolsbuiltin.NewCodeRunner(&toolsbuiltin.CodeOptions{
+		Store: r.store, Verified: r.set, RunRoot: filepath.Join(dataRoot, interpreterRunsDirName), Limits: &cfg.Interpreter,
+	})
+	if err != nil {
+		return err
+	}
+	verifier, err := interpreter.NewVerifier(r.store, r.set, interpreter.WithProber(runner))
+	if err != nil {
+		return err
+	}
+	r.runner, r.verifier = runner, verifier
+	return nil
+}
+
+func (r *interpreterRuntime) attach(builtin *toolsbuiltin.Executor) {
+	if r.runner != nil {
+		builtin.SetCodeRunner(r.runner)
+	}
+}
+
+func startChatInterpreter(ctx context.Context, cfg *config.Config, builtin *toolsbuiltin.Executor, logger *slog.Logger) (stop func(), err error) {
+	manifest, err := interpreter.DefaultManifest()
+	if err != nil {
+		return nil, err
+	}
+	runtime, err := newInterpreterRuntime(cfg, manifest)
+	if err != nil {
+		return nil, err
+	}
+	if err := runtime.enableExecution(cfg); err != nil {
+		return nil, err
+	}
+	runtime.attach(builtin)
+	verifyCtx, cancel := context.WithCancel(ctx)
+	var verification sync.WaitGroup
+	verification.Go(func() { runtime.run(verifyCtx, logger) })
+	return func() {
+		cancel()
+		verification.Wait()
+	}, nil
 }
 
 func (r *interpreterRuntime) run(ctx context.Context, logger *slog.Logger) {

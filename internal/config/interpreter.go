@@ -6,14 +6,16 @@ import (
 	"time"
 
 	yamlv3 "gopkg.in/yaml.v3"
+
+	"github.com/anggasct/aura/internal/tools"
 )
 
 const (
 	MinInterpreterTimeout = time.Second
 	MaxInterpreterTimeout = 10 * time.Minute
 
-	MaxInterpreterSourceBytes   = ByteSize(1 << 20)
-	MaxInterpreterStdinBytes    = ByteSize(16 << 20)
+	MaxInterpreterSourceBytes   = ByteSize(tools.MaxCodeSourceBytes)
+	MaxInterpreterStdinBytes    = ByteSize(tools.MaxCodeStdinBytes)
 	MaxInterpreterOutputBytes   = ByteSize(1 << 20)
 	MaxInterpreterOutputFiles   = 256
 	MaxInterpreterArtifactBytes = ByteSize(1 << 30)
