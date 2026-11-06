@@ -17,7 +17,7 @@ const (
 	MaxInterpreterSourceBytes   = ByteSize(tools.MaxCodeSourceBytes)
 	MaxInterpreterStdinBytes    = ByteSize(tools.MaxCodeStdinBytes)
 	MaxInterpreterOutputBytes   = ByteSize(1 << 20)
-	MaxInterpreterOutputFiles   = 256
+	MaxInterpreterOutputFiles   = tools.MaxCodeOutputFiles
 	MaxInterpreterArtifactBytes = ByteSize(1 << 30)
 	MinInterpreterMemoryBytes   = ByteSize(64 << 20)
 	MaxInterpreterMemoryBytes   = ByteSize(16 << 30)
