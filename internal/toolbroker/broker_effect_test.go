@@ -124,3 +124,67 @@ func TestBrokerEffectfulFailureSettlesByWhetherTheEffectWasPerformed(t *testing.
 		})
 	}
 }
+
+func TestBrokerEffectReceiptCarriesTheAdapterAudit(t *testing.T) {
+	cases := []struct {
+		name      string
+		audit     json.RawMessage
+		wantAudit string
+	}{
+		{"valid audit is embedded", json.RawMessage(`{"runtime":"python","result_class":"ok"}`), `{"runtime":"python","result_class":"ok"}`},
+		{"missing audit is omitted", nil, ""},
+		{"invalid audit is dropped and the effect still settles", json.RawMessage(`{"runtime":`), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			executor := newBrokerEffectExecutor(t)
+			broker, err := New(&Options{
+				HostCapabilities: capabilitytest.Host(t), Effects: executor,
+				Adapters: map[string]Adapter{
+					"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+						return ToolResult{Output: json.RawMessage(`{"ok":true}`), Audit: tc.audit}, nil
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			request := brokerRequest("exec", `{"command":["true"]}`, "exec-linux")
+			request.EventSequence = 1
+			grant, err := broker.Grant(context.Background(), request, time.Minute)
+			if err != nil {
+				t.Fatalf("Grant: %v", err)
+			}
+			request.Approval = &grant
+			result, err := broker.Execute(context.Background(), request)
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if encoded, err := json.Marshal(result); err != nil || containsKey(encoded, "audit") {
+				t.Fatalf("the audit must stay out of the tool result: %s %v", encoded, err)
+			}
+			intents, err := executor.Journal().ListByState(context.Background(), effect.StateSucceeded, 0)
+			if err != nil || len(intents) != 1 {
+				t.Fatalf("succeeded intents = %d, err = %v", len(intents), err)
+			}
+			var receipt struct {
+				Audit json.RawMessage `json:"audit"`
+			}
+			if err := json.Unmarshal(intents[0].ProviderReceipt, &receipt); err != nil {
+				t.Fatalf("receipt %s: %v", intents[0].ProviderReceipt, err)
+			}
+			if string(receipt.Audit) != tc.wantAudit {
+				t.Fatalf("receipt audit = %q, want %q", receipt.Audit, tc.wantAudit)
+			}
+		})
+	}
+}
+
+func containsKey(encoded []byte, key string) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return false
+	}
+	_, present := fields[key]
+	return present
+}

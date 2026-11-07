@@ -71,6 +71,7 @@ type Options struct {
 	Store     *interpreter.Store
 	Verified  *interpreter.VerifiedSet
 	Artifacts ArtifactSink
+	Observer  Observer
 	RunRoot   string
 	Limits    Limits
 }
@@ -81,6 +82,7 @@ type Runner struct {
 	store     *interpreter.Store
 	verified  *interpreter.VerifiedSet
 	artifacts ArtifactSink
+	observer  Observer
 	runRoot   string
 	limits    Limits
 	sandbox   sandboxRunner
@@ -98,7 +100,7 @@ func NewRunner(options *Options) (*Runner, error) {
 		return nil, err
 	}
 	return &Runner{
-		store: options.Store, verified: options.Verified, artifacts: options.Artifacts, runRoot: options.RunRoot, limits: options.Limits,
+		store: options.Store, verified: options.Verified, artifacts: options.Artifacts, observer: options.Observer, runRoot: options.RunRoot, limits: options.Limits,
 		sandbox: sandbox.Run, slots: make(chan struct{}, maxConcurrentRuns),
 	}, nil
 }
@@ -115,9 +117,14 @@ type Request struct {
 
 type Outcome struct {
 	Class           ResultClass
+	Runtime         string
+	RuntimeVersion  string
+	Phase           Phase
 	ExitCode        int
 	Signal          int
 	Duration        time.Duration
+	Build           Usage
+	Run             Usage
 	Stdout          string
 	Stderr          string
 	StdoutTruncated bool
@@ -163,7 +170,7 @@ func (r *Runner) Execute(ctx context.Context, request *Request) (Outcome, error)
 	if err != nil {
 		return Outcome{}, err
 	}
-	return r.run(ctx, &plan{
+	outcome, err := r.run(ctx, &plan{
 		bundle: bundle, language: language, source: request.Source, stdin: request.Stdin, cpu: timeout,
 		outputs: request.OutputFiles, origin: origin, build: r.limits.BuildTimeout,
 		limits: sandbox.Limits{
@@ -172,6 +179,10 @@ func (r *Runner) Execute(ctx context.Context, request *Request) (Outcome, error)
 			Timeout: timeout + wallClockMargin, NoProcessRlimit: true, RunDirBytes: r.limits.MaxRunDirBytes,
 		},
 	})
+	if err == nil && r.observer != nil {
+		r.observer(ctx, newObservation(&outcome, bundle.Runtime.Builds()))
+	}
+	return outcome, err
 }
 
 func (r *Runner) run(ctx context.Context, p *plan) (Outcome, error) {
@@ -189,7 +200,7 @@ func (r *Runner) run(ctx context.Context, p *plan) (Outcome, error) {
 	if err := writeWorkspace(dir.path, p); err != nil {
 		return Outcome{}, err
 	}
-	started := time.Now()
+	var buildUsage Usage
 	program := ""
 	readOnly := []string{p.bundle.Dir}
 	if p.bundle.Runtime.Builds() {
@@ -198,10 +209,12 @@ func (r *Runner) run(ctx context.Context, p *plan) (Outcome, error) {
 		if err != nil {
 			return Outcome{}, err
 		}
+		stopped.Runtime, stopped.RuntimeVersion = p.bundle.Runtime.ID, p.bundle.Runtime.Version
+		stopped.Phase, stopped.Duration = PhaseBuild, stopped.Build.Duration
 		if !built {
-			stopped.Duration = time.Since(started)
 			return stopped, nil
 		}
+		buildUsage = stopped.Build
 		readOnly = nil
 	}
 	argv := p.bundle.Runtime.Command(p.bundle.Executable, p.language.source, program)
@@ -213,13 +226,15 @@ func (r *Runner) run(ctx context.Context, p *plan) (Outcome, error) {
 		Stdin:         []byte(p.stdin),
 		Limits:        p.limits,
 	}
+	runStarted := time.Now()
 	result, err := r.sandbox(ctx, spec, argv[0], argv[1:]...)
-	elapsed := time.Since(started)
+	runUsage := Usage{Duration: time.Since(runStarted), CPUTime: result.CPUTime}
 	if err != nil {
 		return Outcome{}, wrapSandbox(err)
 	}
 	outcome := Outcome{
-		Class: classify(&result, p.cpu), ExitCode: result.ExitCode, Signal: result.Signal, Duration: elapsed,
+		Class: classify(&result, p.cpu), Runtime: p.bundle.Runtime.ID, RuntimeVersion: p.bundle.Runtime.Version, Phase: PhaseRun,
+		ExitCode: result.ExitCode, Signal: result.Signal, Build: buildUsage, Run: runUsage, Duration: buildUsage.Duration + runUsage.Duration,
 		Stdout: result.Stdout, Stderr: result.Stderr, StdoutTruncated: result.StdoutTruncated, StderrTruncated: result.StderrTruncated,
 	}
 	if outcome.Class == ClassOK || outcome.Class == ClassExitNonzero {
@@ -259,14 +274,16 @@ func (r *Runner) build(ctx context.Context, p *plan, dir *runDir, program string
 			MaxProcesses: buildProcesses, FileBytes: buildFileBytes, Timeout: p.build, NoProcessRlimit: true, RunDirBytes: buildRunDirBytes,
 		},
 	}
+	started := time.Now()
 	result, err := r.sandbox(ctx, spec, argv[0], argv[1:]...)
+	usage := Usage{Duration: time.Since(started), CPUTime: result.CPUTime}
 	if err != nil {
 		return Outcome{}, false, wrapSandbox(err)
 	}
 	if class := classify(&result, p.build); class != ClassOK {
 		return Outcome{
 			Class: class, ExitCode: result.ExitCode, Signal: result.Signal, Stdout: result.Stdout, Stderr: result.Stderr,
-			StdoutTruncated: result.StdoutTruncated, StderrTruncated: result.StderrTruncated,
+			StdoutTruncated: result.StdoutTruncated, StderrTruncated: result.StderrTruncated, Build: usage,
 		}, false, nil
 	}
 	for _, sub := range p.language.scratch {
@@ -276,9 +293,9 @@ func (r *Runner) build(ctx context.Context, p *plan, dir *runDir, program string
 	}
 	select {
 	case <-ctx.Done():
-		return Outcome{Class: ClassCancelled, ExitCode: -1, Signal: int(syscall.SIGKILL)}, false, nil
+		return Outcome{Class: ClassCancelled, ExitCode: -1, Signal: int(syscall.SIGKILL), Build: usage}, false, nil
 	default:
-		return Outcome{}, true, nil
+		return Outcome{Build: usage}, true, nil
 	}
 }
 

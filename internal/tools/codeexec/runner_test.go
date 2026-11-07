@@ -295,8 +295,11 @@ func TestExecuteReportsTheOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Outcome{Class: ClassExitNonzero, ExitCode: 3, Stdout: "out", Stderr: "err", StdoutTruncated: true, StderrTruncated: true}
-	outcome.Duration = 0
+	want := Outcome{
+		Class: ClassExitNonzero, Runtime: "python", RuntimeVersion: rigPythonVersion, Phase: PhaseRun,
+		ExitCode: 3, Stdout: "out", Stderr: "err", StdoutTruncated: true, StderrTruncated: true,
+	}
+	outcome.Duration, outcome.Run.Duration = 0, 0
 	if !reflect.DeepEqual(outcome, want) {
 		t.Fatalf("outcome = %+v, want %+v", outcome, want)
 	}

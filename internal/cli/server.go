@@ -84,6 +84,10 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			codeRecorder, err := telemetry.NewCodeRecorder(pipeline.MeterProvider())
+			if err != nil {
+				return err
+			}
 			observer := toolbroker.Observer(func(ctx context.Context, observation toolbroker.Observation) {
 				recorder.Record(ctx, &telemetry.ToolObservation{
 					Name:          observation.ToolName + "@" + observation.ToolVersion,
@@ -265,7 +269,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := interpreterRun.enableExecution(ctx, cfg, builtin.Artifacts(), logger); err != nil {
+				if err := interpreterRun.enableExecution(ctx, cfg, builtin.Artifacts(), codeObserver(codeRecorder), logger); err != nil {
 					return err
 				}
 				interpreterRun.attach(builtin)

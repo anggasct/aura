@@ -24,7 +24,7 @@ func TestEnableExecutionBuildsTheRunnerAndVerifier(t *testing.T) {
 	if runtime.runner != nil {
 		t.Fatal("execution must stay off until it is enabled")
 	}
-	if err := runtime.enableExecution(t.Context(), &config.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: defaults}, testArtifacts(t), slog.New(slog.DiscardHandler)); err != nil {
+	if err := runtime.enableExecution(t.Context(), &config.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: defaults}, testArtifacts(t), nil, slog.New(slog.DiscardHandler)); err != nil {
 		t.Fatalf("enableExecution: %v", err)
 	}
 	if runtime.runner == nil || runtime.verifier == nil {
@@ -47,7 +47,7 @@ func TestEnableExecutionSweepsStaleRunDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.enableExecution(t.Context(), cfg, testArtifacts(t), slog.New(slog.DiscardHandler)); err != nil {
+	if err := runtime.enableExecution(t.Context(), cfg, testArtifacts(t), nil, slog.New(slog.DiscardHandler)); err != nil {
 		t.Fatalf("enableExecution: %v", err)
 	}
 	if _, err := os.Stat(filepath.Dir(stale)); !errors.Is(err, os.ErrNotExist) {
@@ -64,7 +64,7 @@ func TestEnableExecutionRejectsAnInvalidLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.enableExecution(t.Context(), cfg, testArtifacts(t), slog.New(slog.DiscardHandler)); err == nil {
+	if err := runtime.enableExecution(t.Context(), cfg, testArtifacts(t), nil, slog.New(slog.DiscardHandler)); err == nil {
 		t.Fatal("enableExecution accepted a zero process limit")
 	}
 	if runtime.runner != nil {
