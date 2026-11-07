@@ -133,6 +133,46 @@ func TestBrokerApprovalDeciderErrorFailsClosed(t *testing.T) {
 	}
 }
 
+func TestBrokerApprovalPromptIsReadableWhileTheCanonicalRequestStaysExact(t *testing.T) {
+	executor := newBrokerEffectExecutor(t)
+	var prompted *ApprovalPrompt
+	broker, err := New(&Options{
+		HostCapabilities: capabilitytest.Host(t), Effects: executor,
+		Adapters: map[string]Adapter{
+			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+				return ToolResult{Output: json.RawMessage(`{}`)}, nil
+			},
+		},
+		ApprovalDecider: func(_ context.Context, prompt *ApprovalPrompt) (bool, error) {
+			prompted = prompt
+			return false, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	request := brokerRequest("exec", `{"command":["sh","-c","ls 2>&1"]}`, "exec-linux")
+	request.EventSequence = 1
+	canonical, err := broker.canonicalRequest(request)
+	if err != nil {
+		t.Fatalf("canonicalRequest: %v", err)
+	}
+	before := approval.HashArguments(canonical.Arguments)
+	if _, err := broker.Execute(context.Background(), request); classOf(err) != ResultApprovalRequired {
+		t.Fatalf("Execute error = %v, want approval_required", err)
+	}
+	if prompted == nil || prompted.Arguments != `{"command":["sh","-c","ls 2>&1"]}` {
+		t.Fatalf("prompt = %+v", prompted)
+	}
+	after, err := broker.canonicalRequest(request)
+	if err != nil {
+		t.Fatalf("canonicalRequest: %v", err)
+	}
+	if approval.HashArguments(after.Arguments) != before {
+		t.Fatal("the arguments hash changed")
+	}
+}
+
 func TestBrokerApprovalPromptCarriesCanonicalScope(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	var prompted *ApprovalPrompt
