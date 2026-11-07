@@ -5,6 +5,11 @@ CAPS_PKG  := github.com/anggasct/aura/internal/capability
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE      ?= $(shell if [ -n "$$SOURCE_DATE_EPOCH" ]; then date -u -d "@$$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ; else date -u +%Y-%m-%dT%H:%M:%SZ; fi)
+# The default build is the core profile with no compiled capabilities. A
+# Linux build that can run code_execute compiles the interpreter in:
+#   make build PROFILE=exec-linux CAPABILITIES=exec-linux,code-interpreter
+# `aura interpreter list` then names the pinned archive for each runtime and
+# `aura interpreter install` installs it.
 PROFILE   ?= core
 CAPABILITIES ?=
 LDFLAGS   := -s -w -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT) -X $(PKG).date=$(DATE) -X $(CAPS_PKG).buildProfile=$(PROFILE) -X $(CAPS_PKG).buildCapabilities=$(CAPABILITIES)

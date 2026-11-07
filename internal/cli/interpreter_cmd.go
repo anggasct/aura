@@ -105,6 +105,8 @@ type interpreterListRow struct {
 	Version string `json:"version"`
 	State   string `json:"state"`
 	Reason  string `json:"reason,omitempty"`
+	Archive string `json:"archive"`
+	SHA256  string `json:"sha256"`
 }
 
 type interpreterListOutput struct {
@@ -125,9 +127,11 @@ func newInterpreterListCmd(gf *globalFlags, deps interpreterDeps) *cobra.Command
 				}
 				rows := make([]interpreterListRow, 0, len(verifications))
 				for _, verification := range verifications {
+					pinned, _ := store.Manifest().Lookup(verification.Runtime)
 					rows = append(rows, interpreterListRow{
 						Runtime: verification.Runtime, Version: verification.Version,
 						State: string(verification.State), Reason: string(verification.Reason),
+						Archive: pinned.Archive, SHA256: pinned.SHA256,
 					})
 				}
 				if asJSON {
@@ -135,11 +139,14 @@ func newInterpreterListCmd(gf *globalFlags, deps interpreterDeps) *cobra.Command
 					encoder.SetIndent("", "  ")
 					return encoder.Encode(interpreterListOutput{Runtimes: rows})
 				}
-				lines := []string{"RUNTIME\tVERSION\tSTATE"}
+				lines := []string{"RUNTIME\tVERSION\tSTATE\tINSTALL FROM"}
 				for i := range rows {
 					line := fmt.Sprintf("%s\t%s\t%s", rows[i].Runtime, rows[i].Version, rows[i].State)
 					if rows[i].Reason != "" {
 						line += " (" + rows[i].Reason + ")"
+					}
+					if rows[i].State != string(interpreter.StateInstalled) {
+						line += fmt.Sprintf("\t%s sha256:%s", rows[i].Archive, rows[i].SHA256)
 					}
 					lines = append(lines, line)
 				}
