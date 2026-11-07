@@ -19,8 +19,7 @@ tools:
     max_encoded_bytes: 2097152
     max_decoded_bytes: 8388608
   web_search:
-    provider: brave
-    credential_ref: env://AURA_BRAVE_API_KEY
+    provider: duckduckgo
     max_results: 5
 agents:
   definitions: []

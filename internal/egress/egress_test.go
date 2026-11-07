@@ -409,3 +409,65 @@ func TestValidateLiteralDestinationRejectsNonPublicLiteralsAndNames(t *testing.T
 		})
 	}
 }
+
+func TestNewLoopbackClientRejectsNonLoopbackAuthorities(t *testing.T) {
+	for _, authority := range []string{"10.0.0.5:80", "localhost:80", "127.0.0.2:80", "127.0.0.1", "127.0.0.1:0", "127.0.0.1:65536", "127.0.0.1:080", "[::ffff:127.0.0.1]:80", "example.com:443", ""} {
+		t.Run(authority, func(t *testing.T) {
+			client, err := NewLoopbackClient(authority)
+			if client != nil {
+				t.Fatalf("NewLoopbackClient(%q) returned a client", authority)
+			}
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+				t.Fatalf("NewLoopbackClient(%q) = %v, want egress_denied", authority, err)
+			}
+		})
+	}
+}
+
+func TestLoopbackClientDialsOnlyItsPinnedAddress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	authority := strings.TrimPrefix(server.URL, "http://")
+	client, err := NewLoopbackClient(authority)
+	if err != nil {
+		t.Fatalf("NewLoopbackClient: %v", err)
+	}
+	if transport, ok := client.Transport.(*http.Transport); !ok || transport.Proxy != nil {
+		t.Fatal("loopback client must use its own transport without a proxy")
+	}
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/search", http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("pinned request: %v", err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	_, port, err := net.SplitHostPort(authority)
+	if err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	for _, other := range []string{
+		"http://127.0.0.1:1/x",
+		"http://127.0.0.2:" + port + "/x",
+		"http://example.com:" + port + "/x",
+	} {
+		request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, other, http.NoBody)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		response, err := client.Do(request)
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+			t.Fatalf("Do(%q) = %v, want egress_denied", other, err)
+		}
+	}
+}
