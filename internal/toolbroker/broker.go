@@ -56,6 +56,7 @@ type ToolResult struct {
 	Untrusted   bool            `json:"untrusted"`
 	Output      json.RawMessage `json:"output"`
 	Truncated   bool            `json:"truncated"`
+	Audit       json.RawMessage `json:"-"`
 }
 
 type Adapter func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error)
@@ -640,17 +641,22 @@ func (i *effectInvocation) Invoke(ctx context.Context, _ *effect.Invocation) (ef
 	i.result = result
 	i.invoked = true
 	digest := sha256.Sum256(result.Output)
+	audit := result.Audit
+	if !json.Valid(audit) {
+		audit = nil
+	}
 	receipt, err := json.Marshal(struct {
-		ToolName     string      `json:"tool_name"`
-		ToolVersion  string      `json:"tool_version"`
-		Class        ResultClass `json:"class"`
-		OutputBytes  int64       `json:"output_bytes"`
-		OutputDigest string      `json:"output_digest"`
-		Truncated    bool        `json:"truncated"`
+		ToolName     string          `json:"tool_name"`
+		ToolVersion  string          `json:"tool_version"`
+		Class        ResultClass     `json:"class"`
+		OutputBytes  int64           `json:"output_bytes"`
+		OutputDigest string          `json:"output_digest"`
+		Truncated    bool            `json:"truncated"`
+		Audit        json.RawMessage `json:"audit,omitempty"`
 	}{
 		ToolName: i.request.ToolName, ToolVersion: i.request.ToolVersion,
 		Class: result.Class, OutputBytes: int64(len(result.Output)),
-		OutputDigest: hex.EncodeToString(digest[:]), Truncated: result.Truncated,
+		OutputDigest: hex.EncodeToString(digest[:]), Truncated: result.Truncated, Audit: audit,
 	})
 	if err != nil {
 		return effect.Outcome{}, err

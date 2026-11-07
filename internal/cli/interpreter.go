@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/telemetry"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 	"github.com/anggasct/aura/internal/tools/interpreter"
 )
@@ -31,6 +32,17 @@ type interpreterRuntime struct {
 type codeExecution interface {
 	toolsbuiltin.CodeRunner
 	interpreter.Prober
+}
+
+func codeObserver(recorder *telemetry.CodeRecorder) toolsbuiltin.CodeObserver {
+	return func(ctx context.Context, observation *toolsbuiltin.CodeObservation) {
+		recorder.Record(ctx, &telemetry.CodeObservation{
+			Runtime: observation.Runtime, ResultClass: string(observation.Class), Phase: string(observation.Phase),
+			Compiled: observation.Compiled, BuildDuration: observation.Build.Duration, RunDuration: observation.Run.Duration,
+			BuildCPU: observation.Build.CPUTime, RunCPU: observation.Run.CPUTime,
+			OutputBytes: observation.StdoutBytes + observation.StderrBytes, ArtifactBytes: observation.ArtifactBytes,
+		})
+	}
 }
 
 func interpreterEnabled(report capability.Report) bool {
@@ -62,13 +74,13 @@ func newInterpreterRuntime(cfg *config.Config, manifest *interpreter.Manifest) (
 	return &interpreterRuntime{store: runtimeStore, set: set, verifier: verifier}, nil
 }
 
-func (r *interpreterRuntime) enableExecution(ctx context.Context, cfg *config.Config, artifacts store.ArtifactStore, logger *slog.Logger) error {
+func (r *interpreterRuntime) enableExecution(ctx context.Context, cfg *config.Config, artifacts store.ArtifactStore, observer toolsbuiltin.CodeObserver, logger *slog.Logger) error {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return err
 	}
 	runner, err := toolsbuiltin.NewCodeRunner(&toolsbuiltin.CodeOptions{
-		Store: r.store, Verified: r.set, Artifacts: artifacts, RunRoot: filepath.Join(dataRoot, interpreterRunsDirName), Limits: &cfg.Interpreter,
+		Store: r.store, Verified: r.set, Artifacts: artifacts, Observer: observer, RunRoot: filepath.Join(dataRoot, interpreterRunsDirName), Limits: &cfg.Interpreter,
 	})
 	if err != nil {
 		return err
@@ -103,7 +115,7 @@ func startChatInterpreter(ctx context.Context, cfg *config.Config, builtin *tool
 	if err != nil {
 		return nil, err
 	}
-	if err := runtime.enableExecution(ctx, cfg, builtin.Artifacts(), logger); err != nil {
+	if err := runtime.enableExecution(ctx, cfg, builtin.Artifacts(), nil, logger); err != nil {
 		return nil, err
 	}
 	runtime.attach(builtin)

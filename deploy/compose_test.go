@@ -151,3 +151,51 @@ func TestExecProfileFixtureLoadsForTheExecBuild(t *testing.T) {
 		t.Fatalf("enabled capabilities = %v, want exec-linux", result.Config.Capabilities.Enabled)
 	}
 }
+
+func TestCodeInterpreterFixtureNeedsABuildThatCompilesIt(t *testing.T) {
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contained := capability.Dependencies{capability.DependencyProcessContainment: true, capability.DependencyInterpreterRuntime: true}
+	cases := []struct {
+		name         string
+		profile      string
+		compiled     string
+		dependencies capability.Dependencies
+		wantCode     capability.ErrorCode
+	}{
+		{name: "exec build that compiles the interpreter", profile: "exec-linux", compiled: "exec-linux,code-interpreter", dependencies: contained},
+		{name: "exec build without the interpreter", profile: "exec-linux", compiled: "exec-linux", dependencies: contained, wantCode: capability.ErrorCodeCapabilityUnavailable},
+		{name: "core build", profile: "core", compiled: "", dependencies: contained, wantCode: capability.ErrorCodeCapabilityUnavailable},
+		{name: "host without the interpreter runtime", profile: "exec-linux", compiled: "exec-linux,code-interpreter", dependencies: capability.Dependencies{capability.DependencyProcessContainment: true}, wantCode: capability.ErrorCodeDependencyMissing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			build, err := capability.ParseBuild(tc.profile, tc.compiled, "linux")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AURA_CONFIG", "")
+			result, err := config.LoadWithOptions("smoke/code-interpreter-profile.yaml", config.LoadOptions{Build: build, Registry: registry, Dependencies: tc.dependencies})
+			if err != nil {
+				t.Fatalf("smoke/code-interpreter-profile.yaml does not load: %v", err)
+			}
+			if tc.wantCode != "" {
+				if code, ok := capability.CodeOf(result.CapabilityStateError); !ok || code != tc.wantCode {
+					t.Fatalf("capability state error = %v, want code %q", result.CapabilityStateError, tc.wantCode)
+				}
+				return
+			}
+			if result.CapabilityStateError != nil {
+				t.Fatalf("capability state error = %v", result.CapabilityStateError)
+			}
+			if !slices.Equal(result.Config.Capabilities.Enabled, []string{"exec-linux", "code-interpreter"}) {
+				t.Fatalf("enabled capabilities = %v", result.Config.Capabilities.Enabled)
+			}
+			if !slices.Contains(result.CapabilityReport.Active(), "code-interpreter") {
+				t.Fatalf("active capabilities = %v, want code-interpreter", result.CapabilityReport.Active())
+			}
+		})
+	}
+}

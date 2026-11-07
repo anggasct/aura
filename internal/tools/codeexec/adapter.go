@@ -92,7 +92,11 @@ func (r *Runner) adapt(ctx context.Context, request *toolbroker.ToolRequest, con
 	if err != nil {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultExecutionFailed, "code_execute result could not be encoded")
 	}
-	return toolbroker.ToolResult{Class: outcome.Class.toolClass(), Output: output}, nil
+	audit, err := newAudit(request.RequestDigest, &outcome)
+	if err != nil {
+		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultExecutionFailed, "code_execute result could not be encoded")
+	}
+	return toolbroker.ToolResult{Class: outcome.Class.toolClass(), Output: output, Audit: audit}, nil
 }
 
 func notPerformed(ctx context.Context, err error) error {

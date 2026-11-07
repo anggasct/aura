@@ -177,7 +177,8 @@ func TestInterpreterInstallListRemoveLifecycle(t *testing.T) {
 	rig := newAvailableInterpreterRig(t)
 
 	out, err := rig.run(t, "list")
-	if err != nil || !strings.Contains(out, "python\t1.0.0\tabsent") {
+	pinned, _ := rig.manifest.Lookup("python")
+	if err != nil || !strings.Contains(out, "python\t1.0.0\tabsent\t"+pinned.Archive+" sha256:"+pinned.SHA256) {
 		t.Fatalf("list before install = %q, %v", out, err)
 	}
 	out, err = rig.run(t, "install", "python", "--archive", rig.archivePath)
@@ -185,7 +186,7 @@ func TestInterpreterInstallListRemoveLifecycle(t *testing.T) {
 		t.Fatalf("install = %q, %v", out, err)
 	}
 	out, err = rig.run(t, "list")
-	if err != nil || !strings.Contains(out, "python\t1.0.0\tinstalled") {
+	if err != nil || !strings.Contains(out, "python\t1.0.0\tinstalled\n") || strings.Contains(out, pinned.Archive) {
 		t.Fatalf("list after install = %q, %v", out, err)
 	}
 	out, err = rig.run(t, "list", "--json")
@@ -194,7 +195,7 @@ func TestInterpreterInstallListRemoveLifecycle(t *testing.T) {
 	}
 	var listed interpreterListOutput
 	if err := json.Unmarshal([]byte(out), &listed); err != nil || len(listed.Runtimes) != 1 ||
-		listed.Runtimes[0] != (interpreterListRow{Runtime: "python", Version: "1.0.0", State: "installed"}) {
+		listed.Runtimes[0] != (interpreterListRow{Runtime: "python", Version: "1.0.0", State: "installed", Archive: pinned.Archive, SHA256: pinned.SHA256}) {
 		t.Fatalf("list --json = %q, %+v, %v", out, listed, err)
 	}
 
