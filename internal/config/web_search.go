@@ -48,6 +48,9 @@ func parseSearchEndpoint(raw string) (ServiceEndpoint, error) {
 	if endpoint.Path == "" {
 		return ServiceEndpoint{}, errors.New(webSearchEndpointField + " must carry a non-empty path")
 	}
+	if endpoint.Loopback && endpoint.Scheme != "http" {
+		return ServiceEndpoint{}, errors.New(webSearchEndpointField + " must use http for a loopback host")
+	}
 	return endpoint, nil
 }
 

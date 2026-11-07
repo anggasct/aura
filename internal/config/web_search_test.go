@@ -149,6 +149,7 @@ func TestWebSearchEndpointRules(t *testing.T) {
 		"http remote host":       "http://search.example.com/search",
 		"loopback lookalike":     "http://127.0.0.2:8888/search",
 		"loopback shorthand":     "http://127.1:8888/search",
+		"https loopback":         "https://127.0.0.1:8888/search",
 		"https localhost":        "https://localhost/search",
 		"https private ip":       "https://10.0.0.5/search",
 		"https metadata ip":      "https://169.254.169.254/search",
