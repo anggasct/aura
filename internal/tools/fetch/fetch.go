@@ -50,7 +50,7 @@ func New(options Options) (toolbroker.Adapter, error) {
 	}
 	client := options.client
 	if client == nil {
-		client = egress.NewClient(options.Resolver)
+		client = egress.NewAPIClient(options.Resolver)
 	}
 	clientCopy := *client
 	originalRedirect := client.CheckRedirect
@@ -80,9 +80,7 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 	if err != nil || parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "public HTTP(S) URL is required")
 	}
-	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "query and fragment are not allowed")
-	}
+	parsed.Fragment, parsed.RawFragment = "", ""
 	timeout := options.Timeout
 	if constraints.Timeout > 0 && constraints.Timeout < timeout {
 		timeout = constraints.Timeout
@@ -101,7 +99,7 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 	httpRequest.Header.Set("Accept", "text/plain, text/html, application/json, application/xml")
 	response, err := client.Do(httpRequest)
 	if err != nil {
-		return toolbroker.ToolResult{}, err
+		return toolbroker.ToolResult{}, withoutURL(err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.ContentLength > options.MaxEncodedBytes {
@@ -146,6 +144,14 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 		class = toolbroker.ResultExecutionFailed
 	}
 	return toolbroker.ToolResult{Class: class, Output: encoded}, nil
+}
+
+func withoutURL(err error) error {
+	var transport *url.Error
+	if errors.As(err, &transport) {
+		return transport.Err
+	}
+	return err
 }
 
 func allowedContentType(contentType string) bool {

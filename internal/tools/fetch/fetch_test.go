@@ -3,6 +3,7 @@ package fetch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -78,7 +79,7 @@ func TestFetchBoundsBodyAndRejectsBinaryContent(t *testing.T) {
 	}
 }
 
-func TestFetchRejectsQueryAndLimitsRedirects(t *testing.T) {
+func TestFetchLimitsRedirects(t *testing.T) {
 	adapter, err := New(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    0,
@@ -99,11 +100,108 @@ func TestFetchRejectsQueryAndLimitsRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	for _, raw := range []string{"https://public.example/doc?secret=1", "https://public.example/redirect"} {
+	if _, err := adapter(context.Background(), fetchRequest("https://public.example/redirect"), constraints()); err == nil {
+		t.Error("followed a redirect past the limit")
+	}
+}
+
+func TestFetchSendsTheQueryAndDropsTheFragment(t *testing.T) {
+	var sent *http.Request
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 1024,
+		client: cannedClient(func(req *http.Request) (*http.Response, error) {
+			sent = req
+			return cannedResponse(req, "text/plain", "ok"), nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	output, err := adapter(context.Background(), fetchRequest("https://public.example/doc?a=1&b=two%20words#part"), constraints())
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if sent.URL.Path != "/doc" || sent.URL.RawQuery != "a=1&b=two%20words" || sent.URL.Fragment != "" {
+		t.Fatalf("sent URL = %q", sent.URL.String())
+	}
+	var body result
+	if err := json.Unmarshal(output.Output, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.URL != "https://public.example/doc?a=1&b=two%20words" {
+		t.Fatalf("result url = %q", body.URL)
+	}
+}
+
+func TestFetchDeniesUnsafeDestinationsCarryingAQuery(t *testing.T) {
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 1024,
+		Resolver:        publicResolverWithPrivate(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for _, raw := range []string{"https://127.0.0.1/doc?a=1", "https://10.0.0.5/doc?a=1", "https://internal.example/doc?a=1", "http://public.example/doc?a=1"} {
 		_, err := adapter(context.Background(), fetchRequest(raw), constraints())
-		if err == nil {
-			t.Errorf("accepted unsafe URL %q", raw)
+		if code, ok := egress.CodeOf(err); !ok || code != egress.ErrorCodeEgressDenied {
+			t.Errorf("fetch(%q) = %v, want egress_denied before dialing", raw, err)
 		}
+	}
+}
+
+func TestFetchFollowsOnlySameOriginRedirectsToAQuery(t *testing.T) {
+	for name, tc := range map[string]struct {
+		location string
+		followed bool
+	}{
+		"same origin":  {location: "https://public.example/final?a=1", followed: true},
+		"other origin": {location: "https://other.example/final?a=1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := egress.NewAPIClient(staticResolver{
+				"public.example": {net.ParseIP("93.184.216.34")},
+				"other.example":  {net.ParseIP("93.184.216.35")},
+			})
+			client.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path == "/start" {
+					return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": []string{tc.location}}, Body: http.NoBody, Request: req}, nil
+				}
+				return cannedResponse(req, "text/plain", "ok"), nil
+			})
+			adapter, err := New(Options{Timeout: time.Second, MaxRedirects: 2, MaxEncodedBytes: 1024, MaxDecodedBytes: 1024, client: client})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			_, err = adapter(context.Background(), fetchRequest("https://public.example/start"), constraints())
+			if tc.followed && err != nil {
+				t.Fatalf("fetch: %v", err)
+			}
+			if code, ok := egress.CodeOf(err); !tc.followed && (!ok || code != egress.ErrorCodeEgressDenied) {
+				t.Fatalf("fetch = %v, want egress_denied", err)
+			}
+		})
+	}
+}
+
+func TestFetchTransportErrorsCarryNoURL(t *testing.T) {
+	adapter, err := New(Options{
+		Timeout:         time.Second,
+		MaxEncodedBytes: 1024,
+		MaxDecodedBytes: 1024,
+		client: cannedClient(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("connection refused")
+		}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = adapter(context.Background(), fetchRequest("https://public.example/doc?token=hunter2"), constraints())
+	if err == nil || strings.Contains(err.Error(), "hunter2") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
