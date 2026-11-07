@@ -39,6 +39,12 @@ const (
 
 	MetricVisionOperationsTotal   = "vision.operations.total"
 	MetricVisionOperationDuration = "vision.operation.duration"
+
+	MetricCodeRunsTotal    = "code.runs.total"
+	MetricCodeRunDuration  = "code.run.duration"
+	MetricCodeRunCPU       = "code.run.cpu"
+	MetricCodeRunOutput    = "code.run.output.bytes"
+	MetricCodeRunArtifacts = "code.run.artifact.bytes"
 )
 
 const (
@@ -106,6 +112,10 @@ const (
 	AttrVisionSizeBucket      = "vision.size_bucket"
 	AttrVisionPixelsBucket    = "vision.pixels_bucket"
 	AttrVisionDimensionBucket = "vision.dimension_bucket"
+
+	AttrCodeRuntime     = "code.runtime"
+	AttrCodeResultClass = "code.result_class"
+	AttrCodePhase       = "code.phase"
 )
 
 var turnSpanAttrs = []string{
@@ -170,6 +180,11 @@ var metricLabelAttrs = map[string][]string{
 	MetricProfileExtractionQueueAge: {AttrProfileResult},
 	MetricProfileFactsCount:         {AttrProfileStatus, AttrProfileCategory},
 	MetricVisionOperationsTotal:     {AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol, AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket, AttrVisionDimensionBucket},
+	MetricCodeRunsTotal:             {AttrCodeRuntime, AttrCodeResultClass, AttrCodePhase},
+	MetricCodeRunDuration:           {AttrCodeRuntime, AttrCodeResultClass, AttrCodePhase},
+	MetricCodeRunCPU:                {AttrCodeRuntime, AttrCodeResultClass, AttrCodePhase},
+	MetricCodeRunOutput:             {AttrCodeRuntime},
+	MetricCodeRunArtifacts:          {AttrCodeRuntime},
 	MetricVisionOperationDuration:   {AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol, AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket, AttrVisionDimensionBucket},
 }
 
