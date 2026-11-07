@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
@@ -151,13 +152,24 @@ func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *ema
 	if err != nil {
 		return nil, err
 	}
-	searchAdapter, err := searchTool.New(&searchTool.Options{
+	searchOptions := &searchTool.Options{
 		Provider:      toolsCfg.WebSearch.Provider,
 		CredentialRef: toolsCfg.WebSearch.CredentialRef,
 		Timeout:       time.Duration(toolsCfg.Fetch.Timeout),
 		MaxResults:    toolsCfg.WebSearch.MaxResults,
 		MaxBodyBytes:  toolsCfg.Fetch.MaxDecodedBytes,
-	})
+	}
+	if toolsCfg.WebSearch.Endpoint != "" {
+		endpoint, err := toolsCfg.WebSearch.SearchEndpoint()
+		if err != nil {
+			return nil, fmt.Errorf("web search endpoint: %w", err)
+		}
+		searchOptions.Endpoint = endpoint.URL()
+		if endpoint.Loopback {
+			searchOptions.LoopbackAuthority = endpoint.Authority()
+		}
+	}
+	searchAdapter, err := searchTool.New(searchOptions)
 	if err != nil {
 		return nil, err
 	}
