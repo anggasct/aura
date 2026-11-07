@@ -219,7 +219,7 @@ func (h *auditHarness) telemetryText() string {
 	}
 	addSet := func(set attribute.Set) {
 		for _, kv := range set.ToSlice() {
-			fmt.Fprintf(&text, " %s=%s", kv.Key, kv.Value.Emit())
+			fmt.Fprintf(&text, " %s=%s", kv.Key, kv.Value.String())
 		}
 	}
 	for _, scope := range resource.ScopeMetrics {
@@ -241,15 +241,17 @@ func (h *auditHarness) telemetryText() string {
 			}
 		}
 	}
-	for _, span := range h.spans.GetSpans() {
+	spans := h.spans.GetSpans()
+	for i := range spans {
+		span := &spans[i]
 		text.WriteString("\nspan " + span.Name + " " + span.Status.Description)
 		for _, kv := range span.Attributes {
-			fmt.Fprintf(&text, " %s=%s", kv.Key, kv.Value.Emit())
+			fmt.Fprintf(&text, " %s=%s", kv.Key, kv.Value.String())
 		}
 		for _, event := range span.Events {
 			text.WriteString(" event " + event.Name)
 			for _, kv := range event.Attributes {
-				fmt.Fprintf(&text, " %s=%s", kv.Key, kv.Value.Emit())
+				fmt.Fprintf(&text, " %s=%s", kv.Key, kv.Value.String())
 			}
 		}
 	}

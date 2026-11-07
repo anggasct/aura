@@ -83,6 +83,7 @@ func TestObservationHoldsNoFreeFormText(t *testing.T) {
 			}
 		case reflect.Slice, reflect.Map, reflect.Interface, reflect.Pointer:
 			t.Errorf("field %s can carry arbitrary content", field.Name)
+		default:
 		}
 	}
 }

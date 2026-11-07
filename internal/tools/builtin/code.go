@@ -17,6 +17,11 @@ import (
 	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
+type (
+	CodeObservation = codeexec.Observation
+	CodeObserver    = codeexec.Observer
+)
+
 type CodeRunner interface {
 	Adapter() toolbroker.Adapter
 	ArgumentCheck(arguments json.RawMessage) error
@@ -61,7 +66,7 @@ type CodeOptions struct {
 	Store     *interpreter.Store
 	Verified  *interpreter.VerifiedSet
 	Artifacts store.ArtifactStore
-	Observer  codeexec.Observer
+	Observer  CodeObserver
 	RunRoot   string
 	Limits    *config.Interpreter
 }

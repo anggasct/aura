@@ -27,7 +27,7 @@ func collectCodeMetrics(t *testing.T, reader *sdkmetric.ManualReader) map[string
 	flatten := func(set attribute.Set) map[string]string {
 		attrs := map[string]string{}
 		for _, kv := range set.ToSlice() {
-			attrs[string(kv.Key)] = kv.Value.Emit()
+			attrs[string(kv.Key)] = kv.Value.String()
 		}
 		return attrs
 	}

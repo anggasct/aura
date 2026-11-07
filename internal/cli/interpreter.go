@@ -13,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/telemetry"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
-	"github.com/anggasct/aura/internal/tools/codeexec"
 	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
@@ -35,8 +34,8 @@ type codeExecution interface {
 	interpreter.Prober
 }
 
-func codeObserver(recorder *telemetry.CodeRecorder) codeexec.Observer {
-	return func(ctx context.Context, observation *codeexec.Observation) {
+func codeObserver(recorder *telemetry.CodeRecorder) toolsbuiltin.CodeObserver {
+	return func(ctx context.Context, observation *toolsbuiltin.CodeObservation) {
 		recorder.Record(ctx, &telemetry.CodeObservation{
 			Runtime: observation.Runtime, ResultClass: string(observation.Class), Phase: string(observation.Phase),
 			Compiled: observation.Compiled, BuildDuration: observation.Build.Duration, RunDuration: observation.Run.Duration,
@@ -75,7 +74,7 @@ func newInterpreterRuntime(cfg *config.Config, manifest *interpreter.Manifest) (
 	return &interpreterRuntime{store: runtimeStore, set: set, verifier: verifier}, nil
 }
 
-func (r *interpreterRuntime) enableExecution(ctx context.Context, cfg *config.Config, artifacts store.ArtifactStore, observer codeexec.Observer, logger *slog.Logger) error {
+func (r *interpreterRuntime) enableExecution(ctx context.Context, cfg *config.Config, artifacts store.ArtifactStore, observer toolsbuiltin.CodeObserver, logger *slog.Logger) error {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return err
