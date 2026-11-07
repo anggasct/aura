@@ -301,6 +301,18 @@ func TestSupervisorPassesChildConfigToBinary(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	argvDeadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := os.Stat(argDump); err == nil {
+			break
+		}
+		if time.Now().After(argvDeadline) {
+			cancel()
+			<-done
+			t.Fatalf("stub never wrote argv dump: supervisor snapshot %+v", supervisor.Snapshot())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	cancel()
 	<-done
 	argv, err := os.ReadFile(argDump)

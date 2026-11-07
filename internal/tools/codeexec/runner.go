@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/tools"
 	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
@@ -34,17 +35,21 @@ type Limits struct {
 	MaxProcesses   int64
 	MaxRunDirBytes int64
 	MaxFileBytes   int64
+	MaxOutputFiles int64
 }
 
 func (l *Limits) validate() error {
 	positive := []int64{
 		int64(l.Timeout), l.MaxSourceBytes, l.MaxStdinBytes, l.MaxStdoutBytes, l.MaxStderrBytes,
-		l.MaxMemoryBytes, l.MaxProcesses, l.MaxRunDirBytes, l.MaxFileBytes,
+		l.MaxMemoryBytes, l.MaxProcesses, l.MaxRunDirBytes, l.MaxFileBytes, l.MaxOutputFiles,
 	}
 	for _, value := range positive {
 		if value <= 0 {
 			return Errorf(ErrorCodeInvalidArgument, "every interpreter limit must be positive")
 		}
+	}
+	if l.MaxOutputFiles > tools.MaxCodeOutputFiles {
+		return Errorf(ErrorCodeInvalidArgument, "the output file limit must be at most %d", tools.MaxCodeOutputFiles)
 	}
 	if l.Timeout < time.Second {
 		return Errorf(ErrorCodeInvalidArgument, "the interpreter timeout must be at least one second")
@@ -53,26 +58,28 @@ func (l *Limits) validate() error {
 }
 
 type Options struct {
-	Store    *interpreter.Store
-	Verified *interpreter.VerifiedSet
-	RunRoot  string
-	Limits   Limits
+	Store     *interpreter.Store
+	Verified  *interpreter.VerifiedSet
+	Artifacts ArtifactSink
+	RunRoot   string
+	Limits    Limits
 }
 
 type sandboxRunner func(ctx context.Context, spec *sandbox.Spec, command string, args ...string) (sandbox.Result, error)
 
 type Runner struct {
-	store    *interpreter.Store
-	verified *interpreter.VerifiedSet
-	runRoot  string
-	limits   Limits
-	sandbox  sandboxRunner
-	slots    chan struct{}
+	store     *interpreter.Store
+	verified  *interpreter.VerifiedSet
+	artifacts ArtifactSink
+	runRoot   string
+	limits    Limits
+	sandbox   sandboxRunner
+	slots     chan struct{}
 }
 
 func NewRunner(options *Options) (*Runner, error) {
-	if options == nil || options.Store == nil || options.Verified == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "store and verified set are required")
+	if options == nil || options.Store == nil || options.Verified == nil || options.Artifacts == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "store, verified set and artifact sink are required")
 	}
 	if !filepath.IsAbs(options.RunRoot) {
 		return nil, Errorf(ErrorCodeInvalidArgument, "run root must be an absolute path")
@@ -81,16 +88,19 @@ func NewRunner(options *Options) (*Runner, error) {
 		return nil, err
 	}
 	return &Runner{
-		store: options.Store, verified: options.Verified, runRoot: options.RunRoot, limits: options.Limits,
+		store: options.Store, verified: options.Verified, artifacts: options.Artifacts, runRoot: options.RunRoot, limits: options.Limits,
 		sandbox: sandbox.Run, slots: make(chan struct{}, maxConcurrentRuns),
 	}, nil
 }
 
 type Request struct {
-	Runtime string
-	Source  string
-	Stdin   string
-	Timeout time.Duration
+	Runtime     string
+	Source      string
+	Stdin       string
+	SessionID   string
+	RequestID   string
+	OutputFiles []string
+	Timeout     time.Duration
 }
 
 type Outcome struct {
@@ -102,6 +112,7 @@ type Outcome struct {
 	Stderr          string
 	StdoutTruncated bool
 	StderrTruncated bool
+	Artifacts       []ArtifactEntry
 }
 
 type plan struct {
@@ -109,6 +120,8 @@ type plan struct {
 	language language
 	source   string
 	stdin    string
+	outputs  []string
+	origin   provenance
 	limits   sandbox.Limits
 	cpu      time.Duration
 }
@@ -119,6 +132,9 @@ func (r *Runner) Execute(ctx context.Context, request *Request) (Outcome, error)
 	}
 	if int64(len(request.Source)) > r.limits.MaxSourceBytes || int64(len(request.Stdin)) > r.limits.MaxStdinBytes {
 		return Outcome{}, Errorf(ErrorCodeInvalidArgument, "source or stdin exceeds the configured limit")
+	}
+	if err := tools.ValidateCodeOutputFiles(request.OutputFiles, int(r.limits.MaxOutputFiles)); err != nil {
+		return Outcome{}, wrapf(ErrorCodeInvalidArgument, err, "%v", err)
 	}
 	language, supported := languageFor(request.Runtime)
 	if !supported || !r.verified.Verified(request.Runtime) {
@@ -132,8 +148,13 @@ func (r *Runner) Execute(ctx context.Context, request *Request) (Outcome, error)
 	if request.Timeout > 0 && request.Timeout < timeout {
 		timeout = max(request.Timeout, time.Second)
 	}
+	origin, err := newProvenance(request.SessionID, request.RequestID, bundle.Runtime.ID, bundle.Runtime.Version)
+	if err != nil {
+		return Outcome{}, err
+	}
 	return r.run(ctx, &plan{
 		bundle: bundle, language: language, source: request.Source, stdin: request.Stdin, cpu: timeout,
+		outputs: request.OutputFiles, origin: origin,
 		limits: sandbox.Limits{
 			MemoryBytes: r.limits.MaxMemoryBytes, CPUTime: timeout, MaxOutputBytes: max(r.limits.MaxStdoutBytes, r.limits.MaxStderrBytes),
 			MaxOpenFiles: openFilesLimit, MaxProcesses: r.limits.MaxProcesses, FileBytes: r.limits.MaxFileBytes,
@@ -153,16 +174,16 @@ func (r *Runner) run(ctx context.Context, p *plan) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	if err := os.WriteFile(filepath.Join(dir, p.language.source), []byte(p.source), sourceFileMode); err != nil {
+	defer dir.release()
+	if err := os.WriteFile(filepath.Join(dir.path, p.language.source), []byte(p.source), sourceFileMode); err != nil {
 		return Outcome{}, wrapf(ErrorCodeRunFailed, err, "write the program source")
 	}
 	argv := p.bundle.Runtime.Command(p.bundle.Executable, p.language.source)
 	spec := &sandbox.Spec{
 		Profile:       sandbox.ProfileInterpreter,
-		WorkingDir:    dir,
+		WorkingDir:    dir.path,
 		ReadOnlyPaths: []string{p.bundle.Dir},
-		AllowEnv:      environment(dir, &p.bundle.Runtime),
+		AllowEnv:      environment(dir.path, &p.bundle.Runtime),
 		Stdin:         []byte(p.stdin),
 		Limits:        p.limits,
 	}
@@ -172,21 +193,15 @@ func (r *Runner) run(ctx context.Context, p *plan) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, wrapSandbox(err)
 	}
-	return Outcome{
+	outcome := Outcome{
 		Class: classify(&result, p.cpu), ExitCode: result.ExitCode, Signal: result.Signal, Duration: elapsed,
 		Stdout: result.Stdout, Stderr: result.Stderr, StdoutTruncated: result.StdoutTruncated, StderrTruncated: result.StderrTruncated,
-	}, nil
-}
-
-func (r *Runner) newRunDir() (string, error) {
-	if err := os.MkdirAll(r.runRoot, runDirMode); err != nil {
-		return "", wrapf(ErrorCodeRunFailed, pathFree(err), "create the run root")
 	}
-	dir, err := os.MkdirTemp(r.runRoot, runDirPrefix)
-	if err != nil {
-		return "", wrapf(ErrorCodeRunFailed, pathFree(err), "create the run directory")
+	if outcome.Class == ClassOK || outcome.Class == ClassExitNonzero {
+		imports := importer{sink: r.artifacts, maxFiles: int(r.limits.MaxOutputFiles), maxBytes: r.limits.MaxFileBytes}
+		outcome.Artifacts = imports.importAll(ctx, dir.outputDir(), p.outputs, &p.origin)
 	}
-	return dir, nil
+	return outcome, nil
 }
 
 func environment(dir string, runtime *interpreter.Runtime) []string {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/tools"
 	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
@@ -24,7 +26,7 @@ func hasErrorCode(err error, want ErrorCode) bool {
 
 func TestNewRunnerRejectsIncompleteOptions(t *testing.T) {
 	rig := newRig(t, nil)
-	valid := Options{Store: rig.store, Verified: rig.set, RunRoot: rig.runRoot, Limits: rigLimits()}
+	valid := Options{Store: rig.store, Verified: rig.set, Artifacts: rig.sink, RunRoot: rig.runRoot, Limits: rigLimits()}
 	cases := []struct {
 		name   string
 		mutate func(*Options)
@@ -33,6 +35,7 @@ func TestNewRunnerRejectsIncompleteOptions(t *testing.T) {
 		{name: "nil options", nilOpt: true},
 		{name: "missing store", mutate: func(o *Options) { o.Store = nil }},
 		{name: "missing verified set", mutate: func(o *Options) { o.Verified = nil }},
+		{name: "missing artifact sink", mutate: func(o *Options) { o.Artifacts = nil }},
 		{name: "relative run root", mutate: func(o *Options) { o.RunRoot = "runs" }},
 		{name: "empty run root", mutate: func(o *Options) { o.RunRoot = "" }},
 		{name: "zero timeout", mutate: func(o *Options) { o.Limits.Timeout = 0 }},
@@ -45,6 +48,8 @@ func TestNewRunnerRejectsIncompleteOptions(t *testing.T) {
 		{name: "zero process limit", mutate: func(o *Options) { o.Limits.MaxProcesses = 0 }},
 		{name: "zero run directory limit", mutate: func(o *Options) { o.Limits.MaxRunDirBytes = 0 }},
 		{name: "zero file limit", mutate: func(o *Options) { o.Limits.MaxFileBytes = 0 }},
+		{name: "zero output file limit", mutate: func(o *Options) { o.Limits.MaxOutputFiles = 0 }},
+		{name: "output file limit above the tool maximum", mutate: func(o *Options) { o.Limits.MaxOutputFiles = tools.MaxCodeOutputFiles + 1 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -281,7 +286,7 @@ func TestExecuteReportsTheOutcome(t *testing.T) {
 	}
 	want := Outcome{Class: ClassExitNonzero, ExitCode: 3, Stdout: "out", Stderr: "err", StdoutTruncated: true, StderrTruncated: true}
 	outcome.Duration = 0
-	if outcome != want {
+	if !reflect.DeepEqual(outcome, want) {
 		t.Fatalf("outcome = %+v, want %+v", outcome, want)
 	}
 }

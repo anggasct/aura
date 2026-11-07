@@ -10,6 +10,7 @@ import (
 	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/health"
+	"github.com/anggasct/aura/internal/store"
 	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 	"github.com/anggasct/aura/internal/tools/interpreter"
 )
@@ -46,31 +47,38 @@ func newInterpreterStore(cfg *config.Config, manifest *interpreter.Manifest) (*i
 }
 
 func newInterpreterRuntime(cfg *config.Config, manifest *interpreter.Manifest) (*interpreterRuntime, error) {
-	store, err := newInterpreterStore(cfg, manifest)
+	runtimeStore, err := newInterpreterStore(cfg, manifest)
 	if err != nil {
 		return nil, err
 	}
-	set, err := interpreter.NewVerifiedSet(store.Manifest())
+	set, err := interpreter.NewVerifiedSet(runtimeStore.Manifest())
 	if err != nil {
 		return nil, err
 	}
-	verifier, err := interpreter.NewVerifier(store, set)
+	verifier, err := interpreter.NewVerifier(runtimeStore, set)
 	if err != nil {
 		return nil, err
 	}
-	return &interpreterRuntime{store: store, set: set, verifier: verifier}, nil
+	return &interpreterRuntime{store: runtimeStore, set: set, verifier: verifier}, nil
 }
 
-func (r *interpreterRuntime) enableExecution(cfg *config.Config) error {
+func (r *interpreterRuntime) enableExecution(ctx context.Context, cfg *config.Config, artifacts store.ArtifactStore, logger *slog.Logger) error {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return err
 	}
 	runner, err := toolsbuiltin.NewCodeRunner(&toolsbuiltin.CodeOptions{
-		Store: r.store, Verified: r.set, RunRoot: filepath.Join(dataRoot, interpreterRunsDirName), Limits: &cfg.Interpreter,
+		Store: r.store, Verified: r.set, Artifacts: artifacts, RunRoot: filepath.Join(dataRoot, interpreterRunsDirName), Limits: &cfg.Interpreter,
 	})
 	if err != nil {
 		return err
+	}
+	removed, err := runner.SweepStale(ctx)
+	if err != nil {
+		return err
+	}
+	if removed > 0 {
+		logger.InfoContext(ctx, "interpreter stale run directories removed", "component", "interpreter", "removed", removed)
 	}
 	verifier, err := interpreter.NewVerifier(r.store, r.set, interpreter.WithProber(runner))
 	if err != nil {
@@ -95,7 +103,7 @@ func startChatInterpreter(ctx context.Context, cfg *config.Config, builtin *tool
 	if err != nil {
 		return nil, err
 	}
-	if err := runtime.enableExecution(cfg); err != nil {
+	if err := runtime.enableExecution(ctx, cfg, builtin.Artifacts(), logger); err != nil {
 		return nil, err
 	}
 	runtime.attach(builtin)
@@ -149,14 +157,14 @@ func interpreterStatusChecks(cfg *config.Config, report capability.Report) ([]he
 }
 
 func interpreterManifestChecks(cfg *config.Config, manifest *interpreter.Manifest) ([]health.RegisteredCheck, error) {
-	store, err := newInterpreterStore(cfg, manifest)
+	runtimeStore, err := newInterpreterStore(cfg, manifest)
 	if err != nil {
 		return nil, err
 	}
 	return []health.RegisteredCheck{{
 		ID: health.ComponentInterpreter,
 		Checker: health.InterpreterChecker{Runtimes: func(ctx context.Context) ([]health.InterpreterRuntime, error) {
-			verifications, err := store.List(ctx)
+			verifications, err := runtimeStore.List(ctx)
 			if err != nil {
 				return nil, err
 			}

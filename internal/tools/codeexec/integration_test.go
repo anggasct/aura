@@ -94,7 +94,7 @@ func (h *liveHost) verify() error {
 	if err != nil {
 		return err
 	}
-	runner, err := NewRunner(&Options{Store: h.store, Verified: set, RunRoot: filepath.Join(h.data, "runs"), Limits: liveLimits()})
+	runner, err := NewRunner(&Options{Store: h.store, Verified: set, Artifacts: &memorySink{}, RunRoot: filepath.Join(h.data, "runs"), Limits: liveLimits()})
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func (h *liveHost) verify() error {
 func liveLimits() Limits {
 	return Limits{
 		Timeout: 20 * time.Second, MaxSourceBytes: 256 << 10, MaxStdinBytes: 1 << 20, MaxStdoutBytes: 64 << 10, MaxStderrBytes: 64 << 10,
-		MaxMemoryBytes: 512 << 20, MaxProcesses: 64, MaxRunDirBytes: 64 << 20, MaxFileBytes: 32 << 20,
+		MaxMemoryBytes: 512 << 20, MaxProcesses: 64, MaxRunDirBytes: 64 << 20, MaxFileBytes: 32 << 20, MaxOutputFiles: 8,
 	}
 }
 
@@ -120,7 +120,7 @@ func (h *liveHost) runnerWith(t *testing.T, change func(*Limits)) *Runner {
 	t.Helper()
 	limits := liveLimits()
 	change(&limits)
-	runner, err := NewRunner(&Options{Store: h.store, Verified: h.set, RunRoot: filepath.Join(h.data, "runs"), Limits: limits})
+	runner, err := NewRunner(&Options{Store: h.store, Verified: h.set, Artifacts: &memorySink{}, RunRoot: filepath.Join(h.data, "runs"), Limits: limits})
 	if err != nil {
 		t.Fatal(err)
 	}
