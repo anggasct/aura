@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -291,4 +292,27 @@ func newClient(resolver Resolver, target func(*url.URL) string) *http.Client {
 			return nil
 		},
 	}
+}
+
+func NewLoopbackClient(authority string) (*http.Client, error) {
+	host, port, err := net.SplitHostPort(authority)
+	if err != nil {
+		return nil, Errorf(ErrorCodeEgressDenied, "loopback authority must be 127.0.0.1:<port> or [::1]:<port>")
+	}
+	number, err := strconv.Atoi(port)
+	if (host != "127.0.0.1" && host != "::1") || err != nil || number < 1 || number > 65535 || strconv.Itoa(number) != port {
+		return nil, Errorf(ErrorCodeEgressDenied, "loopback authority must be 127.0.0.1:<port> or [::1]:<port>")
+	}
+	pinned := net.JoinHostPort(host, port)
+	dialer := &net.Dialer{}
+	transport := &http.Transport{
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			if address != pinned {
+				return nil, Errorf(ErrorCodeEgressDenied, "the loopback client dials only its configured address")
+			}
+			return dialer.DialContext(ctx, network, pinned)
+		},
+	}
+	return &http.Client{Transport: transport}, nil
 }
