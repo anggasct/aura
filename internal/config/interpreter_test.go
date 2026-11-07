@@ -14,6 +14,7 @@ func TestLoad_InterpreterDefaults(t *testing.T) {
 	}
 	want := Interpreter{
 		Timeout:          Duration(30 * time.Second),
+		BuildTimeout:     Duration(time.Minute),
 		MaxSourceBytes:   262144,
 		MaxStdinBytes:    1 << 20,
 		MaxStdoutBytes:   65536,
@@ -36,6 +37,7 @@ func TestLoad_InterpreterAppliesEveryKey(t *testing.T) {
 	content := `version: 1
 interpreter:
   timeout: 2m
+  build_timeout: 90s
   max_source_bytes: 1KiB
   max_stdin_bytes: 2048
   max_stdout_bytes: 4KiB
@@ -51,7 +53,7 @@ interpreter:
 		t.Fatalf("Load: %v", err)
 	}
 	want := Interpreter{
-		Timeout: Duration(2 * time.Minute), MaxSourceBytes: 1 << 10, MaxStdinBytes: 2048, MaxStdoutBytes: 4 << 10,
+		Timeout: Duration(2 * time.Minute), BuildTimeout: Duration(90 * time.Second), MaxSourceBytes: 1 << 10, MaxStdinBytes: 2048, MaxStdoutBytes: 4 << 10,
 		MaxStderrBytes: 8 << 10, MaxOutputFiles: 3, MaxArtifactBytes: 1 << 20, MaxMemoryBytes: 128 << 20,
 		MaxProcesses: 9, MaxRunDirBytes: 2 << 20,
 	}
@@ -98,6 +100,12 @@ func TestLoad_InterpreterBoundsAreRejected(t *testing.T) {
 		bound{"timeout above the maximum", "timeout: 10m1s", false},
 		bound{"timeout zero", "timeout: 0s", false},
 		bound{"timeout negative", "timeout: -5s", false},
+		bound{"build_timeout at the minimum", "build_timeout: 5s", true},
+		bound{"build_timeout at the maximum", "build_timeout: 10m", true},
+		bound{"build_timeout below the minimum", "build_timeout: 4999ms", false},
+		bound{"build_timeout above the maximum", "build_timeout: 10m1s", false},
+		bound{"build_timeout zero", "build_timeout: 0s", false},
+		bound{"build_timeout negative", "build_timeout: -5s", false},
 		bound{"max_output_files at the minimum", "max_output_files: 1", true},
 		bound{"max_output_files at the maximum", fmt.Sprintf("max_output_files: %d", MaxInterpreterOutputFiles), true},
 		bound{"max_output_files zero", "max_output_files: 0", false},

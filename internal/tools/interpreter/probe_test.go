@@ -150,7 +150,7 @@ func TestRuntimeCommandAndEnvironment(t *testing.T) {
 		Argv:        []string{PlaceholderExecutable, "-I", PlaceholderSource},
 		Environment: map[string]string{"ZED": "last", "ALPHA": "first"},
 	}
-	if got, want := runtime.Command("/bundle/bin/tool", "main.py"), []string{"/bundle/bin/tool", "-I", "main.py"}; !slices.Equal(got, want) {
+	if got, want := runtime.Command("/bundle/bin/tool", "main.py", ""), []string{"/bundle/bin/tool", "-I", "main.py"}; !slices.Equal(got, want) {
 		t.Fatalf("Command = %v, want %v", got, want)
 	}
 	if got, want := runtime.EnvironmentEntries(), []string{"ALPHA=first", "ZED=last"}; !slices.Equal(got, want) {

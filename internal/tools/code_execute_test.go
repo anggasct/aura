@@ -61,7 +61,7 @@ func TestCodeExecuteValidation(t *testing.T) {
 	}{
 		{"python", `{"runtime":"python","source":"print(1)"}`, true},
 		{"javascript with stdin", `{"runtime":"javascript","source":"1","stdin":"in"}`, true},
-		{"go is accepted and answered later", `{"runtime":"go","source":"package main"}`, true},
+		{"go is accepted", `{"runtime":"go","source":"package main"}`, true},
 		{"empty stdin", `{"runtime":"python","source":"x","stdin":""}`, true},
 		{"unknown runtime", `{"runtime":"ruby","source":"x"}`, false},
 		{"runtime case", `{"runtime":"Python","source":"x"}`, false},

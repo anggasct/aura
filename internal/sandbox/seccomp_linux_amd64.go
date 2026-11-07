@@ -129,6 +129,7 @@ func interpreterAdditions() []int {
 		unix.SYS_MKDIR, unix.SYS_RMDIR, unix.SYS_UNLINK, unix.SYS_UNLINKAT,
 		unix.SYS_RENAME, unix.SYS_RENAMEAT, unix.SYS_RENAMEAT2,
 		unix.SYS_FSYNC, unix.SYS_SENDFILE, unix.SYS_TGKILL,
+		unix.SYS_MKDIRAT, unix.SYS_FLOCK, unix.SYS_FALLOCATE, unix.SYS_COPY_FILE_RANGE, unix.SYS_WAITID, unix.SYS_RESTART_SYSCALL,
 	}
 }
 

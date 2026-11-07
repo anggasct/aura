@@ -14,6 +14,7 @@ import (
 func TestCodeLimitsReadEveryConfiguredBound(t *testing.T) {
 	configured := config.Interpreter{
 		Timeout:          config.Duration(7 * time.Second),
+		BuildTimeout:     config.Duration(21 * time.Second),
 		MaxSourceBytes:   11,
 		MaxStdinBytes:    12,
 		MaxStdoutBytes:   13,
@@ -25,7 +26,7 @@ func TestCodeLimitsReadEveryConfiguredBound(t *testing.T) {
 		MaxRunDirBytes:   19,
 	}
 	want := codeexec.Limits{
-		Timeout: 7 * time.Second, MaxSourceBytes: 11, MaxStdinBytes: 12, MaxStdoutBytes: 13, MaxStderrBytes: 14,
+		Timeout: 7 * time.Second, BuildTimeout: 21 * time.Second, MaxSourceBytes: 11, MaxStdinBytes: 12, MaxStdoutBytes: 13, MaxStderrBytes: 14,
 		MaxMemoryBytes: 17, MaxProcesses: 18, MaxRunDirBytes: 19, MaxFileBytes: 16, MaxOutputFiles: 15,
 	}
 	if got := codeLimits(&configured); got != want {

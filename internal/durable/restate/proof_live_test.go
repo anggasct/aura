@@ -246,8 +246,7 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 
 	dir := t.TempDir()
 	ingressPort, adminPort := freePort(t), freePort(t)
-	handlerPort := freePort(t)
-	handlerAddr := fmt.Sprintf("127.0.0.1:%d", handlerPort)
+	handlerAddr := "127.0.0.1:0"
 	ingressURL := fmt.Sprintf("http://127.0.0.1:%d", ingressPort)
 
 	server := startLiveServer(t, binary, dir, ingressPort, adminPort)
@@ -265,7 +264,8 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 		endpointCtx, stopEndpoint := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() { done <- endpoint.Start(endpointCtx) }()
-		waitEndpointReady(t, endpoint)
+		waitEndpointReadyStarted(t, endpoint, done)
+		handlerAddr = resolveHandlerAddr(t, endpoint, handlerAddr)
 		server.registerDeployment(t, handlerAddr)
 		return stopEndpoint, done
 	}

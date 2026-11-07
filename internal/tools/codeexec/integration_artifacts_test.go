@@ -82,10 +82,21 @@ func (s *storedHost) read(t *testing.T, id string) ([]byte, store.ArtifactMetada
 }
 
 func writeBytes(runtime, name string, size int) string {
-	if runtime == "python" {
+	switch runtime {
+	case "python":
 		return fmt.Sprintf("open(%q, 'wb').write(b'x' * %d)\n", name, size)
+	case "go":
+		return fmt.Sprintf("\tos.WriteFile(%q, make([]byte, %d), 0o644)\n", name, size)
+	default:
+		return fmt.Sprintf("require('fs').writeFileSync(%q, Buffer.alloc(%d, 120))\n", name, size)
 	}
-	return fmt.Sprintf("require('fs').writeFileSync(%q, Buffer.alloc(%d, 120))\n", name, size)
+}
+
+func program(runtime, statements string) string {
+	if runtime == "go" {
+		return "package main\nimport \"os\"\nfunc main() {\n" + statements + "}\n"
+	}
+	return statements
 }
 
 func TestLiveDeclaredOutputsBecomeArtifacts(t *testing.T) {
@@ -97,6 +108,9 @@ func TestLiveDeclaredOutputsBecomeArtifacts(t *testing.T) {
 		"javascript": "const fs = require('fs')\nfs.mkdirSync('output/sub', { recursive: true })\nfs.writeFileSync('output/result.csv', 'a,b\\n1,2\\n')\n" +
 			"fs.writeFileSync('output/chart.png', Buffer.from('" + pngHex + "', 'hex'))\n" +
 			"fs.writeFileSync('output/sub/n.txt', 'nested')\nfs.writeFileSync('output/undeclared.txt', 'nope')\nconsole.log('done')\n",
+		"go": "package main\nimport (\"encoding/hex\"; \"fmt\"; \"os\")\nfunc main() {\n\tos.MkdirAll(\"output/sub\", 0o755)\n\tos.WriteFile(\"output/result.csv\", []byte(\"a,b\\n1,2\\n\"), 0o644)\n" +
+			"\tpng, _ := hex.DecodeString(\"" + pngHex + "\")\n\tos.WriteFile(\"output/chart.png\", png, 0o644)\n" +
+			"\tos.WriteFile(\"output/sub/n.txt\", []byte(\"nested\"), 0o644)\n\tos.WriteFile(\"output/undeclared.txt\", []byte(\"nope\"), 0o644)\n\tfmt.Println(\"done\")\n}\n",
 	}
 	for runtime, source := range sources {
 		t.Run(runtime, func(t *testing.T) {
@@ -159,6 +173,10 @@ func TestLiveOutputsFollowTheRunClass(t *testing.T) {
 		{"python seccomp kill", "python", "open('output/a.txt', 'w').write('x')\nimport os\nos.symlink('/etc/passwd', 'output/link')", nil, ClassPolicyDenied, false},
 		{"javascript seccomp kill", "javascript", "require('fs').writeFileSync('output/a.txt', 'x')\nrequire('fs').linkSync('main.js', 'output/copy')", nil, ClassPolicyDenied, false},
 		{"python crash", "python", "open('output/a.txt', 'w').write('x')\nimport ctypes\nctypes.string_at(0)", nil, ClassRuntimeCrashed, false},
+		{"go exit nonzero", "go", program("go", "\tos.WriteFile(\"output/a.txt\", []byte(\"x\"), 0o644)\n\tos.Exit(3)\n"), nil, ClassExitNonzero, true},
+		{"go timeout", "go", "package main\nimport (\"os\"; \"time\")\nfunc main() {\n\tos.WriteFile(\"output/a.txt\", []byte(\"x\"), 0o644)\n\ttime.Sleep(time.Minute)\n}\n", short, ClassTimeout, false},
+		{"go seccomp kill", "go", "package main\nimport (\"os\"; \"syscall\")\nfunc main() {\n\tos.WriteFile(\"output/a.txt\", []byte(\"x\"), 0o644)\n\tsyscall.Kill(syscall.Getpid(), 0)\n}\n", nil, ClassPolicyDenied, false},
+		{"go file limit", "go", "package main\nimport \"os\"\nfunc main() {\n\tif os.WriteFile(\"output/a.txt\", make([]byte, 1<<20), 0o644) != nil {\n\t\tos.Exit(1)\n\t}\n}\n", fileLimit, ClassFileLimit, false},
 		{"python file limit", "python", writeBytes("python", "output/a.txt", 1<<20), fileLimit, ClassFileLimit, false},
 		{"javascript file limit", "javascript", writeBytes("javascript", "output/a.txt", 1<<20), fileLimit, ClassFileLimit, false},
 	}
@@ -183,10 +201,10 @@ func TestLiveOutputsFollowTheRunClass(t *testing.T) {
 
 func TestLiveFileAtTheSizeLimitIsImported(t *testing.T) {
 	const limit = 64 << 10
-	for _, runtime := range []string{"python", "javascript"} {
+	for _, runtime := range []string{"python", "javascript", "go"} {
 		t.Run(runtime, func(t *testing.T) {
 			stored := host.storedRunner(t, store.DefaultArtifactQuotaBytes, func(l *Limits) { l.MaxFileBytes = limit })
-			outcome := stored.run(t, runtime, writeBytes(runtime, "output/a.bin", limit), "a.bin")
+			outcome := stored.run(t, runtime, program(runtime, writeBytes(runtime, "output/a.bin", limit)), "a.bin")
 			if outcome.Class != ClassOK || len(outcome.Artifacts) != 1 || outcome.Artifacts[0].Refused != "" || outcome.Artifacts[0].Size != limit {
 				t.Fatalf("outcome = %+v", outcome)
 			}
@@ -199,10 +217,10 @@ func TestLiveFileAtTheSizeLimitIsImported(t *testing.T) {
 }
 
 func TestLiveQuotaExhaustionKeepsTheRunClassAndLeavesNoPartialArtifact(t *testing.T) {
-	for _, runtime := range []string{"python", "javascript"} {
+	for _, runtime := range []string{"python", "javascript", "go"} {
 		t.Run(runtime, func(t *testing.T) {
 			stored := host.storedRunner(t, 100, nil)
-			source := writeBytes(runtime, "output/small.bin", 50) + writeBytes(runtime, "output/big.bin", 400)
+			source := program(runtime, writeBytes(runtime, "output/small.bin", 50)+writeBytes(runtime, "output/big.bin", 400))
 			outcome := stored.run(t, runtime, source, "small.bin", "big.bin")
 			if outcome.Class != ClassOK || len(outcome.Artifacts) != 2 || outcome.Artifacts[0].Refused != "" || outcome.Artifacts[1].Refused != RefusalQuota {
 				t.Fatalf("outcome = %+v", outcome)
@@ -226,6 +244,7 @@ func TestLiveSpecialFilesCannotBeMadeByTheProgram(t *testing.T) {
 		{"python device", "python", "import os\nos.mknod('output/x', 0o600 | 0o020000, os.makedev(1, 3))"},
 		{"javascript symlink", "javascript", "require('fs').symlinkSync('/etc/passwd', 'output/x')"},
 		{"javascript hard link", "javascript", "const fs = require('fs')\nfs.writeFileSync('real', 'x')\nfs.linkSync('real', 'output/x')"},
+		{"go symlink", "go", "package main\nimport \"os\"\nfunc main() { os.Symlink(\"/etc/passwd\", \"output/x\") }\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,6 +268,7 @@ func TestLiveSweepSparesARunThatIsStillExecuting(t *testing.T) {
 	sources := map[string]string{
 		"python":     "import os, time\nopen('ready', 'w').close()\nwhile not os.path.exists('go'):\n    time.sleep(0.02)\nopen('output/a.txt', 'w').write('late')\n",
 		"javascript": "const fs = require('fs')\nfs.closeSync(fs.openSync('ready', 'w'))\nconst wait = () => fs.existsSync('go') ? fs.writeFileSync('output/a.txt', 'late') : setTimeout(wait, 20)\nwait()\n",
+		"go":         "package main\nimport (\"os\"; \"time\")\nfunc main() {\n\tf, _ := os.Create(\"ready\")\n\tf.Close()\n\tfor {\n\t\tif _, err := os.Stat(\"go\"); err == nil {\n\t\t\tbreak\n\t\t}\n\t\ttime.Sleep(20 * time.Millisecond)\n\t}\n\tos.WriteFile(\"output/a.txt\", []byte(\"late\"), 0o644)\n}\n",
 	}
 	for runtime, source := range sources {
 		t.Run(runtime, func(t *testing.T) {
@@ -293,6 +313,13 @@ func TestLiveNothingCrossesInvocations(t *testing.T) {
 			"process.env.LEAK = '1'\nglobalThis.leaked = 'x'\n" +
 			"const child = cp.spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore' })\nfs.writeFileSync('child_pid', String(child.pid))\n" +
 			"console.log(JSON.stringify(keys))\nconsole.log(JSON.stringify(fs.readdirSync('.').sort()))\nsetTimeout(() => process.exit(0), 200)\n",
+		"go": "package main\nimport (\"fmt\"; \"os\"; \"sort\"; \"strings\")\n" +
+			"func main() {\n\tvar keys, names []string\n\tfor _, entry := range os.Environ() {\n\t\tkeys = append(keys, strings.SplitN(entry, \"=\", 2)[0])\n\t}\n\tsort.Strings(keys)\n" +
+			"\tos.WriteFile(\"leak.txt\", []byte(\"x\"), 0o644)\n\tos.MkdirAll(\".cache/deep\", 0o755)\n\tos.WriteFile(\".cache/deep/c\", []byte(\"x\"), 0o644)\n" +
+			"\tos.MkdirAll(\".go/cache\", 0o755)\n\tos.WriteFile(\".go/cache/planted\", []byte(\"x\"), 0o644)\n\tos.WriteFile(\".go/planted\", []byte(\"x\"), 0o644)\n" +
+			"\tos.WriteFile(os.Getenv(\"TMPDIR\")+\"/tmp.txt\", []byte(\"x\"), 0o644)\n\tos.WriteFile(\"output/o.txt\", []byte(\"x\"), 0o644)\n\tos.Setenv(\"LEAK\", \"1\")\n" +
+			"\tentries, _ := os.ReadDir(\".\")\n\tfor _, entry := range entries {\n\t\tnames = append(names, entry.Name())\n\t}\n" +
+			"\tfmt.Println(keys)\n\tfmt.Println(names)\n}\n",
 	}
 	second := map[string]string{
 		"python": "import os, sys\nprint(sorted(os.environ))\nprint(sorted(os.listdir('.')))\nprint(os.environ.get('LEAK'), hasattr(sys, 'leaked'), 'leak_mod' in sys.modules)\n" +
@@ -300,10 +327,16 @@ func TestLiveNothingCrossesInvocations(t *testing.T) {
 		"javascript": "const fs = require('fs')\nconsole.log(JSON.stringify(Object.keys(process.env).sort()))\nconsole.log(JSON.stringify(fs.readdirSync('.').sort()))\n" +
 			"console.log(process.env.LEAK, typeof globalThis.leaked, Object.keys(require.cache).length)\n" +
 			"try { require('./leak_mod.js'); console.log('imported') } catch (e) { console.log('absent') }\nconsole.log(process.pid, process.ppid)\nconsole.log(JSON.stringify(fs.readdirSync('output')))\n",
+		"go": "package main\nimport (\"fmt\"; \"os\"; \"sort\"; \"strings\")\n" +
+			"func main() {\n\tvar keys, names []string\n\tfor _, entry := range os.Environ() {\n\t\tkeys = append(keys, strings.SplitN(entry, \"=\", 2)[0])\n\t}\n\tsort.Strings(keys)\n" +
+			"\tentries, _ := os.ReadDir(\".\")\n\tfor _, entry := range entries {\n\t\tnames = append(names, entry.Name())\n\t}\n" +
+			"\t_, cacheErr := os.Stat(\".go/cache/planted\")\n\t_, plantedErr := os.Stat(\".go/planted\")\n\t_, cached := os.Stat(\".cache\")\n\toutput, _ := os.ReadDir(\"output\")\n" +
+			"\tfmt.Println(keys)\n\tfmt.Println(names)\n\tfmt.Println(os.Getenv(\"LEAK\") == \"\", cacheErr != nil, plantedErr != nil, cached != nil)\n\tfmt.Println(len(output))\n}\n",
 	}
 	wantSecond := map[string][]string{
 		"python":     {"['main.py', 'output']", "None False False", "absent", "1 0", "[]"},
 		"javascript": {`["main.js","output"]`, "undefined undefined 1", "absent", "1 0", "[]"},
+		"go":         {"[.go go.mod main.go output]", "true true true true", "0"},
 	}
 	for runtime := range first {
 		t.Run(runtime, func(t *testing.T) {
@@ -348,7 +381,7 @@ func (h *liveHost) treeStatus(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := interpreter.NewVerifier(h.store, set, interpreter.WithProber(h.runner))
+	verifier, err := interpreter.NewVerifier(h.store, set)
 	if err != nil {
 		t.Fatal(err)
 	}

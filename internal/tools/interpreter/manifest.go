@@ -19,6 +19,7 @@ import (
 const (
 	PlaceholderExecutable = "{executable}"
 	PlaceholderSource     = "{source}"
+	PlaceholderProgram    = "{program}"
 
 	maxManifestBytes     = 64 << 10
 	maxManifestRuntimes  = 8
@@ -41,6 +42,12 @@ var (
 	environmentKeyRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 )
 
+type Build struct {
+	Argv        []string          `json:"argv"`
+	Program     string            `json:"program"`
+	Environment map[string]string `json:"environment"`
+}
+
 type Runtime struct {
 	ID          string            `json:"id"`
 	Version     string            `json:"version"`
@@ -49,16 +56,19 @@ type Runtime struct {
 	Executable  string            `json:"executable"`
 	Argv        []string          `json:"argv"`
 	Environment map[string]string `json:"environment"`
+	Build       *Build            `json:"build,omitempty"`
 }
 
-func (r *Runtime) Command(executable, source string) []string {
-	argv := make([]string, len(r.Argv))
-	for i, entry := range r.Argv {
+func expandArgv(template []string, executable, source, program string) []string {
+	argv := make([]string, len(template))
+	for i, entry := range template {
 		switch entry {
 		case PlaceholderExecutable:
 			argv[i] = executable
 		case PlaceholderSource:
 			argv[i] = source
+		case PlaceholderProgram:
+			argv[i] = program
 		default:
 			argv[i] = entry
 		}
@@ -66,10 +76,36 @@ func (r *Runtime) Command(executable, source string) []string {
 	return argv
 }
 
+func (r *Runtime) Command(executable, source, program string) []string {
+	return expandArgv(r.Argv, executable, source, program)
+}
+
+func (r *Runtime) Builds() bool {
+	return r.Build != nil
+}
+
+func (r *Runtime) BuildCommand(executable, source, program string) []string {
+	if r.Build == nil {
+		return nil
+	}
+	return expandArgv(r.Build.Argv, executable, source, program)
+}
+
+func (r *Runtime) BuildEnvironmentEntries() []string {
+	if r.Build == nil {
+		return nil
+	}
+	return environmentEntries(r.Build.Environment)
+}
+
 func (r *Runtime) EnvironmentEntries() []string {
-	entries := make([]string, 0, len(r.Environment))
-	for _, key := range slices.Sorted(maps.Keys(r.Environment)) {
-		entries = append(entries, key+"="+r.Environment[key])
+	return environmentEntries(r.Environment)
+}
+
+func environmentEntries(environment map[string]string) []string {
+	entries := make([]string, 0, len(environment))
+	for _, key := range slices.Sorted(maps.Keys(environment)) {
+		entries = append(entries, key+"="+environment[key])
 	}
 	return entries
 }
@@ -78,6 +114,12 @@ func (r *Runtime) clone() Runtime {
 	out := *r
 	out.Argv = slices.Clone(r.Argv)
 	out.Environment = maps.Clone(r.Environment)
+	if r.Build != nil {
+		build := *r.Build
+		build.Argv = slices.Clone(r.Build.Argv)
+		build.Environment = maps.Clone(r.Build.Environment)
+		out.Build = &build
+	}
 	return out
 }
 
@@ -168,8 +210,17 @@ func validateRuntime(runtime *Runtime) []error {
 	if !validExecutablePath(runtime.Executable) {
 		problems = append(problems, fmt.Errorf("%s executable must be a clean relative path", label))
 	}
-	problems = append(problems, validateArgv(label, runtime.Argv)...)
 	problems = append(problems, validateEnvironment(label, runtime.Environment)...)
+	if runtime.Build == nil {
+		return append(problems, validateArgv(label, runtime.Argv, PlaceholderExecutable, PlaceholderSource)...)
+	}
+	buildLabel := label + " build"
+	problems = append(problems, validateArgv(label, runtime.Argv, PlaceholderProgram)...)
+	problems = append(problems, validateArgv(buildLabel, runtime.Build.Argv, PlaceholderExecutable, PlaceholderSource, PlaceholderProgram)...)
+	problems = append(problems, validateEnvironment(buildLabel, runtime.Build.Environment)...)
+	if !validExecutablePath(runtime.Build.Program) {
+		problems = append(problems, fmt.Errorf("%s program must be a clean relative path", buildLabel))
+	}
 	return problems
 }
 
@@ -177,33 +228,42 @@ func validExecutablePath(path string) bool {
 	return len(path) <= maxExecutablePathLen && fs.ValidPath(path) && path != "." && executablePattern.MatchString(path)
 }
 
-func validateArgv(label string, argv []string) []error {
+func validateArgv(label string, argv []string, first string, rest ...string) []error {
 	if len(argv) == 0 || len(argv) > maxArgvEntries {
 		return []error{fmt.Errorf("%s argv must have between 1 and %d entries", label, maxArgvEntries)}
 	}
+	known := append([]string{first}, rest...)
 	var problems []error
-	if argv[0] != PlaceholderExecutable {
-		problems = append(problems, fmt.Errorf("%s argv must start with %s", label, PlaceholderExecutable))
+	if argv[0] != first {
+		problems = append(problems, fmt.Errorf("%s argv must start with %s", label, first))
 	}
-	sources := 0
 	for _, entry := range argv {
 		switch {
 		case entry == "" || len(entry) > maxArgvEntryLength || !printable(entry):
 			problems = append(problems, fmt.Errorf("%s argv entries must be short printable text", label))
-		case entry == PlaceholderSource:
-			sources++
-		case entry == PlaceholderExecutable:
-		case strings.ContainsAny(entry, "{}"):
+		case strings.ContainsAny(entry, "{}") && !slices.Contains(known, entry):
 			problems = append(problems, fmt.Errorf("%s argv entry carries an unknown placeholder", label))
 		}
 	}
-	if sources != 1 {
-		problems = append(problems, fmt.Errorf("%s argv must contain %s exactly once", label, PlaceholderSource))
+	for _, placeholder := range rest {
+		if count := occurrences(argv, placeholder); count != 1 {
+			problems = append(problems, fmt.Errorf("%s argv must contain %s exactly once", label, placeholder))
+		}
 	}
-	if slices.Index(argv, PlaceholderExecutable) != 0 || slices.Index(argv[1:], PlaceholderExecutable) >= 0 {
-		problems = append(problems, fmt.Errorf("%s argv must contain %s only first", label, PlaceholderExecutable))
+	if slices.Index(argv, first) != 0 || slices.Index(argv[1:], first) >= 0 {
+		problems = append(problems, fmt.Errorf("%s argv must contain %s only first", label, first))
 	}
 	return problems
+}
+
+func occurrences(argv []string, placeholder string) int {
+	count := 0
+	for _, entry := range argv {
+		if entry == placeholder {
+			count++
+		}
+	}
+	return count
 }
 
 func validateEnvironment(label string, environment map[string]string) []error {

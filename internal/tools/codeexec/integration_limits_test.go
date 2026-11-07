@@ -72,6 +72,7 @@ func TestLiveResultClasses(t *testing.T) {
 		want    ResultClass
 		exit    int
 		signal  syscall.Signal
+		stderr  string
 	}{
 		{name: "python ok", runtime: "python", source: "print(1)", want: ClassOK},
 		{name: "javascript ok", runtime: "javascript", source: "console.log(1)", want: ClassOK},
@@ -119,6 +120,26 @@ func TestLiveResultClasses(t *testing.T) {
 		{name: "javascript seccomp kill", runtime: "javascript", source: "process.kill(process.pid, 0)", want: ClassPolicyDenied, signal: syscall.SIGSYS},
 		{name: "python symlink seccomp kill", runtime: "python", source: "import os\nos.symlink('/etc/passwd', 'link')", want: ClassPolicyDenied, signal: syscall.SIGSYS},
 		{name: "javascript hard link seccomp kill", runtime: "javascript", source: "require('fs').linkSync('main.js', 'copy')", want: ClassPolicyDenied, signal: syscall.SIGSYS},
+		{name: "go exit code", runtime: "go", source: "package main\nimport \"os\"\nfunc main() { os.Exit(3) }\n", want: ClassExitNonzero, exit: 3},
+		{name: "go timeout", runtime: "go", source: "package main\nimport \"time\"\nfunc main() { time.Sleep(time.Minute) }\n", change: short, want: ClassTimeout},
+		{name: "go cpu limit", runtime: "go", source: "package main\nfunc main() {\n\tfor {\n\t}\n}\n", change: short, want: ClassCPULimit, signal: syscall.SIGKILL},
+		{
+			name: "go memory limit", runtime: "go", source: "package main\nimport \"os\"\nfunc main() {\n\tos.Stdout.WriteString(\"before\\n\")\n\tblock := make([]byte, 1<<30)\n\tfor i := range block {\n\t\tblock[i] = 1\n\t}\n\tos.Stdout.WriteString(\"after\\n\")\n}\n",
+			change: func(l *Limits) { l.MaxMemoryBytes = 256 << 20 }, want: ClassMemoryLimit, signal: syscall.SIGKILL,
+		},
+		{
+			name: "go process limit", runtime: "go", source: "package main\nimport \"syscall\"\nfunc main() {\n\tvar pipe [2]int\n\tsyscall.Pipe(pipe[:])\n\tfor range 200 {\n\t\tgo func() {\n\t\t\tvar b [1]byte\n\t\t\tsyscall.Read(pipe[0], b[:])\n\t\t}()\n\t}\n\tselect {}\n}\n",
+			change: func(l *Limits) { l.MaxProcesses = 20 }, want: ClassProcessLimit, exit: 2,
+		},
+		{
+			name: "go file limit", runtime: "go", source: "package main\nimport \"os\"\nfunc main() {\n\tif os.WriteFile(\"big\", make([]byte, 4<<20), 0o644) != nil {\n\t\tos.Exit(1)\n\t}\n}\n",
+			change: func(l *Limits) { l.MaxFileBytes = 1 << 20 }, want: ClassFileLimit, exit: 1,
+		},
+		{
+			name: "go disk limit", runtime: "go", source: "package main\nimport (\"os\"; \"strconv\"; \"time\")\nfunc main() {\n\tblock := make([]byte, 2<<20)\n\tfor i := range 400 {\n\t\tos.WriteFile(\"f\"+strconv.Itoa(i), block, 0o644)\n\t\ttime.Sleep(50 * time.Millisecond)\n\t}\n}\n",
+			change: func(l *Limits) { l.MaxRunDirBytes = 16 << 20; l.MaxFileBytes = 4 << 20 }, want: ClassDiskLimit, signal: syscall.SIGKILL,
+		},
+		{name: "go seccomp kill", runtime: "go", source: "package main\nimport \"syscall\"\nfunc main() { syscall.Kill(syscall.Getpid(), 0) }\n", want: ClassPolicyDenied, signal: syscall.SIGSYS},
 		{name: "python crash", runtime: "python", source: "import ctypes\nctypes.string_at(0)", want: ClassRuntimeCrashed, signal: syscall.SIGSEGV},
 		{name: "javascript abort", runtime: "javascript", source: "process.abort()", want: ClassRuntimeCrashed},
 	}
@@ -138,6 +159,9 @@ func TestLiveResultClasses(t *testing.T) {
 			if tc.signal != 0 && outcome.Signal != int(tc.signal) {
 				t.Fatalf("signal = %d, want %d: %+v", outcome.Signal, tc.signal, outcome)
 			}
+			if !strings.Contains(outcome.Stderr, tc.stderr) {
+				t.Fatalf("stderr = %q, want it to hold %q", outcome.Stderr, tc.stderr)
+			}
 			host.waitClean(t)
 		})
 	}
@@ -147,6 +171,7 @@ func TestLiveCancelIsDistinctFromTimeout(t *testing.T) {
 	sources := map[string]string{
 		"python":     "open('ready', 'w').close()\nimport time\ntime.sleep(60)",
 		"javascript": "require('fs').closeSync(require('fs').openSync('ready', 'w'))\nsetTimeout(() => {}, 60000)",
+		"go":         "package main\nimport (\"os\"; \"time\")\nfunc main() {\n\tf, _ := os.Create(\"ready\")\n\tf.Close()\n\ttime.Sleep(time.Minute)\n}\n",
 	}
 	for runtime, source := range sources {
 		t.Run(runtime, func(t *testing.T) {
@@ -171,10 +196,67 @@ func TestLiveCancelIsDistinctFromTimeout(t *testing.T) {
 	}
 }
 
+func TestLiveGoCancelDuringTheBuildIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan liveRun, 1)
+	go func() {
+		outcome, err := host.runner.Execute(ctx, &Request{Runtime: "go", Source: "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"never\") }\n"})
+		done <- liveRun{outcome, err}
+	}()
+	host.waitForFile(t, filepath.Join(goScratchDir, goCacheName))
+	cancel()
+	run := <-done
+	if run.err != nil {
+		t.Fatalf("Execute: %v", run.err)
+	}
+	if run.outcome.Class != ClassCancelled || run.outcome.Signal != int(syscall.SIGKILL) || run.outcome.Stdout != "" {
+		t.Fatalf("outcome = %+v", run.outcome)
+	}
+	host.waitClean(t)
+}
+
+func TestLiveGoBuildFailureKeepsTheCompilerOutputAndSkipsTheProgram(t *testing.T) {
+	source := "package main\nimport \"os\"\nfunc main() {\n\tos.WriteFile(\"ran\", nil, 0o644)\n\tvar unused int\n}\n"
+	outcome := host.execute(t, host.runner, "go", source, "")
+	if outcome.Class != ClassExitNonzero || outcome.ExitCode != 1 || outcome.Stdout != "" || !strings.Contains(outcome.Stderr, "declared and not used") {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	host.waitClean(t)
+}
+
+func TestLiveGoBuildTimeoutKeepsItsClass(t *testing.T) {
+	runner := host.runnerWith(t, func(l *Limits) { l.BuildTimeout = time.Second })
+	outcome := host.execute(t, runner, "go", "package main\nimport \"fmt\"\nfunc main() { fmt.Println(1) }\n", "")
+	if outcome.Class != ClassTimeout || outcome.Stdout != "" {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	host.waitClean(t)
+}
+
+func TestLiveGoBuildDoesNotDependOnTheArtifactLimit(t *testing.T) {
+	runner := host.runnerWith(t, func(l *Limits) { l.MaxFileBytes = 64 << 10 })
+	outcome := host.execute(t, runner, "go", "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"built\") }\n", "")
+	if outcome.Class != ClassOK || strings.TrimSpace(outcome.Stdout) != "built" {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	host.waitClean(t)
+}
+
+func TestLiveGoBinaryCountsAgainstTheRunDirectoryLimit(t *testing.T) {
+	runner := host.runnerWith(t, func(l *Limits) { l.MaxRunDirBytes = 512 << 10 })
+	outcome := host.execute(t, runner, "go", "package main\nimport \"time\"\nfunc main() { time.Sleep(time.Minute) }\n", "")
+	if outcome.Class != ClassDiskLimit {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	host.waitClean(t)
+}
+
 func TestLiveDescendantsAreReaped(t *testing.T) {
 	sources := map[string]string{
 		"python":     "import os, time\nif os.fork() == 0:\n    time.sleep(120)\nelse:\n    print('parent done')",
 		"javascript": "const { Worker } = require('worker_threads')\nnew Worker('setTimeout(() => {}, 120000)', { eval: true })\nsetTimeout(() => process.exit(0), 200)",
+		"go":         "package main\nimport (\"os\"; \"os/exec\"; \"time\")\nfunc main() {\n\tif len(os.Args) > 1 {\n\t\ttime.Sleep(2 * time.Minute)\n\t\treturn\n\t}\n\texec.Command(os.Args[0], \"child\").Start()\n}\n",
 	}
 	for runtime, source := range sources {
 		t.Run(runtime, func(t *testing.T) {
@@ -209,62 +291,102 @@ func TestLiveRunsDoNotShareState(t *testing.T) {
 }
 
 func TestLiveTamperedBundleIsUnavailable(t *testing.T) {
-	bundle, err := host.store.Bundle("python")
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		runtime string
+		file    string
+		source  string
+	}{
+		{"python", filepath.Join("python", "lib", "python3.12", "os.py"), "print(1)"},
+		{"go", filepath.Join("go", "src", "os", "file.go"), "package main\nfunc main() {}\n"},
 	}
-	target := filepath.Join(bundle.Dir, "python", "lib", "python3.12", "os.py")
-	original, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range cases {
+		t.Run(tc.runtime, func(t *testing.T) {
+			bundle, err := host.store.Bundle(tc.runtime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(bundle.Dir, tc.file)
+			original, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(target, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = os.Chmod(target, 0o644)
+				_ = os.WriteFile(target, original, 0o644)
+				_ = os.Chmod(target, info.Mode())
+			})
+			if err := os.WriteFile(target, append(append([]byte(nil), original...), '\n'), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			set, err := interpreter.NewVerifiedSet(host.store.Manifest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner, err := NewRunner(&Options{Store: host.store, Verified: set, Artifacts: &memorySink{}, RunRoot: filepath.Join(host.data, "runs"), Limits: liveLimits()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			verifier, err := interpreter.NewVerifier(host.store, set, interpreter.WithProber(runner))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := verifier.Run(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			_, err = runner.Execute(t.Context(), &Request{Runtime: tc.runtime, Source: tc.source})
+			if code, _ := CodeOf(err); code != ErrorCodeUnavailable {
+				t.Fatalf("Execute on a tampered bundle = %v, want %s", err, ErrorCodeUnavailable)
+			}
+			if outcome := host.execute(t, runner, "javascript", "console.log(1)", ""); outcome.Class != ClassOK {
+				t.Fatalf("the untouched runtime must stay available: %+v", outcome)
+			}
+			host.waitClean(t)
+		})
 	}
-	info, err := os.Stat(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(target, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chmod(target, 0o644)
-		_ = os.WriteFile(target, original, 0o644)
-		_ = os.Chmod(target, info.Mode())
-	})
-	if err := os.WriteFile(target, append(append([]byte(nil), original...), '\n'), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	set, err := interpreter.NewVerifiedSet(host.store.Manifest())
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, err := NewRunner(&Options{Store: host.store, Verified: set, Artifacts: &memorySink{}, RunRoot: filepath.Join(host.data, "runs"), Limits: liveLimits()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	verifier, err := interpreter.NewVerifier(host.store, set, interpreter.WithProber(runner))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := verifier.Run(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	_, err = runner.Execute(t.Context(), &Request{Runtime: "python", Source: "print(1)"})
-	if code, _ := CodeOf(err); code != ErrorCodeUnavailable {
-		t.Fatalf("Execute on a tampered bundle = %v, want %s", err, ErrorCodeUnavailable)
-	}
-	if outcome := host.execute(t, runner, "javascript", "console.log(1)", ""); outcome.Class != ClassOK {
-		t.Fatalf("the untouched runtime must stay available: %+v", outcome)
-	}
-	host.waitClean(t)
 }
 
-func TestLiveGoIsUnavailable(t *testing.T) {
-	_, err := host.runner.Execute(t.Context(), &Request{Runtime: "go", Source: "package main\nfunc main() {}"})
-	if code, _ := CodeOf(err); code != ErrorCodeUnavailable {
-		t.Fatalf("Execute(go) = %v, want %s", err, ErrorCodeUnavailable)
+const goSyscallProgram = `package main
+
+import (
+	"io"
+	"os"
+	"os/exec"
+	"syscall"
+	"time"
+)
+
+func main() {
+	if len(os.Args) > 1 {
+		return
 	}
-	host.waitClean(t)
+	if os.Mkdir("d", 0o755) != nil {
+		return
+	}
+	locked, _ := os.Create("locked")
+	if syscall.Flock(int(locked.Fd()), syscall.LOCK_EX) != nil || syscall.Fallocate(int(locked.Fd()), 0, 0, 4096) != nil {
+		return
+	}
+	os.WriteFile("a", make([]byte, 1<<16), 0o644)
+	in, _ := os.Open("a")
+	out, _ := os.Create("b")
+	if copied, err := io.Copy(out, in); err != nil || copied != 1<<16 {
+		return
+	}
+	command := exec.Command(os.Args[0], "child")
+	if command.Run() != nil {
+		return
+	}
+	time.Sleep(10 * time.Millisecond)
+	os.Stdout.WriteString("ok")
 }
+`
 
 func TestLiveSyscallsTheRuntimesNeed(t *testing.T) {
 	cases := []struct {
@@ -298,6 +420,7 @@ func TestLiveSyscallsTheRuntimesNeed(t *testing.T) {
 		{"getsockopt", "python", "import socket\na, b = socket.socketpair()\na.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE)\na.close()\nb.close()\nprint('ok')"},
 		{"getpeername", "python", "import socket\na, b = socket.socketpair()\nprint('ok')"},
 		{"tgkill", "python", "import signal, threading\nsignal.signal(signal.SIGUSR1, lambda *args: None)\nsignal.pthread_kill(threading.get_ident(), signal.SIGUSR1)\nprint('ok')"},
+		{"mkdirat+flock+fallocate+copy_file_range+waitid+restart_syscall", "go", goSyscallProgram},
 	}
 	for _, tc := range cases {
 		t.Run(tc.syscall+"/"+tc.runtime, func(t *testing.T) {

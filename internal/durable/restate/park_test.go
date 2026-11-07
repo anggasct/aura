@@ -54,8 +54,7 @@ func TestParkDurationSurvival(t *testing.T) {
 
 	dir := t.TempDir()
 	ingressPort, adminPort := freePort(t), freePort(t)
-	handlerPort := freePort(t)
-	handlerAddr := fmt.Sprintf("127.0.0.1:%d", handlerPort)
+	handlerAddr := "127.0.0.1:0"
 	server := startLiveServer(t, binary, dir, ingressPort, adminPort)
 	t.Cleanup(func() { server.stop() })
 
@@ -77,7 +76,8 @@ func TestParkDurationSurvival(t *testing.T) {
 		case <-time.After(10 * time.Second):
 		}
 	})
-	waitEndpointReady(t, endpoint)
+	waitEndpointReadyStarted(t, endpoint, endpointDone)
+	handlerAddr = resolveHandlerAddr(t, endpoint, handlerAddr)
 	server.registerDeployment(t, handlerAddr)
 
 	adapter, err := NewAdapter(Config{IngressURL: fmt.Sprintf("http://127.0.0.1:%d", ingressPort)}, nil)
