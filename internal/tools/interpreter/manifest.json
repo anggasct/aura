@@ -25,12 +25,19 @@
       "archive": "go1.27.3.linux-amd64.tar.gz",
       "sha256": "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40",
       "executable": "go/bin/go",
-      "argv": ["{executable}", "run", "{source}"],
-      "environment": {
-        "CGO_ENABLED": "0",
-        "GOFLAGS": "-mod=mod",
-        "GOPROXY": "off",
-        "GOTOOLCHAIN": "local"
+      "argv": ["{program}"],
+      "build": {
+        "argv": ["{executable}", "build", "-buildvcs=false", "-o", "{program}", "{source}"],
+        "program": ".go/program",
+        "environment": {
+          "CGO_ENABLED": "0",
+          "GOENV": "off",
+          "GOFLAGS": "-mod=mod",
+          "GOMAXPROCS": "4",
+          "GOPROXY": "off",
+          "GOTOOLCHAIN": "local",
+          "GOWORK": "off"
+        }
       }
     }
   ]

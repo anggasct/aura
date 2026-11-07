@@ -174,7 +174,6 @@ func TestAdapterRefusesBeforeAnyEffect(t *testing.T) {
 		wantType toolbroker.ResultClass
 	}{
 		{"unknown runtime", codeRequest(`{"runtime":"ruby","source":"x"}`), "runtime_unavailable", toolbroker.ResultCapabilityUnavailable},
-		{"go answers unavailable", codeRequest(`{"runtime":"go","source":"package main"}`), "runtime_unavailable", toolbroker.ResultCapabilityUnavailable},
 		{"unknown field", codeRequest(`{"runtime":"python","source":"x","env":{}}`), "invalid_argument", toolbroker.ResultInvalidArgument},
 		{"oversized source", codeRequest(`{"runtime":"python","source":"` + strings.Repeat("x", 1<<10+1) + `"}`), "invalid_argument", toolbroker.ResultInvalidArgument},
 	}

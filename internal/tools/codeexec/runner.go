@@ -2,8 +2,12 @@ package codeexec
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/anggasct/aura/internal/sandbox"
@@ -23,10 +27,16 @@ const (
 	probeProcesses    = 64
 	probeRunDirBytes  = 16 << 20
 	probeOutputBytes  = 4 << 10
+
+	buildMemoryBytes = 1 << 30
+	buildProcesses   = 128
+	buildFileBytes   = 256 << 20
+	buildRunDirBytes = 512 << 20
 )
 
 type Limits struct {
 	Timeout        time.Duration
+	BuildTimeout   time.Duration
 	MaxSourceBytes int64
 	MaxStdinBytes  int64
 	MaxStdoutBytes int64
@@ -40,7 +50,7 @@ type Limits struct {
 
 func (l *Limits) validate() error {
 	positive := []int64{
-		int64(l.Timeout), l.MaxSourceBytes, l.MaxStdinBytes, l.MaxStdoutBytes, l.MaxStderrBytes,
+		int64(l.Timeout), int64(l.BuildTimeout), l.MaxSourceBytes, l.MaxStdinBytes, l.MaxStdoutBytes, l.MaxStderrBytes,
 		l.MaxMemoryBytes, l.MaxProcesses, l.MaxRunDirBytes, l.MaxFileBytes, l.MaxOutputFiles,
 	}
 	for _, value := range positive {
@@ -51,8 +61,8 @@ func (l *Limits) validate() error {
 	if l.MaxOutputFiles > tools.MaxCodeOutputFiles {
 		return Errorf(ErrorCodeInvalidArgument, "the output file limit must be at most %d", tools.MaxCodeOutputFiles)
 	}
-	if l.Timeout < time.Second {
-		return Errorf(ErrorCodeInvalidArgument, "the interpreter timeout must be at least one second")
+	if l.Timeout < time.Second || l.BuildTimeout < time.Second {
+		return Errorf(ErrorCodeInvalidArgument, "the interpreter timeouts must be at least one second")
 	}
 	return nil
 }
@@ -124,6 +134,7 @@ type plan struct {
 	origin   provenance
 	limits   sandbox.Limits
 	cpu      time.Duration
+	build    time.Duration
 }
 
 func (r *Runner) Execute(ctx context.Context, request *Request) (Outcome, error) {
@@ -154,7 +165,7 @@ func (r *Runner) Execute(ctx context.Context, request *Request) (Outcome, error)
 	}
 	return r.run(ctx, &plan{
 		bundle: bundle, language: language, source: request.Source, stdin: request.Stdin, cpu: timeout,
-		outputs: request.OutputFiles, origin: origin,
+		outputs: request.OutputFiles, origin: origin, build: r.limits.BuildTimeout,
 		limits: sandbox.Limits{
 			MemoryBytes: r.limits.MaxMemoryBytes, CPUTime: timeout, MaxOutputBytes: max(r.limits.MaxStdoutBytes, r.limits.MaxStderrBytes),
 			MaxOpenFiles: openFilesLimit, MaxProcesses: r.limits.MaxProcesses, FileBytes: r.limits.MaxFileBytes,
@@ -175,19 +186,33 @@ func (r *Runner) run(ctx context.Context, p *plan) (Outcome, error) {
 		return Outcome{}, err
 	}
 	defer dir.release()
-	if err := os.WriteFile(filepath.Join(dir.path, p.language.source), []byte(p.source), sourceFileMode); err != nil {
-		return Outcome{}, wrapf(ErrorCodeRunFailed, err, "write the program source")
+	if err := writeWorkspace(dir.path, p); err != nil {
+		return Outcome{}, err
 	}
-	argv := p.bundle.Runtime.Command(p.bundle.Executable, p.language.source)
+	started := time.Now()
+	program := ""
+	readOnly := []string{p.bundle.Dir}
+	if p.bundle.Runtime.Builds() {
+		program = filepath.Join(dir.path, filepath.FromSlash(p.bundle.Runtime.Build.Program))
+		stopped, built, err := r.build(ctx, p, dir, program)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if !built {
+			stopped.Duration = time.Since(started)
+			return stopped, nil
+		}
+		readOnly = nil
+	}
+	argv := p.bundle.Runtime.Command(p.bundle.Executable, p.language.source, program)
 	spec := &sandbox.Spec{
 		Profile:       sandbox.ProfileInterpreter,
 		WorkingDir:    dir.path,
-		ReadOnlyPaths: []string{p.bundle.Dir},
+		ReadOnlyPaths: readOnly,
 		AllowEnv:      environment(dir.path, &p.bundle.Runtime),
 		Stdin:         []byte(p.stdin),
 		Limits:        p.limits,
 	}
-	started := time.Now()
 	result, err := r.sandbox(ctx, spec, argv[0], argv[1:]...)
 	elapsed := time.Since(started)
 	if err != nil {
@@ -204,11 +229,83 @@ func (r *Runner) run(ctx context.Context, p *plan) (Outcome, error) {
 	return outcome, nil
 }
 
+func writeWorkspace(dir string, p *plan) error {
+	for _, sub := range p.language.directories {
+		if err := os.MkdirAll(filepath.Join(dir, sub), runDirMode); err != nil {
+			return wrapf(ErrorCodeRunFailed, pathFree(err), "create the program workspace")
+		}
+	}
+	files := []workspaceFile{{name: p.language.source, content: p.source}}
+	if p.language.workspace != nil {
+		files = append(files, p.language.workspace(&p.bundle)...)
+	}
+	for _, file := range files {
+		if err := os.WriteFile(filepath.Join(dir, file.name), []byte(file.content), sourceFileMode); err != nil {
+			return wrapf(ErrorCodeRunFailed, pathFree(err), "write the program source")
+		}
+	}
+	return nil
+}
+
+func (r *Runner) build(ctx context.Context, p *plan, dir *runDir, program string) (Outcome, bool, error) {
+	argv := p.bundle.Runtime.BuildCommand(p.bundle.Executable, p.language.source, program)
+	spec := &sandbox.Spec{
+		Profile:       sandbox.ProfileInterpreter,
+		WorkingDir:    dir.path,
+		ReadOnlyPaths: []string{p.bundle.Dir},
+		AllowEnv:      buildEnvironment(dir.path, &p.bundle, &p.language),
+		Limits: sandbox.Limits{
+			MemoryBytes: buildMemoryBytes, CPUTime: p.build, MaxOutputBytes: p.limits.MaxOutputBytes, MaxOpenFiles: openFilesLimit,
+			MaxProcesses: buildProcesses, FileBytes: buildFileBytes, Timeout: p.build, NoProcessRlimit: true, RunDirBytes: buildRunDirBytes,
+		},
+	}
+	result, err := r.sandbox(ctx, spec, argv[0], argv[1:]...)
+	if err != nil {
+		return Outcome{}, false, wrapSandbox(err)
+	}
+	if class := classify(&result, p.build); class != ClassOK {
+		return Outcome{
+			Class: class, ExitCode: result.ExitCode, Signal: result.Signal, Stdout: result.Stdout, Stderr: result.Stderr,
+			StdoutTruncated: result.StdoutTruncated, StderrTruncated: result.StderrTruncated,
+		}, false, nil
+	}
+	for _, sub := range p.language.scratch {
+		if err := dir.parent.RemoveAll(dir.name + "/" + sub); err != nil {
+			return Outcome{}, false, wrapf(ErrorCodeRunFailed, pathFree(err), "remove the build scratch")
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return Outcome{Class: ClassCancelled, ExitCode: -1, Signal: int(syscall.SIGKILL)}, false, nil
+	default:
+		return Outcome{}, true, nil
+	}
+}
+
+func baseEnvironment(dir string) []string {
+	return []string{"HOME=" + dir, "TMPDIR=" + dir, "LANG=C.UTF-8"}
+}
+
 func environment(dir string, runtime *interpreter.Runtime) []string {
-	runtimeEntries := runtime.EnvironmentEntries()
-	entries := make([]string, 0, 3+len(runtimeEntries))
-	entries = append(entries, "HOME="+dir, "TMPDIR="+dir, "LANG=C.UTF-8")
-	return append(entries, runtimeEntries...)
+	return append(baseEnvironment(dir), runtime.EnvironmentEntries()...)
+}
+
+func buildEnvironment(dir string, bundle *interpreter.Bundle, lang *language) []string {
+	entries := append(baseEnvironment(dir), bundle.Runtime.BuildEnvironmentEntries()...)
+	if lang.buildEnvironment == nil {
+		return entries
+	}
+	overrides := lang.buildEnvironment(dir, bundle)
+	for _, key := range slices.Sorted(maps.Keys(overrides)) {
+		entry := key + "=" + overrides[key]
+		at := slices.IndexFunc(entries, func(existing string) bool { return strings.HasPrefix(existing, key+"=") })
+		if at < 0 {
+			entries = append(entries, entry)
+			continue
+		}
+		entries[at] = entry
+	}
+	return entries
 }
 
 func wrapSandbox(err error) error {

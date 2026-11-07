@@ -40,6 +40,8 @@ func TestNewRunnerRejectsIncompleteOptions(t *testing.T) {
 		{name: "empty run root", mutate: func(o *Options) { o.RunRoot = "" }},
 		{name: "zero timeout", mutate: func(o *Options) { o.Limits.Timeout = 0 }},
 		{name: "timeout below a second", mutate: func(o *Options) { o.Limits.Timeout = time.Second - 1 }},
+		{name: "zero build timeout", mutate: func(o *Options) { o.Limits.BuildTimeout = 0 }},
+		{name: "build timeout below a second", mutate: func(o *Options) { o.Limits.BuildTimeout = time.Second - 1 }},
 		{name: "zero source limit", mutate: func(o *Options) { o.Limits.MaxSourceBytes = 0 }},
 		{name: "zero stdin limit", mutate: func(o *Options) { o.Limits.MaxStdinBytes = 0 }},
 		{name: "zero stdout limit", mutate: func(o *Options) { o.Limits.MaxStdoutBytes = 0 }},
@@ -128,13 +130,20 @@ func TestExecuteBuildsTheInterpreterSpec(t *testing.T) {
 	}
 }
 
+func runtimePhases(runtime string) []string {
+	if runtime == "go" {
+		return []string{"build", "run"}
+	}
+	return []string{"run"}
+}
+
 func TestExecuteNamesTheSourceFilePerLanguage(t *testing.T) {
 	rig := newRig(t, nil)
-	for runtime, want := range map[string]string{"python": "main.py", "javascript": "main.js"} {
+	for runtime, want := range map[string]string{"python": "main.py", "javascript": "main.js", "go": "main.go"} {
 		if _, err := rig.runner.Execute(t.Context(), &Request{Runtime: runtime, Source: "x"}); err != nil {
 			t.Fatal(err)
 		}
-		if got := rig.stub.last(t).sourceName; got != want {
+		if got := rig.stub.call(t, rig.stub.count()-len(runtimePhases(runtime))).sourceName; got != want {
 			t.Errorf("%s source file = %q, want %q", runtime, got, want)
 		}
 	}
@@ -184,7 +193,9 @@ func TestExecuteRefusesWithoutStartingAProcess(t *testing.T) {
 		runtimes []rigRuntime
 		want     ErrorCode
 	}{
-		{"go is not wired in this step", Request{Runtime: "go", Source: "package main"}, nil, ErrorCodeUnavailable},
+		{"go that is not installed", Request{Runtime: "go", Source: "package main"}, []rigRuntime{
+			{id: "python", version: rigPythonVersion, install: true}, {id: "go", version: rigGoVersion},
+		}, ErrorCodeUnavailable},
 		{"unknown runtime", Request{Runtime: "ruby", Source: "puts 1"}, nil, ErrorCodeUnavailable},
 		{"empty runtime", Request{Source: "x"}, nil, ErrorCodeUnavailable},
 		{"runtime that is not installed", Request{Runtime: "javascript", Source: "x"}, []rigRuntime{
@@ -385,7 +396,7 @@ func TestLanguageTable(t *testing.T) {
 	}{
 		{"python", "main.py", true},
 		{"javascript", "main.js", true},
-		{"go", "", false},
+		{"go", "main.go", true},
 		{"", "", false},
 		{"Python", "", false},
 	}

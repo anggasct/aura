@@ -210,6 +210,7 @@ vision:
   max_transform_memory_bytes: 256MiB
 interpreter:
   timeout: 30s
+  build_timeout: 1m0s
   max_source_bytes: 256KiB
   max_stdin_bytes: 1MiB
   max_stdout_bytes: 64KiB

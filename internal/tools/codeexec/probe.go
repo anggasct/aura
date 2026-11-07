@@ -14,7 +14,7 @@ func (r *Runner) Probe(ctx context.Context, bundle *interpreter.Bundle) error {
 		return interpreter.ErrProbeUnsupported
 	}
 	outcome, err := r.run(ctx, &plan{
-		bundle: *bundle, language: language, source: language.probe, cpu: probeTimeout,
+		bundle: *bundle, language: language, source: language.probe, cpu: probeTimeout, build: r.limits.BuildTimeout,
 		limits: sandbox.Limits{
 			MemoryBytes: probeMemoryBytes, CPUTime: probeTimeout, MaxOutputBytes: probeOutputBytes, MaxOpenFiles: openFilesLimit,
 			MaxProcesses: probeProcesses, FileBytes: probeRunDirBytes, Timeout: probeTimeout, NoProcessRlimit: true, RunDirBytes: probeRunDirBytes,

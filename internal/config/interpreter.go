@@ -14,6 +14,9 @@ const (
 	MinInterpreterTimeout = time.Second
 	MaxInterpreterTimeout = 10 * time.Minute
 
+	MinInterpreterBuildTimeout = 5 * time.Second
+	MaxInterpreterBuildTimeout = 10 * time.Minute
+
 	MaxInterpreterSourceBytes   = ByteSize(tools.MaxCodeSourceBytes)
 	MaxInterpreterStdinBytes    = ByteSize(tools.MaxCodeStdinBytes)
 	MaxInterpreterOutputBytes   = ByteSize(1 << 20)
@@ -27,6 +30,7 @@ const (
 
 type Interpreter struct {
 	Timeout          Duration `koanf:"timeout" yaml:"timeout"`
+	BuildTimeout     Duration `koanf:"build_timeout" yaml:"build_timeout"`
 	MaxSourceBytes   ByteSize `koanf:"max_source_bytes" yaml:"max_source_bytes"`
 	MaxStdinBytes    ByteSize `koanf:"max_stdin_bytes" yaml:"max_stdin_bytes"`
 	MaxStdoutBytes   ByteSize `koanf:"max_stdout_bytes" yaml:"max_stdout_bytes"`
@@ -41,6 +45,7 @@ type Interpreter struct {
 func DefaultInterpreter() Interpreter {
 	return Interpreter{
 		Timeout:          Duration(30 * time.Second),
+		BuildTimeout:     Duration(60 * time.Second),
 		MaxSourceBytes:   ByteSize(256 << 10),
 		MaxStdinBytes:    ByteSize(1 << 20),
 		MaxStdoutBytes:   ByteSize(64 << 10),
@@ -62,6 +67,9 @@ func applyInterpreterDefaults(cfg *Config, doc *yamlv3.Node) {
 	interpreter := &cfg.Interpreter
 	if interpreter.Timeout == 0 && interpreterAbsent(doc, "timeout") {
 		interpreter.Timeout = defaults.Timeout
+	}
+	if interpreter.BuildTimeout == 0 && interpreterAbsent(doc, "build_timeout") {
+		interpreter.BuildTimeout = defaults.BuildTimeout
 	}
 	if interpreter.MaxSourceBytes == 0 && interpreterAbsent(doc, "max_source_bytes") {
 		interpreter.MaxSourceBytes = defaults.MaxSourceBytes
@@ -96,6 +104,9 @@ func validateInterpreter(interpreter *Interpreter) error {
 	var problems []error
 	if time.Duration(interpreter.Timeout) < MinInterpreterTimeout || time.Duration(interpreter.Timeout) > MaxInterpreterTimeout {
 		problems = append(problems, fmt.Errorf("interpreter.timeout must be between %s and %s", MinInterpreterTimeout, MaxInterpreterTimeout))
+	}
+	if time.Duration(interpreter.BuildTimeout) < MinInterpreterBuildTimeout || time.Duration(interpreter.BuildTimeout) > MaxInterpreterBuildTimeout {
+		problems = append(problems, fmt.Errorf("interpreter.build_timeout must be between %s and %s", MinInterpreterBuildTimeout, MaxInterpreterBuildTimeout))
 	}
 	for _, limit := range []struct {
 		name  string
@@ -142,9 +153,9 @@ func validateInterpreterShapes(doc *yamlv3.Node) error {
 		key := node.Content[i].Value
 		value := node.Content[i+1]
 		switch key {
-		case "timeout":
+		case "timeout", "build_timeout":
 			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
-				return fmt.Errorf("interpreter.timeout must be a duration string at line %d", value.Line)
+				return fmt.Errorf("interpreter.%s must be a duration string at line %d", key, value.Line)
 			}
 		case "max_output_files", "max_processes":
 			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!int" {

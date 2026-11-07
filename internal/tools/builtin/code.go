@@ -95,6 +95,7 @@ func (a codeArtifacts) Put(ctx context.Context, content io.Reader, meta *codeexe
 func codeLimits(limits *config.Interpreter) codeexec.Limits {
 	return codeexec.Limits{
 		Timeout:        time.Duration(limits.Timeout),
+		BuildTimeout:   time.Duration(limits.BuildTimeout),
 		MaxSourceBytes: int64(limits.MaxSourceBytes),
 		MaxStdinBytes:  int64(limits.MaxStdinBytes),
 		MaxStdoutBytes: int64(limits.MaxStdoutBytes),

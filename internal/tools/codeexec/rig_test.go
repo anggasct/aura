@@ -37,6 +37,7 @@ type stubSandbox struct {
 	mu     sync.Mutex
 	calls  []stubCall
 	result sandbox.Result
+	script []sandbox.Result
 	err    error
 	before func(ctx context.Context, spec *sandbox.Spec)
 }
@@ -55,6 +56,9 @@ func (s *stubSandbox) run(ctx context.Context, spec *sandbox.Spec, command strin
 	s.mu.Lock()
 	s.calls = append(s.calls, call)
 	hook, result, err := s.before, s.result, s.err
+	if len(s.script) > 0 {
+		result, s.script = s.script[0], s.script[1:]
+	}
 	s.mu.Unlock()
 	if hook != nil {
 		hook(ctx, spec)
@@ -66,6 +70,16 @@ func (s *stubSandbox) count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.calls)
+}
+
+func (s *stubSandbox) call(t *testing.T, index int) stubCall {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if index >= len(s.calls) {
+		t.Fatalf("the sandbox was called %d times, want a call %d", len(s.calls), index)
+	}
+	return s.calls[index]
 }
 
 func (s *stubSandbox) last(t *testing.T) stubCall {
@@ -91,7 +105,7 @@ type rig struct {
 func rigLimits() Limits {
 	return Limits{
 		Timeout: 10 * time.Second, MaxSourceBytes: 1 << 10, MaxStdinBytes: 1 << 10, MaxStdoutBytes: 1 << 10, MaxStderrBytes: 1 << 10,
-		MaxMemoryBytes: 256 << 20, MaxProcesses: 32, MaxRunDirBytes: 8 << 20, MaxFileBytes: 4 << 20, MaxOutputFiles: 4,
+		BuildTimeout: 20 * time.Second, MaxMemoryBytes: 256 << 20, MaxProcesses: 32, MaxRunDirBytes: 8 << 20, MaxFileBytes: 4 << 20, MaxOutputFiles: 4,
 	}
 }
 
@@ -140,24 +154,34 @@ type rigRuntime struct {
 func rigManifest(t testing.TB, archives map[string][]byte, runtimes []rigRuntime) *interpreter.Manifest {
 	t.Helper()
 	type entry struct {
-		ID          string            `json:"id"`
-		Version     string            `json:"version"`
-		Archive     string            `json:"archive"`
-		SHA256      string            `json:"sha256"`
-		Executable  string            `json:"executable"`
-		Argv        []string          `json:"argv"`
-		Environment map[string]string `json:"environment,omitempty"`
+		ID          string             `json:"id"`
+		Version     string             `json:"version"`
+		Archive     string             `json:"archive"`
+		SHA256      string             `json:"sha256"`
+		Executable  string             `json:"executable"`
+		Argv        []string           `json:"argv"`
+		Environment map[string]string  `json:"environment,omitempty"`
+		Build       *interpreter.Build `json:"build,omitempty"`
 	}
 	var file struct {
 		Runtimes []entry `json:"runtimes"`
 	}
 	for _, runtime := range runtimes {
 		sum := sha256.Sum256(archives[runtime.id])
-		file.Runtimes = append(file.Runtimes, entry{
+		item := entry{
 			ID: runtime.id, Version: runtime.version, Archive: runtime.id + ".tar.gz", SHA256: hex.EncodeToString(sum[:]),
 			Executable: "bin/tool", Argv: []string{interpreter.PlaceholderExecutable, "-flag", interpreter.PlaceholderSource},
 			Environment: runtime.env,
-		})
+		}
+		if runtime.id == "go" {
+			item.Argv = []string{interpreter.PlaceholderProgram, "-run"}
+			item.Build = &interpreter.Build{
+				Argv:        []string{interpreter.PlaceholderExecutable, "-build", "-o", interpreter.PlaceholderProgram, interpreter.PlaceholderSource},
+				Program:     ".go/program",
+				Environment: map[string]string{"GOPROXY": "off"},
+			}
+		}
+		file.Runtimes = append(file.Runtimes, item)
 	}
 	data, err := json.Marshal(file)
 	if err != nil {

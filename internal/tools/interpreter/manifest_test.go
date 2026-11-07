@@ -147,6 +147,44 @@ func TestParseManifestRejectsMalformedInput(t *testing.T) {
 		{name: "argv with an empty entry", data: manifestWith(t, func(r *Runtime) {
 			r.Argv = []string{PlaceholderExecutable, "", PlaceholderSource}
 		})},
+		{name: "program placeholder without a build", data: manifestWith(t, func(r *Runtime) {
+			r.Argv = []string{PlaceholderExecutable, PlaceholderSource, PlaceholderProgram}
+		})},
+		{name: "build with a run argv that names the source", data: manifestWith(t, func(r *Runtime) { r.Build = validBuild(); r.Argv = []string{PlaceholderProgram, PlaceholderSource} })},
+		{name: "build with a run argv that names the executable", data: manifestWith(t, func(r *Runtime) { r.Build = validBuild(); r.Argv = []string{PlaceholderExecutable} })},
+		{name: "build with a run argv that does not start with the program", data: manifestWith(t, func(r *Runtime) { r.Build = validBuild(); r.Argv = []string{"-x", PlaceholderProgram} })},
+		{name: "build argv without the program", data: manifestWith(t, func(r *Runtime) {
+			r.Build = validBuild()
+			r.Build.Argv = []string{PlaceholderExecutable, "build", PlaceholderSource}
+		})},
+		{name: "build argv with two programs", data: manifestWith(t, func(r *Runtime) {
+			r.Build = validBuild()
+			r.Build.Argv = []string{PlaceholderExecutable, PlaceholderProgram, PlaceholderProgram, PlaceholderSource}
+		})},
+		{name: "build argv without the source", data: manifestWith(t, func(r *Runtime) {
+			r.Build = validBuild()
+			r.Build.Argv = []string{PlaceholderExecutable, "build", PlaceholderProgram}
+		})},
+		{name: "build argv not starting with the executable", data: manifestWith(t, func(r *Runtime) {
+			r.Build = validBuild()
+			r.Build.Argv = []string{"build", PlaceholderExecutable, PlaceholderProgram, PlaceholderSource}
+		})},
+		{name: "build argv with an unknown placeholder", data: manifestWith(t, func(r *Runtime) {
+			r.Build = validBuild()
+			r.Build.Argv = []string{PlaceholderExecutable, "{out}", PlaceholderProgram, PlaceholderSource}
+		})},
+		{name: "absolute build program", data: manifestWith(t, func(r *Runtime) { r.Build = validBuild(); r.Build.Program = "/tmp/program" })},
+		{name: "traversing build program", data: manifestWith(t, func(r *Runtime) { r.Build = validBuild(); r.Build.Program = "../program" })},
+		{name: "empty build program", data: manifestWith(t, func(r *Runtime) { r.Build = validBuild(); r.Build.Program = "" })},
+		{name: "build environment setting PATH", data: manifestWith(t, func(r *Runtime) {
+			r.Build = validBuild()
+			r.Build.Environment = map[string]string{"PATH": "/usr/bin"}
+		})},
+		{name: "build environment setting LD_PRELOAD", data: manifestWith(t, func(r *Runtime) {
+			r.Build = validBuild()
+			r.Build.Environment = map[string]string{"LD_PRELOAD": "x.so"}
+		})},
+		{name: "unknown build field", data: []byte(strings.Replace(string(manifestWith(t, func(r *Runtime) { r.Build = validBuild() })), `"program"`, `"extra":1,"program"`, 1))},
 		{name: "environment setting PATH", data: manifestWith(t, func(r *Runtime) { r.Environment = map[string]string{"PATH": "/usr/bin"} })},
 		{name: "environment setting LD_PRELOAD", data: manifestWith(t, func(r *Runtime) { r.Environment = map[string]string{"LD_PRELOAD": "x.so"} })},
 		{name: "environment lower-case key", data: manifestWith(t, func(r *Runtime) { r.Environment = map[string]string{"home": "x"} })},
@@ -157,6 +195,62 @@ func TestParseManifestRejectsMalformedInput(t *testing.T) {
 			_, err := ParseManifest(tc.data)
 			requireCode(t, err, ErrorCodeManifestInvalid)
 		})
+	}
+}
+
+func validBuild() *Build {
+	return &Build{
+		Argv:        []string{PlaceholderExecutable, "build", "-o", PlaceholderProgram, PlaceholderSource},
+		Program:     ".go/program",
+		Environment: map[string]string{"GOPROXY": "off"},
+	}
+}
+
+func TestParseManifestAcceptsABuildRuntime(t *testing.T) {
+	manifest, err := ParseManifest(manifestWith(t, func(r *Runtime) {
+		r.Build = validBuild()
+		r.Argv = []string{PlaceholderProgram, "-x"}
+	}))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	runtime, _ := manifest.Lookup("python")
+	if !runtime.Builds() {
+		t.Fatal("the runtime lost its build phase")
+	}
+	if got, want := runtime.BuildCommand("/b/go", "main.go", "/r/.go/program"), []string{"/b/go", "build", "-o", "/r/.go/program", "main.go"}; !slices.Equal(got, want) {
+		t.Fatalf("BuildCommand = %v, want %v", got, want)
+	}
+	if got, want := runtime.Command("/b/go", "main.go", "/r/.go/program"), []string{"/r/.go/program", "-x"}; !slices.Equal(got, want) {
+		t.Fatalf("Command = %v, want %v", got, want)
+	}
+	if got, want := runtime.BuildEnvironmentEntries(), []string{"GOPROXY=off"}; !slices.Equal(got, want) {
+		t.Fatalf("BuildEnvironmentEntries = %v, want %v", got, want)
+	}
+	runtime.Build.Argv[0] = "mutated"
+	runtime.Build.Environment["GOPROXY"] = "mutated"
+	again, _ := manifest.Lookup("python")
+	if again.Build.Argv[0] != PlaceholderExecutable || again.Build.Environment["GOPROXY"] != "off" {
+		t.Fatalf("Lookup exposed mutable build data: %+v", again.Build)
+	}
+}
+
+func TestRuntimeWithoutABuildHasNoBuildCommand(t *testing.T) {
+	runtime := Runtime{Argv: []string{PlaceholderExecutable, PlaceholderSource}}
+	if runtime.Builds() || runtime.BuildCommand("/b/tool", "main.py", "") != nil || runtime.BuildEnvironmentEntries() != nil {
+		t.Fatal("a runtime without a build must have no build phase")
+	}
+}
+
+func TestDefaultManifestBuildsOnlyGo(t *testing.T) {
+	manifest, err := DefaultManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, runtime := range manifest.Runtimes() {
+		if want := runtime.ID == "go"; runtime.Builds() != want {
+			t.Errorf("%s builds = %v, want %v", runtime.ID, runtime.Builds(), want)
+		}
 	}
 }
 
