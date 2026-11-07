@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -113,9 +112,7 @@ func validateEmbeddingCredentialRef(ref string) []error {
 	switch {
 	case ref == "":
 		return nil
-	case strings.HasPrefix(ref, "env://") && len(ref) > len("env://"):
-		return nil
-	case strings.HasPrefix(ref, "file://") && len(ref) > len("file://"):
+	case credentialRefHasName(ref):
 		return nil
 	}
 	return []error{errors.New("knowledge.embedding.credential_ref must use env:// or file:// with a name")}

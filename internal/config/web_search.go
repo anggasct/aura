@@ -95,7 +95,7 @@ func validateWebSearchCredentialRef(webSearch *ToolWebSearch, required bool) []e
 		return nil
 	}
 	var problems []error
-	if !(strings.HasPrefix(ref, "env://") && len(ref) > len("env://")) && !(strings.HasPrefix(ref, "file://") && len(ref) > len("file://")) {
+	if !credentialRefHasName(ref) {
 		problems = append(problems, errors.New("tools.web_search.credential_ref must use env:// or file:// with a name"))
 	}
 	for _, other := range WebSearchProviders() {
@@ -104,4 +104,14 @@ func validateWebSearchCredentialRef(webSearch *ToolWebSearch, required bool) []e
 		}
 	}
 	return problems
+}
+
+func credentialRefHasName(ref string) bool {
+	switch {
+	case strings.HasPrefix(ref, "env://"):
+		return len(ref) > len("env://")
+	case strings.HasPrefix(ref, "file://"):
+		return len(ref) > len("file://")
+	}
+	return false
 }

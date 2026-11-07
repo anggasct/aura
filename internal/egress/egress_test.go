@@ -434,8 +434,8 @@ func TestLoopbackClientDialsOnlyItsPinnedAddress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLoopbackClient: %v", err)
 	}
-	if client.Transport.(*http.Transport).Proxy != nil {
-		t.Fatal("loopback client must not use a proxy")
+	if transport, ok := client.Transport.(*http.Transport); !ok || transport.Proxy != nil {
+		t.Fatal("loopback client must use its own transport without a proxy")
 	}
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/search", http.NoBody)
 	if err != nil {
