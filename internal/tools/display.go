@@ -17,11 +17,14 @@ const (
 	ApprovalDisplayLimit = 1200
 	MaxDisplayFields     = 16
 
-	maxJSONDepth    = 10000
-	truncatedMarker = "...[truncated]"
+	maxJSONDepth         = 10000
+	truncatedMarker      = "...[truncated]"
+	jsonUnicodeEscapeLen = len(`\u0000`)
 )
 
 var displayNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,63}$`)
+
+var markupEscapes = map[string]byte{`\u003c`: '<', `\u003e`: '>', `\u0026`: '&'}
 
 func (d *Definition) FieldApproval() bool {
 	return d.Plugin != nil && d.Effectful
@@ -84,7 +87,7 @@ func jsonText(arguments json.RawMessage, redact func(string) string) string {
 	text := strings.TrimSpace(string(arguments))
 	var compact bytes.Buffer
 	if json.Compact(&compact, []byte(text)) == nil {
-		text = compact.String()
+		text = readableMarkup(compact.String())
 	}
 	if text == "" {
 		text = "{}"
@@ -96,6 +99,28 @@ func jsonText(arguments json.RawMessage, redact func(string) string) string {
 	}
 	escaped, _ = escapeWithin(text, ApprovalDisplayLimit-len(truncatedMarker))
 	return escaped + truncatedMarker
+}
+
+func readableMarkup(compact string) string {
+	var text strings.Builder
+	text.Grow(len(compact))
+	for i := 0; i < len(compact); {
+		if compact[i] != '\\' || i+1 == len(compact) {
+			text.WriteByte(compact[i])
+			i++
+			continue
+		}
+		if i+jsonUnicodeEscapeLen <= len(compact) {
+			if char, ok := markupEscapes[strings.ToLower(compact[i:i+jsonUnicodeEscapeLen])]; ok {
+				text.WriteByte(char)
+				i += jsonUnicodeEscapeLen
+				continue
+			}
+		}
+		text.WriteString(compact[i : i+2])
+		i += 2
+	}
+	return text.String()
 }
 
 func (d *Definition) fieldText(arguments json.RawMessage, redact func(string) string) (string, error) {

@@ -105,6 +105,47 @@ func TestNonPluginToolsKeepTheirRenderingWithEscapingAndTheSameLimit(t *testing.
 	}
 }
 
+func TestJSONDisplayShowsMarkupCharactersAsWritten(t *testing.T) {
+	definition := &tools.Definition{Name: "exec", Version: "v1", Effectful: true}
+	for name, tc := range map[string]struct{ raw, want string }{
+		"escaped by the encoder": {raw: `{"cmd":"a 2\u003e\u00261 \u003cb"}`, want: `{"cmd":"a 2>&1 <b"}`},
+		"upper case hex":         {raw: `{"cmd":"\u003C\u003E"}`, want: `{"cmd":"<>"}`},
+		"already readable":       {raw: `{"cmd":"a > b"}`, want: `{"cmd":"a > b"}`},
+		"literal backslash":      {raw: `{"p":"\\u003e"}`, want: `{"p":"\\u003e"}`},
+		"backslash then escape":  {raw: `{"p":"\\\u003e"}`, want: `{"p":"\\>"}`},
+		"quote stays escaped":    {raw: `{"p":"a\"b\n"}`, want: `{"p":"a\"b\n"}`},
+		"other escape stays":     {raw: `{"p":"\u0041"}`, want: `{"p":"\u0041"}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			text, err := definition.ApprovalText(json.RawMessage(tc.raw), nil)
+			if err != nil || text != tc.want {
+				t.Fatalf("display = %q, %v, want %q", text, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestJSONDisplayRedactsASecretHoldingMarkupCharacters(t *testing.T) {
+	definition := &tools.Definition{Name: "exec", Version: "v1", Effectful: true}
+	redact := func(s string) string { return strings.ReplaceAll(s, "p&ss<word>", "[REDACTED]") }
+	text, err := definition.ApprovalText(json.RawMessage(`{"cmd":"login p\u0026ss\u003cword\u003e"}`), redact)
+	if err != nil || text != `{"cmd":"login [REDACTED]"}` {
+		t.Fatalf("display = %q, %v", text, err)
+	}
+}
+
+func TestJSONDisplayKeepsTheLimitAfterReadableMarkup(t *testing.T) {
+	definition := &tools.Definition{Name: "exec", Version: "v1", Effectful: true}
+	raw := `{"cmd":"` + strings.Repeat(`\u0026`, 2000) + `"}`
+	text, err := definition.ApprovalText(json.RawMessage(raw), nil)
+	if err != nil || len(text) > tools.ApprovalDisplayLimit || !strings.HasSuffix(text, "...[truncated]") {
+		t.Fatalf("display = %d bytes, %v", len(text), err)
+	}
+	if strings.Contains(text, `\u0026`) {
+		t.Fatalf("display kept an escape: %q", text[:40])
+	}
+}
+
 func TestRedactionHappensBeforeSizingAndTruncation(t *testing.T) {
 	definition := displaytest.Definition([]string{"to", "body"})
 	redact := func(s string) string { return strings.ReplaceAll(s, "hunter2", "[REDACTED]") }
