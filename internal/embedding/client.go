@@ -53,7 +53,7 @@ func New(cfg *config.KnowledgeEmbedding, credential string, resolver egress.Reso
 	return newClient(cfg, endpoint, credential, newRemoteClient(resolver)), nil
 }
 
-func newClient(cfg *config.KnowledgeEmbedding, endpoint config.EmbeddingEndpoint, credential string, httpClient *http.Client) *Client {
+func newClient(cfg *config.KnowledgeEmbedding, endpoint config.ServiceEndpoint, credential string, httpClient *http.Client) *Client {
 	return &Client{
 		http:            httpClient,
 		url:             endpoint.URL() + "/embeddings",

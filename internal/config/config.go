@@ -465,7 +465,8 @@ type ToolFetch struct {
 
 type ToolWebSearch struct {
 	Provider      string `koanf:"provider" yaml:"provider"`
-	CredentialRef string `koanf:"credential_ref" yaml:"credential_ref"`
+	CredentialRef string `koanf:"credential_ref" yaml:"credential_ref,omitempty"`
+	Endpoint      string `koanf:"endpoint" yaml:"endpoint,omitempty"`
 	MaxResults    int    `koanf:"max_results" yaml:"max_results"`
 }
 
@@ -975,9 +976,8 @@ func Default() Config {
 				MaxDecodedBytes: 8388608,
 			},
 			WebSearch: ToolWebSearch{
-				Provider:      "brave",
-				CredentialRef: defaultWebSearchCredentialRef(),
-				MaxResults:    5,
+				Provider:   WebSearchProviderDuckDuckGo,
+				MaxResults: 5,
 			},
 		},
 		Server: Server{
@@ -1177,10 +1177,6 @@ func Default() Config {
 			HandoffTimeout: Duration(24 * time.Hour),
 		},
 	}
-}
-
-func defaultWebSearchCredentialRef() string {
-	return fmt.Sprintf("env://%s_%s_%s_%s", "AURA", "BRAVE", "API", "KEY")
 }
 
 func defaultSyncTransportSecretRef() string {

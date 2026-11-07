@@ -110,7 +110,7 @@ func additionalConfiguredSecrets(cfg *config.Config) []configuredSecret {
 	if cfg.Tools != nil {
 		if ref := parseSecretRef(cfg.Tools.WebSearch.CredentialRef); ref.Env != "" || ref.File != "" {
 			entry := referenceSecret("web_search_credential", ref)
-			entry.optional = cfg.Tools.WebSearch.CredentialRef == builtinDefaults().Tools.WebSearch.CredentialRef
+			entry.optional = cfg.Tools.WebSearch.CredentialRef == config.DefaultWebSearchCredentialRef(cfg.Tools.WebSearch.Provider)
 			secrets = append(secrets, entry)
 		}
 	}

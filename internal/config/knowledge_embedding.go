@@ -3,18 +3,12 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net/netip"
-	"net/url"
-	"path"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	yamlv3 "gopkg.in/yaml.v3"
-
-	"github.com/anggasct/aura/internal/egress"
 )
 
 const (
@@ -34,8 +28,7 @@ const (
 	maxEmbeddingPrefixLength = 256
 	maxEmbeddingFieldLength  = 32
 
-	embeddingLoopbackIPv4 = "127.0.0.1"
-	embeddingLoopbackIPv6 = "::1"
+	embeddingBaseURLField = "knowledge.embedding.base_url"
 )
 
 var (
@@ -65,145 +58,15 @@ type KnowledgeEmbedding struct {
 	PublicQueries   bool     `koanf:"public_queries" yaml:"public_queries"`
 }
 
-type EmbeddingEndpoint struct {
-	Scheme   string
-	Host     string
-	Port     string
-	Path     string
-	Loopback bool
-}
-
-func (e EmbeddingEndpoint) Authority() string {
-	return joinHostPort(e.Host, e.Port)
-}
-
-func (e EmbeddingEndpoint) URL() string {
-	return e.Scheme + "://" + e.Authority() + e.Path
-}
-
-func joinHostPort(host, port string) string {
-	if strings.Contains(host, ":") {
-		return "[" + host + "]:" + port
-	}
-	return host + ":" + port
-}
-
-func (e *KnowledgeEmbedding) Endpoint() (EmbeddingEndpoint, error) {
+func (e *KnowledgeEmbedding) Endpoint() (ServiceEndpoint, error) {
 	if e == nil {
-		return EmbeddingEndpoint{}, &Error{Code: ErrorCodeConfigInvalid, Detail: "knowledge.embedding is not configured"}
+		return ServiceEndpoint{}, &Error{Code: ErrorCodeConfigInvalid, Detail: "knowledge.embedding is not configured"}
 	}
-	endpoint, err := parseEmbeddingBaseURL(e.BaseURL)
+	endpoint, err := parseServiceEndpoint(embeddingBaseURLField, e.BaseURL)
 	if err != nil {
-		return EmbeddingEndpoint{}, &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+		return ServiceEndpoint{}, &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
 	}
 	return endpoint, nil
-}
-
-func parseEmbeddingBaseURL(raw string) (EmbeddingEndpoint, error) {
-	if raw == "" || strings.TrimSpace(raw) != raw {
-		return EmbeddingEndpoint{}, errors.New("knowledge.embedding.base_url must be set and carry no surrounding whitespace")
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return EmbeddingEndpoint{}, errors.New("knowledge.embedding.base_url is not a valid URL")
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return EmbeddingEndpoint{}, errors.New("knowledge.embedding.base_url scheme must be http or https")
-	}
-	switch {
-	case u.Opaque != "" || u.Host == "":
-		return EmbeddingEndpoint{}, errors.New("knowledge.embedding.base_url must have a host")
-	case u.User != nil:
-		return EmbeddingEndpoint{}, errors.New("knowledge.embedding.base_url must not embed credentials")
-	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
-		return EmbeddingEndpoint{}, errors.New("knowledge.embedding.base_url must not carry a query or fragment")
-	}
-	host := u.Hostname()
-	if host == "" || strings.ContainsAny(host, "%\\") {
-		return EmbeddingEndpoint{}, errors.New("knowledge.embedding.base_url host is not valid")
-	}
-	port, err := embeddingPort(u)
-	if err != nil {
-		return EmbeddingEndpoint{}, err
-	}
-	endpointPath, err := embeddingPath(u)
-	if err != nil {
-		return EmbeddingEndpoint{}, err
-	}
-	endpoint := EmbeddingEndpoint{Scheme: u.Scheme, Host: host, Port: port, Path: endpointPath}
-	if host == embeddingLoopbackIPv4 || host == embeddingLoopbackIPv6 {
-		endpoint.Loopback = true
-		return endpoint, nil
-	}
-	if err := rejectLoopbackLookalike(host); err != nil {
-		return EmbeddingEndpoint{}, err
-	}
-	if u.Scheme != "https" {
-		return EmbeddingEndpoint{}, errors.New("knowledge.embedding.base_url must use https unless the host is exactly 127.0.0.1 or ::1")
-	}
-	endpoint.Host = strings.ToLower(host)
-	if _, err := netip.ParseAddr(host); err == nil {
-		if err := egress.ValidateLiteralDestination(endpoint.URL()); err != nil {
-			return EmbeddingEndpoint{}, errors.New("knowledge.embedding.base_url address is not a permitted destination")
-		}
-	}
-	return endpoint, nil
-}
-
-func embeddingPort(u *url.URL) (string, error) {
-	port := u.Port()
-	if port == "" {
-		if u.Scheme == "https" {
-			return "443", nil
-		}
-		return "80", nil
-	}
-	number, err := strconv.Atoi(port)
-	if err != nil || number < 1 || number > 65535 || strconv.Itoa(number) != port {
-		return "", errors.New("knowledge.embedding.base_url port must be between 1 and 65535")
-	}
-	return port, nil
-}
-
-func embeddingPath(u *url.URL) (string, error) {
-	escaped := strings.TrimRight(u.EscapedPath(), "/")
-	if escaped == "" {
-		return "", nil
-	}
-	if strings.Contains(escaped, "%") || strings.Contains(escaped, "//") || path.Clean(escaped) != escaped {
-		return "", errors.New("knowledge.embedding.base_url path must be plain and normalized")
-	}
-	return escaped, nil
-}
-
-func rejectLoopbackLookalike(host string) error {
-	name := strings.ToLower(strings.TrimSuffix(host, "."))
-	if name == "localhost" || strings.HasSuffix(name, ".localhost") {
-		return errors.New("knowledge.embedding.base_url must use the literal 127.0.0.1 or ::1 for a local server, not a loopback name")
-	}
-	if addr, err := netip.ParseAddr(name); err == nil {
-		if addr.Unmap().IsLoopback() {
-			return errors.New("knowledge.embedding.base_url loopback address must be written exactly as 127.0.0.1 or ::1")
-		}
-		return nil
-	}
-	last := name[strings.LastIndexByte(name, '.')+1:]
-	if last == "" || isNumericLabel(last) {
-		return errors.New("knowledge.embedding.base_url host form is not accepted")
-	}
-	return nil
-}
-
-func isNumericLabel(label string) bool {
-	if strings.HasPrefix(strings.ToLower(label), "0x") {
-		return true
-	}
-	for _, r := range label {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return label != ""
 }
 
 func validateKnowledge(knowledge *Knowledge) error {
@@ -212,7 +75,7 @@ func validateKnowledge(knowledge *Knowledge) error {
 	}
 	embedding := knowledge.Embedding
 	var problems []error
-	if _, err := parseEmbeddingBaseURL(embedding.BaseURL); err != nil {
+	if _, err := parseServiceEndpoint(embeddingBaseURLField, embedding.BaseURL); err != nil {
 		problems = append(problems, err)
 	}
 	if len(embedding.Model) > maxEmbeddingModelLength || !embeddingModelPattern.MatchString(embedding.Model) {

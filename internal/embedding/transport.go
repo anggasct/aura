@@ -19,7 +19,7 @@ func newRemoteClient(resolver egress.Resolver) *http.Client {
 	return client
 }
 
-func newLoopbackClient(endpoint config.EmbeddingEndpoint) *http.Client {
+func newLoopbackClient(endpoint config.ServiceEndpoint) *http.Client {
 	pinned := net.JoinHostPort(endpoint.Host, endpoint.Port)
 	dialer := &net.Dialer{}
 	transport := &http.Transport{

@@ -1795,7 +1795,7 @@ func validateToolWebSearchShape(node *yamlv3.Node) error {
 		keyNode := node.Content[i]
 		valueNode := node.Content[i+1]
 		switch keyNode.Value {
-		case "provider", "credential_ref":
+		case "provider", "credential_ref", "endpoint":
 			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 				return fmt.Errorf("tools.web_search.%s must be a string at line %d", keyNode.Value, valueNode.Line)
 			}
@@ -2995,7 +2995,7 @@ func applyToolDefaults(cfg *Config, doc *yamlv3.Node) {
 		cfg.Tools.WebSearch.Provider = defaults.WebSearch.Provider
 	}
 	if cfg.Tools.WebSearch.CredentialRef == "" && !configValuePresent(doc, "tools", "web_search", "credential_ref") && !envValuePresent("tools.web_search.credential_ref") {
-		cfg.Tools.WebSearch.CredentialRef = defaults.WebSearch.CredentialRef
+		cfg.Tools.WebSearch.CredentialRef = DefaultWebSearchCredentialRef(cfg.Tools.WebSearch.Provider)
 	}
 	if cfg.Tools.WebSearch.MaxResults == 0 && !configValuePresent(doc, "tools", "web_search", "max_results") && !envValuePresent("tools.web_search.max_results") {
 		cfg.Tools.WebSearch.MaxResults = defaults.WebSearch.MaxResults
@@ -4582,16 +4582,7 @@ func validateTools(toolsConfig *Tools, profile capability.Profile) error {
 	if toolsConfig.Fetch.MaxEncodedBytes <= 0 || toolsConfig.Fetch.MaxDecodedBytes <= 0 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.fetch body limits must be positive"}
 	}
-	if strings.TrimSpace(toolsConfig.WebSearch.Provider) == "" {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.web_search.provider must not be empty"}
-	}
-	if !strings.HasPrefix(toolsConfig.WebSearch.CredentialRef, "env://") && !strings.HasPrefix(toolsConfig.WebSearch.CredentialRef, "file://") {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.web_search.credential_ref must use env:// or file://"}
-	}
-	if toolsConfig.WebSearch.MaxResults < 1 || toolsConfig.WebSearch.MaxResults > 20 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.web_search.max_results must be between 1 and 20"}
-	}
-	return nil
+	return validateWebSearch(&toolsConfig.WebSearch)
 }
 
 func unknownEnvKeys() []string {
