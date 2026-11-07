@@ -273,8 +273,6 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 	requireLiveSocketPathFits(t)
 	dir := t.TempDir()
 	ingressPort, adminPort := freePort(t), freePort(t)
-	handlerPort := freePort(t)
-	handlerAddr := fmt.Sprintf("127.0.0.1:%d", handlerPort)
 	ingressURL := fmt.Sprintf("http://127.0.0.1:%d", ingressPort)
 
 	server := startLiveServer(t, binary, dir, ingressPort, adminPort)
@@ -306,10 +304,9 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 		engine: engine, model: model, tools: counting,
 		server: server, dir: dir,
 		ingressPort: ingressPort, adminPort: adminPort,
-		handlerAddr: handlerAddr,
 	}
 	t.Cleanup(func() { rig.server.stop() })
-	rig.startEndpoint(handlerAddr)
+	rig.startEndpoint("127.0.0.1:0")
 	return rig
 }
 
@@ -390,8 +387,9 @@ func (r *liveTurnRig) startEndpoint(handlerAddr string) {
 	go func() { done <- endpoint.Start(endpointCtx); close(done) }()
 	r.done = done
 	r.endpoint = endpoint
-	waitEndpointReady(r.t, endpoint)
-	r.server.registerDeployment(r.t, handlerAddr)
+	waitEndpointReadyStarted(r.t, endpoint, done)
+	r.handlerAddr = resolveHandlerAddr(r.t, endpoint, handlerAddr)
+	r.server.registerDeployment(r.t, r.handlerAddr)
 }
 
 func (r *liveTurnRig) crash() {

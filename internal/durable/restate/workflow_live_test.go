@@ -194,8 +194,20 @@ func liveTestDB(t *testing.T) *sql.DB {
 
 func waitEndpointReady(t *testing.T, endpoint *Endpoint) {
 	t.Helper()
+	waitEndpointReadyStarted(t, endpoint, nil)
+}
+
+func waitEndpointReadyStarted(t *testing.T, endpoint *Endpoint, started <-chan error) {
+	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
+		if started != nil {
+			select {
+			case err := <-started:
+				t.Fatalf("handler endpoint failed to start: %v", err)
+			default:
+			}
+		}
 		if bound := endpoint.BoundAddr(); bound != nil {
 			response, err := http.Get("http://" + bound.String() + "/health")
 			if err == nil {
@@ -208,6 +220,18 @@ func waitEndpointReady(t *testing.T, endpoint *Endpoint) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("handler endpoint never became ready")
+}
+
+func resolveHandlerAddr(t *testing.T, endpoint *Endpoint, handlerAddr string) string {
+	t.Helper()
+	if handlerAddr != "127.0.0.1:0" {
+		return handlerAddr
+	}
+	bound := endpoint.BoundAddr()
+	if bound == nil {
+		t.Fatal("handler endpoint bound address unavailable")
+	}
+	return bound.String()
 }
 
 func waitForStoreStatus(t *testing.T, disk *workflow.Store, runID, status string, within time.Duration) {
@@ -285,8 +309,7 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 
 	dir := t.TempDir()
 	ingressPort, adminPort := freePort(t), freePort(t)
-	handlerPort := freePort(t)
-	handlerAddr := fmt.Sprintf("127.0.0.1:%d", handlerPort)
+	handlerAddr := "127.0.0.1:0"
 	server := startLiveServer(t, binary, dir, ingressPort, adminPort)
 	t.Cleanup(func() { server.stop() })
 
@@ -301,7 +324,8 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 	endpointCtx, stopEndpoint := context.WithCancel(context.Background())
 	endpointDone := make(chan error, 1)
 	go func() { endpointDone <- endpoint.Start(endpointCtx) }()
-	waitEndpointReady(t, endpoint)
+	waitEndpointReadyStarted(t, endpoint, endpointDone)
+	handlerAddr = resolveHandlerAddr(t, endpoint, handlerAddr)
 	server.registerDeployment(t, handlerAddr)
 	t.Cleanup(func() {
 		stopEndpoint()
@@ -342,7 +366,7 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 	secondCtx, stopSecond := context.WithCancel(context.Background())
 	secondDone := make(chan error, 1)
 	go func() { secondDone <- endpoint.Start(secondCtx) }()
-	waitEndpointReady(t, endpoint)
+	waitEndpointReadyStarted(t, endpoint, secondDone)
 	t.Cleanup(func() {
 		stopEndpoint()
 		stopSecond()
@@ -421,8 +445,7 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 
 	dir := t.TempDir()
 	ingressPort, adminPort := freePort(t), freePort(t)
-	handlerPort := freePort(t)
-	handlerAddr := fmt.Sprintf("127.0.0.1:%d", handlerPort)
+	handlerAddr := "127.0.0.1:0"
 	server := startLiveServer(t, binary, dir, ingressPort, adminPort)
 	t.Cleanup(func() { server.stop() })
 
@@ -437,7 +460,8 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 	endpointCtx, stopEndpoint := context.WithCancel(context.Background())
 	endpointDone := make(chan error, 1)
 	go func() { endpointDone <- endpoint.Start(endpointCtx) }()
-	waitEndpointReady(t, endpoint)
+	waitEndpointReadyStarted(t, endpoint, endpointDone)
+	handlerAddr = resolveHandlerAddr(t, endpoint, handlerAddr)
 	server.registerDeployment(t, handlerAddr)
 	t.Cleanup(func() {
 		stopEndpoint()
@@ -490,7 +514,7 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 	secondCtx, stopSecond := context.WithCancel(context.Background())
 	secondDone := make(chan error, 1)
 	go func() { secondDone <- endpoint.Start(secondCtx) }()
-	waitEndpointReady(t, endpoint)
+	waitEndpointReadyStarted(t, endpoint, secondDone)
 	t.Cleanup(func() {
 		stopEndpoint()
 		stopSecond()
