@@ -109,7 +109,8 @@ func TestImportRefusesEachUnsafeOutput(t *testing.T) {
 			}
 		}, []string{"pipe"}, RefusalNotRegular},
 		{"socket", func(t *testing.T, f *importFixture) {
-			listener, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", filepath.Join(f.output, "s"))
+			t.Chdir(f.output)
+			listener, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", "s")
 			if err != nil {
 				t.Fatal(err)
 			}
