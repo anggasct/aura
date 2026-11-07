@@ -63,7 +63,9 @@ func readResult(node *html.Node) (searchResult, bool) {
 		return searchResult{}, false
 	}
 	entry := searchResult{Title: textOf(link), URL: target}
-	if snippet := findElement(node, func(candidate *html.Node) bool { return candidate.Data == "a" && hasClass(candidate, "result__snippet") }); snippet != nil {
+	if snippet := findElement(node, func(candidate *html.Node) bool {
+		return candidate.Data == "a" && hasClass(candidate, "result__snippet")
+	}); snippet != nil {
 		entry.Snippet = textOf(snippet)
 	}
 	return entry, true
@@ -112,6 +114,9 @@ func textOf(node *html.Node) string {
 	var builder strings.Builder
 	var walk func(*html.Node)
 	walk = func(current *html.Node) {
+		if current.Type == html.ElementNode && (current.Data == "script" || current.Data == "style") {
+			return
+		}
 		if current.Type == html.TextNode {
 			builder.WriteString(current.Data)
 		}

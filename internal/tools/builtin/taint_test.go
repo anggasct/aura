@@ -18,6 +18,7 @@ import (
 func TestExecutorForwardsTheTaintFlagToTheBroker(t *testing.T) {
 	db := storetest.OpenMigrated(t)
 	cfg := config.Default()
+	cfg.Tools.WebSearch = config.ToolWebSearch{Provider: "brave", CredentialRef: "env://AURA_TEST_TAINT_SEARCH_UNSET", MaxResults: 5}
 	cfg.Tools.Workspace = t.TempDir()
 	cfg.Storage.Path = t.TempDir()
 	decisions := 0

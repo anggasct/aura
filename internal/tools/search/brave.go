@@ -45,4 +45,3 @@ func (brave) parse(body []byte) ([]searchResult, error) {
 	}
 	return results, nil
 }
-

@@ -170,6 +170,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	}
 	cfg := config.Default()
 	cfg.Tools.Workspace = workspace
+	cfg.Tools.WebSearch.Provider = "brave"
 	cfg.Tools.WebSearch.CredentialRef = "env://AURA_TEST_TOOL_SECRET"
 	cfg.Tools.MaxInlineResultBytes = 512
 	cfg.Storage.Path = dataRoot
