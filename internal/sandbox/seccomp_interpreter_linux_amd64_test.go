@@ -64,6 +64,12 @@ var interpreterAdditionRuntimes = map[int]struct {
 	unix.SYS_FSYNC:              {"fsync", "python"},
 	unix.SYS_SENDFILE:           {"sendfile", "python"},
 	unix.SYS_TGKILL:             {"tgkill", "python"},
+	unix.SYS_MKDIRAT:            {"mkdirat", "go"},
+	unix.SYS_FLOCK:              {"flock", "go"},
+	unix.SYS_FALLOCATE:          {"fallocate", "go"},
+	unix.SYS_COPY_FILE_RANGE:    {"copy_file_range", "go"},
+	unix.SYS_WAITID:             {"waitid", "go"},
+	unix.SYS_RESTART_SYSCALL:    {"restart_syscall", "go"},
 }
 
 func TestInterpreterAdditionsNameTheRuntimeThatNeedsEach(t *testing.T) {
