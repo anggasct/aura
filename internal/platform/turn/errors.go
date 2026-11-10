@@ -1,0 +1,66 @@
+package turn
+
+import (
+	"errors"
+	"fmt"
+)
+
+type ErrorCode string
+
+const (
+	ErrorCodeRuntimeOverloaded          ErrorCode = "runtime_overloaded"
+	ErrorCodeTurnDeadlineExceeded       ErrorCode = "turn_deadline_exceeded"
+	ErrorCodeTurnCancelled              ErrorCode = "turn_cancelled"
+	ErrorCodeModelCapabilityUnsupported ErrorCode = "model_capability_unsupported"
+	ErrorCodePolicyDenied               ErrorCode = "policy_denied"
+	ErrorCodeStorageUnavailable         ErrorCode = "storage_unavailable"
+	ErrorCodeBudgetExhausted            ErrorCode = "budget_exhausted"
+	ErrorCodeRuntimeInternal            ErrorCode = "runtime_internal"
+	ErrorCodeInvalidArgument            ErrorCode = "invalid_argument"
+	ErrorCodeDeliveryFailed             ErrorCode = "delivery_failed"
+	ErrorCodeDeliverySkipped            ErrorCode = "delivery_skipped"
+	ErrorCodeCheckpointInvalid          ErrorCode = "checkpoint_invalid"
+	ErrorCodeCheckpointNotFound         ErrorCode = "checkpoint_not_found"
+	ErrorCodeCheckpointStale            ErrorCode = "checkpoint_stale"
+	ErrorCodeCheckpointUnsupported      ErrorCode = "checkpoint_unsupported"
+	ErrorCodePersonaNotFound            ErrorCode = "persona_not_found"
+	ErrorCodePersonaMismatch            ErrorCode = "persona_mismatch"
+	ErrorCodeSkillUnavailable           ErrorCode = "skill_unavailable"
+)
+
+func (c ErrorCode) Retryable() bool {
+	switch c {
+	case ErrorCodeRuntimeOverloaded, ErrorCodeStorageUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+type Error struct {
+	Code   ErrorCode
+	Detail string
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
+}
+
+func CodeOf(err error) (ErrorCode, bool) {
+	var target *Error
+	if !errors.As(err, &target) {
+		return "", false
+	}
+	return target.Code, true
+}
+
+func codedError(code ErrorCode, detail string, cause error) error {
+	if cause == nil {
+		return &Error{Code: code, Detail: detail}
+	}
+	return fmt.Errorf("%w: %w", &Error{Code: code, Detail: detail}, cause)
+}
+
+func invalidArgument(detail string) error {
+	return &Error{Code: ErrorCodeInvalidArgument, Detail: detail}
+}

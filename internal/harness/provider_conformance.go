@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/approval"
-	"github.com/anggasct/aura/internal/capability"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/capability"
 )
 
 type ProviderBrokerFactory func(approval.Handler) (approval.ToolBroker, error)

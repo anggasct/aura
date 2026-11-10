@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/connectors/gmail"
-	"github.com/anggasct/aura/internal/plugin"
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/plugins/gmail/connector"
 )
 
 type sentMessage struct {
@@ -76,7 +76,7 @@ func TestGmailManifestAgreesWithTheConnector(t *testing.T) {
 		t.Fatalf("max_message_size = %d, want at least 640 KiB", size)
 	}
 	described := map[string]bool{}
-	for _, tool := range gmail.New().Tools() {
+	for _, tool := range connector.New().Tools() {
 		described[tool.Name] = true
 	}
 	var declared []string

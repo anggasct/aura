@@ -11,18 +11,18 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/discord"
-	"github.com/anggasct/aura/internal/channel/email"
-	"github.com/anggasct/aura/internal/channel/telegram"
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/principal"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
-	"github.com/anggasct/aura/internal/secret"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 type discordResumeStore struct {

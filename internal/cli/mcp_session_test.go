@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/mcp"
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func TestMCPSessionStarterMapping(t *testing.T) {

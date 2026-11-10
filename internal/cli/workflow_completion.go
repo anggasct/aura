@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/access"
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/workflow"
 )
 
 const (

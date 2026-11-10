@@ -7,15 +7,15 @@ import (
 	"net"
 	"testing"
 
-	"github.com/anggasct/aura/internal/approval"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
 type compositionRuntime struct{}
 
-func (compositionRuntime) Run(context.Context, *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (compositionRuntime) Run(context.Context, *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(func(store.RuntimeEvent, error) bool) {}
 }
 

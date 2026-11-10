@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/mcp"
-	"github.com/anggasct/aura/internal/plugin"
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func installApprovedCLIPlugin(t *testing.T, h *mcpHarness, manifest string) *plugin.Service {

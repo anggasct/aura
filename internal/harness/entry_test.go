@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/runtime/engine"
-	"github.com/anggasct/aura/internal/runtime/ingress"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -19,16 +19,16 @@ func TestComposedRuntimeEntryPersistsTerminalBeforeReturn(t *testing.T) {
 		t.Fatalf("Create session: %v", err)
 	}
 	events := store.NewEventStore(db)
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), runtime.NewFakeExecutor([]runtime.FakeStep{{Kind: runtime.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}}), nil)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}}), nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
 	var streamed []store.RuntimeEvent
-	for event, streamErr := range engine.Run(ctx, &runtime.TurnRequest{
+	for event, streamErr := range engine.Run(ctx, &turn.TurnRequest{
 		TurnID:      "entry-turn",
 		SessionID:   "entry-session",
 		PrincipalID: "owner",
-		Origin:      runtime.OriginInternal,
+		Origin:      turn.OriginInternal,
 		Parts:       []runtimeingress.InputPart{{Text: "entry"}},
 	}) {
 		if streamErr != nil {
@@ -49,7 +49,7 @@ func TestComposedRuntimeEntryPersistsTerminalBeforeReturn(t *testing.T) {
 		}
 	}
 	last := stored[len(stored)-1]
-	if last.Kind != runtime.EventKindTurnCompleted {
+	if last.Kind != turn.EventKindTurnCompleted {
 		t.Fatalf("last event kind = %q, want turn.completed", last.Kind)
 	}
 }

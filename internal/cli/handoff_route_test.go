@@ -6,10 +6,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/anggasct/aura/internal/channel/access"
-	"github.com/anggasct/aura/internal/channel/approval"
-	"github.com/anggasct/aura/internal/channel/telegram"
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/telegram"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func telegramHandoffUnavailable() error {

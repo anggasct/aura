@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/anggasct/aura/internal/capability"
+	"github.com/anggasct/aura/internal/platform/capability"
 )
 
 const maxProviderArgumentBytes = 1 << 20

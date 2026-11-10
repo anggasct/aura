@@ -7,8 +7,8 @@ import (
 	"syscall"
 
 	"github.com/anggasct/aura/internal/cli"
-	"github.com/anggasct/aura/internal/sandbox"
-	"github.com/anggasct/aura/internal/server"
+	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/server"
 )
 
 func main() {

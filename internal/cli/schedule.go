@@ -11,24 +11,24 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anggasct/aura/internal/broadcast"
-	"github.com/anggasct/aura/internal/channel/terminal"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
-	"github.com/anggasct/aura/internal/scheduler"
+	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
-	"github.com/anggasct/aura/internal/workflow"
 )
 
 type scheduleStore struct {
 	store store.ScheduleStore
 }
 
-func (s *scheduleStore) InsertJob(ctx context.Context, job *scheduler.Job) error {
+func (s *scheduleStore) InsertJob(ctx context.Context, job *schedule.Job) error {
 	if s.store == nil || job == nil {
 		return errors.New("schedule store must not be nil")
 	}
@@ -41,8 +41,8 @@ func (s *scheduleStore) InsertJob(ctx context.Context, job *scheduler.Job) error
 	}))
 }
 
-func toScheduleJob(job *store.ScheduledJob) scheduler.Job {
-	return scheduler.Job{
+func toScheduleJob(job *store.ScheduledJob) schedule.Job {
+	return schedule.Job{
 		ID: job.ID, Name: job.Name, CronExpression: job.CronExpression, Timezone: job.Timezone,
 		Prompt: job.Prompt, OriginChannel: job.OriginChannel, OriginDestination: job.OriginDestination,
 		OverlapPolicy: job.OverlapPolicy, CatchUpGraceSeconds: job.CatchUpGraceSeconds,
@@ -51,23 +51,23 @@ func toScheduleJob(job *store.ScheduledJob) scheduler.Job {
 	}
 }
 
-func (s *scheduleStore) Job(ctx context.Context, id string) (scheduler.Job, bool, error) {
+func (s *scheduleStore) Job(ctx context.Context, id string) (schedule.Job, bool, error) {
 	if s.store == nil {
-		return scheduler.Job{}, false, errors.New("schedule store must not be nil")
+		return schedule.Job{}, false, errors.New("schedule store must not be nil")
 	}
 	job, err := s.store.Job(ctx, id)
 	if err != nil {
 		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeScheduleNotFound {
-			return scheduler.Job{}, false, nil
+			return schedule.Job{}, false, nil
 		}
-		return scheduler.Job{}, false, mapScheduleStoreError(err)
+		return schedule.Job{}, false, mapScheduleStoreError(err)
 	}
 	return toScheduleJob(&job), true, nil
 }
 
-func (s *scheduleStore) EditJob(ctx context.Context, id string, edit *scheduler.JobEdit, expectedVersion int64, now time.Time) (scheduler.Job, error) {
+func (s *scheduleStore) EditJob(ctx context.Context, id string, edit *schedule.JobEdit, expectedVersion int64, now time.Time) (schedule.Job, error) {
 	if s.store == nil || edit == nil {
-		return scheduler.Job{}, errors.New("schedule store must not be nil")
+		return schedule.Job{}, errors.New("schedule store must not be nil")
 	}
 	updated, err := s.store.EditJob(ctx, id, &store.JobEdit{
 		Name: edit.Name, CronExpression: edit.CronExpression, Timezone: edit.Timezone,
@@ -76,7 +76,7 @@ func (s *scheduleStore) EditJob(ctx context.Context, id string, edit *scheduler.
 		ExpectedVersion: expectedVersion,
 	}, now)
 	if err != nil {
-		return scheduler.Job{}, mapScheduleStoreError(err)
+		return schedule.Job{}, mapScheduleStoreError(err)
 	}
 	return toScheduleJob(&updated), nil
 }
@@ -88,15 +88,15 @@ func (s *scheduleStore) SetJobState(ctx context.Context, id, state string, now t
 	return mapScheduleStoreError(s.store.SetJobState(ctx, id, state, now))
 }
 
-func toScheduleOccurrence(item *store.ScheduledOccurrence) scheduler.Occurrence {
-	return scheduler.Occurrence{
+func toScheduleOccurrence(item *store.ScheduledOccurrence) schedule.Occurrence {
+	return schedule.Occurrence{
 		ID: item.ID, JobID: item.JobID, JobVersion: item.JobVersion,
 		ScheduledForUTC: item.ScheduledForUTC, State: item.State, TurnID: item.TurnID,
 		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }
 
-func (s *scheduleStore) RecordFire(ctx context.Context, occurrence *scheduler.Occurrence) error {
+func (s *scheduleStore) RecordFire(ctx context.Context, occurrence *schedule.Occurrence) error {
 	if s.store == nil || occurrence == nil {
 		return errors.New("schedule store must not be nil")
 	}
@@ -107,30 +107,30 @@ func (s *scheduleStore) RecordFire(ctx context.Context, occurrence *scheduler.Oc
 	}))
 }
 
-func (s *scheduleStore) OccurrenceByFire(ctx context.Context, jobID string, scheduledFor time.Time) (scheduler.Occurrence, bool, error) {
+func (s *scheduleStore) OccurrenceByFire(ctx context.Context, jobID string, scheduledFor time.Time) (schedule.Occurrence, bool, error) {
 	if s.store == nil {
-		return scheduler.Occurrence{}, false, errors.New("schedule store must not be nil")
+		return schedule.Occurrence{}, false, errors.New("schedule store must not be nil")
 	}
 	item, found, err := s.store.OccurrenceByFire(ctx, jobID, scheduledFor)
 	if err != nil {
-		return scheduler.Occurrence{}, false, mapScheduleStoreError(err)
+		return schedule.Occurrence{}, false, mapScheduleStoreError(err)
 	}
 	if !found {
-		return scheduler.Occurrence{}, false, nil
+		return schedule.Occurrence{}, false, nil
 	}
 	return toScheduleOccurrence(&item), true, nil
 }
 
-func (s *scheduleStore) ActiveOccurrence(ctx context.Context, jobID string) (scheduler.Occurrence, bool, error) {
+func (s *scheduleStore) ActiveOccurrence(ctx context.Context, jobID string) (schedule.Occurrence, bool, error) {
 	if s.store == nil {
-		return scheduler.Occurrence{}, false, errors.New("schedule store must not be nil")
+		return schedule.Occurrence{}, false, errors.New("schedule store must not be nil")
 	}
 	item, found, err := s.store.ActiveOccurrence(ctx, jobID)
 	if err != nil {
-		return scheduler.Occurrence{}, false, mapScheduleStoreError(err)
+		return schedule.Occurrence{}, false, mapScheduleStoreError(err)
 	}
 	if !found {
-		return scheduler.Occurrence{}, false, nil
+		return schedule.Occurrence{}, false, nil
 	}
 	return toScheduleOccurrence(&item), true, nil
 }
@@ -142,16 +142,16 @@ func (s *scheduleStore) AttachTurn(ctx context.Context, id, turnID string, now t
 	return mapScheduleStoreError(s.store.AttachTurn(ctx, id, turnID, now))
 }
 
-func (s *scheduleStore) PendingFire(ctx context.Context, jobID string) (scheduler.Occurrence, bool, error) {
+func (s *scheduleStore) PendingFire(ctx context.Context, jobID string) (schedule.Occurrence, bool, error) {
 	if s.store == nil {
-		return scheduler.Occurrence{}, false, errors.New("schedule store must not be nil")
+		return schedule.Occurrence{}, false, errors.New("schedule store must not be nil")
 	}
 	item, found, err := s.store.PendingFire(ctx, jobID)
 	if err != nil {
-		return scheduler.Occurrence{}, false, mapScheduleStoreError(err)
+		return schedule.Occurrence{}, false, mapScheduleStoreError(err)
 	}
 	if !found {
-		return scheduler.Occurrence{}, false, nil
+		return schedule.Occurrence{}, false, nil
 	}
 	return toScheduleOccurrence(&item), true, nil
 }
@@ -180,22 +180,22 @@ func mapScheduleStoreError(err error) error {
 	}
 	code, ok := store.CodeOf(err)
 	if !ok {
-		return scheduler.Errorf(scheduler.ErrorCodeUnavailable, "schedule store is unavailable")
+		return schedule.Errorf(schedule.ErrorCodeUnavailable, "schedule store is unavailable")
 	}
 	switch code {
 	case store.ErrorCodeScheduleConflict:
-		return scheduler.Errorf(scheduler.ErrorCodeOccurrenceConflict, "schedule store conflict")
+		return schedule.Errorf(schedule.ErrorCodeOccurrenceConflict, "schedule store conflict")
 	case store.ErrorCodeScheduleNotFound:
-		return scheduler.Errorf(scheduler.ErrorCodeJobNotFound, "schedule job not found")
+		return schedule.Errorf(schedule.ErrorCodeJobNotFound, "schedule job not found")
 	case store.ErrorCodeInvalidArgument:
-		return scheduler.Errorf(scheduler.ErrorCodeInvalidArgument, "schedule store argument invalid")
+		return schedule.Errorf(schedule.ErrorCodeInvalidArgument, "schedule store argument invalid")
 	default:
-		return scheduler.Errorf(scheduler.ErrorCodeUnavailable, "schedule store is unavailable")
+		return schedule.Errorf(schedule.ErrorCodeUnavailable, "schedule store is unavailable")
 	}
 }
 
 type cronTurnEngine interface {
-	Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+	Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error]
 }
 
 type workflowStarter interface {
@@ -212,27 +212,27 @@ func (w *scheduleWorkflows) set(starter workflowStarter) {
 	}
 }
 
-func (w *scheduleWorkflows) start(ctx context.Context, req *scheduler.TurnRequest) (scheduler.TurnResult, error) {
+func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest) (schedule.TurnResult, error) {
 	var starter *workflowStarter
 	if w != nil {
 		starter = w.starter.Load()
 	}
 	if starter == nil {
-		return scheduler.TurnResult{}, errors.New("scheduled workflows need the durable runtime")
+		return schedule.TurnResult{}, errors.New("scheduled workflows need the durable runtime")
 	}
 	input := &workflow.RunInput{}
 	if req.WorkflowInput != "" {
 		if err := json.Unmarshal([]byte(req.WorkflowInput), input); err != nil {
-			return scheduler.TurnResult{}, fmt.Errorf("scheduled workflow input: %w", err)
+			return schedule.TurnResult{}, fmt.Errorf("scheduled workflow input: %w", err)
 		}
 	}
 	run, err := (*starter).StartKeyed(ctx, req.WorkflowID, &workflow.RunInput{Objective: input.Objective}, &workflow.RunOrigin{
 		PrincipalID: req.PrincipalID, PrincipalClass: string(principal.ClassForPrincipal(req.PrincipalID)),
 	}, "sched-"+req.IdempotencyKey)
 	if err != nil {
-		return scheduler.TurnResult{}, err
+		return schedule.TurnResult{}, err
 	}
-	return scheduler.TurnResult{TurnID: run.ID, Text: fmt.Sprintf("started workflow %s (run %s)", req.WorkflowID, run.ID), Succeeded: true}, nil
+	return schedule.TurnResult{TurnID: run.ID, Text: fmt.Sprintf("started workflow %s (run %s)", req.WorkflowID, run.ID), Succeeded: true}, nil
 }
 
 type engineTurnRunner struct {
@@ -241,36 +241,36 @@ type engineTurnRunner struct {
 	workflows *scheduleWorkflows
 }
 
-func (r *engineTurnRunner) RunTurn(ctx context.Context, req *scheduler.TurnRequest) (scheduler.TurnResult, error) {
+func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnRequest) (schedule.TurnResult, error) {
 	if req == nil {
-		return scheduler.TurnResult{}, errors.New("schedule turn request must not be nil")
+		return schedule.TurnResult{}, errors.New("schedule turn request must not be nil")
 	}
 	if req.WorkflowID != "" {
 		return r.workflows.start(ctx, req)
 	}
 	if r.engine == nil {
-		return scheduler.TurnResult{}, errors.New("turn engine is not wired")
+		return schedule.TurnResult{}, errors.New("turn engine is not wired")
 	}
 	if r.sessions != nil {
 		if err := ensureCronSession(ctx, r.sessions, req.SessionID); err != nil {
-			return scheduler.TurnResult{}, err
+			return schedule.TurnResult{}, err
 		}
 	}
 	var stream []terminal.Event
 	var turnID string
-	for event, err := range r.engine.Run(ctx, &runtime.TurnRequest{
+	for event, err := range r.engine.Run(ctx, &turn.TurnRequest{
 		SessionID:      req.SessionID,
 		PrincipalID:    req.PrincipalID,
 		PrincipalClass: principal.ClassForPrincipal(req.PrincipalID),
-		Origin:         runtime.Origin(req.Origin),
+		Origin:         turn.Origin(req.Origin),
 		Parts:          []runtimeingress.InputPart{{Text: req.Prompt}},
 		IdempotencyKey: req.IdempotencyKey,
 	}) {
 		if err != nil {
-			if code, ok := runtime.CodeOf(err); ok && code == runtime.ErrorCodeRuntimeOverloaded {
-				return scheduler.TurnResult{}, scheduler.Errorf(scheduler.ErrorCodeRuntimeOverloaded, "runtime is overloaded")
+			if code, ok := turn.CodeOf(err); ok && code == turn.ErrorCodeRuntimeOverloaded {
+				return schedule.TurnResult{}, schedule.Errorf(schedule.ErrorCodeRuntimeOverloaded, "runtime is overloaded")
 			}
-			return scheduler.TurnResult{}, err
+			return schedule.TurnResult{}, err
 		}
 		if turnID == "" {
 			turnID = event.TurnID
@@ -279,15 +279,15 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *scheduler.TurnReque
 	}
 	text, _, terminalReached := terminal.PlainRenderer{}.RenderTurn(stream)
 	if !terminalReached {
-		return scheduler.TurnResult{}, errors.New("turn stream ended before a terminal event")
+		return schedule.TurnResult{}, errors.New("turn stream ended before a terminal event")
 	}
 	completed := false
 	for _, event := range stream {
-		if event.Kind == runtime.EventKindTurnCompleted {
+		if event.Kind == turn.EventKindTurnCompleted {
 			completed = true
 		}
 	}
-	result := scheduler.TurnResult{TurnID: turnID, Text: text, Succeeded: completed}
+	result := schedule.TurnResult{TurnID: turnID, Text: text, Succeeded: completed}
 	if !completed {
 		result.SafeErrorCode = "turn_failed"
 	}
@@ -320,7 +320,7 @@ type cronNotifier struct {
 	broadcaster *broadcast.Broadcaster
 }
 
-func (n *cronNotifier) Notify(ctx context.Context, req *scheduler.NotifyRequest) error {
+func (n *cronNotifier) Notify(ctx context.Context, req *schedule.NotifyRequest) error {
 	if req == nil {
 		return errors.New("schedule notify request must not be nil")
 	}
@@ -346,9 +346,9 @@ func notifyContentJSON(text string) string {
 	return string(raw)
 }
 
-func buildScheduleRunner(db *sql.DB, logger *slog.Logger, engine cronTurnEngine, broadcaster *broadcast.Broadcaster, retention time.Duration, observer scheduler.Observer, workflows *scheduleWorkflows) (*scheduler.Runner, error) {
+func buildScheduleRunner(db *sql.DB, logger *slog.Logger, engine cronTurnEngine, broadcaster *broadcast.Broadcaster, retention time.Duration, observer schedule.Observer, workflows *scheduleWorkflows) (*schedule.Runner, error) {
 	turns := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db), workflows: workflows}
-	return scheduler.NewRunner(
+	return schedule.NewRunner(
 		&scheduleStore{store: store.NewScheduleStore(db)},
 		turns,
 		&cronNotifier{broadcaster: broadcaster},
@@ -399,7 +399,7 @@ func (r *cronChannelRegistry) Registered(source string) bool {
 	return r.registered[source]
 }
 
-func registerScheduleHandler(target any, runner *scheduler.Runner) error {
+func registerScheduleHandler(target any, runner *schedule.Runner) error {
 	if runner == nil {
 		return errors.New("schedule runner must not be nil")
 	}
@@ -410,7 +410,7 @@ func registerScheduleHandler(target any, runner *scheduler.Runner) error {
 	if !ok || ifTodo == nil {
 		return errors.New("schedule handler target does not accept handlers")
 	}
-	ifTodo.RegisterHandler(scheduler.HandlerName, runner.Handle)
+	ifTodo.RegisterHandler(schedule.HandlerName, runner.Handle)
 	return nil
 }
 
@@ -421,7 +421,7 @@ func resumeScheduleRuns(ctx context.Context, rt durable.Runtime, db *sql.DB) (in
 	}
 	for i := range jobs {
 		if _, err := rt.Start(ctx, durable.StartRequest{
-			Handler: scheduler.HandlerName, Key: jobs[i].ID, Payload: []byte(jobs[i].ID),
+			Handler: schedule.HandlerName, Key: jobs[i].ID, Payload: []byte(jobs[i].ID),
 		}); err != nil {
 			return 0, err
 		}
@@ -429,11 +429,11 @@ func resumeScheduleRuns(ctx context.Context, rt durable.Runtime, db *sql.DB) (in
 	return len(jobs), nil
 }
 
-func scheduleRecorderObserver(recorder *telemetry.ScheduleRecorder) scheduler.Observer {
+func scheduleRecorderObserver(recorder *telemetry.ScheduleRecorder) schedule.Observer {
 	if recorder == nil {
 		return nil
 	}
-	return func(ctx context.Context, observation *scheduler.Observation) {
+	return func(ctx context.Context, observation *schedule.Observation) {
 		recorder.Record(ctx, &telemetry.ScheduleObservation{
 			State:  observation.State,
 			Result: observation.Result,

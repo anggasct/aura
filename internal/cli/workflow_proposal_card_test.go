@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/access"
-	"github.com/anggasct/aura/internal/channel/discord"
-	"github.com/anggasct/aura/internal/workflow"
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/modules/workflow"
 )
 
 type fakeOfferer struct {

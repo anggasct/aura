@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/model"
+	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/vision"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
-	"github.com/anggasct/aura/internal/vision"
 )
 
 type visionBlobReader struct {

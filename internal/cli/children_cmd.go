@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/store"
 )
 

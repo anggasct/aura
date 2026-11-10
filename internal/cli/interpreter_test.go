@@ -16,10 +16,10 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/tools/interpreter"
+	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/health"
 )
 
 type interpreterRig struct {

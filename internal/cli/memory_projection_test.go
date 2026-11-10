@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/memory"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/runtime/ingress"
-	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -28,8 +28,8 @@ func journalPayload(t *testing.T, author, text string) json.RawMessage {
 	return raw
 }
 
-func hookTurnRequest() *runtime.TurnRequest {
-	return &runtime.TurnRequest{TurnID: "turn-1", SessionID: "sess-1", PrincipalID: "owner-1", Origin: runtime.OriginTerminal}
+func hookTurnRequest() *turn.TurnRequest {
+	return &turn.TurnRequest{TurnID: "turn-1", SessionID: "sess-1", PrincipalID: "owner-1", Origin: turn.OriginTerminal}
 }
 
 func TestMemoryProjectionJournalSeeded(t *testing.T) {
@@ -395,7 +395,7 @@ func TestOwnerDiscordMemoryIsOwnerKeyedAndHiddenFromTrusted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
-	ownerTurn := &runtime.TurnRequest{TurnID: "turn-1", SessionID: "dm:777", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, Origin: "discord:owner"}
+	ownerTurn := &turn.TurnRequest{TurnID: "turn-1", SessionID: "dm:777", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, Origin: "discord:owner"}
 	if err := buildMemoryHook(service, nil, nil, nil)(ctx, ownerTurn, []store.RuntimeEvent{{
 		ID: "ev-owner-1", SessionID: "dm:777", Sequence: 1, TurnID: "turn-1", Author: principal.OwnerID,
 		Kind: store.EventKindADK, SchemaVersion: 1,
@@ -414,7 +414,7 @@ func TestOwnerDiscordMemoryIsOwnerKeyedAndHiddenFromTrusted(t *testing.T) {
 	}
 	recall := func(sessionID, principalID string, class principal.Class) int {
 		t.Helper()
-		evidence, err := provider.RecallTurn(ctx, &runtime.TurnRequest{
+		evidence, err := provider.RecallTurn(ctx, &turn.TurnRequest{
 			TurnID: "turn-2", SessionID: sessionID, PrincipalID: principalID, PrincipalClass: class, Origin: "discord:owner", AgentID: "main",
 			Parts: []runtimeingress.InputPart{{Text: "nightly backup"}},
 		})

@@ -14,20 +14,20 @@ import (
 	"os"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/approval"
-	"github.com/anggasct/aura/internal/channel/terminal"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/model"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/runtime/adk"
-	"github.com/anggasct/aura/internal/runtime/engine"
-	"github.com/anggasct/aura/internal/runtime/ingress"
+	"github.com/anggasct/aura/internal/modules/builtin"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/adk"
+	"github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
-	"github.com/anggasct/aura/internal/toolbroker"
-	"github.com/anggasct/aura/internal/tools/builtin"
 )
 
 type terminalBroker struct{}
@@ -37,7 +37,7 @@ func (terminalBroker) Evaluate(ctx context.Context, request *approval.ToolReques
 }
 
 type terminalRunner struct {
-	engine  runtime.AgentRuntime
+	engine  turn.AgentRuntime
 	agentID string
 }
 
@@ -55,11 +55,11 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 		if agentID == "" {
 			agentID = r.agentID
 		}
-		runtimeReq := &runtime.TurnRequest{
+		runtimeReq := &turn.TurnRequest{
 			SessionID:      req.SessionID,
 			PrincipalID:    req.PrincipalID,
 			PrincipalClass: principal.ClassOwner,
-			Origin:         runtime.OriginTerminal,
+			Origin:         turn.OriginTerminal,
 			Parts:          parts,
 			IdempotencyKey: req.IdempotencyKey,
 			AgentID:        agentID,
@@ -198,14 +198,14 @@ func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger
 	if err != nil {
 		return err
 	}
-	var broker runtime.ToolBroker = terminalBroker{}
+	var broker turn.ToolBroker = terminalBroker{}
 	var executorOpts []runtimeadk.ExecutorOption
 	turnLedger, err := newTurnLedger(cfg, db, prices, logger)
 	if err != nil {
 		return err
 	}
 	executorOpts = append(executorOpts, runtimeadk.WithBudgetLedger(turnLedger, "primary"), runtimeadk.WithAgentResolver(registry, routeModel), ownerContextOption(ctx, cfg.Owner, logger))
-	var memoryHook func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
+	var memoryHook func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
 	var approvals *terminal.ApprovalBridge
 	var builtinTools *toolsbuiltin.Executor
 	if cfg.Tools != nil {

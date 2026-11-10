@@ -9,7 +9,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/platform/approval"
 )
 
 type Phase string

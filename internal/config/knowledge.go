@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"slices"
 
-	"github.com/anggasct/aura/internal/tools"
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const (

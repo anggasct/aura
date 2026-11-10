@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/telegram"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
 func enabledTelegramConfig() config.Config {

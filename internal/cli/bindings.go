@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 const exitNoPersona = 3

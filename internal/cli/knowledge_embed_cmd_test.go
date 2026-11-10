@@ -16,8 +16,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/embedding"
-	"github.com/anggasct/aura/internal/knowledge"
+	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/embedding"
 )
 
 type providerCall struct {

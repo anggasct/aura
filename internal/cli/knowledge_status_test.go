@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/knowledge"
+	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/health"
 )
 
 func knowledgeFindings(t *testing.T, rig *kbRetrievalRig) []health.Finding {

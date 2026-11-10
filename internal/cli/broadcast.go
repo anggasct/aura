@@ -8,14 +8,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anggasct/aura/internal/broadcast"
-	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/effect"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
 )
 
 type broadcastItemStore struct {

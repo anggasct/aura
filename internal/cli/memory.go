@@ -12,11 +12,11 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/memory"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
 )
 
 type memoryDocumentStore struct {
@@ -366,8 +366,8 @@ func (s *llmSummarizer) Summarize(ctx context.Context, prompt *memory.SummaryPro
 	return collected.String(), nil
 }
 
-func buildMemoryHook(service *memory.Service, model *memory.SummaryModel, summarizer memory.Summarizer, logger *slog.Logger) func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error {
-	return func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error {
+func buildMemoryHook(service *memory.Service, model *memory.SummaryModel, summarizer memory.Summarizer, logger *slog.Logger) func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
+	return func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
 		if service == nil {
 			return memory.Errorf(memory.ErrorCodeInvalidArgument, "memory service must not be nil")
 		}

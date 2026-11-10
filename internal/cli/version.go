@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/capability"
+	"github.com/anggasct/aura/internal/platform/capability"
 )
 
 var (

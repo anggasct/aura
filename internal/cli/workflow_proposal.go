@@ -11,8 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/workflow"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func newWorkflowProposalsCmd(gf *globalFlags) *cobra.Command {

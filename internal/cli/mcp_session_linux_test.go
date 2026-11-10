@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/mcp"
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func containedFixture(t *testing.T) string {

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/config"
-	gatewaywebhook "github.com/anggasct/aura/internal/gateway/webhook"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )

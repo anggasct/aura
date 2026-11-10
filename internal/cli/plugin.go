@@ -9,13 +9,13 @@ import (
 	"slices"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/mcp"
-	"github.com/anggasct/aura/internal/plugin"
-	"github.com/anggasct/aura/internal/plugin/auth"
-	"github.com/anggasct/aura/internal/plugin/connector"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/plugin/auth"
+	"github.com/anggasct/aura/internal/modules/plugin/connector"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 )
 

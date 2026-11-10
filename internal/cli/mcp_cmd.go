@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/mcp"
+	"github.com/anggasct/aura/internal/modules/mcp"
 )
 
 const (

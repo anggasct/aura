@@ -8,8 +8,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/capability"
 )
 
 type composeFile struct {

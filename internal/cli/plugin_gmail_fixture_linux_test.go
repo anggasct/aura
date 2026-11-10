@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/approval"
-	"github.com/anggasct/aura/internal/mcp"
-	"github.com/anggasct/aura/internal/plugin"
-	"github.com/anggasct/aura/internal/plugin/connector"
-	"github.com/anggasct/aura/internal/principal"
-	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/plugin/connector"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/principal"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
 const (

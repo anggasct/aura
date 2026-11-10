@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/discord"
-	"github.com/anggasct/aura/internal/channel/terminal"
-	"github.com/anggasct/aura/internal/command"
-	"github.com/anggasct/aura/internal/principal"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/terminal"
+	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/principal"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )

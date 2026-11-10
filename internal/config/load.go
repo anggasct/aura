@@ -23,13 +23,13 @@ import (
 	"github.com/knadh/koanf/v2"
 	yamlv3 "gopkg.in/yaml.v3"
 
-	broadcastpkg "github.com/anggasct/aura/internal/broadcast"
-	"github.com/anggasct/aura/internal/capability"
-	"github.com/anggasct/aura/internal/logging"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/sandbox"
-	"github.com/anggasct/aura/internal/secret"
-	"github.com/anggasct/aura/internal/tools/interpreter"
+	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/logging"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 const (

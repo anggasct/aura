@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func TestIntegrationGmailConnectorRunsInsideTheSandbox(t *testing.T) {

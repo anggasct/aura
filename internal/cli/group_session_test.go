@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/memory"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
+	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -37,9 +37,9 @@ func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 	hook := buildMemoryHook(service, nil, nil, nil)
 	project := func(sessionID, principalID, eventID, text string) {
 		t.Helper()
-		turn := &runtime.TurnRequest{TurnID: "turn-" + eventID, SessionID: sessionID, PrincipalID: principalID, PrincipalClass: principal.ClassPublic, Origin: "discord:owner", AgentID: "main"}
-		if err := hook(ctx, turn, []store.RuntimeEvent{{
-			ID: eventID, SessionID: sessionID, Sequence: 1, TurnID: turn.TurnID, Author: "user",
+		turnRequest := &turn.TurnRequest{TurnID: "turn-" + eventID, SessionID: sessionID, PrincipalID: principalID, PrincipalClass: principal.ClassPublic, Origin: "discord:owner", AgentID: "main"}
+		if err := hook(ctx, turnRequest, []store.RuntimeEvent{{
+			ID: eventID, SessionID: sessionID, Sequence: 1, TurnID: turnRequest.TurnID, Author: "user",
 			Kind: store.EventKindADK, SchemaVersion: 1, Payload: journalPayload(t, "user", text), CreatedAt: time.Now().UTC().Add(-time.Minute),
 		}}); err != nil {
 			t.Fatalf("hook(%s): %v", eventID, err)
@@ -54,7 +54,7 @@ func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 	}
 	recalled := func(sessionID, principalID string) map[string]bool {
 		t.Helper()
-		evidence, err := provider.RecallTurn(ctx, &runtime.TurnRequest{
+		evidence, err := provider.RecallTurn(ctx, &turn.TurnRequest{
 			TurnID: "turn-recall", SessionID: sessionID, PrincipalID: principalID, PrincipalClass: principal.ClassPublic, Origin: "discord:owner", AgentID: "main",
 			Parts: []runtimeingress.InputPart{{Text: "parcel tracking number"}},
 		})

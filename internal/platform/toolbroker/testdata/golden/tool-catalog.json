@@ -1,0 +1,838 @@
+{
+  "policy_version": "builtin-tools-v1",
+  "definitions": [
+    {
+      "key": "code_execute@v1",
+      "name": "code_execute",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/code_execute/v1",
+        "type": "object",
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "python",
+              "javascript",
+              "go"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "stdin": {
+            "type": "string"
+          },
+          "output_files": {
+            "type": "array",
+            "description": "Relative file names written under the output/ directory of the working directory. Each existing regular file is imported as an artifact.",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+){0,3}$"
+            }
+          }
+        },
+        "required": [
+          "runtime",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": [
+        "code-interpreter"
+      ],
+      "requires_approval": true,
+      "effectful": true,
+      "opt_in": false,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "email_send@v1",
+      "name": "email_send",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/email_send/v1",
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 254
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "exec@v1",
+      "name": "exec",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/exec/v1",
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "shell": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": [
+        "exec-linux"
+      ],
+      "requires_approval": true,
+      "effectful": true,
+      "opt_in": false,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "handoff_to_owner@v1",
+      "name": "handoff_to_owner",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/handoff_to_owner/v1",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "kb_search@v1",
+      "name": "kb_search",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/kb_search/v1",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": false,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "list_dir@v1",
+      "name": "list_dir",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/list_dir/v1",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recursive": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": [
+        "workspace-read"
+      ],
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": false,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "read_file@v1",
+      "name": "read_file",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/read_file/v1",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "max_bytes": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": [
+        "workspace-read"
+      ],
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": false,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "web_fetch@v1",
+      "name": "web_fetch",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/web_fetch/v1",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": [
+        "public-web"
+      ],
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": false,
+      "external_sink": true,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "web_search@v1",
+      "name": "web_search",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/web_search/v1",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": [
+        "provider-search"
+      ],
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": false,
+      "external_sink": true,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "workflow_cancel@v1",
+      "name": "workflow_cancel",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/workflow_cancel/v1",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "workflow_list@v1",
+      "name": "workflow_list",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/workflow_list/v1",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "workflow_propose@v1",
+      "name": "workflow_propose",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/workflow_propose/v1",
+        "type": "object",
+        "properties": {
+          "spec": {
+            "type": "object",
+            "properties": {
+              "goal": {
+                "type": "string",
+                "minLength": 1
+              },
+              "steps": {
+                "type": "array",
+                "minItems": 1
+              }
+            },
+            "required": [
+              "goal",
+              "steps"
+            ]
+          }
+        },
+        "required": [
+          "spec"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "external_sink": true,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "workflow_save_routine@v1",
+      "name": "workflow_save_routine",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/workflow_save_routine/v1",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "run_id",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "workflow_start@v1",
+      "name": "workflow_start",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/workflow_start/v1",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "objective": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "external_sink": true,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "workflow_status@v1",
+      "name": "workflow_status",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/workflow_status/v1",
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    },
+    {
+      "key": "write_file@v1",
+      "name": "write_file",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/write_file/v1",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string"
+          },
+          "overwrite": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": [
+        "workspace-write"
+      ],
+      "requires_approval": true,
+      "effectful": true,
+      "opt_in": false,
+      "external_sink": false,
+      "display": null,
+      "has_validator": false
+    }
+  ],
+  "rules": [
+    {
+      "tool_name": "code_execute",
+      "tool_version": "v1",
+      "requires_approval": true,
+      "required_capabilities": [
+        "code-interpreter"
+      ],
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "email_send",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "exec",
+      "tool_version": "v1",
+      "requires_approval": true,
+      "required_capabilities": [
+        "exec-linux"
+      ],
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "handoff_to_owner",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "kb_search",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "list_dir",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": [
+        "workspace-read"
+      ],
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "read_file",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": [
+        "workspace-read"
+      ],
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "web_fetch",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": [
+        "public-web"
+      ],
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "web_search",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": [
+        "provider-search"
+      ],
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "workflow_cancel",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "workflow_list",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "workflow_propose",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "workflow_save_routine",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "workflow_start",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "workflow_status",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "write_file",
+      "tool_version": "v1",
+      "requires_approval": true,
+      "required_capabilities": [
+        "workspace-write"
+      ],
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    }
+  ]
+}

@@ -14,8 +14,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/logging"
-	"github.com/anggasct/aura/internal/usage"
+	"github.com/anggasct/aura/internal/platform/logging"
+	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 const defaultPricesFilename = "prices.yaml"

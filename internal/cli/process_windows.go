@@ -3,7 +3,7 @@
 package cli
 
 import (
-	"github.com/anggasct/aura/internal/health"
+	"github.com/anggasct/aura/internal/platform/health"
 )
 
 func processProbe() (health.ProcessStatus, bool) {

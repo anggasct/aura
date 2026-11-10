@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/channel/httpchat"
-	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/channels/httpchat"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 const (
@@ -28,10 +28,10 @@ type handoffTurnRuntime struct {
 	turns  int
 }
 
-func (r *handoffTurnRuntime) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (r *handoffTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	r.turns++
 	return func(yield func(store.RuntimeEvent, error) bool) {
-		if !yield(store.RuntimeEvent{TurnID: "turn-1", Kind: runtime.EventKindTurnAccepted}, nil) {
+		if !yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnAccepted}, nil) {
 			return
 		}
 		text := handoffTurnHandedOff
@@ -40,12 +40,12 @@ func (r *handoffTurnRuntime) Run(ctx context.Context, req *runtime.TurnRequest) 
 		}); err != nil {
 			text = handoffTurnFailed
 		}
-		answer := store.RuntimeEvent{TurnID: "turn-1", Kind: runtime.EventKindMessageCompleted}
+		answer := store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindMessageCompleted}
 		answer.Payload, _ = json.Marshal(map[string]string{"text": text})
 		if !yield(answer, nil) {
 			return
 		}
-		yield(store.RuntimeEvent{TurnID: "turn-1", Kind: runtime.EventKindTurnCompleted}, nil)
+		yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnCompleted}, nil)
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
-	"github.com/anggasct/aura/internal/tools"
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const (

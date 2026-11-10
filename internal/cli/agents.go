@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/scheduler"
-	"github.com/anggasct/aura/internal/tools/builtin"
+	"github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/schedule"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 func newAgentsCmd(gf *globalFlags) *cobra.Command {
@@ -154,7 +154,7 @@ func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
 		if behavior == nil || behavior.Schedule == "" {
 			continue
 		}
-		if _, err := scheduler.ParseExpression(behavior.Schedule); err != nil {
+		if _, err := schedule.ParseExpression(behavior.Schedule); err != nil {
 			return nil, &auraagent.Error{Code: auraagent.ErrorCodeDefinitionInvalid, Detail: fmt.Sprintf("agent %q evals.behavior.schedule: %v", definitions[i].ID, err)}
 		}
 	}

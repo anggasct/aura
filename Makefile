@@ -1,7 +1,7 @@
 GO        ?= go
 BINARY    := aura
 PKG       := github.com/anggasct/aura/internal/cli
-CAPS_PKG  := github.com/anggasct/aura/internal/capability
+CAPS_PKG  := github.com/anggasct/aura/internal/platform/capability
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE      ?= $(shell if [ -n "$$SOURCE_DATE_EPOCH" ]; then date -u -d "@$$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ; else date -u +%Y-%m-%dT%H:%M:%SZ; fi)
@@ -24,7 +24,7 @@ RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
+.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check arch-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -47,7 +47,7 @@ test:
 	$(GO) test -v -race ./...
 
 durable-test:
-	$(GO) test -race -tags durable -count=1 ./internal/durable/...
+	$(GO) test -race -tags durable -count=1 ./internal/platform/durable/...
 
 restate-server: $(RESTATE_BINARY)
 
@@ -55,7 +55,7 @@ $(RESTATE_BINARY):
 	./scripts/fetch-restate-server.sh $(RESTATE_VERSION) $(RESTATE_DIR)
 
 durable-live: $(RESTATE_BINARY)
-	AURA_RESTATE_BINARY=$(RESTATE_BINARY) AURA_DURABLE_REQUIRE_BINARY=1 $(GO) test -v -race -tags durable -count=1 ./internal/durable/... ./cmd/aura/
+	AURA_RESTATE_BINARY=$(RESTATE_BINARY) AURA_DURABLE_REQUIRE_BINARY=1 $(GO) test -v -race -tags durable -count=1 ./internal/platform/durable/... ./cmd/aura/
 
 vet:
 	$(GO) vet ./...
@@ -71,6 +71,9 @@ fmt-check:
 lint:
 	$(GO) tool golangci-lint run ./...
 
+arch-check:
+	$(GO) run ./scripts/archcheck
+
 refs-check:
 	@found="$$(grep -rInEi '$(INTERNAL_REFS)' --include='*.go' \
 		--exclude-dir=.worktree --exclude-dir=dist . || true)"; \
@@ -80,17 +83,17 @@ refs-check:
 		exit 1; \
 	fi
 
-verify: build-all fmt-check vet test lint refs-check
+verify: build-all fmt-check vet test lint refs-check arch-check
 
 security:
 	$(GO) tool govulncheck ./...
 
 eval:
-	$(GO) test -race ./internal/eval/...
+	$(GO) test -race ./internal/modules/eval/...
 	$(GO) test -race -run 'TestPersonaPolicySuites|TestPersonaCaptureSeedsOwnerDataOnlyForTheOwner' ./internal/cli/
 
 load:
-	$(GO) test -tags load -race -run TestLoad ./internal/runtime/engine/
+	$(GO) test -tags load -race -run TestLoad ./internal/platform/turn/engine/
 
 # Containment integration suite: the runner needs a cgroup v2 subtree with
 # the pids and memory controllers enabled for the test process. Service-
@@ -101,7 +104,7 @@ load:
 # passwordless sudo; fails closed anywhere else.
 integration:
 ifeq ($(shell uname -s),Linux)
-	@sudo -n env PATH="$(PATH)" bash -ec 'echo $$$$ > /sys/fs/cgroup/cgroup.procs && cd "$(CURDIR)" && $(GO) test -tags=integration -race -count=1 ./internal/sandbox/... && $(GO) test -tags=integration -race -count=1 -run "^TestIntegration" ./internal/cli/'
+	@sudo -n env PATH="$(PATH)" bash -ec 'echo $$$$ > /sys/fs/cgroup/cgroup.procs && cd "$(CURDIR)" && $(GO) test -tags=integration -race -count=1 ./internal/platform/sandbox/... && $(GO) test -tags=integration -race -count=1 -run "^TestIntegration" ./internal/cli/'
 else
 	@echo "integration: containment suite is Linux-only; nothing to run on $(shell uname -s)"
 endif
@@ -111,12 +114,12 @@ FUZZ_ATTEMPTS ?= 3
 fuzz-smoke:
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzEventPayload FUZZ_PKG=./internal/store/
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzConfigDecode FUZZ_PKG=./internal/config/
-	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzHTMLToMarkdown FUZZ_PKG=./internal/tools/fetch/
-	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzParseManifest FUZZ_PKG=./internal/tools/interpreter/
-	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzExtractArchive FUZZ_PKG=./internal/tools/interpreter/
-	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzCodeExecuteOutputFiles FUZZ_PKG=./internal/tools/
-	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzCodeExecuteRequest FUZZ_PKG=./internal/tools/codeexec/
-	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzEncodeBoundedResult FUZZ_PKG=./internal/tools/codeexec/
+	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzHTMLToMarkdown FUZZ_PKG=./internal/modules/fetch/
+	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzParseManifest FUZZ_PKG=./internal/modules/codeexec/interpreter/
+	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzExtractArchive FUZZ_PKG=./internal/modules/codeexec/interpreter/
+	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzCodeExecuteOutputFiles FUZZ_PKG=./internal/platform/tools/
+	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzCodeExecuteRequest FUZZ_PKG=./internal/modules/codeexec/
+	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzEncodeBoundedResult FUZZ_PKG=./internal/modules/codeexec/
 
 # The fuzzer can report the end of its own time budget as
 # "context deadline exceeded" instead of a clean pass. Retry only that

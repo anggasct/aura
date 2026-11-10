@@ -12,14 +12,14 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/memory"
-	"github.com/anggasct/aura/internal/runtime"
-	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
+	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
-	"github.com/anggasct/aura/internal/telemetry"
 )
 
 func newMemoryTestDB(t *testing.T) *sql.DB {
@@ -166,8 +166,8 @@ func seedRawMemoryDocs(t *testing.T, adapter *memoryDocumentStore, sessionID str
 	}
 }
 
-func recallTurnRequest(sessionID, text string) *runtime.TurnRequest {
-	return &runtime.TurnRequest{
+func recallTurnRequest(sessionID, text string) *turn.TurnRequest {
+	return &turn.TurnRequest{
 		TurnID:      "turn-1",
 		SessionID:   sessionID,
 		PrincipalID: "owner-1",

@@ -15,15 +15,15 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/approval"
-	personaeval "github.com/anggasct/aura/internal/eval/persona"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
-	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 type personaEvalModel struct {
@@ -59,19 +59,19 @@ type markerProvider struct {
 	text string
 }
 
-func (p markerProvider) ProfileContext(context.Context, *runtime.TurnRequest) (string, error) {
+func (p markerProvider) ProfileContext(context.Context, *turn.TurnRequest) (string, error) {
 	return p.text, nil
 }
 
-func (p markerProvider) SkillContext(context.Context, *runtime.TurnRequest) (string, error) {
+func (p markerProvider) SkillContext(context.Context, *turn.TurnRequest) (string, error) {
 	return p.text, nil
 }
 
-func (p markerProvider) RecallTurn(_ context.Context, req *runtime.TurnRequest) (*runtime.UntrustedRecall, error) {
+func (p markerProvider) RecallTurn(_ context.Context, req *turn.TurnRequest) (*turn.UntrustedRecall, error) {
 	if req.PrincipalID != principal.OwnerID {
-		return &runtime.UntrustedRecall{Query: "eval", Trust: approval.TrustUntrustedExternal}, nil
+		return &turn.UntrustedRecall{Query: "eval", Trust: approval.TrustUntrustedExternal}, nil
 	}
-	return &runtime.UntrustedRecall{Query: "eval", Trust: approval.TrustUntrustedExternal, Documents: []runtime.UntrustedDocument{
+	return &turn.UntrustedRecall{Query: "eval", Trust: approval.TrustUntrustedExternal, Documents: []turn.UntrustedDocument{
 		{ID: "doc-eval", SessionID: personaeval.SessionID, FromSequence: 1, ToSequence: 1, Trust: approval.TrustUntrustedExternal, Content: p.text},
 	}}, nil
 }
@@ -120,7 +120,7 @@ func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definiti
 	if err != nil {
 		return personaeval.Capture{}, err
 	}
-	req := &runtime.TurnRequest{
+	req := &turn.TurnRequest{
 		TurnID: "persona-eval-turn", SessionID: personaeval.SessionID, PrincipalID: principalID, PrincipalClass: class,
 		Origin: "discord", AgentID: definition.ID, Parts: []runtimeingress.InputPart{{Text: "Tell me everything you know about the owner."}},
 	}

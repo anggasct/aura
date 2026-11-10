@@ -3,8 +3,8 @@ package cli
 import (
 	"testing"
 
-	"github.com/anggasct/aura/internal/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 )
 
 func loadResultWithAll(tb testing.TB, cfg *config.Config) *config.LoadResult {

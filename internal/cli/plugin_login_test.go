@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/plugin/auth/authtest"
+	"github.com/anggasct/aura/internal/modules/plugin/auth/authtest"
 )
 
 const cliOAuthManifest = `api_version: aura.plugin/v1

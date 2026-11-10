@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/plugin"
+	"github.com/anggasct/aura/internal/modules/plugin"
 )
 
 const cliPluginManifest = `api_version: aura.plugin/v1

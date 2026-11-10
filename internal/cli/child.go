@@ -11,13 +11,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/runtime/adk"
-	"github.com/anggasct/aura/internal/runtime/ingress"
+	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/adk"
+	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -506,17 +506,17 @@ type childProjection struct {
 	maxCost     int64
 }
 
-func childTurnRequest(sessionID, childID, task string, deadline time.Time, projection *childProjection) *runtime.TurnRequest {
-	turnReq := &runtime.TurnRequest{
+func childTurnRequest(sessionID, childID, task string, deadline time.Time, projection *childProjection) *turn.TurnRequest {
+	turnReq := &turn.TurnRequest{
 		TurnID:         childID,
 		SessionID:      sessionID,
 		PrincipalID:    projection.ownerID,
 		PrincipalClass: principal.ClassForPrincipal(projection.ownerID),
-		Origin:         runtime.OriginInternal,
+		Origin:         turn.OriginInternal,
 		Parts:          []runtimeingress.InputPart{{Text: task}},
 		IdempotencyKey: childID,
 		Deadline:       deadline,
-		Budget:         runtime.Budget{MaxTokens: projection.maxTokens},
+		Budget:         turn.Budget{MaxTokens: projection.maxTokens},
 		AgentID:        projection.agentID,
 	}
 	if turnReq.TurnID == "" {

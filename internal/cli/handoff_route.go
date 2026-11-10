@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/anggasct/aura/internal/channel/access"
-	"github.com/anggasct/aura/internal/channel/approval"
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 var errNoOwnerChannel = errors.New("handoff: no channel can reach the owner")

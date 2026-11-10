@@ -11,11 +11,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/broadcast"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/effect"
+	"github.com/anggasct/aura/internal/modules/broadcast"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/store"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 func newBroadcastCmd(gf *globalFlags) *cobra.Command {

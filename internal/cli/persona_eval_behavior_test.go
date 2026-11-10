@@ -15,10 +15,10 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
-	personaeval "github.com/anggasct/aura/internal/eval/persona"
-	"github.com/anggasct/aura/internal/health"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 )
 

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/mcp"
+	"github.com/anggasct/aura/internal/modules/mcp"
 )
 
 const (

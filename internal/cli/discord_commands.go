@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/discord"
-	"github.com/anggasct/aura/internal/channel/telegram"
-	"github.com/anggasct/aura/internal/command"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/telegram"
+	"github.com/anggasct/aura/internal/platform/command"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
 )
 

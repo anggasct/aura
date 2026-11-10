@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/knowledge"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 )
 
 func embedOutcomeLines(collection string, outcome knowledge.EmbedOutcome) []string {

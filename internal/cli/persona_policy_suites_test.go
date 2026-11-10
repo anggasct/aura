@@ -9,15 +9,15 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
-	personaeval "github.com/anggasct/aura/internal/eval/persona"
-	"github.com/anggasct/aura/internal/principal"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func TestPersonaPolicySuites(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "eval", "persona", "testdata", "personas.yaml"))
+	data, err := os.ReadFile(filepath.Join("..", "modules", "eval", "persona", "testdata", "personas.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestPersonaPolicySuites(t *testing.T) {
 			if !ok {
 				t.Fatalf("persona %s not registered", id)
 			}
-			cases, err := personaeval.LoadCases(filepath.Join("..", "eval", "persona", "testdata", "evals", id))
+			cases, err := personaeval.LoadCases(filepath.Join("..", "modules", "eval", "persona", "testdata", "evals", id))
 			if err != nil || len(cases) == 0 {
 				t.Fatalf("LoadCases(%s) = %d cases, %v", id, len(cases), err)
 			}

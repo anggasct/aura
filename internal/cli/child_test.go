@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/approval"
-	"github.com/anggasct/aura/internal/child"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/runtime/adk"
+	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 
 	adkmodel "google.golang.org/adk/v2/model"

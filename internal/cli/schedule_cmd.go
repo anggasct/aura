@@ -14,10 +14,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/scheduler"
+	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/workflow"
 )
 
 func newScheduleCmd(gf *globalFlags) *cobra.Command {
@@ -37,12 +37,12 @@ func newScheduleCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func scheduleService(db *sql.DB) (*scheduler.Service, error) {
-	return scheduler.NewService(&scheduleStore{store: store.NewScheduleStore(db)})
+func scheduleService(db *sql.DB) (*schedule.Service, error) {
+	return schedule.NewService(&scheduleStore{store: store.NewScheduleStore(db)})
 }
 
 func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
-	var name, schedule, timezone, channel, destination, prompt, overlap, workflowID, workflowInput string
+	var name, cronSchedule, timezone, channel, destination, prompt, overlap, workflowID, workflowInput string
 	var grace time.Duration
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -61,7 +61,7 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 					value string
 				}{
 					{"name", name},
-					{"schedule", schedule},
+					{"schedule", cronSchedule},
 					{"channel", channel},
 					{"destination", destination},
 				} {
@@ -84,8 +84,8 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				job, err := service.Create(ctx, &scheduler.JobSpec{
-					Name: name, CronExpression: schedule, Timezone: timezone,
+				job, err := service.Create(ctx, &schedule.JobSpec{
+					Name: name, CronExpression: cronSchedule, Timezone: timezone,
 					Prompt: prompt, OriginChannel: channel, OriginDestination: destination,
 					OverlapPolicy: overlap, CatchUpGraceSeconds: graceSeconds,
 					WorkflowID: workflowID, WorkflowInput: workflowInput,
@@ -102,7 +102,7 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "job name")
-	cmd.Flags().StringVar(&schedule, "schedule", "", "five-field cron expression")
+	cmd.Flags().StringVar(&cronSchedule, "schedule", "", "five-field cron expression")
 	cmd.Flags().StringVar(&timezone, "timezone", "", "IANA timezone (default from config)")
 	cmd.Flags().StringVar(&channel, "channel", "", "origin channel source")
 	cmd.Flags().StringVar(&destination, "destination", "", "origin destination alias")
@@ -119,7 +119,7 @@ func startScheduleRun(ctx context.Context, runtime durable.Runtime, jobID string
 		return errors.New("durable runtime must not be nil")
 	}
 	_, err := runtime.Start(ctx, durable.StartRequest{
-		Handler: scheduler.HandlerName, Key: jobID, Payload: []byte(jobID),
+		Handler: schedule.HandlerName, Key: jobID, Payload: []byte(jobID),
 	})
 	return err
 }
@@ -186,7 +186,7 @@ func newSchedulePauseCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := service.SetState(ctx, args[0], scheduler.JobPaused); err != nil {
+				if err := service.SetState(ctx, args[0], schedule.JobPaused); err != nil {
 					return err
 				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\nstate: paused\n", args[0])
@@ -208,7 +208,7 @@ func newScheduleResumeCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := service.SetState(ctx, args[0], scheduler.JobActive); err != nil {
+				if err := service.SetState(ctx, args[0], schedule.JobActive); err != nil {
 					return err
 				}
 				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), cfg, logger, args[0]); err != nil {
@@ -233,7 +233,7 @@ func newScheduleDeleteCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := service.SetState(ctx, args[0], scheduler.JobDeleted); err != nil {
+				if err := service.SetState(ctx, args[0], schedule.JobDeleted); err != nil {
 					return err
 				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\nstate: deleted\n", args[0])

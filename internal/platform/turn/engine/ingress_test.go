@@ -1,0 +1,177 @@
+package runtimeengine
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/ingress"
+)
+
+func terminalCount(t *testing.T, db *sql.DB, turnID string) int {
+	t.Helper()
+	var count int
+	err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM runtime_event WHERE turn_id = ? AND kind IN (?, ?, ?)`,
+		turnID, turn.EventKindTurnCompleted, turn.EventKindTurnFailed, turn.EventKindTurnCancelled).Scan(&count)
+	if err != nil {
+		t.Fatalf("count terminal: %v", err)
+	}
+	return count
+}
+
+func eventCountByKind(t *testing.T, db *sql.DB, turnID, kind string) int {
+	t.Helper()
+	var count int
+	err := db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM runtime_event WHERE turn_id = ? AND kind = ?`,
+		turnID, kind).Scan(&count)
+	if err != nil {
+		t.Fatalf("count %s: %v", kind, err)
+	}
+	return count
+}
+
+func jsonStep(kind string) turn.FakeStep {
+	return turn.FakeStep{Kind: kind, Payload: json.RawMessage(`{}`)}
+}
+
+func sampleSession(conversation string) string {
+	return runtimeingress.SessionKey("main", "telegram", conversation)
+}
+
+func sampleEnvelope(conversation, externalID string) *runtimeingress.IngressEnvelope {
+	return &runtimeingress.IngressEnvelope{
+		Source:         "telegram",
+		AgentID:        "main",
+		ExternalID:     externalID,
+		PrincipalID:    "user-1",
+		ConversationID: sampleSession(conversation),
+		Parts:          []runtimeingress.InputPart{{Text: "hello"}},
+		ReceivedAt:     time.Now().UTC(),
+	}
+}
+
+func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindModelStarted), jsonStep(turn.EventKindMessageCompleted)})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, sampleSession("conv-1"))
+
+		ref, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-1"))
+		if err != nil {
+			t.Fatalf("Accept: %v", err)
+		}
+		if ref.Replayed {
+			t.Error("first delivery must not be a replay")
+		}
+		if ref.SessionID != sampleSession("conv-1") || ref.TurnID == "" {
+			t.Errorf("unexpected turn ref: %+v", ref)
+		}
+
+		waitFor(t, func() bool { return terminalCount(t, db, ref.TurnID) == 1 })
+		if got := eventCountByKind(t, db, ref.TurnID, turn.EventKindTurnAccepted); got != 1 {
+			t.Errorf("accepted events = %d, want 1", got)
+		}
+		if got := eventCountByKind(t, db, ref.TurnID, turn.EventKindTurnCompleted); got != 1 {
+			t.Errorf("completed events = %d, want 1", got)
+		}
+	})
+}
+
+func TestAcceptDuplicateReturnsOriginal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, sampleSession("conv-1"))
+
+		first, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-dup"))
+		if err != nil {
+			t.Fatalf("first Accept: %v", err)
+		}
+		second, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-dup"))
+		if err != nil {
+			t.Fatalf("second Accept: %v", err)
+		}
+		if !second.Replayed {
+			t.Error("duplicate delivery must be flagged replayed")
+		}
+		if second.TurnID != first.TurnID {
+			t.Errorf("duplicate turn = %q, want original %q", second.TurnID, first.TurnID)
+		}
+
+		waitFor(t, func() bool { return terminalCount(t, db, first.TurnID) == 1 })
+		var totalAccepted int
+		if err := db.QueryRowContext(context.Background(),
+			`SELECT COUNT(*) FROM runtime_event WHERE kind = ?`, turn.EventKindTurnAccepted).Scan(&totalAccepted); err != nil {
+			t.Fatalf("count accepted: %v", err)
+		}
+		if totalAccepted != 1 {
+			t.Errorf("total accepted events = %d, want 1 (no second sequence)", totalAccepted)
+		}
+	})
+}
+
+func TestAcceptAfterShutdownIsRejected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		mustCreateSession(t, db, sampleSession("conv-1"))
+
+		if err := engine.Shutdown(context.Background()); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+		_, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-late"))
+		code, ok := turn.CodeOf(err)
+		if !ok || code != turn.ErrorCodeRuntimeOverloaded {
+			t.Fatalf("Accept after shutdown code = %q (ok=%v), want runtime_overloaded", code, ok)
+		}
+	})
+}
+
+func TestAcceptValidatesIdentity(t *testing.T) {
+	executor := turn.NewFakeExecutor(nil)
+	engine, db, _ := newTestRuntime(t, Config{}, executor)
+	mustCreateSession(t, db, sampleSession("conv-1"))
+
+	cases := map[string]*runtimeingress.IngressEnvelope{
+		"nil envelope":          nil,
+		"missing source":        {AgentID: "main", ExternalID: "x", PrincipalID: "u", ConversationID: sampleSession("conv-1")},
+		"missing external":      {Source: "telegram", AgentID: "main", PrincipalID: "u", ConversationID: sampleSession("conv-1")},
+		"missing principal":     {Source: "telegram", AgentID: "main", ExternalID: "x", ConversationID: sampleSession("conv-1")},
+		"missing conversation":  {Source: "telegram", AgentID: "main", ExternalID: "x", PrincipalID: "u"},
+		"missing persona":       {Source: "telegram", ExternalID: "x", PrincipalID: "u", ConversationID: sampleSession("conv-1")},
+		"unscoped conversation": {Source: "telegram", AgentID: "main", ExternalID: "x", PrincipalID: "u", ConversationID: "conv-1"},
+		"other persona scope":   {Source: "telegram", AgentID: "kuma", ExternalID: "x", PrincipalID: "u", ConversationID: sampleSession("conv-1")},
+	}
+	for name, env := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := engine.Accept(context.Background(), env)
+			code, ok := turn.CodeOf(err)
+			if !ok || code != turn.ErrorCodeInvalidArgument {
+				t.Fatalf("code = %q (ok=%v), want invalid_argument", code, ok)
+			}
+		})
+	}
+}
+
+func TestAcceptCarriesTheSkillPin(t *testing.T) {
+	envelope := sampleEnvelope("conv-1", "msg-1")
+	envelope.Skill = &runtimeingress.SkillPin{SkillID: "local/pdf@0123456789ab", Digest: "d", InvocationID: "i", PolicyVersion: "1"}
+	req, err := turnRequestFromEnvelope(envelope)
+	if err != nil {
+		t.Fatalf("turnRequestFromEnvelope: %v", err)
+	}
+	if req.Skill == nil || *req.Skill != *envelope.Skill {
+		t.Fatalf("request pin = %+v", req.Skill)
+	}
+	desc := turnDescriptorFromRequest(req)
+	round := turnRequestFromDescriptor(&desc)
+	if round.Skill == nil || *round.Skill != *envelope.Skill {
+		t.Fatalf("descriptor round trip pin = %+v", round.Skill)
+	}
+}

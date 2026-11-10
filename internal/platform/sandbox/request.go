@@ -1,0 +1,264 @@
+package sandbox
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/anggasct/aura/internal/platform/approval"
+)
+
+type SandboxRequest struct {
+	Profile         Profile
+	RequestID       string
+	PrincipalID     string
+	SessionID       string
+	ToolName        string
+	Executable      string
+	Arguments       []string
+	WorkingDir      string
+	ReadOnlyPaths   []string
+	ReadWritePaths  []string
+	Environment     map[string]string
+	Capabilities    []string
+	Deadline        time.Time
+	Limits          Limits
+	ApprovalGrantID string
+}
+
+type boundContract struct {
+	Profile        Profile  `json:"profile,omitempty"`
+	Executable     string   `json:"executable"`
+	Arguments      []string `json:"arguments"`
+	WorkingDir     string   `json:"working_dir"`
+	ReadOnlyPaths  []string `json:"read_only_paths"`
+	ReadWritePaths []string `json:"read_write_paths"`
+	Environment    []string `json:"environment"`
+	Limits         Limits   `json:"limits"`
+}
+
+func DigestPayload(req *SandboxRequest) (json.RawMessage, error) {
+	if req == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
+	readOnly := sortedClone(req.ReadOnlyPaths)
+	readWrite := sortedClone(req.ReadWritePaths)
+	environment := make([]string, 0, len(req.Environment))
+	for key, value := range req.Environment {
+		environment = append(environment, key+"="+value)
+	}
+	environment = sortedClone(environment)
+	payload, err := json.Marshal(boundContract{
+		Profile:        req.Profile,
+		Executable:     req.Executable,
+		Arguments:      req.Arguments,
+		WorkingDir:     req.WorkingDir,
+		ReadOnlyPaths:  readOnly,
+		ReadWritePaths: readWrite,
+		Environment:    environment,
+		Limits:         req.Limits,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func sortedClone(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	clone := slices.Clone(values)
+	slices.Sort(clone)
+	return clone
+}
+
+type registeredGrant struct {
+	grant approval.ApprovalGrant
+}
+
+type Registry struct {
+	mu             sync.Mutex
+	policyVersion  string
+	now            func() time.Time
+	logger         *slog.Logger
+	grants         map[string]registeredGrant
+	consumedNonces map[string]struct{}
+}
+
+func NewRegistry(policyVersion string, logger *slog.Logger) *Registry {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	return &Registry{
+		policyVersion:  policyVersion,
+		now:            time.Now,
+		logger:         logger,
+		grants:         map[string]registeredGrant{},
+		consumedNonces: map[string]struct{}{},
+	}
+}
+
+func (r *Registry) Register(_ context.Context, grant *approval.ApprovalGrant, req *SandboxRequest) error {
+	if grant == nil {
+		return Errorf(ErrorCodeInvalidArgument, "grant must not be nil")
+	}
+	if req == nil {
+		return Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
+	if grant.GrantID == "" || grant.Nonce == "" {
+		return Errorf(ErrorCodeApprovalInvalid, "grant is missing its identity or nonce")
+	}
+	if err := r.assertBinds(grant, req); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.grants[grant.GrantID]; exists {
+		return Errorf(ErrorCodeApprovalInvalid, "grant %s already registered", grant.GrantID)
+	}
+	if _, consumed := r.consumedNonces[grant.Nonce]; consumed {
+		return Errorf(ErrorCodeApprovalInvalid, "grant nonce already consumed")
+	}
+	r.grants[grant.GrantID] = registeredGrant{grant: *grant}
+	return nil
+}
+
+func (r *Registry) assertBinds(grant *approval.ApprovalGrant, req *SandboxRequest) error {
+	payload, err := DigestPayload(req)
+	if err != nil {
+		return Errorf(ErrorCodeApprovalInvalid, "compute request digest: %v", err)
+	}
+	if grant.ArgumentsHash != approval.HashArguments(payload) {
+		return Errorf(ErrorCodeApprovalInvalid, "grant does not bind this request digest")
+	}
+	if grant.CapabilitiesHash != approval.HashCapabilities(req.Capabilities) {
+		return Errorf(ErrorCodeApprovalInvalid, "grant does not bind these capabilities")
+	}
+	if grant.PrincipalID != req.PrincipalID || grant.SessionID != req.SessionID || grant.ToolName != req.ToolName {
+		return Errorf(ErrorCodeApprovalInvalid, "grant does not bind this principal, session, or tool")
+	}
+	return nil
+}
+
+func (r *Registry) resolve(req *SandboxRequest) (approval.ApprovalGrant, error) {
+	if req == nil {
+		return approval.ApprovalGrant{}, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
+	if req.ApprovalGrantID == "" {
+		return approval.ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "request carries no approval grant")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.grants[req.ApprovalGrantID]
+	if !ok {
+		return approval.ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "approval grant %s is not registered", req.ApprovalGrantID)
+	}
+	if _, consumed := r.consumedNonces[entry.grant.Nonce]; consumed {
+		return approval.ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "approval grant nonce was already consumed")
+	}
+	payload, err := DigestPayload(req)
+	if err != nil {
+		return approval.ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "compute request digest: %v", err)
+	}
+	toolReq := &approval.ToolRequest{
+		PrincipalID:  req.PrincipalID,
+		SessionID:    req.SessionID,
+		ToolName:     req.ToolName,
+		Arguments:    payload,
+		Capabilities: req.Capabilities,
+	}
+	if err := entry.grant.ValidFor(toolReq, r.policyVersion, r.now()); err != nil {
+		return approval.ApprovalGrant{}, Errorf(ErrorCodeApprovalInvalid, "%v", err)
+	}
+	r.consumedNonces[entry.grant.Nonce] = struct{}{}
+	return entry.grant, nil
+}
+
+func (r *Registry) Execute(ctx context.Context, req *SandboxRequest) (Result, error) {
+	grant, err := r.resolve(req)
+	if err != nil {
+		r.recordDenied(ctx, req, err)
+		return Result{}, err
+	}
+	spec := specFromRequest(req)
+	start := r.now()
+	result, runErr := Run(ctx, spec, req.Executable, req.Arguments...)
+	r.record(ctx, req, &grant, &result, runErr, r.now().Sub(start))
+	return result, runErr
+}
+
+func specFromRequest(req *SandboxRequest) *Spec {
+	environment := make([]string, 0, len(req.Environment))
+	for key, value := range req.Environment {
+		environment = append(environment, key+"="+value)
+	}
+	return &Spec{
+		Profile:        req.Profile,
+		WorkingDir:     req.WorkingDir,
+		ReadOnlyPaths:  sortedClone(req.ReadOnlyPaths),
+		ReadWritePaths: sortedClone(req.ReadWritePaths),
+		AllowEnv:       environment,
+		Limits:         req.Limits,
+	}
+}
+
+func sessionContract(req *SessionRequest) (*SandboxRequest, error) {
+	if req == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+	}
+	return &SandboxRequest{
+		Profile:         req.Profile,
+		RequestID:       req.RequestID,
+		PrincipalID:     req.PrincipalID,
+		SessionID:       req.SessionID,
+		ToolName:        req.ToolName,
+		Executable:      req.Executable,
+		Arguments:       req.Arguments,
+		WorkingDir:      req.WorkingDir,
+		ReadOnlyPaths:   req.ReadOnlyPaths,
+		ReadWritePaths:  req.ReadWritePaths,
+		Environment:     req.Environment,
+		Capabilities:    req.Capabilities,
+		Limits:          req.Limits,
+		ApprovalGrantID: req.ApprovalGrantID,
+	}, nil
+}
+
+func (r *Registry) validateSessionGrant(req *SessionRequest) error {
+	contract, err := sessionContract(req)
+	if err != nil {
+		return err
+	}
+	if contract.ApprovalGrantID == "" {
+		return Errorf(ErrorCodeApprovalInvalid, "session request carries no approval grant")
+	}
+	r.mu.Lock()
+	entry, ok := r.grants[contract.ApprovalGrantID]
+	_, nonceSpent := r.consumedNonces[entry.grant.Nonce]
+	r.mu.Unlock()
+	if !ok {
+		return Errorf(ErrorCodeApprovalInvalid, "approval grant %s is not registered", contract.ApprovalGrantID)
+	}
+	if nonceSpent {
+		return Errorf(ErrorCodeApprovalInvalid, "approval grant nonce was already consumed")
+	}
+	payload, err := DigestPayload(contract)
+	if err != nil {
+		return Errorf(ErrorCodeApprovalInvalid, "compute request digest: %v", err)
+	}
+	toolReq := &approval.ToolRequest{
+		PrincipalID:  contract.PrincipalID,
+		SessionID:    contract.SessionID,
+		ToolName:     contract.ToolName,
+		Arguments:    payload,
+		Capabilities: contract.Capabilities,
+	}
+	if err := entry.grant.ValidFor(toolReq, r.policyVersion, r.now()); err != nil {
+		return Errorf(ErrorCodeApprovalInvalid, "%v", err)
+	}
+	return nil
+}

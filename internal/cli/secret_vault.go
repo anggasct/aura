@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 type configuredSecret struct {
