@@ -24,7 +24,7 @@ RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check arch-check verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
+.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check arch-check static-check static-check-darwin verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -44,7 +44,7 @@ plugin-gmail:
 	cp plugins/gmail/plugin.yaml dist/plugins/gmail/plugin.yaml
 
 test:
-	$(GO) test -v -race ./...
+	$(GO) test -race ./...
 
 durable-test:
 	$(GO) test -race -tags durable -count=1 ./internal/platform/durable/...
@@ -83,7 +83,13 @@ refs-check:
 		exit 1; \
 	fi
 
-verify: build-all fmt-check vet test lint refs-check arch-check
+static-check: fmt-check vet lint refs-check arch-check
+
+static-check-darwin:
+	GOOS=darwin $(GO) vet ./...
+	GOOS=darwin $$($(GO) tool -n golangci-lint) run ./...
+
+verify: build-all static-check test
 
 security:
 	$(GO) tool govulncheck ./...
