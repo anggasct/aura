@@ -12,6 +12,7 @@ const (
 	kindExempt groupKind = iota
 	kindLegacy
 	kindApp
+	kindCLI
 	kindPlatform
 	kindModule
 	kindChannelKit
@@ -24,7 +25,7 @@ type group struct {
 	name string
 }
 
-var legacyRoots = []string{"internal/cli", "internal/config", "internal/store"}
+var legacyRoots = []string{"internal/config", "internal/store"}
 
 var allowedInternalDirs = []string{"app", "channels", "cli", "config", "modules", "platform", "store"}
 
@@ -46,6 +47,8 @@ func classify(path string) group {
 		return group{kind: kindLegacy, name: path}
 	case within(path, "internal/app"):
 		return group{kind: kindApp}
+	case within(path, "internal/cli"):
+		return group{kind: kindCLI}
 	case within(path, "internal/platform"):
 		return group{kind: kindPlatform}
 	case within(path, "internal/modules"):
@@ -63,13 +66,16 @@ func classify(path string) group {
 
 func layerViolation(from, to string) bool {
 	source, target := classify(from), classify(to)
+	if source.kind == kindCLI {
+		return !within(to, "internal/app") && !within(to, "internal/platform/logging")
+	}
 	if source.kind == kindExempt || source.kind == kindLegacy || source.kind == kindApp || target.kind == kindLegacy {
 		return false
 	}
 	if source.kind == kindPlugin {
 		return !within(to, pluginWire)
 	}
-	upward := target.kind == kindApp
+	upward := target.kind == kindApp || target.kind == kindCLI
 	switch source.kind {
 	case kindPlatform:
 		return upward || target.kind == kindModule || target.kind == kindChannel || target.kind == kindChannelKit

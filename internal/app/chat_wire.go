@@ -1,0 +1,423 @@
+package app
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"iter"
+	"log/slog"
+	"os"
+	"time"
+
+	"github.com/anggasct/aura/internal/channels/terminal"
+	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/builtin"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/adk"
+	"github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/store"
+)
+
+type terminalBroker struct{}
+
+func (terminalBroker) Evaluate(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error) {
+	return approval.PolicyDecision{Outcome: approval.OutcomeDeny, ReasonCode: "plain_console_denies_tools"}, nil
+}
+
+type terminalRunner struct {
+	engine  turn.AgentRuntime
+	agentID string
+}
+
+func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Seq2[terminal.Event, error] {
+	return func(yield func(terminal.Event, error) bool) {
+		if req == nil {
+			yield(terminal.Event{}, errors.New("terminal: request must not be nil"))
+			return
+		}
+		parts := make([]runtimeingress.InputPart, len(req.Parts))
+		for i := range req.Parts {
+			parts[i] = runtimeingress.InputPart{Text: req.Parts[i].Text, Image: req.Parts[i].Image}
+		}
+		agentID := req.AgentID
+		if agentID == "" {
+			agentID = r.agentID
+		}
+		runtimeReq := &turn.TurnRequest{
+			SessionID:      req.SessionID,
+			PrincipalID:    req.PrincipalID,
+			PrincipalClass: principal.ClassOwner,
+			Origin:         turn.OriginTerminal,
+			Parts:          parts,
+			IdempotencyKey: req.IdempotencyKey,
+			AgentID:        agentID,
+			Skill:          req.Skill,
+		}
+		for ev, err := range r.engine.Run(ctx, runtimeReq) {
+			if err != nil {
+				yield(terminal.Event{}, err)
+				return
+			}
+			if !yield(terminal.Event{
+				Kind:    ev.Kind,
+				Author:  ev.Author,
+				TurnID:  ev.TurnID,
+				Payload: ev.Payload,
+			}, nil) {
+				return
+			}
+		}
+	}
+}
+
+type terminalSessions struct {
+	sessions store.SessionService
+	newID    func() (string, error)
+	agentID  string
+}
+
+var _ terminal.Sessions = (*terminalSessions)(nil)
+
+func (s *terminalSessions) Create(ctx context.Context, owner, agentID string) (terminal.Session, error) {
+	newID := s.newID
+	if newID == nil {
+		newID = newTerminalSessionID
+	}
+	id, err := newID()
+	if err != nil {
+		return terminal.Session{}, fmt.Errorf("terminal: create session id: %w", err)
+	}
+	if agentID == "" {
+		agentID = s.agentID
+	}
+	internal := &store.Session{
+		ID:        id,
+		OwnerID:   owner,
+		AgentID:   agentID,
+		Metadata:  json.RawMessage(`{}`),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := s.sessions.Create(ctx, internal); err != nil {
+		return terminal.Session{}, err
+	}
+	return terminal.Session{ID: internal.ID, OwnerID: internal.OwnerID, AgentID: internal.AgentID}, nil
+}
+
+func (s *terminalSessions) Get(ctx context.Context, id string) (terminal.Session, error) {
+	internal, err := s.sessions.Get(ctx, id)
+	if err != nil {
+		if code, ok := store.CodeOf(err); errors.Is(err, sql.ErrNoRows) || (ok && code == store.ErrorCodeSessionNotFound) {
+			return terminal.Session{}, fmt.Errorf("%w: %s", terminal.ErrSessionNotFound, id)
+		}
+		return terminal.Session{}, err
+	}
+	return terminal.Session{ID: internal.ID, OwnerID: internal.OwnerID, AgentID: internal.AgentID}, nil
+}
+
+func (s *terminalSessions) ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]terminal.Event, error) {
+	events, err := s.sessions.ListEvents(ctx, sessionID, afterSequence, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]terminal.Event, len(events))
+	for i := range events {
+		out[i] = terminal.Event{
+			Kind:    events[i].Kind,
+			Author:  events[i].Author,
+			TurnID:  events[i].TurnID,
+			Payload: events[i].Payload,
+		}
+	}
+	return out, nil
+}
+
+type chatPresentation struct {
+	plain   bool
+	noColor bool
+}
+
+func shouldUseTTY(present chatPresentation, inTTY, outTTY bool) bool {
+	if present.plain {
+		return false
+	}
+	return inTTY && outTTY
+}
+
+func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID, persona string, present chatPresentation) error {
+	cfg := result.Config
+	db, err := openStorage(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+
+	prices, err := openPriceRegistry(ctx, logger, cfg, result.Path, "")
+	if err != nil {
+		return err
+	}
+
+	_, visionArtifactRoot, _, err := storagePaths(cfg)
+	if err != nil {
+		return err
+	}
+	models, err := model.NewRegistry(ctx, &model.RegistryOptions{
+		Logger:     logger,
+		Models:     cfg.Models,
+		Routes:     cfg.ModelRoutes,
+		Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)},
+		Prices:     prices,
+		Vision:     visionWiringForConfig(cfg, db, visionArtifactRoot),
+	})
+	if err != nil {
+		return err
+	}
+
+	useTTY := false
+	inFile, inOk := in.(*os.File)
+	outFile, outOk := out.(*os.File)
+	if inOk && outOk {
+		useTTY = shouldUseTTY(present, terminal.IsTerminal(int(inFile.Fd())), terminal.IsTerminal(int(outFile.Fd())))
+	}
+
+	sessions := store.NewSessionService(db)
+	events := store.NewEventStore(db)
+	registry, err := buildAgentRegistry(cfg)
+	if err != nil {
+		return err
+	}
+	agentID, err := resolveChatPersona(ctx, registry, sessions, sessionID, persona)
+	if err != nil {
+		return err
+	}
+	routeModel, err := model.RouteModelName(cfg, cfg.Models.Definitions["primary"].Model)
+	if err != nil {
+		return err
+	}
+	var broker turn.ToolBroker = terminalBroker{}
+	var executorOpts []runtimeadk.ExecutorOption
+	turnLedger, err := newTurnLedger(cfg, db, prices, logger)
+	if err != nil {
+		return err
+	}
+	executorOpts = append(executorOpts, runtimeadk.WithBudgetLedger(turnLedger, "primary"), runtimeadk.WithAgentResolver(registry, routeModel), ownerContextOption(ctx, cfg.Owner, logger))
+	var memoryHook func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
+	var approvals *terminal.ApprovalBridge
+	var builtinTools *toolsbuiltin.Executor
+	if cfg.Tools != nil {
+		if useTTY {
+			approvals = terminal.NewApprovalBridge()
+		}
+		_, artifactRoot, _, err := storagePaths(cfg)
+		if err != nil {
+			return err
+		}
+		builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, result.CapabilityReport, logger, nil, approvalDeciderFor(approvals), nil,
+			toolsbuiltin.WithApprovalReachable(terminalApprovalReachable(approvals)))
+		if err != nil {
+			return err
+		}
+		broker = builtin
+		builtinTools = builtin
+		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
+		if interpreterEnabled(result.CapabilityReport) {
+			stopVerification, err := startChatInterpreter(ctx, cfg, builtin, logger)
+			if err != nil {
+				return err
+			}
+			defer stopVerification()
+		}
+	}
+	if cfg.Memory.Enabled {
+		memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, registry, models, logger, nil)
+		if err != nil {
+			return err
+		}
+		executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryRuntime.provider))
+		memoryHook = buildMemoryHook(memoryRuntime.service, memoryRuntime.model, memoryRuntime.summarizer, logger)
+	}
+	var profileHook postTurnHook
+	if cfg.Profile != nil && cfg.Profile.Enabled {
+		profileRuntime, err := buildProfileRuntime(ctx, cfg, db, models, nil, logger)
+		if err != nil {
+			return err
+		}
+		executorOpts = append(executorOpts, runtimeadk.WithProfileContext(profileRuntime))
+		profileHook = profileRuntime.hook
+		profileRuntime.start(ctx)
+	}
+	var skillRuntime *skillRuntime
+	var skillRenderer runtimeengine.SkillRenderer
+	if cfg.Skills != nil && cfg.Skills.Enabled {
+		skillRuntime, err = buildSkillRuntime(ctx, cfg.Skills, db, logger)
+		if err != nil {
+			return err
+		}
+		executorOpts = append(executorOpts, runtimeadk.WithSkillContext(skillRuntime.context))
+		skillRenderer = skillRuntime.context
+	}
+	kbRuntime, kbEnabled, err := buildKnowledgeRuntime(ctx, cfg, registry)
+	if err != nil {
+		return err
+	}
+	if kbEnabled {
+		defer kbRuntime.close()
+		kbRuntime.attachSearch(builtinTools)
+		executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
+	}
+	executor, err := runtimeadk.NewADKExecutor(
+		"aura", cfg.Models.Definitions["primary"].Model, models, sessions, events, broker, nil, logger, executorOpts...,
+	)
+	if err != nil {
+		return err
+	}
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
+		MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
+		MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
+		TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
+		ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
+		DefaultAgentID:  auraagent.DefaultID,
+		Personas:        registryPersonas{registry: registry},
+		Skills:          skillRenderer,
+		PostTurnHook:    composePostTurnHooks(memoryHook, profileHook),
+	}, events, store.NewDedupeStore(db), executor, logger)
+	if err != nil {
+		return err
+	}
+	executor.SetEventPublisher(engine)
+	console := terminal.NewConsole(
+		&terminalRunner{engine: engine, agentID: agentID},
+		&terminalSessions{sessions: sessions, agentID: agentID},
+		terminal.PlainRenderer{},
+		in, out, diag,
+		terminal.Config{
+			MaxInputBytes:       cfg.Terminal.MaxInputBytes,
+			InMemoryHistory:     cfg.Terminal.InMemoryHistory,
+			SecondInterruptTime: time.Duration(cfg.Terminal.SecondInterruptTime),
+		},
+		principal.OwnerID,
+	)
+	commandRecorder, err := telemetry.NewCommandRecorder(nil, nil)
+	if err != nil {
+		return err
+	}
+	console.SetCommandRecorder(commandRecorder)
+	if skillRuntime != nil {
+		console.SetSkills(skillRuntime.bridge)
+	}
+	console.SetInputCloser(func() { _ = os.Stdin.Close() })
+	console.SetSessionID(sessionID)
+	console.SetAgentID(agentID)
+	if useTTY {
+		outFD := int(outFile.Fd())
+		console.SetTTY(terminal.NewTTYRenderer(terminal.TTYOptions{
+			Out:     terminal.NewTTYOutput(outFile),
+			Width:   func() int { w, _ := terminal.TerminalSize(outFD); return w },
+			Hz:      cfg.Terminal.RenderHz,
+			Styling: !present.noColor,
+			Stdin:   inFile,
+			Stdout:  outFile,
+		}))
+		console.SetApprovalBridge(approvals)
+	}
+	interrupts, stopInterrupts := forwardInterrupts(ctx, interruptsFromContext(ctx))
+	defer stopInterrupts()
+	console.SetInterrupts(interrupts)
+	return console.Run(ctx)
+}
+
+func terminalApprovalReachable(approvals *terminal.ApprovalBridge) func(sessionID string) bool {
+	if approvals == nil {
+		return nil
+	}
+	return func(string) bool { return true }
+}
+
+func approvalDeciderFor(approvals *terminal.ApprovalBridge) toolbroker.ApprovalDecider {
+	if approvals == nil {
+		return nil
+	}
+	return func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+		if prompt == nil {
+			return false, errors.New("approval prompt must not be nil")
+		}
+		return approvals.Decide(ctx, &terminal.ApprovalCard{
+			ToolName:       prompt.ToolName,
+			ToolVersion:    prompt.ToolVersion,
+			SessionID:      prompt.SessionID,
+			TurnID:         prompt.TurnID,
+			PrincipalID:    prompt.PrincipalID,
+			Arguments:      prompt.Arguments,
+			Network:        prompt.Network,
+			Timeout:        prompt.Timeout,
+			MaxOutputBytes: prompt.MaxOutputBytes,
+			PolicyVersion:  prompt.PolicyVersion,
+			ReasonCode:     prompt.ReasonCode,
+			ExpiresAt:      prompt.ExpiresAt,
+		})
+	}
+}
+
+func newTerminalSessionID() (string, error) {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "sess_" + hex.EncodeToString(b[:]), nil
+}
+
+type interruptContextKey struct{}
+
+func WithInterrupts(ctx context.Context, signals <-chan os.Signal) context.Context {
+	return context.WithValue(ctx, interruptContextKey{}, signals)
+}
+
+func interruptsFromContext(ctx context.Context) <-chan os.Signal {
+	signals, _ := ctx.Value(interruptContextKey{}).(<-chan os.Signal)
+	return signals
+}
+
+func forwardInterrupts(ctx context.Context, signals <-chan os.Signal) (events <-chan struct{}, stop func()) {
+	if signals == nil {
+		return nil, func() {}
+	}
+	forwardCtx, cancel := context.WithCancel(ctx)
+	out := make(chan struct{}, 2)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(out)
+		for {
+			select {
+			case <-forwardCtx.Done():
+				return
+			case _, ok := <-signals:
+				if !ok {
+					return
+				}
+				select {
+				case out <- struct{}{}:
+				case <-forwardCtx.Done():
+					return
+				}
+			}
+		}
+	}()
+	stop = func() {
+		cancel()
+		<-done
+	}
+	return out, stop
+}

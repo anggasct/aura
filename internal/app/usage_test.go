@@ -1,0 +1,230 @@
+package app
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/anggasct/aura/internal/platform/usage"
+	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
+)
+
+func writeUsageConfig(t *testing.T, dataRoot string) string {
+	t.Helper()
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+	content := "version: 1\nstorage:\n  path: " + dataRoot +
+		"\nusage:\n  currency: USD\n  daily_budget_micros: 1000000\n  monthly_budget_micros: 10000000\n  reservation_ttl: 1h\n"
+	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return cfg
+}
+
+func seedUsage(t *testing.T, dataRoot string) {
+	t.Helper()
+	ctx := context.Background()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	reg := usage.NewPriceRegistry()
+	price := &usage.Price{
+		ModelDefinitionID:    "primary",
+		Currency:             "USD",
+		MicrosPerInputToken:  10,
+		MicrosPerOutputToken: 30,
+		EffectiveFrom:        time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		MaxReservationRate:   200,
+		Source:               "test",
+	}
+	if err := reg.Put(price); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := usage.NewLedger(db, usage.LedgerOptions{
+		Prices: reg, Currency: "USD", DailyCapMicros: 1000000, MonthlyCapMicros: 10000000, ReservationTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := ledger.Reserve(ctx, &usage.ReserveRequest{
+		InvocationID: "inv-1", Attempt: 0, ModelDefinitionID: "primary", AgentID: "kuma",
+		KnownInputTokens: 100, RequestedMaxOutputTokens: 200,
+	})
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if _, err := ledger.Settle(ctx, &usage.SettleRequest{
+		ReservationID: reservation.ID,
+		Usage:         usage.Usage{InputTokens: 80, OutputTokens: 120},
+	}); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+}
+
+func TestUsageStatus(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeUsageConfig(t, dataRoot)
+	seedUsage(t, dataRoot)
+
+	out, err := execute(t, "usage", "status", "--config", cfg)
+	if err != nil {
+		t.Fatalf("usage status: %v", err)
+	}
+	for _, want := range []string{"window", "day", "month", "used (micros)", "cap (micros)", "remaining (micros)", "active reservations: 0"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestUsageStatusByPersona(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeUsageConfig(t, dataRoot)
+	seedUsage(t, dataRoot)
+
+	out, err := execute(t, "usage", "status", "--by", "persona", "--config", cfg)
+	if err != nil {
+		t.Fatalf("usage status --by persona: %v", err)
+	}
+	if !strings.Contains(out, "persona") || !regexp.MustCompile(`(?m)^kuma\s+[1-9]\d*\s+[1-9]\d*\s*$`).MatchString(out) {
+		t.Fatalf("by-persona output does not attribute spend to kuma:\n%s", out)
+	}
+
+	root := NewRootCommand()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"usage", "status", "--by", "model", "--config", cfg})
+	var ue *usageError
+	if err := root.Execute(); !errors.As(err, &ue) {
+		t.Fatalf("--by model error = %v, want a usage error", err)
+	}
+}
+
+func TestUsageEntries(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeUsageConfig(t, dataRoot)
+	seedUsage(t, dataRoot)
+
+	out, err := execute(t, "usage", "entries", "--config", cfg)
+	if err != nil {
+		t.Fatalf("usage entries: %v", err)
+	}
+	for _, want := range []string{"recorded_at", "reservation_id", "model", "primary", "reported"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("entries output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestUsageEntriesNegativeLimitRejected(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeUsageConfig(t, dataRoot)
+
+	root := NewRootCommand()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"usage", "entries", "--config", cfg, "--limit", "-5"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected a usage error for negative --limit")
+	}
+	var ue *usageError
+	if !errors.As(err, &ue) {
+		t.Errorf("negative --limit must be a usage error (exit 2), got %T: %v", err, err)
+	}
+}
+
+func TestUsageSubcommandsRejectPositionalArgs(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeUsageConfig(t, dataRoot)
+
+	for _, sub := range []string{"status", "entries", "prices", "reconcile"} {
+		t.Run(sub, func(t *testing.T) {
+			out, err := execute(t, "usage", sub, "--config", cfg, "stray")
+			if err == nil {
+				t.Fatalf("usage %s stray: expected an error, got nil (out: %q)", sub, out)
+			}
+			var ue *usageError
+			if !errors.As(err, &ue) {
+				t.Errorf("usage %s stray: must be a usage error (exit 2), got %T: %v", sub, err, err)
+			}
+			if code := exitCodeOf(t, "usage", sub, "--config", cfg, "stray"); code != 2 {
+				t.Errorf("usage %s stray: exit code = %d, want 2", sub, code)
+			}
+		})
+	}
+}
+
+func TestUsageEntriesEmpty(t *testing.T) {
+	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	cfg := writeUsageConfig(t, dataRoot)
+
+	out, err := execute(t, "usage", "entries", "--config", cfg)
+	if err != nil {
+		t.Fatalf("usage entries: %v", err)
+	}
+	if !strings.Contains(out, "no usage entries") {
+		t.Errorf("expected empty message, got:\n%s", out)
+	}
+}
+
+func TestUsagePrices(t *testing.T) {
+	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	cfg := writeUsageConfig(t, dataRoot)
+	prices := filepath.Join(t.TempDir(), "prices.yaml")
+	content := "version: 1\nprices:\n  - model_definition_id: primary\n    currency: USD\n" +
+		"    micros_per_input_token: 10\n    micros_per_output_token: 30\n" +
+		"    effective_from: \"2026-01-01T00:00:00Z\"\n    source: test\n    max_reservation_rate: 200\n"
+	if err := os.WriteFile(prices, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := execute(t, "usage", "prices", "--config", cfg, "--prices", prices)
+	if err != nil {
+		t.Fatalf("usage prices: %v", err)
+	}
+	for _, want := range []string{"model", "primary", "USD", "200%"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prices output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestUsagePricesMissingExplicitFile(t *testing.T) {
+	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	cfg := writeUsageConfig(t, dataRoot)
+	_, err := execute(t, "usage", "prices", "--config", cfg, "--prices", filepath.Join(t.TempDir(), "nope.yaml"))
+	if err == nil {
+		t.Fatal("expected error for missing explicit prices file")
+	}
+}
+
+func TestUsageReconcile(t *testing.T) {
+	dataRoot := t.TempDir()
+	cfg := writeUsageConfig(t, dataRoot)
+	seedUsage(t, dataRoot)
+
+	out, err := execute(t, "usage", "reconcile", "--config", cfg)
+	if err != nil {
+		t.Fatalf("usage reconcile: %v", err)
+	}
+	for _, want := range []string{"expired:", "reconciled:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("reconcile output missing %q:\n%s", want, out)
+		}
+	}
+}

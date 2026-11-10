@@ -33,7 +33,13 @@ func TestLayerViolations(t *testing.T) {
 		{"channel kit to platform", "internal/channels/kit/access", "internal/platform/principal", false},
 		{"plugin to wire", "plugins/gmail/connector", "internal/modules/plugin/wire", false},
 		{"plugin to platform", "plugins/gmail/connector", "internal/platform/toolbroker", true},
-		{"legacy source is exempt", "internal/cli", "internal/modules/memory", false},
+		{"platform to cli", "internal/platform/turn", "internal/cli", true},
+		{"cli to app", "internal/cli", "internal/app", false},
+		{"cli to platform logging", "internal/cli", "internal/platform/logging", false},
+		{"cli to platform turn", "internal/cli", "internal/platform/turn", true},
+		{"cli to legacy config", "internal/cli", "internal/config", true},
+		{"cli to module", "internal/cli", "internal/modules/memory", true},
+		{"legacy source is exempt", "internal/config", "internal/modules/memory", false},
 		{"legacy target is exempt", "internal/platform/turn", "internal/store", false},
 		{"app is exempt", "internal/app", "internal/modules/memory", false},
 		{"cmd is exempt", "cmd/aura", "internal/modules/memory", false},
@@ -64,6 +70,18 @@ func TestCheckLayersHonoursAllowListAndReportsStaleEntries(t *testing.T) {
 		"layers: internal/platform/effect imports internal/channels/discord",
 		"layers.allow:3: stale allow entry internal/modules/memory -> internal/modules/profile",
 	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("checkLayers = %q, want %q", got, want)
+	}
+}
+
+func TestCheckLayersReportsCliImportingPlatformPackages(t *testing.T) {
+	t.Parallel()
+	packages := []repoPackage{
+		{path: "internal/cli", imports: []string{"internal/app", "internal/platform/turn"}},
+	}
+	got := checkLayers(packages, nil)
+	want := []string{"layers: internal/cli imports internal/platform/turn"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("checkLayers = %q, want %q", got, want)
 	}

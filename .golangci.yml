@@ -48,19 +48,19 @@ linters:
       # config change, not an incidental import.
       rules:
         # The ADK executor adapter is an implementation detail wired only by
-        # the cli composition root; everything else depends on the runtime
+        # the app composition root; everything else depends on the runtime
         # boundary (AgentRuntime, TurnRequest, ToolBroker) instead. adk's
         # own files are exempt because they are the package itself.
-        adk-wired-only-by-cli:
+        adk-wired-only-by-app:
           files:
             - "**/internal/**"
             - "**/plugins/**"
-            - "!**/internal/cli/**"
+            - "!**/internal/app/**"
             - "!**/internal/platform/turn/adk/**"
             - "!**/internal/modules/builtin/**"
           deny:
             - pkg: github.com/anggasct/aura/internal/platform/turn/adk
-              desc: only the cli composition root may wire the ADK executor, with the builtin tool executor adapter as the one provider-side implementation; depend on the runtime boundary types instead
+              desc: only the app composition root may wire the ADK executor, with the builtin tool executor adapter as the one provider-side implementation; depend on the runtime boundary types instead
         # The root package is the shared contract layer (types, errors, fake,
         # checkpoint payload). It deliberately references the ingress and
         # checkpoint contract packages — TurnRequest carries ingress
@@ -135,30 +135,30 @@ linters:
             - pkg: github.com/anggasct/aura/internal/platform/turn
               desc: checkpoint contracts are store-facing boundaries consumed by the engine, and must not reach back into the runtime tree
         # Builtin tool adapters are assembled by the tools provider
-        # (internal/modules/builtin); the cli composition root invokes that
+        # (internal/modules/builtin); the app composition root invokes that
         # constructor and must not reach into the adapter packages itself.
         # Lax mode lets the longer allow prefixes (builtin, the interpreter
         # runtime catalog) win over the shorter deny prefixes.
         tools-wired-only-through-builtin:
           list-mode: lax
           files:
-            - "**/internal/cli/**"
+            - "**/internal/app/**"
           allow:
             - github.com/anggasct/aura/internal/modules/builtin
             - github.com/anggasct/aura/internal/modules/codeexec/interpreter
           deny:
             - pkg: github.com/anggasct/aura/internal/platform/tools
-              desc: the builtin adapter set is assembled in internal/modules/builtin; the cli composition root calls that constructor instead
+              desc: the builtin adapter set is assembled in internal/modules/builtin; the app composition root calls that constructor instead
             - pkg: github.com/anggasct/aura/internal/modules/codeexec
-              desc: the code execution adapter is constructed by internal/modules/builtin, not by the cli composition root
+              desc: the code execution adapter is constructed by internal/modules/builtin, not by the app composition root
             - pkg: github.com/anggasct/aura/internal/modules/shellexec
-              desc: the exec adapter is constructed by internal/modules/builtin, not by the cli composition root
+              desc: the exec adapter is constructed by internal/modules/builtin, not by the app composition root
             - pkg: github.com/anggasct/aura/internal/modules/fetch
-              desc: the fetch adapter is constructed by internal/modules/builtin, not by the cli composition root
+              desc: the fetch adapter is constructed by internal/modules/builtin, not by the app composition root
             - pkg: github.com/anggasct/aura/internal/modules/filesystem
-              desc: the filesystem adapters are constructed by internal/modules/builtin, not by the cli composition root
+              desc: the filesystem adapters are constructed by internal/modules/builtin, not by the app composition root
             - pkg: github.com/anggasct/aura/internal/modules/search
-              desc: the search adapter is constructed by internal/modules/builtin, not by the cli composition root
+              desc: the search adapter is constructed by internal/modules/builtin, not by the app composition root
         # Restate SDK types never leave the durable adapter: the domain
         # depends on the DurableRuntime port, and only the adapter package
         # itself may import the SDK (client, serving, and conformance
@@ -271,7 +271,7 @@ linters:
       - linters:
           - gosec
         text: G304
-        path: internal/cli/process_unix.go
+        path: internal/app/process_unix.go
 
       # Directories are hardened to 0700 exactly as the filesystem convention
       # requires; G302's 0600 ceiling is a file rule and cannot express the
@@ -402,10 +402,11 @@ linters:
 
       # The signal-derived context does reach every command, but it travels
       # through cobra's command tree (ExecuteContext then cmd.Context()) and
-      # the analyser cannot trace it across that indirection.
+      # the analyser cannot trace it from the NewRootCommand call in
+      # ExecuteContext across that indirection.
       - linters:
           - contextcheck
-        path: internal/cli/root.go
+        path: internal/cli/execute.go
 
       # The invocation context reaches Restate handlers through the SDK's own
       # handler signature (WorkflowContext embeds context.Context); the

@@ -1,0 +1,486 @@
+package app
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
+)
+
+func TestFormatSandboxStatusAvailable(t *testing.T) {
+	all := sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}
+	text, available := formatSandboxStatus(all, nil)
+	if !available || text != "sandbox: available" {
+		t.Fatalf("got %q available=%v", text, available)
+	}
+}
+
+func TestFormatSandboxStatusNamesMissing(t *testing.T) {
+	partial := sandbox.Primitives{ProcessGroups: true}
+	text, available := formatSandboxStatus(partial, nil)
+	if available {
+		t.Fatal("want unavailable")
+	}
+	for _, want := range []string{"cgroup_v2", "landlock", "seccomp", "user_namespace"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("status %q missing primitive %q", text, want)
+		}
+	}
+	if strings.Contains(text, "process_groups") {
+		t.Errorf("status should not list a present primitive:\n%s", text)
+	}
+}
+
+func TestFormatSandboxStatusReasonOnProbeError(t *testing.T) {
+	text, available := formatSandboxStatus(sandbox.Primitives{}, errors.New("sandbox requires Linux"))
+	if available || !strings.Contains(text, "sandbox requires Linux") {
+		t.Fatalf("got %q available=%v", text, available)
+	}
+}
+
+func TestStatusCmdReportsMissingPrimitive(t *testing.T) {
+	negotiate := func() (sandbox.Primitives, error) {
+		return sandbox.Primitives{ProcessGroups: true}, nil
+	}
+	cmd := newStatusCmdForTest(t, negotiate, false)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("want error when sandbox unavailable")
+	}
+	if !strings.Contains(out.String(), "user_namespace") {
+		t.Errorf("output missing primitive name:\n%s", out.String())
+	}
+}
+
+func TestStatusCmdAvailableExitsClean(t *testing.T) {
+	negotiate := func() (sandbox.Primitives, error) {
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+	}
+	cmd := newStatusCmdForTest(t, negotiate, true)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out.String(), "sandbox: available") {
+		t.Errorf("output=%q", out.String())
+	}
+}
+
+func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, error), healthyStorage bool) *cobra.Command {
+	t.Helper()
+	dataRoot := t.TempDir()
+	if healthyStorage {
+		seedHealthyStorage(t, dataRoot)
+	}
+	cfg := config.Default()
+	cfg.Storage.Path = dataRoot
+	ignoreHostDiskHeadroom(&cfg)
+	cfg.Models.Definitions = map[string]config.ModelDefinition{
+		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
+	}
+	cmd := &cobra.Command{Use: "status"}
+	cmd.SetContext(t.Context())
+	cmd.RunE = func(c *cobra.Command, _ []string) error {
+		return runStatus(c, &cfg, capability.Report{}, negotiate, true, false, pinnedProcessProbe)
+	}
+	return cmd
+}
+
+func ignoreHostDiskHeadroom(cfg *config.Config) {
+	cfg.Health.DiskWarningPercent = 0
+	cfg.Health.DiskCriticalPercent = 0
+	cfg.Health.DiskCriticalFloorBytes = 0
+}
+
+func pinnedProcessProbe() (health.ProcessStatus, bool) {
+	return health.ProcessStatus{FDsOpen: 10, FDsLimit: 4096, MemoryUsedBytes: 1 << 20, MemoryLimitBytes: 1 << 30, MemoryLimitKnown: true}, true
+}
+
+func seedConfiguredStorage(t *testing.T, configPath string) {
+	t.Helper()
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if loaded.Config.Storage.Path == "" {
+		return
+	}
+	dbPath, _, _, err := storagePaths(loaded.Config)
+	if err != nil {
+		t.Fatalf("storagePaths: %v", err)
+	}
+	storetest.Seed(t, dbPath)
+}
+
+func seedHealthyStorage(t *testing.T, dataRoot string) {
+	t.Helper()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	db, err := store.OpenDB(t.Context(), filepath.Join(dataRoot, "aura.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	backups := filepath.Join(dataRoot, "backups")
+	if err := os.MkdirAll(filepath.Join(backups, "latest"), 0o700); err != nil {
+		t.Fatalf("seed backup: %v", err)
+	}
+}
+
+func TestStatusOfflineDeterministicOutputAndExitCodes(t *testing.T) {
+	negotiate := func() (sandbox.Primitives, error) {
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+	}
+	cmd := newStatusCmdForTest(t, negotiate, false)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	err := cmd.RunE(cmd, nil)
+	var coded *exitCodeError
+	if !errors.As(err, &coded) || coded.code != exitCritical {
+		t.Fatalf("RunE err = %v, want critical exit (no db, no backup)", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "live: unreachable") {
+		t.Errorf("offline output must label live unreachable:\n%s", text)
+	}
+	if !strings.Contains(text, "critical backup backup_missing") {
+		t.Errorf("backup finding missing:\n%s", text)
+	}
+}
+
+func TestStatusJSONEncodesContract(t *testing.T) {
+	negotiate := func() (sandbox.Primitives, error) {
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+	}
+	dataRoot := t.TempDir()
+	seedHealthyStorage(t, dataRoot)
+	cfg := config.Default()
+	cfg.Storage.Path = dataRoot
+	ignoreHostDiskHeadroom(&cfg)
+	cfg.Models.Definitions = map[string]config.ModelDefinition{
+		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
+	}
+	cmd := &cobra.Command{Use: "status"}
+	cmd.SetContext(t.Context())
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := runStatus(cmd, &cfg, capability.Report{}, negotiate, true, true, pinnedProcessProbe); err != nil {
+		t.Fatalf("runStatus json: %v", err)
+	}
+	var decoded struct {
+		Status   string `json:"status"`
+		Severity string `json:"severity"`
+		Live     struct {
+			Reachable bool `json:"reachable"`
+		} `json:"live"`
+		Findings []struct {
+			ID       string `json:"id"`
+			Severity string `json:"severity"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode json output: %v\n%s", err, out.String())
+	}
+	if decoded.Status != "up" || decoded.Severity != "info" {
+		t.Errorf("status = %s/%s, want up/info", decoded.Status, decoded.Severity)
+	}
+	if decoded.Live.Reachable {
+		t.Error("offline json must report live unreachable")
+	}
+	if len(decoded.Findings) != 9 {
+		t.Fatalf("findings = %d, want 9 (migration, backup, storage intake, disk, sandbox, capability, process, provider, durable): %v", len(decoded.Findings), decoded.Findings)
+	}
+	for _, f := range decoded.Findings {
+		if f.ID == "" || f.Severity == "" {
+			t.Errorf("finding lacks id/severity: %+v", f)
+		}
+	}
+}
+
+func TestDoctorFiltersByCheck(t *testing.T) {
+	dataRoot := t.TempDir()
+	seedHealthyStorage(t, dataRoot)
+	cfg := config.Default()
+	cfg.Storage.Path = dataRoot
+	cfg.Models.Definitions = map[string]config.ModelDefinition{
+		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
+	}
+	negotiate := func() (sandbox.Primitives, error) {
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+	}
+	registry, err := buildHealthRegistry(&cfg, nil, sandboxSupport(negotiate), pinnedProcessProbe)
+	if err != nil {
+		t.Fatalf("buildHealthRegistry: %v", err)
+	}
+	findings := registry.Evaluate(t.Context())
+	filtered := filterFindingsByCheck(findings, "backup")
+	if len(filtered) != 1 {
+		t.Fatalf("filtered = %d, want 1: %+v", len(filtered), filtered)
+	}
+	if filtered[0].Component != "backup" || filtered[0].ID != "backup/ok" {
+		t.Fatalf("filtered finding = %+v", filtered[0])
+	}
+	if len(filterFindingsByCheck(findings, "no-such-check")) != 0 {
+		t.Fatal("unknown check id must filter to nothing")
+	}
+}
+
+func TestDoctorFormatCarriesContractFields(t *testing.T) {
+	now := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	finding := health.Finding{
+		ID:          "backup/backup_missing",
+		Component:   "backup",
+		Scope:       health.ScopeLocal,
+		Code:        "backup_missing",
+		Status:      health.StatusDown,
+		Severity:    health.SeverityCritical,
+		Detail:      "no backup found",
+		Remediation: health.RemediationRestoreBackup,
+		FirstSeen:   now,
+		LastSeen:    now,
+		CheckedAt:   now,
+	}
+	text := formatDoctorFinding(&finding)
+	for _, want := range []string{"backup/backup_missing", "critical", "remediation: restore-backup", "first_seen:", "last_seen:", "checked_at:"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("doctor output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestStatusUsesBuiltinCapabilityRegistry(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("AURA_CONFIG", "")
+	t.Setenv("AURA_TOOLS_WORKSPACE", t.TempDir())
+	loaded, err := config.Load("")
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	statuses := mapCapabilityStatuses(loaded.CapabilityReport)
+	names := make([]string, 0, len(statuses))
+	for _, s := range statuses {
+		names = append(names, s.Name)
+	}
+	slices.Sort(names)
+	want := []string{"code-interpreter", "exec-linux", "provider-search", "public-web", "workspace-read", "workspace-write"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("capability statuses = %v, want %v", names, want)
+	}
+	for _, s := range statuses {
+		if s.Compiled || s.Enabled {
+			t.Fatalf("default build reports %q as compiled=%v enabled=%v, want absent and disabled", s.Name, s.Compiled, s.Enabled)
+		}
+	}
+}
+
+func loadCapabilityConfig(t *testing.T, enabled []string, options config.LoadOptions) config.LoadResult {
+	t.Helper()
+	dir := t.TempDir()
+	dataRoot := t.TempDir()
+	seedHealthyStorage(t, dataRoot)
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := "version: 1\n" +
+		"capabilities:\n  enabled: [" + strings.Join(enabled, ", ") + "]\n" +
+		"storage:\n  path: " + dataRoot + "\n" +
+		"tools:\n  workspace: " + t.TempDir() + "\n" +
+		"skills:\n  roots: [" + t.TempDir() + "]\n" +
+		"context:\n  recent_complete_turns: 5\n" +
+		"profile:\n  prompt_version: v1\n" +
+		"children:\n  recovery: interrupt\n" +
+		"vision: {}\n" +
+		"models:\n  definitions:\n    primary:\n" +
+		"      protocol: anthropic_messages\n" +
+		"      api_key_env: AURA_TEST_ANTHROPIC_KEY\n" +
+		"      model: claude-sonnet-4\n" +
+		"      capabilities:\n        context_tokens: 200000\n        tokenizer: anthropic\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if options.Build.Profile() == "" {
+		build, err := capability.CurrentBuild()
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.Build = build
+	}
+	loaded, err := config.LoadWithOptions(cfgPath, options)
+	if err != nil {
+		t.Fatalf("config.LoadWithOptions: %v", err)
+	}
+	return loaded
+}
+
+func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadOptions) (*cobra.Command, string, error) {
+	t.Helper()
+	loaded := loadCapabilityConfig(t, enabled, options)
+	ignoreHostDiskHeadroom(loaded.Config)
+	cmd := &cobra.Command{Use: "status"}
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetContext(t.Context())
+	runErr := runStatus(cmd, loaded.Config, loaded.CapabilityReport, func() (sandbox.Primitives, error) {
+		return sandbox.Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, CgroupV2: true, Landlock: true, ProcessGroups: true}, nil
+	}, true, false, pinnedProcessProbe)
+	return cmd, out.String(), runErr
+}
+
+func TestStatusReportsEnabledCapabilityMissingDependency(t *testing.T) {
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	build, err := capability.ParseBuild("exec-linux", "exec-linux", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"exec-linux"}, config.LoadOptions{
+		Build:        build,
+		Registry:     registry,
+		Dependencies: capability.Dependencies{},
+	})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("runStatus error = %v, want exit code error", runErr)
+	}
+	if exitErr.code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	}
+	if !strings.Contains(output, "capability/exec-linux") || !strings.Contains(output, "missing dependency: process-containment") {
+		t.Fatalf("status output missing the capability finding:\n%s", output)
+	}
+}
+
+func TestStatusReportsEnabledCapabilityNotCompiled(t *testing.T) {
+	build, err := capability.ParseBuild("core", "", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"public-web"}, config.LoadOptions{Build: build, Registry: registry})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("runStatus error = %v, want exit code error", runErr)
+	}
+	if exitErr.code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	}
+	if !strings.Contains(output, "capability/public-web") || !strings.Contains(output, "capability_not_compiled") {
+		t.Fatalf("status output missing the not-compiled finding:\n%s", output)
+	}
+}
+
+func TestStatusUnknownCapabilityIsAConfigError(t *testing.T) {
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	build, err := capability.ParseBuild("core", "", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := "version: 1\ncapabilities:\n  enabled: [typo-cap]\ntools:\n  workspace: " + t.TempDir() + "\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = config.LoadWithOptions(cfgPath, config.LoadOptions{Build: build, Registry: registry})
+	if err == nil || !strings.Contains(err.Error(), "capability_unknown") {
+		t.Fatalf("load error = %v, want capability_unknown config error", err)
+	}
+}
+
+func TestStatusReportsProfileExclusionReason(t *testing.T) {
+	build, err := capability.ParseBuild("core", "workspace-write", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"workspace-write"}, config.LoadOptions{Build: build, Registry: registry})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("runStatus error = %v, want exit code error", runErr)
+	}
+	if exitErr.code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	}
+	if !strings.Contains(output, "capability/workspace-write") || !strings.Contains(output, "not included in profile core") {
+		t.Fatalf("status output missing the profile-exclusion reason:\n%s", output)
+	}
+}
+
+func TestStatusReportsNonLinuxReasonForEffectfulCapability(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("OS reason requires a non-Linux build parse; exercised on darwin/windows CI legs")
+	}
+	build, err := capability.ParseBuild("exec-linux", "exec-linux", runtime.GOOS)
+	if err != nil {
+		t.Skipf("profile invalid on %s: %v", runtime.GOOS, err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"exec-linux"}, config.LoadOptions{Build: build, Registry: registry, Dependencies: capability.Dependencies{capability.DependencyProcessContainment: true}})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) {
+		t.Fatalf("runStatus error = %v, want exit code error", runErr)
+	}
+	if exitErr.code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	}
+	if !strings.Contains(output, "effectful capabilities require Linux") {
+		t.Fatalf("status output missing the OS reason:\n%s", output)
+	}
+}
+
+func TestStatusReportsInterpreterRuntimeStates(t *testing.T) {
+	build, err := capability.NewBuild("exec-linux", []string{"code-interpreter"}, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependencies := capability.Dependencies{capability.DependencyProcessContainment: true, capability.DependencyInterpreterRuntime: true}
+	_, output, runErr := statusFromLoadedConfig(t, []string{"code-interpreter"}, config.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
+	var exitErr *exitCodeError
+	if !errors.As(runErr, &exitErr) || exitErr.code != exitDegraded {
+		t.Fatalf("runStatus error = %v, want a degraded exit", runErr)
+	}
+	for _, runtime := range []string{"python", "javascript", "go"} {
+		if !strings.Contains(output, "interpreter interpreter_runtime_absent") || !strings.Contains(output, "aura interpreter install "+runtime) {
+			t.Errorf("status output omits the absent %s runtime:\n%s", runtime, output)
+		}
+	}
+
+	_, output, _ = statusFromLoadedConfig(t, []string{}, config.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
+	if strings.Contains(output, "interpreter_runtime") {
+		t.Errorf("status reports interpreter runtimes while the capability is disabled:\n%s", output)
+	}
+}
