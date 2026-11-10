@@ -3,6 +3,7 @@ package effect
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -82,5 +83,39 @@ func TestPreparePublishesToolRequestBeforeProviderInvocation(t *testing.T) {
 	close(provider.release)
 	if err := <-done; err != nil {
 		t.Fatalf("Execute: %v", err)
+	}
+}
+
+type recordingPublisher struct {
+	mu     sync.Mutex
+	events []store.RuntimeEvent
+}
+
+func (p *recordingPublisher) Publish(ev *store.RuntimeEvent) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, *ev)
+}
+
+func TestFailedPrepareIsNeverPublished(t *testing.T) {
+	t.Parallel()
+	journal, db := newTestJournal(t)
+	publisher := &recordingPublisher{}
+	journal.SetEventPublisher(publisher)
+	first := mustPrepare(t, journal, validPrepare(1))
+
+	conflicting := validPrepare(2)
+	conflicting.EventSequence = 1
+	if _, err := journal.Prepare(context.Background(), conflicting); err == nil {
+		t.Fatal("Prepare accepted a second intent at an occupied event sequence")
+	}
+
+	publisher.mu.Lock()
+	defer publisher.mu.Unlock()
+	if len(publisher.events) != 1 || publisher.events[0].Kind != EventKindToolRequested || publisher.events[0].TurnID != first.TurnID {
+		t.Fatalf("published = %+v, want only the first tool.requested", publisher.events)
+	}
+	if got := intentCount(t, db, "idempotency_key = ?", conflicting.IdempotencyKey); got != 0 {
+		t.Fatalf("intents for the failed prepare = %d, want 0", got)
 	}
 }

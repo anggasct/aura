@@ -24,9 +24,9 @@ type group struct {
 	name string
 }
 
-var legacyRoots = []string{"internal/cli", "internal/config", "internal/store", "internal/harness"}
+var legacyRoots = []string{"internal/cli", "internal/config", "internal/store"}
 
-var allowedInternalDirs = []string{"app", "channels", "cli", "config", "harness", "modules", "platform", "store"}
+var allowedInternalDirs = []string{"app", "channels", "cli", "config", "modules", "platform", "store"}
 
 const pluginWire = "internal/modules/plugin/wire"
 
