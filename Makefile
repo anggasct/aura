@@ -1,6 +1,6 @@
 GO        ?= go
 BINARY    := aura
-PKG       := github.com/anggasct/aura/internal/cli
+PKG       := github.com/anggasct/aura/internal/app
 CAPS_PKG  := github.com/anggasct/aura/internal/platform/capability
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -105,7 +105,7 @@ security:
 
 eval:
 	$(GO) test -race ./internal/modules/eval/...
-	$(GO) test -race -run 'TestPersonaPolicySuites|TestPersonaCaptureSeedsOwnerDataOnlyForTheOwner' ./internal/cli/
+	$(GO) test -race -run 'TestPersonaPolicySuites|TestPersonaCaptureSeedsOwnerDataOnlyForTheOwner' ./internal/app/
 
 load:
 	$(GO) test -tags load -race -run TestLoad ./internal/platform/turn/engine/
@@ -119,7 +119,7 @@ load:
 # passwordless sudo; fails closed anywhere else.
 integration:
 ifeq ($(shell uname -s),Linux)
-	@sudo -n env PATH="$(PATH)" bash -ec 'echo $$$$ > /sys/fs/cgroup/cgroup.procs && cd "$(CURDIR)" && $(GO) test -tags=integration -race -count=1 ./internal/platform/sandbox/... && $(GO) test -tags=integration -race -count=1 -run "^TestIntegration" ./internal/cli/'
+	@sudo -n env PATH="$(PATH)" bash -ec 'echo $$$$ > /sys/fs/cgroup/cgroup.procs && cd "$(CURDIR)" && $(GO) test -tags=integration -race -count=1 ./internal/platform/sandbox/... && $(GO) test -tags=integration -race -count=1 -run "^TestIntegration" ./internal/app/'
 else
 	@echo "integration: containment suite is Linux-only; nothing to run on $(shell uname -s)"
 endif

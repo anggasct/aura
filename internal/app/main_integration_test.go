@@ -1,0 +1,17 @@
+//go:build linux && integration
+
+package app
+
+import (
+	"os"
+	"testing"
+
+	"github.com/anggasct/aura/internal/platform/sandbox"
+)
+
+func TestMain(m *testing.M) {
+	if sandbox.IsChild(os.Args) {
+		os.Exit(sandbox.RunChild())
+	}
+	os.Exit(m.Run())
+}

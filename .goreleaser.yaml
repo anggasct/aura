@@ -18,9 +18,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/anggasct/aura/internal/cli.version={{.Version}}
-      - -X github.com/anggasct/aura/internal/cli.commit={{.ShortCommit}}
-      - -X github.com/anggasct/aura/internal/cli.date={{.Date}}
+      - -X github.com/anggasct/aura/internal/app.version={{.Version}}
+      - -X github.com/anggasct/aura/internal/app.commit={{.ShortCommit}}
+      - -X github.com/anggasct/aura/internal/app.date={{.Date}}
       - -X github.com/anggasct/aura/internal/platform/capability.buildProfile=core
       - -X github.com/anggasct/aura/internal/platform/capability.buildCapabilities=
 
