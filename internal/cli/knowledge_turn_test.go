@@ -3,18 +3,17 @@ package cli
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"iter"
 	"log/slog"
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
@@ -25,8 +24,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
-
-var knowledgeModelSeq atomic.Int64
 
 type knowledgeCapture struct {
 	texts  []string
@@ -143,14 +140,13 @@ agents:
 		vectors:        vectors,
 		provider:       fake,
 	}
-	name := fmt.Sprintf("knowledge-capturing-model-%d", knowledgeModelSeq.Add(1))
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return rig.model, nil })
+	name := "knowledge-capturing-model"
 	sessions, events := store.NewSessionService(db), store.NewEventStore(db)
 	provider, err := knowledge.NewContextProvider(retriever)
 	if err != nil {
 		t.Fatalf("NewContextProvider: %v", err)
 	}
-	executor, err := runtimeadk.NewADKExecutor("aura", name, sessions, events, terminalBroker{}, nil, slog.New(slog.DiscardHandler),
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, sessions, events, terminalBroker{}, nil, slog.New(slog.DiscardHandler),
 		runtimeadk.WithKnowledgeContext(provider))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)

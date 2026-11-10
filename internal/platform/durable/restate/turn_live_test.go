@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -250,10 +251,7 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 	}
 	counting.broker = broker
 
-	modelName := "live-model-" + fmt.Sprint(time.Now().UnixNano())
-	adkmodel.Register("^"+modelName+"$", func(context.Context, string) (adkmodel.LLM, error) {
-		return model, nil
-	})
+	modelName := "live-model"
 	executorOpts := []runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(counting)}
 	var renderer runtimeengine.SkillRenderer
 	for _, wiring := range skills {
@@ -265,7 +263,7 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 			executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(wiring.knowledge))
 		}
 	}
-	executor, err := runtimeadk.NewADKExecutor("aura", modelName, store.NewSessionService(db), events, counting, nil, nil, executorOpts...)
+	executor, err := runtimeadk.NewADKExecutor("aura", modelName, auramodel.Set{modelName: model}, store.NewSessionService(db), events, counting, nil, nil, executorOpts...)
 	if err != nil {
 		t.Fatalf("new ADK executor: %v", err)
 	}

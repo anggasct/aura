@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -80,13 +81,9 @@ func newRecordingTool(t *testing.T) (ft tool.Tool, executed *bool) {
 	return ft, executed
 }
 
-func registerFakeModel(t *testing.T, model *fakeADKModel) string {
-	t.Helper()
-	name := "fake-model-" + runtimeengine.NewTurnID()
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) {
-		return model, nil
-	})
-	return name
+func fakeModelSet(model *fakeADKModel) (name string, models auramodel.Set) {
+	name = "fake-model"
+	return name, auramodel.Set{name: model}
 }
 
 type fakeBroker struct {
@@ -162,21 +159,30 @@ func (b *fakeBroker) Evaluate(ctx context.Context, req *approval.ToolRequest) (a
 	return approval.PolicyDecision{Outcome: "allow"}, nil
 }
 
-func newADKTestExecutor(t *testing.T, modelName string, broker turn.ToolBroker, tools ...tool.Tool) (*ADKExecutor, *sql.DB, store.EventStore) {
+func newADKTestExecutor(t *testing.T, modelName string, models auramodel.Set, broker turn.ToolBroker, tools ...tool.Tool) (*ADKExecutor, *sql.DB, store.EventStore) {
 	t.Helper()
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, broker, tools, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, broker, tools, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	return executor, db, events
 }
 
+func TestNewADKExecutorRequiresModels(t *testing.T) {
+	db, sessions, events := newSessionTestDB(t)
+	t.Cleanup(func() { _ = db.Close() })
+	_, err := NewADKExecutor("aura", "model", nil, sessions, events, &fakeBroker{}, nil, nil)
+	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeInvalidArgument {
+		t.Fatalf("CodeOf(%v) = %q, want invalid_argument", err, code)
+	}
+}
+
 func TestADKExecutorRunsTurnAndPersists(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 5}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	broker := &fakeBroker{}
-	executor, db, _ := newADKTestExecutor(t, modelName, broker)
+	executor, db, _ := newADKTestExecutor(t, modelName, models, broker)
 	mustCreateSession(t, db, "session-1")
 
 	req := &turn.TurnRequest{
@@ -212,9 +218,9 @@ func TestADKExecutorRunsTurnAndPersists(t *testing.T) {
 
 func TestADKExecutorGatesToolCalls(t *testing.T) {
 	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	broker := &fakeBroker{}
-	executor, db, _ := newADKTestExecutor(t, modelName, broker, newFakeTool(t))
+	executor, db, _ := newADKTestExecutor(t, modelName, models, broker, newFakeTool(t))
 	mustCreateSession(t, db, "session-1")
 
 	req := &turn.TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: turn.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}}}
@@ -246,10 +252,10 @@ func TestADKExecutorGatesToolCalls(t *testing.T) {
 
 func TestADKExecutorDeniedToolFailsClosed(t *testing.T) {
 	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	broker := &fakeBroker{deny: true}
 	gateTool, executed := newRecordingTool(t)
-	executor, db, _ := newADKTestExecutor(t, modelName, broker, gateTool)
+	executor, db, _ := newADKTestExecutor(t, modelName, models, broker, gateTool)
 	mustCreateSession(t, db, "session-1")
 
 	req := &turn.TurnRequest{TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: turn.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "hi"}}}
@@ -268,7 +274,7 @@ func TestADKExecutorDeniedToolFailsClosed(t *testing.T) {
 
 func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
 	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	builtin := &fakeBuiltinExecutor{
 		definitions: []BuiltinToolDefinition{{
 			Name:                 "sample_tool",
@@ -280,7 +286,7 @@ func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
 		output: json.RawMessage(`{"ok":true}`),
 	}
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -309,7 +315,7 @@ func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
 
 func TestADKExecutorPublishesDurableBuiltinEvents(t *testing.T) {
 	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	db, sessions, events := newSessionTestDB(t)
 	builtin := &fakeBuiltinExecutor{
 		definitions: []BuiltinToolDefinition{{
@@ -319,7 +325,7 @@ func TestADKExecutorPublishesDurableBuiltinEvents(t *testing.T) {
 		events: events,
 		output: json.RawMessage(`{"ok":true}`),
 	}
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -342,8 +348,8 @@ func TestADKExecutorPublishesDurableBuiltinEvents(t *testing.T) {
 
 func TestADKExecutorBudgetEnforced(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 50}
-	modelName := registerFakeModel(t, model)
-	executor, db, _ := newADKTestExecutor(t, modelName, &fakeBroker{})
+	modelName, models := fakeModelSet(model)
+	executor, db, _ := newADKTestExecutor(t, modelName, models, &fakeBroker{})
 	mustCreateSession(t, db, "session-1")
 
 	req := &turn.TurnRequest{
@@ -367,7 +373,7 @@ func TestADKExecutorBudgetEnforced(t *testing.T) {
 
 func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 	model := &fakeADKModel{answer: "done", toolCall: true, tokens: 3}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	db, sessions, events := newSessionTestDB(t)
 	block := make(chan struct{})
 	builtin := &fakeBuiltinExecutor{
@@ -379,7 +385,7 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 		output: json.RawMessage(`{"ok":true}`),
 		block:  block,
 	}
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

@@ -11,8 +11,8 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -62,13 +62,9 @@ func (m *streamingADKModel) GenerateContent(_ context.Context, _ *adkmodel.LLMRe
 	}
 }
 
-func registerStreamingModel(t *testing.T, model *streamingADKModel) string {
-	t.Helper()
-	name := "streaming-model-" + runtimeengine.NewTurnID()
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) {
-		return model, nil
-	})
-	return name
+func streamingModelSet(model *streamingADKModel) (name string, models auramodel.Set) {
+	name = "streaming-model"
+	return name, auramodel.Set{name: model}
 }
 
 func streamTurn(turnID string, streamPartial bool, budget int64) *turn.TurnRequest {
@@ -125,7 +121,8 @@ func TestADKExecutorStreamsOnlyWhenRequested(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			model := &streamingADKModel{chunks: []string{"par", "tial", " text"}, finalTokens: 4, partialTokens: 4}
-			executor, db, _ := newADKTestExecutor(t, registerStreamingModel(t, model), &fakeBroker{})
+			modelName, models := streamingModelSet(model)
+			executor, db, _ := newADKTestExecutor(t, modelName, models, &fakeBroker{})
 			mustCreateSession(t, db, "session-1")
 
 			events, err := runStreamTurn(t, executor, streamTurn("turn-1", tc.streamTurn, 0))
@@ -160,7 +157,8 @@ func TestADKExecutorStreamingKeepsTurnBudgetTotals(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			model := &streamingADKModel{chunks: []string{"a", "b", "c"}, finalTokens: 10, partialTokens: 9}
-			executor, db, _ := newADKTestExecutor(t, registerStreamingModel(t, model), &fakeBroker{})
+			modelName, models := streamingModelSet(model)
+			executor, db, _ := newADKTestExecutor(t, modelName, models, &fakeBroker{})
 			mustCreateSession(t, db, "session-1")
 
 			events, err := runStreamTurn(t, executor, streamTurn("turn-1", tc.streamTurn, 12))
@@ -196,7 +194,8 @@ func TestADKExecutorRecordsTheFinishReason(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			model := &streamingADKModel{chunks: []string{"cut"}, finish: genai.FinishReasonMaxTokens, finalTokens: 4}
-			executor, db, _ := newADKTestExecutor(t, registerStreamingModel(t, model), &fakeBroker{})
+			modelName, models := streamingModelSet(model)
+			executor, db, _ := newADKTestExecutor(t, modelName, models, &fakeBroker{})
 			mustCreateSession(t, db, "session-1")
 
 			events, err := runStreamTurn(t, executor, streamTurn("turn-1", tc.streamTurn, 0))

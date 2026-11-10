@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -61,23 +62,23 @@ type profileRuntime struct {
 	stated    []string
 }
 
-func buildProfileRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, mp metric.MeterProvider, logger *slog.Logger) (*profileRuntime, error) {
+func buildProfileRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, models runtimeadk.ModelSource, mp metric.MeterProvider, logger *slog.Logger) (*profileRuntime, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	llm, producer, err := profilingLLM(ctx, cfg)
+	llm, producer, err := profilingLLM(ctx, cfg, models)
 	if err != nil {
 		logger.WarnContext(ctx, "profile extraction unavailable", "component", "profile", "error", err)
 	}
 	return newProfileRuntime(cfg, db, llm, producer, mp, buildSecretVault(cfg), logger)
 }
 
-func profilingLLM(ctx context.Context, cfg *config.Config) (adkmodel.LLM, profile.ModelProducer, error) {
+func profilingLLM(ctx context.Context, cfg *config.Config, models runtimeadk.ModelSource) (adkmodel.LLM, profile.ModelProducer, error) {
 	producer, err := profilingProducer(cfg)
 	if err != nil {
 		return nil, profile.ModelProducer{}, err
 	}
-	llm, err := adkmodel.NewLLM(ctx, profilingRole(cfg))
+	llm, err := models.LLM(ctx, profilingRole(cfg))
 	if err != nil {
 		return nil, profile.ModelProducer{}, err
 	}

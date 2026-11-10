@@ -69,7 +69,8 @@ func TestOwnerContextAttachOrder(t *testing.T) {
 			t.Cleanup(func() { _ = db.Close() })
 			resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL: inspect before editing"}}
 			block := RenderOwnerContext(&OwnerContext{Name: "Angga", Language: "Indonesian"})
-			executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, &fakeBroker{}, nil, nil,
+			modelName, models := capturingModelSet(model)
+			executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
 				WithAgentResolver(resolver, nil),
 				WithOwnerContext(block),
 				WithRecallProvider(&stubRecallProvider{evidence: corpusEvidence()}),
@@ -107,7 +108,8 @@ func TestOwnerContextAbsentLeavesInstructionUnchanged(t *testing.T) {
 	db, sessions, events := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL: inspect before editing"}}
-	executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, &fakeBroker{}, nil, nil,
+	modelName, models := capturingModelSet(model)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
 		WithAgentResolver(resolver, nil),
 		WithRecallProvider(&stubRecallProvider{evidence: corpusEvidence()}),
 	)
@@ -133,7 +135,8 @@ func TestOwnerContextWithoutRecall(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL"}}
 	block := RenderOwnerContext(&OwnerContext{Name: "Angga"})
-	executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, &fakeBroker{}, nil, nil,
+	modelName, models := capturingModelSet(model)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
 		WithAgentResolver(resolver, nil),
 		WithOwnerContext(block),
 	)
@@ -176,7 +179,8 @@ func TestOwnerContextOnlyReachesOwnerTurns(t *testing.T) {
 			db, sessions, events := newSessionTestDB(t)
 			t.Cleanup(func() { _ = db.Close() })
 			resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL"}}
-			executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, &fakeBroker{}, nil, nil,
+			modelName, models := capturingModelSet(model)
+			executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
 				WithAgentResolver(resolver, nil),
 				WithOwnerContext(RenderOwnerContext(&OwnerContext{Name: "Angga", Timezone: "Asia/Jakarta"})),
 			)

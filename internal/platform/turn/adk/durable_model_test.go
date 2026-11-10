@@ -158,7 +158,8 @@ func TestJournaledModelStopsCleanlyWhenTheConsumerStops(t *testing.T) {
 func TestDurableExecutorStreamsPartialsWithoutChangingTheJournal(t *testing.T) {
 	run := func(t *testing.T, streamPartial bool, inv *journalInvocation, model *streamingADKModel) []store.RuntimeEvent {
 		t.Helper()
-		executor, db, _ := newADKTestExecutor(t, registerStreamingModel(t, model), &fakeBroker{})
+		modelName, models := streamingModelSet(model)
+		executor, db, _ := newADKTestExecutor(t, modelName, models, &fakeBroker{})
 		mustCreateSession(t, db, "session-1")
 		req := streamTurn("turn-1", streamPartial, 0)
 		var events []store.RuntimeEvent

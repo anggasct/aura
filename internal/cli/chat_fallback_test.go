@@ -67,8 +67,9 @@ func TestChatWireFailsOverThroughRoute(t *testing.T) {
 	route.MaxProviderAttempts = 8
 	cfg.ModelRoutes[routeName] = route
 
-	if err := model.RegisterAdaptersWithRoutes(context.Background(), nil, cfg.Models, cfg.ModelRoutes, nil, nil); err != nil {
-		t.Fatalf("RegisterAdaptersWithRoutes: %v", err)
+	models, err := model.NewRegistry(context.Background(), &model.RegistryOptions{Models: cfg.Models, Routes: cfg.ModelRoutes})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
 	}
 
 	routeModel, err := model.RouteModelName(cfg, cfg.Models.Definitions["failing"].Model)
@@ -83,7 +84,7 @@ func TestChatWireFailsOverThroughRoute(t *testing.T) {
 		t.Fatalf("route resolved to %q, want the fallback route name %q", modelName, routeName)
 	}
 
-	resolved, err := adkmodel.NewLLM(context.Background(), modelName)
+	resolved, err := models.LLM(context.Background(), modelName)
 	if err != nil {
 		t.Fatalf("resolve %q through the model registry: %v", modelName, err)
 	}
@@ -201,8 +202,9 @@ func TestChatWireCostBudget(t *testing.T) {
 				t.Fatalf("openPriceRegistry: %v", err)
 			}
 
-			if err := model.RegisterAdaptersWithRoutes(t.Context(), nil, cfg.Models, cfg.ModelRoutes, nil, prices); err != nil {
-				t.Fatalf("RegisterAdaptersWithRoutes: %v", err)
+			models, err := model.NewRegistry(t.Context(), &model.RegistryOptions{Models: cfg.Models, Routes: cfg.ModelRoutes, Prices: prices})
+			if err != nil {
+				t.Fatalf("NewRegistry: %v", err)
 			}
 
 			routeModel, err := model.RouteModelName(cfg, cfg.Models.Definitions["priced"].Model)
@@ -214,7 +216,7 @@ func TestChatWireCostBudget(t *testing.T) {
 				t.Fatalf("resolve route: %v", err)
 			}
 
-			resolved, err := adkmodel.NewLLM(t.Context(), modelName)
+			resolved, err := models.LLM(t.Context(), modelName)
 			if err != nil {
 				t.Fatalf("resolve %q through the model registry: %v", modelName, err)
 			}

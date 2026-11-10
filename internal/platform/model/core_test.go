@@ -142,16 +142,21 @@ func TestIsTransientError(t *testing.T) {
 	}
 }
 
-func TestRegisterAdaptersValidatesAllBeforeRegistering(t *testing.T) {
+func TestRegistryValidatesEveryDefinition(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "k")
 	valid := configuredDefinition(config.ProtocolOpenAIChatCompat, "atomic-reg-test-1", "https://api.openai.com")
 	invalid := config.ModelDefinition{Protocol: config.ProtocolAnthropicMessages, Model: "atomic-reg-test-1", BaseURL: "https://api.anthropic.com"}
 	models := config.Models{Definitions: map[string]config.ModelDefinition{"primary": valid, "auxiliary": invalid}}
 
-	if err := RegisterAdapters(nil, models); err == nil {
-		t.Fatal("expected registration failure for invalid auxiliary")
+	if _, err := NewRegistry(t.Context(), &RegistryOptions{Models: models}); err == nil {
+		t.Fatal("expected registry failure for invalid auxiliary")
 	}
-	if err := RegisterAdapters(nil, config.Models{Definitions: map[string]config.ModelDefinition{"primary": valid}}); err != nil {
-		t.Fatalf("re-register after failed batch: %v", err)
+	if _, err := NewRegistry(t.Context(), &RegistryOptions{Models: config.Models{Definitions: map[string]config.ModelDefinition{"primary": valid}}}); err != nil {
+		t.Fatalf("build after a failed registry: %v", err)
+	}
+	if _, err := NewRegistry(t.Context(), nil); err == nil {
+		t.Fatal("NewRegistry(nil) succeeded")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		t.Fatalf("NewRegistry(nil) error = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 }

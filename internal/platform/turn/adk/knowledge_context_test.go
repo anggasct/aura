@@ -56,7 +56,8 @@ func newKnowledgeExecutor(t *testing.T, model *capturingModel, provider Knowledg
 	db, sessions, events := newSessionTestDB(t)
 	resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL"}}
 	opts = append([]ExecutorOption{WithAgentResolver(resolver, nil), WithKnowledgeContext(provider)}, opts...)
-	executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, &fakeBroker{}, nil, nil, opts...)
+	modelName, models := capturingModelSet(model)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, opts...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -188,7 +189,8 @@ func TestKnowledgeContextRunsWithoutAProviderAsNoOp(t *testing.T) {
 	model := &capturingModel{answer: "done", tokens: 1}
 	db, sessions, events := newSessionTestDB(t)
 	resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL"}}
-	executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, &fakeBroker{}, nil, nil, WithAgentResolver(resolver, nil))
+	modelName, models := capturingModelSet(model)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithAgentResolver(resolver, nil))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -381,7 +383,7 @@ func TestToolsForOffersKnowledgeSearchOnlyWithAStampedList(t *testing.T) {
 
 func TestBuiltinToolRequestCarriesTheStampedKnowledgeList(t *testing.T) {
 	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	builtin := &fakeBuiltinExecutor{
 		definitions: []BuiltinToolDefinition{{
 			Name: "sample_tool", Version: "v1", Description: "sample",
@@ -390,7 +392,7 @@ func TestBuiltinToolRequestCarriesTheStampedKnowledgeList(t *testing.T) {
 		output: json.RawMessage(`{"ok":true}`),
 	}
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -411,7 +413,7 @@ func TestBuiltinToolRequestCarriesTheStampedKnowledgeList(t *testing.T) {
 
 func TestBuiltinToolRequestIsUntaintedWithoutAStampedList(t *testing.T) {
 	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	builtin := &fakeBuiltinExecutor{
 		definitions: []BuiltinToolDefinition{{
 			Name: "sample_tool", Version: "v1", Description: "sample",
@@ -420,7 +422,7 @@ func TestBuiltinToolRequestIsUntaintedWithoutAStampedList(t *testing.T) {
 		output: json.RawMessage(`{"ok":true}`),
 	}
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -19,6 +18,7 @@ import (
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
@@ -44,8 +44,6 @@ func (m *personaEvalModel) GenerateContent(_ context.Context, req *adkmodel.LLMR
 		}, nil)
 	}
 }
-
-var personaEvalModelSeq atomic.Int64
 
 type staticResolver struct {
 	definition auraagent.Definition
@@ -105,11 +103,10 @@ func capturePersonaTurn(ctx context.Context, definition *auraagent.Definition, c
 func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definition, class principal.Class, principalID string) (personaeval.Capture, error) {
 	sessions := store.NewSessionService(db)
 	model := &personaEvalModel{}
-	name := fmt.Sprintf("persona-eval-%d", personaEvalModelSeq.Add(1))
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return model, nil })
+	name := model.Name()
 	evaluated := *definition
 	evaluated.ModelRoute = ""
-	executor, err := runtimeadk.NewADKExecutor("aura", name, sessions, store.NewEventStore(db), personaEvalDenyAll{}, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, sessions, store.NewEventStore(db), personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(&staticResolver{definition: evaluated}, nil),
 		runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),

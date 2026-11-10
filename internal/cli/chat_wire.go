@@ -173,7 +173,15 @@ func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger
 	if err != nil {
 		return err
 	}
-	if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, prices, visionWiringForConfig(cfg, db, visionArtifactRoot)); err != nil {
+	models, err := model.NewRegistry(ctx, &model.RegistryOptions{
+		Logger:     logger,
+		Models:     cfg.Models,
+		Routes:     cfg.ModelRoutes,
+		Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)},
+		Prices:     prices,
+		Vision:     visionWiringForConfig(cfg, db, visionArtifactRoot),
+	})
+	if err != nil {
 		return err
 	}
 
@@ -233,7 +241,7 @@ func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger
 		}
 	}
 	if cfg.Memory.Enabled {
-		memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, registry, logger, nil)
+		memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, registry, models, logger, nil)
 		if err != nil {
 			return err
 		}
@@ -242,7 +250,7 @@ func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger
 	}
 	var profileHook postTurnHook
 	if cfg.Profile != nil && cfg.Profile.Enabled {
-		profileRuntime, err := buildProfileRuntime(ctx, cfg, db, nil, logger)
+		profileRuntime, err := buildProfileRuntime(ctx, cfg, db, models, nil, logger)
 		if err != nil {
 			return err
 		}
@@ -270,7 +278,7 @@ func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger
 		executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
 	}
 	executor, err := runtimeadk.NewADKExecutor(
-		"aura", cfg.Models.Definitions["primary"].Model, sessions, events, broker, nil, logger, executorOpts...,
+		"aura", cfg.Models.Definitions["primary"].Model, models, sessions, events, broker, nil, logger, executorOpts...,
 	)
 	if err != nil {
 		return err

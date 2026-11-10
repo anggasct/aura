@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -251,12 +252,12 @@ type memoryRuntime struct {
 	summarizer memory.Summarizer
 }
 
-func buildMemoryRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, scopes memory.RecallScopes, logger *slog.Logger, observer memory.Observer) (*memoryRuntime, error) {
+func buildMemoryRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, scopes memory.RecallScopes, models runtimeadk.ModelSource, logger *slog.Logger, observer memory.Observer) (*memoryRuntime, error) {
 	service, err := buildMemoryService(cfg, db, observer)
 	if err != nil {
 		return nil, err
 	}
-	model, summarizer := buildMemorySummary(ctx, cfg, logger, observer)
+	model, summarizer := buildMemorySummary(ctx, cfg, models, logger, observer)
 	provider, err := memory.NewProvider(service, memory.ProviderConfig{Scopes: scopes})
 	if err != nil {
 		return nil, err
@@ -264,7 +265,7 @@ func buildMemoryRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, sco
 	return &memoryRuntime{provider: provider, service: service, model: model, summarizer: summarizer}, nil
 }
 
-func buildMemorySummary(ctx context.Context, cfg *config.Config, logger *slog.Logger, observer memory.Observer) (*memory.SummaryModel, memory.Summarizer) {
+func buildMemorySummary(ctx context.Context, cfg *config.Config, models runtimeadk.ModelSource, logger *slog.Logger, observer memory.Observer) (*memory.SummaryModel, memory.Summarizer) {
 	if cfg == nil {
 		return nil, nil
 	}
@@ -285,7 +286,7 @@ func buildMemorySummary(ctx context.Context, cfg *config.Config, logger *slog.Lo
 	if _, routed := cfg.ModelRoutes[role]; routed {
 		modelName = role
 	}
-	llm, err := adkmodel.NewLLM(ctx, modelName)
+	llm, err := models.LLM(ctx, modelName)
 	if err != nil {
 		if logger != nil {
 			logger.WarnContext(ctx, "memory range summarizer unavailable", "component", "memory", "route", role, "model", definition.Model, "error", err)

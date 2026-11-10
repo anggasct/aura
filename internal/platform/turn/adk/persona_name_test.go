@@ -18,7 +18,8 @@ func newPersonaNameExecutor(t *testing.T, model *capturingModel, definition aura
 	t.Helper()
 	db, sessions, events := newSessionTestDB(t)
 	resolver := &stubResolver{definition: definition}
-	executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, &fakeBroker{}, nil, nil, WithAgentResolver(resolver, nil))
+	modelName, models := capturingModelSet(model)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithAgentResolver(resolver, nil))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

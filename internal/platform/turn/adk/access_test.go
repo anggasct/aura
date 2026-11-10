@@ -12,6 +12,7 @@ import (
 	"google.golang.org/genai"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
@@ -82,11 +83,11 @@ func accessBuiltins() *fakeBuiltinExecutor {
 func newAccessExecutor(t *testing.T, model *declarationModel, builtin *fakeBuiltinExecutor, options ...ExecutorOption) *ADKExecutor {
 	t.Helper()
 	name := "declaration-model-" + strings.ReplaceAll(t.Name(), "/", "-")
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return model, nil })
+	models := auramodel.Set{name: model}
 	db, sessions, events := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	options = append([]ExecutorOption{WithBuiltinToolExecutor(builtin), WithAgentResolver(&stubResolver{definition: teamDefinition()}, nil)}, options...)
-	executor, err := NewADKExecutor("aura", name, sessions, events, &fakeBroker{}, nil, nil, options...)
+	executor, err := NewADKExecutor("aura", name, models, sessions, events, &fakeBroker{}, nil, nil, options...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

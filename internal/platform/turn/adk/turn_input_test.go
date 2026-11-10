@@ -3,13 +3,11 @@ package runtimeadk
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,13 +16,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 
-	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/genai"
 )
-
-var captureID atomic.Int64
 
 func captureResponsesServer(t *testing.T, mu *sync.Mutex, bodies *[][]byte) *httptest.Server {
 	t.Helper()
@@ -41,13 +36,14 @@ func captureResponsesServer(t *testing.T, mu *sync.Mutex, bodies *[][]byte) *htt
 	}))
 }
 
-func registerCaptureModel(t *testing.T, serverURL string) string {
+func captureModelSet(t *testing.T, serverURL string) (name string, models model.Set) {
 	t.Helper()
-	name := fmt.Sprintf("capture-model-%d", captureID.Add(1))
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) {
-		return model.NewOpenAIResponsesAdapter(name, serverURL, "capture-key", 0)
-	})
-	return name
+	name = "capture-model"
+	adapter, err := model.NewOpenAIResponsesAdapter(name, serverURL, "capture-key", 0)
+	if err != nil {
+		t.Fatalf("NewOpenAIResponsesAdapter: %v", err)
+	}
+	return name, model.Set{name: adapter}
 }
 
 func seedUserEvent(t *testing.T, events store.EventStore, sessionID, turnID, eventID, text string, seq uint64) {
@@ -92,9 +88,9 @@ func TestTurnCarriesTriggeringMessage(t *testing.T) {
 	srv := captureResponsesServer(t, &mu, &bodies)
 	defer srv.Close()
 
-	modelName := registerCaptureModel(t, srv.URL)
+	modelName, models := captureModelSet(t, srv.URL)
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -147,9 +143,9 @@ func TestTurnHistoryOrderingExactlyOnce(t *testing.T) {
 	srv := captureResponsesServer(t, &mu, &bodies)
 	defer srv.Close()
 
-	modelName := registerCaptureModel(t, srv.URL)
+	modelName, models := captureModelSet(t, srv.URL)
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -195,10 +191,10 @@ func TestTurnToolLoopShapesPreserved(t *testing.T) {
 	srv := captureResponsesServer(t, &mu, &bodies)
 	defer srv.Close()
 
-	modelName := registerCaptureModel(t, srv.URL)
+	modelName, models := captureModelSet(t, srv.URL)
 	db, sessions, events := newSessionTestDB(t)
 	sample, _ := newRecordingTool(t)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, []tool.Tool{sample}, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, []tool.Tool{sample}, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -287,8 +283,8 @@ func seedToolLoopHistory(t *testing.T, events store.EventStore, sessionID string
 
 func TestTurnEmptyGuardEmitsNoRequest(t *testing.T) {
 	fake := &fakeADKModel{answer: "unused", tokens: 1}
-	modelName := registerFakeModel(t, fake)
-	executor, db, _ := newADKTestExecutor(t, modelName, &fakeBroker{})
+	modelName, models := fakeModelSet(fake)
+	executor, db, _ := newADKTestExecutor(t, modelName, models, &fakeBroker{})
 	mustCreateSession(t, db, "session-input-3")
 
 	req := &turn.TurnRequest{
