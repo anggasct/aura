@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"iter"
-	"regexp"
 	"strconv"
 	"testing"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/approval"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -65,7 +65,7 @@ func TestMemoryDocumentStoreRoundTrip(t *testing.T) {
 func TestBuildMemoryRuntime(t *testing.T) {
 	db := newMemoryTestDB(t)
 	cfg := config.Default()
-	memoryRuntime, err := buildMemoryRuntime(context.Background(), &cfg, db, testRecallScopes(t, &cfg), nil, nil)
+	memoryRuntime, err := buildMemoryRuntime(context.Background(), &cfg, db, testRecallScopes(t, &cfg), auramodel.Set{}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildMemoryRuntime(): %v", err)
 	}
@@ -114,13 +114,6 @@ func (s *recordingSummary) Summarize(_ context.Context, prompt *memory.SummaryPr
 	s.calls++
 	s.last = prompt
 	return s.text, nil
-}
-
-func registerSummaryLLM(t *testing.T, name string, llm adkmodel.LLM) {
-	t.Helper()
-	adkmodel.Register("^"+regexp.QuoteMeta(name)+"$", func(context.Context, string) (adkmodel.LLM, error) {
-		return llm, nil
-	})
 }
 
 func summaryDefinition(protocol, modelName string) config.ModelDefinition {
@@ -180,7 +173,7 @@ func TestBuildMemorySummaryDefaultsToAuxiliaryRoute(t *testing.T) {
 	ctx := context.Background()
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
 	auxModel := "aux-" + suffix
-	registerSummaryLLM(t, "auxiliary", &countingSummaryLLM{answer: "digest"})
+	models := auramodel.Set{"auxiliary": &countingSummaryLLM{answer: "digest"}}
 	cfg := config.Default()
 	cfg.Models.Routing = nil
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
@@ -190,7 +183,7 @@ func TestBuildMemorySummaryDefaultsToAuxiliaryRoute(t *testing.T) {
 	cfg.ModelRoutes = map[string]config.ModelRoute{
 		"auxiliary": {Candidates: []string{"aux"}},
 	}
-	model, summarizer := buildMemorySummary(ctx, &cfg, nil, nil)
+	model, summarizer := buildMemorySummary(ctx, &cfg, models, nil, nil)
 	if model == nil || summarizer == nil {
 		t.Fatal("summary route not resolved")
 	}
@@ -225,7 +218,7 @@ func TestBuildMemorySummaryHonorsSummarizeOverride(t *testing.T) {
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
 	route := "summary-route-" + suffix
 	overrideModel := "override-" + suffix
-	registerSummaryLLM(t, route, &countingSummaryLLM{answer: "digest"})
+	models := auramodel.Set{route: &countingSummaryLLM{answer: "digest"}}
 	cfg := config.Default()
 	cfg.Models.Routing = map[string]string{"summarize": route}
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
@@ -235,7 +228,7 @@ func TestBuildMemorySummaryHonorsSummarizeOverride(t *testing.T) {
 	cfg.ModelRoutes = map[string]config.ModelRoute{
 		route: {Candidates: []string{"override"}},
 	}
-	model, summarizer := buildMemorySummary(context.Background(), &cfg, nil, nil)
+	model, summarizer := buildMemorySummary(context.Background(), &cfg, models, nil, nil)
 	if model == nil || summarizer == nil {
 		t.Fatal("summary route not resolved")
 	}
@@ -249,7 +242,7 @@ func TestMemoryRuntimeRecallStaysRaw(t *testing.T) {
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
 	route := "memory-recall-" + suffix
 	llm := &countingSummaryLLM{answer: "digest"}
-	registerSummaryLLM(t, route, llm)
+	models := auramodel.Set{route: llm}
 	cfg := config.Default()
 	cfg.Memory.RangeThreshold = 6
 	cfg.Memory.RangeLiveWindow = 2
@@ -261,7 +254,7 @@ func TestMemoryRuntimeRecallStaysRaw(t *testing.T) {
 		route: {Candidates: []string{"aux"}},
 	}
 	db := newMemoryTestDB(t)
-	memoryRuntime, err := buildMemoryRuntime(ctx, &cfg, db, testRecallScopes(t, &cfg), nil, nil)
+	memoryRuntime, err := buildMemoryRuntime(ctx, &cfg, db, testRecallScopes(t, &cfg), models, nil, nil)
 	if err != nil {
 		t.Fatalf("buildMemoryRuntime(): %v", err)
 	}

@@ -12,10 +12,10 @@ import (
 
 func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	model := &fakeADKModel{answer: "engine answer", tokens: 4}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	broker := &fakeBroker{}
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, broker, nil, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, broker, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -92,9 +92,9 @@ func collectStream(engine *runtimeengine.Engine, req *turn.TurnRequest) (eventsC
 
 func TestEngineSingleWriterForADKEvents(t *testing.T) {
 	model := &fakeADKModel{answer: "single writer", tokens: 2}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

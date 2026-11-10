@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"iter"
 	"log/slog"
@@ -23,6 +22,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -233,10 +233,9 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	}
 	passEvals(t, db, registry, "desk")
 	model := &countingModel{turns: make(chan struct{}, 16)}
-	name := fmt.Sprintf("email-model-%d", personaEvalModelSeq.Add(1))
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return model, nil })
+	name := "email-model"
 	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)

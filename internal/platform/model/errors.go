@@ -30,6 +30,7 @@ const (
 	ErrorCodeVisionBudgetExceeded      ErrorCode = "vision_budget_exceeded"
 	ErrorCodeVisionArtifactUnavailable ErrorCode = "vision_artifact_unavailable"
 	ErrorCodeProviderInvalid           ErrorCode = "model_provider_invalid"
+	ErrorCodeInvalidArgument           ErrorCode = "invalid_argument"
 )
 
 type ErrorClass string
@@ -120,7 +121,7 @@ func ClassifyError(err error) ErrorClass {
 			return ErrorClassOverloaded
 		case ErrorCodeVisionBudgetExceeded, ErrorCodeVisionArtifactUnavailable:
 			return ErrorClassInvalidRequest
-		case ErrorCodeProviderInvalid:
+		case ErrorCodeProviderInvalid, ErrorCodeInvalidArgument:
 			return ErrorClassInvalidRequest
 		}
 	}

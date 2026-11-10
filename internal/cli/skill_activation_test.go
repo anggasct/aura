@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"iter"
 	"log/slog"
 	"os"
@@ -12,12 +11,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/command"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
@@ -34,8 +33,6 @@ import (
 )
 
 const skillBodyMarker = "REVIEW-PR-RULES-5d1e"
-
-var skillModelSeq atomic.Int64
 
 type skillRequest struct {
 	texts []string
@@ -129,8 +126,7 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 			h.skillID = records[i].ID
 		}
 	}
-	name := fmt.Sprintf("skill-capturing-model-%d", skillModelSeq.Add(1))
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return h.model, nil })
+	name := "skill-capturing-model"
 	sampleTool, err := functiontool.New[map[string]any, map[string]any](
 		functiontool.Config{Name: "sample_tool", Description: "sample"},
 		func(agent.Context, map[string]any) (map[string]any, error) { return map[string]any{}, nil },
@@ -139,7 +135,7 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 		t.Fatalf("tool: %v", err)
 	}
 	sessions, events := store.NewSessionService(db), store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, sessions, events, terminalBroker{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, sessions, events, terminalBroker{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
 		runtimeadk.WithSkillContext(rt.context))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)

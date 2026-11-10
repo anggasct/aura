@@ -29,28 +29,35 @@ const judgeMaxOutputTokens = 512
 type behaviorModels struct {
 	defaultModel string
 	route        func(string) (string, error)
+	models       runtimeadk.ModelSource
 }
 
 func registerBehaviorModels(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger) (behaviorModels, error) {
-	if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, nil); err != nil {
+	models, err := model.NewRegistry(ctx, &model.RegistryOptions{
+		Logger:     logger,
+		Models:     cfg.Models,
+		Routes:     cfg.ModelRoutes,
+		Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)},
+	})
+	if err != nil {
 		return behaviorModels{}, err
 	}
-	return routedBehaviorModels(cfg)
+	return routedBehaviorModels(cfg, models)
 }
 
-func routedBehaviorModels(cfg *config.Config) (behaviorModels, error) {
+func routedBehaviorModels(cfg *config.Config, models runtimeadk.ModelSource) (behaviorModels, error) {
 	defaultModel := cfg.Models.Definitions["primary"].Model
 	route, err := model.RouteModelName(cfg, defaultModel)
 	if err != nil {
 		return behaviorModels{}, err
 	}
-	return behaviorModels{defaultModel: defaultModel, route: route}, nil
+	return behaviorModels{defaultModel: defaultModel, route: route, models: models}, nil
 }
 
 func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Definition, class principal.Class, turns []string) ([]personaeval.Exchange, error) {
 	return personaeval.WithEvalDB(ctx, "discord:eval", func(db *sql.DB) ([]personaeval.Exchange, error) {
 		events := store.NewEventStore(db)
-		executor, err := runtimeadk.NewADKExecutor("aura", m.defaultModel, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
+		executor, err := runtimeadk.NewADKExecutor("aura", m.defaultModel, m.models, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
 			runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 			runtimeadk.WithAgentResolver(&staticResolver{definition: *definition}, m.route),
 			runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
@@ -107,7 +114,7 @@ func (m behaviorModels) judge(route string) personaeval.Judge {
 		if err != nil {
 			return "", err
 		}
-		llm, err := adkmodel.NewLLM(ctx, name)
+		llm, err := m.models.LLM(ctx, name)
 		if err != nil {
 			return "", fmt.Errorf("resolve judge model %q: %w", name, err)
 		}

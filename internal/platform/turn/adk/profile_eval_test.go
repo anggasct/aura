@@ -46,7 +46,8 @@ func TestProfileContextStaysUntrustedUserData(t *testing.T) {
 	db, sessions, events := newSessionTestDB(t)
 	broker := &fakeBroker{}
 	model := &capturingModel{answer: "noted"}
-	executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, broker, nil, nil)
+	modelName, models := capturingModelSet(model)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, broker, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

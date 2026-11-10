@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/profile"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -415,7 +416,7 @@ func TestBuildProfileRuntimeDegradesWithoutRoute(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	rt, err := buildProfileRuntime(t.Context(), loaded.Config, db, sdkmetric.NewMeterProvider(), nil)
+	rt, err := buildProfileRuntime(t.Context(), loaded.Config, db, auramodel.Set{}, sdkmetric.NewMeterProvider(), nil)
 	if err != nil {
 		t.Fatalf("buildProfileRuntime: %v", err)
 	}

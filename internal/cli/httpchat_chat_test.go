@@ -21,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
@@ -164,10 +165,9 @@ func newHTTPChatHarnessWithModel(t *testing.T, turnsPerMinute string, llm adkmod
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
 	passEvals(t, db, registry, "lobby", "staff")
-	name := "http-chat-model-" + strings.ReplaceAll(t.Name(), "/", "-")
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return llm, nil })
+	name := "http-chat-model"
 	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)

@@ -27,6 +27,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -222,8 +223,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	if err != nil {
 		t.Fatalf("newOwnerRoute: %v", err)
 	}
-	name := fmt.Sprintf("email-access-%d", personaEvalModelSeq.Add(1))
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return h.model, nil })
+	name := "email-access"
 	decider := channelApprovalDecider(approvalChannels(approvers, route))
 	builtin, err := toolsbuiltin.New(cfg, db, h.artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil))
 	if err != nil {
@@ -257,7 +257,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	builtin.SetEmailOutbox(&emailOutbox{adapters: mailboxes})
 	builtin.SetHandoffOpener(newHandoffService(db, []handoffNotifier{adapter}))
 	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, store.NewSessionService(db), events, builtin, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, store.NewSessionService(db), events, builtin, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)

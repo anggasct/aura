@@ -32,9 +32,14 @@ import (
 	"google.golang.org/genai"
 )
 
+type ModelSource interface {
+	LLM(ctx context.Context, name string) (adkmodel.LLM, error)
+}
+
 type ADKExecutor struct {
 	appName           string
 	modelName         string
+	models            ModelSource
 	sessions          SessionPort
 	events            runtimeengine.EventStore
 	broker            turn.ToolBroker
@@ -92,12 +97,15 @@ func (x *ADKExecutor) SetEventPublisher(publisher EventPublisher) {
 	}
 }
 
-func NewADKExecutor(appName, modelName string, sessions SessionPort, events runtimeengine.EventStore, broker turn.ToolBroker, tools []tool.Tool, logger *slog.Logger, opts ...ExecutorOption) (*ADKExecutor, error) {
+func NewADKExecutor(appName, modelName string, models ModelSource, sessions SessionPort, events runtimeengine.EventStore, broker turn.ToolBroker, tools []tool.Tool, logger *slog.Logger, opts ...ExecutorOption) (*ADKExecutor, error) {
 	if appName == "" {
 		return nil, invalidArgument("app name must not be empty")
 	}
 	if modelName == "" {
 		return nil, invalidArgument("model name must not be empty")
+	}
+	if models == nil {
+		return nil, invalidArgument("model source must not be nil")
 	}
 	if sessions == nil {
 		return nil, invalidArgument("session port must not be nil")
@@ -114,6 +122,7 @@ func NewADKExecutor(appName, modelName string, sessions SessionPort, events runt
 	e := &ADKExecutor{
 		appName:   appName,
 		modelName: modelName,
+		models:    models,
 		sessions:  sessions,
 		events:    events,
 		broker:    broker,
@@ -592,7 +601,7 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 		}
 		modelName = routeModel
 	}
-	model, err := adkmodel.NewLLM(ctx, modelName)
+	model, err := x.models.LLM(ctx, modelName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model %q: %w", modelName, err)
 	}

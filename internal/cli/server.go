@@ -66,7 +66,15 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := model.RegisterAdaptersWithRoutes(ctx, logger, cfg.Models, cfg.ModelRoutes, &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)}, prices, visionWiringForConfig(cfg, db, visionArtifactRoot)); err != nil {
+			models, err := model.NewRegistry(ctx, &model.RegistryOptions{
+				Logger:     logger,
+				Models:     cfg.Models,
+				Routes:     cfg.ModelRoutes,
+				Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)},
+				Prices:     prices,
+				Vision:     visionWiringForConfig(cfg, db, visionArtifactRoot),
+			})
+			if err != nil {
 				return err
 			}
 			pipeline, err := telemetry.NewPipeline(cfg.Telemetry, logger)
@@ -209,7 +217,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, agentRegistry, logger, memoryRecorderObserver(memoryRecorder))
+				memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, agentRegistry, models, logger, memoryRecorderObserver(memoryRecorder))
 				if err != nil {
 					return err
 				}
@@ -230,7 +238,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				healthChecks = append(slices.Clone(healthChecks), pluginCheck)
 			}
 			if cfg.Profile != nil && cfg.Profile.Enabled {
-				profileRuntime, err := buildProfileRuntime(ctx, cfg, db, pipeline.MeterProvider(), logger)
+				profileRuntime, err := buildProfileRuntime(ctx, cfg, db, models, pipeline.MeterProvider(), logger)
 				if err != nil {
 					return err
 				}
@@ -276,7 +284,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				healthChecks = append(slices.Clone(healthChecks), interpreterRun.check(cfg))
 			}
 			adkExecutor, err := runtimeadk.NewADKExecutor(
-				"aura", modelDefinition.Model, sessions, events, builtin, nil, logger,
+				"aura", modelDefinition.Model, models, sessions, events, builtin, nil, logger,
 				executorOpts...,
 			)
 			if err != nil {
@@ -477,7 +485,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				sweeps.Go(func() { interpreterRun.run(sweepCtx, logger) })
 			}
 			sweeps.Go(func() {
-				runPersonaEvalSchedules(sweepCtx, result.Path, db, agentRegistry, behaviorModels{defaultModel: modelDefinition.Model, route: routeModel}, logger, wallEvalClock)
+				runPersonaEvalSchedules(sweepCtx, result.Path, db, agentRegistry, behaviorModels{defaultModel: modelDefinition.Model, route: routeModel, models: models}, logger, wallEvalClock)
 			})
 			runErr := srv.Run(ctx)
 			stopSweeps()

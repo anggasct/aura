@@ -24,7 +24,7 @@ RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check arch-check static-check static-check-darwin verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
+.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check model-registry-check arch-check static-check static-check-darwin verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -59,6 +59,7 @@ durable-live: $(RESTATE_BINARY)
 
 vet:
 	$(GO) vet ./...
+	$(GO) vet -tags durable,integration,e2e,load ./...
 
 fmt-check:
 	@unformatted="$$(gofmt -l .)"; \
@@ -83,7 +84,15 @@ refs-check:
 		exit 1; \
 	fi
 
-static-check: fmt-check vet lint refs-check arch-check
+model-registry-check:
+	@found="$$(git grep -nE 'adkmodel\.(Register|NewLLM)' -- '*.go' || true)"; \
+	if [ -n "$$found" ]; then \
+		echo "ADK global model registry used in source:"; \
+		echo "$$found"; \
+		exit 1; \
+	fi
+
+static-check: fmt-check vet lint refs-check model-registry-check arch-check
 
 static-check-darwin:
 	GOOS=darwin $(GO) vet ./...

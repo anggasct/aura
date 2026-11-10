@@ -9,6 +9,7 @@ import (
 
 	"database/sql"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -38,13 +39,13 @@ func (t namedToolStub) Name() string        { return t.name }
 func (t namedToolStub) Description() string { return "" }
 func (t namedToolStub) IsLongRunning() bool { return false }
 
-func newAgentTestExecutor(t *testing.T, modelName string, opts ...ExecutorOption) (*ADKExecutor, *stubResolver, *sql.DB) {
+func newAgentTestExecutor(t *testing.T, modelName string, models auramodel.Set, opts ...ExecutorOption) (*ADKExecutor, *stubResolver, *sql.DB) {
 	t.Helper()
 	db, sessions, events := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID}}
 	opts = append([]ExecutorOption{WithAgentResolver(resolver, nil)}, opts...)
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, opts...)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, opts...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -53,8 +54,8 @@ func newAgentTestExecutor(t *testing.T, modelName string, opts ...ExecutorOption
 
 func TestADKExecutorRunsTurnThroughResolvedDefinition(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 5}
-	modelName := registerFakeModel(t, model)
-	executor, _, db := newAgentTestExecutor(t, modelName)
+	modelName, models := fakeModelSet(model)
+	executor, _, db := newAgentTestExecutor(t, modelName, models)
 	mustCreateSession(t, db, "session-1")
 
 	req := &turn.TurnRequest{
@@ -80,11 +81,11 @@ func TestADKExecutorRunsTurnThroughResolvedDefinition(t *testing.T) {
 
 func TestADKExecutorResolutionFailsClosedBeforeWork(t *testing.T) {
 	model := &fakeADKModel{answer: "unused", tokens: 1}
-	modelName := registerFakeModel(t, model)
+	modelName, models := fakeModelSet(model)
 	db, sessions, events := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	resolver := &stubResolver{err: &auraagent.Error{Code: auraagent.ErrorCodeResolutionFailed, Detail: "no agent covers required capabilities"}}
-	executor, err := NewADKExecutor("aura", modelName, sessions, events, &fakeBroker{}, nil, nil, WithAgentResolver(resolver, nil))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithAgentResolver(resolver, nil))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -147,8 +148,8 @@ func TestToolsForNarrowsToDeclaredTools(t *testing.T) {
 
 func TestResolveModelUsesDefinitionRoute(t *testing.T) {
 	model := &fakeADKModel{answer: "route answer", tokens: 1}
-	routeModelName := registerFakeModel(t, model)
-	executor := &ADKExecutor{modelName: "never-registered-default", modelForRoute: func(route string) (string, error) {
+	routeModelName, models := fakeModelSet(model)
+	executor := &ADKExecutor{modelName: "never-registered-default", models: models, modelForRoute: func(route string) (string, error) {
 		if route != "primary" {
 			return "", errors.New("unknown route " + route)
 		}

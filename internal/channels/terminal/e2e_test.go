@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"io"
 	"iter"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"

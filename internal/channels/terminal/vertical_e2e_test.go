@@ -5,8 +5,6 @@ package terminal_test
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"iter"
@@ -22,8 +20,12 @@ import (
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/effect"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 
@@ -65,19 +67,6 @@ func (m *e2eApprovalModel) GenerateContent(_ context.Context, _ *adkmodel.LLMReq
 	}
 }
 
-func registerE2EModel(t *testing.T, model adkmodel.LLM) string {
-	t.Helper()
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		t.Fatalf("model name entropy: %v", err)
-	}
-	name := "e2e-model-" + hex.EncodeToString(b[:])
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) {
-		return model, nil
-	})
-	return name
-}
-
 type e2eEffectPublisher func(*store.RuntimeEvent)
 
 func (f e2eEffectPublisher) Publish(ev *store.RuntimeEvent) { f(ev) }
@@ -94,11 +83,11 @@ func (b e2eBuiltinTools) SetEventPublisher(publish func(*store.RuntimeEvent)) {
 	b.journal.SetEventPublisher(e2eEffectPublisher(publish))
 }
 
-func (b e2eBuiltinTools) Definitions() []turn.BuiltinToolDefinition {
+func (b e2eBuiltinTools) Definitions() []runtimeadk.BuiltinToolDefinition {
 	definitions := b.broker.Definitions()
-	out := make([]turn.BuiltinToolDefinition, 0, len(definitions))
+	out := make([]runtimeadk.BuiltinToolDefinition, 0, len(definitions))
 	for _, definition := range definitions {
-		out = append(out, turn.BuiltinToolDefinition{
+		out = append(out, runtimeadk.BuiltinToolDefinition{
 			Name:                 definition.Name,
 			Version:              definition.Version,
 			Description:          "Aura built-in " + definition.Name + " tool",
@@ -118,7 +107,7 @@ func (b e2eBuiltinTools) Evaluate(ctx context.Context, request *approval.ToolReq
 	})
 }
 
-func (b e2eBuiltinTools) Execute(ctx context.Context, request *turn.BuiltinToolRequest) (json.RawMessage, error) {
+func (b e2eBuiltinTools) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {
 	result, err := b.broker.Execute(ctx, &toolbroker.ToolRequest{
 		RequestID: request.RequestID, TurnID: request.TurnID, SessionID: request.SessionID,
 		PrincipalID: request.PrincipalID, ToolName: request.ToolName, ToolVersion: request.ToolVersion,
@@ -168,12 +157,12 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	}
 	builtin := e2eBuiltinTools{broker: broker, journal: journal}
 	model := &e2eApprovalModel{toolName: "exec", answer: answer}
-	modelName := registerE2EModel(t, model)
-	executor, err := turn.NewADKExecutor("aura", modelName, sessions, events, builtin, nil, nil, turn.WithBuiltinToolExecutor(builtin))
+	modelName := model.Name()
+	executor, err := runtimeadk.NewADKExecutor("aura", modelName, auramodel.Set{modelName: model}, sessions, events, builtin, nil, nil, runtimeadk.WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("executor: %v", err)
 	}
-	engine, err := turn.NewEngine(&turn.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -343,14 +332,14 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 		}
 	}
 	blocker := &blockingExecutor{started: make(chan struct{}), release: make(chan struct{})}
-	engine, err := turn.NewEngine(&turn.Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, events, store.NewDedupeStore(db), blocker, nil)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, events, store.NewDedupeStore(db), blocker, nil)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
 	seedDone := make(chan struct{})
 	go func() {
 		defer close(seedDone)
-		for _, err := range engine.Run(context.Background(), &turn.TurnRequest{SessionID: "seed-a", PrincipalID: "e2e-owner", Origin: turn.OriginTerminal, Parts: []turn.InputPart{{Text: "one"}}}) {
+		for _, err := range engine.Run(context.Background(), &turn.TurnRequest{SessionID: "seed-a", PrincipalID: "e2e-owner", Origin: turn.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "one"}}}) {
 			if err != nil {
 				return
 			}
@@ -360,7 +349,7 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 	queuedDone := make(chan struct{})
 	go func() {
 		defer close(queuedDone)
-		for _, err := range engine.Run(context.Background(), &turn.TurnRequest{SessionID: "seed-b", PrincipalID: "e2e-owner", Origin: turn.OriginTerminal, Parts: []turn.InputPart{{Text: "two"}}}) {
+		for _, err := range engine.Run(context.Background(), &turn.TurnRequest{SessionID: "seed-b", PrincipalID: "e2e-owner", Origin: turn.OriginTerminal, Parts: []runtimeingress.InputPart{{Text: "two"}}}) {
 			if err != nil {
 				return
 			}
@@ -428,7 +417,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	executor1 := turn.NewFakeExecutor([]turn.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"first durable answer"}]},"partial":false}`)},
 	})
-	engine1, err := turn.NewEngine(&turn.Config{}, events1, store.NewDedupeStore(db1), executor1, nil)
+	engine1, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events1, store.NewDedupeStore(db1), executor1, nil)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -462,7 +451,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	executor2 := turn.NewFakeExecutor([]turn.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"second durable answer"}]},"partial":false}`)},
 	})
-	engine2, err := turn.NewEngine(&turn.Config{}, events2, store.NewDedupeStore(db2), executor2, nil)
+	engine2, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events2, store.NewDedupeStore(db2), executor2, nil)
 	if err != nil {
 		t.Fatalf("second engine: %v", err)
 	}
@@ -519,7 +508,7 @@ func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 	})
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(logBuf, nil))
-	engine, err := turn.NewEngine(&turn.Config{}, events, store.NewDedupeStore(db), executor, logger)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, logger)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}

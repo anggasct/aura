@@ -24,7 +24,8 @@ func TestPersonaSoulSitsBetweenOwnerBlockAndCaveats(t *testing.T) {
 			model := &capturingModel{answer: "done", tokens: 1}
 			db, sessions, events := newSessionTestDB(t)
 			t.Cleanup(func() { _ = db.Close() })
-			executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, &fakeBroker{}, nil, nil,
+			modelName, models := capturingModelSet(model)
+			executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
 				WithAgentResolver(registry, nil),
 				WithOwnerContext(owner),
 				WithRecallProvider(&stubRecallProvider{evidence: corpusEvidence()}),

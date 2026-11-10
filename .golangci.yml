@@ -13,6 +13,7 @@ linters:
     - errorlint
     - exhaustive
     - fatcontext
+    - forbidigo
     - gocritic
     - gosec
     - iface
@@ -185,6 +186,12 @@ linters:
       # Error-code switches branch on the codes a caller handles and fall
       # through otherwise; a default arm is the intended exhaustive form.
       default-signifies-exhaustive: true
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^model\.(Register|NewLLM)$'
+          pkg: '^google\.golang\.org/adk/v2/model$'
+          msg: models come from a model.Registry or a model.Set, never from ADK's package-global registry
     gocritic:
       enabled-tags:
         - diagnostic

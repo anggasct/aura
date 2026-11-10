@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 
@@ -101,7 +101,8 @@ func (f *capturingModel) GenerateContent(_ context.Context, req *adkmodel.LLMReq
 func newEvalExecutor(t *testing.T, model *capturingModel, broker turn.ToolBroker, provider RecallProvider, tools ...tool.Tool) *ADKExecutor {
 	t.Helper()
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", capturingModelName(t, model), sessions, events, broker, tools, nil, WithRecallProvider(provider))
+	modelName, models := capturingModelSet(model)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, broker, tools, nil, WithRecallProvider(provider))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -109,13 +110,9 @@ func newEvalExecutor(t *testing.T, model *capturingModel, broker turn.ToolBroker
 	return executor
 }
 
-func capturingModelName(t *testing.T, model *capturingModel) string {
-	t.Helper()
-	name := "eval-model-" + runtimeengine.NewTurnID()
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) {
-		return model, nil
-	})
-	return name
+func capturingModelSet(model *capturingModel) (name string, models auramodel.Set) {
+	name = "eval-model"
+	return name, auramodel.Set{name: model}
 }
 
 func evalTurnRequest() *turn.TurnRequest {

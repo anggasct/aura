@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"regexp"
 	"slices"
-	"sync"
 	"time"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -17,16 +15,30 @@ import (
 	"github.com/anggasct/aura/internal/platform/usage"
 )
 
-var registeredModelPatterns = struct {
-	sync.Mutex
-	patterns map[string]bool
-}{patterns: map[string]bool{}}
-
-func RegisterAdapters(logger *slog.Logger, models config.Models) error {
-	return RegisterAdaptersWithRoutes(context.Background(), logger, models, nil, nil, nil)
+type RegistryOptions struct {
+	Logger     *slog.Logger
+	Models     config.Models
+	Routes     map[string]config.ModelRoute
+	Checkpoint CircuitCheckpointStore
+	Prices     *usage.PriceRegistry
+	Vision     VisionWiring
 }
 
-func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry, wiring ...VisionWiring) error {
+type registryEntry struct {
+	shared adkmodel.LLM
+	build  func() (adkmodel.LLM, error)
+}
+
+type Registry struct {
+	entries map[string]registryEntry
+}
+
+func NewRegistry(ctx context.Context, opts *RegistryOptions) (*Registry, error) {
+	if opts == nil {
+		return nil, newError(ErrorCodeInvalidArgument, "", "", "registry options must not be nil")
+	}
+	logger, models, routes, checkpoint, vw := opts.Logger, opts.Models, opts.Routes, opts.Checkpoint, opts.Vision
+	prices := opts.Prices
 	if prices == nil {
 		prices = usage.NewPriceRegistry()
 	}
@@ -47,14 +59,13 @@ func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models
 		}
 	}
 
-	vw := firstVisionWiring(wiring)
 	adapters, circuits, err := BuildComponents(logger, models, routes, checkpoint, prices, vw)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if circuits != nil && checkpoint != nil {
 		if err := circuits.LoadCheckpoints(ctx); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -73,70 +84,53 @@ func RegisterAdaptersWithRoutes(ctx context.Context, logger *slog.Logger, models
 		idleTimeout = defaultStreamingIdleTimeout
 	}
 
-	type registration struct {
-		role    string
-		pattern string
-		spec    config.ModelDefinition
-		factory func() (adkmodel.LLM, error)
-	}
-	registrations := make([]registration, 0, len(models.Definitions)+len(routeAdapters))
+	entries := make(map[string]registryEntry, len(models.Definitions)+len(routeAdapters))
 	for _, role := range slices.Sorted(maps.Keys(models.Definitions)) {
 		spec := models.Definitions[role]
 		_, configured, err := newAdapter(logger, role, &spec, models.Providers, timeout, idleTimeout, vw)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !configured {
 			continue
 		}
-		def := spec
+		if _, taken := entries[spec.Model]; taken {
+			return nil, newError(ErrorCodeProtocolInvalid, role, "", fmt.Sprintf("model %q is already registered", spec.Model))
+		}
 		definitionID := role
-		registrations = append(registrations, registration{
-			role:    role,
-			pattern: "^" + regexp.QuoteMeta(spec.Model) + "$",
-			spec:    spec,
-			factory: func() (adkmodel.LLM, error) {
-				adapter, _, err := newAdapter(logger, definitionID, &def, models.Providers, timeout, idleTimeout, vw)
-				return adapter, err
-			},
-		})
+		entries[spec.Model] = registryEntry{build: func() (adkmodel.LLM, error) {
+			adapter, _, err := newAdapter(logger, definitionID, &spec, models.Providers, timeout, idleTimeout, vw)
+			return adapter, err
+		}}
 	}
 	for _, name := range slices.Sorted(maps.Keys(routeAdapters)) {
-		definition, ok := models.Definitions[name]
-		if !ok {
-			definition = config.ModelDefinition{}
+		if _, taken := entries[name]; taken {
+			return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("model %q is already registered", models.Definitions[name].Model))
 		}
-		adapter := routeAdapters[name]
-		routeName := name
-		registrations = append(registrations, registration{
-			role:    routeName,
-			pattern: "^" + regexp.QuoteMeta(routeName) + "$",
-			spec:    definition,
-			factory: func() (adkmodel.LLM, error) {
-				return adapter, nil
-			},
-		})
+		entries[name] = registryEntry{shared: routeAdapters[name]}
 	}
+	return &Registry{entries: entries}, nil
+}
 
-	registeredModelPatterns.Lock()
-	defer registeredModelPatterns.Unlock()
-	seen := make(map[string]bool, len(registrations))
-	for i := range registrations {
-		reg := &registrations[i]
-		if registeredModelPatterns.patterns[reg.pattern] || seen[reg.pattern] {
-			return newError(ErrorCodeProtocolInvalid, reg.role, "", fmt.Sprintf("model %q is already registered", reg.spec.Model))
-		}
-		seen[reg.pattern] = true
+func (r *Registry) LLM(_ context.Context, name string) (adkmodel.LLM, error) {
+	entry, ok := r.entries[name]
+	if !ok {
+		return nil, newError(ErrorCodeNotFound, name, "", fmt.Sprintf("model %q is not registered", name))
 	}
-	for i := range registrations {
-		reg := &registrations[i]
-		registeredModelPatterns.patterns[reg.pattern] = true
-		factory := reg.factory
-		adkmodel.Register(reg.pattern, func(_ context.Context, _ string) (adkmodel.LLM, error) {
-			return factory()
-		})
+	if entry.build == nil {
+		return entry.shared, nil
 	}
-	return nil
+	return entry.build()
+}
+
+type Set map[string]adkmodel.LLM
+
+func (s Set) LLM(_ context.Context, name string) (adkmodel.LLM, error) {
+	llm, ok := s[name]
+	if !ok {
+		return nil, newError(ErrorCodeNotFound, name, "", fmt.Sprintf("model %q is not registered", name))
+	}
+	return llm, nil
 }
 
 func RouteModelName(cfg *config.Config, defaultModel string) (func(route string) (string, error), error) {

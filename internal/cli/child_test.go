@@ -4,11 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"iter"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 
@@ -50,17 +49,12 @@ func (f *fakeChildModel) GenerateContent(_ context.Context, _ *adkmodel.LLMReque
 	}
 }
 
-var testChildModelSeq atomic.Uint64
-
 func newTestChildExec(t *testing.T, db *sql.DB, answer string) (exec *runtimeadk.ADKExecutor, modelName string) {
 	t.Helper()
 	model := &fakeChildModel{answer: answer, tokens: 5}
-	name := fmt.Sprintf("fake-child-model-%d", testChildModelSeq.Add(1))
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) {
-		return model, nil
-	})
+	name := "fake-child-model"
 	exec, err := runtimeadk.NewADKExecutor(
-		"aura-test", name,
+		"aura-test", name, auramodel.Set{name: model},
 		store.NewSessionService(db), store.NewEventStore(db),
 		stubChildBroker{}, nil, slog.New(slog.DiscardHandler),
 	)

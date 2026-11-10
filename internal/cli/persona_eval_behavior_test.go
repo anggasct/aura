@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -48,22 +48,14 @@ func (m *scriptedBehaviorModel) requestText(i int) string {
 	return summarizeRequest(m.requests[i]).Text
 }
 
-var scriptedModelSeq atomic.Int64
-
-func registerScriptedModel(model *scriptedBehaviorModel) string {
-	name := fmt.Sprintf("scripted-behavior-%d", scriptedModelSeq.Add(1))
-	adkmodel.Register("^"+name+"$", func(context.Context, string) (adkmodel.LLM, error) { return model, nil })
-	return name
-}
-
 func fakeBehaviorModels(t *testing.T, judgeReply string) (models behaviorModels, persona, judge *scriptedBehaviorModel) {
 	t.Helper()
 	persona = &scriptedBehaviorModel{reply: func(req *adkmodel.LLMRequest) string {
 		return fmt.Sprintf("Hello visitor, this is answer %d.", len(req.Contents))
 	}}
 	judge = &scriptedBehaviorModel{reply: func(*adkmodel.LLMRequest) string { return judgeReply }}
-	personaName, judgeName := registerScriptedModel(persona), registerScriptedModel(judge)
-	return behaviorModels{defaultModel: personaName, route: func(route string) (string, error) {
+	personaName, judgeName := "scripted-persona", "scripted-judge"
+	return behaviorModels{defaultModel: personaName, models: auramodel.Set{personaName: persona, judgeName: judge}, route: func(route string) (string, error) {
 		if route == auraagent.DefaultEvalJudgeRoute {
 			return judgeName, nil
 		}
