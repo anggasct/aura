@@ -16,12 +16,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/durable/restate"
-	runtimeengine "github.com/anggasct/aura/internal/runtime/engine"
-	runtimesessions "github.com/anggasct/aura/internal/runtime/sessions"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/restate"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/workflow"
 )
 
 const durableProbeTimeout = 5 * time.Second

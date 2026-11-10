@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
+	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
-	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
 func TestEnableExecutionBuildsTheRunnerAndVerifier(t *testing.T) {

@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )

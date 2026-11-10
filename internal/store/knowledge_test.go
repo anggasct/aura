@@ -350,7 +350,7 @@ func TestKnowledgeCheckDetectsScopeMismatch(t *testing.T) {
 
 func TestKnowledgeSourceNeverUsesInsertOrReplace(t *testing.T) {
 	forbidden := regexp.MustCompile(`(?i)(insert\s+or\s+replace|replace\s+into)\s+(into\s+)?kb_`)
-	for _, path := range []string{"knowledge.go", "migrate.go", filepath.Join("..", "knowledge", "service.go")} {
+	for _, path := range []string{"knowledge.go", "migrate.go", filepath.Join("..", "modules", "knowledge", "service.go")} {
 		content, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)

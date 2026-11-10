@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/knowledge"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
+	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
 const (
@@ -195,7 +195,7 @@ func TestKnowledgeQueriesLeaveTheHostOnlyWhenEveryGateHolds(t *testing.T) {
 	for name, test := range tests {
 		t.Run("turn context "+name, func(t *testing.T) {
 			rig.provider.reset()
-			evidence, err := provider.KnowledgeContext(t.Context(), &runtime.TurnRequest{
+			evidence, err := provider.KnowledgeContext(t.Context(), &turn.TurnRequest{
 				Knowledge: []string{"support", "faq"}, PrincipalClass: test.class,
 				Parts: []runtimeingress.InputPart{{Text: meaningQuery}},
 			})
@@ -426,7 +426,7 @@ func TestKnowledgeSlowEmbeddingProviderFallsBackToLexicalWithinTheBudget(t *test
 	if err != nil {
 		t.Fatalf("NewContextProvider: %v", err)
 	}
-	evidence, err := provider.KnowledgeContext(budgeted, &runtime.TurnRequest{
+	evidence, err := provider.KnowledgeContext(budgeted, &turn.TurnRequest{
 		Knowledge: []string{"support"}, PrincipalClass: principal.ClassOwner,
 		Parts: []runtimeingress.InputPart{{Text: meaningQuery}},
 	})

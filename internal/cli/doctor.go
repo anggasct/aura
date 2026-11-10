@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func newDoctorCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error)) *cobra.Command {

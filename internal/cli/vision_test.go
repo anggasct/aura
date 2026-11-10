@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/vision"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
-	"github.com/anggasct/aura/internal/vision"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"

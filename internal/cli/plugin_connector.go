@@ -9,13 +9,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/anggasct/aura/internal/capability"
-	"github.com/anggasct/aura/internal/egress"
-	"github.com/anggasct/aura/internal/mcp"
-	"github.com/anggasct/aura/internal/plugin"
-	"github.com/anggasct/aura/internal/plugin/connector"
-	"github.com/anggasct/aura/internal/sandbox"
-	"github.com/anggasct/aura/internal/toolbroker"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/plugin/connector"
+	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
 type connectorRuntimeOptions struct {

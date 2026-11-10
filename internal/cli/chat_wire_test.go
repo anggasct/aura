@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/terminal"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/store"
 )
 

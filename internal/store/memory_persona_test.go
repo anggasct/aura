@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func seedPersonaSession(t *testing.T, db *sql.DB, sessionID, ownerID, agentID string) {

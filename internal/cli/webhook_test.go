@@ -13,14 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/durable"
-	gatewaywebhook "github.com/anggasct/aura/internal/gateway/webhook"
-	"github.com/anggasct/aura/internal/integration/github"
-	"github.com/anggasct/aura/internal/runtime"
-	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
+	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
+	"github.com/anggasct/aura/internal/modules/github"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
-	"github.com/anggasct/aura/internal/workflow"
 )
 
 type fakeTurnRuntime struct {
@@ -38,14 +38,14 @@ type turnOutcome struct {
 	err   error
 }
 
-func (f *fakeTurnRuntime) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (f *fakeTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	f.mu.Lock()
 	f.calls++
 	f.parts = append(f.parts, req.Parts)
 	f.mu.Unlock()
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		if f.overload {
-			yield(store.RuntimeEvent{}, &runtime.Error{Code: runtime.ErrorCodeRuntimeOverloaded, Detail: "pending turn queue is full"})
+			yield(store.RuntimeEvent{}, &turn.Error{Code: turn.ErrorCodeRuntimeOverloaded, Detail: "pending turn queue is full"})
 			return
 		}
 		outcomes := f.events(req.TurnID)
@@ -99,9 +99,9 @@ func (f *fakeTurnRuntime) submitted() int {
 
 func acceptedTurnEvents(turnID string) []turnOutcome {
 	return []turnOutcome{
-		{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: runtime.EventKindTurnAccepted}},
-		{event: store.RuntimeEvent{ID: "evt_msg_" + turnID, TurnID: turnID, Kind: runtime.EventKindMessageCompleted}},
-		{event: store.RuntimeEvent{ID: "evt_done_" + turnID, TurnID: turnID, Kind: runtime.EventKindTurnCompleted}},
+		{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
+		{event: store.RuntimeEvent{ID: "evt_msg_" + turnID, TurnID: turnID, Kind: turn.EventKindMessageCompleted}},
+		{event: store.RuntimeEvent{ID: "evt_done_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnCompleted}},
 	}
 }
 
@@ -314,8 +314,8 @@ func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
 func TestWebhookDispatcher_FailedTurnRecordsCode(t *testing.T) {
 	backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
 		return []turnOutcome{
-			{event: store.RuntimeEvent{ID: "evt_a_" + turnID, TurnID: turnID, Kind: runtime.EventKindTurnAccepted}},
-			{event: store.RuntimeEvent{ID: "evt_f_" + turnID, TurnID: turnID, Kind: runtime.EventKindTurnFailed, Payload: []byte(`{"code":"model_capability_unsupported","detail":"no"}`)}},
+			{event: store.RuntimeEvent{ID: "evt_a_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
+			{event: store.RuntimeEvent{ID: "evt_f_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnFailed, Payload: []byte(`{"code":"model_capability_unsupported","detail":"no"}`)}},
 		}
 	}}
 	dispatcher, executions := webhookTestSetup(t, backend)
@@ -546,7 +546,7 @@ func TestWebhookDispatcherWaitTracksInFlightDrains(t *testing.T) {
 
 func TestWebhookDispatcher_FinishedDrainIsNotResubmittedAsOrphan(t *testing.T) {
 	backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
-		return []turnOutcome{{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: runtime.EventKindTurnAccepted}}}
+		return []turnOutcome{{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}}}
 	}}
 	dispatcher, executions := webhookTestSetup(t, backend)
 	first, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
@@ -605,7 +605,7 @@ func TestWebhookDispatcher_PrunesExpiredStartedEntries(t *testing.T) {
 
 func TestWebhookDispatcher_RestartClearsStartedAllowsOrphanResubmission(t *testing.T) {
 	backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
-		return []turnOutcome{{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: runtime.EventKindTurnAccepted}}}
+		return []turnOutcome{{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}}}
 	}}
 	dispatcher, executions := webhookTestSetup(t, backend)
 	first, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())

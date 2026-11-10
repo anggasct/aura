@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/runtime/adk"
+	"github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
 const ownerContextWarnBytes = 4096

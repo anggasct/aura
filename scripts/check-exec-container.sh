@@ -12,7 +12,7 @@ trap cleanup EXIT
 
 mkdir -p "$work/linux/amd64"
 (cd "$repo" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-	-ldflags "-s -w -X github.com/anggasct/aura/internal/capability.buildProfile=exec-linux -X github.com/anggasct/aura/internal/capability.buildCapabilities=exec-linux" \
+	-ldflags "-s -w -X github.com/anggasct/aura/internal/platform/capability.buildProfile=exec-linux -X github.com/anggasct/aura/internal/platform/capability.buildCapabilities=exec-linux" \
 	-o "$work/linux/amd64/aura" ./cmd/aura)
 cp "$repo/Dockerfile" "$work/Dockerfile"
 docker buildx build --quiet --load --platform linux/amd64 -t "$image" "$work" >/dev/null

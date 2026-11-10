@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/egress"
-	"github.com/anggasct/aura/internal/mcp"
-	"github.com/anggasct/aura/internal/telemetry"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/telemetry"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"

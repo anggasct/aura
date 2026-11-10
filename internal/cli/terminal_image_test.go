@@ -6,16 +6,16 @@ import (
 	"iter"
 	"testing"
 
-	"github.com/anggasct/aura/internal/channel/terminal"
-	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/channels/terminal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
 type captureEngine struct {
-	got *runtime.TurnRequest
+	got *turn.TurnRequest
 }
 
-func (c *captureEngine) Run(_ context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (c *captureEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	c.got = req
 	return func(yield func(store.RuntimeEvent, error) bool) {}
 }

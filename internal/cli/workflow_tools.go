@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/access"
-	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/principal"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
-	"github.com/anggasct/aura/internal/workflow"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/principal"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
 type proposalOfferer interface {

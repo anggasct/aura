@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/access"
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
 

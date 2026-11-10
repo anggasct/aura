@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func TestRegistryPersonasListKnowledgeByClassFromTheConfig(t *testing.T) {

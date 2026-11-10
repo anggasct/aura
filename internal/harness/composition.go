@@ -4,14 +4,14 @@ import (
 	"context"
 	"strings"
 
-	"github.com/anggasct/aura/internal/egress"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 type CompositionConfig struct {
-	Runtime            runtime.AgentRuntime
-	Broker             runtime.ToolBroker
+	Runtime            turn.AgentRuntime
+	Broker             turn.ToolBroker
 	RequireSandbox     bool
 	SandboxPrimitives  sandbox.Primitives
 	Provider           Provider
@@ -22,8 +22,8 @@ type CompositionConfig struct {
 }
 
 type Composition struct {
-	Runtime runtime.AgentRuntime
-	Broker  runtime.ToolBroker
+	Runtime turn.AgentRuntime
+	Broker  turn.ToolBroker
 }
 
 func NewComposition(ctx context.Context, cfg *CompositionConfig) (*Composition, error) {

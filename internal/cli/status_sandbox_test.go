@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func cliWithoutDelegation() (sandbox.Primitives, error) {

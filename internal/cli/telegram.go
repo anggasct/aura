@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/telegram"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/platform/health"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 type telegramAdapters []*telegram.Adapter

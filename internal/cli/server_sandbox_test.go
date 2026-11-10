@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func TestLogSandboxHostLogsOutcome(t *testing.T) {

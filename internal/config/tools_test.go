@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/capability"
+	"github.com/anggasct/aura/internal/platform/capability"
 )
 
 func execLinuxOptions(t *testing.T) LoadOptions {

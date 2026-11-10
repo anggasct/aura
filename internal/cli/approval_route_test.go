@@ -13,14 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/approval"
-	"github.com/anggasct/aura/internal/channel/discord"
-	"github.com/anggasct/aura/internal/channel/httpchat"
-	"github.com/anggasct/aura/internal/channel/telegram"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/httpchat"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/telegram"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/toolbroker"
 )
 
 type askedRequest struct {
@@ -259,9 +259,9 @@ type decidingRuntime struct {
 	decide toolbroker.ApprovalDecider
 }
 
-func (r decidingRuntime) Run(ctx context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (r decidingRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
-		if !yield(store.RuntimeEvent{TurnID: "turn-1", Kind: runtime.EventKindTurnAccepted}, nil) {
+		if !yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnAccepted}, nil) {
 			return
 		}
 		accepted, err := r.decide(ctx, &toolbroker.ApprovalPrompt{
@@ -278,12 +278,12 @@ func (r decidingRuntime) Run(ctx context.Context, req *runtime.TurnRequest) iter
 		if err != nil || !accepted {
 			text = "the tool was denied"
 		}
-		answer := store.RuntimeEvent{TurnID: "turn-1", Kind: runtime.EventKindMessageCompleted}
+		answer := store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindMessageCompleted}
 		answer.Payload, _ = json.Marshal(map[string]string{"text": text})
 		if !yield(answer, nil) {
 			return
 		}
-		yield(store.RuntimeEvent{TurnID: "turn-1", Kind: runtime.EventKindTurnCompleted}, nil)
+		yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnCompleted}, nil)
 	}
 }
 

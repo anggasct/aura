@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/capability"
 )
 
 func TestChatCapabilityGate(t *testing.T) {

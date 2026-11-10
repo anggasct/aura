@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
-	personaeval "github.com/anggasct/aura/internal/eval/persona"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/store"
 )
 

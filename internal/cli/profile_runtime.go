@@ -15,12 +15,12 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/profile"
-	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
 )
 
 const (
@@ -33,7 +33,7 @@ const (
 	remediationReviewProfiling = "check the profiling model route and provider health; extraction resumes on the next completed job"
 )
 
-type postTurnHook func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
+type postTurnHook func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
 
 func composePostTurnHooks(hooks ...postTurnHook) postTurnHook {
 	active := slices.DeleteFunc(slices.Clone(hooks), func(hook postTurnHook) bool { return hook == nil })
@@ -43,7 +43,7 @@ func composePostTurnHooks(hooks ...postTurnHook) postTurnHook {
 	case 1:
 		return active[0]
 	}
-	return func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error {
+	return func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
 		errs := make([]error, 0, len(active))
 		for _, hook := range active {
 			errs = append(errs, hook(ctx, req, events))
@@ -151,7 +151,7 @@ func (r *profileRuntime) check(cfg *config.Config) health.RegisteredCheck {
 	}
 }
 
-func (r *profileRuntime) hook(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error {
+func (r *profileRuntime) hook(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
 	if r == nil || r.extractor == nil || req == nil {
 		return nil
 	}
@@ -171,7 +171,7 @@ func (r *profileRuntime) hook(ctx context.Context, req *runtime.TurnRequest, eve
 	return nil
 }
 
-func (r *profileRuntime) ProfileContext(ctx context.Context, req *runtime.TurnRequest) (string, error) {
+func (r *profileRuntime) ProfileContext(ctx context.Context, req *turn.TurnRequest) (string, error) {
 	if r == nil || req == nil || req.PrincipalClass != principal.ClassOwner {
 		return "", nil
 	}
@@ -188,9 +188,9 @@ func (r *profileRuntime) ProfileContext(ctx context.Context, req *runtime.TurnRe
 	return part.Render(), nil
 }
 
-func directOwnerOrigin(origin runtime.Origin) bool {
+func directOwnerOrigin(origin turn.Origin) bool {
 	channel, _, _ := strings.Cut(string(origin), ":")
-	return origin == runtime.OriginTerminal || channel == principal.ChannelDiscord || channel == principal.ChannelTelegram || channel == principal.ChannelEmail
+	return origin == turn.OriginTerminal || channel == principal.ChannelDiscord || channel == principal.ChannelTelegram || channel == principal.ChannelEmail
 }
 
 func profileJob(sessionID string, events []store.RuntimeEvent) (profile.Job, bool) {
@@ -223,7 +223,7 @@ func ownerInputText(payload json.RawMessage) string {
 	var texts []string
 	for _, part := range envelope.Content.Parts {
 		text := strings.TrimSpace(part.Text)
-		if text == "" || strings.HasPrefix(text, runtime.RecallEvidenceStart) || strings.HasPrefix(text, runtime.ProfileEvidenceStart) {
+		if text == "" || strings.HasPrefix(text, turn.RecallEvidenceStart) || strings.HasPrefix(text, turn.ProfileEvidenceStart) {
 			continue
 		}
 		texts = append(texts, text)

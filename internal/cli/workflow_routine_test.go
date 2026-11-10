@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/scheduler"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
-	"github.com/anggasct/aura/internal/workflow"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func succeededGeneratedRun(t *testing.T, controller *workflowToolController, runs *workflow.Store) string {
@@ -66,7 +66,7 @@ func TestOwnerSavesRoutinesThatTheSchedulerStartsOncePerFire(t *testing.T) {
 	}
 	workflows := &scheduleWorkflows{}
 	turns := &engineTurnRunner{workflows: workflows}
-	request := &scheduler.TurnRequest{PrincipalID: principal.OwnerID, IdempotencyKey: "cron/job-1/2026-11-09T03:00:00Z", WorkflowID: "routine_weekly_report", WorkflowInput: `{"objective":"last week"}`}
+	request := &schedule.TurnRequest{PrincipalID: principal.OwnerID, IdempotencyKey: "cron/job-1/2026-11-09T03:00:00Z", WorkflowID: "routine_weekly_report", WorkflowInput: `{"objective":"last week"}`}
 	if _, err := turns.RunTurn(t.Context(), request); err == nil || !strings.Contains(err.Error(), "durable runtime") {
 		t.Fatalf("scheduled workflow without a runtime = %v", err)
 	}

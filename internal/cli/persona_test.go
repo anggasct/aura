@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/terminal"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/runtime"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -104,21 +104,21 @@ func TestResolveChatPersona(t *testing.T) {
 	}
 	cases := []struct {
 		name, session, requested, want string
-		code                           runtime.ErrorCode
+		code                           turn.ErrorCode
 	}{
 		{name: "default", want: auraagent.DefaultID},
 		{name: "requested", requested: "engineer", want: "engineer"},
-		{name: "unknown", requested: "ghost", code: runtime.ErrorCodePersonaNotFound},
+		{name: "unknown", requested: "ghost", code: turn.ErrorCodePersonaNotFound},
 		{name: "resume keeps session persona", session: "term-kuma", want: "kuma"},
 		{name: "resume with same persona", session: "term-kuma", requested: "kuma", want: "kuma"},
-		{name: "resume with other persona", session: "term-kuma", requested: "engineer", code: runtime.ErrorCodePersonaMismatch},
+		{name: "resume with other persona", session: "term-kuma", requested: "engineer", code: turn.ErrorCodePersonaMismatch},
 		{name: "unknown session falls back", session: "term-new", requested: "engineer", want: "engineer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := resolveChatPersona(t.Context(), registry, sessions, tc.session, tc.requested)
 			if tc.code != "" {
-				if code, ok := runtime.CodeOf(err); !ok || code != tc.code {
+				if code, ok := turn.CodeOf(err); !ok || code != tc.code {
 					t.Fatalf("error = %v, want %s", err, tc.code)
 				}
 				return
@@ -163,7 +163,7 @@ func TestChatRejectsUnknownPersona(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	err = runChat(t.Context(), &result, slog.New(slog.DiscardHandler), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "", "ghost", chatPresentation{plain: true})
-	if code, ok := runtime.CodeOf(err); !ok || code != runtime.ErrorCodePersonaNotFound {
+	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodePersonaNotFound {
 		t.Fatalf("chat --persona ghost error = %v, want persona_not_found", err)
 	}
 }

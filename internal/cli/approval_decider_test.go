@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/approval"
-	"github.com/anggasct/aura/internal/channel/terminal"
-	"github.com/anggasct/aura/internal/toolbroker"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/terminal"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
 type fakeApprovalChannel struct {

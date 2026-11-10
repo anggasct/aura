@@ -40,7 +40,7 @@ linters:
 
   settings:
     depguard:
-      # The rules below freeze the internal/runtime package graph after its
+      # The rules below freeze the internal/platform/turn package graph after its
       # decomposition into root contracts + ingress, channelhost, checkpoint,
       # engine, and adk subpackages. Every deny states the architectural
       # reason it protects; adding an allowed edge requires a deliberate
@@ -53,11 +53,12 @@ linters:
         adk-wired-only-by-cli:
           files:
             - "**/internal/**"
+            - "**/plugins/**"
             - "!**/internal/cli/**"
-            - "!**/internal/runtime/adk/**"
-            - "!**/internal/tools/builtin/**"
+            - "!**/internal/platform/turn/adk/**"
+            - "!**/internal/modules/builtin/**"
           deny:
-            - pkg: github.com/anggasct/aura/internal/runtime/adk
+            - pkg: github.com/anggasct/aura/internal/platform/turn/adk
               desc: only the cli composition root may wire the ADK executor, with the builtin tool executor adapter as the one provider-side implementation; depend on the runtime boundary types instead
         # The root package is the shared contract layer (types, errors, fake,
         # checkpoint payload). It deliberately references the ingress and
@@ -67,13 +68,13 @@ linters:
         # or channelhost. The dependency direction for those is reversed.
         runtime-root-stays-contract-only:
           files:
-            - "**/internal/runtime/*.go"
+            - "**/internal/platform/turn/*.go"
           deny:
-            - pkg: github.com/anggasct/aura/internal/runtime/engine
+            - pkg: github.com/anggasct/aura/internal/platform/turn/engine
               desc: the root contract package must not depend on the turn engine; the dependency direction is engine importing root
-            - pkg: github.com/anggasct/aura/internal/runtime/adk
+            - pkg: github.com/anggasct/aura/internal/platform/turn/adk
               desc: the root contract package must not depend on the ADK adapter; the dependency direction is adk importing root
-            - pkg: github.com/anggasct/aura/internal/runtime/channelhost
+            - pkg: github.com/anggasct/aura/internal/platform/turn/channelhost
               desc: channel contracts are consumed by the engine host and channel adapters, not by the shared root package
         # The engine's deliberate import set is the root contracts plus
         # ingress, channelhost, and checkpoint: the Host binds channel
@@ -84,23 +85,23 @@ linters:
         # adapter, or the port loses its meaning.
         engine-never-imports-adk:
           files:
-            - "**/internal/runtime/engine/**"
+            - "**/internal/platform/turn/engine/**"
           deny:
-            - pkg: github.com/anggasct/aura/internal/runtime/adk
+            - pkg: github.com/anggasct/aura/internal/platform/turn/adk
               desc: the engine consumes executors through the TurnExecutor port and must not depend on the ADK adapter
         # The ADK adapter touches the runtime only through the root contract
         # package and the engine ports. Test files are exempt: they build
         # TurnRequests whose Parts field is typed by the ingress package.
         adk-via-root-and-engine-only:
           files:
-            - "**/internal/runtime/adk/**"
+            - "**/internal/platform/turn/adk/**"
             - "!$test"
           deny:
-            - pkg: github.com/anggasct/aura/internal/runtime/ingress
+            - pkg: github.com/anggasct/aura/internal/platform/turn/ingress
               desc: the ADK adapter maps normalized TurnRequests, not channel ingress envelopes
-            - pkg: github.com/anggasct/aura/internal/runtime/channelhost
+            - pkg: github.com/anggasct/aura/internal/platform/turn/channelhost
               desc: outbound channel delivery belongs to the engine host and channel adapters, not the executor
-            - pkg: github.com/anggasct/aura/internal/runtime/checkpoint
+            - pkg: github.com/anggasct/aura/internal/platform/turn/checkpoint
               desc: checkpoint resume flows through the engine, not the executor adapter
         # Ingress is the innermost contract: it must stay importable by every
         # runtime package, so it may depend on no internal package at all.
@@ -108,7 +109,7 @@ linters:
         # whole internal tree.
         ingress-stays-innermost:
           files:
-            - "**/internal/runtime/ingress/**"
+            - "**/internal/platform/turn/ingress/**"
           deny:
             - pkg: github.com/anggasct/aura/internal
               desc: ingress types are the innermost runtime contract and must not depend on any internal package
@@ -118,42 +119,45 @@ linters:
         channelhost-contract-only:
           list-mode: lax
           files:
-            - "**/internal/runtime/channelhost/**"
+            - "**/internal/platform/turn/channelhost/**"
           allow:
-            - github.com/anggasct/aura/internal/runtime/ingress
+            - github.com/anggasct/aura/internal/platform/turn/ingress
           deny:
-            - pkg: github.com/anggasct/aura/internal/runtime
+            - pkg: github.com/anggasct/aura/internal/platform/turn
               desc: channel contracts are consumed by the engine host and channel adapters, and must not reach back into the runtime tree beyond ingress types
         # The checkpoint contract layer binds to the store only; the runtime
         # root prefix deny covers the root package and every subpackage.
         checkpoint-contract-only:
           files:
-            - "**/internal/runtime/checkpoint/**"
+            - "**/internal/platform/turn/checkpoint/**"
           deny:
-            - pkg: github.com/anggasct/aura/internal/runtime
+            - pkg: github.com/anggasct/aura/internal/platform/turn
               desc: checkpoint contracts are store-facing boundaries consumed by the engine, and must not reach back into the runtime tree
         # Builtin tool adapters are assembled by the tools provider
-        # (internal/tools/builtin); the cli composition root invokes that
+        # (internal/modules/builtin); the cli composition root invokes that
         # constructor and must not reach into the adapter packages itself.
-        # Lax mode lets the tools/builtin allow entry win over the internal
-        # tools deny prefixes.
+        # Lax mode lets the longer allow prefixes (builtin, the interpreter
+        # runtime catalog) win over the shorter deny prefixes.
         tools-wired-only-through-builtin:
           list-mode: lax
           files:
             - "**/internal/cli/**"
           allow:
-            - github.com/anggasct/aura/internal/tools/builtin
+            - github.com/anggasct/aura/internal/modules/builtin
+            - github.com/anggasct/aura/internal/modules/codeexec/interpreter
           deny:
-            - pkg: github.com/anggasct/aura/internal/tools
-              desc: the builtin adapter set is assembled in internal/tools/builtin; the cli composition root calls that constructor instead
-            - pkg: github.com/anggasct/aura/internal/tools/exec
-              desc: the exec adapter is constructed by internal/tools/builtin, not by the cli composition root
-            - pkg: github.com/anggasct/aura/internal/tools/fetch
-              desc: the fetch adapter is constructed by internal/tools/builtin, not by the cli composition root
-            - pkg: github.com/anggasct/aura/internal/tools/filesystem
-              desc: the filesystem adapters are constructed by internal/tools/builtin, not by the cli composition root
-            - pkg: github.com/anggasct/aura/internal/tools/search
-              desc: the search adapter is constructed by internal/tools/builtin, not by the cli composition root
+            - pkg: github.com/anggasct/aura/internal/platform/tools
+              desc: the builtin adapter set is assembled in internal/modules/builtin; the cli composition root calls that constructor instead
+            - pkg: github.com/anggasct/aura/internal/modules/codeexec
+              desc: the code execution adapter is constructed by internal/modules/builtin, not by the cli composition root
+            - pkg: github.com/anggasct/aura/internal/modules/shellexec
+              desc: the exec adapter is constructed by internal/modules/builtin, not by the cli composition root
+            - pkg: github.com/anggasct/aura/internal/modules/fetch
+              desc: the fetch adapter is constructed by internal/modules/builtin, not by the cli composition root
+            - pkg: github.com/anggasct/aura/internal/modules/filesystem
+              desc: the filesystem adapters are constructed by internal/modules/builtin, not by the cli composition root
+            - pkg: github.com/anggasct/aura/internal/modules/search
+              desc: the search adapter is constructed by internal/modules/builtin, not by the cli composition root
         # Restate SDK types never leave the durable adapter: the domain
         # depends on the DurableRuntime port, and only the adapter package
         # itself may import the SDK (client, serving, and conformance
@@ -161,7 +165,8 @@ linters:
         restate-stays-in-adapter:
           files:
             - "**/internal/**"
-            - "!**/internal/durable/restate/**"
+            - "**/plugins/**"
+            - "!**/internal/platform/durable/restate/**"
           deny:
             - pkg: github.com/restatedev/sdk-go
               desc: Restate types stay inside the durable adapter; depend on the DurableRuntime port instead
@@ -252,7 +257,7 @@ linters:
       - linters:
           - gosec
         text: G304
-        path: internal/(store|config|usage|durable/restate)/
+        path: internal/(store|config|platform/usage|platform/durable/restate)/
 
       # The cgroup v2 directory comes from the kernel's /proc/self/cgroup for
       # this very process, never from external input.
@@ -274,14 +279,14 @@ linters:
       - linters:
           - gosec
         text: G103
-        path: internal/sandbox/run_linux.go
+        path: internal/platform/sandbox/run_linux.go
 
       # Landlock and seccomp syscall arguments are stack-local structs handed
       # to the kernel through unsafe.Pointer; the values are built in-package.
       - linters:
           - gosec
         text: G103
-        path: internal/sandbox/(seccomp_linux_amd64|landlock_linux)\.go
+        path: internal/platform/sandbox/(seccomp_linux_amd64|landlock_linux)\.go
 
       # BPF jump offsets, Landlock file descriptors, and rlimit tuples use the
       # kernel's fixed integer widths; the source values are bounded syscall
@@ -289,14 +294,14 @@ linters:
       - linters:
           - gosec
         text: G115
-        path: internal/sandbox/(seccomp_linux_amd64|landlock_linux|rlimit_linux)\.go
+        path: internal/platform/sandbox/(seccomp_linux_amd64|landlock_linux|rlimit_linux)\.go
 
       # Launching a caller-supplied command is this package's entire purpose;
       # the command is constrained by the containment spec, not by gosec.
       - linters:
           - gosec
         text: G204
-        path: internal/sandbox/run_linux.go
+        path: internal/platform/sandbox/run_linux.go
 
       # Launching the operator's own \$EDITOR is the multiline gesture's
       # purpose; the value is as trusted as the command the operator typed.
@@ -304,18 +309,18 @@ linters:
       - linters:
           - gosec
         text: G204
-        path: internal/channel/terminal/ttyrender\.go
+        path: internal/channels/terminal/ttyrender\.go
       - linters:
           - gosec
         text: G702
-        path: internal/channel/terminal/ttyrender\.go
+        path: internal/channels/terminal/ttyrender\.go
 
       # Launching the configured MCP server command is the stdio client's
       # purpose; the command is operator-configured and trust-validated.
       - linters:
           - gosec
         text: G204
-        path: internal/mcp/client\.go
+        path: internal/modules/mcp/client\.go
 
       # Token and trust store paths are operator-configured, cleaned, and
       # confined to a 0700 parent; the directory fsync after rename is the
@@ -323,7 +328,7 @@ linters:
       - linters:
           - gosec
         text: G304
-        path: internal/mcp/persist\.go
+        path: internal/modules/mcp/persist\.go
 
       # Staged draft directories are confined to the configured skill root
       # pending area with 0700 parents; the directory fsync after link is the
@@ -331,7 +336,7 @@ linters:
       - linters:
           - gosec
         text: G304
-        path: internal/skills/lifecycle\.go
+        path: internal/modules/skills/lifecycle\.go
 
       # Serializing OAuth tokens is this file's purpose: they are persisted
       # to the 0600 owner-only store and never enter logs or error strings,
@@ -339,7 +344,7 @@ linters:
       - linters:
           - gosec
         text: G117
-        path: internal/mcp/persist\.go
+        path: internal/modules/mcp/persist\.go
 
       # Serializing the plugin OAuth token is this file's purpose: it is
       # persisted to the 0600 owner-only plugin namespace and never enters
@@ -347,7 +352,7 @@ linters:
       - linters:
           - gosec
         text: G117
-        path: internal/plugin/auth/store\.go
+        path: internal/modules/plugin/auth/store\.go
 
       # Launching the configured durable runtime binary is the supervisor's
       # purpose; the path is operator-configured and resolution fails closed
@@ -355,38 +360,38 @@ linters:
       - linters:
           - gosec
         text: G204
-        path: internal/durable/restate/supervise\.go
+        path: internal/platform/durable/restate/supervise\.go
 
       # Retry jitter is not a security context. Scoped to the one file that
       # needs it rather than excluded repository-wide.
       - linters:
           - gosec
         text: G404
-        path: internal/model/retry.go
+        path: internal/platform/model/retry.go
 
-      # Same retry-jitter rationale as internal/model/retry.go.
+      # Same retry-jitter rationale as internal/platform/model/retry.go.
       - linters:
           - gosec
         text: G404
-        path: internal/usage/busy.go
+        path: internal/platform/usage/busy.go
 
       # Same retry-jitter rationale: gateway reconnect backoff only.
       - linters:
           - gosec
         text: G404
-        path: internal/channel/discord/gateway\.go
+        path: internal/channels/discord/gateway\.go
 
       # Same retry-jitter rationale: telegram poll backoff only.
       - linters:
           - gosec
         text: G404
-        path: internal/channel/telegram/poll\.go
+        path: internal/channels/telegram/poll\.go
 
       # Same retry-jitter rationale: sync interval jitter only.
       - linters:
           - gosec
         text: G404
-        path: internal/sync/worker\.go
+        path: internal/modules/gitsync/worker\.go
 
       # The signal-derived context does reach every command, but it travels
       # through cobra's command tree (ExecuteContext then cmd.Context()) and
@@ -400,7 +405,7 @@ linters:
       # analyser cannot trace it across that framework boundary.
       - linters:
           - contextcheck
-        path: internal/durable/restate/workflow\.go
+        path: internal/platform/durable/restate/workflow\.go
 
 issues:
   max-issues-per-linter: 0

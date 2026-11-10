@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/embedding"
-	"github.com/anggasct/aura/internal/health"
+	"github.com/anggasct/aura/internal/platform/embedding"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 )
 

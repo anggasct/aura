@@ -18,17 +18,17 @@ import (
 
 	adkmodel "google.golang.org/adk/v2/model"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/email"
+	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/effect"
-	"github.com/anggasct/aura/internal/principal"
-	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
-	runtimeengine "github.com/anggasct/aura/internal/runtime/engine"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/principal"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 const (

@@ -13,10 +13,10 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
-	contextpkg "github.com/anggasct/aura/internal/context"
-	"github.com/anggasct/aura/internal/profile"
+	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
 )
 
 const profileOwnerSessionPrefix = "profile-"
@@ -493,7 +493,7 @@ type profileModelCaller struct {
 }
 
 func newProfileModelCaller(llm adkmodel.LLM, producer profile.ModelProducer, maxOutputTokens int) *profileModelCaller {
-	return &profileModelCaller{llm: llm, producer: producer, bound: contextpkg.OutputByteBound(maxOutputTokens) + 1}
+	return &profileModelCaller{llm: llm, producer: producer, bound: compaction.OutputByteBound(maxOutputTokens) + 1}
 }
 
 func (c *profileModelCaller) Extract(ctx context.Context, req *profile.ExtractRequest) (*profile.ExtractResult, error) {

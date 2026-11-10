@@ -11,8 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/memory"
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func newMemoryCmd(gf *globalFlags) *cobra.Command {

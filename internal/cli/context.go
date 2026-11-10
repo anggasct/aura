@@ -12,15 +12,15 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
-	contextpkg "github.com/anggasct/aura/internal/context"
+	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/store"
 )
 
 const contextSummaryAuthor = "runtime"
 
-func compressionProducer(cfg *config.Config) (contextpkg.Producer, error) {
+func compressionProducer(cfg *config.Config) (compaction.Producer, error) {
 	if cfg == nil {
-		return contextpkg.Producer{}, errors.New("cli: config must not be nil")
+		return compaction.Producer{}, errors.New("cli: config must not be nil")
 	}
 	role := cfg.Models.Routing["compression"]
 	if strings.TrimSpace(role) == "" {
@@ -28,19 +28,19 @@ func compressionProducer(cfg *config.Config) (contextpkg.Producer, error) {
 	}
 	route, ok := cfg.ModelRoutes[role]
 	if !ok {
-		return contextpkg.Producer{}, fmt.Errorf("cli: compression route %q is not configured", role)
+		return compaction.Producer{}, fmt.Errorf("cli: compression route %q is not configured", role)
 	}
 	if len(route.Candidates) == 0 {
-		return contextpkg.Producer{}, fmt.Errorf("cli: compression route %q names no candidate", role)
+		return compaction.Producer{}, fmt.Errorf("cli: compression route %q names no candidate", role)
 	}
 	definition, ok := cfg.Models.Definitions[route.Candidates[0]]
 	if !ok {
-		return contextpkg.Producer{}, fmt.Errorf("cli: compression candidate %q is not defined", route.Candidates[0])
+		return compaction.Producer{}, fmt.Errorf("cli: compression candidate %q is not defined", route.Candidates[0])
 	}
 	if strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "" {
-		return contextpkg.Producer{}, fmt.Errorf("cli: compression candidate %q carries no identity", route.Candidates[0])
+		return compaction.Producer{}, fmt.Errorf("cli: compression candidate %q carries no identity", route.Candidates[0])
 	}
-	return contextpkg.Producer{Provider: definition.Protocol, Model: definition.Model}, nil
+	return compaction.Producer{Provider: definition.Protocol, Model: definition.Model}, nil
 }
 
 type contextContentPart struct {
@@ -68,11 +68,11 @@ type contextEventPayload struct {
 	ApprovalID     string `json:"approval_id"`
 }
 
-func mapContextEvent(row *store.RuntimeEvent) contextpkg.Event {
+func mapContextEvent(row *store.RuntimeEvent) compaction.Event {
 	if row == nil {
-		return contextpkg.Event{}
+		return compaction.Event{}
 	}
-	event := contextpkg.Event{
+	event := compaction.Event{
 		ID:           row.ID,
 		Sequence:     row.Sequence,
 		TurnID:       row.TurnID,
@@ -133,12 +133,12 @@ func newContextSummaryStore(sessions store.SessionService, events store.EventSto
 	return &contextSummaryStore{sessions: sessions, events: events}
 }
 
-func (s *contextSummaryStore) ListSummaries(ctx context.Context, sessionID string) ([]contextpkg.SummaryRecord, error) {
+func (s *contextSummaryStore) ListSummaries(ctx context.Context, sessionID string) ([]compaction.SummaryRecord, error) {
 	if ctx == nil {
 		return nil, errors.New("cli: context must not be nil")
 	}
 	const page = 512
-	var records []contextpkg.SummaryRecord
+	var records []compaction.SummaryRecord
 	var after uint64
 	for {
 		rows, err := s.sessions.ListEvents(ctx, sessionID, after, page)
@@ -151,7 +151,7 @@ func (s *contextSummaryStore) ListSummaries(ctx context.Context, sessionID strin
 		for i := range rows {
 			row := &rows[i]
 			after = row.Sequence
-			if row.Kind != contextpkg.SummaryKind {
+			if row.Kind != compaction.SummaryKind {
 				continue
 			}
 			var envelope struct {
@@ -163,7 +163,7 @@ func (s *contextSummaryStore) ListSummaries(ctx context.Context, sessionID strin
 			if err := json.Unmarshal(row.Payload, &envelope); err != nil {
 				continue
 			}
-			records = append(records, contextpkg.SummaryRecord{
+			records = append(records, compaction.SummaryRecord{
 				ID:            row.ID,
 				SessionID:     row.SessionID,
 				StartSequence: envelope.Source.StartSequence,
@@ -180,7 +180,7 @@ func (s *contextSummaryStore) ListSummaries(ctx context.Context, sessionID strin
 	return records, nil
 }
 
-func (s *contextSummaryStore) UpsertSummary(ctx context.Context, record *contextpkg.SummaryRecord) error {
+func (s *contextSummaryStore) UpsertSummary(ctx context.Context, record *compaction.SummaryRecord) error {
 	if ctx == nil {
 		return errors.New("cli: context must not be nil")
 	}
@@ -199,8 +199,8 @@ func (s *contextSummaryStore) UpsertSummary(ctx context.Context, record *context
 		SessionID:     record.SessionID,
 		TurnID:        record.TurnID,
 		Author:        contextSummaryAuthor,
-		Kind:          contextpkg.SummaryKind,
-		SchemaVersion: contextpkg.SummarySchema,
+		Kind:          compaction.SummaryKind,
+		SchemaVersion: compaction.SummarySchema,
 		Payload:       append([]byte(nil), record.Payload...),
 		CreatedAt:     created,
 	})
@@ -209,15 +209,15 @@ func (s *contextSummaryStore) UpsertSummary(ctx context.Context, record *context
 
 type routerSummarizer struct {
 	llm      adkmodel.LLM
-	producer contextpkg.Producer
+	producer compaction.Producer
 	bound    int
 }
 
-func newRouterSummarizer(llm adkmodel.LLM, producer contextpkg.Producer, maxOutputTokens int) *routerSummarizer {
-	return &routerSummarizer{llm: llm, producer: producer, bound: contextpkg.OutputByteBound(maxOutputTokens) + 1}
+func newRouterSummarizer(llm adkmodel.LLM, producer compaction.Producer, maxOutputTokens int) *routerSummarizer {
+	return &routerSummarizer{llm: llm, producer: producer, bound: compaction.OutputByteBound(maxOutputTokens) + 1}
 }
 
-func (s *routerSummarizer) Summarize(ctx context.Context, req *contextpkg.SummarizeRequest) (*contextpkg.SummarizeResult, error) {
+func (s *routerSummarizer) Summarize(ctx context.Context, req *compaction.SummarizeRequest) (*compaction.SummarizeResult, error) {
 	if ctx == nil {
 		return nil, errors.New("cli: context must not be nil")
 	}
@@ -261,10 +261,10 @@ func (s *routerSummarizer) Summarize(ctx context.Context, req *contextpkg.Summar
 		}
 	}
 	if oversized {
-		return nil, contextpkg.Errorf(contextpkg.ErrorCodeSummaryInvalid, "summarizer output exceeds the output bound")
+		return nil, compaction.Errorf(compaction.ErrorCodeSummaryInvalid, "summarizer output exceeds the output bound")
 	}
 	if strings.TrimSpace(collected.String()) == "" {
-		return nil, contextpkg.Errorf(contextpkg.ErrorCodeSummaryUnavailable, "summarizer returned no text")
+		return nil, compaction.Errorf(compaction.ErrorCodeSummaryUnavailable, "summarizer returned no text")
 	}
-	return &contextpkg.SummarizeResult{Text: collected.String(), Producer: s.producer}, nil
+	return &compaction.SummarizeResult{Text: collected.String(), Producer: s.producer}, nil
 }

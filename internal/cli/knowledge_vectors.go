@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/knowledge"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/store"
 )
 

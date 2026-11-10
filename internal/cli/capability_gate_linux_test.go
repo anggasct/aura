@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/workflow"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/capability"
 )
 
 const allCapabilities = "exec-linux,workspace-read,workspace-write,public-web,provider-search"

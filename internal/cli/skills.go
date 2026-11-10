@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/skills"
+	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -159,14 +159,14 @@ type skillActivationLog struct {
 	events store.EventKindReader
 }
 
-func (l *skillActivationLog) Activations(ctx context.Context, sessionID string, limit int) ([]runtime.SkillActivation, error) {
-	events, err := l.events.LatestByKind(ctx, sessionID, runtime.EventKindSkillActivated, limit)
+func (l *skillActivationLog) Activations(ctx context.Context, sessionID string, limit int) ([]turn.SkillActivation, error) {
+	events, err := l.events.LatestByKind(ctx, sessionID, turn.EventKindSkillActivated, limit)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]runtime.SkillActivation, 0, len(events))
+	out := make([]turn.SkillActivation, 0, len(events))
 	for i := range events {
-		var activation runtime.SkillActivation
+		var activation turn.SkillActivation
 		if err := json.Unmarshal(events[i].Payload, &activation); err != nil || activation.SkillID == "" {
 			continue
 		}

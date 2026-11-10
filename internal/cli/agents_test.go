@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 func writeAgentsConfig(t *testing.T, agentsSection string) string {

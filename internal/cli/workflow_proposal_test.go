@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/principal"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
-	"github.com/anggasct/aura/internal/workflow"
 )
 
 type proposalHarness struct {

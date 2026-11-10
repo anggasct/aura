@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	broadcastpkg "github.com/anggasct/aura/internal/broadcast"
+	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
 )
 
 func writeBroadcastConfig(t *testing.T, content string) string {

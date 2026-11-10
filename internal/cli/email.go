@@ -8,14 +8,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/approval"
-	"github.com/anggasct/aura/internal/channel/email"
+	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	runtimechannelhost "github.com/anggasct/aura/internal/runtime/channelhost"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/toolbroker"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 type emailCursors struct {

@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/capability/capabilitytest"
-	"github.com/anggasct/aura/internal/knowledge"
-	"github.com/anggasct/aura/internal/principal"
-	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/principal"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 type kbSearchRig struct {

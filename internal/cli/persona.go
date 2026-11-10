@@ -9,12 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
 )
 
 const soulDigestDisplayLength = 12
@@ -23,13 +23,13 @@ type registryPersonas struct {
 	registry *auraagent.Registry
 }
 
-func (p registryPersonas) Fingerprint(agentID string) (runtime.PersonaFingerprint, bool) {
+func (p registryPersonas) Fingerprint(agentID string) (turn.PersonaFingerprint, bool) {
 	definition, ok := p.registry.Lookup(agentID)
 	if !ok {
-		return runtime.PersonaFingerprint{}, false
+		return turn.PersonaFingerprint{}, false
 	}
 	fingerprint := definition.Fingerprint()
-	return runtime.PersonaFingerprint{
+	return turn.PersonaFingerprint{
 		AgentID:     fingerprint.AgentID,
 		SoulSHA256:  fingerprint.SoulSHA256,
 		ToolsSHA256: fingerprint.ToolsSHA256,
@@ -46,7 +46,7 @@ func (p registryPersonas) Knowledge(agentID string, class principal.Class) []str
 }
 
 func personaTurnHook(recorder *telemetry.PersonaRecorder) postTurnHook {
-	return func(ctx context.Context, req *runtime.TurnRequest, _ []store.RuntimeEvent) error {
+	return func(ctx context.Context, req *turn.TurnRequest, _ []store.RuntimeEvent) error {
 		recorder.Turn(ctx, req.AgentID)
 		return nil
 	}
@@ -65,14 +65,14 @@ func logPersonas(ctx context.Context, logger *slog.Logger, registry *auraagent.R
 func resolveChatPersona(ctx context.Context, registry *auraagent.Registry, sessions store.SessionService, sessionID, requested string) (string, error) {
 	if requested != "" {
 		if _, ok := registry.Lookup(requested); !ok {
-			return "", &runtime.Error{Code: runtime.ErrorCodePersonaNotFound, Detail: fmt.Sprintf("persona %q is not registered", requested)}
+			return "", &turn.Error{Code: turn.ErrorCodePersonaNotFound, Detail: fmt.Sprintf("persona %q is not registered", requested)}
 		}
 	}
 	if sessionID != "" {
 		session, err := sessions.Get(ctx, sessionID)
 		switch {
 		case err == nil && requested != "" && requested != session.AgentID:
-			return "", &runtime.Error{Code: runtime.ErrorCodePersonaMismatch, Detail: fmt.Sprintf("session %s belongs to persona %q, not %q", sessionID, session.AgentID, requested)}
+			return "", &turn.Error{Code: turn.ErrorCodePersonaMismatch, Detail: fmt.Sprintf("session %s belongs to persona %q, not %q", sessionID, session.AgentID, requested)}
 		case err == nil:
 			return session.AgentID, nil
 		case !errors.Is(err, sql.ErrNoRows):

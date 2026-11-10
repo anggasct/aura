@@ -12,15 +12,15 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
-	personaeval "github.com/anggasct/aura/internal/eval/persona"
-	"github.com/anggasct/aura/internal/model"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
-	runtimeengine "github.com/anggasct/aura/internal/runtime/engine"
-	runtimeingress "github.com/anggasct/aura/internal/runtime/ingress"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -63,7 +63,7 @@ func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Defi
 		}
 		transcript := make([]personaeval.Exchange, 0, len(turns))
 		for i, text := range turns {
-			req := &runtime.TurnRequest{
+			req := &turn.TurnRequest{
 				TurnID: fmt.Sprintf("persona-eval-behavior-%d", i+1), SessionID: personaeval.SessionID, PrincipalID: "discord:eval", PrincipalClass: class,
 				Origin: "discord", AgentID: definition.ID, Parts: []runtimeingress.InputPart{{Text: text}},
 			}
@@ -83,7 +83,7 @@ func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Defi
 	})
 }
 
-func persistEvalEvent(ctx context.Context, events store.EventStore, req *runtime.TurnRequest, event *store.RuntimeEvent) error {
+func persistEvalEvent(ctx context.Context, events store.EventStore, req *turn.TurnRequest, event *store.RuntimeEvent) error {
 	if event.ID == "" {
 		event.ID = runtimeengine.NewTurnID()
 	}

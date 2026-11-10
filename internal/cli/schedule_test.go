@@ -10,22 +10,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/broadcast"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/scheduler"
+	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type fakeCronEngine struct {
 	mu      sync.Mutex
-	calls   []*runtime.TurnRequest
+	calls   []*turn.TurnRequest
 	batches [][]store.RuntimeEvent
 	errs    []error
 }
 
-func (f *fakeCronEngine) Run(_ context.Context, req *runtime.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (f *fakeCronEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, req)
@@ -59,9 +59,9 @@ func cronTestDB(t *testing.T) *sql.DB {
 
 func cronCompletedBatch(turnID, text string) []store.RuntimeEvent {
 	return []store.RuntimeEvent{
-		{Kind: runtime.EventKindTurnAccepted, TurnID: turnID},
+		{Kind: turn.EventKindTurnAccepted, TurnID: turnID},
 		{Kind: "message.completed", TurnID: turnID, Payload: json.RawMessage(`{"text":"` + text + `"}`)},
-		{Kind: runtime.EventKindTurnCompleted, TurnID: turnID},
+		{Kind: turn.EventKindTurnCompleted, TurnID: turnID},
 	}
 }
 
@@ -69,7 +69,7 @@ func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 	db := cronTestDB(t)
 	engine := &fakeCronEngine{batches: [][]store.RuntimeEvent{cronCompletedBatch("turn-1", "nightly done")}}
 	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
-	result, err := runner.RunTurn(t.Context(), &scheduler.TurnRequest{
+	result, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "internal",
 		Prompt: "summarize", IdempotencyKey: "cron:job-1:20260912T210000",
 	})
@@ -92,12 +92,12 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 	db := cronTestDB(t)
 	engine := &fakeCronEngine{batches: [][]store.RuntimeEvent{
 		{
-			{Kind: runtime.EventKindTurnAccepted, TurnID: "turn-9"},
-			{Kind: runtime.EventKindTurnFailed, TurnID: "turn-9"},
+			{Kind: turn.EventKindTurnAccepted, TurnID: "turn-9"},
+			{Kind: turn.EventKindTurnFailed, TurnID: "turn-9"},
 		},
 	}}
 	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
-	result, err := runner.RunTurn(t.Context(), &scheduler.TurnRequest{
+	result, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-9", PrincipalID: "cron", Origin: "internal",
 		Prompt: "summarize", IdempotencyKey: "key-9",
 	})
@@ -109,10 +109,10 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 	}
 
 	starved := &fakeCronEngine{batches: [][]store.RuntimeEvent{
-		{{Kind: runtime.EventKindTurnAccepted, TurnID: "turn-8"}},
+		{{Kind: turn.EventKindTurnAccepted, TurnID: "turn-8"}},
 	}}
 	starvedRunner := &engineTurnRunner{engine: starved, sessions: store.NewSessionService(db)}
-	if _, err := starvedRunner.RunTurn(t.Context(), &scheduler.TurnRequest{
+	if _, err := starvedRunner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-8", PrincipalID: "cron", Origin: "internal",
 		Prompt: "summarize", IdempotencyKey: "key-8",
 	}); err == nil {
@@ -122,16 +122,16 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 
 func TestEngineTurnRunnerMapsOverload(t *testing.T) {
 	db := cronTestDB(t)
-	engine := &fakeCronEngine{errs: []error{&runtime.Error{Code: runtime.ErrorCodeRuntimeOverloaded, Detail: "full"}}}
+	engine := &fakeCronEngine{errs: []error{&turn.Error{Code: turn.ErrorCodeRuntimeOverloaded, Detail: "full"}}}
 	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
-	_, err := runner.RunTurn(t.Context(), &scheduler.TurnRequest{
+	_, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "internal",
 		Prompt: "summarize", IdempotencyKey: "key-1",
 	})
 	if err == nil {
 		t.Fatal("overload swallowed")
 	}
-	if code, ok := scheduler.CodeOf(err); !ok || code != scheduler.ErrorCodeRuntimeOverloaded {
+	if code, ok := schedule.CodeOf(err); !ok || code != schedule.ErrorCodeRuntimeOverloaded {
 		t.Errorf("overload code = %v, %v", code, ok)
 	}
 	if _, err := runner.RunTurn(t.Context(), nil); err == nil {
@@ -164,7 +164,7 @@ func TestCronNotifierSubmitsBroadcast(t *testing.T) {
 	db := cronTestDB(t)
 	var started []string
 	notifier := &cronNotifier{broadcaster: testCronBroadcaster(t, db, &started)}
-	if err := notifier.Notify(t.Context(), &scheduler.NotifyRequest{
+	if err := notifier.Notify(t.Context(), &schedule.NotifyRequest{
 		Producer: "cron", Key: "cron:occ-1", Priority: "info",
 		DestinationAlias: "default", Text: "all quiet",
 	}); err != nil {
@@ -183,7 +183,7 @@ func TestCronNotifierSubmitsBroadcast(t *testing.T) {
 	if err := notifier.Notify(t.Context(), nil); err == nil {
 		t.Error("nil notify accepted")
 	}
-	if err := (&cronNotifier{}).Notify(t.Context(), &scheduler.NotifyRequest{}); err == nil {
+	if err := (&cronNotifier{}).Notify(t.Context(), &schedule.NotifyRequest{}); err == nil {
 		t.Error("unwired notifier accepted")
 	}
 }
@@ -192,7 +192,7 @@ func TestScheduleStoreAdapterRoundTrip(t *testing.T) {
 	db := cronTestDB(t)
 	adapter := &scheduleStore{store: store.NewScheduleStore(db)}
 	now := time.Now().UTC()
-	if err := adapter.InsertJob(t.Context(), &scheduler.Job{
+	if err := adapter.InsertJob(t.Context(), &schedule.Job{
 		ID: "job-1", Name: "n", CronExpression: "* * * * *", Timezone: "UTC",
 		Prompt: "p", OriginChannel: "discord", OriginDestination: "default",
 		OverlapPolicy: "skip", State: "active", Version: 1, CreatedAt: now, UpdatedAt: now,
@@ -239,7 +239,7 @@ func TestRegisterScheduleHandler(t *testing.T) {
 	if err := registerScheduleHandler(registrar, runner); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if len(registrar.names) != 1 || registrar.names[0] != scheduler.HandlerName {
+	if len(registrar.names) != 1 || registrar.names[0] != schedule.HandlerName {
 		t.Errorf("registered = %v", registrar.names)
 	}
 	if err := registerScheduleHandler(registrar, nil); err == nil {
@@ -264,7 +264,7 @@ func TestResumeScheduleRuns(t *testing.T) {
 		}
 	}
 	rt := durable.NewFake()
-	rt.RegisterHandler(scheduler.HandlerName, func(context.Context, durable.Invocation) error { return nil })
+	rt.RegisterHandler(schedule.HandlerName, func(context.Context, durable.Invocation) error { return nil })
 	count, err := resumeScheduleRuns(t.Context(), rt, db)
 	if err != nil {
 		t.Fatalf("resumeScheduleRuns(): %v", err)

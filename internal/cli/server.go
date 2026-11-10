@@ -10,25 +10,25 @@ import (
 
 	"github.com/spf13/cobra"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/approval"
-	"github.com/anggasct/aura/internal/child"
-	"github.com/anggasct/aura/internal/command"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/logging"
-	"github.com/anggasct/aura/internal/model"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/runtime/adk"
-	"github.com/anggasct/aura/internal/runtime/engine"
-	"github.com/anggasct/aura/internal/sandbox"
-	"github.com/anggasct/aura/internal/server"
+	"github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/logging"
+	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/server"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/adk"
+	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
-	"github.com/anggasct/aura/internal/toolbroker"
-	"github.com/anggasct/aura/internal/tools/builtin"
-	"github.com/anggasct/aura/internal/tools/interpreter"
-	"github.com/anggasct/aura/internal/workflow"
 )
 
 func newServerCmd(gf *globalFlags) *cobra.Command {
@@ -203,7 +203,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 				runtimeadk.WithAgentResolver(agentRegistry, routeModel),
 				ownerContextOption(ctx, cfg.Owner, logger),
 			}
-			var memoryHook func(ctx context.Context, req *runtime.TurnRequest, events []store.RuntimeEvent) error
+			var memoryHook func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
 			if cfg.Memory.Enabled {
 				memoryRecorder, err := telemetry.NewMemoryRecorder(pipeline.MeterProvider())
 				if err != nil {

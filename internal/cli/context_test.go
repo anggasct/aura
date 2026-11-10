@@ -15,7 +15,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
-	contextpkg "github.com/anggasct/aura/internal/context"
+	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -174,7 +174,7 @@ func TestContextSummaryStoreRoundTrip(t *testing.T) {
 		t.Errorf("listed = %+v", listed)
 	}
 	payload := []byte(`{"source":{"start_sequence":1,"end_sequence":2,"event_ids":[],"digest":"abc"},"producer":{"provider":"p","model":"m","model_version":"","prompt_version":"v1","prompt_digest":"d"},"tokens":{"source":4,"summary":2,"accounting":"exact"},"trust":"derived_untrusted","summary":{"goals":["g"],"decisions":[],"constraints":[],"open_work":[],"facts":[]},"generated_at":"2026-09-14T00:00:00Z","kind":"context.summary.v1","schema_version":1}`)
-	record := &contextpkg.SummaryRecord{ID: "ctxsum-test", SessionID: "sess-1", StartSequence: 1, EndSequence: 2, TurnID: "t1", Payload: payload, CreatedAt: time.Now().UTC()}
+	record := &compaction.SummaryRecord{ID: "ctxsum-test", SessionID: "sess-1", StartSequence: 1, EndSequence: 2, TurnID: "t1", Payload: payload, CreatedAt: time.Now().UTC()}
 	if err := adapter.UpsertSummary(t.Context(), record); err != nil {
 		t.Fatalf("UpsertSummary: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestContextSummaryStoreRoundTrip(t *testing.T) {
 	if err := adapter.UpsertSummary(nilCtx, record); err == nil {
 		t.Errorf("expected nil context rejection")
 	}
-	if err := adapter.UpsertSummary(t.Context(), &contextpkg.SummaryRecord{ID: "x", SessionID: "sess-1"}); err == nil {
+	if err := adapter.UpsertSummary(t.Context(), &compaction.SummaryRecord{ID: "x", SessionID: "sess-1"}); err == nil {
 		t.Errorf("expected anchor turn rejection")
 	}
 }
@@ -224,8 +224,8 @@ func (f *fakeContextLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMReque
 
 func TestRouterSummarizerCollectsText(t *testing.T) {
 	llm := &fakeContextLLM{texts: []string{"part one ", "part two"}}
-	summarizer := newRouterSummarizer(llm, contextpkg.Producer{Provider: "p", Model: "m"}, 2048)
-	result, err := summarizer.Summarize(t.Context(), &contextpkg.SummarizeRequest{Task: "compression", Prompt: "summarize", Sources: []string{"a", "b"}, MaxOutputTokens: 512})
+	summarizer := newRouterSummarizer(llm, compaction.Producer{Provider: "p", Model: "m"}, 2048)
+	result, err := summarizer.Summarize(t.Context(), &compaction.SummarizeRequest{Task: "compression", Prompt: "summarize", Sources: []string{"a", "b"}, MaxOutputTokens: 512})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -236,27 +236,27 @@ func TestRouterSummarizerCollectsText(t *testing.T) {
 
 func TestRouterSummarizerRejects(t *testing.T) {
 	good := &fakeContextLLM{texts: []string{"ok"}}
-	summarizer := newRouterSummarizer(good, contextpkg.Producer{Provider: "p", Model: "m"}, 2048)
+	summarizer := newRouterSummarizer(good, compaction.Producer{Provider: "p", Model: "m"}, 2048)
 	var nilCtx context.Context
-	if _, err := summarizer.Summarize(nilCtx, &contextpkg.SummarizeRequest{}); err == nil {
+	if _, err := summarizer.Summarize(nilCtx, &compaction.SummarizeRequest{}); err == nil {
 		t.Errorf("expected nil context rejection")
 	}
 	if _, err := summarizer.Summarize(t.Context(), nil); err == nil {
 		t.Errorf("expected nil request rejection")
 	}
-	if _, err := newRouterSummarizer(nil, contextpkg.Producer{}, 2048).Summarize(t.Context(), &contextpkg.SummarizeRequest{MaxOutputTokens: 1}); err == nil {
+	if _, err := newRouterSummarizer(nil, compaction.Producer{}, 2048).Summarize(t.Context(), &compaction.SummarizeRequest{MaxOutputTokens: 1}); err == nil {
 		t.Errorf("expected missing model rejection")
 	}
 	big := &fakeContextLLM{texts: []string{strings.Repeat("x", 9000)}}
-	if _, err := newRouterSummarizer(big, contextpkg.Producer{}, 64).Summarize(t.Context(), &contextpkg.SummarizeRequest{MaxOutputTokens: 64}); err == nil {
+	if _, err := newRouterSummarizer(big, compaction.Producer{}, 64).Summarize(t.Context(), &compaction.SummarizeRequest{MaxOutputTokens: 64}); err == nil {
 		t.Errorf("expected oversized rejection")
-	} else if code, ok := contextpkg.CodeOf(err); !ok || code != contextpkg.ErrorCodeSummaryInvalid {
+	} else if code, ok := compaction.CodeOf(err); !ok || code != compaction.ErrorCodeSummaryInvalid {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 	empty := &fakeContextLLM{}
-	if _, err := newRouterSummarizer(empty, contextpkg.Producer{}, 2048).Summarize(t.Context(), &contextpkg.SummarizeRequest{MaxOutputTokens: 64}); err == nil {
+	if _, err := newRouterSummarizer(empty, compaction.Producer{}, 2048).Summarize(t.Context(), &compaction.SummarizeRequest{MaxOutputTokens: 64}); err == nil {
 		t.Errorf("expected empty rejection")
-	} else if code, ok := contextpkg.CodeOf(err); !ok || code != contextpkg.ErrorCodeSummaryUnavailable {
+	} else if code, ok := compaction.CodeOf(err); !ok || code != compaction.ErrorCodeSummaryUnavailable {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 }

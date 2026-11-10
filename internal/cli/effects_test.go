@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/effect"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )

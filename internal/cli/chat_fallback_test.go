@@ -13,7 +13,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/model"
+	"github.com/anggasct/aura/internal/platform/model"
 )
 
 func chatTestConfig(t *testing.T, suffix, failingURL, backupURL string) (cfg *config.Config, routeName string) {

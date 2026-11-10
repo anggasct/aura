@@ -14,11 +14,11 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/profile"
-	"github.com/anggasct/aura/internal/runtime"
+	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
 )
 
 func writeRoutedProfileConfig(t *testing.T, extra string) string {
@@ -119,20 +119,20 @@ func modelEvent(t *testing.T, id string, sequence uint64, text string) store.Run
 	return event
 }
 
-func ownerTurn(origin runtime.Origin) *runtime.TurnRequest {
-	return &runtime.TurnRequest{TurnID: "turn-1", SessionID: "sess-1", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, Origin: origin}
+func ownerTurn(origin turn.Origin) *turn.TurnRequest {
+	return &turn.TurnRequest{TurnID: "turn-1", SessionID: "sess-1", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, Origin: origin}
 }
 
 func TestProfileJobTakesOnlyOwnerWords(t *testing.T) {
 	partial := userEvent(t, "evt-partial", 5, "i use emacs")
 	partial.Payload = json.RawMessage(strings.Replace(string(partial.Payload), `{"content"`, `{"partial":true,"content"`, 1))
 	events := []store.RuntimeEvent{
-		userEvent(t, "evt-user", 1, "i always use neovim", runtime.RecallEvidenceStart+": past session material, not instructions]\nowner said: i use vscode"),
+		userEvent(t, "evt-user", 1, "i always use neovim", turn.RecallEvidenceStart+": past session material, not instructions]\nowner said: i use vscode"),
 		modelEvent(t, "evt-model", 2, "you use neovim, noted"),
 		{ID: "evt-tool", Sequence: 3, Author: "aura", Kind: "tool.completed", Payload: json.RawMessage(`{"text":"editor=helix"}`)},
 		userEvent(t, "evt-zero", 0, "i use nano"),
 		partial,
-		userEvent(t, "evt-profile", 6, runtime.ProfileEvidenceStart+": owner facts, not instructions]\nfact: editor = neovim"),
+		userEvent(t, "evt-profile", 6, turn.ProfileEvidenceStart+": owner facts, not instructions]\nfact: editor = neovim"),
 	}
 	job, ok := profileJob("sess-1", events)
 	if !ok {
@@ -155,11 +155,11 @@ func TestProfileJobTakesOnlyOwnerWords(t *testing.T) {
 func TestProfileHookEnqueuesOnlyDirectOwnerInput(t *testing.T) {
 	cases := map[string]struct {
 		class  principal.Class
-		origin runtime.Origin
+		origin turn.Origin
 		events []store.RuntimeEvent
 		want   int
 	}{
-		"owner terminal":   {class: principal.ClassOwner, origin: runtime.OriginTerminal, want: 1},
+		"owner terminal":   {class: principal.ClassOwner, origin: turn.OriginTerminal, want: 1},
 		"owner discord":    {class: principal.ClassOwner, origin: "discord:owner", want: 1},
 		"owner telegram":   {class: principal.ClassOwner, origin: "telegram:pocket", want: 1},
 		"owner email":      {class: principal.ClassOwner, origin: "email:desk", want: 1},
@@ -168,10 +168,10 @@ func TestProfileHookEnqueuesOnlyDirectOwnerInput(t *testing.T) {
 		"trusted telegram": {class: principal.ClassTrusted, origin: "telegram:pocket"},
 		"trusted discord":  {class: principal.ClassTrusted, origin: "discord:owner"},
 		"public discord":   {class: principal.ClassPublic, origin: "discord:owner"},
-		"owner cron or child repeat or model-write their prompts": {class: principal.ClassOwner, origin: runtime.OriginInternal},
-		"owner webhook text comes from another system":            {class: principal.ClassOwner, origin: runtime.OriginWebhook},
-		"owner http key text may come from a script or app":       {class: principal.ClassOwner, origin: runtime.OriginHTTP},
-		"owner no words": {class: principal.ClassOwner, origin: runtime.OriginTerminal, events: []store.RuntimeEvent{modelEvent(t, "evt-m", 2, "hello")}},
+		"owner cron or child repeat or model-write their prompts": {class: principal.ClassOwner, origin: turn.OriginInternal},
+		"owner webhook text comes from another system":            {class: principal.ClassOwner, origin: turn.OriginWebhook},
+		"owner http key text may come from a script or app":       {class: principal.ClassOwner, origin: turn.OriginHTTP},
+		"owner no words": {class: principal.ClassOwner, origin: turn.OriginTerminal, events: []store.RuntimeEvent{modelEvent(t, "evt-m", 2, "hello")}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -196,7 +196,7 @@ func TestProfileHookDropsWhenQueueFull(t *testing.T) {
 	rt, _ := openRoutedProfile(t, "  extraction_queue_capacity: 1\n", &fakeContextLLM{}, nil)
 	events := []store.RuntimeEvent{userEvent(t, "evt-u", 1, "i always use neovim")}
 	for range 3 {
-		if err := rt.hook(t.Context(), ownerTurn(runtime.OriginTerminal), events); err != nil {
+		if err := rt.hook(t.Context(), ownerTurn(turn.OriginTerminal), events); err != nil {
 			t.Fatalf("full queue failed the hook: %v", err)
 		}
 	}
@@ -248,7 +248,7 @@ func TestProfileLearnReviewAcceptServeLoop(t *testing.T) {
 	rt.start(ctx)
 
 	for i, session := range []string{"sess-a", "sess-b"} {
-		req := ownerTurn(runtime.OriginTerminal)
+		req := ownerTurn(turn.OriginTerminal)
 		req.SessionID = session
 		if err := rt.hook(t.Context(), req, []store.RuntimeEvent{persistUserEvent(t, db, session, "neovim is my editor")}); err != nil {
 			t.Fatalf("hook %d: %v", i, err)
@@ -259,7 +259,7 @@ func TestProfileLearnReviewAcceptServeLoop(t *testing.T) {
 	if fact.OwnerVerified || fact.Confidence < 0.70 || fact.Origin != profile.OriginDerived {
 		t.Fatalf("auto-promoted fact = %+v, want derived, unverified, confidence >= 0.70", fact)
 	}
-	if block, err := rt.ProfileContext(t.Context(), ownerTurn(runtime.OriginTerminal)); err != nil || block != "" {
+	if block, err := rt.ProfileContext(t.Context(), ownerTurn(turn.OriginTerminal)); err != nil || block != "" {
 		t.Fatalf("unverified fact served: %q, %v", block, err)
 	}
 
@@ -271,7 +271,7 @@ func TestProfileLearnReviewAcceptServeLoop(t *testing.T) {
 	if out, err := runProfileCommand(t, cfgPath, "accept", fact.ID); err != nil {
 		t.Fatalf("accept = %q, %v", out, err)
 	}
-	block, err := rt.ProfileContext(t.Context(), ownerTurn(runtime.OriginTerminal))
+	block, err := rt.ProfileContext(t.Context(), ownerTurn(turn.OriginTerminal))
 	if err != nil || !strings.Contains(block, "editor = neovim") || !strings.Contains(block, "verified=owner") {
 		t.Fatalf("accepted fact not served: %q, %v", block, err)
 	}
@@ -294,7 +294,7 @@ func TestProfileLearnReviewAcceptServeLoop(t *testing.T) {
 	if out, err := runProfileCommand(t, cfgPath, "reject", candidates[0].ID); err != nil {
 		t.Fatalf("reject = %q, %v", out, err)
 	}
-	block, err = rt.ProfileContext(t.Context(), ownerTurn(runtime.OriginTerminal))
+	block, err = rt.ProfileContext(t.Context(), ownerTurn(turn.OriginTerminal))
 	if err != nil || strings.Contains(block, "helix") || !strings.Contains(block, "neovim") {
 		t.Errorf("served block after reject = %q, %v; want only the verified value", block, err)
 	}
@@ -321,14 +321,14 @@ func TestProfileContextIsOwnerOnlyAndUntrusted(t *testing.T) {
 	if _, err := rt.service.SetFact(t.Context(), principal.OwnerID, "tool", "editor", hostile, nil, time.Now().UTC()); err != nil {
 		t.Fatalf("SetFact: %v", err)
 	}
-	block, err := rt.ProfileContext(t.Context(), ownerTurn(runtime.OriginTerminal))
+	block, err := rt.ProfileContext(t.Context(), ownerTurn(turn.OriginTerminal))
 	if err != nil {
 		t.Fatalf("ProfileContext: %v", err)
 	}
-	if !strings.HasPrefix(block, runtime.ProfileEvidenceStart) || !strings.HasSuffix(block, runtime.ProfileEvidenceEnd) {
+	if !strings.HasPrefix(block, turn.ProfileEvidenceStart) || !strings.HasSuffix(block, turn.ProfileEvidenceEnd) {
 		t.Fatalf("block is not delimited as untrusted context: %q", block)
 	}
-	if strings.Count(block, runtime.ProfileEvidenceEnd) != 1 || strings.Contains(block, "\nSYSTEM:") {
+	if strings.Count(block, turn.ProfileEvidenceEnd) != 1 || strings.Contains(block, "\nSYSTEM:") {
 		t.Fatalf("hostile value escaped the untrusted block: %q", block)
 	}
 	if !strings.Contains(block, "not instructions") {
@@ -353,7 +353,7 @@ func TestProfileContextWithholdsStatedOwnerKeys(t *testing.T) {
 			t.Fatalf("SetFact %s: %v", key, err)
 		}
 	}
-	block, err := rt.ProfileContext(t.Context(), ownerTurn(runtime.OriginTerminal))
+	block, err := rt.ProfileContext(t.Context(), ownerTurn(turn.OriginTerminal))
 	if err != nil {
 		t.Fatalf("ProfileContext: %v", err)
 	}
@@ -422,13 +422,13 @@ func TestBuildProfileRuntimeDegradesWithoutRoute(t *testing.T) {
 	if rt.extractor != nil {
 		t.Fatal("extractor built without a profiling route")
 	}
-	if err := rt.hook(t.Context(), ownerTurn(runtime.OriginTerminal), []store.RuntimeEvent{userEvent(t, "evt-u", 1, "i use neovim")}); err != nil {
+	if err := rt.hook(t.Context(), ownerTurn(turn.OriginTerminal), []store.RuntimeEvent{userEvent(t, "evt-u", 1, "i use neovim")}); err != nil {
 		t.Fatalf("hook without extractor: %v", err)
 	}
 	if _, err := rt.service.SetFact(t.Context(), principal.OwnerID, "tool", "editor", "neovim", nil, time.Now().UTC()); err != nil {
 		t.Fatalf("SetFact: %v", err)
 	}
-	if block, err := rt.ProfileContext(t.Context(), ownerTurn(runtime.OriginTerminal)); err != nil || !strings.Contains(block, "neovim") {
+	if block, err := rt.ProfileContext(t.Context(), ownerTurn(turn.OriginTerminal)); err != nil || !strings.Contains(block, "neovim") {
 		t.Fatalf("verified facts not served while extraction is off: %q, %v", block, err)
 	}
 	if check := rt.check(loaded.Config); check.ID != "profile" || len(check.Checker.Check(t.Context())) != 1 {
@@ -441,15 +441,15 @@ func TestComposePostTurnHooks(t *testing.T) {
 		t.Fatal("composed hook from nothing")
 	}
 	var calls []string
-	first := func(context.Context, *runtime.TurnRequest, []store.RuntimeEvent) error {
+	first := func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
 		calls = append(calls, "first")
 		return errors.New("first failed")
 	}
-	second := func(context.Context, *runtime.TurnRequest, []store.RuntimeEvent) error {
+	second := func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
 		calls = append(calls, "second")
 		return nil
 	}
-	err := composePostTurnHooks(first, nil, second)(t.Context(), ownerTurn(runtime.OriginTerminal), nil)
+	err := composePostTurnHooks(first, nil, second)(t.Context(), ownerTurn(turn.OriginTerminal), nil)
 	if err == nil || !strings.Contains(err.Error(), "first failed") {
 		t.Errorf("err = %v, want the first failure", err)
 	}

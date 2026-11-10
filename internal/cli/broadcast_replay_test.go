@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/broadcast"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/effect"
+	"github.com/anggasct/aura/internal/modules/broadcast"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 type countingEffectProvider struct {

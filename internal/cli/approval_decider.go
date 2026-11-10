@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/anggasct/aura/internal/channel/approval"
-	"github.com/anggasct/aura/internal/toolbroker"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
 type approvalChannel interface {

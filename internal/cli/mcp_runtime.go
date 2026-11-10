@@ -6,15 +6,15 @@ import (
 	"log/slog"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/egress"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/mcp"
-	"github.com/anggasct/aura/internal/sandbox"
-	"github.com/anggasct/aura/internal/telemetry"
-	"github.com/anggasct/aura/internal/toolbroker"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"go.opentelemetry.io/otel/metric"
 )
 

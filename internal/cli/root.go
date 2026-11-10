@@ -11,10 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/channel/terminal"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/sandbox"
-	"github.com/anggasct/aura/internal/tools/interpreter"
+	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 type usageError struct {

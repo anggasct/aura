@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/approval"
+	"github.com/anggasct/aura/internal/platform/approval"
 )
 
 type recordingDurable struct {

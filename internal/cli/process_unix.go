@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func processProbe() (health.ProcessStatus, bool) {

@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable/restate"
+	"github.com/anggasct/aura/internal/platform/durable/restate"
 )
 
 func newDurableStatusCmdForTest(t *testing.T, cfg *config.Config) (*cobra.Command, *bytes.Buffer) {

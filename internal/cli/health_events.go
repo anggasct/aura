@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/anggasct/aura/internal/health"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 )
 

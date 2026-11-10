@@ -11,7 +11,7 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 const (

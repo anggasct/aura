@@ -16,15 +16,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/approval"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable"
-	"github.com/anggasct/aura/internal/integration/github"
-	"github.com/anggasct/aura/internal/logging"
-	"github.com/anggasct/aura/internal/runtime/adk"
-	"github.com/anggasct/aura/internal/toolbroker"
-	"github.com/anggasct/aura/internal/tools/builtin"
-	"github.com/anggasct/aura/internal/workflow"
+	"github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/github"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/logging"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
 func newWorkflowCmd(gf *globalFlags) *cobra.Command {

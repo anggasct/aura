@@ -15,14 +15,14 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/anggasct/aura/internal/command"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/runtime/adk"
-	"github.com/anggasct/aura/internal/runtime/engine"
-	"github.com/anggasct/aura/internal/runtime/ingress"
-	"github.com/anggasct/aura/internal/skills"
+	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/adk"
+	"github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 
@@ -166,11 +166,11 @@ func (h *skillHarness) pin(t *testing.T, name string) *command.SkillPin {
 
 func (h *skillHarness) turn(t *testing.T, text string, class principal.Class, pin *command.SkillPin) {
 	t.Helper()
-	req := &runtime.TurnRequest{
+	req := &turn.TurnRequest{
 		SessionID:      "sess_skill",
 		PrincipalID:    principal.OwnerID,
 		PrincipalClass: class,
-		Origin:         runtime.OriginTerminal,
+		Origin:         turn.OriginTerminal,
 		Parts:          []runtimeingress.InputPart{{Text: text}},
 		Skill:          pin,
 	}
@@ -181,12 +181,12 @@ func (h *skillHarness) turn(t *testing.T, text string, class principal.Class, pi
 		}
 		last = ev.Kind
 	}
-	if last != runtime.EventKindTurnCompleted {
+	if last != turn.EventKindTurnCompleted {
 		t.Fatalf("turn %q ended with %s", text, last)
 	}
 }
 
-func (h *skillHarness) activations(t *testing.T) []runtime.SkillActivation {
+func (h *skillHarness) activations(t *testing.T) []turn.SkillActivation {
 	t.Helper()
 	activations, err := (&skillActivationLog{events: store.NewEventKindReader(h.db)}).Activations(t.Context(), "sess_skill", 16)
 	if err != nil {
@@ -203,14 +203,14 @@ func TestSkillActivationReachesTheModelAndPersistsInTheSession(t *testing.T) {
 	h := newSkillHarness(t, map[string]string{"review-pr": skillBodyMarker + " Check auth paths first."}, defaultSkillConfig())
 	h.turn(t, "hello", principal.ClassOwner, nil)
 	baseline := h.model.last(t)
-	if strings.Contains(baseline.joined(), runtime.SkillContextStart) {
+	if strings.Contains(baseline.joined(), turn.SkillContextStart) {
 		t.Fatal("block present before any activation")
 	}
 
 	invocation := "/skill review-pr check the auth module"
 	h.turn(t, invocation, principal.ClassOwner, h.pin(t, "review-pr"))
 	invoked := h.model.last(t)
-	if !strings.Contains(invoked.joined(), runtime.SkillContextStart) || strings.Count(invoked.joined(), skillBodyMarker) != 1 || !strings.Contains(invoked.joined(), "untrusted third-party content") {
+	if !strings.Contains(invoked.joined(), turn.SkillContextStart) || strings.Count(invoked.joined(), skillBodyMarker) != 1 || !strings.Contains(invoked.joined(), "untrusted third-party content") {
 		t.Fatalf("invoking request lacks the pinned block:\n%s", invoked.joined())
 	}
 	if !slices.Contains(invoked.texts, invocation) {

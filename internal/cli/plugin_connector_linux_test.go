@@ -20,15 +20,15 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anggasct/aura/internal/approval"
-	"github.com/anggasct/aura/internal/mcp"
-	"github.com/anggasct/aura/internal/plugin"
-	"github.com/anggasct/aura/internal/plugin/auth"
-	"github.com/anggasct/aura/internal/plugin/auth/authtest"
-	"github.com/anggasct/aura/internal/plugin/connector"
-	"github.com/anggasct/aura/internal/principal"
-	runtimeadk "github.com/anggasct/aura/internal/runtime/adk"
-	"github.com/anggasct/aura/internal/toolbroker"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/plugin/auth"
+	"github.com/anggasct/aura/internal/modules/plugin/auth/authtest"
+	"github.com/anggasct/aura/internal/modules/plugin/connector"
+	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
 const connectorNoAuthManifest = `api_version: aura.plugin/v1
@@ -97,7 +97,7 @@ func buildTestConnector(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("find the go toolchain: %v", err)
 	}
-	build := exec.CommandContext(t.Context(), goBinary, "build", "-o", out, "github.com/anggasct/aura/internal/plugin/connector/testdata/testconnector")
+	build := exec.CommandContext(t.Context(), goBinary, "build", "-o", out, "github.com/anggasct/aura/internal/modules/plugin/connector/testdata/testconnector")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build the test connector: %v\n%s", err, output)

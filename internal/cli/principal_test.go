@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/principal"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
 

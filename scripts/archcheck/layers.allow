@@ -1,0 +1,13 @@
+internal/platform/turn/engine -> internal/modules/skills  # engine renders skills until skills provide turn context
+internal/platform/durable/restate -> internal/channels/webhook  # live durable tests drive webhook-started workflows
+internal/platform/durable/restate -> internal/modules/github  # live durable tests drive github-started workflows
+internal/platform/durable/restate -> internal/modules/knowledge  # live durable tests drive knowledge ingestion
+internal/platform/durable/restate -> internal/modules/workflow  # live durable tests drive workflow runs
+internal/modules/github -> internal/channels/webhook  # github consumes the webhook contract until it moves to the platform
+internal/modules/github -> internal/modules/workflow  # github starts workflows until it uses a starter port
+internal/modules/builtin -> internal/modules/codeexec  # builtin assembles tool adapters until each module provides its tools
+internal/modules/builtin -> internal/modules/fetch  # builtin assembles tool adapters until each module provides its tools
+internal/modules/builtin -> internal/modules/filesystem  # builtin assembles tool adapters until each module provides its tools
+internal/modules/builtin -> internal/modules/search  # builtin assembles tool adapters until each module provides its tools
+internal/modules/builtin -> internal/modules/shellexec  # builtin assembles tool adapters until each module provides its tools
+internal/channels/discord -> internal/modules/memory  # discord tests use the memory recorder until they take a port

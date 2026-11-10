@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/skills"
+	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )

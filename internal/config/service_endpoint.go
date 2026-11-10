@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anggasct/aura/internal/egress"
+	"github.com/anggasct/aura/internal/platform/egress"
 )
 
 const (

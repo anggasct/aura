@@ -11,14 +11,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
-	"github.com/anggasct/aura/internal/channel/discord"
-	"github.com/anggasct/aura/internal/channel/telegram"
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/principal"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
-	"github.com/anggasct/aura/internal/usage"
 )
 
 const (

@@ -3,8 +3,8 @@ package config
 import (
 	"testing"
 
-	"github.com/anggasct/aura/internal/capability"
-	"github.com/anggasct/aura/internal/tools/interpreter"
+	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/capability"
 )
 
 func TestLoad_CodeInterpreterCapabilityByBuildAndPlatform(t *testing.T) {

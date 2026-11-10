@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
-	"github.com/anggasct/aura/internal/usage"
 )
 
 func writeUsageConfig(t *testing.T, dataRoot string) string {

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/sync"
+	"github.com/anggasct/aura/internal/modules/gitsync"
 )
 
 func writeSyncCLIConfig(t *testing.T, syncSection string) string {
@@ -88,7 +88,7 @@ func TestSyncRunRefusedWhenDisabled(t *testing.T) {
 	if err == nil {
 		t.Fatal("run without gate must fail")
 	}
-	if code, ok := sync.CodeOf(err); !ok || code != sync.ErrorCodeGateRefused {
+	if code, ok := gitsync.CodeOf(err); !ok || code != gitsync.ErrorCodeGateRefused {
 		t.Fatalf("run code = %v,%v want sync_unavailable", code, ok)
 	}
 }
@@ -116,7 +116,7 @@ func TestSyncReconcileWithoutUnknown(t *testing.T) {
 		if err == nil {
 			t.Fatal("reconcile without unknown must fail")
 		}
-		if code, ok := sync.CodeOf(err); !ok || code != sync.ErrorCodeNoUnknownState {
+		if code, ok := gitsync.CodeOf(err); !ok || code != gitsync.ErrorCodeNoUnknownState {
 			t.Fatalf("reconcile code = %v,%v want sync_no_unknown_state", code, ok)
 		}
 	} else {
@@ -185,9 +185,9 @@ func TestSyncRunEnabledPrintsPassResult(t *testing.T) {
 	sshBin := writeSyncExecutable(t)
 	cfg, _ := enabledSyncConfigWithBinaries(t, gitBin, sshBin, "    - \"skills/**\"\n")
 	previous := syncRunPassFunc
-	syncRunPassFunc = func(_ context.Context, _ *config.Config, _ *sync.StateStore) (sync.PassOutcome, error) {
-		return sync.PassOutcome{
-			State:     sync.WorkerIdle,
+	syncRunPassFunc = func(_ context.Context, _ *config.Config, _ *gitsync.StateStore) (gitsync.PassOutcome, error) {
+		return gitsync.PassOutcome{
+			State:     gitsync.WorkerIdle,
 			LocalRef:  "local-abc123",
 			RemoteRef: "remote-def456",
 			Result:    "pushed",
@@ -215,7 +215,7 @@ func TestSyncStatusSeesDurableCheckpoint(t *testing.T) {
 	gitBin := writeSyncExecutable(t)
 	sshBin := writeSyncExecutable(t)
 	cfg, dataRoot := enabledSyncConfigWithBinaries(t, gitBin, sshBin, "    - \"skills/**\"\n")
-	store, err := sync.NewFileStateStore(sync.SyncStatePath(dataRoot))
+	store, err := gitsync.NewFileStateStore(gitsync.SyncStatePath(dataRoot))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestSyncReconcileFindsDurableUnknown(t *testing.T) {
 	gitBin := writeSyncExecutable(t)
 	sshBin := writeSyncExecutable(t)
 	cfg, dataRoot := enabledSyncConfigWithBinaries(t, gitBin, sshBin, "    - \"skills/**\"\n")
-	store, err := sync.NewFileStateStore(sync.SyncStatePath(dataRoot))
+	store, err := gitsync.NewFileStateStore(gitsync.SyncStatePath(dataRoot))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestSyncMissingConfigTyped(t *testing.T) {
 	if err == nil {
 		t.Fatal("status without sync section must fail")
 	}
-	if code, ok := sync.CodeOf(err); !ok || code != sync.ErrorCodeNotConfigured {
+	if code, ok := gitsync.CodeOf(err); !ok || code != gitsync.ErrorCodeNotConfigured {
 		t.Fatalf("code = %v,%v want sync_not_configured", code, ok)
 	}
 }

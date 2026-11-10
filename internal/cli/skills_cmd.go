@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/skills"
+	"github.com/anggasct/aura/internal/modules/skills"
 )
 
 func newSkillsCmd(gf *globalFlags) *cobra.Command {

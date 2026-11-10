@@ -15,7 +15,7 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
-	"github.com/anggasct/aura/internal/secret"
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 const MaxSoulBytes = 32 << 10

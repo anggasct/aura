@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"io"
 
-	"github.com/anggasct/aura/internal/channel/media"
+	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/store"
 )
 

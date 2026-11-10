@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/durable"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
-	"github.com/anggasct/aura/internal/workflow"
 )
 
 func writeWorkflowFixtures(t *testing.T, definition string) *globalFlags {

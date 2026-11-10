@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/channel/discord"
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/store"
 )

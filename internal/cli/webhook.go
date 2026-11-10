@@ -16,14 +16,14 @@ import (
 	"sync"
 	"time"
 
+	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/config"
-	gatewaywebhook "github.com/anggasct/aura/internal/gateway/webhook"
-	"github.com/anggasct/aura/internal/integration/github"
-	"github.com/anggasct/aura/internal/principal"
-	"github.com/anggasct/aura/internal/runtime"
-	"github.com/anggasct/aura/internal/runtime/ingress"
+	"github.com/anggasct/aura/internal/modules/github"
+	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/workflow"
 )
 
 const (
@@ -35,7 +35,7 @@ type webhookDispatcher struct {
 	mu         sync.Mutex
 	sessions   store.SessionService
 	executions store.WebhookExecutionStore
-	backend    runtime.AgentRuntime
+	backend    turn.AgentRuntime
 	retention  time.Duration
 	clock      func() time.Time
 	logger     *slog.Logger
@@ -46,7 +46,7 @@ type webhookDispatcher struct {
 	drains     sync.WaitGroup
 }
 
-func newWebhookDispatcher(sessions store.SessionService, executions store.WebhookExecutionStore, backend runtime.AgentRuntime, retention time.Duration, clock func() time.Time, logger *slog.Logger) (*webhookDispatcher, error) {
+func newWebhookDispatcher(sessions store.SessionService, executions store.WebhookExecutionStore, backend turn.AgentRuntime, retention time.Duration, clock func() time.Time, logger *slog.Logger) (*webhookDispatcher, error) {
 	if sessions == nil {
 		return nil, errors.New("webhook dispatcher requires a session store")
 	}
@@ -128,8 +128,8 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.
 		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
 	}
 
-	turn := webhookTurnRequest(sessionID, turnID, event)
-	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, turn)
+	turnRequest := webhookTurnRequest(sessionID, turnID, event)
+	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, turnRequest)
 	if err != nil {
 		d.logger.WarnContext(ctx, "webhook runtime refused the turn",
 			"component", "webhook",
@@ -210,8 +210,8 @@ func (d *webhookDispatcher) resubmitOrphaned(ctx context.Context, previous *stor
 		)
 		return
 	}
-	turn := webhookTurnRequest(sessionID, previous.TurnID, event)
-	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, turn)
+	turnRequest := webhookTurnRequest(sessionID, previous.TurnID, event)
+	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, turnRequest)
 	if err != nil {
 		d.logger.WarnContext(ctx, "webhook orphan resubmission skipped",
 			"component", "webhook",
@@ -268,22 +268,22 @@ func (d *webhookDispatcher) drain(ctx context.Context, executionID string, next 
 			return
 		}
 		if err != nil {
-			d.transition(ctx, executionID, store.WebhookExecutionStateFailed, "", string(runtime.ErrorCodeRuntimeInternal))
+			d.transition(ctx, executionID, store.WebhookExecutionStateFailed, "", string(turn.ErrorCodeRuntimeInternal))
 			return
 		}
 		switch event.Kind {
-		case runtime.EventKindTurnAccepted:
-		case runtime.EventKindMessageCompleted:
+		case turn.EventKindTurnAccepted:
+		case turn.EventKindMessageCompleted:
 			completedMessage = event.ID
 			d.transition(ctx, executionID, store.WebhookExecutionStateRunning, "", "")
-		case runtime.EventKindTurnCompleted:
+		case turn.EventKindTurnCompleted:
 			d.transition(ctx, executionID, store.WebhookExecutionStateCompleted, firstNonEmpty(completedMessage, event.ID), "")
 			return
-		case runtime.EventKindTurnFailed:
+		case turn.EventKindTurnFailed:
 			d.transition(ctx, executionID, store.WebhookExecutionStateFailed, firstNonEmpty(completedMessage, event.ID), failedEventCode(event.Payload))
 			return
-		case runtime.EventKindTurnCancelled:
-			d.transition(ctx, executionID, store.WebhookExecutionStateCancelled, "", string(runtime.ErrorCodeTurnCancelled))
+		case turn.EventKindTurnCancelled:
+			d.transition(ctx, executionID, store.WebhookExecutionStateCancelled, "", string(turn.ErrorCodeTurnCancelled))
 			return
 		default:
 			d.transition(ctx, executionID, store.WebhookExecutionStateRunning, "", "")
@@ -317,8 +317,8 @@ func (d *webhookDispatcher) transition(ctx context.Context, executionID, state, 
 
 type turnStep func() (store.RuntimeEvent, error, bool)
 
-func startTurn(ctx context.Context, backend runtime.AgentRuntime, turn *runtime.TurnRequest) (next turnStep, stop func(), err error) {
-	pull, release := iter.Pull2(backend.Run(ctx, turn))
+func startTurn(ctx context.Context, backend turn.AgentRuntime, turnRequest *turn.TurnRequest) (next turnStep, stop func(), err error) {
+	pull, release := iter.Pull2(backend.Run(ctx, turnRequest))
 	event, pullErr, ok := pull()
 	if !ok {
 		release()
@@ -339,13 +339,13 @@ func startTurn(ctx context.Context, backend runtime.AgentRuntime, turn *runtime.
 	return next, release, nil
 }
 
-func webhookTurnRequest(sessionID, turnID string, event *gatewaywebhook.AcceptedEvent) *runtime.TurnRequest {
-	return &runtime.TurnRequest{
+func webhookTurnRequest(sessionID, turnID string, event *gatewaywebhook.AcceptedEvent) *turn.TurnRequest {
+	return &turn.TurnRequest{
 		TurnID:         turnID,
 		SessionID:      sessionID,
 		PrincipalID:    "webhook:" + event.KeyID,
 		PrincipalClass: principal.ClassTrusted,
-		Origin:         runtime.OriginWebhook,
+		Origin:         turn.OriginWebhook,
 		Parts:          webhookTurnParts(event),
 		IdempotencyKey: "webhook:" + event.KeyID + ":" + event.Envelope.EventID,
 	}
@@ -369,7 +369,7 @@ func failedEventCode(payload []byte) string {
 		Code string `json:"code"`
 	}
 	if err := json.Unmarshal(payload, &decoded); err != nil || decoded.Code == "" {
-		return string(runtime.ErrorCodeRuntimeInternal)
+		return string(turn.ErrorCodeRuntimeInternal)
 	}
 	return decoded.Code
 }
@@ -454,7 +454,7 @@ func (l *webhookListener) Start(ctx context.Context) error {
 	}
 }
 
-func buildWebhookListener(cfg *config.Config, db *sql.DB, backend runtime.AgentRuntime, logger *slog.Logger) (*webhookListener, error) {
+func buildWebhookListener(cfg *config.Config, db *sql.DB, backend turn.AgentRuntime, logger *slog.Logger) (*webhookListener, error) {
 	if cfg == nil {
 		return nil, errors.New("webhook listener requires configuration")
 	}

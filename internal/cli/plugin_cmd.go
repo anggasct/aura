@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/plugin"
-	"github.com/anggasct/aura/internal/plugin/auth"
+	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/plugin/auth"
 )
 
 const pluginRestartNotice = "takes effect at the next server start"

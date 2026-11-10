@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/store"
 )
 

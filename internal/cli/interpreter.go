@@ -7,13 +7,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anggasct/aura/internal/capability"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/telemetry"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
-	"github.com/anggasct/aura/internal/tools/interpreter"
 )
 
 const (

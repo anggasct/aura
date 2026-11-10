@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channel/access"
-	"github.com/anggasct/aura/internal/channel/telegram"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/store"
-	toolsbuiltin "github.com/anggasct/aura/internal/tools/builtin"
 )
 
 type stubHandoffNotifier struct {

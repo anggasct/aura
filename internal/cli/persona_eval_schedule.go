@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/agent"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/health"
-	"github.com/anggasct/aura/internal/scheduler"
+	"github.com/anggasct/aura/internal/modules/schedule"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -95,13 +95,13 @@ func runPersonaEvalSchedules(ctx context.Context, configPath string, db *sql.DB,
 }
 
 func runPersonaEvalSchedule(ctx context.Context, configPath string, db *sql.DB, definition *auraagent.Definition, models behaviorModels, logger *slog.Logger, clock evalClock) {
-	schedule, err := scheduler.ParseExpression(definition.EvalBehavior.Schedule)
+	cronSchedule, err := schedule.ParseExpression(definition.EvalBehavior.Schedule)
 	if err != nil {
 		logger.WarnContext(ctx, "persona eval schedule invalid", "component", personaEvalComponent, "agent_id", definition.ID, "error", err)
 		return
 	}
 	for {
-		next, err := scheduler.NextFire(&schedule, time.UTC, clock.now())
+		next, err := schedule.NextFire(&cronSchedule, time.UTC, clock.now())
 		if err != nil {
 			logger.WarnContext(ctx, "persona eval schedule has no next fire", "component", personaEvalComponent, "agent_id", definition.ID, "error", err)
 			return

@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/anggasct/aura/internal/sandbox"
+	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func TestMain(m *testing.M) {
