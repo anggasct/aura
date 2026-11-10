@@ -13,14 +13,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  static-check:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+        target: [static-check, static-check-darwin]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: ${{ matrix.target }}-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}
+
+      - name: Static checks
+        run: make ${{ matrix.target }}
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -31,16 +54,36 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Verify
-        run: make verify
+      - name: Build every release platform
+        run: make build-all
 
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: aura-binaries-${{ matrix.os }}
+          name: aura-binaries
           path: dist/
           retention-days: 7
           if-no-files-found: error
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Race tests
+        run: make test
 
   durable:
     runs-on: ubuntu-latest
