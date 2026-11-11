@@ -10,22 +10,15 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"log/slog"
 	"os"
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/terminal"
-	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/modules/builtin"
-	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
-	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -156,152 +149,43 @@ func shouldUseTTY(present chatPresentation, inTTY, outTTY bool) bool {
 	return inTTY && outTTY
 }
 
-func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger, in io.Reader, out, diag io.Writer, sessionID, persona string, present chatPresentation) error {
-	cfg := result.Config
-	db, err := openStorage(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = db.Close() }()
+type chatBuild struct {
+	inFile    *os.File
+	outFile   *os.File
+	useTTY    bool
+	approvals *terminal.ApprovalBridge
+	agentID   string
+}
 
-	prices, err := openPriceRegistry(ctx, logger, cfg, result.Path, "")
-	if err != nil {
-		return err
-	}
-
-	_, visionArtifactRoot, _, err := storagePaths(cfg)
-	if err != nil {
-		return err
-	}
-	models, err := model.NewRegistry(ctx, &model.RegistryOptions{
-		Logger:     logger,
-		Models:     cfg.Models,
-		Routes:     cfg.ModelRoutes,
-		Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)},
-		Prices:     prices,
-		Vision:     visionWiringForConfig(cfg, db, visionArtifactRoot),
-	})
-	if err != nil {
-		return err
-	}
-
-	useTTY := false
-	inFile, inOk := in.(*os.File)
-	outFile, outOk := out.(*os.File)
+func (b *build) chatToolWiring(ctx context.Context) (toolWiring, error) {
+	chat, opts := b.chat, &b.opts.Chat
+	inFile, inOk := opts.In.(*os.File)
+	outFile, outOk := opts.Out.(*os.File)
 	if inOk && outOk {
-		useTTY = shouldUseTTY(present, terminal.IsTerminal(int(inFile.Fd())), terminal.IsTerminal(int(outFile.Fd())))
+		chat.inFile, chat.outFile = inFile, outFile
+		chat.useTTY = shouldUseTTY(chatPresentation{plain: opts.Plain, noColor: opts.NoColor}, terminal.IsTerminal(int(inFile.Fd())), terminal.IsTerminal(int(outFile.Fd())))
 	}
+	agentID, err := resolveChatPersona(ctx, b.registry, b.sessions, opts.SessionID, opts.Persona)
+	if err != nil {
+		return toolWiring{}, err
+	}
+	chat.agentID = agentID
+	if b.cfg.Tools != nil && chat.useTTY {
+		chat.approvals = terminal.NewApprovalBridge()
+	}
+	return toolWiring{
+		decider:   approvalDeciderFor(chat.approvals),
+		reachable: terminalApprovalReachable(chat.approvals),
+	}, nil
+}
 
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
-	registry, err := buildAgentRegistry(cfg)
-	if err != nil {
-		return err
-	}
-	agentID, err := resolveChatPersona(ctx, registry, sessions, sessionID, persona)
-	if err != nil {
-		return err
-	}
-	routeModel, err := model.RouteModelName(cfg, cfg.Models.Definitions["primary"].Model)
-	if err != nil {
-		return err
-	}
-	var broker turn.ToolBroker = terminalBroker{}
-	var executorOpts []runtimeadk.ExecutorOption
-	turnLedger, err := newTurnLedger(cfg, db, prices, logger)
-	if err != nil {
-		return err
-	}
-	executorOpts = append(executorOpts, runtimeadk.WithBudgetLedger(turnLedger, "primary"), runtimeadk.WithAgentResolver(registry, routeModel), ownerContextOption(ctx, cfg.Owner, logger))
-	var memoryHook func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
-	var approvals *terminal.ApprovalBridge
-	var builtinTools *toolsbuiltin.Executor
-	if cfg.Tools != nil {
-		if useTTY {
-			approvals = terminal.NewApprovalBridge()
-		}
-		_, artifactRoot, _, err := storagePaths(cfg)
-		if err != nil {
-			return err
-		}
-		builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, result.CapabilityReport, logger, nil, approvalDeciderFor(approvals), nil,
-			toolsbuiltin.WithApprovalReachable(terminalApprovalReachable(approvals)))
-		if err != nil {
-			return err
-		}
-		broker = builtin
-		builtinTools = builtin
-		executorOpts = append(executorOpts, runtimeadk.WithBuiltinToolExecutor(builtin))
-		if interpreterEnabled(result.CapabilityReport) {
-			stopVerification, err := startChatInterpreter(ctx, cfg, builtin, logger)
-			if err != nil {
-				return err
-			}
-			defer stopVerification()
-		}
-	}
-	if cfg.Memory.Enabled {
-		memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, registry, models, logger, nil)
-		if err != nil {
-			return err
-		}
-		executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryRuntime.provider))
-		memoryHook = buildMemoryHook(memoryRuntime.service, memoryRuntime.model, memoryRuntime.summarizer, logger)
-	}
-	var profileHook postTurnHook
-	if cfg.Profile != nil && cfg.Profile.Enabled {
-		profileRuntime, err := buildProfileRuntime(ctx, cfg, db, models, nil, logger)
-		if err != nil {
-			return err
-		}
-		executorOpts = append(executorOpts, runtimeadk.WithProfileContext(profileRuntime))
-		profileHook = profileRuntime.hook
-		profileRuntime.start(ctx)
-	}
-	var skillRuntime *skillRuntime
-	var skillRenderer runtimeengine.SkillRenderer
-	if cfg.Skills != nil && cfg.Skills.Enabled {
-		skillRuntime, err = buildSkillRuntime(ctx, cfg.Skills, db, logger)
-		if err != nil {
-			return err
-		}
-		executorOpts = append(executorOpts, runtimeadk.WithSkillContext(skillRuntime.context))
-		skillRenderer = skillRuntime.context
-	}
-	kbRuntime, kbEnabled, err := buildKnowledgeRuntime(ctx, cfg, registry)
-	if err != nil {
-		return err
-	}
-	if kbEnabled {
-		defer kbRuntime.close()
-		kbRuntime.attachSearch(builtinTools)
-		executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
-	}
-	executor, err := runtimeadk.NewADKExecutor(
-		"aura", cfg.Models.Definitions["primary"].Model, models, sessions, events, broker, nil, logger, executorOpts...,
-	)
-	if err != nil {
-		return err
-	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
-		MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
-		MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
-		TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
-		ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
-		DefaultAgentID:  auraagent.DefaultID,
-		Personas:        registryPersonas{registry: registry},
-		Skills:          skillRenderer,
-		PostTurnHook:    composePostTurnHooks(memoryHook, profileHook),
-	}, events, store.NewDedupeStore(db), executor, logger)
-	if err != nil {
-		return err
-	}
-	executor.SetEventPublisher(engine)
+func (b *build) buildChatSurface() error {
+	cfg, chat, opts := b.cfg, b.chat, &b.opts.Chat
 	console := terminal.NewConsole(
-		&terminalRunner{engine: engine, agentID: agentID},
-		&terminalSessions{sessions: sessions, agentID: agentID},
+		&terminalRunner{engine: b.engine, agentID: chat.agentID},
+		&terminalSessions{sessions: b.sessions, agentID: chat.agentID},
 		terminal.PlainRenderer{},
-		in, out, diag,
+		opts.In, opts.Out, opts.Diag,
 		terminal.Config{
 			MaxInputBytes:       cfg.Terminal.MaxInputBytes,
 			InMemoryHistory:     cfg.Terminal.InMemoryHistory,
@@ -314,28 +198,38 @@ func runChat(ctx context.Context, result *config.LoadResult, logger *slog.Logger
 		return err
 	}
 	console.SetCommandRecorder(commandRecorder)
-	if skillRuntime != nil {
-		console.SetSkills(skillRuntime.bridge)
+	if b.modules.skills != nil {
+		console.SetSkills(b.modules.skills)
 	}
-	console.SetInputCloser(func() { _ = os.Stdin.Close() })
-	console.SetSessionID(sessionID)
-	console.SetAgentID(agentID)
-	if useTTY {
+	if closer, ok := opts.In.(io.Closer); ok {
+		console.SetInputCloser(func() { _ = closer.Close() })
+	}
+	console.SetSessionID(opts.SessionID)
+	console.SetAgentID(chat.agentID)
+	if chat.useTTY {
+		outFile := chat.outFile
 		outFD := int(outFile.Fd())
 		console.SetTTY(terminal.NewTTYRenderer(terminal.TTYOptions{
 			Out:     terminal.NewTTYOutput(outFile),
 			Width:   func() int { w, _ := terminal.TerminalSize(outFD); return w },
 			Hz:      cfg.Terminal.RenderHz,
-			Styling: !present.noColor,
-			Stdin:   inFile,
+			Styling: !opts.NoColor,
+			Stdin:   chat.inFile,
 			Stdout:  outFile,
 		}))
-		console.SetApprovalBridge(approvals)
+		console.SetApprovalBridge(chat.approvals)
 	}
-	interrupts, stopInterrupts := forwardInterrupts(ctx, interruptsFromContext(ctx))
-	defer stopInterrupts()
-	console.SetInterrupts(interrupts)
-	return console.Run(ctx)
+	b.serve = serveConsole(console, opts.Interrupts)
+	return nil
+}
+
+func serveConsole(console *terminal.Console, signals <-chan os.Signal) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		interrupts, stopInterrupts := forwardInterrupts(ctx, signals)
+		defer stopInterrupts()
+		console.SetInterrupts(interrupts)
+		return console.Run(ctx)
+	}
 }
 
 func terminalApprovalReachable(approvals *terminal.ApprovalBridge) func(sessionID string) bool {

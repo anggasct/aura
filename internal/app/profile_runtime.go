@@ -137,9 +137,9 @@ func newProfileRuntime(cfg *config.Config, db *sql.DB, llm adkmodel.LLM, produce
 	return rt, nil
 }
 
-func (r *profileRuntime) start(ctx context.Context) {
+func (r *profileRuntime) run(ctx context.Context) {
 	if r != nil && r.extractor != nil {
-		r.extractor.Start(ctx)
+		r.extractor.Run(ctx)
 	}
 }
 

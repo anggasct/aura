@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
@@ -104,28 +103,6 @@ func (r *interpreterRuntime) attach(builtin *toolsbuiltin.Executor) {
 	if r.runner != nil {
 		builtin.SetCodeRunner(r.runner)
 	}
-}
-
-func startChatInterpreter(ctx context.Context, cfg *config.Config, builtin *toolsbuiltin.Executor, logger *slog.Logger) (stop func(), err error) {
-	manifest, err := interpreter.DefaultManifest()
-	if err != nil {
-		return nil, err
-	}
-	runtime, err := newInterpreterRuntime(cfg, manifest)
-	if err != nil {
-		return nil, err
-	}
-	if err := runtime.enableExecution(ctx, cfg, builtin.Artifacts(), nil, logger); err != nil {
-		return nil, err
-	}
-	runtime.attach(builtin)
-	verifyCtx, cancel := context.WithCancel(ctx)
-	var verification sync.WaitGroup
-	verification.Go(func() { runtime.run(verifyCtx, logger) })
-	return func() {
-		cancel()
-		verification.Wait()
-	}, nil
 }
 
 func (r *interpreterRuntime) run(ctx context.Context, logger *slog.Logger) {

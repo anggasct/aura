@@ -246,7 +246,7 @@ func TestProfileLearnReviewAcceptServeLoop(t *testing.T) {
 	rt, db := openRoutedProfile(t, "", llm, nil)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	rt.start(ctx)
+	go rt.run(ctx)
 
 	for i, session := range []string{"sess-a", "sess-b"} {
 		req := ownerTurn(turn.OriginTerminal)

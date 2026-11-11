@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	stdcontext "context"
@@ -53,7 +54,7 @@ func runExtractor(t *testing.T, extractor *Extractor, registry *fakeRegistry, jo
 	t.Helper()
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	defer cancel()
-	extractor.Start(ctx)
+	go extractor.Run(ctx)
 	if err := extractor.Enqueue(t.Context(), job); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -180,7 +181,7 @@ func TestExtractorRejectsUnknownSources(t *testing.T) {
 	extractor, registry := testExtractor(t, caller, 64)
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	defer cancel()
-	extractor.Start(ctx)
+	go extractor.Run(ctx)
 	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "hello"}},
@@ -211,7 +212,7 @@ func TestExtractorRetriesThenDeadLetters(t *testing.T) {
 	extractor, _ := testExtractor(t, caller, 64)
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	defer cancel()
-	extractor.Start(ctx)
+	go extractor.Run(ctx)
 	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "hello"}},
@@ -267,7 +268,7 @@ func TestExtractorReprocessingIdempotent(t *testing.T) {
 	}
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
 	defer cancel()
-	extractor.Start(ctx)
+	go extractor.Run(ctx)
 	for range 2 {
 		if err := extractor.Enqueue(t.Context(), job); err != nil {
 			t.Fatalf("Enqueue: %v", err)
@@ -359,7 +360,7 @@ func TestExtractorStopsOnCancel(t *testing.T) {
 	blocking := &blockingCaller{release: make(chan struct{})}
 	extractor, registry := testExtractor(t, blocking, 64)
 	ctx, cancel := stdcontext.WithCancel(stdcontext.Background())
-	extractor.Start(ctx)
+	go extractor.Run(ctx)
 	if err := extractor.Enqueue(t.Context(), Job{
 		OwnerID: "owner-1", SessionID: "sess-1",
 		Events: []JobEvent{{ID: "evt-1", Sequence: 1, Text: "hello"}},
@@ -388,4 +389,20 @@ func (b *blockingCaller) Extract(ctx stdcontext.Context, _ *ExtractRequest) (*Ex
 	case <-b.release:
 		return &ExtractResult{}, nil
 	}
+}
+
+func TestExtractorRunReturnsWhenCancelled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		extractor, _ := testExtractor(t, &fakeCaller{}, 4)
+		ctx, cancel := stdcontext.WithCancel(t.Context())
+		returned := make(chan struct{})
+		go func() {
+			defer close(returned)
+			extractor.Run(ctx)
+		}()
+		synctest.Wait()
+
+		cancel()
+		<-returned
+	})
 }
