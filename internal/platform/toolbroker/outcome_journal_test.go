@@ -367,9 +367,53 @@ func TestToolFailureIsTheSameOnEveryPath(t *testing.T) {
 	}
 }
 
+type endingContext struct {
+	end context.CancelFunc
+}
+
+func (e *endingContext) within(ctx context.Context) context.Context {
+	ended, cancel := context.WithCancel(ctx)
+	e.end = cancel
+	return ended
+}
+
+func (e *endingContext) thenReturn(result ToolResult, err error) Adapter {
+	return func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
+		e.end()
+		return result, err
+	}
+}
+
 func TestDurableToolFailureIsJournaledRedacted(t *testing.T) {
 	hosted := startHostedRuntime(t)
-	for _, branch := range failureBranches(journalSecret) {
+	ownTimeout := failureBranch{
+		name:  "the tool's own timeout",
+		err:   fmt.Errorf("fetch with %s: %w", journalSecret, context.DeadlineExceeded),
+		class: ResultDeadlineExceeded,
+	}
+	t.Run("a tool whose context ended", func(t *testing.T) {
+		broker := newProbeBroker(t)
+		broker.RegisterSecret(journalSecret)
+		ending := &endingContext{}
+		registerProbe(t, broker, &probeTool{rule: probeRule("probe"), respond: ending.thenReturn(ToolResult{}, errors.New("stopped while sending "+journalSecret))})
+		var first callOutcome
+		key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
+			first = outcomeOf(broker.Execute(ending.within(inTurn(ctx, inv)), probeRequest("probe")))
+			return nil
+		})
+		if first.class != ResultDeadlineExceeded {
+			t.Errorf("class = %q, want %q", first.class, ResultDeadlineExceeded)
+		}
+		if strings.Contains(first.text, journalSecret) {
+			t.Errorf("returned text = %q, want the secret redacted", first.text)
+		}
+		rows := hosted.actionRows(t, key)
+		requireNoRowHolds(t, rows, journalSecret)
+		if execution := rows[len(rows)-1]; execution.outcome != "failed" || !strings.Contains(execution.detail, "[REDACTED]") {
+			t.Errorf("execution action = %q with the detail %q, want a failed action with redacted text", execution.outcome, execution.detail)
+		}
+	})
+	for _, branch := range append(failureBranches(journalSecret), ownTimeout) {
 		t.Run(branch.name, func(t *testing.T) {
 			broker := newProbeBroker(t)
 			broker.RegisterSecret(journalSecret)
@@ -440,6 +484,23 @@ func TestDurableToolResultIsJournaledRedacted(t *testing.T) {
 			}
 		})
 	}
+	t.Run("a tool that succeeded although its context ended", func(t *testing.T) {
+		broker := newProbeBroker(t)
+		broker.RegisterSecret(journalSecret)
+		ending := &endingContext{}
+		registerProbe(t, broker, &probeTool{rule: probeRule("probe"), respond: ending.thenReturn(ToolResult{Output: json.RawMessage(`{"token":"` + journalSecret + `"}`)}, nil)})
+		var first callOutcome
+		key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
+			first = outcomeOf(broker.Execute(ending.within(inTurn(ctx, inv)), probeRequest("probe")))
+			return nil
+		})
+		if want := (callOutcome{class: ResultOK, output: `{"token":"[REDACTED]"}`}); first != want {
+			t.Errorf("first execution = %+v, want %+v", first, want)
+		}
+		rows := hosted.actionRows(t, key)
+		requireNoRowHolds(t, rows, journalSecret)
+		requireEveryRowIsAResult(t, rows)
+	})
 }
 
 func TestDurableSecretRegisteredLaterIsRedactedOnReplay(t *testing.T) {
@@ -718,6 +779,27 @@ func TestDurableApprovalErrorsReplayWithTheirClass(t *testing.T) {
 			requireEveryRowIsAResult(t, rows)
 		})
 	}
+	t.Run("a recorded approval failure is redacted", func(t *testing.T) {
+		const capabilityName = "remote-unicorns"
+		fixture := newApprovalFixture(t)
+		fixture.broker.RegisterSecret(capabilityName)
+		_, inMemory := fixture.broker.Execute(t.Context(), probeRequest("gated"))
+		if inMemory == nil || !strings.Contains(inMemory.Error(), capabilityName) {
+			t.Fatalf("in-memory error = %v, want it to name %s", inMemory, capabilityName)
+		}
+		var first callOutcome
+		key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
+			_, err := fixture.broker.Execute(inTurn(ctx, inv), probeRequest("gated"))
+			first = outcomeOf(ToolResult{}, err)
+			return nil
+		})
+		if first.class != ResultCapabilityUnavailable || strings.Contains(first.text, capabilityName) {
+			t.Errorf("first call = %+v, want %s without %s", first, ResultCapabilityUnavailable, capabilityName)
+		}
+		rows := hosted.actionRows(t, key)
+		requireNoRowHolds(t, rows, capabilityName)
+		requireEveryRowIsAResult(t, rows)
+	})
 	ended := []struct {
 		name    string
 		request func(fixture *approvalFixture) *ToolRequest
