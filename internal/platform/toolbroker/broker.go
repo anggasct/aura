@@ -504,7 +504,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	result.ToolName = canonical.ToolName
 	result.ToolVersion = canonical.ToolVersion
 	result.Untrusted = true
-	result.Output = redact(result.Output, b.secretValues())
+	result.Output = redactOutput(result.Output, b.secretValues())
 	if result.Class == "" {
 		result.Class = ResultOK
 	}
@@ -954,17 +954,6 @@ func mapApprovalError(err error) error {
 		}
 	}
 	return err
-}
-
-func redact(data []byte, secrets []string) []byte {
-	redacted := slices.Clone(data)
-	for _, secret := range secrets {
-		if secret == "" {
-			continue
-		}
-		redacted = []byte(strings.ReplaceAll(string(redacted), secret, "[REDACTED]"))
-	}
-	return redacted
 }
 
 func cloneAdapters(adapters map[string]Adapter) map[string]Adapter {
