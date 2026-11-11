@@ -48,7 +48,12 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 		Use:   "add",
 		Short: "Create a scheduled job and start its run",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, db *sql.DB) error {
+			result, err := config.Load(gf.configPath)
+			if err != nil {
+				return err
+			}
+			return withApp(cmd, &commandInput{result: &result, parts: scheduleParts(result.Config)}, func(ctx context.Context, app *App) error {
+				cfg, db := app.result.Config, app.db
 				if timezone == "" {
 					timezone = cfg.Scheduler.DefaultTimezone
 				}
@@ -93,7 +98,7 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), cfg, logger, job.ID); err != nil {
+				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), app, job.ID); err != nil {
 					return err
 				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", job.ID)
@@ -124,16 +129,19 @@ func startScheduleRun(ctx context.Context, runtime durable.Runtime, jobID string
 	return err
 }
 
-func startScheduleRunIfDurable(ctx context.Context, out io.Writer, cfg *config.Config, logger *slog.Logger, jobID string) error {
-	if cfg.Durable == nil || !cfg.Durable.Enabled {
+func scheduleParts(cfg *config.Config) []Part {
+	if durableEnabled(cfg) {
+		return []Part{PartDurable}
+	}
+	return nil
+}
+
+func startScheduleRunIfDurable(ctx context.Context, out io.Writer, app *App, jobID string) error {
+	if !durableEnabled(app.result.Config) {
 		_, err := fmt.Fprintln(out, "note: the job run starts with the server")
 		return err
 	}
-	runtime, err := durableRuntimeForConfig(cfg, logger)
-	if err != nil {
-		return err
-	}
-	return startScheduleRun(ctx, runtime, jobID)
+	return startScheduleRun(ctx, app.runtime, jobID)
 }
 
 func newScheduleListCmd(gf *globalFlags) *cobra.Command {
@@ -203,7 +211,12 @@ func newScheduleResumeCmd(gf *globalFlags) *cobra.Command {
 		Short: "Resume a paused job and restart its run",
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, db *sql.DB) error {
+			result, err := config.Load(gf.configPath)
+			if err != nil {
+				return err
+			}
+			return withApp(cmd, &commandInput{result: &result, parts: scheduleParts(result.Config)}, func(ctx context.Context, app *App) error {
+				db := app.db
 				service, err := scheduleService(db)
 				if err != nil {
 					return err
@@ -211,7 +224,7 @@ func newScheduleResumeCmd(gf *globalFlags) *cobra.Command {
 				if err := service.SetState(ctx, args[0], schedule.JobActive); err != nil {
 					return err
 				}
-				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), cfg, logger, args[0]); err != nil {
+				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), app, args[0]); err != nil {
 					return err
 				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\nstate: active\n", args[0])
@@ -286,7 +299,12 @@ func newScheduleRunNowCmd(gf *globalFlags) *cobra.Command {
 		Short: "Record a manual fire and start the job run",
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, db *sql.DB) error {
+			result, err := config.Load(gf.configPath)
+			if err != nil {
+				return err
+			}
+			return withApp(cmd, &commandInput{result: &result, parts: scheduleParts(result.Config)}, func(ctx context.Context, app *App) error {
+				db := app.db
 				service, err := scheduleService(db)
 				if err != nil {
 					return err
@@ -295,7 +313,7 @@ func newScheduleRunNowCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), cfg, logger, args[0]); err != nil {
+				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), app, args[0]); err != nil {
 					return err
 				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\noccurrence: %s\n", args[0], occurrence.ID)

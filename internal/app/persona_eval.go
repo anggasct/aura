@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"time"
 
@@ -73,43 +72,44 @@ func newPersonaEvalCmd(gf *globalFlags) *cobra.Command {
 			if behavior && definition.EvalBehavior == nil {
 				return &exitCodeError{code: 1, err: fmt.Errorf("%s: persona %q does not enable behavior evaluation (set evals.behavior)", personaeval.ErrorCodeInvalid, definition.ID)}
 			}
-			db, err := openStorage(cmd.Context(), result.Config)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = db.Close() }()
-			recorded, err := runPersonaEval(cmd.Context(), db, result.Path, &definition)
-			if err != nil {
-				return err
-			}
-			lines := []string{
-				"persona: " + definition.ID,
-				"digest: " + recorded.Digest[:12],
-				fmt.Sprintf("cases: %d, failed: %d", recorded.CasesTotal, recorded.CasesFailed),
-			}
-			for _, name := range recorded.FailedCases {
-				lines = append(lines, "failed: "+name)
-			}
-			passed := recorded.Passed
+			var parts []Part
 			if behavior {
-				models, err := registerBehaviorModels(cmd.Context(), result.Config, db, slog.New(slog.DiscardHandler))
+				parts = []Part{PartModels}
+			}
+			return withApp(cmd, &commandInput{result: &result, parts: parts}, func(ctx context.Context, app *App) error {
+				recorded, err := runPersonaEval(ctx, app.db, result.Path, &definition)
 				if err != nil {
 					return err
 				}
-				scored, report, err := runPersonaBehaviorEval(cmd.Context(), db, result.Path, &definition, models)
-				if err != nil {
-					return err
+				lines := []string{
+					"persona: " + definition.ID,
+					"digest: " + recorded.Digest[:12],
+					fmt.Sprintf("cases: %d, failed: %d", recorded.CasesTotal, recorded.CasesFailed),
 				}
-				lines = append(lines, behaviorLines(&report)...)
-				passed = passed && scored.Passed
-			}
-			if !passed {
-				if err := writeChildLines(cmd, append(lines, "result: fail")); err != nil {
-					return err
+				for _, name := range recorded.FailedCases {
+					lines = append(lines, "failed: "+name)
 				}
-				return &exitCodeError{code: 1, err: errors.New("persona_eval_failed: the persona evaluation did not pass")}
-			}
-			return writeChildLines(cmd, append(lines, "result: pass"))
+				passed := recorded.Passed
+				if behavior {
+					models, err := routedBehaviorModels(result.Config, app.models)
+					if err != nil {
+						return err
+					}
+					scored, report, err := runPersonaBehaviorEval(ctx, app.db, result.Path, &definition, models)
+					if err != nil {
+						return err
+					}
+					lines = append(lines, behaviorLines(&report)...)
+					passed = passed && scored.Passed
+				}
+				if !passed {
+					if err := writeChildLines(cmd, append(lines, "result: fail")); err != nil {
+						return err
+					}
+					return &exitCodeError{code: 1, err: errors.New("persona_eval_failed: the persona evaluation did not pass")}
+				}
+				return writeChildLines(cmd, append(lines, "result: pass"))
+			})
 		},
 	}
 	cmd.Flags().BoolVar(&behavior, "behavior", false, "also run the live behavior evaluation (persona must set evals.behavior)")

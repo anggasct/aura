@@ -11,6 +11,7 @@ import (
 
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -80,6 +81,8 @@ func TestBuildWebhookListener(t *testing.T) {
 	t.Setenv("AURA_WEBHOOK_E2E_SECRET", webhookE2ESecret)
 	db := storetest.OpenMigrated(t)
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
+	runtime := durable.NewFake()
+	t.Cleanup(runtime.Close)
 	cfg := &config.Config{
 		Webhook: config.Webhook{
 			Enabled:            true,
@@ -91,7 +94,7 @@ func TestBuildWebhookListener(t *testing.T) {
 			Keys:               []config.WebhookKey{{ID: "primary", SecretEnv: "AURA_WEBHOOK_E2E_SECRET"}},
 		},
 	}
-	listener, err := buildWebhookListener(cfg, db, backend, slog.New(slog.DiscardHandler))
+	listener, err := buildWebhookListener(&webhookListenerInput{cfg: cfg, db: db, backend: backend, logger: slog.New(slog.DiscardHandler), runtime: runtime})
 	if err != nil {
 		t.Fatalf("buildWebhookListener: %v", err)
 	}
@@ -101,7 +104,7 @@ func TestBuildWebhookListener(t *testing.T) {
 
 	missing := *cfg
 	missing.Webhook.Keys = []config.WebhookKey{{ID: "primary", SecretEnv: "AURA_WEBHOOK_E2E_MISSING"}}
-	if _, err := buildWebhookListener(&missing, db, backend, slog.New(slog.DiscardHandler)); err == nil {
+	if _, err := buildWebhookListener(&webhookListenerInput{cfg: &missing, db: db, backend: backend, logger: slog.New(slog.DiscardHandler), runtime: runtime}); err == nil {
 		t.Error("expected listener build to fail without a resolvable secret, got nil")
 	}
 }

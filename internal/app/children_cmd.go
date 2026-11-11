@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -133,16 +134,21 @@ func newChildrenCancelCmd(gf *globalFlags) *cobra.Command {
 		Short: "Cancel a nonterminal child run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			canceller, closer, err := openChildCanceller(cmd, gf)
+			result, err := config.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
-			defer closer()
-			state, err := canceller.Cancel(cmd.Context(), args[0])
-			if err != nil {
-				return err
+			if result.Config.Children == nil || !result.Config.Children.Enabled {
+				return errors.New("subagent runner is not enabled")
 			}
-			return writeChildLines(cmd, []string{"cancelled: " + args[0] + " state=" + state})
+			return withApp(cmd, &commandInput{result: &result, parts: []Part{PartDurable}}, func(ctx context.Context, app *App) error {
+				canceller := &childCanceller{registry: newChildRegistry(app.db), runs: &durableChildRuns{runtime: app.runtime}}
+				state, err := canceller.Cancel(ctx, args[0])
+				if err != nil {
+					return err
+				}
+				return writeChildLines(cmd, []string{"cancelled: " + args[0] + " state=" + state})
+			})
 		},
 	}
 }

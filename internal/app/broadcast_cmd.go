@@ -103,8 +103,12 @@ func newBroadcastReconcileCmd(gf *globalFlags) *cobra.Command {
 		Short: "Settle an unknown broadcast or restart a stalled run",
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, db *sql.DB) error {
-				adapter := &broadcastItemStore{store: store.NewBroadcastStore(db)}
+			result, err := config.Load(gf.configPath)
+			if err != nil {
+				return err
+			}
+			return withApp(cmd, &commandInput{result: &result, parts: []Part{PartDurable}}, func(ctx context.Context, app *App) error {
+				adapter := &broadcastItemStore{store: store.NewBroadcastStore(app.db)}
 				item, found, err := adapter.Load(ctx, args[0])
 				if err != nil {
 					return err
@@ -115,17 +119,13 @@ func newBroadcastReconcileCmd(gf *globalFlags) *cobra.Command {
 				out := cmd.OutOrStdout()
 				switch item.State {
 				case broadcast.StateUnknown:
-					return reconcileUnknownBroadcast(ctx, cmd.OutOrStdout(), db, logger, cfg, adapter, &item)
+					return reconcileUnknownBroadcast(ctx, cmd.OutOrStdout(), app.db, app.logger, result.Config, adapter, &item)
 				case broadcast.StateHeld, broadcast.StateScheduled:
 					if item.NotBefore.UTC().After(time.Now().UTC()) {
 						_, err := fmt.Fprintf(out, "id: %s\nresult: no-op (not due until %s)\n", item.ID, item.NotBefore.UTC().Format(time.RFC3339))
 						return err
 					}
-					runtime, err := durableRuntimeForConfig(cfg, logger)
-					if err != nil {
-						return err
-					}
-					if err := broadcast.StartItemRun(ctx, runtime, item.ID); err != nil {
+					if err := broadcast.StartItemRun(ctx, app.runtime, item.ID); err != nil {
 						return err
 					}
 					_, err = fmt.Fprintf(out, "id: %s\nresult: run started\n", item.ID)

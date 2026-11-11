@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,6 +92,21 @@ func TestDurableStatusReachable(t *testing.T) {
 	}
 }
 
+func buildWorkflowCommandApp(t *testing.T, cfg *config.Config) *App {
+	t.Helper()
+	restoreDefaultLogger(t)
+	app := buildApp(t, &Options{
+		Surface: SurfaceCommand, Config: loadResultWithAll(t, cfg), LogLevel: "debug", LogFormat: "json", LogOutput: io.Discard,
+		Command: CommandOptions{Parts: []Part{PartWorkflows}},
+	})
+	t.Cleanup(func() { _ = app.Close(context.Background()) })
+	return app
+}
+
+func durableListenerFor(app *App) *durableListenerInput {
+	return &durableListenerInput{result: app.result, db: app.db, logger: app.logger, interpreter: app.interpreter}
+}
+
 func TestBuildDurableListenerExternalUnreachableFailsClosed(t *testing.T) {
 	dataRoot := t.TempDir()
 	seedHealthyStorage(t, dataRoot)
@@ -105,12 +120,7 @@ func TestBuildDurableListenerExternalUnreachableFailsClosed(t *testing.T) {
 	cfg.Durable.Mode = config.DurableModeExternal
 	cfg.Durable.Endpoint = "http://127.0.0.1:1"
 	cfg.Durable.AdminEndpoint = "http://127.0.0.1:1"
-	db, err := openStorage(t.Context(), &cfg)
-	if err != nil {
-		t.Fatalf("openStorage: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-	listener, err := buildDurableListener(t.Context(), loadResultWithAll(t, &cfg), db, nil, nil)
+	listener, err := buildDurableListener(durableListenerFor(buildWorkflowCommandApp(t, &cfg)))
 	if err != nil {
 		t.Fatalf("buildDurableListener: %v", err)
 	}
@@ -159,12 +169,7 @@ func TestExternalListenerRegistersItsHandlerURL(t *testing.T) {
 	cfg.Durable.AdminEndpoint = admin.URL
 	cfg.Durable.HandlerAddr = "127.0.0.1:0"
 	cfg.Durable.HandlerURL = "http://aura:9080"
-	db, err := openStorage(t.Context(), &cfg)
-	if err != nil {
-		t.Fatalf("openStorage: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-	listener, err := buildDurableListener(t.Context(), loadResultWithAll(t, &cfg), db, slog.New(slog.DiscardHandler), nil)
+	listener, err := buildDurableListener(durableListenerFor(buildWorkflowCommandApp(t, &cfg)))
 	if err != nil {
 		t.Fatalf("buildDurableListener: %v", err)
 	}
@@ -205,14 +210,10 @@ func TestEndpointCancelledAroundItsBindStopsCleanly(t *testing.T) {
 	cfg.Durable.Mode = config.DurableModeExternal
 	cfg.Durable.HandlerAddr = "127.0.0.1:0"
 	cfg.Durable.HandlerURL = "http://aura:9080"
-	db, err := openStorage(t.Context(), &cfg)
-	if err != nil {
-		t.Fatalf("openStorage: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	app := buildWorkflowCommandApp(t, &cfg)
 	for name, delay := range map[string]time.Duration{"before start": -1, "right after start": 0, "after bind": 50 * time.Millisecond} {
 		t.Run(name, func(t *testing.T) {
-			listener, err := buildDurableListener(t.Context(), loadResultWithAll(t, &cfg), db, slog.New(slog.DiscardHandler), nil)
+			listener, err := buildDurableListener(durableListenerFor(app))
 			if err != nil {
 				t.Fatalf("buildDurableListener: %v", err)
 			}

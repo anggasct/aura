@@ -64,6 +64,7 @@ children:
 
 func runChildrenCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
+	restoreDefaultLogger(t)
 	gf := &globalFlags{configPath: cfg}
 	cmd := newChildrenCmd(gf)
 	out := &bytes.Buffer{}

@@ -171,3 +171,33 @@ func hasWorkflowCode(err error, want workflow.ErrorCode) bool {
 	code, ok := workflow.CodeOf(err)
 	return ok && code == want
 }
+
+func TestWorkflowProposalShowRunsThroughTheCommand(t *testing.T) {
+	gf := writeWorkflowFixtures(t, validWorkflowYAML)
+	spec := &workflow.Spec{
+		ID: "gen_shown", Goal: "Show the plan", Version: 1, Source: workflow.SourceGenerated,
+		Steps: []workflow.StepSpec{{ID: "approve", Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: time.Minute}},
+	}
+	digest, err := workflow.Digest(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := &workflow.Proposal{
+		ID: workflow.NewProposalID(), SessionID: "ops/terminal:owner", AgentID: "ops", PrincipalID: principal.OwnerID,
+		Spec: spec, Digest: digest, CreatedAt: time.Now().UTC(),
+	}
+	db := openAccessDB(t, gf.configPath)
+	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflow.NewStore(db).CreateProposal(t.Context(), proposal); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runWorkflowCommand(t, gf, "proposal", "show", proposal.ID)
+	if err != nil {
+		t.Fatalf("proposal show: %v", err)
+	}
+	if !strings.Contains(out, "proposal: "+proposal.ID) {
+		t.Fatalf("output = %q, want the proposal id", out)
+	}
+}

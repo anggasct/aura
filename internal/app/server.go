@@ -239,7 +239,7 @@ func (b *build) buildServerDurable() error {
 	if !durableEnabled(b.cfg) {
 		return nil
 	}
-	sessionRuntime, err := durableRuntimeForConfig(b.cfg, b.logger)
+	sessionRuntime, err := b.durableRuntime()
 	if err != nil {
 		return err
 	}
@@ -296,13 +296,11 @@ func (b *build) buildBroadcast() error {
 	if err != nil {
 		return err
 	}
-	if s.durableConfig != nil {
-		s.broadcastRuntime = s.durableConfig.Runtime
-	} else {
-		s.broadcastRuntime, err = durableRuntimeForConfig(cfg, logger)
-		if err != nil {
-			return err
-		}
+	s.broadcastRuntime, err = b.durableRuntime()
+	if err != nil {
+		return err
+	}
+	if s.durableConfig == nil {
 		if err := registerBroadcastHandler(s.broadcastRuntime, s.broadcastRunner); err != nil {
 			return err
 		}
@@ -391,7 +389,11 @@ func (b *build) buildProbe() error {
 func (b *build) addEdgeListeners() error {
 	cfg, s := b.cfg, b.server
 	if cfg.Webhook.Enabled {
-		webhookListener, err := buildWebhookListener(cfg, b.db, b.engine, b.logger)
+		runtime, err := b.durableRuntime()
+		if err != nil {
+			return err
+		}
+		webhookListener, err := buildWebhookListener(&webhookListenerInput{cfg: cfg, db: b.db, backend: b.engine, logger: b.logger, runtime: runtime})
 		if err != nil {
 			return err
 		}
@@ -426,7 +428,12 @@ func (b *build) wireDurableListener(ctx context.Context) error {
 	if !durableEnabled(cfg) {
 		return nil
 	}
-	durableListener, err := buildDurableListener(ctx, b.result, db, b.logger, b.engine)
+	if err := b.buildWorkflows(ctx); err != nil {
+		return err
+	}
+	durableListener, err := buildDurableListener(&durableListenerInput{
+		result: b.result, db: db, logger: b.logger, engine: b.engine, interpreter: b.interpreter,
+	})
 	if err != nil {
 		return err
 	}

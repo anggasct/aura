@@ -58,12 +58,16 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 			Short: "Show a proposal and its plan",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return withProposalInterpreter(cmd, gf, func(ctx context.Context, _ *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store) error {
-					proposal, err := runs.Proposal(ctx, args[0], time.Now())
+				result, err := config.Load(gf.configPath)
+				if err != nil {
+					return err
+				}
+				return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
+					proposal, err := workflow.NewStore(app.db).Proposal(ctx, args[0], time.Now())
 					if err != nil {
 						return err
 					}
-					graph, err := workflow.Compile(proposal.Spec, interpreter.ValidationDeps())
+					graph, err := workflow.Compile(proposal.Spec, app.interpreter.ValidationDeps())
 					if err != nil {
 						return err
 					}
@@ -86,8 +90,12 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 			Short: "Approve a proposal and start exactly the approved spec",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return withProposalInterpreter(cmd, gf, func(ctx context.Context, cfg *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store) error {
-					runID, err := approveProposal(ctx, cfg, interpreter, runs, args[0], time.Now())
+				result, err := config.Load(gf.configPath)
+				if err != nil {
+					return err
+				}
+				return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
+					runID, err := approveProposal(ctx, result.Config, app.interpreter, workflow.NewStore(app.db), args[0], time.Now())
 					if err != nil {
 						return err
 					}
@@ -100,7 +108,12 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 			Short: "Reject a proposal; nothing runs",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return withProposalInterpreter(cmd, gf, func(ctx context.Context, _ *config.Config, _ *workflow.Interpreter, runs *workflow.Store) error {
+				result, err := config.Load(gf.configPath)
+				if err != nil {
+					return err
+				}
+				return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
+					runs := workflow.NewStore(app.db)
 					if _, err := runs.Proposal(ctx, args[0], time.Now()); err != nil {
 						return err
 					}
@@ -113,16 +126,6 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 		},
 	)
 	return cmd
-}
-
-func withProposalInterpreter(cmd *cobra.Command, gf *globalFlags, fn func(ctx context.Context, cfg *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store) error) error {
-	return withLoadedStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, result *config.LoadResult, db *sql.DB) error {
-		interpreter, err := buildWorkflowInterpreterWithDB(ctx, result, db, logger)
-		if err != nil {
-			return err
-		}
-		return fn(ctx, result.Config, interpreter, workflow.NewStore(db))
-	})
 }
 
 func approveProposal(ctx context.Context, cfg *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, now time.Time) (string, error) {

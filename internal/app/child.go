@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -177,27 +176,6 @@ func (r *childRegistry) ActiveForParent(ctx context.Context, parentSessionID str
 		spawns = append(spawns, childSpawnFromStore(&runs[i]))
 	}
 	return spawns, nil
-}
-
-func openChildCanceller(cmd *cobra.Command, gf *globalFlags) (*childCanceller, func(), error) {
-	result, err := config.Load(gf.configPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	if result.Config.Children == nil || !result.Config.Children.Enabled {
-		return nil, nil, errors.New("subagent runner is not enabled")
-	}
-	db, err := openStorage(cmd.Context(), result.Config)
-	if err != nil {
-		return nil, nil, err
-	}
-	closer := func() { _ = db.Close() }
-	durableRT, err := durableRuntimeForConfig(result.Config, nil)
-	if err != nil {
-		_ = db.Close()
-		return nil, nil, err
-	}
-	return &childCanceller{registry: newChildRegistry(db), runs: &durableChildRuns{runtime: durableRT}}, closer, nil
 }
 
 type durableChildRuns struct {
