@@ -378,12 +378,12 @@ func TestDurableResumeNeedsNoScan(t *testing.T) {
 	})
 	_, db, events := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 	mustCreateSession(t, db, "session-a")
-	stub := newStubSessionStore(events, store.NewDedupeStore(db))
+	sessions := newHookedSessionStore(t, db)
 	backend := durable.NewFake()
 	ctx := context.Background()
 	for _, turnRequest := range []string{"turn-0", "turn-1"} {
 		desc := turnDescriptorFromRequest(sampleRequest("session-a", turnRequest))
-		if _, err := stub.Admit(ctx, &runtimesessions.AdmitRequest{
+		if _, err := sessions.Admit(ctx, &runtimesessions.AdmitRequest{
 			Turn:            desc,
 			AcceptedEventID: "event-" + turnRequest,
 			MaxPending:      16,
@@ -395,7 +395,7 @@ func TestDurableResumeNeedsNoScan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restarted engine: %v", err)
 	}
-	restarted.sessionStore = stub
+	restarted.sessionStore = sessions
 	restarted.durableRuntime = backend
 	backend.RegisterHandler("turn", restarted.serveTurn)
 	desc := turnDescriptorFromRequest(sampleRequest("session-a", "turn-0"))
@@ -592,15 +592,17 @@ func TestDurableTurnReleasedBeforeItIsStagedStillReachesItsCaller(t *testing.T) 
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})
-		engine, stub, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		engine, sessions, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
-		stub.afterAdmit = func(turnID string) {
-			if turnID != "turn-1" {
-				return
+		sessions.hooks(func(s *hookedSessionStore) {
+			s.afterAdmit = func(turnID string) {
+				if turnID != "turn-1" {
+					return
+				}
+				close(gate)
+				synctest.Wait()
 			}
-			close(gate)
-			synctest.Wait()
-		}
+		})
 		first := make(chan error, 1)
 		go func() {
 			_, err := collect(t, engine, sampleRequest("session-a", "turn-0"))
@@ -630,18 +632,20 @@ func TestShutdownBetweenGrantAndStagingCancelsTheTurnAndLeavesNoGrant(t *testing
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})
-		engine, stub, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
+		engine, sessions, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
 		mustCreateSession(t, db, "session-a")
-		stub.afterAdmit = func(turnID string) {
-			if turnID != "turn-1" {
-				return
+		sessions.hooks(func(s *hookedSessionStore) {
+			s.afterAdmit = func(turnID string) {
+				if turnID != "turn-1" {
+					return
+				}
+				close(gate)
+				synctest.Wait()
+				if err := engine.Shutdown(context.Background()); err != nil {
+					t.Errorf("shutdown: %v", err)
+				}
 			}
-			close(gate)
-			synctest.Wait()
-			if err := engine.Shutdown(context.Background()); err != nil {
-				t.Errorf("shutdown: %v", err)
-			}
-		}
+		})
 		go func() { _, _ = collect(t, engine, sampleRequest("session-a", "turn-0")) }()
 		waitFor(t, func() bool { return executor.StartCount() == 1 })
 		events, _ := collect(t, engine, sampleRequest("session-a", "turn-1"))
@@ -659,10 +663,13 @@ func TestShutdownBetweenGrantAndStagingCancelsTheTurnAndLeavesNoGrant(t *testing
 func TestReleaseNeverGrantsAnAdmittingTurnOfAnotherSession(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)}})
-		engine, stub, _ := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
-		stub.release = func(string, string) (runtimesessions.ReleaseResult, bool) {
-			return runtimesessions.ReleaseResult{ToStart: &runtimesessions.QueuedTurn{Descriptor: runtimesessions.Descriptor{TurnID: "turn-x", SessionID: "session-b"}}}, true
-		}
+		engine, sessions, _ := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		sessions.hooks(func(s *hookedSessionStore) {
+			s.aroundStatus = func(string, func() (runtimesessions.StatusResult, error)) (runtimesessions.StatusResult, error) {
+				foreign := runtimesessions.Descriptor{TurnID: "turn-x", SessionID: "session-b"}
+				return runtimesessions.StatusResult{ActiveTurnID: "turn-x", Active: &runtimesessions.ActiveTurn{Descriptor: foreign}}, nil
+			}
+		})
 		engine.mu.Lock()
 		engine.admitting = map[string]string{"turn-x": "session-b"}
 		engine.mu.Unlock()

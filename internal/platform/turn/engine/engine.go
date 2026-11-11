@@ -80,6 +80,7 @@ type Engine struct {
 	durableRuntime durable.Runtime
 	adapters       []runtimechannelhost.ChannelPort
 	delivered      map[string]time.Time
+	statusPoll     time.Duration
 
 	mu        sync.Mutex
 	sessions  map[string]*sessionQueue
@@ -128,16 +129,17 @@ func NewEngine(config *Config, events EventStore, dedupe DedupeStore, executor T
 		return nil, err
 	}
 	engine := &Engine{
-		cfg:      cfg,
-		events:   events,
-		dedupe:   dedupe,
-		executor: executor,
-		logger:   logger,
-		sessions: make(map[string]*sessionQueue),
-		turns:    make(map[string]*turnState),
-		staged:   make(map[string]*turnState),
-		granted:  make(map[string]struct{}),
-		sesKeys:  make(map[string]struct{}),
+		cfg:        cfg,
+		events:     events,
+		dedupe:     dedupe,
+		executor:   executor,
+		logger:     logger,
+		statusPoll: durableStatusPoll,
+		sessions:   make(map[string]*sessionQueue),
+		turns:      make(map[string]*turnState),
+		staged:     make(map[string]*turnState),
+		granted:    make(map[string]struct{}),
+		sesKeys:    make(map[string]struct{}),
 	}
 	if cfg.Durable != nil {
 		engine.sessionStore = cfg.Durable.Sessions
@@ -156,14 +158,16 @@ type sessionQueue struct {
 }
 
 type turnState struct {
-	req      turn.TurnRequest
-	turnID   string
-	accepted store.RuntimeEvent
-	subs     map[*subscriber]struct{}
-	cancel   context.CancelFunc
-	start    func()
-	done     chan struct{}
-	running  bool
+	req          turn.TurnRequest
+	turnID       string
+	accepted     store.RuntimeEvent
+	subs         map[*subscriber]struct{}
+	cancel       context.CancelFunc
+	start        func()
+	done         chan struct{}
+	running      bool
+	holdsPending bool
+	attached     bool
 }
 
 type subscriber struct {
@@ -501,7 +505,7 @@ func (e *Engine) submit(ctx context.Context, req *turn.TurnRequest) (*subscriber
 		return sub, nil
 	}
 	if e.sessionStore != nil {
-		e.stageDurable(ctx, req, &accepted, sub, granted)
+		e.stageDurable(ctx, &durableStaging{req: req, accepted: &accepted, sub: sub, granted: granted})
 	}
 	return sub, nil
 }

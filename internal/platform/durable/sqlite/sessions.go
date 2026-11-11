@@ -122,6 +122,9 @@ func (a *admission) run(ctx context.Context) (runtimesessions.AdmitResult, bool,
 	if err := rejectHeldTurn(ctx, a.tx, desc.TurnID); err != nil {
 		return runtimesessions.AdmitResult{}, false, err
 	}
+	if err := rejectUsedTurn(ctx, a.tx, turnRef{sessionID: desc.SessionID, turnID: desc.TurnID}); err != nil {
+		return runtimesessions.AdmitResult{}, false, err
+	}
 	held, err := countHeldTurns(ctx, a.tx, desc.SessionID)
 	if err != nil {
 		return runtimesessions.AdmitResult{}, false, err
@@ -211,6 +214,18 @@ func rejectHeldTurn(ctx context.Context, tx *sql.Tx, turnID string) error {
 	}
 	if held {
 		return invalidArgument(fmt.Sprintf("turn %q is already held by a session", turnID))
+	}
+	return nil
+}
+
+func rejectUsedTurn(ctx context.Context, tx *sql.Tx, ref turnRef) error {
+	var used bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM durable_run WHERE key = ?1)
+    OR EXISTS (SELECT 1 FROM runtime_event WHERE session_id = ?2 AND turn_id = ?1)`, ref.turnID, ref.sessionID).Scan(&used); err != nil {
+		return fmt.Errorf("durable session admit: read turn use: %w", err)
+	}
+	if used {
+		return invalidArgument(fmt.Sprintf("turn %q was already used", ref.turnID))
 	}
 	return nil
 }
@@ -371,6 +386,31 @@ LEFT JOIN durable_session_turn AS active ON active.session_id = wanted.session_i
 		result.Deadline = at.UTC().Format(time.RFC3339Nano)
 	}
 	return result, nil
+}
+
+func (s *SessionStore) ActiveTurns(ctx context.Context) ([]runtimesessions.QueuedTurn, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT turn_id, descriptor_json, sequence FROM durable_session_turn WHERE state = 'active' ORDER BY rowid`)
+	if err != nil {
+		return nil, fmt.Errorf("durable session active turns: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	active := []runtimesessions.QueuedTurn{}
+	for rows.Next() {
+		var turnID, descriptorJSON string
+		var sequence uint64
+		if err := rows.Scan(&turnID, &descriptorJSON, &sequence); err != nil {
+			return nil, fmt.Errorf("durable session active turns: read turn: %w", err)
+		}
+		desc, err := decodeDescriptor(descriptorJSON)
+		if err != nil {
+			return nil, fmt.Errorf("durable session active turns: turn %q: %w", turnID, err)
+		}
+		active = append(active, runtimesessions.QueuedTurn{Descriptor: desc, Sequence: sequence})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("durable session active turns: %w", err)
+	}
+	return active, nil
 }
 
 func (s *SessionStore) Abort(ctx context.Context, sessionID string) (runtimesessions.AbortResult, error) {

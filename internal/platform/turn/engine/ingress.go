@@ -29,7 +29,7 @@ func (e *Engine) Accept(ctx context.Context, env *runtimeingress.IngressEnvelope
 		return runtimeingress.TurnRef{TurnID: originalTurnID, SessionID: req.SessionID, Replayed: true}, nil
 	}
 	if e.sessionStore != nil {
-		e.stageDurable(ctx, req, &accepted, nil, granted)
+		e.stageDurable(ctx, &durableStaging{req: req, accepted: &accepted, granted: granted})
 		return runtimeingress.TurnRef{TurnID: req.TurnID, SessionID: req.SessionID}, nil
 	}
 	return runtimeingress.TurnRef{TurnID: req.TurnID, SessionID: req.SessionID}, nil

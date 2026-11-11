@@ -75,7 +75,7 @@ func newRefusingTestRuntime(t *testing.T, executor TurnExecutor, refusedKind str
 	}
 	if live {
 		backend := durable.NewFake()
-		engine.sessionStore = newStubSessionStore(events, dedupe)
+		engine.sessionStore = newHookedSessionStore(t, db)
 		engine.durableRuntime = backend
 		backend.RegisterHandler("turn", engine.serveTurn)
 	}

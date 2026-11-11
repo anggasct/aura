@@ -333,6 +333,10 @@ func (l *liveSessionCalls) Abort(ctx context.Context, sessionID string) (runtime
 	return liveSessionCall[runtimesessions.AbortResult](ctx, l.runtime, sessionID, SessionAbortHandler, json.RawMessage(`{}`))
 }
 
+func (l *liveSessionCalls) ActiveTurns(context.Context) ([]runtimesessions.QueuedTurn, error) {
+	return []runtimesessions.QueuedTurn{}, nil
+}
+
 func liveSessionCall[Result any](ctx context.Context, rt durable.Runtime, sessionID, handler string, payload any) (Result, error) {
 	var zero Result
 	raw, err := json.Marshal(payload)
