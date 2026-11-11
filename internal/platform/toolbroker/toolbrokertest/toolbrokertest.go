@@ -15,6 +15,15 @@ type Stub struct {
 	Run              toolbroker.Adapter
 }
 
+func NewBroker(tb testing.TB, options *toolbroker.Options) *toolbroker.Broker {
+	tb.Helper()
+	broker, err := toolbroker.New(options)
+	if err != nil {
+		tb.Fatalf("build the stub tool broker: %v", err)
+	}
+	return broker
+}
+
 func Register(tb testing.TB, broker *toolbroker.Broker, stub Stub) {
 	tb.Helper()
 	definition := &tools.Definition{

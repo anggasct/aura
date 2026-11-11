@@ -335,10 +335,7 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	if err != nil {
 		t.Fatalf("sqlite.NewSessionStore: %v", err)
 	}
-	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
-	if err != nil {
-		t.Fatalf("toolbroker.New: %v", err)
-	}
+	broker := toolbrokertest.NewBroker(t, &toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
 	tools := &ledgerTools{broker: broker, ledger: ledger, gated: scenario.gated}
 	for _, stub := range scenario.tools {
 		toolbrokertest.Register(t, broker, toolbrokertest.Stub{Name: stub.name, RequiresApproval: stub.approval, Run: ledger.adapter(stub)})
