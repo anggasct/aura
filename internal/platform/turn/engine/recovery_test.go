@@ -391,8 +391,8 @@ func TestRecoverTurnsAttachesRunningTurnsPastTheGate(t *testing.T) {
 			t.Fatalf("SessionActivity(%s) = %q, %d; want %s active and nothing queued", req.SessionID, active, queued, req.TurnID)
 		}
 	}
-	if _, staged, _ := engineCounts(rig.engine); staged != 0 {
-		t.Fatalf("staged turns = %d, want 0", staged)
+	if active, staged, _ := engineCounts(rig.engine); active != 2 || staged != 0 {
+		t.Fatalf("active, staged turns = %d, %d; want both attached turns active past the gate and none staged", active, staged)
 	}
 	if err := rig.engine.Shutdown(t.Context()); err != nil {
 		if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeRuntimeInternal {
@@ -971,5 +971,63 @@ func TestCancelAfterTheRunCompletedKeepsTheOneTerminalEvent(t *testing.T) {
 	eventually(t, "the engine lets go of turn-0", func() bool { return !engineKnows(engine, "turn-0") })
 	if got := terminalsOf(t, db, "turn-0"); !slices.Equal(got, []string{turn.EventKindTurnCompleted}) {
 		t.Fatalf("terminal events = %v, want the one turn.completed", got)
+	}
+}
+
+type budgetedTurnEvents struct {
+	DedupeStore
+
+	readsLeft atomic.Int64
+}
+
+func (d *budgetedTurnEvents) ListTurnEvents(ctx context.Context, turnID string) ([]store.RuntimeEvent, error) {
+	if d.readsLeft.Add(-1) < 0 {
+		return nil, errors.New("turn events are unreadable")
+	}
+	return d.DedupeStore.ListTurnEvents(ctx, turnID)
+}
+
+func TestEndedTurnWhoseEventsCannotBeReadStaysActiveUntilTheNextRecovery(t *testing.T) {
+	executor := newHoldingExecutor()
+	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	events := &budgetedTurnEvents{DedupeStore: rig.engine.dedupe}
+	rig.engine.dedupe = events
+	mustCreateSession(t, rig.db, "session-a")
+	req := sampleRequest("session-a", "turn-1")
+	admitThroughStore(t, rig.sessions, req)
+	startTurnRun(t, rig.runtime, req)
+	if err := rig.runtime.Cancel(t.Context(), durable.RunRef{Key: req.TurnID}); err != nil {
+		t.Fatalf("cancel the run: %v", err)
+	}
+	if state := waitRunEnded(t, rig.runtime, req.TurnID); state != durable.RunCancelled {
+		t.Fatalf("run ended %s, want cancelled", state)
+	}
+	rig.startHost()
+
+	events.readsLeft.Store(1)
+	if err := rig.engine.RecoverTurns(t.Context()); err != nil {
+		t.Fatalf("RecoverTurns with one readable pass: %v", err)
+	}
+	eventually(t, "the poller gives up on turn-1", func() bool {
+		return events.readsLeft.Load() < 0 && !engineKnows(rig.engine, "turn-1")
+	})
+	if active, _ := storeActiveTurn(t, rig.sessions, "session-a"); active != "turn-1" {
+		t.Fatalf("active turn = %q, want turn-1 still held", active)
+	}
+	if got := terminalsOf(t, rig.db, "turn-1"); len(got) != 0 {
+		t.Fatalf("terminal events = %v, want none while the events are unreadable", got)
+	}
+
+	events.readsLeft.Store(1 << 30)
+	if err := rig.engine.RecoverTurns(t.Context()); err != nil {
+		t.Fatalf("RecoverTurns with readable events: %v", err)
+	}
+	requireTerminals(t, rig.db, eventFilter{turnID: "turn-1", kinds: []string{turn.EventKindTurnCancelled}})
+	eventually(t, "the session lets go of turn-1", func() bool {
+		active, _ := storeActiveTurn(t, rig.sessions, "session-a")
+		return active == ""
+	})
+	if starts := executor.startCount("turn-1"); starts != 0 {
+		t.Fatalf("executor started turn-1 %d times, want never", starts)
 	}
 }
