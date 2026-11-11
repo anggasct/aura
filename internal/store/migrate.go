@@ -56,6 +56,7 @@ var migrations = []migration{
 	{version: 38, sql: memoryNonOwnerTrustSchemaSQL},
 	{version: 39, sql: knowledgeBaseSchemaSQL},
 	{version: 40, sql: knowledgeEmbeddingSchemaSQL},
+	{version: 41, sql: durableRuntimeSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -813,6 +814,74 @@ CREATE TABLE kb_embedding (
     fingerprint TEXT NOT NULL,
     content_sha256 TEXT NOT NULL,
     vector BLOB NOT NULL
+);
+`
+
+const durableRuntimeSchemaSQL = `
+CREATE TABLE durable_host (
+    owner       TEXT PRIMARY KEY,
+    expires_at  INTEGER NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE durable_run (
+    key               TEXT PRIMARY KEY,
+    handler           TEXT NOT NULL,
+    payload           BLOB NOT NULL,
+    state             TEXT NOT NULL CHECK (state IN ('running','succeeded','failed','cancelled')),
+    detail            TEXT NOT NULL DEFAULT '',
+    cancel_requested  INTEGER NOT NULL DEFAULT 0 CHECK (cancel_requested IN (0, 1)),
+    owner             TEXT,
+    claim             INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+);
+CREATE INDEX durable_run_running_idx ON durable_run(handler) WHERE state = 'running';
+
+CREATE TABLE durable_action (
+    id          INTEGER PRIMARY KEY,
+    run_key     TEXT NOT NULL REFERENCES durable_run(key) ON DELETE CASCADE,
+    action_key  TEXT NOT NULL,
+    outcome     TEXT NOT NULL CHECK (outcome IN ('result','failed')),
+    result      BLOB NOT NULL,
+    detail      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    UNIQUE (run_key, action_key)
+);
+
+CREATE TABLE durable_signal (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_key     TEXT NOT NULL REFERENCES durable_run(key) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    seq         INTEGER NOT NULL,
+    payload     BLOB NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (run_key, name, seq)
+);
+
+CREATE TABLE durable_wait (
+    run_key     TEXT NOT NULL REFERENCES durable_run(key) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    seq         INTEGER NOT NULL,
+    deadline    TEXT NOT NULL,
+    outcome     TEXT NOT NULL CHECK (outcome IN ('pending','signal','timeout')),
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (run_key, name, seq)
+) WITHOUT ROWID;
+
+CREATE TABLE durable_timer (
+    run_key     TEXT NOT NULL REFERENCES durable_run(key) ON DELETE CASCADE,
+    seq         INTEGER NOT NULL,
+    fire_at     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (run_key, seq)
+) WITHOUT ROWID;
+
+CREATE TABLE durable_approval (
+    approval_id  TEXT PRIMARY KEY,
+    run_key      TEXT NOT NULL REFERENCES durable_run(key) ON DELETE CASCADE,
+    consumed_at  TEXT NOT NULL
 );
 `
 
