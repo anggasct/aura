@@ -24,7 +24,7 @@ RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check model-registry-check arch-check static-check static-check-darwin verify security eval load integration durable-test durable-live restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
+.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check model-registry-check arch-check static-check static-check-darwin verify security eval load integration durable-test durable-live durable-turns restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -56,6 +56,9 @@ $(RESTATE_BINARY):
 
 durable-live: $(RESTATE_BINARY)
 	AURA_RESTATE_BINARY=$(RESTATE_BINARY) AURA_DURABLE_REQUIRE_BINARY=1 $(GO) test -v -race -tags durable -count=1 ./internal/platform/durable/... ./cmd/aura/
+
+durable-turns:
+	$(GO) test -v -race -tags durable -count=1 -run '^TestDurableTurn' ./internal/app/
 
 vet:
 	$(GO) vet ./...

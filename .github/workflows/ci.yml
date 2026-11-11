@@ -87,7 +87,7 @@ jobs:
 
   durable:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -103,6 +103,9 @@ jobs:
 
       - name: Durable conformance against restate-server
         run: make durable-live
+
+      - name: Turn crash and resume suites on the SQLite runtime
+        run: make durable-turns
 
   image:
     runs-on: ubuntu-latest
