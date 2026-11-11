@@ -883,3 +883,75 @@ func TestQueueEntryRequiresItsAcceptedEvent(t *testing.T) {
 	}
 	mustInsertHeldTurn(t, f.db, heldRow{sessionID: testSessionID, turnID: "turn-orphan", sequence: 7, state: turnStateActive})
 }
+
+func activeTurnIDs(t *testing.T, sessions *SessionStore) []string {
+	t.Helper()
+	active, err := sessions.ActiveTurns(t.Context())
+	if err != nil {
+		t.Fatalf("ActiveTurns: %v", err)
+	}
+	ids := make([]string, 0, len(active))
+	for i := range active {
+		ids = append(ids, active[i].Descriptor.SessionID+"/"+queuedRef(&active[i]))
+	}
+	return ids
+}
+
+func TestActiveTurnsListsEachSessionsActiveTurn(t *testing.T) {
+	f := newSessionFixture(t)
+	if empty, err := f.sessions.ActiveTurns(t.Context()); err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("active turns of an empty store = %#v, %v; want an empty list", empty, err)
+	}
+	createSession(t, f.db, "session-b")
+	createSession(t, f.db, "session-c")
+	a1 := f.admit(t, turnSpec{turnID: "a1"})
+	b1 := f.admit(t, turnSpec{turnID: "b1", sessionID: "session-b"})
+	a2 := f.admit(t, turnSpec{turnID: "a2"})
+	c1 := f.admit(t, turnSpec{turnID: "c1", sessionID: "session-c"})
+	want := []string{
+		fmt.Sprintf("%s/a1@%d", testSessionID, a1.Sequence),
+		fmt.Sprintf("session-b/b1@%d", b1.Sequence),
+		fmt.Sprintf("session-c/c1@%d", c1.Sequence),
+	}
+	if got := activeTurnIDs(t, f.sessions); !slices.Equal(got, want) {
+		t.Fatalf("active turns = %v, want %v", got, want)
+	}
+	f.release(t, "a1")
+	want = []string{
+		fmt.Sprintf("session-b/b1@%d", b1.Sequence),
+		fmt.Sprintf("%s/a2@%d", testSessionID, a2.Sequence),
+		fmt.Sprintf("session-c/c1@%d", c1.Sequence),
+	}
+	if got := activeTurnIDs(t, f.sessions); !slices.Equal(got, want) {
+		t.Fatalf("active turns after the release = %v, want %v", got, want)
+	}
+	execSQL(t, f.db, `UPDATE durable_session_turn SET descriptor_json = 'not json' WHERE turn_id = 'c1'`)
+	if _, err := f.sessions.ActiveTurns(t.Context()); err == nil {
+		t.Fatal("ActiveTurns decoded a descriptor that is not JSON")
+	}
+}
+
+func TestAdmitRejectsAUsedTurnID(t *testing.T) {
+	f := newSessionFixture(t)
+	f.admit(t, turnSpec{turnID: "turn-1"})
+	f.release(t, "turn-1")
+	insertRun(t, f.db, runFixture{key: "turn-run", handler: "turn"})
+	before := snapshotAdmission(t, f.db)
+	for _, spec := range []turnSpec{
+		{turnID: "turn-1", key: "key-released", eventID: "event-turn-1-again"},
+		{turnID: "turn-run", key: "key-run"},
+	} {
+		t.Run(spec.turnID, func(t *testing.T) {
+			_, err := f.sessions.Admit(t.Context(), admitRequest(spec))
+			requireCode(t, err, ErrorCodeInvalidArgument)
+			requireUnchanged(t, f.db, before)
+		})
+	}
+	for _, key := range []string{"key-released", "key-run"} {
+		got := f.admit(t, turnSpec{turnID: "turn-after-" + key, key: key})
+		if got.Replayed || got.Sequence == 0 {
+			t.Fatalf("admit with %s after the rejection = %+v, want a new accepted turn", key, got)
+		}
+		f.release(t, "turn-after-"+key)
+	}
+}

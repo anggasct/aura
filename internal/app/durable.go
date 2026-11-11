@@ -360,3 +360,7 @@ func (s *durableSessionStore) Status(ctx context.Context, sessionID string) (run
 func (s *durableSessionStore) Abort(ctx context.Context, sessionID string) (runtimesessions.AbortResult, error) {
 	return callSessionObject[runtimesessions.AbortResult](ctx, s.runtime, sessionID, restate.SessionAbortHandler, json.RawMessage(`{}`))
 }
+
+func (s *durableSessionStore) ActiveTurns(context.Context) ([]runtimesessions.QueuedTurn, error) {
+	return []runtimesessions.QueuedTurn{}, nil
+}
