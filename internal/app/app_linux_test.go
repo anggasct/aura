@@ -124,13 +124,8 @@ func TestCompositionServerRegistersEveryConfiguredEntry(t *testing.T) {
 	}
 }
 
-func TestCompositionServerToolsHonourThePersonaCeiling(t *testing.T) {
-	restoreDefaultLogger(t)
-	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
-	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, compositionPersonaYAML))
-	result.CapabilityReport = capabilitytest.Report(t, "workspace-read")
-	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))
-	t.Cleanup(func() { _ = app.Close(context.Background()) })
+func requirePersonaCeiling(t *testing.T, app *App) {
+	t.Helper()
 	call := func(tool string) error {
 		_, err := app.builtin.Execute(t.Context(), &runtimeadk.BuiltinToolRequest{
 			RequestID: "call-" + tool, TurnID: "turn-1", SessionID: "sess-ceiling", PrincipalID: "friend",
@@ -145,6 +140,48 @@ func TestCompositionServerToolsHonourThePersonaCeiling(t *testing.T) {
 	}
 	if code, ok := toolbroker.CodeOf(call("list_dir")); !ok || code != toolbroker.ResultToolTierDenied {
 		t.Fatalf("list_dir outside the persona ceiling = %v, want tool_tier_denied", code)
+	}
+}
+
+func TestCompositionServerToolsHonourThePersonaCeiling(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, compositionPersonaYAML))
+	result.CapabilityReport = capabilitytest.Report(t, "workspace-read")
+	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))
+	t.Cleanup(func() { _ = app.Close(context.Background()) })
+	requirePersonaCeiling(t, app)
+}
+
+func TestCompositionServerWithDurableKeepsThePersonaCeiling(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	definitions := t.TempDir()
+	if err := os.WriteFile(filepath.Join(definitions, "demo.yaml"), []byte(validWorkflowYAML), 0o600); err != nil {
+		t.Fatalf("write definition: %v", err)
+	}
+	extra := compositionPersonaYAML + fmt.Sprintf("workflows:\n  definitions_dir: %s\ndurable:\n  enabled: true\n  mode: external\n  endpoint: http://%s\n  admin_endpoint: http://%s\n  handler_addr: %s\n",
+		definitions, freeLoopbackAddress(t), freeLoopbackAddress(t), freeLoopbackAddress(t))
+	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra))
+	result.CapabilityReport = capabilitytest.Report(t, "workspace-read")
+	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))
+	t.Cleanup(func() { _ = app.Close(context.Background()) })
+	requirePersonaCeiling(t, app)
+}
+
+func TestCompositionServerSkipsWorkflowsWithoutDurable(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	definitions := t.TempDir()
+	broken := "id: broken\nversion: 1\ngoal: g\nsteps:\n  - id: a\n    executor: { kind: shell }\n    timeout: 1m\n"
+	if err := os.WriteFile(filepath.Join(definitions, "broken.yaml"), []byte(broken), 0o600); err != nil {
+		t.Fatalf("write definition: %v", err)
+	}
+	extra := fmt.Sprintf("workflows:\n  definitions_dir: %s\n", definitions)
+	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra))
+	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))
+	if err := app.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 }
 

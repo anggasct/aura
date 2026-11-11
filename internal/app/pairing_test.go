@@ -18,6 +18,7 @@ import (
 
 func runAccessCommand(t *testing.T, build func(*globalFlags) *cobra.Command, cfg string, args ...string) (string, error) {
 	t.Helper()
+	restoreDefaultLogger(t)
 	cmd := build(&globalFlags{configPath: cfg})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)

@@ -178,12 +178,19 @@ func durableRuntimeForConfig(cfg *config.Config, logger *slog.Logger) (durable.R
 	return durable.NewFake(), nil
 }
 
-func buildDurableListener(ctx context.Context, result *config.LoadResult, db *sql.DB, logger *slog.Logger, engine *runtimeengine.Engine) (*durableListener, error) {
-	durableCfg := result.Config.Durable
-	interpreter, err := buildWorkflowInterpreterWithDB(ctx, result, db, logger)
-	if err != nil {
-		return nil, err
+type durableListenerInput struct {
+	result      *config.LoadResult
+	db          *sql.DB
+	logger      *slog.Logger
+	engine      *runtimeengine.Engine
+	interpreter *workflow.Interpreter
+}
+
+func buildDurableListener(in *durableListenerInput) (*durableListener, error) {
+	if in == nil || in.result == nil || in.result.Config == nil || in.result.Config.Durable == nil || in.db == nil || in.interpreter == nil {
+		return nil, invalidOptions("durable listener input must carry a config with durable settings, storage and an interpreter")
 	}
+	durableCfg, db, logger, engine, interpreter := in.result.Config.Durable, in.db, in.logger, in.engine, in.interpreter
 	endpoint, err := restate.NewEndpoint(restate.EndpointConfig{HandlerAddr: durableCfg.HandlerAddr}, logger)
 	if err != nil {
 		return nil, err

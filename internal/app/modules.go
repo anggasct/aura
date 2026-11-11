@@ -7,6 +7,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/server"
@@ -154,4 +155,44 @@ func (b *build) buildInterpreter(ctx context.Context) error {
 	return b.group.Add(server.Background("interpreter_verification", func(ctx context.Context) {
 		runtime.run(ctx, logger)
 	}))
+}
+
+func (b *build) buildWorkflows(ctx context.Context) error {
+	cfg, db := b.cfg, b.db
+	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(cfg))
+	if err != nil {
+		return err
+	}
+	deps, err := workflowValidationDeps(cfg)
+	if err != nil {
+		return err
+	}
+	options := &workflow.Options{
+		MaxConcurrentSteps: workflowMaxConcurrentSteps(cfg),
+		Logger:             b.logger,
+	}
+	if cfg.Workflows != nil {
+		options.GeneratedBudget = workflow.Budget{MaxSteps: cfg.Workflows.Generated.MaxSteps, MaxTokens: cfg.Workflows.Generated.MaxTokens}
+	}
+	if cfg.Tools != nil {
+		tools, err := newWorkflowToolRunner(b.result, db, b.logger)
+		if err != nil {
+			return err
+		}
+		options.Tools = tools
+	}
+	runtime, err := b.durableRuntime()
+	if err != nil {
+		return err
+	}
+	built := workflow.NewInterpreter(workflow.NewStore(db), runtime, options)
+	routines, err := workflow.NewStore(db).Routines(ctx)
+	if err != nil {
+		return err
+	}
+	if err := built.LoadAll(ctx, append(specs, routines...), deps); err != nil {
+		return err
+	}
+	b.interpreter = built
+	return nil
 }

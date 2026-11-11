@@ -21,6 +21,7 @@ func writeScheduleCLIConfig(t *testing.T, dataDir string) string {
 
 func runScheduleCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
 	t.Helper()
+	restoreDefaultLogger(t)
 	cmd := newScheduleCmd(gf)
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)

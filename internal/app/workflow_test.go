@@ -70,6 +70,7 @@ steps:
 
 func runWorkflowCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
 	t.Helper()
+	restoreDefaultLogger(t)
 	cmd := newWorkflowCmd(gf)
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -559,14 +560,17 @@ func TestBuildWorkflowInterpreterEmitsWarningOnStatusPersistFailure(t *testing.T
 		t.Fatalf("load config: %v", err)
 	}
 
+	restoreDefaultLogger(t)
 	buf := &syncBuffer{}
-	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-
-	interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
+	app, err := Build(ctx, &Options{
+		Surface: SurfaceCommand, Config: &result, LogLevel: "warn", LogFormat: "text", LogOutput: buf,
+		Command: CommandOptions{Parts: []Part{PartWorkflows}},
+	})
 	if err != nil {
-		t.Fatalf("buildWorkflowInterpreter: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
-	defer closeStorage()
+	defer func() { _ = app.Close(ctx) }()
+	interpreter := app.interpreter
 
 	db, err := openStorage(ctx, result.Config)
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -30,19 +29,6 @@ type behaviorModels struct {
 	defaultModel string
 	route        func(string) (string, error)
 	models       runtimeadk.ModelSource
-}
-
-func registerBehaviorModels(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger) (behaviorModels, error) {
-	models, err := model.NewRegistry(ctx, &model.RegistryOptions{
-		Logger:     logger,
-		Models:     cfg.Models,
-		Routes:     cfg.ModelRoutes,
-		Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)},
-	})
-	if err != nil {
-		return behaviorModels{}, err
-	}
-	return routedBehaviorModels(cfg, models)
 }
 
 func routedBehaviorModels(cfg *config.Config, models runtimeadk.ModelSource) (behaviorModels, error) {

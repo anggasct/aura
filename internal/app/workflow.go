@@ -22,7 +22,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
-	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 )
@@ -157,95 +156,28 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 		Short: "Start one workflow run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
 			result, err := config.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
-			cfg := result.Config
-			level, format := resolveLogging(cmd, cfg)
-			logger, err := logging.Setup(level, format, cmd.ErrOrStderr())
-			if err != nil {
-				return err
-			}
-			logConfigResult(ctx, logger, &result)
-			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
-			if err != nil {
-				return err
-			}
-			defer closeStorage()
-			runInput := &workflow.RunInput{}
-			if inputFlag != "" {
-				if err := json.Unmarshal([]byte(inputFlag), runInput); err != nil {
-					return fmt.Errorf("invalid --input json: %w", err)
+			return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
+				runInput := &workflow.RunInput{}
+				if inputFlag != "" {
+					if err := json.Unmarshal([]byte(inputFlag), runInput); err != nil {
+						return fmt.Errorf("invalid --input json: %w", err)
+					}
 				}
-			}
-			summary, err := interpreter.Start(ctx, args[0], runInput)
-			if err != nil {
+				summary, err := app.interpreter.Start(ctx, args[0], runInput)
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nstatus: %s\n", summary.ID, summary.Status)
 				return err
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nstatus: %s\n", summary.ID, summary.Status)
-			return err
+			})
 		},
 	}
 	cmd.Flags().StringVar(&inputFlag, "input", "", "run input as JSON (objective, resources, permissions)")
 	return cmd
-}
-
-func buildWorkflowInterpreter(ctx context.Context, result *config.LoadResult, logger *slog.Logger) (*workflow.Interpreter, func(), error) {
-	db, err := openStorage(ctx, result.Config)
-	if err != nil {
-		return nil, nil, err
-	}
-	closeStorage := func() { _ = db.Close() }
-	interpreter, err := buildWorkflowInterpreterWithDB(ctx, result, db, logger)
-	if err != nil {
-		return nil, closeStorage, err
-	}
-	return interpreter, closeStorage, nil
-}
-
-func buildWorkflowInterpreterWithDB(ctx context.Context, result *config.LoadResult, db *sql.DB, logger *slog.Logger) (*workflow.Interpreter, error) {
-	cfg := result.Config
-	definitionsDir := workflowDefinitionsDir(cfg)
-	specs, err := workflow.LoadDefinitionsDir(definitionsDir)
-	if err != nil {
-		return nil, err
-	}
-	deps, err := workflowValidationDeps(cfg)
-	if err != nil {
-		return nil, err
-	}
-	if logger == nil {
-		logger = slog.Default()
-	}
-	options := &workflow.Options{
-		MaxConcurrentSteps: workflowMaxConcurrentSteps(cfg),
-		Logger:             logger,
-	}
-	if cfg.Workflows != nil {
-		options.GeneratedBudget = workflow.Budget{MaxSteps: cfg.Workflows.Generated.MaxSteps, MaxTokens: cfg.Workflows.Generated.MaxTokens}
-	}
-	if cfg.Tools != nil {
-		tools, err := newWorkflowToolRunner(result, db, logger)
-		if err != nil {
-			return nil, err
-		}
-		options.Tools = tools
-	}
-	runtime, err := durableRuntimeForConfig(cfg, logger)
-	if err != nil {
-		return nil, err
-	}
-	interpreter := workflow.NewInterpreter(workflow.NewStore(db), runtime, options)
-	routines, err := workflow.NewStore(db).Routines(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := interpreter.LoadAll(ctx, append(specs, routines...), deps); err != nil {
-		return nil, err
-	}
-	return interpreter, nil
 }
 
 func workflowMaxConcurrentSteps(cfg *config.Config) int {
@@ -316,7 +248,10 @@ func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, logger *slog.L
 	if logger == nil {
 		logger = slog.Default()
 	}
-	executor, err := toolsbuiltin.New(cfg, db, artifactRoot, result.CapabilityReport, logger, nil, workflowApprovalDecider, nil)
+	executor, err := newToolExecutor(&toolExecutorInput{
+		result: result, db: db, artifactRoot: artifactRoot, logger: logger,
+		wiring: &toolWiring{decider: workflowApprovalDecider},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("build builtin tool executor: %w", err)
 	}
@@ -458,25 +393,16 @@ func newWorkflowCancelCmd(gf *globalFlags) *cobra.Command {
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nstatus: %s\n", run.ID, run.Status)
 				return err
 			}
-			level, format := resolveLogging(cmd, cfg)
-			logger, err := logging.Setup(level, format, cmd.ErrOrStderr())
-			if err != nil {
+			return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
+				if err := app.interpreter.Cancel(ctx, args[0]); err != nil && !errors.Is(err, durable.ErrUnknownRun) {
+					return err
+				}
+				if err := runs.SetRunStatus(ctx, args[0], workflow.RunCancelled); err != nil {
+					return err
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nstatus: %s\n", args[0], workflow.RunCancelled)
 				return err
-			}
-			logConfigResult(ctx, logger, &result)
-			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
-			if err != nil {
-				return err
-			}
-			defer closeStorage()
-			if err := interpreter.Cancel(ctx, args[0]); err != nil && !errors.Is(err, durable.ErrUnknownRun) {
-				return err
-			}
-			if err := runs.SetRunStatus(ctx, args[0], workflow.RunCancelled); err != nil {
-				return err
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nstatus: %s\n", args[0], workflow.RunCancelled)
-			return err
+			})
 		},
 	}
 }
@@ -492,36 +418,25 @@ func newWorkflowApproveCmd(gf *globalFlags) *cobra.Command {
 			if stepID == "" {
 				return errors.New("step id is required: pass --step <id>")
 			}
-			ctx := cmd.Context()
 			result, err := config.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
-			cfg := result.Config
-			level, format := resolveLogging(cmd, cfg)
-			logger, err := logging.Setup(level, format, cmd.ErrOrStderr())
-			if err != nil {
+			return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
+				decision := "approve"
+				if reject {
+					decision = "reject"
+				}
+				payload, err := json.Marshal(map[string]string{"decision": decision})
+				if err != nil {
+					return fmt.Errorf("encode approval decision: %w", err)
+				}
+				if err := app.interpreter.Signal(ctx, args[0], "approval."+stepID, payload); err != nil {
+					return err
+				}
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nsignal: %s\ndecision: %s\n", args[0], "approval."+stepID, decision)
 				return err
-			}
-			logConfigResult(ctx, logger, &result)
-			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
-			if err != nil {
-				return err
-			}
-			defer closeStorage()
-			decision := "approve"
-			if reject {
-				decision = "reject"
-			}
-			payload, err := json.Marshal(map[string]string{"decision": decision})
-			if err != nil {
-				return fmt.Errorf("encode approval decision: %w", err)
-			}
-			if err := interpreter.Signal(ctx, args[0], "approval."+stepID, payload); err != nil {
-				return err
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nsignal: %s\ndecision: %s\n", args[0], "approval."+stepID, decision)
-			return err
+			})
 		},
 	}
 	cmd.Flags().StringVar(&stepID, "step", "", "approval step id to resolve")
@@ -543,28 +458,17 @@ func newWorkflowSignalCmd(gf *globalFlags) *cobra.Command {
 			if !json.Valid([]byte(payloadFlag)) {
 				return errors.New("payload must be valid JSON")
 			}
-			ctx := cmd.Context()
 			result, err := config.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
-			cfg := result.Config
-			level, format := resolveLogging(cmd, cfg)
-			logger, err := logging.Setup(level, format, cmd.ErrOrStderr())
-			if err != nil {
+			return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
+				if err := app.interpreter.Signal(ctx, args[0], "wait."+stepID, []byte(payloadFlag)); err != nil {
+					return err
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nsignal: %s\n", args[0], "wait."+stepID)
 				return err
-			}
-			logConfigResult(ctx, logger, &result)
-			interpreter, closeStorage, err := buildWorkflowInterpreter(ctx, &result, logger)
-			if err != nil {
-				return err
-			}
-			defer closeStorage()
-			if err := interpreter.Signal(ctx, args[0], "wait."+stepID, []byte(payloadFlag)); err != nil {
-				return err
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nsignal: %s\n", args[0], "wait."+stepID)
-			return err
+			})
 		},
 	}
 	cmd.Flags().StringVar(&stepID, "step", "", "wait step id to signal")

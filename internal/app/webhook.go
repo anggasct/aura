@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -454,7 +455,19 @@ func (l *webhookListener) Start(ctx context.Context) error {
 	}
 }
 
-func buildWebhookListener(cfg *config.Config, db *sql.DB, backend turn.AgentRuntime, logger *slog.Logger) (*webhookListener, error) {
+type webhookListenerInput struct {
+	cfg     *config.Config
+	db      *sql.DB
+	backend turn.AgentRuntime
+	logger  *slog.Logger
+	runtime durable.Runtime
+}
+
+func buildWebhookListener(in *webhookListenerInput) (*webhookListener, error) {
+	if in == nil {
+		return nil, invalidOptions("webhook listener input must not be nil")
+	}
+	cfg, db, backend, logger := in.cfg, in.db, in.backend, in.logger
 	if cfg == nil {
 		return nil, errors.New("webhook listener requires configuration")
 	}
@@ -463,6 +476,9 @@ func buildWebhookListener(cfg *config.Config, db *sql.DB, backend turn.AgentRunt
 	}
 	if backend == nil {
 		return nil, errors.New("webhook listener requires a runtime")
+	}
+	if in.runtime == nil {
+		return nil, errors.New("webhook listener requires a durable runtime")
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -493,11 +509,7 @@ func buildWebhookListener(cfg *config.Config, db *sql.DB, backend turn.AgentRunt
 	if err != nil {
 		return nil, err
 	}
-	durableRuntime, err := durableRuntimeForConfig(cfg, logger)
-	if err != nil {
-		return nil, err
-	}
-	githubAdapter, err := github.NewAdapter(workflow.NewStore(db), durableRuntime, logger)
+	githubAdapter, err := github.NewAdapter(workflow.NewStore(db), in.runtime, logger)
 	if err != nil {
 		return nil, err
 	}

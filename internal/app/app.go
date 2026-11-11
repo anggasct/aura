@@ -7,12 +7,17 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
@@ -30,8 +35,17 @@ import (
 type Surface string
 
 const (
-	SurfaceServer Surface = "server"
-	SurfaceChat   Surface = "chat"
+	SurfaceServer  Surface = "server"
+	SurfaceChat    Surface = "chat"
+	SurfaceCommand Surface = "command"
+)
+
+type Part string
+
+const (
+	PartDurable   Part = "durable"
+	PartWorkflows Part = "workflows"
+	PartModels    Part = "models"
 )
 
 type Options struct {
@@ -42,6 +56,11 @@ type Options struct {
 	LogOutput io.Writer
 	Server    ServerOptions
 	Chat      ChatOptions
+	Command   CommandOptions
+}
+
+type CommandOptions struct {
+	Parts []Part
 }
 
 type ServerOptions struct {
@@ -70,9 +89,16 @@ const (
 )
 
 type App struct {
-	group   *server.LifecycleGroup
-	builtin *toolsbuiltin.Executor
-	serve   func(ctx context.Context) error
+	surface     Surface
+	group       *server.LifecycleGroup
+	builtin     *toolsbuiltin.Executor
+	serve       func(ctx context.Context) error
+	logger      *slog.Logger
+	db          *sql.DB
+	result      *config.LoadResult
+	runtime     durable.Runtime
+	interpreter *workflow.Interpreter
+	models      *model.Registry
 
 	mu    sync.Mutex
 	state appState
@@ -83,17 +109,7 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 		return nil, err
 	}
 	b := newBuild(opts)
-	steps := []func() error{
-		func() error { return b.setupLogging(ctx) },
-		func() error { return b.openStorage(ctx) },
-		b.startTelemetry,
-		func() error { return b.buildModelRegistry(ctx) },
-		func() error { return b.buildKernel(ctx) },
-		func() error { return b.buildModules(ctx) },
-		b.buildTurnRuntime,
-		func() error { return b.buildSurface(ctx) },
-	}
-	for _, step := range steps {
+	for _, step := range b.phases(ctx) {
 		if err := step(); err != nil {
 			if b.group != nil {
 				_ = b.group.Stop(ctx)
@@ -101,10 +117,17 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 			return nil, err
 		}
 	}
-	return &App{group: b.group, builtin: b.builtin, serve: b.serve}, nil
+	return &App{
+		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
+		logger: b.logger, db: b.db, result: b.result,
+		runtime: b.runtime, interpreter: b.interpreter, models: b.models,
+	}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
+	if a.surface == SurfaceCommand {
+		return &Error{Code: ErrorCodeInvalidArgument, Detail: "surface command has no main loop"}
+	}
 	a.mu.Lock()
 	if a.state != appReady {
 		a.mu.Unlock()
@@ -134,18 +157,45 @@ func (a *App) Close(ctx context.Context) error {
 	return a.group.Stop(ctx)
 }
 
-func runAndClose(ctx context.Context, app *App) (err error) {
-	defer func() {
-		closeErr := app.Close(ctx)
-		switch {
-		case closeErr == nil:
-		case err == nil:
-			err = closeErr
-		default:
-			err = errors.Join(err, closeErr)
-		}
-	}()
-	return app.Run(ctx)
+func runAndClose(ctx context.Context, app *App) error {
+	return closeAfter(ctx, app, app.Run(ctx))
+}
+
+func closeAfter(ctx context.Context, app *App, err error) error {
+	closeErr := app.Close(ctx)
+	switch {
+	case closeErr == nil:
+		return err
+	case err == nil:
+		return closeErr
+	default:
+		return errors.Join(err, closeErr)
+	}
+}
+
+type commandInput struct {
+	result *config.LoadResult
+	parts  []Part
+}
+
+func withApp(cmd *cobra.Command, in *commandInput, body func(ctx context.Context, app *App) error) error {
+	if in == nil || in.result == nil || in.result.Config == nil {
+		return invalidOptions("command input must carry a loaded config")
+	}
+	ctx := cmd.Context()
+	level, format := resolveLogging(cmd, in.result.Config)
+	app, err := Build(ctx, &Options{
+		Surface:   SurfaceCommand,
+		Config:    in.result,
+		LogLevel:  level,
+		LogFormat: format,
+		LogOutput: cmd.ErrOrStderr(),
+		Command:   CommandOptions{Parts: in.parts},
+	})
+	if err != nil {
+		return err
+	}
+	return closeAfter(ctx, app, body(ctx, app))
 }
 
 func validateOptions(opts *Options) error {
@@ -154,7 +204,7 @@ func validateOptions(opts *Options) error {
 		return invalidOptions("options must not be nil")
 	case opts.Config == nil || opts.Config.Config == nil:
 		return invalidOptions("config must not be nil")
-	case opts.Surface != SurfaceServer && opts.Surface != SurfaceChat:
+	case opts.Surface != SurfaceServer && opts.Surface != SurfaceChat && opts.Surface != SurfaceCommand:
 		return invalidOptions("surface " + string(opts.Surface) + " is not supported")
 	case opts.LogOutput == nil:
 		return invalidOptions("log output must not be nil")
@@ -164,6 +214,24 @@ func validateOptions(opts *Options) error {
 		return invalidOptions("chat output must not be nil")
 	case opts.Surface == SurfaceChat && opts.Chat.Diag == nil:
 		return invalidOptions("chat diagnostics output must not be nil")
+	case opts.Surface != SurfaceCommand && len(opts.Command.Parts) > 0:
+		return invalidOptions("parts are only valid on the command surface")
+	}
+	return validateParts(opts.Command.Parts)
+}
+
+func validateParts(parts []Part) error {
+	var seen []Part
+	for _, part := range parts {
+		switch part {
+		case PartDurable, PartWorkflows, PartModels:
+		default:
+			return invalidOptions("part " + string(part) + " is not supported")
+		}
+		if slices.Contains(seen, part) {
+			return invalidOptions("part " + string(part) + " is listed twice")
+		}
+		seen = append(seen, part)
 	}
 	return nil
 }
@@ -177,6 +245,24 @@ type toolWiring struct {
 	decider   toolbroker.ApprovalDecider
 	access    toolbroker.AccessPolicy
 	reachable func(sessionID string) bool
+}
+
+type toolExecutorInput struct {
+	result       *config.LoadResult
+	db           *sql.DB
+	artifactRoot string
+	logger       *slog.Logger
+	wiring       *toolWiring
+}
+
+func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
+	if in == nil || in.result == nil || in.wiring == nil {
+		return nil, invalidOptions("tool executor input must carry a config result and wiring")
+	}
+	wiring := in.wiring
+	return toolsbuiltin.New(in.result.Config, in.db, in.artifactRoot, in.result.CapabilityReport, in.logger,
+		wiring.observer, wiring.decider, wiring.access,
+		toolsbuiltin.WithApprovalReachable(wiring.reachable))
 }
 
 type lifecycleStage struct {
@@ -212,6 +298,8 @@ type build struct {
 	pipeline     *telemetry.Pipeline
 	prices       *usage.PriceRegistry
 	models       *model.Registry
+	runtime      durable.Runtime
+	interpreter  *workflow.Interpreter
 	artifactRoot string
 
 	registry   *auraagent.Registry
@@ -234,12 +322,62 @@ type build struct {
 	chat   *chatBuild
 }
 
+func (b *build) phases(ctx context.Context) []func() error {
+	setup := []func() error{
+		func() error { return b.setupLogging(ctx) },
+		func() error { return b.openStorage(ctx) },
+	}
+	if b.opts.Surface == SurfaceCommand {
+		return append(setup, func() error { return b.buildCommandParts(ctx) })
+	}
+	return append(setup,
+		b.startTelemetry,
+		func() error { return b.buildModelRegistry(ctx) },
+		func() error { return b.buildKernel(ctx) },
+		func() error { return b.buildModules(ctx) },
+		b.buildTurnRuntime,
+		func() error { return b.buildSurface(ctx) },
+	)
+}
+
+func (b *build) buildCommandParts(ctx context.Context) error {
+	parts := b.opts.Command.Parts
+	if slices.Contains(parts, PartDurable) || slices.Contains(parts, PartWorkflows) {
+		if _, err := b.durableRuntime(); err != nil {
+			return err
+		}
+	}
+	if slices.Contains(parts, PartWorkflows) {
+		if err := b.buildWorkflows(ctx); err != nil {
+			return err
+		}
+	}
+	if slices.Contains(parts, PartModels) {
+		return b.newModelRegistry(ctx, evaluationModelOptions(b.cfg, b.db))
+	}
+	return nil
+}
+
+func (b *build) durableRuntime() (durable.Runtime, error) {
+	if b.runtime != nil {
+		return b.runtime, nil
+	}
+	runtime, err := durableRuntimeForConfig(b.cfg, b.logger)
+	if err != nil {
+		return nil, err
+	}
+	b.runtime = runtime
+	return runtime, nil
+}
+
 func newBuild(opts *Options) *build {
 	b := &build{opts: opts, result: opts.Config, cfg: opts.Config.Config}
-	if opts.Surface == SurfaceServer {
+	switch opts.Surface {
+	case SurfaceServer:
 		b.server = &serverBuild{}
-	} else {
+	case SurfaceChat:
 		b.chat = &chatBuild{}
+	case SurfaceCommand:
 	}
 	return b
 }
@@ -266,11 +404,15 @@ func (b *build) setupLogging(ctx context.Context) error {
 		Logger:      logger,
 	})
 	logConfigResult(ctx, logger, b.result)
-	if !b.onServer() {
+	switch b.opts.Surface {
+	case SurfaceServer:
+		logSandboxHost(ctx, logger, b.opts.Server.Host, b.opts.Server.HostErr)
+		return b.result.CapabilityStateError
+	case SurfaceChat:
 		return chatCapabilityGate(ctx, logger, b.result)
+	case SurfaceCommand:
 	}
-	logSandboxHost(ctx, logger, b.opts.Server.Host, b.opts.Server.HostErr)
-	return b.result.CapabilityStateError
+	return nil
 }
 
 func (b *build) openStorage(ctx context.Context) error {
@@ -296,7 +438,7 @@ func (b *build) buildModelRegistry(ctx context.Context) error {
 		return err
 	}
 	b.artifactRoot = artifactRoot
-	models, err := model.NewRegistry(ctx, &model.RegistryOptions{
+	return b.newModelRegistry(ctx, &model.RegistryOptions{
 		Logger:     b.logger,
 		Models:     b.cfg.Models,
 		Routes:     b.cfg.ModelRoutes,
@@ -304,6 +446,19 @@ func (b *build) buildModelRegistry(ctx context.Context) error {
 		Prices:     prices,
 		Vision:     visionWiringForConfig(b.cfg, b.db, artifactRoot),
 	})
+}
+
+func evaluationModelOptions(cfg *config.Config, db *sql.DB) *model.RegistryOptions {
+	return &model.RegistryOptions{
+		Logger:     slog.New(slog.DiscardHandler),
+		Models:     cfg.Models,
+		Routes:     cfg.ModelRoutes,
+		Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)},
+	}
+}
+
+func (b *build) newModelRegistry(ctx context.Context, opts *model.RegistryOptions) error {
+	models, err := model.NewRegistry(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -329,9 +484,9 @@ func (b *build) buildKernel(ctx context.Context) error {
 		return err
 	}
 	if b.onServer() || b.cfg.Tools != nil {
-		builtin, err := toolsbuiltin.New(b.cfg, b.db, b.artifactRoot, b.result.CapabilityReport, b.logger,
-			b.wiring.observer, b.wiring.decider, b.wiring.access,
-			toolsbuiltin.WithApprovalReachable(b.wiring.reachable))
+		builtin, err := newToolExecutor(&toolExecutorInput{
+			result: b.result, db: b.db, artifactRoot: b.artifactRoot, logger: b.logger, wiring: &b.wiring,
+		})
 		if err != nil {
 			return err
 		}
