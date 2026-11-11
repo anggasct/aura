@@ -627,10 +627,6 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		e.Publish(ev)
 		return nil
 	}
-	emit := func(ctx context.Context, kind string, payload []byte) error {
-		ev := &store.RuntimeEvent{Kind: kind, Payload: payload}
-		return persist(ctx, ev)
-	}
 
 	var executed []store.RuntimeEvent
 	e.notifyPresenceStarted(ctx, req)
@@ -653,6 +649,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 				}
 				continue
 			}
+			ev.ID = scope.NextEventID(req.TurnID)
 			if emitErr := persist(ctx, &ev); emitErr != nil {
 				execErr = emitErr
 				break
@@ -693,7 +690,8 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		e.notifyPresenceFailed(context.WithoutCancel(ctx), req)
 	}
 	e.notifyPresenceEnded(ctx, req)
-	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
+	terminal := &store.RuntimeEvent{ID: req.TurnID + "-terminal", Kind: terminalKind, Payload: terminalPayload}
+	if err := persist(context.WithoutCancel(ctx), terminal); err != nil {
 		return err
 	}
 	return e.releaseAndAdvance(context.WithoutCancel(ctx), scope, req)

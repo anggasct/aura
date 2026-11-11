@@ -20,6 +20,7 @@ const maxEventLoad = 1 << 20
 type ADKSessionService struct {
 	sessions      SessionPort
 	historyAuthor string
+	leaveOutTurn  string
 }
 
 type SessionPort interface {
@@ -273,6 +274,9 @@ func (s *ADKSessionService) loadEvents(ctx context.Context, sessionID string) ([
 	events := make([]*session.Event, 0, len(stored))
 	for i := range stored {
 		if stored[i].Kind != store.EventKindADK {
+			continue
+		}
+		if s.leaveOutTurn != "" && stored[i].TurnID == s.leaveOutTurn {
 			continue
 		}
 		ev, err := store.RuntimeEventToADK(&stored[i])

@@ -3,7 +3,9 @@ package runtimeadk
 import (
 	"context"
 	"encoding/json"
+	"iter"
 	"slices"
+	"sync"
 	"testing"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -208,5 +210,81 @@ func TestDurableExecutorStreamsPartialsWithoutChangingTheJournal(t *testing.T) {
 	}
 	if len(streamModel.streams) != 1 {
 		t.Errorf("provider calls after replay = %d, want 1", len(streamModel.streams))
+	}
+}
+
+type functionCallModel struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (m *functionCallModel) Name() string { return "function-call-model" }
+
+func (m *functionCallModel) GenerateContent(context.Context, *adkmodel.LLMRequest, bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		m.mu.Lock()
+		m.calls++
+		m.mu.Unlock()
+		yield(&adkmodel.LLMResponse{
+			Content: &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{
+				{FunctionCall: &genai.FunctionCall{Name: "lookup", Args: map[string]any{"q": "a"}}},
+				{FunctionCall: &genai.FunctionCall{ID: "call-7", Name: "lookup", Args: map[string]any{"q": "b"}}},
+			}},
+			TurnComplete: true,
+		}, nil)
+	}
+}
+
+func (m *functionCallModel) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
+func yieldedFunctionCallIDs(ctx context.Context, t *testing.T, model adkmodel.LLM) []string {
+	t.Helper()
+	var ids []string
+	for response, err := range model.GenerateContent(ctx, journaledRequest(), false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+		for _, part := range response.Content.Parts {
+			if part.FunctionCall != nil {
+				ids = append(ids, part.FunctionCall.ID)
+			}
+		}
+	}
+	return ids
+}
+
+func TestJournaledModelGivesAnUnnamedFunctionCallAStableID(t *testing.T) {
+	inner := &functionCallModel{}
+	inv := &journalInvocation{}
+	want := []string{"adk-turn-1-op-1-0", "call-7"}
+
+	first := yieldedFunctionCallIDs(withTurnID(scopedContext(t, inv), "turn-1"), t, journalModel(inner))
+	second := yieldedFunctionCallIDs(withTurnID(scopedContext(t, inv), "turn-1"), t, journalModel(inner))
+
+	if !slices.Equal(first, want) {
+		t.Errorf("function call ids = %v, want %v", first, want)
+	}
+	if !slices.Equal(second, want) {
+		t.Errorf("function call ids on the second call = %v, want %v", second, want)
+	}
+	if calls := inner.callCount(); calls != 1 {
+		t.Errorf("model calls = %d, want the second call served from the journal", calls)
+	}
+	recorded := journalSnapshot(t, inv)["op-1"]
+	if len(recorded) != 1 || recorded[0].Content.Parts[0].FunctionCall.ID != want[0] {
+		t.Errorf("recorded response = %+v, want it to carry the id %s", recorded, want[0])
+	}
+
+	unscoped := yieldedFunctionCallIDs(withTurnID(t.Context(), "turn-1"), t, journalModel(inner))
+
+	if !slices.Equal(unscoped, []string{"", "call-7"}) {
+		t.Errorf("function call ids outside a turn scope = %v, want the unnamed call left empty", unscoped)
+	}
+	if calls := inner.callCount(); calls != 2 {
+		t.Errorf("model calls = %d, want the call outside a turn scope to reach the model", calls)
 	}
 }
