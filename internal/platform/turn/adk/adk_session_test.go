@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -175,5 +176,54 @@ func TestADKSessionHistoryIgnoresSkillActivations(t *testing.T) {
 	}
 	if got.Session.Events().Len() != 0 {
 		t.Fatalf("history events = %d, want the activation excluded", got.Session.Events().Len())
+	}
+}
+
+func TestSessionHistoryLeavesOutTheTurnBeingExecuted(t *testing.T) {
+	db, sessions, events := newSessionTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	for _, turnID := range []string{"turn-1", "turn-2"} {
+		ev := &session.Event{
+			ID:           "event-" + turnID,
+			Timestamp:    time.Now().UTC().Truncate(time.Millisecond),
+			InvocationID: "inv-" + turnID,
+			Author:       "model",
+		}
+		ev.Content = genai.NewContentFromText("answer of "+turnID, genai.RoleModel)
+		re, err := store.RuntimeEventFromADK("session-1", turnID, ev)
+		if err != nil {
+			t.Fatalf("RuntimeEventFromADK: %v", err)
+		}
+		if _, err := events.AppendSequenced(t.Context(), "session-1", &re); err != nil {
+			t.Fatalf("append the event of %s: %v", turnID, err)
+		}
+	}
+	cases := []struct {
+		name     string
+		leaveOut string
+		want     []string
+	}{
+		{name: "told to leave out turn-2", leaveOut: "turn-2", want: []string{"event-turn-1"}},
+		{name: "told nothing", want: []string{"event-turn-1", "event-turn-2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, err := NewADKSessionService(sessions)
+			if err != nil {
+				t.Fatalf("NewADKSessionService: %v", err)
+			}
+			svc.leaveOutTurn = tc.leaveOut
+			got, err := svc.Get(t.Context(), &session.GetRequest{SessionID: "session-1"})
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			var ids []string
+			for ev := range got.Session.Events().All() {
+				ids = append(ids, ev.ID)
+			}
+			if !slices.Equal(ids, tc.want) {
+				t.Errorf("history = %v, want %v", ids, tc.want)
+			}
+		})
 	}
 }

@@ -260,6 +260,9 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			return
 		}
 		sessionService.historyAuthor = x.agentName(&definition)
+		if _, ok := durable.TurnScopeFrom(runCtx); ok {
+			sessionService.leaveOutTurn = req.TurnID
+		}
 		recallAttached := req.UntrustedContext != nil
 		if x.recall != nil && !recallAttached {
 			evidence, rerr := x.recall.RecallTurn(runCtx, req)

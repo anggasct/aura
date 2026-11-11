@@ -118,6 +118,7 @@ type durableHostRig struct {
 	runtime  *sqlite.Runtime
 	engine   *Engine
 	host     *runningHost
+	hostTTL  time.Duration
 }
 
 type runningHost struct {
@@ -146,9 +147,19 @@ func newDurableHostRig(t *testing.T, cfg Config, executor TurnExecutor) *durable
 	return rig
 }
 
+const shortHostTTL = time.Second
+
+func newShortLeaseHostRig(t *testing.T, cfg Config, executor TurnExecutor) *durableHostRig {
+	t.Helper()
+	db := openTestDatabase(t)
+	rig := &durableHostRig{t: t, cfg: cfg, db: db, sessions: newHookedSessionStore(t, db), hostTTL: shortHostTTL}
+	rig.build(executor)
+	return rig
+}
+
 func (r *durableHostRig) build(executor TurnExecutor) {
 	r.t.Helper()
-	rt, err := sqlite.New(&sqlite.Options{DB: r.db, Logger: slog.New(slog.DiscardHandler), PollInterval: hostRigPoll, StopGrace: 5 * time.Second})
+	rt, err := sqlite.New(&sqlite.Options{DB: r.db, Logger: slog.New(slog.DiscardHandler), PollInterval: hostRigPoll, StopGrace: 5 * time.Second, HostTTL: r.hostTTL})
 	if err != nil {
 		r.t.Fatalf("sqlite.New: %v", err)
 	}
