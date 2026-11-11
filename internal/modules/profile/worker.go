@@ -170,14 +170,10 @@ func (e *Extractor) Enqueue(ctx stdcontext.Context, job Job) error {
 	}
 }
 
-func (e *Extractor) Start(ctx stdcontext.Context) {
+func (e *Extractor) Run(ctx stdcontext.Context) {
 	if ctx == nil {
 		return
 	}
-	go e.run(ctx)
-}
-
-func (e *Extractor) run(ctx stdcontext.Context) {
 	for {
 		select {
 		case <-ctx.Done():

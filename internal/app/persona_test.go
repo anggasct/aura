@@ -2,11 +2,10 @@ package app
 
 import (
 	"bytes"
-	"log/slog"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 
@@ -156,13 +155,16 @@ func TestTerminalRunsAndRecordsChosenPersona(t *testing.T) {
 }
 
 func TestChatRejectsUnknownPersona(t *testing.T) {
+	restoreDefaultLogger(t)
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
 	path := writePersonaCLIConfig(t, "You are Kuma.")
 	result, err := config.Load(path)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	err = runChat(t.Context(), &result, slog.New(slog.DiscardHandler), strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, "", "ghost", chatPresentation{plain: true})
+	opts := chatCompositionOptions(&result, io.Discard)
+	opts.Chat.Persona = "ghost"
+	_, err = Build(t.Context(), opts)
 	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodePersonaNotFound {
 		t.Fatalf("chat --persona ghost error = %v, want persona_not_found", err)
 	}

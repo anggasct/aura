@@ -1,9 +1,11 @@
 package memory
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -248,4 +250,36 @@ func TestPurgeExpiredIsBounded(t *testing.T) {
 	if _, err := service.PurgeExpired(t.Context(), now, 501); err == nil {
 		t.Error("unbounded purge accepted")
 	}
+}
+
+func TestRunPurgeLoopPurgesUntilCancelled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := testService()
+		expired := time.Now().UTC().Add(-time.Hour)
+		document := &StoredDocument{
+			ID: "mem-expired", OwnerID: "owner-1", SessionID: "sess-a", Kind: KindSummary,
+			FromSequence: 1, ToSequence: 1, Content: "old summary",
+			TrustLabel: "derived_untrusted", CreatedAt: expired, ExpiresAt: &expired,
+		}
+		if _, err := service.documents.UpsertDocument(t.Context(), document); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		returned := make(chan struct{})
+		go func() {
+			defer close(returned)
+			service.RunPurgeLoop(ctx, time.Minute, 10)
+		}()
+
+		time.Sleep(time.Minute + time.Second)
+		synctest.Wait()
+		remaining, err := service.PurgeExpired(t.Context(), time.Now().UTC(), 10)
+		if err != nil || remaining != 0 {
+			t.Fatalf("purge after one tick = %d, %v; want the loop to have purged the expired document", remaining, err)
+		}
+
+		cancel()
+		<-returned
+	})
 }

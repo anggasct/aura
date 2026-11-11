@@ -297,24 +297,22 @@ func (s *Service) ProjectionFailureCount() int64 {
 	return s.projectionFailures.Load()
 }
 
-func (s *Service) StartPurgeLoop(ctx context.Context, interval time.Duration, limit int) {
+func (s *Service) RunPurgeLoop(ctx context.Context, interval time.Duration, limit int) {
 	if s == nil || interval <= 0 || limit <= 0 {
 		return
 	}
 	ticker := time.NewTicker(interval)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if _, err := s.PurgeExpired(ctx, time.Now().UTC(), limit); err != nil {
-					s.observe(ctx, &Observation{Outcome: "purge_error"})
-				}
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, err := s.PurgeExpired(ctx, time.Now().UTC(), limit); err != nil {
+				s.observe(ctx, &Observation{Outcome: "purge_error"})
 			}
 		}
-	}()
+	}
 }
 
 func trustFor(ownerID, author, kind string) (approval.TrustLabel, bool) {

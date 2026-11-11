@@ -9,7 +9,6 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability"
-	"github.com/anggasct/aura/internal/platform/logging"
 )
 
 func newChatCmd(gf *globalFlags) *cobra.Command {
@@ -25,20 +24,28 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cfg := result.Config
-			level, format := resolveLogging(cmd, cfg)
-			logger, err := logging.Setup(level, format, os.Stderr)
+			level, format := resolveLogging(cmd, result.Config)
+			app, err := Build(ctx, &Options{
+				Surface:   SurfaceChat,
+				Config:    &result,
+				LogLevel:  level,
+				LogFormat: format,
+				LogOutput: os.Stderr,
+				Chat: ChatOptions{
+					In:         os.Stdin,
+					Out:        os.Stdout,
+					Diag:       os.Stderr,
+					SessionID:  sessionID,
+					Persona:    persona,
+					Plain:      plain,
+					NoColor:    os.Getenv("NO_COLOR") != "",
+					Interrupts: interruptsFromContext(ctx),
+				},
+			})
 			if err != nil {
 				return err
 			}
-			logConfigResult(ctx, logger, &result)
-			if err := chatCapabilityGate(ctx, logger, &result); err != nil {
-				return err
-			}
-			return runChat(ctx, &result, logger, os.Stdin, os.Stdout, os.Stderr, sessionID, persona, chatPresentation{
-				plain:   plain,
-				noColor: os.Getenv("NO_COLOR") != "",
-			})
+			return runAndClose(ctx, app)
 		},
 	}
 	cmd.Flags().BoolVar(&plain, "plain", false, "force non-TTY plain output")

@@ -4,29 +4,27 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"slices"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
-	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
-	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/durable"
-	"github.com/anggasct/aura/internal/platform/logging"
-	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
+	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -41,462 +39,454 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := startup.config
-			cfg := result.Config
-			level, format := resolveLogging(cmd, cfg)
-			logger, err := logging.Setup(level, format, os.Stderr)
-			if err != nil {
-				return err
-			}
-			logConfigResult(ctx, logger, &result)
-			logSandboxHost(ctx, logger, startup.host, startup.hostErr)
-			if result.CapabilityStateError != nil {
-				return result.CapabilityStateError
-			}
-			db, err := openStorage(ctx, cfg)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = db.Close() }()
-			prices, err := openPriceRegistry(ctx, logger, cfg, result.Path, "")
-			if err != nil {
-				return err
-			}
-			_, visionArtifactRoot, _, err := storagePaths(cfg)
-			if err != nil {
-				return err
-			}
-			models, err := model.NewRegistry(ctx, &model.RegistryOptions{
-				Logger:     logger,
-				Models:     cfg.Models,
-				Routes:     cfg.ModelRoutes,
-				Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)},
-				Prices:     prices,
-				Vision:     visionWiringForConfig(cfg, db, visionArtifactRoot),
+			level, format := resolveLogging(cmd, startup.config.Config)
+			app, err := Build(ctx, &Options{
+				Surface:   SurfaceServer,
+				Config:    &startup.config,
+				LogLevel:  level,
+				LogFormat: format,
+				LogOutput: os.Stderr,
+				Server:    ServerOptions{Host: startup.host, HostErr: startup.hostErr},
 			})
 			if err != nil {
 				return err
 			}
-			pipeline, err := telemetry.NewPipeline(cfg.Telemetry, logger)
-			if err != nil {
-				return err
-			}
-			defer func() {
-				shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
-				defer cancel()
-				if err := pipeline.Shutdown(shutdownCtx); err != nil {
-					logger.WarnContext(shutdownCtx, "telemetry shutdown", "component", "telemetry", "error", err)
-				}
-			}()
-			recorder, err := telemetry.NewToolRecorder(pipeline.TracerProvider(), pipeline.MeterProvider())
-			if err != nil {
-				return err
-			}
-			codeRecorder, err := telemetry.NewCodeRecorder(pipeline.MeterProvider())
-			if err != nil {
-				return err
-			}
-			observer := toolbroker.Observer(func(ctx context.Context, observation toolbroker.Observation) {
-				recorder.Record(ctx, &telemetry.ToolObservation{
-					Name:          observation.ToolName + "@" + observation.ToolVersion,
-					Status:        string(observation.Class),
-					PolicyOutcome: observation.PolicyOutcome,
-					Approval:      observation.Approval,
-					Executor:      observation.Executor,
-					Duration:      observation.Duration,
-					OutputBytes:   observation.OutputBytes,
-				})
-			})
-			_, artifactRoot, _, err := storagePaths(cfg)
-			if err != nil {
-				return err
-			}
-			agentRegistry, err := buildAgentRegistry(cfg)
-			if err != nil {
-				return err
-			}
-			logPersonas(ctx, logger, agentRegistry)
-			personaRouter, err := auraagent.NewRouter(agentRegistry, &cfg.Channels, cfg.Bindings)
-			if err != nil {
-				return err
-			}
-			if err := recoverEmailEffects(ctx, cfg, db, logger); err != nil {
-				return err
-			}
-			channelAdapters, channelChecks, approvalAdapters, err := buildChannelAdapters(cfg, personaRouter, db, artifactRoot, pipeline.MeterProvider(), logger)
-			if err != nil {
-				return err
-			}
-			accessRecorder, err := telemetry.NewAccessRecorder(pipeline.MeterProvider())
-			if err != nil {
-				return err
-			}
-			var ownerRoute *approval.OwnerRoute
-			if cfg.Channels.HTTP.Enabled || cfg.Channels.Email.Enabled {
-				ownerRoute, err = newOwnerRoute(approvalAdapters, accessRecorder.ApprovalRouted)
-				if err != nil {
-					return err
-				}
-			}
-			emailMailboxes := wireEmailOwnerAccess(channelAdapters, ownerRoute, approvalAdapters)
-			approvalTargets := approvalChannels(approvalAdapters, ownerRoute)
-			approvalDecider := channelApprovalDecider(approvalTargets)
-			builtin, err := toolsbuiltin.New(cfg, db, artifactRoot, result.CapabilityReport, logger, observer, approvalDecider, newAccessPolicy(agentRegistry, db, accessRecorder),
-				toolsbuiltin.WithApprovalReachable(channelApprovalReachable(approvalTargets)))
-			if err != nil {
-				return err
-			}
-			notifiers := handoffNotifiers(channelAdapters)
-			if cfg.Channels.HTTP.Enabled {
-				notifiers = append(notifiers, newHTTPHandoffNotifier(ownerRoute, approvalAdapters))
-			}
-			builtin.SetHandoffOpener(newHandoffService(db, notifiers))
-			builtin.SetEmailOutbox(&emailOutbox{adapters: emailMailboxes})
-			plugins, err := planPlugins(ctx, cfg, db, builtin.Broker())
-			if err != nil {
-				return err
-			}
-			plugins.warnUnavailablePlugins(ctx, logger, agentRegistry.Definitions())
-			if connectorPlugins := plugins.connectorPlugins(); len(connectorPlugins) > 0 {
-				connectors, err := startConnectorPlugins(ctx, &connectorRuntimeOptions{
-					Broker: builtin.Broker(), Logger: logger, Capabilities: result.CapabilityReport, Plugins: connectorPlugins,
-				})
-				if err != nil {
-					return err
-				}
-				plugins.connectors = connectors
-				defer func() {
-					closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
-					defer cancel()
-					if err := connectors.Close(closeCtx); err != nil {
-						logger.WarnContext(closeCtx, "connector plugin shutdown", "component", "plugin_connector", "error", err)
-					}
-				}()
-			}
-			var mcpServers *mcpRuntime
-			if mcpServersConfigured(cfg) || len(plugins.mcpPlugins()) > 0 {
-				mcpServers, err = startConfiguredMCP(ctx, cfg, builtin.Broker(), logger, pipeline.MeterProvider(), result.CapabilityReport, agentRegistry.Definitions(), plugins.mcpPlugins())
-				if err != nil {
-					return err
-				}
-				defer func() {
-					closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
-					defer cancel()
-					if err := mcpServers.Close(closeCtx); err != nil {
-						logger.WarnContext(closeCtx, "mcp shutdown", "component", "mcp", "error", err)
-					}
-				}()
-			}
-			modelDefinition := cfg.Models.Definitions["primary"]
-			if modelDefinition.Model == "" {
-				return &config.Error{Code: config.ErrorCodeConfigInvalid, Detail: "models.definitions.primary.model is required for the server runtime"}
-			}
-			sessions := store.NewSessionService(db)
-			events := store.NewEventStore(db)
-			personaRecorder, err := telemetry.NewPersonaRecorder(pipeline.MeterProvider())
-			if err != nil {
-				return err
-			}
-			routeModel, err := model.RouteModelName(cfg, modelDefinition.Model)
-			if err != nil {
-				return err
-			}
-			turnLedger, err := newTurnLedger(cfg, db, prices, logger)
-			if err != nil {
-				return err
-			}
-			executorOpts := []runtimeadk.ExecutorOption{
-				runtimeadk.WithBudgetLedger(turnLedger, "primary"),
-				runtimeadk.WithBuiltinToolExecutor(builtin),
-				runtimeadk.WithAgentResolver(agentRegistry, routeModel),
-				ownerContextOption(ctx, cfg.Owner, logger),
-			}
-			var memoryHook func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
-			if cfg.Memory.Enabled {
-				memoryRecorder, err := telemetry.NewMemoryRecorder(pipeline.MeterProvider())
-				if err != nil {
-					return err
-				}
-				memoryRuntime, err := buildMemoryRuntime(ctx, cfg, db, agentRegistry, models, logger, memoryRecorderObserver(memoryRecorder))
-				if err != nil {
-					return err
-				}
-				executorOpts = append(executorOpts, runtimeadk.WithRecallProvider(memoryRuntime.provider))
-				memoryHook = buildMemoryHook(memoryRuntime.service, memoryRuntime.model, memoryRuntime.summarizer, logger)
-				memoryRuntime.service.StartPurgeLoop(ctx, time.Duration(cfg.Memory.PurgeInterval), cfg.Memory.PurgeLimit)
-			}
-			var profileHook postTurnHook
-			healthChecks := channelChecks
-			if mcpServers != nil && mcpServers.hasCheck {
-				healthChecks = append(slices.Clone(healthChecks), mcpServers.check)
-			}
-			pluginCheck, pluginChecked, err := plugins.healthCheck(cfg, db, mcpServers)
-			if err != nil {
-				return err
-			}
-			if pluginChecked {
-				healthChecks = append(slices.Clone(healthChecks), pluginCheck)
-			}
-			if cfg.Profile != nil && cfg.Profile.Enabled {
-				profileRuntime, err := buildProfileRuntime(ctx, cfg, db, models, pipeline.MeterProvider(), logger)
-				if err != nil {
-					return err
-				}
-				executorOpts = append(executorOpts, runtimeadk.WithProfileContext(profileRuntime))
-				profileHook = profileRuntime.hook
-				profileRuntime.start(ctx)
-				healthChecks = append(slices.Clone(healthChecks), profileRuntime.check(cfg))
-			}
-			var skillRenderer runtimeengine.SkillRenderer
-			var skillCommands command.Skills
-			if cfg.Skills != nil && cfg.Skills.Enabled {
-				skillRuntime, err := buildSkillRuntime(ctx, cfg.Skills, db, logger)
-				if err != nil {
-					return err
-				}
-				executorOpts = append(executorOpts, runtimeadk.WithSkillContext(skillRuntime.context))
-				skillRenderer = skillRuntime.context
-				skillCommands = skillRuntime.bridge
-			}
-			kbRuntime, kbEnabled, err := buildKnowledgeRuntime(ctx, cfg, agentRegistry)
-			if err != nil {
-				return err
-			}
-			if kbEnabled {
-				defer kbRuntime.close()
-				kbRuntime.attachSearch(builtin)
-				executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(kbRuntime.provider))
-			}
-			var interpreterRun *interpreterRuntime
-			if interpreterEnabled(result.CapabilityReport) {
-				interpreterManifest, err := interpreter.DefaultManifest()
-				if err != nil {
-					return err
-				}
-				interpreterRun, err = newInterpreterRuntime(cfg, interpreterManifest)
-				if err != nil {
-					return err
-				}
-				if err := interpreterRun.enableExecution(ctx, cfg, builtin.Artifacts(), codeObserver(codeRecorder), logger); err != nil {
-					return err
-				}
-				interpreterRun.attach(builtin)
-				healthChecks = append(slices.Clone(healthChecks), interpreterRun.check(cfg))
-			}
-			adkExecutor, err := runtimeadk.NewADKExecutor(
-				"aura", modelDefinition.Model, models, sessions, events, builtin, nil, logger,
-				executorOpts...,
-			)
-			if err != nil {
-				return err
-			}
-			var durableConfig *runtimeengine.DurableConfig
-			if cfg.Durable != nil && cfg.Durable.Enabled {
-				sessionRuntime, err := durableRuntimeForConfig(cfg, logger)
-				if err != nil {
-					return err
-				}
-				durableConfig = &runtimeengine.DurableConfig{
-					Sessions: &durableSessionStore{runtime: sessionRuntime},
-					Runtime:  sessionRuntime,
-				}
-			}
-			runtimeEngine, err := runtimeengine.NewEngine(&runtimeengine.Config{
-				MaxActiveTurns:  cfg.Runtime.MaxActiveTurns,
-				MaxPendingTurns: cfg.Runtime.MaxPendingTurns,
-				TurnTimeout:     time.Duration(cfg.Runtime.TurnTimeout),
-				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
-				DefaultAgentID:  auraagent.DefaultID,
-				Personas:        registryPersonas{registry: agentRegistry},
-				Skills:          skillRenderer,
-				Durable:         durableConfig,
-				PostTurnHook:    composePostTurnHooks(memoryHook, profileHook, personaTurnHook(personaRecorder)),
-			}, events, store.NewDedupeStore(db), adkExecutor, logger)
-			if err != nil {
-				return err
-			}
-			adkExecutor.SetEventPublisher(runtimeEngine)
-			commandRecorder, err := telemetry.NewCommandRecorder(pipeline.TracerProvider(), pipeline.MeterProvider())
-			if err != nil {
-				return err
-			}
-			if err := wireChatCommands(channelAdapters, runtimeEngine, sessions, events, store.NewConversationSessionStore(db), skillCommands, commandRecorder); err != nil {
-				return err
-			}
-			host, err := runtimeengine.NewHost(runtimeEngine, channelAdapters, logger)
-			if err != nil {
-				return err
-			}
-			broadcastEffects, err := toolsbuiltin.NewChannelEffects(db, logger)
-			if err != nil {
-				return err
-			}
-			broadcastWiring := buildBroadcastSenders(channelAdapters, broadcastEffects, store.NewSessionService(db))
-			broadcastRecorder, err := telemetry.NewBroadcastRecorder(pipeline.MeterProvider())
-			if err != nil {
-				return err
-			}
-			broadcastObserver := broadcastRecorderObserver(broadcastRecorder)
-			broadcastRunner, err := buildBroadcastRunner(cfg, db, logger, broadcastWiring, broadcastObserver)
-			if err != nil {
-				return err
-			}
-			var broadcastRuntime durable.Runtime
-			if durableConfig != nil {
-				broadcastRuntime = durableConfig.Runtime
-			} else {
-				broadcastRuntime, err = durableRuntimeForConfig(cfg, logger)
-				if err != nil {
-					return err
-				}
-				if err := registerBroadcastHandler(broadcastRuntime, broadcastRunner); err != nil {
-					return err
-				}
-			}
-			if resumed, err := resumeBroadcastRunners(ctx, broadcastRuntime, db); err != nil {
-				return err
-			} else if resumed > 0 {
-				logger.InfoContext(ctx, "resumed broadcast runs", "component", "broadcast", "count", resumed)
-			}
-			cronBroadcaster, err := buildCronBroadcaster(cfg, db, broadcastRuntime, broadcastWiring)
-			if err != nil {
-				return err
-			}
-			scheduleRecorder, err := telemetry.NewScheduleRecorder(pipeline.MeterProvider())
-			if err != nil {
-				return err
-			}
-			scheduledWorkflows := &scheduleWorkflows{}
-			scheduleRunner, err := buildScheduleRunner(db, logger, runtimeEngine, cronBroadcaster, time.Duration(cfg.Scheduler.OccurrenceRetention), scheduleRecorderObserver(scheduleRecorder), scheduledWorkflows)
-			if err != nil {
-				return err
-			}
-			if durableConfig == nil {
-				if err := registerScheduleHandler(broadcastRuntime, scheduleRunner); err != nil {
-					return err
-				}
-			}
-			var childLedger child.BudgetLedger = child.NewLedger(nil, 0)
-			if cfg.Children != nil && cfg.Children.Enabled {
-				childHandler, err := buildChildHandler(db, childLedger, &runtimeSignaler{runtime: broadcastRuntime}, adkExecutor, modelDefinition.Model)
-				if err != nil {
-					return err
-				}
-				if durableConfig == nil {
-					if err := registerChildHandler(broadcastRuntime, childHandler); err != nil {
-						return err
-					}
-				}
-			}
-			if resumedJobs, err := resumeScheduleRuns(ctx, broadcastRuntime, db); err != nil {
-				return err
-			} else if resumedJobs > 0 {
-				logger.InfoContext(ctx, "resumed schedule runs", "component", "schedule", "count", resumedJobs)
-			}
-			if err := host.Start(ctx); err != nil {
-				return err
-			}
-			healthChecks = append(slices.Clone(healthChecks), personaEvalCheck(cfg, agentRegistry, db))
-			httpChat, httpChatChecks, err := buildHTTPChat(cfg, db, runtimeEngine, agentRegistry, accessRecorder, ownerRoute, logger)
-			if err != nil {
-				return err
-			}
-			healthChecks = append(healthChecks, httpChatChecks...)
-			probeListener, err := buildProbeListener(cfg, mapCapabilityStatuses(result.CapabilityReport), store.NewEventStore(db), store.NewSessionService(db), healthChecks...)
-			if err != nil {
-				return err
-			}
-			srv := server.New(server.Options{
-				Logger:          logger,
-				ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
-			})
-			if err := srv.Add(probeListener); err != nil {
-				return err
-			}
-			if cfg.Durable != nil && cfg.Durable.Enabled {
-				durableListener, err := buildDurableListener(ctx, &result, db, logger, runtimeEngine)
-				if err != nil {
-					return err
-				}
-				workflowTools, err := newWorkflowToolController(durableListener.interpreter, workflow.NewStore(db), agentRegistry, replyTargeters(channelAdapters)...)
-				if err != nil {
-					return err
-				}
-				workflowTools.enableProposalCards(cfg, proposalOfferers(channelAdapters), logger)
-				go workflowTools.runProposalCards(ctx)
-				builtin.SetWorkflowController(workflowTools)
-				scheduledWorkflows.set(durableListener.interpreter)
-				if err := registerBroadcastHandler(durableListener, broadcastRunner); err != nil {
-					return err
-				}
-				if err := registerScheduleHandler(durableListener, scheduleRunner); err != nil {
-					return err
-				}
-				if cfg.Children != nil && cfg.Children.Enabled {
-					childHandler, err := buildChildHandler(db, childLedger, nil, adkExecutor, modelDefinition.Model)
-					if err != nil {
-						return err
-					}
-					if err := registerChildHandler(durableListener, childHandler); err != nil {
-						return err
-					}
-				}
-				if err := srv.Add(durableListener); err != nil {
-					return err
-				}
-			}
-			if cfg.Webhook.Enabled {
-				webhookListener, err := buildWebhookListener(cfg, db, runtimeEngine, logger)
-				if err != nil {
-					return err
-				}
-				if err := srv.Add(webhookListener); err != nil {
-					return err
-				}
-			}
-			if cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.UsesWebhook() {
-				telegramWebhook, err := buildTelegramWebhookServer(cfg, channelAdapters)
-				if err != nil {
-					return err
-				}
-				if err := srv.Add(telegramWebhook); err != nil {
-					return err
-				}
-			}
-			if httpChat != nil {
-				if err := srv.Add(httpChat); err != nil {
-					return err
-				}
-			}
-			logger.InfoContext(ctx, "starting server",
-				"component", "server",
-				"host", cfg.Server.Host,
-				"port", cfg.Server.Port,
-			)
-			sweepCtx, stopSweeps := context.WithCancel(ctx)
-			var sweeps sync.WaitGroup
-			sweeps.Go(func() { runRetentionSweeps(sweepCtx, cfg, db, artifactRoot, logger) })
-			if cfg.Durable != nil && cfg.Durable.Enabled {
-				sweeps.Go(func() {
-					newWorkflowCompletionNotifier(cfg, db, agentRegistry, logger).run(sweepCtx, workflowCompletionInterval)
-				})
-			}
-			if interpreterRun != nil {
-				sweeps.Go(func() { interpreterRun.run(sweepCtx, logger) })
-			}
-			sweeps.Go(func() {
-				runPersonaEvalSchedules(sweepCtx, result.Path, db, agentRegistry, behaviorModels{defaultModel: modelDefinition.Model, route: routeModel, models: models}, logger, wallEvalClock)
-			})
-			runErr := srv.Run(ctx)
-			stopSweeps()
-			sweeps.Wait()
-			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cfg.Runtime.ShutdownTimeout))
-			defer cancel()
-			if err := host.Shutdown(shutdownCtx); runErr == nil {
-				runErr = err
-			}
-			return runErr
+			return runAndClose(ctx, app)
 		},
+	}
+}
+
+type serverBuild struct {
+	channels           []runtimechannelhost.ChannelPort
+	checks             []health.RegisteredCheck
+	approvalAdapters   []approvalAdapter
+	emailMailboxes     []*email.Adapter
+	ownerRoute         *approval.OwnerRoute
+	accessRecorder     *telemetry.AccessRecorder
+	mcp                *mcpRuntime
+	personaHook        postTurnHook
+	durableConfig      *runtimeengine.DurableConfig
+	host               *runtimeengine.Host
+	broadcastRuntime   durable.Runtime
+	broadcastWiring    *broadcastChannels
+	broadcastRunner    *broadcast.Runner
+	scheduleRunner     *schedule.Runner
+	scheduledWorkflows *scheduleWorkflows
+	childLedger        child.BudgetLedger
+	listeners          *server.Server
+	httpChat           *httpchat.Server
+}
+
+func durableEnabled(cfg *config.Config) bool {
+	return cfg.Durable != nil && cfg.Durable.Enabled
+}
+
+func (b *build) startTelemetry() error {
+	if !b.onServer() {
+		return nil
+	}
+	pipeline, err := telemetry.NewPipeline(b.cfg.Telemetry, b.logger)
+	if err != nil {
+		return err
+	}
+	b.pipeline = pipeline
+	logger := b.logger
+	return b.group.Defer("telemetry", func(ctx context.Context) error {
+		if err := pipeline.Shutdown(ctx); err != nil {
+			logger.WarnContext(ctx, "telemetry shutdown", "component", "telemetry", "error", err)
+		}
+		return nil
+	})
+}
+
+func toolObserver(recorder *telemetry.ToolRecorder) toolbroker.Observer {
+	return func(ctx context.Context, observation toolbroker.Observation) {
+		recorder.Record(ctx, &telemetry.ToolObservation{
+			Name:          observation.ToolName + "@" + observation.ToolVersion,
+			Status:        string(observation.Class),
+			PolicyOutcome: observation.PolicyOutcome,
+			Approval:      observation.Approval,
+			Executor:      observation.Executor,
+			Duration:      observation.Duration,
+			OutputBytes:   observation.OutputBytes,
+		})
+	}
+}
+
+func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
+	cfg, db, s, meters := b.cfg, b.db, b.server, b.meters()
+	toolRecorder, err := telemetry.NewToolRecorder(b.pipeline.TracerProvider(), meters)
+	if err != nil {
+		return toolWiring{}, err
+	}
+	personaRecorder, err := telemetry.NewPersonaRecorder(meters)
+	if err != nil {
+		return toolWiring{}, err
+	}
+	s.personaHook = personaTurnHook(personaRecorder)
+	personaRouter, err := auraagent.NewRouter(b.registry, &cfg.Channels, cfg.Bindings)
+	if err != nil {
+		return toolWiring{}, err
+	}
+	if err := recoverEmailEffects(ctx, cfg, db, b.logger); err != nil {
+		return toolWiring{}, err
+	}
+	channelAdapters, channelChecks, approvalAdapters, err := buildChannelAdapters(cfg, personaRouter, db, b.artifactRoot, meters, b.logger)
+	if err != nil {
+		return toolWiring{}, err
+	}
+	accessRecorder, err := telemetry.NewAccessRecorder(meters)
+	if err != nil {
+		return toolWiring{}, err
+	}
+	var ownerRoute *approval.OwnerRoute
+	if cfg.Channels.HTTP.Enabled || cfg.Channels.Email.Enabled {
+		ownerRoute, err = newOwnerRoute(approvalAdapters, accessRecorder.ApprovalRouted)
+		if err != nil {
+			return toolWiring{}, err
+		}
+	}
+	s.channels, s.checks, s.approvalAdapters = channelAdapters, channelChecks, approvalAdapters
+	s.ownerRoute, s.accessRecorder = ownerRoute, accessRecorder
+	s.emailMailboxes = wireEmailOwnerAccess(channelAdapters, ownerRoute, approvalAdapters)
+	approvalTargets := approvalChannels(approvalAdapters, ownerRoute)
+	return toolWiring{
+		observer:  toolObserver(toolRecorder),
+		decider:   channelApprovalDecider(approvalTargets),
+		access:    newAccessPolicy(b.registry, db, accessRecorder),
+		reachable: channelApprovalReachable(approvalTargets),
+	}, nil
+}
+
+func (b *build) buildServerTools(ctx context.Context) error {
+	cfg, db, s := b.cfg, b.db, b.server
+	notifiers := handoffNotifiers(s.channels)
+	if cfg.Channels.HTTP.Enabled {
+		notifiers = append(notifiers, newHTTPHandoffNotifier(s.ownerRoute, s.approvalAdapters))
+	}
+	b.builtin.SetHandoffOpener(newHandoffService(db, notifiers))
+	b.builtin.SetEmailOutbox(&emailOutbox{adapters: s.emailMailboxes})
+	plugins, err := planPlugins(ctx, cfg, db, b.builtin.Broker())
+	if err != nil {
+		return err
+	}
+	plugins.warnUnavailablePlugins(ctx, b.logger, b.registry.Definitions())
+	if err := b.startConnectorPlugins(ctx, plugins); err != nil {
+		return err
+	}
+	if err := b.startMCPServers(ctx, plugins); err != nil {
+		return err
+	}
+	pluginCheck, pluginChecked, err := plugins.healthCheck(cfg, db, s.mcp)
+	if err != nil {
+		return err
+	}
+	if pluginChecked {
+		s.checks = append(s.checks, pluginCheck)
+	}
+	if b.primaryModel() == "" {
+		return &config.Error{Code: config.ErrorCodeConfigInvalid, Detail: "models.definitions.primary.model is required for the server runtime"}
+	}
+	return nil
+}
+
+func (b *build) startConnectorPlugins(ctx context.Context, plugins *pluginRuntime) error {
+	connectorPlugins := plugins.connectorPlugins()
+	if len(connectorPlugins) == 0 {
+		return nil
+	}
+	logger := b.logger
+	connectors, err := startConnectorPlugins(ctx, &connectorRuntimeOptions{
+		Broker: b.builtin.Broker(), Logger: logger, Capabilities: b.result.CapabilityReport, Plugins: connectorPlugins,
+	})
+	if err != nil {
+		return err
+	}
+	plugins.connectors = connectors
+	return b.group.Defer("plugin_connector", func(ctx context.Context) error {
+		if err := connectors.Close(ctx); err != nil {
+			logger.WarnContext(ctx, "connector plugin shutdown", "component", "plugin_connector", "error", err)
+		}
+		return nil
+	})
+}
+
+func (b *build) startMCPServers(ctx context.Context, plugins *pluginRuntime) error {
+	cfg, logger := b.cfg, b.logger
+	if !mcpServersConfigured(cfg) && len(plugins.mcpPlugins()) == 0 {
+		return nil
+	}
+	mcpServers, err := startConfiguredMCP(ctx, cfg, b.builtin.Broker(), logger, b.meters(), b.result.CapabilityReport, b.registry.Definitions(), plugins.mcpPlugins())
+	if err != nil {
+		return err
+	}
+	b.server.mcp = mcpServers
+	if err := b.group.Defer("mcp", func(ctx context.Context) error {
+		if err := mcpServers.Close(ctx); err != nil {
+			logger.WarnContext(ctx, "mcp shutdown", "component", "mcp", "error", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if mcpServers.hasCheck {
+		b.server.checks = append(b.server.checks, mcpServers.check)
+	}
+	return nil
+}
+
+func (b *build) buildServerDurable() error {
+	if !durableEnabled(b.cfg) {
+		return nil
+	}
+	sessionRuntime, err := durableRuntimeForConfig(b.cfg, b.logger)
+	if err != nil {
+		return err
+	}
+	b.server.durableConfig = &runtimeengine.DurableConfig{
+		Sessions: &durableSessionStore{runtime: sessionRuntime},
+		Runtime:  sessionRuntime,
+	}
+	return nil
+}
+
+func (b *build) buildServerSurface(ctx context.Context) error {
+	steps := []func() error{
+		b.buildChannelHost,
+		b.buildBroadcast,
+		b.buildSchedule,
+		b.buildProbe,
+		func() error { return b.wireDurableListener(ctx) },
+		b.addEdgeListeners,
+		b.registerSweeps,
+	}
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *build) buildChannelHost() error {
+	s, meters := b.server, b.meters()
+	commandRecorder, err := telemetry.NewCommandRecorder(b.pipeline.TracerProvider(), meters)
+	if err != nil {
+		return err
+	}
+	if err := wireChatCommands(s.channels, b.engine, b.sessions, b.events, store.NewConversationSessionStore(b.db), b.modules.skills, commandRecorder); err != nil {
+		return err
+	}
+	s.host, err = runtimeengine.NewHost(b.engine, s.channels, b.logger)
+	return err
+}
+
+func (b *build) buildBroadcast() error {
+	cfg, db, logger, s := b.cfg, b.db, b.logger, b.server
+	broadcastEffects, err := toolsbuiltin.NewChannelEffects(db, logger)
+	if err != nil {
+		return err
+	}
+	s.broadcastWiring = buildBroadcastSenders(s.channels, broadcastEffects, b.sessions)
+	broadcastRecorder, err := telemetry.NewBroadcastRecorder(b.meters())
+	if err != nil {
+		return err
+	}
+	s.broadcastRunner, err = buildBroadcastRunner(cfg, db, logger, s.broadcastWiring, broadcastRecorderObserver(broadcastRecorder))
+	if err != nil {
+		return err
+	}
+	if s.durableConfig != nil {
+		s.broadcastRuntime = s.durableConfig.Runtime
+	} else {
+		s.broadcastRuntime, err = durableRuntimeForConfig(cfg, logger)
+		if err != nil {
+			return err
+		}
+		if err := registerBroadcastHandler(s.broadcastRuntime, s.broadcastRunner); err != nil {
+			return err
+		}
+	}
+	runtime := s.broadcastRuntime
+	return b.group.Add(&lifecycleStage{name: "broadcast_resume", start: func(ctx context.Context) error {
+		resumed, err := resumeBroadcastRunners(ctx, runtime, db)
+		if err != nil {
+			return err
+		}
+		if resumed > 0 {
+			logger.InfoContext(ctx, "resumed broadcast runs", "component", "broadcast", "count", resumed)
+		}
+		return nil
+	}})
+}
+
+func (b *build) buildSchedule() error {
+	cfg, db, logger, s := b.cfg, b.db, b.logger, b.server
+	cronBroadcaster, err := buildCronBroadcaster(cfg, db, s.broadcastRuntime, s.broadcastWiring)
+	if err != nil {
+		return err
+	}
+	scheduleRecorder, err := telemetry.NewScheduleRecorder(b.meters())
+	if err != nil {
+		return err
+	}
+	s.scheduledWorkflows = &scheduleWorkflows{}
+	s.scheduleRunner, err = buildScheduleRunner(db, logger, b.engine, cronBroadcaster, time.Duration(cfg.Scheduler.OccurrenceRetention), scheduleRecorderObserver(scheduleRecorder), s.scheduledWorkflows)
+	if err != nil {
+		return err
+	}
+	if s.durableConfig == nil {
+		if err := registerScheduleHandler(s.broadcastRuntime, s.scheduleRunner); err != nil {
+			return err
+		}
+	}
+	s.childLedger = child.NewLedger(nil, 0)
+	if cfg.Children != nil && cfg.Children.Enabled {
+		childHandler, err := buildChildHandler(db, s.childLedger, &runtimeSignaler{runtime: s.broadcastRuntime}, b.executor, b.primaryModel())
+		if err != nil {
+			return err
+		}
+		if s.durableConfig == nil {
+			if err := registerChildHandler(s.broadcastRuntime, childHandler); err != nil {
+				return err
+			}
+		}
+	}
+	runtime, host := s.broadcastRuntime, s.host
+	if err := b.group.Add(&lifecycleStage{name: "schedule_resume", start: func(ctx context.Context) error {
+		resumed, err := resumeScheduleRuns(ctx, runtime, db)
+		if err != nil {
+			return err
+		}
+		if resumed > 0 {
+			logger.InfoContext(ctx, "resumed schedule runs", "component", "schedule", "count", resumed)
+		}
+		return nil
+	}}); err != nil {
+		return err
+	}
+	return b.group.Add(&lifecycleStage{name: "channels", start: host.Start, stop: host.Shutdown})
+}
+
+func (b *build) buildProbe() error {
+	cfg, s := b.cfg, b.server
+	s.checks = append(s.checks, personaEvalCheck(cfg, b.registry, b.db))
+	httpChat, httpChatChecks, err := buildHTTPChat(cfg, b.db, b.engine, b.registry, s.accessRecorder, s.ownerRoute, b.logger)
+	if err != nil {
+		return err
+	}
+	s.httpChat = httpChat
+	s.checks = append(s.checks, httpChatChecks...)
+	probeListener, err := b.newProbeListener()
+	if err != nil {
+		return err
+	}
+	s.listeners = server.New(server.Options{
+		Logger:          b.logger,
+		ShutdownTimeout: time.Duration(cfg.Runtime.ShutdownTimeout),
+	})
+	return s.listeners.Add(probeListener)
+}
+
+func (b *build) addEdgeListeners() error {
+	cfg, s := b.cfg, b.server
+	if cfg.Webhook.Enabled {
+		webhookListener, err := buildWebhookListener(cfg, b.db, b.engine, b.logger)
+		if err != nil {
+			return err
+		}
+		if err := s.listeners.Add(webhookListener); err != nil {
+			return err
+		}
+	}
+	if cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.UsesWebhook() {
+		telegramWebhook, err := buildTelegramWebhookServer(cfg, s.channels)
+		if err != nil {
+			return err
+		}
+		if err := s.listeners.Add(telegramWebhook); err != nil {
+			return err
+		}
+	}
+	if s.httpChat != nil {
+		if err := s.listeners.Add(s.httpChat); err != nil {
+			return err
+		}
+	}
+	b.serve = serveListeners(s.listeners, b.logger, cfg)
+	return nil
+}
+
+func (b *build) newProbeListener() (*probeListener, error) {
+	return buildProbeListener(b.cfg, mapCapabilityStatuses(b.result.CapabilityReport), b.events, b.sessions, b.server.checks...)
+}
+
+func (b *build) wireDurableListener(ctx context.Context) error {
+	cfg, db, s := b.cfg, b.db, b.server
+	if !durableEnabled(cfg) {
+		return nil
+	}
+	durableListener, err := buildDurableListener(ctx, b.result, db, b.logger, b.engine)
+	if err != nil {
+		return err
+	}
+	workflowTools, err := newWorkflowToolController(durableListener.interpreter, workflow.NewStore(db), b.registry, replyTargeters(s.channels)...)
+	if err != nil {
+		return err
+	}
+	workflowTools.enableProposalCards(cfg, proposalOfferers(s.channels), b.logger)
+	if err := b.group.Add(server.Background("workflow_proposal_cards", workflowTools.runProposalCards)); err != nil {
+		return err
+	}
+	b.builtin.SetWorkflowController(workflowTools)
+	s.scheduledWorkflows.set(durableListener.interpreter)
+	if err := registerBroadcastHandler(durableListener, s.broadcastRunner); err != nil {
+		return err
+	}
+	if err := registerScheduleHandler(durableListener, s.scheduleRunner); err != nil {
+		return err
+	}
+	if cfg.Children != nil && cfg.Children.Enabled {
+		childHandler, err := buildChildHandler(db, s.childLedger, nil, b.executor, b.primaryModel())
+		if err != nil {
+			return err
+		}
+		if err := registerChildHandler(durableListener, childHandler); err != nil {
+			return err
+		}
+	}
+	return s.listeners.Add(durableListener)
+}
+
+func (b *build) registerSweeps() error {
+	cfg, db, registry, logger, artifactRoot := b.cfg, b.db, b.registry, b.logger, b.artifactRoot
+	if err := b.group.Add(server.Background("retention_sweeps", func(ctx context.Context) {
+		runRetentionSweeps(ctx, cfg, db, artifactRoot, logger)
+	})); err != nil {
+		return err
+	}
+	if durableEnabled(cfg) {
+		if err := b.group.Add(server.Background("workflow_completion", func(ctx context.Context) {
+			newWorkflowCompletionNotifier(cfg, db, registry, logger).run(ctx, workflowCompletionInterval)
+		})); err != nil {
+			return err
+		}
+	}
+	configPath := b.result.Path
+	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models}
+	return b.group.Add(server.Background("persona_eval_schedules", func(ctx context.Context) {
+		runPersonaEvalSchedules(ctx, configPath, db, registry, models, logger, wallEvalClock)
+	}))
+}
+
+func serveListeners(listeners *server.Server, logger *slog.Logger, cfg *config.Config) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		logger.InfoContext(ctx, "starting server",
+			"component", "server",
+			"host", cfg.Server.Host,
+			"port", cfg.Server.Port,
+		)
+		return listeners.Run(ctx)
 	}
 }
 
