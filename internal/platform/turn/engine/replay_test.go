@@ -41,6 +41,9 @@ func (x *replayingExecutor) Execute(ctx context.Context, _ *turn.TurnRequest) it
 			return
 		}
 		for position, kind := range replayEventKinds {
+			if invocation == 1 && position == 1 && !yield(streamedOnlyOnce(), nil) {
+				return
+			}
 			if invocation == 1 && position == 2 {
 				close(x.blocked)
 				<-ctx.Done()
@@ -60,6 +63,15 @@ func (x *replayingExecutor) Execute(ctx context.Context, _ *turn.TurnRequest) it
 				return
 			}
 		}
+	}
+}
+
+func streamedOnlyOnce() store.RuntimeEvent {
+	return store.RuntimeEvent{
+		ID:        NewTurnID(),
+		Kind:      store.EventKindADK,
+		Payload:   adkPartialStep("streamed by the first invocation only").Payload,
+		CreatedAt: time.Now().UTC(),
 	}
 }
 
@@ -137,10 +149,11 @@ func loseHostLease(t *testing.T, db *sql.DB) {
 
 func startBlockedReplayTurn(t *testing.T, executor *replayingExecutor) (rig *durableHostRig, outcome <-chan turnOutcome) {
 	t.Helper()
-	rig = newShortLeaseHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 16, Skills: &stubSkillRenderer{body: "Do things."}}
+	rig = newShortLeaseHostRig(t, cfg, executor)
 	mustCreateSession(t, rig.db, "session-a")
 	rig.startHost()
-	outcome = callTurn(context.WithoutCancel(t.Context()), rig.engine, sampleRequest("session-a", "turn-1"))
+	outcome = callTurn(context.WithoutCancel(t.Context()), rig.engine, pinnedRequest("session-a", "turn-1"))
 	executor.waitBlocked(t)
 	return rig, outcome
 }
@@ -163,10 +176,15 @@ func TestReplayedTurnStoresItsEventsOnce(t *testing.T) {
 	if len(stored) != 3 {
 		t.Fatalf("stored executor events = %d, want 3", len(stored))
 	}
-	for i := range stored {
-		if want := fmt.Sprintf("turn-1-ev-%d", i+1); stored[i].ID != want {
-			t.Errorf("event %d id = %q, want %q", i+1, stored[i].ID, want)
-		}
+	if ids := eventIDs(stored); !slices.Equal(ids, []string{"turn-1-ev-2", "turn-1-ev-3", "turn-1-ev-4"}) {
+		t.Errorf("stored executor events = %v, want the positions after the activation", ids)
+	}
+	all := turnEventsOf(t, rig.db, "turn-1")
+	if ids := idsOfKind(all, turn.EventKindSkillActivated); !slices.Equal(ids, []string{"turn-1-ev-1"}) {
+		t.Errorf("stored skill activations = %v, want the first invocation's one", ids)
+	}
+	if ids := idsOfKind(all, store.EventKindADK); len(ids) != 0 {
+		t.Errorf("stored streamed chunks = %v, want none", ids)
 	}
 	for i := range before {
 		if stored[i].Sequence != before[i].Sequence || !stored[i].CreatedAt.Equal(before[i].CreatedAt) {
@@ -215,8 +233,11 @@ func TestReplayThatFailsEarlyStillEndsTheTurn(t *testing.T) {
 		t.Errorf("terminal code = %q, want %q", payload.Code, turn.ErrorCodePersonaNotFound)
 	}
 	stored := executorEventsOf(t, rig.db, "turn-1")
-	if ids := eventIDs(stored); !slices.Equal(ids, []string{"turn-1-ev-1", "turn-1-ev-2"}) {
+	if ids := eventIDs(stored); !slices.Equal(ids, []string{"turn-1-ev-2", "turn-1-ev-3"}) {
 		t.Errorf("stored executor events = %v, want the first invocation's two", ids)
+	}
+	if ids := idsOfKind(turnEventsOf(t, rig.db, "turn-1"), turn.EventKindSkillActivated); !slices.Equal(ids, []string{"turn-1-ev-1"}) {
+		t.Errorf("stored skill activations = %v, want the first invocation's one", ids)
 	}
 	if active, _ := storeActiveTurn(t, rig.sessions, "session-a"); active != "" {
 		t.Errorf("active turn of session-a = %q, want the session released", active)
@@ -234,6 +255,16 @@ func TestDurableTurnTerminalEventHasAFixedID(t *testing.T) {
 	if len(terminals) != 1 || terminals[0].ID != "turn-1-terminal" {
 		t.Fatalf("terminal events of turn-1 = %v, want one with the id turn-1-terminal", eventIDs(terminals))
 	}
+}
+
+func idsOfKind(events []store.RuntimeEvent, kind string) []string {
+	var ids []string
+	for i := range events {
+		if events[i].Kind == kind {
+			ids = append(ids, events[i].ID)
+		}
+	}
+	return ids
 }
 
 func eventIDs(events []store.RuntimeEvent) []string {

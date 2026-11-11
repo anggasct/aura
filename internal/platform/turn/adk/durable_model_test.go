@@ -229,6 +229,7 @@ func (m *functionCallModel) GenerateContent(context.Context, *adkmodel.LLMReques
 			Content: &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{
 				{FunctionCall: &genai.FunctionCall{Name: "lookup", Args: map[string]any{"q": "a"}}},
 				{FunctionCall: &genai.FunctionCall{ID: "call-7", Name: "lookup", Args: map[string]any{"q": "b"}}},
+				{FunctionCall: &genai.FunctionCall{Name: "lookup", Args: map[string]any{"q": "c"}}},
 			}},
 			TurnComplete: true,
 		}, nil)
@@ -260,7 +261,7 @@ func yieldedFunctionCallIDs(ctx context.Context, t *testing.T, model adkmodel.LL
 func TestJournaledModelGivesAnUnnamedFunctionCallAStableID(t *testing.T) {
 	inner := &functionCallModel{}
 	inv := &journalInvocation{}
-	want := []string{"adk-turn-1-op-1-0", "call-7"}
+	want := []string{"adk-turn-1-op-1-0", "call-7", "adk-turn-1-op-1-2"}
 
 	first := yieldedFunctionCallIDs(withTurnID(scopedContext(t, inv), "turn-1"), t, journalModel(inner))
 	second := yieldedFunctionCallIDs(withTurnID(scopedContext(t, inv), "turn-1"), t, journalModel(inner))
@@ -281,8 +282,8 @@ func TestJournaledModelGivesAnUnnamedFunctionCallAStableID(t *testing.T) {
 
 	unscoped := yieldedFunctionCallIDs(withTurnID(t.Context(), "turn-1"), t, journalModel(inner))
 
-	if !slices.Equal(unscoped, []string{"", "call-7"}) {
-		t.Errorf("function call ids outside a turn scope = %v, want the unnamed call left empty", unscoped)
+	if !slices.Equal(unscoped, []string{"", "call-7", ""}) {
+		t.Errorf("function call ids outside a turn scope = %v, want the unnamed calls left empty", unscoped)
 	}
 	if calls := inner.callCount(); calls != 2 {
 		t.Errorf("model calls = %d, want the call outside a turn scope to reach the model", calls)
