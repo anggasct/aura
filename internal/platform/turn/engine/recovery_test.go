@@ -951,3 +951,25 @@ func TestTurnCancelledWhileQueuedEndsCancelled(t *testing.T) {
 		t.Fatalf("executor started turn-1 %d times, want never", starts)
 	}
 }
+
+func TestCancelAfterTheRunCompletedKeepsTheOneTerminalEvent(t *testing.T) {
+	executor := newHoldingExecutor()
+	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	engine.statusPoll = time.Hour
+	mustCreateSession(t, db, "session-a")
+
+	outcomes := callTurn(t.Context(), engine, sampleRequest("session-a", "turn-0"))
+	awaitTerminal(t, outcomes, turn.EventKindTurnCompleted)
+	if state := waitRunEnded(t, engine.durableRuntime, "turn-0"); state != durable.RunSucceeded {
+		t.Fatalf("run state = %q, want succeeded", state)
+	}
+
+	cancelledTurn, cancelled, err := engine.CancelActive(t.Context(), "session-a")
+	if err != nil || !cancelled || cancelledTurn != "turn-0" {
+		t.Fatalf("CancelActive = %q, %v, %v, want the turn its poller still holds", cancelledTurn, cancelled, err)
+	}
+	eventually(t, "the engine lets go of turn-0", func() bool { return !engineKnows(engine, "turn-0") })
+	if got := terminalsOf(t, db, "turn-0"); !slices.Equal(got, []string{turn.EventKindTurnCompleted}) {
+		t.Fatalf("terminal events = %v, want the one turn.completed", got)
+	}
+}

@@ -852,7 +852,7 @@ func (e *Engine) cancelDurableTurn(ctx context.Context, t *turnState, ref durabl
 	if err := e.durableRuntime.Cancel(context.WithoutCancel(ctx), ref); err != nil {
 		e.logger.DebugContext(ctx, "durable turn cancel failed", "error", err, "turn_id", t.turnID)
 	}
-	if ended, err := e.hasTerminalEvent(ctx, t); err == nil && ended {
+	if ended, err := e.hasTerminalEvent(context.WithoutCancel(ctx), t); err == nil && ended {
 		e.replayStoredToLive(ctx, t)
 		e.closeSubscribers(t)
 		e.releaseTurn(ctx, t)
