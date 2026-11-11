@@ -483,10 +483,15 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	}
 	if scope, ok := durable.TurnScopeFrom(ctx); ok {
 		result, err = b.executeDurable(ctx, scope, &canonical, decision.Constraints, adapter, definition.Effectful)
-	} else if definition.Effectful {
-		result, err = b.executeEffect(ctx, &canonical, decision.Constraints, adapter)
 	} else {
-		result, err = adapter(ctx, &canonical, decision.Constraints)
+		if definition.Effectful {
+			result, err = b.executeEffect(ctx, &canonical, decision.Constraints, adapter)
+		} else {
+			result, err = adapter(ctx, &canonical, decision.Constraints)
+		}
+		if err != nil {
+			err = b.classifyExecutionError(ctx, &canonical, err)
+		}
 	}
 	if definition.Effectful {
 		executorClass = ExecutorEffect
@@ -494,29 +499,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		executorClass = ExecutorDirect
 	}
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return ToolResult{}, errorf(ResultDeadlineExceeded, "tool request ended: %v", err)
-		}
-		if code, ok := CodeOf(err); ok && code.stable() {
-			return ToolResult{}, errorf(code, "%s", redact([]byte(err.Error()), b.secretValues()))
-		}
-		if code, ok := sandbox.CodeOf(err); ok {
-			switch code {
-			case sandbox.ErrorCodeSandboxUnavailable:
-				return ToolResult{}, errorf(ResultCapabilityUnavailable, "%v", err)
-			case sandbox.ErrorCodeSandboxPathDenied, sandbox.ErrorCodeSandboxViolation, sandbox.ErrorCodeSandboxSyscallDenied:
-				return ToolResult{}, errorf(ResultPolicyDenied, "%v", err)
-			default:
-				return ToolResult{}, errorf(ResultExecutionFailed, "%v", err)
-			}
-		}
-		if code, ok := egress.CodeOf(err); ok && code == egress.ErrorCodeEgressDenied {
-			return ToolResult{}, errorf(ResultPolicyDenied, "%v", err)
-		}
-		if contextError(ctx, canonical.Deadline) != nil {
-			return ToolResult{}, contextError(ctx, canonical.Deadline)
-		}
-		return ToolResult{}, errorf(ResultExecutionFailed, "tool %q failed: %s", key, redact([]byte(err.Error()), b.secretValues()))
+		return ToolResult{}, err
 	}
 	result.ToolName = canonical.ToolName
 	result.ToolVersion = canonical.ToolVersion
@@ -905,6 +888,41 @@ func requestDigest(request *ToolRequest, policyVersion string) (string, error) {
 	}
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+func toolKey(request *ToolRequest) string {
+	return request.ToolName + "@" + request.ToolVersion
+}
+
+func (b *Broker) classifyExecutionError(ctx context.Context, canonical *ToolRequest, err error) *Error {
+	secrets := b.secretValues()
+	classified := func(class ResultClass, detail string) *Error {
+		return &Error{Class: class, Detail: string(redact([]byte(detail), secrets))}
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return classified(ResultDeadlineExceeded, fmt.Sprintf("tool request ended: %v", err))
+	}
+	if code, ok := CodeOf(err); ok && code.stable() {
+		return classified(code, err.Error())
+	}
+	if code, ok := sandbox.CodeOf(err); ok {
+		switch code {
+		case sandbox.ErrorCodeSandboxUnavailable:
+			return classified(ResultCapabilityUnavailable, err.Error())
+		case sandbox.ErrorCodeSandboxPathDenied, sandbox.ErrorCodeSandboxViolation, sandbox.ErrorCodeSandboxSyscallDenied:
+			return classified(ResultPolicyDenied, err.Error())
+		default:
+			return classified(ResultExecutionFailed, err.Error())
+		}
+	}
+	if code, ok := egress.CodeOf(err); ok && code == egress.ErrorCodeEgressDenied {
+		return classified(ResultPolicyDenied, err.Error())
+	}
+	var ended *Error
+	if errors.As(contextError(ctx, canonical.Deadline), &ended) {
+		return classified(ended.Class, ended.Detail)
+	}
+	return classified(ResultExecutionFailed, fmt.Sprintf("tool %q failed: %s", toolKey(canonical), err.Error()))
 }
 
 func contextError(ctx context.Context, deadline time.Time) error {

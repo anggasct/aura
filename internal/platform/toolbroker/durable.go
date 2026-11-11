@@ -57,18 +57,22 @@ func (b *Broker) evaluatePolicy(ctx context.Context, request *approval.ToolReque
 		return decision, "", err
 	}
 	key := scope.NextOp()
-	raw, err := scope.Invocation().RunAction(ctx, key, func(ctx context.Context) ([]byte, error) {
+	raw, err := scope.Invocation().RunAction(ctx, key, b.recordApproval(func(ctx context.Context) ([]byte, error) {
 		decision, err := b.engine.Evaluate(ctx, request)
 		if err != nil {
 			return nil, err
 		}
 		return json.Marshal(decision)
-	})
+	}))
+	if err != nil {
+		return approval.PolicyDecision{}, "", err
+	}
+	recorded, err := b.readOutcome(raw)
 	if err != nil {
 		return approval.PolicyDecision{}, "", err
 	}
 	var decision approval.PolicyDecision
-	if err := json.Unmarshal(raw, &decision); err != nil {
+	if err := json.Unmarshal(recorded, &decision); err != nil {
 		return approval.PolicyDecision{}, "", err
 	}
 	return decision, key, nil
@@ -77,28 +81,23 @@ func (b *Broker) evaluatePolicy(ctx context.Context, request *approval.ToolReque
 func (b *Broker) executeDurable(ctx context.Context, scope *durable.TurnScope, canonical *ToolRequest, constraints approval.Constraints, adapter Adapter, effectful bool) (result ToolResult, err error) {
 	defer func() {
 		if recovered := durable.RecoveredPanic(); recovered != nil && err == nil {
-			err = recovered
+			err = b.classifyExecutionError(ctx, canonical, recovered)
 		}
 	}()
+	call := &journaledTool{canonical: canonical, constraints: constraints, adapter: adapter, effectful: effectful}
 	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), func(ctx context.Context) ([]byte, error) {
-		var result ToolResult
-		var err error
-		if effectful {
-			result, err = b.executeEffect(ctx, canonical, constraints, adapter)
-		} else {
-			result, err = adapter(ctx, canonical, constraints)
-		}
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(result)
+		return b.runJournaledTool(ctx, call)
 	})
+	if err != nil {
+		return ToolResult{}, b.classifyExecutionError(ctx, canonical, err)
+	}
+	recorded, err := b.readOutcome(raw)
 	if err != nil {
 		return ToolResult{}, err
 	}
 	var decoded ToolResult
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return ToolResult{}, err
+	if err := json.Unmarshal(recorded, &decoded); err != nil {
+		return ToolResult{}, unreadableOutcome()
 	}
 	return decoded, nil
 }
@@ -107,28 +106,36 @@ func (b *Broker) validateDurable(ctx context.Context, scope *durable.TurnScope, 
 	if scope == nil || grant == nil {
 		return b.engine.ValidateAndConsume(ctx, toApprovalRequest(canonical, b.PolicyVersion()), grant)
 	}
-	_, err := scope.Invocation().RunAction(ctx, scope.NextOp(), func(ctx context.Context) ([]byte, error) {
+	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), b.recordApproval(func(ctx context.Context) ([]byte, error) {
 		if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(canonical, b.PolicyVersion()), grant); err != nil {
 			return nil, err
 		}
 		return []byte(`{}`), nil
-	})
+	}))
+	if err != nil {
+		return err
+	}
+	_, err = b.readOutcome(raw)
 	return err
 }
 
 func (b *Broker) grantDurableUntil(ctx context.Context, scope *durable.TurnScope, canonical *ToolRequest, expiry time.Time) (approval.ApprovalGrant, error) {
-	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), func(ctx context.Context) ([]byte, error) {
+	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), b.recordApproval(func(ctx context.Context) ([]byte, error) {
 		grant, err := b.engine.GrantUntil(ctx, toApprovalRequest(canonical, b.PolicyVersion()), expiry)
 		if err != nil {
 			return nil, err
 		}
 		return json.Marshal(grant)
-	})
+	}))
+	if err != nil {
+		return approval.ApprovalGrant{}, err
+	}
+	recorded, err := b.readOutcome(raw)
 	if err != nil {
 		return approval.ApprovalGrant{}, err
 	}
 	var grant approval.ApprovalGrant
-	if err := json.Unmarshal(raw, &grant); err != nil {
+	if err := json.Unmarshal(recorded, &grant); err != nil {
 		return approval.ApprovalGrant{}, err
 	}
 	return grant, nil
@@ -215,21 +222,37 @@ func (b *Broker) parkForApproval(ctx context.Context, scope *durable.TurnScope, 
 	if ttl <= 0 {
 		return nil, errorf(ResultPolicyDenied, "tool %q approval window elapsed", canonical.ToolName)
 	}
-	grantRaw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), func(ctx context.Context) ([]byte, error) {
+	issued, err := b.grantParked(ctx, canonical, ttl)
+	if err != nil {
+		return nil, err
+	}
+	return &issued, nil
+}
+
+func (b *Broker) grantParked(ctx context.Context, canonical *ToolRequest, ttl time.Duration) (approval.ApprovalGrant, error) {
+	scope, ok := durable.TurnScopeFrom(ctx)
+	if !ok {
+		return b.Grant(ctx, canonical, ttl)
+	}
+	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), b.recordApproval(func(ctx context.Context) ([]byte, error) {
 		issued, err := b.Grant(ctx, canonical, ttl)
 		if err != nil {
 			return nil, err
 		}
 		return json.Marshal(issued)
-	})
+	}))
 	if err != nil {
-		return nil, err
+		return approval.ApprovalGrant{}, err
+	}
+	recorded, err := b.readOutcome(raw)
+	if err != nil {
+		return approval.ApprovalGrant{}, err
 	}
 	var issued approval.ApprovalGrant
-	if err := json.Unmarshal(grantRaw, &issued); err != nil {
-		return nil, errorf(ResultExecutionFailed, "decode durable approval grant: %v", err)
+	if err := json.Unmarshal(recorded, &issued); err != nil {
+		return approval.ApprovalGrant{}, errorf(ResultExecutionFailed, "decode durable approval grant: %v", err)
 	}
-	return &issued, nil
+	return issued, nil
 }
 
 type ApprovalEventStore interface {
