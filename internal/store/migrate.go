@@ -57,6 +57,7 @@ var migrations = []migration{
 	{version: 39, sql: knowledgeBaseSchemaSQL},
 	{version: 40, sql: knowledgeEmbeddingSchemaSQL},
 	{version: 41, sql: durableRuntimeSchemaSQL},
+	{version: 42, sql: durableSessionSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -883,6 +884,24 @@ CREATE TABLE durable_approval (
     run_key      TEXT NOT NULL REFERENCES durable_run(key) ON DELETE CASCADE,
     consumed_at  TEXT NOT NULL
 );
+`
+
+const durableSessionSchemaSQL = `
+CREATE TABLE durable_session_turn (
+    turn_id          TEXT PRIMARY KEY,
+    session_id       TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+    sequence         INTEGER NOT NULL CHECK (sequence > 0),
+    state            TEXT NOT NULL CHECK (state IN ('queued','active')),
+    descriptor_json  TEXT NOT NULL,
+    deadline         TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    UNIQUE (session_id, sequence),
+    FOREIGN KEY (session_id, sequence)
+        REFERENCES runtime_event(session_id, sequence) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX durable_session_turn_active_idx
+    ON durable_session_turn(session_id) WHERE state = 'active';
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

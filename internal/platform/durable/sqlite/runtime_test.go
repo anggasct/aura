@@ -221,12 +221,44 @@ func TestCallRunsTheRegisteredHandler(t *testing.T) {
 	requireCode(t, err, ErrorCodeInvalidArgument)
 }
 
-func TestTurnDeadlineIsUnsetUntilSessionsExist(t *testing.T) {
-	rt := newRuntime(t, openDB(t, newDatabaseFile(t)), nil)
-	deadline, ok, err := rt.TurnDeadline(t.Context(), "session-1")
-	if err != nil || ok || !deadline.IsZero() {
-		t.Fatalf("TurnDeadline = %v, %v, %v; want zero, false, nil", deadline, ok, err)
+func TestTurnDeadlineReadsTheActiveTurn(t *testing.T) {
+	f := newSessionFixture(t)
+	rt := newRuntime(t, f.db, nil)
+	deadline := time.Date(2030, 4, 5, 9, 0, 0, 42, time.UTC)
+	for _, id := range []string{"session-empty", "session-open", "session-queued", "session-ahead", "session-corrupt"} {
+		createSession(t, f.db, id)
 	}
-	_, _, err = rt.TurnDeadline(t.Context(), "")
+	f.admit(t, turnSpec{turnID: "turn-1", deadline: deadline})
+	f.admit(t, turnSpec{turnID: "turn-2", deadline: deadline.Add(time.Hour)})
+	f.admit(t, turnSpec{sessionID: "session-open", turnID: "turn-3"})
+	f.admit(t, turnSpec{sessionID: "session-queued", turnID: "turn-4"})
+	f.admit(t, turnSpec{sessionID: "session-queued", turnID: "turn-5", deadline: deadline})
+	mustInsertHeldTurn(t, f.db, heldRow{sessionID: "session-ahead", turnID: "turn-6", sequence: 1, state: turnStateQueued, deadline: deadline.Format(time.RFC3339Nano)})
+	mustInsertHeldTurn(t, f.db, heldRow{sessionID: "session-ahead", turnID: "turn-7", sequence: 2, state: turnStateActive})
+	mustInsertHeldTurn(t, f.db, heldRow{sessionID: "session-corrupt", turnID: "turn-8", sequence: 1, state: turnStateActive, deadline: "tomorrow"})
+	cases := []struct {
+		name      string
+		sessionID string
+		want      time.Time
+		wantOK    bool
+	}{
+		{name: "active turn with a deadline", sessionID: testSessionID, want: deadline, wantOK: true},
+		{name: "session with no turn", sessionID: "session-empty"},
+		{name: "active turn without a deadline", sessionID: "session-open"},
+		{name: "deadline only on a queued turn", sessionID: "session-queued"},
+		{name: "deadline only on a queued turn ahead of the active one", sessionID: "session-ahead"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok, err := rt.TurnDeadline(t.Context(), tc.sessionID)
+			if err != nil || ok != tc.wantOK || !got.Equal(tc.want) {
+				t.Fatalf("TurnDeadline = %v, %v, %v; want %v, %v, nil", got, ok, err, tc.want, tc.wantOK)
+			}
+		})
+	}
+	_, _, err := rt.TurnDeadline(t.Context(), "")
 	requireCode(t, err, ErrorCodeInvalidArgument)
+	if _, _, err := rt.TurnDeadline(t.Context(), "session-corrupt"); err == nil {
+		t.Fatal("TurnDeadline with an unparseable deadline succeeded")
+	}
 }
