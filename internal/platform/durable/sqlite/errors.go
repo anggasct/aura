@@ -19,6 +19,7 @@ const (
 	ErrorCodeOwnershipLost        ErrorCode = "ownership_lost"
 	ErrorCodeHostRunning          ErrorCode = "host_running"
 	ErrorCodeStopTimeout          ErrorCode = "stop_timeout"
+	ErrorCodeSessionStateInvalid  ErrorCode = "session_state_invalid"
 )
 
 type Error struct {

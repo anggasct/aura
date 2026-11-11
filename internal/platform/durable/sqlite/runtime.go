@@ -391,11 +391,26 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req durable.ResolveApprov
 	return nil
 }
 
-func (r *Runtime) TurnDeadline(_ context.Context, sessionID string) (time.Time, bool, error) {
+func (r *Runtime) TurnDeadline(ctx context.Context, sessionID string) (time.Time, bool, error) {
 	if sessionID == "" {
 		return time.Time{}, false, invalidArgument("durable turn deadline requires a session id")
 	}
-	return time.Time{}, false, nil
+	var deadline sql.NullString
+	err := r.db.QueryRowContext(ctx, `SELECT deadline FROM durable_session_turn WHERE session_id = ? AND state = 'active'`, sessionID).Scan(&deadline)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("durable turn deadline: %w", err)
+	}
+	if !deadline.Valid {
+		return time.Time{}, false, nil
+	}
+	at, err := time.Parse(time.RFC3339Nano, deadline.String)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("durable turn deadline: parse: %w", err)
+	}
+	return at, true, nil
 }
 
 func sortedNames(handlers map[string]durable.Handler) []string {
