@@ -606,6 +606,32 @@ func (e *Engine) finishTurn(ctx context.Context, t *turnState) {
 
 const durableStatusPoll = 500 * time.Millisecond
 
+const turnStartAction = "turn-start"
+
+func (e *Engine) turnDeadline(ctx context.Context, inv durable.Invocation, req *turn.TurnRequest) (time.Time, error) {
+	if !req.Deadline.IsZero() {
+		return req.Deadline, nil
+	}
+	raw, err := inv.RunAction(ctx, turnStartAction, func(context.Context) ([]byte, error) {
+		return json.Marshal(time.Now().UTC())
+	})
+	if err != nil {
+		return time.Time{}, codedError(turn.ErrorCodeStorageUnavailable, "failed to journal the turn start", err)
+	}
+	var started time.Time
+	if err := json.Unmarshal(raw, &started); err != nil {
+		return time.Time{}, codedError(turn.ErrorCodeStorageUnavailable, "failed to decode the turn start", err)
+	}
+	return started.Add(e.cfg.TurnTimeout), nil
+}
+
+func (e *Engine) closeCancelledPresence(ctx context.Context, req *turn.TurnRequest) {
+	if !durable.Preempted(ctx) {
+		e.notifyPresenceFailed(context.WithoutCancel(ctx), req)
+	}
+	e.notifyPresenceEnded(ctx, req)
+}
+
 func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *runtimesessions.Descriptor) error {
 	if inv == nil {
 		return invalidArgument("durable turn drive requires an invocation")
@@ -644,9 +670,9 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	}
 	ctx = durable.WithTurnScope(ctx, scope)
 	t := &turnState{req: *req, turnID: req.TurnID, accepted: *accepted}
-	deadline := req.Deadline
-	if deadline.IsZero() {
-		deadline = accepted.CreatedAt.Add(e.cfg.TurnTimeout)
+	deadline, err := e.turnDeadline(ctx, inv, req)
+	if err != nil {
+		return err
 	}
 	ctx, stop := context.WithDeadline(ctx, deadline)
 	defer stop()
@@ -716,6 +742,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		}
 	}
 	if ctx.Err() == context.Canceled {
+		e.closeCancelledPresence(ctx, req)
 		return ctx.Err()
 	}
 	terminalKind, terminalPayload := e.terminalOutcome(ctx, execErr, req)

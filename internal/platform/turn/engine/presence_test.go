@@ -299,3 +299,58 @@ func TestEngineRoutesPresenceToOwningAdapter(t *testing.T) {
 		}
 	})
 }
+
+func (a *presenceCapture) counts() (started, failed int, ended []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, update := range a.updates {
+		if update.failed {
+			failed++
+		}
+	}
+	return a.started, failed, append([]string(nil), a.ended...)
+}
+
+func TestCancelledDurableTurnClosesItsPresence(t *testing.T) {
+	gate := make(chan struct{})
+	t.Cleanup(func() { close(gate) })
+	executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	capture := &presenceCapture{}
+	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+	mustCreateSession(t, rig.db, "channel:333")
+	rig.startHost()
+	outcome := callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", "turn-cancelled"))
+	eventually(t, "the turn reaches the executor", func() bool { return executor.StartCount() == 1 })
+	if _, cancelled, err := rig.engine.CancelActive(t.Context(), "channel:333"); err != nil || !cancelled {
+		t.Fatalf("CancelActive = %v, %v; want the turn cancelled", cancelled, err)
+	}
+	awaitTerminal(t, outcome, turn.EventKindTurnCancelled)
+	started, failed, ended := capture.counts()
+	if started != 1 || failed != 1 {
+		t.Errorf("presence starts = %d, failed updates = %d; want 1 and 1", started, failed)
+	}
+	if len(ended) != 1 || ended[0] != "turn-cancelled" {
+		t.Errorf("presence ends = %v, want one for the turn", ended)
+	}
+}
+
+func TestPreemptedDurableTurnEndsItsPresenceWithoutFailingIt(t *testing.T) {
+	executor := newTwoInvocationExecutor()
+	rig := newShortLeaseHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	capture := &presenceCapture{}
+	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+	mustCreateSession(t, rig.db, "channel:333")
+	rig.startHost()
+	outcome := callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", "turn-preempted"))
+	executor.waitBlocked(t)
+	loseHostLease(t, rig.db)
+	awaitTerminal(t, outcome, turn.EventKindTurnCompleted)
+	started, failed, ended := capture.counts()
+	if failed != 0 {
+		t.Errorf("failed presence updates = %d, want none for a preempted invocation", failed)
+	}
+	if started != 2 || len(ended) != 2 {
+		t.Errorf("presence starts = %d, ends = %v; want two of each", started, ended)
+	}
+}
