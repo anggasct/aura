@@ -12,6 +12,7 @@ import (
 type Stub struct {
 	Name             string
 	RequiresApproval bool
+	Effectful        bool
 	Run              toolbroker.Adapter
 }
 
@@ -29,6 +30,7 @@ func Register(tb testing.TB, broker *toolbroker.Broker, stub Stub) {
 	definition := &tools.Definition{
 		Name:      stub.Name,
 		Version:   "v1",
+		Effectful: stub.Effectful,
 		Validator: func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil },
 	}
 	rule := &approval.Rule{ToolName: stub.Name, ToolVersion: "v1", RequiresApproval: stub.RequiresApproval}

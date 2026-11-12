@@ -3,24 +3,16 @@
 package app
 
 import (
-	"context"
 	"database/sql"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
-	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/store"
 )
 
-const (
-	runFirstLifeEnv = "AURA_DURABLE_RUN_FIRST_LIFE"
-	workflowHandler = "workflow"
-)
+const runFirstLifeEnv = "AURA_DURABLE_RUN_FIRST_LIFE"
 
 var runEntry = lifeEntry{test: "TestDurableRunFirstLife", env: runFirstLifeEnv}
 
@@ -32,13 +24,13 @@ type runPlan struct {
 }
 
 type runLife struct {
-	plan      runPlan
-	scenario  runScenario
-	db        *sql.DB
-	runtime   *sqlite.Runtime
-	ledger    *turnLedger
-	workflows *workflow.Store
-	effects   *effect.Executor
+	plan        runPlan
+	scenario    runScenario
+	db          *sql.DB
+	runtime     *sqlite.Runtime
+	ledger      *turnLedger
+	workflows   *workflow.Store
+	interpreter *workflow.Interpreter
 }
 
 func openRunLife(t *testing.T, plan runPlan) *runLife {
@@ -65,41 +57,6 @@ func openRunLife(t *testing.T, plan runPlan) *runLife {
 	return life
 }
 
-type workflowTick struct {
-	RunID        string `json:"run_id"`
-	DefinitionID string `json:"definition_id"`
-	Version      int    `json:"version"`
-}
-
-var errTickWithoutRun = errors.New("durable run payload names no run")
-
-func registerWorkflowHandler(rt *sqlite.Runtime, interpreter *workflow.Interpreter) {
-	rt.RegisterHandler(workflowHandler, func(ctx context.Context, inv durable.Invocation) error {
-		var tick workflowTick
-		if err := json.Unmarshal(inv.Payload(), &tick); err != nil {
-			return fmt.Errorf("decode durable run payload: %w", err)
-		}
-		if tick.RunID == "" {
-			return errTickWithoutRun
-		}
-		_, err := interpreter.DriveSerial(ctx, inv, tick.RunID)
-		return err
-	})
-}
-
-func (l *runLife) startWorkflow(t *testing.T) {
-	t.Helper()
-	summary, err := l.workflows.Run(t.Context(), l.plan.Run)
-	if err != nil {
-		t.Fatalf("read the workflow run: %v", err)
-	}
-	payload, err := json.Marshal(workflowTick{RunID: summary.ID, DefinitionID: summary.DefinitionID, Version: summary.DefinitionVersion})
-	if err != nil {
-		t.Fatalf("encode the workflow tick: %v", err)
-	}
-	l.start(t, durable.StartRequest{Handler: workflowHandler, Key: l.plan.Key, Payload: payload})
-}
-
 func (l *runLife) start(t *testing.T, req durable.StartRequest) {
 	t.Helper()
 	if _, err := l.runtime.Start(t.Context(), req); err != nil {
@@ -109,7 +66,7 @@ func (l *runLife) start(t *testing.T, req durable.StartRequest) {
 
 func (l *runLife) signal(t *testing.T, name string, payload []byte) {
 	t.Helper()
-	if err := l.runtime.Signal(t.Context(), durable.RunRef{Key: l.plan.Key}, name, payload); err != nil {
+	if err := l.interpreter.Signal(t.Context(), l.plan.Run, name, payload); err != nil {
 		t.Fatalf("signal %s: %v", name, err)
 	}
 }
@@ -139,17 +96,6 @@ func requireStepsSucceeded(t *testing.T, disk *workflow.Store, runID string) {
 	}
 }
 
-type ledgerToolRunner struct {
-	ledger *turnLedger
-}
-
-func (r *ledgerToolRunner) Invoke(_ context.Context, toolID string, _ json.RawMessage) (json.RawMessage, error) {
-	if _, err := r.ledger.record(executions(toolID), ""); err != nil {
-		return nil, err
-	}
-	return json.RawMessage(`{"ok":true}`), nil
-}
-
 type runStart struct {
 	scenario string
 	github   string
@@ -172,6 +118,9 @@ func startRunSuite(t *testing.T, start runStart) *runSuite {
 	suite := &runSuite{plan: runPlan{lifePlan: plan, GitHub: start.github}, db: db, ledger: &turnLedger{dir: plan.Ledger}}
 	scenario.seed(t, suite)
 	suite.child = startFirstLife(t, lifeLaunch{entry: runEntry, plan: suite.plan})
+	if scenario.started != nil {
+		scenario.started(t, suite)
+	}
 	return suite
 }
 
@@ -202,5 +151,16 @@ func (s *runSuite) requireRunSucceeded(t *testing.T) {
 	}
 	if claim != 2 {
 		t.Errorf("durable run %s claim = %d, want 2 (one claim by each life; a third claim means a host lost its lease under load and an action may have run twice)", s.plan.Key, claim)
+	}
+}
+
+func (s *runSuite) requireWorkflowHandler(t *testing.T) {
+	t.Helper()
+	var handler string
+	if err := s.db.QueryRowContext(t.Context(), `SELECT handler FROM durable_run WHERE key = ?`, s.plan.Key).Scan(&handler); err != nil {
+		t.Fatalf("read the handler of the run %s: %v", s.plan.Key, err)
+	}
+	if handler != workflow.HandlerName {
+		t.Errorf("durable run %s handler = %q, want %q", s.plan.Key, handler, workflow.HandlerName)
 	}
 }

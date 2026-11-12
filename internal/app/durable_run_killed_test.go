@@ -3,11 +3,14 @@
 package app
 
 import (
+	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"testing"
 
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
+	"github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	githubadapter "github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -32,23 +35,23 @@ func TestDurableRunFirstLife(t *testing.T) {
 
 func TestDurableWorkflowSkipsCompletedStepsAfterAKilledProcess(t *testing.T) {
 	suite := startRunSuite(t, runStart{scenario: "defined"})
-	suite.waitSuspendedAfterOneReadFile(t)
+	suite.waitSuspendedAfterOneBuild(t)
 	suite.child.kill(t)
 	suite.requireResumedAtTheHold(t)
 }
 
 func TestDurableWorkflowGeneratedRunResumesFromTheStoreAfterAKilledProcess(t *testing.T) {
 	suite := startRunSuite(t, runStart{scenario: "generated"})
-	suite.waitSuspendedAfterOneReadFile(t)
+	suite.waitSuspendedAfterOneBuild(t)
 	suite.child.kill(t)
 	suite.requireResumedAtTheHold(t)
 }
 
-func (s *runSuite) waitSuspendedAfterOneReadFile(t *testing.T) {
+func (s *runSuite) waitSuspendedAfterOneBuild(t *testing.T) {
 	t.Helper()
 	disk := workflow.NewStore(s.db)
-	s.child.waitKillPoint(t, "the run is suspended after one read_file", func() bool {
-		return workflowStatus(t, disk, s.plan.Run) == workflow.RunSuspended && len(s.ledger.records(t, executions(readFileTool))) == 1
+	s.child.waitKillPoint(t, "the run is suspended after one stub-build", func() bool {
+		return workflowStatus(t, disk, s.plan.Run) == workflow.RunSuspended && len(s.ledger.records(t, executions(stubBuildTool))) == 1
 	})
 }
 
@@ -59,12 +62,13 @@ func (s *runSuite) requireResumedAtTheHold(t *testing.T) {
 	life.signal(t, holdSignal, []byte(`{"ci":"green"}`))
 
 	s.requireRunSucceeded(t)
+	s.requireWorkflowHandler(t)
 	if status := workflowStatus(t, disk, s.plan.Run); status != workflow.RunSucceeded {
 		t.Errorf("workflow run status = %q, want %q", status, workflow.RunSucceeded)
 	}
 	requireStepsSucceeded(t, disk, s.plan.Run)
-	s.ledger.requireCount(t, executions(readFileTool), 1)
-	s.ledger.requireCount(t, executions(listDirTool), 1)
+	s.ledger.requireCount(t, executions(stubBuildTool), 1)
+	s.ledger.requireCount(t, executions(stubShipTool), 1)
 }
 
 func TestDurableWorkflowWithGitHubToolsSurvivesAKilledProcess(t *testing.T) {
@@ -85,6 +89,7 @@ func TestDurableWorkflowWithGitHubToolsSurvivesAKilledProcess(t *testing.T) {
 	life.signal(t, mergeSignal, []byte(approveOutcome))
 
 	suite.requireRunSucceeded(t)
+	suite.requireWorkflowHandler(t)
 	if status := workflowStatus(t, disk, suite.plan.Run); status != workflow.RunSucceeded {
 		t.Errorf("workflow run status = %q, want %q", status, workflow.RunSucceeded)
 	}
@@ -94,11 +99,8 @@ func TestDurableWorkflowWithGitHubToolsSurvivesAKilledProcess(t *testing.T) {
 			t.Errorf("%s calls = %d, want exactly one across the killed process", name, calls)
 		}
 	}
-	for _, tool := range githubadapter.ToolNames() {
-		suite.ledger.requireCount(t, executions(tool), 1)
-	}
 	requireCIFamily(t, correlations(t, disk, suite.plan.Run))
-	requireOneEffectPerOperation(t, life.effects)
+	requireOneEffectPerOperation(t, suite.db)
 }
 
 func (s *runSuite) stepSucceeded(t *testing.T, stepID string) bool {
@@ -161,8 +163,12 @@ func requireCIFamily(t *testing.T, rows []workflow.Correlation) {
 	}
 }
 
-func requireOneEffectPerOperation(t *testing.T, effects *effect.Executor) {
+func requireOneEffectPerOperation(t *testing.T, db *sql.DB) {
 	t.Helper()
+	effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("NewChannelEffects: %v", err)
+	}
 	intents, err := effects.Journal().ListByState(t.Context(), effect.StateSucceeded, 0)
 	if err != nil {
 		t.Fatalf("list the succeeded effect intents: %v", err)
