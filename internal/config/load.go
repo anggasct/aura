@@ -1736,6 +1736,10 @@ func validateToolsShapes(doc *yamlv3.Node) error {
 			if err := validateToolWebSearchShape(valueNode); err != nil {
 				return err
 			}
+		case "github":
+			if err := validateToolGitHubShape(valueNode); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -4376,6 +4380,9 @@ func configuredSecretValues(cfg *Config) []string {
 	}
 	if cfg.Tools != nil {
 		add(resolveSecretRef(cfg.Tools.WebSearch.CredentialRef))
+		for i := range cfg.Tools.GitHub.Credentials {
+			add(resolveSecretRef(cfg.Tools.GitHub.Credentials[i].Ref))
+		}
 	}
 	for i := range cfg.Channels.Discord.Accounts {
 		add(resolveSecretRef(cfg.Channels.Discord.Accounts[i].BotTokenRef))
@@ -4587,6 +4594,9 @@ func validateTools(toolsConfig *Tools, profile capability.Profile) error {
 	}
 	if toolsConfig.Fetch.MaxEncodedBytes <= 0 || toolsConfig.Fetch.MaxDecodedBytes <= 0 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.fetch body limits must be positive"}
+	}
+	if err := validateToolGitHub(&toolsConfig.GitHub); err != nil {
+		return err
 	}
 	return validateWebSearch(&toolsConfig.WebSearch)
 }

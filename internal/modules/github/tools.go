@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,7 +29,15 @@ const (
 	defaultTimeout         = 30 * time.Second
 	defaultMaxResponseSize = 64 * 1024
 	githubAPIVersion       = "2022-11-28"
+
+	aliasNotConfigured = "credential is not a configured github credential"
+	optionsRequired    = "github tool options are required"
 )
+
+type Credential struct {
+	Name string
+	Ref  string
+}
 
 type ToolOptions struct {
 	BaseURL          string
@@ -36,7 +45,8 @@ type ToolOptions struct {
 	Timeout          time.Duration
 	MaxResponseBytes int64
 
-	HTTPClient *http.Client
+	HTTPClient  *http.Client
+	Credentials []Credential
 }
 
 func baseURLOrDefault(raw string) string {
@@ -61,28 +71,33 @@ func maxResponseOrDefault(limit int64) int64 {
 }
 
 type commonArguments struct {
-	Repo          string `json:"repo"`
-	CredentialRef string `json:"credential_ref"`
+	Repo           string `json:"repo"`
+	CredentialName string `json:"credential_name"`
 }
 
 type client struct {
-	baseURL string
-	http    *http.Client
-	timeout time.Duration
-	maxSize int64
+	baseURL     string
+	http        *http.Client
+	timeout     time.Duration
+	maxSize     int64
+	credentials []Credential
 }
 
-func newClient(options ToolOptions) *client {
+func newClient(options *ToolOptions) (*client, error) {
+	if options == nil {
+		return nil, toolbroker.Errorf(toolbroker.ResultInvalidArgument, optionsRequired)
+	}
 	httpClient := options.HTTPClient
 	if httpClient == nil {
 		httpClient = egress.NewClient(options.Resolver)
 	}
 	return &client{
-		baseURL: baseURLOrDefault(options.BaseURL),
-		http:    httpClient,
-		timeout: timeoutOrDefault(options.Timeout),
-		maxSize: maxResponseOrDefault(options.MaxResponseBytes),
-	}
+		baseURL:     baseURLOrDefault(options.BaseURL),
+		http:        httpClient,
+		timeout:     timeoutOrDefault(options.Timeout),
+		maxSize:     maxResponseOrDefault(options.MaxResponseBytes),
+		credentials: slices.Clone(options.Credentials),
+	}, nil
 }
 
 func parseRepo(repo string) (owner, name string, err error) {
@@ -93,15 +108,22 @@ func parseRepo(repo string) (owner, name string, err error) {
 	return parts[0], parts[1], nil
 }
 
-func resolveToken(ref string) (string, error) {
+func credentialIndex(credentials []Credential, name string) int {
+	return slices.IndexFunc(credentials, func(c Credential) bool { return c.Name == name })
+}
+
+func resolveToken(name string, credentials []Credential) (string, error) {
+	index := credentialIndex(credentials, name)
+	if index < 0 {
+		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, aliasNotConfigured)
+	}
+	ref := credentials[index].Ref
 	var source secret.Reference
 	switch {
 	case strings.HasPrefix(ref, "env://"):
 		source.Env = strings.TrimPrefix(ref, "env://")
 	case strings.HasPrefix(ref, "file://"):
 		source.File = strings.TrimPrefix(ref, "file://")
-	default:
-		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, "credential_ref must use env:// or file://")
 	}
 	token, err := source.Resolve()
 	if err != nil || token == "" {
@@ -191,9 +213,12 @@ type createPRArguments struct {
 	Body  string `json:"body,omitempty"`
 }
 
-func CreatePRAdapter(options ToolOptions) toolbroker.Adapter {
-	cli := newClient(options)
+func CreatePRAdapter(options *ToolOptions) toolbroker.Adapter {
+	cli, setupErr := newClient(options)
 	return func(ctx context.Context, request *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
+		if setupErr != nil {
+			return toolbroker.ToolResult{}, setupErr
+		}
 		if request == nil {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "request must not be nil")
 		}
@@ -208,7 +233,7 @@ func CreatePRAdapter(options ToolOptions) toolbroker.Adapter {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Head) == "" || strings.TrimSpace(args.Base) == "" {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "title, head, and base are required")
 		}
-		token, err := resolveToken(args.CredentialRef)
+		token, err := resolveToken(args.CredentialName, cli.credentials)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -246,9 +271,12 @@ type mergeArguments struct {
 	MergeMethod string `json:"merge_method,omitempty"`
 }
 
-func MergeAdapter(options ToolOptions) toolbroker.Adapter {
-	cli := newClient(options)
+func MergeAdapter(options *ToolOptions) toolbroker.Adapter {
+	cli, setupErr := newClient(options)
 	return func(ctx context.Context, request *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
+		if setupErr != nil {
+			return toolbroker.ToolResult{}, setupErr
+		}
 		if request == nil {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "request must not be nil")
 		}
@@ -270,7 +298,7 @@ func MergeAdapter(options ToolOptions) toolbroker.Adapter {
 		if method != "merge" && method != "squash" && method != "rebase" {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "merge_method must be merge, squash, or rebase")
 		}
-		token, err := resolveToken(args.CredentialRef)
+		token, err := resolveToken(args.CredentialName, cli.credentials)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -304,9 +332,12 @@ type commentArguments struct {
 	Body   string `json:"body"`
 }
 
-func CommentAdapter(options ToolOptions) toolbroker.Adapter {
-	cli := newClient(options)
+func CommentAdapter(options *ToolOptions) toolbroker.Adapter {
+	cli, setupErr := newClient(options)
 	return func(ctx context.Context, request *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
+		if setupErr != nil {
+			return toolbroker.ToolResult{}, setupErr
+		}
 		if request == nil {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "request must not be nil")
 		}
@@ -324,7 +355,7 @@ func CommentAdapter(options ToolOptions) toolbroker.Adapter {
 		if strings.TrimSpace(args.Body) == "" || len(args.Body) > 65536 {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "body must be non-empty within 64 KiB")
 		}
-		token, err := resolveToken(args.CredentialRef)
+		token, err := resolveToken(args.CredentialName, cli.credentials)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -369,11 +400,11 @@ func intFloor(limit int) *int {
 
 func fieldSchema(requiredStrings, optionalStrings, requiredNumbers []string) json.RawMessage {
 	properties := map[string]fieldType{
-		"repo":           {Type: "string"},
-		"credential_ref": {Type: "string"},
+		"repo":            {Type: "string"},
+		"credential_name": {Type: "string"},
 	}
 	required := make([]string, 0, 2+len(requiredStrings)+len(requiredNumbers))
-	required = append(required, "repo", "credential_ref")
+	required = append(required, "repo", "credential_name")
 	for _, field := range requiredStrings {
 		if _, ok := properties[field]; !ok {
 			properties[field] = fieldType{Type: "string"}
@@ -405,7 +436,7 @@ func fieldValidator(requiredStrings, optionalStrings, requiredNumbers []string) 
 		if err := json.Unmarshal(raw, &document); err != nil {
 			return nil, errors.New("arguments must be a JSON object")
 		}
-		allowed := map[string]bool{"repo": true, "credential_ref": true}
+		allowed := map[string]bool{"repo": true, "credential_name": true}
 		for _, field := range requiredStrings {
 			allowed[field] = true
 		}
@@ -420,7 +451,7 @@ func fieldValidator(requiredStrings, optionalStrings, requiredNumbers []string) 
 				return nil, fmt.Errorf("unknown argument %q", field)
 			}
 		}
-		for _, field := range append([]string{"repo", "credential_ref"}, requiredStrings...) {
+		for _, field := range append([]string{"repo", "credential_name"}, requiredStrings...) {
 			var value string
 			if err := json.Unmarshal(document[field], &value); err != nil || strings.TrimSpace(value) == "" {
 				return nil, fmt.Errorf("argument %q must be a non-empty string", field)
@@ -504,9 +535,35 @@ type ToolRegistrar interface {
 	RegisterTool(definition *tools.Definition, adapter toolbroker.Adapter, rule *approval.Rule) error
 }
 
-func Register(registrar ToolRegistrar, options ToolOptions) error {
+func credentialValidator(inner func(json.RawMessage) (json.RawMessage, error), credentials []Credential) func(json.RawMessage) (json.RawMessage, error) {
+	return func(raw json.RawMessage) (json.RawMessage, error) {
+		validated, err := inner(raw)
+		if err != nil {
+			return nil, err
+		}
+		var args commonArguments
+		if err := json.Unmarshal(validated, &args); err != nil || credentialIndex(credentials, args.CredentialName) < 0 {
+			return nil, errors.New(aliasNotConfigured)
+		}
+		return validated, nil
+	}
+}
+
+func Register(registrar ToolRegistrar, options *ToolOptions) error {
 	if registrar == nil {
 		return errors.New("github tools require a registrar")
+	}
+	if options == nil {
+		return toolbroker.Errorf(toolbroker.ResultInvalidArgument, optionsRequired)
+	}
+	credentials := slices.Clone(options.Credentials)
+	if len(credentials) == 0 {
+		return toolbroker.Errorf(toolbroker.ResultInvalidArgument, "github tools require at least one configured credential")
+	}
+	for i := range credentials {
+		if credentialIndex(credentials[:i], credentials[i].Name) >= 0 {
+			return toolbroker.Errorf(toolbroker.ResultInvalidArgument, "github credential %q is listed twice", credentials[i].Name)
+		}
 	}
 	adapters := map[string]toolbroker.Adapter{
 		ToolCreatePR: CreatePRAdapter(options),
@@ -516,6 +573,7 @@ func Register(registrar ToolRegistrar, options ToolOptions) error {
 	definitions := Definitions()
 	rules := Rules()
 	for i := range definitions {
+		definitions[i].Validator = credentialValidator(definitions[i].Validator, credentials)
 		if err := registrar.RegisterTool(&definitions[i], adapters[definitions[i].Name], &rules[i]); err != nil {
 			return fmt.Errorf("register %s: %w", definitions[i].Name, err)
 		}

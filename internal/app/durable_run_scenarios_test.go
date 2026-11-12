@@ -27,20 +27,21 @@ import (
 )
 
 const (
-	stubBuildTool  = "stub-build"
-	stubShipTool   = "stub-ship"
-	holdSignal     = "wait.hold"
-	generatedID    = "gen_crash_resume"
-	proofTokenEnv  = "AURA_PROOF_GITHUB_TOKEN"
-	proofToken     = "proof-token"
-	proofPullID    = "org/repo#42"
-	childID        = "child-1"
-	childParent    = "session-parent"
-	childSession   = "session-child"
-	childTask      = "CHILD-TASK"
-	gateSignal     = "approval.gate"
-	mergeSignal    = "approval.approve_merge"
-	approveOutcome = `{"decision":"approve"}`
+	stubBuildTool   = "stub-build"
+	stubShipTool    = "stub-ship"
+	holdSignal      = "wait.hold"
+	generatedID     = "gen_crash_resume"
+	proofTokenEnv   = "AURA_PROOF_GITHUB_TOKEN"
+	proofCredential = "proof"
+	proofToken      = "proof-token"
+	proofPullID     = "org/repo#42"
+	childID         = "child-1"
+	childParent     = "session-parent"
+	childSession    = "session-child"
+	childTask       = "CHILD-TASK"
+	gateSignal      = "approval.gate"
+	mergeSignal     = "approval.approve_merge"
+	approveOutcome  = `{"decision":"approve"}`
 )
 
 type runScenario struct {
@@ -91,7 +92,7 @@ var generatedWorkflow = &workflowShape{
 }
 
 var proofWorkflow = &workflowShape{
-	spec:      func() *workflow.Spec { return proofSpec("env://" + proofTokenEnv) },
+	spec:      func() *workflow.Spec { return proofSpec(proofCredential) },
 	known:     githubadapter.ToolNames(),
 	effectful: githubadapter.ToolNames(),
 	wire:      registerGitHubOnTheStub,
@@ -235,7 +236,7 @@ func (okAgentRunner) Run(context.Context, *auraagent.Definition, *workflow.Execu
 	return json.RawMessage(`{"ok":true}`), nil
 }
 
-func proofSpec(credentialRef string) *workflow.Spec {
+func proofSpec(credential string) *workflow.Spec {
 	tool := func(id, toolID, args string, depends ...string) workflow.StepSpec {
 		return workflow.StepSpec{
 			ID: id, DependsOn: depends,
@@ -258,23 +259,23 @@ func proofSpec(credentialRef string) *workflow.Spec {
 			agent("implement", engineer, "gate"),
 			agent("test", engineer, "implement"),
 			tool("open_pr", githubadapter.ToolCreatePR,
-				`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential_ref":"`+credentialRef+`"}`, "test"),
+				`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential_name":"`+credential+`"}`, "test"),
 			{ID: "hold_ci", DependsOn: []string{"open_pr"},
 				Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &ciEvent, ExternalRef: &openPR},
 				Timeout:  10 * time.Minute},
 			tool("review", githubadapter.ToolComment,
-				`{"repo":"org/repo","number":42,"body":"looks good","credential_ref":"`+credentialRef+`"}`, "hold_ci"),
+				`{"repo":"org/repo","number":42,"body":"looks good","credential_name":"`+credential+`"}`, "hold_ci"),
 			{ID: "approve_merge", DependsOn: []string{"review"},
 				Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: 10 * time.Minute},
 			tool("merge_pr", githubadapter.ToolMerge,
-				`{"repo":"org/repo","number":42,"credential_ref":"`+credentialRef+`"}`, "approve_merge"),
+				`{"repo":"org/repo","number":42,"credential_name":"`+credential+`"}`, "approve_merge"),
 		},
 	}
 }
 
 func registerGitHubOnTheStub(t *testing.T, life *runLife, runner *workflowToolRunner) workflow.ToolRunner {
 	t.Helper()
-	if err := githubadapter.Register(runner.executor, githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}}); err != nil {
+	if err := githubadapter.Register(runner.executor, &githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}, Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: "env://" + proofTokenEnv}}}); err != nil {
 		t.Fatalf("register the github tools: %v", err)
 	}
 	return runner

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -260,9 +262,29 @@ func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
 		return nil, invalidOptions("tool executor input must carry a config result and wiring")
 	}
 	wiring := in.wiring
-	return toolsbuiltin.New(in.result.Config, in.db, in.artifactRoot, in.result.CapabilityReport, in.logger,
+	executor, err := toolsbuiltin.New(in.result.Config, in.db, in.artifactRoot, in.result.CapabilityReport, in.logger,
 		wiring.observer, wiring.decider, wiring.access,
 		toolsbuiltin.WithApprovalReachable(wiring.reachable))
+	if err != nil {
+		return nil, err
+	}
+	for _, credential := range githubCredentials(in.result.Config) {
+		if value, err := parseSecretRef(credential.Ref).Resolve(); err == nil && strings.TrimSpace(value) != "" {
+			executor.Broker().RegisterSecret(value)
+		}
+	}
+	return executor, nil
+}
+
+func githubCredentials(cfg *config.Config) []github.Credential {
+	if cfg.Tools == nil {
+		return nil
+	}
+	var credentials []github.Credential
+	for _, entry := range cfg.Tools.GitHub.Credentials {
+		credentials = append(credentials, github.Credential(entry))
+	}
+	return credentials
 }
 
 type lifecycleStage struct {

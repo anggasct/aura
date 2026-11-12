@@ -133,7 +133,9 @@ func proofEffectExecutor(t *testing.T, db *sql.DB) *effect.Executor {
 	return executor
 }
 
-func proofSpec(credentialRef string) *workflow.Spec {
+const proofCredential = "proof"
+
+func proofSpec(credential string) *workflow.Spec {
 	tool := func(id string, toolID string, args string, depends ...string) workflow.StepSpec {
 		return workflow.StepSpec{
 			ID: id, DependsOn: depends,
@@ -158,16 +160,16 @@ func proofSpec(credentialRef string) *workflow.Spec {
 			agent("implement", engineer, "gate"),
 			agent("test", engineer, "implement"),
 			tool("open_pr", githubadapter.ToolCreatePR,
-				`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential_ref":"`+credentialRef+`"}`, "test"),
+				`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential_name":"`+credential+`"}`, "test"),
 			{ID: "hold_ci", DependsOn: []string{"open_pr"},
 				Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &ciEvent, ExternalRef: &openPR},
 				Timeout:  10 * time.Minute},
 			tool("review", githubadapter.ToolComment,
-				`{"repo":"org/repo","number":42,"body":"looks good","credential_ref":"`+credentialRef+`"}`, "hold_ci"),
+				`{"repo":"org/repo","number":42,"body":"looks good","credential_name":"`+credential+`"}`, "hold_ci"),
 			{ID: "approve_merge", DependsOn: []string{"review"},
 				Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: 10 * time.Minute},
 			tool("merge_pr", githubadapter.ToolMerge,
-				`{"repo":"org/repo","number":42,"credential_ref":"`+credentialRef+`"}`, "approve_merge"),
+				`{"repo":"org/repo","number":42,"credential_name":"`+credential+`"}`, "approve_merge"),
 		},
 	}
 }
@@ -209,7 +211,7 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new broker: %v", err)
 	}
-	if err := githubadapter.Register(broker, githubadapter.ToolOptions{BaseURL: api.server.URL, HTTPClient: api.server.Client()}); err != nil {
+	if err := githubadapter.Register(broker, &githubadapter.ToolOptions{BaseURL: api.server.URL, HTTPClient: api.server.Client(), Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: "env://AURA_PROOF_GITHUB_TOKEN"}}}); err != nil {
 		t.Fatalf("register github tools: %v", err)
 	}
 	runner := &brokerToolRunner{broker: broker}
@@ -224,7 +226,7 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 			Agents:             proofAgentRunner{},
 			Tools:              runner,
 		})
-		spec := proofSpec("env://AURA_PROOF_GITHUB_TOKEN")
+		spec := proofSpec(proofCredential)
 		deps := workflow.ValidationDeps{
 			KnownTools:     githubadapter.ToolNames(),
 			EffectfulTools: githubadapter.ToolNames(),
@@ -237,7 +239,7 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 	}
 	interpreter := newInterpreter()
 
-	summary, err := disk.CreateRun(ctx, proofSpec("env://AURA_PROOF_GITHUB_TOKEN"), &workflow.RunInput{Objective: "ship it"})
+	summary, err := disk.CreateRun(ctx, proofSpec(proofCredential), &workflow.RunInput{Objective: "ship it"})
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

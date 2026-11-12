@@ -81,6 +81,9 @@ func configuredSecrets(cfg *config.Config) []configuredSecret {
 			secrets = append(secrets, environmentSecret("webhook_"+key.ID, key.SecretEnv))
 		}
 	}
+	for _, credential := range githubCredentials(cfg) {
+		secrets = append(secrets, configuredSecret{name: "github_credential_" + credential.Name, optional: true, resolve: parseSecretRef(credential.Ref).Resolve})
+	}
 	for name := range cfg.Models.Definitions {
 		def := cfg.Models.Definitions[name]
 		if def.APIKeyEnv != "" {
