@@ -218,13 +218,17 @@ func TestWebhookExecutionStore_ListsUnfinished(t *testing.T) {
 	}
 }
 
-func seedExecutionAtVersion42(t *testing.T, db *sql.DB, id, state string) {
+type seededExecution struct {
+	id, state string
+}
+
+func seedExecutionAtVersion42(t *testing.T, db *sql.DB, execution seededExecution) {
 	t.Helper()
 	if _, err := db.ExecContext(t.Context(),
 		`INSERT INTO webhook_execution (id, key_id, event_id, nonce, body_digest, turn_id, state, created_at, updated_at, expires_at)
 		 VALUES (?, 'primary', ?, ?, 'digest', ?, ?, '2026-09-07T12:00:00Z', '2026-09-07T12:00:00Z', '2030-01-01T00:00:00Z')`,
-		id, "evt-"+id, "nonce-"+id, "turn-"+id, state); err != nil {
-		t.Fatalf("seed execution %s: %v", id, err)
+		execution.id, "evt-"+execution.id, "nonce-"+execution.id, "turn-"+execution.id, execution.state); err != nil {
+		t.Fatalf("seed execution %s: %v", execution.id, err)
 	}
 }
 
@@ -246,14 +250,14 @@ func seedTurnEventAtVersion42(t *testing.T, db *sql.DB, event seededTurnEvent) {
 func TestWebhookExecutionSessionMigration(t *testing.T) {
 	ctx := t.Context()
 	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), 42)
-	seedExecutionAtVersion42(t, db, "whex_completed", WebhookExecutionStateCompleted)
+	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_completed", state: WebhookExecutionStateCompleted})
 	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-other", turnID: "turn-other", kind: "turn.accepted"})
 	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-completed", turnID: "turn-whex_completed", kind: "turn.accepted"})
 	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-completed", turnID: "turn-whex_completed", kind: "turn.completed"})
-	seedExecutionAtVersion42(t, db, "whex_running", WebhookExecutionStateRunning)
+	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_running", state: WebhookExecutionStateRunning})
 	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-running", turnID: "turn-whex_running", kind: "turn.accepted"})
-	seedExecutionAtVersion42(t, db, "whex_never_admitted", WebhookExecutionStateAccepted)
-	seedExecutionAtVersion42(t, db, "whex_events_gone", WebhookExecutionStateCompleted)
+	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_never_admitted", state: WebhookExecutionStateAccepted})
+	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_events_gone", state: WebhookExecutionStateCompleted})
 
 	if err := Migrate(ctx, db); err != nil {
 		t.Fatalf("Migrate: %v", err)
