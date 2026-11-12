@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -32,23 +33,25 @@ func turnDescriptorFromRequest(req *turn.TurnRequest) runtimesessions.Descriptor
 		parts = append(parts, runtimesessions.Part{Text: part.Text, Image: part.Image})
 	}
 	return runtimesessions.Descriptor{
-		TurnID:         req.TurnID,
-		SessionID:      req.SessionID,
-		PrincipalID:    req.PrincipalID,
-		PrincipalClass: string(req.PrincipalClass),
-		Origin:         string(req.Origin),
-		Parts:          parts,
-		ReplyContext:   req.ReplyContext,
-		IdempotencyKey: req.IdempotencyKey,
-		Deadline:       req.Deadline,
-		MaxTokens:      req.Budget.MaxTokens,
-		MaxCost:        req.Budget.MaxCost,
-		TraceParent:    req.TraceParent,
-		AgentID:        req.AgentID,
-		Persona:        req.Persona,
-		Skill:          req.Skill,
-		StreamPartial:  req.StreamPartial,
-		Knowledge:      slices.Clone(req.Knowledge),
+		TurnID:           req.TurnID,
+		SessionID:        req.SessionID,
+		PrincipalID:      req.PrincipalID,
+		PrincipalClass:   string(req.PrincipalClass),
+		Origin:           string(req.Origin),
+		Parts:            parts,
+		ReplyContext:     req.ReplyContext,
+		UntrustedContext: untrustedContextFromRecall(req.UntrustedContext),
+		RequireRecall:    req.RequireRecall,
+		IdempotencyKey:   req.IdempotencyKey,
+		Deadline:         req.Deadline,
+		MaxTokens:        req.Budget.MaxTokens,
+		MaxCost:          req.Budget.MaxCost,
+		TraceParent:      req.TraceParent,
+		AgentID:          req.AgentID,
+		Persona:          req.Persona,
+		Skill:            req.Skill,
+		StreamPartial:    req.StreamPartial,
+		Knowledge:        slices.Clone(req.Knowledge),
 	}
 }
 
@@ -58,22 +61,72 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *turn.TurnReque
 		parts = append(parts, runtimeingress.InputPart{Text: part.Text, Image: part.Image})
 	}
 	return &turn.TurnRequest{
-		TurnID:         desc.TurnID,
-		SessionID:      desc.SessionID,
-		PrincipalID:    desc.PrincipalID,
-		PrincipalClass: principal.ParseClass(desc.PrincipalClass),
-		Origin:         turn.Origin(desc.Origin),
-		Parts:          parts,
-		ReplyContext:   desc.ReplyContext,
-		IdempotencyKey: desc.IdempotencyKey,
-		Deadline:       desc.Deadline,
-		Budget:         turn.Budget{MaxTokens: desc.MaxTokens, MaxCost: desc.MaxCost},
-		TraceParent:    desc.TraceParent,
-		AgentID:        desc.AgentID,
-		Persona:        desc.Persona,
-		Skill:          desc.Skill,
-		StreamPartial:  desc.StreamPartial,
-		Knowledge:      slices.Clone(desc.Knowledge),
+		TurnID:           desc.TurnID,
+		SessionID:        desc.SessionID,
+		PrincipalID:      desc.PrincipalID,
+		PrincipalClass:   principal.ParseClass(desc.PrincipalClass),
+		Origin:           turn.Origin(desc.Origin),
+		Parts:            parts,
+		ReplyContext:     desc.ReplyContext,
+		UntrustedContext: untrustedRecallFromContext(desc.UntrustedContext),
+		RequireRecall:    desc.RequireRecall,
+		IdempotencyKey:   desc.IdempotencyKey,
+		Deadline:         desc.Deadline,
+		Budget:           turn.Budget{MaxTokens: desc.MaxTokens, MaxCost: desc.MaxCost},
+		TraceParent:      desc.TraceParent,
+		AgentID:          desc.AgentID,
+		Persona:          desc.Persona,
+		Skill:            desc.Skill,
+		StreamPartial:    desc.StreamPartial,
+		Knowledge:        slices.Clone(desc.Knowledge),
+	}
+}
+
+func untrustedContextFromRecall(recall *turn.UntrustedRecall) *runtimesessions.UntrustedContext {
+	if recall == nil {
+		return nil
+	}
+	var documents []runtimesessions.UntrustedDocument
+	for i := range recall.Documents {
+		document := &recall.Documents[i]
+		documents = append(documents, runtimesessions.UntrustedDocument{
+			ID:           document.ID,
+			SessionID:    document.SessionID,
+			FromSequence: document.FromSequence,
+			ToSequence:   document.ToSequence,
+			Trust:        string(document.Trust),
+			Content:      document.Content,
+		})
+	}
+	return &runtimesessions.UntrustedContext{
+		Query:     recall.Query,
+		Summary:   recall.Summary,
+		Trust:     string(recall.Trust),
+		Documents: documents,
+	}
+}
+
+func untrustedRecallFromContext(stored *runtimesessions.UntrustedContext) *turn.UntrustedRecall {
+	if stored == nil {
+		return nil
+	}
+	var documents []turn.UntrustedDocument
+	for i := range stored.Documents {
+		document := &stored.Documents[i]
+		documents = append(documents, turn.UntrustedDocument{
+			ID:           document.ID,
+			SessionID:    document.SessionID,
+			FromSequence: document.FromSequence,
+			ToSequence:   document.ToSequence,
+			Trust:        approval.TrustLabel(document.Trust),
+			Content:      document.Content,
+		})
+	}
+	return &turn.UntrustedRecall{
+		Query:     stored.Query,
+		Summary:   stored.Summary,
+		Trust:     approval.TrustLabel(stored.Trust),
+		Documents: documents,
 	}
 }
 
