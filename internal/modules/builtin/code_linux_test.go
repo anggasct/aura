@@ -3,6 +3,7 @@
 package toolsbuiltin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -111,12 +112,16 @@ func TestCodeExecuteNeverReRunsAReplayedRequest(t *testing.T) {
 	fixture := newGateFixture(t, capabilitytest.Report(t, "code-interpreter"), true)
 	runner := &fakeCodeRunner{output: json.RawMessage(`{"result_class":"ok"}`)}
 	fixture.executor.SetCodeRunner(runner)
-	if _, err := fixture.call("code_execute", codeArguments, "code-interpreter"); err != nil {
+	first, err := fixture.call("code_execute", codeArguments, "code-interpreter")
+	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	_, err := fixture.call("code_execute", codeArguments, "code-interpreter")
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultExecutionFailed {
-		t.Fatalf("replayed call error = %v, want execution_failed", err)
+	replayed, err := fixture.call("code_execute", codeArguments, "code-interpreter")
+	if err != nil {
+		t.Fatalf("replayed call: %v", err)
+	}
+	if !bytes.Equal(replayed, first) {
+		t.Fatalf("replayed output = %s, want the first output %s", replayed, first)
 	}
 	if runner.calls != 1 {
 		t.Fatalf("runner calls = %d, want the program to run once", runner.calls)

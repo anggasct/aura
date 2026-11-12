@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -69,13 +70,21 @@ func TestWorkflowToolRunnerDerivesItsIdsFromTheStepCall(t *testing.T) {
 		t.Fatalf("runner is %T, want *workflowToolRunner", runner)
 	}
 
-	t.Run("the same run and step send the same ids whatever the attempt and the effect is performed once", func(t *testing.T) {
-		if _, err := runner.Invoke(stepCallAt(t, "run-1", "step-a", 0), "write_file", writeFileArgs(t, "a.txt", "one")); err != nil {
+	t.Run("the same run and step send the same ids whatever the attempt, and the effect is performed once", func(t *testing.T) {
+		first, err := runner.Invoke(stepCallAt(t, "run-1", "step-a", 0), "write_file", writeFileArgs(t, "a.txt", "one"))
+		if err != nil {
 			t.Fatalf("first Invoke: %v", err)
 		}
-		_, err := runner.Invoke(stepCallAt(t, "run-1", "step-a", 1), "write_file", writeFileArgs(t, "a.txt", "two"))
-		if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultExecutionFailed {
-			t.Fatalf("retry Invoke error = %v, want %s", err, toolbroker.ResultExecutionFailed)
+		retried, err := runner.Invoke(stepCallAt(t, "run-1", "step-a", 1), "write_file", writeFileArgs(t, "a.txt", "one"))
+		if err != nil {
+			t.Fatalf("retry Invoke with the same arguments: %v", err)
+		}
+		if !bytes.Equal(retried, first) {
+			t.Fatalf("retry Invoke output = %s, want the first output %s", retried, first)
+		}
+		_, err = runner.Invoke(stepCallAt(t, "run-1", "step-a", 2), "write_file", writeFileArgs(t, "a.txt", "two"))
+		if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultInvalidArgument {
+			t.Fatalf("retry Invoke with other arguments error = %v, want %s", err, toolbroker.ResultInvalidArgument)
 		}
 		content, err := os.ReadFile(filepath.Join(workspace, "a.txt"))
 		if err != nil {
