@@ -360,7 +360,7 @@ func (j *Journal) resolvePrepareConflict(ctx context.Context, req *PrepareReques
 		}
 		return existing, nil
 	}
-	return nil, codedError(ErrorCodeIdempotencyConflict,
+	return nil, codedError(ErrorCodeIdempotencyKeyInUse,
 		fmt.Sprintf("effect: idempotency key %q already in use", req.IdempotencyKey), cause)
 }
 
@@ -442,6 +442,38 @@ func (j *Journal) Succeed(ctx context.Context, id string, receipt json.RawMessag
 	})
 }
 
+func (j *Journal) succeedWith(ctx context.Context, started *Intent, outcome *Outcome) (*Intent, error) {
+	if started == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "effect: started intent must not be nil", nil)
+	}
+	if outcome == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "effect: outcome must not be nil", nil)
+	}
+	if len(outcome.Receipt) > 0 && !json.Valid(outcome.Receipt) {
+		return nil, codedError(ErrorCodeInvalidArgument, "effect: receipt must be valid JSON", nil)
+	}
+	spec := &transitionSpec{
+		from:          []State{StateStarted},
+		to:            StateSucceeded,
+		receipt:       outcome.Receipt,
+		setFinishedAt: true,
+		invalidCode:   ErrorCodeTransitionInvalid,
+	}
+	offered := outcome.Result != nil
+	if offered && recordable(outcome.Result) {
+		spec.result = outcome.Result
+		spec.resultDigest = resultDigest(started.ID, started.RequestDigest, outcome.Result)
+	}
+	intent, err := j.transition(ctx, started.ID, spec)
+	if err != nil {
+		return nil, err
+	}
+	if (offered && spec.result == nil) || outcome.UnrecordedResult {
+		j.observe(ctx, intent, observationResultNotRecorded)
+	}
+	return intent, nil
+}
+
 func (j *Journal) Fail(ctx context.Context, id, safeErrorCode string) (*Intent, error) {
 	return j.transition(ctx, id, &transitionSpec{
 		from:          []State{StatePrepared, StateStarted},
@@ -494,6 +526,8 @@ type transitionSpec struct {
 	from            []State
 	to              State
 	receipt         json.RawMessage
+	result          json.RawMessage
+	resultDigest    string
 	safeErrorCode   string
 	setStartedAt    bool
 	setFinishedAt   bool
@@ -529,6 +563,10 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	if spec.receipt != nil {
 		receiptArg = string(spec.receipt)
 	}
+	var resultArg any
+	if spec.result != nil {
+		resultArg = string(spec.result)
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE effect_intent
 		SET state = ?,
@@ -537,13 +575,15 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 		    finished_at = CASE WHEN ? THEN ? ELSE finished_at END,
 		    reconciled_at = CASE WHEN ? THEN ? ELSE reconciled_at END,
 		    provider_receipt_json = ?,
+		    result_json = ?,
+		    result_digest = ?,
 		    safe_error_code = ?
 		WHERE id = ? AND state = ?`,
 		string(spec.to), fmtTime(now),
 		boolToInt(spec.setStartedAt), fmtTime(now),
 		boolToInt(spec.setFinishedAt), fmtTime(now),
 		boolToInt(spec.setReconciledAt), fmtTime(now),
-		receiptArg, nullableString(spec.safeErrorCode),
+		receiptArg, resultArg, nullableString(spec.resultDigest), nullableString(spec.safeErrorCode),
 		id, string(currentState),
 	)
 	if err != nil {
