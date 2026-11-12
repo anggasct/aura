@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -213,5 +214,97 @@ func TestErasePrincipalSucceedsWhenAnOwnedEffectHasAnOperatorApproval(t *testing
 	}
 	if got := countRows(t, db, `SELECT (SELECT COUNT(*) FROM effect_intent) + (SELECT COUNT(*) FROM effect_approval)`); got != 0 {
 		t.Errorf("effect rows left = %d, want 0", got)
+	}
+}
+
+type durableRunFixture struct {
+	key, handler, payload, state string
+	actions                      int
+}
+
+func seedDurableRun(t *testing.T, db *sql.DB, run durableRunFixture) {
+	t.Helper()
+	const at = "2026-11-12T09:00:00Z"
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO durable_run (key, handler, payload, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		run.key, run.handler, []byte(run.payload), run.state, at, at); err != nil {
+		t.Fatalf("seed run %s: %v", run.key, err)
+	}
+	for i := range run.actions {
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO durable_action (run_key, action_key, outcome, result, created_at) VALUES (?, ?, 'result', ?, ?)`,
+			run.key, fmt.Sprintf("step-%d", i), []byte(`{"text":"model reply"}`), at); err != nil {
+			t.Fatalf("seed action of %s: %v", run.key, err)
+		}
+	}
+}
+
+func TestErasePrincipalDeletesTheTurnRunsOfItsSessions(t *testing.T) {
+	const (
+		dmSession      = "lobby/discord:owner/dm:601"
+		channelSession = "lobby/discord:owner/channel:333/principal:discord:601"
+		otherSession   = "lobby/discord:owner/dm:602"
+	)
+	db := newTestDB(t)
+	seedPersonaSession(t, db, dmSession, "discord:601", "lobby")
+	seedPersonaSession(t, db, channelSession, "discord:601", "lobby")
+	seedPersonaSession(t, db, otherSession, "discord:602", "lobby")
+	for _, run := range []durableRunFixture{
+		{key: "turn-601-ended", handler: "turn", payload: `{"turn_id":"turn-601-ended","session_id":"` + dmSession + `"}`, state: "succeeded", actions: 2},
+		{key: "turn-601-running", handler: "turn", payload: `{"turn_id":"turn-601-running","session_id":"` + channelSession + `"}`, state: "running", actions: 1},
+		{key: "turn-602", handler: "turn", payload: `{"turn_id":"turn-602","session_id":"` + otherSession + `"}`, state: "succeeded", actions: 1},
+		{key: "turn-left-behind", handler: "turn", payload: `{"turn_id":"turn-left-behind","session_id":"lobby/discord:owner/dm:600"}`, state: "failed", actions: 1},
+		{key: "workflow-601", handler: "workflow", payload: `{"session_id":"` + dmSession + `"}`, state: "succeeded", actions: 1},
+		{key: "schedule-job", handler: "schedule", payload: `{"job_id":"daily"}`, state: "succeeded", actions: 1},
+		{key: "turn-not-json", handler: "turn", payload: `not json`, state: "failed", actions: 1},
+		{key: "turn-no-session", handler: "turn", payload: `{"turn_id":"turn-no-session"}`, state: "failed", actions: 1},
+	} {
+		seedDurableRun(t, db, run)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO durable_signal (run_key, name, seq, payload, created_at) VALUES ('turn-601-ended', 'approval', 0, ?, '2026-11-12T09:00:00Z')`, []byte(`{}`)); err != nil {
+		t.Fatalf("seed signal: %v", err)
+	}
+	const allRuns, allActions = 8, 9
+	want := ErasureCounts{Sessions: 2}
+	dry, err := ErasePrincipal(t.Context(), db, "discord:601", false, ErasureOptions{})
+	if err != nil || dry != want {
+		t.Fatalf("dry run = %+v, %v; want %+v", dry, err, want)
+	}
+	for query, expect := range map[string]int{
+		`SELECT COUNT(*) FROM durable_run`:    allRuns,
+		`SELECT COUNT(*) FROM durable_action`: allActions,
+		`SELECT COUNT(*) FROM durable_signal`: 1,
+	} {
+		if got := countRows(t, db, query); got != expect {
+			t.Errorf("after a dry run %s = %d, want %d", query, got, expect)
+		}
+	}
+	applied, err := ErasePrincipal(t.Context(), db, "discord:601", true, ErasureOptions{})
+	if err != nil || applied != want {
+		t.Fatalf("apply = %+v, %v; want %+v", applied, err, want)
+	}
+	kept := `('turn-602', 'workflow-601', 'schedule-job', 'turn-not-json', 'turn-no-session')`
+	for query, expect := range map[string]int{
+		`SELECT COUNT(*) FROM durable_run WHERE key IN ('turn-601-ended', 'turn-601-running', 'turn-left-behind')`:        0,
+		`SELECT COUNT(*) FROM durable_action WHERE run_key IN ('turn-601-ended', 'turn-601-running', 'turn-left-behind')`: 0,
+		`SELECT COUNT(*) FROM durable_signal`:                          0,
+		`SELECT COUNT(*) FROM durable_run WHERE key IN ` + kept:        5,
+		`SELECT COUNT(*) FROM durable_action WHERE run_key IN ` + kept: 5,
+	} {
+		if got := countRows(t, db, query); got != expect {
+			t.Errorf("after the apply %s = %d, want %d", query, got, expect)
+		}
+	}
+	if _, err := ErasePrincipal(t.Context(), db, "discord:602", true, ErasureOptions{}); err != nil {
+		t.Fatalf("erase the last principal: %v", err)
+	}
+	unattributable := `('workflow-601', 'schedule-job', 'turn-not-json', 'turn-no-session')`
+	for query, expect := range map[string]int{
+		`SELECT COUNT(*) FROM session`:                                           0,
+		`SELECT COUNT(*) FROM durable_run`:                                       4,
+		`SELECT COUNT(*) FROM durable_run WHERE key IN ` + unattributable:        4,
+		`SELECT COUNT(*) FROM durable_action WHERE run_key IN ` + unattributable: 4,
+	} {
+		if got := countRows(t, db, query); got != expect {
+			t.Errorf("with no session left %s = %d, want %d", query, got, expect)
+		}
 	}
 }
