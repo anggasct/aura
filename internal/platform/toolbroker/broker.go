@@ -443,6 +443,31 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if err != nil {
 		return ToolResult{}, err
 	}
+	return b.finalize(ctx, &canonical, &pendingResult{result: result, limit: b.outputLimit(decision.Constraints)})
+}
+
+type pendingResult struct {
+	result   ToolResult
+	limit    int64
+	recorded bool
+}
+
+func (b *Broker) outputLimit(constraints approval.Constraints) int64 {
+	limit := b.maxInlineResultBytes
+	if constraints.MaxOutputBytes > 0 && constraints.MaxOutputBytes < limit {
+		limit = constraints.MaxOutputBytes
+	}
+	return limit
+}
+
+func (b *Broker) finalize(ctx context.Context, canonical *ToolRequest, pending *pendingResult) (ToolResult, error) {
+	if canonical == nil {
+		return ToolResult{}, errorf(ResultInvalidArgument, "tool request must not be nil")
+	}
+	if pending == nil {
+		return ToolResult{}, errorf(ResultInvalidArgument, "pending result must not be nil")
+	}
+	result := pending.result
 	result.ToolName = canonical.ToolName
 	result.ToolVersion = canonical.ToolVersion
 	result.Untrusted = true
@@ -450,12 +475,16 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if result.Class == "" {
 		result.Class = ResultOK
 	}
-	maxOutputBytes := b.maxInlineResultBytes
-	if decision.Constraints.MaxOutputBytes > 0 && decision.Constraints.MaxOutputBytes < maxOutputBytes {
-		maxOutputBytes = decision.Constraints.MaxOutputBytes
+	maxOutputBytes := pending.limit
+	if pending.recorded {
+		recordLimit, err := recordOutputLimit(&result)
+		if err != nil {
+			return ToolResult{}, err
+		}
+		maxOutputBytes = min(maxOutputBytes, recordLimit)
 	}
 	if int64(len(result.Output)) > maxOutputBytes {
-		bounded, err := b.boundOutput(ctx, &canonical, result.Output, maxOutputBytes)
+		bounded, err := b.boundOutput(ctx, canonical, result.Output, maxOutputBytes)
 		if err != nil {
 			return ToolResult{}, err
 		}
@@ -546,9 +575,13 @@ type effectInvocation struct {
 	adapter     Adapter
 	request     *ToolRequest
 	constraints approval.Constraints
+	limit       int64
+	finalize    func(context.Context, *pendingResult) (ToolResult, error)
 	result      ToolResult
 	invoked     bool
 	notDone     error
+	failure     error
+	unrecorded  error
 }
 
 func (i *effectInvocation) SupportsIdempotency() bool { return false }
@@ -586,7 +619,29 @@ func (i *effectInvocation) Invoke(ctx context.Context, _ *effect.Invocation) (ef
 	if err != nil {
 		return effect.Outcome{}, err
 	}
-	return effect.Outcome{Succeeded: true, Receipt: receipt}, nil
+	return i.record(ctx, receipt, &result), nil
+}
+
+func (i *effectInvocation) record(ctx context.Context, receipt json.RawMessage, result *ToolResult) effect.Outcome {
+	unrecorded := effect.Outcome{Succeeded: true, Receipt: receipt, UnrecordedResult: true}
+	finalized, err := i.finalize(ctx, &pendingResult{result: *result, limit: i.limit, recorded: true})
+	if err != nil {
+		i.failure = err
+		return unrecorded
+	}
+	i.result = finalized
+	record, err := encodeRecord(&finalized)
+	if err != nil {
+		i.unrecorded = err
+		return unrecorded
+	}
+	decoded, err := decodeRecord(record)
+	if err != nil {
+		i.unrecorded = err
+		return unrecorded
+	}
+	i.result = decoded
+	return effect.Outcome{Succeeded: true, Receipt: receipt, Result: record}
 }
 
 func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constraints approval.Constraints, adapter Adapter) (ToolResult, error) {
@@ -598,7 +653,12 @@ func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constr
 	if err != nil {
 		return ToolResult{}, errorf(ResultInvalidArgument, "encode effect request: %v", err)
 	}
-	invocation := &effectInvocation{adapter: adapter, request: request, constraints: constraints}
+	invocation := &effectInvocation{
+		adapter: adapter, request: request, constraints: constraints, limit: b.outputLimit(constraints),
+		finalize: func(ctx context.Context, pending *pendingResult) (ToolResult, error) {
+			return b.finalize(ctx, request, pending)
+		},
+	}
 	intent, err := b.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID: request.SessionID, TurnID: request.TurnID, ToolCallID: request.RequestID,
 		IdempotencyKey: request.IdempotencyKey, Provider: "builtin-tools", Operation: request.ToolName,
@@ -607,6 +667,9 @@ func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constr
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
 	}, invocation)
 	if err != nil {
+		if code, ok := effect.CodeOf(err); ok && code == effect.ErrorCodeIdempotencyConflict {
+			return ToolResult{}, errorf(ResultInvalidArgument, "tool %q was called again under its idempotency key with a different request", request.ToolName)
+		}
 		return ToolResult{}, err
 	}
 	if invocation.notDone != nil && intent.State == effect.StateFailed {
@@ -616,7 +679,10 @@ func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constr
 		return ToolResult{}, errorf(ResultExecutionFailed, "effectful tool settled as %s", intent.State)
 	}
 	if !invocation.invoked {
-		return ToolResult{}, errorf(ResultExecutionFailed, "effectful tool result is unavailable for a replayed request")
+		return b.replayRecorded(ctx, request, intent)
+	}
+	if invocation.failure != nil {
+		return ToolResult{}, invocation.failure
 	}
 	return invocation.result, nil
 }
