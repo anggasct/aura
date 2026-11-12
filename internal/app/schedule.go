@@ -444,10 +444,16 @@ func registerScheduleHandler(target any, runner *schedule.Runner) error {
 	return nil
 }
 
-func resumeScheduleRuns(ctx context.Context, rt durable.Runtime, db *sql.DB) (int, error) {
-	return schedule.StartRuns(ctx, &schedule.RunsRequest{
+func scheduleRunsRequest(rt durable.Runtime, db *sql.DB) *schedule.RunsRequest {
+	return &schedule.RunsRequest{
 		Starter: rt, Store: &scheduleStore{store: store.NewScheduleStore(db)}, Now: time.Now().UTC(),
-	})
+	}
+}
+
+func resumeScheduleRuns(ctx context.Context, rt durable.Runtime, db *sql.DB) (int, error) {
+	req := scheduleRunsRequest(rt, db)
+	req.Reuse = durable.ReuseEnded
+	return schedule.StartRuns(ctx, req)
 }
 
 const schedulePassInterval = 5 * time.Minute
@@ -467,7 +473,7 @@ func (p *schedulePass) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, err := resumeScheduleRuns(ctx, p.runtime, p.db); err != nil && ctx.Err() == nil {
+			if _, err := schedule.StartRuns(ctx, scheduleRunsRequest(p.runtime, p.db)); err != nil && ctx.Err() == nil {
 				p.logger.WarnContext(ctx, "schedule pass failed", "component", "schedule", "error", err)
 			}
 		}

@@ -13,20 +13,34 @@ type ResumeStore interface {
 	ListActive(ctx context.Context, limit int) ([]FullItem, error)
 }
 
+type itemRun struct {
+	runtime durable.Runtime
+	reuse   durable.ReusePolicy
+}
+
 func StartItemRun(ctx context.Context, runtime durable.Runtime, itemID string) error {
+	return itemRun{runtime: runtime}.start(ctx, itemID)
+}
+
+func ResumeItemRun(ctx context.Context, runtime durable.Runtime, itemID string) error {
+	return itemRun{runtime: runtime, reuse: durable.ReuseEnded}.start(ctx, itemID)
+}
+
+func (r itemRun) start(ctx context.Context, itemID string) error {
 	if ctx == nil {
 		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
 	}
-	if runtime == nil {
+	if r.runtime == nil {
 		return Errorf(ErrorCodeInvalidArgument, "durable runtime must not be nil")
 	}
 	if strings.TrimSpace(itemID) == "" {
 		return Errorf(ErrorCodeInvalidArgument, "broadcast item id must not be empty")
 	}
-	_, err := runtime.Start(ctx, durable.StartRequest{
+	_, err := r.runtime.Start(ctx, durable.StartRequest{
 		Handler: HandlerName,
 		Key:     itemID,
 		Payload: []byte(itemID),
+		Reuse:   r.reuse,
 	})
 	return err
 }
@@ -46,7 +60,7 @@ func ResumeActive(ctx context.Context, runtime durable.Runtime, items ResumeStor
 		return 0, err
 	}
 	for i := range active {
-		if err := StartItemRun(ctx, runtime, active[i].ID); err != nil {
+		if err := ResumeItemRun(ctx, runtime, active[i].ID); err != nil {
 			return 0, err
 		}
 	}

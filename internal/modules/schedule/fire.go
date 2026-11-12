@@ -56,6 +56,7 @@ type FireRequest struct {
 	Chain      bool
 	Expression string
 	Timezone   string
+	Reuse      durable.ReusePolicy
 }
 
 func StartFire(ctx context.Context, req *FireRequest) error {
@@ -73,7 +74,7 @@ func StartFire(ctx context.Context, req *FireRequest) error {
 	if err != nil {
 		return err
 	}
-	_, err = req.Starter.Start(ctx, durable.StartRequest{Handler: HandlerName, Key: fireKey(fire.JobID, fire.Instant), Payload: payload})
+	_, err = req.Starter.Start(ctx, durable.StartRequest{Handler: HandlerName, Key: fireKey(fire.JobID, fire.Instant), Payload: payload, Reuse: req.Reuse})
 	return err
 }
 

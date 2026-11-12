@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"iter"
 	"log/slog"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
@@ -453,4 +455,107 @@ func TestSchedulePassPicksUpAManualOccurrence(t *testing.T) {
 	if err := task.Stop(t.Context()); err != nil {
 		t.Errorf("stop the pass: %v", err)
 	}
+}
+
+type countedStarts struct {
+	durable.Runtime
+	mu     sync.Mutex
+	starts int
+}
+
+func (c *countedStarts) Start(ctx context.Context, req durable.StartRequest) (durable.RunRef, error) {
+	c.mu.Lock()
+	c.starts++
+	c.mu.Unlock()
+	return c.Runtime.Start(ctx, req)
+}
+
+func (c *countedStarts) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.starts
+}
+
+type failingScheduleHandler struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (h *failingScheduleHandler) handle(context.Context, durable.Invocation) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls++
+	return errors.New("turn transport failed")
+}
+
+func (h *failingScheduleHandler) invocations() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.calls
+}
+
+func hostScheduleHandler(t *testing.T, db *sql.DB, handler durable.Handler) *sqlite.Runtime {
+	t.Helper()
+	rt, err := sqlite.New(&sqlite.Options{DB: db, Logger: slog.New(slog.DiscardHandler), PollInterval: 5 * time.Millisecond, HostTTL: time.Second, StopGrace: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	rt.RegisterHandler(schedule.HandlerName, handler)
+	ctx, stop := context.WithCancel(context.WithoutCancel(t.Context()))
+	hosted := make(chan error, 1)
+	go func() { hosted <- rt.Run(ctx) }()
+	t.Cleanup(func() {
+		stop()
+		select {
+		case err := <-hosted:
+			if err != nil {
+				t.Errorf("durable host: %v", err)
+			}
+		case <-time.After(scheduleWaitDeadline):
+			t.Error("the durable host did not stop")
+		}
+	})
+	return rt
+}
+
+func runState(t *testing.T, rt durable.Runtime, key string) durable.RunState {
+	t.Helper()
+	status, err := rt.Status(t.Context(), durable.RunRef{Key: key})
+	if err != nil {
+		return ""
+	}
+	return status.State
+}
+
+func TestScheduleRunsAreRestartedAtBootOnly(t *testing.T) {
+	db := cronTestDB(t)
+	manual := time.Now().UTC().Add(-time.Hour).Truncate(time.Second).Add(7 * time.Nanosecond)
+	seedScheduleJobs(t, db, []scheduleSeed{{id: "job-1", state: store.ScheduleJobActive, fired: manual}})
+	handler := &failingScheduleHandler{}
+	rt := hostScheduleHandler(t, db, handler.handle)
+	key := scheduleRunKey("job-1", manual)
+	starts := &countedStarts{Runtime: rt}
+	pass := &schedulePass{runtime: starts, db: db, logger: slog.New(slog.DiscardHandler), interval: 10 * time.Millisecond}
+	task := server.Background("schedule_pass", pass.run)
+	if err := task.Start(t.Context()); err != nil {
+		t.Fatalf("start the pass: %v", err)
+	}
+	awaitSchedule(t, "the run the pass started fails", func() bool { return runState(t, rt, key) == durable.RunFailed })
+	ended := starts.count()
+	awaitSchedule(t, "ten more passes start the ended run", func() bool { return starts.count() >= ended+10 })
+	if err := task.Stop(t.Context()); err != nil {
+		t.Errorf("stop the pass: %v", err)
+	}
+	if calls := handler.invocations(); calls != 1 {
+		t.Errorf("handler invocations after the passes = %d, want 1", calls)
+	}
+	if state := runState(t, rt, key); state != durable.RunFailed {
+		t.Errorf("run after the passes = %s, want %s", state, durable.RunFailed)
+	}
+
+	if _, err := resumeScheduleRuns(t.Context(), rt, db); err != nil {
+		t.Fatalf("resumeScheduleRuns(): %v", err)
+	}
+	awaitSchedule(t, "the boot call invokes the handler again", func() bool { return handler.invocations() == 2 })
+	awaitSchedule(t, "the restarted run fails", func() bool { return runState(t, rt, key) == durable.RunFailed })
 }
