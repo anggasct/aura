@@ -19,24 +19,42 @@ type Part struct {
 	Image json.RawMessage `json:"image,omitempty"`
 }
 
+type UntrustedDocument struct {
+	ID           string `json:"id"`
+	SessionID    string `json:"session_id"`
+	FromSequence uint64 `json:"from_sequence"`
+	ToSequence   uint64 `json:"to_sequence"`
+	Trust        string `json:"trust"`
+	Content      string `json:"content"`
+}
+
+type UntrustedContext struct {
+	Query     string              `json:"query"`
+	Summary   string              `json:"summary"`
+	Trust     string              `json:"trust"`
+	Documents []UntrustedDocument `json:"documents,omitempty"`
+}
+
 type Descriptor struct {
-	TurnID         string                   `json:"turn_id"`
-	SessionID      string                   `json:"session_id"`
-	PrincipalID    string                   `json:"principal_id"`
-	PrincipalClass string                   `json:"principal_class,omitempty"`
-	Origin         string                   `json:"origin"`
-	Parts          []Part                   `json:"parts"`
-	ReplyContext   json.RawMessage          `json:"reply_context,omitempty"`
-	IdempotencyKey string                   `json:"idempotency_key"`
-	Deadline       time.Time                `json:"deadline,omitempty"`
-	MaxTokens      int64                    `json:"max_tokens"`
-	MaxCost        float64                  `json:"max_cost"`
-	TraceParent    string                   `json:"trace_parent"`
-	AgentID        string                   `json:"agent_id"`
-	Persona        *turn.PersonaFingerprint `json:"persona_fingerprint,omitempty"`
-	Skill          *turn.SkillPin           `json:"skill,omitempty"`
-	StreamPartial  bool                     `json:"stream_partial,omitempty"`
-	Knowledge      []string                 `json:"knowledge,omitempty"`
+	TurnID           string                   `json:"turn_id"`
+	SessionID        string                   `json:"session_id"`
+	PrincipalID      string                   `json:"principal_id"`
+	PrincipalClass   string                   `json:"principal_class,omitempty"`
+	Origin           string                   `json:"origin"`
+	Parts            []Part                   `json:"parts"`
+	ReplyContext     json.RawMessage          `json:"reply_context,omitempty"`
+	UntrustedContext *UntrustedContext        `json:"untrusted_context,omitempty"`
+	RequireRecall    bool                     `json:"require_recall,omitempty"`
+	IdempotencyKey   string                   `json:"idempotency_key"`
+	Deadline         time.Time                `json:"deadline,omitempty"`
+	MaxTokens        int64                    `json:"max_tokens"`
+	MaxCost          float64                  `json:"max_cost"`
+	TraceParent      string                   `json:"trace_parent"`
+	AgentID          string                   `json:"agent_id"`
+	Persona          *turn.PersonaFingerprint `json:"persona_fingerprint,omitempty"`
+	Skill            *turn.SkillPin           `json:"skill,omitempty"`
+	StreamPartial    bool                     `json:"stream_partial,omitempty"`
+	Knowledge        []string                 `json:"knowledge,omitempty"`
 }
 
 type QueuedTurn struct {
