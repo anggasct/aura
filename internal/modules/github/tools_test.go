@@ -103,7 +103,7 @@ func TestCreatePRReturnsCorrelationIdentity(t *testing.T) {
 	server := stubGitHubAPI(t)
 	adapter := CreatePRAdapter(toolOptions(server))
 	result, err := adapter(context.Background(), toolRequest(t,
-		`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential":"ci"}`),
+		`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential_name":"ci"}`),
 		approval.Constraints{})
 	if err != nil {
 		t.Fatalf("CreatePR: %v", err)
@@ -128,7 +128,7 @@ func TestMergeAndCommentRoundTrip(t *testing.T) {
 	server := stubGitHubAPI(t)
 	options := toolOptions(server)
 	merged, err := MergeAdapter(options)(context.Background(), toolRequest(t,
-		`{"repo":"org/repo","number":42,"merge_method":"squash","credential":"ci"}`),
+		`{"repo":"org/repo","number":42,"merge_method":"squash","credential_name":"ci"}`),
 		approval.Constraints{})
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -137,7 +137,7 @@ func TestMergeAndCommentRoundTrip(t *testing.T) {
 		t.Errorf("merge output = %s, want merged true", merged.Output)
 	}
 	commented, err := CommentAdapter(options)(context.Background(), toolRequest(t,
-		`{"repo":"org/repo","number":7,"body":"looks good","credential":"ci"}`),
+		`{"repo":"org/repo","number":7,"body":"looks good","credential_name":"ci"}`),
 		approval.Constraints{})
 	if err != nil {
 		t.Fatalf("Comment: %v", err)
@@ -156,13 +156,13 @@ func TestToolsRejectBadInput(t *testing.T) {
 		adapter toolbroker.Adapter
 		args    string
 	}{
-		{"create bad repo", CreatePRAdapter(options), `{"repo":"nonsense","title":"t","head":"h","base":"b","credential":"ci"}`},
-		{"create missing title", CreatePRAdapter(options), `{"repo":"org/repo","head":"h","base":"b","credential":"ci"}`},
-		{"create bad credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"token"}`},
-		{"create missing credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"absent"}`},
-		{"merge bad method", MergeAdapter(options), `{"repo":"org/repo","number":42,"merge_method":"fast-forward","credential":"ci"}`},
-		{"merge zero number", MergeAdapter(options), `{"repo":"org/repo","number":0,"credential":"ci"}`},
-		{"comment empty body", CommentAdapter(options), `{"repo":"org/repo","number":7,"body":"","credential":"ci"}`},
+		{"create bad repo", CreatePRAdapter(options), `{"repo":"nonsense","title":"t","head":"h","base":"b","credential_name":"ci"}`},
+		{"create missing title", CreatePRAdapter(options), `{"repo":"org/repo","head":"h","base":"b","credential_name":"ci"}`},
+		{"create bad credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"token"}`},
+		{"create missing credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"absent"}`},
+		{"merge bad method", MergeAdapter(options), `{"repo":"org/repo","number":42,"merge_method":"fast-forward","credential_name":"ci"}`},
+		{"merge zero number", MergeAdapter(options), `{"repo":"org/repo","number":0,"credential_name":"ci"}`},
+		{"comment empty body", CommentAdapter(options), `{"repo":"org/repo","number":7,"body":"","credential_name":"ci"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestToolsSurfaceAuthFailure(t *testing.T) {
 	t.Setenv("GITHUB_TEST_TOKEN", "wrong-token")
 	server := stubGitHubAPI(t)
 	_, err := CreatePRAdapter(toolOptions(server))(context.Background(), toolRequest(t,
-		`{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"ci"}`),
+		`{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"ci"}`),
 		approval.Constraints{})
 	if err == nil || !strings.Contains(err.Error(), "credential") {
 		t.Errorf("err = %v, want credential rejection without the secret", err)
@@ -208,12 +208,12 @@ func TestDefinitionsCarryBrokerContract(t *testing.T) {
 		if err := json.Unmarshal(definition.Schema, &schema); err != nil {
 			t.Fatalf("%s schema is not JSON: %v", definition.Name, err)
 		}
-		if !slices.Contains(schema.Required, "credential") {
+		if !slices.Contains(schema.Required, "credential_name") {
 			t.Errorf("%s required = %v, want the credential argument", definition.Name, schema.Required)
 		}
 		for key := range schema.Properties {
-			if strings.HasPrefix(key, "credential") && key != "credential" {
-				t.Errorf("%s schema has the property %q, want only credential", definition.Name, key)
+			if strings.HasPrefix(key, "credential") && key != "credential_name" {
+				t.Errorf("%s schema has the property %q, want only credential_name", definition.Name, key)
 			}
 		}
 	}
@@ -245,9 +245,9 @@ func TestAdaptersRefuseACredentialThatIsNotConfigured(t *testing.T) {
 		build func(*ToolOptions) toolbroker.Adapter
 		args  string
 	}{
-		{"create_pr", CreatePRAdapter, `{"repo":"org/repo","title":"t","head":"h","base":"b","credential":%s}`},
-		{"merge", MergeAdapter, `{"repo":"org/repo","number":42,"credential":%s}`},
-		{"comment", CommentAdapter, `{"repo":"org/repo","number":7,"body":"hi","credential":%s}`},
+		{"create_pr", CreatePRAdapter, `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":%s}`},
+		{"merge", MergeAdapter, `{"repo":"org/repo","number":42,"credential_name":%s}`},
+		{"comment", CommentAdapter, `{"repo":"org/repo","number":7,"body":"hi","credential_name":%s}`},
 	}
 	configured := func() []Credential { return []Credential{{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"}} }
 	call := func(adapter toolbroker.Adapter, template, credential string) error {

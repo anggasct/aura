@@ -64,7 +64,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 
 func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 	comment := func(credential string) json.RawMessage {
-		return json.RawMessage(`{"repo":"org/repo","number":7,"body":"hi","credential":"` + credential + `"}`)
+		return json.RawMessage(`{"repo":"org/repo","number":7,"body":"hi","credential_name":"` + credential + `"}`)
 	}
 	runner, _, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *config.Config) {
 		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}

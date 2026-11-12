@@ -71,8 +71,8 @@ func maxResponseOrDefault(limit int64) int64 {
 }
 
 type commonArguments struct {
-	Repo       string `json:"repo"`
-	Credential string `json:"credential"`
+	Repo           string `json:"repo"`
+	CredentialName string `json:"credential_name"`
 }
 
 type client struct {
@@ -233,7 +233,7 @@ func CreatePRAdapter(options *ToolOptions) toolbroker.Adapter {
 		if strings.TrimSpace(args.Title) == "" || strings.TrimSpace(args.Head) == "" || strings.TrimSpace(args.Base) == "" {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "title, head, and base are required")
 		}
-		token, err := resolveToken(args.Credential, cli.credentials)
+		token, err := resolveToken(args.CredentialName, cli.credentials)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -298,7 +298,7 @@ func MergeAdapter(options *ToolOptions) toolbroker.Adapter {
 		if method != "merge" && method != "squash" && method != "rebase" {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "merge_method must be merge, squash, or rebase")
 		}
-		token, err := resolveToken(args.Credential, cli.credentials)
+		token, err := resolveToken(args.CredentialName, cli.credentials)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -355,7 +355,7 @@ func CommentAdapter(options *ToolOptions) toolbroker.Adapter {
 		if strings.TrimSpace(args.Body) == "" || len(args.Body) > 65536 {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "body must be non-empty within 64 KiB")
 		}
-		token, err := resolveToken(args.Credential, cli.credentials)
+		token, err := resolveToken(args.CredentialName, cli.credentials)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -400,11 +400,11 @@ func intFloor(limit int) *int {
 
 func fieldSchema(requiredStrings, optionalStrings, requiredNumbers []string) json.RawMessage {
 	properties := map[string]fieldType{
-		"repo":       {Type: "string"},
-		"credential": {Type: "string"},
+		"repo":            {Type: "string"},
+		"credential_name": {Type: "string"},
 	}
 	required := make([]string, 0, 2+len(requiredStrings)+len(requiredNumbers))
-	required = append(required, "repo", "credential")
+	required = append(required, "repo", "credential_name")
 	for _, field := range requiredStrings {
 		if _, ok := properties[field]; !ok {
 			properties[field] = fieldType{Type: "string"}
@@ -436,7 +436,7 @@ func fieldValidator(requiredStrings, optionalStrings, requiredNumbers []string) 
 		if err := json.Unmarshal(raw, &document); err != nil {
 			return nil, errors.New("arguments must be a JSON object")
 		}
-		allowed := map[string]bool{"repo": true, "credential": true}
+		allowed := map[string]bool{"repo": true, "credential_name": true}
 		for _, field := range requiredStrings {
 			allowed[field] = true
 		}
@@ -451,7 +451,7 @@ func fieldValidator(requiredStrings, optionalStrings, requiredNumbers []string) 
 				return nil, fmt.Errorf("unknown argument %q", field)
 			}
 		}
-		for _, field := range append([]string{"repo", "credential"}, requiredStrings...) {
+		for _, field := range append([]string{"repo", "credential_name"}, requiredStrings...) {
 			var value string
 			if err := json.Unmarshal(document[field], &value); err != nil || strings.TrimSpace(value) == "" {
 				return nil, fmt.Errorf("argument %q must be a non-empty string", field)
@@ -542,7 +542,7 @@ func credentialValidator(inner func(json.RawMessage) (json.RawMessage, error), c
 			return nil, err
 		}
 		var args commonArguments
-		if err := json.Unmarshal(validated, &args); err != nil || credentialIndex(credentials, args.Credential) < 0 {
+		if err := json.Unmarshal(validated, &args); err != nil || credentialIndex(credentials, args.CredentialName) < 0 {
 			return nil, errors.New(aliasNotConfigured)
 		}
 		return validated, nil

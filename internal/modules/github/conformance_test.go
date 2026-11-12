@@ -63,7 +63,7 @@ func TestBrokerConformance(t *testing.T) {
 	request := &toolbroker.ToolRequest{
 		RequestID: "request-1", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: ToolCreatePR, ToolVersion: ToolVersion,
-		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential":"ci"}`),
+		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential_name":"ci"}`),
 		Trust:          approval.TrustTrustedConfiguration,
 		IdempotencyKey: "idempotency-1",
 		EventSequence:  1,
@@ -111,7 +111,7 @@ func TestBrokerDeniesARequestClaimingACapabilityTheHostLacks(t *testing.T) {
 	request := &toolbroker.ToolRequest{
 		RequestID: "request-2", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: ToolCreatePR, ToolVersion: ToolVersion,
-		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"ci"}`),
+		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"ci"}`),
 		Capabilities:   []string{"repository.write"},
 		Trust:          approval.TrustTrustedConfiguration,
 		IdempotencyKey: "idempotency-2",
@@ -129,9 +129,9 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 		byName[definition.Name] = true
 	}
 	expectedRequired := map[string]map[string]bool{
-		ToolCreatePR: {"repo": true, "credential": true, "title": true, "head": true, "base": true},
-		ToolMerge:    {"repo": true, "credential": true, "number": true},
-		ToolComment:  {"repo": true, "credential": true, "number": true, "body": true},
+		ToolCreatePR: {"repo": true, "credential_name": true, "title": true, "head": true, "base": true},
+		ToolMerge:    {"repo": true, "credential_name": true, "number": true},
+		ToolComment:  {"repo": true, "credential_name": true, "number": true, "body": true},
 	}
 	for _, definition := range definitions {
 		var schema struct {
@@ -181,9 +181,9 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 		}
 	}
 	minimal := map[string]string{
-		ToolCreatePR: `{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"ci"}`,
-		ToolMerge:    `{"repo":"org/repo","number":42,"credential":"ci"}`,
-		ToolComment:  `{"repo":"org/repo","number":7,"body":"hi","credential":"ci"}`,
+		ToolCreatePR: `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"ci"}`,
+		ToolMerge:    `{"repo":"org/repo","number":42,"credential_name":"ci"}`,
+		ToolComment:  `{"repo":"org/repo","number":7,"body":"hi","credential_name":"ci"}`,
 	}
 	for _, definition := range definitions {
 		raw, err := definition.Validate(json.RawMessage(minimal[definition.Name]))
@@ -211,8 +211,8 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 		}
 	}
 	wrongNumerics := map[string]string{
-		ToolMerge:   `{"repo":"org/repo","number":"42","credential":"ci"}`,
-		ToolComment: `{"repo":"org/repo","number":"7","body":"hi","credential":"ci"}`,
+		ToolMerge:   `{"repo":"org/repo","number":"42","credential_name":"ci"}`,
+		ToolComment: `{"repo":"org/repo","number":"7","body":"hi","credential_name":"ci"}`,
 	}
 	for _, definition := range definitions {
 		raw, ok := wrongNumerics[definition.Name]
@@ -265,7 +265,7 @@ func TestRegisteredToolsRefuseAnUnconfiguredCredentialBeforeApproval(t *testing.
 		_, err := broker.Execute(context.Background(), &toolbroker.ToolRequest{
 			RequestID: "request-" + key, TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 			ToolName: ToolCreatePR, ToolVersion: ToolVersion,
-			Arguments:      json.RawMessage(`{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"` + credential + `"}`),
+			Arguments:      json.RawMessage(`{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"` + credential + `"}`),
 			Trust:          approval.TrustTrustedConfiguration,
 			IdempotencyKey: key,
 			EventSequence:  sequence,
