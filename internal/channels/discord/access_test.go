@@ -394,8 +394,8 @@ func TestOwnerDMChannelIsOpenedOnce(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassTrusted)
 	for range 2 {
-		result := decideAsync(t.Context(), adapter, trustedPrompt(time.Now().Add(time.Minute)))
 		posts := len(stub.postsTo("555"))
+		result := decideAsync(t.Context(), adapter, trustedPrompt(time.Now().Add(time.Minute)))
 		_, ids := cardButtons(t, stub.waitPostTo(t, "555", posts+1)[posts])
 		adapter.resolveComponentClick(t.Context(), clickPayload("ix-approve-"+ids[0], "777", "", "555", ids[0]))
 		awaitDecide(t, result, 5*time.Second)
