@@ -237,6 +237,19 @@ func seedDurableRun(t *testing.T, db *sql.DB, run durableRunFixture) {
 	}
 }
 
+type turnEventFixture struct {
+	session, turn, kind string
+}
+
+func seedTurnEvent(t *testing.T, db *sql.DB, event turnEventFixture) {
+	t.Helper()
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO runtime_event (id, session_id, sequence, turn_id, invocation_id, author, kind, schema_version, payload_json, created_at)
+		VALUES (?1 || '-' || ?3, ?2, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM runtime_event WHERE session_id = ?2), ?1, '', 'discord:601', ?3, 1, '{}', '2026-11-12T09:00:00Z')`,
+		event.turn, event.session, event.kind); err != nil {
+		t.Fatalf("seed %s of %s: %v", event.kind, event.turn, err)
+	}
+}
+
 func TestErasePrincipalDeletesTheTurnRunsOfItsSessions(t *testing.T) {
 	const (
 		dmSession      = "lobby/discord:owner/dm:601"
@@ -259,6 +272,7 @@ func TestErasePrincipalDeletesTheTurnRunsOfItsSessions(t *testing.T) {
 	} {
 		seedDurableRun(t, db, run)
 	}
+	seedTurnEvent(t, db, turnEventFixture{session: otherSession, turn: "turn-602", kind: "turn.accepted"})
 	if _, err := db.ExecContext(t.Context(), `INSERT INTO durable_signal (run_key, name, seq, payload, created_at) VALUES ('turn-601-ended', 'approval', 0, ?, '2026-11-12T09:00:00Z')`, []byte(`{}`)); err != nil {
 		t.Fatalf("seed signal: %v", err)
 	}
@@ -306,5 +320,57 @@ func TestErasePrincipalDeletesTheTurnRunsOfItsSessions(t *testing.T) {
 		if got := countRows(t, db, query); got != expect {
 			t.Errorf("with no session left %s = %d, want %d", query, got, expect)
 		}
+	}
+}
+
+func TestDeleteOrphanedTurnRuns(t *testing.T) {
+	const (
+		liveSession     = "lobby/discord:owner/dm:601"
+		returnedSession = "lobby/discord:owner/dm:600"
+		goneSession     = "lobby/discord:owner/dm:599"
+	)
+	db := newTestDB(t)
+	seedPersonaSession(t, db, liveSession, "discord:601", "lobby")
+	seedPersonaSession(t, db, returnedSession, "discord:600", "lobby")
+	for _, run := range []durableRunFixture{
+		{key: "turn-gone-running", handler: "turn", payload: `{"turn_id":"turn-gone-running","session_id":"` + goneSession + `"}`, state: "running", actions: 2},
+		{key: "turn-returned-running", handler: "turn", payload: `{"turn_id":"turn-returned-running","session_id":"` + returnedSession + `"}`, state: "running", actions: 1},
+		{key: "turn-returned-failed", handler: "turn", payload: `{"turn_id":"turn-returned-failed","session_id":"` + returnedSession + `"}`, state: "failed", actions: 1},
+		{key: "turn-live", handler: "turn", payload: `{"turn_id":"turn-live","session_id":"` + liveSession + `"}`, state: "succeeded", actions: 1},
+		{key: "workflow-gone", handler: "workflow", payload: `{"session_id":"` + goneSession + `"}`, state: "succeeded", actions: 1},
+		{key: "turn-not-json", handler: "turn", payload: `not json`, state: "failed", actions: 1},
+		{key: "turn-no-session", handler: "turn", payload: `{"turn_id":"turn-no-session"}`, state: "failed", actions: 1},
+	} {
+		seedDurableRun(t, db, run)
+	}
+	for _, event := range []turnEventFixture{
+		{session: liveSession, turn: "turn-live", kind: "turn.accepted"},
+		{session: liveSession, turn: "turn-returned-running", kind: "turn.accepted"},
+		{session: returnedSession, turn: "turn-returned-failed", kind: "turn.cancelled"},
+	} {
+		seedTurnEvent(t, db, event)
+	}
+	deleted, err := DeleteOrphanedTurnRuns(t.Context(), db)
+	if err != nil || deleted != 3 {
+		t.Fatalf("DeleteOrphanedTurnRuns = %d, %v; want 3", deleted, err)
+	}
+	orphans := `('turn-gone-running', 'turn-returned-running', 'turn-returned-failed')`
+	kept := `('turn-live', 'workflow-gone', 'turn-not-json', 'turn-no-session')`
+	for query, expect := range map[string]int{
+		`SELECT COUNT(*) FROM durable_run WHERE key IN ` + orphans:        0,
+		`SELECT COUNT(*) FROM durable_action WHERE run_key IN ` + orphans: 0,
+		`SELECT COUNT(*) FROM durable_run WHERE key IN ` + kept:           4,
+		`SELECT COUNT(*) FROM durable_action WHERE run_key IN ` + kept:    4,
+		`SELECT COUNT(*) FROM durable_run`:                                4,
+	} {
+		if got := countRows(t, db, query); got != expect {
+			t.Errorf("%s = %d, want %d", query, got, expect)
+		}
+	}
+	if again, err := DeleteOrphanedTurnRuns(t.Context(), db); err != nil || again != 0 {
+		t.Errorf("second DeleteOrphanedTurnRuns = %d, %v; want 0", again, err)
+	}
+	if _, err := DeleteOrphanedTurnRuns(t.Context(), nil); !hasCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("DeleteOrphanedTurnRuns without a database = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 }

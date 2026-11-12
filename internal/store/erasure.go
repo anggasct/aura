@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -36,8 +37,15 @@ const (
 
 	turnRunSessionID = `CASE WHEN json_valid(CAST(durable_run.payload AS TEXT)) THEN json_extract(CAST(durable_run.payload AS TEXT), '$.session_id') END`
 
-	orphanedTurnRuns = `DELETE FROM durable_run WHERE handler = 'turn' AND ` + turnRunSessionID + ` IS NOT NULL
-		AND NOT EXISTS (SELECT 1 FROM session WHERE session.id = ` + turnRunSessionID + `)`
+	orphanedTurnRun = `durable_run.handler = 'turn' AND ` + turnRunSessionID + ` IS NOT NULL
+		AND NOT EXISTS (SELECT 1 FROM runtime_event WHERE runtime_event.session_id = ` + turnRunSessionID + `
+			AND runtime_event.turn_id = durable_run.key AND runtime_event.kind = 'turn.accepted')`
+
+	orphanedTurnRuns = `DELETE FROM durable_run WHERE ` + orphanedTurnRun
+
+	orphanedTurnRunKeys = `SELECT key FROM durable_run WHERE ` + orphanedTurnRun
+
+	orphanedTurnRunsByKey = `DELETE FROM durable_run WHERE key IN (SELECT value FROM json_each(?)) AND ` + orphanedTurnRun
 )
 
 type erasureTarget struct {
@@ -109,4 +117,47 @@ func ErasePrincipal(ctx context.Context, db *sql.DB, principalID string, apply b
 		counts.Blobs = report.DeletedBlobs
 	}
 	return counts, nil
+}
+
+func DeleteOrphanedTurnRuns(ctx context.Context, db *sql.DB) (int, error) {
+	if db == nil {
+		return 0, errNilArgument("db")
+	}
+	keys, err := readOrphanedTurnRunKeys(ctx, db)
+	if err != nil || len(keys) == 0 {
+		return 0, err
+	}
+	encoded, err := json.Marshal(keys)
+	if err != nil {
+		return 0, fmt.Errorf("encode orphaned turn run keys: %w", err)
+	}
+	result, err := db.ExecContext(ctx, orphanedTurnRunsByKey, string(encoded))
+	if err != nil {
+		return 0, classifyBusy(fmt.Errorf("delete orphaned turn runs: %w", err))
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, classifyBusy(fmt.Errorf("delete orphaned turn runs: %w", err))
+	}
+	return int(deleted), nil
+}
+
+func readOrphanedTurnRunKeys(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, orphanedTurnRunKeys)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("read orphaned turn runs: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scan orphaned turn run: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("read orphaned turn runs: %w", err))
+	}
+	return keys, nil
 }

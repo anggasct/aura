@@ -540,8 +540,10 @@ func (b *build) registerRunRetention() error {
 	if !ok {
 		return invalidOptions("the durable runtime cannot prune ended runs")
 	}
+	db := b.db
 	sweep := &runRetention{
 		pruner:    prune,
+		orphans:   func(ctx context.Context) (int, error) { return store.DeleteOrphanedTurnRuns(ctx, db) },
 		retention: time.Duration(b.cfg.Runtime.RunRetention),
 		batch:     runRetentionBatch,
 		interval:  runRetentionInterval,
