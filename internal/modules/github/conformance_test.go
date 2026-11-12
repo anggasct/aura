@@ -3,7 +3,10 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -43,7 +47,7 @@ func TestBrokerConformance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := Register(broker, ToolOptions{BaseURL: server.URL, HTTPClient: server.Client()}); err != nil {
+	if err := Register(broker, toolOptions(server)); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	names := map[string]bool{}
@@ -59,7 +63,7 @@ func TestBrokerConformance(t *testing.T) {
 	request := &toolbroker.ToolRequest{
 		RequestID: "request-1", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: ToolCreatePR, ToolVersion: ToolVersion,
-		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential_ref":"env://GITHUB_TEST_TOKEN"}`),
+		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential":"ci"}`),
 		Trust:          approval.TrustTrustedConfiguration,
 		IdempotencyKey: "idempotency-1",
 		EventSequence:  1,
@@ -101,13 +105,13 @@ func TestBrokerDeniesARequestClaimingACapabilityTheHostLacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := Register(broker, ToolOptions{}); err != nil {
+	if err := Register(broker, &ToolOptions{Credentials: testCredentials()}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	request := &toolbroker.ToolRequest{
 		RequestID: "request-2", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: ToolCreatePR, ToolVersion: ToolVersion,
-		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"t","head":"h","base":"b","credential_ref":"env://GITHUB_TEST_TOKEN"}`),
+		Arguments:      json.RawMessage(`{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"ci"}`),
 		Capabilities:   []string{"repository.write"},
 		Trust:          approval.TrustTrustedConfiguration,
 		IdempotencyKey: "idempotency-2",
@@ -125,9 +129,9 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 		byName[definition.Name] = true
 	}
 	expectedRequired := map[string]map[string]bool{
-		ToolCreatePR: {"repo": true, "credential_ref": true, "title": true, "head": true, "base": true},
-		ToolMerge:    {"repo": true, "credential_ref": true, "number": true},
-		ToolComment:  {"repo": true, "credential_ref": true, "number": true, "body": true},
+		ToolCreatePR: {"repo": true, "credential": true, "title": true, "head": true, "base": true},
+		ToolMerge:    {"repo": true, "credential": true, "number": true},
+		ToolComment:  {"repo": true, "credential": true, "number": true, "body": true},
 	}
 	for _, definition := range definitions {
 		var schema struct {
@@ -177,9 +181,9 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 		}
 	}
 	minimal := map[string]string{
-		ToolCreatePR: `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_ref":"env://GITHUB_TEST_TOKEN"}`,
-		ToolMerge:    `{"repo":"org/repo","number":42,"credential_ref":"env://GITHUB_TEST_TOKEN"}`,
-		ToolComment:  `{"repo":"org/repo","number":7,"body":"hi","credential_ref":"env://GITHUB_TEST_TOKEN"}`,
+		ToolCreatePR: `{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"ci"}`,
+		ToolMerge:    `{"repo":"org/repo","number":42,"credential":"ci"}`,
+		ToolComment:  `{"repo":"org/repo","number":7,"body":"hi","credential":"ci"}`,
 	}
 	for _, definition := range definitions {
 		raw, err := definition.Validate(json.RawMessage(minimal[definition.Name]))
@@ -207,8 +211,8 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 		}
 	}
 	wrongNumerics := map[string]string{
-		ToolMerge:   `{"repo":"org/repo","number":"42","credential_ref":"env://GITHUB_TEST_TOKEN"}`,
-		ToolComment: `{"repo":"org/repo","number":"7","body":"hi","credential_ref":"env://GITHUB_TEST_TOKEN"}`,
+		ToolMerge:   `{"repo":"org/repo","number":"42","credential":"ci"}`,
+		ToolComment: `{"repo":"org/repo","number":"7","body":"hi","credential":"ci"}`,
 	}
 	for _, definition := range definitions {
 		raw, ok := wrongNumerics[definition.Name]
@@ -218,5 +222,117 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 		if _, err := definition.Validate(json.RawMessage(raw)); err == nil {
 			t.Errorf("%s accepts string-typed number, want rejection per integer schema", definition.Name)
 		}
+	}
+}
+
+func journalSize(t *testing.T, executor *effect.Executor) int {
+	t.Helper()
+	total := 0
+	for _, state := range []effect.State{effect.StatePrepared, effect.StateStarted, effect.StateSucceeded, effect.StateUnknown, effect.StateFailed} {
+		intents, err := executor.Journal().ListByState(context.Background(), state, 0)
+		if err != nil {
+			t.Fatalf("list %s intents: %v", state, err)
+		}
+		total += len(intents)
+	}
+	return total
+}
+
+func TestRegisteredToolsRefuseAnUnconfiguredCredentialBeforeApproval(t *testing.T) {
+	t.Setenv("GITHUB_TEST_TOKEN", "test-token")
+	server, requests := stubGitHubAPICounting(t)
+	executor := brokerEffectExecutor(t)
+	var asked atomic.Int32
+	broker, err := toolbroker.New(&toolbroker.Options{
+		HostCapabilities: capabilitytest.Host(t),
+		Effects:          executor,
+		ApprovalDecider: func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
+			asked.Add(1)
+			return true, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	creds := []Credential{{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"}}
+	if err := Register(broker, &ToolOptions{BaseURL: server.URL, HTTPClient: server.Client(), Credentials: creds}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	var sequence uint64
+	execute := func(credential string) error {
+		sequence++
+		key := "idempotency-" + strconv.FormatUint(sequence, 10)
+		_, err := broker.Execute(context.Background(), &toolbroker.ToolRequest{
+			RequestID: "request-" + key, TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
+			ToolName: ToolCreatePR, ToolVersion: ToolVersion,
+			Arguments:      json.RawMessage(`{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"` + credential + `"}`),
+			Trust:          approval.TrustTrustedConfiguration,
+			IdempotencyKey: key,
+			EventSequence:  sequence,
+		})
+		return err
+	}
+	assertRefusedBeforeApproval := func(credential string, wantAsked, wantRequests int32) {
+		t.Helper()
+		err := execute(credential)
+		var coded *toolbroker.Error
+		if !errors.As(err, &coded) || coded.Class != toolbroker.ResultInvalidArgument || coded.Detail != "credential is not a configured github credential" {
+			t.Errorf("credential %q err = %v, want invalid_argument not a configured github credential", credential, err)
+		}
+		if asked.Load() != wantAsked || requests.Load() != wantRequests {
+			t.Errorf("credential %q asked = %d, requests = %d, want %d and %d", credential, asked.Load(), requests.Load(), wantAsked, wantRequests)
+		}
+	}
+	assertRefusedBeforeApproval("other", 0, 0)
+	if size := journalSize(t, executor); size != 0 {
+		t.Fatalf("journal holds %d intents after a refused credential, want none", size)
+	}
+	if err := execute("ci"); err != nil {
+		t.Fatalf("configured credential: %v", err)
+	}
+	if asked.Load() != 1 || requests.Load() != 1 {
+		t.Fatalf("asked = %d, requests = %d, want one each", asked.Load(), requests.Load())
+	}
+	creds[0].Name = "other"
+	if err := execute("ci"); err != nil {
+		t.Fatalf("credential after the caller renamed its slice: %v", err)
+	}
+	assertRefusedBeforeApproval("other", 2, 2)
+}
+
+type recordingRegistrar struct {
+	registered []string
+}
+
+func (r *recordingRegistrar) RegisterTool(definition *tools.Definition, _ toolbroker.Adapter, _ *approval.Rule) error {
+	r.registered = append(r.registered, definition.Name)
+	return nil
+}
+
+func TestRegisterRefusesMissingEmptyOrRepeatedCredentials(t *testing.T) {
+	cases := []struct {
+		name    string
+		options *ToolOptions
+	}{
+		{"nil options", nil},
+		{"nil list", &ToolOptions{}},
+		{"empty list", &ToolOptions{Credentials: []Credential{}}},
+		{"repeated name", &ToolOptions{Credentials: []Credential{{Name: "ci", Ref: "env://A"}, {Name: "ci", Ref: "env://B"}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			registrar := &recordingRegistrar{}
+			err := Register(registrar, tc.options)
+			var coded *toolbroker.Error
+			if !errors.As(err, &coded) || coded.Class != toolbroker.ResultInvalidArgument {
+				t.Fatalf("err = %v, want an invalid_argument error", err)
+			}
+			if len(registrar.registered) != 0 {
+				t.Errorf("registered = %v, want nothing", registrar.registered)
+			}
+			if tc.name == "repeated name" && (!strings.Contains(coded.Detail, `"ci"`) || strings.Contains(coded.Detail, "env://")) {
+				t.Errorf("detail = %q, want the name and no reference", coded.Detail)
+			}
+		})
 	}
 }

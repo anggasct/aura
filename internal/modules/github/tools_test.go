@@ -3,9 +3,15 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -14,6 +20,13 @@ import (
 
 func stubGitHubAPI(t *testing.T) *httptest.Server {
 	t.Helper()
+	server, _ := stubGitHubAPICounting(t)
+	return server
+}
+
+func stubGitHubAPICounting(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var requests atomic.Int32
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/org/repo/pulls", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -56,13 +69,23 @@ func stubGitHubAPI(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":99,"html_url":"https://github.com/org/repo/pull/42#issuecomment-99"}`))
 	})
-	server := httptest.NewTLSServer(mux)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(server.Close)
-	return server
+	return server, &requests
 }
 
-func toolOptions(server *httptest.Server) ToolOptions {
-	return ToolOptions{BaseURL: server.URL, HTTPClient: server.Client()}
+func testCredentials() []Credential {
+	return []Credential{
+		{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"},
+		{Name: "absent", Ref: "env://GITHUB_TEST_TOKEN_ABSENT"},
+	}
+}
+
+func toolOptions(server *httptest.Server) *ToolOptions {
+	return &ToolOptions{BaseURL: server.URL, HTTPClient: server.Client(), Credentials: testCredentials()}
 }
 
 func toolRequest(t *testing.T, args string) *toolbroker.ToolRequest {
@@ -80,7 +103,7 @@ func TestCreatePRReturnsCorrelationIdentity(t *testing.T) {
 	server := stubGitHubAPI(t)
 	adapter := CreatePRAdapter(toolOptions(server))
 	result, err := adapter(context.Background(), toolRequest(t,
-		`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential_ref":"env://GITHUB_TEST_TOKEN"}`),
+		`{"repo":"org/repo","title":"Add thing","head":"feature","base":"main","credential":"ci"}`),
 		approval.Constraints{})
 	if err != nil {
 		t.Fatalf("CreatePR: %v", err)
@@ -105,7 +128,7 @@ func TestMergeAndCommentRoundTrip(t *testing.T) {
 	server := stubGitHubAPI(t)
 	options := toolOptions(server)
 	merged, err := MergeAdapter(options)(context.Background(), toolRequest(t,
-		`{"repo":"org/repo","number":42,"merge_method":"squash","credential_ref":"env://GITHUB_TEST_TOKEN"}`),
+		`{"repo":"org/repo","number":42,"merge_method":"squash","credential":"ci"}`),
 		approval.Constraints{})
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -114,7 +137,7 @@ func TestMergeAndCommentRoundTrip(t *testing.T) {
 		t.Errorf("merge output = %s, want merged true", merged.Output)
 	}
 	commented, err := CommentAdapter(options)(context.Background(), toolRequest(t,
-		`{"repo":"org/repo","number":7,"body":"looks good","credential_ref":"env://GITHUB_TEST_TOKEN"}`),
+		`{"repo":"org/repo","number":7,"body":"looks good","credential":"ci"}`),
 		approval.Constraints{})
 	if err != nil {
 		t.Fatalf("Comment: %v", err)
@@ -133,13 +156,13 @@ func TestToolsRejectBadInput(t *testing.T) {
 		adapter toolbroker.Adapter
 		args    string
 	}{
-		{"create bad repo", CreatePRAdapter(options), `{"repo":"nonsense","title":"t","head":"h","base":"b","credential_ref":"env://GITHUB_TEST_TOKEN"}`},
-		{"create missing title", CreatePRAdapter(options), `{"repo":"org/repo","head":"h","base":"b","credential_ref":"env://GITHUB_TEST_TOKEN"}`},
-		{"create bad credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_ref":"token"}`},
-		{"create missing credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_ref":"env://GITHUB_TEST_TOKEN_ABSENT"}`},
-		{"merge bad method", MergeAdapter(options), `{"repo":"org/repo","number":42,"merge_method":"fast-forward","credential_ref":"env://GITHUB_TEST_TOKEN"}`},
-		{"merge zero number", MergeAdapter(options), `{"repo":"org/repo","number":0,"credential_ref":"env://GITHUB_TEST_TOKEN"}`},
-		{"comment empty body", CommentAdapter(options), `{"repo":"org/repo","number":7,"body":"","credential_ref":"env://GITHUB_TEST_TOKEN"}`},
+		{"create bad repo", CreatePRAdapter(options), `{"repo":"nonsense","title":"t","head":"h","base":"b","credential":"ci"}`},
+		{"create missing title", CreatePRAdapter(options), `{"repo":"org/repo","head":"h","base":"b","credential":"ci"}`},
+		{"create bad credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"token"}`},
+		{"create missing credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"absent"}`},
+		{"merge bad method", MergeAdapter(options), `{"repo":"org/repo","number":42,"merge_method":"fast-forward","credential":"ci"}`},
+		{"merge zero number", MergeAdapter(options), `{"repo":"org/repo","number":0,"credential":"ci"}`},
+		{"comment empty body", CommentAdapter(options), `{"repo":"org/repo","number":7,"body":"","credential":"ci"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,7 +177,7 @@ func TestToolsSurfaceAuthFailure(t *testing.T) {
 	t.Setenv("GITHUB_TEST_TOKEN", "wrong-token")
 	server := stubGitHubAPI(t)
 	_, err := CreatePRAdapter(toolOptions(server))(context.Background(), toolRequest(t,
-		`{"repo":"org/repo","title":"t","head":"h","base":"b","credential_ref":"env://GITHUB_TEST_TOKEN"}`),
+		`{"repo":"org/repo","title":"t","head":"h","base":"b","credential":"ci"}`),
 		approval.Constraints{})
 	if err == nil || !strings.Contains(err.Error(), "credential") {
 		t.Errorf("err = %v, want credential rejection without the secret", err)
@@ -178,6 +201,21 @@ func TestDefinitionsCarryBrokerContract(t *testing.T) {
 		if len(definition.RequiredCapabilities) != 0 {
 			t.Errorf("%s requires capabilities %v that no host can provide", definition.Name, definition.RequiredCapabilities)
 		}
+		var schema struct {
+			Required   []string                   `json:"required"`
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(definition.Schema, &schema); err != nil {
+			t.Fatalf("%s schema is not JSON: %v", definition.Name, err)
+		}
+		if !slices.Contains(schema.Required, "credential") {
+			t.Errorf("%s required = %v, want the credential argument", definition.Name, schema.Required)
+		}
+		for key := range schema.Properties {
+			if strings.HasPrefix(key, "credential") && key != "credential" {
+				t.Errorf("%s schema has the property %q, want only credential", definition.Name, key)
+			}
+		}
 	}
 	for _, name := range []string{ToolCreatePR, ToolMerge, ToolComment} {
 		if !seen[name] {
@@ -192,5 +230,71 @@ func TestDefinitionsCarryBrokerContract(t *testing.T) {
 		if !rule.RequiresApproval {
 			t.Errorf("rule %s must require approval", rule.ToolName)
 		}
+	}
+}
+
+func TestAdaptersRefuseACredentialThatIsNotConfigured(t *testing.T) {
+	t.Setenv("GITHUB_TEST_TOKEN", "test-token")
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("test-token\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	server, requests := stubGitHubAPICounting(t)
+	cases := []struct {
+		name  string
+		build func(*ToolOptions) toolbroker.Adapter
+		args  string
+	}{
+		{"create_pr", CreatePRAdapter, `{"repo":"org/repo","title":"t","head":"h","base":"b","credential":%s}`},
+		{"merge", MergeAdapter, `{"repo":"org/repo","number":42,"credential":%s}`},
+		{"comment", CommentAdapter, `{"repo":"org/repo","number":7,"body":"hi","credential":%s}`},
+	}
+	configured := func() []Credential { return []Credential{{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"}} }
+	call := func(adapter toolbroker.Adapter, template, credential string) error {
+		quoted, err := json.Marshal(credential)
+		if err != nil {
+			t.Fatalf("encode credential: %v", err)
+		}
+		_, err = adapter(context.Background(), toolRequest(t, fmt.Sprintf(template, quoted)), approval.Constraints{})
+		return err
+	}
+	assertRefused := func(t *testing.T, err error, detail string) {
+		t.Helper()
+		var coded *toolbroker.Error
+		if !errors.As(err, &coded) || coded.Class != toolbroker.ResultInvalidArgument || coded.Detail != detail {
+			t.Errorf("err = %v, want invalid_argument %q", err, detail)
+		}
+	}
+	const notConfigured = "credential is not a configured github credential"
+	for _, tool := range cases {
+		t.Run(tool.name, func(t *testing.T) {
+			options := &ToolOptions{BaseURL: server.URL, HTTPClient: server.Client(), Credentials: configured()}
+			before := requests.Load()
+			if err := call(tool.build(options), tool.args, "ci"); err != nil {
+				t.Fatalf("configured credential: %v", err)
+			}
+			if got := requests.Load() - before; got != 1 {
+				t.Fatalf("requests for the configured credential = %d, want 1", got)
+			}
+			before = requests.Load()
+			for _, credential := range []string{"ci ", "CI", "c", "ci2", "env://GITHUB_TEST_TOKEN", "file://" + tokenFile} {
+				assertRefused(t, call(tool.build(options), tool.args, credential), notConfigured)
+			}
+			for _, credentials := range [][]Credential{nil, {}} {
+				empty := &ToolOptions{BaseURL: server.URL, HTTPClient: server.Client(), Credentials: credentials}
+				assertRefused(t, call(tool.build(empty), tool.args, "ci"), notConfigured)
+			}
+			assertRefused(t, call(tool.build(nil), tool.args, "ci"), "github tool options are required")
+			if got := requests.Load() - before; got != 0 {
+				t.Errorf("requests for refused credentials = %d, want 0", got)
+			}
+			creds := configured()
+			cloned := tool.build(&ToolOptions{BaseURL: server.URL, HTTPClient: server.Client(), Credentials: creds})
+			creds[0].Name = "other"
+			if err := call(cloned, tool.args, "ci"); err != nil {
+				t.Errorf("credential after the caller renamed its slice: %v", err)
+			}
+			assertRefused(t, call(cloned, tool.args, "other"), notConfigured)
+		})
 	}
 }
