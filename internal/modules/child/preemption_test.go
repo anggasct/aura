@@ -294,6 +294,7 @@ func TestHandlerDoesNotJournalASessionItsHostPreempted(t *testing.T) {
 		calls int
 	}{
 		{name: "a session the stop cancelled runs again", first: func() Result { return Result{Status: "cancelled"} }, calls: 2},
+		{name: "a session the stop failed runs again", first: func() Result { return Result{Status: "failed"} }, calls: 2},
 		{name: "a session that completed after the stop is kept", first: completedSession, calls: 1},
 	}
 	for _, tc := range cases {
@@ -316,8 +317,9 @@ func TestHandlerDoesNotJournalASessionItsHostPreempted(t *testing.T) {
 			host.startHost()
 			host.awaitDurableState(ref, durable.RunSucceeded)
 			host.requireSettled(settlement{state: StatusSucceeded, charged: 1, released: 1, results: 1, signals: 1})
-			if states, _ := host.runs.recorded(); slices.Contains(states, StatusCancelled) {
-				t.Errorf("states = %v, want no %s", states, StatusCancelled)
+			states, _ := host.runs.recorded()
+			if slices.Contains(states, StatusCancelled) || slices.Contains(states, StatusFailed) {
+				t.Errorf("states = %v, want neither %s nor %s", states, StatusCancelled, StatusFailed)
 			}
 			if calls := sessions.callCount(); calls != tc.calls {
 				t.Errorf("executor calls = %d, want %d", calls, tc.calls)
