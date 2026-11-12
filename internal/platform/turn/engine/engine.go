@@ -639,13 +639,6 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 
 	persistEvent := func(ctx context.Context, ev *store.RuntimeEvent) error {
 		e.fillTurnEvent(t, ev)
-		if e.sessionStore != nil {
-			if _, err := e.events.AppendSequenced(ctx, t.req.SessionID, ev); err != nil {
-				return codedError(turn.ErrorCodeStorageUnavailable, "failed to persist "+ev.Kind, err)
-			}
-			e.broadcast(t, ev)
-			return nil
-		}
 		err := e.sessionQueue(t.req.SessionID).lock(func() error {
 			seq, err := e.nextSequence(ctx, t.req.SessionID)
 			if err != nil {
@@ -730,9 +723,6 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	e.notifyPresenceEnded(ctx, &t.req)
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to persist terminal event", "error", err, "turn_id", t.turnID)
-	}
-	if e.sessionStore != nil {
-		e.releaseTurn(ctx, t)
 	}
 
 	for sub := range t.subs {

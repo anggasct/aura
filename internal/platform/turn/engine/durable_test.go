@@ -609,7 +609,22 @@ func TestDurableTurnReleasedBeforeItIsStagedStillReachesItsCaller(t *testing.T) 
 			first <- err
 		}()
 		waitFor(t, func() bool { return executor.StartCount() == 1 })
-		events, err := collect(t, engine, sampleRequest("session-a", "turn-1"))
+		type streamed struct {
+			events []store.RuntimeEvent
+			err    error
+		}
+		second := make(chan streamed, 1)
+		go func() {
+			events, err := collect(t, engine, sampleRequest("session-a", "turn-1"))
+			second <- streamed{events: events, err: err}
+		}()
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		if starts := executor.StartCount(); starts != 2 {
+			t.Fatalf("executor starts before the next status poll = %d, want turn-1 started by its own grant", starts)
+		}
+		got := <-second
+		events, err := got.events, got.err
 		if err != nil {
 			t.Fatalf("turn-1: %v", err)
 		}
