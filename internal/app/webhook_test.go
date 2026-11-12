@@ -7,8 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"iter"
+	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ type fakeTurnRuntime struct {
 	store     store.EventStore
 	sequences map[string]uint64
 	parts     [][]runtimeingress.InputPart
+	sessions  []string
 }
 
 type turnOutcome struct {
@@ -42,6 +44,7 @@ func (f *fakeTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.S
 	f.mu.Lock()
 	f.calls++
 	f.parts = append(f.parts, req.Parts)
+	f.sessions = append(f.sessions, req.SessionID)
 	f.mu.Unlock()
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		if f.overload {
@@ -97,6 +100,12 @@ func (f *fakeTurnRuntime) submitted() int {
 	return f.calls
 }
 
+func (f *fakeTurnRuntime) submittedSessions() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.sessions)
+}
+
 func acceptedTurnEvents(turnID string) []turnOutcome {
 	return []turnOutcome{
 		{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
@@ -105,13 +114,28 @@ func acceptedTurnEvents(turnID string) []turnOutcome {
 	}
 }
 
+type webhookTestRig struct {
+	db       *sql.DB
+	backend  *fakeTurnRuntime
+	sessions store.SessionService
+	logger   *slog.Logger
+}
+
 func webhookTestSetup(t *testing.T, backend *fakeTurnRuntime) (*webhookDispatcher, store.WebhookExecutionStore) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
-	executions := store.NewWebhookExecutionStore(db)
-	backend.store = store.NewEventStore(db)
-	backend.sequences = make(map[string]uint64)
-	dispatcher, err := newWebhookDispatcher(store.NewSessionService(db), executions, backend, 24*time.Hour, time.Now, nil)
+	return newWebhookTestDispatcher(t, &webhookTestRig{db: storetest.OpenMigrated(t), backend: backend})
+}
+
+func newWebhookTestDispatcher(t *testing.T, rig *webhookTestRig) (*webhookDispatcher, store.WebhookExecutionStore) {
+	t.Helper()
+	executions := store.NewWebhookExecutionStore(rig.db)
+	rig.backend.store = store.NewEventStore(rig.db)
+	rig.backend.sequences = make(map[string]uint64)
+	sessions := rig.sessions
+	if sessions == nil {
+		sessions = store.NewSessionService(rig.db)
+	}
+	dispatcher, err := newWebhookDispatcher(sessions, executions, rig.backend, 24*time.Hour, time.Now, rig.logger)
 	if err != nil {
 		t.Fatalf("newWebhookDispatcher: %v", err)
 	}
@@ -170,6 +194,9 @@ func TestWebhookDispatcher_AcceptCompletesTurn(t *testing.T) {
 	execution := waitForExecutionState(t, executions, ref.ExecutionID, store.WebhookExecutionStateCompleted)
 	if execution.TurnID != ref.TurnID {
 		t.Errorf("turn id = %q, want %q", execution.TurnID, ref.TurnID)
+	}
+	if got := backend.submittedSessions(); execution.SessionID == "" || !slices.Equal(got, []string{execution.SessionID}) {
+		t.Errorf("execution session = %q, turn sessions = %v; want the session the turn ran in", execution.SessionID, got)
 	}
 	if execution.ResultEventID == "" {
 		t.Error("expected a result event id on completion")
@@ -278,7 +305,8 @@ func TestWebhookDispatcher_ConcurrentDuplicatesSubmitOnce(t *testing.T) {
 
 func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	dispatcher, executions := webhookTestSetup(t, backend)
+	db := storetest.OpenMigrated(t)
+	dispatcher, executions := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: backend})
 	ctx := t.Context()
 
 	now := time.Now().UTC()
@@ -289,6 +317,7 @@ func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
 		Nonce:      "nonce-abcdefghijklmnop",
 		BodyDigest: "digest-1",
 		TurnID:     "turn_orphan",
+		SessionID:  "sess_orphan",
 		State:      store.WebhookExecutionStateAccepted,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -305,9 +334,15 @@ func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
 	if ref.ExecutionID != "whex_orphan" || ref.TurnID != "turn_orphan" {
 		t.Fatalf("replay ref = %+v, want the orphaned identity", ref)
 	}
-	waitForExecutionState(t, executions, "whex_orphan", store.WebhookExecutionStateCompleted)
-	if backend.submitted() != 1 {
-		t.Errorf("submitted turns = %d, want 1", backend.submitted())
+	execution := waitForExecutionState(t, executions, "whex_orphan", store.WebhookExecutionStateCompleted)
+	if got := backend.submittedSessions(); !slices.Equal(got, []string{"sess_orphan"}) {
+		t.Errorf("submitted turn sessions = %v, want one turn in sess_orphan", got)
+	}
+	if execution.ResultEventID != "evt_msg_turn_orphan" {
+		t.Errorf("result event = %q, want the message of the turn that ran", execution.ResultEventID)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM session`); got != 1 || countRows(t, db, `SELECT COUNT(*) FROM session WHERE id = 'sess_orphan'`) != 1 {
+		t.Errorf("sessions = %d, want only sess_orphan", got)
 	}
 }
 
@@ -569,68 +604,5 @@ func TestWebhookDispatcher_FinishedDrainIsNotResubmittedAsOrphan(t *testing.T) {
 	}
 	if backend.submitted() != 1 {
 		t.Fatalf("submitted turns = %d, want 1: a drain this process already ran is not an orphan", backend.submitted())
-	}
-}
-
-func TestWebhookDispatcher_PrunesExpiredStartedEntries(t *testing.T) {
-	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	now := time.Now()
-	dispatcher, _ := webhookTestSetup(t, backend)
-	dispatcher.retention = time.Millisecond
-	dispatcher.clock = func() time.Time { return now }
-	dispatcher.markStarted("old")
-	now = now.Add(10 * time.Millisecond)
-	dispatcher.markStarted("recent")
-	if !dispatcher.startedHere("old") {
-		t.Fatal("an expired entry was swept before the sweep interval")
-	}
-	now = now.Add(webhookStartedSweepEvery)
-	dispatcher.markStarted("new")
-	if dispatcher.startedHere("old") || dispatcher.startedHere("recent") {
-		t.Fatal("expired entries survived the periodic sweep")
-	}
-	if !dispatcher.startedHere("new") {
-		t.Fatal("the entry just started was dropped")
-	}
-	dispatcher.retention = time.Hour
-	for i := range webhookStartedSweepAt {
-		dispatcher.markStarted(fmt.Sprintf("bulk-%d", i))
-	}
-	now = now.Add(2 * time.Hour)
-	dispatcher.markStarted("after-threshold")
-	if dispatcher.startedHere("bulk-0") || !dispatcher.startedHere("after-threshold") {
-		t.Fatal("reaching the size threshold did not sweep expired entries")
-	}
-}
-
-func TestWebhookDispatcher_RestartClearsStartedAllowsOrphanResubmission(t *testing.T) {
-	backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
-		return []turnOutcome{{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}}}
-	}}
-	dispatcher, executions := webhookTestSetup(t, backend)
-	first, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	if err := dispatcher.Wait(t.Context()); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-	execution, found, err := executions.ExecutionByNonce(t.Context(), "primary", "nonce-abcdefghijklmnop")
-	if err != nil || !found || execution.State != store.WebhookExecutionStateAccepted {
-		t.Fatalf("execution = %+v, %v, %v; want it left accepted by a turn that ended without a terminal event", execution, found, err)
-	}
-	dispatcher.started = map[string]time.Time{}
-	again, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
-	if err != nil {
-		t.Fatalf("Dispatch after restart: %v", err)
-	}
-	if again.ExecutionID != first.ExecutionID {
-		t.Fatalf("execution id changed after restart")
-	}
-	if err := dispatcher.Wait(t.Context()); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-	if backend.submitted() != 2 {
-		t.Fatalf("submitted turns = %d, want 2 after restart resubmission", backend.submitted())
 	}
 }

@@ -443,6 +443,9 @@ func (b *build) addEdgeListeners() error {
 		if err := s.listeners.Add(webhookListener); err != nil {
 			return err
 		}
+		if err := b.group.Add(server.Background("webhook_reconcile", webhookListener.dispatcher.reconcilePass().run)); err != nil {
+			return err
+		}
 	}
 	if cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.UsesWebhook() {
 		telegramWebhook, err := buildTelegramWebhookServer(cfg, s.channels)

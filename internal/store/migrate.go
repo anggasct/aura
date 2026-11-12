@@ -58,6 +58,7 @@ var migrations = []migration{
 	{version: 40, sql: knowledgeEmbeddingSchemaSQL},
 	{version: 41, sql: durableRuntimeSchemaSQL},
 	{version: 42, sql: durableSessionSchemaSQL},
+	{version: 43, sql: webhookExecutionSessionSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -902,6 +903,21 @@ CREATE TABLE durable_session_turn (
 );
 CREATE UNIQUE INDEX durable_session_turn_active_idx
     ON durable_session_turn(session_id) WHERE state = 'active';
+`
+
+const webhookExecutionSessionSchemaSQL = `
+ALTER TABLE webhook_execution ADD COLUMN session_id TEXT NOT NULL DEFAULT '';
+
+UPDATE webhook_execution
+SET session_id = e.session_id
+FROM runtime_event AS e
+WHERE e.turn_id = webhook_execution.turn_id AND e.kind = 'turn.accepted';
+
+DELETE FROM webhook_execution
+WHERE session_id = '' AND state IN ('accepted','running');
+
+CREATE INDEX webhook_execution_unfinished_idx
+    ON webhook_execution(id) WHERE state IN ('accepted','running');
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

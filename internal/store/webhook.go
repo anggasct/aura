@@ -23,6 +23,7 @@ type WebhookExecution struct {
 	Nonce         string
 	BodyDigest    string
 	TurnID        string
+	SessionID     string
 	State         string
 	ResultEventID string
 	ErrorCode     string
@@ -39,6 +40,13 @@ type WebhookExecutionStore interface {
 	MarkRunning(ctx context.Context, id string, updatedAt time.Time) (bool, error)
 	MarkTerminal(ctx context.Context, id, state, resultEventID, errorCode string, updatedAt time.Time) (bool, error)
 	DeleteExecution(ctx context.Context, id string) error
+	ListUnfinished(ctx context.Context, query *UnfinishedExecutionQuery) ([]WebhookExecution, error)
+}
+
+type UnfinishedExecutionQuery struct {
+	Now     time.Time
+	AfterID string
+	Limit   int
 }
 
 type sqliteWebhookExecutionStore struct {
@@ -56,20 +64,21 @@ func (s *sqliteWebhookExecutionStore) InsertExecution(ctx context.Context, execu
 	if execution == nil {
 		return errNilArgument("execution")
 	}
-	if execution.ID == "" || execution.KeyID == "" || execution.EventID == "" || execution.Nonce == "" || execution.TurnID == "" {
+	if execution.ID == "" || execution.KeyID == "" || execution.EventID == "" || execution.Nonce == "" || execution.TurnID == "" || execution.SessionID == "" {
 		return Errorf(ErrorCodeInvalidArgument, "execution identity must not be empty")
 	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO webhook_execution (
-			id, key_id, event_id, nonce, body_digest, turn_id, state,
+			id, key_id, event_id, nonce, body_digest, turn_id, session_id, state,
 			result_event_id, error_code, created_at, updated_at, expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		execution.ID,
 		execution.KeyID,
 		execution.EventID,
 		execution.Nonce,
 		execution.BodyDigest,
 		execution.TurnID,
+		execution.SessionID,
 		execution.State,
 		nullText(execution.ResultEventID),
 		nullText(execution.ErrorCode),
@@ -177,20 +186,66 @@ func (s *sqliteWebhookExecutionStore) DeleteExecution(ctx context.Context, id st
 	return nil
 }
 
-const selectWebhookExecutionColumns = `id, key_id, event_id, nonce, body_digest, turn_id, state,
+func (s *sqliteWebhookExecutionStore) ListUnfinished(ctx context.Context, query *UnfinishedExecutionQuery) ([]WebhookExecution, error) {
+	if s.db == nil {
+		return nil, errNilArgument("db")
+	}
+	if query == nil {
+		return nil, errNilArgument("query")
+	}
+	if query.Limit <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "unfinished execution limit must be positive")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+selectWebhookExecutionColumns+` FROM webhook_execution
+		 WHERE state IN ('accepted','running') AND expires_at > ? AND id > ?
+		 ORDER BY id LIMIT ?`,
+		formatTime(query.Now.UTC()), query.AfterID, query.Limit)
+	if err != nil {
+		return nil, classifyBusy(fmt.Errorf("list unfinished webhook executions: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var executions []WebhookExecution
+	for rows.Next() {
+		execution, err := scanWebhookExecution(rows)
+		if err != nil {
+			return nil, err
+		}
+		executions = append(executions, execution)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list unfinished webhook executions: %w", err))
+	}
+	return executions, nil
+}
+
+const selectWebhookExecutionColumns = `id, key_id, event_id, nonce, body_digest, turn_id, session_id, state,
 	result_event_id, error_code, created_at, updated_at, expires_at`
 
 func (s *sqliteWebhookExecutionStore) findExecution(ctx context.Context, query string, args ...any) (WebhookExecution, bool, error) {
+	execution, err := scanWebhookExecution(s.db.QueryRowContext(ctx, query, args...))
+	switch {
+	case err == nil:
+		return execution, true, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return WebhookExecution{}, false, nil
+	default:
+		return WebhookExecution{}, false, err
+	}
+}
+
+func scanWebhookExecution(row rowScanner) (WebhookExecution, error) {
 	var execution WebhookExecution
 	var resultEventID, errorCode sql.NullString
 	var createdAtRaw, updatedAtRaw, expiresAtRaw string
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(
+	err := row.Scan(
 		&execution.ID,
 		&execution.KeyID,
 		&execution.EventID,
 		&execution.Nonce,
 		&execution.BodyDigest,
 		&execution.TurnID,
+		&execution.SessionID,
 		&execution.State,
 		&resultEventID,
 		&errorCode,
@@ -201,9 +256,9 @@ func (s *sqliteWebhookExecutionStore) findExecution(ctx context.Context, query s
 	switch {
 	case err == nil:
 	case errors.Is(err, sql.ErrNoRows):
-		return WebhookExecution{}, false, nil
+		return WebhookExecution{}, err
 	default:
-		return WebhookExecution{}, false, classifyBusy(fmt.Errorf("read webhook execution: %w", err))
+		return WebhookExecution{}, classifyBusy(fmt.Errorf("read webhook execution: %w", err))
 	}
 	if resultEventID.Valid {
 		execution.ResultEventID = resultEventID.String
@@ -213,24 +268,24 @@ func (s *sqliteWebhookExecutionStore) findExecution(ctx context.Context, query s
 	}
 	var parseErr error
 	if execution.CreatedAt, parseErr = parseTime(createdAtRaw); parseErr != nil {
-		return WebhookExecution{}, false, &Error{
+		return WebhookExecution{}, &Error{
 			Code:   ErrorCodeWebhookExecutionInvalid,
 			Detail: "stored creation timestamp is not a valid time",
 		}
 	}
 	if execution.UpdatedAt, parseErr = parseTime(updatedAtRaw); parseErr != nil {
-		return WebhookExecution{}, false, &Error{
+		return WebhookExecution{}, &Error{
 			Code:   ErrorCodeWebhookExecutionInvalid,
 			Detail: "stored update timestamp is not a valid time",
 		}
 	}
 	if execution.ExpiresAt, parseErr = parseTime(expiresAtRaw); parseErr != nil {
-		return WebhookExecution{}, false, &Error{
+		return WebhookExecution{}, &Error{
 			Code:   ErrorCodeWebhookExecutionInvalid,
 			Detail: "stored expiry timestamp is not a valid time",
 		}
 	}
-	return execution, true, nil
+	return execution, nil
 }
 
 func nullText(value string) sql.NullString {

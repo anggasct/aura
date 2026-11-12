@@ -27,11 +27,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-const (
-	webhookStartedSweepAt    = 4096
-	webhookStartedSweepEvery = time.Minute
-)
-
 type webhookDispatcher struct {
 	mu         sync.Mutex
 	sessions   store.SessionService
@@ -41,9 +36,7 @@ type webhookDispatcher struct {
 	clock      func() time.Time
 	logger     *slog.Logger
 	github     *github.Adapter
-	startedMu  sync.Mutex
-	started    map[string]time.Time
-	sweptAt    time.Time
+	reconciler *webhookReconciler
 	drains     sync.WaitGroup
 }
 
@@ -73,7 +66,7 @@ func newWebhookDispatcher(sessions store.SessionService, executions store.Webhoo
 		retention:  retention,
 		clock:      clock,
 		logger:     logger,
-		started:    make(map[string]time.Time),
+		reconciler: &webhookReconciler{sessions: sessions, executions: executions, clock: clock, page: webhookReconcileEventPage},
 	}, nil
 }
 
@@ -117,6 +110,7 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.
 		Nonce:      event.Nonce,
 		BodyDigest: event.BodyDigest,
 		TurnID:     turnID,
+		SessionID:  sessionID,
 		State:      store.WebhookExecutionStateAccepted,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -140,7 +134,6 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.
 		_ = d.executions.DeleteExecution(context.WithoutCancel(ctx), executionID)
 		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeRuntimeOverloaded, "runtime did not accept the turn")
 	}
-	d.markStarted(executionID)
 	d.startDrain(context.WithoutCancel(ctx), executionID, next, stop)
 
 	return gatewaywebhook.ExecutionRef{ExecutionID: executionID, TurnID: turnID}, nil
@@ -164,65 +157,36 @@ func (d *webhookDispatcher) replayIdentical(ctx context.Context, event *gatewayw
 	if previous.BodyDigest != event.BodyDigest {
 		return empty, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeReplayConflict, "identity was already used with different content")
 	}
-	if previous.State == store.WebhookExecutionStateAccepted && !d.startedHere(previous.ID) {
-		d.resubmitOrphaned(ctx, &previous, event)
+	if previous.State == store.WebhookExecutionStateAccepted || previous.State == store.WebhookExecutionStateRunning {
+		d.settleReplayed(ctx, &previous, event)
 	}
 	return gatewaywebhook.ExecutionRef{ExecutionID: previous.ID, TurnID: previous.TurnID}, nil
 }
 
-func (d *webhookDispatcher) markStarted(executionID string) {
-	now := d.clock()
-	d.startedMu.Lock()
-	defer d.startedMu.Unlock()
-	if len(d.started) >= webhookStartedSweepAt || now.Sub(d.sweptAt) >= webhookStartedSweepEvery {
-		for id, at := range d.started {
-			if now.Sub(at) > d.retention {
-				delete(d.started, id)
-			}
-		}
-		d.sweptAt = now
+func (d *webhookDispatcher) settleReplayed(ctx context.Context, previous *store.WebhookExecution, event *gatewaywebhook.AcceptedEvent) {
+	if err := d.reconcileReplayed(ctx, previous, event); err != nil {
+		d.logger.WarnContext(ctx, "webhook replay reconcile failed",
+			"component", "webhook",
+			"key_id", event.KeyID,
+			"error", err,
+		)
 	}
-	d.started[executionID] = now
 }
 
-func (d *webhookDispatcher) startedHere(executionID string) bool {
-	d.startedMu.Lock()
-	defer d.startedMu.Unlock()
-	_, ok := d.started[executionID]
-	return ok
-}
-
-func (d *webhookDispatcher) resubmitOrphaned(ctx context.Context, previous *store.WebhookExecution, event *gatewaywebhook.AcceptedEvent) {
-	sessionID, err := newWebhookID("sess_")
+func (d *webhookDispatcher) reconcileReplayed(ctx context.Context, previous *store.WebhookExecution, event *gatewaywebhook.AcceptedEvent) error {
+	result, err := d.reconciler.reconcile(ctx, previous)
+	if err != nil || result.admitted {
+		return err
+	}
+	if err := d.createSession(ctx, previous.SessionID, event.KeyID, d.clock().UTC()); err != nil {
+		return err
+	}
+	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, webhookTurnRequest(previous.SessionID, previous.TurnID, event))
 	if err != nil {
-		d.logger.WarnContext(ctx, "webhook orphan resubmission skipped",
-			"component", "webhook",
-			"key_id", event.KeyID,
-			"error", err,
-		)
-		return
+		return fmt.Errorf("submit the turn of webhook execution %s: %w", previous.ID, err)
 	}
-	now := d.clock().UTC()
-	if err := d.createSession(ctx, sessionID, event.KeyID, now); err != nil {
-		d.logger.WarnContext(ctx, "webhook orphan resubmission skipped",
-			"component", "webhook",
-			"key_id", event.KeyID,
-			"error", err,
-		)
-		return
-	}
-	turnRequest := webhookTurnRequest(sessionID, previous.TurnID, event)
-	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, turnRequest)
-	if err != nil {
-		d.logger.WarnContext(ctx, "webhook orphan resubmission skipped",
-			"component", "webhook",
-			"key_id", event.KeyID,
-			"error", err,
-		)
-		return
-	}
-	d.markStarted(previous.ID)
 	d.startDrain(context.WithoutCancel(ctx), previous.ID, next, stop)
+	return nil
 }
 
 func (d *webhookDispatcher) createSession(ctx context.Context, sessionID, keyID string, now time.Time) error {
@@ -262,55 +226,28 @@ func (d *webhookDispatcher) Wait(ctx context.Context) error {
 
 func (d *webhookDispatcher) drain(ctx context.Context, executionID string, next turnStep, stop func()) {
 	defer stop()
-	completedMessage := ""
+	var derivation executionDerivation
 	for {
 		event, err, ok := next()
-		if !ok {
+		if !ok || err != nil {
 			return
 		}
-		if err != nil {
-			d.transition(ctx, executionID, store.WebhookExecutionStateFailed, "", string(turn.ErrorCodeRuntimeInternal))
+		outcome, terminal := derivation.next(&event)
+		if terminal && event.ID == "" {
 			return
 		}
-		switch event.Kind {
-		case turn.EventKindTurnAccepted:
-		case turn.EventKindMessageCompleted:
-			completedMessage = event.ID
-			d.transition(ctx, executionID, store.WebhookExecutionStateRunning, "", "")
-		case turn.EventKindTurnCompleted:
-			d.transition(ctx, executionID, store.WebhookExecutionStateCompleted, firstNonEmpty(completedMessage, event.ID), "")
+		d.transition(ctx, executionID, &outcome)
+		if terminal {
 			return
-		case turn.EventKindTurnFailed:
-			d.transition(ctx, executionID, store.WebhookExecutionStateFailed, firstNonEmpty(completedMessage, event.ID), failedEventCode(event.Payload))
-			return
-		case turn.EventKindTurnCancelled:
-			d.transition(ctx, executionID, store.WebhookExecutionStateCancelled, "", string(turn.ErrorCodeTurnCancelled))
-			return
-		default:
-			d.transition(ctx, executionID, store.WebhookExecutionStateRunning, "", "")
 		}
 	}
 }
 
-func (d *webhookDispatcher) transition(ctx context.Context, executionID, state, resultEventID, errorCode string) {
-	now := d.clock().UTC()
-	var err error
-	switch state {
-	case store.WebhookExecutionStateRunning:
-		_, err = d.executions.MarkRunning(ctx, executionID, now)
-	case store.WebhookExecutionStateCompleted, store.WebhookExecutionStateFailed, store.WebhookExecutionStateCancelled:
-		_, err = d.executions.MarkTerminal(ctx, executionID, state, resultEventID, errorCode, now)
-	default:
-		d.logger.WarnContext(ctx, "webhook drain reached an unknown state",
-			"component", "webhook",
-			"state", state,
-		)
-		return
-	}
-	if err != nil {
+func (d *webhookDispatcher) transition(ctx context.Context, executionID string, outcome *executionOutcome) {
+	if _, err := d.reconciler.write(ctx, executionID, outcome); err != nil {
 		d.logger.WarnContext(ctx, "webhook state transition failed",
 			"component", "webhook",
-			"state", state,
+			"state", outcome.state,
 			"error", err,
 		)
 	}
