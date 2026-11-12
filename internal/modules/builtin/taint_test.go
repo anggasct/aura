@@ -38,7 +38,7 @@ func TestExecutorForwardsTheTaintFlagToTheBroker(t *testing.T) {
 		}
 	}
 	_, err = executor.Execute(t.Context(), request("unreachable", true))
-	if class, _ := toolbroker.CodeOf(err); class != toolbroker.ResultKnowledgeSinkNoApprover || decisions != 0 {
+	if class, _ := toolbroker.CodeOf(err); class != toolbroker.ResultUntrustedInputNoApprover || decisions != 0 {
 		t.Fatalf("tainted on an unreachable session: %v, decisions %d", err, decisions)
 	}
 	_, err = executor.Execute(t.Context(), request("reachable", true))
@@ -46,7 +46,7 @@ func TestExecutorForwardsTheTaintFlagToTheBroker(t *testing.T) {
 		t.Fatalf("tainted on a reachable session: %v, decisions %d, want a rejected prompt", err, decisions)
 	}
 	_, err = executor.Execute(t.Context(), request("unreachable", false))
-	if class, _ := toolbroker.CodeOf(err); class == toolbroker.ResultKnowledgeSinkNoApprover || decisions != 1 {
+	if class, _ := toolbroker.CodeOf(err); class == toolbroker.ResultUntrustedInputNoApprover || decisions != 1 {
 		t.Fatalf("untainted call: %v, decisions %d, want no taint denial and no prompt", err, decisions)
 	}
 }

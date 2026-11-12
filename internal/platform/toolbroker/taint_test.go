@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -16,6 +17,7 @@ type taintHarness struct {
 	broker  *Broker
 	calls   map[string]int
 	prompts int
+	reasons []string
 	seq     int
 }
 
@@ -35,8 +37,9 @@ func newTaintBroker(t *testing.T, reachable func(sessionID string) bool, access 
 	broker, err := New(&Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: adapters,
-		ApprovalDecider: func(context.Context, *ApprovalPrompt) (bool, error) {
+		ApprovalDecider: func(_ context.Context, prompt *ApprovalPrompt) (bool, error) {
 			harness.prompts++
+			harness.reasons = append(harness.reasons, prompt.ReasonCode)
 			return true, nil
 		},
 		Access:            access,
@@ -179,8 +182,8 @@ func TestTaintedApprovalWithNoReachableApproverIsDeniedAtOnce(t *testing.T) {
 			harness := newTaintBroker(t, reachable, nil)
 			call := sinkCalls["web_fetch"]
 			err := harness.call("web_fetch", call.arguments, true, principal.ClassOwner, call.capabilities...)
-			if classOf(err) != ResultKnowledgeSinkNoApprover {
-				t.Fatalf("error = %v, want knowledge_sink_no_approver", err)
+			if classOf(err) != ResultUntrustedInputNoApprover {
+				t.Fatalf("error = %v, want untrusted_input_no_approver", err)
 			}
 			if harness.prompts != 0 || harness.calls["web_fetch"] != 0 {
 				t.Errorf("prompts = %d calls = %d, want neither", harness.prompts, harness.calls["web_fetch"])
@@ -204,7 +207,7 @@ func TestTaintedApprovalChecksReachabilityPerSession(t *testing.T) {
 	}
 	request := classifiedRequest("web_search", call.arguments, principal.ClassOwner, call.capabilities...)
 	request.Tainted, request.SessionID = true, "session-2"
-	if _, err := harness.broker.Execute(t.Context(), request); classOf(err) != ResultKnowledgeSinkNoApprover {
+	if _, err := harness.broker.Execute(t.Context(), request); classOf(err) != ResultUntrustedInputNoApprover {
 		t.Fatalf("unreachable session error = %v", err)
 	}
 	if len(asked) != 2 || asked[0] != "session-1" || asked[1] != "session-2" {
@@ -212,11 +215,69 @@ func TestTaintedApprovalChecksReachabilityPerSession(t *testing.T) {
 	}
 }
 
-func TestKnowledgeSinkNoApproverIsAStableClass(t *testing.T) {
-	if !ResultKnowledgeSinkNoApprover.stable() {
-		t.Fatal("knowledge_sink_no_approver is not listed in stable()")
+func TestTaintedPublicTurnsNeverAskTheOwner(t *testing.T) {
+	access := teamAccess()
+	access.ceilings[principal.ClassPublic] = []string{"web_fetch"}
+	access.ceilings[principal.ClassTrusted] = []string{"web_fetch"}
+	harness := newTaintBroker(t, always, access)
+	call := sinkCalls["web_fetch"]
+
+	err := harness.call("web_fetch", call.arguments, true, principal.ClassPublic, call.capabilities...)
+	if classOf(err) != ResultUntrustedInputNoApprover || !strings.Contains(err.Error(), "a public principal's turn never asks the owner") {
+		t.Fatalf("tainted public web_fetch error = %v, want untrusted_input_no_approver for a public principal", err)
 	}
-	if string(ResultKnowledgeSinkNoApprover) != "knowledge_sink_no_approver" {
-		t.Errorf("class = %q", ResultKnowledgeSinkNoApprover)
+	if harness.prompts != 0 || harness.calls["web_fetch"] != 0 {
+		t.Fatalf("prompts = %d calls = %d, want neither", harness.prompts, harness.calls["web_fetch"])
+	}
+	if err := harness.call("web_fetch", call.arguments, false, principal.ClassPublic, call.capabilities...); err != nil {
+		t.Fatalf("untainted public web_fetch: %v", err)
+	}
+	if harness.prompts != 0 || harness.calls["web_fetch"] != 1 {
+		t.Fatalf("untainted: prompts = %d calls = %d, want the call to run unprompted", harness.prompts, harness.calls["web_fetch"])
+	}
+	if err := harness.call("web_fetch", call.arguments, true, principal.ClassTrusted, call.capabilities...); err != nil {
+		t.Fatalf("tainted trusted web_fetch: %v", err)
+	}
+	if harness.prompts != 1 || harness.calls["web_fetch"] != 2 {
+		t.Errorf("trusted: prompts = %d calls = %d, want one prompt and a run", harness.prompts, harness.calls["web_fetch"])
+	}
+}
+
+func TestTaintedApprovalPromptCarriesTheUntrustedInputReason(t *testing.T) {
+	access := teamAccess()
+	harness := newTaintBroker(t, always, access)
+	fetch := sinkCalls["web_fetch"]
+	cases := []struct {
+		tool      string
+		arguments string
+		class     principal.Class
+		tainted   bool
+		want      string
+	}{
+		{"web_fetch", fetch.arguments, principal.ClassOwner, true, approval.ReasonUntrustedInput},
+		{"exec", `{"command":["true"]}`, principal.ClassTrusted, true, approval.ReasonUntrustedInput},
+		{"exec", `{"command":["true"]}`, principal.ClassTrusted, false, string(approval.ErrorCodeApprovalRequired)},
+	}
+	for _, tc := range cases {
+		harness.reasons = nil
+		capabilities := []string{"exec-linux"}
+		if tc.tool == "web_fetch" {
+			capabilities = fetch.capabilities
+		}
+		if err := harness.call(tc.tool, tc.arguments, tc.tainted, tc.class, capabilities...); err != nil {
+			t.Fatalf("%s tainted=%v: %v", tc.tool, tc.tainted, err)
+		}
+		if len(harness.reasons) != 1 || harness.reasons[0] != tc.want {
+			t.Errorf("%s tainted=%v prompt reasons = %v, want [%s]", tc.tool, tc.tainted, harness.reasons, tc.want)
+		}
+	}
+}
+
+func TestUntrustedInputNoApproverIsAStableClass(t *testing.T) {
+	if !ResultUntrustedInputNoApprover.stable() {
+		t.Fatal("untrusted_input_no_approver is not listed in stable()")
+	}
+	if string(ResultUntrustedInputNoApprover) != "untrusted_input_no_approver" {
+		t.Errorf("class = %q", ResultUntrustedInputNoApprover)
 	}
 }

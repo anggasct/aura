@@ -26,7 +26,7 @@ func (e *Engine) channelAdapterFor(req *turn.TurnRequest) (runtimechannelhost.Ch
 		return nil, false
 	}
 	switch req.Origin {
-	case turn.OriginTerminal, turn.OriginInternal, turn.OriginWebhook, turn.OriginHTTP:
+	case turn.OriginTerminal, turn.OriginInternal, turn.OriginWebhook, turn.OriginHTTP, turn.OriginChild, turn.OriginSchedule:
 		return nil, false
 	}
 	if len(req.ReplyContext) == 0 {

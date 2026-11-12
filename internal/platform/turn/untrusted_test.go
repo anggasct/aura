@@ -53,3 +53,41 @@ func TestQuoteUntrustedEscapesNewlinesQuotesAndMarkersWithoutHTMLEscaping(t *tes
 		})
 	}
 }
+
+func TestTurnInputIsUntrustedUnlessAPrincipalAuthoredIt(t *testing.T) {
+	tests := map[string]struct {
+		req  *TurnRequest
+		want bool
+	}{
+		"nil request":           {req: nil, want: true},
+		"terminal":              {req: &TurnRequest{Origin: OriginTerminal}},
+		"http":                  {req: &TurnRequest{Origin: OriginHTTP}},
+		"schedule":              {req: &TurnRequest{Origin: OriginSchedule}},
+		"discord account":       {req: &TurnRequest{Origin: "discord:main"}},
+		"telegram account":      {req: &TurnRequest{Origin: "telegram:main"}},
+		"email account":         {req: &TurnRequest{Origin: "email:main"}},
+		"webhook":               {req: &TurnRequest{Origin: OriginWebhook}, want: true},
+		"webhook account":       {req: &TurnRequest{Origin: "webhook:main"}, want: true},
+		"child":                 {req: &TurnRequest{Origin: OriginChild}, want: true},
+		"internal":              {req: &TurnRequest{Origin: OriginInternal}, want: true},
+		"empty origin":          {req: &TurnRequest{}, want: true},
+		"unlisted channel":      {req: &TurnRequest{Origin: "slack:main"}, want: true},
+		"empty account":         {req: &TurnRequest{Origin: "discord:"}, want: true},
+		"channel without colon": {req: &TurnRequest{Origin: "discord"}, want: true},
+		"terminal with knowledge": {
+			req:  &TurnRequest{Origin: OriginTerminal, Knowledge: []string{"faq"}},
+			want: true,
+		},
+		"http with empty context": {
+			req:  &TurnRequest{Origin: OriginHTTP, UntrustedContext: &UntrustedRecall{}},
+			want: true,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := tc.req.Tainted(); got != tc.want {
+				t.Errorf("Tainted() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

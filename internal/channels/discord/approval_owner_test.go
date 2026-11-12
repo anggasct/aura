@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
+	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -124,6 +125,33 @@ func TestDecideForOwnerOffersNoStandingGrantToPublicOrOwnerRequesters(t *testing
 				t.Fatalf("card buttons = %v, want no standing grant", labels)
 			}
 			adapter.resolveComponentClick(t.Context(), clickPayload("ix-reject", "777", "", "555", ids[1]))
+			if outcome := awaitDecide(t, result, 5*time.Second); outcome.err != nil || outcome.accepted {
+				t.Fatalf("DecideForOwner() = %v, %v; want the rejection applied", outcome.accepted, outcome.err)
+			}
+		})
+	}
+}
+
+func TestDecideForOwnerOffersNoStandingGrantForUntrustedInput(t *testing.T) {
+	cases := []struct {
+		reason string
+		want   string
+	}{
+		{"approval_required", "Approve|Allow 7 days|Reject"},
+		{policy.ReasonUntrustedInput, "Approve|Reject"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.reason, func(t *testing.T) {
+			stub := newApprovalStub(t)
+			adapter, _ := newHTTPOwnerAdapter(t, stub, []string{"discord:777"}, accessPersonas())
+			prompt := httpPrompt(time.Now().Add(time.Minute))
+			prompt.ReasonCode = tc.reason
+			result := decideForOwnerAsync(t.Context(), adapter, prompt, httpRequester(principal.ClassTrusted))
+			labels, ids := cardButtons(t, stub.waitPostTo(t, "555", 1)[0])
+			if strings.Join(labels, "|") != tc.want {
+				t.Fatalf("card buttons = %v, want %s", labels, tc.want)
+			}
+			adapter.resolveComponentClick(t.Context(), clickPayload("ix-reject", "777", "", "555", ids[len(ids)-1]))
 			if outcome := awaitDecide(t, result, 5*time.Second); outcome.err != nil || outcome.accepted {
 				t.Fatalf("DecideForOwner() = %v, %v; want the rejection applied", outcome.accepted, outcome.err)
 			}

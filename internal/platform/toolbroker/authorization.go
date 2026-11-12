@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -44,8 +45,11 @@ func (b *Broker) authorize(ctx context.Context, call *authorization) (string, er
 func (b *Broker) decideAuthorization(ctx context.Context, call *authorization) (string, error) {
 	key := toolKey(call.canonical)
 	if call.decision.Outcome == approval.OutcomeRequireApproval && !call.standing {
+		if call.canonical.Tainted && requestClass(call.canonical) == principal.ClassPublic {
+			return ApprovalMissing, errorf(ResultUntrustedInputNoApprover, "tool %q needs approval because this turn carries untrusted input, and a public principal's turn never asks the owner", key)
+		}
 		if call.canonical.Tainted && !b.sessionReachable(call.canonical.SessionID) {
-			return ApprovalMissing, errorf(ResultKnowledgeSinkNoApprover, "tool %q needs approval on a turn with knowledge and nobody can be asked", key)
+			return ApprovalMissing, errorf(ResultUntrustedInputNoApprover, "tool %q needs approval because this turn carries untrusted input, and nobody can be asked", key)
 		}
 		if b.decider == nil {
 			return ApprovalMissing, errorf(ResultApprovalRequired, "tool %q requires approval", key)

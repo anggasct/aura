@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const HandlerName = "schedule"
@@ -370,7 +371,7 @@ func (r *Runner) decideTurn(ctx context.Context, sub *submission) ([]byte, error
 		return json.Marshal(turnOutcome{Kind: outcomeExpired})
 	}
 	result, err := r.turns.RunTurn(ctx, &TurnRequest{
-		SessionID: "cron:" + job.ID, PrincipalID: r.principal, Origin: "internal", Prompt: job.Prompt,
+		SessionID: "cron:" + job.ID, PrincipalID: r.principal, Origin: string(turn.OriginSchedule), Prompt: job.Prompt,
 		IdempotencyKey: turnKey(job.ID, sub.occurrence.ScheduledForUTC),
 		WorkflowID:     job.WorkflowID, WorkflowInput: job.WorkflowInput,
 	})

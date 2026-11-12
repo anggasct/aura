@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -301,8 +302,13 @@ type StandingGrantRequest struct {
 	TTL         time.Duration
 }
 
-func OffersStandingGrant(class principal.Class, grants StandingGrantRecorder, ttl time.Duration) bool {
-	return class == principal.ClassTrusted && grants != nil && ttl > 0
+type StandingOffer struct {
+	Grants StandingGrantRecorder
+	TTL    time.Duration
+}
+
+func OffersStandingGrant(prompt *Prompt, class principal.Class, offer StandingOffer) bool {
+	return prompt != nil && prompt.ReasonCode != policy.ReasonUntrustedInput && class == principal.ClassTrusted && offer.Grants != nil && offer.TTL > 0
 }
 
 func StandingGrantLabel(ttl time.Duration) string {
@@ -344,6 +350,9 @@ func RenderCard(prompt *Prompt, persona string, clean func(string) string) strin
 	card.WriteString("approval required: " + clean(prompt.ToolName))
 	if prompt.ToolVersion != "" {
 		card.WriteString("@" + clean(prompt.ToolVersion))
+	}
+	if prompt.ReasonCode == policy.ReasonUntrustedInput {
+		card.WriteString("\n" + policy.UntrustedInputNotice)
 	}
 	if persona != "" {
 		card.WriteString("\npersona: " + clean(persona))

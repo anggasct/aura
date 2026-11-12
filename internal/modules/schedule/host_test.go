@@ -280,7 +280,7 @@ func TestOccurrenceRunHandlesItsFireAndStartsTheNext(t *testing.T) {
 			if len(requests) != 1 {
 				t.Fatalf("turn requests = %d, want 1", len(requests))
 			}
-			want := TurnRequest{SessionID: "cron:" + h.job.ID, PrincipalID: principal.OwnerID, Origin: "internal", Prompt: "summarize", IdempotencyKey: turnKey(h.job.ID, fire)}
+			want := TurnRequest{SessionID: "cron:" + h.job.ID, PrincipalID: principal.OwnerID, Origin: "schedule", Prompt: "summarize", IdempotencyKey: turnKey(h.job.ID, fire)}
 			if requests[0] != want {
 				t.Errorf("turn request = %+v, want %+v", requests[0], want)
 			}

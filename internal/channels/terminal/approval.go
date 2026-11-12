@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/approval"
 )
 
 func errNilArgument(name string) error {
@@ -115,6 +117,9 @@ func renderApprovalCard(card *ApprovalCard, width int) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "approval required: %s@%s\n", sanitizeText(card.ToolName), sanitizeText(card.ToolVersion))
+	if card.ReasonCode == approval.ReasonUntrustedInput {
+		b.WriteString(approval.UntrustedInputNotice + "\n")
+	}
 	fmt.Fprintf(&b, "  session: %s\n", sanitizeText(card.SessionID))
 	fmt.Fprintf(&b, "  principal: %s\n", sanitizeText(card.PrincipalID))
 	if strings.Contains(arguments, "\n") {

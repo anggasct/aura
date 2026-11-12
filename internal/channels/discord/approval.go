@@ -184,7 +184,7 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 		persona:   requester.persona,
 		actor:     ownerID,
 		channelID: dmChannel,
-		standing:  a.offersStandingGrant(requester.class),
+		standing:  a.offersStandingGrant(prompt, requester.class),
 	}
 	tokenID, pending, err := a.approvals.Issue(binding.shared(), expiresAt)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/tool"
@@ -74,10 +75,12 @@ type turnAccess struct {
 	class       principal.Class
 	agentID     string
 	knowledge   []string
+	tainted     bool
 }
 
-func withTurnAccess(ctx context.Context, principalID string, class principal.Class, agentID string, knowledge []string) context.Context {
-	return context.WithValue(ctx, turnAccessContextKey{}, turnAccess{principalID: principalID, class: class, agentID: agentID, knowledge: slices.Clone(knowledge)})
+func withTurnAccess(ctx context.Context, req *turn.TurnRequest, agentID string) context.Context {
+	access := turnAccess{principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: slices.Clone(req.Knowledge), tainted: req.Tainted()}
+	return context.WithValue(ctx, turnAccessContextKey{}, access)
 }
 
 func turnAccessFromContext(ctx context.Context) turnAccess {

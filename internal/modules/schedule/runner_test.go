@@ -931,7 +931,7 @@ func TestRunner_WorkflowJobsPassTheirTargetInsteadOfAPrompt(t *testing.T) {
 		if call.WorkflowID != "routine_weekly_report" || call.WorkflowInput != `{"objective":"last week"}` || call.Prompt != "" || call.IdempotencyKey == "" {
 			t.Errorf("fire request = %+v", call)
 		}
-		if call.SessionID != "cron:"+f.job.ID || call.PrincipalID != principal.OwnerID || call.Origin != "internal" {
+		if call.SessionID != "cron:"+f.job.ID || call.PrincipalID != principal.OwnerID || call.Origin != "schedule" {
 			t.Errorf("fire request = %+v", call)
 		}
 	})

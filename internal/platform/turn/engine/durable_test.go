@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
@@ -250,6 +251,40 @@ func TestDescriptorRoundTripPreservesDeadline(t *testing.T) {
 	}
 	if roundTripped.Budget.MaxTokens != 1000 || roundTripped.TurnID != "turn-0" || string(roundTripped.Origin) != "terminal" {
 		t.Fatalf("round trip lost fields: %+v", roundTripped)
+	}
+}
+
+func TestDurableDescriptorKeepsTheTurnTaint(t *testing.T) {
+	tests := map[string]struct {
+		origin    turn.Origin
+		knowledge []string
+		recall    *turn.UntrustedRecall
+		want      bool
+	}{
+		"webhook":           {origin: turn.OriginWebhook, want: true},
+		"http with history": {origin: turn.OriginHTTP, recall: &turn.UntrustedRecall{Trust: approval.TrustUntrustedExternal}, want: true},
+		"knowledge":         {origin: turn.OriginTerminal, knowledge: []string{"faq"}, want: true},
+		"schedule":          {origin: turn.OriginSchedule},
+		"terminal":          {origin: turn.OriginTerminal},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			req := sampleRequest("session-a", "turn-0")
+			req.Origin = tc.origin
+			req.Knowledge = tc.knowledge
+			req.UntrustedContext = tc.recall
+			encoded, err := json.Marshal(turnDescriptorFromRequest(req))
+			if err != nil {
+				t.Fatalf("marshal descriptor: %v", err)
+			}
+			var desc runtimesessions.Descriptor
+			if err := json.Unmarshal(encoded, &desc); err != nil {
+				t.Fatalf("unmarshal descriptor: %v", err)
+			}
+			if got := turnRequestFromDescriptor(&desc).Tainted(); got != req.Tainted() || got != tc.want {
+				t.Errorf("Tainted() after the round trip = %v, request %v, want %v", got, req.Tainted(), tc.want)
+			}
+		})
 	}
 }
 

@@ -19,6 +19,8 @@ const (
 	OriginInternal Origin = "internal"
 	OriginWebhook  Origin = "webhook"
 	OriginHTTP     Origin = "http"
+	OriginChild    Origin = "child"
+	OriginSchedule Origin = "schedule"
 )
 
 type Budget struct {

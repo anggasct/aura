@@ -490,7 +490,7 @@ func childTurnRequest(sessionID, childID, task string, deadline time.Time, proje
 		SessionID:      sessionID,
 		PrincipalID:    projection.ownerID,
 		PrincipalClass: principal.ClassForPrincipal(projection.ownerID),
-		Origin:         turn.OriginInternal,
+		Origin:         turn.OriginChild,
 		Parts:          []runtimeingress.InputPart{{Text: task}},
 		IdempotencyKey: childID,
 		Deadline:       deadline,

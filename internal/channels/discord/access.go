@@ -250,8 +250,8 @@ func (a *Adapter) observeRouted(ctx context.Context, result string) {
 	}
 }
 
-func (a *Adapter) offersStandingGrant(class principal.Class) bool {
-	return approval.OffersStandingGrant(class, a.access.Grants, a.access.StandingGrantTTL)
+func (a *Adapter) offersStandingGrant(prompt *approval.Prompt, class principal.Class) bool {
+	return approval.OffersStandingGrant(prompt, class, approval.StandingOffer{Grants: a.access.Grants, TTL: a.access.StandingGrantTTL})
 }
 
 func personaLabel(definition *auraagent.Definition) string {
