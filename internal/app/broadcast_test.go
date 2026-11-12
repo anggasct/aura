@@ -2,13 +2,21 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/modules/broadcast"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -112,5 +120,85 @@ func TestBroadcastReconcileReportsNoop(t *testing.T) {
 	}
 	if _, err := runBroadcastCommand(t, gf, "reconcile", "missing"); err == nil {
 		t.Error("missing item accepted")
+	}
+}
+
+func TestDiscordBroadcastSenderReportsAStartedIntentAsAmbiguous(t *testing.T) {
+	cases := []struct {
+		name      string
+		finish    func(ctx context.Context, journal *effect.Journal, id string) (*effect.Intent, error)
+		succeeded bool
+		ambiguous bool
+	}{
+		{name: "an intent an interrupted call left started", ambiguous: true},
+		{name: "a failed intent", finish: func(ctx context.Context, journal *effect.Journal, id string) (*effect.Intent, error) {
+			return journal.Fail(ctx, id, "discord_rejected")
+		}},
+		{name: "a succeeded intent", succeeded: true, finish: func(ctx context.Context, journal *effect.Journal, id string) (*effect.Intent, error) {
+			return journal.Succeed(ctx, id, json.RawMessage(`{"message_id":"m1"}`))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := storetest.OpenMigrated(t)
+			sessions := store.NewSessionService(db)
+			now := time.Now().UTC()
+			if err := sessions.Create(t.Context(), &store.Session{ID: "broadcast:default", OwnerID: "broadcast", Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+				t.Fatalf("Create session: %v", err)
+			}
+			effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+			if err != nil {
+				t.Fatalf("NewChannelEffects: %v", err)
+			}
+			payload, err := json.Marshal(discord.SendOperation{ChannelID: "123456", Text: "hello"})
+			if err != nil {
+				t.Fatalf("encode the request: %v", err)
+			}
+			prepared, err := effects.Journal().Prepare(t.Context(), &effect.PrepareRequest{
+				SessionID:      "broadcast:default",
+				IdempotencyKey: "bcst:bcst-1:a1",
+				Provider:       "discord",
+				Operation:      discord.OpSendMessage,
+				Classification: effect.ClassificationEffectful,
+				Request:        payload,
+				EventKind:      effect.EventKindChannelRequested,
+			})
+			if err != nil {
+				t.Fatalf("Prepare: %v", err)
+			}
+			if _, err := effects.Journal().Start(t.Context(), prepared.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			if tc.finish != nil {
+				if _, err := tc.finish(t.Context(), effects.Journal(), prepared.ID); err != nil {
+					t.Fatalf("finish the intent: %v", err)
+				}
+			}
+			before, err := effects.Journal().Get(t.Context(), prepared.ID)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+
+			sender := &discordBroadcastSender{adapter: &discord.Adapter{}, effects: effects, sessions: sessions}
+			outcome, err := sender.Send(t.Context(), &broadcast.SendRequest{
+				Route:          broadcast.Route{Source: "discord", Instance: "123456"},
+				Text:           "hello",
+				SessionID:      "broadcast:default",
+				IdempotencyKey: "bcst:bcst-1:a1",
+			})
+			if err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			if outcome.IntentID != prepared.ID || outcome.Succeeded != tc.succeeded || outcome.Ambiguous != tc.ambiguous {
+				t.Errorf("outcome = %+v, want intent %s, succeeded %t, ambiguous %t", outcome, prepared.ID, tc.succeeded, tc.ambiguous)
+			}
+			after, err := effects.Journal().Get(t.Context(), prepared.ID)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if after.State != before.State || !after.UpdatedAt.Equal(before.UpdatedAt) {
+				t.Errorf("intent after the send = %s at %s, want %s at %s, not invoked", after.State, after.UpdatedAt, before.State, before.UpdatedAt)
+			}
+		})
 	}
 }
