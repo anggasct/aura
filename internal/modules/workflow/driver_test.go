@@ -66,18 +66,19 @@ func twoToolStepSpec(id string) *Spec {
 func TestSerialDriverRegistersTheJournaledHandler(t *testing.T) {
 	tests := []struct {
 		name        string
-		driver      Driver
+		options     *Options
 		wantJournal bool
 	}{
-		{name: "serial driver journals every step", driver: DriverSerial, wantJournal: true},
-		{name: "zero driver registers the concurrent handler", driver: DriverConcurrent, wantJournal: false},
+		{name: "serial driver journals every step", options: &Options{Tools: &fakeToolRunner{}, Driver: DriverSerial}, wantJournal: true},
+		{name: "zero driver journals every step", options: &Options{Tools: &fakeToolRunner{}}, wantJournal: true},
+		{name: "concurrent driver journals nothing", options: &Options{Tools: &fakeToolRunner{}, Driver: DriverConcurrent}, wantJournal: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
 			disk := newTestStore(t)
 			runtime := &recordingRegistrar{Fake: durable.NewFake()}
-			interpreter := NewInterpreter(disk, runtime, &Options{Tools: &fakeToolRunner{}, Driver: tc.driver})
+			interpreter := NewInterpreter(disk, runtime, tc.options)
 			if err := interpreter.Load(ctx, twoToolStepSpec("driver-two-steps"), testValidationDeps()); err != nil {
 				t.Fatalf("Load: %v", err)
 			}
