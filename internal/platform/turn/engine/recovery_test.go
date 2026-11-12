@@ -1095,6 +1095,9 @@ func TestSubmitterLeavingAfterTheTerminalEventDoesNotCancelTheRun(t *testing.T) 
 	}
 	leave()
 	eventually(t, "the engine lets go of turn-0", func() bool { return !engineKnows(rig.engine, "turn-0") })
+	if active, _ := storeActiveTurn(t, rig.sessions, "session-a"); active != "" {
+		t.Fatalf("active turn = %q, want the session released by the engine", active)
+	}
 	close(proceed)
 
 	if state := waitRunEnded(t, rig.runtime, "turn-0"); state != durable.RunSucceeded {
