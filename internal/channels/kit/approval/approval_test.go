@@ -8,6 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -335,20 +336,23 @@ func (recorder) RecordStandingGrant(context.Context, *StandingGrantRequest) erro
 func TestOffersStandingGrant(t *testing.T) {
 	cases := []struct {
 		name   string
+		prompt *Prompt
 		class  principal.Class
 		grants StandingGrantRecorder
 		ttl    time.Duration
 		want   bool
 	}{
-		{"trusted with store and ttl", principal.ClassTrusted, recorder{}, time.Hour, true},
-		{"owner", principal.ClassOwner, recorder{}, time.Hour, false},
-		{"public", principal.ClassPublic, recorder{}, time.Hour, false},
-		{"no store", principal.ClassTrusted, nil, time.Hour, false},
-		{"no ttl", principal.ClassTrusted, recorder{}, 0, false},
+		{"trusted with store and ttl", &Prompt{}, principal.ClassTrusted, recorder{}, time.Hour, true},
+		{"owner", &Prompt{}, principal.ClassOwner, recorder{}, time.Hour, false},
+		{"public", &Prompt{}, principal.ClassPublic, recorder{}, time.Hour, false},
+		{"no store", &Prompt{}, principal.ClassTrusted, nil, time.Hour, false},
+		{"no ttl", &Prompt{}, principal.ClassTrusted, recorder{}, 0, false},
+		{"untrusted input", &Prompt{ReasonCode: policy.ReasonUntrustedInput}, principal.ClassTrusted, recorder{}, time.Hour, false},
+		{"nil prompt", nil, principal.ClassTrusted, recorder{}, time.Hour, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := OffersStandingGrant(tc.class, tc.grants, tc.ttl); got != tc.want {
+			if got := OffersStandingGrant(tc.prompt, tc.class, StandingOffer{Grants: tc.grants, TTL: tc.ttl}); got != tc.want {
 				t.Errorf("OffersStandingGrant() = %v, want %v", got, tc.want)
 			}
 		})
@@ -402,5 +406,25 @@ func TestRenderCardCleansArgumentsAndNeverTruncatesThem(t *testing.T) {
 	empty := RenderCard(&Prompt{ToolName: "t", SessionID: "s", PrincipalID: "p"}, "", nil)
 	if !strings.Contains(empty, "arguments: {}") {
 		t.Errorf("empty arguments card = %q", empty)
+	}
+}
+
+func TestCardStatesTheUntrustedInputReason(t *testing.T) {
+	arguments := strings.Repeat("x", 1200)
+	for _, reason := range []string{"", "approval_required", policy.ReasonUntrustedInput} {
+		t.Run("reason "+reason, func(t *testing.T) {
+			card := RenderCard(&Prompt{ToolName: "web_fetch", ToolVersion: "v1", SessionID: "s", PrincipalID: "p", Arguments: arguments, ReasonCode: reason}, "team", nil)
+			lines := strings.Split(card, "\n")
+			count := strings.Count(card, policy.UntrustedInputNotice)
+			if reason != policy.ReasonUntrustedInput {
+				if count != 0 {
+					t.Errorf("card states the untrusted input reason for %q", reason)
+				}
+				return
+			}
+			if count != 1 || !strings.HasPrefix(lines[0], "approval required: web_fetch") || lines[1] != policy.UntrustedInputNotice {
+				t.Errorf("card does not state the reason as its second line, once: %q", lines[:3])
+			}
+		})
 	}
 }

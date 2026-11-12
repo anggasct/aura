@@ -154,7 +154,7 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, r
 		Persona:   persona,
 		Actor:     strconv.FormatInt(ownerChat, 10),
 		Scope:     scopeOf(ownerDest),
-		Standing:  approval.OffersStandingGrant(requester.binding.Class, a.access.Grants, a.access.StandingGrantTTL),
+		Standing:  approval.OffersStandingGrant(prompt, requester.binding.Class, approval.StandingOffer{Grants: a.access.Grants, TTL: a.access.StandingGrantTTL}),
 	}
 	text := approval.RenderCard(prompt, approval.PersonaLabel(definition.ID, definition.Name), nil)
 	card, err := a.openCard(ctx, token, &binding, ownerDest, text, expiresAt)

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/tools/displaytest"
 )
 
@@ -453,5 +454,24 @@ func TestApprovalCardShowsEveryScenarioOfTheApprovalDisplay(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestApprovalCardStatesTheUntrustedInputReason(t *testing.T) {
+	for _, reason := range []string{"approval_required", approval.ReasonUntrustedInput} {
+		t.Run(reason, func(t *testing.T) {
+			rendered := renderApprovalCard(&ApprovalCard{ToolName: "web_fetch", ToolVersion: "v1", SessionID: "s", PrincipalID: "p", Arguments: "{}", ReasonCode: reason}, 0)
+			lines := strings.Split(rendered, "\n")
+			count := strings.Count(rendered, approval.UntrustedInputNotice)
+			if reason != approval.ReasonUntrustedInput {
+				if count != 0 {
+					t.Errorf("card states the untrusted input reason for %q", reason)
+				}
+				return
+			}
+			if count != 1 || !strings.HasPrefix(lines[0], "approval required: web_fetch@v1") || lines[1] != approval.UntrustedInputNotice {
+				t.Errorf("card does not state the reason on the line after its header, once: %q", lines[:3])
+			}
+		})
 	}
 }
