@@ -73,7 +73,7 @@ func TestDurableWorkflowWithGitHubToolsSurvivesAKilledProcess(t *testing.T) {
 	suite := startRunSuite(t, runStart{scenario: "github", github: api.server.URL})
 	disk := workflow.NewStore(suite.db)
 	suite.child.waitKillPoint(t, "the run is suspended at the CI wait with its pull request created and bound", func() bool {
-		return api.creates.Load() == 1 && workflowStatus(t, disk, suite.plan.Run) == workflow.RunSuspended && stepSucceeded(t, disk, suite.plan.Run, "open_pr") && len(correlations(t, disk, suite.plan.Run)) == 1
+		return api.creates.Load() == 1 && workflowStatus(t, disk, suite.plan.Run) == workflow.RunSuspended && suite.stepSucceeded(t, "open_pr") && len(correlations(t, disk, suite.plan.Run)) == 1
 	})
 	if rows := correlations(t, disk, suite.plan.Run); rows[0].ExternalID != proofPullID {
 		t.Fatalf("bindings = %+v, want the create_pr external identity %s", rows, proofPullID)
@@ -101,9 +101,9 @@ func TestDurableWorkflowWithGitHubToolsSurvivesAKilledProcess(t *testing.T) {
 	requireOneEffectPerOperation(t, life.effects)
 }
 
-func stepSucceeded(t *testing.T, disk *workflow.Store, runID, stepID string) bool {
+func (s *runSuite) stepSucceeded(t *testing.T, stepID string) bool {
 	t.Helper()
-	steps, err := disk.Steps(t.Context(), runID)
+	steps, err := workflow.NewStore(s.db).Steps(t.Context(), s.plan.Run)
 	if err != nil {
 		t.Fatalf("Steps: %v", err)
 	}
