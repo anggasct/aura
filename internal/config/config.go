@@ -449,6 +449,7 @@ type Tools struct {
 	Exec                 ToolExec      `koanf:"exec" yaml:"exec"`
 	Fetch                ToolFetch     `koanf:"fetch" yaml:"fetch"`
 	WebSearch            ToolWebSearch `koanf:"web_search" yaml:"web_search"`
+	GitHub               ToolGitHub    `koanf:"github" yaml:"github,omitempty"`
 }
 
 type ToolExec struct {
