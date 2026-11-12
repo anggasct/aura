@@ -416,6 +416,32 @@ func TestServerRecoversATurnAtBoot(t *testing.T) {
 	}
 }
 
+func TestServerRunRetentionDeletesOrphanedTurnRuns(t *testing.T) {
+	restoreDefaultLogger(t)
+	model := newStubModel(t, stubAnswers)
+	cfg := writeTurnServerConfig(t, model, serverTurnShutdownTimeout)
+	db := compositionDatabase(t, cfg.path)
+	const orphanKey = "turn-of-an-erased-session"
+	stamp := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO durable_run (key, handler, payload, state, created_at, updated_at) VALUES (?, ?, ?, 'failed', ?, ?)`,
+		orphanKey, runtimeengine.HandlerName, []byte(`{"turn_id":"`+orphanKey+`","session_id":"sess-erased"}`), stamp, stamp); err != nil {
+		t.Fatalf("insert the orphaned run: %v", err)
+	}
+	srv := buildTurnServer(t, cfg.path)
+	srv.run(t)
+	awaitSchedule(t, "the orphaned turn run is deleted", func() bool {
+		var runs int
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM durable_run WHERE key = ?`, orphanKey).Scan(&runs); err != nil {
+			t.Fatalf("count the orphaned run: %v", err)
+		}
+		return runs == 0
+	})
+	if got := model.calls.Load(); got != 0 {
+		t.Fatalf("model calls = %d, want 0", got)
+	}
+	srv.close(t)
+}
+
 func TestServerStopDrainsItsTurns(t *testing.T) {
 	t.Run("a turn whose model answers during the stop completes", func(t *testing.T) {
 		restoreDefaultLogger(t)
