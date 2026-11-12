@@ -196,4 +196,10 @@ func TestSerialHandlerRefusesAPayloadWithoutARunID(t *testing.T) {
 			}
 		})
 	}
+	t.Run("no invocation", func(t *testing.T) {
+		interpreter := NewInterpreter(newTestStore(t), durable.NewFake(), &Options{Tools: &fakeToolRunner{}})
+		if code, ok := CodeOf(interpreter.HandleSerial(t.Context(), nil)); !ok || code != ErrorCodeStepFailed {
+			t.Fatalf("HandleSerial without an invocation, want code %s", ErrorCodeStepFailed)
+		}
+	})
 }

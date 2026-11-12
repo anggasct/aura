@@ -52,6 +52,9 @@ func updateFromJournaled(record *journaledAttempt) *stepUpdate {
 }
 
 func (i *Interpreter) HandleSerial(ctx context.Context, inv durable.Invocation) error {
+	if inv == nil {
+		return codedError(ErrorCodeStepFailed, "serial run requires an invocation")
+	}
 	var tick struct {
 		RunID string `json:"run_id"`
 	}
