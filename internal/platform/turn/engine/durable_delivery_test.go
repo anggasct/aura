@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -124,6 +125,34 @@ func (a *stopOutlivingAdapter) Deliver(ctx context.Context, req *runtimechannelh
 	return a.capturingAdapter.Deliver(ctx, req)
 }
 
+type fencedDeliveryAdapter struct {
+	capturingAdapter
+	once   sync.Once
+	db     *sql.DB
+	handed chan struct{}
+	err    error
+}
+
+func (a *fencedDeliveryAdapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryRequest) (runtimechannelhost.ProviderReceipt, error) {
+	a.once.Do(func() {
+		a.err = handRunToGhostHost(ctx, a.db, req.EffectID)
+		close(a.handed)
+	})
+	return a.capturingAdapter.Deliver(ctx, req)
+}
+
+func (a *fencedDeliveryAdapter) await(t *testing.T) {
+	t.Helper()
+	select {
+	case <-a.handed:
+	case <-time.After(hostRigTimeout):
+		t.Fatal("the turn never reached its delivery")
+	}
+	if a.err != nil {
+		t.Fatalf("hand the run to another host: %v", a.err)
+	}
+}
+
 func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 	t.Run("a sent reply", func(t *testing.T) {
 		capture := &capturingAdapter{}
@@ -149,6 +178,64 @@ func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 		}
 		if got := capture.count(); got != 0 {
 			t.Fatalf("Deliver calls = %d, want 0", got)
+		}
+	})
+	t.Run("a reply whose channel has no adapter", func(t *testing.T) {
+		capture := &capturingAdapter{}
+		rig := runDurableChannelTurn(t, &namedCapturingAdapter{capturingAdapter: capture, name: "telegram"}, textStep("hello"))
+		if got := terminalRecordOf(t, rig.db, "turn-1"); got.kind != turn.EventKindTurnFailed || got.code != turn.ErrorCodeDeliveryFailed {
+			t.Fatalf("terminal of turn-1 = %+v, want turn.failed with %s", got, turn.ErrorCodeDeliveryFailed)
+		}
+		want := `{"outcome":"failed","code":"delivery_failed","detail":"delivery_failed: owning channel adapter is not configured"}`
+		if got := deliveryRecordsOf(t, rig.db, "turn-1"); len(got) != 1 || got[0] != want {
+			t.Fatalf("delivery records = %v, want %s", got, want)
+		}
+		if got := capture.count(); got != 0 {
+			t.Fatalf("Deliver calls = %d, want 0", got)
+		}
+	})
+	t.Run("a delivery whose record another host fences is decided again by the next execution", func(t *testing.T) {
+		var hooks atomic.Int32
+		cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 16, PostTurnHook: func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
+			hooks.Add(1)
+			return nil
+		}}
+		executor := turn.NewFakeExecutor([]turn.FakeStep{textStep("hello")})
+		rig := newDurableHostRig(t, cfg, executor)
+		adapter := &fencedDeliveryAdapter{db: rig.db, handed: make(chan struct{})}
+		rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{adapter})
+		mustCreateSession(t, rig.db, "channel:333")
+		rig.startHost()
+		_ = callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", "turn-1"))
+		adapter.await(t)
+		rig.stopHost()
+		if got := hooks.Load(); got != 0 {
+			t.Fatalf("post-turn hooks after the fenced delivery = %d, want 0", got)
+		}
+		if terminals := terminalsOf(t, rig.db, "turn-1"); len(terminals) != 0 {
+			t.Fatalf("terminal events after the fenced delivery = %v, want none", terminals)
+		}
+		if got := deliveryRecordsOf(t, rig.db, "turn-1"); len(got) != 0 {
+			t.Fatalf("delivery records after the fenced delivery = %v, want none", got)
+		}
+		if _, err := rig.db.ExecContext(t.Context(), `DELETE FROM durable_host WHERE owner = ?`, ghostHostOwner); err != nil {
+			t.Fatalf("drop the other host: %v", err)
+		}
+		rig.build(executor)
+		rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{adapter})
+		rig.startHost()
+		awaitTerminals(t, rig.db, "turn-1")
+		if got := terminalRecordOf(t, rig.db, "turn-1"); got.kind != turn.EventKindTurnCompleted {
+			t.Fatalf("terminal of turn-1 = %+v, want turn.completed", got)
+		}
+		if got := deliveryRecordsOf(t, rig.db, "turn-1"); len(got) != 1 || got[0] != `{"outcome":"sent"}` {
+			t.Fatalf("delivery records = %v, want one sent record", got)
+		}
+		if got := adapter.count(); got != 2 {
+			t.Fatalf("Deliver calls across the two executions = %d, want 2", got)
+		}
+		if got := hooks.Load(); got != 1 {
+			t.Fatalf("post-turn hooks across the two executions = %d, want 1", got)
 		}
 	})
 	t.Run("a reply whose send outlives the host's stop", func(t *testing.T) {
@@ -293,8 +380,8 @@ func TestAmbiguousDeliveryEndsTheTurnAmbiguous(t *testing.T) {
 			if got.kind != turn.EventKindTurnFailed || got.code != tc.code {
 				t.Fatalf("terminal of turn-1 = %+v, want turn.failed with %s", got, tc.code)
 			}
-			if !strings.HasPrefix(got.detail, tc.detail) {
-				t.Errorf("terminal detail = %q, want it to start with %q", got.detail, tc.detail)
+			if want := tc.detail + ": " + tc.err.Error(); got.detail != want {
+				t.Errorf("terminal detail = %q, want %q", got.detail, want)
 			}
 			records := deliveryRecordsOf(t, rig.db, "turn-1")
 			if len(records) != 1 {
