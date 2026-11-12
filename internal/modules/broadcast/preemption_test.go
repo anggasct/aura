@@ -83,6 +83,7 @@ type recordingRunStore struct {
 	callMu sync.Mutex
 	calls  []string
 	claims []time.Time
+	broken int
 }
 
 func (s *recordingRunStore) enter(done <-chan struct{}, method, id string) {
@@ -94,7 +95,26 @@ func (s *recordingRunStore) enter(done <-chan struct{}, method, id string) {
 
 func (s *recordingRunStore) Load(ctx context.Context, id string) (FullItem, bool, error) {
 	s.enter(ctx.Done(), "Load", id)
+	if s.takeBrokenLoad() {
+		return FullItem{}, false, errors.New("database is locked")
+	}
 	return s.fakeRunStore.Load(ctx, id)
+}
+
+func (s *recordingRunStore) breakLoads(count int) {
+	s.callMu.Lock()
+	defer s.callMu.Unlock()
+	s.broken = count
+}
+
+func (s *recordingRunStore) takeBrokenLoad() bool {
+	s.callMu.Lock()
+	defer s.callMu.Unlock()
+	if s.broken == 0 {
+		return false
+	}
+	s.broken--
+	return true
 }
 
 func (s *recordingRunStore) ListHeld(ctx context.Context, alias, priority string, notBefore time.Time, limit int) ([]FullItem, error) {

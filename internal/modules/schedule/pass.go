@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/durable"
 )
 
 const passLimit = 512
@@ -18,6 +20,7 @@ type RunsRequest struct {
 	Starter Starter
 	Store   PassStore
 	Now     time.Time
+	Reuse   durable.ReusePolicy
 }
 
 type passTally struct {
@@ -43,7 +46,7 @@ func StartRuns(ctx context.Context, req *RunsRequest) (int, error) {
 	}
 	tally := &passTally{}
 	for i := range fired {
-		tally.add(StartFire(ctx, &FireRequest{Starter: req.Starter, JobID: fired[i].JobID, Instant: fired[i].ScheduledForUTC}))
+		tally.add(StartFire(ctx, &FireRequest{Starter: req.Starter, JobID: fired[i].JobID, Instant: fired[i].ScheduledForUTC, Reuse: req.Reuse}))
 	}
 	jobs, err := req.Store.ActiveJobs(ctx, passLimit)
 	if err != nil {
