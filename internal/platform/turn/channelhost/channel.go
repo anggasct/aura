@@ -3,10 +3,13 @@ package runtimechannelhost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 )
+
+var ErrDeliveryAmbiguous = errors.New("channel delivery outcome is unknown")
 
 type OutputPart struct {
 	Text string

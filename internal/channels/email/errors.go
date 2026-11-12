@@ -3,6 +3,8 @@ package email
 import (
 	"errors"
 	"fmt"
+
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
 type ErrorCode string
@@ -41,6 +43,10 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error {
 	return e.Cause
+}
+
+func (e *Error) Is(target error) bool {
+	return target == runtimechannelhost.ErrDeliveryAmbiguous && e.Code == ErrorCodeDeliveryAmbiguous
 }
 
 func CodeOf(err error) (ErrorCode, bool) {

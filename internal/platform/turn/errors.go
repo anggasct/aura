@@ -18,6 +18,7 @@ const (
 	ErrorCodeRuntimeInternal            ErrorCode = "runtime_internal"
 	ErrorCodeInvalidArgument            ErrorCode = "invalid_argument"
 	ErrorCodeDeliveryFailed             ErrorCode = "delivery_failed"
+	ErrorCodeDeliveryAmbiguous          ErrorCode = "delivery_ambiguous"
 	ErrorCodeDeliverySkipped            ErrorCode = "delivery_skipped"
 	ErrorCodeCheckpointInvalid          ErrorCode = "checkpoint_invalid"
 	ErrorCodeCheckpointNotFound         ErrorCode = "checkpoint_not_found"

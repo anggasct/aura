@@ -747,16 +747,11 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	}
 	terminalKind, terminalPayload := e.terminalOutcome(ctx, execErr, req)
 	if terminalKind == turn.EventKindTurnCompleted {
-		deliveryCtx := context.WithoutCancel(ctx)
-		if deliveryErr := e.deliverCompletedTurn(deliveryCtx, req, executed); deliveryErr != nil {
-			if code, ok := turn.CodeOf(deliveryErr); ok && code == turn.ErrorCodeDeliverySkipped {
-				e.logger.DebugContext(deliveryCtx, "turn delivery skipped", "error", deliveryErr, "turn_id", req.TurnID)
-			} else {
-				e.logger.ErrorContext(deliveryCtx, "turn delivery failed", "error", deliveryErr, "turn_id", req.TurnID)
-				terminalKind = turn.EventKindTurnFailed
-				terminalPayload = failedPayload(turn.ErrorCodeDeliveryFailed, "channel delivery failed", deliveryErr, e.agentID(req))
-			}
+		record, err := e.journalDelivery(context.WithoutCancel(ctx), scope, &completedTurn{req: req, events: executed})
+		if err != nil {
+			return err
 		}
+		terminalKind, terminalPayload = record.terminal(e.agentID(req))
 	}
 	if e.cfg.PostTurnHook != nil {
 		hookCtx := context.WithoutCancel(ctx)
@@ -773,6 +768,25 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		return err
 	}
 	return e.releaseAndAdvance(context.WithoutCancel(ctx), scope, req)
+}
+
+const deliveryAction = "delivery"
+
+func (e *Engine) journalDelivery(ctx context.Context, scope *durable.TurnScope, done *completedTurn) (deliveryRecord, error) {
+	if done == nil || done.req == nil {
+		return deliveryRecord{}, invalidArgument("turn delivery requires the completed turn")
+	}
+	raw, err := scope.Invocation().RunAction(ctx, deliveryAction, func(ctx context.Context) ([]byte, error) {
+		return json.Marshal(e.deliverOnce(ctx, done))
+	})
+	if err != nil {
+		return deliveryRecord{}, codedError(turn.ErrorCodeStorageUnavailable, "failed to journal the turn delivery", err)
+	}
+	var record deliveryRecord
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return deliveryRecord{}, codedError(turn.ErrorCodeStorageUnavailable, "failed to decode the turn delivery", err)
+	}
+	return record, nil
 }
 
 func (e *Engine) releaseAndAdvance(ctx context.Context, scope *durable.TurnScope, req *turn.TurnRequest) error {

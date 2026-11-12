@@ -147,7 +147,7 @@ func receiptMessageID(intent *effect.Intent) (int64, error) {
 			return 0, Errorf(ErrorCodeDeliveryAmbiguous, "delivery receipt is missing the message id")
 		}
 		return receipt.MessageID, nil
-	case effect.StateUnknown:
+	case effect.StateUnknown, effect.StateStarted:
 		return 0, Errorf(ErrorCodeDeliveryAmbiguous, "delivery outcome is unknown")
 	default:
 		return 0, Errorf(ErrorCodeDeliveryFailed, "delivery settled without success")
