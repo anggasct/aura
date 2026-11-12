@@ -33,6 +33,11 @@ const (
 	emailEffectIDs = `SELECT id FROM effect_intent WHERE ` + emailEffectMatch
 
 	ownedEffectIDs = `SELECT id FROM effect_intent WHERE session_id IN (SELECT id FROM session WHERE owner_id = ?1)`
+
+	turnRunSessionID = `CASE WHEN json_valid(CAST(durable_run.payload AS TEXT)) THEN json_extract(CAST(durable_run.payload AS TEXT), '$.session_id') END`
+
+	orphanedTurnRuns = `DELETE FROM durable_run WHERE handler = 'turn' AND ` + turnRunSessionID + ` IS NOT NULL
+		AND NOT EXISTS (SELECT 1 FROM session WHERE session.id = ` + turnRunSessionID + `)`
 )
 
 type erasureTarget struct {
@@ -52,6 +57,7 @@ func (c *ErasureCounts) targets() []erasureTarget {
 		{field: &c.Sessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ?`, erase: []string{
 			`DELETE FROM effect_approval WHERE intent_id IN (` + ownedEffectIDs + `)`,
 			`DELETE FROM session WHERE owner_id = ?`,
+			orphanedTurnRuns,
 		}},
 		{field: &c.Grants, count: `SELECT COUNT(*) FROM principal_grant WHERE principal_id = ?`, erase: []string{`DELETE FROM principal_grant WHERE principal_id = ?`}, grant: true},
 		{field: &c.StandingGrants, count: `SELECT COUNT(*) FROM standing_grant WHERE principal_id = ?`, erase: []string{`DELETE FROM standing_grant WHERE principal_id = ?`}},
