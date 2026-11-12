@@ -439,7 +439,7 @@ func (s *reuseSuite) endedStartsANewRun(t *testing.T) {
 					t.Fatalf("Cancel: %v", err)
 				}
 			} else {
-				s.mustStart(t, durable.StartRequest{Handler: reuseHandler, Key: key, Payload: []byte(tc.first)})
+				s.mustStart(t, durable.StartRequest{Handler: reuseHandler, Key: key, Payload: []byte(tc.first), Reuse: durable.ReuseEnded})
 			}
 			s.end(t, key, tc.ended)
 			s.mustStart(t, durable.StartRequest{Handler: reuseHandler, Key: key, Payload: []byte(tc.second), Reuse: durable.ReuseEnded})
