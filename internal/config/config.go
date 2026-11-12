@@ -436,6 +436,7 @@ type Runtime struct {
 	MaxPendingTurns int      `koanf:"max_pending_turns" yaml:"max_pending_turns"`
 	TurnTimeout     Duration `koanf:"turn_timeout" yaml:"turn_timeout"`
 	ShutdownTimeout Duration `koanf:"shutdown_timeout" yaml:"shutdown_timeout"`
+	RunRetention    Duration `koanf:"run_retention" yaml:"run_retention"`
 }
 
 type Capabilities struct {
@@ -943,6 +944,7 @@ func Default() Config {
 			MaxPendingTurns: 64,
 			TurnTimeout:     Duration(5 * time.Minute),
 			ShutdownTimeout: Duration(30 * time.Second),
+			RunRetention:    Duration(720 * time.Hour),
 		},
 		Capabilities: Capabilities{Enabled: []string{}},
 		Agents:       &Agents{},

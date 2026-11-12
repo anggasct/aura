@@ -294,6 +294,50 @@ func TestLoad_ExplicitZeroRuntimeValuesRejected(t *testing.T) {
 	}
 }
 
+func TestRuntimeRunRetentionDefaultsAndValidates(t *testing.T) {
+	loads := []struct {
+		name    string
+		content string
+		env     string
+		want    time.Duration
+	}{
+		{name: "absent key", content: "version: 1\n", want: 720 * time.Hour},
+		{name: "explicit value", content: "version: 1\nruntime:\n  run_retention: 48h\n", want: 48 * time.Hour},
+		{name: "environment override", content: "version: 1\nruntime:\n  run_retention: 48h\n", env: "96h", want: 96 * time.Hour},
+	}
+	for _, tc := range loads {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env != "" {
+				t.Setenv("AURA_RUNTIME_RUN_RETENTION", tc.env)
+			}
+			res, err := Load(writeTempConfig(t, tc.content))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := time.Duration(res.Config.Runtime.RunRetention); got != tc.want {
+				t.Fatalf("run_retention = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	for _, value := range []string{"23h", "0s", "-48h"} {
+		t.Run("below the floor "+value, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, "version: 1\nruntime:\n  run_retention: "+value+"\n"))
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
+				t.Fatalf("Load error = %v, want %s", err, ErrorCodeConfigInvalid)
+			}
+			if !strings.Contains(err.Error(), "runtime.run_retention must be at least 24h") {
+				t.Fatalf("Load error = %v, want the floor named", err)
+			}
+		})
+	}
+	t.Run("not a duration string", func(t *testing.T) {
+		_, err := Load(writeTempConfig(t, "version: 1\nruntime:\n  run_retention: 720\n"))
+		if err == nil || !strings.Contains(err.Error(), "runtime.run_retention must be a duration string") {
+			t.Fatalf("Load error = %v, want a shape error", err)
+		}
+	})
+}
+
 func TestLoad_PathIsDirectory(t *testing.T) {
 	_, err := Load(t.TempDir())
 	if err == nil {

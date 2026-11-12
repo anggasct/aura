@@ -554,7 +554,7 @@ func validateSectionShapes(doc *yamlv3.Node) error {
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
 					return fmt.Errorf("runtime.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
 				}
-			case "turn_timeout", "shutdown_timeout":
+			case "turn_timeout", "shutdown_timeout", "run_retention":
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 					return fmt.Errorf("runtime.%s must be a duration string at line %d", keyNode.Value, valueNode.Line)
 				}
@@ -2277,6 +2277,9 @@ func applyDefaults(cfg *Config, data []byte) error {
 	if cfg.Runtime.ShutdownTimeout == 0 && !configValuePresent(doc, "runtime", "shutdown_timeout") && !envValuePresent("runtime.shutdown_timeout") {
 		cfg.Runtime.ShutdownTimeout = defaults.Runtime.ShutdownTimeout
 	}
+	if cfg.Runtime.RunRetention == 0 && !configValuePresent(doc, "runtime", "run_retention") && !envValuePresent("runtime.run_retention") {
+		cfg.Runtime.RunRetention = defaults.Runtime.RunRetention
+	}
 	if cfg.Capabilities.Enabled == nil {
 		cfg.Capabilities.Enabled = []string{}
 	}
@@ -3091,6 +3094,9 @@ func validateRuntime(runtime Runtime) error {
 	}
 	if runtime.ShutdownTimeout <= 0 {
 		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.shutdown_timeout must be positive"}
+	}
+	if time.Duration(runtime.RunRetention) < MinRetention {
+		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.run_retention must be at least 24h"}
 	}
 	return nil
 }

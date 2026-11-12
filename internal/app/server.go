@@ -498,6 +498,9 @@ func (b *build) registerSweeps() error {
 	})); err != nil {
 		return err
 	}
+	if err := b.registerRunRetention(); err != nil {
+		return err
+	}
 	if durableEnabled(cfg) {
 		if err := b.group.Add(server.Background("workflow_completion", func(ctx context.Context) {
 			newWorkflowCompletionNotifier(cfg, db, registry, logger).run(ctx, workflowCompletionInterval)
@@ -510,6 +513,24 @@ func (b *build) registerSweeps() error {
 	return b.group.Add(server.Background("persona_eval_schedules", func(ctx context.Context) {
 		runPersonaEvalSchedules(ctx, configPath, db, registry, models, logger, wallEvalClock)
 	}))
+}
+
+func (b *build) registerRunRetention() error {
+	if durableEnabled(b.cfg) {
+		return nil
+	}
+	prune, ok := b.server.broadcastRuntime.(pruner)
+	if !ok {
+		return invalidOptions("the durable runtime cannot prune ended runs")
+	}
+	sweep := &runRetention{
+		pruner:    prune,
+		retention: time.Duration(b.cfg.Runtime.RunRetention),
+		batch:     runRetentionBatch,
+		interval:  runRetentionInterval,
+		logger:    b.logger,
+	}
+	return b.group.Add(server.Background("run_retention", sweep.run))
 }
 
 func serveListeners(listeners *server.Server, logger *slog.Logger, cfg *config.Config) func(ctx context.Context) error {

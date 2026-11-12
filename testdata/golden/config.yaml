@@ -4,6 +4,7 @@ runtime:
   max_pending_turns: 64
   turn_timeout: 5m0s
   shutdown_timeout: 30s
+  run_retention: 720h0m0s
 capabilities:
   enabled: []
 tools:
