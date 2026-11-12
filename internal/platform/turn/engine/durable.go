@@ -844,7 +844,7 @@ func (e *Engine) pollDurableTurn(ctx context.Context, t *turnState) {
 			e.failDurableStart(ctx, t, err)
 			return
 		}
-		ref, err = e.durableRuntime.Start(ctx, durable.StartRequest{Handler: "turn", Key: t.turnID, Payload: payload})
+		ref, err = e.durableRuntime.Start(ctx, durable.StartRequest{Handler: HandlerName, Key: t.turnID, Payload: payload})
 		if err != nil {
 			e.failDurableStart(ctx, t, err)
 			return
@@ -925,16 +925,27 @@ func (e *Engine) recordRunEnd(ctx context.Context, t *turnState, status *durable
 }
 
 func (e *Engine) cancelDurableTurn(ctx context.Context, t *turnState, ref durable.RunRef) {
+	if e.letGoOfEndedTurn(ctx, t) {
+		return
+	}
 	if err := e.durableRuntime.Cancel(context.WithoutCancel(ctx), ref); err != nil {
 		e.logger.DebugContext(ctx, "durable turn cancel failed", "error", err, "turn_id", t.turnID)
 	}
-	if ended, err := e.hasTerminalEvent(context.WithoutCancel(ctx), t); err == nil && ended {
-		e.replayStoredToLive(ctx, t)
-		e.closeSubscribers(t)
-		e.releaseTurn(ctx, t)
+	if e.letGoOfEndedTurn(ctx, t) {
 		return
 	}
 	e.endCancelledTurn(ctx, t)
+}
+
+func (e *Engine) letGoOfEndedTurn(ctx context.Context, t *turnState) bool {
+	ended, err := e.hasTerminalEvent(context.WithoutCancel(ctx), t)
+	if err != nil || !ended {
+		return false
+	}
+	e.replayStoredToLive(ctx, t)
+	e.closeSubscribers(t)
+	e.releaseTurn(ctx, t)
+	return true
 }
 
 func (e *Engine) endCancelledTurn(ctx context.Context, t *turnState) {
