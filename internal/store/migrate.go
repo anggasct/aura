@@ -60,6 +60,7 @@ var migrations = []migration{
 	{version: 42, sql: durableSessionSchemaSQL},
 	{version: 43, sql: webhookExecutionSessionSchemaSQL},
 	{version: 44, sql: runtimeEventTurnFirstIndexSQL},
+	{version: 45, sql: effectIntentResultSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -926,6 +927,18 @@ DROP INDEX runtime_event_turn_idx;
 
 CREATE INDEX runtime_event_turn_idx
     ON runtime_event(turn_id, session_id, sequence);
+`
+
+const effectIntentResultSchemaSQL = `
+ALTER TABLE effect_intent ADD COLUMN result_json TEXT;
+
+ALTER TABLE effect_intent ADD COLUMN result_digest TEXT
+    CHECK ((result_json IS NULL) = (result_digest IS NULL)
+       AND (result_json IS NULL OR (state = 'succeeded'
+            AND typeof(result_json) = 'text'
+            AND typeof(result_digest) = 'text'
+            AND json_valid(result_json)
+            AND length(CAST(result_json AS BLOB)) <= 1048576)));
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {
