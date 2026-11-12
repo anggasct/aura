@@ -347,6 +347,7 @@ func TestDeleteOrphanedTurnRuns(t *testing.T) {
 		{session: liveSession, turn: "turn-live", kind: "turn.accepted"},
 		{session: liveSession, turn: "turn-returned-running", kind: "turn.accepted"},
 		{session: returnedSession, turn: "turn-returned-failed", kind: "turn.cancelled"},
+		{session: returnedSession, turn: "turn-returned-later", kind: "turn.accepted"},
 	} {
 		seedTurnEvent(t, db, event)
 	}
