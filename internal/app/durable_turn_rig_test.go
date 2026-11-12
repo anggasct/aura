@@ -314,6 +314,56 @@ type turnLife struct {
 	ledger   *turnLedger
 }
 
+func newSuiteRuntime(t *testing.T, db *sql.DB) *sqlite.Runtime {
+	t.Helper()
+	rt, err := sqlite.New(&sqlite.Options{DB: db, Logger: slog.New(slog.DiscardHandler), PollInterval: suiteTick, HostTTL: suiteHostTTL, StopGrace: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	return rt
+}
+
+func serveRuntime(t *testing.T, rt *sqlite.Runtime) {
+	t.Helper()
+	hostCtx, stopHost := context.WithCancel(context.WithoutCancel(t.Context()))
+	hosted := make(chan error, 1)
+	go func() { hosted <- rt.Run(hostCtx) }()
+	t.Cleanup(func() {
+		stopHost()
+		select {
+		case err := <-hosted:
+			if err != nil {
+				t.Errorf("durable host: %v", err)
+			}
+		case <-time.After(suiteStopBound):
+			t.Error("the durable host did not stop")
+		}
+	})
+}
+
+type ledgerTurn struct {
+	scenario turnScenario
+	ledger   *turnLedger
+	options  []runtimeadk.ExecutorOption
+}
+
+func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.ADKExecutor {
+	t.Helper()
+	broker := toolbrokertest.NewBroker(t, &toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
+	tools := &ledgerTools{broker: broker, ledger: parts.ledger, gated: parts.scenario.gated}
+	for _, stub := range parts.scenario.tools {
+		toolbrokertest.Register(t, broker, toolbrokertest.Stub{Name: stub.name, RequiresApproval: stub.approval, Run: parts.ledger.adapter(stub)})
+		tools.defs = append(tools.defs, runtimeadk.BuiltinToolDefinition{Name: stub.name, Version: stubToolVersion, Schema: json.RawMessage(`{"type":"object"}`)})
+	}
+	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)
+	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps}
+	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, store.NewSessionService(db), store.NewEventStore(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
+	if err != nil {
+		t.Fatalf("NewADKExecutor: %v", err)
+	}
+	return executor
+}
+
 func openLife(t *testing.T, plan lifePlan) *turnLife {
 	t.Helper()
 	scenario, ok := turnScenarios[plan.Scenario]
@@ -327,37 +377,24 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	t.Cleanup(func() { _ = db.Close() })
 	logger := slog.New(slog.DiscardHandler)
 	ledger := &turnLedger{dir: plan.Ledger, life: plan.Life}
-	rt, err := sqlite.New(&sqlite.Options{DB: db, Logger: logger, PollInterval: suiteTick, HostTTL: suiteHostTTL, StopGrace: 5 * time.Second})
-	if err != nil {
-		t.Fatalf("sqlite.New: %v", err)
-	}
+	rt := newSuiteRuntime(t, db)
 	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: db})
 	if err != nil {
 		t.Fatalf("sqlite.NewSessionStore: %v", err)
-	}
-	broker := toolbrokertest.NewBroker(t, &toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
-	tools := &ledgerTools{broker: broker, ledger: ledger, gated: scenario.gated}
-	for _, stub := range scenario.tools {
-		toolbrokertest.Register(t, broker, toolbrokertest.Stub{Name: stub.name, RequiresApproval: stub.approval, Run: ledger.adapter(stub)})
-		tools.defs = append(tools.defs, runtimeadk.BuiltinToolDefinition{Name: stub.name, Version: stubToolVersion, Schema: json.RawMessage(`{"type":"object"}`)})
 	}
 	var wiring lifeWiring
 	if scenario.wiring != nil {
 		wiring = scenario.wiring(t, ledger)
 	}
-	opts := []runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}
+	var opts []runtimeadk.ExecutorOption
 	if wiring.skillContext != nil {
 		opts = append(opts, runtimeadk.WithSkillContext(wiring.skillContext))
 	}
 	if wiring.knowledge != nil {
 		opts = append(opts, runtimeadk.WithKnowledgeContext(wiring.knowledge))
 	}
-	model := &scriptedModel{ledger: ledger, steps: scenario.steps}
+	executor := newLedgerExecutor(t, db, &ledgerTurn{scenario: scenario, ledger: ledger, options: opts})
 	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, store.NewSessionService(db), events, tools, nil, logger, opts...)
-	if err != nil {
-		t.Fatalf("NewADKExecutor: %v", err)
-	}
 	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
 		MaxActiveTurns:  4,
 		MaxPendingTurns: 16,
@@ -370,23 +407,12 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 		t.Fatalf("NewEngine: %v", err)
 	}
 	executor.SetEventPublisher(engine)
-	hostCtx, stopHost := context.WithCancel(context.WithoutCancel(t.Context()))
-	hosted := make(chan error, 1)
-	go func() { hosted <- rt.Run(hostCtx) }()
+	serveRuntime(t, rt)
 	t.Cleanup(func() {
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), suiteStopBound)
 		defer cancel()
 		if err := engine.Shutdown(shutdownCtx); err != nil {
 			t.Errorf("shut the engine down: %v", err)
-		}
-		stopHost()
-		select {
-		case err := <-hosted:
-			if err != nil {
-				t.Errorf("durable host: %v", err)
-			}
-		case <-time.After(suiteStopBound):
-			t.Error("the durable host did not stop")
 		}
 	})
 	return &turnLife{scenario: scenario, db: db, runtime: rt, sessions: sessions, engine: engine, ledger: ledger}
@@ -497,14 +523,26 @@ type firstLife struct {
 	ended  bool
 }
 
-func startFirstLife(t *testing.T, plan lifePlan) *firstLife {
+type lifeEntry struct {
+	test string
+	env  string
+}
+
+var turnEntry = lifeEntry{test: "TestDurableTurnFirstLife", env: firstLifeEnv}
+
+type lifeLaunch struct {
+	entry lifeEntry
+	plan  any
+}
+
+func startFirstLife(t *testing.T, launch lifeLaunch) *firstLife {
 	t.Helper()
-	encoded, err := json.Marshal(plan)
+	encoded, err := json.Marshal(launch.plan)
 	if err != nil {
 		t.Fatalf("encode the first life plan: %v", err)
 	}
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestDurableTurnFirstLife$", "-test.timeout=3m", "-test.v")
-	cmd.Env = append(os.Environ(), firstLifeEnv+"="+string(encoded), "GORACE=halt_on_error=1")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+launch.entry.test+"$", "-test.timeout=3m", "-test.v")
+	cmd.Env = append(os.Environ(), launch.entry.env+"="+string(encoded), "GORACE=halt_on_error=1")
 	output := &bytes.Buffer{}
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -592,7 +630,7 @@ func startKilledSuite(t *testing.T, scenario string) *killedSuite {
 		scenario: turnScenarios[scenario],
 		db:       db,
 		ledger:   &turnLedger{dir: plan.Ledger},
-		child:    startFirstLife(t, plan),
+		child:    startFirstLife(t, lifeLaunch{entry: turnEntry, plan: plan}),
 	}
 }
 
