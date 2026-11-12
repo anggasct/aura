@@ -1055,6 +1055,56 @@ func TestCancelAfterTheRunCompletedKeepsTheOneTerminalEvent(t *testing.T) {
 	}
 }
 
+func runUntilCompleted(ctx context.Context, engine *Engine, req *turn.TurnRequest) error {
+	for ev, err := range engine.Run(ctx, req) {
+		if err != nil {
+			return err
+		}
+		if ev.Kind == turn.EventKindTurnCompleted {
+			return nil
+		}
+	}
+	return errors.New("the stream ended before turn.completed")
+}
+
+func TestSubmitterLeavingAfterTheTerminalEventDoesNotCancelTheRun(t *testing.T) {
+	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, newHoldingExecutor())
+	mustCreateSession(t, rig.db, "session-a")
+	releasing, proceed := make(chan struct{}), make(chan struct{})
+	var handlerReleased atomic.Bool
+	rig.sessions.hooks(func(s *hookedSessionStore) {
+		s.aroundRelease = func(_, _ string, release func() (runtimesessions.ReleaseResult, error)) (runtimesessions.ReleaseResult, error) {
+			if handlerReleased.CompareAndSwap(false, true) {
+				close(releasing)
+				<-proceed
+			}
+			return release()
+		}
+	})
+	rig.startHost()
+
+	ctx, leave := context.WithCancel(t.Context())
+	defer leave()
+	if err := runUntilCompleted(ctx, rig.engine, sampleRequest("session-a", "turn-0")); err != nil {
+		t.Fatalf("turn stream: %v", err)
+	}
+	select {
+	case <-releasing:
+	case <-time.After(hostRigTimeout):
+		t.Fatal("the run never reached its release")
+	}
+	leave()
+	eventually(t, "the engine lets go of turn-0", func() bool { return !engineKnows(rig.engine, "turn-0") })
+	close(proceed)
+
+	if state := waitRunEnded(t, rig.runtime, "turn-0"); state != durable.RunSucceeded {
+		t.Fatalf("run state = %q, want succeeded", state)
+	}
+	if got := terminalsOf(t, rig.db, "turn-0"); !slices.Equal(got, []string{turn.EventKindTurnCompleted}) {
+		t.Fatalf("terminal events = %v, want the one turn.completed", got)
+	}
+}
+
 type budgetedTurnEvents struct {
 	DedupeStore
 
