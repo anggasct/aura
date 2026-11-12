@@ -1,9 +1,18 @@
 package store
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
+
+func occurrenceIDs(items []ScheduledOccurrence) []string {
+	ids := make([]string, 0, len(items))
+	for i := range items {
+		ids = append(ids, items[i].ID)
+	}
+	return ids
+}
 
 func testScheduledJob(id string) *ScheduledJob {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
@@ -150,43 +159,48 @@ func TestScheduleStore_RejectsInvalidRows(t *testing.T) {
 	}
 }
 
-func TestScheduleStore_PendingFireAndPrune(t *testing.T) {
+func TestScheduleStore_FiredOccurrencesAndPrune(t *testing.T) {
 	db := newTestDB(t)
 	s := NewScheduleStore(db)
 	ctx := t.Context()
 
-	if err := s.InsertJob(ctx, testScheduledJob("job-1")); err != nil {
-		t.Fatalf("seed job: %v", err)
+	for _, id := range []string{"job-1", "job-2"} {
+		if err := s.InsertJob(ctx, testScheduledJob(id)); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
 	}
 	fire := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
-	now := fire.Add(time.Minute)
-	orphan := &ScheduledOccurrence{
-		ID: "cron-orphan", JobID: "job-1", JobVersion: 1, ScheduledForUTC: fire,
-		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
+	now := fire.Add(3 * time.Hour)
+	seeded := []*ScheduledOccurrence{
+		{ID: "cron-newest", JobID: "job-1", JobVersion: 1, ScheduledForUTC: fire.Add(2 * time.Hour), State: OccurrenceFired, CreatedAt: now, UpdatedAt: now},
+		{ID: "cron-attached", JobID: "job-1", JobVersion: 1, ScheduledForUTC: fire.Add(time.Hour), State: OccurrenceFired, CreatedAt: now, UpdatedAt: now},
+		{ID: "cron-oldest", JobID: "job-2", JobVersion: 1, ScheduledForUTC: fire, State: OccurrenceFired, CreatedAt: now, UpdatedAt: now},
+		{ID: "cron-settled", JobID: "job-2", JobVersion: 1, ScheduledForUTC: fire.Add(-time.Hour), State: OccurrenceCompleted, CreatedAt: now, UpdatedAt: now},
 	}
-	if err := s.RecordFire(ctx, orphan); err != nil {
-		t.Fatalf("seed orphan: %v", err)
-	}
-	pending, found, err := s.PendingFire(ctx, "job-1")
-	if err != nil || !found || pending.ID != "cron-orphan" {
-		t.Errorf("PendingFire() = %+v, %v, %v", pending.ID, found, err)
-	}
-	if _, found, err := s.PendingFire(ctx, "missing"); err != nil || found {
-		t.Errorf("missing PendingFire() = %v, %v", found, err)
-	}
-	attached := &ScheduledOccurrence{
-		ID: "cron-attached", JobID: "job-1", JobVersion: 1, ScheduledForUTC: fire.Add(time.Hour),
-		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := s.RecordFire(ctx, attached); err != nil {
-		t.Fatalf("seed attached: %v", err)
+	for _, occurrence := range seeded {
+		if err := s.RecordFire(ctx, occurrence); err != nil {
+			t.Fatalf("seed %s: %v", occurrence.ID, err)
+		}
 	}
 	if err := s.AttachTurn(ctx, "cron-attached", "turn-1", now); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
-	pending, found, err = s.PendingFire(ctx, "job-1")
-	if err != nil || !found || pending.ID != "cron-orphan" {
-		t.Errorf("PendingFire() skips attached rows: %+v, %v, %v", pending.ID, found, err)
+	fired, err := s.FiredOccurrences(ctx, 10)
+	if err != nil {
+		t.Fatalf("FiredOccurrences(): %v", err)
+	}
+	if got := occurrenceIDs(fired); !slices.Equal(got, []string{"cron-oldest", "cron-attached", "cron-newest"}) {
+		t.Errorf("FiredOccurrences() = %v, want the fired rows of every job, oldest first", got)
+	}
+	limited, err := s.FiredOccurrences(ctx, 2)
+	if err != nil {
+		t.Fatalf("FiredOccurrences(limit 2): %v", err)
+	}
+	if got := occurrenceIDs(limited); !slices.Equal(got, []string{"cron-oldest", "cron-attached"}) {
+		t.Errorf("FiredOccurrences(limit 2) = %v, want the two oldest", got)
+	}
+	if _, err := s.FiredOccurrences(ctx, 0); err == nil {
+		t.Error("non-positive fired limit accepted")
 	}
 
 	old := now.Add(-1000 * time.Hour)

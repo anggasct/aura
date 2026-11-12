@@ -142,18 +142,34 @@ func (s *scheduleStore) AttachTurn(ctx context.Context, id, turnID string, now t
 	return mapScheduleStoreError(s.store.AttachTurn(ctx, id, turnID, now))
 }
 
-func (s *scheduleStore) PendingFire(ctx context.Context, jobID string) (schedule.Occurrence, bool, error) {
+func (s *scheduleStore) FiredOccurrences(ctx context.Context, limit int) ([]schedule.Occurrence, error) {
 	if s.store == nil {
-		return schedule.Occurrence{}, false, errors.New("schedule store must not be nil")
+		return nil, errors.New("schedule store must not be nil")
 	}
-	item, found, err := s.store.PendingFire(ctx, jobID)
+	items, err := s.store.FiredOccurrences(ctx, limit)
 	if err != nil {
-		return schedule.Occurrence{}, false, mapScheduleStoreError(err)
+		return nil, mapScheduleStoreError(err)
 	}
-	if !found {
-		return schedule.Occurrence{}, false, nil
+	occurrences := make([]schedule.Occurrence, 0, len(items))
+	for i := range items {
+		occurrences = append(occurrences, toScheduleOccurrence(&items[i]))
 	}
-	return toScheduleOccurrence(&item), true, nil
+	return occurrences, nil
+}
+
+func (s *scheduleStore) ActiveJobs(ctx context.Context, limit int) ([]schedule.Job, error) {
+	if s.store == nil {
+		return nil, errors.New("schedule store must not be nil")
+	}
+	items, err := s.store.ActiveJobs(ctx, limit)
+	if err != nil {
+		return nil, mapScheduleStoreError(err)
+	}
+	jobs := make([]schedule.Job, 0, len(items))
+	for i := range items {
+		jobs = append(jobs, toScheduleJob(&items[i]))
+	}
+	return jobs, nil
 }
 
 func (s *scheduleStore) PruneOccurrences(ctx context.Context, jobID string, before time.Time, limit int) (int, error) {
@@ -346,16 +362,30 @@ func notifyContentJSON(text string) string {
 	return string(raw)
 }
 
-func buildScheduleRunner(db *sql.DB, logger *slog.Logger, engine cronTurnEngine, broadcaster *broadcast.Broadcaster, retention time.Duration, observer schedule.Observer, workflows *scheduleWorkflows) (*schedule.Runner, error) {
-	turns := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db), workflows: workflows}
-	return schedule.NewRunner(
-		&scheduleStore{store: store.NewScheduleStore(db)},
-		turns,
-		&cronNotifier{broadcaster: broadcaster},
-		logger,
-		retention,
-		observer,
-	)
+type scheduleRunnerInput struct {
+	db          *sql.DB
+	logger      *slog.Logger
+	engine      cronTurnEngine
+	broadcaster *broadcast.Broadcaster
+	retention   time.Duration
+	observer    schedule.Observer
+	workflows   *scheduleWorkflows
+	starter     schedule.Starter
+}
+
+func buildScheduleRunner(in *scheduleRunnerInput) (*schedule.Runner, error) {
+	if in == nil {
+		return nil, errors.New("schedule runner input must not be nil")
+	}
+	return schedule.NewRunner(&schedule.RunnerDeps{
+		Jobs:      &scheduleStore{store: store.NewScheduleStore(in.db)},
+		Turns:     &engineTurnRunner{engine: in.engine, sessions: store.NewSessionService(in.db), workflows: in.workflows},
+		Notify:    &cronNotifier{broadcaster: in.broadcaster},
+		Starter:   in.starter,
+		Logger:    in.logger,
+		Retention: in.retention,
+		Observer:  in.observer,
+	})
 }
 
 func buildCronBroadcaster(cfg *config.Config, db *sql.DB, rt durable.Runtime, channels *broadcastChannels) (*broadcast.Broadcaster, error) {
@@ -415,18 +445,33 @@ func registerScheduleHandler(target any, runner *schedule.Runner) error {
 }
 
 func resumeScheduleRuns(ctx context.Context, rt durable.Runtime, db *sql.DB) (int, error) {
-	jobs, err := store.NewScheduleStore(db).ActiveJobs(ctx, 512)
-	if err != nil {
-		return 0, err
-	}
-	for i := range jobs {
-		if _, err := rt.Start(ctx, durable.StartRequest{
-			Handler: schedule.HandlerName, Key: jobs[i].ID, Payload: []byte(jobs[i].ID),
-		}); err != nil {
-			return 0, err
+	return schedule.StartRuns(ctx, &schedule.RunsRequest{
+		Starter: rt, Store: &scheduleStore{store: store.NewScheduleStore(db)}, Now: time.Now().UTC(),
+	})
+}
+
+const schedulePassInterval = 5 * time.Minute
+
+type schedulePass struct {
+	runtime  durable.Runtime
+	db       *sql.DB
+	logger   *slog.Logger
+	interval time.Duration
+}
+
+func (p *schedulePass) run(ctx context.Context) {
+	ticker := time.NewTicker(p.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, err := resumeScheduleRuns(ctx, p.runtime, p.db); err != nil && ctx.Err() == nil {
+				p.logger.WarnContext(ctx, "schedule pass failed", "component", "schedule", "error", err)
+			}
 		}
 	}
-	return len(jobs), nil
 }
 
 func scheduleRecorderObserver(recorder *telemetry.ScheduleRecorder) schedule.Observer {

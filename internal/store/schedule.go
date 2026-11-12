@@ -79,7 +79,7 @@ type ScheduleStore interface {
 	RecordFire(ctx context.Context, occurrence *ScheduledOccurrence) error
 	OccurrenceByFire(ctx context.Context, jobID string, scheduledFor time.Time) (ScheduledOccurrence, bool, error)
 	ActiveJobs(ctx context.Context, limit int) ([]ScheduledJob, error)
-	PendingFire(ctx context.Context, jobID string) (ScheduledOccurrence, bool, error)
+	FiredOccurrences(ctx context.Context, limit int) ([]ScheduledOccurrence, error)
 	PruneOccurrences(ctx context.Context, jobID string, before time.Time, limit int) (int, error)
 	ListJobs(ctx context.Context, limit int) ([]ScheduledJob, error)
 	ActiveOccurrence(ctx context.Context, jobID string) (ScheduledOccurrence, bool, error)
@@ -553,34 +553,35 @@ func (s *sqliteScheduleStore) ActiveJobs(ctx context.Context, limit int) ([]Sche
 	return jobs, nil
 }
 
-func (s *sqliteScheduleStore) PendingFire(ctx context.Context, jobID string) (ScheduledOccurrence, bool, error) {
+func (s *sqliteScheduleStore) FiredOccurrences(ctx context.Context, limit int) ([]ScheduledOccurrence, error) {
 	if s.db == nil {
-		return ScheduledOccurrence{}, false, errNilArgument("db")
+		return nil, errNilArgument("db")
 	}
-	if jobID == "" {
-		return ScheduledOccurrence{}, false, Errorf(ErrorCodeInvalidArgument, "job id must not be empty")
+	if limit <= 0 {
+		return nil, Errorf(ErrorCodeInvalidArgument, "list limit must be positive")
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, job_id, job_version, scheduled_for_utc, state, turn_id,
 		result_event_id, safe_error_code, created_at, updated_at
-		FROM scheduled_occurrence
-		WHERE job_id = ? AND state = ? AND (turn_id IS NULL OR turn_id = '')
-		ORDER BY scheduled_for_utc, id LIMIT 1`,
-		jobID, OccurrenceFired)
+		FROM scheduled_occurrence WHERE state = ? ORDER BY scheduled_for_utc, id LIMIT ?`,
+		OccurrenceFired, limit)
 	if err != nil {
-		return ScheduledOccurrence{}, false, classifyBusy(fmt.Errorf("load pending fire: %w", err))
+		return nil, classifyBusy(fmt.Errorf("list fired occurrences: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		_ = rows.Close()
-		return ScheduledOccurrence{}, false, nil
+	items := []ScheduledOccurrence{}
+	for rows.Next() {
+		item, err := scanScheduledOccurrence(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		items = append(items, item)
 	}
-	item, err := scanScheduledOccurrence(rows)
-	if err != nil {
-		_ = rows.Close()
-		return ScheduledOccurrence{}, false, err
+	if err := rows.Err(); err != nil {
+		return nil, classifyBusy(fmt.Errorf("list fired occurrences: %w", err))
 	}
-	return item, true, nil
+	return items, nil
 }
 
 func (s *sqliteScheduleStore) PruneOccurrences(ctx context.Context, jobID string, before time.Time, limit int) (int, error) {

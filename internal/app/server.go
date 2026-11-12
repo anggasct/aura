@@ -329,7 +329,11 @@ func (b *build) buildSchedule() error {
 		return err
 	}
 	s.scheduledWorkflows = &scheduleWorkflows{}
-	s.scheduleRunner, err = buildScheduleRunner(db, logger, b.engine, cronBroadcaster, time.Duration(cfg.Scheduler.OccurrenceRetention), scheduleRecorderObserver(scheduleRecorder), s.scheduledWorkflows)
+	s.scheduleRunner, err = buildScheduleRunner(&scheduleRunnerInput{
+		db: db, logger: logger, engine: b.engine, broadcaster: cronBroadcaster,
+		retention: time.Duration(cfg.Scheduler.OccurrenceRetention), observer: scheduleRecorderObserver(scheduleRecorder),
+		workflows: s.scheduledWorkflows, starter: s.broadcastRuntime,
+	})
 	if err != nil {
 		return err
 	}
@@ -361,6 +365,10 @@ func (b *build) buildSchedule() error {
 		}
 		return nil
 	}}); err != nil {
+		return err
+	}
+	pass := &schedulePass{runtime: runtime, db: db, logger: logger, interval: schedulePassInterval}
+	if err := b.group.Add(server.Background("schedule_pass", pass.run)); err != nil {
 		return err
 	}
 	return b.group.Add(&lifecycleStage{name: "channels", start: host.Start, stop: host.Shutdown})

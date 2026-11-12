@@ -98,7 +98,8 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), app, job.ID); err != nil {
+				starts := &scheduleRunStart{out: cmd.OutOrStdout(), app: app}
+				if err := starts.next(ctx, &job); err != nil {
 					return err
 				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", job.ID)
@@ -119,16 +120,6 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func startScheduleRun(ctx context.Context, runtime durable.Runtime, jobID string) error {
-	if runtime == nil {
-		return errors.New("durable runtime must not be nil")
-	}
-	_, err := runtime.Start(ctx, durable.StartRequest{
-		Handler: schedule.HandlerName, Key: jobID, Payload: []byte(jobID),
-	})
-	return err
-}
-
 func scheduleParts(cfg *config.Config) []Part {
 	if durableEnabled(cfg) {
 		return []Part{PartDurable}
@@ -136,12 +127,36 @@ func scheduleParts(cfg *config.Config) []Part {
 	return nil
 }
 
-func startScheduleRunIfDurable(ctx context.Context, out io.Writer, app *App, jobID string) error {
-	if !durableEnabled(app.result.Config) {
-		_, err := fmt.Fprintln(out, "note: the job run starts with the server")
+type scheduleRunStart struct {
+	out io.Writer
+	app *App
+}
+
+func (s *scheduleRunStart) runtime() (durable.Runtime, bool, error) {
+	if !durableEnabled(s.app.result.Config) {
+		_, err := fmt.Fprintln(s.out, "note: the job run starts with the server")
+		return nil, false, err
+	}
+	if s.app.runtime == nil {
+		return nil, false, errors.New("durable runtime must not be nil")
+	}
+	return s.app.runtime, true, nil
+}
+
+func (s *scheduleRunStart) next(ctx context.Context, job *schedule.Job) error {
+	runtime, ok, err := s.runtime()
+	if err != nil || !ok {
 		return err
 	}
-	return startScheduleRun(ctx, app.runtime, jobID)
+	return schedule.StartNext(ctx, &schedule.NextRequest{Starter: runtime, Job: job, After: time.Now().UTC()})
+}
+
+func (s *scheduleRunStart) recorded(ctx context.Context, occurrence *schedule.Occurrence) error {
+	runtime, ok, err := s.runtime()
+	if err != nil || !ok {
+		return err
+	}
+	return schedule.StartFire(ctx, &schedule.FireRequest{Starter: runtime, JobID: occurrence.JobID, Instant: occurrence.ScheduledForUTC})
 }
 
 func newScheduleListCmd(gf *globalFlags) *cobra.Command {
@@ -224,7 +239,12 @@ func newScheduleResumeCmd(gf *globalFlags) *cobra.Command {
 				if err := service.SetState(ctx, args[0], schedule.JobActive); err != nil {
 					return err
 				}
-				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), app, args[0]); err != nil {
+				job, err := service.Get(ctx, args[0])
+				if err != nil {
+					return err
+				}
+				starts := &scheduleRunStart{out: cmd.OutOrStdout(), app: app}
+				if err := starts.next(ctx, &job); err != nil {
 					return err
 				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\nstate: active\n", args[0])
@@ -313,7 +333,8 @@ func newScheduleRunNowCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := startScheduleRunIfDurable(ctx, cmd.OutOrStdout(), app, args[0]); err != nil {
+				starts := &scheduleRunStart{out: cmd.OutOrStdout(), app: app}
+				if err := starts.recorded(ctx, &occurrence); err != nil {
 					return err
 				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\noccurrence: %s\n", args[0], occurrence.ID)
