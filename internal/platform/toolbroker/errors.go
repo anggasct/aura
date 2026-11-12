@@ -17,8 +17,8 @@ const (
 	ResultExecutionFailed       ResultClass = "execution_failed"
 	ResultToolTierDenied        ResultClass = "tool_tier_denied"
 
-	ResultApprovalDisplayTooLarge ResultClass = "approval_display_too_large"
-	ResultKnowledgeSinkNoApprover ResultClass = "knowledge_sink_no_approver"
+	ResultApprovalDisplayTooLarge  ResultClass = "approval_display_too_large"
+	ResultUntrustedInputNoApprover ResultClass = "untrusted_input_no_approver"
 )
 
 type Error struct {
@@ -50,7 +50,7 @@ func (c ResultClass) stable() bool {
 	switch c {
 	case ResultOK, ResultInvalidArgument, ResultPolicyDenied, ResultApprovalRequired,
 		ResultCapabilityUnavailable, ResultDeadlineExceeded, ResultExecutionFailed, ResultToolTierDenied,
-		ResultApprovalDisplayTooLarge, ResultKnowledgeSinkNoApprover:
+		ResultApprovalDisplayTooLarge, ResultUntrustedInputNoApprover:
 		return true
 	}
 	return false

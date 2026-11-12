@@ -448,7 +448,7 @@ func TestTaintedApprovalOnADurableTurnFollowsReachability(t *testing.T) {
 		{name: "an approver can be reached", reachable: true, want: probeSucceeded, prompts: 1, runs: 1, state: ApprovalApproved},
 		{
 			name:  "nobody can be reached",
-			want:  callOutcome{class: ResultKnowledgeSinkNoApprover, text: `knowledge_sink_no_approver: tool "probe@v1" needs approval on a turn with knowledge and nobody can be asked`},
+			want:  callOutcome{class: ResultUntrustedInputNoApprover, text: `untrusted_input_no_approver: tool "probe@v1" needs approval because this turn carries untrusted input, and nobody can be asked`},
 			state: ApprovalMissing,
 		},
 	}

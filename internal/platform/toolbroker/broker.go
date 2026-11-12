@@ -388,6 +388,9 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		decision.Outcome = approval.OutcomeRequireApproval
 		policyOutcome = decision.Outcome
 	}
+	if canonical.Tainted && decision.Outcome == approval.OutcomeRequireApproval {
+		decision.ReasonCode = approval.ReasonUntrustedInput
+	}
 	if definition.Effectful {
 		if b.effects == nil {
 			return ToolResult{}, errorf(ResultCapabilityUnavailable, "effect journal is required for tool %q", key)
@@ -414,7 +417,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 		approvalState, err = b.authorize(ctx, &authorization{canonical: &canonical, definition: definition, decision: decision, expiry: absoluteApprovalExpiry(canonical.Deadline), standing: standing})
 		if err != nil {
-			if code, _ := CodeOf(err); code == ResultKnowledgeSinkNoApprover {
+			if code, _ := CodeOf(err); code == ResultUntrustedInputNoApprover {
 				policyOutcome = PolicyOutcomeDeny
 			}
 			return ToolResult{}, err
