@@ -203,10 +203,18 @@ func (s *runSuite) requireEffectStepRefused(t *testing.T, phrase string) {
 	if err != nil {
 		t.Fatalf("Steps: %v", err)
 	}
+	effectSteps := 0
 	for _, step := range steps {
-		if step.StepID == effectStepID && (step.Status != workflow.StepFailed || step.ErrorCode != string(workflow.ErrorCodeStepFailed)) {
+		if step.StepID != effectStepID {
+			continue
+		}
+		effectSteps++
+		if step.Status != workflow.StepFailed || step.ErrorCode != string(workflow.ErrorCodeStepFailed) {
 			t.Errorf("step %s = %s with %q, want %s with %q", step.StepID, step.Status, step.ErrorCode, workflow.StepFailed, workflow.ErrorCodeStepFailed)
 		}
+	}
+	if effectSteps != 1 {
+		t.Errorf("step runs of %s = %d, want 1", effectStepID, effectSteps)
 	}
 	class := string(toolbroker.ResultExecutionFailed)
 	want := journaledAction{Status: workflow.StepFailed, ErrorCode: string(workflow.ErrorCodeStepFailed), Detail: class + ": " + class + ": " + phrase}
