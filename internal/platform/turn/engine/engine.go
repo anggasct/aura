@@ -30,6 +30,8 @@ type Config struct {
 	PostTurnHook    func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
 }
 
+const HandlerName = "turn"
+
 type DurableConfig struct {
 	Sessions SessionStore
 	Runtime  durable.Runtime
@@ -147,7 +149,7 @@ func NewEngine(config *Config, events EventStore, dedupe DedupeStore, executor T
 		engine.durableRuntime = cfg.Durable.Runtime
 	}
 	if registrar, ok := engine.durableRuntime.(durable.HandlerRegistrar); ok {
-		registrar.RegisterHandler("turn", engine.serveTurn)
+		registrar.RegisterHandler(HandlerName, engine.serveTurn)
 	}
 	return engine, nil
 }

@@ -219,7 +219,7 @@ func buildDurableListener(in *durableListenerInput) (*durableListener, error) {
 		Events: store.NewEventStore(db),
 		Dedupe: store.NewDedupeStore(db),
 	})
-	endpoint.RegisterHandler("turn", func(ctx context.Context, inv durable.Invocation) error {
+	endpoint.RegisterHandler(runtimeengine.HandlerName, func(ctx context.Context, inv durable.Invocation) error {
 		if engine == nil {
 			return errors.New("durable turn drive requires an engine")
 		}

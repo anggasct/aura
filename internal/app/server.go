@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/server"
@@ -237,17 +238,23 @@ func (b *build) startMCPServers(ctx context.Context, plugins *pluginRuntime) err
 }
 
 func (b *build) buildServerDurable() error {
-	if !durableEnabled(b.cfg) {
-		return nil
-	}
-	sessionRuntime, err := b.durableRuntime()
+	runtime, err := b.durableRuntime()
 	if err != nil {
 		return err
 	}
-	b.server.durableConfig = &runtimeengine.DurableConfig{
-		Sessions: &durableSessionStore{runtime: sessionRuntime},
-		Runtime:  sessionRuntime,
+	if durableEnabled(b.cfg) {
+		b.server.durableConfig = &runtimeengine.DurableConfig{
+			Sessions: &durableSessionStore{runtime: runtime},
+			Runtime:  runtime,
+		}
+		return nil
 	}
+	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: b.db})
+	if err != nil {
+		return err
+	}
+	b.server.durableConfig = &runtimeengine.DurableConfig{Sessions: sessions, Runtime: runtime}
+	b.server.hostedHandlers = append(b.server.hostedHandlers, runtimeengine.HandlerName)
 	return nil
 }
 
@@ -376,6 +383,10 @@ func (b *build) buildSchedule() error {
 	if err := b.group.Add(server.Background("schedule_pass", pass.run)); err != nil {
 		return err
 	}
+	recovery := &turnRecovery{recoverer: b.engine, logger: logger, interval: turnRecoveryInterval}
+	if err := b.group.Add(&lifecycleStage{name: "turn_recovery", start: recovery.start}); err != nil {
+		return err
+	}
 	return b.group.Add(&lifecycleStage{name: "channels", start: host.Start, stop: host.Shutdown})
 }
 
@@ -391,7 +402,11 @@ func (b *build) buildDurableHost() error {
 			return err
 		}
 	}
-	return b.group.Add(&lifecycleStage{name: "turn_engine", stop: b.engine.Shutdown})
+	if err := b.group.Add(&lifecycleStage{name: "turn_engine", stop: b.engine.Shutdown}); err != nil {
+		return err
+	}
+	recovery := &turnRecovery{recoverer: b.engine, logger: b.logger, interval: turnRecoveryInterval}
+	return b.group.Add(server.Background("turn_recovery_pass", recovery.run))
 }
 
 func (b *build) buildProbe() error {

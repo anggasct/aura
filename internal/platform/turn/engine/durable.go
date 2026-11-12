@@ -844,7 +844,7 @@ func (e *Engine) pollDurableTurn(ctx context.Context, t *turnState) {
 			e.failDurableStart(ctx, t, err)
 			return
 		}
-		ref, err = e.durableRuntime.Start(ctx, durable.StartRequest{Handler: "turn", Key: t.turnID, Payload: payload})
+		ref, err = e.durableRuntime.Start(ctx, durable.StartRequest{Handler: HandlerName, Key: t.turnID, Payload: payload})
 		if err != nil {
 			e.failDurableStart(ctx, t, err)
 			return
