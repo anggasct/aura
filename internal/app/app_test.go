@@ -15,7 +15,11 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -224,7 +228,7 @@ func TestCompositionCommandBuildsNamedParts(t *testing.T) {
 		runtime, interpreter, models bool
 	}{
 		{"durable", []Part{PartDurable}, true, false, false},
-		{"workflows", []Part{PartWorkflows}, true, true, false},
+		{"workflows", []Part{PartWorkflows}, false, true, false},
 		{"models", []Part{PartModels}, false, false, true},
 		{"models, workflows, durable", []Part{PartModels, PartWorkflows, PartDurable}, true, true, true},
 	}
@@ -248,24 +252,43 @@ func TestCompositionCommandBuildsNamedParts(t *testing.T) {
 	}
 }
 
-func TestCompositionCommandWorkflowsUseTheProcessRuntime(t *testing.T) {
+func TestCompositionCommandWorkflowsRunInTheirOwnRuntime(t *testing.T) {
 	restoreDefaultLogger(t)
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
 	result := loadCompositionConfig(t, writeCommandCompositionConfig(t, validWorkflowYAML))
 	app := buildApp(t, commandCompositionOptions(result, &syncBuffer{}, PartWorkflows))
-	summary, err := app.interpreter.Start(t.Context(), "demo", nil)
-	if err != nil {
+	t.Cleanup(func() { _ = app.Close(context.Background()) })
+	if app.runtime != nil {
+		t.Fatal("a workflows-only command build built the durable runtime")
+	}
+	if _, err := app.interpreter.Start(t.Context(), "demo", nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	run := durable.RunRef{Key: summary.DurableKey}
-	if _, err := app.runtime.Status(t.Context(), run); err != nil {
-		t.Fatalf("the process runtime does not know the run: %v", err)
+	if n := countRows(t, app.db, `SELECT COUNT(*) FROM durable_run`); n != 0 {
+		t.Fatalf("durable_run rows = %d, want 0", n)
 	}
-	if err := app.runtime.Cancel(t.Context(), run); err != nil {
-		t.Fatalf("Cancel: %v", err)
+}
+
+func TestCompositionCommandStartsRunsForTheServer(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	result := loadCompositionConfig(t, writeCommandCompositionConfig(t, validWorkflowYAML))
+	app := buildApp(t, commandCompositionOptions(result, &syncBuffer{}, PartDurable))
+	t.Cleanup(func() { _ = app.Close(context.Background()) })
+	requireNames(t, "entries", app.group.Names(), []string{"sqlite"})
+	for _, handler := range []string{broadcast.HandlerName, schedule.HandlerName, child.HandlerName} {
+		t.Run(handler, func(t *testing.T) {
+			if _, err := app.runtime.Start(t.Context(), durable.StartRequest{Handler: handler, Key: "run-" + handler}); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			if n := countRows(t, app.db, `SELECT COUNT(*) FROM durable_run WHERE key = ? AND handler = ? AND state = 'running' AND owner IS NULL`, "run-"+handler, handler); n != 1 {
+				t.Fatalf("unowned running rows = %d, want 1", n)
+			}
+		})
 	}
-	if err := app.Close(t.Context()); err != nil {
-		t.Fatalf("Close: %v", err)
+	_, err := app.runtime.Start(t.Context(), durable.StartRequest{Handler: "unknown", Key: "run-unknown"})
+	if code, ok := sqlite.CodeOf(err); !ok || code != sqlite.ErrorCodeHandlerNotRegistered {
+		t.Fatalf("Start of an undeclared handler = %v, want %s", err, sqlite.ErrorCodeHandlerNotRegistered)
 	}
 }
 
@@ -312,14 +335,10 @@ func TestCompositionCommandModelOptionsMatchEvaluation(t *testing.T) {
 }
 
 func TestCompositionDurableRuntimeIsBuiltOnce(t *testing.T) {
-	for name, enabled := range map[string]bool{"fake": false, "external": true} {
+	for name, enabled := range map[string]bool{"sqlite": false, "external": true} {
 		t.Run(name, func(t *testing.T) {
-			cfg := config.Default()
-			cfg.Durable.Enabled = enabled
-			cfg.Durable.Mode = config.DurableModeExternal
-			cfg.Durable.Endpoint = "http://127.0.0.1:1"
-			b := newBuild(&Options{Surface: SurfaceCommand, Config: &config.LoadResult{Config: &cfg}})
-			b.logger = slog.New(slog.DiscardHandler)
+			b := newDurableRuntimeBuild(enabled)
+			b.db = storetest.OpenMigrated(t)
 			first, err := b.durableRuntime()
 			if err != nil {
 				t.Fatalf("durableRuntime: %v", err)
@@ -331,6 +350,25 @@ func TestCompositionDurableRuntimeIsBuiltOnce(t *testing.T) {
 			if first != second {
 				t.Fatal("durableRuntime built a second runtime")
 			}
+			if _, isSQLite := first.(*sqlite.Runtime); isSQLite == enabled {
+				t.Fatalf("durableRuntime = %T with durable enabled %t", first, enabled)
+			}
 		})
 	}
+	t.Run("storage not open", func(t *testing.T) {
+		_, err := newDurableRuntimeBuild(false).durableRuntime()
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			t.Fatalf("durableRuntime without storage = %v, want %s", err, ErrorCodeInvalidArgument)
+		}
+	})
+}
+
+func newDurableRuntimeBuild(enabled bool) *build {
+	cfg := config.Default()
+	cfg.Durable.Enabled = enabled
+	cfg.Durable.Mode = config.DurableModeExternal
+	cfg.Durable.Endpoint = "http://127.0.0.1:1"
+	b := newBuild(&Options{Surface: SurfaceCommand, Config: &config.LoadResult{Config: &cfg}})
+	b.logger = slog.New(slog.DiscardHandler)
+	return b
 }

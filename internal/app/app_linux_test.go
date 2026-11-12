@@ -89,9 +89,9 @@ func TestCompositionServerStartsAndStopsInOrder(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	requireNames(t, "lifecycle started", lifecycleNames(t, logs.String(), "lifecycle started"),
-		[]string{"memory_purge", "broadcast_resume", "schedule_resume", "schedule_pass", "channels", "retention_sweeps", "persona_eval_schedules"})
+		[]string{"memory_purge", "broadcast_resume", "schedule_resume", "schedule_pass", "channels", "durable_host", "retention_sweeps", "persona_eval_schedules"})
 	requireNames(t, "lifecycle stopped", lifecycleNames(t, logs.String(), "lifecycle stopped"),
-		[]string{"persona_eval_schedules", "retention_sweeps", "channels", "schedule_pass", "schedule_resume", "broadcast_resume", "memory_purge", "telemetry", "sqlite"})
+		[]string{"persona_eval_schedules", "retention_sweeps", "durable_host", "channels", "schedule_pass", "schedule_resume", "broadcast_resume", "memory_purge", "telemetry", "sqlite"})
 }
 
 func TestCompositionServerBuildFailureReleasesWhatWasBuilt(t *testing.T) {
