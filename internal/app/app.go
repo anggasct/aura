@@ -342,7 +342,7 @@ func (b *build) phases(ctx context.Context) []func() error {
 
 func (b *build) buildCommandParts(ctx context.Context) error {
 	parts := b.opts.Command.Parts
-	if slices.Contains(parts, PartDurable) || slices.Contains(parts, PartWorkflows) {
+	if slices.Contains(parts, PartDurable) {
 		if _, err := b.durableRuntime(); err != nil {
 			return err
 		}
@@ -362,7 +362,7 @@ func (b *build) durableRuntime() (durable.Runtime, error) {
 	if b.runtime != nil {
 		return b.runtime, nil
 	}
-	runtime, err := durableRuntimeForConfig(b.cfg, b.logger)
+	runtime, err := durableRuntimeForConfig(b.cfg, b.db, b.logger)
 	if err != nil {
 		return nil, err
 	}

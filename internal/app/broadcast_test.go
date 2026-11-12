@@ -123,6 +123,37 @@ func TestBroadcastReconcileReportsNoop(t *testing.T) {
 	}
 }
 
+func TestBroadcastReconcileRestartsAnEndedRun(t *testing.T) {
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, "aura.db")
+	seedBroadcastCLIItem(t, dbPath, "bcst-1", "scheduled", `{"text":"a"}`)
+	db := openDatabaseFile(t, dbPath)
+	now := "2026-09-12T12:00:00Z"
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO durable_run (key, handler, payload, state, claim, created_at, updated_at) VALUES (?, ?, ?, 'failed', 3, ?, ?)`,
+		"bcst-1", broadcast.HandlerName, []byte("bcst-1"), now, now); err != nil {
+		t.Fatalf("seed the ended run: %v", err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO durable_action (run_key, action_key, outcome, result, created_at) VALUES (?, ?, 'result', ?, ?)`,
+		"bcst-1", "send", []byte("{}"), now); err != nil {
+		t.Fatalf("seed the journal: %v", err)
+	}
+	gf := &globalFlags{configPath: writeBroadcastCLIConfig(t, dataDir)}
+
+	out, err := runBroadcastCommand(t, gf, "reconcile", "bcst-1")
+	if err != nil {
+		t.Fatalf("reconcile: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "result: run started") {
+		t.Errorf("reconcile output wrong:\n%s", out)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM durable_run WHERE key = 'bcst-1' AND state = 'running' AND claim = 3`); n != 1 {
+		t.Fatalf("running rows with the claim counter kept = %d, want 1", n)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM durable_action WHERE run_key = 'bcst-1'`); n != 0 {
+		t.Fatalf("journal rows = %d, want 0", n)
+	}
+}
+
 func TestDiscordBroadcastSenderReportsAStartedIntentAsAmbiguous(t *testing.T) {
 	cases := []struct {
 		name      string

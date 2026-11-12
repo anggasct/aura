@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"time"
@@ -52,7 +51,7 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return withApp(cmd, &commandInput{result: &result, parts: scheduleParts(result.Config)}, func(ctx context.Context, app *App) error {
+			return withApp(cmd, &commandInput{result: &result, parts: scheduleParts()}, func(ctx context.Context, app *App) error {
 				cfg, db := app.result.Config, app.db
 				if timezone == "" {
 					timezone = cfg.Scheduler.DefaultTimezone
@@ -98,7 +97,7 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				starts := &scheduleRunStart{out: cmd.OutOrStdout(), app: app}
+				starts := &scheduleRunStart{app: app}
 				if err := starts.next(ctx, &job); err != nil {
 					return err
 				}
@@ -120,40 +119,32 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func scheduleParts(cfg *config.Config) []Part {
-	if durableEnabled(cfg) {
-		return []Part{PartDurable}
-	}
-	return nil
+func scheduleParts() []Part {
+	return []Part{PartDurable}
 }
 
 type scheduleRunStart struct {
-	out io.Writer
 	app *App
 }
 
-func (s *scheduleRunStart) runtime() (durable.Runtime, bool, error) {
-	if !durableEnabled(s.app.result.Config) {
-		_, err := fmt.Fprintln(s.out, "note: the job run starts with the server")
-		return nil, false, err
-	}
+func (s *scheduleRunStart) runtime() (durable.Runtime, error) {
 	if s.app.runtime == nil {
-		return nil, false, errors.New("durable runtime must not be nil")
+		return nil, errors.New("durable runtime must not be nil")
 	}
-	return s.app.runtime, true, nil
+	return s.app.runtime, nil
 }
 
 func (s *scheduleRunStart) next(ctx context.Context, job *schedule.Job) error {
-	runtime, ok, err := s.runtime()
-	if err != nil || !ok {
+	runtime, err := s.runtime()
+	if err != nil {
 		return err
 	}
 	return schedule.StartNext(ctx, &schedule.NextRequest{Starter: runtime, Job: job, After: time.Now().UTC()})
 }
 
 func (s *scheduleRunStart) recorded(ctx context.Context, occurrence *schedule.Occurrence) error {
-	runtime, ok, err := s.runtime()
-	if err != nil || !ok {
+	runtime, err := s.runtime()
+	if err != nil {
 		return err
 	}
 	return schedule.StartFire(ctx, &schedule.FireRequest{Starter: runtime, JobID: occurrence.JobID, Instant: occurrence.ScheduledForUTC})
@@ -230,7 +221,7 @@ func newScheduleResumeCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return withApp(cmd, &commandInput{result: &result, parts: scheduleParts(result.Config)}, func(ctx context.Context, app *App) error {
+			return withApp(cmd, &commandInput{result: &result, parts: scheduleParts()}, func(ctx context.Context, app *App) error {
 				db := app.db
 				service, err := scheduleService(db)
 				if err != nil {
@@ -243,7 +234,7 @@ func newScheduleResumeCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				starts := &scheduleRunStart{out: cmd.OutOrStdout(), app: app}
+				starts := &scheduleRunStart{app: app}
 				if err := starts.next(ctx, &job); err != nil {
 					return err
 				}
@@ -323,7 +314,7 @@ func newScheduleRunNowCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return withApp(cmd, &commandInput{result: &result, parts: scheduleParts(result.Config)}, func(ctx context.Context, app *App) error {
+			return withApp(cmd, &commandInput{result: &result, parts: scheduleParts()}, func(ctx context.Context, app *App) error {
 				db := app.db
 				service, err := scheduleService(db)
 				if err != nil {
@@ -333,7 +324,7 @@ func newScheduleRunNowCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				starts := &scheduleRunStart{out: cmd.OutOrStdout(), app: app}
+				starts := &scheduleRunStart{app: app}
 				if err := starts.recorded(ctx, &occurrence); err != nil {
 					return err
 				}

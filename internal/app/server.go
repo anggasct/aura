@@ -68,6 +68,7 @@ type serverBuild struct {
 	durableConfig      *runtimeengine.DurableConfig
 	host               *runtimeengine.Host
 	broadcastRuntime   durable.Runtime
+	hostedHandlers     []string
 	broadcastWiring    *broadcastChannels
 	broadcastRunner    *broadcast.Runner
 	scheduleRunner     *schedule.Runner
@@ -255,6 +256,7 @@ func (b *build) buildServerSurface(ctx context.Context) error {
 		b.buildChannelHost,
 		b.buildBroadcast,
 		b.buildSchedule,
+		b.buildDurableHost,
 		b.buildProbe,
 		func() error { return b.wireDurableListener(ctx) },
 		b.addEdgeListeners,
@@ -304,6 +306,7 @@ func (b *build) buildBroadcast() error {
 		if err := registerBroadcastHandler(s.broadcastRuntime, s.broadcastRunner); err != nil {
 			return err
 		}
+		s.hostedHandlers = append(s.hostedHandlers, broadcast.HandlerName)
 	}
 	runtime := s.broadcastRuntime
 	return b.group.Add(&lifecycleStage{name: "broadcast_resume", start: func(ctx context.Context) error {
@@ -341,6 +344,7 @@ func (b *build) buildSchedule() error {
 		if err := registerScheduleHandler(s.broadcastRuntime, s.scheduleRunner); err != nil {
 			return err
 		}
+		s.hostedHandlers = append(s.hostedHandlers, schedule.HandlerName)
 	}
 	s.childLedger = child.NewLedger(nil, 0)
 	if cfg.Children != nil && cfg.Children.Enabled {
@@ -352,6 +356,7 @@ func (b *build) buildSchedule() error {
 			if err := registerChildHandler(s.broadcastRuntime, childHandler); err != nil {
 				return err
 			}
+			s.hostedHandlers = append(s.hostedHandlers, child.HandlerName)
 		}
 	}
 	runtime, host := s.broadcastRuntime, s.host
@@ -372,6 +377,19 @@ func (b *build) buildSchedule() error {
 		return err
 	}
 	return b.group.Add(&lifecycleStage{name: "channels", start: host.Start, stop: host.Shutdown})
+}
+
+func (b *build) buildDurableHost() error {
+	if durableEnabled(b.cfg) {
+		return nil
+	}
+	s := b.server
+	host, ok := s.broadcastRuntime.(durableRunHost)
+	if !ok {
+		return invalidOptions("the durable runtime cannot host runs")
+	}
+	stage := &durableHostStage{host: host, handlers: s.hostedHandlers, logger: b.logger}
+	return b.group.Add(&lifecycleStage{name: "durable_host", start: stage.start, stop: stage.stop})
 }
 
 func (b *build) buildProbe() error {

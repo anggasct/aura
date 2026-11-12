@@ -2,10 +2,14 @@ package app
 
 import (
 	"bytes"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/store"
 )
 
 func writeScheduleCLIConfig(t *testing.T, dataDir string) string {
@@ -138,4 +142,89 @@ func TestScheduleRunNowStartsRun(t *testing.T) {
 	if !strings.Contains(out, "fired") {
 		t.Errorf("manual fire not recorded:\n%s", out)
 	}
+}
+
+func scheduleRunRows(t *testing.T, db *sql.DB, keyPattern string) int {
+	t.Helper()
+	return countRows(t, db, `SELECT COUNT(*) FROM durable_run WHERE handler = ? AND state = 'running' AND key LIKE ?`, schedule.HandlerName, keyPattern)
+}
+
+func requireNoNote(t *testing.T, out string) {
+	t.Helper()
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.HasPrefix(line, "note:") {
+			t.Fatalf("the command printed a note:\n%s", out)
+		}
+	}
+}
+
+func TestScheduleCommandsStartRunsForTheServer(t *testing.T) {
+	t.Run("add", func(t *testing.T) {
+		dataDir := t.TempDir()
+		gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+		out, err := runScheduleCommand(t, gf, "add",
+			"--name", "nightly", "--schedule", dailySchedule, "--timezone", "UTC",
+			"--channel", "discord", "--destination", "default", "--prompt", "summarize")
+		if err != nil {
+			t.Fatalf("cron add: %v\n%s", err, out)
+		}
+		requireNoNote(t, out)
+		db := openDatabaseFile(t, filepath.Join(dataDir, "aura.db"))
+		var id string
+		if err := db.QueryRowContext(t.Context(), `SELECT id FROM scheduled_job`).Scan(&id); err != nil {
+			t.Fatalf("read the job: %v", err)
+		}
+		if n := scheduleRunRows(t, db, schedule.HandlerName+"/"+id+"/%"); n != 1 {
+			t.Fatalf("schedule runs of the job = %d, want 1", n)
+		}
+	})
+	t.Run("resume", func(t *testing.T) {
+		dataDir := t.TempDir()
+		gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+		db := openDatabaseFile(t, filepath.Join(dataDir, "aura.db"))
+		service, err := scheduleService(db)
+		if err != nil {
+			t.Fatalf("scheduleService: %v", err)
+		}
+		job, err := service.Create(t.Context(), &schedule.JobSpec{
+			Name: "nightly", CronExpression: dailySchedule, Timezone: "UTC", Prompt: "summarize",
+			OriginChannel: "discord", OriginDestination: "default", OverlapPolicy: schedule.OverlapSkip,
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := service.SetState(t.Context(), job.ID, schedule.JobPaused); err != nil {
+			t.Fatalf("SetState: %v", err)
+		}
+		pattern := schedule.HandlerName + "/" + job.ID + "/%"
+		if n := scheduleRunRows(t, db, pattern); n != 0 {
+			t.Fatalf("schedule runs before resume = %d, want 0", n)
+		}
+		out, err := runScheduleCommand(t, gf, "resume", job.ID)
+		if err != nil {
+			t.Fatalf("cron resume: %v\n%s", err, out)
+		}
+		requireNoNote(t, out)
+		if n := scheduleRunRows(t, db, pattern); n != 1 {
+			t.Fatalf("schedule runs after resume = %d, want 1", n)
+		}
+	})
+	t.Run("run-now", func(t *testing.T) {
+		dataDir := t.TempDir()
+		gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+		id := addScheduleJob(t, gf)
+		out, err := runScheduleCommand(t, gf, "run-now", id)
+		if err != nil {
+			t.Fatalf("cron run-now: %v\n%s", err, out)
+		}
+		requireNoNote(t, out)
+		db := openDatabaseFile(t, filepath.Join(dataDir, "aura.db"))
+		occurrences, err := store.NewScheduleStore(db).Occurrences(t.Context(), id, 10)
+		if err != nil || len(occurrences) != 1 {
+			t.Fatalf("occurrences = %v, %v; want one", occurrences, err)
+		}
+		if n := scheduleRunRows(t, db, scheduleRunKey(id, occurrences[0].ScheduledForUTC)); n != 1 {
+			t.Fatalf("schedule runs for the manual fire = %d, want 1", n)
+		}
+	})
 }

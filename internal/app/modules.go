@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -181,7 +182,7 @@ func (b *build) buildWorkflows(ctx context.Context) error {
 		}
 		options.Tools = tools
 	}
-	runtime, err := b.durableRuntime()
+	runtime, err := b.workflowRuntime()
 	if err != nil {
 		return err
 	}
@@ -195,4 +196,11 @@ func (b *build) buildWorkflows(ctx context.Context) error {
 	}
 	b.interpreter = built
 	return nil
+}
+
+func (b *build) workflowRuntime() (durable.Runtime, error) {
+	if durableEnabled(b.cfg) {
+		return b.durableRuntime()
+	}
+	return durable.NewFake(), nil
 }

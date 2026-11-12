@@ -125,7 +125,7 @@ func newBroadcastReconcileCmd(gf *globalFlags) *cobra.Command {
 						_, err := fmt.Fprintf(out, "id: %s\nresult: no-op (not due until %s)\n", item.ID, item.NotBefore.UTC().Format(time.RFC3339))
 						return err
 					}
-					if err := broadcast.StartItemRun(ctx, app.runtime, item.ID); err != nil {
+					if err := broadcast.ResumeItemRun(ctx, app.runtime, item.ID); err != nil {
 						return err
 					}
 					_, err = fmt.Fprintf(out, "id: %s\nresult: run started\n", item.ID)

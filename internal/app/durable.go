@@ -16,9 +16,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/restate"
+	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/store"
@@ -171,11 +175,27 @@ func probeDeploymentRegistration(ctx context.Context, adminURL, handlerAddr stri
 	return deploymentAbsent
 }
 
-func durableRuntimeForConfig(cfg *config.Config, logger *slog.Logger) (durable.Runtime, error) {
+func durableRuntimeForConfig(cfg *config.Config, db *sql.DB, logger *slog.Logger) (durable.Runtime, error) {
 	if cfg != nil && cfg.Durable != nil && cfg.Durable.Enabled {
 		return restate.NewAdapter(restate.Config{IngressURL: cfg.Durable.Endpoint}, logger)
 	}
-	return durable.NewFake(), nil
+	if cfg == nil || db == nil {
+		return nil, invalidOptions("the durable runtime needs a config and open storage")
+	}
+	runtime, err := sqlite.New(durableHostOptions(db, logger, cfg.Runtime))
+	if err != nil {
+		return nil, err
+	}
+	declareRunHandlers(runtime)
+	return runtime, nil
+}
+
+type runHandlerDeclarer interface {
+	DeclareHandlers(names ...string)
+}
+
+func declareRunHandlers(runtime runHandlerDeclarer) {
+	runtime.DeclareHandlers(broadcast.HandlerName, schedule.HandlerName, child.HandlerName)
 }
 
 type durableListenerInput struct {
