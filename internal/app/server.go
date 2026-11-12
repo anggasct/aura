@@ -302,7 +302,7 @@ func (b *build) buildBroadcast() error {
 	if err != nil {
 		return err
 	}
-	if s.durableConfig == nil {
+	if !durableEnabled(cfg) {
 		if err := registerBroadcastHandler(s.broadcastRuntime, s.broadcastRunner); err != nil {
 			return err
 		}
@@ -340,7 +340,7 @@ func (b *build) buildSchedule() error {
 	if err != nil {
 		return err
 	}
-	if s.durableConfig == nil {
+	if !durableEnabled(cfg) {
 		if err := registerScheduleHandler(s.broadcastRuntime, s.scheduleRunner); err != nil {
 			return err
 		}
@@ -352,7 +352,7 @@ func (b *build) buildSchedule() error {
 		if err != nil {
 			return err
 		}
-		if s.durableConfig == nil {
+		if !durableEnabled(cfg) {
 			if err := registerChildHandler(s.broadcastRuntime, childHandler); err != nil {
 				return err
 			}
@@ -380,16 +380,18 @@ func (b *build) buildSchedule() error {
 }
 
 func (b *build) buildDurableHost() error {
-	if durableEnabled(b.cfg) {
-		return nil
+	if !durableEnabled(b.cfg) {
+		s := b.server
+		host, ok := s.broadcastRuntime.(durableRunHost)
+		if !ok {
+			return invalidOptions("the durable runtime cannot host runs")
+		}
+		stage := &durableHostStage{host: host, handlers: s.hostedHandlers, logger: b.logger}
+		if err := b.group.Add(&lifecycleStage{name: "durable_host", start: stage.start, stop: stage.stop}); err != nil {
+			return err
+		}
 	}
-	s := b.server
-	host, ok := s.broadcastRuntime.(durableRunHost)
-	if !ok {
-		return invalidOptions("the durable runtime cannot host runs")
-	}
-	stage := &durableHostStage{host: host, handlers: s.hostedHandlers, logger: b.logger}
-	return b.group.Add(&lifecycleStage{name: "durable_host", start: stage.start, stop: stage.stop})
+	return b.group.Add(&lifecycleStage{name: "turn_engine", stop: b.engine.Shutdown})
 }
 
 func (b *build) buildProbe() error {

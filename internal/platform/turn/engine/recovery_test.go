@@ -873,6 +873,87 @@ func TestTurnAdmittedDuringShutdownLeavesNoRow(t *testing.T) {
 	}
 }
 
+type heldTurnStop struct {
+	gate      chan struct{}
+	endedTurn string
+}
+
+func stopEngineReleasingHeldTurn(t *testing.T, rig *durableHostRig, stop heldTurnStop) {
+	t.Helper()
+	engine := rig.engine
+	stopped := make(chan error, 1)
+	go func() { stopped <- engine.Shutdown(context.WithoutCancel(t.Context())) }()
+	awaitTerminals(t, rig.db, stop.endedTurn)
+	close(stop.gate)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	case <-time.After(hostRigTimeout):
+		t.Fatal("Shutdown did not return")
+	}
+}
+
+func TestShutdownCancelsTheQueuedTurnsOfAnEarlierProcess(t *testing.T) {
+	t.Run("turns an earlier process admitted", func(t *testing.T) {
+		executor := newHoldingExecutor()
+		gate := executor.hold("turn-1")
+		rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
+		mustCreateSession(t, rig.db, "session-a")
+		rig.startHost()
+		admitThroughStore(t, rig.sessions, sampleRequest("session-a", "turn-1"))
+		startTurnRun(t, rig.runtime, sampleRequest("session-a", "turn-1"))
+		admitThroughStore(t, rig.sessions, sampleRequest("session-a", "turn-2"))
+		executor.waitEntered(t, "turn-1")
+		if engineKnows(rig.engine, "turn-1") || engineKnows(rig.engine, "turn-2") {
+			t.Fatal("engine knows the turns of the earlier process before recovery")
+		}
+
+		if err := rig.engine.RecoverTurns(t.Context()); err != nil {
+			t.Fatalf("RecoverTurns: %v", err)
+		}
+		if !engineKnows(rig.engine, "turn-1") || engineKnows(rig.engine, "turn-2") {
+			t.Fatal("recovery must attach the active turn-1 and leave the queued turn-2 unknown")
+		}
+		stopEngineReleasingHeldTurn(t, rig, heldTurnStop{gate: gate, endedTurn: "turn-2"})
+
+		requireTerminals(t, rig.db, eventFilter{turnID: "turn-2", kinds: []string{turn.EventKindTurnCancelled}})
+		requireTerminals(t, rig.db, eventFilter{turnID: "turn-1", kinds: []string{turn.EventKindTurnCompleted}})
+		if active, queued := storeActiveTurn(t, rig.sessions, "session-a"); active != "" || queued != 0 {
+			t.Fatalf("session-a holds %q and %d queued after Shutdown, want nothing", active, queued)
+		}
+		if starts := executor.startCount("turn-2"); starts != 0 {
+			t.Fatalf("executor started turn-2 %d times, want never", starts)
+		}
+	})
+
+	t.Run("a turn the engine queued", func(t *testing.T) {
+		executor := newHoldingExecutor()
+		gate := executor.hold("turn-1")
+		rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
+		mustCreateSession(t, rig.db, "session-a")
+		rig.startHost()
+		first := callTurn(context.WithoutCancel(t.Context()), rig.engine, sampleRequest("session-a", "turn-1"))
+		executor.waitEntered(t, "turn-1")
+		second := callTurn(context.WithoutCancel(t.Context()), rig.engine, sampleRequest("session-a", "turn-2"))
+		eventually(t, "the engine queues turn-2", func() bool {
+			_, staged, _ := engineCounts(rig.engine)
+			return staged == 1
+		})
+
+		stopEngineReleasingHeldTurn(t, rig, heldTurnStop{gate: gate, endedTurn: "turn-2"})
+
+		awaitTerminal(t, second, turn.EventKindTurnCancelled)
+		awaitTerminal(t, first, turn.EventKindTurnCompleted)
+		requireTerminals(t, rig.db, eventFilter{turnID: "turn-2", kinds: []string{turn.EventKindTurnCancelled}})
+		requireTerminals(t, rig.db, eventFilter{turnID: "turn-1", kinds: []string{turn.EventKindTurnCompleted}})
+		if active, queued := storeActiveTurn(t, rig.sessions, "session-a"); active != "" || queued != 0 {
+			t.Fatalf("session-a holds %q and %d queued after Shutdown, want nothing", active, queued)
+		}
+	})
+}
+
 func TestTurnTheEngineAdoptedOutlivesTheCallThatAdoptedIt(t *testing.T) {
 	t.Run("recovery call", func(t *testing.T) {
 		executor := newHoldingExecutor()

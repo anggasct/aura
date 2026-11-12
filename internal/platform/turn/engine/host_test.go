@@ -76,7 +76,10 @@ func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 		if err := host.Start(context.Background()); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
-		t.Cleanup(func() { _ = host.Shutdown(context.Background()) })
+		t.Cleanup(func() {
+			_ = host.Shutdown(context.Background())
+			_ = engine.Shutdown(context.Background())
+		})
 
 		<-adapter.accepted
 		ref, acceptErr := adapter.ref()
@@ -96,7 +99,8 @@ func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 func TestHostShutdownStopsAdapters(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
-		engine, _, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
+		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
+		mustCreateSession(t, db, "session-a")
 
 		adapter := newFakeChannelAdapter("telegram")
 		host, err := NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, nil)
@@ -116,12 +120,24 @@ func TestHostShutdownStopsAdapters(t *testing.T) {
 		default:
 			t.Error("adapter Start did not return after shutdown")
 		}
+
+		events, err := collect(t, engine, sampleRequest("session-a", "turn-after-host-stop"))
+		if err != nil {
+			t.Fatalf("turn after the host stopped: %v", err)
+		}
+		if got := lastKind(events); got != turn.EventKindTurnCompleted {
+			t.Fatalf("turn after the host stopped ended with %q, want %q", got, turn.EventKindTurnCompleted)
+		}
+		if err := engine.Shutdown(context.Background()); err != nil {
+			t.Fatalf("engine Shutdown: %v", err)
+		}
 	})
 }
 
 func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
+		gate := make(chan struct{})
+		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`), Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
 		mustCreateSession(t, db, sampleSession("conv-drain"))
 
@@ -139,9 +155,22 @@ func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 		if acceptErr != nil {
 			t.Fatalf("sink.Accept from adapter: %v", acceptErr)
 		}
+		synctest.Wait()
+		if starts := executor.StartCount(); starts != 1 {
+			t.Fatalf("executor started %d turns before the host stopped, want 1", starts)
+		}
 
 		if err := host.Shutdown(context.Background()); err != nil {
 			t.Fatalf("Shutdown: %v", err)
+		}
+		select {
+		case <-adapter.stoppedCh:
+		default:
+			t.Fatal("adapter Start did not return after shutdown")
+		}
+		close(gate)
+		if err := engine.Shutdown(context.Background()); err != nil {
+			t.Fatalf("engine Shutdown: %v", err)
 		}
 		if got := terminalCount(t, db, ref.TurnID); got != 1 {
 			t.Errorf("durable terminals after drain = %d, want 1", got)
