@@ -10,3 +10,7 @@ import (
 func TestPortConformance(t *testing.T) {
 	durabletest.ExerciseRuntime(t, durable.NewFake())
 }
+
+func TestPortReuse(t *testing.T) {
+	durabletest.ExerciseReuse(t, durable.NewFake())
+}

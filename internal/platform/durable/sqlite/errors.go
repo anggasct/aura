@@ -20,6 +20,7 @@ const (
 	ErrorCodeHostRunning          ErrorCode = "host_running"
 	ErrorCodeStopTimeout          ErrorCode = "stop_timeout"
 	ErrorCodeSessionStateInvalid  ErrorCode = "session_state_invalid"
+	ErrorCodeKeyInUse             ErrorCode = "key_in_use"
 )
 
 type Error struct {
@@ -50,6 +51,14 @@ func invalidArgument(detail string) error {
 
 func unknownRun(key string) error {
 	return fmt.Errorf("%w: %s", durable.ErrUnknownRun, key)
+}
+
+func handlerNotRegistered(name string) error {
+	return &Error{Code: ErrorCodeHandlerNotRegistered, Detail: "no durable handler registered or declared for " + name}
+}
+
+func keyInUse(key string) error {
+	return &Error{Code: ErrorCodeKeyInUse, Detail: "durable run " + key + " belongs to another handler", cause: durable.ErrKeyInUse}
 }
 
 func ownershipLost(key string) error {

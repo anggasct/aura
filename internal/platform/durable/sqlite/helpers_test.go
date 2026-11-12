@@ -252,3 +252,26 @@ func (l *invocationLog) handler() durable.Handler {
 		return nil
 	}
 }
+
+var childTables = []string{"durable_action", "durable_signal", "durable_wait", "durable_timer", "durable_approval"}
+
+func insertChildren(t *testing.T, db *sql.DB, key string) {
+	t.Helper()
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	execSQL(t, db, `INSERT INTO durable_action (run_key, action_key, outcome, result, detail, created_at) VALUES (?, 'step', 'result', ?, '', ?)`, key, []byte("x"), stamp)
+	execSQL(t, db, `INSERT INTO durable_signal (run_key, name, seq, payload, created_at) VALUES (?, 'go', 0, ?, ?)`, key, []byte("x"), stamp)
+	execSQL(t, db, `INSERT INTO durable_wait (run_key, name, seq, deadline, outcome, created_at, updated_at) VALUES (?, 'go', 0, ?, 'signal', ?, ?)`, key, stamp, stamp, stamp)
+	execSQL(t, db, `INSERT INTO durable_timer (run_key, seq, fire_at, created_at) VALUES (?, 0, ?, ?)`, key, stamp, stamp)
+	execSQL(t, db, `INSERT INTO durable_approval (approval_id, run_key, consumed_at) VALUES (?, ?, ?)`, durable.FormatApprovalAddr(key, "decision"), key, stamp)
+}
+
+func childRows(t *testing.T, db *sql.DB, key string) map[string]int {
+	t.Helper()
+	counts := map[string]int{}
+	for _, table := range childTables {
+		if n := countRows(t, db, `SELECT COUNT(*) FROM `+table+` WHERE run_key = ?`, key); n > 0 {
+			counts[table] = n
+		}
+	}
+	return counts
+}

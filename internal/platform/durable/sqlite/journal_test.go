@@ -403,3 +403,59 @@ func TestRestartKeepsTimerFireTime(t *testing.T) {
 	third := restart(t, &restartPlan{path: path, configure: withClock, register: register})
 	waitState(t, third, runWant{key: timer.Key, state: durable.RunSucceeded})
 }
+
+type suspendedClock struct {
+	timers *durable.ManualClock
+	mu     sync.Mutex
+	jumped time.Duration
+}
+
+func (c *suspendedClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.timers.Now().Add(c.jumped)
+}
+
+func (c *suspendedClock) Timer(d time.Duration) <-chan time.Time {
+	return c.timers.Timer(d)
+}
+
+func (c *suspendedClock) jump(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.jumped += d
+}
+
+func TestSleepFollowsTheWallClock(t *testing.T) {
+	clock := &suspendedClock{timers: durable.NewManualClock(time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC))}
+	const check = 30 * time.Second
+	rt := newRuntime(t, openDB(t, newDatabaseFile(t)), func(opts *Options) {
+		opts.Clock = clock
+		opts.ClockCheck = check
+	})
+	reports := make(chan waitReport, 1)
+	rt.RegisterHandler("sleeper", func(_ context.Context, inv durable.Invocation) error {
+		return inv.Sleep(time.Hour)
+	})
+	rt.RegisterHandler("waiter", func(ctx context.Context, inv durable.Invocation) error {
+		payload, timedOut, ok := inv.Wait(ctx, "never", time.Hour)
+		reports <- waitReport{payload: string(payload), timedOut: timedOut, ok: ok}
+		return nil
+	})
+	startHost(t, rt)
+
+	sleep := mustStart(t, rt, durable.StartRequest{Handler: "sleeper", Key: "k-suspended-sleep"})
+	waitUntil(t, "the sleep parks", func() bool { return rt.stats().parked == 1 })
+	clock.jump(2 * time.Hour)
+	clock.timers.Advance(check)
+	waitState(t, rt, runWant{key: sleep.Key, state: durable.RunSucceeded})
+
+	wait := mustStart(t, rt, durable.StartRequest{Handler: "waiter", Key: "k-suspended-wait"})
+	waitUntil(t, "the wait parks", func() bool { return rt.stats().parked == 1 })
+	clock.jump(2 * time.Hour)
+	clock.timers.Advance(check)
+	if got := receive(t, reports); !got.ok || !got.timedOut {
+		t.Fatalf("wait = %+v, want a timeout at the wall-clock deadline", got)
+	}
+	waitState(t, rt, runWant{key: wait.Key, state: durable.RunSucceeded})
+}

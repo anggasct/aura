@@ -21,6 +21,7 @@ const (
 	defaultHostTTL             = 10 * time.Second
 	defaultStopGrace           = 10 * time.Second
 	defaultRecoveryConcurrency = 8
+	defaultClockCheck          = time.Minute
 	writeTimeout               = 5 * time.Second
 )
 
@@ -37,6 +38,7 @@ type Options struct {
 	HostTTL             time.Duration
 	StopGrace           time.Duration
 	RecoveryConcurrency int
+	ClockCheck          time.Duration
 }
 
 type callKey struct {
@@ -70,6 +72,7 @@ type Runtime struct {
 	hostTTL             time.Duration
 	stopGrace           time.Duration
 	recoveryConcurrency int
+	clockCheck          time.Duration
 	hostID              string
 
 	hosted   atomic.Bool
@@ -105,6 +108,7 @@ func New(opts *Options) (*Runtime, error) {
 		hostTTL:             orDefault(opts.HostTTL, defaultHostTTL),
 		stopGrace:           orDefault(opts.StopGrace, defaultStopGrace),
 		recoveryConcurrency: orDefault(opts.RecoveryConcurrency, defaultRecoveryConcurrency),
+		clockCheck:          orDefault(opts.ClockCheck, defaultClockCheck),
 		hostID:              rand.Text(),
 		handlers:            map[string]durable.Handler{},
 		declared:            map[string]struct{}{},
@@ -124,6 +128,7 @@ func validateOptions(opts *Options) error {
 		{"poll interval", opts.PollInterval},
 		{"host ttl", opts.HostTTL},
 		{"stop grace", opts.StopGrace},
+		{"clock check", opts.ClockCheck},
 	}
 	for _, d := range durations {
 		switch {
@@ -233,6 +238,9 @@ func (r *Runtime) Start(ctx context.Context, req durable.StartRequest) (durable.
 		return durable.RunRef{}, invalidArgument("durable start requires a handler")
 	}
 	ref := durable.RunRef{Key: req.Key}
+	if req.Reuse == durable.ReuseEnded {
+		return r.startReusingEnded(ctx, &req)
+	}
 	if !r.knowsHandler(req.Handler) {
 		exists, err := runExists(ctx, r.db, req.Key)
 		if err != nil {
@@ -241,7 +249,7 @@ func (r *Runtime) Start(ctx context.Context, req durable.StartRequest) (durable.
 		if exists {
 			return ref, nil
 		}
-		return durable.RunRef{}, &Error{Code: ErrorCodeHandlerNotRegistered, Detail: "no durable handler registered or declared for " + req.Handler}
+		return durable.RunRef{}, handlerNotRegistered(req.Handler)
 	}
 	stamp := r.stamp()
 	if _, err := r.db.ExecContext(ctx, `INSERT INTO durable_run (key, handler, payload, state, created_at, updated_at)
@@ -252,6 +260,44 @@ VALUES (?, ?, ?, 'running', ?, ?) ON CONFLICT (key) DO NOTHING`, req.Key, req.Ha
 		h.nudge()
 	}
 	return ref, nil
+}
+
+func (r *Runtime) startReusingEnded(ctx context.Context, req *durable.StartRequest) (durable.RunRef, error) {
+	if !r.knowsHandler(req.Handler) {
+		return durable.RunRef{}, handlerNotRegistered(req.Handler)
+	}
+	if err := r.inTx(ctx, "durable start", func(tx *sql.Tx) error { return r.replaceEnded(ctx, tx, req) }); err != nil {
+		return durable.RunRef{}, err
+	}
+	if h := r.currentHost(); h != nil {
+		h.nudge()
+	}
+	return durable.RunRef{Key: req.Key}, nil
+}
+
+func (r *Runtime) replaceEnded(ctx context.Context, tx *sql.Tx, req *durable.StartRequest) error {
+	var handler, state string
+	var claim int64
+	err := tx.QueryRowContext(ctx, `SELECT handler, state, claim FROM durable_run WHERE key = ?`, req.Key).Scan(&handler, &state, &claim)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return fmt.Errorf("durable start: read run: %w", err)
+	case handler != req.Handler:
+		return keyInUse(req.Key)
+	case durable.RunState(state) == durable.RunRunning:
+		return nil
+	default:
+		if _, err := tx.ExecContext(ctx, `DELETE FROM durable_run WHERE key = ?`, req.Key); err != nil {
+			return fmt.Errorf("durable start: delete ended run: %w", err)
+		}
+	}
+	stamp := r.stamp()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO durable_run (key, handler, payload, state, claim, created_at, updated_at)
+VALUES (?, ?, ?, 'running', ?, ?, ?)`, req.Key, req.Handler, bytesOrEmpty(req.Payload), claim, stamp, stamp); err != nil {
+		return fmt.Errorf("durable start: insert run: %w", err)
+	}
+	return nil
 }
 
 func (r *Runtime) Signal(ctx context.Context, run durable.RunRef, name string, payload []byte) error {
@@ -284,10 +330,12 @@ func (r *Runtime) notifySignal(key string) {
 
 func (r *Runtime) Cancel(ctx context.Context, run durable.RunRef) error {
 	var liveOwner string
+	var liveClaim int64
 	err := r.inTx(ctx, "durable cancel", func(tx *sql.Tx) error {
 		var state string
 		var owner sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT state, owner FROM durable_run WHERE key = ?`, run.Key).Scan(&state, &owner)
+		var claim int64
+		err := tx.QueryRowContext(ctx, `SELECT state, owner, claim FROM durable_run WHERE key = ?`, run.Key).Scan(&state, &owner, &claim)
 		if errors.Is(err, sql.ErrNoRows) {
 			return unknownRun(run.Key)
 		}
@@ -313,6 +361,7 @@ func (r *Runtime) Cancel(ctx context.Context, run durable.RunRef) error {
 			return fmt.Errorf("durable cancel: request: %w", err)
 		}
 		liveOwner = owner.String
+		liveClaim = claim
 		return nil
 	})
 	if err != nil || liveOwner == "" {
@@ -322,7 +371,7 @@ func (r *Runtime) Cancel(ctx context.Context, run durable.RunRef) error {
 	if h == nil {
 		return nil
 	}
-	exec := h.cancelLocal(run.Key, liveOwner)
+	exec := h.cancelLocal(run.Key, liveOwner, liveClaim)
 	h.nudge()
 	if exec == nil {
 		return nil
