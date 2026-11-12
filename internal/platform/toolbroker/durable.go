@@ -3,61 +3,17 @@ package toolbroker
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
-	"github.com/anggasct/aura/internal/platform/tools"
-	"github.com/anggasct/aura/internal/store"
 )
 
-type ApprovalDecision struct {
-	Approved bool   `json:"approved"`
-	Note     string `json:"note,omitempty"`
-}
-
-type ApprovalEvent struct {
-	ID          string    `json:"id"`
-	TurnID      string    `json:"turn_id"`
-	SessionID   string    `json:"session_id"`
-	PrincipalID string    `json:"principal_id"`
-	ToolName    string    `json:"tool_name"`
-	ToolVersion string    `json:"tool_version"`
-	Arguments   string    `json:"arguments"`
-	ApprovalID  string    `json:"approval_id"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-type ApprovalEventSink interface {
-	EmitApprovalRequired(ctx context.Context, event *ApprovalEvent) error
-}
-
-type approvalSinkKey struct{}
-
-func WithApprovalSink(ctx context.Context, sink ApprovalEventSink) context.Context {
-	if sink == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, approvalSinkKey{}, sink)
-}
-
-func ApprovalSinkFrom(ctx context.Context) (ApprovalEventSink, bool) {
-	sink, ok := ctx.Value(approvalSinkKey{}).(ApprovalEventSink)
-	if !ok || sink == nil {
-		return nil, false
-	}
-	return sink, true
-}
-
-func (b *Broker) evaluatePolicy(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, string, error) {
+func (b *Broker) evaluatePolicy(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error) {
 	scope, ok := durable.TurnScopeFrom(ctx)
 	if !ok {
-		decision, err := b.engine.Evaluate(ctx, request)
-		return decision, "", err
+		return b.engine.Evaluate(ctx, request)
 	}
-	key := scope.NextOp()
-	raw, err := scope.Invocation().RunAction(ctx, key, b.recordApproval(func(ctx context.Context) ([]byte, error) {
+	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), b.recordApproval(func(ctx context.Context) ([]byte, error) {
 		decision, err := b.engine.Evaluate(ctx, request)
 		if err != nil {
 			return nil, err
@@ -65,17 +21,17 @@ func (b *Broker) evaluatePolicy(ctx context.Context, request *approval.ToolReque
 		return json.Marshal(decision)
 	}))
 	if err != nil {
-		return approval.PolicyDecision{}, "", err
+		return approval.PolicyDecision{}, err
 	}
 	recorded, err := b.readOutcome(raw)
 	if err != nil {
-		return approval.PolicyDecision{}, "", err
+		return approval.PolicyDecision{}, err
 	}
 	var decision approval.PolicyDecision
 	if err := json.Unmarshal(recorded, &decision); err != nil {
-		return approval.PolicyDecision{}, "", err
+		return approval.PolicyDecision{}, err
 	}
-	return decision, key, nil
+	return decision, nil
 }
 
 func (b *Broker) executeDurable(ctx context.Context, scope *durable.TurnScope, canonical *ToolRequest, constraints approval.Constraints, adapter Adapter, effectful bool) (result ToolResult, err error) {
@@ -117,193 +73,4 @@ func (b *Broker) validateDurable(ctx context.Context, scope *durable.TurnScope, 
 	}
 	_, err = b.readOutcome(raw)
 	return err
-}
-
-func (b *Broker) grantDurableUntil(ctx context.Context, scope *durable.TurnScope, canonical *ToolRequest, expiry time.Time) (approval.ApprovalGrant, error) {
-	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), b.recordApproval(func(ctx context.Context) ([]byte, error) {
-		grant, err := b.engine.GrantUntil(ctx, toApprovalRequest(canonical, b.PolicyVersion()), expiry)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(grant)
-	}))
-	if err != nil {
-		return approval.ApprovalGrant{}, err
-	}
-	recorded, err := b.readOutcome(raw)
-	if err != nil {
-		return approval.ApprovalGrant{}, err
-	}
-	var grant approval.ApprovalGrant
-	if err := json.Unmarshal(recorded, &grant); err != nil {
-		return approval.ApprovalGrant{}, err
-	}
-	return grant, nil
-}
-
-func (b *Broker) parkForApproval(ctx context.Context, scope *durable.TurnScope, evalKey string, canonical *ToolRequest, definition *tools.Definition, approvalExpiry time.Time) (grant *approval.ApprovalGrant, err error) {
-	defer func() {
-		if recovered := durable.RecoveredPanic(); recovered != nil && err == nil {
-			err = recovered
-		}
-	}()
-	signal := "approval-" + evalKey
-	addr := durable.FormatApprovalAddr(canonical.TurnID, signal)
-	sink, ok := ApprovalSinkFrom(ctx)
-	if !ok {
-		return nil, errorf(ResultCapabilityUnavailable, "durable approval requires an event sink")
-	}
-	clockRaw, err := scope.Invocation().RunAction(ctx, scope.NextClock(), func(ctx context.Context) ([]byte, error) {
-		return json.Marshal(struct {
-			Expiry time.Time `json:"expiry"`
-			Now    time.Time `json:"now"`
-		}{Expiry: approvalExpiry, Now: time.Now().UTC()})
-	})
-	if err != nil {
-		return nil, err
-	}
-	var clock struct {
-		Expiry time.Time `json:"expiry"`
-		Now    time.Time `json:"now"`
-	}
-	if err := json.Unmarshal(clockRaw, &clock); err != nil {
-		return nil, errorf(ResultExecutionFailed, "decode durable approval clock: %v", err)
-	}
-	expiry := clock.Expiry.UTC()
-	observed := clock.Now.UTC()
-	prompt, err := b.buildApprovalPrompt(canonical, definition, approval.PolicyDecision{Outcome: approval.OutcomeRequireApproval}, expiry)
-	if err != nil {
-		return nil, err
-	}
-	event := ApprovalEvent{
-		ID:          "approval-" + canonical.TurnID + "-" + signal,
-		TurnID:      canonical.TurnID,
-		SessionID:   canonical.SessionID,
-		PrincipalID: canonical.PrincipalID,
-		ToolName:    canonical.ToolName,
-		ToolVersion: canonical.ToolVersion,
-		Arguments:   prompt.Arguments,
-		ApprovalID:  addr,
-		ExpiresAt:   expiry,
-		CreatedAt:   observed,
-	}
-	if err := sink.EmitApprovalRequired(ctx, &event); err != nil {
-		return nil, err
-	}
-	wait := expiry.Sub(observed)
-	if wait <= 0 {
-		return nil, errorf(ResultPolicyDenied, "tool %q approval window elapsed", canonical.ToolName)
-	}
-	payload, timedOut, ok := scope.Invocation().Wait(ctx, signal, wait)
-	if !ok {
-		if ctx.Err() != nil {
-			return nil, errorf(ResultDeadlineExceeded, "tool request ended: %v", ctx.Err())
-		}
-		return nil, errorf(ResultPolicyDenied, "tool %q approval wait failed", canonical.ToolName)
-	}
-	if timedOut {
-		return nil, errorf(ResultPolicyDenied, "tool %q approval window elapsed", canonical.ToolName)
-	}
-	var decision ApprovalDecision
-	if err := json.Unmarshal(payload, &decision); err != nil || !decision.Approved {
-		return nil, errorf(ResultPolicyDenied, "tool %q approval was rejected", canonical.ToolName)
-	}
-	afterRaw, err := scope.Invocation().RunAction(ctx, scope.NextClock(), func(ctx context.Context) ([]byte, error) {
-		return json.Marshal(time.Now().UTC())
-	})
-	if err != nil {
-		return nil, err
-	}
-	var after time.Time
-	if err := json.Unmarshal(afterRaw, &after); err != nil {
-		return nil, errorf(ResultExecutionFailed, "decode durable approval clock: %v", err)
-	}
-	ttl := expiry.Sub(after.UTC())
-	if ttl <= 0 {
-		return nil, errorf(ResultPolicyDenied, "tool %q approval window elapsed", canonical.ToolName)
-	}
-	issued, err := b.grantParked(ctx, canonical, ttl)
-	if err != nil {
-		return nil, err
-	}
-	return &issued, nil
-}
-
-func (b *Broker) grantParked(ctx context.Context, canonical *ToolRequest, ttl time.Duration) (approval.ApprovalGrant, error) {
-	scope, ok := durable.TurnScopeFrom(ctx)
-	if !ok {
-		return b.Grant(ctx, canonical, ttl)
-	}
-	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), b.recordApproval(func(ctx context.Context) ([]byte, error) {
-		issued, err := b.Grant(ctx, canonical, ttl)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(issued)
-	}))
-	if err != nil {
-		return approval.ApprovalGrant{}, err
-	}
-	recorded, err := b.readOutcome(raw)
-	if err != nil {
-		return approval.ApprovalGrant{}, err
-	}
-	var issued approval.ApprovalGrant
-	if err := json.Unmarshal(recorded, &issued); err != nil {
-		return approval.ApprovalGrant{}, errorf(ResultExecutionFailed, "decode durable approval grant: %v", err)
-	}
-	return issued, nil
-}
-
-type ApprovalEventStore interface {
-	UpsertEvent(ctx context.Context, e *store.RuntimeEvent) (uint64, bool, error)
-}
-
-type approvalEventSink struct {
-	events  ApprovalEventStore
-	publish func(*store.RuntimeEvent)
-}
-
-func NewApprovalEventSink(events ApprovalEventStore, publish func(*store.RuntimeEvent)) ApprovalEventSink {
-	return &approvalEventSink{events: events, publish: publish}
-}
-
-func (s *approvalEventSink) EmitApprovalRequired(ctx context.Context, event *ApprovalEvent) error {
-	payload, err := json.Marshal(struct {
-		ApprovalID string `json:"approval_id"`
-		ToolName   string `json:"tool_name"`
-		Version    string `json:"tool_version"`
-		Arguments  string `json:"arguments"`
-		ExpiresAt  string `json:"expires_at"`
-	}{
-		ApprovalID: event.ApprovalID,
-		ToolName:   event.ToolName,
-		Version:    event.ToolVersion,
-		Arguments:  event.Arguments,
-		ExpiresAt:  event.ExpiresAt.UTC().Format(time.RFC3339Nano),
-	})
-	if err != nil {
-		return err
-	}
-	created := event.CreatedAt.UTC()
-	if created.IsZero() {
-		created = time.Now().UTC()
-	}
-	full := &store.RuntimeEvent{
-		ID:            event.ID,
-		SessionID:     event.SessionID,
-		TurnID:        event.TurnID,
-		Author:        event.PrincipalID,
-		Kind:          "approval.required",
-		SchemaVersion: 1,
-		Payload:       payload,
-		CreatedAt:     created,
-	}
-	sequence, _, err := s.events.UpsertEvent(ctx, full)
-	if err != nil {
-		return err
-	}
-	full.Sequence = sequence
-	s.publish(full)
-	return nil
 }

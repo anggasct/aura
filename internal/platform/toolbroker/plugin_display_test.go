@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
@@ -14,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/tools/displaytest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const displayToolName = "plugin_mailer_send"
@@ -221,88 +219,47 @@ func TestOtherToolsKeepTheirJSONRenderingWithEscapedControlCharacters(t *testing
 	}
 }
 
-func startDurableScope(t *testing.T) (context.Context, *recordingSink) {
-	t.Helper()
-	backend := durable.NewFake()
-	invocations := make(chan durable.Invocation, 1)
-	backend.RegisterHandler("driver", func(_ context.Context, inv durable.Invocation) error {
-		invocations <- inv
-		select {}
-	})
-	if _, err := backend.Start(context.Background(), durable.StartRequest{Handler: "driver", Key: "turn-1"}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	var inv durable.Invocation
-	select {
-	case inv = <-invocations:
-	case <-time.After(20 * time.Second):
-		t.Fatal("driver invocation never started")
-	}
-	sink := &recordingSink{ready: make(chan struct{})}
-	ctx := WithApprovalSink(context.Background(), sink)
-	return durable.WithTurnScope(ctx, durable.NewTurnScope(inv)), sink
-}
-
 func TestDurableApprovalCarriesTheSameDisplayAndFailsClosedWhenItCannotFit(t *testing.T) {
-	t.Run("display text reaches the event", func(t *testing.T) {
+	hosted := startHostedRuntime(t)
+	t.Run("the display text reaches the decider", func(t *testing.T) {
+		arguments := `{"body":"` + strings.Repeat("b", 3000) + `","to":["a@mail.example"],"subject":"Hi"}`
+		inMemory := newDisplayHarness(t, []string{"to", "subject", "body"})
+		if err := inMemory.run(arguments, principal.ClassTrusted); err != nil {
+			t.Fatalf("in-memory Execute: %v", err)
+		}
 		h := newDisplayHarness(t, []string{"to", "subject", "body"})
-		ctx, sink := startDurableScope(t)
-		done := make(chan error, 1)
-		go func() {
-			_, err := h.broker.Execute(ctx, classifiedRequest(displayToolName, `{"body":"`+strings.Repeat("b", 3000)+`","to":["a@mail.example"],"subject":"Hi"}`, principal.ClassTrusted))
-			done <- err
-		}()
-		select {
-		case <-sink.ready:
-		case err := <-done:
-			t.Fatalf("Execute ended before parking: %v", err)
-		case <-time.After(20 * time.Second):
-			t.Fatal("approval event never emitted")
+		var durableErr error
+		hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
+			_, durableErr = h.broker.Execute(inTurn(ctx, inv), classifiedRequest(displayToolName, arguments, principal.ClassTrusted))
+			return nil
+		})
+		if durableErr != nil {
+			t.Fatalf("durable Execute: %v", durableErr)
 		}
-		events := sink.snapshot()
-		if len(events) != 1 || !strings.HasPrefix(events[0].Arguments, "to: [\"a@mail.example\"]\nsubject: Hi\nbody: ") || !strings.Contains(events[0].Arguments, "bytes hidden]") || len(events[0].Arguments) > tools.ApprovalDisplayLimit {
-			t.Fatalf("approval events = %+v", events)
+		prompts, want := h.promptList(), inMemory.promptList()
+		if len(prompts) != 1 || len(want) != 1 || prompts[0].Arguments != want[0].Arguments {
+			t.Fatalf("durable prompts = %+v, want the in-memory display %+v", prompts, want)
+		}
+		display := prompts[0].Arguments
+		if !strings.HasPrefix(display, "to: [\"a@mail.example\"]\nsubject: Hi\nbody: ") || !strings.Contains(display, "bytes hidden]") || len(display) > tools.ApprovalDisplayLimit {
+			t.Fatalf("display = %q", display)
+		}
+		if h.calls != 1 {
+			t.Fatalf("calls = %d, want 1", h.calls)
 		}
 	})
-	t.Run("an oversized display never parks", func(t *testing.T) {
+	t.Run("an oversized display never reaches the decider", func(t *testing.T) {
 		h := newDisplayHarness(t, []string{"body", "to"})
-		ctx, sink := startDurableScope(t)
-		_, err := h.broker.Execute(ctx, classifiedRequest(displayToolName, `{"body":"`+strings.Repeat("b", 3000)+`","to":"a@mail.example"}`, principal.ClassTrusted))
-		if classOf(err) != ResultApprovalDisplayTooLarge {
-			t.Fatalf("Execute error = %v, want approval_display_too_large", err)
+		var durableErr error
+		hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
+			_, durableErr = h.broker.Execute(inTurn(ctx, inv), classifiedRequest(displayToolName, `{"body":"`+strings.Repeat("b", 3000)+`","to":"a@mail.example"}`, principal.ClassTrusted))
+			return nil
+		})
+		if classOf(durableErr) != ResultApprovalDisplayTooLarge {
+			t.Fatalf("Execute error = %v, want approval_display_too_large", durableErr)
 		}
-		if len(sink.snapshot()) != 0 || h.calls != 0 {
-			t.Fatalf("events = %d calls = %d, want neither", len(sink.snapshot()), h.calls)
+		if len(h.promptList()) != 0 || h.calls != 0 {
+			t.Fatalf("prompts = %d calls = %d, want neither", len(h.promptList()), h.calls)
 		}
 	})
-}
-
-type captureEvents struct {
-	mu     sync.Mutex
-	stored []*store.RuntimeEvent
-}
-
-func (c *captureEvents) UpsertEvent(_ context.Context, e *store.RuntimeEvent) (sequence uint64, inserted bool, err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.stored = append(c.stored, e)
-	return 1, true, nil
-}
-
-func TestApprovalEventPayloadCarriesTheDisplayAsText(t *testing.T) {
-	events := &captureEvents{}
-	sink := NewApprovalEventSink(events, func(*store.RuntimeEvent) {})
-	err := sink.EmitApprovalRequired(context.Background(), &ApprovalEvent{
-		ID: "approval-1", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1", ToolName: displayToolName, ToolVersion: "v1",
-		Arguments: "to: [\"a@mail.example\"]\nbody: hi", ApprovalID: "addr", ExpiresAt: time.Now().Add(time.Minute), CreatedAt: time.Now(),
-	})
-	if err != nil {
-		t.Fatalf("EmitApprovalRequired: %v", err)
-	}
-	var payload struct {
-		Arguments string `json:"arguments"`
-	}
-	if err := json.Unmarshal(events.stored[0].Payload, &payload); err != nil || payload.Arguments != "to: [\"a@mail.example\"]\nbody: hi" {
-		t.Fatalf("payload = %s, %v", events.stored[0].Payload, err)
-	}
 }

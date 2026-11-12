@@ -239,7 +239,7 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 				return raw, nil
 			}},
 			adapter,
-			&approval.Rule{ToolName: toolDef.name, ToolVersion: "v1", RequiresApproval: toolDef.approval},
+			&approval.Rule{ToolName: toolDef.name, ToolVersion: "v1"},
 		); err != nil {
 			t.Fatalf("register tool %s: %v", toolDef.name, err)
 		}
@@ -309,8 +309,7 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 }
 
 type liveToolDef struct {
-	name     string
-	approval bool
+	name string
 }
 
 type liveSessionCalls struct {
@@ -528,94 +527,5 @@ func TestLiveTurnToolsSurviveCrash(t *testing.T) {
 	}
 	if got := rig.tools.doneContent("tool-b"); got != `{"ok":true}` {
 		t.Fatalf("tool-b output = %q, want recorded success", got)
-	}
-}
-
-func TestLiveTurnApprovalSurvivesCrash(t *testing.T) {
-	binary := liveRestateBinary(t)
-	model := &liveScriptModel{steps: []liveModelStep{{tool: "tool-c"}, {text: "done"}}}
-	rig := startLiveTurnRig(t, binary, model, []liveToolDef{{name: "tool-c", approval: true}})
-
-	streamDone := make(chan error, 1)
-	go func() {
-		for ev, err := range rig.engine.Run(context.Background(), liveTurnRequest("turn-2")) {
-			_ = ev
-			if err != nil {
-				streamDone <- err
-				return
-			}
-		}
-		streamDone <- nil
-	}()
-
-	addr := rig.waitApprovalEvent("turn-2", 90*time.Second)
-	if got := rig.countKind("turn-2", turn.EventKindApprovalRequired); got != 1 {
-		t.Fatalf("approval.required rows = %d, want 1", got)
-	}
-	rig.crash()
-	rig.restart()
-	if got := rig.countKind("turn-2", turn.EventKindApprovalRequired); got != 1 {
-		t.Fatalf("approval.required rows after resume = %d, want 1 (no duplicate emit)", got)
-	}
-
-	decision, _ := json.Marshal(map[string]any{"approved": true})
-	if err := rig.adapter.ResolveApproval(context.Background(), durable.ResolveApprovalRequest{
-		ApprovalID: addr,
-		Payload:    decision,
-	}); err != nil {
-		t.Fatalf("resolve approval: %v", err)
-	}
-	events := rig.waitTerminal("turn-2", 120*time.Second)
-	if last := events[len(events)-1]; last.Kind != turn.EventKindTurnCompleted {
-		t.Fatalf("terminal = %q, want turn.completed", last.Kind)
-	}
-	select {
-	case err := <-streamDone:
-		if err != nil {
-			t.Fatalf("stream: %v", err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("stream never terminated")
-	}
-	if got := rig.tools.count("tool-c"); got != 1 {
-		t.Fatalf("tool-c calls = %d, want 1", got)
-	}
-	if got := rig.tools.doneContent("tool-c"); got != `{"ok":true}` {
-		t.Fatalf("tool-c output = %q, want recorded success", got)
-	}
-	if err := rig.adapter.ResolveApproval(context.Background(), durable.ResolveApprovalRequest{
-		ApprovalID: addr,
-		Payload:    decision,
-	}); err == nil {
-		t.Fatal("expected a double-consume error")
-	}
-}
-
-func (r *liveTurnRig) waitApprovalEvent(turnID string, within time.Duration) string {
-	r.t.Helper()
-	deadline := time.Now().Add(within)
-	for {
-		events, err := store.NewDedupeStore(r.db).ListTurnEvents(context.Background(), turnID)
-		if err != nil {
-			r.t.Fatalf("list turn events: %v", err)
-		}
-		for i := range events {
-			if events[i].Kind == turn.EventKindApprovalRequired {
-				var payload struct {
-					ApprovalID string `json:"approval_id"`
-				}
-				if err := json.Unmarshal(events[i].Payload, &payload); err != nil {
-					r.t.Fatalf("decode approval event: %v", err)
-				}
-				if payload.ApprovalID == "" {
-					r.t.Fatal("approval event carries no approval id")
-				}
-				return payload.ApprovalID
-			}
-		}
-		if time.Now().After(deadline) {
-			r.t.Fatalf("turn %s never parked for approval", turnID)
-		}
-		time.Sleep(200 * time.Millisecond)
 	}
 }

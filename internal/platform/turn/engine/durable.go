@@ -12,7 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
@@ -644,7 +643,6 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		return err
 	}
 	ctx = durable.WithTurnScope(ctx, scope)
-	ctx = toolbroker.WithApprovalSink(ctx, toolbroker.NewApprovalEventSink(e.events, e.Publish))
 	t := &turnState{req: *req, turnID: req.TurnID, accepted: *accepted}
 	deadline := req.Deadline
 	if deadline.IsZero() {
