@@ -359,7 +359,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if err := contextError(ctx, canonical.Deadline); err != nil {
 		return ToolResult{}, err
 	}
-	decision, evalKey, err := b.evaluatePolicy(ctx, toApprovalRequest(&canonical, b.PolicyVersion()))
+	decision, err := b.evaluatePolicy(ctx, toApprovalRequest(&canonical, b.PolicyVersion()))
 	if err != nil {
 		policyOutcome = PolicyOutcomeDeny
 		return ToolResult{}, mapApprovalError(err)
@@ -397,89 +397,28 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 	}
 
-	approvalExpiry := absoluteApprovalExpiry(canonical.Deadline)
-	grant := canonical.Approval
-	standing := false
-	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && class == principal.ClassTrusted && !guarded && !canonical.Tainted && !definition.FieldApproval() {
-		standing, err = b.standingGrant(ctx, &canonical, definition.Server)
-		if err != nil {
-			approvalState = ApprovalRejected
-			return ToolResult{}, err
-		}
-	}
-	if decision.Outcome == approval.OutcomeRequireApproval && grant == nil && !standing {
-		_, durableTurn := durable.TurnScopeFrom(ctx)
-		if canonical.Tainted && (durableTurn || !b.sessionReachable(canonical.SessionID)) {
-			policyOutcome = PolicyOutcomeDeny
-			approvalState = ApprovalMissing
-			return ToolResult{}, errorf(ResultKnowledgeSinkNoApprover, "tool %q needs approval on a turn with knowledge and nobody can be asked", key)
-		}
-		if scope, ok := durable.TurnScopeFrom(ctx); ok {
-			parked, err := b.parkForApproval(ctx, scope, evalKey, &canonical, definition, approvalExpiry)
-			if err != nil {
-				approvalState = ApprovalRejected
-				return ToolResult{}, err
-			}
-			approvalState = ApprovalApproved
-			grant = parked
-		} else if b.decider == nil {
-			approvalState = ApprovalMissing
-			return ToolResult{}, errorf(ResultApprovalRequired, "tool %q requires approval", key)
-		}
-	}
-	if grant == nil {
-		switch {
-		case standing:
-			approvalState = ApprovalStanding
-		case decision.Outcome == approval.OutcomeRequireApproval:
-			prompt, err := b.buildApprovalPrompt(&canonical, definition, decision, approvalExpiry)
-			if err != nil {
-				approvalState = ApprovalRejected
-				return ToolResult{}, err
-			}
-			accepted, err := b.decider(ctx, prompt)
-			if err != nil {
-				approvalState = ApprovalRejected
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return ToolResult{}, errorf(ResultDeadlineExceeded, "tool request ended: %v", err)
-				}
-				return ToolResult{}, errorf(ResultPolicyDenied, "tool %q approval failed closed: %s", key, redact([]byte(err.Error()), b.secretValues()))
-			}
-			if !accepted {
-				approvalState = ApprovalRejected
-				return ToolResult{}, errorf(ResultApprovalRequired, "tool %q approval was rejected", key)
-			}
-			approvalState = ApprovalApproved
-		default:
-			approvalState = ApprovalAuto
-		}
-		if err := contextError(ctx, approvalExpiry); err != nil {
-			approvalState = ApprovalRejected
-			return ToolResult{}, err
-		}
-		if durableScope, ok := durable.TurnScopeFrom(ctx); ok {
-			journaled, grantErr := b.grantDurableUntil(ctx, durableScope, &canonical, approvalExpiry)
-			if grantErr != nil {
-				return ToolResult{}, mapApprovalError(grantErr)
-			}
-			grant = &journaled
-		} else {
-			newGrant, grantErr := b.engine.GrantUntil(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), approvalExpiry)
-			err = grantErr
-			if err != nil {
-				return ToolResult{}, mapApprovalError(err)
-			}
-			grant = &newGrant
-		}
-	} else {
+	if canonical.Approval != nil {
 		approvalState = ApprovalAttached
-	}
-	if durableScope, ok := durable.TurnScopeFrom(ctx); ok {
-		if err := b.validateDurable(ctx, durableScope, &canonical, grant); err != nil {
+		scope, _ := durable.TurnScopeFrom(ctx)
+		if err := b.validateDurable(ctx, scope, &canonical, canonical.Approval); err != nil {
 			return ToolResult{}, mapApprovalError(err)
 		}
-	} else if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), grant); err != nil {
-		return ToolResult{}, mapApprovalError(err)
+	} else {
+		standing := false
+		if decision.Outcome == approval.OutcomeRequireApproval && class == principal.ClassTrusted && !guarded && !canonical.Tainted && !definition.FieldApproval() {
+			standing, err = b.standingGrant(ctx, &canonical, definition.Server)
+			if err != nil {
+				approvalState = ApprovalRejected
+				return ToolResult{}, err
+			}
+		}
+		approvalState, err = b.authorize(ctx, &authorization{canonical: &canonical, definition: definition, decision: decision, expiry: absoluteApprovalExpiry(canonical.Deadline), standing: standing})
+		if err != nil {
+			if code, _ := CodeOf(err); code == ResultKnowledgeSinkNoApprover {
+				policyOutcome = PolicyOutcomeDeny
+			}
+			return ToolResult{}, err
+		}
 	}
 	if scope, ok := durable.TurnScopeFrom(ctx); ok {
 		result, err = b.executeDurable(ctx, scope, &canonical, decision.Constraints, adapter, definition.Effectful)

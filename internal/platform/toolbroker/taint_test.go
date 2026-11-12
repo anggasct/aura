@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
-	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -211,47 +209,6 @@ func TestTaintedApprovalChecksReachabilityPerSession(t *testing.T) {
 	}
 	if len(asked) != 2 || asked[0] != "session-1" || asked[1] != "session-2" {
 		t.Errorf("reachability asked for %v", asked)
-	}
-}
-
-func TestTaintedApprovalOnADurableTurnIsDeniedWithoutParking(t *testing.T) {
-	harness := newTaintBroker(t, always, nil)
-	backend := durable.NewFake()
-	invocations := make(chan durable.Invocation, 1)
-	backend.RegisterHandler("driver", func(_ context.Context, inv durable.Invocation) error {
-		invocations <- inv
-		select {}
-	})
-	if _, err := backend.Start(t.Context(), durable.StartRequest{Handler: "driver", Key: "turn-1"}); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	var inv durable.Invocation
-	select {
-	case inv = <-invocations:
-	case <-time.After(5 * time.Second):
-		t.Fatal("driver invocation never started")
-	}
-	sink := &recordingSink{ready: make(chan struct{})}
-	ctx := durable.WithTurnScope(WithApprovalSink(t.Context(), sink), durable.NewTurnScope(inv))
-	call := sinkCalls["web_fetch"]
-	request := classifiedRequest("web_fetch", call.arguments, principal.ClassOwner, call.capabilities...)
-	request.Tainted = true
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := harness.broker.Execute(ctx, request)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if classOf(err) != ResultKnowledgeSinkNoApprover {
-			t.Fatalf("error = %v, want knowledge_sink_no_approver", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the tainted durable call parked instead of failing at once")
-	}
-	if len(sink.snapshot()) != 0 || harness.prompts != 0 || harness.calls["web_fetch"] != 0 {
-		t.Errorf("approval events = %d prompts = %d calls = %d, want none", len(sink.snapshot()), harness.prompts, harness.calls["web_fetch"])
 	}
 }
 

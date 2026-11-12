@@ -193,7 +193,12 @@ func executions(tool string) string {
 var errStubToolFailed = errors.New("stub tool failed")
 
 func (l *turnLedger) adapter(stub stubTool) toolbroker.Adapter {
-	return func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
+	return func(ctx context.Context, _ *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
+		if stub.gatedInAdapter {
+			if err := l.gate(ctx, stub.name); err != nil {
+				return toolbroker.ToolResult{}, err
+			}
+		}
 		if _, err := l.record(executions(stub.name), ""); err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -201,6 +206,15 @@ func (l *turnLedger) adapter(stub stubTool) toolbroker.Adapter {
 			return toolbroker.ToolResult{}, errStubToolFailed
 		}
 		return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
+	}
+}
+
+func (l *turnLedger) decider(approvingLife int) toolbroker.ApprovalDecider {
+	return func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+		if _, err := l.record(approvalCalls, prompt.ToolName); err != nil {
+			return false, err
+		}
+		return l.life == approvingLife, nil
 	}
 }
 
@@ -349,7 +363,7 @@ type ledgerTurn struct {
 
 func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.ADKExecutor {
 	t.Helper()
-	broker := toolbrokertest.NewBroker(t, &toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
+	broker := toolbrokertest.NewBroker(t, &toolbroker.Options{HostCapabilities: capabilitytest.Host(t), ApprovalDecider: parts.ledger.decider(parts.scenario.approvingLife)})
 	tools := &ledgerTools{broker: broker, ledger: parts.ledger, gated: parts.scenario.gated}
 	for _, stub := range parts.scenario.tools {
 		toolbrokertest.Register(t, broker, toolbrokertest.Stub{Name: stub.name, RequiresApproval: stub.approval, Run: parts.ledger.adapter(stub)})

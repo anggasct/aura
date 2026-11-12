@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	approvalCalls       = "approval"
 	skillRenders        = "render"
 	skillContextCalls   = "skill-context"
 	knowledgeCalls      = "knowledge"
@@ -35,9 +36,10 @@ const (
 )
 
 type stubTool struct {
-	name     string
-	approval bool
-	fails    bool
+	name           string
+	approval       bool
+	fails          bool
+	gatedInAdapter bool
 }
 
 type lifeWiring struct {
@@ -47,12 +49,13 @@ type lifeWiring struct {
 }
 
 type turnScenario struct {
-	steps     []string
-	tools     []stubTool
-	gated     string
-	requests  []turn.TurnRequest
-	wiring    func(t *testing.T, ledger *turnLedger) lifeWiring
-	firstLife func(t *testing.T, life *turnLife)
+	steps         []string
+	tools         []stubTool
+	gated         string
+	approvingLife int
+	requests      []turn.TurnRequest
+	wiring        func(t *testing.T, ledger *turnLedger) lifeWiring
+	firstLife     func(t *testing.T, life *turnLife)
 }
 
 var turnScenarios = map[string]turnScenario{
@@ -63,9 +66,10 @@ var turnScenarios = map[string]turnScenario{
 		requests: []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-TOOLS")},
 	},
 	"approval": {
-		steps:    []string{"tool-c", textStep},
-		tools:    []stubTool{{name: "tool-c", approval: true}},
-		requests: []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-APPROVAL")},
+		steps:         []string{"tool-c", textStep},
+		tools:         []stubTool{{name: "tool-c", approval: true, gatedInAdapter: true}},
+		approvingLife: 1,
+		requests:      []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-APPROVAL")},
 	},
 	"skill": {
 		steps:    []string{"tool-a", textStep},

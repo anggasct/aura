@@ -10,8 +10,6 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/modules/knowledge"
-	"github.com/anggasct/aura/internal/platform/durable"
-	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -56,53 +54,23 @@ func TestDurableTurnToolsSurviveAKilledProcess(t *testing.T) {
 
 func TestDurableTurnApprovalSurvivesAKilledProcess(t *testing.T) {
 	suite := startKilledSuite(t, "approval")
-	var approvalID string
-	suite.child.waitKillPoint(t, "the approval wait is recorded", func() bool {
-		approvalID = requestedApproval(t, turnEvents(t, suite.db, "turn-1"))
-		return approvalID != "" && hasWaitRow(t, suite)
-	})
+	suite.child.waitKillPoint(t, "tool-c is entered after its approval", suite.ledger.exists(t, "tool-c.entered"))
+	suite.ledger.requireCount(t, approvalCalls, 1)
+	suite.ledger.requireCount(t, executions("tool-c"), 0)
 
 	life := suite.resume(t)
-	decision := durable.ResolveApprovalRequest{ApprovalID: approvalID, Payload: []byte(`{"approved":true}`)}
-	if err := life.runtime.ResolveApproval(t.Context(), decision); err != nil {
-		t.Fatalf("ResolveApproval: %v", err)
-	}
+	suite.release(t, "tool-c")
 
 	suite.requireResumed(t, life)
-	if n := countKind(turnEvents(t, suite.db, "turn-1"), turn.EventKindApprovalRequired); n != 1 {
-		t.Errorf("approval.required events = %d, want 1", n)
+	if questions := suite.ledger.records(t, approvalCalls); len(questions) != 1 || questions[0].Life != 1 {
+		t.Errorf("approval questions = %+v, want one, asked by the first life", questions)
 	}
-	suite.ledger.requireCount(t, executions("tool-c"), 1)
-	err := life.runtime.ResolveApproval(t.Context(), decision)
-	if code, ok := sqlite.CodeOf(err); !ok || code != sqlite.ErrorCodeApprovalConsumed {
-		t.Errorf("second ResolveApproval = %v, want the code %s", err, sqlite.ErrorCodeApprovalConsumed)
+	if effects := suite.ledger.records(t, executions("tool-c")); len(effects) != 1 || effects[0].Life != 2 {
+		t.Errorf("tool-c effects = %+v, want one, recorded by the second life", effects)
 	}
-}
-
-func requestedApproval(t *testing.T, events []store.RuntimeEvent) string {
-	t.Helper()
-	for i := range events {
-		if events[i].Kind != turn.EventKindApprovalRequired {
-			continue
-		}
-		var payload struct {
-			ApprovalID string `json:"approval_id"`
-		}
-		if err := json.Unmarshal(events[i].Payload, &payload); err != nil {
-			t.Fatalf("decode the approval event: %v", err)
-		}
-		return payload.ApprovalID
+	if n := countKind(turnEvents(t, suite.db, "turn-1"), turn.EventKindApprovalRequired); n != 0 {
+		t.Errorf("approval.required events = %d, want none", n)
 	}
-	return ""
-}
-
-func hasWaitRow(t *testing.T, suite *killedSuite) bool {
-	t.Helper()
-	var waits int
-	if err := suite.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM durable_wait WHERE run_key = ?`, "turn-1").Scan(&waits); err != nil {
-		t.Fatalf("read the waits of turn-1: %v", err)
-	}
-	return waits > 0
 }
 
 func TestDurableTurnSkillActivatesOnceAcrossAKilledProcess(t *testing.T) {

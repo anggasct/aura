@@ -35,8 +35,9 @@ const (
 type hostedBody func(ctx context.Context, inv durable.Invocation) error
 
 type hostedRuntime struct {
-	db *sql.DB
-	rt *sqlite.Runtime
+	db   *sql.DB
+	rt   *sqlite.Runtime
+	halt func() bool
 
 	mu       sync.Mutex
 	runs     int
@@ -53,24 +54,44 @@ func startHostedRuntime(t *testing.T) *hostedRuntime {
 		t.Fatalf("open database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	rt, err := sqlite.New(&sqlite.Options{DB: db, Logger: slog.New(slog.DiscardHandler), PollInterval: 10 * time.Millisecond, HostTTL: time.Second, StopGrace: 5 * time.Second})
+	hosted := &hostedRuntime{db: db, bodies: map[string]hostedBody{}, returned: map[string]int{}}
+	hosted.serve(t)
+	return hosted
+}
+
+func (h *hostedRuntime) serve(t *testing.T) {
+	t.Helper()
+	rt, err := sqlite.New(&sqlite.Options{DB: h.db, Logger: slog.New(slog.DiscardHandler), PollInterval: 10 * time.Millisecond, HostTTL: time.Second, StopGrace: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)
 	}
-	hosted := &hostedRuntime{db: db, rt: rt, bodies: map[string]hostedBody{}, returned: map[string]int{}}
-	rt.RegisterHandler(hostedHandler, hosted.handle)
+	rt.RegisterHandler(hostedHandler, h.handle)
 	ctx, stop := context.WithCancel(context.WithoutCancel(t.Context()))
 	done := make(chan error, 1)
 	go func() { done <- rt.Run(ctx) }()
-	t.Cleanup(func() {
+	halt := sync.OnceValue(func() bool {
 		stop()
 		select {
 		case <-done:
+			return true
 		case <-time.After(hostedWait):
+			return false
+		}
+	})
+	h.rt, h.halt = rt, halt
+	t.Cleanup(func() {
+		if !halt() {
 			t.Error("the durable host did not stop")
 		}
 	})
-	return hosted
+}
+
+func (h *hostedRuntime) restartHost(t *testing.T) {
+	t.Helper()
+	if !h.halt() {
+		t.Fatal("the durable host did not stop")
+	}
+	h.serve(t)
 }
 
 func (h *hostedRuntime) handle(ctx context.Context, inv durable.Invocation) error {
@@ -430,8 +451,8 @@ func TestDurableToolFailureIsJournaledRedacted(t *testing.T) {
 				t.Errorf("returned text = %q, want the secret redacted", first.text)
 			}
 			rows := hosted.actionRows(t, key)
-			if len(rows) != 4 {
-				t.Fatalf("recorded actions = %d, want 4 (policy, grant, validation, execution)", len(rows))
+			if len(rows) != 3 {
+				t.Fatalf("recorded actions = %d, want 3 (policy, authorization, execution)", len(rows))
 			}
 			requireNoRowHolds(t, rows, journalSecret)
 			requireEveryRowIsAResult(t, rows)
@@ -662,6 +683,12 @@ func requireNoInterruptionRecorded(t *testing.T, rows []actionRow) {
 			t.Errorf("action %s outcome = %q (detail %q), want result", row.key, row.outcome, row.detail)
 			continue
 		}
+		if authorized, ok := decodeAuthorization(row.result); ok {
+			if authorized.Failure != nil {
+				t.Errorf("action %s records the refused authorization %+v", row.key, authorized.Failure)
+			}
+			continue
+		}
 		recorded, err := decodeOutcome(row.result)
 		if err != nil {
 			failures++
@@ -739,21 +766,20 @@ func TestDurableApprovalErrorsReplayWithTheirClass(t *testing.T) {
 			class: ResultPolicyDenied,
 		},
 		{
-			name: "grant with an expiry that has passed",
+			name: "authorization with an expiry that has passed",
 			call: func(ctx context.Context, fixture *approvalFixture) error {
-				scope, _ := durable.TurnScopeFrom(ctx)
-				_, err := fixture.broker.grantDurableUntil(ctx, scope, fixture.probe, time.Now().Add(-time.Minute))
+				_, err := fixture.broker.authorize(ctx, &authorization{canonical: fixture.probe, decision: approval.PolicyDecision{Outcome: approval.OutcomeAllow}, expiry: time.Now().Add(-time.Minute)})
 				return err
 			},
-			class: ResultPolicyDenied,
+			class: ResultDeadlineExceeded,
 		},
 		{
-			name: "park grant with a time to live of zero",
+			name: "authorization of a call that needs approval with nobody to ask",
 			call: func(ctx context.Context, fixture *approvalFixture) error {
-				_, err := fixture.broker.grantParked(ctx, fixture.probe, 0)
+				_, err := fixture.broker.authorize(ctx, &authorization{canonical: fixture.probe, decision: approval.PolicyDecision{Outcome: approval.OutcomeRequireApproval}, expiry: time.Now().Add(time.Minute)})
 				return err
 			},
-			class: ResultPolicyDenied,
+			class: ResultApprovalRequired,
 		},
 	}
 	hosted := startHostedRuntime(t)
@@ -829,6 +855,70 @@ func TestDurableApprovalErrorsReplayWithTheirClass(t *testing.T) {
 			if len(rows) != 1 || rows[0].outcome != "failed" {
 				t.Fatalf("recorded actions = %+v, want one failed action", rows)
 			}
+		})
+	}
+	interrupted := []struct {
+		name   string
+		answer func(end context.CancelFunc) (bool, error)
+		detail string
+	}{
+		{
+			name: "authorization whose decider fails after its context ended",
+			answer: func(end context.CancelFunc) (bool, error) {
+				end()
+				return false, fmt.Errorf("card for %s: %w", journalSecret, context.Canceled)
+			},
+			detail: "[REDACTED]",
+		},
+		{
+			name: "authorization answered after its context ended",
+			answer: func(end context.CancelFunc) (bool, error) {
+				end()
+				return true, nil
+			},
+			detail: "tool request ended",
+		},
+	}
+	for _, tc := range interrupted {
+		t.Run(tc.name, func(t *testing.T) {
+			ending := &endingContext{}
+			var asked atomic.Int32
+			broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), ApprovalDecider: func(context.Context, *ApprovalPrompt) (bool, error) {
+				asked.Add(1)
+				return tc.answer(ending.end)
+			}})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			broker.RegisterSecret(journalSecret)
+			registerProbe(t, broker, &probeTool{rule: &approval.Rule{ToolName: "probe", ToolVersion: "v1", RequiresApproval: true}})
+			canonical, err := broker.canonicalRequest(probeRequest("probe"))
+			if err != nil {
+				t.Fatalf("canonical request: %v", err)
+			}
+			call := &authorization{canonical: &canonical, definition: broker.definitions["probe@v1"], decision: approval.PolicyDecision{Outcome: approval.OutcomeRequireApproval}, expiry: time.Now().Add(time.Minute)}
+			var first, replay callOutcome
+			key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
+				_, err := broker.authorize(ending.within(inTurn(ctx, inv)), call)
+				first = outcomeOf(ToolResult{}, err)
+				_, err = broker.authorize(inTurn(ctx, inv), call)
+				replay = outcomeOf(ToolResult{}, err)
+				return nil
+			})
+			if first.class != ResultDeadlineExceeded || strings.Contains(first.text, journalSecret) {
+				t.Errorf("first call = %+v, want %s without the secret", first, ResultDeadlineExceeded)
+			}
+			if replay.class != ResultPolicyDenied || strings.Contains(replay.text, journalSecret) {
+				t.Errorf("replay = %+v, want %s without the secret", replay, ResultPolicyDenied)
+			}
+			if n := asked.Load(); n != 1 {
+				t.Errorf("decider calls = %d, want 1", n)
+			}
+			rows := hosted.actionRows(t, key)
+			if len(rows) != 1 || rows[0].outcome != "failed" || !strings.Contains(rows[0].detail, tc.detail) {
+				t.Fatalf("recorded actions = %+v, want one failed action whose detail holds %q", rows, tc.detail)
+			}
+			requireNoRowHolds(t, rows, journalSecret)
 		})
 	}
 }
