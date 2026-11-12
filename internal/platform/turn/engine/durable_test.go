@@ -31,7 +31,7 @@ func TestDurableAdmitCompletesTurn(t *testing.T) {
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})
-		engine, _, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		events, err := collect(t, engine, sampleRequest("session-a", "turn-0"))
@@ -53,7 +53,7 @@ func TestDurableSessionFIFO(t *testing.T) {
 		executor := turn.NewFakeExecutor([]turn.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 		})
-		engine, _, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		errs := make(chan error, 3)
@@ -90,7 +90,7 @@ func TestDurableDuplicateKeyReplaysWithoutReexecution(t *testing.T) {
 		executor := turn.NewFakeExecutor([]turn.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)},
 		})
-		engine, _, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		first := sampleRequest("session-a", "turn-0")
@@ -126,7 +126,7 @@ func TestDurableQueueOverflowFailsClosed(t *testing.T) {
 		executor := turn.NewFakeExecutor([]turn.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 		})
-		engine, _, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, executor)
+		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		go func() { _, _ = collect(t, engine, sampleRequest("session-a", "turn-0")) }()
@@ -192,7 +192,7 @@ func TestDurableParityWithLegacy(t *testing.T) {
 		legacyTranscripts := runAll(legacy, legacyDB)
 
 		durableExecutor := turn.NewFakeExecutor(script)
-		durableEngine, _, durableDB := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, durableExecutor)
+		durableEngine, _, durableDB := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, durableExecutor)
 		mustCreateSession(t, durableDB, "session-a")
 		mustCreateSession(t, durableDB, "session-b")
 		durableTranscripts := runAll(durableEngine, durableDB)
@@ -219,7 +219,7 @@ func TestDurableShutdownCancelsStaged(t *testing.T) {
 		executor := turn.NewFakeExecutor([]turn.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 		})
-		engine, _, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
+		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		go func() { _, _ = collect(t, engine, sampleRequest("session-a", "turn-0")) }()
@@ -265,7 +265,7 @@ func TestDurableLongStreamReplaysFullyFromStore(t *testing.T) {
 		}
 		script = append(script, turn.FakeStep{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)})
 		executor := turn.NewFakeExecutor(script)
-		engine, _, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		events, err := collect(t, engine, sampleRequest("session-a", "turn-0"))
@@ -592,7 +592,7 @@ func TestDurableTurnReleasedBeforeItIsStagedStillReachesItsCaller(t *testing.T) 
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})
-		engine, sessions, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		engine, sessions, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
 		sessions.hooks(func(s *hookedSessionStore) {
 			s.afterAdmit = func(turnID string) {
@@ -632,7 +632,7 @@ func TestShutdownBetweenGrantAndStagingCancelsTheTurnAndLeavesNoGrant(t *testing
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})
-		engine, sessions, db := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
+		engine, sessions, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
 		mustCreateSession(t, db, "session-a")
 		sessions.hooks(func(s *hookedSessionStore) {
 			s.afterAdmit = func(turnID string) {
@@ -663,7 +663,7 @@ func TestShutdownBetweenGrantAndStagingCancelsTheTurnAndLeavesNoGrant(t *testing
 func TestReleaseNeverGrantsAnAdmittingTurnOfAnotherSession(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)}})
-		engine, sessions, _ := newDurableTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		engine, sessions, _ := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		sessions.hooks(func(s *hookedSessionStore) {
 			s.aroundStatus = func(string, func() (runtimesessions.StatusResult, error)) (runtimesessions.StatusResult, error) {
 				foreign := runtimesessions.Descriptor{TurnID: "turn-x", SessionID: "session-b"}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -86,14 +87,6 @@ func (s *hookedSessionStore) ActiveTurns(ctx context.Context) ([]runtimesessions
 	return around(list)
 }
 
-func newDurableTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *hookedSessionStore, *sql.DB) {
-	t.Helper()
-	engine, db, _ := newTestRuntime(t, cfg, executor)
-	sessions := newHookedSessionStore(t, db)
-	engine.sessionStore = sessions
-	return engine, sessions, db
-}
-
 func newDurableLiveTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *hookedSessionStore, *sql.DB) {
 	t.Helper()
 	engine, db, _ := newTestRuntime(t, cfg, executor)
@@ -102,6 +95,7 @@ func newDurableLiveTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) 
 	engine.sessionStore = sessions
 	engine.durableRuntime = backend
 	backend.RegisterHandler("turn", engine.serveTurn)
+	t.Cleanup(func() { _ = engine.Shutdown(context.Background()) })
 	return engine, sessions, db
 }
 
@@ -219,4 +213,21 @@ func (r *durableHostRig) restart(executor TurnExecutor) {
 	r.stopHost()
 	r.build(executor)
 	r.startHost()
+}
+
+func TestNewEngineRefusesADurableConfigWithoutAStoreOrARuntime(t *testing.T) {
+	db := openTestDatabase(t)
+	sessions := newHookedSessionStore(t, db)
+	configs := map[string]*DurableConfig{
+		"no runtime":       {Sessions: sessions},
+		"no session store": {Runtime: durable.NewFake()},
+	}
+	for name, durableCfg := range configs {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewEngine(&Config{Durable: durableCfg}, store.NewEventStore(db), store.NewDedupeStore(db), turn.NewFakeExecutor(nil), nil)
+			if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeInvalidArgument {
+				t.Fatalf("NewEngine err = %v, want invalid_argument", err)
+			}
+		})
+	}
 }

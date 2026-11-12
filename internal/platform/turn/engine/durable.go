@@ -222,11 +222,7 @@ func (e *Engine) stageDurable(ctx context.Context, staging *durableStaging) {
 		done:         make(chan struct{}),
 		holdsPending: !staging.adopted,
 	}
-	if e.durableRuntime != nil {
-		t.start = func() { e.pollDurableTurn(turnCtx, t) }
-	} else {
-		t.start = func() { e.runTurn(turnCtx, t) }
-	}
+	t.start = func() { e.pollDurableTurn(turnCtx, t) }
 	e.mu.Lock()
 	if staging.adopted {
 		if e.shutdown || e.knownLocked(req.TurnID) {
@@ -448,15 +444,13 @@ func (e *Engine) actOnActiveTurn(ctx context.Context, sessionID string, active *
 func (e *Engine) adoptDurable(ctx context.Context, active *runtimesessions.QueuedTurn) error {
 	req := turnRequestFromDescriptor(&active.Descriptor)
 	runExists := false
-	if e.durableRuntime != nil {
-		_, err := e.durableRuntime.Status(ctx, durable.RunRef{Key: req.TurnID})
-		switch {
-		case err == nil:
-			runExists = true
-		case errors.Is(err, durable.ErrUnknownRun):
-		default:
-			return codedError(turn.ErrorCodeStorageUnavailable, "failed to read the durable turn run", err)
-		}
+	_, err := e.durableRuntime.Status(ctx, durable.RunRef{Key: req.TurnID})
+	switch {
+	case err == nil:
+		runExists = true
+	case errors.Is(err, durable.ErrUnknownRun):
+	default:
+		return codedError(turn.ErrorCodeStorageUnavailable, "failed to read the durable turn run", err)
 	}
 	events, err := e.turnEvents(ctx, req)
 	if err != nil {

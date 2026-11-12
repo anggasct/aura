@@ -66,6 +66,12 @@ func (c *Config) validate() error {
 	if c.ShutdownTimeout <= 0 {
 		problems = append(problems, invalidArgument("shutdown_timeout must be positive"))
 	}
+	if c.Durable != nil && c.Durable.Sessions == nil {
+		problems = append(problems, invalidArgument("durable turns need a session store"))
+	}
+	if c.Durable != nil && c.Durable.Runtime == nil {
+		problems = append(problems, invalidArgument("durable turns need a durable runtime"))
+	}
 	return errors.Join(problems...)
 }
 
