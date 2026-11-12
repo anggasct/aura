@@ -31,7 +31,7 @@ import (
 
 const (
 	serverTurnShutdownTimeout = 3 * time.Second
-	drainShutdownTimeout      = 2 * time.Second
+	drainShutdownTimeout      = 4 * time.Second
 	stubAnswerDelay           = 200 * time.Millisecond
 	stubRequestLimit          = 1 << 20
 	leftTurnID                = "turn-left"
