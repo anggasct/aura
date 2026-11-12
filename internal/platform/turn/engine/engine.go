@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
+	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -867,9 +868,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 		e.terminateStaged(drainCtx, t)
 	}
 	for _, key := range sesKeys {
-		if _, err := e.sessionStore.Abort(drainCtx, key); err != nil {
-			e.logger.ErrorContext(drainCtx, "runtime failed to abort durable session", "error", err)
-		}
+		e.abortSession(drainCtx, key)
 	}
 
 	done := make(chan struct{})
@@ -940,6 +939,48 @@ func (e *Engine) terminateQueued(ctx context.Context, t *turnState) {
 	delete(e.turns, t.turnID)
 	close(t.done)
 	e.mu.Unlock()
+}
+
+func (e *Engine) abortSession(ctx context.Context, sessionID string) {
+	result, err := e.sessionStore.Abort(ctx, sessionID)
+	if err != nil {
+		e.logger.ErrorContext(ctx, "runtime failed to abort durable session", "error", err)
+		return
+	}
+	for i := range result.Dropped {
+		e.terminateDropped(ctx, &result.Dropped[i].Descriptor)
+	}
+}
+
+func (e *Engine) terminateDropped(ctx context.Context, desc *runtimesessions.Descriptor) {
+	e.mu.Lock()
+	held := e.knownLocked(desc.TurnID)
+	e.mu.Unlock()
+	if held {
+		return
+	}
+	events, err := e.dedupe.ListTurnEvents(ctx, desc.TurnID)
+	if err != nil {
+		e.logger.ErrorContext(ctx, "runtime failed to read the events of a dropped durable turn", "error", err, "turn_id", desc.TurnID)
+		return
+	}
+	if hasTerminalKind(events) {
+		return
+	}
+	req := turnRequestFromDescriptor(desc)
+	terminal := &store.RuntimeEvent{
+		ID:            NewTurnID(),
+		SessionID:     req.SessionID,
+		TurnID:        req.TurnID,
+		Author:        req.PrincipalID,
+		Kind:          turn.EventKindTurnCancelled,
+		SchemaVersion: 1,
+		Payload:       cancelledPayload("runtime shutdown", e.agentID(req)),
+		CreatedAt:     time.Now().UTC(),
+	}
+	if _, err := e.events.AppendSequenced(ctx, req.SessionID, terminal); err != nil {
+		e.logger.ErrorContext(ctx, "runtime failed to persist dropped terminal event", "error", err, "turn_id", req.TurnID)
+	}
 }
 
 func completedPayload(agentID string) []byte {

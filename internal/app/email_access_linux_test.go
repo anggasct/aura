@@ -285,6 +285,9 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 		if err := host.Shutdown(ctx); err != nil {
 			t.Errorf("Shutdown: %v", err)
 		}
+		if err := engine.Shutdown(ctx); err != nil {
+			t.Errorf("engine Shutdown: %v", err)
+		}
 	})
 	awaitSignal(t, h.mail.waiting, "adapter never waited for mail")
 	return h

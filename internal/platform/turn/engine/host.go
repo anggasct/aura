@@ -83,5 +83,5 @@ func (h *Host) Shutdown(ctx context.Context) error {
 		h.logger.WarnContext(ctx, "channel adapters did not stop within grace; abandoning")
 	case <-ctx.Done():
 	}
-	return h.runtime.Shutdown(ctx)
+	return nil
 }
