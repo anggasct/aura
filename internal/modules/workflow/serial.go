@@ -92,6 +92,9 @@ func (i *Interpreter) driveSerial(ctx context.Context, inv durable.Invocation, r
 			break
 		}
 	}
+	if durable.Preempted(ctx) {
+		return "", ctx.Err()
+	}
 	persistCtx := context.WithoutCancel(ctx)
 	if err := ctx.Err(); err != nil {
 		if setErr := i.store.SetRunStatus(persistCtx, runID, RunCancelled); setErr != nil {
@@ -142,7 +145,7 @@ func (e *stepExecution) driveStep(ctx context.Context, step *StepSpec) {
 			return
 		}
 		update, ended := e.executeSerial(ctx, step, attempt)
-		if ended {
+		if ended || durable.Preempted(ctx) {
 			return
 		}
 		if !e.budget.spend(update.Tokens) {
@@ -208,11 +211,16 @@ func (e *stepExecution) executeActionSerial(ctx context.Context, step *StepSpec,
 	key := "run/" + e.runID + "/step/" + step.ID + "/attempt/" + strconv.Itoa(attempt)
 	raw, err := e.invocation.RunAction(attemptCtx, key, func(actionCtx context.Context) ([]byte, error) {
 		update := e.invokeExecutor(actionCtx, step, attempt)
+		if update.Status != StepSucceeded && durable.Preempted(actionCtx) {
+			return nil, context.Cause(actionCtx)
+		}
 		update.Attempt = attempt + 1
 		return json.Marshal(journaledFromUpdate(update))
 	})
 	if err != nil {
-		e.failRun(ctx, step.ID, err)
+		if !durable.Preempted(ctx) {
+			e.failRun(ctx, step.ID, err)
+		}
 		return nil, true
 	}
 	var record journaledAttempt
