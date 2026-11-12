@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
-	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,16 +43,23 @@ func TestDurableHostStopGraceFitsTheShutdownTimeout(t *testing.T) {
 }
 
 type scriptedRunHost struct {
-	early chan struct{}
-	held  chan struct{}
-	err   error
+	early      chan struct{}
+	held       chan struct{}
+	err        error
+	acquireErr error
+	ran        atomic.Bool
 }
 
 func newScriptedRunHost(err error) *scriptedRunHost {
 	return &scriptedRunHost{early: make(chan struct{}), held: make(chan struct{}), err: err}
 }
 
+func (h *scriptedRunHost) Acquire(context.Context) error {
+	return h.acquireErr
+}
+
 func (h *scriptedRunHost) Run(ctx context.Context) error {
+	h.ran.Store(true)
 	select {
 	case <-h.early:
 		return h.err
@@ -96,19 +103,29 @@ func TestDurableHostStageReportsHowItsRunEnded(t *testing.T) {
 			t.Fatalf("stop = %v, want %s", err, ErrorCodeStopTimeout)
 		}
 	})
-	t.Run("a host that ends before the stop is logged once and the stop succeeds", func(t *testing.T) {
+	t.Run("a host that ends before the stop: the stop returns its error", func(t *testing.T) {
 		host := newScriptedRunHost(hostFailed)
-		stage, logs := startScriptedHostStage(t, host)
+		stage, _ := startScriptedHostStage(t, host)
 		close(host.early)
 		<-stage.done
-		if err := stage.stop(t.Context()); err != nil {
-			t.Fatalf("stop = %v, want nil", err)
-		}
-		if n := strings.Count(logs.String(), `"level":"ERROR"`); n != 1 {
-			t.Fatalf("error lines = %d, want 1 in %s", n, logs.String())
-		}
-		if !strings.Contains(logs.String(), hostFailed.Error()) {
-			t.Fatalf("the error line does not carry the host's error: %s", logs.String())
+		if err := stage.stop(t.Context()); !errors.Is(err, hostFailed) {
+			t.Fatalf("stop = %v, want the host's error", err)
 		}
 	})
+}
+
+func TestDurableHostStageFailsItsStartWithoutALease(t *testing.T) {
+	host := newScriptedRunHost(nil)
+	host.acquireErr = errors.New("the lease was refused")
+	logs := &syncBuffer{}
+	stage := &durableHostStage{host: host, logger: slog.New(slog.NewJSONHandler(logs, nil))}
+	if err := stage.start(t.Context()); !errors.Is(err, host.acquireErr) {
+		t.Fatalf("start = %v, want the lease error", err)
+	}
+	if host.ran.Load() {
+		t.Fatal("the stage ran a host that holds no lease")
+	}
+	if logs.String() != "" {
+		t.Fatalf("a start that failed logged %s", logs.String())
+	}
 }

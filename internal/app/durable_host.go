@@ -18,6 +18,7 @@ func durableHostOptions(db *sql.DB, logger *slog.Logger, runtimeCfg config.Runti
 }
 
 type durableRunHost interface {
+	Acquire(ctx context.Context) error
 	Run(ctx context.Context) error
 }
 
@@ -32,6 +33,9 @@ type durableHostStage struct {
 }
 
 func (d *durableHostStage) start(ctx context.Context) error {
+	if err := d.host.Acquire(ctx); err != nil {
+		return err
+	}
 	hostCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	d.cancel, d.done = cancel, make(chan struct{})
 	go d.run(hostCtx)
@@ -41,12 +45,7 @@ func (d *durableHostStage) start(ctx context.Context) error {
 
 func (d *durableHostStage) run(ctx context.Context) {
 	defer close(d.done)
-	err := d.host.Run(ctx)
-	if ctx.Err() == nil {
-		d.logger.ErrorContext(ctx, "durable host stopped before shutdown", "component", "durable", "error", err)
-		return
-	}
-	d.err = err
+	d.err = d.host.Run(ctx)
 }
 
 func (d *durableHostStage) stop(ctx context.Context) error {

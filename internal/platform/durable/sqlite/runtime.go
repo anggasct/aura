@@ -83,6 +83,7 @@ type Runtime struct {
 	declared map[string]struct{}
 	calls    map[callKey]durable.CallHandler
 	host     *host
+	acquired *host
 }
 
 func New(opts *Options) (*Runtime, error) {
@@ -213,6 +214,20 @@ func (r *Runtime) setHost(h *host) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.host = h
+}
+
+func (r *Runtime) setAcquired(h *host) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.acquired = h
+}
+
+func (r *Runtime) takeAcquired() *host {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := r.acquired
+	r.acquired = nil
+	return h
 }
 
 func (r *Runtime) stamp() string {
