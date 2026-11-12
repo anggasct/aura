@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
@@ -44,11 +45,11 @@ var (
 		{key: "schedule-old", handler: schedule.HandlerName, state: "succeeded", age: 49 * time.Hour},
 		{key: "schedule-older", handler: schedule.HandlerName, state: "cancelled", age: 51 * time.Hour},
 		{key: "child-old", handler: child.HandlerName, state: "failed", age: 49 * time.Hour},
+		{key: "workflow-old", handler: workflow.HandlerName, state: "succeeded", age: 49 * time.Hour},
 		{key: "turn-old", handler: runtimeengine.HandlerName, state: "succeeded", age: 49 * time.Hour},
 		{key: "turn-older", handler: runtimeengine.HandlerName, state: "cancelled", age: 52 * time.Hour},
 	}
 	keptRunSeeds = []retentionRunSeed{
-		{key: "workflow-old", handler: "workflow", state: "succeeded", age: 49 * time.Hour},
 		{key: "turn-running", handler: runtimeengine.HandlerName, state: "running", age: 49 * time.Hour},
 		{key: heldTurnKey, handler: runtimeengine.HandlerName, state: "succeeded", age: 49 * time.Hour},
 		{key: "schedule-recent", handler: schedule.HandlerName, state: "succeeded", age: 47 * time.Hour},

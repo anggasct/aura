@@ -144,7 +144,7 @@ func childRuns(t *testing.T, disk *Store, definitionID string) []*RunSummary {
 
 func TestComposedRunDrivesChildrenInProcess(t *testing.T) {
 	tools := &fakeToolRunner{output: func(string) json.RawMessage { return json.RawMessage(`{"ok":true}`) }}
-	interpreter, _, disk := serialTestSetup(t, tools)
+	interpreter, _, disk := driverTestSetup(t, tools, DriverConcurrent)
 	interpreter.options.MaxConcurrentSteps = 1
 	loadAll(t, interpreter, toolSpec("leaf"), composingSpec("middle", "leaf"), composingSpec("top", "middle", "leaf"))
 	summary, err := interpreter.Start(context.Background(), "top", &RunInput{Objective: "nest"})
@@ -173,7 +173,7 @@ func TestComposedRunDrivesChildrenInProcess(t *testing.T) {
 
 func TestFailedChildFailsTheComposingStep(t *testing.T) {
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, durable.NewFake(), &Options{MaxConcurrentSteps: 2, Tools: failingTools{}})
+	interpreter := NewInterpreter(disk, durable.NewFake(), &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 2, Tools: failingTools{}})
 	loadAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
 	summary, err := interpreter.Start(context.Background(), "top", nil)
 	if err != nil {

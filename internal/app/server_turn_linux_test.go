@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -368,7 +369,7 @@ func TestServerTurnRunsAsADurableRun(t *testing.T) {
 	srv.run(t)
 	awaitChatListener(t, cfg.chatAddr)
 	requireNames(t, "hosted handlers", srv.hostedHandlers(t),
-		[]string{runtimeengine.HandlerName, broadcast.HandlerName, schedule.HandlerName, child.HandlerName})
+		[]string{runtimeengine.HandlerName, broadcast.HandlerName, schedule.HandlerName, child.HandlerName, workflow.HandlerName})
 	turnID := postChatTurn(t, cfg.chatAddr, key)
 	db := compositionDatabase(t, cfg.path)
 	if got, want := awaitRunEnded(t, db, turnID), (storedRun{handler: runtimeengine.HandlerName, state: "succeeded"}); got != want {

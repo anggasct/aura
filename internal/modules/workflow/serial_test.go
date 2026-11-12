@@ -14,6 +14,11 @@ import (
 
 func serialTestSetup(t *testing.T, tools *fakeToolRunner) (*Interpreter, *durable.Fake, *Store) {
 	t.Helper()
+	return driverTestSetup(t, tools, DriverSerial)
+}
+
+func driverTestSetup(t *testing.T, tools *fakeToolRunner, driver Driver) (*Interpreter, *durable.Fake, *Store) {
+	t.Helper()
 	registry, err := buildTestRegistry()
 	if err != nil {
 		t.Fatalf("registry: %v", err)
@@ -25,6 +30,7 @@ func serialTestSetup(t *testing.T, tools *fakeToolRunner) (*Interpreter, *durabl
 		AgentResolver:      registry,
 		Agents:             &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},
 		Tools:              tools,
+		Driver:             driver,
 	})
 	return interpreter, fake, disk
 }

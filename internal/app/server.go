@@ -263,6 +263,7 @@ func (b *build) buildServerSurface(ctx context.Context) error {
 		b.buildChannelHost,
 		b.buildBroadcast,
 		b.buildSchedule,
+		func() error { return b.buildWorkflowHost(ctx) },
 		b.buildDurableHost,
 		b.buildProbe,
 		func() error { return b.wireDurableListener(ctx) },
@@ -390,6 +391,18 @@ func (b *build) buildSchedule() error {
 	return b.group.Add(&lifecycleStage{name: "channels", start: host.Start, stop: host.Shutdown})
 }
 
+func (b *build) buildWorkflowHost(ctx context.Context) error {
+	if durableEnabled(b.cfg) {
+		return nil
+	}
+	if err := b.buildWorkflows(ctx, true); err != nil {
+		return err
+	}
+	s := b.server
+	s.hostedHandlers = append(s.hostedHandlers, workflow.HandlerName)
+	return nil
+}
+
 func (b *build) buildDurableHost() error {
 	if !durableEnabled(b.cfg) {
 		s := b.server
@@ -474,7 +487,7 @@ func (b *build) wireDurableListener(ctx context.Context) error {
 	if !durableEnabled(cfg) {
 		return nil
 	}
-	if err := b.buildWorkflows(ctx); err != nil {
+	if err := b.buildWorkflows(ctx, true); err != nil {
 		return err
 	}
 	durableListener, err := buildDurableListener(&durableListenerInput{

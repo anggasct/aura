@@ -90,6 +90,7 @@ func TestInterpreterRunsMixedWorkflowEndToEnd(t *testing.T) {
 		return json.RawMessage(`{"pr":123}`)
 	}}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -168,6 +169,7 @@ func TestInterpreterSkipsDownstreamOnFalseCondition(t *testing.T) {
 	disk := newTestStore(t)
 	agents := &fakeAgentRunner{output: json.RawMessage(`{"decision":"reject"}`)}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -223,6 +225,7 @@ func testStepTimeoutRetriesThenFailsRun(t *testing.T) {
 	block := make(chan struct{})
 	agents := &fakeAgentRunner{inFlight: block}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -278,6 +281,7 @@ func TestInterpreterBoundsConcurrentSteps(t *testing.T) {
 		},
 	}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -309,6 +313,7 @@ func TestInterpreterWaitSuspendsAndResumes(t *testing.T) {
 	fake := durable.NewFake()
 	disk := newTestStore(t)
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
 	})
@@ -354,6 +359,7 @@ func TestInterpreterCancelReachesCancelled(t *testing.T) {
 	disk := newTestStore(t)
 	agents := blockingRunner{}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -495,7 +501,7 @@ func TestApprovalRejectionRoutesRunToFailure(t *testing.T) {
 	}
 	fake := durable.NewFake()
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, fake, &Options{MaxConcurrentSteps: 1, AgentResolver: registry})
+	interpreter := NewInterpreter(disk, fake, &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 1, AgentResolver: registry})
 	spec := &Spec{
 		ID: "rejectflow", Goal: "Reject", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
@@ -549,7 +555,7 @@ func TestInterpreterSignalStepTimeoutRetryConvergesOnSignal(t *testing.T) {
 				clock := durable.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
 				fake := durable.NewFake().WithClock(clock)
 				disk := newTestStore(t)
-				interpreter := NewInterpreter(disk, fake, &Options{MaxConcurrentSteps: 1, AgentResolver: registry})
+				interpreter := NewInterpreter(disk, fake, &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 1, AgentResolver: registry})
 				step := StepSpec{ID: "gate", Executor: ExecutorSpec{Kind: tc.kind}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 1, Backoff: time.Minute}}
 				if tc.kind == KindWait {
 					step.Executor.Event = ptr("ci.completed")
@@ -600,6 +606,7 @@ func testTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
 	disk := newTestStore(t)
 	tracker := &attemptTracker{events: map[int]string{}}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
 		Agents:             tracker,
@@ -708,6 +715,7 @@ func TestInterpreterSinksOversizedOutputThroughArtifactSink(t *testing.T) {
 	sink := &fakeArtifactSink{digest: "sha256-abc123"}
 	agents := &fakeAgentRunner{output: oversizedOutput(70000)}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -757,6 +765,7 @@ func TestInterpreterWaitPayloadOverInlineLimitIsSunk(t *testing.T) {
 	disk := newTestStore(t)
 	sink := &fakeArtifactSink{digest: "sha256-wait"}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
 		Artifacts:          sink,
@@ -802,6 +811,7 @@ func TestInterpreterOversizedOutputWithoutSinkFailsTheRun(t *testing.T) {
 	disk := newTestStore(t)
 	agents := &fakeAgentRunner{output: oversizedOutput(70000)}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -841,6 +851,7 @@ func TestInterpreterStepPersistFailureFailsTheRun(t *testing.T) {
 	block := make(chan struct{})
 	agents := &fakeAgentRunner{inFlight: block}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -876,6 +887,7 @@ func TestInterpreterSuspendedRunStaysSuspendedWhenSiblingCompletes(t *testing.T)
 	disk := newTestStore(t)
 	agents := &fakeAgentRunner{}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -924,6 +936,7 @@ func TestInterpreterSuspendedStepReleasesConcurrencySlot(t *testing.T) {
 	started := make(chan struct{}, 1)
 	agents := &countingRunner{onStart: func() { started <- struct{}{} }}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
 		Agents:             agents,
@@ -1098,6 +1111,7 @@ func TestApprovalRequesterPortFailsStepAndRun(t *testing.T) {
 	fake := durable.NewFake()
 	requester := &testApprovalRequester{err: errors.New("approval backend unavailable")}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:    DriverConcurrent,
 		Approvals: requester,
 	})
 	if err := interpreter.Load(ctx, spec, ValidationDeps{}); err != nil {
@@ -1138,6 +1152,7 @@ func TestApprovalRequesterPortSucceedsOnSignal(t *testing.T) {
 	fake := durable.NewFake()
 	requester := &testApprovalRequester{}
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:    DriverConcurrent,
 		Approvals: requester,
 	})
 	if err := interpreter.Load(ctx, spec, ValidationDeps{}); err != nil {

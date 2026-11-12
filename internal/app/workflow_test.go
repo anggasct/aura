@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
@@ -374,6 +375,11 @@ func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 	}
 }
 
+func stepCallContext(t *testing.T) context.Context {
+	t.Helper()
+	return workflow.WithStepCall(t.Context(), workflow.StepCall{RunID: "run-1", StepID: "step-1"})
+}
+
 func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -404,7 +410,7 @@ func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
 	}
 	runner, _, workspace := newWorkflowToolRunnerFixture(t)
 	args := json.RawMessage(`{"path":"notes.txt","content":"authored by the workflow step"}`)
-	output, err := runner.Invoke(t.Context(), "write_file", args)
+	output, err := runner.Invoke(stepCallContext(t), "write_file", args)
 	if err != nil {
 		t.Fatalf("Invoke with real arguments: %v", err)
 	}
@@ -429,7 +435,7 @@ func TestWorkflowToolRunnerRejectsEmptyArgumentsFailClosed(t *testing.T) {
 	}
 	runner, _, workspace := newWorkflowToolRunnerFixture(t)
 	for _, args := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(`null`)} {
-		_, err := runner.Invoke(t.Context(), "write_file", args)
+		_, err := runner.Invoke(stepCallContext(t), "write_file", args)
 		if err == nil {
 			t.Fatalf("Invoke accepted empty arguments %s", args)
 		}
@@ -571,6 +577,15 @@ func TestBuildWorkflowInterpreterEmitsWarningOnStatusPersistFailure(t *testing.T
 	}
 	defer func() { _ = app.Close(ctx) }()
 	interpreter := app.interpreter
+	runHost, ok := app.runtime.(durableRunHost)
+	if !ok {
+		t.Fatal("the command build's durable runtime cannot host runs")
+	}
+	stage := &durableHostStage{host: runHost, handlers: []string{workflow.HandlerName}, logger: app.logger}
+	if err := stage.start(ctx); err != nil {
+		t.Fatalf("start the durable host: %v", err)
+	}
+	defer func() { _ = stage.stop(ctx) }()
 
 	db, err := openStorage(ctx, result.Config)
 	if err != nil {

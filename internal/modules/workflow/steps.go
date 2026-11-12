@@ -174,7 +174,7 @@ func (e *stepExecution) invokeExecutor(ctx context.Context, step *StepSpec, atte
 	case KindAgent:
 		return e.runAgentStep(ctx, step)
 	case KindTool:
-		return e.runToolStep(ctx, step)
+		return e.runToolStep(ctx, step, attempt)
 	case KindWait:
 		return e.runWaitStep(ctx, step, attempt)
 	case KindApproval:
@@ -230,12 +230,13 @@ func toolArguments(step *StepSpec) json.RawMessage {
 	return append(json.RawMessage(nil), step.Executor.ToolArgs...)
 }
 
-func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec) *stepUpdate {
+func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
 	runner := e.interpreter.options.Tools
 	if runner == nil || step.Executor.ToolID == nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: "no tool runner is wired", EndedAt: nowPtr()}
 	}
-	output, err := runner.Invoke(ctx, *step.Executor.ToolID, toolArguments(step))
+	call := StepCall{RunID: e.runID, StepID: step.ID, Attempt: attempt}
+	output, err := runner.Invoke(WithStepCall(ctx, call), *step.Executor.ToolID, toolArguments(step))
 	if err != nil {
 		code := ErrorCodeStepFailed
 		if coded, ok := CodeOf(err); ok {

@@ -51,6 +51,20 @@ func updateFromJournaled(record *journaledAttempt) *stepUpdate {
 	}
 }
 
+func (i *Interpreter) HandleSerial(ctx context.Context, inv durable.Invocation) error {
+	var tick struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal(inv.Payload(), &tick); err != nil {
+		return codedError(ErrorCodeStepFailed, "decode serial run payload: "+err.Error())
+	}
+	if tick.RunID == "" {
+		return codedError(ErrorCodeStepFailed, "serial run payload has no run id")
+	}
+	_, err := i.DriveSerial(ctx, inv, tick.RunID)
+	return err
+}
+
 func (i *Interpreter) DriveSerial(ctx context.Context, inv durable.Invocation, runID string) (string, error) {
 	return i.driveSerial(ctx, inv, runID, nil)
 }

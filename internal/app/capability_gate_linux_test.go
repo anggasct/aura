@@ -80,7 +80,7 @@ func TestWorkflowToolRunnerFollowsTheHostCapabilitySet(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newWorkflowToolRunner: %v", err)
 			}
-			_, invokeErr := runner.Invoke(t.Context(), tc.tool, json.RawMessage(tc.arguments))
+			_, invokeErr := runner.Invoke(stepCallContext(t), tc.tool, json.RawMessage(tc.arguments))
 			_, statErr := os.Stat(filepath.Join(result.Config.Tools.Workspace, tc.effect))
 			if tc.wantDenied {
 				if code, ok := workflow.CodeOf(invokeErr); !ok || code != workflow.ErrorCodeCapabilityUnavailable {

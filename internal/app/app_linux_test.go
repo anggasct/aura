@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -169,7 +170,7 @@ func TestCompositionServerWithDurableKeepsThePersonaCeiling(t *testing.T) {
 	requirePersonaCeiling(t, app)
 }
 
-func TestCompositionServerSkipsWorkflowsWithoutDurable(t *testing.T) {
+func TestCompositionServerRefusesABrokenWorkflowDefinition(t *testing.T) {
 	restoreDefaultLogger(t)
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
 	definitions := t.TempDir()
@@ -179,9 +180,9 @@ func TestCompositionServerSkipsWorkflowsWithoutDurable(t *testing.T) {
 	}
 	extra := fmt.Sprintf("workflows:\n  definitions_dir: %s\n", definitions)
 	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra))
-	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))
-	if err := app.Close(t.Context()); err != nil {
-		t.Fatalf("Close: %v", err)
+	_, err := Build(t.Context(), serverCompositionOptions(result, &syncBuffer{}))
+	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid {
+		t.Fatalf("Build error = %v, want %s", err, workflow.ErrorCodeExecutorInvalid)
 	}
 }
 

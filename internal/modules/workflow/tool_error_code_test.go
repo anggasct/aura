@@ -21,7 +21,7 @@ func TestToolStepRecordsTheCodeOfACodedRunnerError(t *testing.T) {
 	for _, tc := range cases {
 		t.Run("started/"+tc.name, func(t *testing.T) {
 			tools := &fakeToolRunner{err: tc.err}
-			interpreter, _, disk := serialTestSetup(t, tools)
+			interpreter, _, disk := driverTestSetup(t, tools, DriverConcurrent)
 			loadAll(t, interpreter, toolSpec("leaf"))
 			summary, err := interpreter.Start(context.Background(), "leaf", nil)
 			if err != nil {

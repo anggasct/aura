@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/model"
@@ -228,7 +229,7 @@ func TestCompositionCommandBuildsNamedParts(t *testing.T) {
 		runtime, interpreter, models bool
 	}{
 		{"durable", []Part{PartDurable}, true, false, false},
-		{"workflows", []Part{PartWorkflows}, false, true, false},
+		{"workflows", []Part{PartWorkflows}, true, true, false},
 		{"models", []Part{PartModels}, false, false, true},
 		{"models, workflows, durable", []Part{PartModels, PartWorkflows, PartDurable}, true, true, true},
 	}
@@ -252,20 +253,20 @@ func TestCompositionCommandBuildsNamedParts(t *testing.T) {
 	}
 }
 
-func TestCompositionCommandWorkflowsRunInTheirOwnRuntime(t *testing.T) {
+func TestCompositionCommandWorkflowsAreClientsOfTheServer(t *testing.T) {
 	restoreDefaultLogger(t)
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
 	result := loadCompositionConfig(t, writeCommandCompositionConfig(t, validWorkflowYAML))
 	app := buildApp(t, commandCompositionOptions(result, &syncBuffer{}, PartWorkflows))
 	t.Cleanup(func() { _ = app.Close(context.Background()) })
-	if app.runtime != nil {
-		t.Fatal("a workflows-only command build built the durable runtime")
+	if app.runtime == nil {
+		t.Fatal("a workflows-only command build did not build the durable runtime")
 	}
 	if _, err := app.interpreter.Start(t.Context(), "demo", nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if n := countRows(t, app.db, `SELECT COUNT(*) FROM durable_run`); n != 0 {
-		t.Fatalf("durable_run rows = %d, want 0", n)
+	if n := countRows(t, app.db, `SELECT COUNT(*) FROM durable_run WHERE handler = ? AND state = 'running' AND owner IS NULL`, workflow.HandlerName); n != 1 {
+		t.Fatalf("unowned running workflow runs = %d, want 1", n)
 	}
 }
 
@@ -276,7 +277,7 @@ func TestCompositionCommandStartsRunsForTheServer(t *testing.T) {
 	app := buildApp(t, commandCompositionOptions(result, &syncBuffer{}, PartDurable))
 	t.Cleanup(func() { _ = app.Close(context.Background()) })
 	requireNames(t, "entries", app.group.Names(), []string{"sqlite"})
-	for _, handler := range []string{broadcast.HandlerName, schedule.HandlerName, child.HandlerName} {
+	for _, handler := range []string{broadcast.HandlerName, schedule.HandlerName, child.HandlerName, workflow.HandlerName} {
 		t.Run(handler, func(t *testing.T) {
 			if _, err := app.runtime.Start(t.Context(), durable.StartRequest{Handler: handler, Key: "run-" + handler}); err != nil {
 				t.Fatalf("Start: %v", err)

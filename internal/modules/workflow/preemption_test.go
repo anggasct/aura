@@ -72,6 +72,7 @@ func newWorkflowHost(t *testing.T, options *Options) *workflowHost {
 	disk := NewStore(db)
 	warnings := &warningLog{}
 	options.Logger = warnings
+	options.Driver = DriverConcurrent
 	host := &workflowHost{t: t, db: db, disk: disk, interpreter: NewInterpreter(disk, durable.NewFake(), options), warnings: warnings}
 	host.startHost()
 	t.Cleanup(host.stopHost)

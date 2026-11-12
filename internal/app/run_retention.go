@@ -8,6 +8,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 )
@@ -72,7 +73,7 @@ func (r *runRetention) deleteOrphansThenPrune(ctx context.Context) (runRetention
 
 func (r *runRetention) prune(ctx context.Context, before time.Time) (int, error) {
 	req := sqlite.PruneRequest{
-		Handlers: []string{broadcast.HandlerName, schedule.HandlerName, child.HandlerName, runtimeengine.HandlerName},
+		Handlers: []string{broadcast.HandlerName, schedule.HandlerName, child.HandlerName, workflow.HandlerName, runtimeengine.HandlerName},
 		Before:   before,
 		Limit:    r.batch,
 	}
