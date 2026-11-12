@@ -262,6 +262,9 @@ func (h *Handler) handle(ctx stdcontext.Context, inv durable.Invocation, payload
 		return err
 	}
 	result, execErr := h.runJournaled(ctx, inv, &run, start.Task)
+	if durable.Preempted(ctx) {
+		return ctx.Err()
+	}
 	if execErr == nil {
 		enrichResult(&result, start.ChildID, &run)
 		if checkErr := checkResult(&result); checkErr != nil {
@@ -371,6 +374,9 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, r
 		res, runErr := h.exec.RunSession(actionCtx, req)
 		if runErr != nil {
 			return nil, runErr
+		}
+		if res.Status != "completed" && durable.Preempted(actionCtx) {
+			return nil, stdcontext.Cause(actionCtx)
 		}
 		encoded, encErr := json.Marshal(res)
 		if encErr != nil {
