@@ -51,10 +51,12 @@ type runScenario struct {
 }
 
 var runScenarios = map[string]runScenario{
-	"defined":   definedWorkflow.scenario(nil),
-	"generated": generatedWorkflow.scenario(nil),
-	"github":    proofWorkflow.scenario(approveTheGate),
-	"child":     {seed: seedChild, host: hostChild, firstLife: startTheChild},
+	"defined":            definedWorkflow.scenario(nil),
+	"generated":          generatedWorkflow.scenario(nil),
+	"github":             proofWorkflow.scenario(approveTheGate),
+	"effect-returned":    effectReturnedWorkflow.scenario(approveTheGate),
+	"effect-interrupted": effectInterruptedWorkflow.scenario(approveTheGate),
+	"child":              {seed: seedChild, host: hostChild, firstLife: startTheChild},
 }
 
 type workflowStub struct {
