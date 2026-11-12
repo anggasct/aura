@@ -75,16 +75,17 @@ func compositionDatabase(t *testing.T, configPath string) *sql.DB {
 }
 
 type sleepingProbe struct {
-	invoked  chan struct{}
-	returned chan struct{}
-	once     sync.Once
+	invoked    chan struct{}
+	returned   chan struct{}
+	once       sync.Once
+	returnOnce sync.Once
 }
 
 func (p *sleepingProbe) handle(_ context.Context, inv durable.Invocation) error {
 	p.once.Do(func() { close(p.invoked) })
 	err := inv.Sleep(time.Hour)
 	<-time.After(probeStopDelay)
-	close(p.returned)
+	p.returnOnce.Do(func() { close(p.returned) })
 	return err
 }
 
