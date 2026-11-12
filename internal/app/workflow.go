@@ -271,8 +271,10 @@ func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, logger *slog.L
 	if err != nil {
 		return nil, fmt.Errorf("build builtin tool executor: %w", err)
 	}
-	if err := github.Register(executor, github.ToolOptions{}); err != nil {
-		return nil, fmt.Errorf("register github tools: %w", err)
+	if credentials := githubCredentials(cfg); len(credentials) > 0 {
+		if err := github.Register(executor, &github.ToolOptions{Credentials: credentials}); err != nil {
+			return nil, fmt.Errorf("register github tools: %w", err)
+		}
 	}
 	caps := make(map[string][]string)
 	definitions := executor.Definitions()

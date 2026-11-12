@@ -382,6 +382,11 @@ func stepCallContext(t *testing.T) context.Context {
 
 func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, string) {
 	t.Helper()
+	return newWorkflowToolRunnerFixtureWith(t, nil)
+}
+
+func newWorkflowToolRunnerFixtureWith(t *testing.T, configure func(*config.Config)) (workflow.ToolRunner, *sql.DB, string) {
+	t.Helper()
 	dir := t.TempDir()
 	workspace := filepath.Join(dir, "workspace")
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
@@ -390,6 +395,9 @@ func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, s
 	cfg := config.Default()
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dir
+	if configure != nil {
+		configure(&cfg)
+	}
 	ctx := t.Context()
 	storetest.Seed(t, filepath.Join(dir, "aura.db"))
 	db, err := store.OpenDB(ctx, filepath.Join(dir, "aura.db"))
