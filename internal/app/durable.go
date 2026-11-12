@@ -195,7 +195,7 @@ type runHandlerDeclarer interface {
 }
 
 func declareRunHandlers(runtime runHandlerDeclarer) {
-	runtime.DeclareHandlers(broadcast.HandlerName, schedule.HandlerName, child.HandlerName)
+	runtime.DeclareHandlers(broadcast.HandlerName, schedule.HandlerName, child.HandlerName, workflow.HandlerName)
 }
 
 type durableListenerInput struct {
@@ -229,16 +229,7 @@ func buildDurableListener(in *durableListenerInput) (*durableListener, error) {
 		}
 		return engine.DriveTurn(ctx, inv, &desc)
 	})
-	endpoint.RegisterHandler("workflow", func(ctx context.Context, inv durable.Invocation) error {
-		var tick struct {
-			RunID string `json:"run_id"`
-		}
-		if err := json.Unmarshal(inv.Payload(), &tick); err != nil || tick.RunID == "" {
-			return fmt.Errorf("decode durable run payload: %w", err)
-		}
-		_, err := interpreter.DriveSerial(ctx, inv, tick.RunID)
-		return err
-	})
+	endpoint.RegisterHandler(workflow.HandlerName, interpreter.HandleSerial)
 	return &durableListener{config: durableCfg, endpoint: endpoint, logger: logger, interpreter: interpreter}, nil
 }
 

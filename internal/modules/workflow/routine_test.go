@@ -23,7 +23,7 @@ func TestRoutineIDsAreSlugsOfValidNames(t *testing.T) {
 
 func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	tools := &fakeToolRunner{}
-	interpreter, fake, disk := serialTestSetup(t, tools)
+	interpreter, fake, disk := driverTestSetup(t, tools, DriverConcurrent)
 	proposed := toolSpec("x")
 	proposed.Steps = append(proposed.Steps, StepSpec{ID: "gate", DependsOn: []string{"read"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second})
 	generated := NormalizeProposal(proposed, "prop_r")
@@ -76,7 +76,7 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	if err != nil || len(routines) != 1 || routines[0].Version != 2 {
 		t.Fatalf("Routines = %+v, %v", routines, err)
 	}
-	fresh := NewInterpreter(disk, durable.NewFake(), &Options{Tools: tools})
+	fresh := NewInterpreter(disk, durable.NewFake(), &Options{Driver: DriverConcurrent, Tools: tools})
 	loadAll(t, fresh, toolSpec("leaf"))
 	started, err := fresh.StartKeyed(context.Background(), first.ID, &RunInput{}, nil, "sched-once")
 	if err != nil || started.DefinitionVersion != 2 {

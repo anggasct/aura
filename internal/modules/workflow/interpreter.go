@@ -19,9 +19,19 @@ func sha256Hex(content []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+const HandlerName = "workflow"
+
+type Driver int
+
+const (
+	DriverSerial Driver = iota
+	DriverConcurrent
+)
+
 type Options struct {
 	MaxConcurrentSteps int
 	HandlerName        string
+	Driver             Driver
 	AgentResolver      AgentResolver
 	Agents             AgentRunner
 	Tools              ToolRunner
@@ -95,7 +105,7 @@ func NewInterpreter(store *Store, runtime durable.Runtime, options *Options) *In
 		options.MaxConcurrentSteps = 4
 	}
 	if options.HandlerName == "" {
-		options.HandlerName = "workflow"
+		options.HandlerName = HandlerName
 	}
 	if options.Logger == nil {
 		options.Logger = slog.Default()
@@ -108,9 +118,16 @@ func NewInterpreter(store *Store, runtime durable.Runtime, options *Options) *In
 		inflight: make(chan struct{}, options.MaxConcurrentSteps),
 	}
 	if registrar, ok := runtime.(durable.HandlerRegistrar); ok {
-		registrar.RegisterHandler(options.HandlerName, interpreter.handleInvocation)
+		registrar.RegisterHandler(options.HandlerName, interpreter.handlerFor(options.Driver))
 	}
 	return interpreter
+}
+
+func (i *Interpreter) handlerFor(driver Driver) durable.Handler {
+	if driver == DriverConcurrent {
+		return i.handleInvocation
+	}
+	return i.HandleSerial
 }
 
 func (i *Interpreter) Load(ctx context.Context, spec *Spec, deps ValidationDeps) error {

@@ -348,7 +348,7 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 		}
 	}
 	if slices.Contains(parts, PartWorkflows) {
-		if err := b.buildWorkflows(ctx); err != nil {
+		if err := b.buildWorkflows(ctx, false); err != nil {
 			return err
 		}
 	}

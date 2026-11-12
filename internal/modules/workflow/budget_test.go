@@ -31,6 +31,7 @@ func budgetInterpreter(t *testing.T, budget Budget, options *Options) (*Interpre
 	fake := durable.NewFake()
 	options.GeneratedBudget = budget
 	options.MaxConcurrentSteps = 2
+	options.Driver = DriverConcurrent
 	return NewInterpreter(disk, fake, options), disk, fake
 }
 

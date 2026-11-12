@@ -3,7 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -171,7 +171,7 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nstatus: %s\n", summary.ID, summary.Status)
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "run: %s\nstatus: %s\nnote: the run is executed by a running aura server\n", summary.ID, summary.Status)
 				return err
 			})
 		},
@@ -197,6 +197,24 @@ type workflowToolRunner struct {
 	caps     map[string][]string
 }
 
+type workflowToolIDs struct {
+	sessionID      string
+	turnID         string
+	requestID      string
+	idempotencyKey string
+}
+
+func workflowToolIDsFor(call workflow.StepCall) workflowToolIDs {
+	sum := sha256.Sum256([]byte(call.RunID + "/" + call.StepID))
+	digest := hex.EncodeToString(sum[:])[:24]
+	return workflowToolIDs{
+		sessionID:      "wf-" + digest,
+		turnID:         "turn-" + digest,
+		requestID:      "req-" + digest,
+		idempotencyKey: "wf/" + call.RunID + "/" + call.StepID,
+	}
+}
+
 func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
 	if len(args) == 0 || string(args) == "{}" || string(args) == "null" {
 		return nil, &workflow.Error{
@@ -204,27 +222,25 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 			Detail: "tool step has no arguments: the workflow-core step model does not carry tool arguments, so no canned or placeholder payload is executed; real tool-step arguments ship with the durable-workflows feature",
 		}
 	}
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return nil, fmt.Errorf("generate tool request id: %w", err)
+	call, ok := workflow.StepCallFrom(ctx)
+	if !ok {
+		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool step has no step call"}
 	}
-	sessionID := "wf-" + hex.EncodeToString(b[:8])
-	turnID := "turn-" + hex.EncodeToString(b[8:12])
-	reqID := "req-" + hex.EncodeToString(b[12:])
+	ids := workflowToolIDsFor(call)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if r.db != nil {
 		_, _ = r.db.ExecContext(ctx,
 			`INSERT INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES (?, ?, '{}', ?, ?) ON CONFLICT(id) DO NOTHING`,
-			sessionID, "workflow", now, now,
+			ids.sessionID, "workflow", now, now,
 		)
 	}
 	output, err := r.executor.Execute(ctx, &runtimeadk.BuiltinToolRequest{
-		RequestID:       reqID,
-		SessionID:       sessionID,
-		TurnID:          turnID,
-		IdempotencyKey:  "wf/" + reqID,
+		RequestID:       ids.requestID,
+		SessionID:       ids.sessionID,
+		TurnID:          ids.turnID,
+		IdempotencyKey:  ids.idempotencyKey,
 		EventSequence:   1,
-		EventInvocation: reqID,
+		EventInvocation: ids.requestID,
 		EventBranch:     "main",
 		EventAuthor:     "workflow",
 		ToolName:        toolID,

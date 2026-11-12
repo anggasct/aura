@@ -23,6 +23,7 @@ func runScriptedWorkflow(t *testing.T, script []struct {
 	fake := durable.NewFake()
 	disk := newTestStore(t)
 	interpreter := NewInterpreter(disk, fake, &Options{
+		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
 		Agents:             &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},

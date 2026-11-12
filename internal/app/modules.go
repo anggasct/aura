@@ -9,7 +9,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
-	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -158,7 +157,7 @@ func (b *build) buildInterpreter(ctx context.Context) error {
 	}))
 }
 
-func (b *build) buildWorkflows(ctx context.Context) error {
+func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 	cfg, db := b.cfg, b.db
 	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(cfg))
 	if err != nil {
@@ -175,14 +174,14 @@ func (b *build) buildWorkflows(ctx context.Context) error {
 	if cfg.Workflows != nil {
 		options.GeneratedBudget = workflow.Budget{MaxSteps: cfg.Workflows.Generated.MaxSteps, MaxTokens: cfg.Workflows.Generated.MaxTokens}
 	}
-	if cfg.Tools != nil {
+	if host && cfg.Tools != nil {
 		tools, err := newWorkflowToolRunner(b.result, db, b.logger)
 		if err != nil {
 			return err
 		}
 		options.Tools = tools
 	}
-	runtime, err := b.workflowRuntime()
+	runtime, err := b.durableRuntime()
 	if err != nil {
 		return err
 	}
@@ -196,11 +195,4 @@ func (b *build) buildWorkflows(ctx context.Context) error {
 	}
 	b.interpreter = built
 	return nil
-}
-
-func (b *build) workflowRuntime() (durable.Runtime, error) {
-	if durableEnabled(b.cfg) {
-		return b.durableRuntime()
-	}
-	return durable.NewFake(), nil
 }
