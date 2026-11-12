@@ -197,11 +197,32 @@ func (r *Runner) clock(ctx context.Context, inv durable.Invocation, key string) 
 	if err != nil {
 		return time.Time{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
 	moment, err := time.Parse(time.RFC3339Nano, string(raw))
 	if err != nil {
 		return time.Time{}, Errorf(ErrorCodeInvalidArgument, "journaled clock is not a valid timestamp")
 	}
 	return moment, nil
+}
+
+func (r *Runner) load(ctx context.Context, id string) (FullItem, bool, error) {
+	item, found, err := r.items.Load(ctx, id)
+	if err != nil {
+		return FullItem{}, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return FullItem{}, false, err
+	}
+	return item, found, nil
+}
+
+func (r *Runner) settleExpired(ctx context.Context, item *FullItem, now time.Time) error {
+	if err := r.items.Settle(ctx, item.ID, StateFailed, item.EffectID, now); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 func (r *Runner) sleepUntil(inv durable.Invocation, now, instant time.Time) error {
@@ -230,7 +251,7 @@ func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 	if id == "" {
 		return Errorf(ErrorCodeInvalidArgument, "broadcast item id must not be empty")
 	}
-	item, found, err := r.items.Load(ctx, id)
+	item, found, err := r.load(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -246,10 +267,13 @@ func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 		return err
 	}
 	if now.Sub(item.CreatedAt) > r.maxAge {
-		return r.items.Settle(ctx, id, StateFailed, item.EffectID, now)
+		return r.settleExpired(ctx, &item, now)
 	}
 	if item.NotBefore.After(now) {
 		if err := r.sleepUntil(inv, now, item.NotBefore); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		fresh, err := r.clock(ctx, inv, "release:"+id)
@@ -261,9 +285,9 @@ func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 			now = item.NotBefore
 		}
 		if now.Sub(item.CreatedAt) > r.maxAge {
-			return r.items.Settle(ctx, id, StateFailed, item.EffectID, now)
+			return r.settleExpired(ctx, &item, now)
 		}
-		current, found, err := r.items.Load(ctx, id)
+		current, found, err := r.load(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -276,7 +300,7 @@ func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 		if err := r.releaseWindow(ctx, inv, &item, now); err != nil {
 			return err
 		}
-		current, found, err := r.items.Load(ctx, id)
+		current, found, err := r.load(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -303,12 +327,15 @@ func (r *Runner) releaseWindow(ctx context.Context, inv durable.Invocation, self
 	}
 	groups := GroupDigests(toItems(members), r.maxDigestItems, r.maxDigestBytes)
 	for index := range groups {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		group := groups[index]
 		if len(group) == 0 {
 			continue
 		}
 		if len(group) == 1 {
-			single, found, err := r.items.Load(ctx, group[0].ID)
+			single, found, err := r.load(ctx, group[0].ID)
 			if err != nil {
 				return err
 			}
@@ -325,6 +352,9 @@ func (r *Runner) releaseWindow(ctx context.Context, inv durable.Invocation, self
 			if code, ok := CodeOf(err); ok && code == ErrorCodeConflict {
 				continue
 			}
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if !replayed {
@@ -350,7 +380,7 @@ func (r *Runner) createDigest(ctx context.Context, group []Item, index int) (Ite
 }
 
 func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *Item, keyBase string) error {
-	current, found, err := r.items.Load(ctx, item.ID)
+	current, found, err := r.load(ctx, item.ID)
 	if err != nil {
 		return err
 	}
@@ -390,7 +420,7 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 		if now.Sub(item.CreatedAt) > r.maxAge {
 			return r.settleObserved(ctx, item, StateFailed, "", now, attempt-1, ResultFailed)
 		}
-		slot, err := r.items.ClaimDispatchSlot(ctx, item.DestinationAlias, now, r.gap)
+		slot, err := r.dispatchSlot(ctx, inv, &slotClaim{key: "slot:" + keyBase + ":a" + strconv.Itoa(attempt), alias: item.DestinationAlias, now: now})
 		if err != nil {
 			return err
 		}
@@ -400,7 +430,13 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 		if err := r.sleepUntil(inv, now, slot); err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := r.items.NoteAttempt(ctx, item.ID, int64(attempt), now); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		outcome, sendErr := r.journaledSend(ctx, inv, sender, &SendRequest{
@@ -409,6 +445,9 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 			SessionID:      sessionID,
 			IdempotencyKey: "bcst:" + keyBase + ":a" + strconv.Itoa(attempt),
 		}, keyBase, attempt)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if sendErr != nil {
 			if attempt < r.maxAttempts {
 				r.observe(ctx, &Observation{Priority: item.Priority, State: item.State, Result: ResultRetried, Attempts: attempt})
@@ -457,6 +496,9 @@ func (r *Runner) fallbackOrFail(ctx context.Context, inv durable.Invocation, ite
 		SessionID:      sessionID,
 		IdempotencyKey: "bcst:" + keyBase + ":fb",
 	}, keyBase, 0)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	now, err := r.clock(ctx, inv, "fallback:"+keyBase)
 	if err != nil {
 		return err
@@ -477,6 +519,9 @@ func (r *Runner) settleObserved(ctx context.Context, item *Item, state, effectID
 	if err := r.items.Settle(ctx, item.ID, state, effectID, now); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.observe(ctx, &Observation{
 		Priority: item.Priority,
 		State:    state,
@@ -485,6 +530,33 @@ func (r *Runner) settleObserved(ctx context.Context, item *Item, state, effectID
 		Age:      now.Sub(item.CreatedAt),
 	})
 	return nil
+}
+
+type slotClaim struct {
+	key   string
+	alias string
+	now   time.Time
+}
+
+func (r *Runner) dispatchSlot(ctx context.Context, inv durable.Invocation, claim *slotClaim) (time.Time, error) {
+	raw, err := inv.RunAction(ctx, claim.key, func(ctx context.Context) ([]byte, error) {
+		slot, err := r.items.ClaimDispatchSlot(ctx, claim.alias, claim.now, r.gap)
+		if err != nil {
+			return nil, err
+		}
+		return []byte(slot.UTC().Format(time.RFC3339Nano)), nil
+	})
+	if err != nil {
+		return time.Time{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
+	slot, err := time.Parse(time.RFC3339Nano, string(raw))
+	if err != nil {
+		return time.Time{}, Errorf(ErrorCodeInvalidArgument, "journaled dispatch slot is not a valid timestamp")
+	}
+	return slot, nil
 }
 
 type journaledOutcome struct {
@@ -498,6 +570,9 @@ func (r *Runner) journaledSend(ctx context.Context, inv durable.Invocation, send
 	}
 	raw, err := inv.RunAction(ctx, key, func(ctx context.Context) ([]byte, error) {
 		outcome, err := sender.Send(ctx, req)
+		if ctx.Err() != nil && (err != nil || !outcome.Succeeded) {
+			return nil, context.Cause(ctx)
+		}
 		if err != nil {
 			return nil, err
 		}

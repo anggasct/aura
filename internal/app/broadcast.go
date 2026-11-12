@@ -228,7 +228,7 @@ func (s *discordBroadcastSender) Send(ctx context.Context, req *broadcast.SendRe
 	switch intent.State {
 	case effect.StateSucceeded:
 		return broadcast.SendOutcome{IntentID: intent.ID, Receipt: intent.ProviderReceipt, Succeeded: true}, nil
-	case effect.StateUnknown:
+	case effect.StateUnknown, effect.StateStarted:
 		return broadcast.SendOutcome{IntentID: intent.ID, Ambiguous: true}, nil
 	default:
 		return broadcast.SendOutcome{IntentID: intent.ID}, nil
