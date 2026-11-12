@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -36,8 +37,28 @@ type workflowHost struct {
 	stop        context.CancelFunc
 	stopped     chan error
 
-	mu     sync.Mutex
-	drives []driveRecord
+	warnings *warningLog
+	mu       sync.Mutex
+	drives   []driveRecord
+}
+
+type warningLog struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (l *warningLog) InfoContext(context.Context, string, ...any) {}
+
+func (l *warningLog) WarnContext(_ context.Context, msg string, _ ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.messages = append(l.messages, msg)
+}
+
+func (l *warningLog) logged() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.messages...)
 }
 
 type hostedRun struct {
@@ -49,8 +70,9 @@ func newWorkflowHost(t *testing.T, options *Options) *workflowHost {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
 	disk := NewStore(db)
-	options.Logger = slog.New(slog.DiscardHandler)
-	host := &workflowHost{t: t, db: db, disk: disk, interpreter: NewInterpreter(disk, durable.NewFake(), options)}
+	warnings := &warningLog{}
+	options.Logger = warnings
+	host := &workflowHost{t: t, db: db, disk: disk, interpreter: NewInterpreter(disk, durable.NewFake(), options), warnings: warnings}
 	host.startHost()
 	t.Cleanup(host.stopHost)
 	return host
@@ -212,6 +234,14 @@ func (h *workflowHost) requirePreemptedDrives() {
 		if drive.err == nil {
 			h.t.Errorf("drive %d returned nil after its host stopped", index+1)
 		}
+	}
+	h.requireNoStepFailureLogged()
+}
+
+func (h *workflowHost) requireNoStepFailureLogged() {
+	h.t.Helper()
+	if warnings := h.warnings.logged(); slices.Contains(warnings, "workflow step failed") {
+		h.t.Errorf("warnings = %v, want no step failure", warnings)
 	}
 }
 
@@ -446,6 +476,7 @@ func TestSerialDriveKeepsARunWhoseHostLostItsLease(t *testing.T) {
 	if status := drives[0].status; status == RunCancelled || status == RunFailed {
 		t.Errorf("run status after the lease was lost = %s, want neither cancelled nor failed", status)
 	}
+	host.requireNoStepFailureLogged()
 }
 
 func TestSerialDriveLeavesAChildWorkflowAsItIsWhenItsHostStops(t *testing.T) {
