@@ -3,6 +3,7 @@ package runtimeengine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -206,6 +207,37 @@ func deliveryParts(texts []string) []runtimechannelhost.OutputPart {
 	return parts
 }
 
+type plannedDelivery struct {
+	adapter runtimechannelhost.ChannelPort
+	request *runtimechannelhost.DeliveryRequest
+}
+
+func (e *Engine) planDelivery(req *turn.TurnRequest, events []store.RuntimeEvent) (plannedDelivery, error) {
+	if req == nil {
+		return plannedDelivery{}, invalidArgument("turn request must not be nil")
+	}
+	adapter, ok := e.channelAdapterFor(req)
+	if !ok {
+		if req.Origin == turn.OriginTerminal || req.Origin == turn.OriginInternal || req.Origin == turn.OriginWebhook || req.Origin == turn.OriginHTTP || len(req.ReplyContext) == 0 {
+			return plannedDelivery{}, codedError(turn.ErrorCodeDeliverySkipped, "turn has no channel destination", nil)
+		}
+		return plannedDelivery{}, codedError(turn.ErrorCodeDeliveryFailed, "owning channel adapter is not configured", nil)
+	}
+	parts := deliveryParts(extractDeliveryTexts(events))
+	if len(parts) == 0 {
+		return plannedDelivery{}, codedError(turn.ErrorCodeDeliverySkipped, "turn completed with no model text", nil)
+	}
+	return plannedDelivery{adapter: adapter, request: &runtimechannelhost.DeliveryRequest{
+		EffectID:       req.TurnID,
+		Channel:        string(req.Origin),
+		ConversationID: req.SessionID,
+		ReplyContext:   req.ReplyContext,
+		Parts:          parts,
+		IdempotencyKey: req.TurnID,
+		Deadline:       req.Deadline,
+	}}, nil
+}
+
 func (e *Engine) deliverCompletedTurn(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
 	if req == nil {
 		return invalidArgument("turn request must not be nil")
@@ -213,36 +245,78 @@ func (e *Engine) deliverCompletedTurn(ctx context.Context, req *turn.TurnRequest
 	if e.hasDelivered(req.TurnID) {
 		return nil
 	}
-	adapter, ok := e.channelAdapterFor(req)
-	if !ok {
-		if req.Origin == turn.OriginTerminal || req.Origin == turn.OriginInternal || req.Origin == turn.OriginWebhook || req.Origin == turn.OriginHTTP || len(req.ReplyContext) == 0 {
+	planned, err := e.planDelivery(req, events)
+	if err != nil {
+		if code, ok := turn.CodeOf(err); ok && code == turn.ErrorCodeDeliverySkipped {
 			e.markDelivered(req.TurnID)
-			return codedError(turn.ErrorCodeDeliverySkipped, "turn has no channel destination", nil)
 		}
-		return codedError(turn.ErrorCodeDeliveryFailed, "owning channel adapter is not configured", nil)
-	}
-	texts := extractDeliveryTexts(events)
-	if len(deliveryParts(texts)) == 0 {
-		e.markDelivered(req.TurnID)
-		return codedError(turn.ErrorCodeDeliverySkipped, "turn completed with no model text", nil)
+		return err
 	}
 	if !e.markDelivered(req.TurnID) {
 		return nil
 	}
-	delivery := &runtimechannelhost.DeliveryRequest{
-		EffectID:       req.TurnID,
-		Channel:        string(req.Origin),
-		ConversationID: req.SessionID,
-		ReplyContext:   req.ReplyContext,
-		Parts:          deliveryParts(texts),
-		IdempotencyKey: req.TurnID,
-		Deadline:       req.Deadline,
-	}
-	if _, err := adapter.Deliver(ctx, delivery); err != nil {
+	if _, err := planned.adapter.Deliver(ctx, planned.request); err != nil {
 		e.unmarkDelivered(req.TurnID)
 		return codedError(turn.ErrorCodeDeliveryFailed, "channel delivery failed", err)
 	}
 	return nil
+}
+
+type deliveryOutcome string
+
+const (
+	deliverySent    deliveryOutcome = "sent"
+	deliverySkipped deliveryOutcome = "skipped"
+	deliveryFailed  deliveryOutcome = "failed"
+)
+
+type deliveryRecord struct {
+	Outcome deliveryOutcome `json:"outcome"`
+	Code    turn.ErrorCode  `json:"code,omitempty"`
+	Detail  string          `json:"detail,omitempty"`
+}
+
+type completedTurn struct {
+	req    *turn.TurnRequest
+	events []store.RuntimeEvent
+}
+
+func (e *Engine) deliverOnce(ctx context.Context, done *completedTurn) deliveryRecord {
+	planned, err := e.planDelivery(done.req, done.events)
+	if err != nil {
+		if code, ok := turn.CodeOf(err); ok && code == turn.ErrorCodeDeliverySkipped {
+			e.logger.DebugContext(ctx, "turn delivery skipped", "error", err, "turn_id", done.req.TurnID)
+			return deliveryRecord{Outcome: deliverySkipped}
+		}
+		return e.failedDelivery(ctx, done.req, err)
+	}
+	if _, err := planned.adapter.Deliver(ctx, planned.request); err != nil {
+		return e.failedDelivery(ctx, done.req, err)
+	}
+	return deliveryRecord{Outcome: deliverySent}
+}
+
+func (e *Engine) failedDelivery(ctx context.Context, req *turn.TurnRequest, err error) deliveryRecord {
+	code := turn.ErrorCodeDeliveryFailed
+	if errors.Is(err, runtimechannelhost.ErrDeliveryAmbiguous) {
+		code = turn.ErrorCodeDeliveryAmbiguous
+	}
+	e.logger.ErrorContext(ctx, "turn delivery failed", "error", err, "code", code, "turn_id", req.TurnID)
+	return deliveryRecord{Outcome: deliveryFailed, Code: code, Detail: err.Error()}
+}
+
+func (r deliveryRecord) terminal(agentID string) (kind string, payload []byte) {
+	if r.Outcome != deliveryFailed {
+		return turn.EventKindTurnCompleted, completedPayload(agentID)
+	}
+	detail := "channel delivery failed"
+	if r.Code == turn.ErrorCodeDeliveryAmbiguous {
+		detail = "channel delivery outcome is unknown"
+	}
+	if r.Detail != "" {
+		detail += ": " + r.Detail
+	}
+	return turn.EventKindTurnFailed, failedPayload(r.Code, detail, nil, agentID)
 }
 
 func DeliveryTexts(events []store.RuntimeEvent) []string {
