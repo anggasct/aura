@@ -242,7 +242,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			yield(store.RuntimeEvent{}, err)
 			return
 		}
-		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req.PrincipalID, req.PrincipalClass, definition.ID, req.Knowledge)
+		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req, definition.ID)
 		if req.SessionID != "" {
 			runCtx = auramodel.WithSessionID(runCtx, req.SessionID)
 		}
@@ -501,7 +501,7 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		PrincipalClass:  access.class,
 		AgentID:         access.agentID,
 		Knowledge:       slices.Clone(access.knowledge),
-		Tainted:         len(access.knowledge) > 0,
+		Tainted:         access.tainted,
 		ToolName:        definition.Name,
 		ToolVersion:     definition.Version,
 		Arguments:       raw,

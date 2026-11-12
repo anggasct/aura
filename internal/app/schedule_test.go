@@ -74,7 +74,7 @@ func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 	engine := &fakeCronEngine{batches: [][]store.RuntimeEvent{cronCompletedBatch("turn-1", "nightly done")}}
 	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
 	result, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
-		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "internal",
+		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "cron:job-1:20260912T210000",
 	})
 	if err != nil {
@@ -87,7 +87,7 @@ func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 		t.Errorf("cron session not ensured: %v", err)
 	}
 	call := engine.calls[0]
-	if call.IdempotencyKey != "cron:job-1:20260912T210000" || string(call.Origin) != "internal" {
+	if call.IdempotencyKey != "cron:job-1:20260912T210000" || string(call.Origin) != "schedule" {
 		t.Errorf("turn request = %+v", call)
 	}
 }
@@ -102,7 +102,7 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 	}}
 	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
 	result, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
-		SessionID: "cron:job-9", PrincipalID: "cron", Origin: "internal",
+		SessionID: "cron:job-9", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "key-9",
 	})
 	if err != nil {
@@ -117,7 +117,7 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 	}}
 	starvedRunner := &engineTurnRunner{engine: starved, sessions: store.NewSessionService(db)}
 	if _, err := starvedRunner.RunTurn(t.Context(), &schedule.TurnRequest{
-		SessionID: "cron:job-8", PrincipalID: "cron", Origin: "internal",
+		SessionID: "cron:job-8", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "key-8",
 	}); err == nil {
 		t.Error("truncated stream accepted")
@@ -129,7 +129,7 @@ func TestEngineTurnRunnerMapsOverload(t *testing.T) {
 	engine := &fakeCronEngine{errs: []error{&turn.Error{Code: turn.ErrorCodeRuntimeOverloaded, Detail: "full"}}}
 	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
 	_, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
-		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "internal",
+		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "key-1",
 	})
 	if err == nil {

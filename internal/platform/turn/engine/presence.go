@@ -29,7 +29,7 @@ func presenceAdapterFor(req *turn.TurnRequest, adapters []runtimechannelhost.Cha
 		return nil, nil, false
 	}
 	switch req.Origin {
-	case turn.OriginTerminal, turn.OriginInternal, turn.OriginWebhook, turn.OriginHTTP:
+	case turn.OriginTerminal, turn.OriginInternal, turn.OriginWebhook, turn.OriginHTTP, turn.OriginChild, turn.OriginSchedule:
 		return nil, nil, false
 	}
 	if len(req.ReplyContext) == 0 {

@@ -5,13 +5,17 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
-func TestWebhookTurnsAreTrusted(t *testing.T) {
+func TestWebhookTurnsAreTrustedClassWithUntrustedInput(t *testing.T) {
 	req := webhookTurnRequest("webhook:primary", "turn-1", webhookTestEvent())
-	if req.PrincipalID != "webhook:primary" || req.PrincipalClass != principal.ClassTrusted {
-		t.Fatalf("webhook principal = %q/%q, want webhook:primary/trusted", req.PrincipalID, req.PrincipalClass)
+	if req.PrincipalID != "webhook:primary" || req.PrincipalClass != principal.ClassTrusted || req.Origin != turn.OriginWebhook {
+		t.Fatalf("webhook turn = %q/%q/%q, want webhook:primary/trusted/webhook", req.PrincipalID, req.PrincipalClass, req.Origin)
+	}
+	if !req.Tainted() {
+		t.Fatal("a webhook turn is not tainted")
 	}
 }
 
@@ -49,5 +53,16 @@ func TestChildTurnsInheritParentClass(t *testing.T) {
 	}
 	if req := childTurnRequest("sess-child-1", "", "work", time.Time{}, &childProjection{ownerID: principal.OwnerID}); req.TurnID != "sess-child-1" || req.IdempotencyKey != "sess-child-1" {
 		t.Fatalf("anonymous child turn = %+v, want session-keyed ids", req)
+	}
+}
+
+func TestChildTurnsCarryUntrustedInput(t *testing.T) {
+	for name, owner := range map[string]string{"owner parent": principal.OwnerID, "trusted parent": "discord:111"} {
+		t.Run(name, func(t *testing.T) {
+			req := childTurnRequest("sess-child-1", "ch-1", "work", time.Now().Add(time.Minute), &childProjection{ownerID: owner})
+			if req.Origin != turn.OriginChild || !req.Tainted() {
+				t.Fatalf("child turn origin = %q tainted = %v, want child and tainted", req.Origin, req.Tainted())
+			}
+		})
 	}
 }

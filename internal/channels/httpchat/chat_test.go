@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
@@ -399,6 +400,28 @@ func TestChatClientSystemMessagesNeverBecomeInstructions(t *testing.T) {
 	content := recall.Documents[0].Content
 	if !strings.HasPrefix(content, "role=system text=\"") || strings.ContainsAny(content, "\n\r") {
 		t.Errorf("system text is not quoted on one line: %q", content)
+	}
+}
+
+func TestChatSystemMessageAloneIsUntrustedHistory(t *testing.T) {
+	fixture := newChatFixture(t, chatFixtureOptions{maxMessages: 10, maxBytes: 1 << 16})
+	issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
+	messages := chatBody(roleMessage("system", "client rules"), userMessage("hi"))
+
+	first := fixture.post(t, issued.Plaintext, messages)
+	decodeCompletion(t, first)
+	decodeCompletion(t, fixture.post(t, issued.Plaintext, messages, SessionHeader, first.Header().Get(SessionHeader)))
+
+	turns := fixture.runtime.requests()
+	if len(turns) != 2 {
+		t.Fatalf("turns = %d, want 2", len(turns))
+	}
+	recall := turns[0].UntrustedContext
+	if recall == nil || len(recall.Documents) != 1 || recall.Documents[0].Trust != approval.TrustUntrustedExternal || !strings.Contains(recall.Documents[0].Content, "client rules") {
+		t.Fatalf("new session context = %+v, want the system text as untrusted_external", recall)
+	}
+	if turns[1].UntrustedContext != nil {
+		t.Errorf("continued session context = %+v, want none", turns[1].UntrustedContext)
 	}
 }
 

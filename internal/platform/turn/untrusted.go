@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 var untrustedMarker = regexp.MustCompile(`(?i)\[\s*/?\s*untrusted`)
@@ -21,4 +23,23 @@ func QuoteUntrusted(text string) string {
 		return `""`
 	}
 	return strings.TrimSuffix(encoded.String(), "\n")
+}
+
+func (r *TurnRequest) Tainted() bool {
+	return r == nil || len(r.Knowledge) > 0 || r.UntrustedContext != nil || !authoredInputOrigin(r.Origin)
+}
+
+func authoredInputOrigin(origin Origin) bool {
+	if origin == OriginTerminal || origin == OriginHTTP || origin == OriginSchedule {
+		return true
+	}
+	channel, account, found := strings.Cut(string(origin), ":")
+	if !found || account == "" {
+		return false
+	}
+	switch channel {
+	case principal.ChannelDiscord, principal.ChannelTelegram, principal.ChannelEmail:
+		return true
+	}
+	return false
 }
