@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -25,7 +27,7 @@ func TestDedupeAcceptClaimsAndReplays(t *testing.T) {
 		t.Fatalf("Accept = (%q, %v), want (turn-1, true)", turnID, created)
 	}
 
-	events, err := dedupe.ListTurnEvents(ctx, "turn-1")
+	events, err := dedupe.ListTurnEvents(ctx, "session-1", "turn-1")
 	if err != nil {
 		t.Fatalf("ListTurnEvents: %v", err)
 	}
@@ -43,7 +45,7 @@ func TestDedupeAcceptClaimsAndReplays(t *testing.T) {
 	if created || turnID != "turn-1" {
 		t.Fatalf("duplicate Accept = (%q, %v), want (turn-1, false)", turnID, created)
 	}
-	events, err = dedupe.ListTurnEvents(ctx, "turn-1")
+	events, err = dedupe.ListTurnEvents(ctx, "session-1", "turn-1")
 	if err != nil {
 		t.Fatalf("ListTurnEvents after duplicate: %v", err)
 	}
@@ -229,6 +231,107 @@ func TestClaimDedupeTxClaimsOncePerWindow(t *testing.T) {
 			_, _, err = ClaimDedupeTx(t.Context(), target, tc.claim)
 			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
 				t.Fatalf("err = %v, want %s", err, ErrorCodeInvalidArgument)
+			}
+		})
+	}
+}
+
+func TestListTurnEventsReadsOnlyTheNamedSession(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDB(t)
+	events := NewEventStore(db)
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		mustCreateSession(t, db, sessionID)
+	}
+	written := []struct {
+		sessionID string
+		sequence  uint64
+		turnID    string
+	}{
+		{"session-a", 1, "turn-1"},
+		{"session-a", 2, "turn-2"},
+		{"session-a", 3, "turn-1"},
+		{"session-b", 1, "turn-1"},
+	}
+	for _, w := range written {
+		ev := newEvent(w.sessionID, w.sequence)
+		ev.TurnID = w.turnID
+		if err := events.Append(ctx, &ev); err != nil {
+			t.Fatalf("append %s/%d: %v", w.sessionID, w.sequence, err)
+		}
+	}
+	dedupe := NewDedupeStore(db)
+	reads := []struct {
+		sessionID string
+		want      []string
+	}{
+		{"session-a", []string{"session-a-event-1", "session-a-event-3"}},
+		{"session-b", []string{"session-b-event-1"}},
+		{"session-c", nil},
+	}
+	for _, read := range reads {
+		t.Run(read.sessionID, func(t *testing.T) {
+			got, err := dedupe.ListTurnEvents(ctx, read.sessionID, "turn-1")
+			if err != nil {
+				t.Fatalf("ListTurnEvents: %v", err)
+			}
+			var ids []string
+			for i := range got {
+				ids = append(ids, got[i].ID)
+			}
+			if !slices.Equal(ids, read.want) {
+				t.Fatalf("event ids = %v, want %v", ids, read.want)
+			}
+		})
+	}
+	missing := []struct {
+		name, sessionID, turnID string
+	}{
+		{"no session", "", "turn-1"},
+		{"no turn", "session-a", ""},
+	}
+	for _, m := range missing {
+		t.Run(m.name, func(t *testing.T) {
+			_, err := dedupe.ListTurnEvents(ctx, m.sessionID, m.turnID)
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+				t.Fatalf("ListTurnEvents err = %v, want invalid_argument", err)
+			}
+		})
+	}
+}
+
+func TestTurnReadsUseTheTurnIndex(t *testing.T) {
+	db := newTestDB(t)
+	statements := []struct {
+		name, query string
+		args        []any
+		search      string
+	}{
+		{"by turn", `SELECT 1 FROM runtime_event WHERE turn_id = ?`, []any{"turn-1"}, "(turn_id=?)"},
+		{"by session and turn", `SELECT ` + selectRuntimeEventColumns + ` FROM runtime_event WHERE session_id = ? AND turn_id = ? ORDER BY sequence ASC`, []any{"session-1", "turn-1"}, "(turn_id=? AND session_id=?)"},
+	}
+	for _, s := range statements {
+		t.Run(s.name, func(t *testing.T) {
+			rows, err := db.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+s.query, s.args...)
+			if err != nil {
+				t.Fatalf("explain: %v", err)
+			}
+			defer func() { _ = rows.Close() }()
+			var details []string
+			for rows.Next() {
+				var id, parent, unused int
+				var detail string
+				if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+					t.Fatalf("scan plan: %v", err)
+				}
+				details = append(details, detail)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatalf("read plan: %v", err)
+			}
+			want := "INDEX runtime_event_turn_idx " + s.search
+			if len(details) != 1 || !strings.HasPrefix(details[0], "SEARCH runtime_event USING ") || !strings.HasSuffix(details[0], want) {
+				t.Fatalf("plan = %q, want one search ending in %q", details, want)
 			}
 		})
 	}

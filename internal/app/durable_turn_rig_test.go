@@ -714,7 +714,15 @@ func (s *killedSuite) requireRequestsAfterKill(t *testing.T, texts []string) {
 
 func turnEvents(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
 	t.Helper()
-	events, err := store.NewDedupeStore(db).ListTurnEvents(t.Context(), turnID)
+	var sessionID string
+	err := db.QueryRowContext(t.Context(), `SELECT session_id FROM runtime_event WHERE turn_id = ? AND kind = ?`, turnID, turn.EventKindTurnAccepted).Scan(&sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("read the session of %s: %v", turnID, err)
+	}
+	events, err := store.NewDedupeStore(db).ListTurnEvents(t.Context(), sessionID, turnID)
 	if err != nil {
 		t.Fatalf("list the events of %s: %v", turnID, err)
 	}

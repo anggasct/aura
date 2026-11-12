@@ -458,7 +458,7 @@ func (e *Engine) adoptDurable(ctx context.Context, active *runtimesessions.Queue
 			return codedError(turn.ErrorCodeStorageUnavailable, "failed to read the durable turn run", err)
 		}
 	}
-	events, err := e.turnEvents(ctx, req.TurnID)
+	events, err := e.turnEvents(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -503,8 +503,8 @@ func (e *Engine) attachDurable(ctx context.Context, req *turn.TurnRequest, accep
 	go t.start()
 }
 
-func (e *Engine) turnEvents(ctx context.Context, turnID string) ([]store.RuntimeEvent, error) {
-	events, err := e.dedupe.ListTurnEvents(ctx, turnID)
+func (e *Engine) turnEvents(ctx context.Context, req *turn.TurnRequest) ([]store.RuntimeEvent, error) {
+	events, err := e.dedupe.ListTurnEvents(ctx, req.SessionID, req.TurnID)
 	if err != nil {
 		return nil, codedError(turn.ErrorCodeStorageUnavailable, "failed to read the durable turn events", err)
 	}
@@ -650,7 +650,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		return invalidArgument("durable turn drive requires an invocation")
 	}
 	req := turnRequestFromDescriptor(desc)
-	events, err := e.turnEvents(ctx, req.TurnID)
+	events, err := e.turnEvents(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -831,7 +831,7 @@ func (e *Engine) refuseUnheldTurn(ctx context.Context, req *turn.TurnRequest) er
 }
 
 func (e *Engine) replayStoredToLive(ctx context.Context, t *turnState) {
-	events, err := e.dedupe.ListTurnEvents(context.WithoutCancel(ctx), t.turnID)
+	events, err := e.dedupe.ListTurnEvents(context.WithoutCancel(ctx), t.req.SessionID, t.turnID)
 	if err != nil {
 		e.logger.ErrorContext(ctx, "durable turn replay failed", "error", err, "turn_id", t.turnID)
 		return
@@ -983,7 +983,7 @@ func (e *Engine) endCancelledTurn(ctx context.Context, t *turnState) {
 }
 
 func (e *Engine) hasTerminalEvent(ctx context.Context, t *turnState) (bool, error) {
-	events, err := e.dedupe.ListTurnEvents(ctx, t.turnID)
+	events, err := e.dedupe.ListTurnEvents(ctx, t.req.SessionID, t.turnID)
 	if err != nil {
 		return false, err
 	}

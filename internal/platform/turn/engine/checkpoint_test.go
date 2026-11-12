@@ -70,7 +70,7 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 	if err := engine.SaveCheckpoint(context.Background(), checkpoint); err != nil {
 		t.Fatalf("SaveCheckpoint: %v", err)
 	}
-	loaded, err := engine.LoadCheckpoint(context.Background(), checkpoint.TurnID)
+	loaded, err := engine.LoadCheckpoint(context.Background(), checkpoint.SessionID, checkpoint.TurnID)
 	if err != nil {
 		t.Fatalf("LoadCheckpoint: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 	if currentSequence <= checkpoint.EventSequence {
 		t.Fatalf("checkpoint event sequence = %d, boundary = %d", currentSequence, checkpoint.EventSequence)
 	}
-	if _, err := engine.ValidateCheckpoint(context.Background(), checkpoint.TurnID, validResumeValidation(checkpoint, currentSequence)); err != nil {
+	if _, err := engine.ValidateCheckpoint(context.Background(), validResumeValidation(checkpoint, currentSequence)); err != nil {
 		t.Fatalf("ValidateCheckpoint: %v", err)
 	}
 	next := *checkpoint
@@ -93,7 +93,7 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 	if err := engine.SaveCheckpoint(context.Background(), &next); err != nil {
 		t.Fatalf("SaveCheckpoint next generation: %v", err)
 	}
-	latest, err := engine.LoadCheckpoint(context.Background(), checkpoint.TurnID)
+	latest, err := engine.LoadCheckpoint(context.Background(), checkpoint.SessionID, checkpoint.TurnID)
 	if err != nil {
 		t.Fatalf("LoadCheckpoint latest: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEngine after restart: %v", err)
 	}
-	if _, err := restarted.LoadCheckpoint(context.Background(), checkpoint.TurnID); err != nil {
+	if _, err := restarted.LoadCheckpoint(context.Background(), checkpoint.SessionID, checkpoint.TurnID); err != nil {
 		t.Fatalf("LoadCheckpoint after restart: %v", err)
 	}
 }
@@ -180,7 +180,7 @@ func TestConcurrentCheckpointMutationHasOneAuthoritativePayload(t *testing.T) {
 	if successes != 1 || stale != 1 {
 		t.Fatalf("concurrent saves successes=%d stale=%d, want one each", successes, stale)
 	}
-	loaded, err := engine.LoadCheckpoint(context.Background(), first.TurnID)
+	loaded, err := engine.LoadCheckpoint(context.Background(), first.SessionID, first.TurnID)
 	if err != nil {
 		t.Fatalf("LoadCheckpoint: %v", err)
 	}
@@ -306,14 +306,14 @@ func TestValidateCheckpointWithEffectsRequiresRecovery(t *testing.T) {
 	validator := &resumeEffectValidator{}
 	validation := validResumeValidation(checkpoint, last+1)
 	validation.EffectStateValid = false
-	if _, err := engine.ValidateCheckpointWithEffects(context.Background(), checkpoint.TurnID, validation, validator); err != nil {
+	if _, err := engine.ValidateCheckpointWithEffects(context.Background(), validation, validator); err != nil {
 		t.Fatalf("ValidateCheckpointWithEffects: %v", err)
 	}
 	if validator.calls != 1 {
 		t.Fatalf("effect validator calls = %d, want 1", validator.calls)
 	}
 	validator.err = errors.New("effect recovery unavailable")
-	if _, err := engine.ValidateCheckpointWithEffects(context.Background(), checkpoint.TurnID, validation, validator); err == nil {
+	if _, err := engine.ValidateCheckpointWithEffects(context.Background(), validation, validator); err == nil {
 		t.Fatal("ValidateCheckpointWithEffects accepted failed effect recovery")
 	} else if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeCheckpointStale {
 		t.Fatalf("CodeOf(%v) = %q, %v; want checkpoint_stale", err, code, ok)

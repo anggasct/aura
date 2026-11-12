@@ -75,7 +75,7 @@ func TestPartialModelTextReachesSubscribersOnlyAsDeltas(t *testing.T) {
 			}
 		}
 
-		stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-partial")
+		stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-partial")
 		if err != nil {
 			t.Fatalf("ListTurnEvents: %v", err)
 		}
@@ -311,7 +311,7 @@ func TestDurableTurnRelaysPartialModelTextWithoutJournalingIt(t *testing.T) {
 	if lastDelta < 0 || lastDelta > terminal {
 		t.Errorf("deltas did not arrive before the turn ended: %v", kindsOf(live))
 	}
-	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-durable-partial")
+	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID)
 	if err != nil {
 		t.Fatalf("ListTurnEvents: %v", err)
 	}

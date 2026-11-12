@@ -98,7 +98,7 @@ func (x *replayingExecutor) waitBlocked(t *testing.T) {
 
 func turnEventsOf(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
 	t.Helper()
-	events, err := store.NewDedupeStore(db).ListTurnEvents(t.Context(), turnID)
+	events, err := store.NewDedupeStore(db).ListTurnEvents(t.Context(), acceptedSessionOf(t, db, turnID), turnID)
 	if err != nil {
 		t.Fatalf("list the events of %s: %v", turnID, err)
 	}

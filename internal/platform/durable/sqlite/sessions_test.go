@@ -931,6 +931,23 @@ func TestActiveTurnsListsEachSessionsActiveTurn(t *testing.T) {
 	}
 }
 
+func TestAdmitRefusesATurnIDUsedInAnotherSession(t *testing.T) {
+	f := newSessionFixture(t)
+	f.admit(t, turnSpec{turnID: "turn-1"})
+	f.release(t, "turn-1")
+	insertRun(t, f.db, runFixture{key: "turn-1", handler: "turn"})
+	execSQL(t, f.db, `DELETE FROM durable_run WHERE key = 'turn-1'`)
+	createSession(t, f.db, "session-b")
+	before := snapshotAdmission(t, f.db)
+	_, err := f.sessions.Admit(t.Context(), admitRequest(turnSpec{sessionID: "session-b", turnID: "turn-1", eventID: "event-turn-1-in-b"}))
+	requireCode(t, err, ErrorCodeInvalidArgument)
+	requireUnchanged(t, f.db, before)
+	got := f.admit(t, turnSpec{sessionID: "session-b", turnID: "turn-2"})
+	if got.Replayed || got.Sequence == 0 {
+		t.Fatalf("admit of a fresh turn id into session-b = %+v, want a new accepted turn", got)
+	}
+}
+
 func TestAdmitRejectsAUsedTurnID(t *testing.T) {
 	f := newSessionFixture(t)
 	f.admit(t, turnSpec{turnID: "turn-1"})

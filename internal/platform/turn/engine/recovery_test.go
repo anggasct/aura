@@ -468,7 +468,7 @@ func TestRecoverTurnsEndsATurnWhoseRunEndedWithoutATerminalEvent(t *testing.T) {
 			requireTerminals(t, rig.db, eventFilter{turnID: "turn-2", kinds: []string{turn.EventKindTurnCompleted}})
 			requireTerminals(t, rig.db, eventFilter{turnID: "turn-1", kinds: []string{tc.terminal}})
 			if tc.code != "" {
-				events, err := store.NewDedupeStore(rig.db).ListTurnEvents(t.Context(), "turn-1")
+				events, err := store.NewDedupeStore(rig.db).ListTurnEvents(t.Context(), "session-a", "turn-1")
 				if err != nil {
 					t.Fatalf("list events: %v", err)
 				}
@@ -1114,11 +1114,11 @@ type budgetedTurnEvents struct {
 	readsLeft atomic.Int64
 }
 
-func (d *budgetedTurnEvents) ListTurnEvents(ctx context.Context, turnID string) ([]store.RuntimeEvent, error) {
+func (d *budgetedTurnEvents) ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]store.RuntimeEvent, error) {
 	if d.readsLeft.Add(-1) < 0 {
 		return nil, errors.New("turn events are unreadable")
 	}
-	return d.DedupeStore.ListTurnEvents(ctx, turnID)
+	return d.DedupeStore.ListTurnEvents(ctx, sessionID, turnID)
 }
 
 func TestEndedTurnWhoseEventsCannotBeReadStaysActiveUntilTheNextRecovery(t *testing.T) {

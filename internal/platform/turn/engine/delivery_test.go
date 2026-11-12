@@ -244,7 +244,7 @@ func TestDeliveryFailureMarksTurnFailed(t *testing.T) {
 		if !strings.Contains(logged, "turn delivery failed") || !strings.Contains(logged, "turn-fail-delivery") || !strings.Contains(logged, "boom delivery") {
 			t.Errorf("missing error log carrying the delivery failure: %q", logged)
 		}
-		stored, err := engine.dedupe.ListTurnEvents(context.Background(), "turn-fail-delivery")
+		stored, err := engine.dedupe.ListTurnEvents(context.Background(), "channel:333", "turn-fail-delivery")
 		if err != nil {
 			t.Fatalf("ListTurnEvents: %v", err)
 		}

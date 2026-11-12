@@ -99,7 +99,7 @@ func TestFailedEventWriteIsNeverStreamed(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}
-			stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-refused")
+			stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-refused", "turn-refused")
 			if err != nil {
 				t.Fatalf("list turn events: %v", err)
 			}

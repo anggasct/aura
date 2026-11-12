@@ -299,7 +299,7 @@ func (r *durableTurnRig) runClaim(t *testing.T) int {
 
 func (r *durableTurnRig) turnEvents(t *testing.T) []store.RuntimeEvent {
 	t.Helper()
-	events, err := store.NewDedupeStore(r.db).ListTurnEvents(t.Context(), "turn-1")
+	events, err := store.NewDedupeStore(r.db).ListTurnEvents(t.Context(), "session-1", "turn-1")
 	if err != nil {
 		t.Fatalf("list the events of turn-1: %v", err)
 	}

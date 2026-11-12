@@ -77,14 +77,17 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *turn.Checkpoint
 	})
 }
 
-func (e *Engine) LoadCheckpoint(ctx context.Context, turnID string) (turn.Checkpoint, error) {
+func (e *Engine) LoadCheckpoint(ctx context.Context, sessionID, turnID string) (turn.Checkpoint, error) {
 	if ctx == nil {
 		return turn.Checkpoint{}, invalidArgument("context must not be nil")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return turn.Checkpoint{}, invalidArgument("session id must not be empty")
 	}
 	if strings.TrimSpace(turnID) == "" {
 		return turn.Checkpoint{}, invalidArgument("turn id must not be empty")
 	}
-	events, err := e.dedupe.ListTurnEvents(ctx, turnID)
+	events, err := e.dedupe.ListTurnEvents(ctx, sessionID, turnID)
 	if err != nil {
 		return turn.Checkpoint{}, codedError(turn.ErrorCodeStorageUnavailable, "list checkpoint events", err)
 	}
@@ -109,8 +112,11 @@ func (e *Engine) LoadCheckpoint(ctx context.Context, turnID string) (turn.Checkp
 	return latest, nil
 }
 
-func (e *Engine) ValidateCheckpoint(ctx context.Context, turnID string, validation *runtimecheckpoint.ResumeValidation) (turn.Checkpoint, error) {
-	checkpoint, err := e.LoadCheckpoint(ctx, turnID)
+func (e *Engine) ValidateCheckpoint(ctx context.Context, validation *runtimecheckpoint.ResumeValidation) (turn.Checkpoint, error) {
+	if validation == nil {
+		return turn.Checkpoint{}, invalidArgument("resume validation must not be nil")
+	}
+	checkpoint, err := e.LoadCheckpoint(ctx, validation.SessionID, validation.TurnID)
 	if err != nil {
 		return turn.Checkpoint{}, err
 	}
@@ -120,16 +126,16 @@ func (e *Engine) ValidateCheckpoint(ctx context.Context, turnID string, validati
 	return checkpoint, nil
 }
 
-func (e *Engine) ValidateCheckpointWithEffects(ctx context.Context, turnID string, validation *runtimecheckpoint.ResumeValidation, effects runtimecheckpoint.EffectResumeValidator) (turn.Checkpoint, error) {
+func (e *Engine) ValidateCheckpointWithEffects(ctx context.Context, validation *runtimecheckpoint.ResumeValidation, effects runtimecheckpoint.EffectResumeValidator) (turn.Checkpoint, error) {
 	if effects == nil {
 		return turn.Checkpoint{}, invalidArgument("effect resume validator must not be nil")
 	}
-	checkpoint, err := e.LoadCheckpoint(ctx, turnID)
-	if err != nil {
-		return turn.Checkpoint{}, err
-	}
 	if validation == nil {
 		return turn.Checkpoint{}, invalidArgument("resume validation must not be nil")
+	}
+	checkpoint, err := e.LoadCheckpoint(ctx, validation.SessionID, validation.TurnID)
+	if err != nil {
+		return turn.Checkpoint{}, err
 	}
 	validated := *validation
 	if err := effects.ValidateResumeEffects(ctx, checkpoint.SessionID, checkpoint.TurnID, checkpoint.PendingToolCallIDs); err != nil {

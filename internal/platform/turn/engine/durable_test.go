@@ -18,7 +18,7 @@ import (
 func collectDurableTerminal(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
 	t.Helper()
 	waitForTerminalDurable(t, db, turnID)
-	events, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), turnID)
+	events, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), acceptedSessionOf(t, db, turnID), turnID)
 	if err != nil {
 		t.Fatalf("list turn events: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestDurableQueueOverflowFailsClosed(t *testing.T) {
 		if got := acceptedCount(t, db, "session-a"); got != 1 {
 			t.Fatalf("accepted events = %d, want 1 (overloaded admit must persist nothing)", got)
 		}
-		rejected, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-1")
+		rejected, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-1")
 		if err != nil {
 			t.Fatalf("list rejected turn events: %v", err)
 		}
@@ -280,7 +280,7 @@ func TestDurableLongStreamReplaysFullyFromStore(t *testing.T) {
 				t.Fatalf("stream sequences not contiguous at %d: %d after %d", i, events[i].Sequence, events[i-1].Sequence)
 			}
 		}
-		stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-0")
+		stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-0")
 		if err != nil {
 			t.Fatalf("list turn events: %v", err)
 		}
@@ -310,7 +310,7 @@ func TestDurableLiveStreamDeliversPersistedSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "turn-live-0")
+	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-live", "turn-live-0")
 	if err != nil {
 		t.Fatalf("list turn events: %v", err)
 	}
@@ -681,4 +681,63 @@ func TestReleaseNeverGrantsAnAdmittingTurnOfAnotherSession(t *testing.T) {
 			t.Fatalf("a turn of another session was granted (%v) or started (%d)", engine.granted, executor.StartCount())
 		}
 	})
+}
+
+func TestDurableTurnIgnoresAnotherSessionsEventsUnderItsTurnID(t *testing.T) {
+	executor := newHoldingExecutor()
+	gate := executor.hold("turn-1")
+	rig := newDurableHostRig(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 16}, executor)
+	mustCreateSession(t, rig.db, "session-a")
+	mustCreateSession(t, rig.db, "session-b")
+	rig.startHost()
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := collect(t, rig.engine, sampleRequest("session-a", "turn-1"))
+		first <- err
+	}()
+	executor.waitEntered(t, "turn-1")
+	type streamed struct {
+		events []store.RuntimeEvent
+		err    error
+	}
+	second := make(chan streamed, 1)
+	go func() {
+		events, err := collect(t, rig.engine, sampleRequest("session-a", "turn-2"))
+		second <- streamed{events: events, err: err}
+	}()
+	eventually(t, "turn-2 waits behind turn-1", func() bool {
+		_, queued := storeActiveTurn(t, rig.sessions, "session-a")
+		return queued == 1
+	})
+	foreign := &store.RuntimeEvent{
+		ID: "session-b-turn-2-completed", SessionID: "session-b", Sequence: 1, TurnID: "turn-2", InvocationID: "foreign",
+		Author: "runtime", Kind: turn.EventKindTurnCompleted, SchemaVersion: 1, Payload: []byte(`{}`), CreatedAt: time.Now().UTC(),
+	}
+	if err := store.NewEventStore(rig.db).Append(t.Context(), foreign); err != nil {
+		t.Fatalf("append the foreign event: %v", err)
+	}
+	close(gate)
+
+	if err := <-first; err != nil {
+		t.Fatalf("turn-1: %v", err)
+	}
+	got := <-second
+	if got.err != nil {
+		t.Fatalf("turn-2: %v", got.err)
+	}
+	if len(got.events) == 0 {
+		t.Fatal("turn-2 streamed no events")
+	}
+	for i := range got.events {
+		if got.events[i].SessionID != "session-a" {
+			t.Fatalf("turn-2 streamed %s of session %q, want only session-a", got.events[i].Kind, got.events[i].SessionID)
+		}
+	}
+	if last := got.events[len(got.events)-1]; last.Kind != turn.EventKindTurnCompleted {
+		t.Fatalf("turn-2 ended with %s, want turn.completed", last.Kind)
+	}
+	if starts := executor.startCount("turn-2"); starts != 1 {
+		t.Fatalf("executor started turn-2 %d times, want once", starts)
+	}
 }
