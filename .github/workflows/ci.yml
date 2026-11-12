@@ -107,6 +107,9 @@ jobs:
       - name: Turn crash and resume suites on the SQLite runtime
         run: make durable-turns
 
+      - name: Workflow and child crash and resume suites on the SQLite runtime
+        run: make durable-workflows
+
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 25
