@@ -2,9 +2,9 @@ package schedule
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -58,7 +58,6 @@ type RunStore interface {
 	ActiveOccurrence(ctx context.Context, jobID string) (Occurrence, bool, error)
 	AttachTurn(ctx context.Context, id, turnID string, now time.Time) error
 	SettleOccurrence(ctx context.Context, id, state, turnID, resultEventID, safeErrorCode string, now time.Time) error
-	PendingFire(ctx context.Context, jobID string) (Occurrence, bool, error)
 	PruneOccurrences(ctx context.Context, jobID string, before time.Time, limit int) (int, error)
 }
 
@@ -66,12 +65,34 @@ const defaultRetention = 720 * time.Hour
 
 const pruneBatchLimit = 100
 
-const wakeInterval = 5 * time.Minute
+const (
+	actionNext   = "next"
+	actionNotify = "notify"
+	actionTurn   = "turn/"
+)
+
+const (
+	notifySent   = "sent"
+	notifyFailed = "failed"
+	nextNone     = "none"
+	nextStarted  = "started"
+)
+
+type RunnerDeps struct {
+	Jobs      RunStore
+	Turns     TurnRunner
+	Notify    Notifier
+	Starter   Starter
+	Logger    *slog.Logger
+	Retention time.Duration
+	Observer  Observer
+}
 
 type Runner struct {
 	jobs      RunStore
 	turns     TurnRunner
 	notify    Notifier
+	starter   Starter
 	overlap   time.Duration
 	retention time.Duration
 	logger    *slog.Logger
@@ -80,40 +101,45 @@ type Runner struct {
 	observer  Observer
 }
 
-func NewRunner(jobs RunStore, turns TurnRunner, notify Notifier, logger *slog.Logger, retention time.Duration, observer Observer) (*Runner, error) {
-	if jobs == nil {
+func NewRunner(deps *RunnerDeps) (*Runner, error) {
+	if deps == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "runner dependencies must not be nil")
+	}
+	if deps.Jobs == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "run store must not be nil")
 	}
-	if turns == nil {
+	if deps.Turns == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "turn runner must not be nil")
 	}
-	if notify == nil {
+	if deps.Notify == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "notifier must not be nil")
 	}
+	if deps.Starter == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "run starter must not be nil")
+	}
+	retention := deps.Retention
 	if retention <= 0 {
 		retention = defaultRetention
 	}
+	logger := deps.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Runner{jobs: jobs, turns: turns, notify: notify, overlap: overlapPollInterval, retention: retention, logger: logger, principal: principal.OwnerID, observer: observer, now: func() time.Time {
-		return time.Now().UTC()
-	}}, nil
+	return &Runner{
+		jobs: deps.Jobs, turns: deps.Turns, notify: deps.Notify, starter: deps.Starter,
+		overlap: overlapPollInterval, retention: retention, logger: logger,
+		principal: principal.OwnerID, observer: deps.Observer,
+		now: func() time.Time { return time.Now().UTC() },
+	}, nil
 }
 
-func (r *Runner) clock(ctx context.Context, inv durable.Invocation, key string) (time.Time, error) {
-	raw, err := inv.RunAction(ctx, "clock:"+key, func(context.Context) ([]byte, error) {
-		return []byte(r.now().Format(time.RFC3339Nano)), nil
-	})
-	if err != nil {
-		return time.Time{}, err
-	}
-	moment, err := time.Parse(time.RFC3339Nano, string(raw))
-	if err != nil {
-		return time.Time{}, Errorf(ErrorCodeInvalidArgument, "journaled clock is not a valid timestamp")
-	}
-	return moment, nil
-}
+type step int
+
+const (
+	stepEnd step = iota
+	stepNext
+	stepDrive
+)
 
 func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 	if ctx == nil {
@@ -122,252 +148,129 @@ func (r *Runner) Handle(ctx context.Context, inv durable.Invocation) error {
 	if inv == nil {
 		return Errorf(ErrorCodeInvalidArgument, "invocation must not be nil")
 	}
-	id := strings.TrimSpace(string(inv.Payload()))
-	if id == "" {
-		return Errorf(ErrorCodeInvalidArgument, "schedule job id must not be empty")
-	}
-	job, found, err := r.jobs.Job(ctx, id)
+	fire, err := decodeFire(inv.Payload())
 	if err != nil {
 		return err
+	}
+	if err := inv.Sleep(max(fire.Instant.Sub(r.now()), 0)); err != nil {
+		return err
+	}
+	next, occurrence, err := r.locate(ctx, inv, &fire)
+	if err != nil || next == stepEnd {
+		return err
+	}
+	if next == stepDrive {
+		if err := r.drive(ctx, inv, &occurrence); err != nil {
+			return err
+		}
+	}
+	return r.startSuccessor(ctx, inv, &fire)
+}
+
+func (r *Runner) locate(ctx context.Context, inv durable.Invocation, fire *firePayload) (step, Occurrence, error) {
+	occurrence, found, err := r.jobs.OccurrenceByFire(ctx, fire.JobID, fire.Instant)
+	switch {
+	case err != nil:
+		return stepEnd, Occurrence{}, err
+	case found && occurrence.State != OccurrenceFired:
+		return stepNext, occurrence, nil
+	case found:
+		r.observeFired(ctx, fire.Instant)
+		return stepDrive, occurrence, nil
+	case !fire.Chain:
+		return stepEnd, Occurrence{}, nil
+	}
+	return r.gate(ctx, inv, fire)
+}
+
+func (r *Runner) gate(ctx context.Context, inv durable.Invocation, fire *firePayload) (step, Occurrence, error) {
+	job, live, err := r.liveJob(ctx, fire.JobID)
+	if err != nil || !live {
+		return stepEnd, Occurrence{}, err
+	}
+	scheduled, err := firesAt(&job, fire)
+	if err != nil || !scheduled {
+		return stepNext, Occurrence{}, err
+	}
+	r.observeFired(ctx, fire.Instant)
+	if r.now().Sub(fire.Instant) > graceOf(&job) {
+		return r.record(ctx, &recording{job: &job, instant: fire.Instant, state: OccurrenceExpired})
+	}
+	verdict, err := r.checkOverlap(ctx, inv, &job)
+	switch {
+	case err != nil:
+		return stepEnd, Occurrence{}, err
+	case verdict == overlapEnd:
+		return stepEnd, Occurrence{}, nil
+	case verdict == overlapSkip:
+		return r.record(ctx, &recording{job: &job, instant: fire.Instant, state: OccurrenceSkippedOverlap})
+	}
+	return r.record(ctx, &recording{job: &job, instant: fire.Instant, state: OccurrenceFired})
+}
+
+func (r *Runner) liveJob(ctx context.Context, jobID string) (Job, bool, error) {
+	job, found, err := r.jobs.Job(ctx, jobID)
+	if err != nil {
+		return Job{}, false, err
 	}
 	if !found {
 		r.logger.WarnContext(ctx, "schedule job missing", "component", "schedule")
-		return nil
+		return Job{}, false, nil
 	}
-	schedule, err := ParseExpression(job.CronExpression)
-	if err != nil {
-		return err
-	}
-	location, err := time.LoadLocation(job.Timezone)
-	if err != nil {
-		return Errorf(ErrorCodeTimezoneInvalid, "timezone is not a valid IANA name")
-	}
-	anchor, err := r.clock(ctx, inv, "start")
-	if err != nil {
-		return err
-	}
-	var iter uint64
-	for {
-		iter++
-		job, found, err := r.jobs.Job(ctx, id)
-		if err != nil {
-			return err
-		}
-		if !found || job.State == JobDeleted || job.State == JobPaused {
-			return nil
-		}
-		if pending, found, err := r.jobs.PendingFire(ctx, id); err != nil {
-			return err
-		} else if found {
-			now, err := r.clock(ctx, inv, "pending:"+strconv.FormatUint(iter, 10))
-			if err != nil {
-				return err
-			}
-			if _, err := r.fireDue(ctx, inv, &job, pending.ScheduledForUTC, now, iter); err != nil {
-				return err
-			}
-			continue
-		}
-		fire, err := NextFire(&schedule, location, anchor)
-		if err != nil {
-			return err
-		}
-		now, err := r.clock(ctx, inv, "fire:"+strconv.FormatUint(iter, 10))
-		if err != nil {
-			return err
-		}
-		if fire.After(now) {
-			remaining := fire.Sub(now)
-			if remaining > wakeInterval {
-				remaining = wakeInterval
-			}
-			if err := inv.Sleep(remaining); err != nil {
-				return err
-			}
-			continue
-		}
-		done, err := r.fireDue(ctx, inv, &job, fire, now, iter)
-		if err != nil {
-			return err
-		}
-		if done {
-			anchor = fire
-		}
-	}
+	return job, job.State != JobDeleted && job.State != JobPaused, nil
 }
 
-func (r *Runner) fireDue(ctx context.Context, inv durable.Invocation, job *Job, fire, now time.Time, iter uint64) (bool, error) {
-	tag := strconv.FormatUint(iter, 10)
-	grace := time.Duration(job.CatchUpGraceSeconds) * time.Second
-	lag := now.Sub(fire)
-	if lag < 0 {
-		lag = 0
-	}
-	r.observe(ctx, &Observation{State: OccurrenceFired, Result: ResultFired, Lag: lag})
-	if now.Sub(fire) > grace {
-		occurrence, replayed, err := r.recordFire(ctx, job, fire, now)
-		if err != nil {
-			return false, err
-		}
-		if replayed {
-			current, found, err := r.jobs.OccurrenceByFire(ctx, job.ID, fire.UTC())
-			if err != nil {
-				return false, err
-			}
-			if found && current.State != OccurrenceFired {
-				return true, nil
-			}
-		}
-		if err := r.settle(ctx, job.ID, &occurrence, OccurrenceExpired, "", "", now); err != nil {
-			return false, err
-		}
+func firesAt(job *Job, fire *firePayload) (bool, error) {
+	if job.CronExpression == fire.Expression && job.Timezone == fire.Timezone {
 		return true, nil
 	}
+	next, err := nextFireOf(job, fire.Instant.Add(-time.Nanosecond))
+	if err != nil {
+		return false, err
+	}
+	return next.Equal(fire.Instant), nil
+}
+
+func graceOf(job *Job) time.Duration {
+	return time.Duration(job.CatchUpGraceSeconds) * time.Second
+}
+
+type overlapVerdict int
+
+const (
+	overlapProceed overlapVerdict = iota
+	overlapSkip
+	overlapEnd
+)
+
+func (r *Runner) checkOverlap(ctx context.Context, inv durable.Invocation, job *Job) (overlapVerdict, error) {
 	if job.OverlapPolicy == OverlapQueueOne {
-		proceed, err := r.awaitActive(ctx, inv, job)
-		if err != nil {
-			return false, err
+		proceed, err := r.awaitActive(ctx, inv, job.ID)
+		if err != nil || !proceed {
+			return overlapEnd, err
 		}
-		if !proceed {
-			return false, nil
-		}
-	} else {
-		_, found, err := r.jobs.ActiveOccurrence(ctx, job.ID)
-		if err != nil {
-			return false, err
-		}
-		if found {
-			occurrence, replayed, err := r.recordFire(ctx, job, fire, now)
-			if err != nil {
-				return false, err
-			}
-			if replayed {
-				current, found, err := r.jobs.OccurrenceByFire(ctx, job.ID, fire.UTC())
-				if err != nil {
-					return false, err
-				}
-				if found && current.State != OccurrenceFired {
-					return true, nil
-				}
-			}
-			if err := r.settle(ctx, job.ID, &occurrence, OccurrenceSkippedOverlap, "", "", now); err != nil {
-				return false, err
-			}
-			return true, nil
-		}
+		return overlapProceed, nil
 	}
-	occurrence, replayed, err := r.recordFire(ctx, job, fire, now)
+	_, found, err := r.jobs.ActiveOccurrence(ctx, job.ID)
 	if err != nil {
-		return false, err
+		return overlapEnd, err
 	}
-	if replayed {
-		current, found, err := r.jobs.OccurrenceByFire(ctx, job.ID, fire.UTC())
-		if err != nil {
-			return false, err
-		}
-		if found && current.State != OccurrenceFired {
-			return true, nil
-		}
+	if found {
+		return overlapSkip, nil
 	}
-	for retry := 0; ; retry++ {
-		result, err := r.turns.RunTurn(ctx, &TurnRequest{
-			SessionID:      "cron:" + job.ID,
-			PrincipalID:    r.principal,
-			Origin:         "internal",
-			Prompt:         job.Prompt,
-			IdempotencyKey: turnKey(job.ID, fire),
-			WorkflowID:     job.WorkflowID,
-			WorkflowInput:  job.WorkflowInput,
-		})
-		if err != nil {
-			if code, ok := CodeOf(err); ok && code == ErrorCodeRuntimeOverloaded {
-				r.observe(ctx, &Observation{State: occurrence.State, Result: ResultRetried})
-				expired, err := r.awaitCapacity(ctx, inv, job, fire, tag+":"+strconv.Itoa(retry))
-				if err != nil {
-					return false, err
-				}
-				if expired {
-					settled, err := r.clock(ctx, inv, "expired:"+tag)
-					if err != nil {
-						return false, err
-					}
-					if err := r.settle(ctx, job.ID, &occurrence, OccurrenceExpired, "", "", settled); err != nil {
-						return false, err
-					}
-					return true, nil
-				}
-				continue
-			}
-			return false, err
-		}
-		if err := r.jobs.AttachTurn(ctx, occurrence.ID, result.TurnID, now); err != nil {
-			return false, err
-		}
-		terminal := OccurrenceCompleted
-		code := ""
-		if !result.Succeeded {
-			terminal = OccurrenceFailed
-			code = result.SafeErrorCode
-		}
-		settled, err := r.clock(ctx, inv, "settle:"+tag)
-		if err != nil {
-			return false, err
-		}
-		if err := r.settle(ctx, job.ID, &occurrence, terminal, result.TurnID, code, settled); err != nil {
-			return false, err
-		}
-		priority := PriorityInfo
-		if terminal == OccurrenceFailed {
-			priority = PriorityWarning
-		}
-		if err := r.notify.Notify(ctx, &NotifyRequest{
-			Producer:         "cron",
-			Key:              "cron:" + occurrence.ID,
-			Priority:         priority,
-			DestinationAlias: job.OriginDestination,
-			Text:             result.Text,
-		}); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
+	return overlapProceed, nil
 }
 
-func (r *Runner) awaitCapacity(ctx context.Context, inv durable.Invocation, job *Job, fire time.Time, tag string) (bool, error) {
-	grace := time.Duration(job.CatchUpGraceSeconds) * time.Second
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	now, err := r.clock(ctx, inv, "capacity:"+tag)
-	if err != nil {
-		return false, err
-	}
-	if now.Sub(fire) > grace {
-		return true, nil
-	}
-	remaining := grace - now.Sub(fire)
-	if remaining > overlapPollInterval {
-		remaining = overlapPollInterval
-	}
-	if err := inv.Sleep(remaining); err != nil {
-		return false, err
-	}
-	return false, nil
-}
-
-func (r *Runner) awaitActive(ctx context.Context, inv durable.Invocation, job *Job) (bool, error) {
+func (r *Runner) awaitActive(ctx context.Context, inv durable.Invocation, jobID string) (bool, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
-		current, found, err := r.jobs.Job(ctx, job.ID)
-		if err != nil {
+		_, live, err := r.liveJob(ctx, jobID)
+		if err != nil || !live {
 			return false, err
 		}
-		if !found || current.State == JobDeleted || current.State == JobPaused {
-			return false, nil
-		}
-		_, found, err = r.jobs.ActiveOccurrence(ctx, job.ID)
+		_, found, err := r.jobs.ActiveOccurrence(ctx, jobID)
 		if err != nil {
 			return false, err
 		}
@@ -380,19 +283,187 @@ func (r *Runner) awaitActive(ctx context.Context, inv durable.Invocation, job *J
 	}
 }
 
-func (r *Runner) settle(ctx context.Context, jobID string, occurrence *Occurrence, state, turnID, safeErrorCode string, now time.Time) error {
-	if err := r.jobs.SettleOccurrence(ctx, occurrence.ID, state, turnID, "", safeErrorCode, now); err != nil {
+type recording struct {
+	job     *Job
+	instant time.Time
+	state   string
+}
+
+func (r *Runner) record(ctx context.Context, rec *recording) (step, Occurrence, error) {
+	now := r.now()
+	occurrence := Occurrence{
+		ID: occurrenceID(rec.job.ID, rec.instant), JobID: rec.job.ID, JobVersion: rec.job.Version,
+		ScheduledForUTC: rec.instant.UTC(), State: rec.state, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := r.jobs.RecordFire(ctx, &occurrence); err != nil {
+		return r.recordedElsewhere(ctx, &occurrence, err)
+	}
+	if rec.state == OccurrenceFired {
+		return stepDrive, occurrence, nil
+	}
+	r.settled(ctx, &occurrence, now)
+	return stepNext, occurrence, nil
+}
+
+func (r *Runner) recordedElsewhere(ctx context.Context, occurrence *Occurrence, recordErr error) (step, Occurrence, error) {
+	if code, ok := CodeOf(recordErr); !ok || code != ErrorCodeOccurrenceConflict {
+		return stepEnd, Occurrence{}, recordErr
+	}
+	existing, found, err := r.jobs.OccurrenceByFire(ctx, occurrence.JobID, occurrence.ScheduledForUTC)
+	switch {
+	case err != nil:
+		return stepEnd, Occurrence{}, err
+	case !found:
+		return stepEnd, Occurrence{}, recordErr
+	case existing.State == OccurrenceFired:
+		return stepDrive, existing, nil
+	}
+	return stepNext, existing, nil
+}
+
+func (r *Runner) drive(ctx context.Context, inv durable.Invocation, occurrence *Occurrence) error {
+	outcome := turnOutcome{}
+	for attempt := 1; ; attempt++ {
+		var err error
+		outcome, err = r.submitTurn(ctx, inv, &submission{occurrence: occurrence, attempt: attempt, first: outcome.First})
+		if err != nil {
+			return err
+		}
+		if outcome.Kind != outcomeOverloaded {
+			return r.conclude(ctx, inv, &turnEnd{occurrence: occurrence, outcome: &outcome})
+		}
+		r.observe(ctx, &Observation{State: OccurrenceFired, Result: ResultRetried})
+		if err := inv.Sleep(r.pause(&outcome)); err != nil {
+			return err
+		}
+	}
+}
+
+func (r *Runner) pause(outcome *turnOutcome) time.Duration {
+	return min(r.overlap, max(outcome.Deadline.Sub(r.now()), 0))
+}
+
+func (r *Runner) submitTurn(ctx context.Context, inv durable.Invocation, sub *submission) (turnOutcome, error) {
+	raw, err := inv.RunAction(ctx, actionTurn+strconv.Itoa(sub.attempt), func(actionCtx context.Context) ([]byte, error) {
+		return r.decideTurn(actionCtx, sub)
+	})
+	if err != nil {
+		return turnOutcome{}, err
+	}
+	var outcome turnOutcome
+	if err := json.Unmarshal(raw, &outcome); err != nil {
+		return turnOutcome{}, Errorf(ErrorCodeInvalidArgument, "journaled turn outcome is not valid")
+	}
+	return outcome, nil
+}
+
+func (r *Runner) decideTurn(ctx context.Context, sub *submission) ([]byte, error) {
+	job, found, err := r.jobs.Job(ctx, sub.occurrence.JobID)
+	if err != nil {
+		return nil, err
+	}
+	if !found || job.State == JobDeleted {
+		return json.Marshal(turnOutcome{Kind: outcomeCancelled})
+	}
+	window := admissionOf(&job, sub, r.now())
+	if window.expired {
+		return json.Marshal(turnOutcome{Kind: outcomeExpired})
+	}
+	result, err := r.turns.RunTurn(ctx, &TurnRequest{
+		SessionID: "cron:" + job.ID, PrincipalID: r.principal, Origin: "internal", Prompt: job.Prompt,
+		IdempotencyKey: turnKey(job.ID, sub.occurrence.ScheduledForUTC),
+		WorkflowID:     job.WorkflowID, WorkflowInput: job.WorkflowInput,
+	})
+	if durable.Preempted(ctx) {
+		return nil, context.Cause(ctx)
+	}
+	if err != nil {
+		if code, ok := CodeOf(err); ok && code == ErrorCodeRuntimeOverloaded {
+			return json.Marshal(turnOutcome{Kind: outcomeOverloaded, First: window.first, Deadline: window.deadline})
+		}
+		return nil, err
+	}
+	return json.Marshal(resultOutcome(&result, job.OriginDestination))
+}
+
+type turnEnd struct {
+	occurrence *Occurrence
+	outcome    *turnOutcome
+}
+
+func (r *Runner) conclude(ctx context.Context, inv durable.Invocation, end *turnEnd) error {
+	occurrence, outcome := end.occurrence, end.outcome
+	switch outcome.Kind {
+	case outcomeExpired:
+		return r.settle(ctx, occurrence, &settlement{state: OccurrenceExpired})
+	case outcomeCancelled:
+		return r.settle(ctx, occurrence, &settlement{state: OccurrenceCancelled})
+	}
+	if err := r.jobs.AttachTurn(ctx, occurrence.ID, outcome.TurnID, r.now()); err != nil {
+		return settledElsewhere(err)
+	}
+	if err := r.notifyOutcome(ctx, inv, end); err != nil {
 		return err
 	}
-	age := now.Sub(occurrence.CreatedAt)
-	if age < 0 {
-		age = 0
+	terminal := settlement{state: OccurrenceCompleted, turnID: outcome.TurnID}
+	if !outcome.Succeeded {
+		terminal = settlement{state: OccurrenceFailed, turnID: outcome.TurnID, safeErrorCode: outcome.SafeErrorCode}
 	}
-	r.observe(ctx, &Observation{State: state, Result: ResultSettled, Age: age})
-	if err := r.pruneHistory(ctx, jobID, now); err != nil {
+	return r.settle(ctx, occurrence, &terminal)
+}
+
+func (r *Runner) notifyOutcome(ctx context.Context, inv durable.Invocation, n *turnEnd) error {
+	priority := PriorityInfo
+	if !n.outcome.Succeeded {
+		priority = PriorityWarning
+	}
+	req := &NotifyRequest{
+		Producer: "cron", Key: "cron:" + n.occurrence.ID, Priority: priority,
+		DestinationAlias: n.outcome.Destination, Text: n.outcome.Text,
+	}
+	_, err := inv.RunAction(ctx, actionNotify, func(actionCtx context.Context) ([]byte, error) {
+		err := r.notify.Notify(actionCtx, req)
+		if durable.Preempted(actionCtx) {
+			return nil, context.Cause(actionCtx)
+		}
+		if err != nil {
+			r.logger.WarnContext(actionCtx, "schedule notification failed", "component", "schedule", "error", err)
+			return []byte(notifyFailed), nil
+		}
+		return []byte(notifySent), nil
+	})
+	return err
+}
+
+type settlement struct {
+	state         string
+	turnID        string
+	safeErrorCode string
+}
+
+func (r *Runner) settle(ctx context.Context, occurrence *Occurrence, terminal *settlement) error {
+	now := r.now()
+	if err := r.jobs.SettleOccurrence(ctx, occurrence.ID, terminal.state, terminal.turnID, "", terminal.safeErrorCode, now); err != nil {
+		return settledElsewhere(err)
+	}
+	settled := *occurrence
+	settled.State = terminal.state
+	r.settled(ctx, &settled, now)
+	return nil
+}
+
+func settledElsewhere(err error) error {
+	if code, ok := CodeOf(err); ok && code == ErrorCodeOccurrenceConflict {
+		return nil
+	}
+	return err
+}
+
+func (r *Runner) settled(ctx context.Context, occurrence *Occurrence, now time.Time) {
+	r.observe(ctx, &Observation{State: occurrence.State, Result: ResultSettled, Age: max(now.Sub(occurrence.CreatedAt), 0)})
+	if err := r.pruneHistory(ctx, occurrence.JobID, now); err != nil {
 		r.logger.WarnContext(ctx, "occurrence prune failed", "component", "schedule")
 	}
-	return nil
 }
 
 func (r *Runner) pruneHistory(ctx context.Context, jobID string, now time.Time) error {
@@ -401,28 +472,50 @@ func (r *Runner) pruneHistory(ctx context.Context, jobID string, now time.Time) 
 	return err
 }
 
-func (r *Runner) recordFire(ctx context.Context, job *Job, fire, now time.Time) (Occurrence, bool, error) {
-	id := occurrenceID(job.ID, fire)
-	err := r.jobs.RecordFire(ctx, &Occurrence{
-		ID: id, JobID: job.ID, JobVersion: job.Version, ScheduledForUTC: fire.UTC(),
-		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
+func (r *Runner) startSuccessor(ctx context.Context, inv durable.Invocation, fire *firePayload) error {
+	_, err := inv.RunAction(ctx, actionNext, func(actionCtx context.Context) ([]byte, error) {
+		return r.successor(actionCtx, fire)
 	})
+	return err
+}
+
+func (r *Runner) successor(ctx context.Context, fire *firePayload) ([]byte, error) {
+	job, live, err := r.liveJob(ctx, fire.JobID)
 	if err != nil {
-		existing, found, findErr := r.jobs.OccurrenceByFire(ctx, job.ID, fire.UTC())
-		if findErr != nil {
-			return Occurrence{}, false, findErr
-		}
-		if !found {
-			return Occurrence{}, false, err
-		}
-		return existing, true, nil
+		return nil, err
 	}
-	return Occurrence{
-		ID: id, JobID: job.ID, JobVersion: job.Version, ScheduledForUTC: fire.UTC(),
-		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
-	}, false, nil
+	if !live {
+		return []byte(nextNone), nil
+	}
+	after := fire.Instant
+	if !fire.Chain {
+		_, active, err := r.jobs.ActiveOccurrence(ctx, job.ID)
+		if err != nil {
+			return nil, err
+		}
+		if active {
+			return []byte(nextNone), nil
+		}
+		after = r.now()
+	}
+	if err := StartNext(ctx, &NextRequest{Starter: r.starter, Job: &job, After: after}); err != nil {
+		return nil, err
+	}
+	return []byte(nextStarted), nil
+}
+
+func (r *Runner) observeFired(ctx context.Context, instant time.Time) {
+	r.observe(ctx, &Observation{State: OccurrenceFired, Result: ResultFired, Lag: max(r.now().Sub(instant), 0)})
 }
 
 func turnKey(jobID string, fire time.Time) string {
-	return "cron:" + jobID + ":" + fire.UTC().Format("20060102T150405")
+	layout := "20060102T150405"
+	if isManual(fire) {
+		layout = "20060102T150405.000000000"
+	}
+	return "cron:" + jobID + ":" + fire.UTC().Format(layout)
+}
+
+func isManual(instant time.Time) bool {
+	return instant.Nanosecond() != 0
 }

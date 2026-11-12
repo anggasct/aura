@@ -12,6 +12,9 @@ type fakeJobStore struct {
 	jobs        map[string]Job
 	occurrences map[string]Occurrence
 	byFire      map[string]string
+	jobReads    int
+	writes      []string
+	settleHook  func(ctx context.Context) error
 }
 
 func newFakeJobStore() *fakeJobStore {
@@ -31,6 +34,7 @@ func (s *fakeJobStore) InsertJob(_ context.Context, job *Job) error {
 func (s *fakeJobStore) Job(_ context.Context, id string) (Job, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.jobReads++
 	job, ok := s.jobs[id]
 	return job, ok, nil
 }
@@ -82,6 +86,7 @@ func (s *fakeJobStore) RecordFire(_ context.Context, occurrence *Occurrence) err
 	if _, ok := s.byFire[key]; ok {
 		return Errorf(ErrorCodeOccurrenceConflict, "occurrence already recorded for this fire")
 	}
+	s.writes = append(s.writes, "record:"+occurrence.State)
 	s.occurrences[occurrence.ID] = *occurrence
 	s.byFire[key] = occurrence.ID
 	return nil
