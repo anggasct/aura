@@ -114,9 +114,7 @@ func (b *Broker) runJournaledTool(ctx context.Context, call *journaledTool) ([]b
 		classified := b.classifyExecutionError(ctx, call.canonical, err)
 		return encodeOutcomeFailure(classified.Class, classified.Detail)
 	}
-	if len(result.Output) > 0 {
-		result.Output = redact(result.Output, b.secretValues())
-	}
+	result.Output = redactOutput(result.Output, b.secretValues())
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return encodeOutcomeFailure(ResultExecutionFailed, fmt.Sprintf("tool %q returned output that is not valid JSON", toolKey(call.canonical)))
