@@ -18,6 +18,7 @@ const (
 	ErrorCodeActionFailed         ErrorCode = "action_failed"
 	ErrorCodeOwnershipLost        ErrorCode = "ownership_lost"
 	ErrorCodeHostRunning          ErrorCode = "host_running"
+	ErrorCodeHostLease            ErrorCode = "host_lease"
 	ErrorCodeStopTimeout          ErrorCode = "stop_timeout"
 	ErrorCodeSessionStateInvalid  ErrorCode = "session_state_invalid"
 	ErrorCodeKeyInUse             ErrorCode = "key_in_use"
@@ -59,6 +60,10 @@ func handlerNotRegistered(name string) error {
 
 func keyInUse(key string) error {
 	return &Error{Code: ErrorCodeKeyInUse, Detail: "durable run " + key + " belongs to another handler", cause: durable.ErrKeyInUse}
+}
+
+func hostLease(cause error) error {
+	return &Error{Code: ErrorCodeHostLease, Detail: "the durable host could not write its lease: " + cause.Error(), cause: cause}
 }
 
 func ownershipLost(key string) error {

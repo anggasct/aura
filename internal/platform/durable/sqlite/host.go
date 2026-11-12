@@ -90,9 +90,18 @@ type host struct {
 	warned       map[string]struct{}
 }
 
-func (r *Runtime) Run(ctx context.Context) error {
+func (r *Runtime) Acquire(ctx context.Context) error {
+	h, err := r.acquire(ctx)
+	if err != nil {
+		return err
+	}
+	r.setAcquired(h)
+	return nil
+}
+
+func (r *Runtime) acquire(ctx context.Context) (*host, error) {
 	if !r.hosted.CompareAndSwap(false, true) {
-		return &Error{Code: ErrorCodeHostRunning, Detail: "this durable runtime already hosts runs"}
+		return nil, &Error{Code: ErrorCodeHostRunning, Detail: "this durable runtime already hosts runs"}
 	}
 	h := &host{
 		rt:     r,
@@ -103,6 +112,21 @@ func (r *Runtime) Run(ctx context.Context) error {
 		warned: map[string]struct{}{},
 	}
 	if err := h.writeLease(ctx); err != nil {
+		return nil, err
+	}
+	return h, nil
+}
+
+func (r *Runtime) hostToServe(ctx context.Context) (*host, error) {
+	if h := r.takeAcquired(); h != nil {
+		return h, nil
+	}
+	return r.acquire(ctx)
+}
+
+func (r *Runtime) Run(ctx context.Context) error {
+	h, err := r.hostToServe(ctx)
+	if err != nil {
 		return err
 	}
 	r.setHost(h)
@@ -165,7 +189,7 @@ func (h *host) writeLease(ctx context.Context) error {
 	owner := h.currentOwner()
 	if _, err := h.rt.db.ExecContext(wctx, `INSERT INTO durable_host (owner, expires_at, created_at) VALUES (?, `+dbNowMS+` + ?, ?)`,
 		owner, h.rt.hostTTL.Milliseconds(), h.rt.stamp()); err != nil {
-		return fmt.Errorf("durable host lease: %w", err)
+		return hostLease(err)
 	}
 	h.leaseOK = true
 	h.renewedAt = time.Now()
