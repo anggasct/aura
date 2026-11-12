@@ -81,7 +81,8 @@ func overlappingCases() []redactionCase {
 		{name: "a longer value registered first", secrets: []string{"abcdef", "abc"}, input: "abcdef abc", want: "[REDACTED] [REDACTED]"},
 		{name: "values that overlap at the start", secrets: []string{"abcd", "xab"}, input: "xabcd", want: "[REDACTED]"},
 		{name: "values that overlap at the end", secrets: []string{"abc", "bcd"}, input: "abcd", want: "[REDACTED]"},
-		{name: "occurrences next to each other", secrets: []string{"abc"}, input: "abcabc abc", want: "[REDACTED] [REDACTED]"},
+		{name: "occurrences next to each other", secrets: []string{"abc"}, input: "abcabc abc", want: "[REDACTED][REDACTED] [REDACTED]"},
+		{name: "values next to each other", secrets: []string{"abc", "def"}, input: "abcdef", want: "[REDACTED][REDACTED]"},
 		{name: "occurrences that overlap", secrets: []string{"aa"}, input: "aaa b", want: "[REDACTED] b"},
 	}
 }

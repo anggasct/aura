@@ -68,41 +68,51 @@ func minimalJSONBody(value string) (string, error) {
 	return string(encoded[1 : len(encoded)-1]), nil
 }
 
+type coverage struct {
+	covered   []bool
+	continues []bool
+}
+
+func (c *coverage) add(start, length int) {
+	c.covered[start] = true
+	for k := start + 1; k < start+length; k++ {
+		c.covered[k] = true
+		c.continues[k] = true
+	}
+}
+
 func redactText(text string, forms []string) string {
-	covered := coveredBytes(text, forms)
-	if covered == nil {
+	matched := matchedBytes(text, forms)
+	if matched == nil {
 		return text
 	}
 	var redacted strings.Builder
 	for i := range len(text) {
-		if !covered[i] {
+		if !matched.covered[i] {
 			redacted.WriteByte(text[i])
-		} else if i == 0 || !covered[i-1] {
+		} else if !matched.continues[i] {
 			redacted.WriteString(redactionMarker)
 		}
 	}
 	return redacted.String()
 }
 
-func coveredBytes(text string, forms []string) []bool {
-	var covered []bool
+func matchedBytes(text string, forms []string) *coverage {
+	var matched *coverage
 	for _, form := range forms {
 		for from := 0; ; {
 			index := strings.Index(text[from:], form)
 			if index < 0 {
 				break
 			}
-			if covered == nil {
-				covered = make([]bool, len(text))
+			if matched == nil {
+				matched = &coverage{covered: make([]bool, len(text)), continues: make([]bool, len(text))}
 			}
-			start := from + index
-			for k := range len(form) {
-				covered[start+k] = true
-			}
-			from = start + 1
+			matched.add(from+index, len(form))
+			from += index + 1
 		}
 	}
-	return covered
+	return matched
 }
 
 func redactStrings(output []byte, forms []string) []byte {
