@@ -122,7 +122,7 @@ func (a *admission) run(ctx context.Context) (runtimesessions.AdmitResult, bool,
 	if err := rejectHeldTurn(ctx, a.tx, desc.TurnID); err != nil {
 		return runtimesessions.AdmitResult{}, false, err
 	}
-	if err := rejectUsedTurn(ctx, a.tx, turnRef{sessionID: desc.SessionID, turnID: desc.TurnID}); err != nil {
+	if err := rejectUsedTurn(ctx, a.tx, desc.TurnID); err != nil {
 		return runtimesessions.AdmitResult{}, false, err
 	}
 	held, err := countHeldTurns(ctx, a.tx, desc.SessionID)
@@ -218,14 +218,14 @@ func rejectHeldTurn(ctx context.Context, tx *sql.Tx, turnID string) error {
 	return nil
 }
 
-func rejectUsedTurn(ctx context.Context, tx *sql.Tx, ref turnRef) error {
+func rejectUsedTurn(ctx context.Context, tx *sql.Tx, turnID string) error {
 	var used bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM durable_run WHERE key = ?1)
-    OR EXISTS (SELECT 1 FROM runtime_event WHERE session_id = ?2 AND turn_id = ?1)`, ref.turnID, ref.sessionID).Scan(&used); err != nil {
+    OR EXISTS (SELECT 1 FROM runtime_event WHERE turn_id = ?1)`, turnID).Scan(&used); err != nil {
 		return fmt.Errorf("durable session admit: read turn use: %w", err)
 	}
 	if used {
-		return invalidArgument(fmt.Sprintf("turn %q was already used", ref.turnID))
+		return invalidArgument(fmt.Sprintf("turn %q was already used", turnID))
 	}
 	return nil
 }

@@ -11,7 +11,7 @@ import (
 type DedupeStore interface {
 	Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *RuntimeEvent) (originalTurnID string, created bool, err error)
 	Claimed(ctx context.Context, source, externalID string) (bool, error)
-	ListTurnEvents(ctx context.Context, turnID string) ([]RuntimeEvent, error)
+	ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]RuntimeEvent, error)
 }
 
 type DedupeClaim struct {
@@ -134,13 +134,16 @@ func (s *sqliteDedupeStore) Claimed(ctx context.Context, source, externalID stri
 	return expiresAtRaw >= formatTime(time.Now().UTC()), nil
 }
 
-func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, turnID string) ([]RuntimeEvent, error) {
+func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]RuntimeEvent, error) {
+	if sessionID == "" || turnID == "" {
+		return nil, Errorf(ErrorCodeInvalidArgument, "turn events read must name a session and a turn")
+	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`
 		 FROM runtime_event
-		 WHERE turn_id = ?
+		 WHERE session_id = ? AND turn_id = ?
 		 ORDER BY sequence ASC`,
-		turnID,
+		sessionID, turnID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list turn %s events: %w", turnID, err)

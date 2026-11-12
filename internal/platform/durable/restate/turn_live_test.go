@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"os"
@@ -427,10 +428,7 @@ func (r *liveTurnRig) waitTerminal(turnID string, within time.Duration) []store.
 	r.t.Helper()
 	deadline := time.Now().Add(within)
 	for {
-		events, err := store.NewDedupeStore(r.db).ListTurnEvents(context.Background(), turnID)
-		if err != nil {
-			r.t.Fatalf("list turn events: %v", err)
-		}
+		events := r.turnEvents(turnID)
 		for i := range events {
 			switch events[i].Kind {
 			case turn.EventKindTurnCompleted, turn.EventKindTurnFailed, turn.EventKindTurnCancelled:
@@ -444,12 +442,26 @@ func (r *liveTurnRig) waitTerminal(turnID string, within time.Duration) []store.
 	}
 }
 
-func (r *liveTurnRig) countKind(turnID, kind string) int {
+func (r *liveTurnRig) turnEvents(turnID string) []store.RuntimeEvent {
 	r.t.Helper()
-	events, err := store.NewDedupeStore(r.db).ListTurnEvents(context.Background(), turnID)
+	var sessionID string
+	err := r.db.QueryRowContext(context.Background(), `SELECT session_id FROM runtime_event WHERE turn_id = ? AND kind = ?`, turnID, turn.EventKindTurnAccepted).Scan(&sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		r.t.Fatalf("read the session of %s: %v", turnID, err)
+	}
+	events, err := store.NewDedupeStore(r.db).ListTurnEvents(context.Background(), sessionID, turnID)
 	if err != nil {
 		r.t.Fatalf("list turn events: %v", err)
 	}
+	return events
+}
+
+func (r *liveTurnRig) countKind(turnID, kind string) int {
+	r.t.Helper()
+	events := r.turnEvents(turnID)
 	count := 0
 	for i := range events {
 		if events[i].Kind == kind {

@@ -107,7 +107,7 @@ type EventStore interface {
 
 type DedupeStore interface {
 	Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *store.RuntimeEvent) (originalTurnID string, created bool, err error)
-	ListTurnEvents(ctx context.Context, turnID string) ([]store.RuntimeEvent, error)
+	ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]store.RuntimeEvent, error)
 }
 
 func NewEngine(config *Config, events EventStore, dedupe DedupeStore, executor TurnExecutor, logger *slog.Logger) (*Engine, error) {
@@ -303,12 +303,12 @@ func (e *Engine) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store
 			select {
 			case <-ctx.Done():
 				e.cancelTurn(copyReq.TurnID)
-				e.drainUntilTerminal(ctx, copyReq.TurnID, sub, yield)
+				e.drainUntilTerminal(ctx, &copyReq, sub, yield)
 				return
 			case ev, ok := <-sub.events:
 				if !ok {
 					if sub.wasGapped() {
-						e.replayAfterGap(ctx, copyReq.TurnID, lastSequence, yield)
+						e.replayAfterGap(ctx, &copyReq, lastSequence, yield)
 					}
 					return
 				}
@@ -326,7 +326,7 @@ func (e *Engine) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store
 	}
 }
 
-func (e *Engine) drainUntilTerminal(ctx context.Context, turnID string, sub *subscriber, yield func(store.RuntimeEvent, error) bool) {
+func (e *Engine) drainUntilTerminal(ctx context.Context, req *turn.TurnRequest, sub *subscriber, yield func(store.RuntimeEvent, error) bool) {
 	var lastSequence uint64
 	for ev := range sub.events {
 		if ev.Sequence != 0 {
@@ -340,19 +340,19 @@ func (e *Engine) drainUntilTerminal(ctx context.Context, turnID string, sub *sub
 		}
 	}
 	if sub.wasGapped() {
-		e.replayAfterGap(ctx, turnID, lastSequence, yield)
+		e.replayAfterGap(ctx, req, lastSequence, yield)
 	}
 }
 
-func (e *Engine) replayAfterGap(ctx context.Context, turnID string, afterSequence uint64, yield func(store.RuntimeEvent, error) bool) {
+func (e *Engine) replayAfterGap(ctx context.Context, req *turn.TurnRequest, afterSequence uint64, yield func(store.RuntimeEvent, error) bool) {
 	e.mu.Lock()
-	t, live := e.turns[turnID]
+	t, live := e.turns[req.TurnID]
 	e.mu.Unlock()
 	if live {
 		<-t.done
 	}
 
-	events, err := e.dedupe.ListTurnEvents(context.WithoutCancel(ctx), turnID)
+	events, err := e.dedupe.ListTurnEvents(context.WithoutCancel(ctx), req.SessionID, req.TurnID)
 	if err != nil {
 		yield(store.RuntimeEvent{Kind: turn.EventKindTurnFailed, Payload: failedPayload(turn.ErrorCodeRuntimeInternal, "failed to replay the live turn", err, "")}, nil)
 		return
@@ -504,7 +504,7 @@ func (e *Engine) submit(ctx context.Context, req *turn.TurnRequest) (*subscriber
 	}
 	if replay {
 		e.releasePending()
-		go e.replay(ctx, originalTurnID, sub)
+		go e.replay(ctx, turnRef{sessionID: req.SessionID, turnID: originalTurnID}, sub)
 		return sub, nil
 	}
 	if e.sessionStore != nil {
@@ -810,10 +810,15 @@ func (e *Engine) cancelTurn(turnID string) {
 	t.cancel()
 }
 
-func (e *Engine) replay(ctx context.Context, turnID string, sub *subscriber) {
+type turnRef struct {
+	sessionID string
+	turnID    string
+}
+
+func (e *Engine) replay(ctx context.Context, original turnRef, sub *subscriber) {
 	defer sub.stop()
 	e.mu.Lock()
-	t, live := e.turns[turnID]
+	t, live := e.turns[original.turnID]
 	e.mu.Unlock()
 	if live {
 		select {
@@ -822,7 +827,7 @@ func (e *Engine) replay(ctx context.Context, turnID string, sub *subscriber) {
 			return
 		}
 	}
-	events, err := e.dedupe.ListTurnEvents(ctx, turnID)
+	events, err := e.dedupe.ListTurnEvents(ctx, original.sessionID, original.turnID)
 	if err != nil {
 		sub.sendContext(ctx, &store.RuntimeEvent{Kind: turn.EventKindTurnFailed, Payload: failedPayload(turn.ErrorCodeRuntimeInternal, "failed to replay the original turn", err, "")})
 		return
@@ -968,7 +973,7 @@ func (e *Engine) terminateDropped(ctx context.Context, desc *runtimesessions.Des
 	if held {
 		return
 	}
-	events, err := e.dedupe.ListTurnEvents(ctx, desc.TurnID)
+	events, err := e.dedupe.ListTurnEvents(ctx, desc.SessionID, desc.TurnID)
 	if err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to read the events of a dropped durable turn", "error", err, "turn_id", desc.TurnID)
 		return

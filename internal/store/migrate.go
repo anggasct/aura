@@ -59,6 +59,7 @@ var migrations = []migration{
 	{version: 41, sql: durableRuntimeSchemaSQL},
 	{version: 42, sql: durableSessionSchemaSQL},
 	{version: 43, sql: webhookExecutionSessionSchemaSQL},
+	{version: 44, sql: runtimeEventTurnFirstIndexSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -918,6 +919,13 @@ WHERE session_id = '' AND state IN ('accepted','running');
 
 CREATE INDEX webhook_execution_unfinished_idx
     ON webhook_execution(id) WHERE state IN ('accepted','running');
+`
+
+const runtimeEventTurnFirstIndexSQL = `
+DROP INDEX runtime_event_turn_idx;
+
+CREATE INDEX runtime_event_turn_idx
+    ON runtime_event(turn_id, session_id, sequence);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

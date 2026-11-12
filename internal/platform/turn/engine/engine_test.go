@@ -535,6 +535,16 @@ func TestSaturatedLifecycleSubscriberReplaysAfterGap(t *testing.T) {
 	}
 }
 
+func acceptedSessionOf(t *testing.T, db *sql.DB, turnID string) string {
+	t.Helper()
+	var sessionID string
+	err := db.QueryRowContext(context.Background(), `SELECT session_id FROM runtime_event WHERE turn_id = ? AND kind = ?`, turnID, turn.EventKindTurnAccepted).Scan(&sessionID)
+	if err != nil {
+		t.Fatalf("read the session of %s: %v", turnID, err)
+	}
+	return sessionID
+}
+
 func waitForTerminalDurable(t *testing.T, db *sql.DB, turnID string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -631,7 +641,7 @@ func TestCompletedTurnsArePruned(t *testing.T) {
 			return len(engine.turns) == 0
 		})
 
-		events, err := engine.dedupe.ListTurnEvents(context.Background(), turnID(0))
+		events, err := engine.dedupe.ListTurnEvents(context.Background(), "session-a", turnID(0))
 		if err != nil {
 			t.Fatalf("ListTurnEvents after prune: %v", err)
 		}
