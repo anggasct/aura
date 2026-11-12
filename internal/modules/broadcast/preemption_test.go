@@ -800,7 +800,7 @@ func TestRunnerWritesNothingAfterItsContextEnded(t *testing.T) {
 		}},
 		{name: "the load in the delivery", block: "Load", nth: 2, arrange: scheduledNow},
 		{name: "the attempt clock", block: "clock:attempt:bcst-1:a1", nth: 1, arrange: scheduledNow},
-		{name: "the dispatch slot claim", block: "ClaimDispatchSlot", nth: 1, ownRow: "slot:", arrange: scheduledNow},
+		{name: "the dispatch slot claim of a paced item", block: "ClaimDispatchSlot", nth: 1, ownRow: "slot:", arrange: paced},
 		{name: "the slot sleep", block: "Sleep", nth: 1, arrange: paced},
 		{name: "the attempt note", block: "NoteAttempt", nth: 1, arrange: scheduledNow},
 		{name: "a primary send that succeeded", block: "primary", nth: 1, ownRow: "send:", arrange: scheduledNow},
