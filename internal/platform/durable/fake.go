@@ -319,6 +319,7 @@ type Fake struct {
 
 type fakeRun struct {
 	ref        RunRef
+	handler    string
 	cancel     context.CancelFunc
 	done       chan struct{}
 	invocation *invocation
@@ -408,17 +409,17 @@ func (f *Fake) Start(ctx context.Context, req StartRequest) (RunRef, error) {
 		return RunRef{}, errors.New("durable start requires a key")
 	}
 	f.mu.Lock()
-	if run, ok := f.runs[req.Key]; ok {
+	kept, handler, err := f.admit(&req)
+	if err != nil {
 		f.mu.Unlock()
-		return run.ref, nil
+		return RunRef{}, err
 	}
-	handler, ok := f.handlers[req.Handler]
-	if !ok {
+	if kept != nil {
 		f.mu.Unlock()
-		return RunRef{}, fmt.Errorf("no durable handler registered for %q", req.Handler)
+		return kept.ref, nil
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	run := &fakeRun{ref: RunRef{Key: req.Key}, cancel: cancel, done: make(chan struct{}), state: RunRunning}
+	run := &fakeRun{ref: RunRef{Key: req.Key}, handler: req.Handler, cancel: cancel, done: make(chan struct{}), state: RunRunning}
 	f.runs[req.Key] = run
 	clock := f.clock
 	f.mu.Unlock()
@@ -454,6 +455,33 @@ func (f *Fake) Start(ctx context.Context, req StartRequest) (RunRef, error) {
 		f.log("durable run %s finished as %s", run.ref.Key, state)
 	}()
 	return run.ref, nil
+}
+
+func (f *Fake) admit(req *StartRequest) (*fakeRun, Handler, error) {
+	existing, found := f.runs[req.Key]
+	if found && req.Reuse != ReuseEnded {
+		return existing, nil, nil
+	}
+	handler, ok := f.handlers[req.Handler]
+	if !ok {
+		return nil, nil, fmt.Errorf("no durable handler registered for %q", req.Handler)
+	}
+	if !found {
+		return nil, handler, nil
+	}
+	if existing.handler != req.Handler {
+		return nil, nil, fmt.Errorf("%w: %s", ErrKeyInUse, req.Key)
+	}
+	if !existing.ended() {
+		return existing, nil, nil
+	}
+	return nil, handler, nil
+}
+
+func (r *fakeRun) ended() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state == RunSucceeded || r.state == RunFailed || r.state == RunCancelled
 }
 
 func (f *Fake) Signal(_ context.Context, run RunRef, name string, payload []byte) error {

@@ -136,7 +136,7 @@ func (h *host) snapshot() []*execution {
 	return slices.Collect(maps.Values(h.execs))
 }
 
-func (h *host) cancelLocal(key, owner string) *execution {
+func (h *host) cancelLocal(key, owner string, claim int64) *execution {
 	h.claimMu.Lock()
 	defer h.claimMu.Unlock()
 	h.mu.Lock()
@@ -145,9 +145,10 @@ func (h *host) cancelLocal(key, owner string) *execution {
 		return nil
 	}
 	exec := h.execs[key]
-	if exec != nil {
-		exec.cancel(durable.ErrRunCancelled)
+	if exec == nil || exec.claim != claim {
+		return nil
 	}
+	exec.cancel(durable.ErrRunCancelled)
 	return exec
 }
 

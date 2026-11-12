@@ -426,7 +426,7 @@ func (inv *invocation) until(at time.Time) bool {
 			return true
 		}
 		inv.releaseSlot()
-		fired := clock.Timer(at.Sub(now))
+		fired := clock.Timer(min(at.Sub(now), inv.rt.clockCheck))
 		if !clock.Now().Before(at) {
 			return true
 		}
@@ -600,26 +600,37 @@ func (inv *invocation) decideWait(ctx context.Context, key waitKey, deadline tim
 			return nil, true, true
 		}
 		inv.releaseSlot()
+		if !inv.parkWait(ctx, wake, deadline) {
+			return nil, false, false
+		}
+	}
+}
+
+func (inv *invocation) parkWait(ctx context.Context, wake <-chan struct{}, deadline time.Time) bool {
+	clock := inv.rt.clock
+	for {
 		now := clock.Now()
 		if !now.Before(deadline) {
-			continue
+			return true
 		}
-		expired := clock.Timer(deadline.Sub(now))
+		expired := clock.Timer(min(deadline.Sub(now), inv.rt.clockCheck))
 		if !clock.Now().Before(deadline) {
-			continue
+			return true
 		}
 		inv.rt.counters.parked.Add(1)
 		select {
 		case <-wake:
+			inv.rt.counters.parked.Add(-1)
+			return true
 		case <-expired:
+			inv.rt.counters.parked.Add(-1)
 		case <-ctx.Done():
 			inv.rt.counters.parked.Add(-1)
-			return nil, false, false
+			return false
 		case <-inv.done():
 			inv.rt.counters.parked.Add(-1)
-			return nil, false, false
+			return false
 		}
-		inv.rt.counters.parked.Add(-1)
 	}
 }
 

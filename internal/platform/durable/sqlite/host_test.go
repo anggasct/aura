@@ -306,3 +306,37 @@ func TestRecoveryIsBounded(t *testing.T) {
 		t.Fatalf("peak concurrent replays = %d, want 2", peak.Load())
 	}
 }
+
+func TestLocalCancelIgnoresAnotherClaim(t *testing.T) {
+	db := openDB(t, newDatabaseFile(t))
+	insertRun(t, db, runFixture{key: "k-reclaimed", handler: "hold", claim: 3})
+	rt := newRuntime(t, db, nil)
+	entered := make(chan struct{}, 1)
+	rt.RegisterHandler("hold", func(ctx context.Context, _ durable.Invocation) error {
+		entered <- struct{}{}
+		return parkUntilStopped(ctx)
+	})
+	startHost(t, rt)
+	receive(t, entered)
+	h := rt.currentHost()
+	running := h.execution("k-reclaimed")
+	if running == nil || running.claim != 4 {
+		t.Fatalf("execution = %+v, want one under claim 4", running)
+	}
+	if exec := h.cancelLocal("k-reclaimed", h.currentOwner(), 3); exec != nil {
+		t.Fatal("cancelLocal under an earlier claim returned the execution")
+	}
+	if running.cause() != nil {
+		t.Fatalf("execution ended after a cancel under an earlier claim: %v", running.cause())
+	}
+	if row := readRun(t, db, "k-reclaimed"); row.state != string(durable.RunRunning) || row.claim != 4 {
+		t.Fatalf("run = %+v, want running under claim 4", row)
+	}
+	if exec := h.cancelLocal("k-reclaimed", h.currentOwner(), 4); exec != running {
+		t.Fatal("cancelLocal under the current claim did not return the execution")
+	}
+	if !errors.Is(running.cause(), durable.ErrRunCancelled) {
+		t.Fatalf("cause = %v, want ErrRunCancelled", running.cause())
+	}
+	waitState(t, rt, runWant{key: "k-reclaimed", state: durable.RunCancelled})
+}

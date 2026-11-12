@@ -20,10 +20,20 @@ type RunRef struct {
 	Key string
 }
 
+type ReusePolicy int
+
+const (
+	ReuseNever ReusePolicy = iota
+	ReuseEnded
+)
+
+var ErrKeyInUse = errors.New("durable run key is used by another handler")
+
 type StartRequest struct {
 	Handler string
 	Key     string
 	Payload []byte
+	Reuse   ReusePolicy
 }
 
 type RunStatus struct {

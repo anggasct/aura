@@ -19,6 +19,12 @@ func TestRuntimePortConformance(t *testing.T) {
 	durabletest.ExerciseRuntime(t, rt)
 }
 
+func TestRuntimePortReuse(t *testing.T) {
+	rt := newRuntime(t, openDB(t, newDatabaseFile(t)), nil)
+	startHost(t, rt)
+	durabletest.ExerciseReuse(t, rt)
+}
+
 func TestNewRejectsInvalidOptions(t *testing.T) {
 	db := openDB(t, newDatabaseFile(t))
 	cases := []struct {
@@ -34,6 +40,8 @@ func TestNewRejectsInvalidOptions(t *testing.T) {
 		{"poll interval below a millisecond", &Options{DB: db, PollInterval: time.Microsecond}},
 		{"host ttl below a millisecond", &Options{DB: db, HostTTL: 999 * time.Microsecond}},
 		{"stop grace below a millisecond", &Options{DB: db, StopGrace: time.Nanosecond}},
+		{"negative clock check", &Options{DB: db, ClockCheck: -time.Second}},
+		{"clock check below a millisecond", &Options{DB: db, ClockCheck: 999 * time.Microsecond}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,6 +58,24 @@ func TestNewRejectsInvalidOptions(t *testing.T) {
 	}
 	if rt.pollInterval != defaultPollInterval || rt.hostTTL != defaultHostTTL || rt.stopGrace != defaultStopGrace || rt.recoveryConcurrency != defaultRecoveryConcurrency {
 		t.Fatalf("defaults = %v %v %v %d", rt.pollInterval, rt.hostTTL, rt.stopGrace, rt.recoveryConcurrency)
+	}
+}
+
+func TestNewDefaultsTheClockCheck(t *testing.T) {
+	db := openDB(t, newDatabaseFile(t))
+	rt, err := New(&Options{DB: db})
+	if err != nil {
+		t.Fatalf("New with defaults: %v", err)
+	}
+	if rt.clockCheck != time.Minute {
+		t.Fatalf("default clock check = %v, want one minute", rt.clockCheck)
+	}
+	rt, err = New(&Options{DB: db, ClockCheck: time.Millisecond})
+	if err != nil {
+		t.Fatalf("New with a clock check: %v", err)
+	}
+	if rt.clockCheck != time.Millisecond {
+		t.Fatalf("clock check = %v, want the configured millisecond", rt.clockCheck)
 	}
 }
 
