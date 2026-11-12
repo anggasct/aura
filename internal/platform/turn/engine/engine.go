@@ -879,32 +879,39 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 		close(done)
 	}()
 
-	grace := e.cfg.ShutdownTimeout
+	budget := e.cfg.ShutdownTimeout
 	if deadline, ok := ctx.Deadline(); ok {
-		if remaining := time.Until(deadline); remaining < grace {
-			grace = remaining
+		if remaining := time.Until(deadline); remaining < budget {
+			budget = remaining
 		}
 	}
-	timer := time.NewTimer(grace)
+	reserve := min(budget/2, maxCancelReserve)
+	timer := time.NewTimer(budget - reserve)
 	defer timer.Stop()
 
 	select {
 	case <-done:
 		return nil
 	case <-timer.C:
-		e.mu.Lock()
-		for _, t := range e.turns {
-			if t.cancel != nil {
-				t.cancel()
-			}
-		}
-		e.mu.Unlock()
-		timer.Reset(grace)
-		select {
-		case <-done:
-			return nil
-		case <-timer.C:
-			return codedError(turn.ErrorCodeRuntimeInternal, "shutdown grace elapsed with turns still draining", nil)
+	}
+	e.cancelRunning()
+	timer.Reset(reserve)
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		return codedError(turn.ErrorCodeRuntimeInternal, "shutdown grace elapsed with turns still draining", nil)
+	}
+}
+
+const maxCancelReserve = 10 * time.Second
+
+func (e *Engine) cancelRunning() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, t := range e.turns {
+		if t.cancel != nil {
+			t.cancel()
 		}
 	}
 }
