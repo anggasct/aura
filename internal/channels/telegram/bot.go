@@ -228,6 +228,17 @@ type replyParameters struct {
 	AllowSendingWithoutReply bool  `json:"allow_sending_without_reply"`
 }
 
+func previewsDisabledUnlessOptedIn(linkPreviews bool) *linkPreviewOptions {
+	if linkPreviews {
+		return nil
+	}
+	return previewsDisabled()
+}
+
+func previewsDisabled() *linkPreviewOptions {
+	return &linkPreviewOptions{IsDisabled: true}
+}
+
 type linkPreviewOptions struct {
 	IsDisabled bool `json:"is_disabled"`
 }
@@ -271,9 +282,10 @@ type clearKeyboardRequest struct {
 }
 
 type editMessageTextRequest struct {
-	ChatID    int64  `json:"chat_id"`
-	MessageID int64  `json:"message_id"`
-	Text      string `json:"text"`
+	ChatID             int64               `json:"chat_id"`
+	MessageID          int64               `json:"message_id"`
+	Text               string              `json:"text"`
+	LinkPreviewOptions *linkPreviewOptions `json:"link_preview_options,omitempty"`
 }
 
 type chatActionRequest struct {

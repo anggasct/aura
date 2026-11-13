@@ -313,6 +313,7 @@ func sendText(ctx context.Context, client *http.Client, base, token, channelID, 
 	}
 	payload, err := json.Marshal(map[string]any{
 		"content":          neutralizeMentions(text),
+		"flags":            suppressEmbedsFlags,
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	})
 	if err != nil {

@@ -833,6 +833,10 @@ func validateDiscordAccountShapes(accountsNode *yamlv3.Node) error {
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
 					return fmt.Errorf("%s.accept_dms must be a boolean at line %d", field, valueNode.Line)
 				}
+			case "link_previews":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.link_previews must be a boolean at line %d", field, valueNode.Line)}
+				}
 			case "name", "bot_token_ref", "persona":
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
 					return fmt.Errorf("%s.%s must be a string at line %d", field, keyNode.Value, valueNode.Line)
@@ -959,6 +963,10 @@ func validateTelegramAccountShapes(accountsNode *yamlv3.Node) error {
 			case "accept_private_chats":
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
 					return fmt.Errorf("%s.accept_private_chats must be a boolean at line %d", field, valueNode.Line)
+				}
+			case "link_previews":
+				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
+					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.link_previews must be a boolean at line %d", field, valueNode.Line)}
 				}
 			case "allowed_user_ids", "allowed_chat_ids":
 				if err := quotedStringSequence(field+"."+keyNode.Value, valueNode); err != nil {

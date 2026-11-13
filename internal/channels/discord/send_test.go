@@ -1,8 +1,11 @@
 package discord
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/effect"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -439,5 +443,127 @@ func TestDeliver_RejectsInvalid(t *testing.T) {
 	}
 	if stub.postCount() != 0 {
 		t.Errorf("posts = %d, want none", stub.postCount())
+	}
+}
+
+func embedFlags(t *testing.T, raw []byte) (flags float64, present bool) {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	flags, present = payload["flags"].(float64)
+	return flags, present
+}
+
+func uploadPayloadJSON(t *testing.T, call restCall) []byte {
+	t.Helper()
+	_, params, err := mime.ParseMediaType(call.contentType)
+	if err != nil {
+		t.Fatalf("upload content type %q: %v", call.contentType, err)
+	}
+	reader := multipart.NewReader(bytes.NewReader(call.body), params["boundary"])
+	for {
+		part, err := reader.NextPart()
+		if err != nil {
+			t.Fatalf("upload has no payload_json part: %v", err)
+		}
+		if part.FormName() != "payload_json" {
+			continue
+		}
+		raw, err := io.ReadAll(part)
+		if err != nil {
+			t.Fatalf("payload_json: %v", err)
+		}
+		return raw
+	}
+}
+
+type deliveredBodies struct {
+	post   []byte
+	edit   []byte
+	upload []byte
+}
+
+func deliverLinkBodies(t *testing.T, linkPreviews bool) deliveredBodies {
+	t.Helper()
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		writeMessage(t, w, "m1")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+		cfg.MinEditInterval = config.Duration(time.Millisecond)
+		cfg.Accounts[0].LinkPreviews = linkPreviews
+	})
+	const link = "https://evil.example/?d=x"
+	if _, err := adapter.Deliver(t.Context(), deliverTestRequest("link-edit", "discord", link)); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if _, err := adapter.Deliver(t.Context(), deliverTestRequest("link-edit", "discord", link+" edited")); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	if _, err := adapter.Deliver(t.Context(), deliverTestRequest("link-upload", "discord", link+strings.Repeat("x", 2000*3+100))); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	var bodies deliveredBodies
+	for _, call := range stub.calls {
+		switch {
+		case call.method == http.MethodPatch:
+			bodies.edit = call.body
+		case strings.HasPrefix(call.contentType, "multipart/form-data"):
+			bodies.upload = uploadPayloadJSON(t, call)
+		case bodies.post == nil:
+			bodies.post = call.body
+		}
+	}
+	if bodies.post == nil || bodies.edit == nil || bodies.upload == nil {
+		t.Fatalf("missing bodies: post=%t edit=%t upload=%t", bodies.post != nil, bodies.edit != nil, bodies.upload != nil)
+	}
+	return bodies
+}
+
+func TestDeliverSuppressesEmbedsByDefault(t *testing.T) {
+	bodies := deliverLinkBodies(t, false)
+	for name, raw := range map[string][]byte{"post": bodies.post, "edit": bodies.edit, "upload": bodies.upload} {
+		t.Run(name, func(t *testing.T) {
+			if flags, present := embedFlags(t, raw); !present || flags != suppressEmbedsFlags {
+				t.Errorf("flags = %v (present %t), want %d", flags, present, suppressEmbedsFlags)
+			}
+		})
+	}
+}
+
+func TestDeliverShowsEmbedsOnOptedInAccount(t *testing.T) {
+	bodies := deliverLinkBodies(t, true)
+	for name, raw := range map[string][]byte{"post": bodies.post, "edit": bodies.edit, "upload": bodies.upload} {
+		t.Run(name, func(t *testing.T) {
+			if flags, present := embedFlags(t, raw); present {
+				t.Errorf("flags = %v, want the key omitted", flags)
+			}
+		})
+	}
+}
+
+func TestBroadcastSuppressesEmbeds(t *testing.T) {
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+		writeMessage(t, w, "m1")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, nil)
+	request, err := json.Marshal(SendOperation{ChannelID: "333", Text: "https://evil.example/?d=x"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	outcome, err := adapter.Invoke(t.Context(), &effect.Invocation{Provider: "discord", Operation: OpSendMessage, Request: request})
+	if err != nil || !outcome.Succeeded {
+		t.Fatalf("Invoke = %+v, %v", outcome, err)
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(stub.calls))
+	}
+	if flags, present := embedFlags(t, stub.calls[0].body); !present || flags != suppressEmbedsFlags {
+		t.Errorf("flags = %v (present %t), want %d", flags, present, suppressEmbedsFlags)
 	}
 }

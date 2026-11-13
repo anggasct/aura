@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/effect"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -296,5 +297,81 @@ func TestSplitMessageCountsUTF16AndKeepsOrder(t *testing.T) {
 	lines := splitMessage(strings.Repeat("abc\n", messageLimit/4) + "next")
 	if len(lines) != 2 || lines[1] != "next" {
 		t.Fatalf("split did not prefer the line boundary: %d chunks, last %q", len(lines), lines[len(lines)-1])
+	}
+}
+
+func previewsDisabledIn(t *testing.T, body map[string]any) bool {
+	t.Helper()
+	options, _ := body["link_preview_options"].(map[string]any)
+	return options["is_disabled"] == true
+}
+
+func editInvocation(t *testing.T, text string) *effect.Invocation {
+	t.Helper()
+	request, err := json.Marshal(editOperation{ChatID: ownerUserID, MessageID: 701, Text: text})
+	if err != nil {
+		t.Fatalf("marshal edit: %v", err)
+	}
+	return &effect.Invocation{Provider: ProviderName, Operation: opEditMessage, Request: request}
+}
+
+func TestDeliverDisablesLinkPreviewsByDefault(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapter(t, nil)
+	const link = "see https://evil.example/?d=x"
+	h.api.failNextOn("sendMessage", describedFailure(http.StatusBadRequest, entityParseFailure, 0))
+	if _, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-links", link)); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if outcome, err := adapter.Invoke(t.Context(), editInvocation(t, link)); err != nil || !outcome.Succeeded {
+		t.Fatalf("Invoke edit = %+v, %v", outcome, err)
+	}
+	sends := h.api.sends()
+	if len(sends) != 2 {
+		t.Fatalf("sendMessage calls = %d, want the formatted attempt and one plain resend", len(sends))
+	}
+	if sends[1]["parse_mode"] != nil {
+		t.Fatalf("second send = %v, want the plain-text resend", sends[1])
+	}
+	for name, body := range map[string]map[string]any{
+		"formatted send":    sends[0],
+		"plain-text resend": sends[1],
+		"edit":              h.api.bodies("editMessageText")[0],
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !previewsDisabledIn(t, body) {
+				t.Errorf("link_preview_options = %v, want is_disabled true", body["link_preview_options"])
+			}
+		})
+	}
+}
+
+func TestDeliverKeepsLinkPreviewsOnOptedInAccount(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapterWith(t, nil, func(_ *config.Telegram, account *config.TelegramAccount) {
+		account.LinkPreviews = true
+	})
+	const link = "see https://evil.example/?d=x"
+	h.api.failNextOn("sendMessage", describedFailure(http.StatusBadRequest, entityParseFailure, 0))
+	if _, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-links", link)); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if outcome, err := adapter.Invoke(t.Context(), editInvocation(t, link)); err != nil || !outcome.Succeeded {
+		t.Fatalf("Invoke edit = %+v, %v", outcome, err)
+	}
+	sends := h.api.sends()
+	if len(sends) != 2 {
+		t.Fatalf("sendMessage calls = %d, want the formatted attempt and one plain resend", len(sends))
+	}
+	for name, body := range map[string]map[string]any{
+		"formatted send":    sends[0],
+		"plain-text resend": sends[1],
+		"edit":              h.api.bodies("editMessageText")[0],
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, present := body["link_preview_options"]; present {
+				t.Errorf("body = %v, want no link_preview_options", body)
+			}
+		})
 	}
 }

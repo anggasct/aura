@@ -215,7 +215,7 @@ func (a *Adapter) openCard(ctx context.Context, token string, binding *approval.
 		MessageThreadID:    dest.threadID,
 		Text:               text,
 		ReplyMarkup:        &inlineKeyboard{Rows: [][]inlineButton{row}},
-		LinkPreviewOptions: &linkPreviewOptions{IsDisabled: true},
+		LinkPreviewOptions: previewsDisabled(),
 	})
 	if err != nil {
 		a.approvals.Drop(tokenID, pending)
