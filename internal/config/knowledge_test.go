@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -86,6 +87,37 @@ func TestLoad_PersonaKnowledgeRejectsSinksInTheMatchingClassList(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, personaKnowledgeConfig(test.fields)))
 			if err == nil || !strings.Contains(err.Error(), test.detail) {
 				t.Fatalf("error = %v, want detail %q", err, test.detail)
+			}
+		})
+	}
+}
+
+func TestLoad_PersonaKnowledgeTreatsUnknownToolsAsSinks(t *testing.T) {
+	const prefix = "      knowledge: [faq]\n      principal_knowledge: [faq]\n"
+	tests := map[string]struct {
+		tools  string
+		detail string
+	}{
+		"github_comment": {tools: "[github_comment]", detail: "which is not a known tool or sends data out"},
+		"github_merge":   {tools: "[github_merge]", detail: "which is not a known tool or sends data out"},
+		"web_fetch":      {tools: "[web_fetch]", detail: "which sends data out"},
+		"read_file":      {tools: "[read_file]"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(writeDiscordConfig(t, personaKnowledgeConfig(prefix+"      principal_tools: "+test.tools+"\n")))
+			if test.detail == "" {
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				return
+			}
+			var coded *Error
+			if !errors.As(err, &coded) || coded.Code != ErrorCodePersonaInvalid || !strings.Contains(coded.Detail, test.detail) {
+				t.Fatalf("error = %v, want persona_invalid with %q", err, test.detail)
+			}
+			if test.detail == "which sends data out" && strings.Contains(coded.Detail, "not a known tool") {
+				t.Fatalf("detail = %q, want the known-sink wording", coded.Detail)
 			}
 		})
 	}
