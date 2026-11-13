@@ -561,12 +561,13 @@ func (b *build) buildTurnRuntime() error {
 	b.executor = executor
 	hooks := []postTurnHook{b.modules.memoryHook, b.modules.profileHook}
 	var durableConfig *runtimeengine.DurableConfig
+	var countTurn func(context.Context, *turn.TurnRequest)
 	if b.onServer() {
 		if err := b.buildServerDurable(); err != nil {
 			return err
 		}
 		durableConfig = b.server.durableConfig
-		hooks = append(hooks, b.server.personaHook)
+		countTurn = personaTurnCounter(b.server.personaRecorder)
 	}
 	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
 		MaxActiveTurns:  b.cfg.Runtime.MaxActiveTurns,
@@ -578,6 +579,7 @@ func (b *build) buildTurnRuntime() error {
 		Skills:          b.modules.skillRenderer,
 		Durable:         durableConfig,
 		PostTurnHook:    composePostTurnHooks(hooks...),
+		CountTurn:       countTurn,
 	}, b.events, store.NewDedupeStore(b.db), executor, b.logger)
 	if err != nil {
 		return err

@@ -276,12 +276,12 @@ type deliveryRecord struct {
 	Detail  string          `json:"detail,omitempty"`
 }
 
-type completedTurn struct {
+type endedTurn struct {
 	req    *turn.TurnRequest
 	events []store.RuntimeEvent
 }
 
-func (e *Engine) deliverOnce(ctx context.Context, done *completedTurn) deliveryRecord {
+func (e *Engine) deliverOnce(ctx context.Context, done *endedTurn) deliveryRecord {
 	planned, err := e.planDelivery(done.req, done.events)
 	if err != nil {
 		if code, ok := turn.CodeOf(err); ok && code == turn.ErrorCodeDeliverySkipped {

@@ -65,7 +65,7 @@ type serverBuild struct {
 	ownerRoute         *approval.OwnerRoute
 	accessRecorder     *telemetry.AccessRecorder
 	mcp                *mcpRuntime
-	personaHook        postTurnHook
+	personaRecorder    *telemetry.PersonaRecorder
 	durableConfig      *runtimeengine.DurableConfig
 	host               *runtimeengine.Host
 	broadcastRuntime   durable.Runtime
@@ -126,7 +126,7 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 	if err != nil {
 		return toolWiring{}, err
 	}
-	s.personaHook = personaTurnHook(personaRecorder)
+	s.personaRecorder = personaRecorder
 	personaRouter, err := auraagent.NewRouter(b.registry, &cfg.Channels, cfg.Bindings)
 	if err != nil {
 		return toolWiring{}, err

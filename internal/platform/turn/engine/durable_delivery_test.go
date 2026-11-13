@@ -284,11 +284,15 @@ type crashAfterDelivery struct {
 }
 
 func (c *crashAfterDelivery) hook(ctx context.Context, req *turn.TurnRequest, _ []store.RuntimeEvent) error {
+	c.handOff(ctx, req.TurnID)
+	return nil
+}
+
+func (c *crashAfterDelivery) handOff(ctx context.Context, runKey string) {
 	c.once.Do(func() {
-		c.err = handRunToGhostHost(ctx, c.db, req.TurnID)
+		c.err = handRunToGhostHost(ctx, c.db, runKey)
 		close(c.crashed)
 	})
-	return nil
 }
 
 func (c *crashAfterDelivery) await(t *testing.T) {
@@ -296,7 +300,7 @@ func (c *crashAfterDelivery) await(t *testing.T) {
 	select {
 	case <-c.crashed:
 	case <-time.After(hostRigTimeout):
-		t.Fatal("the first life never reached the post-turn hook")
+		t.Fatal("the first life never reached its crash point")
 	}
 	if c.err != nil {
 		t.Fatalf("hand the run to another host: %v", c.err)

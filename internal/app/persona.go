@@ -45,10 +45,9 @@ func (p registryPersonas) Knowledge(agentID string, class principal.Class) []str
 	return definition.KnowledgeFor(class)
 }
 
-func personaTurnHook(recorder *telemetry.PersonaRecorder) postTurnHook {
-	return func(ctx context.Context, req *turn.TurnRequest, _ []store.RuntimeEvent) error {
+func personaTurnCounter(recorder *telemetry.PersonaRecorder) func(context.Context, *turn.TurnRequest) {
+	return func(ctx context.Context, req *turn.TurnRequest) {
 		recorder.Turn(ctx, req.AgentID)
-		return nil
 	}
 }
 

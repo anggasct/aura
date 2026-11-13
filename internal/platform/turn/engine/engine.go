@@ -28,6 +28,7 @@ type Config struct {
 	Skills          SkillRenderer
 	Durable         *DurableConfig
 	PostTurnHook    func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
+	CountTurn       func(ctx context.Context, req *turn.TurnRequest)
 }
 
 const HandlerName = "turn"
@@ -716,6 +717,9 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 		if hookErr := e.cfg.PostTurnHook(hookCtx, &t.req, executed); hookErr != nil {
 			e.logger.ErrorContext(hookCtx, "post-turn hook failed", "error", hookErr, "turn_id", t.turnID)
 		}
+	}
+	if e.cfg.CountTurn != nil {
+		e.cfg.CountTurn(context.WithoutCancel(ctx), &t.req)
 	}
 	if terminalKind != turn.EventKindTurnCompleted {
 		e.notifyPresenceFailed(context.WithoutCancel(ctx), &t.req)

@@ -736,22 +736,24 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		}
 	}
 	if ctx.Err() == context.Canceled {
+		if !durable.Preempted(ctx) {
+			if err := e.journalPostTurn(context.WithoutCancel(ctx), scope, &endedTurn{req: req, events: executed}); err != nil {
+				e.logger.ErrorContext(ctx, "post-turn record failed", "error", err, "turn_id", req.TurnID)
+			}
+		}
 		e.closeCancelledPresence(ctx, req)
 		return ctx.Err()
 	}
 	terminalKind, terminalPayload := e.terminalOutcome(ctx, execErr, req)
 	if terminalKind == turn.EventKindTurnCompleted {
-		record, err := e.journalDelivery(context.WithoutCancel(ctx), scope, &completedTurn{req: req, events: executed})
+		record, err := e.journalDelivery(context.WithoutCancel(ctx), scope, &endedTurn{req: req, events: executed})
 		if err != nil {
 			return err
 		}
 		terminalKind, terminalPayload = record.terminal(e.agentID(req))
 	}
-	if e.cfg.PostTurnHook != nil {
-		hookCtx := context.WithoutCancel(ctx)
-		if hookErr := e.cfg.PostTurnHook(hookCtx, req, executed); hookErr != nil {
-			e.logger.ErrorContext(hookCtx, "post-turn hook failed", "error", hookErr, "turn_id", req.TurnID)
-		}
+	if err := e.journalPostTurn(context.WithoutCancel(ctx), scope, &endedTurn{req: req, events: executed}); err != nil {
+		return err
 	}
 	if terminalKind != turn.EventKindTurnCompleted {
 		e.notifyPresenceFailed(context.WithoutCancel(ctx), req)
@@ -766,7 +768,33 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 
 const deliveryAction = "delivery"
 
-func (e *Engine) journalDelivery(ctx context.Context, scope *durable.TurnScope, done *completedTurn) (deliveryRecord, error) {
+const postTurnAction = "post-turn"
+
+func (e *Engine) journalPostTurn(ctx context.Context, scope *durable.TurnScope, done *endedTurn) error {
+	if e.cfg.PostTurnHook == nil && e.cfg.CountTurn == nil {
+		return nil
+	}
+	ran := false
+	_, err := scope.Invocation().RunAction(ctx, postTurnAction, func(ctx context.Context) ([]byte, error) {
+		ran = true
+		if e.cfg.PostTurnHook != nil {
+			hookCtx := context.WithoutCancel(ctx)
+			if hookErr := e.cfg.PostTurnHook(hookCtx, done.req, done.events); hookErr != nil {
+				e.logger.ErrorContext(hookCtx, "post-turn hook failed", "error", hookErr, "turn_id", done.req.TurnID)
+			}
+		}
+		return []byte("{}"), nil
+	})
+	if err != nil {
+		return codedError(turn.ErrorCodeStorageUnavailable, "failed to journal the post-turn work", err)
+	}
+	if ran && e.cfg.CountTurn != nil {
+		e.cfg.CountTurn(context.WithoutCancel(ctx), done.req)
+	}
+	return nil
+}
+
+func (e *Engine) journalDelivery(ctx context.Context, scope *durable.TurnScope, done *endedTurn) (deliveryRecord, error) {
 	if done == nil || done.req == nil {
 		return deliveryRecord{}, invalidArgument("turn delivery requires the completed turn")
 	}
