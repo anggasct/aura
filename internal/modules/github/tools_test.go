@@ -164,7 +164,7 @@ func TestToolsRejectBadInput(t *testing.T) {
 		{"create bad credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"token"}`},
 		{"create missing credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"absent"}`},
 		{"merge bad method", MergeAdapter(options), `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","merge_method":"fast-forward","credential_name":"ci"}`},
-		{"merge zero number", MergeAdapter(options), `{"repo":"org/repo","number":0,"sha":"0123456789abcdef0123456789abcdef01234567","credential_name":"ci"}`},
+		{"merge zero number", MergeAdapter(options), `{"repo":"org/repo","number":0,"sha":"0123456789abcdef0123456789abcdef01234567","merge_method":"merge","credential_name":"ci"}`},
 		{"comment empty body", CommentAdapter(options), `{"repo":"org/repo","number":7,"body":"","credential_name":"ci"}`},
 	}
 	for _, tc := range cases {
@@ -270,7 +270,7 @@ func TestAdaptersRefuseACredentialThatIsNotConfigured(t *testing.T) {
 		args  string
 	}{
 		{"create_pr", CreatePRAdapter, `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":%s}`},
-		{"merge", MergeAdapter, `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","credential_name":%s}`},
+		{"merge", MergeAdapter, `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","merge_method":"merge","credential_name":%s}`},
 		{"comment", CommentAdapter, `{"repo":"org/repo","number":7,"body":"hi","credential_name":%s}`},
 	}
 	configured := func() []Credential { return []Credential{{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"}} }
@@ -367,7 +367,7 @@ func TestMergeSendsTheExpectedHead(t *testing.T) {
 	} {
 		raw := arguments(sha)
 		if name == "missing" {
-			raw = json.RawMessage(`{"repo":"org/repo","number":42,"credential_name":"ci"}`)
+			raw = json.RawMessage(`{"repo":"org/repo","number":42,"merge_method":"squash","credential_name":"ci"}`)
 		}
 		if _, err := validate(raw); err == nil {
 			t.Errorf("validator accepted a %s sha", name)

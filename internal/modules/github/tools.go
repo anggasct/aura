@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -105,12 +107,36 @@ func newClient(options *ToolOptions) (*client, error) {
 	}, nil
 }
 
-func parseRepo(repo string) (owner, name string, err error) {
-	parts := strings.Split(strings.TrimSpace(repo), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || len(repo) > 128 {
-		return "", "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, "repo must be owner/name")
+var (
+	ownerPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$`)
+	namePattern  = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
+)
+
+const repoDetail = "repo must be owner/name, owner up to 39 letters, digits, '-' or '_', name up to 100 letters, digits, '.', '-' or '_'"
+
+type repoRef struct {
+	owner, name string
+}
+
+func parseRepo(repo string) (repoRef, error) {
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || !ownerPattern.MatchString(parts[0]) || !namePattern.MatchString(parts[1]) || parts[1] == "." || parts[1] == ".." {
+		return repoRef{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, repoDetail)
 	}
-	return parts[0], parts[1], nil
+	return repoRef{owner: parts[0], name: parts[1]}, nil
+}
+
+func (r repoRef) path(rest ...string) string {
+	var path strings.Builder
+	path.WriteString("/repos/")
+	path.WriteString(url.PathEscape(r.owner))
+	path.WriteString("/")
+	path.WriteString(url.PathEscape(r.name))
+	for _, element := range rest {
+		path.WriteString("/")
+		path.WriteString(url.PathEscape(element))
+	}
+	return path.String()
 }
 
 func credentialIndex(credentials []Credential, name string) int {
@@ -231,7 +257,7 @@ func CreatePRAdapter(options *ToolOptions) toolbroker.Adapter {
 		if err := json.Unmarshal(request.Arguments, &args); err != nil {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "arguments must be a JSON object")
 		}
-		owner, repo, err := parseRepo(args.Repo)
+		ref, err := parseRepo(args.Repo)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -243,7 +269,7 @@ func CreatePRAdapter(options *ToolOptions) toolbroker.Adapter {
 			return toolbroker.ToolResult{}, err
 		}
 		status, raw, err := cli.call(ctx, token, http.MethodPost,
-			fmt.Sprintf("/repos/%s/%s/pulls", owner, repo),
+			ref.path("pulls"),
 			map[string]string{"title": args.Title, "head": args.Head, "base": args.Base, "body": args.Body})
 		if err != nil {
 			return toolbroker.ToolResult{}, err
@@ -259,7 +285,7 @@ func CreatePRAdapter(options *ToolOptions) toolbroker.Adapter {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultExecutionFailed, "github pull request response is not usable")
 		}
 		output, err := json.Marshal(map[string]any{
-			"external_id": fmt.Sprintf("%s/%s#%d", owner, repo, created.Number),
+			"external_id": fmt.Sprintf("%s/%s#%d", ref.owner, ref.name, created.Number),
 			"number":      created.Number,
 			"url":         created.HTMLURL,
 		})
@@ -274,7 +300,7 @@ type mergeArguments struct {
 	commonArguments
 	Number      int    `json:"number"`
 	SHA         string `json:"sha"`
-	MergeMethod string `json:"merge_method,omitempty"`
+	MergeMethod string `json:"merge_method"`
 }
 
 func MergeAdapter(options *ToolOptions) toolbroker.Adapter {
@@ -290,18 +316,14 @@ func MergeAdapter(options *ToolOptions) toolbroker.Adapter {
 		if err := json.Unmarshal(request.Arguments, &args); err != nil {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "arguments must be a JSON object")
 		}
-		owner, repo, err := parseRepo(args.Repo)
+		ref, err := parseRepo(args.Repo)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
 		if args.Number <= 0 {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "number must be positive")
 		}
-		method := args.MergeMethod
-		if method == "" {
-			method = "merge"
-		}
-		if method != "merge" && method != "squash" && method != "rebase" {
+		if !slices.Contains(mergeMethods, args.MergeMethod) {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "merge_method must be merge, squash, or rebase")
 		}
 		token, err := resolveToken(args.CredentialName, cli.credentials)
@@ -309,8 +331,8 @@ func MergeAdapter(options *ToolOptions) toolbroker.Adapter {
 			return toolbroker.ToolResult{}, err
 		}
 		status, raw, err := cli.call(ctx, token, http.MethodPut,
-			fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, args.Number),
-			map[string]string{"merge_method": method, "sha": args.SHA})
+			ref.path("pulls", strconv.Itoa(args.Number), "merge"),
+			map[string]string{"merge_method": args.MergeMethod, "sha": args.SHA})
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -354,7 +376,7 @@ func CommentAdapter(options *ToolOptions) toolbroker.Adapter {
 		if err := json.Unmarshal(request.Arguments, &args); err != nil {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "arguments must be a JSON object")
 		}
-		owner, repo, err := parseRepo(args.Repo)
+		ref, err := parseRepo(args.Repo)
 		if err != nil {
 			return toolbroker.ToolResult{}, err
 		}
@@ -369,7 +391,7 @@ func CommentAdapter(options *ToolOptions) toolbroker.Adapter {
 			return toolbroker.ToolResult{}, err
 		}
 		status, raw, err := cli.call(ctx, token, http.MethodPost,
-			fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, args.Number),
+			ref.path("issues", strconv.Itoa(args.Number), "comments"),
 			map[string]string{"body": args.Body})
 		if err != nil {
 			return toolbroker.ToolResult{}, err
@@ -411,7 +433,12 @@ func intRef(limit int) *int {
 	return &limit
 }
 
+var mergeMethods = []string{"merge", "squash", "rebase"}
+
 func textProperty(name string) fieldType {
+	if name == "merge_method" {
+		return fieldType{Type: "string", Enum: slices.Clone(mergeMethods)}
+	}
 	if name == "body" {
 		return fieldType{Type: "string", MaxLength: intRef(maxBodyHint), Description: bodyHint}
 	}
@@ -477,6 +504,13 @@ func fieldValidator(requiredStrings, optionalStrings, requiredNumbers []string) 
 				return nil, fmt.Errorf("argument %q must be a non-empty string", field)
 			}
 		}
+		var repo string
+		if err := json.Unmarshal(document["repo"], &repo); err != nil {
+			return nil, errors.New(`argument "repo" must be a non-empty string`)
+		}
+		if _, err := parseRepo(repo); err != nil {
+			return nil, err
+		}
 		for _, field := range optionalStrings {
 			rawValue, ok := document[field]
 			if !ok {
@@ -501,6 +535,12 @@ var headPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 func mergeValidator(inner func(json.RawMessage) (json.RawMessage, error)) func(json.RawMessage) (json.RawMessage, error) {
 	return func(raw json.RawMessage) (json.RawMessage, error) {
+		var probe struct {
+			MergeMethod string `json:"merge_method"`
+		}
+		if json.Unmarshal(raw, &probe) == nil && !slices.Contains(mergeMethods, probe.MergeMethod) {
+			return nil, toolbroker.Errorf(toolbroker.ResultInvalidArgument, `argument "merge_method" must be merge, squash, or rebase`)
+		}
 		validated, err := inner(raw)
 		if err != nil {
 			return nil, err
@@ -555,8 +595,8 @@ func Definitions() []tools.Definition {
 		},
 		{
 			Name: ToolMerge, Version: ToolVersion,
-			Schema:               fieldSchema([]string{"sha"}, []string{"merge_method"}, []string{"number"}),
-			Validator:            mergeValidator(fieldValidator([]string{"sha"}, []string{"merge_method"}, []string{"number"})),
+			Schema:               fieldSchema([]string{"sha", "merge_method"}, nil, []string{"number"}),
+			Validator:            mergeValidator(fieldValidator([]string{"sha", "merge_method"}, nil, []string{"number"})),
 			RequiresApproval:     true,
 			Effectful:            true,
 			OptIn:                true,
