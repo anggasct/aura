@@ -6,14 +6,15 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/toolcall"
 )
 
-func (b *Broker) evaluatePolicy(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error) {
+func (b *Broker) evaluatePolicy(ctx context.Context, slot *toolcall.Slot, request *approval.ToolRequest) (approval.PolicyDecision, error) {
 	scope, ok := durable.TurnScopeFrom(ctx)
 	if !ok {
 		return b.engine.Evaluate(ctx, request)
 	}
-	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), b.recordApproval(func(ctx context.Context) ([]byte, error) {
+	raw, err := scope.Invocation().RunAction(ctx, slot.Action("policy"), b.recordApproval(func(ctx context.Context) ([]byte, error) {
 		decision, err := b.engine.Evaluate(ctx, request)
 		if err != nil {
 			return nil, err
@@ -34,18 +35,18 @@ func (b *Broker) evaluatePolicy(ctx context.Context, request *approval.ToolReque
 	return decision, nil
 }
 
-func (b *Broker) executeDurable(ctx context.Context, scope *durable.TurnScope, canonical *ToolRequest, constraints approval.Constraints, adapter Adapter, effectful bool) (result ToolResult, err error) {
+func (b *Broker) executeDurable(ctx context.Context, slot *toolcall.Slot, call *journaledTool) (result ToolResult, err error) {
 	defer func() {
 		if recovered := durable.RecoveredPanic(); recovered != nil && err == nil {
-			err = b.classifyExecutionError(ctx, canonical, recovered)
+			err = b.classifyExecutionError(ctx, call.canonical, recovered)
 		}
 	}()
-	call := &journaledTool{canonical: canonical, constraints: constraints, adapter: adapter, effectful: effectful}
-	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), func(ctx context.Context) ([]byte, error) {
+	scope, _ := durable.TurnScopeFrom(ctx)
+	raw, err := scope.Invocation().RunAction(ctx, slot.Action("execution"), func(ctx context.Context) ([]byte, error) {
 		return b.runJournaledTool(ctx, call)
 	})
 	if err != nil {
-		return ToolResult{}, b.classifyExecutionError(ctx, canonical, err)
+		return ToolResult{}, b.classifyExecutionError(ctx, call.canonical, err)
 	}
 	recorded, err := b.readOutcome(raw)
 	if err != nil {
@@ -58,11 +59,13 @@ func (b *Broker) executeDurable(ctx context.Context, scope *durable.TurnScope, c
 	return decoded, nil
 }
 
-func (b *Broker) validateDurable(ctx context.Context, scope *durable.TurnScope, canonical *ToolRequest, grant *approval.ApprovalGrant) error {
-	if scope == nil || grant == nil {
+func (b *Broker) validateDurable(ctx context.Context, slot *toolcall.Slot, canonical *ToolRequest) error {
+	grant := canonical.Approval
+	scope, ok := durable.TurnScopeFrom(ctx)
+	if !ok || grant == nil {
 		return b.engine.ValidateAndConsume(ctx, toApprovalRequest(canonical, b.PolicyVersion()), grant)
 	}
-	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), b.recordApproval(func(ctx context.Context) ([]byte, error) {
+	raw, err := scope.Invocation().RunAction(ctx, slot.Action("grant-validation"), b.recordApproval(func(ctx context.Context) ([]byte, error) {
 		if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(canonical, b.PolicyVersion()), grant); err != nil {
 			return nil, err
 		}

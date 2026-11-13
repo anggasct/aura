@@ -21,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -361,10 +362,14 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if err != nil {
 		return ToolResult{}, err
 	}
+	slot, _ := toolcall.From(ctx)
+	if _, scoped := durable.TurnScopeFrom(ctx); scoped && slot == nil {
+		return ToolResult{}, errorf(ResultInvalidArgument, "tool %q has no call key on a durable turn", canonical.ToolName)
+	}
 	if err := contextError(ctx, canonical.Deadline); err != nil {
 		return ToolResult{}, err
 	}
-	decision, err := b.evaluatePolicy(ctx, toApprovalRequest(&canonical, b.PolicyVersion()))
+	decision, err := b.evaluatePolicy(ctx, slot, toApprovalRequest(&canonical, b.PolicyVersion()))
 	if err != nil {
 		policyOutcome = PolicyOutcomeDeny
 		return ToolResult{}, mapApprovalError(err)
@@ -418,21 +423,20 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		approvalState = ApprovalReplayed
 	case canonical.Approval != nil:
 		approvalState = ApprovalAttached
-		scope, _ := durable.TurnScopeFrom(ctx)
-		if err := b.validateDurable(ctx, scope, &canonical, canonical.Approval); err != nil {
+		if err := b.validateDurable(ctx, slot, &canonical); err != nil {
 			return ToolResult{}, mapApprovalError(err)
 		}
 	default:
-		standing := false
-		standingAllowed := definition.StandingGrantAllowed() && !guarded
-		if decision.Outcome == approval.OutcomeRequireApproval && class == principal.ClassTrusted && standingAllowed && !canonical.Tainted {
-			standing, err = b.standingGrant(ctx, &canonical, definition.Server)
+		call := &authorization{canonical: &canonical, definition: definition, decision: decision, standingAllowed: definition.StandingGrantAllowed() && !guarded}
+		if decision.Outcome == approval.OutcomeRequireApproval && class == principal.ClassTrusted && call.standingAllowed && !canonical.Tainted {
+			call.standing, err = b.standingGrant(ctx, slot, call)
 			if err != nil {
 				approvalState = ApprovalRejected
 				return ToolResult{}, err
 			}
 		}
-		approvalState, err = b.authorize(ctx, &authorization{canonical: &canonical, definition: definition, decision: decision, expiry: absoluteApprovalExpiry(canonical.Deadline), standing: standing, standingAllowed: standingAllowed})
+		call.expiry = absoluteApprovalExpiry(canonical.Deadline)
+		approvalState, err = b.authorize(ctx, slot, call)
 		if err != nil {
 			if code, _ := CodeOf(err); code == ResultUntrustedInputNoApprover {
 				policyOutcome = PolicyOutcomeDeny
@@ -440,8 +444,8 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			return ToolResult{}, err
 		}
 	}
-	if scope, ok := durable.TurnScopeFrom(ctx); ok {
-		result, err = b.executeDurable(ctx, scope, &canonical, decision.Constraints, adapter, definition.Effectful)
+	if _, ok := durable.TurnScopeFrom(ctx); ok {
+		result, err = b.executeDurable(ctx, slot, &journaledTool{canonical: &canonical, constraints: decision.Constraints, adapter: adapter, effectful: definition.Effectful})
 	} else {
 		if definition.Effectful {
 			result, err = b.executeEffect(ctx, &canonical, decision.Constraints, adapter)
@@ -798,12 +802,13 @@ func (b *Broker) guardRequires(ctx context.Context, request *ToolRequest) (bool,
 	return required, nil
 }
 
-func (b *Broker) standingGrant(ctx context.Context, request *ToolRequest, server string) (bool, error) {
+func (b *Broker) standingGrant(ctx context.Context, slot *toolcall.Slot, call *authorization) (bool, error) {
+	request := call.canonical
 	if b.access == nil || request.AgentID == "" {
 		return false, nil
 	}
 	lookup := func(ctx context.Context) ([]byte, error) {
-		active, err := b.access.StandingGrant(ctx, request.PrincipalID, request.AgentID, request.ToolName, server)
+		active, err := b.access.StandingGrant(ctx, request.PrincipalID, request.AgentID, request.ToolName, call.definition.Server)
 		if err != nil {
 			return nil, err
 		}
@@ -812,7 +817,7 @@ func (b *Broker) standingGrant(ctx context.Context, request *ToolRequest, server
 	var raw []byte
 	var err error
 	if scope, ok := durable.TurnScopeFrom(ctx); ok {
-		raw, err = scope.Invocation().RunAction(ctx, scope.NextOp(), lookup)
+		raw, err = scope.Invocation().RunAction(ctx, slot.Action("standing-grant"), lookup)
 	} else {
 		raw, err = lookup(ctx)
 	}

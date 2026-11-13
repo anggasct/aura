@@ -246,9 +246,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		if req.SessionID != "" {
 			runCtx = auramodel.WithSessionID(runCtx, req.SessionID)
 		}
-		if _, ok := durable.TurnScopeFrom(runCtx); ok {
-			runCtx = platform.WithTaskRunner(runCtx, runTasksSequential)
-		}
+		runCtx = platform.WithTaskRunner(runCtx, newToolCallRunner().run)
 		if definition.Limits.TurnTimeout > 0 {
 			var cancel context.CancelFunc
 			runCtx, cancel = context.WithTimeout(runCtx, definition.Limits.TurnTimeout)

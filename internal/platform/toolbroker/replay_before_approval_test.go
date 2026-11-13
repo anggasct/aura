@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
 )
 
@@ -148,7 +147,7 @@ func TestEffectRequestMayLetTheJournalAllocateItsSequence(t *testing.T) {
 		harness := newReplayHarness(t, &replayConfig{output: json.RawMessage(`{"ok":true}`), inlineLimit: 64 << 10})
 		request := replayRequest(replayArguments)
 		request.EventSequence, request.AllocateEventSequence = 0, true
-		ctx := durable.WithTurnScope(t.Context(), durable.NewTurnScope(passthroughInvocation{}))
+		ctx := inTurn(t.Context(), passthroughInvocation{})
 		if _, err := harness.run(ctx, request); err != nil {
 			t.Fatalf("Execute under a turn scope = %v, want success", err)
 		}

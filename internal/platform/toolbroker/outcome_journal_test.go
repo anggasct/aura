@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -167,7 +168,7 @@ type actionRow struct {
 
 func (h *hostedRuntime) actionRows(t *testing.T, key string) []actionRow {
 	t.Helper()
-	rows, err := h.db.QueryContext(t.Context(), `SELECT action_key, outcome, result, detail FROM durable_action WHERE run_key = ? ORDER BY action_key`, key)
+	rows, err := h.db.QueryContext(t.Context(), `SELECT action_key, outcome, result, detail FROM durable_action WHERE run_key = ? ORDER BY id`, key)
 	if err != nil {
 		t.Fatalf("read the actions of %s: %v", key, err)
 	}
@@ -208,7 +209,16 @@ func requireEveryRowIsAResult(t *testing.T, rows []actionRow) {
 }
 
 func inTurn(ctx context.Context, inv durable.Invocation) context.Context {
-	return durable.WithTurnScope(ctx, durable.NewTurnScope(inv))
+	return withCallSlot(durable.WithTurnScope(ctx, durable.NewTurnScope(inv)))
+}
+
+func callSlot(ctx context.Context) *toolcall.Slot {
+	slot, _ := toolcall.From(ctx)
+	return slot
+}
+
+func withCallSlot(ctx context.Context) context.Context {
+	return toolcall.With(ctx, toolcall.NewBatch(1, 1).Slot(0))
 }
 
 type probeTool struct {
@@ -638,7 +648,7 @@ func TestDurableToolOutcomeSurvivesBeingInvokedAgain(t *testing.T) {
 				ctx = inTurn(ctx, inv)
 				var outcome invocationOutcome
 				outcome.first = outcomeOf(broker.Execute(ctx, probeRequest("first")))
-				outcome.second = outcomeOf(broker.Execute(ctx, probeRequest("second")))
+				outcome.second = outcomeOf(broker.Execute(toolcall.With(ctx, toolcall.NewBatch(2, 1).Slot(0)), probeRequest("second")))
 				outcomes = append(outcomes, outcome)
 				return nil
 			})
@@ -759,16 +769,17 @@ func TestDurableApprovalErrorsReplayWithTheirClass(t *testing.T) {
 		{
 			name: "validation of a grant for another request",
 			call: func(ctx context.Context, fixture *approvalFixture) error {
-				scope, _ := durable.TurnScopeFrom(ctx)
+				request := *fixture.probe
 				grant := foreignGrant
-				return fixture.broker.validateDurable(ctx, scope, fixture.probe, &grant)
+				request.Approval = &grant
+				return fixture.broker.validateDurable(ctx, callSlot(ctx), &request)
 			},
 			class: ResultPolicyDenied,
 		},
 		{
 			name: "authorization with an expiry that has passed",
 			call: func(ctx context.Context, fixture *approvalFixture) error {
-				_, err := fixture.broker.authorize(ctx, &authorization{canonical: fixture.probe, decision: approval.PolicyDecision{Outcome: approval.OutcomeAllow}, expiry: time.Now().Add(-time.Minute)})
+				_, err := fixture.broker.authorize(ctx, callSlot(ctx), &authorization{canonical: fixture.probe, decision: approval.PolicyDecision{Outcome: approval.OutcomeAllow}, expiry: time.Now().Add(-time.Minute)})
 				return err
 			},
 			class: ResultDeadlineExceeded,
@@ -776,7 +787,7 @@ func TestDurableApprovalErrorsReplayWithTheirClass(t *testing.T) {
 		{
 			name: "authorization of a call that needs approval with nobody to ask",
 			call: func(ctx context.Context, fixture *approvalFixture) error {
-				_, err := fixture.broker.authorize(ctx, &authorization{canonical: fixture.probe, decision: approval.PolicyDecision{Outcome: approval.OutcomeRequireApproval}, expiry: time.Now().Add(time.Minute)})
+				_, err := fixture.broker.authorize(ctx, callSlot(ctx), &authorization{canonical: fixture.probe, decision: approval.PolicyDecision{Outcome: approval.OutcomeRequireApproval}, expiry: time.Now().Add(time.Minute)})
 				return err
 			},
 			class: ResultApprovalRequired,
@@ -840,9 +851,10 @@ func TestDurableApprovalErrorsReplayWithTheirClass(t *testing.T) {
 			key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
 				endedCtx, cancel := context.WithCancel(inTurn(ctx, inv))
 				cancel()
-				scope, _ := durable.TurnScopeFrom(endedCtx)
+				request := *tc.request(fixture)
 				grant := foreignGrant
-				err = fixture.broker.validateDurable(endedCtx, scope, tc.request(fixture), &grant)
+				request.Approval = &grant
+				err = fixture.broker.validateDurable(endedCtx, callSlot(endedCtx), &request)
 				return nil
 			})
 			if code, ok := sqlite.CodeOf(err); !ok || code != sqlite.ErrorCodeActionFailed {
@@ -899,9 +911,11 @@ func TestDurableApprovalErrorsReplayWithTheirClass(t *testing.T) {
 			call := &authorization{canonical: &canonical, definition: broker.definitions["probe@v1"], decision: approval.PolicyDecision{Outcome: approval.OutcomeRequireApproval}, expiry: time.Now().Add(time.Minute)}
 			var first, replay callOutcome
 			key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
-				_, err := broker.authorize(ending.within(inTurn(ctx, inv)), call)
+				endingCtx := ending.within(inTurn(ctx, inv))
+				_, err := broker.authorize(endingCtx, callSlot(endingCtx), call)
 				first = outcomeOf(ToolResult{}, err)
-				_, err = broker.authorize(inTurn(ctx, inv), call)
+				replayCtx := inTurn(ctx, inv)
+				_, err = broker.authorize(replayCtx, callSlot(replayCtx), call)
 				replay = outcomeOf(ToolResult{}, err)
 				return nil
 			})

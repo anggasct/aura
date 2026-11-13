@@ -168,7 +168,7 @@ func TestDurableTurnDeadlineIsTheSameOnEveryInvocation(t *testing.T) {
 			t.Errorf("turn-start rows = %d, want 1", rows)
 		}
 	})
-	t.Run("a request's own deadline records no start", func(t *testing.T) {
+	t.Run("a request's own deadline records the start", func(t *testing.T) {
 		own := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Millisecond)
 		req := sampleRequest("session-a", "turn-1")
 		req.Deadline = own
@@ -178,8 +178,8 @@ func TestDurableTurnDeadlineIsTheSameOnEveryInvocation(t *testing.T) {
 				t.Errorf("deadline of invocation %d = %v, want the request's %v", i+1, deadline, own)
 			}
 		}
-		if rows := turnStartRows(t, rig, "turn-1"); rows != 0 {
-			t.Errorf("turn-start rows = %d, want 0", rows)
+		if rows := turnStartRows(t, rig, "turn-1"); rows != 1 {
+			t.Errorf("turn-start rows = %d, want 1", rows)
 		}
 	})
 }

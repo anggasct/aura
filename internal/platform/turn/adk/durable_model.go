@@ -12,12 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
-func runTasksSequential(ctx context.Context, tasks []func(context.Context)) {
-	for _, task := range tasks {
-		task(ctx)
-	}
-}
-
 const adkFunctionCallIDPrefix = "adk-"
 
 type journaledModel struct {
@@ -46,7 +40,7 @@ func (m *journaledModel) GenerateContent(ctx context.Context, req *adkmodel.LLMR
 				yield(nil, runErr)
 			}
 		}()
-		key := scope.NextOp()
+		key := scope.NextModelCall()
 		callPrefix := adkFunctionCallIDPrefix + turnIDFromContext(ctx) + "-" + key
 		raw, err := scope.Invocation().RunAction(ctx, key, func(ctx context.Context) ([]byte, error) {
 			var chunks []*adkmodel.LLMResponse

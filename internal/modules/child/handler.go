@@ -1,10 +1,12 @@
 package child
 
 import (
+	"bytes"
 	stdcontext "context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -318,6 +320,29 @@ func cancelSignalName(run *HandlerRun) string {
 	return "child-cancel/"
 }
 
+type childClockRecord struct {
+	Now     time.Time `json:"now"`
+	Journal int       `json:"journal"`
+}
+
+const childJournalVersion = 1
+
+func decodeChildClock(raw []byte) (childClockRecord, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var record childClockRecord
+	if err := decoder.Decode(&record); err != nil {
+		return childClockRecord{}, false
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return childClockRecord{}, false
+	}
+	if record.Journal != childJournalVersion || record.Now.IsZero() {
+		return childClockRecord{}, false
+	}
+	return record, true
+}
+
 func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, run *HandlerRun, task string) (Result, error) {
 	if run == nil {
 		return Result{}, Errorf(ErrorCodeInvalidArgument, "child run must not be nil")
@@ -339,15 +364,16 @@ func (h *Handler) runJournaled(ctx stdcontext.Context, inv durable.Invocation, r
 		return Result{}, err
 	}
 	clockRaw, err := inv.RunAction(ctx, "child-clock/"+sessionID, func(stdcontext.Context) ([]byte, error) {
-		return json.Marshal(time.Now().UTC())
+		return json.Marshal(childClockRecord{Now: time.Now().UTC(), Journal: childJournalVersion})
 	})
 	if err != nil {
 		return Result{}, err
 	}
-	var journaledNow time.Time
-	if err := json.Unmarshal(clockRaw, &journaledNow); err != nil {
-		return Result{}, err
+	clock, ok := decodeChildClock(clockRaw)
+	if !ok {
+		return Result{}, Errorf(ErrorCodeChildUnavailable, "child journal was written by another build")
 	}
+	journaledNow := clock.Now
 	var remaining time.Duration
 	if !deadline.IsZero() {
 		remaining = deadline.UTC().Sub(journaledNow.UTC())
