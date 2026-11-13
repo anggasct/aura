@@ -12,11 +12,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
 type recordingExecutor struct {
-	inner *turn.FakeExecutor
+	inner *turntest.FakeExecutor
 	mu    sync.Mutex
 	seen  []turn.TurnRequest
 }
@@ -70,7 +71,7 @@ func acceptedPersona(t *testing.T, payload []byte) (string, *turn.PersonaFingerp
 
 func TestAcceptStampsEnvelopePersonaAndFingerprint(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := &recordingExecutor{inner: turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})}
+		executor := &recordingExecutor{inner: turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})}
 		personas := stubPersonas{"main": personaFixture("main", "soul-main"), "kuma": personaFixture("kuma", "soul-kuma")}
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, DefaultAgentID: "main", Personas: personas}, executor)
 		env := sampleEnvelope("conv-1", "msg-1")
@@ -94,7 +95,7 @@ func TestAcceptStampsEnvelopePersonaAndFingerprint(t *testing.T) {
 }
 
 func TestRunDefaultsPersonaAndRejectsUnknown(t *testing.T) {
-	executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
 	personas := stubPersonas{"main": personaFixture("main", "soul-main")}
 	engine, db, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: personas}, executor)
 	mustCreateSession(t, db, "session-a")
@@ -135,7 +136,7 @@ func TestDurableDescriptorKeepsAcceptedPersona(t *testing.T) {
 		t.Fatalf("descriptor %s does not persist the fingerprint: %v", payload, err)
 	}
 
-	engine, _, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: stubPersonas{"kuma": personaFixture("kuma", "soul-v2")}}, turn.NewFakeExecutor(nil))
+	engine, _, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: stubPersonas{"kuma": personaFixture("kuma", "soul-v2")}}, turntest.NewFakeExecutor(nil))
 	var stored runtimesessions.Descriptor
 	if err := json.Unmarshal(payload, &stored); err != nil {
 		t.Fatalf("unmarshal descriptor: %v", err)

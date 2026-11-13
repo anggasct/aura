@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -91,7 +92,7 @@ func TestFailedEventWriteIsNeverStreamed(t *testing.T) {
 		{name: "durable live", live: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			executor := unsequencedExecutor{inner: turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})}
+			executor := unsequencedExecutor{inner: turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})}
 			engine, db := newRefusingTestRuntime(t, executor, turn.EventKindMessageCompleted, tc.live)
 			mustCreateSession(t, db, "session-refused")
 
@@ -132,7 +133,7 @@ func TestFailedEventWriteIsNeverStreamed(t *testing.T) {
 }
 
 func TestRunStreamMatchesTheStoredTurn(t *testing.T) {
-	executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})
 	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 	mustCreateSession(t, db, "session-entry")
 

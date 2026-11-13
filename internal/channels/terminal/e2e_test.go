@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -87,7 +88,7 @@ func TestTerminalVerticalSlice(t *testing.T) {
 
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
-	executor := turn.NewFakeExecutor([]turn.FakeStep{
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"hello from the slice"}]},"partial":false}`)},
 	})
 	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
@@ -132,7 +133,7 @@ func TestTerminalReplayCompletedEventWins(t *testing.T) {
 	db := storetest.OpenMigrated(t)
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
-	executor := turn.NewFakeExecutor([]turn.FakeStep{
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: turn.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"partial "}]}}`)},
 		{Kind: turn.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"stream"}]}}`)},
 		{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"content":{"parts":[{"text":"durable answer"}]}}`)},

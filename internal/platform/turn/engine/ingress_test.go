@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
 
 func terminalCount(t *testing.T, db *sql.DB, turnID string) int {
@@ -36,8 +37,8 @@ func eventCountByKind(t *testing.T, db *sql.DB, turnID, kind string) int {
 	return count
 }
 
-func jsonStep(kind string) turn.FakeStep {
-	return turn.FakeStep{Kind: kind, Payload: json.RawMessage(`{}`)}
+func jsonStep(kind string) turntest.FakeStep {
+	return turntest.FakeStep{Kind: kind, Payload: json.RawMessage(`{}`)}
 }
 
 func sampleSession(conversation string) string {
@@ -58,7 +59,7 @@ func sampleEnvelope(conversation, externalID string) *runtimeingress.IngressEnve
 
 func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindModelStarted), jsonStep(turn.EventKindMessageCompleted)})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindModelStarted), jsonStep(turn.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, sampleSession("conv-1"))
 
@@ -85,7 +86,7 @@ func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
 
 func TestAcceptDuplicateReturnsOriginal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, sampleSession("conv-1"))
 
@@ -118,7 +119,7 @@ func TestAcceptDuplicateReturnsOriginal(t *testing.T) {
 
 func TestAcceptAfterShutdownIsRejected(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, sampleSession("conv-1"))
 
@@ -134,7 +135,7 @@ func TestAcceptAfterShutdownIsRejected(t *testing.T) {
 }
 
 func TestAcceptValidatesIdentity(t *testing.T) {
-	executor := turn.NewFakeExecutor(nil)
+	executor := turntest.NewFakeExecutor(nil)
 	engine, db, _ := newTestRuntime(t, Config{}, executor)
 	mustCreateSession(t, db, sampleSession("conv-1"))
 

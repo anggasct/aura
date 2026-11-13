@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -34,12 +35,12 @@ func (h *recordingHook) fn(_ context.Context, req *turn.TurnRequest, events []st
 	return h.err
 }
 
-func hookMessageStep(text string) turn.FakeStep {
-	return turn.FakeStep{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":` + strconv.Quote(text) + `}`)}
+func hookMessageStep(text string) turntest.FakeStep {
+	return turntest.FakeStep{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":` + strconv.Quote(text) + `}`)}
 }
 
 func TestPostTurnHookRunsAfterCommit(t *testing.T) {
-	executor := turn.NewFakeExecutor([]turn.FakeStep{hookMessageStep("hello from model")})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{hookMessageStep("hello from model")})
 	hook := &recordingHook{}
 	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn}, executor)
 	mustCreateSession(t, db, "session-a")
@@ -69,7 +70,7 @@ func TestPostTurnHookRunsAfterCommit(t *testing.T) {
 }
 
 func TestPostTurnHookFailureDoesNotFailTurn(t *testing.T) {
-	executor := turn.NewFakeExecutor([]turn.FakeStep{hookMessageStep("hello from model")})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{hookMessageStep("hello from model")})
 	hook := &recordingHook{err: errors.New("projection boom")}
 	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn}, executor)
 	mustCreateSession(t, db, "session-a")

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -92,7 +93,7 @@ func TestConcurrentSubmitsStartInAcceptedOrder(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			gate := make(chan struct{})
-			executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
+			executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
 			engine, db, events := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 			session := sampleSession("conv-1")
 			mustCreateSession(t, db, session)

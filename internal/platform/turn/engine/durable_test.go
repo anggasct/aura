@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -28,7 +29,7 @@ func collectDurableTerminal(t *testing.T, db *sql.DB, turnID string) []store.Run
 
 func TestDurableAdmitCompletesTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})
@@ -51,7 +52,7 @@ func TestDurableAdmitCompletesTurn(t *testing.T) {
 func TestDurableSessionFIFO(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 		})
 		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
@@ -88,7 +89,7 @@ func TestDurableSessionFIFO(t *testing.T) {
 
 func TestDurableDuplicateKeyReplaysWithoutReexecution(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)},
 		})
 		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
@@ -124,7 +125,7 @@ func TestDurableQueueOverflowFailsClosed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
 		defer close(gate)
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 		})
 		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, executor)
@@ -163,7 +164,7 @@ func transcript(events []store.RuntimeEvent) [][2]string {
 
 func TestDurableParityWithLegacy(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		script := []turn.FakeStep{
+		script := []turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)},
 			{Kind: turn.EventKindModelDelta, Payload: []byte(`{}`)},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
@@ -186,13 +187,13 @@ func TestDurableParityWithLegacy(t *testing.T) {
 			}
 			return transcripts
 		}
-		legacyExecutor := turn.NewFakeExecutor(script)
+		legacyExecutor := turntest.NewFakeExecutor(script)
 		legacy, legacyDB, _ := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, legacyExecutor)
 		mustCreateSession(t, legacyDB, "session-a")
 		mustCreateSession(t, legacyDB, "session-b")
 		legacyTranscripts := runAll(legacy, legacyDB)
 
-		durableExecutor := turn.NewFakeExecutor(script)
+		durableExecutor := turntest.NewFakeExecutor(script)
 		durableEngine, _, durableDB := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, durableExecutor)
 		mustCreateSession(t, durableDB, "session-a")
 		mustCreateSession(t, durableDB, "session-b")
@@ -217,7 +218,7 @@ func TestDurableParityWithLegacy(t *testing.T) {
 func TestDurableShutdownCancelsStaged(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 		})
 		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
@@ -291,15 +292,15 @@ func TestDurableDescriptorKeepsTheTurnTaint(t *testing.T) {
 func TestDurableLongStreamReplaysFullyFromStore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const deltas = 100
-		script := make([]turn.FakeStep, 0, deltas+1)
+		script := make([]turntest.FakeStep, 0, deltas+1)
 		for i := range deltas {
-			script = append(script, turn.FakeStep{
+			script = append(script, turntest.FakeStep{
 				Kind:    turn.EventKindModelDelta,
 				Payload: []byte(`{"n":` + string(rune('0'+i%10)) + `}`),
 			})
 		}
-		script = append(script, turn.FakeStep{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)})
-		executor := turn.NewFakeExecutor(script)
+		script = append(script, turntest.FakeStep{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)})
+		executor := turntest.NewFakeExecutor(script)
 		engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -331,13 +332,13 @@ func TestDurableLongStreamReplaysFullyFromStore(t *testing.T) {
 }
 
 func TestDurableLiveStreamDeliversPersistedSequence(t *testing.T) {
-	script := []turn.FakeStep{
+	script := []turntest.FakeStep{
 		{Kind: turn.EventKindModelStarted, Payload: []byte(`{"s":1}`)},
 		{Kind: turn.EventKindModelDelta, Payload: []byte(`{"d":1}`)},
 		{Kind: turn.EventKindModelDelta, Payload: []byte(`{"d":2}`)},
 		{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 	}
-	executor := turn.NewFakeExecutor(script)
+	executor := turntest.NewFakeExecutor(script)
 	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 	mustCreateSession(t, db, "session-live")
 
@@ -367,7 +368,7 @@ func TestDurableLiveStreamDeliversPersistedSequence(t *testing.T) {
 
 func TestDurableChainCompletesFIFO(t *testing.T) {
 	gate := make(chan struct{})
-	executor := turn.NewFakeExecutor([]turn.FakeStep{
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 	})
 	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
@@ -408,7 +409,7 @@ func TestDurableChainCompletesFIFO(t *testing.T) {
 }
 
 func TestDurableResumeNeedsNoScan(t *testing.T) {
-	executor := turn.NewFakeExecutor([]turn.FakeStep{
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)},
 	})
 	_, db, events := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
@@ -458,7 +459,7 @@ func TestDurableResumeNeedsNoScan(t *testing.T) {
 func TestDurableDeadlineIsTerminal(t *testing.T) {
 	gate := make(chan struct{})
 	defer close(gate)
-	executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
 	engine, _, db := newDurableLiveTestRuntime(t, Config{
 		MaxActiveTurns: 2, MaxPendingTurns: 4, TurnTimeout: 200 * time.Millisecond,
 	}, executor)
@@ -537,7 +538,7 @@ func TestDurableBudgetExhaustedIsTerminal(t *testing.T) {
 
 func TestDurableCancelIsTerminal(t *testing.T) {
 	gate := make(chan struct{})
-	executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
 	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 	mustCreateSession(t, db, "session-a")
 
@@ -588,7 +589,7 @@ func TestDurableCancelIsTerminal(t *testing.T) {
 
 func TestDurableShutdownDrainsActive(t *testing.T) {
 	gate := make(chan struct{})
-	executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
 	engine, _, db := newDurableLiveTestRuntime(t, Config{
 		MaxActiveTurns: 1, MaxPendingTurns: 4, ShutdownTimeout: 5 * time.Second,
 	}, executor)
@@ -623,7 +624,7 @@ func TestDurableShutdownDrainsActive(t *testing.T) {
 func TestDurableTurnReleasedBeforeItIsStagedStillReachesItsCaller(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})
@@ -678,7 +679,7 @@ func TestDurableTurnReleasedBeforeItIsStagedStillReachesItsCaller(t *testing.T) 
 func TestShutdownBetweenGrantAndStagingCancelsTheTurnAndLeavesNoGrant(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})
@@ -712,7 +713,7 @@ func TestShutdownBetweenGrantAndStagingCancelsTheTurnAndLeavesNoGrant(t *testing
 
 func TestReleaseNeverGrantsAnAdmittingTurnOfAnotherSession(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)}})
 		engine, sessions, _ := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 		sessions.hooks(func(s *hookedSessionStore) {
 			s.aroundStatus = func(string, func() (runtimesessions.StatusResult, error)) (runtimesessions.StatusResult, error) {

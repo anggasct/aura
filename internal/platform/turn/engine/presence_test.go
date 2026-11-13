@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -64,7 +65,7 @@ func (a *presenceCapture) PresenceEnded(_ context.Context, turnID string) error 
 	return nil
 }
 
-func adkTextStep(text string) turn.FakeStep {
+func adkTextStep(text string) turntest.FakeStep {
 	raw, err := json.Marshal(map[string]any{
 		"content": map[string]any{
 			"role":  "model",
@@ -74,12 +75,12 @@ func adkTextStep(text string) turn.FakeStep {
 	if err != nil {
 		panic("test payload is not serializable")
 	}
-	return turn.FakeStep{Kind: "adk_event", Payload: raw}
+	return turntest.FakeStep{Kind: "adk_event", Payload: raw}
 }
 
 func TestEngineDrivesPresenceForSlowTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			adkTextStep("Looking through notes"),
 			textStep("final answer"),
 		})
@@ -129,7 +130,7 @@ func TestEnginePresenceFailure(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal failure fixture: %v", err)
 		}
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: "adk_event", Payload: raw},
 			textStep("recovered answer"),
 		})
@@ -196,7 +197,7 @@ func TestExtractPresenceActivityOmitsParallelToolArgs(t *testing.T) {
 	}
 }
 
-func adkStepWithArgs(text string, args map[string]any) turn.FakeStep {
+func adkStepWithArgs(text string, args map[string]any) turntest.FakeStep {
 	raw, err := json.Marshal(map[string]any{
 		"content": map[string]any{
 			"role":  "model",
@@ -206,12 +207,12 @@ func adkStepWithArgs(text string, args map[string]any) turn.FakeStep {
 	if err != nil {
 		panic("test payload is not serializable")
 	}
-	return turn.FakeStep{Kind: "adk_event", Payload: raw}
+	return turntest.FakeStep{Kind: "adk_event", Payload: raw}
 }
 
 func TestEngineForwardsToolArgsToPresence(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			adkStepWithArgs("Looking at secret-token abc123", map[string]any{"path": "notes.md", "query": "secret hunter2"}),
 			textStep("final answer"),
 		})
@@ -251,7 +252,7 @@ func (n *namedPresenceCapture) ChannelName() string {
 
 func TestEngineSkipsPresenceForNonChannelOrigin(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			adkTextStep("Looking through notes"),
 			textStep("final answer"),
 		})
@@ -274,7 +275,7 @@ func TestEngineSkipsPresenceForNonChannelOrigin(t *testing.T) {
 
 func TestEngineRoutesPresenceToOwningAdapter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			adkTextStep("Looking through notes"),
 			textStep("final answer"),
 		})
@@ -314,7 +315,7 @@ func (a *presenceCapture) counts() (started, failed int, ended []string) {
 func TestCancelledDurableTurnClosesItsPresence(t *testing.T) {
 	gate := make(chan struct{})
 	t.Cleanup(func() { close(gate) })
-	executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
 	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 	capture := &presenceCapture{}
 	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})

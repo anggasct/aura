@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
 
 func callersContext() *turn.UntrustedRecall {
@@ -124,7 +125,7 @@ func TestTurnDescriptorCarriesEveryRequestField(t *testing.T) {
 }
 
 func TestDurableTurnExecutesWithTheCallersContext(t *testing.T) {
-	executor := &recordingExecutor{inner: turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})}
+	executor := &recordingExecutor{inner: turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})}
 	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 	mustCreateSession(t, db, "session-context")
 	req := sampleRequest("session-context", "turn-context")
