@@ -40,6 +40,7 @@ type Spec struct {
 	Goal    string     `json:"goal"`
 	Version int        `json:"version"`
 	Source  Source     `json:"source"`
+	RunAs   string     `json:"run_as,omitempty"`
 	Steps   []StepSpec `json:"steps"`
 }
 

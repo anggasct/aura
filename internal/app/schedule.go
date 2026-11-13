@@ -16,7 +16,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
-	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -216,7 +215,7 @@ type cronTurnEngine interface {
 }
 
 type workflowStarter interface {
-	StartKeyed(ctx context.Context, definitionID string, input *workflow.RunInput, origin *workflow.RunOrigin, durableKey string) (*workflow.RunSummary, error)
+	StartConfigured(ctx context.Context, definitionID string, input *workflow.RunInput, principalID string, class principal.Class, durableKey string) (*workflow.RunSummary, error)
 }
 
 type scheduleWorkflows struct {
@@ -243,9 +242,7 @@ func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest
 			return schedule.TurnResult{}, fmt.Errorf("scheduled workflow input: %w", err)
 		}
 	}
-	run, err := (*starter).StartKeyed(ctx, req.WorkflowID, &workflow.RunInput{Objective: input.Objective}, &workflow.RunOrigin{
-		PrincipalID: req.PrincipalID, PrincipalClass: string(principal.ClassForPrincipal(req.PrincipalID)), AgentID: auraagent.DefaultID,
-	}, "sched-"+req.IdempotencyKey)
+	run, err := (*starter).StartConfigured(ctx, req.WorkflowID, &workflow.RunInput{Objective: input.Objective}, req.PrincipalID, principal.ClassForPrincipal(req.PrincipalID), "sched-"+req.IdempotencyKey)
 	if err != nil {
 		return schedule.TurnResult{}, err
 	}

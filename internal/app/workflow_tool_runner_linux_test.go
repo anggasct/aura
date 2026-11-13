@@ -22,7 +22,6 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
-	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -73,9 +72,23 @@ func digestOf(runID, stepID string) string {
 	return hex.EncodeToString(sum[:])[:24]
 }
 
+const probePersona = "prober"
+
+func probeStepCall(runID, stepID string, attempt int) *workflow.StepCall {
+	call := ownerStepCall(runID, stepID, attempt)
+	call.Origin.AgentID = probePersona
+	return call
+}
+
+func withProbePersona(cfg *config.Config) {
+	cfg.Agents.Definitions = append(cfg.Agents.Definitions, config.AgentDefinition{
+		ID: probePersona, Description: "d", Instructions: "i",
+	})
+}
+
 func stepCallAt(t *testing.T, db *sql.DB, runID, stepID string, attempt int) context.Context {
 	t.Helper()
-	return stepContextFor(t, db, ownerStepCall(runID, stepID, attempt))
+	return stepContextFor(t, db, probeStepCall(runID, stepID, attempt))
 }
 
 const probeTool = "probe_effect"
@@ -108,6 +121,7 @@ func registerToolProbe(t *testing.T, runner workflow.ToolRunner) *toolProbe {
 			return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
 		},
 	})
+	toolRunner.catalog = toolsbuiltin.NewStepCatalog(toolRunner.executor.Broker().Definitions())
 	return probe
 }
 
@@ -137,6 +151,7 @@ func runSessionEvents(t *testing.T, db *sql.DB, runID string) []uint64 {
 }
 
 func withKnowledgePersona(cfg *config.Config) {
+	withProbePersona(cfg)
 	cfg.Agents.Definitions = append(cfg.Agents.Definitions, config.AgentDefinition{
 		ID: "librarian", Description: "d", Instructions: "i", Knowledge: []string{"docs"},
 	})
@@ -147,7 +162,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 	probe := registerToolProbe(t, runner)
 
 	librarianCall := func(runID, stepID string) *workflow.StepCall {
-		call := ownerStepCall(runID, stepID, 0)
+		call := probeStepCall(runID, stepID, 0)
 		call.Origin.AgentID = "librarian"
 		return call
 	}
@@ -177,7 +192,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 		}
 		for index, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				call := ownerStepCall("run-taint-"+strconv.Itoa(index), "step-1", 0)
+				call := probeStepCall("run-taint-"+strconv.Itoa(index), "step-1", 0)
 				call.Origin.Tainted, call.Approval.Tainted = tc.origin, tc.approval
 				before := len(probe.seen())
 				if _, err := runner.Invoke(stepContextFor(t, db, call), probeTool, probeArgs("taint"+strconv.Itoa(index))); err != nil {
@@ -205,7 +220,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 		}
 		for index, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				call := ownerStepCall("run-label-"+strconv.Itoa(index), "step-1", 0)
+				call := probeStepCall("run-label-"+strconv.Itoa(index), "step-1", 0)
 				call.Approval.Kind = tc.kind
 				before := len(probe.seen())
 				_, err := runner.Invoke(stepContextFor(t, db, call), probeTool, probeArgs("label"+strconv.Itoa(index)))
@@ -237,13 +252,13 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 			t.Fatalf("request knowledge = %v, want [docs]", got)
 		}
 		before = len(probe.seen())
-		if _, err := runner.Invoke(stepContextFor(t, db, ownerStepCall("run-knowledge-main", "step-1", 0)), probeTool, probeArgs("knowledge-main")); err != nil {
-			t.Fatalf("Invoke as main: %v", err)
+		if _, err := runner.Invoke(stepContextFor(t, db, probeStepCall("run-knowledge-bare", "step-1", 0)), probeTool, probeArgs("knowledge-bare")); err != nil {
+			t.Fatalf("Invoke as a persona without knowledge: %v", err)
 		}
 		if got := probe.seen()[before].Knowledge; len(got) != 0 {
 			t.Fatalf("request knowledge for a persona without any = %v, want none", got)
 		}
-		ghost := ownerStepCall("run-ghost", "step-1", 0)
+		ghost := probeStepCall("run-ghost", "step-1", 0)
 		ghost.Origin.AgentID = "ghost"
 		before = len(probe.seen())
 		_, err := runner.Invoke(stepContextFor(t, db, ghost), probeTool, probeArgs("ghost"))
@@ -256,7 +271,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 	})
 
 	t.Run("the deadline is the step context's, and a context without one is refused", func(t *testing.T) {
-		call := ownerStepCall("run-deadline", "step-1", 0)
+		call := probeStepCall("run-deadline", "step-1", 0)
 		ctx := stepContextFor(t, db, call)
 		want, ok := ctx.Deadline()
 		if !ok {
@@ -364,7 +379,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 }
 
 func TestWorkflowStepRefusesAMissingRunSession(t *testing.T) {
-	runner, db, _ := newWorkflowToolRunnerFixture(t)
+	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, withProbePersona)
 	probe := registerToolProbe(t, runner)
 
 	sessionCount := func(t *testing.T, runID string) int {
@@ -390,11 +405,11 @@ func TestWorkflowStepRefusesAMissingRunSession(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		t.Cleanup(cancel)
-		return workflow.WithStepCall(ctx, ownerStepCall(runID, "step-1", 0))
+		return workflow.WithStepCall(ctx, probeStepCall(runID, "step-1", 0))
 	}
 
 	t.Run("a deleted session is not recreated", func(t *testing.T) {
-		ctx := seed(t, "run-deleted", principal.OwnerID, auraagent.DefaultID)
+		ctx := seed(t, "run-deleted", principal.OwnerID, probePersona)
 		if _, err := db.ExecContext(t.Context(), `DELETE FROM session WHERE id = ?`, workflow.RunSessionID("run-deleted")); err != nil {
 			t.Fatalf("delete run session: %v", err)
 		}
@@ -413,7 +428,7 @@ func TestWorkflowStepRefusesAMissingRunSession(t *testing.T) {
 		agent string
 	}{
 		{name: "another agent", owner: principal.OwnerID, agent: "other"},
-		{name: "another owner", owner: "discord:111", agent: auraagent.DefaultID},
+		{name: "another owner", owner: "discord:111", agent: probePersona},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -431,7 +446,7 @@ func TestWorkflowStepRefusesAMissingRunSession(t *testing.T) {
 }
 
 func TestWorkflowStepsShareTheirRunsJournal(t *testing.T) {
-	runner, db, _ := newWorkflowToolRunnerFixture(t)
+	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, withProbePersona)
 	registerToolProbe(t, runner)
 
 	for _, step := range []string{"step-a", "step-b"} {
@@ -478,9 +493,11 @@ func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
 		},
 	}
 	deps := &workflow.ValidationDeps{
+		Agents:         registry,
 		KnownTools:     toolsbuiltin.DefinitionNames(),
 		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
 		CheckToolCall:  acceptToolCall,
+		StepAllowed:    acceptStepAllowed,
 	}
 	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Install: %v", err)

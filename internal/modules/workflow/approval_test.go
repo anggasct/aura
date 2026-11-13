@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 const staleDigest = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -99,8 +100,8 @@ func TestStartRefusesAnUnapprovedDefinition(t *testing.T) {
 			if _, err := interpreter.Start(t.Context(), generated.ID, &RunInput{}, ownerOrigin()); !hasCode(err, ErrorCodeApprovalMissing) {
 				t.Fatalf("Start = %v, want %s", err, ErrorCodeApprovalMissing)
 			}
-			if _, err := interpreter.StartKeyed(t.Context(), generated.ID, &RunInput{}, ownerOrigin(), "sched-unapproved"); !hasCode(err, ErrorCodeApprovalMissing) {
-				t.Fatalf("StartKeyed = %v, want %s", err, ErrorCodeApprovalMissing)
+			if _, err := interpreter.StartConfigured(t.Context(), generated.ID, &RunInput{}, "local-owner", principal.ClassOwner, "sched-unapproved"); !hasCode(err, ErrorCodeApprovalMissing) {
+				t.Fatalf("StartConfigured = %v, want %s", err, ErrorCodeApprovalMissing)
 			}
 			if got := countRuns(t, disk); got != 0 {
 				t.Fatalf("%d workflow_run rows written for an unapproved definition, want none", got)

@@ -20,12 +20,25 @@ import (
 
 func acceptToolCall(string, json.RawMessage) error { return nil }
 
+func acceptStepAllowed(string, principal.Class, string) (allowed, personaKnown bool) {
+	return true, true
+}
+
 func waitingSpec(id, goal string) *workflow.Spec {
 	event := id + ".done"
 	return &workflow.Spec{
 		ID: id, Goal: goal, Version: 1, Source: workflow.SourceDefined,
 		Steps: []workflow.StepSpec{{ID: "hold", Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &event}, Timeout: time.Minute}},
 	}
+}
+
+func builtinRegistry(t *testing.T) *auraagent.Registry {
+	t.Helper()
+	registry, err := auraagent.Build(nil, toolsbuiltin.DefinitionNames(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
 }
 
 func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolController, *workflow.Store, *sql.DB) {
@@ -35,18 +48,18 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolContro
 	fake := durable.NewFake()
 	t.Cleanup(fake.Close)
 	interpreter := workflow.NewInterpreter(runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
-	deps := &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), EffectfulTools: toolsbuiltin.EffectfulToolNames(), CheckToolCall: acceptToolCall}
-	for _, spec := range []*workflow.Spec{waitingSpec("book_visit", "Book a visit"), waitingSpec("refund", "Issue a refund")} {
-		if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, deps); err != nil {
-			t.Fatal(err)
-		}
-	}
 	registry, err := auraagent.Build([]config.AgentDefinition{{
 		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: config.AudiencePublic,
 		Tools: []string{"workflow_start"}, PublicTools: []string{"workflow_start"}, Workflows: allowlist,
 	}}, toolsbuiltin.DefinitionNames(), nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	deps := &workflow.ValidationDeps{Agents: registry, KnownTools: toolsbuiltin.DefinitionNames(), EffectfulTools: toolsbuiltin.EffectfulToolNames(), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}
+	for _, spec := range []*workflow.Spec{waitingSpec("book_visit", "Book a visit"), waitingSpec("refund", "Issue a refund")} {
+		if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, deps); err != nil {
+			t.Fatal(err)
+		}
 	}
 	controller, err := newWorkflowToolController(interpreter, runs, registry, nil)
 	if err != nil {

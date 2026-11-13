@@ -40,10 +40,10 @@ func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 
 	interpreter := workflow.NewInterpreter(runs, queuedRuntime{durable.NewFake()}, nil)
 	spec := &workflow.Spec{ID: "terminal_demo", Goal: "Run the demo", Version: 1, Source: workflow.SourceDefined, Steps: []workflow.StepSpec{{ID: "approve", Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: time.Minute}}}
-	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), CheckToolCall: acceptToolCall}); err != nil {
+	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := interpreter.Start(t.Context(), spec.ID, nil, ownerRunOrigin())
+	run, err := interpreter.StartConfigured(t.Context(), spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatal(err)
 	}

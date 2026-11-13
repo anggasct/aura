@@ -139,9 +139,6 @@ func TestStartRefusesAnIncompleteOrigin(t *testing.T) {
 			if _, err := interpreter.Start(t.Context(), "leaf", nil, origin); !hasCode(err, ErrorCodeOriginIncomplete) {
 				t.Fatalf("Start = %v, want code %s", err, ErrorCodeOriginIncomplete)
 			}
-			if _, err := interpreter.StartKeyed(t.Context(), "leaf", nil, origin, "sched-key"); !hasCode(err, ErrorCodeOriginIncomplete) {
-				t.Fatalf("StartKeyed = %v, want code %s", err, ErrorCodeOriginIncomplete)
-			}
 			if _, err := disk.newRun(t.Context(), toolSpec("leaf"), nil, origin); !hasCode(err, ErrorCodeOriginIncomplete) {
 				t.Fatalf("CreateRun = %v, want code %s", err, ErrorCodeOriginIncomplete)
 			}

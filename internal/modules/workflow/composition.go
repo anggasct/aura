@@ -21,6 +21,9 @@ func (i *Interpreter) createChildRun(ctx context.Context, workflowID string, inp
 	if err != nil {
 		return nil, err
 	}
+	if err := i.admitRun(compiled.spec, runOrigin); err != nil {
+		return nil, err
+	}
 	return i.store.createRun(ctx, compiled.spec, input, runOrigin, newID("dur"), parentRunID)
 }
 

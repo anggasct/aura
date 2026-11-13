@@ -245,10 +245,10 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	}
 	disk := workflow.NewStore(db)
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), CheckToolCall: acceptToolCall}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
+	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -311,10 +311,10 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	}
 	disk := workflow.NewStore(db)
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), CheckToolCall: acceptToolCall}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
+	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -531,16 +531,18 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 		},
 	}
 	deps := &workflow.ValidationDeps{
+		Agents:         builtinRegistry(t),
 		KnownTools:     toolsbuiltin.DefinitionNames(),
 		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
 		CheckToolCall:  acceptToolCall,
+		StepAllowed:    acceptStepAllowed,
 	}
 	ctx := t.Context()
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
-	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
+	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -659,7 +661,7 @@ END;`); err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
 
-	summary, err := interpreter.Start(ctx, "demo", nil, ownerRunOrigin())
+	summary, err := interpreter.StartConfigured(ctx, "demo", nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -728,10 +730,10 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 		t.Fatalf("load fixture spec: %v", err)
 	}
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), CheckToolCall: acceptToolCall}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
+	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}

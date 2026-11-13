@@ -268,21 +268,26 @@ func (i *Interpreter) Spec(id string) (*Spec, bool) {
 }
 
 func (i *Interpreter) Start(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
-	return i.start(ctx, definitionID, input, origin, newID("dur"))
+	return i.start(ctx, definitionID, input, origin, newID("dur"), false)
 }
 
-func (i *Interpreter) StartKeyed(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin, durableKey string) (*RunSummary, error) {
-	existing, found, err := i.store.RunByDurableKey(ctx, durableKey)
-	if err != nil {
-		return nil, err
+func (i *Interpreter) StartConfigured(ctx context.Context, definitionID string, input *RunInput, principalID string, class principal.Class, durableKey string) (*RunSummary, error) {
+	if durableKey == "" {
+		durableKey = newID("dur")
+	} else {
+		existing, found, err := i.store.RunByDurableKey(ctx, durableKey)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			return existing, nil
+		}
 	}
-	if found {
-		return existing, nil
-	}
-	return i.start(ctx, definitionID, input, origin, durableKey)
+	origin := &RunOrigin{PrincipalID: principalID, PrincipalClass: string(class)}
+	return i.start(ctx, definitionID, input, origin, durableKey, true)
 }
 
-func (i *Interpreter) start(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin, durableKey string) (*RunSummary, error) {
+func (i *Interpreter) start(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin, durableKey string, configured bool) (*RunSummary, error) {
 	compiled, ok := i.compiledFor(ctx, definitionID, 0)
 	if !ok {
 		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+definitionID+" is not loaded")
@@ -293,6 +298,12 @@ func (i *Interpreter) start(ctx context.Context, definitionID string, input *Run
 	}
 	runOrigin, err := originUnderApproval(origin, approval)
 	if err != nil {
+		return nil, err
+	}
+	if configured {
+		runOrigin.AgentID = configuredAgent(compiled.spec, approval)
+	}
+	if err := i.admitRun(compiled.spec, runOrigin); err != nil {
 		return nil, err
 	}
 	summary, err := i.store.createRun(ctx, compiled.spec, input, runOrigin, durableKey, "")

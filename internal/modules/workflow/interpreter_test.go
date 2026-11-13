@@ -12,13 +12,15 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func buildTestRegistry() (*auraagent.Registry, error) {
-	return auraagent.Build(nil, []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search"}, []string{"primary"})
+	lobby := config.AgentDefinition{ID: "lobby", Description: "front desk", Instructions: "greet", Audience: config.AudiencePublic}
+	return auraagent.Build([]config.AgentDefinition{lobby}, []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search"}, []string{"primary"})
 }
 
 type fakeAgentRunner struct {
@@ -1102,6 +1104,10 @@ func (r *testApprovalRequester) Request(ctx context.Context, runID, stepID strin
 
 func TestApprovalRequesterPortFailsStepAndRun(t *testing.T) {
 	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
 	spec := &Spec{
 		ID:      "approval-port-fail-flow",
 		Goal:    "Test approval requester port failure",
@@ -1115,10 +1121,11 @@ func TestApprovalRequesterPortFailsStepAndRun(t *testing.T) {
 	fake := durable.NewFake()
 	requester := &testApprovalRequester{err: errors.New("approval backend unavailable")}
 	interpreter := NewInterpreter(disk, fake, &Options{
-		Driver:    DriverConcurrent,
-		Approvals: requester,
+		Driver:        DriverConcurrent,
+		Approvals:     requester,
+		AgentResolver: registry,
 	})
-	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())
@@ -1143,6 +1150,10 @@ func TestApprovalRequesterPortFailsStepAndRun(t *testing.T) {
 
 func TestApprovalRequesterPortSucceedsOnSignal(t *testing.T) {
 	ctx := context.Background()
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
 	spec := &Spec{
 		ID:      "approval-port-success-flow",
 		Goal:    "Test approval requester port success",
@@ -1156,10 +1167,11 @@ func TestApprovalRequesterPortSucceedsOnSignal(t *testing.T) {
 	fake := durable.NewFake()
 	requester := &testApprovalRequester{}
 	interpreter := NewInterpreter(disk, fake, &Options{
-		Driver:    DriverConcurrent,
-		Approvals: requester,
+		Driver:        DriverConcurrent,
+		Approvals:     requester,
+		AgentResolver: registry,
 	})
-	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())

@@ -25,6 +25,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability"
@@ -86,19 +87,27 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 	}
 	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *config.Config) {
 		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}
+		cfg.Agents.Definitions = append(cfg.Agents.Definitions, config.AgentDefinition{
+			ID: "reviewer", Description: "d", Instructions: "i", Tools: []string{github.ToolComment},
+		})
 	})
-	_, err := runner.Invoke(stepCallContext(t, db), github.ToolComment, comment("other"))
+	asReviewer := func(runID string) context.Context {
+		call := ownerStepCall(runID, "step-1", 0)
+		call.Origin.AgentID = "reviewer"
+		return stepContextFor(t, db, call)
+	}
+	_, err := runner.Invoke(asReviewer("run-other"), github.ToolComment, comment("other"))
 	if err == nil || !strings.Contains(err.Error(), "not a configured github credential") {
 		t.Errorf("unconfigured credential err = %v, want not a configured github credential", err)
 	}
-	_, err = runner.Invoke(stepCallContext(t, db), github.ToolComment, comment("ci"))
+	_, err = runner.Invoke(asReviewer("run-ci"), github.ToolComment, comment("ci"))
 	if err == nil || !strings.Contains(err.Error(), "github credential is unavailable") {
 		t.Errorf("configured credential err = %v, want github credential is unavailable", err)
 	}
 	bare, bareDB, _ := newWorkflowToolRunnerFixture(t)
 	_, err = bare.Invoke(stepCallContext(t, bareDB), github.ToolComment, comment("ci"))
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultPolicyDenied || !strings.Contains(err.Error(), "unknown tool") {
-		t.Errorf("no credentials err = %v, want policy_denied unknown tool", err)
+	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
+		t.Errorf("no credentials err = %v, want %s", err, workflow.ErrorCodeCapabilityExceeded)
 	}
 }
 

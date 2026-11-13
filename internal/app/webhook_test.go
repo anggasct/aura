@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
@@ -388,10 +389,10 @@ func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durable.Fake
 		},
 	}
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{backend}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{CheckToolCall: acceptToolCall}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
+	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

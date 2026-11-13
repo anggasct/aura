@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 const twoReadStepsYAML = `id: two-reads
@@ -62,7 +63,7 @@ func TestServerHostsWorkflowRunsTheCLIStarts(t *testing.T) {
 
 	command := buildApp(t, commandCompositionOptions(loadCompositionConfig(t, path), &syncBuffer{}, PartWorkflows))
 	t.Cleanup(func() { _ = command.Close(context.Background()) })
-	summary, err := command.interpreter.Start(t.Context(), "two-reads", nil, ownerRunOrigin())
+	summary, err := command.interpreter.StartConfigured(t.Context(), "two-reads", nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

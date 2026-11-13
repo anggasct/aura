@@ -79,7 +79,19 @@ func workflowValidationDeps(cfg *config.Config) (*workflow.ValidationDeps, error
 		return deps, err
 	}
 	deps.Agents = registry
+	deps.StepAllowed = stepCeiling(registry, catalog)
 	return deps, nil
+}
+
+func stepCeiling(registry *auraagent.Registry, catalog *toolsbuiltin.StepCatalog) func(agentID string, class principal.Class, toolID string) (allowed, personaKnown bool) {
+	return func(agentID string, class principal.Class, toolID string) (bool, bool) {
+		persona, known := registry.Lookup(agentID)
+		if !known {
+			return false, false
+		}
+		tool, found := catalog.Lookup(toolID)
+		return found && persona.StepToolAllowed(class, tool), true
+	}
 }
 
 func workflowSet(specs []*workflow.Spec) func(id string) (*workflow.Spec, bool) {
@@ -169,10 +181,6 @@ func workflowDefinitionsDir(cfg *config.Config) string {
 	return cfg.Workflows.DefinitionsDir
 }
 
-func ownerRunOrigin() *workflow.RunOrigin {
-	return &workflow.RunOrigin{PrincipalID: principal.OwnerID, PrincipalClass: string(principal.ClassOwner), AgentID: auraagent.DefaultID}
-}
-
 func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 	var inputFlag string
 	cmd := &cobra.Command{
@@ -191,7 +199,7 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 						return fmt.Errorf("invalid --input json: %w", err)
 					}
 				}
-				summary, err := app.interpreter.Start(ctx, args[0], runInput, ownerRunOrigin())
+				summary, err := app.interpreter.StartConfigured(ctx, args[0], runInput, principal.OwnerID, principal.ClassOwner, "")
 				if err != nil {
 					return err
 				}
@@ -217,6 +225,7 @@ func workflowApprovalDecider(ctx context.Context, prompt *toolbroker.ApprovalPro
 
 type workflowToolRunner struct {
 	executor      *toolsbuiltin.Executor
+	catalog       *toolsbuiltin.StepCatalog
 	sessions      store.SessionService
 	registry      *auraagent.Registry
 	caps          map[string][]string
@@ -287,6 +296,9 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 	persona, ok := r.registry.Lookup(call.Origin.AgentID)
 	if !ok {
 		return nil, &workflow.Error{Code: workflow.ErrorCodePersonaMissing, Detail: "persona " + call.Origin.AgentID + " is not configured"}
+	}
+	if tool, found := r.catalog.Lookup(toolID); !found || !persona.StepToolAllowed(class, tool) {
+		return nil, &workflow.Error{Code: workflow.ErrorCodeCapabilityExceeded, Detail: "tool " + toolID + " is outside the ceiling of persona " + call.Origin.AgentID + " for " + string(class) + " runs"}
 	}
 	deadline, ok := ctx.Deadline()
 	if !ok {
@@ -362,6 +374,10 @@ func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, registry *aura
 	if err != nil {
 		return nil, err
 	}
+	catalog, err := stepToolCatalog(result.Config)
+	if err != nil {
+		return nil, err
+	}
 	caps := make(map[string][]string)
 	definitions := executor.Definitions()
 	for i := range definitions {
@@ -374,7 +390,7 @@ func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, registry *aura
 			orchestration[registered[i].Name] = true
 		}
 	}
-	return &workflowToolRunner{executor: executor, sessions: store.NewSessionService(db), registry: registry, caps: caps, orchestration: orchestration}, nil
+	return &workflowToolRunner{executor: executor, catalog: catalog, sessions: store.NewSessionService(db), registry: registry, caps: caps, orchestration: orchestration}, nil
 }
 
 func newWorkflowRunsCmd(gf *globalFlags) *cobra.Command {

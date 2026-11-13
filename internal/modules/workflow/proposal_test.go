@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func proposalSession(t *testing.T, disk *Store, id string) {
@@ -47,10 +48,12 @@ func TestCeilingAndPlanRendering(t *testing.T) {
 		{ID: "write", DependsOn: []string{"approve"}, Executor: ExecutorSpec{Kind: KindTool, ToolID: ptr("write_file"), ToolArgs: json.RawMessage(`{"path":"a","content":"b"}`)}, Timeout: time.Minute},
 		{ID: "ci", DependsOn: []string{"write"}, Executor: ExecutorSpec{Kind: KindWait, Event: &event}, Timeout: time.Minute},
 	}}
-	if err := CheckCeiling(spec, []string{"read_file"}); !hasCode(err, ErrorCodeCapabilityExceeded) || !strings.Contains(err.Error(), "write_file") {
+	deps := testValidationDeps()
+	deps.StepAllowed = personaTools(map[string][]string{"narrow": {"read_file"}, "wide": {"write_file"}})
+	if err := CheckCeiling(spec, "narrow", principal.ClassOwner, deps); !hasCode(err, ErrorCodeCapabilityExceeded) || !strings.Contains(err.Error(), "write_file") {
 		t.Fatalf("ceiling without write_file = %v", err)
 	}
-	if err := CheckCeiling(spec, []string{"write_file"}); err != nil {
+	if err := CheckCeiling(spec, "wide", principal.ClassOwner, deps); err != nil {
 		t.Fatalf("ceiling with write_file = %v", err)
 	}
 	graph, err := Compile(spec, testValidationDeps())

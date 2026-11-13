@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func TestRoutineIDsAreSlugsOfValidNames(t *testing.T) {
@@ -27,7 +28,14 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	proposed := toolSpec("x")
 	proposed.Steps = append(proposed.Steps, StepSpec{ID: "gate", DependsOn: []string{"read"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second})
 	generated := NormalizeProposal(proposed, "prop_r")
-	installAll(t, interpreter, generated, threeToolSteps("defined", SourceDefined))
+	installAll(t, interpreter, threeToolSteps("defined", SourceDefined))
+	if err := interpreter.LoadAll(context.Background(), []*Spec{generated}, testValidationDeps()); err != nil {
+		t.Fatal(err)
+	}
+	proposal := proposeSpec(t, disk, "prop_r", "main", false, generated)
+	if err := disk.ApproveProposal(context.Background(), proposal.ID, proposalApproval(proposal)); err != nil {
+		t.Fatal(err)
+	}
 	run, err := interpreter.Start(context.Background(), generated.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
@@ -78,11 +86,11 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	}
 	fresh := NewInterpreter(disk, durable.NewFake(), &Options{Driver: DriverConcurrent, Tools: tools})
 	installAll(t, fresh, toolSpec("leaf"))
-	started, err := fresh.StartKeyed(context.Background(), first.ID, &RunInput{}, ownerOrigin(), "sched-once")
+	started, err := fresh.StartConfigured(context.Background(), first.ID, &RunInput{}, "local-owner", principal.ClassOwner, "sched-once")
 	if err != nil || started.DefinitionVersion != 2 {
 		t.Fatalf("starting a routine that is only in the store = %+v, %v", started, err)
 	}
-	again, err := fresh.StartKeyed(context.Background(), first.ID, &RunInput{}, ownerOrigin(), "sched-once")
+	again, err := fresh.StartConfigured(context.Background(), first.ID, &RunInput{}, "local-owner", principal.ClassOwner, "sched-once")
 	if err != nil || again.ID != started.ID {
 		t.Fatalf("a replayed keyed start created %v, %v instead of returning %s", again, err, started.ID)
 	}

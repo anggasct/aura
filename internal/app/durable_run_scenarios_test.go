@@ -115,7 +115,7 @@ func (w *workflowShape) deps(t *testing.T) *workflow.ValidationDeps {
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}
-	return &workflow.ValidationDeps{KnownTools: w.known, EffectfulTools: append([]string{}, w.effectful...), Agents: registry, CheckToolCall: acceptToolCall}
+	return &workflow.ValidationDeps{KnownTools: w.known, EffectfulTools: append([]string{}, w.effectful...), Agents: registry, CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}
 }
 
 func (w *workflowShape) seed(t *testing.T, suite *runSuite) {
@@ -207,7 +207,7 @@ func (w *workflowShape) host(t *testing.T, life *runLife) {
 
 func (w *workflowShape) startRun(t *testing.T, life *runLife) {
 	t.Helper()
-	summary, err := life.interpreter.Start(t.Context(), w.spec().ID, &workflow.RunInput{Objective: "survive the kill"}, ownerRunOrigin())
+	summary, err := life.interpreter.StartConfigured(t.Context(), w.spec().ID, &workflow.RunInput{Objective: "survive the kill"}, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

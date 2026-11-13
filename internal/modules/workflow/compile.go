@@ -1,6 +1,11 @@
 package workflow
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+
+	"github.com/anggasct/aura/internal/platform/principal"
+)
 
 type Graph struct {
 	Order      []string
@@ -11,6 +16,9 @@ type Graph struct {
 
 func Compile(spec *Spec, deps *ValidationDeps) (*Graph, error) {
 	if err := Validate(spec, deps); err != nil {
+		return nil, err
+	}
+	if err := checkRunAs(spec, deps); err != nil {
 		return nil, err
 	}
 	byStep := make(map[string]*StepSpec, len(spec.Steps))
@@ -59,4 +67,20 @@ func sortedCopy(values []string) []string {
 	result := append([]string(nil), values...)
 	slices.Sort(result)
 	return result
+}
+
+func checkRunAs(spec *Spec, deps *ValidationDeps) error {
+	if spec.RunAs == "" {
+		return nil
+	}
+	if err := checkDisplaySafe("run_as", spec.RunAs); err != nil {
+		return err
+	}
+	if deps.Agents == nil {
+		return codedError(ErrorCodeSpecInvalid, "run_as cannot be checked: no persona resolver is configured")
+	}
+	if _, err := deps.Agents.Resolve(nil, &spec.RunAs); err != nil {
+		return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("run_as references unknown persona %q", spec.RunAs))
+	}
+	return CheckCeiling(spec, spec.RunAs, principal.ClassOwner, deps)
 }
