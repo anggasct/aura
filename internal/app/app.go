@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -268,9 +269,15 @@ func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, credential := range githubCredentials(in.result.Config) {
+	credentials := githubCredentials(in.result.Config)
+	for _, credential := range credentials {
 		if value, err := parseSecretRef(credential.Ref).Resolve(); err == nil && strings.TrimSpace(value) != "" {
 			executor.Broker().RegisterSecret(value)
+		}
+	}
+	if len(credentials) > 0 {
+		if err := github.Register(executor, &github.ToolOptions{Credentials: credentials}); err != nil {
+			return nil, fmt.Errorf("register github tools: %w", err)
 		}
 	}
 	return executor, nil
