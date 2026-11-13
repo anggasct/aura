@@ -211,10 +211,11 @@ func (a *Adapter) openCard(ctx context.Context, token string, binding *approval.
 	call, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
 	sent, err := a.bot.sendMessage(call, token, &sendMessageRequest{
-		ChatID:          dest.chatID,
-		MessageThreadID: dest.threadID,
-		Text:            text,
-		ReplyMarkup:     &inlineKeyboard{Rows: [][]inlineButton{row}},
+		ChatID:             dest.chatID,
+		MessageThreadID:    dest.threadID,
+		Text:               text,
+		ReplyMarkup:        &inlineKeyboard{Rows: [][]inlineButton{row}},
+		LinkPreviewOptions: &linkPreviewOptions{IsDisabled: true},
 	})
 	if err != nil {
 		a.approvals.Drop(tokenID, pending)

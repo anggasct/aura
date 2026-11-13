@@ -228,13 +228,18 @@ type replyParameters struct {
 	AllowSendingWithoutReply bool  `json:"allow_sending_without_reply"`
 }
 
+type linkPreviewOptions struct {
+	IsDisabled bool `json:"is_disabled"`
+}
+
 type sendMessageRequest struct {
-	ChatID          int64            `json:"chat_id"`
-	Text            string           `json:"text"`
-	ParseMode       string           `json:"parse_mode,omitempty"`
-	ReplyParameters *replyParameters `json:"reply_parameters,omitempty"`
-	MessageThreadID int64            `json:"message_thread_id,omitempty"`
-	ReplyMarkup     *inlineKeyboard  `json:"reply_markup,omitempty"`
+	ChatID             int64               `json:"chat_id"`
+	Text               string              `json:"text"`
+	ParseMode          string              `json:"parse_mode,omitempty"`
+	ReplyParameters    *replyParameters    `json:"reply_parameters,omitempty"`
+	MessageThreadID    int64               `json:"message_thread_id,omitempty"`
+	ReplyMarkup        *inlineKeyboard     `json:"reply_markup,omitempty"`
+	LinkPreviewOptions *linkPreviewOptions `json:"link_preview_options,omitempty"`
 }
 
 type inlineKeyboard struct {
