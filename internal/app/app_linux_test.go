@@ -90,9 +90,9 @@ func TestCompositionServerStartsAndStopsInOrder(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	requireNames(t, "lifecycle started", lifecycleNames(t, logs.String(), "lifecycle started"),
-		[]string{"memory_purge", "broadcast_resume", "schedule_resume", "schedule_pass", "turn_recovery", "channels", "durable_host", "turn_engine", "turn_recovery_pass", "retention_sweeps", "run_retention", "persona_eval_schedules"})
+		[]string{"memory_purge", "broadcast_resume", "schedule_resume", "schedule_pass", "turn_recovery", "channels", "durable_host", "turn_engine", "turn_recovery_pass", "workflow_proposal_cards", "retention_sweeps", "run_retention", "workflow_completion", "persona_eval_schedules"})
 	requireNames(t, "lifecycle stopped", lifecycleNames(t, logs.String(), "lifecycle stopped"),
-		[]string{"persona_eval_schedules", "run_retention", "retention_sweeps", "turn_recovery_pass", "turn_engine", "durable_host", "channels", "turn_recovery", "schedule_pass", "schedule_resume", "broadcast_resume", "memory_purge", "telemetry", "sqlite"})
+		[]string{"persona_eval_schedules", "workflow_completion", "run_retention", "retention_sweeps", "workflow_proposal_cards", "turn_recovery_pass", "turn_engine", "durable_host", "channels", "turn_recovery", "schedule_pass", "schedule_resume", "broadcast_resume", "memory_purge", "telemetry", "sqlite"})
 }
 
 func TestCompositionServerBuildFailureReleasesWhatWasBuilt(t *testing.T) {

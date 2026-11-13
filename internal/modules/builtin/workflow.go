@@ -132,7 +132,7 @@ func (h *workflowHolder) adapter(call workflowCall) toolbroker.Adapter {
 		}
 		controller := h.controller.Load()
 		if controller == nil {
-			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultCapabilityUnavailable, "workflows need the durable runtime")
+			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultCapabilityUnavailable, "workflows run only in aura server")
 		}
 		var args workflowArgs
 		if err := json.Unmarshal(request.Arguments, &args); err != nil {

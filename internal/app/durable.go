@@ -230,14 +230,13 @@ func buildDurableListener(in *durableListenerInput) (*durableListener, error) {
 		return engine.DriveTurn(ctx, inv, &desc)
 	})
 	endpoint.RegisterHandler(workflow.HandlerName, interpreter.HandleSerial)
-	return &durableListener{config: durableCfg, endpoint: endpoint, logger: logger, interpreter: interpreter}, nil
+	return &durableListener{config: durableCfg, endpoint: endpoint, logger: logger}, nil
 }
 
 type durableListener struct {
-	config      *config.Durable
-	endpoint    *restate.Endpoint
-	logger      *slog.Logger
-	interpreter *workflow.Interpreter
+	config   *config.Durable
+	endpoint *restate.Endpoint
+	logger   *slog.Logger
 }
 
 func (l *durableListener) Name() string { return "durable" }

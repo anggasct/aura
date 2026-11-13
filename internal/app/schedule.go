@@ -234,7 +234,7 @@ func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest
 		starter = w.starter.Load()
 	}
 	if starter == nil {
-		return schedule.TurnResult{}, errors.New("scheduled workflows need the durable runtime")
+		return schedule.TurnResult{}, errors.New("scheduled workflows have no workflow interpreter")
 	}
 	input := &workflow.RunInput{}
 	if req.WorkflowInput != "" {

@@ -86,7 +86,7 @@ func TestOwnerSavesRoutinesThatTheSchedulerStartsOncePerFire(t *testing.T) {
 	workflows := &scheduleWorkflows{}
 	turns := &engineTurnRunner{workflows: workflows}
 	request := &schedule.TurnRequest{PrincipalID: principal.OwnerID, IdempotencyKey: "cron/job-1/2026-11-09T03:00:00Z", WorkflowID: "routine_weekly_report", WorkflowInput: `{"objective":"last week"}`}
-	if _, err := turns.RunTurn(t.Context(), request); err == nil || !strings.Contains(err.Error(), "durable runtime") {
+	if _, err := turns.RunTurn(t.Context(), request); err == nil || !strings.Contains(err.Error(), "no workflow interpreter") {
 		t.Fatalf("scheduled workflow without a runtime = %v", err)
 	}
 	workflows.set(controller.interpreter)
