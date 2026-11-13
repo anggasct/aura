@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1358,86 +1359,27 @@ models:
 	}
 }
 
-func TestLoad_DurableDefaultsApplied(t *testing.T) {
-	res, err := Load(writeTempConfig(t, "version: 1\n"))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	durable := res.Config.Durable
-	if durable == nil {
-		t.Fatal("durable section was not defaulted")
-	}
-	if durable.Enabled {
-		t.Error("durable.enabled defaults to false")
-	}
-	if durable.Mode != DurableModeSupervised {
-		t.Errorf("durable.mode = %q, want supervised", durable.Mode)
-	}
-	if durable.Endpoint != "http://127.0.0.1:8080" {
-		t.Errorf("durable.endpoint = %q", durable.Endpoint)
-	}
-	if durable.AdminEndpoint != "http://127.0.0.1:9070" {
-		t.Errorf("durable.admin_endpoint = %q", durable.AdminEndpoint)
-	}
-	if durable.HandlerAddr != "127.0.0.1:9080" {
-		t.Errorf("durable.handler_addr = %q", durable.HandlerAddr)
-	}
-	if durable.NodeAddr != "127.0.0.1:5122" {
-		t.Errorf("durable.node_addr = %q", durable.NodeAddr)
-	}
-	if time.Duration(durable.RestartBackoffInitial) != time.Second {
-		t.Errorf("durable.restart_backoff_initial = %s, want 1s", time.Duration(durable.RestartBackoffInitial))
-	}
-	if time.Duration(durable.RestartBackoffMax) != 30*time.Second {
-		t.Errorf("durable.restart_backoff_max = %s, want 30s", time.Duration(durable.RestartBackoffMax))
-	}
-}
-
-func TestLoad_DurableValidation(t *testing.T) {
-	cases := []struct {
-		name    string
-		content string
-		want    string
-	}{
-		{"bad mode", "version: 1\ndurable:\n  enabled: true\n  mode: managed\n", "durable.mode"},
-		{"bad endpoint", "version: 1\ndurable:\n  enabled: true\n  endpoint: \"http://example.com:abc\"\n", "durable.endpoint"},
-		{"bad handler addr", "version: 1\ndurable:\n  enabled: true\n  handler_addr: not-an-addr\n", "durable.handler_addr"},
-		{"public node addr", "version: 1\ndurable:\n  enabled: true\n  node_addr: 0.0.0.0:5122\n", "durable.node_addr \"0.0.0.0:5122\" must be a loopback host:port"},
-		{"routable node addr", "version: 1\ndurable:\n  enabled: true\n  node_addr: 10.0.0.5:5122\n", "durable.node_addr"},
-		{"node addr without port", "version: 1\ndurable:\n  enabled: true\n  node_addr: 127.0.0.1\n", "durable.node_addr"},
-		{"non-string node addr", "version: 1\ndurable:\n  enabled: true\n  node_addr: 5122\n", "durable.node_addr must be a string"},
-		{"inverted backoff", "version: 1\ndurable:\n  enabled: true\n  restart_backoff_initial: 30s\n  restart_backoff_max: 1s\n", "durable.restart_backoff_max"},
-		{"non-bool enabled", "version: 1\ndurable:\n  enabled: \"yes\"\n", "durable.enabled must be a boolean"},
-		{"handler url in supervised mode", "version: 1\ndurable:\n  enabled: true\n  handler_url: https://aura.example:9080\n", "apply only to durable.mode \"external\""},
-		{"plaintext in supervised mode", "version: 1\ndurable:\n  enabled: true\n  allow_plaintext: true\n", "apply only to durable.mode \"external\""},
-		{"private endpoint without plaintext opt-in", "version: 1\ndurable:\n  enabled: true\n  mode: external\n  endpoint: http://restate:8080\n", "durable.endpoint: https is required"},
-		{"private handler url without plaintext opt-in", "version: 1\ndurable:\n  enabled: true\n  mode: external\n  handler_url: http://aura:9080\n", "durable.handler_url: https is required"},
-		{"handler url with query", "version: 1\ndurable:\n  enabled: true\n  mode: external\n  allow_plaintext: true\n  handler_url: http://aura:9080?x=1\n", "durable.handler_url: query and fragment"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := Load(writeTempConfig(t, tc.content))
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("Load error = %v, want %q", err, tc.want)
-			}
-		})
-	}
-}
-
-func TestLoad_DurableExternalPrivateNetwork(t *testing.T) {
-	content := "version: 1\ndurable:\n  enabled: true\n  mode: external\n  allow_plaintext: true\n  endpoint: http://restate:8080\n  admin_endpoint: http://restate:9070\n  handler_addr: 0.0.0.0:9080\n  handler_url: http://aura:9080\n"
-	result, err := Load(writeTempConfig(t, content))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if durable := result.Config.Durable; durable.HandlerURL != "http://aura:9080" || !durable.AllowPlaintext {
-		t.Fatalf("durable = %+v", durable)
-	}
-}
-
-func TestLoad_DurableDisabledSkipsValidation(t *testing.T) {
-	content := "version: 1\ndurable:\n  enabled: false\n  mode: managed\n  endpoint: nonsense\n"
-	if _, err := Load(writeTempConfig(t, content)); err != nil {
-		t.Fatalf("disabled durable section must not validate, got %v", err)
-	}
+func TestLoad_RejectsTheRemovedDurableSection(t *testing.T) {
+	t.Run("a durable section is refused as an unknown key", func(t *testing.T) {
+		_, err := Load(writeTempConfig(t, "version: 1\ndurable:\n  enabled: false\n"))
+		if err == nil {
+			t.Fatal("expected error for the removed durable section, got nil")
+		}
+		if !strings.HasPrefix(err.Error(), "config: ") {
+			t.Errorf("error %q missing config component prefix", err)
+		}
+		if !strings.Contains(err.Error(), `unknown key "durable" at line 2`) {
+			t.Errorf("error %q does not name the durable key and its line", err)
+		}
+	})
+	t.Run("a durable environment variable is reported, not applied", func(t *testing.T) {
+		t.Setenv("AURA_DURABLE_ENABLED", "true")
+		res, err := Load(writeTempConfig(t, "version: 1\n"))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !slices.Contains(res.Warnings, "AURA_DURABLE_ENABLED") {
+			t.Errorf("Warnings = %v, want AURA_DURABLE_ENABLED listed", res.Warnings)
+		}
+	})
 }

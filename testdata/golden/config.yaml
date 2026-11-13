@@ -31,15 +31,6 @@ workflows:
   generated:
     max_steps: 20
     max_tokens: 200000
-durable:
-  enabled: false
-  mode: supervised
-  endpoint: http://127.0.0.1:8080
-  admin_endpoint: http://127.0.0.1:9070
-  handler_addr: 127.0.0.1:9080
-  node_addr: 127.0.0.1:5122
-  restart_backoff_initial: 1s
-  restart_backoff_max: 30s
 server:
   host: 127.0.0.1
   port: 8280
