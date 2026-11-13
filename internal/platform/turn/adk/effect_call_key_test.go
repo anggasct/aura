@@ -29,17 +29,20 @@ import (
 type scriptedModel struct {
 	responses [][]*genai.Part
 
-	mu    sync.Mutex
-	calls int
+	mu       sync.Mutex
+	calls    int
+	requests []requestParts
 }
 
 func (m *scriptedModel) Name() string { return "scripted-model" }
 
-func (m *scriptedModel) GenerateContent(context.Context, *adkmodel.LLMRequest, bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+func (m *scriptedModel) GenerateContent(_ context.Context, req *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
+		seen := capturedParts(req)
 		m.mu.Lock()
 		call := m.calls
 		m.calls++
+		m.requests = append(m.requests, seen)
 		m.mu.Unlock()
 		if call >= len(m.responses) {
 			yield(nil, errors.New("the scripted model has no response left"))
@@ -50,6 +53,16 @@ func (m *scriptedModel) GenerateContent(context.Context, *adkmodel.LLMRequest, b
 			TurnComplete: true,
 		}, nil)
 	}
+}
+
+func (m *scriptedModel) seen() []requestParts {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.requests)
+}
+
+func queryCall(id, query string) *genai.Part {
+	return &genai.Part{FunctionCall: &genai.FunctionCall{ID: id, Name: "tool-a", Args: map[string]any{"query": query}}}
 }
 
 func effectCall(id, note string) *genai.Part {
@@ -66,6 +79,7 @@ type effectTools struct {
 
 	mu         sync.Mutex
 	keys       []string
+	requestIDs []string
 	failures   []error
 	runs       map[string]int
 	blockFirst bool
@@ -107,6 +121,7 @@ func (e *effectTools) Evaluate(ctx context.Context, request *approval.ToolReques
 func (e *effectTools) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
 	e.mu.Lock()
 	e.keys = append(e.keys, request.IdempotencyKey)
+	e.requestIDs = append(e.requestIDs, request.RequestID)
 	e.mu.Unlock()
 	result, err := e.broker.Execute(ctx, &toolbroker.ToolRequest{
 		RequestID:             request.RequestID,
@@ -150,7 +165,7 @@ func (e *effectTools) perform(ctx context.Context, request *toolbroker.ToolReque
 		<-ctx.Done()
 		return toolbroker.ToolResult{}, ctx.Err()
 	}
-	output, err := json.Marshal(map[string]bool{"ok": true})
+	output, err := json.Marshal(map[string]string{"note": arguments.Note})
 	return toolbroker.ToolResult{Output: output}, err
 }
 
@@ -172,6 +187,12 @@ func (e *effectTools) seenKeys() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return slices.Clone(e.keys)
+}
+
+func (e *effectTools) seenRequestIDs() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.requestIDs)
 }
 
 func (e *effectTools) seenFailures() []error {
@@ -208,8 +229,12 @@ func (e *effectTools) intents(t *testing.T) []effectIntentRow {
 }
 
 func effectTurn() *turn.TurnRequest {
+	return ownerTurn("turn-1")
+}
+
+func ownerTurn(turnID string) *turn.TurnRequest {
 	return &turn.TurnRequest{
-		TurnID:         "turn-1",
+		TurnID:         turnID,
 		SessionID:      "session-1",
 		PrincipalID:    "user-1",
 		PrincipalClass: principal.ClassOwner,
@@ -226,11 +251,22 @@ func requireEachCallPerformed(t *testing.T, e *effectTools, wantKeys []string) {
 	if failures := e.seenFailures(); len(failures) != 0 {
 		t.Errorf("broker errors = %v, want none", failures)
 	}
+	intents := e.intents(t)
+	seenIDs := map[string]bool{}
+	var got []effectIntentRow
+	for _, intent := range intents {
+		requireAuraCallID(t, intent.toolCallID)
+		if seenIDs[intent.toolCallID] {
+			t.Errorf("effect intents = %+v, want pairwise distinct tool call ids", intents)
+		}
+		seenIDs[intent.toolCallID] = true
+		got = append(got, effectIntentRow{key: intent.key, state: intent.state})
+	}
 	var want []effectIntentRow
 	for _, key := range wantKeys {
-		want = append(want, effectIntentRow{toolCallID: "call_0", key: key, state: "succeeded"})
+		want = append(want, effectIntentRow{key: key, state: "succeeded"})
 	}
-	if got := e.intents(t); !slices.Equal(got, want) {
+	if !slices.Equal(got, want) {
 		t.Errorf("effect intents = %+v, want %+v", got, want)
 	}
 }

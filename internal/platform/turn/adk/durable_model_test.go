@@ -258,34 +258,43 @@ func yieldedFunctionCallIDs(ctx context.Context, t *testing.T, model adkmodel.LL
 	return ids
 }
 
-func TestJournaledModelGivesAnUnnamedFunctionCallAStableID(t *testing.T) {
+func TestJournaledModelReplaysTheCallIDsItRecorded(t *testing.T) {
 	inner := &functionCallModel{}
 	inv := &journalInvocation{}
-	want := []string{"adk-turn-1-model-1-0", "call-7", "adk-turn-1-model-1-2"}
+	named := journalModel(nameCalls(inner))
 
-	first := yieldedFunctionCallIDs(withTurnID(scopedContext(t, inv), "turn-1"), t, journalModel(inner))
-	second := yieldedFunctionCallIDs(withTurnID(scopedContext(t, inv), "turn-1"), t, journalModel(inner))
+	first := yieldedFunctionCallIDs(scopedContext(t, inv), t, named)
+	second := yieldedFunctionCallIDs(scopedContext(t, inv), t, named)
 
-	if !slices.Equal(first, want) {
-		t.Errorf("function call ids = %v, want %v", first, want)
+	if len(first) != 3 || !slices.Equal(first, second) {
+		t.Fatalf("function call ids = %v then %v, want the same three both times", first, second)
 	}
-	if !slices.Equal(second, want) {
-		t.Errorf("function call ids on the second call = %v, want %v", second, want)
+	for _, id := range first {
+		requireAuraCallID(t, id)
+	}
+	if distinct := len(slices.Compact(slices.Sorted(slices.Values(first)))); distinct != 3 || slices.Contains(first, "call-7") {
+		t.Errorf("function call ids = %v, want three distinct ids none of them call-7", first)
 	}
 	if calls := inner.callCount(); calls != 1 {
 		t.Errorf("model calls = %d, want the second call served from the journal", calls)
 	}
 	recorded := journalSnapshot(t, inv)["model-1"]
-	if len(recorded) != 1 || recorded[0].Content.Parts[0].FunctionCall.ID != want[0] {
-		t.Errorf("recorded response = %+v, want it to carry the id %s", recorded, want[0])
+	var recordedIDs []string
+	for _, response := range recorded {
+		for _, part := range response.Content.Parts {
+			recordedIDs = append(recordedIDs, part.FunctionCall.ID)
+		}
+	}
+	if !slices.Equal(recordedIDs, first) {
+		t.Errorf("recorded function call ids = %v, want %v", recordedIDs, first)
 	}
 
-	unscoped := yieldedFunctionCallIDs(withTurnID(t.Context(), "turn-1"), t, journalModel(inner))
+	bare := yieldedFunctionCallIDs(scopedContext(t, &journalInvocation{}), t, journalModel(inner))
 
-	if !slices.Equal(unscoped, []string{"", "call-7", ""}) {
-		t.Errorf("function call ids outside a turn scope = %v, want the unnamed calls left empty", unscoped)
+	if !slices.Equal(bare, []string{"", "call-7", ""}) {
+		t.Errorf("function call ids through the journal alone = %v, want the provider's ids untouched", bare)
 	}
 	if calls := inner.callCount(); calls != 2 {
-		t.Errorf("model calls = %d, want the call outside a turn scope to reach the model", calls)
+		t.Errorf("model calls = %d, want the bare journal to reach the model", calls)
 	}
 }

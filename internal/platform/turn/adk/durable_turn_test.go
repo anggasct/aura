@@ -18,12 +18,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
-	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -59,7 +57,28 @@ func (r requestParts) count(match func(requestPart) bool) int {
 func isUserText(part requestPart) bool { return part.text == durableTurnText }
 func isCall(part requestPart) bool     { return part.callName != "" }
 func isResponse(part requestPart) bool { return part.responseName != "" }
-func hasPartID(part requestPart) bool  { return part.callID != "" || part.responseID != "" }
+
+func capturedParts(req *adkmodel.LLMRequest) requestParts {
+	var seen requestParts
+	for _, content := range req.Contents {
+		for _, part := range content.Parts {
+			captured := requestPart{role: content.Role, text: part.Text}
+			if part.FunctionCall != nil {
+				captured.callID, captured.callName = part.FunctionCall.ID, part.FunctionCall.Name
+			}
+			if part.FunctionResponse != nil {
+				captured.responseID, captured.responseName = part.FunctionResponse.ID, part.FunctionResponse.Name
+				output, err := json.Marshal(part.FunctionResponse.Response)
+				if err != nil {
+					output = []byte(err.Error())
+				}
+				captured.output = string(output)
+			}
+			seen = append(seen, captured)
+		}
+	}
+	return seen
+}
 
 type toolThenTextModel struct {
 	callID  string
@@ -73,21 +92,7 @@ func (m *toolThenTextModel) Name() string { return "tool-then-text-model" }
 
 func (m *toolThenTextModel) GenerateContent(_ context.Context, req *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		var seen requestParts
-		for _, content := range req.Contents {
-			for _, part := range content.Parts {
-				captured := requestPart{role: content.Role, text: part.Text}
-				if part.FunctionCall != nil {
-					captured.callID, captured.callName = part.FunctionCall.ID, part.FunctionCall.Name
-				}
-				if part.FunctionResponse != nil {
-					captured.responseID, captured.responseName = part.FunctionResponse.ID, part.FunctionResponse.Name
-					output, _ := json.Marshal(part.FunctionResponse.Response)
-					captured.output = string(output)
-				}
-				seen = append(seen, captured)
-			}
-		}
+		seen := capturedParts(req)
 		m.mu.Lock()
 		m.requests = append(m.requests, seen)
 		call := len(m.requests)
@@ -240,9 +245,8 @@ func newDurableTurnRig(t *testing.T, model adkmodel.LLM) *durableTurnRig {
 	return &durableTurnRig{db: db, model: model, sessions: sessions, events: events}
 }
 
-func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig {
+func newGatedTools(t *testing.T) *gatedBrokerTools {
 	t.Helper()
-	rig := newDurableTurnRig(t, model)
 	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("toolbroker.New: %v", err)
@@ -255,6 +259,13 @@ func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig
 	); err != nil {
 		t.Fatalf("register tool-a: %v", err)
 	}
+	return gated
+}
+
+func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig {
+	t.Helper()
+	rig := newDurableTurnRig(t, model)
+	gated := newGatedTools(t)
 	rig.tools, rig.gated = gated, gated
 	rig.startLife(t)
 	return rig
@@ -308,17 +319,14 @@ func (r *durableTurnRig) startLife(t *testing.T) {
 }
 
 func (r *durableTurnRig) run(ctx context.Context) <-chan error {
+	return r.runRequest(ctx, ownerTurn("turn-1"))
+}
+
+func (r *durableTurnRig) runRequest(ctx context.Context, req *turn.TurnRequest) <-chan error {
 	out := make(chan error, 1)
 	go func() {
 		var streamErr error
-		for _, err := range r.engine.Run(ctx, &turn.TurnRequest{
-			TurnID:         "turn-1",
-			SessionID:      "session-1",
-			PrincipalID:    "user-1",
-			PrincipalClass: principal.ClassOwner,
-			Origin:         turn.OriginTerminal,
-			Parts:          []runtimeingress.InputPart{{Text: durableTurnText}},
-		}) {
+		for _, err := range r.engine.Run(ctx, req) {
 			if err != nil {
 				streamErr = err
 				break
@@ -428,41 +436,17 @@ func TestReplayedTurnGivesTheModelEachMessageOnce(t *testing.T) {
 	if len(terminals) != 1 || terminals[0].Kind != turn.EventKindTurnCompleted || terminals[0].ID != "turn-1-terminal" {
 		t.Fatalf("terminal events = %+v, want one turn.completed with the id turn-1-terminal", terminals)
 	}
-	var stored requestParts
 	for i := range adk {
 		if want := fmt.Sprintf("turn-1-ev-%d", i+1); adk[i].ID != want {
 			t.Errorf("stored ADK event %d id = %q, want %q", i+1, adk[i].ID, want)
 		}
-		ev, err := store.RuntimeEventToADK(&adk[i])
-		if err != nil {
-			t.Fatalf("decode stored ADK event %s: %v", adk[i].ID, err)
-		}
-		if ev.Content == nil {
-			continue
-		}
-		for _, part := range ev.Content.Parts {
-			captured := requestPart{role: ev.Content.Role, text: part.Text}
-			if part.FunctionCall != nil {
-				captured.callID, captured.callName = part.FunctionCall.ID, part.FunctionCall.Name
-			}
-			if part.FunctionResponse != nil {
-				captured.responseID, captured.responseName = part.FunctionResponse.ID, part.FunctionResponse.Name
-			}
-			stored = append(stored, captured)
-		}
 	}
+	stored := adkEventParts(t, adk)
 	requireEachMessageOnce(t, stored)
-	var callID, responseID string
-	for _, part := range stored {
-		if isCall(part) {
-			callID = part.callID
-		}
-		if isResponse(part) {
-			responseID = part.responseID
-		}
-	}
-	if callID == "" || responseID != callID {
-		t.Errorf("stored function call id = %q, response id = %q, want one non-empty id on both", callID, responseID)
+	callID, responseID := callAndResponseIDs(stored)
+	requireAuraCallID(t, callID)
+	if responseID != callID {
+		t.Errorf("stored function call id = %q, response id = %q, want one id on both", callID, responseID)
 	}
 
 	requests := model.seen()
@@ -471,10 +455,8 @@ func TestReplayedTurnGivesTheModelEachMessageOnce(t *testing.T) {
 	}
 	afterReplay := requests[1]
 	requireEachMessageOnce(t, afterReplay)
-	for _, part := range afterReplay {
-		if (isCall(part) || isResponse(part)) && hasPartID(part) {
-			t.Errorf("request part %+v carries an id, want the stamped id removed", part)
-		}
+	if afterCall, afterResponse := callAndResponseIDs(afterReplay); afterCall != callID || afterResponse != callID {
+		t.Errorf("request after replay carries call id %q and response id %q, want the stored id %q on both", afterCall, afterResponse, callID)
 	}
 	keys := rig.gated.seenKeys()
 	if len(keys) != 2 || keys[0] != keys[1] {

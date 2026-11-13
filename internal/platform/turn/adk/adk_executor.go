@@ -417,6 +417,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 		}
 		model = wrapped
 	}
+	model = nameCalls(model)
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
