@@ -42,7 +42,7 @@ func TestParkDurationSurvival(t *testing.T) {
 		},
 	}
 	deps := workflow.ValidationDeps{KnownTools: []string{}, EffectfulTools: []string{}, Agents: registry}
-	if err := interpreter.Load(ctx, spec, deps); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatal(err)
 	}
 	summary, err := disk.CreateRun(ctx, spec, nil, ownerOrigin())

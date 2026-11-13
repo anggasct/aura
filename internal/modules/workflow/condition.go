@@ -34,6 +34,9 @@ const (
 	ErrorCodeNotPermitted         ErrorCode = "workflow_not_permitted"
 	ErrorCodeRoutineInvalid       ErrorCode = "workflow_routine_invalid"
 	ErrorCodeOriginIncomplete     ErrorCode = "workflow_origin_incomplete"
+	ErrorCodeApprovalMissing      ErrorCode = "workflow_approval_missing"
+	ErrorCodeApprovalConflict     ErrorCode = "workflow_approval_conflict"
+	ErrorCodePlanUnshowable       ErrorCode = "workflow_plan_unshowable"
 )
 
 const ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"

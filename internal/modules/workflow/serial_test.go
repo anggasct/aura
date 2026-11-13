@@ -64,7 +64,7 @@ func holdInvocation(t *testing.T, fake *durable.Fake, key string) (durable.Invoc
 func startSerialRun(t *testing.T, interpreter *Interpreter, disk *Store, spec *Spec, input *RunInput) string {
 	t.Helper()
 	ctx := context.Background()
-	if err := interpreter.Load(ctx, spec, testValidationDeps()); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, testValidationDeps()); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := disk.CreateRun(ctx, spec, input, ownerOrigin())

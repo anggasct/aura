@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -261,9 +262,8 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 	return output, err
 }
 
-func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, logger *slog.Logger) (workflow.ToolRunner, error) {
-	cfg := result.Config
-	_, artifactRoot, _, err := storagePaths(cfg)
+func newWorkflowToolExecutor(result *config.LoadResult, db *sql.DB, logger *slog.Logger) (*toolsbuiltin.Executor, error) {
+	_, artifactRoot, _, err := storagePaths(result.Config)
 	if err != nil {
 		return nil, fmt.Errorf("resolve tool artifact root: %w", err)
 	}
@@ -276,6 +276,27 @@ func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, logger *slog.L
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build builtin tool executor: %w", err)
+	}
+	return executor, nil
+}
+
+func commandToolCallText(result *config.LoadResult, db *sql.DB, logger *slog.Logger) workflow.ToolCallText {
+	var once sync.Once
+	var executor *toolsbuiltin.Executor
+	var buildErr error
+	return func(toolID string, args json.RawMessage) (string, error) {
+		once.Do(func() { executor, buildErr = newWorkflowToolExecutor(result, db, logger) })
+		if buildErr != nil {
+			return "", buildErr
+		}
+		return executor.Broker().CallDisplay(toolID, args)
+	}
+}
+
+func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, logger *slog.Logger) (workflow.ToolRunner, error) {
+	executor, err := newWorkflowToolExecutor(result, db, logger)
+	if err != nil {
+		return nil, err
 	}
 	caps := make(map[string][]string)
 	definitions := executor.Definitions()

@@ -190,7 +190,10 @@ func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 	if err != nil {
 		return err
 	}
-	if err := built.LoadAll(ctx, append(specs, routines...), deps); err != nil {
+	if err := built.Install(ctx, specs, deps); err != nil {
+		return err
+	}
+	if err := built.LoadAll(ctx, routines, deps); err != nil {
 		return err
 	}
 	b.interpreter = built

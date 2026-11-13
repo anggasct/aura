@@ -232,7 +232,7 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 			EffectfulTools: githubadapter.ToolNames(),
 			Agents:         registry,
 		}
-		if err := interpreter.Load(ctx, spec, deps); err != nil {
+		if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 			t.Fatalf("Load: %v", err)
 		}
 		return interpreter

@@ -501,6 +501,9 @@ func (b *build) wireDurableListener(ctx context.Context) error {
 		return err
 	}
 	workflowTools.enableProposalCards(cfg, proposalOfferers(s.channels), b.logger)
+	if broker := b.builtin.Broker(); broker != nil {
+		workflowTools.enableCallDisplay(broker.CallDisplay)
+	}
 	if err := b.group.Add(server.Background("workflow_proposal_cards", workflowTools.runProposalCards)); err != nil {
 		return err
 	}

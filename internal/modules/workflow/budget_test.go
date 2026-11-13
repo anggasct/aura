@@ -53,7 +53,7 @@ func stepByID(t *testing.T, disk *Store, runID, stepID string) *StepRun {
 func TestGeneratedRunsStopAtMaxStepsAndDefinedRunsDoNot(t *testing.T) {
 	tools := &fakeToolRunner{}
 	interpreter, disk, _ := budgetInterpreter(t, Budget{MaxSteps: 2, MaxTokens: 1000}, &Options{Tools: tools})
-	loadAll(t, interpreter, threeToolSteps("gen_prop_a", SourceGenerated), threeToolSteps("defined", SourceDefined))
+	installAll(t, interpreter, threeToolSteps("gen_prop_a", SourceGenerated), threeToolSteps("defined", SourceDefined))
 	generated, err := interpreter.Start(context.Background(), "gen_prop_a", nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestRetriesAndChildStepsCountTowardTheParentBudget(t *testing.T) {
 	}}
 	tools := &flakyTools{}
 	interpreter, disk, _ := budgetInterpreter(t, Budget{MaxSteps: 3}, &Options{Tools: tools})
-	loadAll(t, interpreter, retrying)
+	installAll(t, interpreter, retrying)
 	run, err := interpreter.Start(context.Background(), retrying.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestRetriesAndChildStepsCountTowardTheParentBudget(t *testing.T) {
 	parentInterpreter, parentDisk, _ := budgetInterpreter(t, Budget{MaxSteps: 3}, &Options{Tools: counting})
 	parent := composingSpec("gen_prop_parent", "defined")
 	parent.Source = SourceGenerated
-	loadAll(t, parentInterpreter, threeToolSteps("defined", SourceDefined), parent)
+	installAll(t, parentInterpreter, threeToolSteps("defined", SourceDefined), parent)
 	parentRun, err := parentInterpreter.Start(context.Background(), parent.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestMeteredAgentTokensStopTheRunInBothDrivers(t *testing.T) {
 		t.Fatal(err)
 	}
 	interpreter, disk, fake := budgetInterpreter(t, Budget{MaxSteps: 10, MaxTokens: 250}, &Options{Agents: meteredAgents{tokens: 150}, AgentResolver: registry})
-	loadAll(t, interpreter, agentSteps("gen_prop_tokens"), agentSteps("gen_prop_serial"))
+	installAll(t, interpreter, agentSteps("gen_prop_tokens"), agentSteps("gen_prop_serial"))
 	run, err := interpreter.Start(context.Background(), "gen_prop_tokens", nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestMeteredAgentTokensStopTheRunInBothDrivers(t *testing.T) {
 
 func TestProposalLongerThanMaxStepsIsRejected(t *testing.T) {
 	interpreter, _, _ := budgetInterpreter(t, Budget{MaxSteps: 2}, &Options{Tools: &fakeToolRunner{}})
-	loadAll(t, interpreter, toolSpec("leaf"))
+	installAll(t, interpreter, toolSpec("leaf"))
 	if _, err := interpreter.CompileProposal(NormalizeProposal(threeToolSteps("x", SourceGenerated), "prop_long"), []string{"read_file"}); !hasCode(err, ErrorCodeBudgetExhausted) {
 		t.Fatalf("CompileProposal of a 3-step spec under max_steps 2 = %v", err)
 	}

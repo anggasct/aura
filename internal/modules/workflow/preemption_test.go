@@ -135,7 +135,7 @@ func (h *workflowHost) driveRecords() []driveRecord {
 
 func (h *workflowHost) load(specs ...*Spec) {
 	h.t.Helper()
-	loadAll(h.t, h.interpreter, specs...)
+	installAll(h.t, h.interpreter, specs...)
 }
 
 func (h *workflowHost) startRun(definitionID string) hostedRun {

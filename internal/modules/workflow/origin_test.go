@@ -132,7 +132,7 @@ func TestStartRefusesAnIncompleteOrigin(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			interpreter, _, disk := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
-			loadAll(t, interpreter, toolSpec("leaf"))
+			installAll(t, interpreter, toolSpec("leaf"))
 			origin := tc.mutate(ownerOrigin())
 			if _, err := interpreter.Start(t.Context(), "leaf", nil, origin); !hasCode(err, ErrorCodeOriginIncomplete) {
 				t.Fatalf("Start = %v, want code %s", err, ErrorCodeOriginIncomplete)
@@ -157,7 +157,7 @@ func TestToolStepCarriesOriginAndDigest(t *testing.T) {
 			tools := &stepCallTools{}
 			interpreter, fake, disk := driverTestSetup(t, tools, driver)
 			spec := toolSpec("leaf")
-			loadAll(t, interpreter, spec)
+			installAll(t, interpreter, spec)
 			digest, err := Digest(spec)
 			if err != nil {
 				t.Fatal(err)
@@ -200,7 +200,7 @@ func TestToolStepWithoutCompleteOriginNeverReachesTheRunner(t *testing.T) {
 			tools := &stepCallTools{}
 			interpreter, fake, disk := driverTestSetup(t, tools, driver)
 			spec := toolSpec("leaf")
-			loadAll(t, interpreter, spec)
+			installAll(t, interpreter, spec)
 			run, err := disk.CreateRun(t.Context(), spec, &RunInput{}, ownerOrigin())
 			if err != nil {
 				t.Fatal(err)
@@ -241,7 +241,7 @@ func TestChildRunInheritsOriginAndStaysQuiet(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tools := &stepCallTools{}
 			interpreter, fake, disk := driverTestSetup(t, tools, driver)
-			loadAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
+			installAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
 			origin := toolStartedOrigin()
 			var parentID string
 			if driver == DriverSerial {

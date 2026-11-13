@@ -34,7 +34,7 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolContro
 	interpreter := workflow.NewInterpreter(runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
 	deps := workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), EffectfulTools: toolsbuiltin.EffectfulToolNames()}
 	for _, spec := range []*workflow.Spec{waitingSpec("book_visit", "Book a visit"), waitingSpec("refund", "Issue a refund")} {
-		if err := interpreter.Load(t.Context(), spec, deps); err != nil {
+		if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, deps); err != nil {
 			t.Fatal(err)
 		}
 	}

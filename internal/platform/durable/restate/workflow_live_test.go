@@ -301,7 +301,7 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 		EffectfulTools: []string{},
 		Agents:         registry,
 	}
-	if err := interpreter.Load(ctx, spec, deps); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := disk.CreateRun(ctx, spec, &workflow.RunInput{Objective: "survive restart"}, ownerOrigin())
@@ -437,7 +437,7 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 		EffectfulTools: []string{},
 		Agents:         registry,
 	}
-	if err := interpreter.Load(ctx, spec, deps); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := disk.CreateRun(ctx, spec, &workflow.RunInput{Objective: "survive restart"}, ownerOrigin())

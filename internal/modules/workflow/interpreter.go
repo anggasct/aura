@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func sha256Hex(content []byte) string {
@@ -130,10 +131,6 @@ func (i *Interpreter) handlerFor(driver Driver) durable.Handler {
 	return i.HandleSerial
 }
 
-func (i *Interpreter) Load(ctx context.Context, spec *Spec, deps ValidationDeps) error {
-	return i.LoadAll(ctx, []*Spec{spec}, deps)
-}
-
 func (i *Interpreter) compiledFor(ctx context.Context, id string, version int) (*compiledSpec, bool) {
 	cached, present := i.specs.get(id)
 	if present && (version == 0 || cached.spec.Version == version) {
@@ -164,6 +161,14 @@ func (i *Interpreter) compiledFor(ctx context.Context, id string, version int) (
 }
 
 func (i *Interpreter) LoadAll(ctx context.Context, specs []*Spec, deps ValidationDeps) error {
+	return i.load(ctx, specs, deps, nil)
+}
+
+func (i *Interpreter) Install(ctx context.Context, specs []*Spec, deps ValidationDeps) error {
+	return i.load(ctx, specs, deps, &Approval{Kind: ApprovalInstalled, ApproverID: principal.OwnerID})
+}
+
+func (i *Interpreter) load(ctx context.Context, specs []*Spec, deps ValidationDeps, approval *Approval) error {
 	i.depsMu.Lock()
 	i.deps = deps
 	i.depsMu.Unlock()
@@ -191,7 +196,7 @@ func (i *Interpreter) LoadAll(ctx context.Context, specs []*Spec, deps Validatio
 		graphs[index] = graph
 	}
 	for index, spec := range specs {
-		if err := i.store.SaveDefinition(ctx, spec); err != nil {
+		if err := i.store.saveDefinition(ctx, spec, approval); err != nil {
 			return err
 		}
 		i.specs.put(spec, graphs[index])
@@ -230,6 +235,9 @@ func (i *Interpreter) start(ctx context.Context, definitionID string, input *Run
 	compiled, ok := i.compiledFor(ctx, definitionID, 0)
 	if !ok {
 		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+definitionID+" is not loaded")
+	}
+	if _, err := i.requireSpecApproval(ctx, compiled.spec); err != nil {
+		return nil, err
 	}
 	summary, err := i.store.createRun(ctx, compiled.spec, input, origin, durableKey, "")
 	if err != nil {

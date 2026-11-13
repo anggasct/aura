@@ -62,6 +62,7 @@ var migrations = []migration{
 	{version: 44, sql: runtimeEventTurnFirstIndexSQL},
 	{version: 45, sql: effectIntentResultSchemaSQL},
 	{version: 46, sql: workflowRunTaintSchemaSQL},
+	{version: 47, sql: workflowApprovalSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -949,6 +950,26 @@ ALTER TABLE workflow_proposal ADD COLUMN tainted INTEGER NOT NULL DEFAULT 0 CHEC
 DROP INDEX workflow_run_completion_idx;
 CREATE INDEX workflow_run_completion_idx ON workflow_run(status, updated_at)
     WHERE origin_session_id IS NOT NULL AND completion_notified_at IS NULL AND parent_run_id IS NULL;
+`
+
+const workflowApprovalSchemaSQL = `
+CREATE TABLE workflow_approval (
+    definition_id      TEXT NOT NULL,
+    definition_version INTEGER NOT NULL,
+    spec_sha256        TEXT NOT NULL,
+    kind               TEXT NOT NULL CHECK (kind IN ('installed','proposal','routine')),
+    agent_id           TEXT,
+    approver_id        TEXT NOT NULL,
+    proposal_id        TEXT REFERENCES workflow_proposal(id),
+    source_definition_id      TEXT,
+    source_definition_version INTEGER,
+    tainted            INTEGER NOT NULL DEFAULT 0 CHECK (tainted IN (0,1)),
+    approved_at        TEXT NOT NULL,
+    PRIMARY KEY (definition_id, definition_version),
+    FOREIGN KEY (definition_id, definition_version) REFERENCES workflow_definition(id, version) ON DELETE RESTRICT,
+    CHECK ((kind = 'proposal') = (proposal_id IS NOT NULL)),
+    CHECK ((kind = 'routine') = (source_definition_id IS NOT NULL AND source_definition_version IS NOT NULL))
+);
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

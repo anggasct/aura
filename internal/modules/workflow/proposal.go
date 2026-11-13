@@ -71,15 +71,23 @@ func CheckCeiling(spec *Spec, tools []string) error {
 	return nil
 }
 
-func RenderPlan(spec *Spec, graph *Graph) string {
+type ToolCallText func(toolID string, args json.RawMessage) (string, error)
+
+func RenderPlan(spec *Spec, graph *Graph, show ToolCallText) (string, error) {
 	lines := make([]string, 0, 1+len(graph.Order))
 	lines = append(lines, "Plan: "+spec.Goal)
 	for index, stepID := range graph.Order {
 		step := graph.ByStep[stepID]
 		line := fmt.Sprintf("%d. %s — ", index+1, step.ID)
+		var call string
 		switch step.Executor.Kind {
 		case KindTool:
 			line += "run tool " + deref(step.Executor.ToolID)
+			text, err := showToolCall(step, show)
+			if err != nil {
+				return "", err
+			}
+			call = text
 		case KindAgent:
 			line += "ask agent " + cmpOr(deref(step.Executor.AgentID), strings.Join(step.Executor.RequiredCapabilities, "+"))
 		case KindWait:
@@ -98,8 +106,24 @@ func RenderPlan(spec *Spec, graph *Graph) string {
 			line += " if " + *step.Condition
 		}
 		lines = append(lines, line)
+		if call != "" {
+			for _, callLine := range strings.Split(call, "\n") {
+				lines = append(lines, "    "+callLine)
+			}
+		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), nil
+}
+
+func showToolCall(step *StepSpec, show ToolCallText) (string, error) {
+	if show == nil {
+		return "", codedError(ErrorCodePlanUnshowable, fmt.Sprintf("step %q: no tool display is available to show the call", step.ID))
+	}
+	text, err := show(deref(step.Executor.ToolID), toolArguments(step))
+	if err != nil {
+		return "", codedError(ErrorCodePlanUnshowable, fmt.Sprintf("step %q: the call of tool %q cannot be shown: %v", step.ID, deref(step.Executor.ToolID), err))
+	}
+	return text, nil
 }
 
 func deref(value *string) string {

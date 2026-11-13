@@ -791,21 +791,43 @@ func absoluteApprovalExpiry(deadline time.Time) time.Time {
 	return time.Now().Add(defaultApprovalTTL)
 }
 
-func (b *Broker) buildApprovalPrompt(call *authorization) (*ApprovalPrompt, error) {
-	request, decision := call.canonical, call.decision
+func (b *Broker) approvalText(definition *tools.Definition, arguments json.RawMessage) (string, error) {
 	secrets := b.secretValues()
-	display, err := call.definition.ApprovalText(request.Arguments, func(text string) string {
+	display, err := definition.ApprovalText(arguments, func(text string) string {
 		return string(redact([]byte(text), secrets))
 	})
 	if err != nil {
 		code, _ := tools.CodeOf(err)
 		if code == tools.ErrorCodeDisplayTooLarge {
-			return nil, errorf(ResultApprovalDisplayTooLarge, "tool %q arguments do not fit the approval display", request.ToolName)
+			return "", errorf(ResultApprovalDisplayTooLarge, "tool %q arguments do not fit the approval display", definition.Name)
 		}
 		if code == tools.ErrorCodeDisplayRedacted {
-			return nil, errorf(ResultPolicyDenied, "tool %q arguments hold a configured secret, so the approval card cannot show them", request.ToolName)
+			return "", errorf(ResultPolicyDenied, "tool %q arguments hold a configured secret, so the approval card cannot show them", definition.Name)
 		}
-		return nil, errorf(ResultPolicyDenied, "tool %q approval display failed closed", request.ToolName)
+		return "", errorf(ResultPolicyDenied, "tool %q approval display failed closed", definition.Name)
+	}
+	return display, nil
+}
+
+func (b *Broker) CallDisplay(toolName string, args json.RawMessage) (string, error) {
+	b.mu.RLock()
+	definition, ok := b.definitions[toolName+"@"+tools.Version]
+	b.mu.RUnlock()
+	if !ok {
+		return "", errorf(ResultPolicyDenied, "unknown tool %q version %q", toolName, tools.Version)
+	}
+	arguments, err := b.checkedArguments(definition, args)
+	if err != nil {
+		return "", err
+	}
+	return b.approvalText(definition, arguments)
+}
+
+func (b *Broker) buildApprovalPrompt(call *authorization) (*ApprovalPrompt, error) {
+	request, decision := call.canonical, call.decision
+	display, err := b.approvalText(call.definition, request.Arguments)
+	if err != nil {
+		return nil, err
 	}
 	return &ApprovalPrompt{
 		ToolName:       request.ToolName,
@@ -825,6 +847,19 @@ func (b *Broker) buildApprovalPrompt(call *authorization) (*ApprovalPrompt, erro
 	}, nil
 }
 
+func (b *Broker) checkedArguments(definition *tools.Definition, raw json.RawMessage) (json.RawMessage, error) {
+	arguments, err := definition.Validate(raw)
+	if err != nil {
+		return nil, errorf(ResultInvalidArgument, "%v", err)
+	}
+	if check := b.argumentChecks[definition.Key()]; check != nil {
+		if err := check(arguments); err != nil {
+			return nil, errorf(ResultInvalidArgument, "%v", err)
+		}
+	}
+	return arguments, nil
+}
+
 func (b *Broker) canonicalRequest(request *ToolRequest) (ToolRequest, error) {
 	if request == nil {
 		return ToolRequest{}, errorf(ResultInvalidArgument, "request must not be nil")
@@ -835,14 +870,9 @@ func (b *Broker) canonicalRequest(request *ToolRequest) (ToolRequest, error) {
 	if !ok {
 		return ToolRequest{}, errorf(ResultPolicyDenied, "unknown tool %q version %q", request.ToolName, request.ToolVersion)
 	}
-	arguments, err := definition.Validate(request.Arguments)
+	arguments, err := b.checkedArguments(definition, request.Arguments)
 	if err != nil {
-		return ToolRequest{}, errorf(ResultInvalidArgument, "%v", err)
-	}
-	if check := b.argumentChecks[definition.Key()]; check != nil {
-		if err := check(arguments); err != nil {
-			return ToolRequest{}, errorf(ResultInvalidArgument, "%v", err)
-		}
+		return ToolRequest{}, err
 	}
 	canonical := *request
 	canonical.Arguments = arguments

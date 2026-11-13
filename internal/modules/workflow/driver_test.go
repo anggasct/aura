@@ -79,7 +79,7 @@ func TestSerialDriverRegistersTheJournaledHandler(t *testing.T) {
 			disk := newTestStore(t)
 			runtime := &recordingRegistrar{Fake: durable.NewFake()}
 			interpreter := NewInterpreter(disk, runtime, tc.options)
-			if err := interpreter.Load(ctx, twoToolStepSpec("driver-two-steps"), testValidationDeps()); err != nil {
+			if err := interpreter.Install(ctx, []*Spec{twoToolStepSpec("driver-two-steps")}, testValidationDeps()); err != nil {
 				t.Fatalf("Load: %v", err)
 			}
 			if got := runtime.registeredNames(); !slices.Equal(got, []string{HandlerName}) {

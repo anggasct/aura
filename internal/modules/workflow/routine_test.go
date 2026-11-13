@@ -27,7 +27,7 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	proposed := toolSpec("x")
 	proposed.Steps = append(proposed.Steps, StepSpec{ID: "gate", DependsOn: []string{"read"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second})
 	generated := NormalizeProposal(proposed, "prop_r")
-	loadAll(t, interpreter, generated, threeToolSteps("defined", SourceDefined))
+	installAll(t, interpreter, generated, threeToolSteps("defined", SourceDefined))
 	run, err := interpreter.Start(context.Background(), generated.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 		t.Fatalf("Routines = %+v, %v", routines, err)
 	}
 	fresh := NewInterpreter(disk, durable.NewFake(), &Options{Driver: DriverConcurrent, Tools: tools})
-	loadAll(t, fresh, toolSpec("leaf"))
+	installAll(t, fresh, toolSpec("leaf"))
 	started, err := fresh.StartKeyed(context.Background(), first.ID, &RunInput{}, ownerOrigin(), "sched-once")
 	if err != nil || started.DefinitionVersion != 2 {
 		t.Fatalf("starting a routine that is only in the store = %+v, %v", started, err)

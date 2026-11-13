@@ -34,6 +34,9 @@ func proposalFixture(t *testing.T) *proposalHarness {
 		t.Fatal(err)
 	}
 	controller.registry = registry
+	controller.enableCallDisplay(func(toolID string, args json.RawMessage) (string, error) {
+		return "call " + toolID + " " + string(args), nil
+	})
 	owner := &toolsbuiltin.WorkflowCaller{SessionID: "ops/terminal:owner", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, AgentID: "ops"}
 	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: owner.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)

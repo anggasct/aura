@@ -238,6 +238,13 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec, attempt
 	if !e.origin.Complete() {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeOriginIncomplete), Detail: "run " + e.runID + " has no complete origin", EndedAt: nowPtr()}
 	}
+	if _, err := e.interpreter.requireApproval(ctx, e.spec.ID, e.spec.Version, e.definitionDigest); err != nil {
+		code := ErrorCodeStepFailed
+		if coded, ok := CodeOf(err); ok {
+			code = coded
+		}
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(code), Detail: err.Error(), EndedAt: nowPtr()}
+	}
 	call := &StepCall{RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: e.origin, DefinitionDigest: e.definitionDigest}
 	output, err := runner.Invoke(WithStepCall(ctx, call), *step.Executor.ToolID, toolArguments(step))
 	if err != nil {
