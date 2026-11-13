@@ -113,7 +113,7 @@ func (b e2eBuiltinTools) Execute(ctx context.Context, request *runtimeadk.Builti
 		PrincipalID: request.PrincipalID, ToolName: request.ToolName, ToolVersion: request.ToolVersion,
 		Arguments: request.Arguments, Capabilities: request.Capabilities,
 		Trust: approval.TrustLabel(request.Trust), Deadline: request.Deadline, IdempotencyKey: request.IdempotencyKey,
-		EventSequence: request.EventSequence, EventInvocation: request.EventInvocation,
+		AllocateEventSequence: true, EventInvocation: request.EventInvocation,
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
 	})
 	if err != nil {

@@ -314,7 +314,7 @@ func (e *Executor) Execute(ctx context.Context, request *runtimeadk.BuiltinToolR
 		ToolName: request.ToolName, ToolVersion: request.ToolVersion,
 		Arguments: request.Arguments, Capabilities: request.Capabilities, Trust: approval.TrustLabel(request.Trust),
 		Deadline: request.Deadline, IdempotencyKey: request.IdempotencyKey,
-		EventSequence: request.EventSequence, EventInvocation: request.EventInvocation,
+		AllocateEventSequence: true, EventInvocation: request.EventInvocation,
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
 		Knowledge: slices.Clone(request.Knowledge), Tainted: request.Tainted,
 	})

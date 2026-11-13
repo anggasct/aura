@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
 )
 
@@ -120,20 +121,18 @@ func TestEffectRequestMayLetTheJournalAllocateItsSequence(t *testing.T) {
 	tests := []struct {
 		name     string
 		mutate   func(*ToolRequest)
-		scoped   bool
 		wantFail bool
 	}{
 		{name: "allocation without a sequence", mutate: func(r *ToolRequest) { r.EventSequence, r.AllocateEventSequence = 0, true }},
 		{name: "a sequence without allocation", mutate: func(r *ToolRequest) { r.EventSequence = 4 }},
 		{name: "neither", mutate: func(r *ToolRequest) { r.EventSequence = 0 }, wantFail: true},
 		{name: "both", mutate: func(r *ToolRequest) { r.EventSequence, r.AllocateEventSequence = 4, true }, wantFail: true},
-		{name: "allocation under a durable turn scope", mutate: func(r *ToolRequest) { r.EventSequence, r.AllocateEventSequence = 0, true }, scoped: true, wantFail: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			request := replayRequest(replayArguments)
 			tc.mutate(request)
-			err := validateEffectRequest(request, tc.scoped)
+			err := validateEffectRequest(request)
 			if tc.wantFail {
 				if class, _ := CodeOf(err); class != ResultInvalidArgument {
 					t.Fatalf("validateEffectRequest = %v, want %s", err, ResultInvalidArgument)
@@ -145,4 +144,20 @@ func TestEffectRequestMayLetTheJournalAllocateItsSequence(t *testing.T) {
 			}
 		})
 	}
+	t.Run("allocation under a durable turn scope reaches the journal", func(t *testing.T) {
+		harness := newReplayHarness(t, &replayConfig{output: json.RawMessage(`{"ok":true}`), inlineLimit: 64 << 10})
+		request := replayRequest(replayArguments)
+		request.EventSequence, request.AllocateEventSequence = 0, true
+		ctx := durable.WithTurnScope(t.Context(), durable.NewTurnScope(passthroughInvocation{}))
+		if _, err := harness.run(ctx, request); err != nil {
+			t.Fatalf("Execute under a turn scope = %v, want success", err)
+		}
+		var sequence uint64
+		if err := harness.db.QueryRowContext(t.Context(), `SELECT sequence FROM runtime_event WHERE session_id = ? AND kind = 'tool.requested'`, request.SessionID).Scan(&sequence); err != nil {
+			t.Fatalf("read the tool.requested event: %v", err)
+		}
+		if sequence != 1 {
+			t.Fatalf("tool.requested sequence = %d, want 1", sequence)
+		}
+	})
 }

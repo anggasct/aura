@@ -74,7 +74,6 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 		Capabilities:    []string{"workspace-write"},
 		Trust:           string(approval.TrustOwnerInput),
 		IdempotencyKey:  "wiring/effect/1",
-		EventSequence:   1,
 		EventInvocation: "inv-1",
 		EventBranch:     "main",
 		EventAuthor:     "agent",

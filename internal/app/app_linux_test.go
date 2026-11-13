@@ -132,7 +132,7 @@ func requirePersonaCeiling(t *testing.T, app *App) {
 			RequestID: "call-" + tool, TurnID: "turn-1", SessionID: "sess-ceiling", PrincipalID: "friend",
 			PrincipalClass: principal.ClassTrusted, AgentID: "desk", ToolName: tool, ToolVersion: "v1",
 			Arguments: json.RawMessage(`{"path":"."}`), Capabilities: []string{"workspace-read"}, Trust: "derived_untrusted",
-			Deadline: time.Now().Add(time.Minute), IdempotencyKey: "ceiling/" + tool, EventSequence: 1,
+			Deadline: time.Now().Add(time.Minute), IdempotencyKey: "ceiling/" + tool,
 		})
 		return err
 	}

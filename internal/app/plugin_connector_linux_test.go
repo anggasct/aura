@@ -339,15 +339,11 @@ func (f *connectorFixture) call(t *testing.T, tool, id string, class principal.C
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	f.h.mu.Lock()
-	f.h.sequence++
-	sequence := f.h.sequence
-	f.h.mu.Unlock()
 	return f.h.executor.Execute(t.Context(), &runtimeadk.BuiltinToolRequest{
 		RequestID: id, TurnID: "turn-" + id, SessionID: "session-1", PrincipalID: "owner-1", PrincipalClass: class,
 		ToolName: "plugin_mailer_" + tool, ToolVersion: "v1", Arguments: raw,
 		Trust: string(approval.TrustDerivedUntrusted), IdempotencyKey: "key-" + id,
-		EventSequence: sequence, EventInvocation: "inv-" + id, EventBranch: "main", EventAuthor: "agent",
+		EventInvocation: "inv-" + id, EventBranch: "main", EventAuthor: "agent",
 	})
 }
 

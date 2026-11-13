@@ -118,7 +118,6 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 		Capabilities:    []string{"workspace-read"},
 		Trust:           string(approval.TrustDerivedUntrusted),
 		IdempotencyKey:  "test/spill/1",
-		EventSequence:   1,
 		EventInvocation: "inv-1",
 		EventBranch:     "main",
 		EventAuthor:     "agent",
@@ -193,7 +192,6 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 		Capabilities:    []string{"workspace-write"},
 		Trust:           string(approval.TrustOwnerInput),
 		IdempotencyKey:  "approval-secret-1",
-		EventSequence:   1,
 		EventInvocation: "inv-secret",
 		EventBranch:     "main",
 		EventAuthor:     "agent",
@@ -223,7 +221,6 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 		Capabilities:   []string{"workspace-write"},
 		Trust:          string(approval.TrustOwnerInput),
 		IdempotencyKey: "diagnostic-secret-1",
-		EventSequence:  2,
 	})
 	if err == nil {
 		t.Fatal("diagnostic executor unexpectedly succeeded")

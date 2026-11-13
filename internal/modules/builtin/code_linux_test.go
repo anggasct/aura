@@ -136,7 +136,7 @@ func TestCodeExecuteIsNeverOfferedToPublicPrincipals(t *testing.T) {
 		RequestID: "call-public", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "visitor-1", PrincipalClass: principal.ClassPublic,
 		ToolName: "code_execute", ToolVersion: "v1", Arguments: json.RawMessage(codeArguments),
 		Capabilities: []string{"code-interpreter"}, Trust: string(approval.TrustDerivedUntrusted),
-		IdempotencyKey: "test/public", EventSequence: 1, EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
+		IdempotencyKey: "test/public", EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
 	})
 	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultToolTierDenied {
 		t.Fatalf("code_execute for a public principal = %v, want tool_tier_denied", err)

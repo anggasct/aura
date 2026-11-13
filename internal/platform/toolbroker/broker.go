@@ -402,7 +402,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			return ToolResult{}, errorf(ResultCapabilityUnavailable, "effect journal is required for tool %q", key)
 		}
 		_, scoped := durable.TurnScopeFrom(ctx)
-		if err := validateEffectRequest(&canonical, scoped); err != nil {
+		if err := validateEffectRequest(&canonical); err != nil {
 			return ToolResult{}, err
 		}
 		if !scoped {
@@ -732,9 +732,9 @@ func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constr
 	return invocation.result, nil
 }
 
-func validateEffectRequest(request *ToolRequest, scoped bool) error {
-	if request.AllocateEventSequence && (request.EventSequence != 0 || scoped) {
-		return errorf(ResultInvalidArgument, "effectful tool requests that let the journal allocate the event sequence must carry none and run outside a durable turn")
+func validateEffectRequest(request *ToolRequest) error {
+	if request.AllocateEventSequence && request.EventSequence != 0 {
+		return errorf(ResultInvalidArgument, "effectful tool requests that let the journal allocate the event sequence must carry none")
 	}
 	sequenced := request.EventSequence != 0 || request.AllocateEventSequence
 	if request.SessionID == "" || request.TurnID == "" || request.RequestID == "" || request.IdempotencyKey == "" || !sequenced {

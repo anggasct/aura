@@ -48,8 +48,8 @@ func (r *kbSearchRig) call(t *testing.T, agent string, class principal.Class, ar
 		RequestID: "call-" + string(class), TurnID: "turn-1", SessionID: "sess_kb", PrincipalID: principal.OwnerID,
 		PrincipalClass: class, AgentID: agent, ToolName: "kb_search", ToolVersion: "v1",
 		Arguments: json.RawMessage(arguments), Trust: "derived_untrusted", Deadline: time.Now().Add(time.Minute),
-		IdempotencyKey: "kb/" + string(class), EventSequence: 1,
-		Knowledge: r.personas.Knowledge(agent, class),
+		IdempotencyKey: "kb/" + string(class),
+		Knowledge:      r.personas.Knowledge(agent, class),
 	})
 	var result kbSearchResult
 	if err != nil {

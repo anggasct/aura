@@ -251,15 +251,11 @@ func (f *e2eFixture) search(t *testing.T, id, message string) (json.RawMessage, 
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	f.h.mu.Lock()
-	f.h.sequence++
-	sequence := f.h.sequence
-	f.h.mu.Unlock()
 	return f.h.executor.Execute(t.Context(), &runtimeadk.BuiltinToolRequest{
 		RequestID: id, TurnID: "turn-" + id, SessionID: "session-1", PrincipalID: "owner-1", PrincipalClass: principal.ClassOwner,
 		ToolName: "plugin_mailer_search", ToolVersion: "v1", Arguments: args,
 		Trust: string(approval.TrustDerivedUntrusted), IdempotencyKey: "key-" + id,
-		EventSequence: sequence, EventInvocation: "inv-" + id, EventBranch: "main", EventAuthor: "agent",
+		EventInvocation: "inv-" + id, EventBranch: "main", EventAuthor: "agent",
 	})
 }
 
