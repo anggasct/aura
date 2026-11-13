@@ -188,7 +188,7 @@ func newHTTPChatHarnessWithModel(t *testing.T, turnsPerMinute string, llm adkmod
 		t.Fatalf("buildHTTPChat: %v", err)
 	}
 	baseURL := serveHTTPChat(t, server)
-	return &httpChatHarness{t: t, config: path, baseURL: baseURL, db: db}
+	return &httpChatHarness{t: t, cfg: cfg, config: path, baseURL: baseURL, db: db}
 }
 
 func (h *httpChatHarness) key(persona, class string) (plaintext, id string) {
