@@ -14,3 +14,12 @@ type Invocation interface {
 	Wait(ctx context.Context, name string, timeout time.Duration) (payload []byte, timedOut bool, ok bool)
 	RunAction(ctx context.Context, key string, fn func(ctx context.Context) ([]byte, error)) ([]byte, error)
 }
+
+type concurrentActions interface {
+	ConcurrentActions() bool
+}
+
+func ConcurrentActions(inv Invocation) bool {
+	declared, ok := inv.(concurrentActions)
+	return ok && declared.ConcurrentActions()
+}

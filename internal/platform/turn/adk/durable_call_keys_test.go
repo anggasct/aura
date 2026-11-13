@@ -47,6 +47,7 @@ func TestDurableToolCallKeysFollowTheCall(t *testing.T) {
 	close(rig.tools.release)
 
 	awaitStream(t, rig.run(context.WithoutCancel(t.Context())))
+	waitFor(t, "the turn is released", func() bool { return slices.Contains(rig.actionKeys(t), "release") })
 
 	var keys []string
 	clocks := 0
@@ -69,39 +70,58 @@ func TestDurableToolCallKeysFollowTheCall(t *testing.T) {
 		t.Error("clock keys = 0, want the stamp of the terminal event")
 	}
 	wantIdempotency := []string{"adk/session-1/turn-1/adk-turn-1-model-1-0", "adk/session-1/turn-1/adk-turn-1-model-1-1"}
-	if got := rig.tools.seenKeys(); !slices.Equal(got, wantIdempotency) {
+	got := rig.tools.seenKeys()
+	slices.Sort(got)
+	if !slices.Equal(got, wantIdempotency) {
 		t.Errorf("idempotency keys = %q, want %q", got, wantIdempotency)
 	}
 }
 
 func TestReplayedToolCallsKeepTheirOwnRecords(t *testing.T) {
-	rig := startDurableTurnRig(t, &toolThenTextModel{queries: []string{"a", "b"}})
-	rig.tools.stalled = "b"
-	close(rig.tools.release)
-	rig.run(context.WithoutCancel(t.Context()))
-	waitFor(t, "call 1 is running with call 0 recorded", func() bool { return rig.tools.runsOf("a") == 1 && rig.tools.runsOf("b") == 1 })
+	cases := []struct {
+		name     string
+		stalled  string
+		recorded string
+	}{
+		{name: "call 0 ends while call 1 blocks", stalled: "b", recorded: "call-1-0/execution"},
+		{name: "call 1 ends while call 0 blocks", stalled: "a", recorded: "call-1-1/execution"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := startDurableTurnRig(t, &toolThenTextModel{queries: []string{"a", "b"}})
+			rig.tools.stalled = tc.stalled
+			close(rig.tools.release)
+			rig.run(context.WithoutCancel(t.Context()))
+			waitFor(t, "one call is recorded and the other is running", func() bool {
+				return rig.tools.runsOf("a") == 1 && rig.tools.runsOf("b") == 1 && slices.Contains(rig.actionKeys(t), tc.recorded)
+			})
 
-	rig.stopHost()
-	rig.startLife(t)
-	waitFor(t, "the second life ends the turn", func() bool { return rig.turnEnded(t) })
+			rig.stopHost()
+			rig.startLife(t)
+			waitFor(t, "the second life ends the turn", func() bool { return rig.turnEnded(t) })
 
-	if got := rig.tools.runsOf("a"); got != 1 {
-		t.Errorf("call 0 runs = %d, want 1", got)
-	}
-	if got := rig.tools.runsOf("b"); got != 2 {
-		t.Errorf("call 1 runs = %d, want 2", got)
-	}
-	requests := rig.model.seen()
-	if len(requests) != 2 {
-		t.Fatalf("model calls = %d, want 2", len(requests))
-	}
-	var outputs []string
-	for _, part := range requests[1] {
-		if isResponse(part) {
-			outputs = append(outputs, part.output)
-		}
-	}
-	if len(outputs) != 2 || !strings.Contains(outputs[0], `"query":"a"`) || !strings.Contains(outputs[1], `"query":"b"`) {
-		t.Errorf("function responses in the next request = %q, want call 0's output then call 1's", outputs)
+			for _, query := range []string{"a", "b"} {
+				want := 1
+				if query == tc.stalled {
+					want = 2
+				}
+				if got := rig.tools.runsOf(query); got != want {
+					t.Errorf("runs of %s = %d, want %d", query, got, want)
+				}
+			}
+			requests := rig.model.seen()
+			if len(requests) != 2 {
+				t.Fatalf("model calls = %d, want 2", len(requests))
+			}
+			var outputs []string
+			for _, part := range requests[1] {
+				if isResponse(part) {
+					outputs = append(outputs, part.output)
+				}
+			}
+			if len(outputs) != 2 || !strings.Contains(outputs[0], `"query":"a"`) || !strings.Contains(outputs[1], `"query":"b"`) {
+				t.Errorf("function responses in the next request = %q, want call 0's output then call 1's", outputs)
+			}
+		})
 	}
 }

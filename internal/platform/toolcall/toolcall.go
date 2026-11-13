@@ -3,6 +3,7 @@ package toolcall
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 type Batch struct {
@@ -10,16 +11,22 @@ type Batch struct {
 }
 
 type Slot struct {
-	number int
-	index  int
+	batch      *Batch
+	number     int
+	index      int
+	alone      bool
+	authorize  sync.Once
+	authorized chan struct{}
+	closing    sync.Once
+	closed     chan struct{}
 }
 
 func NewBatch(number, size int) *Batch {
-	slots := make([]*Slot, max(size, 0))
-	for i := range slots {
-		slots[i] = &Slot{number: number, index: i}
+	batch := &Batch{slots: make([]*Slot, max(size, 0))}
+	for i := range batch.slots {
+		batch.slots[i] = &Slot{batch: batch, number: number, index: i, authorized: make(chan struct{}), closed: make(chan struct{})}
 	}
-	return &Batch{slots: slots}
+	return batch
 }
 
 func (b *Batch) Slot(i int) *Slot {
@@ -52,4 +59,49 @@ func From(ctx context.Context) (*Slot, bool) {
 		return nil, false
 	}
 	return slot, true
+}
+
+func (s *Slot) AwaitAuthorization(ctx context.Context) error {
+	for _, earlier := range s.batch.slots[:s.index] {
+		if err := waitFor(ctx, earlier.authorized); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Slot) Authorized(alone bool) {
+	s.authorize.Do(func() {
+		s.alone = alone
+		close(s.authorized)
+	})
+}
+
+func (s *Slot) AwaitExecution(ctx context.Context) error {
+	for _, earlier := range s.batch.slots[:s.index] {
+		if err := waitFor(ctx, earlier.authorized); err != nil {
+			return err
+		}
+		if !s.alone && !earlier.alone {
+			continue
+		}
+		if err := waitFor(ctx, earlier.closed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Slot) Close() {
+	s.Authorized(true)
+	s.closing.Do(func() { close(s.closed) })
+}
+
+func waitFor(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

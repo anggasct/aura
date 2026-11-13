@@ -560,7 +560,7 @@ func (b *build) buildTurnRuntime() error {
 		broker = b.builtin
 	}
 	executor, err := runtimeadk.NewADKExecutor(
-		"aura", b.primaryModel(), b.models, b.sessions, b.events, broker, nil, b.logger, b.execOpts...,
+		"aura", b.primaryModel(), b.models, b.sessions, broker, nil, b.logger, b.execOpts...,
 	)
 	if err != nil {
 		return err

@@ -146,7 +146,7 @@ agents:
 	if err != nil {
 		t.Fatalf("NewContextProvider: %v", err)
 	}
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, sessions, events, terminalBroker{}, nil, slog.New(slog.DiscardHandler),
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, sessions, terminalBroker{}, nil, slog.New(slog.DiscardHandler),
 		runtimeadk.WithKnowledgeContext(provider))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)

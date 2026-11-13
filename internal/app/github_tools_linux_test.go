@@ -414,7 +414,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	}
 	name := "http-chat-model"
 	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, store.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)

@@ -39,13 +39,13 @@ func TestBuiltinToolRequestCarriesTheTaintOfUntrustedInput(t *testing.T) {
 				}},
 				output: json.RawMessage(`{"ok":true}`),
 			}
-			db, sessions, events := newSessionTestDB(t)
+			db, sessions, _ := newSessionTestDB(t)
 			definition := auraagent.Definition{ID: "team", PrincipalTools: []string{"sample_tool"}}
 			options := []ExecutorOption{WithBuiltinToolExecutor(builtin), WithAgentResolver(&stubResolver{definition: definition}, nil)}
 			if tc.recall != nil {
 				options = append(options, WithRecallProvider(tc.recall))
 			}
-			executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, options...)
+			executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, options...)
 			if err != nil {
 				t.Fatalf("NewADKExecutor: %v", err)
 			}

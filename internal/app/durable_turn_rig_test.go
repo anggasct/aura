@@ -371,7 +371,7 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 	}
 	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)
 	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps}
-	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, store.NewSessionService(db), store.NewEventStore(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
+	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, store.NewSessionService(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

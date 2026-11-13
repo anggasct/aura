@@ -135,7 +135,7 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 		t.Fatalf("tool: %v", err)
 	}
 	sessions, events := store.NewSessionService(db), store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, sessions, events, terminalBroker{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, sessions, terminalBroker{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
 		runtimeadk.WithSkillContext(rt.context))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)

@@ -166,7 +166,7 @@ func (b *fakeBroker) Evaluate(ctx context.Context, req *approval.ToolRequest) (a
 func newADKTestExecutor(t *testing.T, modelName string, models auramodel.Set, broker turn.ToolBroker, tools ...tool.Tool) (*ADKExecutor, *sql.DB, store.EventStore) {
 	t.Helper()
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, broker, tools, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, broker, tools, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -174,9 +174,9 @@ func newADKTestExecutor(t *testing.T, modelName string, models auramodel.Set, br
 }
 
 func TestNewADKExecutorRequiresModels(t *testing.T) {
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
-	_, err := NewADKExecutor("aura", "model", nil, sessions, events, &fakeBroker{}, nil, nil)
+	_, err := NewADKExecutor("aura", "model", nil, sessions, &fakeBroker{}, nil, nil)
 	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeInvalidArgument {
 		t.Fatalf("CodeOf(%v) = %q, want invalid_argument", err, code)
 	}
@@ -289,8 +289,8 @@ func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
 		}},
 		output: json.RawMessage(`{"ok":true}`),
 	}
-	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	db, sessions, _ := newSessionTestDB(t)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestADKExecutorPublishesDurableBuiltinEvents(t *testing.T) {
 		events: events,
 		output: json.RawMessage(`{"ok":true}`),
 	}
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 		output: json.RawMessage(`{"ok":true}`),
 		block:  block,
 	}
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

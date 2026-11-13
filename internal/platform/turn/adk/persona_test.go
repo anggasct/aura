@@ -22,10 +22,10 @@ func TestPersonaSoulSitsBetweenOwnerBlockAndCaveats(t *testing.T) {
 	for _, class := range []principal.Class{principal.ClassOwner, principal.ClassTrusted} {
 		t.Run(string(class), func(t *testing.T) {
 			model := &capturingModel{answer: "done", tokens: 1}
-			db, sessions, events := newSessionTestDB(t)
+			db, sessions, _ := newSessionTestDB(t)
 			t.Cleanup(func() { _ = db.Close() })
 			modelName, models := capturingModelSet(model)
-			executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
+			executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 				WithAgentResolver(registry, nil),
 				WithOwnerContext(owner),
 				WithRecallProvider(&stubRecallProvider{evidence: corpusEvidence()}),

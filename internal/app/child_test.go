@@ -55,7 +55,7 @@ func newTestChildExec(t *testing.T, db *sql.DB, answer string) (exec *runtimeadk
 	name := "fake-child-model"
 	exec, err := runtimeadk.NewADKExecutor(
 		"aura-test", name, auramodel.Set{name: model},
-		store.NewSessionService(db), store.NewEventStore(db),
+		store.NewSessionService(db),
 		stubChildBroker{}, nil, slog.New(slog.DiscardHandler),
 	)
 	if err != nil {

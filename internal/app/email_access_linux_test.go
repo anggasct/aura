@@ -257,7 +257,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	builtin.SetEmailOutbox(&emailOutbox{adapters: mailboxes})
 	builtin.SetHandoffOpener(newHandoffService(db, []handoffNotifier{adapter}))
 	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, store.NewSessionService(db), events, builtin, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, store.NewSessionService(db), builtin, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)

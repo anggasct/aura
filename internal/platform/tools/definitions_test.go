@@ -151,3 +151,36 @@ func TestKBSearchValidationIsStrictAndBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestRunsAloneFollowsEffectsAndOrchestration(t *testing.T) {
+	definitions := Builtins()
+	for i := range definitions {
+		definition := &definitions[i]
+		if want := definition.Effectful || definition.Orchestration; definition.RunsAlone() != want {
+			t.Errorf("%s RunsAlone() = %v, want %v", definition.Key(), definition.RunsAlone(), want)
+		}
+	}
+	byName := map[string]*Definition{}
+	for i := range definitions {
+		byName[definitions[i].Name] = &definitions[i]
+	}
+	for name, want := range map[string]bool{
+		"exec":                 true,
+		"write_file":           true,
+		EmailSendToolName:      true,
+		WorkflowCancelToolName: true,
+		HandoffToolName:        true,
+		"read_file":            false,
+		"web_search":           false,
+		KBSearchToolName:       false,
+	} {
+		definition, ok := byName[name]
+		if !ok {
+			t.Errorf("builtin %s is not defined", name)
+			continue
+		}
+		if got := definition.RunsAlone(); got != want {
+			t.Errorf("%s RunsAlone() = %v, want %v", name, got, want)
+		}
+	}
+}

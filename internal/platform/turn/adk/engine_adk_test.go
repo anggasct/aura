@@ -15,7 +15,7 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	modelName, models := fakeModelSet(model)
 	broker := &fakeBroker{}
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, broker, nil, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, broker, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 	model := &fakeADKModel{answer: "single writer", tokens: 2}
 	modelName, models := fakeModelSet(model)
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

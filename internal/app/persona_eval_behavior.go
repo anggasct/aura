@@ -43,7 +43,7 @@ func routedBehaviorModels(cfg *config.Config, models runtimeadk.ModelSource) (be
 func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Definition, class principal.Class, turns []string) ([]personaeval.Exchange, error) {
 	return personaeval.WithEvalDB(ctx, "discord:eval", func(db *sql.DB) ([]personaeval.Exchange, error) {
 		events := store.NewEventStore(db)
-		executor, err := runtimeadk.NewADKExecutor("aura", m.defaultModel, m.models, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
+		executor, err := runtimeadk.NewADKExecutor("aura", m.defaultModel, m.models, store.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
 			runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 			runtimeadk.WithAgentResolver(&staticResolver{definition: *definition}, m.route),
 			runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),

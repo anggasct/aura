@@ -113,7 +113,7 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 	}
 	events := store.NewEventStore(db)
 	name := "untrusted-input"
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, store.NewSessionService(db), events, builtin, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, store.NewSessionService(db), builtin, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)

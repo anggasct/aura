@@ -124,6 +124,10 @@ func (d *Definition) IsExternalSink() bool {
 	return d.ExternalSink || d.Server != "" || d.Plugin != nil
 }
 
+func (d *Definition) RunsAlone() bool {
+	return d.Effectful || d.Orchestration
+}
+
 func (d *Definition) Key() string {
 	return d.Name + "@" + d.Version
 }

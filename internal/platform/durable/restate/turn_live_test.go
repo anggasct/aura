@@ -264,7 +264,7 @@ func startLiveTurnRig(t *testing.T, binary string, model *liveScriptModel, toolD
 			executorOpts = append(executorOpts, runtimeadk.WithKnowledgeContext(wiring.knowledge))
 		}
 	}
-	executor, err := runtimeadk.NewADKExecutor("aura", modelName, auramodel.Set{modelName: model}, store.NewSessionService(db), events, counting, nil, nil, executorOpts...)
+	executor, err := runtimeadk.NewADKExecutor("aura", modelName, auramodel.Set{modelName: model}, store.NewSessionService(db), counting, nil, nil, executorOpts...)
 	if err != nil {
 		t.Fatalf("new ADK executor: %v", err)
 	}

@@ -17,7 +17,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/platform/vision"
 	"github.com/anggasct/aura/internal/store"
@@ -41,7 +40,6 @@ type ADKExecutor struct {
 	modelName         string
 	models            ModelSource
 	sessions          SessionPort
-	events            runtimeengine.EventStore
 	broker            turn.ToolBroker
 	tools             []tool.Tool
 	optIn             map[string]bool
@@ -50,7 +48,6 @@ type ADKExecutor struct {
 	pluginTools       map[string]string
 	logger            *slog.Logger
 	builtins          BuiltinToolExecutor
-	toolSeq           toolSequence
 	publisher         EventPublisher
 	agents            AgentResolver
 	modelForRoute     func(route string) (string, error)
@@ -97,7 +94,7 @@ func (x *ADKExecutor) SetEventPublisher(publisher EventPublisher) {
 	}
 }
 
-func NewADKExecutor(appName, modelName string, models ModelSource, sessions SessionPort, events runtimeengine.EventStore, broker turn.ToolBroker, tools []tool.Tool, logger *slog.Logger, opts ...ExecutorOption) (*ADKExecutor, error) {
+func NewADKExecutor(appName, modelName string, models ModelSource, sessions SessionPort, broker turn.ToolBroker, tools []tool.Tool, logger *slog.Logger, opts ...ExecutorOption) (*ADKExecutor, error) {
 	if appName == "" {
 		return nil, invalidArgument("app name must not be empty")
 	}
@@ -110,9 +107,6 @@ func NewADKExecutor(appName, modelName string, models ModelSource, sessions Sess
 	if sessions == nil {
 		return nil, invalidArgument("session port must not be nil")
 	}
-	if events == nil {
-		return nil, invalidArgument("event store must not be nil")
-	}
 	if broker == nil {
 		return nil, invalidArgument("tool broker must not be nil")
 	}
@@ -124,7 +118,6 @@ func NewADKExecutor(appName, modelName string, models ModelSource, sessions Sess
 		modelName: modelName,
 		models:    models,
 		sessions:  sessions,
-		events:    events,
 		broker:    broker,
 		tools:     tools,
 		logger:    logger,
@@ -511,8 +504,6 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		EventBranch:     actx.Branch(),
 		EventAuthor:     actx.AgentName(),
 	}
-	x.toolSeq.mu.Lock()
-	defer x.toolSeq.mu.Unlock()
 	output, err := x.builtins.Execute(actx, request)
 	if err != nil {
 		return nil, err

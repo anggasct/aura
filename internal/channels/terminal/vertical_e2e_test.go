@@ -158,7 +158,7 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	builtin := e2eBuiltinTools{broker: broker, journal: journal}
 	model := &e2eApprovalModel{toolName: "exec", answer: answer}
 	modelName := model.Name()
-	executor, err := runtimeadk.NewADKExecutor("aura", modelName, auramodel.Set{modelName: model}, sessions, events, builtin, nil, nil, runtimeadk.WithBuiltinToolExecutor(builtin))
+	executor, err := runtimeadk.NewADKExecutor("aura", modelName, auramodel.Set{modelName: model}, sessions, builtin, nil, nil, runtimeadk.WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("executor: %v", err)
 	}

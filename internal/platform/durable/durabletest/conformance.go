@@ -3,6 +3,7 @@ package durabletest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -186,6 +187,86 @@ func ExerciseRuntime(t *testing.T, backend durable.Runtime) {
 			t.Fatalf("Start: %v", err)
 		}
 		waitForState(ctx, t, backend, ref.Key, durable.RunSucceeded)
+	})
+
+	t.Run("run_action_concurrent_keys", func(t *testing.T) {
+		const actions = 16
+		type outcome struct {
+			declared bool
+			problems []string
+		}
+		outcomes := make(chan outcome, 1)
+		registrar.RegisterHandler("concurrent-actor", func(ctx context.Context, inv durable.Invocation) error {
+			if !durable.ConcurrentActions(inv) {
+				outcomes <- outcome{}
+				return nil
+			}
+			var started sync.WaitGroup
+			started.Add(actions)
+			allStarted := make(chan struct{})
+			go func() {
+				started.Wait()
+				close(allStarted)
+			}()
+			var mu sync.Mutex
+			var problems []string
+			report := func(format string, args ...any) {
+				mu.Lock()
+				defer mu.Unlock()
+				problems = append(problems, fmt.Sprintf(format, args...))
+			}
+			var calls atomic.Int64
+			var group sync.WaitGroup
+			for i := range actions {
+				group.Go(func() {
+					key := fmt.Sprintf("concurrent-%d", i)
+					want := fmt.Sprintf(`{"n":%d}`, i)
+					out, err := inv.RunAction(ctx, key, func(context.Context) ([]byte, error) {
+						calls.Add(1)
+						started.Done()
+						select {
+						case <-allStarted:
+						case <-time.After(10 * time.Second):
+							return nil, errors.New("the actions never ran at once")
+						}
+						return []byte(want), nil
+					})
+					if err != nil || string(out) != want {
+						report("RunAction(%s) = %q, %v; want %s", key, out, err, want)
+					}
+				})
+			}
+			group.Wait()
+			ran := calls.Load()
+			for i := range actions {
+				key := fmt.Sprintf("concurrent-%d", i)
+				want := fmt.Sprintf(`{"n":%d}`, i)
+				out, err := inv.RunAction(ctx, key, func(context.Context) ([]byte, error) {
+					calls.Add(1)
+					return nil, errors.New("the action ran again")
+				})
+				if err != nil || string(out) != want {
+					report("second RunAction(%s) = %q, %v; want %s", key, out, err, want)
+				}
+			}
+			if again := calls.Load(); again != ran || ran != actions {
+				report("action calls = %d then %d, want %d each", ran, again, actions)
+			}
+			outcomes <- outcome{declared: true, problems: problems}
+			return nil
+		})
+		ref, err := backend.Start(ctx, durable.StartRequest{Handler: "concurrent-actor", Key: "k-concurrent-actions"})
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		waitForState(ctx, t, backend, ref.Key, durable.RunSucceeded)
+		got := <-outcomes
+		if !got.declared {
+			t.Skip("the runtime does not declare concurrent actions")
+		}
+		for _, problem := range got.problems {
+			t.Error(problem)
+		}
 	})
 
 	t.Run("signal_unknown_run_fails", func(t *testing.T) {

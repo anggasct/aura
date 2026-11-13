@@ -32,10 +32,10 @@ func (s *stubSkillContext) SkillContext(context.Context, *turn.TurnRequest) (str
 
 func newSkillContextExecutor(t *testing.T, model *capturingModel, provider SkillContextProvider) *ADKExecutor {
 	t.Helper()
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL"}}
 	modelName, models := capturingModelSet(model)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 		WithAgentResolver(resolver, nil),
 		WithSkillContext(provider),
 	)
