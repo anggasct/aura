@@ -36,6 +36,8 @@ const (
 	envPrefix        = "AURA_"
 	envConfigVar     = "AURA_CONFIG"
 	supportedVersion = 1
+
+	githubCapability = "provider-github"
 )
 
 var envLookup = buildEnvLookup()
@@ -295,6 +297,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
+	}
+	if cfg.Tools != nil && len(cfg.Tools.GitHub.Credentials) > 0 && !slices.Contains(report.Active(), githubCapability) {
+		return LoadResult{}, &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.github.credentials needs the " + githubCapability + " capability: compile it into the build and list it in capabilities.enabled"}
 	}
 	return LoadResult{
 		Config:               cfg,
