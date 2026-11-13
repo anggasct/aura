@@ -15,10 +15,12 @@ type Invocation struct {
 }
 
 type Outcome struct {
-	Ambiguous     bool
-	Succeeded     bool
-	Receipt       json.RawMessage
-	SafeErrorCode string
+	Ambiguous        bool
+	Succeeded        bool
+	Receipt          json.RawMessage
+	Result           json.RawMessage
+	UnrecordedResult bool
+	SafeErrorCode    string
 }
 
 type Evidence struct {

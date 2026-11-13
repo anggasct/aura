@@ -56,7 +56,7 @@ func (e *Executor) Execute(ctx context.Context, req *PrepareRequest, p Provider)
 		return e.journal.MarkUnknown(ctx, started.ID)
 	}
 	if outcome.Succeeded {
-		return e.journal.Succeed(ctx, started.ID, outcome.Receipt)
+		return e.journal.succeedWith(ctx, started, &outcome)
 	}
 	return e.journal.Fail(ctx, started.ID, outcome.SafeErrorCode)
 }

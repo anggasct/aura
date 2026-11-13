@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -183,11 +184,20 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 		t.Fatalf("expected ResultOK, got %s", res.Class)
 	}
 
-	toolReqNoCaps := *toolReq
-	toolReqNoCaps.Capabilities = nil
-	_, err = broker.Execute(ctx, &toolReqNoCaps)
-	if err == nil {
-		t.Fatal("expected execution to fail closed when required capabilities are missing")
+	replayed, err := broker.Execute(ctx, toolReq)
+	if err != nil {
+		t.Fatalf("replayed broker.Execute failed: %v", err)
+	}
+	if !bytes.Equal(replayed.Output, res.Output) || replayed.Class != res.Class {
+		t.Fatalf("replayed result = %s %s, want the recorded %s %s", replayed.Class, replayed.Output, res.Class, res.Output)
+	}
+
+	unknownCapability := *toolReq
+	unknownCapability.RequestID = "req-2"
+	unknownCapability.Capabilities = []string{"not-a-host-capability"}
+	_, err = broker.Execute(ctx, withEffectIdentity(&unknownCapability, "lifecycle-2"))
+	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultCapabilityUnavailable {
+		t.Fatalf("execution claiming a capability the host lacks = %v, want %s", err, toolbroker.ResultCapabilityUnavailable)
 	}
 
 	if err := mgr.Close(ctx); err != nil {

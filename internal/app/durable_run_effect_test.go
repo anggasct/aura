@@ -185,7 +185,47 @@ func (s *runSuite) journaledAttempt(t *testing.T, attempt int) (journaledAction,
 
 func requireReturnedEffectOutcome(t *testing.T, suite *runSuite) {
 	t.Helper()
-	suite.requireEffectStepRefused(t, "effectful tool result is unavailable for a replayed request")
+	disk := workflow.NewStore(suite.db)
+	if status := workflowStatus(t, disk, suite.plan.Run); status != workflow.RunSucceeded {
+		t.Errorf("workflow run status = %q, want %q", status, workflow.RunSucceeded)
+	}
+	requireStepsSucceeded(t, disk, suite.plan.Run)
+	steps, err := disk.Steps(t.Context(), suite.plan.Run)
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	effectSteps := 0
+	for _, step := range steps {
+		if step.StepID != effectStepID {
+			continue
+		}
+		effectSteps++
+		if string(step.Output) != `{"ok":true}` {
+			t.Errorf("step %s output = %s, want %s", step.StepID, step.Output, `{"ok":true}`)
+		}
+	}
+	if effectSteps != 1 {
+		t.Errorf("step runs of %s = %d, want 1", effectStepID, effectSteps)
+	}
+	var raw []byte
+	if err := suite.db.QueryRowContext(t.Context(), `SELECT result FROM durable_action WHERE run_key = ? AND action_key = ?`, suite.plan.Key, suite.effectAction(0)).Scan(&raw); err != nil {
+		t.Fatalf("read the journal of attempt 0: %v", err)
+	}
+	var record struct {
+		Status  string          `json:"status"`
+		Attempt int             `json:"attempt"`
+		Output  json.RawMessage `json:"output"`
+	}
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatalf("decode the journal of attempt 0: %v", err)
+	}
+	if record.Status != workflow.StepSucceeded || record.Attempt != 1 || string(record.Output) != `{"ok":true}` {
+		t.Errorf("journal of attempt 0 = %s %d %s, want %s 1 %s", record.Status, record.Attempt, record.Output, workflow.StepSucceeded, `{"ok":true}`)
+	}
+	if _, found := suite.journaledAttempt(t, 1); found {
+		t.Error("the journal holds an attempt 1, want none")
+	}
+	suite.ledger.requireCount(t, executions(afterEffectTool), 1)
 }
 
 func requireInterruptedEffectOutcome(t *testing.T, suite *runSuite) {

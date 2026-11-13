@@ -21,8 +21,8 @@ func pluginGrant(id, surface, value string) PluginGrant {
 func TestPluginMigrationV37Schema(t *testing.T) {
 	db := newTestDB(t)
 	applied, latest, err := SchemaVersions(t.Context(), db)
-	if err != nil || applied != 44 || latest != 44 {
-		t.Fatalf("schema = applied %d latest %d %v, want 44", applied, latest, err)
+	if err != nil || applied != 45 || latest != 45 {
+		t.Fatalf("schema = applied %d latest %d %v, want 45", applied, latest, err)
 	}
 	for _, table := range []string{"plugin", "plugin_version", "plugin_grant"} {
 		var name string
