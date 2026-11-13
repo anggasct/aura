@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	ToolCreatePR = "github.create_pr"
-	ToolMerge    = "github.merge"
-	ToolComment  = "github.comment"
+	ToolCreatePR = "github_create_pr"
+	ToolMerge    = "github_merge"
+	ToolComment  = "github_comment"
 	ToolVersion  = "v1"
 
 	defaultBaseURL         = "https://api.github.com"
@@ -36,6 +36,7 @@ const (
 	headMoved          = "github refused the merge: the pull request head is not the given sha"
 	bodyHint           = "Shown whole on the owner's approval card. A body that does not fit the card (about 800 characters, less with a long title or repository) is refused, not truncated."
 	maxBodyHint        = 800
+	capabilityName     = "provider-github"
 )
 
 type Credential struct {
@@ -399,10 +400,11 @@ type objectSchema struct {
 }
 
 type fieldType struct {
-	Type        string `json:"type"`
-	Minimum     *int   `json:"minimum,omitempty"`
-	MaxLength   *int   `json:"maxLength,omitempty"`
-	Description string `json:"description,omitempty"`
+	Type        string   `json:"type"`
+	Minimum     *int     `json:"minimum,omitempty"`
+	MaxLength   *int     `json:"maxLength,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
 }
 
 func intRef(limit int) *int {
@@ -511,6 +513,26 @@ func mergeValidator(inner func(json.RawMessage) (json.RawMessage, error)) func(j
 	}
 }
 
+func describe(action string) string {
+	return action + "; credential_name is one of the configured credential names, and the owner approves each call on an exact card that shows every argument, so a body over about 800 characters is refused."
+}
+
+func withCredentialEnum(schema json.RawMessage, names []string) (json.RawMessage, error) {
+	var document objectSchema
+	if err := json.Unmarshal(schema, &document); err != nil {
+		return nil, fmt.Errorf("decode github schema: %w", err)
+	}
+	if _, ok := document.Properties["credential_name"]; !ok {
+		return nil, errors.New("github schema has no credential_name property")
+	}
+	document.Properties["credential_name"] = fieldType{Type: "string", Enum: slices.Clone(names)}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return nil, fmt.Errorf("encode github schema: %w", err)
+	}
+	return encoded, nil
+}
+
 func ToolNames() []string {
 	return []string{ToolCreatePR, ToolMerge, ToolComment}
 }
@@ -519,33 +541,44 @@ func Definitions() []tools.Definition {
 	return []tools.Definition{
 		{
 			Name: ToolCreatePR, Version: ToolVersion,
-			Schema:           fieldSchema([]string{"title", "head", "base"}, []string{"body"}, nil),
-			Validator:        fieldValidator([]string{"title", "head", "base"}, []string{"body"}, nil),
-			RequiresApproval: true,
-			Effectful:        true,
-			NoStandingGrant:  true,
-			ExactDisplay:     true,
-			Display:          []string{"repo", "head", "base", "title", "credential_name", "body"},
+			Schema:               fieldSchema([]string{"title", "head", "base"}, []string{"body"}, nil),
+			Validator:            fieldValidator([]string{"title", "head", "base"}, []string{"body"}, nil),
+			RequiresApproval:     true,
+			Effectful:            true,
+			OptIn:                true,
+			ExternalSink:         true,
+			NoStandingGrant:      true,
+			ExactDisplay:         true,
+			RequiredCapabilities: []string{capabilityName},
+			Description:          describe("Open a pull request on a GitHub repository"),
+			Display:              []string{"repo", "head", "base", "title", "credential_name", "body"},
 		},
 		{
 			Name: ToolMerge, Version: ToolVersion,
-			Schema:           fieldSchema([]string{"sha"}, []string{"merge_method"}, []string{"number"}),
-			Validator:        mergeValidator(fieldValidator([]string{"sha"}, []string{"merge_method"}, []string{"number"})),
-			RequiresApproval: true,
-			Effectful:        true,
-			NoStandingGrant:  true,
-			ExactDisplay:     true,
-			Display:          []string{"repo", "number", "sha", "merge_method", "credential_name"},
+			Schema:               fieldSchema([]string{"sha"}, []string{"merge_method"}, []string{"number"}),
+			Validator:            mergeValidator(fieldValidator([]string{"sha"}, []string{"merge_method"}, []string{"number"})),
+			RequiresApproval:     true,
+			Effectful:            true,
+			OptIn:                true,
+			NoStandingGrant:      true,
+			ExactDisplay:         true,
+			RequiredCapabilities: []string{capabilityName},
+			Description:          describe("Merge a GitHub pull request at the given head sha"),
+			Display:              []string{"repo", "number", "sha", "merge_method", "credential_name"},
 		},
 		{
 			Name: ToolComment, Version: ToolVersion,
-			Schema:           fieldSchema([]string{"body"}, nil, []string{"number"}),
-			Validator:        fieldValidator([]string{"body"}, nil, []string{"number"}),
-			RequiresApproval: true,
-			Effectful:        true,
-			NoStandingGrant:  true,
-			ExactDisplay:     true,
-			Display:          []string{"repo", "number", "credential_name", "body"},
+			Schema:               fieldSchema([]string{"body"}, nil, []string{"number"}),
+			Validator:            fieldValidator([]string{"body"}, nil, []string{"number"}),
+			RequiresApproval:     true,
+			Effectful:            true,
+			OptIn:                true,
+			ExternalSink:         true,
+			NoStandingGrant:      true,
+			ExactDisplay:         true,
+			RequiredCapabilities: []string{capabilityName},
+			Description:          describe("Comment on a GitHub issue or pull request"),
+			Display:              []string{"repo", "number", "credential_name", "body"},
 		},
 	}
 }
@@ -608,6 +641,10 @@ func Register(registrar ToolRegistrar, options *ToolOptions) error {
 			return toolbroker.Errorf(toolbroker.ResultInvalidArgument, "github credential %q is listed twice", credentials[i].Name)
 		}
 	}
+	names := make([]string, len(credentials))
+	for i := range credentials {
+		names[i] = credentials[i].Name
+	}
 	adapters := map[string]toolbroker.Adapter{
 		ToolCreatePR: CreatePRAdapter(options),
 		ToolMerge:    MergeAdapter(options),
@@ -617,6 +654,11 @@ func Register(registrar ToolRegistrar, options *ToolOptions) error {
 	rules := Rules()
 	for i := range definitions {
 		definitions[i].Validator = credentialValidator(definitions[i].Validator, credentials)
+		schema, err := withCredentialEnum(definitions[i].Schema, names)
+		if err != nil {
+			return fmt.Errorf("register %s: %w", definitions[i].Name, err)
+		}
+		definitions[i].Schema = schema
 		if err := registrar.RegisterTool(&definitions[i], adapters[definitions[i].Name], &rules[i]); err != nil {
 			return fmt.Errorf("register %s: %w", definitions[i].Name, err)
 		}
