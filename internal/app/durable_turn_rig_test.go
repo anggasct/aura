@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,6 +30,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -297,21 +299,25 @@ func (l *ledgerTools) Execute(ctx context.Context, request *runtimeadk.BuiltinTo
 		}
 	}
 	result, err := l.broker.Execute(ctx, &toolbroker.ToolRequest{
-		RequestID:      request.RequestID,
-		TurnID:         request.TurnID,
-		SessionID:      request.SessionID,
-		PrincipalID:    request.PrincipalID,
-		PrincipalClass: request.PrincipalClass,
-		AgentID:        request.AgentID,
-		ToolName:       request.ToolName,
-		ToolVersion:    request.ToolVersion,
-		Arguments:      request.Arguments,
-		Capabilities:   request.Capabilities,
-		Trust:          approval.TrustLabel(request.Trust),
-		Deadline:       request.Deadline,
-		IdempotencyKey: request.IdempotencyKey,
-		Knowledge:      request.Knowledge,
-		Tainted:        request.Tainted,
+		RequestID:             request.RequestID,
+		TurnID:                request.TurnID,
+		SessionID:             request.SessionID,
+		PrincipalID:           request.PrincipalID,
+		PrincipalClass:        request.PrincipalClass,
+		AgentID:               request.AgentID,
+		ToolName:              request.ToolName,
+		ToolVersion:           request.ToolVersion,
+		Arguments:             request.Arguments,
+		Capabilities:          request.Capabilities,
+		Trust:                 approval.TrustLabel(request.Trust),
+		Deadline:              request.Deadline,
+		IdempotencyKey:        request.IdempotencyKey,
+		Knowledge:             request.Knowledge,
+		Tainted:               request.Tainted,
+		AllocateEventSequence: true,
+		EventInvocation:       request.EventInvocation,
+		EventBranch:           request.EventBranch,
+		EventAuthor:           request.EventAuthor,
 	})
 	if err != nil {
 		return nil, err
@@ -361,12 +367,43 @@ type ledgerTurn struct {
 	options  []runtimeadk.ExecutorOption
 }
 
+type succeededGate struct {
+	ledger *turnLedger
+}
+
+func (g succeededGate) Observe(ctx context.Context, observation *effect.Observation) {
+	if observation.Outcome == string(effect.StateSucceeded) {
+		_ = g.ledger.gate(ctx, observation.Operation+"-succeeded")
+	}
+}
+
+func newGatedEffects(t *testing.T, db *sql.DB, ledger *turnLedger) *effect.Executor {
+	t.Helper()
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: succeededGate{ledger: ledger}})
+	if err != nil {
+		t.Fatalf("effect.NewJournal: %v", err)
+	}
+	executor, err := effect.NewExecutor(journal)
+	if err != nil {
+		t.Fatalf("effect.NewExecutor: %v", err)
+	}
+	return executor
+}
+
+func (s *turnScenario) hasEffectfulTool() bool {
+	return slices.ContainsFunc(s.tools, func(stub stubTool) bool { return stub.effectful })
+}
+
 func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.ADKExecutor {
 	t.Helper()
-	broker := toolbrokertest.NewBroker(t, &toolbroker.Options{HostCapabilities: capabilitytest.Host(t), ApprovalDecider: parts.ledger.decider(parts.scenario.approvingLife)})
+	options := &toolbroker.Options{HostCapabilities: capabilitytest.Host(t), ApprovalDecider: parts.ledger.decider(parts.scenario.approvingLife)}
+	if parts.scenario.hasEffectfulTool() {
+		options.Effects = newGatedEffects(t, db, parts.ledger)
+	}
+	broker := toolbrokertest.NewBroker(t, options)
 	tools := &ledgerTools{broker: broker, ledger: parts.ledger, gated: parts.scenario.gated}
 	for _, stub := range parts.scenario.tools {
-		toolbrokertest.Register(t, broker, toolbrokertest.Stub{Name: stub.name, RequiresApproval: stub.approval, Run: parts.ledger.adapter(stub)})
+		toolbrokertest.Register(t, broker, toolbrokertest.Stub{Name: stub.name, RequiresApproval: stub.approval, Effectful: stub.effectful, Run: parts.ledger.adapter(stub)})
 		tools.defs = append(tools.defs, runtimeadk.BuiltinToolDefinition{Name: stub.name, Version: stubToolVersion, Schema: json.RawMessage(`{"type":"object"}`)})
 	}
 	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)

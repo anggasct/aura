@@ -40,6 +40,7 @@ type stubTool struct {
 	approval       bool
 	fails          bool
 	gatedInAdapter bool
+	effectful      bool
 }
 
 type lifeWiring struct {
@@ -122,6 +123,11 @@ var turnScenarios = map[string]turnScenario{
 		tools:    []stubTool{{name: "tool-a"}},
 		requests: []turn.TurnRequest{knowledgeRequest("turn-1", "USER-TEXT-KNOWLEDGE-FAILURE")},
 		wiring:   failingKnowledge,
+	},
+	"effect-returned": {
+		steps:    []string{"tool-e", textStep},
+		tools:    []stubTool{{name: "tool-e", effectful: true}},
+		requests: []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-EFFECT-RETURNED")},
 	},
 	"lost-lease": {
 		steps:    []string{"tool-a", textStep},

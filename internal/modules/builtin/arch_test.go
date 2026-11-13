@@ -3,6 +3,7 @@ package toolsbuiltin
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -15,7 +16,8 @@ func TestCliWiresBuiltinToolsOnlyThroughThisPackage(t *testing.T) {
 		"github.com/anggasct/aura/internal/modules/filesystem",
 		"github.com/anggasct/aura/internal/modules/search",
 	}
-	forbiddenCalls := []string{"toolbroker.New(", "effect.NewExecutor("}
+	forbiddenCalls := []string{"toolbroker.New("}
+	forbiddenProductionCalls := []string{"effect.NewExecutor("}
 	for _, dir := range []string{"app", "cli"} {
 		err := filepath.WalkDir(filepath.Join("..", "..", dir), func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -34,7 +36,11 @@ func TestCliWiresBuiltinToolsOnlyThroughThisPackage(t *testing.T) {
 					t.Errorf("%s imports %s: tool adapters are assembled only in this package", path, imported)
 				}
 			}
-			for _, call := range forbiddenCalls {
+			calls := forbiddenCalls
+			if !strings.HasSuffix(path, "_test.go") {
+				calls = append(slices.Clone(forbiddenCalls), forbiddenProductionCalls...)
+			}
+			for _, call := range calls {
 				if strings.Contains(source, call) {
 					t.Errorf("%s contains %s: broker and effect assembly live in this package's constructor", path, call)
 				}

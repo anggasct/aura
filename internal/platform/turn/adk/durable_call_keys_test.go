@@ -44,7 +44,7 @@ func (r *durableTurnRig) turnEnded(t *testing.T) bool {
 
 func TestDurableToolCallKeysFollowTheCall(t *testing.T) {
 	rig := startDurableTurnRig(t, &toolThenTextModel{queries: []string{"a", "b"}})
-	close(rig.tools.release)
+	close(rig.gated.release)
 
 	awaitStream(t, rig.run(context.WithoutCancel(t.Context())))
 	waitFor(t, "the turn is released", func() bool { return slices.Contains(rig.actionKeys(t), "release") })
@@ -69,8 +69,8 @@ func TestDurableToolCallKeysFollowTheCall(t *testing.T) {
 	if clocks == 0 {
 		t.Error("clock keys = 0, want the stamp of the terminal event")
 	}
-	wantIdempotency := []string{"adk/session-1/turn-1/adk-turn-1-model-1-0", "adk/session-1/turn-1/adk-turn-1-model-1-1"}
-	got := rig.tools.seenKeys()
+	wantIdempotency := []string{"adk/session-1/turn-1/call-1-0", "adk/session-1/turn-1/call-1-1"}
+	got := rig.gated.seenKeys()
 	slices.Sort(got)
 	if !slices.Equal(got, wantIdempotency) {
 		t.Errorf("idempotency keys = %q, want %q", got, wantIdempotency)
@@ -88,12 +88,13 @@ func TestReplayedToolCallsKeepTheirOwnRecords(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rig := startDurableTurnRig(t, &toolThenTextModel{queries: []string{"a", "b"}})
-			rig.tools.stalled = tc.stalled
-			close(rig.tools.release)
+			model := &toolThenTextModel{queries: []string{"a", "b"}}
+			rig := startDurableTurnRig(t, model)
+			rig.gated.stalled = tc.stalled
+			close(rig.gated.release)
 			rig.run(context.WithoutCancel(t.Context()))
 			waitFor(t, "one call is recorded and the other is running", func() bool {
-				return rig.tools.runsOf("a") == 1 && rig.tools.runsOf("b") == 1 && slices.Contains(rig.actionKeys(t), tc.recorded)
+				return rig.gated.runsOf("a") == 1 && rig.gated.runsOf("b") == 1 && slices.Contains(rig.actionKeys(t), tc.recorded)
 			})
 
 			rig.stopHost()
@@ -105,11 +106,11 @@ func TestReplayedToolCallsKeepTheirOwnRecords(t *testing.T) {
 				if query == tc.stalled {
 					want = 2
 				}
-				if got := rig.tools.runsOf(query); got != want {
+				if got := rig.gated.runsOf(query); got != want {
 					t.Errorf("runs of %s = %d, want %d", query, got, want)
 				}
 			}
-			requests := rig.model.seen()
+			requests := model.seen()
 			if len(requests) != 2 {
 				t.Fatalf("model calls = %d, want 2", len(requests))
 			}
