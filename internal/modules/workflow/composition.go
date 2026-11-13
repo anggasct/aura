@@ -17,14 +17,18 @@ func (i *Interpreter) createChildRun(ctx context.Context, workflowID string, inp
 	if err != nil {
 		return nil, err
 	}
+	claim, err := proposalClaimFor(approval, "")
+	if err != nil {
+		return nil, err
+	}
 	runOrigin, err := originUnderApproval(origin, approval)
 	if err != nil {
 		return nil, err
 	}
-	if err := i.admitRun(compiled.spec, runOrigin); err != nil {
+	if err := i.admitRun(ctx, compiled.spec, runOrigin); err != nil {
 		return nil, err
 	}
-	return i.store.createRun(ctx, compiled.spec, input, runOrigin, newID("dur"), parentRunID)
+	return i.store.createRun(ctx, &runCreate{Spec: compiled.spec, Input: input, Origin: runOrigin, DurableKey: newID("dur"), ParentRunID: parentRunID, ClaimProposalID: claim})
 }
 
 func (i *Interpreter) driveInline(ctx context.Context, inv durable.Invocation, runID string, inherited *runBudget) (string, error) {

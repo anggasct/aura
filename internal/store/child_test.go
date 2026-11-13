@@ -171,8 +171,8 @@ func TestChildDepthRemovalUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersions: %v", err)
 	}
-	if latest != 47 || applied != 47 {
-		t.Fatalf("schema = applied %d latest %d, want 47", applied, latest)
+	if latest != 48 || applied != 48 {
+		t.Fatalf("schema = applied %d latest %d, want 48", applied, latest)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err == nil {
 		t.Fatal("depth column must be removed by v17")

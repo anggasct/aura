@@ -29,7 +29,7 @@ func proposeSpec(t *testing.T, disk *Store, id, agent string, tainted bool, spec
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal := &Proposal{ID: id, SessionID: "session-" + id, AgentID: agent, PrincipalID: "local-owner", Tainted: tainted, Spec: spec, Digest: digest, CreatedAt: time.Now().UTC()}
+	proposal := &Proposal{ID: id, SessionID: "session-" + id, AgentID: agent, PrincipalID: "local-owner", Tainted: tainted, Spec: spec, PlanText: "Plan: " + spec.Goal, Digest: digest, CreatedAt: time.Now().UTC()}
 	if err := disk.CreateProposal(t.Context(), proposal); err != nil {
 		t.Fatal(err)
 	}
@@ -291,13 +291,13 @@ func TestApproveProposalRecordsInOneTransaction(t *testing.T) {
 }
 
 func TestRoutineCarriesItsSourceApproval(t *testing.T) {
-	t.Run("a routine of an approved tainted proposal run", func(t *testing.T) {
+	t.Run("a routine of an approved proposal run", func(t *testing.T) {
 		interpreter, _, disk := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
 		generated := NormalizeProposal(toolSpec("x"), "prop_routine")
 		if err := interpreter.LoadAll(t.Context(), []*Spec{generated}, testValidationDeps()); err != nil {
 			t.Fatal(err)
 		}
-		proposal := proposeSpec(t, disk, "prop_routine", "ops", true, generated)
+		proposal := proposeSpec(t, disk, "prop_routine", "ops", false, generated)
 		if err := disk.ApproveProposal(t.Context(), proposal.ID, proposalApproval(proposal)); err != nil {
 			t.Fatal(err)
 		}
@@ -320,7 +320,7 @@ func TestRoutineCarriesItsSourceApproval(t *testing.T) {
 		}
 		want := Approval{
 			DefinitionID: routine.ID, DefinitionVersion: routine.Version, Digest: digest, Kind: ApprovalRoutine, AgentID: "ops", ApproverID: "local-owner",
-			SourceDefinitionID: generated.ID, SourceDefinitionVersion: generated.Version, Tainted: true,
+			SourceDefinitionID: generated.ID, SourceDefinitionVersion: generated.Version,
 		}
 		record.ApprovedAt = time.Time{}
 		if *record != want {

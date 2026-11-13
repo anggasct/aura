@@ -111,7 +111,7 @@ func (c *workflowToolController) deliverProposalCard(ctx context.Context, offer 
 			}
 			return "rejected " + proposalID, nil
 		}
-		runID, err := approveProposal(ctx, c.cards.cfg, c.interpreter, c.runs, proposalID, c.showCall, time.Now())
+		runID, err := approveRenderedProposal(ctx, c.cards.cfg, c.interpreter, c.runs, proposalID, c.showCall, time.Now())
 		if err != nil {
 			return "", err
 		}
@@ -257,7 +257,7 @@ func (c *workflowToolController) Propose(ctx context.Context, caller *toolsbuilt
 	}
 	if err := c.runs.CreateProposal(ctx, &workflow.Proposal{
 		ID: id, SessionID: caller.SessionID, AgentID: caller.AgentID, PrincipalID: caller.PrincipalID, Tainted: caller.Tainted,
-		Spec: normalized, Digest: digest, CreatedAt: time.Now().UTC(),
+		Spec: normalized, PlanText: plan, Digest: digest, CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		return toolsbuiltin.WorkflowProposal{}, err
 	}

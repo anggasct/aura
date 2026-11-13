@@ -73,7 +73,7 @@ func newTestDB(t *testing.T) *sql.DB {
 }
 
 func (s *Store) newRun(ctx context.Context, spec *Spec, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
-	return s.createRun(ctx, spec, input, origin, newID("dur"), "")
+	return s.createRun(ctx, &runCreate{Spec: spec, Input: input, Origin: origin, DurableKey: newID("dur")})
 }
 
 func newTestStore(t *testing.T) *Store {

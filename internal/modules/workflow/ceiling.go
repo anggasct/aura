@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -29,7 +30,7 @@ func configuredAgent(spec *Spec, approval *Approval) string {
 	return approval.AgentID
 }
 
-func (i *Interpreter) admitRun(spec *Spec, origin *RunOrigin) error {
+func (i *Interpreter) admitRun(ctx context.Context, spec *Spec, origin *RunOrigin) error {
 	if !origin.Complete() {
 		return codedError(ErrorCodeOriginIncomplete, "a run needs a principal, a known principal class and an agent")
 	}
@@ -54,6 +55,9 @@ func (i *Interpreter) admitRun(spec *Spec, origin *RunOrigin) error {
 				continue
 			}
 			if child, ok := i.Spec(*step.Executor.WorkflowID); ok {
+				if err := i.refuseSpentChild(ctx, child); err != nil {
+					return err
+				}
 				if err := walk(child); err != nil {
 					return err
 				}
@@ -62,4 +66,18 @@ func (i *Interpreter) admitRun(spec *Spec, origin *RunOrigin) error {
 		return nil
 	}
 	return walk(spec)
+}
+
+func (i *Interpreter) refuseSpentChild(ctx context.Context, child *Spec) error {
+	approval, err := i.requireSpecApproval(ctx, child)
+	if code, ok := CodeOf(err); ok && code == ErrorCodeApprovalMissing {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := proposalClaimFor(approval, ""); err != nil {
+		return fmt.Errorf("definition %s: %w", child.ID, err)
+	}
+	return nil
 }

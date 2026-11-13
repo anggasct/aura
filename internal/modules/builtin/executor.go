@@ -92,7 +92,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 	artifacts := store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))
 	brokerOptions := &toolbroker.Options{
 		Adapters:             adapters,
-		Secrets:              configuredToolSecrets(cfg),
+		Secrets:              ConfiguredToolSecrets(cfg),
 		MaxInlineResultBytes: cfg.Tools.MaxInlineResultBytes,
 		Artifacts:            artifacts,
 		Effects:              effects,
@@ -231,7 +231,7 @@ func StepToolNames(personaTools []string) []string {
 	return slices.DeleteFunc(slices.Clone(personaTools), func(name string) bool { return orchestration[name] })
 }
 
-func configuredToolSecrets(cfg *config.Config) []string {
+func ConfiguredToolSecrets(cfg *config.Config) []string {
 	if cfg == nil || cfg.Tools == nil {
 		return nil
 	}

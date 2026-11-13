@@ -43,6 +43,9 @@ func (i *Interpreter) SaveRoutine(ctx context.Context, runID, name string) (*Spe
 	if err != nil {
 		return nil, err
 	}
+	if sourceApproval.Tainted {
+		return nil, codedError(ErrorCodeRoutineInvalid, "a routine cannot be saved from a definition that untrusted input shaped; propose it again from a trusted turn")
+	}
 	version := 1
 	if latest, err := i.store.LatestDefinition(ctx, id); err == nil {
 		version = latest.Version + 1
@@ -51,7 +54,7 @@ func (i *Interpreter) SaveRoutine(ctx context.Context, runID, name string) (*Spe
 	}
 	routine := &Spec{ID: id, Name: strings.TrimSpace(name), Goal: source.Goal, Version: version, Source: SourceGenerated, Steps: slices.Clone(source.Steps)}
 	approval := &Approval{
-		Kind: ApprovalRoutine, AgentID: sourceApproval.AgentID, ApproverID: principal.OwnerID, Tainted: sourceApproval.Tainted,
+		Kind: ApprovalRoutine, AgentID: sourceApproval.AgentID, ApproverID: principal.OwnerID,
 		SourceDefinitionID: source.ID, SourceDefinitionVersion: source.Version,
 	}
 	if err := i.load(ctx, []*Spec{routine}, i.ValidationDeps(), approval); err != nil {

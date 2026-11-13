@@ -186,7 +186,7 @@ func TestProposalApprovalLoadStaysStrict(t *testing.T) {
 	if err := h.controller.interpreter.LoadAll(t.Context(), nil, refusing); err != nil {
 		t.Fatal(err)
 	}
-	_, err = approveProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
+	_, err = approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
 	if !hasWorkflowCode(err, workflow.ErrorCodeSpecInvalid) {
 		t.Fatalf("approval of a proposal that fails the argument check = %v, want %s", err, workflow.ErrorCodeSpecInvalid)
 	}

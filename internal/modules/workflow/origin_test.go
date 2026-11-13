@@ -382,11 +382,11 @@ func TestRunSessionIsCreatedWithTheRun(t *testing.T) {
 		if err := disk.SaveDefinition(t.Context(), spec); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := disk.createRun(t.Context(), spec, &RunInput{}, origin, "key-taken", ""); err != nil {
+		if _, err := disk.createRun(t.Context(), &runCreate{Spec: spec, Input: &RunInput{}, Origin: origin, DurableKey: "key-taken"}); err != nil {
 			t.Fatalf("first createRun: %v", err)
 		}
 		disk.newRunID = func() string { return "run-second" }
-		if _, err := disk.createRun(t.Context(), spec, &RunInput{}, origin, "key-taken", ""); err == nil {
+		if _, err := disk.createRun(t.Context(), &runCreate{Spec: spec, Input: &RunInput{}, Origin: origin, DurableKey: "key-taken"}); err == nil {
 			t.Fatal("createRun accepted a durable key that is already taken")
 		}
 		if _, _, found := runSessionOwner(t, disk, "run-second"); found {

@@ -63,6 +63,7 @@ var migrations = []migration{
 	{version: 45, sql: effectIntentResultSchemaSQL},
 	{version: 46, sql: workflowRunTaintSchemaSQL},
 	{version: 47, sql: workflowApprovalSchemaSQL},
+	{version: 48, sql: workflowProposalPlanTextSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -970,6 +971,15 @@ CREATE TABLE workflow_approval (
     CHECK ((kind = 'proposal') = (proposal_id IS NOT NULL)),
     CHECK ((kind = 'routine') = (source_definition_id IS NOT NULL AND source_definition_version IS NOT NULL))
 );
+`
+
+const workflowProposalPlanTextSchemaSQL = `
+ALTER TABLE workflow_proposal ADD COLUMN plan_text TEXT NOT NULL DEFAULT '';
+CREATE TRIGGER workflow_proposal_plan_text_immutable BEFORE UPDATE OF plan_text ON workflow_proposal
+WHEN NEW.plan_text IS NOT OLD.plan_text
+BEGIN
+    SELECT RAISE(ABORT, 'workflow_proposal.plan_text is immutable');
+END;
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

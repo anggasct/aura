@@ -3,14 +3,18 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/config"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -59,16 +63,8 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 			Short: "Show a proposal and its plan",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				result, err := config.Load(gf.configPath)
-				if err != nil {
-					return err
-				}
-				return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
-					proposal, err := workflow.NewStore(app.db).Proposal(ctx, args[0], time.Now())
-					if err != nil {
-						return err
-					}
-					graph, err := workflow.Compile(proposal.Spec, app.interpreter.ValidationDeps())
+				return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+					proposal, err := workflow.NewStore(db).Proposal(ctx, args[0], time.Now())
 					if err != nil {
 						return err
 					}
@@ -86,11 +82,10 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 					if proposal.RunID != "" {
 						lines = append(lines, "run: "+workflow.EscapeText(proposal.RunID))
 					}
-					plan, err := workflow.RenderPlan(proposal.Spec, graph, commandToolCallText(&result, app.db, app.logger))
-					if err != nil {
-						return err
+					if proposal.PlanText == "" {
+						return writeChildLines(cmd, append(lines, planNotStoredLine))
 					}
-					return writeChildLines(cmd, append(lines, plan))
+					return writeChildLines(cmd, append(lines, proposal.PlanText))
 				})
 			},
 		},
@@ -104,7 +99,8 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
-					runID, err := approveProposal(ctx, result.Config, app.interpreter, workflow.NewStore(app.db), args[0], commandToolCallText(&result, app.db, app.logger), time.Now())
+					secrets := slices.Concat(toolsbuiltin.ConfiguredToolSecrets(result.Config), githubCredentialSecrets(result.Config))
+					runID, err := approveStoredProposal(ctx, result.Config, app.interpreter, workflow.NewStore(app.db), args[0], secrets, time.Now())
 					if err != nil {
 						return err
 					}
@@ -144,7 +140,82 @@ func yesNo(value bool) string {
 	return "no"
 }
 
-func approveProposal(ctx context.Context, _ *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, show workflow.ToolCallText, now time.Time) (string, error) {
+const planNotStoredLine = "plan: not stored; this proposal predates plan storage; propose it again"
+
+type planCheck func(proposal *workflow.Proposal, graph *workflow.Graph) error
+
+func approveRenderedProposal(ctx context.Context, _ *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, render workflow.ToolCallText, now time.Time) (string, error) {
+	return approveOnStoredPlan(ctx, interpreter, runs, id, now, func(proposal *workflow.Proposal, graph *workflow.Graph) error {
+		if render == nil {
+			return planUnshowable("no tool display is available to show the plan again")
+		}
+		plan, err := workflow.RenderPlan(proposal.Spec, graph, render)
+		if err != nil {
+			return err
+		}
+		if plan != proposal.PlanText {
+			return planUnshowable("the plan changed since it was proposed; propose it again")
+		}
+		return nil
+	})
+}
+
+func approveStoredProposal(ctx context.Context, _ *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, secrets []string, now time.Time) (string, error) {
+	return approveOnStoredPlan(ctx, interpreter, runs, id, now, func(proposal *workflow.Proposal, _ *workflow.Graph) error {
+		if holdsSecret(proposal.PlanText, secrets) || stepArgumentsHoldSecret(proposal.Spec, secrets) {
+			return planUnshowable("the plan holds a configured secret value; propose it again without it")
+		}
+		return nil
+	})
+}
+
+func planUnshowable(detail string) error {
+	return &workflow.Error{Code: workflow.ErrorCodePlanUnshowable, Detail: detail}
+}
+
+func holdsSecret(text string, secrets []string) bool {
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(text, secret) {
+			return true
+		}
+	}
+	return false
+}
+
+func valueHoldsSecret(value any, secrets []string) bool {
+	switch typed := value.(type) {
+	case string:
+		return holdsSecret(typed, secrets)
+	case []any:
+		return slices.ContainsFunc(typed, func(item any) bool { return valueHoldsSecret(item, secrets) })
+	case map[string]any:
+		for key, item := range typed {
+			if holdsSecret(key, secrets) || valueHoldsSecret(item, secrets) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func stepArgumentsHoldSecret(spec *workflow.Spec, secrets []string) bool {
+	for index := range spec.Steps {
+		executor := &spec.Steps[index].Executor
+		if executor.Kind != workflow.KindTool {
+			continue
+		}
+		if holdsSecret(string(executor.ToolArgs), secrets) {
+			return true
+		}
+		var decoded any
+		if json.Unmarshal(executor.ToolArgs, &decoded) == nil && valueHoldsSecret(decoded, secrets) {
+			return true
+		}
+	}
+	return false
+}
+
+func approveOnStoredPlan(ctx context.Context, interpreter *workflow.Interpreter, runs *workflow.Store, id string, now time.Time, check planCheck) (string, error) {
 	proposal, err := runs.Proposal(ctx, id, now)
 	if err != nil {
 		return "", err
@@ -159,11 +230,14 @@ func approveProposal(ctx context.Context, _ *config.Config, interpreter *workflo
 	if digest != proposal.Digest {
 		return "", &workflow.Error{Code: workflow.ErrorCodeDigestMismatch, Detail: "proposal " + id + " no longer matches the digest it was proposed with"}
 	}
+	if proposal.PlanText == "" {
+		return "", planUnshowable("proposal " + id + " has no stored plan; propose it again")
+	}
 	graph, err := interpreter.CompileProposal(proposal.Spec, proposal.AgentID)
 	if err != nil {
 		return "", err
 	}
-	if _, err := workflow.RenderPlan(proposal.Spec, graph, show); err != nil {
+	if err := check(proposal, graph); err != nil {
 		return "", err
 	}
 	if err := interpreter.LoadAll(ctx, []*workflow.Spec{proposal.Spec}, interpreter.ValidationDeps()); err != nil {
@@ -175,11 +249,11 @@ func approveProposal(ctx context.Context, _ *config.Config, interpreter *workflo
 	}); err != nil {
 		return "", err
 	}
-	summary, err := interpreter.Start(ctx, proposal.Spec.ID, &workflow.RunInput{}, &workflow.RunOrigin{
+	summary, err := interpreter.StartApproved(ctx, id, &workflow.RunInput{}, &workflow.RunOrigin{
 		PrincipalID: proposal.PrincipalID, PrincipalClass: string(principal.ClassOwner), AgentID: proposal.AgentID, SessionID: proposal.SessionID, Tainted: proposal.Tainted,
 	})
 	if err != nil {
 		return "", err
 	}
-	return summary.ID, runs.AttachProposalRun(ctx, id, summary.ID)
+	return summary.ID, nil
 }

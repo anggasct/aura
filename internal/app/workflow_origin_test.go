@@ -33,7 +33,7 @@ func TestApprovedProposalRunKeepsTheProposalTaint(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runID, err := approveProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
+			runID, err := approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}

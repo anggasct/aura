@@ -168,11 +168,21 @@ func decodeSpec(encoded string) (*Spec, error) {
 	return &spec, nil
 }
 
-func (s *Store) createRun(ctx context.Context, spec *Spec, input *RunInput, origin *RunOrigin, durableKey, parentRunID string) (*RunSummary, error) {
+type runCreate struct {
+	Spec            *Spec
+	Input           *RunInput
+	Origin          *RunOrigin
+	DurableKey      string
+	ParentRunID     string
+	ClaimProposalID string
+}
+
+func (s *Store) createRun(ctx context.Context, create *runCreate) (*RunSummary, error) {
+	spec, origin := create.Spec, create.Origin
 	if !origin.Complete() {
 		return nil, codedError(ErrorCodeOriginIncomplete, "a run needs a principal, a known principal class and an agent")
 	}
-	encodedInput, err := json.Marshal(input)
+	encodedInput, err := json.Marshal(create.Input)
 	if err != nil {
 		return nil, codedError(ErrorCodeSpecInvalid, "encode run input: "+err.Error())
 	}
@@ -182,8 +192,8 @@ func (s *Store) createRun(ctx context.Context, spec *Spec, input *RunInput, orig
 		ID:                s.newRunID(),
 		DefinitionID:      spec.ID,
 		DefinitionVersion: spec.Version,
-		DurableKey:        durableKey,
-		ParentRunID:       parentRunID,
+		DurableKey:        create.DurableKey,
+		ParentRunID:       create.ParentRunID,
 		Goal:              spec.Goal,
 		Status:            RunQueued,
 		CreatedAt:         now,
@@ -214,6 +224,11 @@ func (s *Store) createRun(ctx context.Context, spec *Spec, input *RunInput, orig
 	); err != nil {
 		return nil, fmt.Errorf("insert run: %w", err)
 	}
+	if create.ClaimProposalID != "" {
+		if err := claimProposalRun(ctx, tx, create.ClaimProposalID, summary.ID); err != nil {
+			return nil, err
+		}
+	}
 	for index := range spec.Steps {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO workflow_step_run (run_id, step_id, status, attempt, updated_at) VALUES (?, ?, ?, 0, ?)`,
@@ -226,6 +241,25 @@ func (s *Store) createRun(ctx context.Context, spec *Spec, input *RunInput, orig
 		return nil, fmt.Errorf("commit run create: %w", err)
 	}
 	return summary, nil
+}
+
+func claimProposalRun(ctx context.Context, tx *sql.Tx, proposalID, runID string) error {
+	result, err := tx.ExecContext(ctx, `UPDATE workflow_proposal SET run_id = ? WHERE id = ? AND run_id IS NULL`, runID, proposalID)
+	if err != nil {
+		return fmt.Errorf("claim proposal run: %w", err)
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed == 1 {
+		return err
+	}
+	var tainted bool
+	err = tx.QueryRowContext(ctx, `SELECT tainted FROM workflow_proposal WHERE id = ?`, proposalID).Scan(&tainted)
+	switch {
+	case err == nil && !tainted:
+		return nil
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("read proposal taint: %w", err)
+	}
+	return codedError(ErrorCodeApprovalSpent, "the approval of proposal "+proposalID+" already ran")
 }
 
 func (s *Store) Run(ctx context.Context, runID string) (*RunSummary, error) {

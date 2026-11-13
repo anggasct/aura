@@ -269,18 +269,25 @@ func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
 	if err != nil {
 		return nil, err
 	}
-	credentials := githubCredentials(in.result.Config)
-	for _, credential := range credentials {
-		if value, err := parseSecretRef(credential.Ref).Resolve(); err == nil && strings.TrimSpace(value) != "" {
-			executor.Broker().RegisterSecret(value)
-		}
+	for _, value := range githubCredentialSecrets(in.result.Config) {
+		executor.Broker().RegisterSecret(value)
 	}
-	if len(credentials) > 0 {
+	if credentials := githubCredentials(in.result.Config); len(credentials) > 0 {
 		if err := github.Register(executor, &github.ToolOptions{Credentials: credentials}); err != nil {
 			return nil, fmt.Errorf("register github tools: %w", err)
 		}
 	}
 	return executor, nil
+}
+
+func githubCredentialSecrets(cfg *config.Config) []string {
+	var values []string
+	for _, credential := range githubCredentials(cfg) {
+		if value, err := parseSecretRef(credential.Ref).Resolve(); err == nil && strings.TrimSpace(value) != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func githubCredentials(cfg *config.Config) []github.Credential {

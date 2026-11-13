@@ -46,8 +46,8 @@ VALUES (?, 'sess-1', 'main', 'owner-1', '{}', 'digest', 'proposed', '2026-11-13T
 		t.Fatalf("Migrate: %v", err)
 	}
 	applied, latest, err := SchemaVersions(ctx, db)
-	if err != nil || applied != 47 || latest != 47 {
-		t.Fatalf("schema = applied %d latest %d %v, want 47", applied, latest, err)
+	if err != nil || applied != 48 || latest != 48 {
+		t.Fatalf("schema = applied %d latest %d %v, want 48", applied, latest, err)
 	}
 	var runTainted int
 	var parent sql.NullString

@@ -76,10 +76,10 @@ func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 			}
 		})
 	}
-	t.Run("proposal show of a goal that is out of rule", func(t *testing.T) {
+	t.Run("proposal show of a goal that is out of rule prints only its stored plan", func(t *testing.T) {
 		out, err := runWorkflowCommand(t, gf, "proposal", "show", listed.ID)
-		if !hasWorkflowCode(err, workflow.ErrorCodeSpecInvalid) || strings.ContainsRune(out, 0x1b) {
-			t.Fatalf("proposal show = %q, %v, want a refusal with %s and no raw escape", out, err, workflow.ErrorCodeSpecInvalid)
+		if err != nil || strings.ContainsRune(out, 0x1b) || !strings.Contains(out, planNotStoredLine) {
+			t.Fatalf("proposal show = %q, %v, want the escaped headers and the not-stored line", out, err)
 		}
 	})
 }
