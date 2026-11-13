@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
 func toolSpec(id string) *Spec {
@@ -174,7 +174,7 @@ func TestComposedRunDrivesChildrenInProcess(t *testing.T) {
 
 func TestFailedChildFailsTheComposingStep(t *testing.T) {
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, durable.NewFake(), &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 2, Tools: failingTools{}})
+	interpreter := NewInterpreter(disk, durabletest.NewFake(), &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 2, Tools: failingTools{}})
 	installAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
 	summary, err := interpreter.Start(context.Background(), "top", nil, ownerOrigin())
 	if err != nil {

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
 func runScriptedWorkflow(t *testing.T, script []struct {
@@ -20,7 +20,7 @@ func runScriptedWorkflow(t *testing.T, script []struct {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	interpreter := NewInterpreter(disk, fake, &Options{
 		Driver:             DriverConcurrent,

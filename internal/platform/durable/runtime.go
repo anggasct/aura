@@ -28,6 +28,7 @@ const (
 )
 
 var ErrKeyInUse = errors.New("durable run key is used by another handler")
+var ErrUnknownRun = errors.New("unknown durable run")
 
 type StartRequest struct {
 	Handler string
@@ -81,6 +82,8 @@ type Runtime interface {
 }
 
 type Handler func(ctx context.Context, inv Invocation) error
+
+type CallHandler func(ctx context.Context, key string, payload []byte) ([]byte, error)
 
 type HandlerRegistrar interface {
 	RegisterHandler(name string, fn Handler)

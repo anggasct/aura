@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -201,7 +202,7 @@ func writingCall(call string) bool {
 type scriptedSender struct {
 	name    string
 	wire    *tripwire
-	clock   *durable.ManualClock
+	clock   *durabletest.ManualClock
 	mu      sync.Mutex
 	calls   []SendRequest
 	times   []time.Time
@@ -270,7 +271,7 @@ type hostSetup struct {
 type broadcastHost struct {
 	t        *testing.T
 	db       *sql.DB
-	clock    *durable.ManualClock
+	clock    *durabletest.ManualClock
 	wire     *tripwire
 	store    *recordingRunStore
 	primary  *scriptedSender
@@ -284,7 +285,7 @@ type broadcastHost struct {
 
 func newBroadcastHost(t *testing.T, setup *hostSetup) *broadcastHost {
 	t.Helper()
-	clock := durable.NewManualClock(time.Now())
+	clock := durabletest.NewManualClock(time.Now())
 	wire := newTripwire(setup.block, setup.nth)
 	host := &broadcastHost{
 		t:        t,

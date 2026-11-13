@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
@@ -92,7 +92,7 @@ func newDurableLiveTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) 
 	t.Helper()
 	engine, db, _ := newTestRuntime(t, cfg, executor)
 	sessions := newHookedSessionStore(t, db)
-	backend := durable.NewFake()
+	backend := durabletest.NewFake()
 	engine.sessionStore = sessions
 	engine.durableRuntime = backend
 	backend.RegisterHandler("turn", engine.serveTurn)
@@ -221,7 +221,7 @@ func TestNewEngineRefusesADurableConfigWithoutAStoreOrARuntime(t *testing.T) {
 	sessions := newHookedSessionStore(t, db)
 	configs := map[string]*DurableConfig{
 		"no runtime":       {Sessions: sessions},
-		"no session store": {Runtime: durable.NewFake()},
+		"no session store": {Runtime: durabletest.NewFake()},
 	}
 	for name, durableCfg := range configs {
 		t.Run(name, func(t *testing.T) {

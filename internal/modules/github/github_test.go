@@ -13,6 +13,7 @@ import (
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
 func suiteBody(t *testing.T, action string, pull int, sha string) []byte {
@@ -198,7 +199,7 @@ func TestNormalizeRejectsMalformedGitHubBodies(t *testing.T) {
 
 func TestHandleIgnoresNonGitHubEvents(t *testing.T) {
 	store := &fakeCorrelations{}
-	runtime := &countingRuntime{Runtime: durable.NewFake()}
+	runtime := &countingRuntime{Runtime: durabletest.NewFake()}
 	adapter := testAdapter(t, store, runtime)
 	handled, _, err := adapter.Handle(context.Background(), acceptedEvent([]byte(`{"k":1}`), "digest-1"))
 	if err != nil || handled {
@@ -208,7 +209,7 @@ func TestHandleIgnoresNonGitHubEvents(t *testing.T) {
 
 func TestHandleUnmatchedEventAcknowledgesWithoutSignal(t *testing.T) {
 	store := &fakeCorrelations{}
-	runtime := &countingRuntime{Runtime: durable.NewFake()}
+	runtime := &countingRuntime{Runtime: durabletest.NewFake()}
 	adapter := testAdapter(t, store, runtime)
 	handled, _, err := adapter.Handle(context.Background(), acceptedEvent(suiteBody(t, "completed", 42, "abc123"), "digest-1"))
 	if err != nil || !handled {
@@ -225,7 +226,7 @@ func TestHandleUnmatchedEventAcknowledgesWithoutSignal(t *testing.T) {
 func TestHandleAdvancesRunExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeCorrelations{}
-	backend := durable.NewFake()
+	backend := durabletest.NewFake()
 	backend.RegisterHandler("waiter", func(ctx context.Context, inv durable.Invocation) error {
 		_, ok := inv.Signal(ctx, "wait.hold")
 		if !ok {
@@ -272,7 +273,7 @@ func envelopeAcceptedEvent(t *testing.T, eventID, nonce string, githubPayload []
 	}
 }
 
-func startWaiter(t *testing.T, backend *durable.Fake, key string) {
+func startWaiter(t *testing.T, backend *durabletest.Fake, key string) {
 	t.Helper()
 	backend.RegisterHandler("waiter", func(ctx context.Context, inv durable.Invocation) error {
 		_, ok := inv.Signal(ctx, "wait.hold")
@@ -289,7 +290,7 @@ func startWaiter(t *testing.T, backend *durable.Fake, key string) {
 func TestHandleEnvelopePayloadResolvesBinding(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeCorrelations{}
-	backend := durable.NewFake()
+	backend := durabletest.NewFake()
 	startWaiter(t, backend, "durable-1")
 	runtime := &countingRuntime{Runtime: backend}
 	adapter := testAdapter(t, store, runtime)
@@ -307,7 +308,7 @@ func TestHandleEnvelopePayloadResolvesBinding(t *testing.T) {
 func TestHandleSamePayloadDifferentIdentitySignalsTwice(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeCorrelations{}
-	backend := durable.NewFake()
+	backend := durabletest.NewFake()
 	backend.RegisterHandler("waiter", func(ctx context.Context, inv durable.Invocation) error {
 		for range 2 {
 			if _, ok := inv.Signal(ctx, "wait.hold"); !ok {
@@ -339,7 +340,7 @@ func TestHandleSamePayloadDifferentIdentitySignalsTwice(t *testing.T) {
 func TestHandleIdenticalIdentityRedeliverySignalsOnce(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeCorrelations{}
-	backend := durable.NewFake()
+	backend := durabletest.NewFake()
 	startWaiter(t, backend, "durable-1")
 	runtime := &countingRuntime{Runtime: backend}
 	adapter := testAdapter(t, store, runtime)
@@ -365,7 +366,7 @@ func TestHandleIdenticalIdentityRedeliverySignalsOnce(t *testing.T) {
 func TestHandleSignalFailureRollsBackDelivery(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeCorrelations{}
-	backend := durable.NewFake()
+	backend := durabletest.NewFake()
 	backend.RegisterHandler("waiter", func(ctx context.Context, inv durable.Invocation) error {
 		_, ok := inv.Signal(ctx, "wait.hold")
 		if !ok {

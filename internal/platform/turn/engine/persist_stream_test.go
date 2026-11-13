@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
@@ -75,7 +75,7 @@ func newRefusingTestRuntime(t *testing.T, executor TurnExecutor, refusedKind str
 		t.Fatalf("NewEngine: %v", err)
 	}
 	if live {
-		backend := durable.NewFake()
+		backend := durabletest.NewFake()
 		engine.sessionStore = newHookedSessionStore(t, db)
 		engine.durableRuntime = backend
 		backend.RegisterHandler("turn", engine.serveTurn)

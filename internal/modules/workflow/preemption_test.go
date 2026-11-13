@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -73,7 +74,7 @@ func newWorkflowHost(t *testing.T, options *Options) *workflowHost {
 	warnings := &warningLog{}
 	options.Logger = warnings
 	options.Driver = DriverConcurrent
-	host := &workflowHost{t: t, db: db, disk: disk, interpreter: NewInterpreter(disk, durable.NewFake(), options), warnings: warnings}
+	host := &workflowHost{t: t, db: db, disk: disk, interpreter: NewInterpreter(disk, durabletest.NewFake(), options), warnings: warnings}
 	host.startHost()
 	t.Cleanup(host.stopHost)
 	return host

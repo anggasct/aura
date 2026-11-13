@@ -1,4 +1,4 @@
-package durable
+package durabletest
 
 import (
 	"context"
@@ -6,30 +6,9 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/durable"
 )
-
-var ErrUnknownRun = errors.New("unknown durable run")
-
-type Clock interface {
-	Now() time.Time
-	Timer(d time.Duration) <-chan time.Time
-}
-
-type realClock struct{}
-
-func (realClock) Now() time.Time { return time.Now().UTC() }
-
-func (realClock) Timer(d time.Duration) <-chan time.Time {
-	if d <= 0 {
-		fired := make(chan time.Time, 1)
-		fired <- time.Now()
-		return fired
-	}
-	timer := time.NewTimer(d)
-	return timer.C
-}
-
-func RealClock() Clock { return realClock{} }
 
 type ManualClock struct {
 	mu      sync.Mutex
@@ -82,10 +61,10 @@ func (c *ManualClock) Timer(d time.Duration) <-chan time.Time {
 }
 
 type invocation struct {
-	run     RunRef
+	run     durable.RunRef
 	payload []byte
 	done    <-chan struct{}
-	clock   Clock
+	clock   durable.Clock
 	mu      *sync.Mutex
 	signals map[string]*signalQueue
 	journal map[string][]byte
@@ -107,7 +86,7 @@ type signalDelivery struct {
 	payload []byte
 }
 
-func (i *invocation) Run() RunRef { return i.run }
+func (i *invocation) Run() durable.RunRef { return i.run }
 
 func (i *invocation) Payload() []byte { return i.payload }
 
@@ -310,28 +289,28 @@ func (i *invocation) RunAction(ctx context.Context, key string, fn func(ctx cont
 
 type Fake struct {
 	mu        sync.Mutex
-	handlers  map[string]Handler
-	calls     map[string]CallHandler
+	handlers  map[string]durable.Handler
+	calls     map[string]durable.CallHandler
 	consumed  map[string]struct{}
 	deadlines map[string]time.Time
 	runs      map[string]*fakeRun
-	clock     Clock
+	clock     durable.Clock
 	logger    func(format string, args ...any)
 }
 
 type fakeRun struct {
-	ref        RunRef
+	ref        durable.RunRef
 	handler    string
 	cancel     context.CancelFunc
 	done       chan struct{}
 	invocation *invocation
 	mu         sync.Mutex
-	state      RunState
+	state      durable.RunState
 	detail     string
 }
 
 func NewFake() *Fake {
-	return &Fake{handlers: map[string]Handler{}, runs: map[string]*fakeRun{}, clock: RealClock()}
+	return &Fake{handlers: map[string]durable.Handler{}, runs: map[string]*fakeRun{}, clock: durable.RealClock()}
 }
 
 func (f *Fake) Close() {
@@ -347,7 +326,7 @@ func (f *Fake) Close() {
 	}
 }
 
-func (f *Fake) WithClock(clock Clock) *Fake {
+func (f *Fake) WithClock(clock durable.Clock) *Fake {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.clock = clock
@@ -361,24 +340,22 @@ func (f *Fake) WithLogger(logger func(format string, args ...any)) *Fake {
 	return f
 }
 
-func (f *Fake) RegisterHandler(name string, fn Handler) {
+func (f *Fake) RegisterHandler(name string, fn durable.Handler) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.handlers[name] = fn
 }
 
-type CallHandler func(ctx context.Context, key string, payload []byte) ([]byte, error)
-
-func (f *Fake) RegisterCall(service, handler string, fn CallHandler) {
+func (f *Fake) RegisterCall(service, handler string, fn durable.CallHandler) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.calls == nil {
-		f.calls = map[string]CallHandler{}
+		f.calls = map[string]durable.CallHandler{}
 	}
 	f.calls[service+"\x00"+handler] = fn
 }
 
-func (f *Fake) Call(ctx context.Context, req CallRequest) ([]byte, error) {
+func (f *Fake) Call(ctx context.Context, req durable.CallRequest) ([]byte, error) {
 	if req.Service == "" {
 		return nil, errors.New("durable call requires a service")
 	}
@@ -406,22 +383,22 @@ func (f *Fake) log(format string, args ...any) {
 	}
 }
 
-func (f *Fake) Start(ctx context.Context, req StartRequest) (RunRef, error) {
+func (f *Fake) Start(ctx context.Context, req durable.StartRequest) (durable.RunRef, error) {
 	if req.Key == "" {
-		return RunRef{}, errors.New("durable start requires a key")
+		return durable.RunRef{}, errors.New("durable start requires a key")
 	}
 	f.mu.Lock()
 	kept, handler, err := f.admit(&req)
 	if err != nil {
 		f.mu.Unlock()
-		return RunRef{}, err
+		return durable.RunRef{}, err
 	}
 	if kept != nil {
 		f.mu.Unlock()
 		return kept.ref, nil
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	run := &fakeRun{ref: RunRef{Key: req.Key}, handler: req.Handler, cancel: cancel, done: make(chan struct{}), state: RunRunning}
+	run := &fakeRun{ref: durable.RunRef{Key: req.Key}, handler: req.Handler, cancel: cancel, done: make(chan struct{}), state: durable.RunRunning}
 	f.runs[req.Key] = run
 	clock := f.clock
 	f.mu.Unlock()
@@ -440,13 +417,13 @@ func (f *Fake) Start(ctx context.Context, req StartRequest) (RunRef, error) {
 	go func() {
 		defer close(run.done)
 		handlerErr := handler(runCtx, inv)
-		state := RunSucceeded
+		state := durable.RunSucceeded
 		detail := ""
 		switch {
 		case runCtx.Err() != nil:
-			state = RunCancelled
+			state = durable.RunCancelled
 		case handlerErr != nil:
-			state = RunFailed
+			state = durable.RunFailed
 			detail = handlerErr.Error()
 		}
 		run.mu.Lock()
@@ -459,9 +436,9 @@ func (f *Fake) Start(ctx context.Context, req StartRequest) (RunRef, error) {
 	return run.ref, nil
 }
 
-func (f *Fake) admit(req *StartRequest) (*fakeRun, Handler, error) {
+func (f *Fake) admit(req *durable.StartRequest) (*fakeRun, durable.Handler, error) {
 	existing, found := f.runs[req.Key]
-	if found && req.Reuse != ReuseEnded {
+	if found && req.Reuse != durable.ReuseEnded {
 		return existing, nil, nil
 	}
 	handler, ok := f.handlers[req.Handler]
@@ -472,7 +449,7 @@ func (f *Fake) admit(req *StartRequest) (*fakeRun, Handler, error) {
 		return nil, handler, nil
 	}
 	if existing.handler != req.Handler {
-		return nil, nil, fmt.Errorf("%w: %s", ErrKeyInUse, req.Key)
+		return nil, nil, fmt.Errorf("%w: %s", durable.ErrKeyInUse, req.Key)
 	}
 	if !existing.ended() {
 		return existing, nil, nil
@@ -483,20 +460,20 @@ func (f *Fake) admit(req *StartRequest) (*fakeRun, Handler, error) {
 func (r *fakeRun) ended() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.state == RunSucceeded || r.state == RunFailed || r.state == RunCancelled
+	return r.state == durable.RunSucceeded || r.state == durable.RunFailed || r.state == durable.RunCancelled
 }
 
-func (f *Fake) Signal(_ context.Context, run RunRef, name string, payload []byte) error {
+func (f *Fake) Signal(_ context.Context, run durable.RunRef, name string, payload []byte) error {
 	f.mu.Lock()
 	run_ := f.runs[run.Key]
 	f.mu.Unlock()
 	if run_ == nil {
-		return fmt.Errorf("%w: %s", ErrUnknownRun, run.Key)
+		return fmt.Errorf("%w: %s", durable.ErrUnknownRun, run.Key)
 	}
 	run_.mu.Lock()
 	state := run_.state
 	run_.mu.Unlock()
-	if state == RunSucceeded || state == RunFailed || state == RunCancelled {
+	if state == durable.RunSucceeded || state == durable.RunFailed || state == durable.RunCancelled {
 		return fmt.Errorf("durable run %s is %s and cannot receive signals", run.Key, state)
 	}
 	select {
@@ -506,7 +483,7 @@ func (f *Fake) Signal(_ context.Context, run RunRef, name string, payload []byte
 	}
 	inv := f.invocationFor(run.Key)
 	if inv == nil {
-		return fmt.Errorf("%w: %s", ErrUnknownRun, run.Key)
+		return fmt.Errorf("%w: %s", durable.ErrUnknownRun, run.Key)
 	}
 	inv.mu.Lock()
 	queue := inv.signals[name]
@@ -526,15 +503,15 @@ func (f *Fake) Signal(_ context.Context, run RunRef, name string, payload []byte
 	return nil
 }
 
-func (f *Fake) Cancel(_ context.Context, run RunRef) error {
+func (f *Fake) Cancel(_ context.Context, run durable.RunRef) error {
 	f.mu.Lock()
 	target := f.runs[run.Key]
 	f.mu.Unlock()
 	if target == nil {
-		return fmt.Errorf("%w: %s", ErrUnknownRun, run.Key)
+		return fmt.Errorf("%w: %s", durable.ErrUnknownRun, run.Key)
 	}
 	target.mu.Lock()
-	terminal := target.state != RunRunning && target.state != RunSuspended
+	terminal := target.state != durable.RunRunning && target.state != durable.RunSuspended
 	target.mu.Unlock()
 	if terminal {
 		return nil
@@ -544,19 +521,19 @@ func (f *Fake) Cancel(_ context.Context, run RunRef) error {
 	return nil
 }
 
-func (f *Fake) Status(_ context.Context, run RunRef) (RunStatus, error) {
+func (f *Fake) Status(_ context.Context, run durable.RunRef) (durable.RunStatus, error) {
 	f.mu.Lock()
 	target := f.runs[run.Key]
 	f.mu.Unlock()
 	if target == nil {
-		return RunStatus{}, fmt.Errorf("%w: %s", ErrUnknownRun, run.Key)
+		return durable.RunStatus{}, fmt.Errorf("%w: %s", durable.ErrUnknownRun, run.Key)
 	}
 	target.mu.Lock()
 	defer target.mu.Unlock()
-	return RunStatus{State: target.state, Detail: target.detail}, nil
+	return durable.RunStatus{State: target.state, Detail: target.detail}, nil
 }
 
-func (f *Fake) WaitReady(run RunRef) {
+func (f *Fake) WaitReady(run durable.RunRef) {
 	f.mu.Lock()
 	target := f.runs[run.Key]
 	f.mu.Unlock()
@@ -575,11 +552,11 @@ func (f *Fake) invocationFor(key string) *invocation {
 	return run.invocation
 }
 
-func (f *Fake) ResolveApproval(ctx context.Context, req ResolveApprovalRequest) error {
+func (f *Fake) ResolveApproval(ctx context.Context, req durable.ResolveApprovalRequest) error {
 	if req.ApprovalID == "" {
 		return errors.New("durable resolve approval requires an approval id")
 	}
-	runKey, signal, err := ParseApprovalAddr(req.ApprovalID)
+	runKey, signal, err := durable.ParseApprovalAddr(req.ApprovalID)
 	if err != nil {
 		return err
 	}
@@ -593,7 +570,7 @@ func (f *Fake) ResolveApproval(ctx context.Context, req ResolveApprovalRequest) 
 	}
 	f.consumed[req.ApprovalID] = struct{}{}
 	f.mu.Unlock()
-	return f.Signal(ctx, RunRef{Key: runKey}, signal, req.Payload)
+	return f.Signal(ctx, durable.RunRef{Key: runKey}, signal, req.Payload)
 }
 
 func (f *Fake) RegisterTurnDeadline(sessionID string, deadline time.Time) {

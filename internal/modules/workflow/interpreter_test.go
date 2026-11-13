@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -87,7 +88,7 @@ func TestInterpreterRunsMixedWorkflowEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake().WithLogger(func(format string, args ...any) {
+	fake := durabletest.NewFake().WithLogger(func(format string, args ...any) {
 		t.Logf(format, args...)
 	})
 	disk := newTestStore(t)
@@ -171,7 +172,7 @@ func TestInterpreterSkipsDownstreamOnFalseCondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	agents := &fakeAgentRunner{output: json.RawMessage(`{"decision":"reject"}`)}
 	interpreter := NewInterpreter(disk, fake, &Options{
@@ -225,8 +226,8 @@ func testStepTimeoutRetriesThenFailsRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	clock := durable.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
-	fake := durable.NewFake().WithClock(clock)
+	clock := durabletest.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
+	fake := durabletest.NewFake().WithClock(clock)
 	disk := newTestStore(t)
 	block := make(chan struct{})
 	agents := &fakeAgentRunner{inFlight: block}
@@ -270,7 +271,7 @@ func TestInterpreterBoundsConcurrentSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	var inFlight, maxInFlight atomic.Int64
 	agents := &countingRunner{
@@ -316,7 +317,7 @@ func TestInterpreterWaitSuspendsAndResumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	interpreter := NewInterpreter(disk, fake, &Options{
 		Driver:             DriverConcurrent,
@@ -361,7 +362,7 @@ func TestInterpreterCancelReachesCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	agents := blockingRunner{}
 	interpreter := NewInterpreter(disk, fake, &Options{
@@ -393,7 +394,7 @@ func TestInterpreterCancelReachesCancelled(t *testing.T) {
 func TestLoadRejectsInvalidSpecWithoutPersisting(t *testing.T) {
 	ctx := context.Background()
 	disk := newTestStore(t)
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	interpreter := NewInterpreter(disk, fake, &Options{})
 	spec := validTestSpec()
 	spec.Steps[0].Executor.AgentID = nil
@@ -409,7 +410,7 @@ func TestLoadRejectsInvalidSpecWithoutPersisting(t *testing.T) {
 func TestStartUnknownDefinitionFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, durable.NewFake(), &Options{})
+	interpreter := NewInterpreter(disk, durabletest.NewFake(), &Options{})
 	if _, err := interpreter.Start(ctx, "ghost", nil, ownerOrigin()); err == nil {
 		t.Fatal("Start accepted an unknown definition")
 	} else if code, _ := CodeOf(err); code != ErrorCodeDefinitionNotFound {
@@ -434,7 +435,7 @@ func waitForRunStatus(t *testing.T, disk *Store, runID, status string, within ti
 	t.Fatalf("run %s status = %s, want %s within %s", runID, run.Status, status, within)
 }
 
-func expireAttempts(t *testing.T, clock *durable.ManualClock, attempts int) {
+func expireAttempts(t *testing.T, clock *durabletest.ManualClock, attempts int) {
 	t.Helper()
 	for range attempts {
 		synctest.Wait()
@@ -505,7 +506,7 @@ func TestApprovalRejectionRoutesRunToFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	interpreter := NewInterpreter(disk, fake, &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 1, AgentResolver: registry})
 	spec := &Spec{
@@ -558,8 +559,8 @@ func TestInterpreterSignalStepTimeoutRetryConvergesOnSignal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctx := context.Background()
-				clock := durable.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
-				fake := durable.NewFake().WithClock(clock)
+				clock := durabletest.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
+				fake := durabletest.NewFake().WithClock(clock)
 				disk := newTestStore(t)
 				interpreter := NewInterpreter(disk, fake, &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 1, AgentResolver: registry})
 				step := StepSpec{ID: "gate", Executor: ExecutorSpec{Kind: tc.kind}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 1, Backoff: time.Minute}}
@@ -607,8 +608,8 @@ func testTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	clock := durable.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
-	fake := durable.NewFake().WithClock(clock)
+	clock := durabletest.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
+	fake := durabletest.NewFake().WithClock(clock)
 	disk := newTestStore(t)
 	tracker := &attemptTracker{events: map[int]string{}}
 	interpreter := NewInterpreter(disk, fake, &Options{
@@ -716,7 +717,7 @@ func TestInterpreterSinksOversizedOutputThroughArtifactSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	sink := &fakeArtifactSink{digest: "sha256-abc123"}
 	agents := &fakeAgentRunner{output: oversizedOutput(70000)}
@@ -767,7 +768,7 @@ func TestInterpreterWaitPayloadOverInlineLimitIsSunk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	sink := &fakeArtifactSink{digest: "sha256-wait"}
 	interpreter := NewInterpreter(disk, fake, &Options{
@@ -813,7 +814,7 @@ func TestInterpreterOversizedOutputWithoutSinkFailsTheRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	agents := &fakeAgentRunner{output: oversizedOutput(70000)}
 	interpreter := NewInterpreter(disk, fake, &Options{
@@ -851,7 +852,7 @@ func TestInterpreterStepPersistFailureFailsTheRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	db := newTestDB(t)
 	disk := NewStore(db)
 	block := make(chan struct{})
@@ -889,7 +890,7 @@ func TestInterpreterSuspendedRunStaysSuspendedWhenSiblingCompletes(t *testing.T)
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	agents := &fakeAgentRunner{}
 	interpreter := NewInterpreter(disk, fake, &Options{
@@ -937,7 +938,7 @@ func TestInterpreterSuspendedStepReleasesConcurrencySlot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	started := make(chan struct{}, 1)
 	agents := &countingRunner{onStart: func() { started <- struct{}{} }}
@@ -1118,7 +1119,7 @@ func TestApprovalRequesterPortFailsStepAndRun(t *testing.T) {
 		},
 	}
 	disk := newTestStore(t)
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	requester := &testApprovalRequester{err: errors.New("approval backend unavailable")}
 	interpreter := NewInterpreter(disk, fake, &Options{
 		Driver:        DriverConcurrent,
@@ -1164,7 +1165,7 @@ func TestApprovalRequesterPortSucceedsOnSignal(t *testing.T) {
 		},
 	}
 	disk := newTestStore(t)
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	requester := &testApprovalRequester{}
 	interpreter := NewInterpreter(disk, fake, &Options{
 		Driver:        DriverConcurrent,

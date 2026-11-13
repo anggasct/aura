@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -54,7 +55,7 @@ func (l *invocationLog) invoked(key string) bool {
 type scheduleHost struct {
 	t       *testing.T
 	db      *sql.DB
-	clock   *durable.ManualClock
+	clock   *durabletest.ManualClock
 	store   *fakeJobStore
 	turns   *fakeTurnRunner
 	notify  *fakeNotifier
@@ -72,7 +73,7 @@ func newScheduleHost(t *testing.T, mutate func(*JobSpec)) *scheduleHost {
 		mutate(spec)
 	}
 	h := &scheduleHost{
-		t: t, db: storetest.OpenMigrated(t), clock: durable.NewManualClock(time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)),
+		t: t, db: storetest.OpenMigrated(t), clock: durabletest.NewManualClock(time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)),
 		store: newFakeJobStore(), turns: &fakeTurnRunner{}, notify: &fakeNotifier{}, log: &invocationLog{},
 	}
 	service, err := NewService(h.store)

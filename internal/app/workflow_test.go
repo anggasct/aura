@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -243,7 +244,7 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 		t.Fatalf("open storage: %v", err)
 	}
 	disk := workflow.NewStore(db)
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
+	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
@@ -309,7 +310,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 		t.Fatalf("open storage: %v", err)
 	}
 	disk := workflow.NewStore(db)
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
+	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
@@ -477,7 +478,7 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 	runner, db, workspace := newWorkflowToolRunnerFixture(t)
 
 	toolPtr := func(s string) *string { return &s }
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := workflow.NewStore(db)
 	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{
 		Tools:  runner,
@@ -693,7 +694,7 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture spec: %v", err)
 	}
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
+	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}

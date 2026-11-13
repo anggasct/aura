@@ -9,7 +9,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
 func threeToolSteps(id string, source Source) *Spec {
@@ -25,10 +25,10 @@ func threeToolSteps(id string, source Source) *Spec {
 	return spec
 }
 
-func budgetInterpreter(t *testing.T, budget Budget, options *Options) (*Interpreter, *Store, *durable.Fake) {
+func budgetInterpreter(t *testing.T, budget Budget, options *Options) (*Interpreter, *Store, *durabletest.Fake) {
 	t.Helper()
 	disk := newTestStore(t)
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	options.GeneratedBudget = budget
 	options.MaxConcurrentSteps = 2
 	options.Driver = DriverConcurrent

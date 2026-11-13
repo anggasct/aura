@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
 func refuseBadPath(_ string, args json.RawMessage) error {
@@ -24,7 +24,7 @@ func specWithPath(id, path string) *Spec {
 
 func freshInterpreter(t *testing.T) *Interpreter {
 	t.Helper()
-	return NewInterpreter(newTestStore(t), durable.NewFake(), &Options{})
+	return NewInterpreter(newTestStore(t), durabletest.NewFake(), &Options{})
 }
 
 func TestCompileChecksEveryToolStepsArguments(t *testing.T) {
@@ -84,7 +84,7 @@ func TestCompileChecksEveryToolStepsArguments(t *testing.T) {
 func TestBootQuarantinesARoutineThatNoLongerCompiles(t *testing.T) {
 	disk := newTestStore(t)
 	good, broken := specWithPath("good_routine", "a"), specWithPath("broken_routine", "bad")
-	author := NewInterpreter(disk, durable.NewFake(), &Options{})
+	author := NewInterpreter(disk, durabletest.NewFake(), &Options{})
 	if err := author.LoadAll(t.Context(), []*Spec{good, broken}, testValidationDeps()); err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestBootQuarantinesARoutineThatNoLongerCompiles(t *testing.T) {
 	refusing.CheckToolCall = refuseBadPath
 
 	t.Run("LoadRoutines loads the rest and returns the failing routine", func(t *testing.T) {
-		interpreter := NewInterpreter(disk, durable.NewFake(), &Options{})
+		interpreter := NewInterpreter(disk, durabletest.NewFake(), &Options{})
 		quarantined, err := interpreter.LoadRoutines(t.Context(), []*Spec{good, broken}, refusing)
 		if err != nil {
 			t.Fatalf("LoadRoutines: %v", err)

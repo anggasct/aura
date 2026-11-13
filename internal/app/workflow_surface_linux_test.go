@@ -28,6 +28,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -674,7 +675,7 @@ type driveStep struct {
 func driveToolRun(t *testing.T, rig *surfaceRig, id string, origin *workflow.RunOrigin, step *driveStep) []*workflow.StepRun {
 	t.Helper()
 	disk := workflow.NewStore(rig.db)
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{Tools: rig.runner, Logger: slog.New(slog.DiscardHandler)})
 	tool := step.tool
 	spec := &workflow.Spec{
@@ -793,7 +794,7 @@ func TestWorkflowStepInsideADurableTurnIsRefused(t *testing.T) {
 	call.Origin.AgentID = probePersona
 	stepCtx := stepContextFor(t, rig.db, call)
 
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	done := make(chan error, 1)
 	fake.RegisterHandler("scoped", func(ctx context.Context, inv durable.Invocation) error {
 		scoped := durable.WithTurnScope(stepCtx, durable.NewTurnScope(inv))

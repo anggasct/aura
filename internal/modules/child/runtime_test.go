@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
 func TestStarterRoutesThroughDurableRuntime(t *testing.T) {
-	runtime := durable.NewFake()
+	runtime := durabletest.NewFake()
 	payloads := make(chan []byte, 1)
 	runtime.RegisterHandler(HandlerName, func(_ stdcontext.Context, inv durable.Invocation) error {
 		payloads <- inv.Payload()
@@ -72,7 +73,7 @@ func TestStarterRoutesThroughDurableRuntime(t *testing.T) {
 }
 
 func TestStarterReleasesWhenRuntimeHasNoHandler(t *testing.T) {
-	runtime := durable.NewFake()
+	runtime := durabletest.NewFake()
 	launcher, err := AdaptRuntime(runtime)
 	if err != nil {
 		t.Fatalf("AdaptRuntime: %v", err)

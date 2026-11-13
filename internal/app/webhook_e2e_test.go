@@ -11,7 +11,7 @@ import (
 
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -81,7 +81,7 @@ func TestBuildWebhookListener(t *testing.T) {
 	t.Setenv("AURA_WEBHOOK_E2E_SECRET", webhookE2ESecret)
 	db := storetest.OpenMigrated(t)
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	runtime := durable.NewFake()
+	runtime := durabletest.NewFake()
 	t.Cleanup(runtime.Close)
 	cfg := &config.Config{
 		Webhook: config.Webhook{

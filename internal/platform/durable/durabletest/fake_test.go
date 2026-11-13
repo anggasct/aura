@@ -1,4 +1,4 @@
-package durable
+package durabletest
 
 import (
 	"context"
@@ -8,20 +8,22 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/durable"
 )
 
 func TestFakeStartIsIdempotentPerKey(t *testing.T) {
 	fake := NewFake()
 	var runs atomic.Int64
-	fake.RegisterHandler("svc", func(_ context.Context, inv Invocation) error {
+	fake.RegisterHandler("svc", func(_ context.Context, inv durable.Invocation) error {
 		runs.Add(1)
 		return nil
 	})
-	first, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-1"})
+	first, err := fake.Start(context.Background(), durable.StartRequest{Handler: "svc", Key: "run-1"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	second, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-1"})
+	second, err := fake.Start(context.Background(), durable.StartRequest{Handler: "svc", Key: "run-1"})
 	if err != nil {
 		t.Fatalf("Start again: %v", err)
 	}
@@ -33,7 +35,7 @@ func TestFakeStartIsIdempotentPerKey(t *testing.T) {
 		t.Fatalf("handler ran %d times, want 1", got)
 	}
 	status, err := fake.Status(context.Background(), first)
-	if err != nil || status.State != RunSucceeded {
+	if err != nil || status.State != durable.RunSucceeded {
 		t.Fatalf("status = %+v (%v), want succeeded", status, err)
 	}
 }
@@ -42,7 +44,7 @@ func TestFakeSignalQueuesBeforeAndWakesAfterWait(t *testing.T) {
 	fake := NewFake()
 	started := make(chan struct{})
 	release := make(chan struct{})
-	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
+	fake.RegisterHandler("svc", func(ctx context.Context, inv durable.Invocation) error {
 		close(started)
 		payload, ok := inv.Signal(ctx, "go")
 		if !ok || string(payload) != "green" {
@@ -51,7 +53,7 @@ func TestFakeSignalQueuesBeforeAndWakesAfterWait(t *testing.T) {
 		close(release)
 		return nil
 	})
-	run, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-1"})
+	run, err := fake.Start(context.Background(), durable.StartRequest{Handler: "svc", Key: "run-1"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -70,12 +72,12 @@ func TestFakeSignalQueuesBeforeAndWakesAfterWait(t *testing.T) {
 func TestFakeCancelTerminatesWait(t *testing.T) {
 	fake := NewFake()
 	observed := make(chan error, 1)
-	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
+	fake.RegisterHandler("svc", func(ctx context.Context, inv durable.Invocation) error {
 		_, ok := inv.Signal(ctx, "never")
 		observed <- map[bool]error{true: nil, false: context.Canceled}[ok]
 		return nil
 	})
-	run, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-1"})
+	run, err := fake.Start(context.Background(), durable.StartRequest{Handler: "svc", Key: "run-1"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -86,7 +88,7 @@ func TestFakeCancelTerminatesWait(t *testing.T) {
 		t.Fatalf("handler observed %v, want context.Canceled", err)
 	}
 	status, _ := fake.Status(context.Background(), run)
-	if status.State != RunCancelled {
+	if status.State != durable.RunCancelled {
 		t.Fatalf("state = %s, want cancelled", status.State)
 	}
 	if err := fake.Signal(context.Background(), run, "x", nil); err == nil {
@@ -97,20 +99,20 @@ func TestFakeCancelTerminatesWait(t *testing.T) {
 func TestFakeCloseStopsEveryRunBeforeReturning(t *testing.T) {
 	fake := NewFake()
 	var finished atomic.Int32
-	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
+	fake.RegisterHandler("svc", func(ctx context.Context, inv durable.Invocation) error {
 		defer finished.Add(1)
 		_, _ = inv.Signal(ctx, "never")
 		return nil
 	})
-	fake.RegisterHandler("quick", func(context.Context, Invocation) error {
+	fake.RegisterHandler("quick", func(context.Context, durable.Invocation) error {
 		defer finished.Add(1)
 		return nil
 	})
-	waiting, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-wait"})
+	waiting, err := fake.Start(context.Background(), durable.StartRequest{Handler: "svc", Key: "run-wait"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if _, err := fake.Start(context.Background(), StartRequest{Handler: "quick", Key: "run-quick"}); err != nil {
+	if _, err := fake.Start(context.Background(), durable.StartRequest{Handler: "quick", Key: "run-quick"}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	fake.Close()
@@ -118,7 +120,7 @@ func TestFakeCloseStopsEveryRunBeforeReturning(t *testing.T) {
 		t.Fatalf("finished handlers after Close = %d, want 2", got)
 	}
 	status, _ := fake.Status(context.Background(), waiting)
-	if status.State != RunCancelled {
+	if status.State != durable.RunCancelled {
 		t.Fatalf("waiting run state = %s, want cancelled", status.State)
 	}
 	fake.Close()
@@ -133,7 +135,7 @@ func TestFakeSleepFiresOnManualClock(t *testing.T) {
 	fake := NewFake().WithClock(clock)
 	timerRegistered := make(chan struct{})
 	slept := make(chan struct{})
-	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
+	fake.RegisterHandler("svc", func(ctx context.Context, inv durable.Invocation) error {
 		timer := inv.Timer(time.Minute)
 		close(timerRegistered)
 		select {
@@ -144,7 +146,7 @@ func TestFakeSleepFiresOnManualClock(t *testing.T) {
 		close(slept)
 		return nil
 	})
-	run, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-1"})
+	run, err := fake.Start(context.Background(), durable.StartRequest{Handler: "svc", Key: "run-1"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -160,30 +162,30 @@ func TestFakeSleepFiresOnManualClock(t *testing.T) {
 
 func TestFakeUnknownRunOperationsFail(t *testing.T) {
 	fake := NewFake()
-	missing := RunRef{Key: "nope"}
-	if _, err := fake.Status(context.Background(), missing); !errIs(err, ErrUnknownRun) {
+	missing := durable.RunRef{Key: "nope"}
+	if _, err := fake.Status(context.Background(), missing); !errIs(err, durable.ErrUnknownRun) {
 		t.Fatalf("Status err = %v, want unknown run", err)
 	}
-	if err := fake.Signal(context.Background(), missing, "x", nil); !errIs(err, ErrUnknownRun) {
+	if err := fake.Signal(context.Background(), missing, "x", nil); !errIs(err, durable.ErrUnknownRun) {
 		t.Fatalf("Signal err = %v, want unknown run", err)
 	}
-	if err := fake.Cancel(context.Background(), missing); !errIs(err, ErrUnknownRun) {
+	if err := fake.Cancel(context.Background(), missing); !errIs(err, durable.ErrUnknownRun) {
 		t.Fatalf("Cancel err = %v, want unknown run", err)
 	}
 }
 
 func TestFakeFailureCarriesDetail(t *testing.T) {
 	fake := NewFake()
-	fake.RegisterHandler("svc", func(_ context.Context, inv Invocation) error {
+	fake.RegisterHandler("svc", func(_ context.Context, inv durable.Invocation) error {
 		return errors.New("step exploded")
 	})
-	run, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-1"})
+	run, err := fake.Start(context.Background(), durable.StartRequest{Handler: "svc", Key: "run-1"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	fake.WaitReady(run)
 	status, _ := fake.Status(context.Background(), run)
-	if status.State != RunFailed || status.Detail != "step exploded" {
+	if status.State != durable.RunFailed || status.Detail != "step exploded" {
 		t.Fatalf("status = %+v, want failed with detail", status)
 	}
 }
@@ -192,7 +194,7 @@ func TestFakeRunCompletionReleasesParkedSignal(t *testing.T) {
 	fake := NewFake()
 	parked := make(chan struct{})
 	released := make(chan struct{})
-	fake.RegisterHandler("svc", func(runCtx context.Context, inv Invocation) error {
+	fake.RegisterHandler("svc", func(runCtx context.Context, inv durable.Invocation) error {
 		go func() {
 			close(parked)
 			_, ok := inv.Signal(runCtx, "late")
@@ -204,7 +206,7 @@ func TestFakeRunCompletionReleasesParkedSignal(t *testing.T) {
 		<-parked
 		return errors.New("step failed")
 	})
-	run, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "run-1"})
+	run, err := fake.Start(context.Background(), durable.StartRequest{Handler: "svc", Key: "run-1"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -220,7 +222,7 @@ func TestFakeRunCompletionReleasesParkedSignal(t *testing.T) {
 }
 
 func TestSignalWaitCancellationPreservesRacedDelivery(t *testing.T) {
-	inv := &invocation{run: RunRef{Key: "test"}, clock: RealClock(), done: make(chan struct{}), mu: &sync.Mutex{}, signals: map[string]*signalQueue{}}
+	inv := &invocation{run: durable.RunRef{Key: "test"}, clock: durable.RealClock(), done: make(chan struct{}), mu: &sync.Mutex{}, signals: map[string]*signalQueue{}}
 	ctx, cancel := context.WithCancel(context.Background())
 	type signalResult struct {
 		payload []byte
@@ -281,7 +283,7 @@ func TestFakeCallDispatchesByServiceAndHandler(t *testing.T) {
 	fake.RegisterCall("SessionTurns", "admit", func(_ context.Context, key string, payload []byte) ([]byte, error) {
 		return []byte(`{"key":` + strconv.Quote(key) + `,"payload":` + string(payload) + `}`), nil
 	})
-	out, err := fake.Call(context.Background(), CallRequest{
+	out, err := fake.Call(context.Background(), durable.CallRequest{
 		Service: "SessionTurns",
 		Key:     "session-1",
 		Handler: "admit",
@@ -298,7 +300,7 @@ func TestFakeCallDispatchesByServiceAndHandler(t *testing.T) {
 
 func TestFakeCallRejectsUnknownAndInvalid(t *testing.T) {
 	fake := NewFake()
-	cases := map[string]CallRequest{
+	cases := map[string]durable.CallRequest{
 		"unknown handler": {Service: "SessionTurns", Key: "s", Handler: "nope", Payload: []byte(`{}`)},
 		"missing service": {Key: "s", Handler: "admit"},
 		"missing key":     {Service: "SessionTurns", Handler: "admit"},
@@ -315,20 +317,20 @@ func TestFakeCallRejectsUnknownAndInvalid(t *testing.T) {
 
 func TestFakeResolveApprovalConsumesOnce(t *testing.T) {
 	fake := NewFake()
-	fake.RegisterHandler("svc", func(ctx context.Context, inv Invocation) error {
+	fake.RegisterHandler("svc", func(ctx context.Context, inv durable.Invocation) error {
 		_, _, _ = inv.Wait(ctx, "approval-op-1", time.Minute)
 		return nil
 	})
-	ref, err := fake.Start(context.Background(), StartRequest{Handler: "svc", Key: "turn-1"})
+	ref, err := fake.Start(context.Background(), durable.StartRequest{Handler: "svc", Key: "turn-1"})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	_ = ref
-	addr := FormatApprovalAddr("turn-1", "approval-op-1")
-	if err := fake.ResolveApproval(context.Background(), ResolveApprovalRequest{ApprovalID: addr, Payload: []byte(`{"decision":"approve"}`)}); err != nil {
+	addr := durable.FormatApprovalAddr("turn-1", "approval-op-1")
+	if err := fake.ResolveApproval(context.Background(), durable.ResolveApprovalRequest{ApprovalID: addr, Payload: []byte(`{"decision":"approve"}`)}); err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if err := fake.ResolveApproval(context.Background(), ResolveApprovalRequest{ApprovalID: addr, Payload: []byte(`{"decision":"approve"}`)}); err == nil {
+	if err := fake.ResolveApproval(context.Background(), durable.ResolveApprovalRequest{ApprovalID: addr, Payload: []byte(`{"decision":"approve"}`)}); err == nil {
 		t.Fatal("expected a double-consume error")
 	}
 	if _, _, err := fake.TurnDeadline(context.Background(), "session-1"); err != nil {
@@ -340,7 +342,7 @@ func TestFakeResolveApprovalConsumesOnce(t *testing.T) {
 	if err != nil || !ok || !deadline.Equal(when) {
 		t.Fatalf("deadline = %v %v (%v), want %v true", deadline, ok, err, when)
 	}
-	if err := fake.ResolveApproval(context.Background(), ResolveApprovalRequest{}); err == nil {
+	if err := fake.ResolveApproval(context.Background(), durable.ResolveApprovalRequest{}); err == nil {
 		t.Fatal("expected an empty-id error")
 	}
 	if _, _, err := fake.TurnDeadline(context.Background(), ""); err == nil {
@@ -349,12 +351,12 @@ func TestFakeResolveApprovalConsumesOnce(t *testing.T) {
 }
 
 func TestParseApprovalAddr(t *testing.T) {
-	runKey, signal, err := ParseApprovalAddr("turn-1/approval-op-2")
+	runKey, signal, err := durable.ParseApprovalAddr("turn-1/approval-op-2")
 	if err != nil || runKey != "turn-1" || signal != "approval-op-2" {
 		t.Fatalf("parsed = %q %q (%v)", runKey, signal, err)
 	}
 	for _, bad := range []string{"", "noslash", "/signal", "run/"} {
-		if _, _, err := ParseApprovalAddr(bad); err == nil {
+		if _, _, err := durable.ParseApprovalAddr(bad); err == nil {
 			t.Fatalf("expected an error for %q", bad)
 		}
 	}

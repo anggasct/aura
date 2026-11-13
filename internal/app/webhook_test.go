@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -378,7 +379,7 @@ func (queuedRuntime) Start(_ context.Context, req durable.StartRequest) (durable
 	return durable.RunRef{Key: req.Key}, nil
 }
 
-func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durable.Fake) string {
+func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durabletest.Fake) string {
 	t.Helper()
 	ctx := context.Background()
 	event := "check_suite.completed"
@@ -425,7 +426,7 @@ func TestDispatcherRoutesGitHubEventToCorrelation(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
 	dispatcher, _ := webhookTestSetup(t, backend)
 	_, disk := githubTestStore(t)
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	runID := githubTestBinding(t, disk, fake)
 	adapter, err := github.NewAdapter(disk, fake, nil)
 	if err != nil {
@@ -459,7 +460,7 @@ func TestDispatcherFallsBackToTurnsForNonGitHub(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
 	dispatcher, _ := webhookTestSetup(t, backend)
 	_, disk := githubTestStore(t)
-	adapter, err := github.NewAdapter(disk, durable.NewFake(), nil)
+	adapter, err := github.NewAdapter(disk, durabletest.NewFake(), nil)
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
@@ -519,7 +520,7 @@ func TestDispatcherRoutesEnvelopeWrappedGitHubEventToCorrelation(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
 	dispatcher, _ := webhookTestSetup(t, backend)
 	_, disk := githubTestStore(t)
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	runID := githubTestBinding(t, disk, fake)
 	counter := &signalCountingRuntime{Runtime: fake}
 	adapter, err := github.NewAdapter(disk, counter, nil)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
@@ -415,7 +416,7 @@ func TestDurableResumeNeedsNoScan(t *testing.T) {
 	_, db, events := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 	mustCreateSession(t, db, "session-a")
 	sessions := newHookedSessionStore(t, db)
-	backend := durable.NewFake()
+	backend := durabletest.NewFake()
 	ctx := context.Background()
 	for _, turnRequest := range []string{"turn-0", "turn-1"} {
 		desc := turnDescriptorFromRequest(sampleRequest("session-a", turnRequest))

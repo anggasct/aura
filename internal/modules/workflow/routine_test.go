@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -84,7 +85,7 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	if err != nil || len(routines) != 1 || routines[0].Version != 2 {
 		t.Fatalf("Routines = %+v, %v", routines, err)
 	}
-	fresh := NewInterpreter(disk, durable.NewFake(), &Options{Driver: DriverConcurrent, Tools: tools})
+	fresh := NewInterpreter(disk, durabletest.NewFake(), &Options{Driver: DriverConcurrent, Tools: tools})
 	installAll(t, fresh, toolSpec("leaf"))
 	started, err := fresh.StartConfigured(context.Background(), first.ID, &RunInput{}, "local-owner", principal.ClassOwner, "sched-once")
 	if err != nil || started.DefinitionVersion != 2 {
