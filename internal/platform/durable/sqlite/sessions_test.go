@@ -737,107 +737,88 @@ func TestConcurrentAdmitsKeepOneActiveTurn(t *testing.T) {
 }
 
 type scriptStep struct {
-	op     string
-	turnID string
-	key    string
+	op             string
+	turnID         string
+	key            string
+	wantStart      string
+	wantReplayed   bool
+	wantOriginal   string
+	wantOverloaded bool
+	wantSequence   uint64
+	wantDropped    []string
+	wantDepth      int
+	wantActive     string
 }
 
-type machineAdmission struct {
-	req      *runtimesessions.AdmitRequest
-	sequence uint64
-}
-
-func machineAdmit(t *testing.T, state *runtimesessions.State, in machineAdmission) runtimesessions.AdmitResult {
-	t.Helper()
-	original, err := runtimesessions.CheckReplay(state, in.req.Turn.IdempotencyKey)
-	if err != nil {
-		t.Fatalf("CheckReplay: %v", err)
-	}
-	if original != "" {
-		return runtimesessions.AdmitResult{Replayed: true, OriginalTurnID: original}
-	}
-	sequence := in.sequence
-	if sequence == 0 {
-		sequence = state.LastSequence + 1
-	}
-	result, err := runtimesessions.Enqueue(state, &in.req.Turn, sequence, in.req.MaxPending)
-	if code, ok := turn.CodeOf(err); ok && code == turn.ErrorCodeRuntimeOverloaded {
-		return runtimesessions.AdmitResult{Overloaded: true}
-	}
-	if err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	return result
-}
-
-func TestSessionStoreMatchesTheStateMachine(t *testing.T) {
+func TestSessionStoreFollowsAnAdmitReleaseAbortScript(t *testing.T) {
 	f := newSessionFixture(t)
-	state := runtimesessions.NewState()
 	script := []scriptStep{
-		{"admit", "turn-1", "key-1"},
-		{"admit", "turn-2", ""},
-		{"admit", "turn-3", "key-1"},
-		{"admit", "turn-4", "key-4"},
-		{"admit", "turn-5", ""},
-		{"admit", "turn-6", "key-6"},
-		{"release", "turn-1", ""},
-		{"admit", "turn-7", "key-6"},
-		{"release", "turn-2", ""},
-		{"admit", "turn-8", "key-4"},
-		{"abort", "", ""},
-		{"admit", "turn-9", ""},
-		{"admit", "turn-10", "key-1"},
-		{"release", "turn-9", ""},
-		{"admit", "turn-11", "key-11"},
+		{op: "admit", turnID: "turn-1", key: "key-1", wantStart: "turn-1@1", wantSequence: 1, wantActive: "turn-1"},
+		{op: "admit", turnID: "turn-2", wantSequence: 2, wantActive: "turn-1", wantDepth: 1},
+		{op: "admit", turnID: "turn-3", key: "key-1", wantReplayed: true, wantOriginal: "turn-1", wantActive: "turn-1", wantDepth: 1},
+		{op: "admit", turnID: "turn-4", key: "key-4", wantSequence: 3, wantActive: "turn-1", wantDepth: 2},
+		{op: "admit", turnID: "turn-5", wantOverloaded: true, wantActive: "turn-1", wantDepth: 2},
+		{op: "admit", turnID: "turn-6", key: "key-6", wantOverloaded: true, wantActive: "turn-1", wantDepth: 2},
+		{op: "release", turnID: "turn-1", wantStart: "turn-2@2", wantActive: "turn-2", wantDepth: 1},
+		{op: "admit", turnID: "turn-7", key: "key-6", wantSequence: 4, wantActive: "turn-2", wantDepth: 2},
+		{op: "release", turnID: "turn-2", wantStart: "turn-4@3", wantActive: "turn-4", wantDepth: 1},
+		{op: "admit", turnID: "turn-8", key: "key-4", wantReplayed: true, wantOriginal: "turn-4", wantActive: "turn-4", wantDepth: 1},
+		{op: "abort", wantDropped: []string{"turn-4@3", "turn-7@4"}},
+		{op: "admit", turnID: "turn-9", wantStart: "turn-9@5", wantSequence: 5, wantActive: "turn-9"},
+		{op: "admit", turnID: "turn-10", key: "key-1", wantReplayed: true, wantOriginal: "turn-1", wantActive: "turn-9"},
+		{op: "release", turnID: "turn-9"},
+		{op: "admit", turnID: "turn-11", key: "key-11", wantStart: "turn-11@6", wantSequence: 6, wantActive: "turn-11"},
 	}
-	for i, step := range script {
-		label := fmt.Sprintf("step %d %s %s", i, step.op, step.turnID)
-		switch step.op {
-		case "admit":
-			req := admitRequest(turnSpec{turnID: step.turnID, key: step.key, maxPending: 3})
-			got, err := f.sessions.Admit(t.Context(), req)
-			if err != nil {
-				t.Fatalf("%s: store: %v", label, err)
-			}
-			want := machineAdmit(t, state, machineAdmission{req: req, sequence: got.Sequence})
-			if queuedRef(got.ToStart) != queuedRef(want.ToStart) || got.Overloaded != want.Overloaded || got.Replayed != want.Replayed || got.OriginalTurnID != want.OriginalTurnID {
-				t.Fatalf("%s: store %+v, machine %+v", label, got, want)
-			}
-		case "release":
-			got := f.release(t, step.turnID)
-			want, err := runtimesessions.Release(state, step.turnID)
-			if err != nil {
-				t.Fatalf("%s: machine: %v", label, err)
-			}
-			if queuedRef(got.ToStart) != queuedRef(want.ToStart) || got.QueueDepth != want.QueueDepth {
-				t.Fatalf("%s: store %q depth %d, machine %q depth %d", label, queuedRef(got.ToStart), got.QueueDepth, queuedRef(want.ToStart), want.QueueDepth)
-			}
-		case "abort":
-			got, err := f.sessions.Abort(t.Context(), testSessionID)
-			if err != nil {
-				t.Fatalf("%s: store: %v", label, err)
-			}
-			want, err := runtimesessions.Abort(state)
-			if err != nil {
-				t.Fatalf("%s: machine: %v", label, err)
-			}
-			if len(got.Dropped) != len(want) {
-				t.Fatalf("%s: store dropped %d, machine %d", label, len(got.Dropped), len(want))
-			}
-			for j := range want {
-				if queuedRef(&got.Dropped[j]) != queuedRef(&want[j]) {
-					t.Fatalf("%s: dropped %d store %q, machine %q", label, j, queuedRef(&got.Dropped[j]), queuedRef(&want[j]))
+	for i := range script {
+		step := &script[i]
+		t.Run(fmt.Sprintf("step %02d %s %s", i, step.op, step.turnID), func(t *testing.T) {
+			switch step.op {
+			case "admit":
+				req := admitRequest(turnSpec{turnID: step.turnID, key: step.key, maxPending: 3})
+				got, err := f.sessions.Admit(t.Context(), req)
+				if err != nil {
+					t.Fatalf("Admit: %v", err)
 				}
+				if ref := queuedRef(got.ToStart); ref != step.wantStart {
+					t.Fatalf("started %q, want %q", ref, step.wantStart)
+				}
+				if got.Replayed != step.wantReplayed || got.OriginalTurnID != step.wantOriginal {
+					t.Fatalf("replayed %v of %q, want %v of %q", got.Replayed, got.OriginalTurnID, step.wantReplayed, step.wantOriginal)
+				}
+				if got.Overloaded != step.wantOverloaded {
+					t.Fatalf("overloaded %v, want %v", got.Overloaded, step.wantOverloaded)
+				}
+				if got.Sequence != step.wantSequence {
+					t.Fatalf("sequence %d, want %d", got.Sequence, step.wantSequence)
+				}
+			case "release":
+				got := f.release(t, step.turnID)
+				if ref := queuedRef(got.ToStart); ref != step.wantStart {
+					t.Fatalf("started %q, want %q", ref, step.wantStart)
+				}
+				if got.QueueDepth != step.wantDepth {
+					t.Fatalf("release queue depth %d, want %d", got.QueueDepth, step.wantDepth)
+				}
+			case "abort":
+				got, err := f.sessions.Abort(t.Context(), testSessionID)
+				if err != nil {
+					t.Fatalf("Abort: %v", err)
+				}
+				var dropped []string
+				for j := range got.Dropped {
+					dropped = append(dropped, queuedRef(&got.Dropped[j]))
+				}
+				if !slices.Equal(dropped, step.wantDropped) {
+					t.Fatalf("dropped %v, want %v", dropped, step.wantDropped)
+				}
+			default:
+				t.Fatalf("unknown op %q", step.op)
 			}
-		}
-		status := f.status(t)
-		wantActive := ""
-		if state.Active != nil {
-			wantActive = state.Active.Descriptor.TurnID
-		}
-		if status.QueueDepth != len(state.Queue) || status.ActiveTurnID != wantActive {
-			t.Fatalf("%s: store active %q depth %d, machine active %q depth %d", label, status.ActiveTurnID, status.QueueDepth, wantActive, len(state.Queue))
-		}
+			status := f.status(t)
+			if status.ActiveTurnID != step.wantActive || status.QueueDepth != step.wantDepth {
+				t.Fatalf("active %q depth %d, want active %q depth %d", status.ActiveTurnID, status.QueueDepth, step.wantActive, step.wantDepth)
+			}
+		})
 	}
 }
 
