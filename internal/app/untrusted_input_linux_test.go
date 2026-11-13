@@ -259,7 +259,7 @@ func serverApprovalReachable(t *testing.T) func(sessionID string) bool {
 	telegramCfg := enabledTelegramConfig()
 	cfg.Owner = telegramCfg.Owner
 	cfg.Channels.Telegram = telegramCfg.Channels.Telegram
-	_, _, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), discordTestDB(t), t.TempDir(), nil, nil)
+	_, _, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), discordTestDB(t), t.TempDir(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters: %v", err)
 	}

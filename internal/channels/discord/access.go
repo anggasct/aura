@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -186,6 +187,9 @@ func (a *Adapter) forgetMe(ctx context.Context, msg *messagePayload, inv *comman
 	}
 	if err := a.access.Erasure.Forget(ctx, envelope.PrincipalID); err != nil {
 		a.logger.WarnContext(ctx, "forgetme erasure failed", "component", "discord")
+		if errors.Is(err, access.ErrForgetRunsStopping) {
+			a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageForgetmeStopping))
+		}
 		return
 	}
 	a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageForgetmeDone))

@@ -129,11 +129,11 @@ func TestPrincipalListIncludesTelegramPrincipals(t *testing.T) {
 func TestTelegramAccessSettingsShareTheDiscordGates(t *testing.T) {
 	cfg := enabledTelegramConfig()
 	db := discordTestDB(t)
-	settings := telegramAccessSettings(&cfg, db, nil)
+	settings := telegramAccessSettings(&cfg, db, nil, nil)
 	if settings.Pairing == nil || settings.Budgets == nil || settings.Erasure == nil || settings.Handoffs == nil || settings.Evals == nil {
 		t.Fatalf("telegram access settings are missing gates: %+v", settings)
 	}
-	bare := telegramAccessSettings(&cfg, nil, nil)
+	bare := telegramAccessSettings(&cfg, nil, nil, nil)
 	if bare.Budgets != nil || bare.Erasure != nil || bare.Handoffs != nil || bare.Evals != nil {
 		t.Fatalf("settings without a database carry gates: %+v", bare)
 	}

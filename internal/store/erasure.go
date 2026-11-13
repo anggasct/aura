@@ -24,6 +24,11 @@ type ErasureCounts struct {
 	UsageLinks      int
 	EmailEffects    int
 	Blobs           int
+
+	WorkflowRuns       int
+	WorkflowApprovals  int
+	LegacyStepSessions int
+	LiveWorkflowRuns   int
 }
 
 const (
@@ -87,6 +92,9 @@ func ErasePrincipal(ctx context.Context, db *sql.DB, principalID string, apply b
 		return counts, classifyBusy(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := eraseWorkflowData(ctx, tx, principalID, apply, &counts); err != nil {
+		return counts, err
+	}
 	for _, target := range counts.targets() {
 		if target.grant && opts.KeepGrants {
 			continue
@@ -109,7 +117,7 @@ func ErasePrincipal(ctx context.Context, db *sql.DB, principalID string, apply b
 	if err := tx.Commit(); err != nil {
 		return counts, classifyBusy(err)
 	}
-	if opts.ArtifactRoot != "" && counts.Sessions > 0 {
+	if opts.ArtifactRoot != "" && (counts.Sessions > 0 || counts.LegacyStepSessions > 0) {
 		report, err := Collect(ctx, db, opts.ArtifactRoot, time.Now().UTC().Add(time.Second))
 		if err != nil {
 			return counts, fmt.Errorf("collect erased blobs: %w", err)

@@ -3,9 +3,11 @@ package discord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/command"
 )
@@ -106,5 +108,17 @@ func TestForgetMeRefusesTheOwnerAndReportsNothingOnFailure(t *testing.T) {
 	}
 	if posts := stub.postsTo("4402"); len(posts) != 0 {
 		t.Fatalf("failed erasure replied %+v, want no done message", posts)
+	}
+}
+
+func TestForgetMeAsksToRepeatWhileWorkflowRunsStop(t *testing.T) {
+	defaults := config.PersonaMessageDefaults()
+	eraser := &fakeEraser{err: fmt.Errorf("blocked: %w", access.ErrForgetRunsStopping)}
+	adapter, _, stub := newForgetAdapter(t, eraser)
+	if _, err := adapter.admit(t.Context(), textMessage("9821", "4403", "", "601", "/forgetme confirm", nil)); err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if got := lastReply(t, stub, "4403"); got != defaults[config.MessageForgetmeStopping] {
+		t.Fatalf("reply = %q, want the runs-stopping message", got)
 	}
 }

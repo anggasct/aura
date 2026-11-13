@@ -124,7 +124,7 @@ func (adapters discordAdapters) Check(ctx context.Context) []health.Finding {
 	return findings
 }
 
-func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
+func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, runs *erasureRuns, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
 	if cfg == nil || (!cfg.Channels.Discord.Enabled && !cfg.Channels.Telegram.Enabled && !cfg.Channels.Email.Enabled) {
 		return nil, nil, nil, nil
 	}
@@ -159,7 +159,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			}
 			adapter.SetPrincipalResolver(owners)
 			adapter.SetPersonaRouter(router)
-			settings := discordAccessSettings(cfg, db, accessRecorder)
+			settings := discordAccessSettings(cfg, db, accessRecorder, runs)
 			adapter.SetAccess(&settings)
 			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
 				recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
@@ -192,7 +192,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			}
 			adapter.SetPrincipalResolver(owners)
 			adapter.SetPersonaRouter(router)
-			settings := telegramAccessSettings(cfg, db, accessRecorder)
+			settings := telegramAccessSettings(cfg, db, accessRecorder, runs)
 			adapter.SetAccess(&settings)
 			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
 				recorder.Admitted(ctx, string(class), principal.ChannelTelegram)
@@ -221,7 +221,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 			}
 			adapter.SetPrincipalResolver(owners)
 			adapter.SetPersonaRouter(router)
-			settings := discordAccessSettings(cfg, db, accessRecorder)
+			settings := discordAccessSettings(cfg, db, accessRecorder, runs)
 			adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
 			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
 				recorder.Admitted(ctx, string(class), principal.ChannelEmail)

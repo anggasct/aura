@@ -149,7 +149,7 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 func TestDiscordAccessSettingsUseTheAccessSection(t *testing.T) {
 	cfg := config.Default()
 	cfg.Access.ApprovalTimeout = config.Duration(10 * time.Minute)
-	settings := discordAccessSettings(&cfg, nil, nil)
+	settings := discordAccessSettings(&cfg, nil, nil, nil)
 	if settings.ApprovalTimeout != 10*time.Minute || settings.StandingGrantTTL != 168*time.Hour || settings.Grants == nil {
 		t.Fatalf("settings = %+v", settings)
 	}

@@ -90,7 +90,7 @@ func buildHTTPChat(cfg *config.Config, db *sql.DB, backend turn.AgentRuntime, re
 	if !settings.Enabled {
 		return nil, nil, nil
 	}
-	gates := discordAccessSettings(cfg, db, recorder)
+	gates := discordAccessSettings(cfg, db, recorder, nil)
 	sessions := &httpSessionStore{sessions: store.NewSessionService(db)}
 	chat, err := httpchat.NewChat(&httpchat.ChatOptions{
 		Runtime:            backend,

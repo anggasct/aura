@@ -131,7 +131,7 @@ func TestPrincipalBudgetGateReadsTheTurnLedger(t *testing.T) {
 	}); err == nil {
 		t.Fatal("turn ledger ignored the configured public cap")
 	}
-	settings := discordAccessSettings(loaded.Config, db, nil)
+	settings := discordAccessSettings(loaded.Config, db, nil, nil)
 	if settings.Budgets == nil {
 		t.Fatal("discord access settings carry no budget gate")
 	}

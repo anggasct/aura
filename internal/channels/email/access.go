@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 
@@ -97,6 +98,9 @@ func (a *Adapter) forgetMe(ctx context.Context, inv *command.Invocation, found *
 	default:
 		if err := a.access.Erasure.Forget(ctx, found.principal); err != nil {
 			a.logger.WarnContext(ctx, "forgetme erasure failed", "component", "email", "account", a.account.Name)
+			if errors.Is(err, access.ErrForgetRunsStopping) {
+				a.noticeSender(ctx, found, definition.Message(config.MessageForgetmeStopping))
+			}
 			return
 		}
 		a.noticeSender(ctx, found, definition.Message(config.MessageForgetmeDone))

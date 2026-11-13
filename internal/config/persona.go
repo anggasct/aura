@@ -55,6 +55,7 @@ const (
 	MessageHandoffClosed     = "handoff_closed"
 	MessageForgetmeConfirm   = "forgetme_confirm"
 	MessageForgetmeDone      = "forgetme_done"
+	MessageForgetmeStopping  = "forgetme_stopping"
 	MessageUnavailable       = "unavailable"
 	MessageWorkflowSucceeded = "workflow_succeeded"
 	MessageWorkflowFailed    = "workflow_failed"
@@ -76,6 +77,7 @@ var personaMessageDefaults = map[string]string{
 	MessageHandoffClosed:     "The owner has handed the conversation back to me.",
 	MessageForgetmeConfirm:   "This erases your conversations and data with me. Send /forgetme confirm to proceed.",
 	MessageForgetmeDone:      "Your data has been erased.",
+	MessageForgetmeStopping:  "Your workflow runs are being stopped. Please send /forgetme confirm again in a minute.",
 	MessageUnavailable:       "This assistant is not available right now.",
 	MessageWorkflowSucceeded: "Done: " + WorkflowGoalPlaceholder,
 	MessageWorkflowFailed:    "Sorry, " + WorkflowGoalPlaceholder + " could not be completed.",

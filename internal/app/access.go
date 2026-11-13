@@ -135,7 +135,7 @@ func recordAccessAction(ctx context.Context, db *sql.DB, action *accessAction, s
 	return err
 }
 
-func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.AccessRecorder) discord.AccessSettings {
+func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) discord.AccessSettings {
 	settings := discord.AccessSettings{
 		Grants:         newStandingGrantRecorder(db),
 		Pairing:        newPairingService(db, recorder),
@@ -153,7 +153,7 @@ func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.A
 	}
 	if db != nil {
 		_, artifactRoot, _, _ := storagePaths(cfg)
-		settings.Erasure = &principalEraser{db: db, artifactRoot: artifactRoot, now: time.Now}
+		settings.Erasure = &principalEraser{db: db, artifactRoot: artifactRoot, now: time.Now, runs: runs}
 		if registry, err := buildAgentRegistry(cfg); err == nil {
 			settings.Evals = &personaEvalGate{registry: registry, results: store.NewPersonaEvalStore(db)}
 		}
@@ -164,8 +164,8 @@ func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.A
 	return settings
 }
 
-func telegramAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.AccessRecorder) telegram.AccessSettings {
-	shared := discordAccessSettings(cfg, db, recorder)
+func telegramAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) telegram.AccessSettings {
+	shared := discordAccessSettings(cfg, db, recorder, runs)
 	return telegram.AccessSettings{
 		ApprovalTimeout:  shared.ApprovalTimeout,
 		StandingGrantTTL: shared.StandingGrantTTL,
