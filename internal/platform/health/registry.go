@@ -37,7 +37,6 @@ const (
 	RemediationRestoreBackup   = "restore-backup"
 	RemediationConfigureModels = "configure-models"
 	RemediationReviewSandbox   = "review-sandbox-host"
-	RemediationReconcileState  = "reconcile-durable-state"
 	RemediationRepairStorage   = "repair-storage"
 	RemediationReviewProfile   = "review-capability-profile"
 	RemediationRelieveLimits   = "relieve-resource-limits"

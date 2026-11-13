@@ -78,6 +78,16 @@ func TestUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestRootHasNoDurableCommand(t *testing.T) {
+	_, err := execute(t, "durable", "status")
+	if err == nil {
+		t.Fatal("expected error for the removed durable command, got nil")
+	}
+	if !strings.Contains(err.Error(), `unknown command "durable"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestServerInvalidConfig(t *testing.T) {
 	_, err := execute(t, "server", "--config", "../../testdata/config/unknown_keys.yaml")
 	if err == nil {
