@@ -16,15 +16,11 @@ LDFLAGS   := -s -w -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT) -X $(
 
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-RESTATE_VERSION := 1.7.14
-RESTATE_DIR     := $(CURDIR)/.cache/restate/$(RESTATE_VERSION)
-RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
-
 # Source must read as a standalone product: no internal tracking IDs, doc
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check model-registry-check arch-check static-check static-check-darwin verify security eval load integration durable-test durable-live durable-turns durable-workflows restate-server fuzz-smoke fuzz-one release-snapshot image-check exec-container-check release-check clean
+.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check model-registry-check arch-check static-check static-check-darwin verify security eval load integration durable-turns durable-workflows fuzz-smoke fuzz-one release-snapshot image-check exec-container-check release-check clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -45,17 +41,6 @@ plugin-gmail:
 
 test:
 	$(GO) test -race ./...
-
-durable-test:
-	$(GO) test -race -tags durable -count=1 ./internal/platform/durable/...
-
-restate-server: $(RESTATE_BINARY)
-
-$(RESTATE_BINARY):
-	./scripts/fetch-restate-server.sh $(RESTATE_VERSION) $(RESTATE_DIR)
-
-durable-live: $(RESTATE_BINARY)
-	AURA_RESTATE_BINARY=$(RESTATE_BINARY) AURA_DURABLE_REQUIRE_BINARY=1 $(GO) test -v -race -tags durable -count=1 ./internal/platform/durable/... ./cmd/aura/
 
 durable-turns:
 	$(GO) test -v -race -tags durable -count=1 -run '^TestDurableTurn' ./internal/app/

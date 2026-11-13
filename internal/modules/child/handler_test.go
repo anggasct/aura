@@ -445,7 +445,7 @@ func TestHandlerDurableUsesJournaledBoundaries(t *testing.T) {
 	timers, waits := inv.timers, inv.waits
 	inv.mu.Unlock()
 	if timers != 0 {
-		t.Fatalf("durable path must not use Timer (Restate panics), timers = %d", timers)
+		t.Fatalf("durable path must not use Timer, timers = %d", timers)
 	}
 	if waits == 0 {
 		t.Fatal("durable path must observe cancel settlement via Wait")

@@ -159,20 +159,6 @@ linters:
               desc: the filesystem adapters are constructed by internal/modules/builtin, not by the app composition root
             - pkg: github.com/anggasct/aura/internal/modules/search
               desc: the search adapter is constructed by internal/modules/builtin, not by the app composition root
-        # Restate SDK types never leave the durable adapter: the domain
-        # depends on the DurableRuntime port, and only the adapter package
-        # itself may import the SDK (client, serving, and conformance
-        # helpers all live behind the port boundary).
-        restate-stays-in-adapter:
-          files:
-            - "**/internal/**"
-            - "**/plugins/**"
-            - "!**/internal/platform/durable/restate/**"
-          deny:
-            - pkg: github.com/restatedev/sdk-go
-              desc: Restate types stay inside the durable adapter; depend on the DurableRuntime port instead
-            - pkg: github.com/restatedev/sdk-go/ingress
-              desc: the Restate ingress client is owned by the durable adapter; depend on the DurableRuntime port instead
     errcheck:
       # A deliberate ignore is written `_ =` at the call site so the decision
       # stays visible in review; check-blank would make that idiom impossible.
@@ -259,12 +245,11 @@ linters:
         text: hugeParam
 
       # Every path reaching these opens is either operator-supplied config or
-      # confined to the data root by resolveRootedPath before use. The durable
-      # child config directory is the operator-supplied restate data dir.
+      # confined to the data root by resolveRootedPath before use.
       - linters:
           - gosec
         text: G304
-        path: internal/(store|config|platform/usage|platform/durable/restate)/
+        path: internal/(store|config|platform/usage)/
 
       # The cgroup v2 directory comes from the kernel's /proc/self/cgroup for
       # this very process, never from external input.
@@ -361,14 +346,6 @@ linters:
         text: G117
         path: internal/modules/plugin/auth/store\.go
 
-      # Launching the configured durable runtime binary is the supervisor's
-      # purpose; the path is operator-configured and resolution fails closed
-      # when the binary is absent or not executable.
-      - linters:
-          - gosec
-        text: G204
-        path: internal/platform/durable/restate/supervise\.go
-
       # Retry jitter is not a security context. Scoped to the one file that
       # needs it rather than excluded repository-wide.
       - linters:
@@ -407,13 +384,6 @@ linters:
       - linters:
           - contextcheck
         path: internal/cli/execute.go
-
-      # The invocation context reaches Restate handlers through the SDK's own
-      # handler signature (WorkflowContext embeds context.Context); the
-      # analyser cannot trace it across that framework boundary.
-      - linters:
-          - contextcheck
-        path: internal/platform/durable/restate/workflow\.go
 
 issues:
   max-issues-per-linter: 0

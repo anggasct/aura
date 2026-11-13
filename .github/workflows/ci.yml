@@ -98,12 +98,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Fetch pinned restate-server
-        run: make restate-server
-
-      - name: Durable conformance against restate-server
-        run: make durable-live
-
       - name: Turn crash and resume suites on the SQLite runtime
         run: make durable-turns
 
