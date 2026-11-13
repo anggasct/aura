@@ -236,10 +236,15 @@ func (i *Interpreter) start(ctx context.Context, definitionID string, input *Run
 	if !ok {
 		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+definitionID+" is not loaded")
 	}
-	if _, err := i.requireSpecApproval(ctx, compiled.spec); err != nil {
+	approval, err := i.requireSpecApproval(ctx, compiled.spec)
+	if err != nil {
 		return nil, err
 	}
-	summary, err := i.store.createRun(ctx, compiled.spec, input, origin, durableKey, "")
+	runOrigin, err := originUnderApproval(origin, approval)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := i.store.createRun(ctx, compiled.spec, input, runOrigin, durableKey, "")
 	if err != nil {
 		return nil, err
 	}

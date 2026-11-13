@@ -389,3 +389,59 @@ func TestEmailSendCardShowsTheRecipientFirst(t *testing.T) {
 		t.Fatalf("long card = %q, want the recipient first and a hidden-bytes marker", text)
 	}
 }
+
+func TestExactApprovalTextShowsTheWholeCallOrRefuses(t *testing.T) {
+	redact := func(s string) string { return strings.ReplaceAll(s, "SECRET", "[REDACTED]") }
+	cases := []struct {
+		name       string
+		definition *tools.Definition
+		arguments  string
+		want       string
+		wantCode   tools.ErrorCode
+	}{
+		{name: "field display that fits", definition: displaytest.Definition([]string{"repo", "body"}), arguments: `{"body":"looks good","repo":"org/repo"}`, want: "repo: org/repo\nbody: looks good"},
+		{name: "field display tail that would be cut", definition: displaytest.Definition([]string{"repo", "body"}), arguments: `{"body":"` + strings.Repeat("b", 2000) + `","repo":"org/repo"}`, wantCode: tools.ErrorCodeDisplayTooLarge},
+		{name: "field display holding a secret", definition: displaytest.Definition([]string{"repo", "body"}), arguments: `{"body":"a SECRET b","repo":"org/repo"}`, wantCode: tools.ErrorCodeDisplayRedacted},
+		{name: "json display that fits", definition: &tools.Definition{Name: "exec", Version: "v1", Effectful: true}, arguments: `{ "command": ["echo", "hi"] }`, want: `{"command":["echo","hi"]}`},
+		{name: "json display over the limit", definition: &tools.Definition{Name: "exec", Version: "v1", Effectful: true}, arguments: `{"command":["` + strings.Repeat("a", 5000) + `"]}`, wantCode: tools.ErrorCodeDisplayTooLarge},
+		{name: "json display holding a secret", definition: &tools.Definition{Name: "exec", Version: "v1", Effectful: true}, arguments: `{"command":["echo","SECRET"]}`, wantCode: tools.ErrorCodeDisplayRedacted},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			text, err := tc.definition.ExactApprovalText(json.RawMessage(tc.arguments), redact)
+			if tc.wantCode != "" {
+				requireCode(t, err, tc.wantCode)
+				if text != "" {
+					t.Fatalf("display = %q, want none", text)
+				}
+				return
+			}
+			if err != nil || text != tc.want {
+				t.Fatalf("display = %q, %v, want %q", text, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDisplaySafe(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "plain text", text: "Book a visit, then notify the team", want: true},
+		{name: "letters of other scripts", text: "日本語のテキスト", want: true},
+		{name: "a newline", text: "a\nb"},
+		{name: "an escape character", text: "a\x1b[31mb"},
+		{name: "a bidi override", text: "a" + string(rune(0x202e)) + "b"},
+		{name: "a tag character", text: "a\U000E0041b"},
+		{name: "invalid utf-8", text: "a\xffb"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tools.DisplaySafe(tc.text); got != tc.want {
+				t.Fatalf("DisplaySafe(%q) = %t, want %t", tc.text, got, tc.want)
+			}
+		})
+	}
+}

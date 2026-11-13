@@ -220,7 +220,7 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 		t.Fatalf("agent registry: %v", err)
 	}
 	newInterpreter := func() *workflow.Interpreter {
-		interpreter := workflow.NewInterpreter(disk, durable.NewFake(), &workflow.Options{
+		interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, &workflow.Options{
 			MaxConcurrentSteps: 1,
 			AgentResolver:      registry,
 			Agents:             proofAgentRunner{},
@@ -239,7 +239,7 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 	}
 	interpreter := newInterpreter()
 
-	summary, err := disk.CreateRun(ctx, proofSpec(proofCredential), &workflow.RunInput{Objective: "ship it"}, ownerOrigin())
+	summary, err := interpreter.Start(ctx, proofSpec(proofCredential).ID, &workflow.RunInput{Objective: "ship it"}, ownerOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

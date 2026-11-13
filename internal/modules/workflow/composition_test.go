@@ -196,7 +196,7 @@ func TestSerialCompositionJournalsTheChildAndPropagatesCancel(t *testing.T) {
 	event := "never"
 	waiting := &Spec{ID: "waiting", Goal: "Wait", Version: 1, Source: SourceDefined, Steps: []StepSpec{{ID: "hold", Executor: ExecutorSpec{Kind: KindWait, Event: &event}, Timeout: time.Minute}}}
 	installAll(t, interpreter, toolSpec("leaf"), waiting, composingSpec("top", "leaf"), composingSpec("stuck", "waiting"))
-	topRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "top"), &RunInput{}, ownerOrigin())
+	topRun, err := disk.newRun(context.Background(), specOf(t, interpreter, "top"), &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestSerialCompositionJournalsTheChildAndPropagatesCancel(t *testing.T) {
 	if leaves := childRuns(t, disk, "leaf"); len(leaves) != 1 || leaves[0].Status != RunSucceeded {
 		t.Fatalf("leaf runs after serial drive = %+v", leaves)
 	}
-	stuckRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "stuck"), &RunInput{}, ownerOrigin())
+	stuckRun, err := disk.newRun(context.Background(), specOf(t, interpreter, "stuck"), &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}

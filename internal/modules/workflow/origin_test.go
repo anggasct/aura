@@ -18,12 +18,12 @@ func TestRunsRecordWhoStartedThemFromWhere(t *testing.T) {
 	if err := disk.SaveDefinition(t.Context(), spec); err != nil {
 		t.Fatal(err)
 	}
-	cli, err := disk.CreateRun(t.Context(), spec, &RunInput{}, ownerOrigin())
+	cli, err := disk.newRun(t.Context(), spec, &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
 	origin := RunOrigin{PrincipalID: "discord:111", PrincipalClass: "public", AgentID: "lobby", SessionID: "lobby/discord:111/dm", Tainted: true}
-	tool, err := disk.CreateRun(t.Context(), spec, &RunInput{Objective: "Saturday"}, &origin)
+	tool, err := disk.newRun(t.Context(), spec, &RunInput{Objective: "Saturday"}, &origin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,15 +46,15 @@ func TestCompletionOutboxClaimsOnceAndRetriesWithinTheCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	origin := RunOrigin{PrincipalID: "discord:111", PrincipalClass: "public", AgentID: "lobby", SessionID: "lobby/discord:111/dm", ReplyAccount: "front", ReplyChannelID: "333"}
-	tool, err := disk.CreateRun(t.Context(), spec, &RunInput{}, &origin)
+	tool, err := disk.newRun(t.Context(), spec, &RunInput{}, &origin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err := disk.CreateRun(t.Context(), spec, &RunInput{}, &origin)
+	running, err := disk.newRun(t.Context(), spec, &RunInput{}, &origin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cli, err := disk.CreateRun(t.Context(), spec, &RunInput{}, ownerOrigin())
+	cli, err := disk.newRun(t.Context(), spec, &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestStartRefusesAnIncompleteOrigin(t *testing.T) {
 			if _, err := interpreter.StartKeyed(t.Context(), "leaf", nil, origin, "sched-key"); !hasCode(err, ErrorCodeOriginIncomplete) {
 				t.Fatalf("StartKeyed = %v, want code %s", err, ErrorCodeOriginIncomplete)
 			}
-			if _, err := disk.CreateRun(t.Context(), toolSpec("leaf"), nil, origin); !hasCode(err, ErrorCodeOriginIncomplete) {
+			if _, err := disk.newRun(t.Context(), toolSpec("leaf"), nil, origin); !hasCode(err, ErrorCodeOriginIncomplete) {
 				t.Fatalf("CreateRun = %v, want code %s", err, ErrorCodeOriginIncomplete)
 			}
 			if got := countRuns(t, disk); got != 0 {
@@ -165,7 +165,7 @@ func TestToolStepCarriesOriginAndDigest(t *testing.T) {
 			origin := toolStartedOrigin()
 			var runID string
 			if driver == DriverSerial {
-				run, err := disk.CreateRun(t.Context(), spec, &RunInput{}, origin)
+				run, err := disk.newRun(t.Context(), spec, &RunInput{}, origin)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -201,7 +201,7 @@ func TestToolStepWithoutCompleteOriginNeverReachesTheRunner(t *testing.T) {
 			interpreter, fake, disk := driverTestSetup(t, tools, driver)
 			spec := toolSpec("leaf")
 			installAll(t, interpreter, spec)
-			run, err := disk.CreateRun(t.Context(), spec, &RunInput{}, ownerOrigin())
+			run, err := disk.newRun(t.Context(), spec, &RunInput{}, ownerOrigin())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -245,7 +245,7 @@ func TestChildRunInheritsOriginAndStaysQuiet(t *testing.T) {
 			origin := toolStartedOrigin()
 			var parentID string
 			if driver == DriverSerial {
-				run, err := disk.CreateRun(t.Context(), specOf(t, interpreter, "top"), &RunInput{}, origin)
+				run, err := disk.newRun(t.Context(), specOf(t, interpreter, "top"), &RunInput{}, origin)
 				if err != nil {
 					t.Fatal(err)
 				}

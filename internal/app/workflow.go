@@ -289,7 +289,7 @@ func commandToolCallText(result *config.LoadResult, db *sql.DB, logger *slog.Log
 		if buildErr != nil {
 			return "", buildErr
 		}
-		return executor.Broker().CallDisplay(toolID, args)
+		return executor.Broker().ExactCallText(toolID, args)
 	}
 }
 
@@ -328,7 +328,7 @@ func newWorkflowRunsCmd(gf *globalFlags) *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			for _, run := range runs {
-				if _, err := fmt.Fprintf(out, "%s\t%s\t%s@v%d\t%s\n", run.ID, run.Status, run.DefinitionID, run.DefinitionVersion, run.Goal); err != nil {
+				if _, err := fmt.Fprintf(out, "%s\t%s\t%s@v%d\t%s\n", run.ID, run.Status, run.DefinitionID, run.DefinitionVersion, workflow.EscapeText(run.Goal)); err != nil {
 					return err
 				}
 			}
@@ -365,7 +365,7 @@ func newWorkflowInspectCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			if _, err := fmt.Fprintf(out, "run: %s\nstatus: %s\ndefinition: %s@v%d\ngoal: %s\n", run.ID, run.Status, run.DefinitionID, run.DefinitionVersion, run.Goal); err != nil {
+			if _, err := fmt.Fprintf(out, "run: %s\nstatus: %s\ndefinition: %s@v%d\ngoal: %s\n", run.ID, run.Status, run.DefinitionID, run.DefinitionVersion, workflow.EscapeText(run.Goal)); err != nil {
 				return err
 			}
 			for _, step := range steps {

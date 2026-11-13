@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -32,7 +33,7 @@ func TestApprovedProposalRunKeepsTheProposalTaint(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runID, err := approveProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, time.Now())
+			runID, err := approveProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -127,16 +128,16 @@ func TestProposalCardAndShowSayUntrustedInput(t *testing.T) {
 			}
 			bound.waitAttempts(t, 1)
 			bound.mu.Lock()
-			card := strings.Join(bound.offered, "\n")
+			cards := append([]discord.ProposalCard(nil), bound.cards...)
 			bound.mu.Unlock()
-			if strings.Contains(card, approval.UntrustedInputNotice) != tc.wantNotice {
-				t.Fatalf("card carries the notice = %v, want %v:\n%s", !tc.wantNotice, tc.wantNotice, card)
+			if len(cards) != 1 || cards[0].Tainted != tc.tainted || cards[0].ID != proposed.ProposalID || cards[0].Plan != proposed.Plan {
+				t.Fatalf("card = %+v, want id %s, taint %v and the plan", cards, proposed.ProposalID, tc.tainted)
 			}
-			if strings.Contains(proposed.Plan, approval.UntrustedInputNotice) != tc.wantNotice {
-				t.Fatalf("plan carries the notice = %v, want %v:\n%s", !tc.wantNotice, tc.wantNotice, proposed.Plan)
+			if proposed.UntrustedInput != tc.tainted {
+				t.Fatalf("untrusted_input = %v, want %v", proposed.UntrustedInput, tc.tainted)
 			}
-			if tc.wantNotice && !strings.Contains(card, "\n"+approval.UntrustedInputNotice+"\n") {
-				t.Fatalf("the notice is not on its own line:\n%s", card)
+			if strings.Contains(proposed.Plan, approval.UntrustedInputNotice) {
+				t.Fatalf("the plan carries the notice:\n%s", proposed.Plan)
 			}
 		})
 		t.Run("show/"+tc.name, func(t *testing.T) {

@@ -27,11 +27,11 @@ func Validate(spec *Spec, deps ValidationDeps) error {
 	if spec == nil {
 		return codedError(ErrorCodeSpecInvalid, "spec must not be nil")
 	}
-	if strings.TrimSpace(spec.ID) == "" {
-		return codedError(ErrorCodeSpecInvalid, "id must not be empty")
+	if err := checkID("id", spec.ID); err != nil {
+		return err
 	}
-	if strings.TrimSpace(spec.Goal) == "" {
-		return codedError(ErrorCodeSpecInvalid, "goal must not be empty")
+	if err := checkGoal(spec.Goal); err != nil {
+		return err
 	}
 	if spec.Version <= 0 {
 		return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("version %d must be positive", spec.Version))
@@ -53,6 +53,9 @@ func Validate(spec *Spec, deps ValidationDeps) error {
 		if ids[step.ID] {
 			return codedError(ErrorCodeDuplicateStep, fmt.Sprintf("steps[%d].id %q is duplicated", index, step.ID))
 		}
+		if err := checkID(fmt.Sprintf("steps[%d].id", index), step.ID); err != nil {
+			return err
+		}
 		ids[step.ID] = true
 		stepsByID[step.ID] = step
 		for _, dependency := range step.DependsOn {
@@ -65,6 +68,9 @@ func Validate(spec *Spec, deps ValidationDeps) error {
 	for index := range spec.Steps {
 		step := &spec.Steps[index]
 		for _, dependency := range step.DependsOn {
+			if err := checkID(fmt.Sprintf("steps[%d].depends_on entry", index), dependency); err != nil {
+				return err
+			}
 			if !ids[dependency] {
 				return codedError(ErrorCodeUnknownDependency, fmt.Sprintf("steps[%d].depends_on references unknown step %q", index, dependency))
 			}
@@ -84,6 +90,9 @@ func Validate(spec *Spec, deps ValidationDeps) error {
 		step := &spec.Steps[index]
 		if step.Condition == nil {
 			continue
+		}
+		if err := checkDisplayText(fmt.Sprintf("steps[%d].condition", index), *step.Condition, maxConditionRunes); err != nil {
+			return err
 		}
 		parsed, err := parseCondition(*step.Condition)
 		if err != nil {
@@ -136,6 +145,16 @@ func validateExecutor(step *StepSpec, deps ValidationDeps, ids map[string]bool) 
 		if !hasAgent && len(step.Executor.RequiredCapabilities) == 0 {
 			return codedError(ErrorCodeExecutorInvalid, field+" needs agent_id or a non-empty requires list")
 		}
+		if hasAgent {
+			if err := checkDisplaySafe(field+" agent_id", *step.Executor.AgentID); err != nil {
+				return err
+			}
+		}
+		for _, capability := range step.Executor.RequiredCapabilities {
+			if err := checkDisplaySafe(field+" requires entry", capability); err != nil {
+				return err
+			}
+		}
 		if hasAgent && deps.Agents != nil {
 			agentID := *step.Executor.AgentID
 			if _, err := deps.Agents.Resolve(nil, &agentID); err != nil {
@@ -164,12 +183,18 @@ func validateExecutor(step *StepSpec, deps ValidationDeps, ids map[string]bool) 
 		if step.Executor.Event == nil || *step.Executor.Event == "" {
 			return codedError(ErrorCodeExecutorInvalid, field+" needs event")
 		}
+		if err := checkDisplayText(field+" event", *step.Executor.Event, maxEventRunes); err != nil {
+			return err
+		}
 		if step.Executor.Source != nil && *step.Executor.Source == "" {
 			return codedError(ErrorCodeExecutorInvalid, field+" source must not be empty")
 		}
 		if step.Executor.ExternalRef != nil {
 			if *step.Executor.ExternalRef == "" {
 				return codedError(ErrorCodeExecutorInvalid, field+" external_ref must not be empty")
+			}
+			if err := checkID(field+" external_ref", *step.Executor.ExternalRef); err != nil {
+				return err
 			}
 			if !ids[*step.Executor.ExternalRef] {
 				return codedError(ErrorCodeExecutorInvalid, field+" external_ref references unknown step "+fmt.Sprintf("%q", *step.Executor.ExternalRef))
@@ -185,6 +210,9 @@ func validateExecutor(step *StepSpec, deps ValidationDeps, ids map[string]bool) 
 	case KindWorkflow:
 		if step.Executor.WorkflowID == nil || *step.Executor.WorkflowID == "" {
 			return codedError(ErrorCodeExecutorInvalid, field+" needs workflow")
+		}
+		if err := checkID(field+" workflow", *step.Executor.WorkflowID); err != nil {
+			return err
 		}
 		if step.Executor.AgentID != nil || len(step.Executor.RequiredCapabilities) > 0 || step.Executor.ToolID != nil || step.Executor.Event != nil {
 			return codedError(ErrorCodeExecutorInvalid, field+" takes only workflow")

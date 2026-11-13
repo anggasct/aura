@@ -19,19 +19,21 @@ type fakeOfferer struct {
 	mu       sync.Mutex
 	sessions map[string]bool
 	offered  []string
+	cards    []discord.ProposalCard
 	decide   discord.ProposalDecider
 	fail     error
 	attempts int
 }
 
-func (f *fakeOfferer) OfferProposal(_ context.Context, proposalID, plan string, decide discord.ProposalDecider) error {
+func (f *fakeOfferer) OfferProposal(_ context.Context, card discord.ProposalCard, decide discord.ProposalDecider) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.attempts++
 	if f.fail != nil {
 		return f.fail
 	}
-	f.offered = append(f.offered, proposalID+"|"+plan)
+	f.offered = append(f.offered, card.ID+"|"+card.Plan)
+	f.cards = append(f.cards, card)
 	f.decide = decide
 	return nil
 }

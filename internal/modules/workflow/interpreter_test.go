@@ -70,6 +70,10 @@ func newTestDB(t *testing.T) *sql.DB {
 	return storetest.OpenMigrated(t)
 }
 
+func (s *Store) newRun(ctx context.Context, spec *Spec, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
+	return s.createRun(ctx, spec, input, origin, newID("dur"), "")
+}
+
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	return NewStore(newTestDB(t))
@@ -988,11 +992,11 @@ func TestRunsOrdersRunsByIdentity(t *testing.T) {
 	if err := disk.SaveDefinition(ctx, spec); err != nil {
 		t.Fatalf("SaveDefinition: %v", err)
 	}
-	first, err := disk.CreateRun(ctx, spec, nil, ownerOrigin())
+	first, err := disk.newRun(ctx, spec, nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("first CreateRun: %v", err)
 	}
-	second, err := disk.CreateRun(ctx, spec, nil, ownerOrigin())
+	second, err := disk.newRun(ctx, spec, nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("second CreateRun: %v", err)
 	}

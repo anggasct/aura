@@ -87,12 +87,22 @@ func (d *Definition) ApprovalText(arguments json.RawMessage, redact func(string)
 		redact = func(text string) string { return text }
 	}
 	if d.FieldDisplay() {
-		return d.fieldText(arguments, redact)
+		return d.fieldText(arguments, redact, d.ExactDisplay)
 	}
 	return jsonText(arguments, redact), nil
 }
 
-func jsonText(arguments json.RawMessage, redact func(string) string) string {
+func (d *Definition) ExactApprovalText(arguments json.RawMessage, redact func(string) string) (string, error) {
+	if redact == nil {
+		redact = func(text string) string { return text }
+	}
+	if d.FieldDisplay() {
+		return d.fieldText(arguments, redact, true)
+	}
+	return exactJSONText(arguments, redact)
+}
+
+func compactJSON(arguments json.RawMessage) string {
 	text := strings.TrimSpace(string(arguments))
 	var compact bytes.Buffer
 	if json.Compact(&compact, []byte(text)) == nil {
@@ -101,6 +111,36 @@ func jsonText(arguments json.RawMessage, redact func(string) string) string {
 	if text == "" {
 		text = "{}"
 	}
+	return text
+}
+
+func exactJSONText(arguments json.RawMessage, redact func(string) string) (string, error) {
+	text := compactJSON(arguments)
+	if redact(text) != text {
+		return "", errorf(ErrorCodeDisplayRedacted, "the arguments hold a configured secret")
+	}
+	text = strings.ToValidUTF8(text, "�")
+	escaped, consumed := escapeWithin(text, ApprovalDisplayLimit, false)
+	if consumed != len(text) {
+		return "", tooLarge()
+	}
+	return escaped, nil
+}
+
+func DisplaySafe(text string) bool {
+	if !utf8.ValidString(text) {
+		return false
+	}
+	for _, r := range text {
+		if displayEscaped(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func jsonText(arguments json.RawMessage, redact func(string) string) string {
+	text := compactJSON(arguments)
 	text = strings.ToValidUTF8(redact(text), "�")
 	escaped, consumed := escapeWithin(text, ApprovalDisplayLimit, false)
 	if consumed == len(text) {
@@ -132,7 +172,7 @@ func readableMarkup(compact string) string {
 	return text.String()
 }
 
-func (d *Definition) fieldText(arguments json.RawMessage, redact func(string) string) (string, error) {
+func (d *Definition) fieldText(arguments json.RawMessage, redact func(string) string, exact bool) (string, error) {
 	var object map[string]json.RawMessage
 	if len(bytes.TrimSpace(arguments)) == 0 {
 		arguments = json.RawMessage("{}")
@@ -146,25 +186,33 @@ func (d *Definition) fieldText(arguments json.RawMessage, redact func(string) st
 	order, tail := displayOrder(object, d.Display)
 	lines := make([]string, 0, len(order)+1)
 	for _, name := range order {
-		value, _, err := fieldValue(object[name], redact, d.ExactDisplay)
+		value, _, err := fieldValue(object[name], redact, exact)
 		if err != nil {
 			return "", err
 		}
-		lines = append(lines, escapeText(redact(name))+": "+escapeText(value))
+		shownName, err := redactedValue(name, redact, exact)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, escapeText(shownName)+": "+escapeText(value))
 	}
 	if tail == "" {
 		return fitLines(lines)
 	}
-	value, isString, err := fieldValue(object[tail], redact, d.ExactDisplay)
+	value, isString, err := fieldValue(object[tail], redact, exact)
 	if err != nil {
 		return "", err
 	}
-	label := escapeText(redact(tail)) + ": "
+	shownTail, err := redactedValue(tail, redact, exact)
+	if err != nil {
+		return "", err
+	}
+	label := escapeText(shownTail) + ": "
 	full := append(slices.Clone(lines), label+escapeText(value))
 	if joined := strings.Join(full, "\n"); len(joined) <= ApprovalDisplayLimit {
 		return joined, nil
 	}
-	if !isString || d.ExactDisplay {
+	if !isString || exact {
 		return "", tooLarge()
 	}
 	return truncateTail(lines, label, value)

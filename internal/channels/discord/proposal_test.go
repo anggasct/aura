@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -48,7 +49,7 @@ func TestProposalCardIsDecidedOnlyByTheOwnerInTheDM(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
 	recorded := &recordedDecision{reply: "approved prop_1: run run_9"}
-	if err := adapter.OfferProposal(t.Context(), "prop_1", "Plan: Write the release note\n1. approve — owner approval", recorded.decide); err != nil {
+	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_1", Plan: "Plan: Write the release note\n1. approve — owner approval"}, recorded.decide); err != nil {
 		t.Fatal(err)
 	}
 	card := stub.waitPostTo(t, "555", 1)[0]
@@ -85,7 +86,7 @@ func TestProposalCardRejectionAndFailureAreReported(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
 	recorded := &recordedDecision{err: errors.New("workflow_proposal_digest_mismatch: changed")}
-	if err := adapter.OfferProposal(t.Context(), "prop_2", "Plan: x", recorded.decide); err != nil {
+	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_2", Plan: "Plan: x"}, recorded.decide); err != nil {
 		t.Fatal(err)
 	}
 	_, ids := cardButtons(t, stub.waitPostTo(t, "555", 1)[0])
@@ -102,7 +103,7 @@ func TestProposalCardRejectionAndFailureAreReported(t *testing.T) {
 func TestProposalCardNeedsAnOwnerIdentity(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter, _ := newOwnerRoutedAdapter(t, stub, nil, principal.ClassOwner)
-	if err := adapter.OfferProposal(t.Context(), "prop_3", "Plan: x", (&recordedDecision{}).decide); err == nil {
+	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_3", Plan: "Plan: x"}, (&recordedDecision{}).decide); err == nil {
 		t.Fatal("a proposal card was offered without an owner identity")
 	}
 	if posts := stub.postsTo("555"); len(posts) != 0 {
@@ -110,12 +111,12 @@ func TestProposalCardNeedsAnOwnerIdentity(t *testing.T) {
 	}
 }
 
-func TestProposalCardEscapesAndFencesThePlan(t *testing.T) {
+func TestCardDoesNotEscapeThePlanTwice(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
 	fence := strings.Repeat("`", 3)
-	plan := "Plan: ship\U000E0041" + fence + "[ok](https://evil)\n1. approve - owner approval"
-	if err := adapter.OfferProposal(t.Context(), "prop_1", plan, (&recordedDecision{}).decide); err != nil {
+	plan := "Plan: ship" + fence + "[ok](https://evil)\n1. approve - owner approval\n    path: a\\\\b"
+	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_1", Plan: plan}, (&recordedDecision{}).decide); err != nil {
 		t.Fatal(err)
 	}
 	card := stub.waitPostTo(t, "555", 1)[0]
@@ -123,16 +124,75 @@ func TestProposalCardEscapesAndFencesThePlan(t *testing.T) {
 	if flags, _ := card.body["flags"].(float64); flags != 4 {
 		t.Errorf("flags = %v, want 4", card.body["flags"])
 	}
-	if !strings.Contains(content, `\u{e0041}`) || strings.ContainsRune(content, '\U000E0041') {
-		t.Errorf("card does not escape the tag character: %q", content)
-	}
 	if count := strings.Count(content, fence); count != 2 {
 		t.Errorf("card holds %d runs of three backticks, want 2: %q", count, content)
+	}
+	if !strings.Contains(content, `a\\b`) || strings.Contains(content, `a\\\\b`) {
+		t.Errorf("card escapes the plan a second time: %q", content)
 	}
 	block := strings.TrimSuffix(strings.TrimPrefix(content[strings.Index(content, "\n")+1:], fence+"\n"), "\n"+fence)
 	for _, line := range []string{"Plan: ship", "[ok](https://evil)", "1. approve - owner approval"} {
 		if !strings.Contains(block, line) {
 			t.Errorf("block lacks %q: %q", line, block)
 		}
+	}
+}
+
+func TestLongPlanCardHasNoButtons(t *testing.T) {
+	cases := []struct {
+		name        string
+		plan        string
+		wantButtons bool
+	}{
+		{name: "a plan over the message limit", plan: "Plan: " + strings.Repeat("a", 2100)},
+		{name: "backticks that the fence pushes over the limit", plan: strings.Repeat("`", 1900)},
+		{name: "a short plan", plan: "Plan: ship\n1. approve - owner approval", wantButtons: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newApprovalStub(t)
+			adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
+			if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_9", Plan: tc.plan}, (&recordedDecision{}).decide); err != nil {
+				t.Fatal(err)
+			}
+			post := stub.waitPostTo(t, "555", 1)[0]
+			content, _ := post.body["content"].(string)
+			components, _ := post.body["components"].([]any)
+			if tc.wantButtons {
+				if len(components) == 0 || adapter.approvals.Len() != 1 {
+					t.Fatalf("short plan: components = %v, pending tokens = %d, want buttons and one token", post.body["components"], adapter.approvals.Len())
+				}
+				return
+			}
+			if len(components) != 0 {
+				t.Errorf("long plan carries components: %v", post.body["components"])
+			}
+			if got := adapter.approvals.Len(); got != 0 {
+				t.Errorf("long plan minted %d approval tokens, want none", got)
+			}
+			if !strings.Contains(content, "workflow proposal prop_9 is too long for a card") || !strings.Contains(content, "aura workflow proposal show prop_9") {
+				t.Errorf("notice = %q", content)
+			}
+			if len([]rune(content)) > discordMessageLimit {
+				t.Errorf("notice is %d runes", len([]rune(content)))
+			}
+		})
+	}
+}
+
+func TestUntrustedLineSurvivesALongPlan(t *testing.T) {
+	stub := newApprovalStub(t)
+	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
+	plan := "Plan: " + strings.Repeat("a", 1794)
+	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_5", Plan: plan, Tainted: true}, (&recordedDecision{}).decide); err != nil {
+		t.Fatal(err)
+	}
+	content, _ := stub.waitPostTo(t, "555", 1)[0].body["content"].(string)
+	lines := strings.Split(content, "\n")
+	if len(lines) < 3 || lines[0] != "workflow proposal prop_5" || lines[1] != policy.UntrustedInputNotice {
+		t.Fatalf("card head = %q, want the header then the untrusted-input line", lines[:min(len(lines), 2)])
+	}
+	if !strings.Contains(content, plan) {
+		t.Errorf("card does not hold the whole plan")
 	}
 }

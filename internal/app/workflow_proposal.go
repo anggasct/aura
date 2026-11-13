@@ -38,7 +38,7 @@ func newWorkflowProposalsCmd(gf *globalFlags) *cobra.Command {
 				}
 				lines := []string{"ID\tSTATUS\tPERSONA\tCREATED\tGOAL"}
 				for _, proposal := range proposals {
-					lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s\t%s", proposal.ID, proposal.Status, proposal.AgentID, proposal.CreatedAt.UTC().Format(time.RFC3339), proposal.Spec.Goal))
+					lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s\t%s", proposal.ID, proposal.Status, workflow.EscapeText(proposal.AgentID), proposal.CreatedAt.UTC().Format(time.RFC3339), workflow.EscapeText(proposal.Spec.Goal)))
 				}
 				return writeChildLines(cmd, lines)
 			})
@@ -73,18 +73,18 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 						return err
 					}
 					lines := []string{
-						"proposal: " + proposal.ID,
-						"status: " + proposal.Status,
-						"persona: " + proposal.AgentID,
-						"session: " + proposal.SessionID,
-						"digest: " + proposal.Digest,
+						"proposal: " + workflow.EscapeText(proposal.ID),
+						"status: " + workflow.EscapeText(proposal.Status),
+						"persona: " + workflow.EscapeText(proposal.AgentID),
+						"session: " + workflow.EscapeText(proposal.SessionID),
+						"digest: " + workflow.EscapeText(proposal.Digest),
 					}
 					lines = append(lines, "tainted: "+yesNo(proposal.Tainted))
 					if proposal.Tainted {
 						lines = append(lines, approval.UntrustedInputNotice)
 					}
 					if proposal.RunID != "" {
-						lines = append(lines, "run: "+proposal.RunID)
+						lines = append(lines, "run: "+workflow.EscapeText(proposal.RunID))
 					}
 					plan, err := workflow.RenderPlan(proposal.Spec, graph, commandToolCallText(&result, app.db, app.logger))
 					if err != nil {
@@ -104,7 +104,7 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
-					runID, err := approveProposal(ctx, result.Config, app.interpreter, workflow.NewStore(app.db), args[0], time.Now())
+					runID, err := approveProposal(ctx, result.Config, app.interpreter, workflow.NewStore(app.db), args[0], commandToolCallText(&result, app.db, app.logger), time.Now())
 					if err != nil {
 						return err
 					}
@@ -144,7 +144,7 @@ func yesNo(value bool) string {
 	return "no"
 }
 
-func approveProposal(ctx context.Context, cfg *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, now time.Time) (string, error) {
+func approveProposal(ctx context.Context, cfg *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, show workflow.ToolCallText, now time.Time) (string, error) {
 	proposal, err := runs.Proposal(ctx, id, now)
 	if err != nil {
 		return "", err
@@ -167,7 +167,11 @@ func approveProposal(ctx context.Context, cfg *config.Config, interpreter *workf
 	if !ok {
 		return "", errors.New("the proposing persona " + proposal.AgentID + " is no longer configured")
 	}
-	if _, err := interpreter.CompileProposal(proposal.Spec, definition.Tools); err != nil {
+	graph, err := interpreter.CompileProposal(proposal.Spec, definition.Tools)
+	if err != nil {
+		return "", err
+	}
+	if _, err := workflow.RenderPlan(proposal.Spec, graph, show); err != nil {
 		return "", err
 	}
 	if err := interpreter.LoadAll(ctx, []*workflow.Spec{proposal.Spec}, interpreter.ValidationDeps()); err != nil {

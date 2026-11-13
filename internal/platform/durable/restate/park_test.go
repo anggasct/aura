@@ -28,7 +28,7 @@ func TestParkDurationSurvival(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	interpreter := workflow.NewInterpreter(disk, durable.NewFake(), &workflow.Options{
+	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, &workflow.Options{
 		MaxConcurrentSteps: 1, AgentResolver: registry, Agents: parkAgent{},
 	})
 	engineer := "engineer"
@@ -45,7 +45,7 @@ func TestParkDurationSurvival(t *testing.T) {
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatal(err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil, ownerOrigin())
+	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}

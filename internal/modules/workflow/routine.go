@@ -9,12 +9,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
-var routineName = regexp.MustCompile(`^[A-Za-z0-9 _-]{1,64}$`)
+var routineName = regexp.MustCompile(`^[A-Za-z0-9 _-]{1,56}$`)
 
 func RoutineID(name string) (string, error) {
 	trimmed := strings.TrimSpace(name)
 	if !routineName.MatchString(trimmed) {
-		return "", codedError(ErrorCodeRoutineInvalid, "routine name must be 1-64 letters, digits, spaces, '-' or '_'")
+		return "", codedError(ErrorCodeRoutineInvalid, "routine name must be 1-56 letters, digits, spaces, '-' or '_'")
 	}
 	slug := strings.NewReplacer(" ", "_", "-", "_").Replace(strings.ToLower(trimmed))
 	return "routine_" + slug, nil

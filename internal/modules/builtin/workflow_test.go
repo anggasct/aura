@@ -36,7 +36,7 @@ func (s *scriptedWorkflows) Start(_ context.Context, caller *WorkflowCaller, id,
 
 func (s *scriptedWorkflows) Propose(_ context.Context, caller *WorkflowCaller, spec json.RawMessage) (WorkflowProposal, error) {
 	s.record(caller, "propose "+string(spec))
-	return WorkflowProposal{ProposalID: "prop_1", Digest: "abc", Plan: "Plan: x"}, s.err
+	return WorkflowProposal{ProposalID: "prop_1", Digest: "abc", Plan: "Plan: x", UntrustedInput: true, ApproveWith: "aura workflow proposal approve prop_1"}, s.err
 }
 
 func (s *scriptedWorkflows) SaveRoutine(_ context.Context, caller *WorkflowCaller, runID, name string) (WorkflowRoutine, error) {
@@ -109,7 +109,7 @@ func TestWorkflowProposeAdapterPassesTheSpecAndMapsRejections(t *testing.T) {
 	controller := &scriptedWorkflows{}
 	(&Executor{workflows: holder}).SetWorkflowController(controller)
 	result, err := runWorkflowTool(t, holder, workflowRequest(principal.ClassOwner, tools.WorkflowProposeToolName, `{"spec":{"goal":"g","steps":[]}}`))
-	if err != nil || string(result.Output) != `{"proposal_id":"prop_1","digest":"abc","plan":"Plan: x"}` {
+	if err != nil || string(result.Output) != `{"proposal_id":"prop_1","digest":"abc","plan":"Plan: x","untrusted_input":true,"approve_with":"aura workflow proposal approve prop_1"}` {
 		t.Fatalf("propose = %s, %v", result.Output, err)
 	}
 	if controller.calls[0] != `propose {"goal":"g","steps":[]}` {

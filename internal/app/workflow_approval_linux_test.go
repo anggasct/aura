@@ -19,9 +19,14 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-func githubProposalFixture(t *testing.T) *proposalHarness {
+type githubHarness struct {
+	*proposalHarness
+	secrets func(value string)
+}
+
+func githubProposalFixture(t *testing.T) *githubHarness {
 	t.Helper()
-	h := proposalFixture(t)
+	h := &githubHarness{proposalHarness: proposalFixture(t)}
 	dir := t.TempDir()
 	cfg := config.Default()
 	cfg.Storage.Path = dir
@@ -52,7 +57,9 @@ func githubProposalFixture(t *testing.T) *proposalHarness {
 		t.Fatal(err)
 	}
 	h.controller.registry = registry
-	h.controller.enableCallDisplay(executor.Broker().CallDisplay)
+	h.cfg = &cfg
+	h.controller.enableCallDisplay(executor.Broker().ExactCallText)
+	h.secrets = executor.Broker().RegisterSecret
 	return h
 }
 

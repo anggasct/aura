@@ -49,9 +49,11 @@ type WorkflowRunState struct {
 }
 
 type WorkflowProposal struct {
-	ProposalID string `json:"proposal_id"`
-	Digest     string `json:"digest"`
-	Plan       string `json:"plan"`
+	ProposalID     string `json:"proposal_id"`
+	Digest         string `json:"digest"`
+	Plan           string `json:"plan"`
+	UntrustedInput bool   `json:"untrusted_input"`
+	ApproveWith    string `json:"approve_with"`
 }
 
 type WorkflowRejection struct {

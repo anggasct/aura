@@ -371,6 +371,12 @@ func githubTestStore(t *testing.T) (*sql.DB, *workflow.Store) {
 	return db, workflow.NewStore(db)
 }
 
+type queuedRuntime struct{ durable.Runtime }
+
+func (queuedRuntime) Start(_ context.Context, req durable.StartRequest) (durable.RunRef, error) {
+	return durable.RunRef{Key: req.Key}, nil
+}
+
 func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durable.Fake) string {
 	t.Helper()
 	ctx := context.Background()
@@ -381,10 +387,11 @@ func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durable.Fake
 			{ID: "hold", Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &event}, Timeout: time.Minute},
 		},
 	}
-	if err := disk.SaveDefinition(ctx, spec); err != nil {
-		t.Fatalf("SaveDefinition: %v", err)
+	interpreter := workflow.NewInterpreter(disk, queuedRuntime{backend}, nil)
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, workflow.ValidationDeps{}); err != nil {
+		t.Fatalf("Install: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil, ownerRunOrigin())
+	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

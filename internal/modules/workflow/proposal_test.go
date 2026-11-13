@@ -110,7 +110,7 @@ func TestInterpreterResolvesStoredDefinitionsItDidNotLoad(t *testing.T) {
 	author, fake, disk := serialTestSetup(t, tools)
 	generated := NormalizeProposal(toolSpec("x"), "prop_c")
 	installAll(t, author, toolSpec("leaf"), generated)
-	run, err := disk.CreateRun(context.Background(), generated, &RunInput{}, ownerOrigin())
+	run, err := disk.newRun(context.Background(), generated, &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}

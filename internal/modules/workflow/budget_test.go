@@ -155,7 +155,7 @@ func TestMeteredAgentTokensStopTheRunInBothDrivers(t *testing.T) {
 	if third := stepByID(t, disk, run.ID, "third"); third.Status == StepSucceeded {
 		t.Fatal("a step ran after the token budget was spent")
 	}
-	serialRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "gen_prop_serial"), &RunInput{}, ownerOrigin())
+	serialRun, err := disk.newRun(context.Background(), specOf(t, interpreter, "gen_prop_serial"), &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
