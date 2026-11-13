@@ -169,7 +169,7 @@ func proofSpec(credential string) *workflow.Spec {
 			{ID: "approve_merge", DependsOn: []string{"review"},
 				Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: 10 * time.Minute},
 			tool("merge_pr", githubadapter.ToolMerge,
-				`{"repo":"org/repo","number":42,"credential_name":"`+credential+`"}`, "approve_merge"),
+				`{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","credential_name":"`+credential+`"}`, "approve_merge"),
 		},
 	}
 }

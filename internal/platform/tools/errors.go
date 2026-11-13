@@ -9,6 +9,7 @@ type ErrorCode string
 
 const (
 	ErrorCodeDisplayTooLarge    ErrorCode = "approval_display_too_large"
+	ErrorCodeDisplayRedacted    ErrorCode = "approval_display_redacted"
 	ErrorCodeDisplayInvalid     ErrorCode = "tool_display_invalid"
 	ErrorCodeArgumentsAmbiguous ErrorCode = "arguments_ambiguous"
 )

@@ -123,6 +123,8 @@ func testPrompt(session string, expiresAt time.Time) *ApprovalPrompt {
 		PolicyVersion: "v3",
 		ReasonCode:    "approval_required",
 		ExpiresAt:     expiresAt,
+
+		StandingGrantAllowed: true,
 	}
 }
 

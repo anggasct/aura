@@ -130,17 +130,20 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 	}
 	expectedRequired := map[string]map[string]bool{
 		ToolCreatePR: {"repo": true, "credential_name": true, "title": true, "head": true, "base": true},
-		ToolMerge:    {"repo": true, "credential_name": true, "number": true},
+		ToolMerge:    {"repo": true, "credential_name": true, "number": true, "sha": true},
 		ToolComment:  {"repo": true, "credential_name": true, "number": true, "body": true},
 	}
 	for _, definition := range definitions {
 		var schema struct {
 			Type       string `json:"type"`
 			Properties map[string]struct {
-				Type    string `json:"type"`
-				Minimum *int   `json:"minimum"`
+				Type        string `json:"type"`
+				Minimum     *int   `json:"minimum"`
+				MaxLength   *int   `json:"maxLength"`
+				Description string `json:"description"`
 			} `json:"properties"`
-			Required []string `json:"required"`
+			Required             []string `json:"required"`
+			AdditionalProperties *bool    `json:"additionalProperties"`
 		}
 		if err := json.Unmarshal(definition.Schema, &schema); err != nil {
 			t.Fatalf("%s schema is not JSON: %v", definition.Name, err)
@@ -148,6 +151,12 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 		want, ok := expectedRequired[definition.Name]
 		if !ok {
 			t.Fatalf("unexpected tool %s", definition.Name)
+		}
+		if schema.AdditionalProperties == nil || *schema.AdditionalProperties {
+			t.Errorf("%s schema additionalProperties = %v, want false", definition.Name, schema.AdditionalProperties)
+		}
+		if body, ok := schema.Properties["body"]; ok && (body.MaxLength == nil || *body.MaxLength != 800 || body.Description == "") {
+			t.Errorf("%s body property = %+v, want maxLength 800 and a description", definition.Name, body)
 		}
 		if len(schema.Required) != len(want) {
 			t.Errorf("%s required = %v, want %d fields", definition.Name, schema.Required, len(want))
@@ -182,7 +191,7 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 	}
 	minimal := map[string]string{
 		ToolCreatePR: `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"ci"}`,
-		ToolMerge:    `{"repo":"org/repo","number":42,"credential_name":"ci"}`,
+		ToolMerge:    `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","credential_name":"ci"}`,
 		ToolComment:  `{"repo":"org/repo","number":7,"body":"hi","credential_name":"ci"}`,
 	}
 	for _, definition := range definitions {
@@ -211,7 +220,7 @@ func TestBrokerSchemasMatchValidators(t *testing.T) {
 		}
 	}
 	wrongNumerics := map[string]string{
-		ToolMerge:   `{"repo":"org/repo","number":"42","credential_name":"ci"}`,
+		ToolMerge:   `{"repo":"org/repo","number":"42","sha":"0123456789abcdef0123456789abcdef01234567","credential_name":"ci"}`,
 		ToolComment: `{"repo":"org/repo","number":"7","body":"hi","credential_name":"ci"}`,
 	}
 	for _, definition := range definitions {
@@ -334,5 +343,65 @@ func TestRegisterRefusesMissingEmptyOrRepeatedCredentials(t *testing.T) {
 				t.Errorf("detail = %q, want the name and no reference", coded.Detail)
 			}
 		})
+	}
+}
+
+func TestApprovalCardShowsTheTargetFirstAndRefusesWhatDoesNotFit(t *testing.T) {
+	t.Setenv("GITHUB_TEST_TOKEN", "test-token")
+	server, requests := stubGitHubAPICounting(t)
+	executor := brokerEffectExecutor(t)
+	var prompts []*toolbroker.ApprovalPrompt
+	broker, err := toolbroker.New(&toolbroker.Options{
+		HostCapabilities: capabilitytest.Host(t),
+		Effects:          executor,
+		ApprovalDecider: func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+			prompts = append(prompts, prompt)
+			return true, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := Register(broker, toolOptions(server)); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	var sequence uint64
+	execute := func(tool, arguments string) error {
+		sequence++
+		key := "idempotency-" + strconv.FormatUint(sequence, 10)
+		_, err := broker.Execute(context.Background(), &toolbroker.ToolRequest{
+			RequestID: "request-" + key, TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
+			ToolName: tool, ToolVersion: ToolVersion,
+			Arguments:      json.RawMessage(arguments),
+			Trust:          approval.TrustTrustedConfiguration,
+			IdempotencyKey: key,
+			EventSequence:  sequence,
+		})
+		return err
+	}
+	err = execute(ToolComment, `{"repo":"org/repo","number":7,"credential_name":"ci","body":"`+strings.Repeat("b", 2048)+`"}`)
+	var coded *toolbroker.Error
+	if !errors.As(err, &coded) || coded.Class != toolbroker.ResultApprovalDisplayTooLarge {
+		t.Fatalf("long body error = %v, want approval_display_too_large", err)
+	}
+	if len(prompts) != 0 || requests.Load() != 0 || journalSize(t, executor) != 0 {
+		t.Fatalf("prompts = %d requests = %d intents = %d, want none of them", len(prompts), requests.Load(), journalSize(t, executor))
+	}
+	if err := execute(ToolComment, `{"body":"looks good","credential_name":"ci","number":7,"repo":"org/repo"}`); err != nil {
+		t.Fatalf("short comment: %v", err)
+	}
+	if want := "repo: org/repo\nnumber: 7\ncredential_name: ci\nbody: looks good"; len(prompts) != 1 || prompts[0].Arguments != want {
+		t.Fatalf("comment prompts = %+v, want arguments %q", prompts, want)
+	}
+	if err := execute(ToolCreatePR, `{"body":"text","title":"Add thing","base":"main","head":"feature","credential_name":"ci","repo":"org/repo"}`); err != nil {
+		t.Fatalf("create pr: %v", err)
+	}
+	if want := "repo: org/repo\nhead: feature\nbase: main\ntitle: Add thing\ncredential_name: ci\nbody: text"; len(prompts) != 2 || prompts[1].Arguments != want {
+		t.Fatalf("create pr prompts = %+v, want arguments %q", prompts, want)
+	}
+	for _, definition := range Definitions() {
+		if err := tools.CheckDisplaySchema(definition.Display, definition.Schema); err != nil {
+			t.Errorf("%s display does not fit its schema: %v", definition.Name, err)
+		}
 	}
 }

@@ -155,6 +155,8 @@ func approvalPrompt(sessionID, principalID string) *approval.Prompt {
 		PolicyVersion: "v3",
 		ReasonCode:    "approval_required",
 		ExpiresAt:     time.Now().Add(cardLifetime),
+
+		StandingGrantAllowed: true,
 	}
 }
 

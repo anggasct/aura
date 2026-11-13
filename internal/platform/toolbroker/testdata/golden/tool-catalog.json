@@ -52,6 +52,8 @@
       "effectful": true,
       "opt_in": false,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -94,7 +96,13 @@
       "effectful": true,
       "opt_in": true,
       "external_sink": false,
-      "display": null,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "display": [
+        "to",
+        "subject",
+        "body"
+      ],
       "has_validator": false
     },
     {
@@ -131,6 +139,8 @@
       "effectful": true,
       "opt_in": false,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -161,6 +171,8 @@
       "effectful": false,
       "opt_in": true,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -196,6 +208,8 @@
       "effectful": false,
       "opt_in": false,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -230,6 +244,8 @@
       "effectful": false,
       "opt_in": false,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -265,6 +281,8 @@
       "effectful": false,
       "opt_in": false,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -297,6 +315,8 @@
       "effectful": false,
       "opt_in": false,
       "external_sink": true,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -332,6 +352,8 @@
       "effectful": false,
       "opt_in": false,
       "external_sink": true,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -361,6 +383,8 @@
       "effectful": false,
       "opt_in": true,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -382,6 +406,8 @@
       "effectful": false,
       "opt_in": true,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -424,6 +450,8 @@
       "effectful": false,
       "opt_in": true,
       "external_sink": true,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -459,6 +487,8 @@
       "effectful": false,
       "opt_in": true,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -492,6 +522,8 @@
       "effectful": false,
       "opt_in": true,
       "external_sink": true,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -521,6 +553,8 @@
       "effectful": false,
       "opt_in": true,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     },
@@ -559,6 +593,8 @@
       "effectful": true,
       "opt_in": false,
       "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
       "display": null,
       "has_validator": false
     }

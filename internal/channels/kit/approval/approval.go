@@ -56,6 +56,8 @@ type Prompt struct {
 	PolicyVersion  string
 	ReasonCode     string
 	ExpiresAt      time.Time
+
+	StandingGrantAllowed bool
 }
 
 type Requester struct {
@@ -309,7 +311,7 @@ type StandingOffer struct {
 }
 
 func OffersStandingGrant(prompt *Prompt, class principal.Class, offer StandingOffer) bool {
-	return prompt != nil && prompt.ReasonCode != policy.ReasonUntrustedInput && class == principal.ClassTrusted && offer.Grants != nil && offer.TTL > 0
+	return prompt != nil && prompt.ReasonCode != policy.ReasonUntrustedInput && class == principal.ClassTrusted && offer.Grants != nil && offer.TTL > 0 && prompt.StandingGrantAllowed
 }
 
 func StandingGrantLabel(ttl time.Duration) string {

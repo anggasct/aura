@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -32,6 +33,9 @@ const (
 
 	aliasNotConfigured = "credential is not a configured github credential"
 	optionsRequired    = "github tool options are required"
+	headMoved          = "github refused the merge: the pull request head is not the given sha"
+	bodyHint           = "Shown whole on the owner's approval card. A body that does not fit the card (about 800 characters, less with a long title or repository) is refused, not truncated."
+	maxBodyHint        = 800
 )
 
 type Credential struct {
@@ -268,6 +272,7 @@ func CreatePRAdapter(options *ToolOptions) toolbroker.Adapter {
 type mergeArguments struct {
 	commonArguments
 	Number      int    `json:"number"`
+	SHA         string `json:"sha"`
 	MergeMethod string `json:"merge_method,omitempty"`
 }
 
@@ -304,9 +309,12 @@ func MergeAdapter(options *ToolOptions) toolbroker.Adapter {
 		}
 		status, raw, err := cli.call(ctx, token, http.MethodPut,
 			fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, args.Number),
-			map[string]string{"merge_method": method})
+			map[string]string{"merge_method": method, "sha": args.SHA})
 		if err != nil {
 			return toolbroker.ToolResult{}, err
+		}
+		if status == http.StatusConflict {
+			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, headMoved)
 		}
 		if status != http.StatusOK {
 			return toolbroker.ToolResult{}, statusError(status, raw)
@@ -384,18 +392,28 @@ func CommentAdapter(options *ToolOptions) toolbroker.Adapter {
 }
 
 type objectSchema struct {
-	Type       string               `json:"type"`
-	Properties map[string]fieldType `json:"properties"`
-	Required   []string             `json:"required"`
+	Type                 string               `json:"type"`
+	Properties           map[string]fieldType `json:"properties"`
+	Required             []string             `json:"required"`
+	AdditionalProperties bool                 `json:"additionalProperties"`
 }
 
 type fieldType struct {
-	Type    string `json:"type"`
-	Minimum *int   `json:"minimum,omitempty"`
+	Type        string `json:"type"`
+	Minimum     *int   `json:"minimum,omitempty"`
+	MaxLength   *int   `json:"maxLength,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
-func intFloor(limit int) *int {
+func intRef(limit int) *int {
 	return &limit
+}
+
+func textProperty(name string) fieldType {
+	if name == "body" {
+		return fieldType{Type: "string", MaxLength: intRef(maxBodyHint), Description: bodyHint}
+	}
+	return fieldType{Type: "string"}
 }
 
 func fieldSchema(requiredStrings, optionalStrings, requiredNumbers []string) json.RawMessage {
@@ -407,17 +425,17 @@ func fieldSchema(requiredStrings, optionalStrings, requiredNumbers []string) jso
 	required = append(required, "repo", "credential_name")
 	for _, field := range requiredStrings {
 		if _, ok := properties[field]; !ok {
-			properties[field] = fieldType{Type: "string"}
+			properties[field] = textProperty(field)
 		}
 		required = append(required, field)
 	}
 	for _, field := range optionalStrings {
 		if _, ok := properties[field]; !ok {
-			properties[field] = fieldType{Type: "string"}
+			properties[field] = textProperty(field)
 		}
 	}
 	for _, field := range requiredNumbers {
-		properties[field] = fieldType{Type: "integer", Minimum: intFloor(1)}
+		properties[field] = fieldType{Type: "integer", Minimum: intRef(1)}
 		required = append(required, field)
 	}
 	encoded, err := json.Marshal(objectSchema{
@@ -477,6 +495,22 @@ func fieldValidator(requiredStrings, optionalStrings, requiredNumbers []string) 
 	}
 }
 
+var headPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+func mergeValidator(inner func(json.RawMessage) (json.RawMessage, error)) func(json.RawMessage) (json.RawMessage, error) {
+	return func(raw json.RawMessage) (json.RawMessage, error) {
+		validated, err := inner(raw)
+		if err != nil {
+			return nil, err
+		}
+		var args mergeArguments
+		if err := json.Unmarshal(validated, &args); err != nil || !headPattern.MatchString(args.SHA) {
+			return nil, errors.New(`argument "sha" must be a 40-character lowercase hex commit id`)
+		}
+		return validated, nil
+	}
+}
+
 func ToolNames() []string {
 	return []string{ToolCreatePR, ToolMerge, ToolComment}
 }
@@ -489,13 +523,19 @@ func Definitions() []tools.Definition {
 			Validator:        fieldValidator([]string{"title", "head", "base"}, []string{"body"}, nil),
 			RequiresApproval: true,
 			Effectful:        true,
+			NoStandingGrant:  true,
+			ExactDisplay:     true,
+			Display:          []string{"repo", "head", "base", "title", "credential_name", "body"},
 		},
 		{
 			Name: ToolMerge, Version: ToolVersion,
-			Schema:           fieldSchema(nil, []string{"merge_method"}, []string{"number"}),
-			Validator:        fieldValidator(nil, []string{"merge_method"}, []string{"number"}),
+			Schema:           fieldSchema([]string{"sha"}, []string{"merge_method"}, []string{"number"}),
+			Validator:        mergeValidator(fieldValidator([]string{"sha"}, []string{"merge_method"}, []string{"number"})),
 			RequiresApproval: true,
 			Effectful:        true,
+			NoStandingGrant:  true,
+			ExactDisplay:     true,
+			Display:          []string{"repo", "number", "sha", "merge_method", "credential_name"},
 		},
 		{
 			Name: ToolComment, Version: ToolVersion,
@@ -503,6 +543,9 @@ func Definitions() []tools.Definition {
 			Validator:        fieldValidator([]string{"body"}, nil, []string{"number"}),
 			RequiresApproval: true,
 			Effectful:        true,
+			NoStandingGrant:  true,
+			ExactDisplay:     true,
+			Display:          []string{"repo", "number", "credential_name", "body"},
 		},
 	}
 }

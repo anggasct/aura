@@ -29,6 +29,8 @@ type catalogDefinition struct {
 	Effectful            bool            `json:"effectful"`
 	OptIn                bool            `json:"opt_in"`
 	ExternalSink         bool            `json:"external_sink"`
+	NoStandingGrant      bool            `json:"no_standing_grant"`
+	ExactDisplay         bool            `json:"exact_display"`
 	Display              []string        `json:"display"`
 	HasValidator         bool            `json:"has_validator"`
 }
@@ -65,6 +67,8 @@ func TestToolCatalogGolden(t *testing.T) {
 			Effectful:            definition.Effectful,
 			OptIn:                definition.OptIn,
 			ExternalSink:         definition.ExternalSink,
+			NoStandingGrant:      definition.NoStandingGrant,
+			ExactDisplay:         definition.ExactDisplay,
 			Display:              definition.Display,
 			HasValidator:         definition.Validator != nil,
 		})
