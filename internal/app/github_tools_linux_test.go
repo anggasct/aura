@@ -84,19 +84,19 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 	comment := func(credential string) json.RawMessage {
 		return json.RawMessage(`{"repo":"org/repo","number":7,"body":"hi","credential_name":"` + credential + `"}`)
 	}
-	runner, _, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *config.Config) {
+	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *config.Config) {
 		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}
 	})
-	_, err := runner.Invoke(stepCallContext(t), github.ToolComment, comment("other"))
+	_, err := runner.Invoke(stepCallContext(t, db), github.ToolComment, comment("other"))
 	if err == nil || !strings.Contains(err.Error(), "not a configured github credential") {
 		t.Errorf("unconfigured credential err = %v, want not a configured github credential", err)
 	}
-	_, err = runner.Invoke(stepCallContext(t), github.ToolComment, comment("ci"))
+	_, err = runner.Invoke(stepCallContext(t, db), github.ToolComment, comment("ci"))
 	if err == nil || !strings.Contains(err.Error(), "github credential is unavailable") {
 		t.Errorf("configured credential err = %v, want github credential is unavailable", err)
 	}
-	bare, _, _ := newWorkflowToolRunnerFixture(t)
-	_, err = bare.Invoke(stepCallContext(t), github.ToolComment, comment("ci"))
+	bare, bareDB, _ := newWorkflowToolRunnerFixture(t)
+	_, err = bare.Invoke(stepCallContext(t, bareDB), github.ToolComment, comment("ci"))
 	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultPolicyDenied || !strings.Contains(err.Error(), "unknown tool") {
 		t.Errorf("no credentials err = %v, want policy_denied unknown tool", err)
 	}

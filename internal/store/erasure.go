@@ -17,6 +17,7 @@ type ErasureOptions struct {
 
 type ErasureCounts struct {
 	Sessions        int
+	RunSessions     int
 	MemoryDocuments int
 	Grants          int
 	StandingGrants  int
@@ -38,7 +39,9 @@ const (
 
 	emailEffectIDs = `SELECT id FROM effect_intent WHERE ` + emailEffectMatch
 
-	ownedEffectIDs = `SELECT id FROM effect_intent WHERE session_id IN (SELECT id FROM session WHERE owner_id = ?1)`
+	ownedEffectIDs = `SELECT id FROM effect_intent WHERE session_id IN (SELECT id FROM session WHERE owner_id = ?1 AND id NOT GLOB 'wf-*')`
+
+	runSessionEffectIDs = `SELECT id FROM effect_intent WHERE session_id IN (SELECT id FROM session WHERE owner_id = ?1 AND id GLOB 'wf-*')`
 
 	turnRunSessionID = `CASE WHEN json_valid(CAST(durable_run.payload AS TEXT)) THEN json_extract(CAST(durable_run.payload AS TEXT), '$.session_id') END`
 
@@ -67,10 +70,14 @@ func (c *ErasureCounts) targets() []erasureTarget {
 			`DELETE FROM effect_intent WHERE id IN (` + emailEffectIDs + `)`,
 		}},
 		{field: &c.MemoryDocuments, count: `SELECT COUNT(*) FROM memory_document WHERE owner_id = ?`, erase: []string{`DELETE FROM memory_document WHERE owner_id = ?`}},
-		{field: &c.Sessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ?`, erase: []string{
+		{field: &c.Sessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ? AND id NOT GLOB 'wf-*'`, erase: []string{
 			`DELETE FROM effect_approval WHERE intent_id IN (` + ownedEffectIDs + `)`,
-			`DELETE FROM session WHERE owner_id = ?`,
+			`DELETE FROM session WHERE owner_id = ? AND id NOT GLOB 'wf-*'`,
 			orphanedTurnRuns,
+		}},
+		{field: &c.RunSessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ? AND id GLOB 'wf-*'`, erase: []string{
+			`DELETE FROM effect_approval WHERE intent_id IN (` + runSessionEffectIDs + `)`,
+			`DELETE FROM session WHERE owner_id = ? AND id GLOB 'wf-*'`,
 		}},
 		{field: &c.Grants, count: `SELECT COUNT(*) FROM principal_grant WHERE principal_id = ?`, erase: []string{`DELETE FROM principal_grant WHERE principal_id = ?`}, grant: true},
 		{field: &c.StandingGrants, count: `SELECT COUNT(*) FROM standing_grant WHERE principal_id = ?`, erase: []string{`DELETE FROM standing_grant WHERE principal_id = ?`}},
@@ -117,7 +124,7 @@ func ErasePrincipal(ctx context.Context, db *sql.DB, principalID string, apply b
 	if err := tx.Commit(); err != nil {
 		return counts, classifyBusy(err)
 	}
-	if opts.ArtifactRoot != "" && (counts.Sessions > 0 || counts.LegacyStepSessions > 0) {
+	if opts.ArtifactRoot != "" && (counts.Sessions > 0 || counts.RunSessions > 0 || counts.LegacyStepSessions > 0) {
 		report, err := Collect(ctx, db, opts.ArtifactRoot, time.Now().UTC().Add(time.Second))
 		if err != nil {
 			return counts, fmt.Errorf("collect erased blobs: %w", err)

@@ -5,10 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
-const defaultSessionAgentID = "main"
+const (
+	defaultSessionAgentID = "main"
+	workflowSessionPrefix = "wf-"
+)
 
 type sqliteSessionService struct {
 	db *sql.DB
@@ -22,6 +26,30 @@ func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error 
 	if sess == nil {
 		return errNilArgument("session")
 	}
+	if strings.HasPrefix(sess.ID, workflowSessionPrefix) {
+		return &Error{
+			Code:   ErrorCodeInvalidArgument,
+			Detail: "session ids starting with " + workflowSessionPrefix + " are reserved for workflow runs",
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return classifyBusy(fmt.Errorf("begin create session %s: %w", sess.ID, err))
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := CreateSessionTx(ctx, tx, sess); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return classifyBusy(fmt.Errorf("commit create session %s: %w", sess.ID, err))
+	}
+	return nil
+}
+
+func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *Session) error {
+	if sess == nil {
+		return errNilArgument("session")
+	}
 	metadata := sess.Metadata
 	if metadata == nil {
 		metadata = json.RawMessage(`{}`)
@@ -30,7 +58,7 @@ func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error 
 	if agentID == "" {
 		agentID = defaultSessionAgentID
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := tx.ExecContext(ctx,
 		`INSERT INTO session (id, owner_id, agent_id, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.OwnerID, agentID, string(metadata), formatTime(sess.CreatedAt), formatTime(sess.UpdatedAt),
 	)

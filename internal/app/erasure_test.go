@@ -107,3 +107,10 @@ func TestRetentionSweepErasesIdlePrincipalsByClass(t *testing.T) {
 		t.Fatalf("second sweep = %v, %v; want idempotent", again, err)
 	}
 }
+
+func TestErasureLinesPrintRunSessionsAfterSessions(t *testing.T) {
+	lines := erasureLines(&store.ErasureCounts{Sessions: 2, RunSessions: 5})
+	if len(lines) < 2 || lines[0] != "sessions: 2" || lines[1] != "run_sessions: 5" {
+		t.Fatalf("erasure lines = %v, want sessions then run_sessions", lines)
+	}
+}

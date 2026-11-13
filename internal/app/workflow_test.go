@@ -17,7 +17,9 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -344,7 +346,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 func TestNewWorkflowToolRunnerPropagatesConstructionErrors(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_DATA_HOME", "")
-	if _, err := newWorkflowToolRunner(loadResultWithAll(t, &config.Config{Tools: &config.Tools{}}), nil, nil); err == nil {
+	if _, err := newWorkflowToolRunner(loadResultWithAll(t, &config.Config{Tools: &config.Tools{}}), nil, nil, nil); err == nil {
 		t.Fatal("tool runner construction swallowed the storage path failure")
 	} else if !strings.Contains(err.Error(), "cannot resolve data directory") {
 		t.Fatalf("error = %v, want the data directory cause", err)
@@ -353,7 +355,7 @@ func TestNewWorkflowToolRunnerPropagatesConstructionErrors(t *testing.T) {
 		Tools:   &config.Tools{Workspace: t.TempDir()},
 		Storage: config.Storage{Path: t.TempDir()},
 	}
-	if _, err := newWorkflowToolRunner(loadResultWithAll(t, cfg), nil, nil); err == nil {
+	if _, err := newWorkflowToolRunner(loadResultWithAll(t, cfg), nil, nil, nil); err == nil {
 		t.Fatal("tool runner construction swallowed the executor failure")
 	} else if !strings.Contains(err.Error(), "storage database is required") {
 		t.Fatalf("error = %v, want the executor cause", err)
@@ -382,9 +384,46 @@ func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 	}
 }
 
-func stepCallContext(t *testing.T) context.Context {
+func ownerStepCall(runID, stepID string, attempt int) *workflow.StepCall {
+	return &workflow.StepCall{
+		RunID: runID, StepID: stepID, Attempt: attempt,
+		Origin: workflow.RunOrigin{
+			PrincipalID: principal.OwnerID, PrincipalClass: string(principal.ClassOwner), AgentID: auraagent.DefaultID,
+		},
+		Approval: workflow.Approval{Kind: workflow.ApprovalInstalled},
+	}
+}
+
+func seedRunSession(t *testing.T, db *sql.DB, call *workflow.StepCall) {
 	t.Helper()
-	return workflow.WithStepCall(t.Context(), &workflow.StepCall{RunID: "run-1", StepID: "step-1"})
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	sess := &store.Session{ID: workflow.RunSessionID(call.RunID), OwnerID: call.Origin.PrincipalID, AgentID: call.Origin.AgentID}
+	if err := store.CreateSessionTx(t.Context(), tx, sess); err != nil {
+		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionIDConflict {
+			return
+		}
+		t.Fatalf("create run session: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
+func stepContextFor(t *testing.T, db *sql.DB, call *workflow.StepCall) context.Context {
+	t.Helper()
+	seedRunSession(t, db, call)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	t.Cleanup(cancel)
+	return workflow.WithStepCall(ctx, call)
+}
+
+func stepCallContext(t *testing.T, db *sql.DB) context.Context {
+	t.Helper()
+	return stepContextFor(t, db, ownerStepCall("run-1", "step-1", 0))
 }
 
 func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, string) {
@@ -412,7 +451,11 @@ func newWorkflowToolRunnerFixtureWith(t *testing.T, configure func(*config.Confi
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	runner, err := newWorkflowToolRunner(loadResultWithAll(t, &cfg), db, slog.Default())
+	registry, err := buildAgentRegistry(&cfg)
+	if err != nil {
+		t.Fatalf("buildAgentRegistry: %v", err)
+	}
+	runner, err := newWorkflowToolRunner(loadResultWithAll(t, &cfg), db, registry, slog.Default())
 	if err != nil {
 		t.Fatalf("newWorkflowToolRunner: %v", err)
 	}
@@ -423,9 +466,9 @@ func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("builtin tool executor requires Linux")
 	}
-	runner, _, workspace := newWorkflowToolRunnerFixture(t)
+	runner, db, workspace := newWorkflowToolRunnerFixture(t)
 	args := json.RawMessage(`{"path":"notes.txt","content":"authored by the workflow step"}`)
-	output, err := runner.Invoke(stepCallContext(t), "write_file", args)
+	output, err := runner.Invoke(stepCallContext(t, db), "write_file", args)
 	if err != nil {
 		t.Fatalf("Invoke with real arguments: %v", err)
 	}
@@ -448,9 +491,9 @@ func TestWorkflowToolRunnerRejectsEmptyArgumentsFailClosed(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("builtin tool executor requires Linux")
 	}
-	runner, _, workspace := newWorkflowToolRunnerFixture(t)
+	runner, db, workspace := newWorkflowToolRunnerFixture(t)
 	for _, args := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(`null`)} {
-		_, err := runner.Invoke(stepCallContext(t), "write_file", args)
+		_, err := runner.Invoke(stepCallContext(t, db), "write_file", args)
 		if err == nil {
 			t.Fatalf("Invoke accepted empty arguments %s", args)
 		}

@@ -345,7 +345,7 @@ type PrincipalActivity struct {
 }
 
 func ListPrincipalActivity(ctx context.Context, db *sql.DB) ([]PrincipalActivity, error) {
-	rows, err := db.QueryContext(ctx, `SELECT owner_id, updated_at FROM session WHERE owner_id LIKE '%:%'`)
+	rows, err := db.QueryContext(ctx, `SELECT owner_id, updated_at FROM session WHERE owner_id LIKE '%:%' AND id NOT GLOB 'wf-*'`)
 	if err != nil {
 		return nil, classifyBusy(fmt.Errorf("read principal sessions: %w", err))
 	}

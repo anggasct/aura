@@ -76,11 +76,15 @@ func TestWorkflowToolRunnerFollowsTheHostCapabilitySet(t *testing.T) {
 				t.Fatalf("openStorage: %v", err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
-			runner, err := newWorkflowToolRunner(&result, db, slog.New(slog.DiscardHandler))
+			registry, err := buildAgentRegistry(result.Config)
+			if err != nil {
+				t.Fatalf("buildAgentRegistry: %v", err)
+			}
+			runner, err := newWorkflowToolRunner(&result, db, registry, slog.New(slog.DiscardHandler))
 			if err != nil {
 				t.Fatalf("newWorkflowToolRunner: %v", err)
 			}
-			_, invokeErr := runner.Invoke(stepCallContext(t), tc.tool, json.RawMessage(tc.arguments))
+			_, invokeErr := runner.Invoke(stepCallContext(t, db), tc.tool, json.RawMessage(tc.arguments))
 			_, statErr := os.Stat(filepath.Join(result.Config.Tools.Workspace, tc.effect))
 			if tc.wantDenied {
 				if code, ok := workflow.CodeOf(invokeErr); !ok || code != workflow.ErrorCodeCapabilityUnavailable {

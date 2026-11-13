@@ -26,6 +26,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/store"
 )
 
 func newWorkflowCmd(gf *globalFlags) *cobra.Command {
@@ -216,7 +217,8 @@ func workflowApprovalDecider(ctx context.Context, prompt *toolbroker.ApprovalPro
 
 type workflowToolRunner struct {
 	executor      *toolsbuiltin.Executor
-	db            *sql.DB
+	sessions      store.SessionService
+	registry      *auraagent.Registry
 	caps          map[string][]string
 	orchestration map[string]bool
 }
@@ -232,11 +234,35 @@ func workflowToolIDsFor(call *workflow.StepCall) workflowToolIDs {
 	sum := sha256.Sum256([]byte(call.RunID + "/" + call.StepID))
 	digest := hex.EncodeToString(sum[:])[:24]
 	return workflowToolIDs{
-		sessionID:      "wf-" + digest,
+		sessionID:      workflow.RunSessionID(call.RunID),
 		turnID:         "turn-" + digest,
 		requestID:      "req-" + digest,
 		idempotencyKey: "wf/" + call.RunID + "/" + call.StepID,
 	}
+}
+
+func workflowTrustLabel(kind workflow.ApprovalKind) (approval.TrustLabel, error) {
+	switch kind {
+	case workflow.ApprovalInstalled:
+		return approval.TrustTrustedConfiguration, nil
+	case workflow.ApprovalProposal, workflow.ApprovalRoutine:
+		return approval.TrustDerivedUntrusted, nil
+	default:
+		return "", &workflow.Error{Code: workflow.ErrorCodeApprovalMissing, Detail: "workflow approval has no known kind"}
+	}
+}
+
+func (r *workflowToolRunner) checkRunSession(ctx context.Context, sessionID string, origin *workflow.RunOrigin) error {
+	sess, err := r.sessions.Get(ctx, sessionID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return &workflow.Error{Code: workflow.ErrorCodeSessionInvalid, Detail: "run session " + sessionID + " does not exist"}
+	case err != nil:
+		return &workflow.Error{Code: workflow.ErrorCodeStepFailed, Detail: "read run session: " + err.Error()}
+	case sess.OwnerID != origin.PrincipalID || sess.AgentID != origin.AgentID:
+		return &workflow.Error{Code: workflow.ErrorCodeSessionInvalid, Detail: "run session " + sessionID + " does not belong to the run's origin"}
+	}
+	return nil
 }
 
 func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
@@ -253,18 +279,33 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 	if r.orchestration[toolID] {
 		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool " + toolID + " is an orchestration tool and cannot run as a workflow step"}
 	}
+	trust, err := workflowTrustLabel(call.Approval.Kind)
+	if err != nil {
+		return nil, err
+	}
+	class := principal.ParseClass(call.Origin.PrincipalClass)
+	persona, ok := r.registry.Lookup(call.Origin.AgentID)
+	if !ok {
+		return nil, &workflow.Error{Code: workflow.ErrorCodePersonaMissing, Detail: "persona " + call.Origin.AgentID + " is not configured"}
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool step has no deadline"}
+	}
 	ids := workflowToolIDsFor(&call)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if r.db != nil {
-		_, _ = r.db.ExecContext(ctx,
-			`INSERT INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES (?, ?, '{}', ?, ?) ON CONFLICT(id) DO NOTHING`,
-			ids.sessionID, "workflow", now, now,
-		)
+	if err := r.checkRunSession(ctx, ids.sessionID, &call.Origin); err != nil {
+		return nil, err
 	}
 	result, err := r.executor.Broker().Execute(ctx, &toolbroker.ToolRequest{
 		RequestID:             ids.requestID,
 		SessionID:             ids.sessionID,
 		TurnID:                ids.turnID,
+		PrincipalID:           call.Origin.PrincipalID,
+		PrincipalClass:        class,
+		AgentID:               call.Origin.AgentID,
+		Knowledge:             persona.KnowledgeFor(class),
+		Tainted:               call.Origin.Tainted || call.Approval.Tainted,
+		Deadline:              deadline,
 		IdempotencyKey:        ids.idempotencyKey,
 		AllocateEventSequence: true,
 		EventInvocation:       ids.requestID,
@@ -274,7 +315,7 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 		ToolVersion:           "v1",
 		Arguments:             args,
 		Capabilities:          slices.Clone(r.caps[toolID]),
-		Trust:                 approval.TrustTrustedConfiguration,
+		Trust:                 trust,
 	})
 	if code, ok := toolbroker.CodeOf(err); ok && code == toolbroker.ResultCapabilityUnavailable {
 		return nil, &workflow.Error{Code: workflow.ErrorCodeCapabilityUnavailable, Detail: "tool " + toolID + " needs a capability this host does not provide"}
@@ -316,7 +357,7 @@ func commandToolCallText(result *config.LoadResult, db *sql.DB, logger *slog.Log
 	}
 }
 
-func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, logger *slog.Logger) (workflow.ToolRunner, error) {
+func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, registry *auraagent.Registry, logger *slog.Logger) (workflow.ToolRunner, error) {
 	executor, err := newWorkflowToolExecutor(result, db, logger)
 	if err != nil {
 		return nil, err
@@ -333,7 +374,7 @@ func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, logger *slog.L
 			orchestration[registered[i].Name] = true
 		}
 	}
-	return &workflowToolRunner{executor: executor, db: db, caps: caps, orchestration: orchestration}, nil
+	return &workflowToolRunner{executor: executor, sessions: store.NewSessionService(db), registry: registry, caps: caps, orchestration: orchestration}, nil
 }
 
 func newWorkflowRunsCmd(gf *globalFlags) *cobra.Command {

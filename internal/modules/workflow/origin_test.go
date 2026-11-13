@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -308,4 +310,90 @@ func TestProposalKeepsItsTaint(t *testing.T) {
 			t.Fatalf("%s tainted = %v, %v; want %v", tc.id, got, err, tc.tainted)
 		}
 	}
+}
+
+func runSessionOwner(t *testing.T, disk *Store, runID string) (owner, agent string, found bool) {
+	t.Helper()
+	err := disk.db.QueryRowContext(t.Context(), `SELECT owner_id, agent_id FROM session WHERE id = ?`, RunSessionID(runID)).Scan(&owner, &agent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false
+	}
+	if err != nil {
+		t.Fatalf("read run session: %v", err)
+	}
+	return owner, agent, true
+}
+
+func TestRunSessionIsCreatedWithTheRun(t *testing.T) {
+	origin := &RunOrigin{PrincipalID: "discord:111", PrincipalClass: "trusted", AgentID: "lobby"}
+
+	t.Run("a start and a child start create the run's session for the origin", func(t *testing.T) {
+		tools := &fakeToolRunner{}
+		interpreter, _, disk := driverTestSetup(t, tools, DriverConcurrent)
+		installAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
+		summary, err := interpreter.Start(t.Context(), "top", nil, origin)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		waitForRunStatus(t, disk, summary.ID, RunSucceeded, 5*time.Second)
+		children := childRuns(t, disk, "leaf")
+		if len(children) != 1 {
+			t.Fatalf("child runs = %d, want 1", len(children))
+		}
+		for _, run := range []*RunSummary{summary, children[0]} {
+			owner, agent, found := runSessionOwner(t, disk, run.ID)
+			if !found || owner != "discord:111" || agent != "lobby" {
+				t.Fatalf("session of run %s = %q/%q found=%v, want discord:111/lobby", run.ID, owner, agent, found)
+			}
+		}
+	})
+
+	tests := []struct {
+		name  string
+		owner string
+		agent string
+	}{
+		{name: "a session of the same owner", owner: "discord:111", agent: "lobby"},
+		{name: "a session of another owner", owner: "discord:999", agent: "main"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name+" with the run's id is a conflict and no run is written", func(t *testing.T) {
+			disk := newTestStore(t)
+			disk.newRunID = func() string { return "run-fixed" }
+			spec := toolSpec("leaf")
+			if err := disk.SaveDefinition(t.Context(), spec); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := disk.db.ExecContext(t.Context(), `INSERT INTO session (id, owner_id, agent_id, metadata_json, created_at, updated_at) VALUES (?, ?, ?, '{}', '2026-11-13T09:00:00Z', '2026-11-13T09:00:00Z')`,
+				RunSessionID("run-fixed"), tc.owner, tc.agent); err != nil {
+				t.Fatalf("seed session: %v", err)
+			}
+			_, err := disk.newRun(t.Context(), spec, &RunInput{}, origin)
+			if !hasCode(err, ErrorCodeSessionInvalid) {
+				t.Fatalf("newRun error = %v, want %s", err, ErrorCodeSessionInvalid)
+			}
+			var runs int
+			if err := disk.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM workflow_run`).Scan(&runs); err != nil || runs != 0 {
+				t.Fatalf("workflow_run rows after the refusal = %d, %v; want 0", runs, err)
+			}
+		})
+	}
+
+	t.Run("a run that cannot be written leaves no session behind", func(t *testing.T) {
+		disk := newTestStore(t)
+		spec := toolSpec("leaf")
+		if err := disk.SaveDefinition(t.Context(), spec); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := disk.createRun(t.Context(), spec, &RunInput{}, origin, "key-taken", ""); err != nil {
+			t.Fatalf("first createRun: %v", err)
+		}
+		disk.newRunID = func() string { return "run-second" }
+		if _, err := disk.createRun(t.Context(), spec, &RunInput{}, origin, "key-taken", ""); err == nil {
+			t.Fatal("createRun accepted a durable key that is already taken")
+		}
+		if _, _, found := runSessionOwner(t, disk, "run-second"); found {
+			t.Fatal("a refused run left its session behind")
+		}
+	})
 }
