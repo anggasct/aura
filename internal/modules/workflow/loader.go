@@ -20,6 +20,7 @@ type specFile struct {
 	Version int             `yaml:"version"`
 	Goal    string          `yaml:"goal"`
 	Source  string          `yaml:"source"`
+	RunAs   string          `yaml:"run_as"`
 	Steps   []stepFileEntry `yaml:"steps"`
 }
 
@@ -83,6 +84,7 @@ func parseSpec(content []byte) (*Spec, error) {
 		Goal:    file.Goal,
 		Version: file.Version,
 		Source:  Source(file.Source),
+		RunAs:   file.RunAs,
 	}
 	if spec.Source == "" {
 		spec.Source = SourceDefined

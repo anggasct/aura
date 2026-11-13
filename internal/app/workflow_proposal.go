@@ -144,7 +144,7 @@ func yesNo(value bool) string {
 	return "no"
 }
 
-func approveProposal(ctx context.Context, cfg *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, show workflow.ToolCallText, now time.Time) (string, error) {
+func approveProposal(ctx context.Context, _ *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, show workflow.ToolCallText, now time.Time) (string, error) {
 	proposal, err := runs.Proposal(ctx, id, now)
 	if err != nil {
 		return "", err
@@ -159,15 +159,7 @@ func approveProposal(ctx context.Context, cfg *config.Config, interpreter *workf
 	if digest != proposal.Digest {
 		return "", &workflow.Error{Code: workflow.ErrorCodeDigestMismatch, Detail: "proposal " + id + " no longer matches the digest it was proposed with"}
 	}
-	registry, err := buildAgentRegistry(cfg)
-	if err != nil {
-		return "", err
-	}
-	definition, ok := registry.Lookup(proposal.AgentID)
-	if !ok {
-		return "", errors.New("the proposing persona " + proposal.AgentID + " is no longer configured")
-	}
-	graph, err := interpreter.CompileProposal(proposal.Spec, definition.Tools)
+	graph, err := interpreter.CompileProposal(proposal.Spec, proposal.AgentID)
 	if err != nil {
 		return "", err
 	}

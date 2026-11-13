@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -262,7 +263,7 @@ func TestCompositionCommandWorkflowsAreClientsOfTheServer(t *testing.T) {
 	if app.runtime == nil {
 		t.Fatal("a workflows-only command build did not build the durable runtime")
 	}
-	if _, err := app.interpreter.Start(t.Context(), "demo", nil, ownerRunOrigin()); err != nil {
+	if _, err := app.interpreter.StartConfigured(t.Context(), "demo", nil, principal.OwnerID, principal.ClassOwner, ""); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if n := countRows(t, app.db, `SELECT COUNT(*) FROM durable_run WHERE handler = ? AND state = 'running' AND owner IS NULL`, workflow.HandlerName); n != 1 {

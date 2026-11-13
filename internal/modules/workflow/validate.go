@@ -8,6 +8,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 type AgentResolver interface {
@@ -20,6 +21,7 @@ type ValidationDeps struct {
 	Agents             AgentResolver
 	DefaultStepTimeout time.Duration
 	CheckToolCall      func(toolID string, args json.RawMessage) error
+	StepAllowed        func(agentID string, class principal.Class, toolID string) (allowed, personaKnown bool)
 }
 
 const MaxCompositionDepth = 3

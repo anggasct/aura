@@ -78,9 +78,10 @@ func TestCLIAndScheduledStartsRunAsTheOwnerDefaultPersona(t *testing.T) {
 		name      string
 		principal string
 		class     string
+		refused   bool
 	}{
 		{name: "owner job", principal: principal.OwnerID, class: "owner"},
-		{name: "other principal job", principal: "discord:111", class: "trusted"},
+		{name: "other principal job", principal: "discord:111", class: "trusted", refused: true},
 	}
 	for _, tc := range scheduled {
 		t.Run("scheduled start/"+tc.name, func(t *testing.T) {
@@ -89,6 +90,12 @@ func TestCLIAndScheduledStartsRunAsTheOwnerDefaultPersona(t *testing.T) {
 			workflows.set(controller.interpreter)
 			turns := &engineTurnRunner{workflows: workflows}
 			fired, err := turns.RunTurn(t.Context(), &schedule.TurnRequest{PrincipalID: tc.principal, IdempotencyKey: "cron/job-1/2026-11-13T03:00:00Z", WorkflowID: "book_visit"})
+			if tc.refused {
+				if !hasWorkflowCode(err, workflow.ErrorCodeNotPermitted) {
+					t.Fatalf("fire = %+v, %v, want %s", fired, err, workflow.ErrorCodeNotPermitted)
+				}
+				return
+			}
 			if err != nil || !fired.Succeeded {
 				t.Fatalf("fire = %+v, %v", fired, err)
 			}

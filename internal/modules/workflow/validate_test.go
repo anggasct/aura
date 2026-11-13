@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func TestParseConditionGrammar(t *testing.T) {
@@ -113,6 +115,16 @@ func testValidationDeps() *ValidationDeps {
 		EffectfulTools: []string{"exec", "write_file"},
 		Agents:         registry,
 		CheckToolCall:  acceptToolCall,
+		StepAllowed:    acceptStep,
+	}
+}
+
+func acceptStep(string, principal.Class, string) (allowed, personaKnown bool) { return true, true }
+
+func personaTools(byPersona map[string][]string) func(string, principal.Class, string) (bool, bool) {
+	return func(agentID string, _ principal.Class, toolID string) (bool, bool) {
+		granted, known := byPersona[agentID]
+		return slices.Contains(granted, toolID), known
 	}
 }
 

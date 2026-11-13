@@ -54,7 +54,7 @@ func TestCompileChecksEveryToolStepsArguments(t *testing.T) {
 			if err := interpreter.LoadAll(t.Context(), nil, deps); err != nil {
 				t.Fatalf("LoadAll: %v", err)
 			}
-			_, err := interpreter.CompileProposal(NormalizeProposal(spec, "prop_check"), []string{"read_file"})
+			_, err := interpreter.CompileProposal(NormalizeProposal(spec, "prop_check"), "main")
 			return err
 		}},
 	}

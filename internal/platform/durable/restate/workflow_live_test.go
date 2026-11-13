@@ -21,12 +21,17 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type queuedRuntime struct{ durable.Runtime }
 
 func acceptToolCall(string, json.RawMessage) error { return nil }
+
+func acceptStepAllowed(string, principal.Class, string) (allowed, personaKnown bool) {
+	return true, true
+}
 
 func (queuedRuntime) Start(_ context.Context, req durable.StartRequest) (durable.RunRef, error) {
 	return durable.RunRef{Key: req.Key}, nil
@@ -309,6 +314,7 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 		EffectfulTools: []string{},
 		Agents:         registry,
 		CheckToolCall:  acceptToolCall,
+		StepAllowed:    acceptStepAllowed,
 	}
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -446,6 +452,7 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 		EffectfulTools: []string{},
 		Agents:         registry,
 		CheckToolCall:  acceptToolCall,
+		StepAllowed:    acceptStepAllowed,
 	}
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)

@@ -41,7 +41,7 @@ var effectInterruptedWorkflow = &workflowShape{
 func effectSpec() *workflow.Spec {
 	effectID, afterID := effectTool, afterEffectTool
 	return &workflow.Spec{
-		ID: "effect-once", Goal: "Perform an effect once across a killed process", Version: 1, Source: workflow.SourceDefined,
+		ID: "effect-once", Goal: "Perform an effect once across a killed process", Version: 1, Source: workflow.SourceDefined, RunAs: scenarioPersona,
 		Steps: []workflow.StepSpec{
 			{ID: "gate", Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: 10 * time.Minute},
 			{

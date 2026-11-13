@@ -35,6 +35,12 @@ func proposalFixture(t *testing.T) *proposalHarness {
 		t.Fatal(err)
 	}
 	controller.registry = registry
+	deps := controller.interpreter.ValidationDeps()
+	deps.Agents = registry
+	deps.StepAllowed = stepCeiling(registry, toolsbuiltin.NewStepCatalog(nil))
+	if err := controller.interpreter.LoadAll(t.Context(), nil, deps); err != nil {
+		t.Fatal(err)
+	}
 	controller.enableCallDisplay(func(toolID string, args json.RawMessage) (string, error) {
 		return "call " + toolID + " " + string(args), nil
 	})

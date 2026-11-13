@@ -41,7 +41,7 @@ func TestParkDurationSurvival(t *testing.T) {
 			{ID: "hold", DependsOn: []string{"implement"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &ciEvent, ExternalRef: &implementRef}, Timeout: 15 * time.Minute},
 		},
 	}
-	deps := &workflow.ValidationDeps{KnownTools: []string{}, EffectfulTools: []string{}, Agents: registry, CheckToolCall: acceptToolCall}
+	deps := &workflow.ValidationDeps{KnownTools: []string{}, EffectfulTools: []string{}, Agents: registry, CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatal(err)
 	}

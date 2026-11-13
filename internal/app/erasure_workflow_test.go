@@ -19,7 +19,7 @@ const forgottenPrincipal = "discord:601"
 func startRunAs(t *testing.T, app *App, principalID string) *workflow.RunSummary {
 	t.Helper()
 	summary, err := app.interpreter.Start(t.Context(), "demo", nil, &workflow.RunOrigin{
-		PrincipalID: principalID, PrincipalClass: string(principal.ClassTrusted), AgentID: "main",
+		PrincipalID: principalID, PrincipalClass: string(principal.ClassOwner), AgentID: "main",
 	})
 	if err != nil {
 		t.Fatalf("Start as %s: %v", principalID, err)

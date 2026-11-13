@@ -172,7 +172,7 @@ func TestMeteredAgentTokensStopTheRunInBothDrivers(t *testing.T) {
 func TestProposalLongerThanMaxStepsIsRejected(t *testing.T) {
 	interpreter, _, _ := budgetInterpreter(t, Budget{MaxSteps: 2}, &Options{Tools: &fakeToolRunner{}})
 	installAll(t, interpreter, toolSpec("leaf"))
-	if _, err := interpreter.CompileProposal(NormalizeProposal(threeToolSteps("x", SourceGenerated), "prop_long"), []string{"read_file"}); !hasCode(err, ErrorCodeBudgetExhausted) {
+	if _, err := interpreter.CompileProposal(NormalizeProposal(threeToolSteps("x", SourceGenerated), "prop_long"), "main"); !hasCode(err, ErrorCodeBudgetExhausted) {
 		t.Fatalf("CompileProposal of a 3-step spec under max_steps 2 = %v", err)
 	}
 }

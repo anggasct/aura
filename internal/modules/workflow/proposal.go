@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -62,14 +63,21 @@ func Digest(spec *Spec) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func CheckCeiling(spec *Spec, allowed []string) error {
+func CheckCeiling(spec *Spec, agentID string, class principal.Class, deps *ValidationDeps) error {
 	for index := range spec.Steps {
 		step := &spec.Steps[index]
 		if step.Executor.Kind != KindTool || step.Executor.ToolID == nil {
 			continue
 		}
-		if !slices.Contains(allowed, *step.Executor.ToolID) {
-			return codedError(ErrorCodeCapabilityExceeded, fmt.Sprintf("step %q uses tool %q, which the proposing persona does not have", step.ID, *step.Executor.ToolID))
+		if deps.StepAllowed == nil {
+			return codedError(ErrorCodeCapabilityExceeded, fmt.Sprintf("step %q cannot be checked: no tool ceiling is configured", step.ID))
+		}
+		allowed, known := deps.StepAllowed(agentID, class, *step.Executor.ToolID)
+		if !known {
+			return codedError(ErrorCodePersonaMissing, fmt.Sprintf("persona %q is not configured", agentID))
+		}
+		if !allowed {
+			return codedError(ErrorCodeCapabilityExceeded, fmt.Sprintf("step %q uses tool %q, which persona %q does not allow for %s runs", step.ID, *step.Executor.ToolID, agentID, class))
 		}
 	}
 	return nil
@@ -242,15 +250,22 @@ func scanProposal(row proposalRow) (*Proposal, error) {
 	return &proposal, nil
 }
 
-func (i *Interpreter) CompileProposal(spec *Spec, allowed []string) (*Graph, error) {
-	graph, err := Compile(spec, i.ValidationDeps())
+func (i *Interpreter) CompileProposal(spec *Spec, agentID string) (*Graph, error) {
+	if spec.RunAs != "" {
+		return nil, codedError(ErrorCodeSpecInvalid, "a proposal cannot set run_as; the proposing persona runs it")
+	}
+	deps := i.ValidationDeps()
+	graph, err := Compile(spec, deps)
 	if err != nil {
 		return nil, err
 	}
 	if err := ValidateComposition(spec, i.Spec); err != nil {
 		return nil, err
 	}
-	if err := CheckCeiling(spec, allowed); err != nil {
+	if err := checkPersona(deps, agentID, principal.ClassOwner); err != nil {
+		return nil, err
+	}
+	if err := CheckCeiling(spec, agentID, principal.ClassOwner, deps); err != nil {
 		return nil, err
 	}
 	if err := checkStepBudget(spec, i.options.GeneratedBudget); err != nil {

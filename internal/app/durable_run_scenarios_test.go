@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	githubadapter "github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -109,13 +110,23 @@ func (w *workflowShape) scenario(afterStart func(t *testing.T, life *runLife)) r
 	return runScenario{seed: w.seed, host: w.host, firstLife: firstLife, started: discoverTheRun}
 }
 
-func (w *workflowShape) deps(t *testing.T) *workflow.ValidationDeps {
+const scenarioPersona = "scenario"
+
+func (w *workflowShape) registry(t *testing.T) *auraagent.Registry {
 	t.Helper()
-	registry, err := auraagent.Build(nil, w.known, []string{"primary"})
+	persona := config.AgentDefinition{ID: scenarioPersona, Description: "runs the scenario tools", Instructions: "run the listed tools", Tools: w.known}
+	registry, err := auraagent.Build([]config.AgentDefinition{persona}, w.known, []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}
-	return &workflow.ValidationDeps{KnownTools: w.known, EffectfulTools: append([]string{}, w.effectful...), Agents: registry, CheckToolCall: acceptToolCall}
+	return registry
+}
+
+func (w *workflowShape) deps(registry *auraagent.Registry, runner *workflowToolRunner) *workflow.ValidationDeps {
+	return &workflow.ValidationDeps{
+		KnownTools: w.known, EffectfulTools: append([]string{}, w.effectful...), Agents: registry,
+		CheckToolCall: acceptToolCall, StepAllowed: stepCeiling(registry, runner.catalog),
+	}
 }
 
 func (w *workflowShape) seed(t *testing.T, suite *runSuite) {
@@ -139,16 +150,12 @@ func (w *workflowShape) seed(t *testing.T, suite *runSuite) {
 	}
 }
 
-func newProductionToolRunner(t *testing.T, life *runLife, cfg *config.Config) *workflowToolRunner {
+func newProductionToolRunner(t *testing.T, life *runLife, cfg *config.Config, registry *auraagent.Registry) *workflowToolRunner {
 	t.Helper()
 	cfg.Storage.Path = filepath.Dir(life.plan.Database)
 	cfg.Tools.Workspace = filepath.Join(cfg.Storage.Path, "workspace")
 	if err := os.MkdirAll(cfg.Tools.Workspace, 0o700); err != nil {
 		t.Fatalf("create the tool workspace: %v", err)
-	}
-	registry, err := buildAgentRegistry(cfg)
-	if err != nil {
-		t.Fatalf("buildAgentRegistry: %v", err)
 	}
 	built, err := newWorkflowToolRunner(loadResultWithAll(t, cfg), life.db, registry, slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -175,14 +182,16 @@ func (w *workflowShape) registerStubs(t *testing.T, life *runLife, runner *workf
 
 func (w *workflowShape) host(t *testing.T, life *runLife) {
 	t.Helper()
-	deps := w.deps(t)
+	registry := w.registry(t)
 	cfg := config.Default()
-	runner := newProductionToolRunner(t, life, &cfg)
+	runner := newProductionToolRunner(t, life, &cfg, registry)
 	w.registerStubs(t, life, runner)
 	var tools workflow.ToolRunner = runner
 	if w.wire != nil {
 		tools = w.wire(t, life, runner)
 	}
+	runner.catalog = toolsbuiltin.NewStepCatalog(runner.executor.Broker().Definitions())
+	deps := w.deps(registry, runner)
 	interpreter := workflow.NewInterpreter(life.workflows, life.runtime, &workflow.Options{
 		MaxConcurrentSteps: workflowMaxConcurrentSteps(&cfg),
 		Logger:             slog.New(slog.DiscardHandler),
@@ -207,7 +216,7 @@ func (w *workflowShape) host(t *testing.T, life *runLife) {
 
 func (w *workflowShape) startRun(t *testing.T, life *runLife) {
 	t.Helper()
-	summary, err := life.interpreter.Start(t.Context(), w.spec().ID, &workflow.RunInput{Objective: "survive the kill"}, ownerRunOrigin())
+	summary, err := life.interpreter.StartConfigured(t.Context(), w.spec().ID, &workflow.RunInput{Objective: "survive the kill"}, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -236,7 +245,7 @@ func crashResumeSpec(id string, source workflow.Source) *workflow.Spec {
 	build, ship, ciEvent := stubBuildTool, stubShipTool, "ci"
 	args := func(step string) json.RawMessage { return json.RawMessage(`{"step":"` + step + `"}`) }
 	return &workflow.Spec{
-		ID: id, Goal: "Resume after a killed process", Version: 1, Source: source,
+		ID: id, Goal: "Resume after a killed process", Version: 1, Source: source, RunAs: scenarioPersona,
 		Steps: []workflow.StepSpec{
 			{ID: "build", Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: &build, ToolArgs: args("build")}, Timeout: 30 * time.Second},
 			{ID: "hold", DependsOn: []string{"build"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &ciEvent}, Timeout: 5 * time.Minute},
@@ -268,7 +277,7 @@ func proofSpec(credential string) *workflow.Spec {
 	}
 	engineer, ciEvent, openPR := "engineer", "check_suite.completed", "open_pr"
 	return &workflow.Spec{
-		ID: "software-development", Goal: "Ship the change", Version: 1, Source: workflow.SourceDefined,
+		ID: "software-development", Goal: "Ship the change", Version: 1, Source: workflow.SourceDefined, RunAs: scenarioPersona,
 		Steps: []workflow.StepSpec{
 			{ID: "gate", Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: 10 * time.Minute},
 			agent("implement", engineer, "gate"),

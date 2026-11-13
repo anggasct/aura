@@ -776,17 +776,10 @@ func (b *Broker) enforceToolTier(request *ToolRequest, class principal.Class, de
 		return errorf(ResultToolTierDenied, "tool %q is not available to %s principals", request.ToolName, class)
 	}
 	ceiling, known := b.access.ToolCeiling(request.AgentID, class)
-	if !known || !listsInCeiling(ceiling, request.ToolName, definition) {
+	if !known || !tools.ListedInCeiling(ceiling, request.ToolName, definition) {
 		return errorf(ResultToolTierDenied, "tool %q is not available to %s principals", request.ToolName, class)
 	}
 	return nil
-}
-
-func listsInCeiling(ceiling []string, name string, definition *tools.Definition) bool {
-	if definition.Plugin != nil {
-		return tools.ListsPluginTool(ceiling, name, definition.Plugin.ID)
-	}
-	return tools.ListsTool(ceiling, name, definition.Server)
 }
 
 func (b *Broker) sessionReachable(sessionID string) bool {

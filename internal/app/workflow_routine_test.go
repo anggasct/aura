@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -10,18 +11,36 @@ import (
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/store"
 )
 
-func succeededGeneratedRun(t *testing.T, controller *workflowToolController, runs *workflow.Store) string {
+func succeededGeneratedRun(t *testing.T, controller *workflowToolController, runs *workflow.Store, db *sql.DB) string {
 	t.Helper()
 	event := "done"
 	generated := workflow.NormalizeProposal(&workflow.Spec{Goal: "Weekly report", Steps: []workflow.StepSpec{
 		{ID: "hold", Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &event}, Timeout: time.Minute},
 	}}, "prop_weekly")
-	if err := controller.interpreter.Install(t.Context(), []*workflow.Spec{generated}, controller.interpreter.ValidationDeps()); err != nil {
+	if err := controller.interpreter.LoadAll(t.Context(), []*workflow.Spec{generated}, controller.interpreter.ValidationDeps()); err != nil {
 		t.Fatal(err)
 	}
-	run, err := controller.interpreter.Start(t.Context(), generated.ID, nil, ownerRunOrigin())
+	now := time.Now().UTC()
+	sessionID := "main/terminal:owner"
+	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: sessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := workflow.Digest(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.CreateProposal(t.Context(), &workflow.Proposal{ID: "prop_weekly", SessionID: sessionID, AgentID: "main", PrincipalID: principal.OwnerID, Spec: generated, Digest: digest, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.ApproveProposal(t.Context(), "prop_weekly", &workflow.Approval{
+		DefinitionID: generated.ID, DefinitionVersion: generated.Version, Digest: digest, AgentID: "main", ApproverID: principal.OwnerID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := controller.interpreter.StartConfigured(t.Context(), generated.ID, nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,8 +49,8 @@ func succeededGeneratedRun(t *testing.T, controller *workflowToolController, run
 }
 
 func TestOwnerSavesRoutinesThatTheSchedulerStartsOncePerFire(t *testing.T) {
-	controller, runs, _ := workflowToolFixture(t, "book_visit")
-	runID := succeededGeneratedRun(t, controller, runs)
+	controller, runs, db := workflowToolFixture(t, "book_visit")
+	runID := succeededGeneratedRun(t, controller, runs, db)
 	owner := caller(principal.ClassOwner, principal.OwnerID)
 	if _, err := controller.SaveRoutine(t.Context(), caller(principal.ClassTrusted, "discord:111"), runID, "Weekly report"); !errors.Is(err, toolsbuiltin.ErrWorkflowNotPermitted) {
 		t.Fatalf("trusted save = %v", err)

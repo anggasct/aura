@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 type Definition struct {
@@ -80,7 +81,7 @@ func (d *Definition) Admits(class principal.Class) bool {
 	return classRank(class) <= audienceRank(d.Audience)
 }
 
-func (d *Definition) ToolCeiling(class principal.Class) (tools []string, restricted bool) {
+func (d *Definition) ToolCeiling(class principal.Class) (ceiling []string, restricted bool) {
 	switch class {
 	case principal.ClassOwner:
 		return slices.Clone(d.Tools), false
@@ -88,6 +89,31 @@ func (d *Definition) ToolCeiling(class principal.Class) (tools []string, restric
 		return slices.Clone(d.PublicTools), true
 	default:
 		return slices.Clone(d.PrincipalTools), true
+	}
+}
+
+func (d *Definition) StepToolAllowed(class principal.Class, tool *tools.Definition) bool {
+	if tool.Name == tools.KBSearchToolName {
+		if len(d.KnowledgeFor(class)) == 0 {
+			return false
+		}
+		if class == principal.ClassOwner {
+			return true
+		}
+		ceiling, restricted := d.ToolCeiling(class)
+		return restricted && tools.ListedInCeiling(ceiling, tool.Name, tool)
+	}
+	switch class {
+	case principal.ClassOwner:
+		if len(d.Tools) > 0 {
+			return tools.ListedInCeiling(d.Tools, tool.Name, tool)
+		}
+		return tool.Server == "" && tool.Plugin == nil && !tool.OptIn
+	case principal.ClassTrusted, principal.ClassPublic:
+		ceiling, _ := d.ToolCeiling(class)
+		return tools.ListedInCeiling(ceiling, tool.Name, tool)
+	default:
+		return false
 	}
 }
 
@@ -132,9 +158,9 @@ type Fingerprint struct {
 }
 
 func (d *Definition) Fingerprint() Fingerprint {
-	tools := slices.Clone(d.Tools)
-	slices.Sort(tools)
-	toolsText := strings.Join(tools, "\n")
+	listed := slices.Clone(d.Tools)
+	slices.Sort(listed)
+	toolsText := strings.Join(listed, "\n")
 	if len(d.Plugins) > 0 {
 		plugins := slices.Clone(d.Plugins)
 		slices.Sort(plugins)

@@ -243,8 +243,7 @@ func (c *workflowToolController) Propose(ctx context.Context, caller *toolsbuilt
 	}
 	id := workflow.NewProposalID()
 	normalized := workflow.NormalizeProposal(&spec, id)
-	definition, _ := c.registry.Lookup(caller.AgentID)
-	graph, err := c.interpreter.CompileProposal(normalized, definition.Tools)
+	graph, err := c.interpreter.CompileProposal(normalized, caller.AgentID)
 	if err != nil {
 		return toolsbuiltin.WorkflowProposal{}, workflowRejection(err)
 	}

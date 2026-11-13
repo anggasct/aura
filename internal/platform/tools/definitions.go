@@ -68,6 +68,13 @@ func ListsTool(entries []string, name, server string) bool {
 	return server != "" && slices.Contains(entries, MCPServerEntry(server))
 }
 
+func ListedInCeiling(ceiling []string, name string, definition *Definition) bool {
+	if definition.Plugin != nil {
+		return ListsPluginTool(ceiling, name, definition.Plugin.ID)
+	}
+	return ListsTool(ceiling, name, definition.Server)
+}
+
 const (
 	Version         = "v1"
 	HandoffToolName = "handoff_to_owner"
