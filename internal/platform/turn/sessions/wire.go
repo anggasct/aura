@@ -18,10 +18,6 @@ type AdmitResult struct {
 	ToStart        *QueuedTurn     `json:"to_start,omitempty"`
 }
 
-type ReleaseRequest struct {
-	TurnID string `json:"turn_id"`
-}
-
 type ReleaseResult struct {
 	ToStart    *QueuedTurn `json:"to_start,omitempty"`
 	QueueDepth int         `json:"queue_depth"`
