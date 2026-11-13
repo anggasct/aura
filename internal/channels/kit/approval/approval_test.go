@@ -342,12 +342,13 @@ func TestOffersStandingGrant(t *testing.T) {
 		ttl    time.Duration
 		want   bool
 	}{
-		{"trusted with store and ttl", &Prompt{}, principal.ClassTrusted, recorder{}, time.Hour, true},
-		{"owner", &Prompt{}, principal.ClassOwner, recorder{}, time.Hour, false},
-		{"public", &Prompt{}, principal.ClassPublic, recorder{}, time.Hour, false},
-		{"no store", &Prompt{}, principal.ClassTrusted, nil, time.Hour, false},
-		{"no ttl", &Prompt{}, principal.ClassTrusted, recorder{}, 0, false},
-		{"untrusted input", &Prompt{ReasonCode: policy.ReasonUntrustedInput}, principal.ClassTrusted, recorder{}, time.Hour, false},
+		{"trusted with store and ttl", &Prompt{StandingGrantAllowed: true}, principal.ClassTrusted, recorder{}, time.Hour, true},
+		{"owner", &Prompt{StandingGrantAllowed: true}, principal.ClassOwner, recorder{}, time.Hour, false},
+		{"public", &Prompt{StandingGrantAllowed: true}, principal.ClassPublic, recorder{}, time.Hour, false},
+		{"no store", &Prompt{StandingGrantAllowed: true}, principal.ClassTrusted, nil, time.Hour, false},
+		{"no ttl", &Prompt{StandingGrantAllowed: true}, principal.ClassTrusted, recorder{}, 0, false},
+		{"untrusted input", &Prompt{ReasonCode: policy.ReasonUntrustedInput, StandingGrantAllowed: true}, principal.ClassTrusted, recorder{}, time.Hour, false},
+		{"per call only", &Prompt{}, principal.ClassTrusted, recorder{}, time.Hour, false},
 		{"nil prompt", nil, principal.ClassTrusted, recorder{}, time.Hour, false},
 	}
 	for _, tc := range cases {

@@ -104,6 +104,8 @@ type ApprovalPrompt struct {
 	PolicyVersion  string
 	ReasonCode     string
 	ExpiresAt      time.Time
+
+	StandingGrantAllowed bool
 }
 
 type ApprovalDecider func(ctx context.Context, prompt *ApprovalPrompt) (bool, error)
@@ -408,14 +410,15 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 	} else {
 		standing := false
-		if decision.Outcome == approval.OutcomeRequireApproval && class == principal.ClassTrusted && !guarded && !canonical.Tainted && !definition.FieldApproval() {
+		standingAllowed := definition.StandingGrantAllowed() && !guarded
+		if decision.Outcome == approval.OutcomeRequireApproval && class == principal.ClassTrusted && standingAllowed && !canonical.Tainted {
 			standing, err = b.standingGrant(ctx, &canonical, definition.Server)
 			if err != nil {
 				approvalState = ApprovalRejected
 				return ToolResult{}, err
 			}
 		}
-		approvalState, err = b.authorize(ctx, &authorization{canonical: &canonical, definition: definition, decision: decision, expiry: absoluteApprovalExpiry(canonical.Deadline), standing: standing})
+		approvalState, err = b.authorize(ctx, &authorization{canonical: &canonical, definition: definition, decision: decision, expiry: absoluteApprovalExpiry(canonical.Deadline), standing: standing, standingAllowed: standingAllowed})
 		if err != nil {
 			if code, _ := CodeOf(err); code == ResultUntrustedInputNoApprover {
 				policyOutcome = PolicyOutcomeDeny
@@ -788,14 +791,19 @@ func absoluteApprovalExpiry(deadline time.Time) time.Time {
 	return time.Now().Add(defaultApprovalTTL)
 }
 
-func (b *Broker) buildApprovalPrompt(request *ToolRequest, definition *tools.Definition, decision approval.PolicyDecision, expiresAt time.Time) (*ApprovalPrompt, error) {
+func (b *Broker) buildApprovalPrompt(call *authorization) (*ApprovalPrompt, error) {
+	request, decision := call.canonical, call.decision
 	secrets := b.secretValues()
-	display, err := definition.ApprovalText(request.Arguments, func(text string) string {
+	display, err := call.definition.ApprovalText(request.Arguments, func(text string) string {
 		return string(redact([]byte(text), secrets))
 	})
 	if err != nil {
-		if code, coded := tools.CodeOf(err); coded && code == tools.ErrorCodeDisplayTooLarge {
+		code, _ := tools.CodeOf(err)
+		if code == tools.ErrorCodeDisplayTooLarge {
 			return nil, errorf(ResultApprovalDisplayTooLarge, "tool %q arguments do not fit the approval display", request.ToolName)
+		}
+		if code == tools.ErrorCodeDisplayRedacted {
+			return nil, errorf(ResultPolicyDenied, "tool %q arguments hold a configured secret, so the approval card cannot show them", request.ToolName)
 		}
 		return nil, errorf(ResultPolicyDenied, "tool %q approval display failed closed", request.ToolName)
 	}
@@ -811,7 +819,9 @@ func (b *Broker) buildApprovalPrompt(request *ToolRequest, definition *tools.Def
 		MaxOutputBytes: decision.Constraints.MaxOutputBytes,
 		PolicyVersion:  decision.PolicyVersion,
 		ReasonCode:     decision.ReasonCode,
-		ExpiresAt:      expiresAt,
+		ExpiresAt:      call.expiry,
+
+		StandingGrantAllowed: call.standingAllowed,
 	}, nil
 }
 

@@ -87,6 +87,20 @@ func TestChannelApprovalDeciderCarriesTheWholePrompt(t *testing.T) {
 	}
 }
 
+func TestChannelApprovalPromptCarriesTheStandingGrantFlag(t *testing.T) {
+	for _, allowed := range []bool{true, false} {
+		channel := &fakeApprovalChannel{sessions: map[string]bool{"s": true}}
+		prompt := brokerPrompt("s")
+		prompt.StandingGrantAllowed = allowed
+		if _, err := channelApprovalDecider([]approvalChannel{channel})(t.Context(), prompt); err != nil {
+			t.Fatalf("decider(): %v", err)
+		}
+		if len(channel.prompts) != 1 || channel.prompts[0].StandingGrantAllowed != allowed {
+			t.Errorf("channel prompts = %+v, want StandingGrantAllowed %t", channel.prompts, allowed)
+		}
+	}
+}
+
 func TestChannelApprovalDeciderPropagatesTheChannelError(t *testing.T) {
 	failure := errors.New("owner approval unavailable")
 	channel := &fakeApprovalChannel{sessions: map[string]bool{"s": true}, err: failure}

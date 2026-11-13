@@ -160,6 +160,37 @@ func TestDecideForOwnerOffersNoStandingGrantForUntrustedInput(t *testing.T) {
 	}
 }
 
+func TestDecideForOwnerOffersNoStandingGrantForPerCallOnlyTools(t *testing.T) {
+	cases := []struct {
+		name    string
+		allowed bool
+		want    string
+	}{
+		{"standing allowed", true, "Approve|Allow 7 days|Reject"},
+		{"per call only", false, "Approve|Reject"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newApprovalStub(t)
+			adapter, observer := newHTTPOwnerAdapter(t, stub, []string{"discord:777"}, accessPersonas())
+			prompt := httpPrompt(time.Now().Add(time.Minute))
+			prompt.StandingGrantAllowed = tc.allowed
+			result := decideForOwnerAsync(t.Context(), adapter, prompt, httpRequester(principal.ClassTrusted))
+			labels, ids := cardButtons(t, stub.waitPostTo(t, "555", 1)[0])
+			if strings.Join(labels, "|") != tc.want {
+				t.Fatalf("card buttons = %v, want %s", labels, tc.want)
+			}
+			adapter.resolveComponentClick(t.Context(), clickPayload("ix-approve", "777", "", "555", ids[0]))
+			if outcome := awaitDecide(t, result, 5*time.Second); outcome.err != nil || !outcome.accepted {
+				t.Fatalf("DecideForOwner() = %v, %v; want the approval applied", outcome.accepted, outcome.err)
+			}
+			if len(observer.grants) != 0 {
+				t.Fatalf("standing grants = %+v, want none", observer.grants)
+			}
+		})
+	}
+}
+
 func TestDecideForOwnerTimesOutWithTheOwnerApprovalTimeout(t *testing.T) {
 	stub := newApprovalStub(t)
 	personas := accessPersonas()

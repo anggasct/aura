@@ -20,6 +20,8 @@ type authorization struct {
 	decision   approval.PolicyDecision
 	expiry     time.Time
 	standing   bool
+
+	standingAllowed bool
 }
 
 type authorizationRecord struct {
@@ -80,7 +82,7 @@ func (b *Broker) approvalAnswer(ctx context.Context, call *authorization) (strin
 		return ApprovalAuto, nil
 	}
 	key := toolKey(call.canonical)
-	prompt, err := b.buildApprovalPrompt(call.canonical, call.definition, call.decision, call.expiry)
+	prompt, err := b.buildApprovalPrompt(call)
 	if err != nil {
 		return ApprovalRejected, err
 	}

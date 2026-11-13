@@ -197,6 +197,42 @@ func TestOwnerCardOffersNoStandingGrantForUntrustedInput(t *testing.T) {
 	}
 }
 
+func TestOwnerCardOffersNoStandingGrantForPerCallOnlyTools(t *testing.T) {
+	cases := []struct {
+		name       string
+		allowed    bool
+		wantLabels []string
+	}{
+		{"standing allowed", true, []string{"Approve", "Allow 7 days", "Reject"}},
+		{"per call only", false, []string{"Approve", "Reject"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newApprovalRig(t, accessOpts{definition: routedDefinition()})
+			synctest.Test(t, func(t *testing.T) {
+				prompt := approvalPrompt("http-session", httpPrincipal)
+				prompt.StandingGrantAllowed = tc.allowed
+				result := rig.decideForOwner(t.Context(), prompt, httpRequester(principal.ClassTrusted))
+				card := rig.mustCard(t, 1)
+				var labels []string
+				for _, button := range card.buttons {
+					labels = append(labels, button.text)
+				}
+				if !slices.Equal(labels, tc.wantLabels) {
+					t.Fatalf("card buttons = %v, want %v", labels, tc.wantLabels)
+				}
+				rig.press(t, "cb-owner", ownerUserID, card, card.data(t, "Approve"))
+				if outcome, done := settled(result); !done || outcome.err != nil || !outcome.accepted {
+					t.Fatalf("decision = %+v (settled %v), want accepted", outcome, done)
+				}
+				if grants := rig.grants.recorded(); len(grants) != 0 {
+					t.Fatalf("recorded grants = %+v, want none", grants)
+				}
+			})
+		})
+	}
+}
+
 func TestDecideForOwnerWithoutATelegramOwnerIsUnavailable(t *testing.T) {
 	rig := newApprovalRig(t, accessOpts{definition: routedDefinition()})
 	owners, err := principal.NewResolver([]string{"discord:123456789012345678"})

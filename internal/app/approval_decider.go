@@ -38,6 +38,8 @@ func channelApprovalDecider(channels []approvalChannel) toolbroker.ApprovalDecid
 				PolicyVersion:  prompt.PolicyVersion,
 				ReasonCode:     prompt.ReasonCode,
 				ExpiresAt:      prompt.ExpiresAt,
+
+				StandingGrantAllowed: prompt.StandingGrantAllowed,
 			})
 		}
 		return false, nil
