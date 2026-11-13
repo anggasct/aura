@@ -19,7 +19,6 @@ func TestPackageStaysOnPorts(t *testing.T) {
 		t.Fatalf("glob: %v", err)
 	}
 	denied := []string{
-		"github.com/restatedev/sdk-go",
 		"github.com/anggasct/aura/internal/platform/model",
 		"github.com/anggasct/aura/internal/platform/tools",
 		"github.com/anggasct/aura/internal/platform/turn/adk",
