@@ -201,8 +201,8 @@ func TestToolCallsOfOneResponseRunSideBySide(t *testing.T) {
 	t.Run("a durable turn", func(t *testing.T) {
 		model := &toolThenTextModel{queries: queries}
 		rig := startDurableTurnRig(t, model)
-		rig.tools.overlap = newOverlapGate(queries)
-		close(rig.tools.release)
+		rig.gated.overlap = newOverlapGate(queries)
+		close(rig.gated.release)
 
 		awaitStream(t, rig.run(context.WithoutCancel(t.Context())))
 

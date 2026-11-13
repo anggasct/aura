@@ -3,6 +3,7 @@
 package app
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -70,6 +72,66 @@ func TestDurableTurnApprovalSurvivesAKilledProcess(t *testing.T) {
 	}
 	if n := countKind(turnEvents(t, suite.db, "turn-1"), turn.EventKindApprovalRequired); n != 0 {
 		t.Errorf("approval.required events = %d, want none", n)
+	}
+}
+
+const effectReturnedKey = "adk/session-1/turn-1/call-1-0"
+
+func requireOneToolEffect(t *testing.T, db *sql.DB) {
+	t.Helper()
+	rows, err := db.QueryContext(t.Context(), `SELECT state, idempotency_key FROM effect_intent WHERE operation = ?`, "tool-e")
+	if err != nil {
+		t.Fatalf("read the effect intents of tool-e: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	type intent struct{ state, key string }
+	var intents []intent
+	for rows.Next() {
+		var found intent
+		if err := rows.Scan(&found.state, &found.key); err != nil {
+			t.Fatalf("scan an effect intent: %v", err)
+		}
+		intents = append(intents, found)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read the effect intents of tool-e: %v", err)
+	}
+	want := intent{state: string(effect.StateSucceeded), key: effectReturnedKey}
+	if len(intents) != 1 || intents[0] != want {
+		t.Fatalf("effect intents of tool-e = %+v, want exactly %+v", intents, want)
+	}
+}
+
+func TestDurableTurnDoesNotRepeatAnEffectThatSucceededBeforeAKill(t *testing.T) {
+	suite := startKilledSuite(t, "effect-returned")
+	suite.child.waitKillPoint(t, "tool-e has succeeded", suite.ledger.exists(t, "tool-e-succeeded.entered"))
+	suite.ledger.requireCount(t, executions("tool-e"), 1)
+	requireOneToolEffect(t, suite.db)
+	const executionRow = `SELECT COUNT(*) FROM durable_action WHERE run_key = ? AND action_key = ?`
+	if n := countRows(t, suite.db, executionRow, "turn-1", "call-1-0/execution"); n != 0 {
+		t.Fatalf("call-1-0/execution rows at the kill = %d, want 0", n)
+	}
+
+	life := suite.resume(t)
+	suite.release(t, "tool-e-succeeded")
+
+	suite.requireResumed(t, life)
+	suite.ledger.requireCount(t, executions("tool-e"), 1)
+	requireOneToolEffect(t, suite.db)
+	var raw []byte
+	if err := suite.db.QueryRowContext(t.Context(), `SELECT result FROM durable_action WHERE run_key = ? AND action_key = ?`, "turn-1", "call-1-0/execution").Scan(&raw); err != nil {
+		t.Fatalf("read the recorded execution of call-1-0: %v", err)
+	}
+	var outcome struct {
+		Result struct {
+			Output json.RawMessage `json:"output"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &outcome); err != nil {
+		t.Fatalf("decode the recorded execution %s: %v", raw, err)
+	}
+	if string(outcome.Result.Output) != `{"ok":true}` {
+		t.Errorf("recorded execution = %s, want a result whose output is {\"ok\":true}", raw)
 	}
 }
 

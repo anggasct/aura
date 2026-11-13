@@ -133,13 +133,17 @@ func (g *gatedBrokerTools) Definitions() []BuiltinToolDefinition {
 	return []BuiltinToolDefinition{{Name: "tool-a", Version: "v1", Schema: json.RawMessage(`{"type":"object"}`)}}
 }
 
-func (g *gatedBrokerTools) Evaluate(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error) {
-	return g.broker.Evaluate(ctx, &toolbroker.ToolRequest{
+func evaluateThrough(ctx context.Context, broker *toolbroker.Broker, request *approval.ToolRequest) (approval.PolicyDecision, error) {
+	return broker.Evaluate(ctx, &toolbroker.ToolRequest{
 		RequestID: request.RequestID, TurnID: request.TurnID, SessionID: request.SessionID,
 		PrincipalID: request.PrincipalID, ToolName: request.ToolName, ToolVersion: request.ToolVersion,
 		Arguments: request.Arguments, RequestDigest: request.RequestDigest, Capabilities: request.Capabilities,
 		Trust: request.Trust, Deadline: request.Deadline, IdempotencyKey: request.IdempotencyKey,
 	})
+}
+
+func (g *gatedBrokerTools) Evaluate(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error) {
+	return evaluateThrough(ctx, g.broker, request)
 }
 
 func (g *gatedBrokerTools) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
@@ -213,20 +217,32 @@ func (g *gatedBrokerTools) executionCount() int {
 	return g.executions
 }
 
+type turnTools interface {
+	BuiltinToolExecutor
+	turn.ToolBroker
+}
+
 type durableTurnRig struct {
 	db       *sql.DB
 	engine   *runtimeengine.Engine
-	model    *toolThenTextModel
-	tools    *gatedBrokerTools
+	model    adkmodel.LLM
+	tools    turnTools
+	gated    *gatedBrokerTools
 	sessions store.SessionService
 	events   store.EventStore
 	stopHost func()
 }
 
-func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig {
+func newDurableTurnRig(t *testing.T, model adkmodel.LLM) *durableTurnRig {
 	t.Helper()
 	db, sessions, events := newSessionTestDB(t)
 	mustCreateSession(t, db, "session-1")
+	return &durableTurnRig{db: db, model: model, sessions: sessions, events: events}
+}
+
+func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig {
+	t.Helper()
+	rig := newDurableTurnRig(t, model)
 	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("toolbroker.New: %v", err)
@@ -239,7 +255,7 @@ func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig
 	); err != nil {
 		t.Fatalf("register tool-a: %v", err)
 	}
-	rig := &durableTurnRig{db: db, model: model, tools: gated, sessions: sessions, events: events}
+	rig.tools, rig.gated = gated, gated
 	rig.startLife(t)
 	return rig
 }
@@ -372,12 +388,13 @@ func requireEachMessageOnce(t *testing.T, request requestParts) {
 }
 
 func TestDurableTurnGivesTheModelEachMessageOnce(t *testing.T) {
-	rig := startDurableTurnRig(t, &toolThenTextModel{callID: "call-1"})
-	close(rig.tools.release)
+	model := &toolThenTextModel{callID: "call-1"}
+	rig := startDurableTurnRig(t, model)
+	close(rig.gated.release)
 
 	awaitStream(t, rig.run(context.WithoutCancel(t.Context())))
 
-	requests := rig.model.seen()
+	requests := model.seen()
 	if len(requests) != 2 {
 		t.Fatalf("model calls = %d, want 2", len(requests))
 	}
@@ -385,15 +402,16 @@ func TestDurableTurnGivesTheModelEachMessageOnce(t *testing.T) {
 }
 
 func TestReplayedTurnGivesTheModelEachMessageOnce(t *testing.T) {
-	rig := startDurableTurnRig(t, &toolThenTextModel{})
+	model := &toolThenTextModel{}
+	rig := startDurableTurnRig(t, model)
 	done := rig.run(context.WithoutCancel(t.Context()))
-	waitFor(t, "the first invocation reaches tool-a", func() bool { return len(rig.tools.seenKeys()) == 1 })
+	waitFor(t, "the first invocation reaches tool-a", func() bool { return len(rig.gated.seenKeys()) == 1 })
 
 	if _, err := rig.db.ExecContext(t.Context(), `DELETE FROM durable_host`); err != nil {
 		t.Fatalf("delete the host lease: %v", err)
 	}
 	waitFor(t, "the run of turn-1 is claimed again", func() bool { return rig.runClaim(t) >= 2 })
-	close(rig.tools.release)
+	close(rig.gated.release)
 	awaitStream(t, done)
 
 	events := rig.turnEvents(t)
@@ -447,7 +465,7 @@ func TestReplayedTurnGivesTheModelEachMessageOnce(t *testing.T) {
 		t.Errorf("stored function call id = %q, response id = %q, want one non-empty id on both", callID, responseID)
 	}
 
-	requests := rig.model.seen()
+	requests := model.seen()
 	if len(requests) != 2 {
 		t.Fatalf("model calls = %d, want 2", len(requests))
 	}
@@ -458,11 +476,11 @@ func TestReplayedTurnGivesTheModelEachMessageOnce(t *testing.T) {
 			t.Errorf("request part %+v carries an id, want the stamped id removed", part)
 		}
 	}
-	keys := rig.tools.seenKeys()
+	keys := rig.gated.seenKeys()
 	if len(keys) != 2 || keys[0] != keys[1] {
 		t.Errorf("tool-a idempotency keys = %v, want the same key in both invocations", keys)
 	}
-	if n := rig.tools.executionCount(); n != 1 {
+	if n := rig.gated.executionCount(); n != 1 {
 		t.Errorf("tool-a executions = %d, want 1", n)
 	}
 }

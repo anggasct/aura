@@ -609,7 +609,7 @@ type turnStartRecord struct {
 	Journal   int       `json:"journal"`
 }
 
-const turnJournalVersion = 1
+const turnJournalVersion = 2
 
 func decodeTurnStart(raw []byte) (turnStartRecord, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))

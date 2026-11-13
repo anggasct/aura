@@ -325,7 +325,7 @@ type childClockRecord struct {
 	Journal int       `json:"journal"`
 }
 
-const childJournalVersion = 1
+const childJournalVersion = 2
 
 func decodeChildClock(raw []byte) (childClockRecord, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))

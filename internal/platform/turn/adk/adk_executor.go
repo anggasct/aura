@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/toolcall"
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/usage"
@@ -474,6 +475,10 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 	if err != nil {
 		return nil, codedError(turn.ErrorCodeRuntimeInternal, "failed to marshal tool arguments", err)
 	}
+	slot, ok := toolcall.From(actx)
+	if !ok {
+		return nil, invalidArgument(fmt.Sprintf("tool %q has no call key", toolName))
+	}
 	requestID := actx.FunctionCallID()
 	if requestID == "" {
 		requestID = actx.InvocationID()
@@ -499,7 +504,7 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		Capabilities:    slices.Clone(definition.RequiredCapabilities),
 		Trust:           "derived_untrusted",
 		Deadline:        deadline,
-		IdempotencyKey:  "adk/" + actx.SessionID() + "/" + turnID + "/" + requestID,
+		IdempotencyKey:  "adk/" + actx.SessionID() + "/" + turnID + "/" + slot.Key(),
 		EventInvocation: actx.InvocationID(),
 		EventBranch:     actx.Branch(),
 		EventAuthor:     actx.AgentName(),
