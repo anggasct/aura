@@ -13,8 +13,6 @@ import (
 	"unicode/utf8"
 )
 
-const ErrorCodeDisplayRedacted ErrorCode = "approval_display_redacted"
-
 const (
 	ApprovalDisplayLimit = 1200
 	MaxDisplayFields     = 16
