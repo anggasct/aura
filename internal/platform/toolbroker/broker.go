@@ -581,7 +581,6 @@ type effectInvocation struct {
 	invoked     bool
 	notDone     error
 	failure     error
-	unrecorded  error
 }
 
 func (i *effectInvocation) SupportsIdempotency() bool { return false }
@@ -632,12 +631,10 @@ func (i *effectInvocation) record(ctx context.Context, receipt json.RawMessage, 
 	i.result = finalized
 	record, err := encodeRecord(&finalized)
 	if err != nil {
-		i.unrecorded = err
 		return unrecorded
 	}
 	decoded, err := decodeRecord(record)
 	if err != nil {
-		i.unrecorded = err
 		return unrecorded
 	}
 	i.result = decoded
