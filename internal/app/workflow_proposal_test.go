@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -68,7 +69,7 @@ func TestProposeStoresAValidatedPlanForTheOwnerOnly(t *testing.T) {
 	if len(proposed.Digest) != 64 || !strings.HasPrefix(proposed.ProposalID, "prop") {
 		t.Fatalf("proposal = %+v", proposed)
 	}
-	for _, want := range []string{"Plan: Write the release note", "owner approval", "run tool write_file (after approve)", "wait for ci.done", "aura workflow proposal approve " + proposed.ProposalID} {
+	for _, want := range []string{"Plan: Write the release note", "owner approval", "run tool write_file (after approve)", "wait for ci.done"} {
 		if !strings.Contains(proposed.Plan, want) {
 			t.Fatalf("plan lacks %q:\n%s", want, proposed.Plan)
 		}
@@ -119,7 +120,7 @@ func TestApprovalRunsExactlyTheApprovedDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runID, err := approveProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, time.Now())
+	runID, err := approveProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, controller.showCall, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestApprovalRunsExactlyTheApprovedDigest(t *testing.T) {
 	if err != nil || approved.Status != workflow.ProposalApproved || approved.RunID != runID {
 		t.Fatalf("approved proposal = %+v, %v", approved, err)
 	}
-	if _, err := approveProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodeProposalDecided) {
+	if _, err := approveProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, controller.showCall, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodeProposalDecided) {
 		t.Fatalf("second approval = %v", err)
 	}
 }
@@ -146,7 +147,7 @@ func TestTamperedProposalIsRefusedAndRejectionRunsNothing(t *testing.T) {
 	if _, err := h.db.ExecContext(t.Context(), `UPDATE workflow_proposal SET spec_json = replace(spec_json, 'note.md', 'passwd') WHERE id = ?`, proposed.ProposalID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := approveProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodeDigestMismatch) {
+	if _, err := approveProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, controller.showCall, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodeDigestMismatch) {
 		t.Fatalf("approving a modified spec = %v", err)
 	}
 	second, err := controller.Propose(t.Context(), owner, json.RawMessage(coveredProposal))
@@ -202,5 +203,49 @@ func TestWorkflowProposalShowRunsThroughTheCommand(t *testing.T) {
 	}
 	if !strings.Contains(out, "proposal: "+proposal.ID) {
 		t.Fatalf("output = %q, want the proposal id", out)
+	}
+}
+
+func TestProposalResultSeparatesPlanAndHint(t *testing.T) {
+	for _, tainted := range []bool{false, true} {
+		name := "untainted"
+		if tainted {
+			name = "tainted"
+		}
+		t.Run(name, func(t *testing.T) {
+			h := proposalFixture(t)
+			owner := *h.owner
+			owner.Tainted = tainted
+			proposed, err := h.controller.Propose(t.Context(), &owner, json.RawMessage(coveredProposal))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := h.runs.Proposal(t.Context(), proposed.ProposalID, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			graph, err := workflow.Compile(stored.Spec, h.controller.interpreter.ValidationDeps())
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantPlan, err := workflow.RenderPlan(stored.Spec, graph, h.controller.showCall)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if proposed.Plan != wantPlan {
+				t.Fatalf("plan:\n%s\nwant the rendered plan:\n%s", proposed.Plan, wantPlan)
+			}
+			if proposed.UntrustedInput != tainted {
+				t.Fatalf("untrusted_input = %v, want %v", proposed.UntrustedInput, tainted)
+			}
+			if want := "aura workflow proposal approve " + proposed.ProposalID; proposed.ApproveWith != want {
+				t.Fatalf("approve_with = %q, want %q", proposed.ApproveWith, want)
+			}
+			for _, unwanted := range []string{approval.UntrustedInputNotice, "Approve with", "aura workflow proposal approve"} {
+				if strings.Contains(proposed.Plan, unwanted) {
+					t.Fatalf("the plan carries %q:\n%s", unwanted, proposed.Plan)
+				}
+			}
+		})
 	}
 }

@@ -135,3 +135,12 @@ func (i *Interpreter) requireSpecApproval(ctx context.Context, spec *Spec) (*App
 	}
 	return i.requireApproval(ctx, spec.ID, spec.Version, digest)
 }
+
+func originUnderApproval(origin *RunOrigin, approval *Approval) (*RunOrigin, error) {
+	if origin == nil {
+		return nil, codedError(ErrorCodeOriginIncomplete, "a run needs a principal, a known principal class and an agent")
+	}
+	copied := *origin
+	copied.Tainted = origin.Tainted || approval.Tainted
+	return &copied, nil
+}

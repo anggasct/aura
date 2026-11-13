@@ -67,7 +67,7 @@ func startSerialRun(t *testing.T, interpreter *Interpreter, disk *Store, spec *S
 	if err := interpreter.Install(ctx, []*Spec{spec}, testValidationDeps()); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, input, ownerOrigin())
+	summary, err := disk.newRun(ctx, spec, input, ownerOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

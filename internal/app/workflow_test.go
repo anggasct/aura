@@ -237,10 +237,11 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 		t.Fatalf("open storage: %v", err)
 	}
 	disk := workflow.NewStore(db)
-	if err := disk.SaveDefinition(ctx, spec); err != nil {
-		t.Fatalf("save definition: %v", err)
+	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames()}); err != nil {
+		t.Fatalf("install definition: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil, ownerRunOrigin())
+	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -302,10 +303,11 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 		t.Fatalf("open storage: %v", err)
 	}
 	disk := workflow.NewStore(db)
-	if err := disk.SaveDefinition(ctx, spec); err != nil {
-		t.Fatalf("save definition: %v", err)
+	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames()}); err != nil {
+		t.Fatalf("install definition: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil, ownerRunOrigin())
+	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -676,10 +678,11 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture spec: %v", err)
 	}
-	if err := disk.SaveDefinition(ctx, spec); err != nil {
-		t.Fatalf("save definition: %v", err)
+	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames()}); err != nil {
+		t.Fatalf("install definition: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil, ownerRunOrigin())
+	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}

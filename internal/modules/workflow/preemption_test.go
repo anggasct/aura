@@ -140,7 +140,7 @@ func (h *workflowHost) load(specs ...*Spec) {
 
 func (h *workflowHost) startRun(definitionID string) hostedRun {
 	h.t.Helper()
-	summary, err := h.disk.CreateRun(h.t.Context(), specOf(h.t, h.interpreter, definitionID), &RunInput{}, ownerOrigin())
+	summary, err := h.disk.newRun(h.t.Context(), specOf(h.t, h.interpreter, definitionID), &RunInput{}, ownerOrigin())
 	if err != nil {
 		h.t.Fatalf("CreateRun: %v", err)
 	}

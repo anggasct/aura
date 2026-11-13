@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -11,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const (
@@ -37,12 +40,13 @@ type Proposal struct {
 }
 
 func NewProposalID() string {
-	return newID("prop")
+	return "prop-" + strings.ToLower(rand.Text())
 }
 
 func NormalizeProposal(spec *Spec, proposalID string) *Spec {
 	normalized := *spec
 	normalized.ID = "gen_" + proposalID
+	normalized.Name = ""
 	normalized.Version = 1
 	normalized.Source = SourceGenerated
 	normalized.Steps = slices.Clone(spec.Steps)
@@ -58,13 +62,13 @@ func Digest(spec *Spec) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func CheckCeiling(spec *Spec, tools []string) error {
+func CheckCeiling(spec *Spec, allowed []string) error {
 	for index := range spec.Steps {
 		step := &spec.Steps[index]
 		if step.Executor.Kind != KindTool || step.Executor.ToolID == nil {
 			continue
 		}
-		if !slices.Contains(tools, *step.Executor.ToolID) {
+		if !slices.Contains(allowed, *step.Executor.ToolID) {
 			return codedError(ErrorCodeCapabilityExceeded, fmt.Sprintf("step %q uses tool %q, which the proposing persona does not have", step.ID, *step.Executor.ToolID))
 		}
 	}
@@ -75,35 +79,35 @@ type ToolCallText func(toolID string, args json.RawMessage) (string, error)
 
 func RenderPlan(spec *Spec, graph *Graph, show ToolCallText) (string, error) {
 	lines := make([]string, 0, 1+len(graph.Order))
-	lines = append(lines, "Plan: "+spec.Goal)
+	lines = append(lines, "Plan: "+tools.EscapeDisplayText(spec.Goal))
 	for index, stepID := range graph.Order {
 		step := graph.ByStep[stepID]
-		line := fmt.Sprintf("%d. %s — ", index+1, step.ID)
+		line := fmt.Sprintf("%d. %s — ", index+1, tools.EscapeDisplayText(step.ID))
 		var call string
 		switch step.Executor.Kind {
 		case KindTool:
-			line += "run tool " + deref(step.Executor.ToolID)
+			line += "run tool " + tools.EscapeDisplayText(deref(step.Executor.ToolID))
 			text, err := showToolCall(step, show)
 			if err != nil {
 				return "", err
 			}
 			call = text
 		case KindAgent:
-			line += "ask agent " + cmpOr(deref(step.Executor.AgentID), strings.Join(step.Executor.RequiredCapabilities, "+"))
+			line += "ask agent " + tools.EscapeDisplayText(cmpOr(deref(step.Executor.AgentID), strings.Join(step.Executor.RequiredCapabilities, "+")))
 		case KindWait:
-			line += "wait for " + deref(step.Executor.Event)
+			line += "wait for " + tools.EscapeDisplayText(deref(step.Executor.Event))
 		case KindApproval:
 			line += "owner approval"
 		case KindWorkflow:
-			line += "run workflow " + deref(step.Executor.WorkflowID)
+			line += "run workflow " + tools.EscapeDisplayText(deref(step.Executor.WorkflowID))
 		default:
-			line += string(step.Executor.Kind)
+			line += tools.EscapeDisplayText(string(step.Executor.Kind))
 		}
 		if len(step.DependsOn) > 0 {
-			line += " (after " + strings.Join(step.DependsOn, ", ") + ")"
+			line += " (after " + tools.EscapeDisplayText(strings.Join(step.DependsOn, ", ")) + ")"
 		}
 		if step.Condition != nil {
-			line += " if " + *step.Condition
+			line += " if " + tools.EscapeDisplayText(*step.Condition)
 		}
 		lines = append(lines, line)
 		if call != "" {
@@ -117,11 +121,11 @@ func RenderPlan(spec *Spec, graph *Graph, show ToolCallText) (string, error) {
 
 func showToolCall(step *StepSpec, show ToolCallText) (string, error) {
 	if show == nil {
-		return "", codedError(ErrorCodePlanUnshowable, fmt.Sprintf("step %q: no tool display is available to show the call", step.ID))
+		return "", codedError(ErrorCodePlanUnshowable, "step \""+tools.EscapeDisplayText(step.ID)+"\": no tool display is available to show the call")
 	}
 	text, err := show(deref(step.Executor.ToolID), toolArguments(step))
 	if err != nil {
-		return "", codedError(ErrorCodePlanUnshowable, fmt.Sprintf("step %q: the call of tool %q cannot be shown: %v", step.ID, deref(step.Executor.ToolID), err))
+		return "", codedError(ErrorCodePlanUnshowable, "step \""+tools.EscapeDisplayText(step.ID)+"\": the call of tool \""+tools.EscapeDisplayText(deref(step.Executor.ToolID))+"\" cannot be shown: "+err.Error())
 	}
 	return text, nil
 }
@@ -238,7 +242,7 @@ func scanProposal(row proposalRow) (*Proposal, error) {
 	return &proposal, nil
 }
 
-func (i *Interpreter) CompileProposal(spec *Spec, tools []string) (*Graph, error) {
+func (i *Interpreter) CompileProposal(spec *Spec, allowed []string) (*Graph, error) {
 	i.depsMu.Lock()
 	deps := i.deps
 	i.depsMu.Unlock()
@@ -249,7 +253,7 @@ func (i *Interpreter) CompileProposal(spec *Spec, tools []string) (*Graph, error
 	if err := ValidateComposition(spec, i.Spec); err != nil {
 		return nil, err
 	}
-	if err := CheckCeiling(spec, tools); err != nil {
+	if err := CheckCeiling(spec, allowed); err != nil {
 		return nil, err
 	}
 	if err := checkStepBudget(spec, i.options.GeneratedBudget); err != nil {

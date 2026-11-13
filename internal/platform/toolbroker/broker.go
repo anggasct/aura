@@ -792,24 +792,28 @@ func absoluteApprovalExpiry(deadline time.Time) time.Time {
 }
 
 func (b *Broker) approvalText(definition *tools.Definition, arguments json.RawMessage) (string, error) {
+	return b.renderedText(arguments, definition.Name, definition.ApprovalText)
+}
+
+func (b *Broker) renderedText(arguments json.RawMessage, toolName string, render func(json.RawMessage, func(string) string) (string, error)) (string, error) {
 	secrets := b.secretValues()
-	display, err := definition.ApprovalText(arguments, func(text string) string {
+	display, err := render(arguments, func(text string) string {
 		return string(redact([]byte(text), secrets))
 	})
 	if err != nil {
 		code, _ := tools.CodeOf(err)
 		if code == tools.ErrorCodeDisplayTooLarge {
-			return "", errorf(ResultApprovalDisplayTooLarge, "tool %q arguments do not fit the approval display", definition.Name)
+			return "", errorf(ResultApprovalDisplayTooLarge, "tool %q arguments do not fit the approval display", toolName)
 		}
 		if code == tools.ErrorCodeDisplayRedacted {
-			return "", errorf(ResultPolicyDenied, "tool %q arguments hold a configured secret, so the approval card cannot show them", definition.Name)
+			return "", errorf(ResultPolicyDenied, "tool %q arguments hold a configured secret, so the approval card cannot show them", toolName)
 		}
-		return "", errorf(ResultPolicyDenied, "tool %q approval display failed closed", definition.Name)
+		return "", errorf(ResultPolicyDenied, "tool %q approval display failed closed", toolName)
 	}
 	return display, nil
 }
 
-func (b *Broker) CallDisplay(toolName string, args json.RawMessage) (string, error) {
+func (b *Broker) ExactCallText(toolName string, args json.RawMessage) (string, error) {
 	b.mu.RLock()
 	definition, ok := b.definitions[toolName+"@"+tools.Version]
 	b.mu.RUnlock()
@@ -820,7 +824,7 @@ func (b *Broker) CallDisplay(toolName string, args json.RawMessage) (string, err
 	if err != nil {
 		return "", err
 	}
-	return b.approvalText(definition, arguments)
+	return b.renderedText(arguments, definition.Name, definition.ExactApprovalText)
 }
 
 func (b *Broker) buildApprovalPrompt(call *authorization) (*ApprovalPrompt, error) {

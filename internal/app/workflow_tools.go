@@ -17,22 +17,20 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
-	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
 type proposalOfferer interface {
-	OfferProposal(ctx context.Context, proposalID, plan string, decide discord.ProposalDecider) error
+	OfferProposal(ctx context.Context, card discord.ProposalCard, decide discord.ProposalDecider) error
 	ReplyTarget(sessionID string) (access.HandoffTarget, bool)
 }
 
 const proposalCardQueue = 16
 
 type proposalOffer struct {
-	sessionID  string
-	proposalID string
-	plan       string
+	sessionID string
+	card      discord.ProposalCard
 }
 
 type proposalCards struct {
@@ -86,19 +84,19 @@ func (c *workflowToolController) runProposalCards(ctx context.Context) {
 	}
 }
 
-func (c *workflowToolController) offerProposal(ctx context.Context, sessionID, proposalID, plan string) {
+func (c *workflowToolController) offerProposal(ctx context.Context, sessionID string, card discord.ProposalCard) {
 	if c.cards == nil {
 		return
 	}
 	select {
-	case c.cards.requests <- proposalOffer{sessionID: sessionID, proposalID: proposalID, plan: plan}:
+	case c.cards.requests <- proposalOffer{sessionID: sessionID, card: card}:
 	default:
-		c.cards.logger.WarnContext(ctx, "proposal card unavailable", "component", "workflow", "proposal_id", proposalID, "error", "card queue is full")
+		c.cards.logger.WarnContext(ctx, "proposal card unavailable", "component", "workflow", "proposal_id", card.ID, "error", "card queue is full")
 	}
 }
 
 func (c *workflowToolController) deliverProposalCard(ctx context.Context, offer *proposalOffer) {
-	sessionID, proposalID, plan := offer.sessionID, offer.proposalID, offer.plan
+	sessionID, proposalID := offer.sessionID, offer.card.ID
 	offerer := c.cards.offerers[0]
 	for _, candidate := range c.cards.offerers {
 		if _, ok := candidate.ReplyTarget(sessionID); ok {
@@ -113,13 +111,13 @@ func (c *workflowToolController) deliverProposalCard(ctx context.Context, offer 
 			}
 			return "rejected " + proposalID, nil
 		}
-		runID, err := approveProposal(ctx, c.cards.cfg, c.interpreter, c.runs, proposalID, time.Now())
+		runID, err := approveProposal(ctx, c.cards.cfg, c.interpreter, c.runs, proposalID, c.showCall, time.Now())
 		if err != nil {
 			return "", err
 		}
 		return "approved " + proposalID + ": run " + runID, nil
 	}
-	if err := offerer.OfferProposal(ctx, proposalID, plan, decide); err != nil {
+	if err := offerer.OfferProposal(ctx, offer.card, decide); err != nil {
 		c.cards.logger.WarnContext(ctx, "proposal card unavailable", "component", "workflow", "proposal_id", proposalID, "error", err)
 	}
 }
@@ -261,12 +259,8 @@ func (c *workflowToolController) Propose(ctx context.Context, caller *toolsbuilt
 	}); err != nil {
 		return toolsbuiltin.WorkflowProposal{}, err
 	}
-	if caller.Tainted {
-		plan += "\n" + approval.UntrustedInputNotice
-	}
-	plan += "\nApprove with: aura workflow proposal approve " + id
-	c.offerProposal(ctx, caller.SessionID, id, plan)
-	return toolsbuiltin.WorkflowProposal{ProposalID: id, Digest: digest, Plan: plan}, nil
+	c.offerProposal(ctx, caller.SessionID, discord.ProposalCard{ID: id, Plan: plan, Tainted: caller.Tainted})
+	return toolsbuiltin.WorkflowProposal{ProposalID: id, Digest: digest, Plan: plan, UntrustedInput: caller.Tainted, ApproveWith: "aura workflow proposal approve " + id}, nil
 }
 
 func (c *workflowToolController) SaveRoutine(ctx context.Context, caller *toolsbuiltin.WorkflowCaller, runID, name string) (toolsbuiltin.WorkflowRoutine, error) {

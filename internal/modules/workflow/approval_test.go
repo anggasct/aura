@@ -160,7 +160,7 @@ func TestChildOfUnapprovedDefinitionFailsTheParentStep(t *testing.T) {
 				t.Fatal(err)
 			}
 			installAll(t, interpreter, composingSpec("top", "leaf_unapproved"))
-			run, err := disk.CreateRun(t.Context(), specOf(t, interpreter, "top"), &RunInput{}, ownerOrigin())
+			run, err := disk.newRun(t.Context(), specOf(t, interpreter, "top"), &RunInput{}, ownerOrigin())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -194,7 +194,8 @@ func TestChildOfUnapprovedDefinitionFailsTheParentStep(t *testing.T) {
 	}
 }
 
-func TestToolStepOfUnapprovedDigestNeverReachesTheRunner(t *testing.T) {
+func assertToolStepRefusedForApproval(t *testing.T, breakApproval string, args ...any) {
+	t.Helper()
 	for _, tc := range originDrivers {
 		driver := tc.driver
 		t.Run(tc.name, func(t *testing.T) {
@@ -202,11 +203,11 @@ func TestToolStepOfUnapprovedDigestNeverReachesTheRunner(t *testing.T) {
 			interpreter, fake, disk := driverTestSetup(t, tools, driver)
 			spec := toolSpec("leaf")
 			installAll(t, interpreter, spec)
-			run, err := disk.CreateRun(t.Context(), spec, &RunInput{}, ownerOrigin())
+			run, err := disk.newRun(t.Context(), spec, &RunInput{}, ownerOrigin())
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := disk.db.ExecContext(t.Context(), `DELETE FROM workflow_approval WHERE definition_id = 'leaf'`); err != nil {
+			if _, err := disk.db.ExecContext(t.Context(), breakApproval, args...); err != nil {
 				t.Fatal(err)
 			}
 			if driver == DriverSerial {
@@ -230,10 +231,18 @@ func TestToolStepOfUnapprovedDigestNeverReachesTheRunner(t *testing.T) {
 				t.Fatalf("step = %s/%s, want failed/%s", steps[0].Status, steps[0].ErrorCode, ErrorCodeApprovalMissing)
 			}
 			if calls := tools.recorded(); len(calls) != 0 {
-				t.Fatalf("the runner was called %d times for a tool step of an unapproved digest", len(calls))
+				t.Fatalf("the runner was called %d times for a tool step without a matching approval", len(calls))
 			}
 		})
 	}
+}
+
+func TestToolStepOfUnapprovedDigestNeverReachesTheRunner(t *testing.T) {
+	assertToolStepRefusedForApproval(t, `DELETE FROM workflow_approval WHERE definition_id = 'leaf'`)
+}
+
+func TestToolStepOfMismatchedDigestNeverReachesTheRunner(t *testing.T) {
+	assertToolStepRefusedForApproval(t, `UPDATE workflow_approval SET spec_sha256 = ? WHERE definition_id = 'leaf'`, staleDigest)
 }
 
 func TestApproveProposalRecordsInOneTransaction(t *testing.T) {
@@ -326,7 +335,7 @@ func TestRoutineCarriesItsSourceApproval(t *testing.T) {
 		if err := interpreter.LoadAll(t.Context(), []*Spec{generated}, testValidationDeps()); err != nil {
 			t.Fatal(err)
 		}
-		run, err := disk.CreateRun(t.Context(), generated, &RunInput{}, ownerOrigin())
+		run, err := disk.newRun(t.Context(), generated, &RunInput{}, ownerOrigin())
 		if err != nil {
 			t.Fatal(err)
 		}

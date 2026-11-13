@@ -161,10 +161,6 @@ func decodeSpec(encoded string) (*Spec, error) {
 	return &spec, nil
 }
 
-func (s *Store) CreateRun(ctx context.Context, spec *Spec, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
-	return s.createRun(ctx, spec, input, origin, newID("dur"), "")
-}
-
 func (s *Store) createRun(ctx context.Context, spec *Spec, input *RunInput, origin *RunOrigin, durableKey, parentRunID string) (*RunSummary, error) {
 	if !origin.Complete() {
 		return nil, codedError(ErrorCodeOriginIncomplete, "a run needs a principal, a known principal class and an agent")

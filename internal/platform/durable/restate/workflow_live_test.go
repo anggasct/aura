@@ -24,6 +24,12 @@ import (
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
+type queuedRuntime struct{ durable.Runtime }
+
+func (queuedRuntime) Start(_ context.Context, req durable.StartRequest) (durable.RunRef, error) {
+	return durable.RunRef{Key: req.Key}, nil
+}
+
 func ownerOrigin() *workflow.RunOrigin {
 	return &workflow.RunOrigin{PrincipalID: "local-owner", PrincipalClass: "owner", AgentID: auraagent.DefaultID}
 }
@@ -280,7 +286,7 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 	ctx := context.Background()
 	disk := workflow.NewStore(liveTestDB(t))
 	tools := &countingToolRunner{}
-	runner := durable.NewFake()
+	runner := queuedRuntime{durable.NewFake()}
 	interpreter := workflow.NewInterpreter(disk, runner, &workflow.Options{
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
@@ -304,7 +310,7 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, &workflow.RunInput{Objective: "survive restart"}, ownerOrigin())
+	summary, err := interpreter.Start(ctx, spec.ID, &workflow.RunInput{Objective: "survive restart"}, ownerOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -414,7 +420,7 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 	ctx := context.Background()
 	disk := workflow.NewStore(liveTestDB(t))
 	tools := &countingToolRunner{}
-	runner := durable.NewFake()
+	runner := queuedRuntime{durable.NewFake()}
 	budget := workflow.Budget{MaxSteps: 3, MaxTokens: 1}
 	interpreter := workflow.NewInterpreter(disk, runner, &workflow.Options{
 		MaxConcurrentSteps: 1,
@@ -440,7 +446,7 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, &workflow.RunInput{Objective: "survive restart"}, ownerOrigin())
+	summary, err := interpreter.Start(ctx, spec.ID, &workflow.RunInput{Objective: "survive restart"}, ownerOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -495,7 +501,7 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 	server.stop()
 
 	server = startLiveServer(t, binary, dir, ingressPort, adminPort)
-	resumed := workflow.NewInterpreter(disk, durable.NewFake(), &workflow.Options{
+	resumed := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, &workflow.Options{
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
 		Tools:              tools,
