@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
@@ -130,6 +131,14 @@ func orNone(value string) string {
 	return value
 }
 
+func personaToolNames(cfg *config.Config) []string {
+	names := toolsbuiltin.DefinitionNames()
+	if len(githubCredentials(cfg)) > 0 {
+		names = append(names, github.ToolNames()...)
+	}
+	return names
+}
+
 func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
 	routeSet := make(map[string]bool, len(cfg.Models.Definitions)+len(cfg.ModelRoutes))
 	for route := range cfg.Models.Definitions {
@@ -144,7 +153,7 @@ func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
 	if cfg.Agents != nil {
 		overrides = cfg.Agents.Definitions
 	}
-	registry, err := auraagent.BuildWithMCP(overrides, toolsbuiltin.DefinitionNames(), configuredMCPServerNames(cfg), modelRoutes)
+	registry, err := auraagent.BuildWithMCP(overrides, personaToolNames(cfg), configuredMCPServerNames(cfg), modelRoutes)
 	if err != nil {
 		return nil, err
 	}

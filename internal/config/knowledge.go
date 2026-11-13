@@ -68,23 +68,29 @@ func rejectKnowledgeSinks(field string, definition *AgentDefinition) error {
 			continue
 		}
 		for _, entry := range class.toolList {
-			if isExternalSinkEntry(entry) {
-				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.%s lists %q, which sends data out, while %s.%s is not empty", field, class.toolsField, entry, field, class.knowledgeField)}
+			sink, known := isExternalSinkEntry(entry)
+			if !sink {
+				continue
 			}
+			reason := "which sends data out"
+			if !known {
+				reason = "which is not a known tool or sends data out"
+			}
+			return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.%s lists %q, %s, while %s.%s is not empty", field, class.toolsField, entry, reason, field, class.knowledgeField)}
 		}
 	}
 	return nil
 }
 
-func isExternalSinkEntry(entry string) bool {
+func isExternalSinkEntry(entry string) (sink, known bool) {
 	if tools.IsMCPEntry(entry) || tools.IsPluginEntry(entry) {
-		return true
+		return true, true
 	}
 	builtins := tools.Builtins()
 	for i := range builtins {
 		if builtins[i].Name == entry {
-			return builtins[i].IsExternalSink()
+			return builtins[i].IsExternalSink(), true
 		}
 	}
-	return false
+	return true, false
 }

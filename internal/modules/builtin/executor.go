@@ -1,6 +1,7 @@
 package toolsbuiltin
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -219,6 +220,17 @@ func EffectfulToolNames() []string {
 	return names
 }
 
+func StepToolNames(personaTools []string) []string {
+	orchestration := map[string]bool{}
+	builtins := tools.Builtins()
+	for i := range builtins {
+		if builtins[i].Orchestration {
+			orchestration[builtins[i].Name] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(personaTools), func(name string) bool { return orchestration[name] })
+}
+
 func configuredToolSecrets(cfg *config.Config) []string {
 	if cfg == nil || cfg.Tools == nil {
 		return nil
@@ -248,7 +260,7 @@ func (e *Executor) Definitions() []runtimeadk.BuiltinToolDefinition {
 		if !e.offers(definition) {
 			continue
 		}
-		description := "Aura built-in " + definition.Name + " tool"
+		description := cmp.Or(definition.Description, "Aura built-in "+definition.Name+" tool")
 		plugin := ""
 		if definition.Server != "" {
 			description = "Tool " + definition.Name + " provided by the external server " + definition.Server

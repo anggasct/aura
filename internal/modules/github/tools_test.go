@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -17,6 +18,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
+
+var providerSafeName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 func stubGitHubAPI(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -210,8 +213,17 @@ func TestDefinitionsCarryBrokerContract(t *testing.T) {
 		if want := displayOrders[definition.Name]; !slices.Equal(definition.Display, want) {
 			t.Errorf("%s display = %v, want %v", definition.Name, definition.Display, want)
 		}
-		if len(definition.RequiredCapabilities) != 0 {
-			t.Errorf("%s requires capabilities %v that no host can provide", definition.Name, definition.RequiredCapabilities)
+		if !slices.Equal(definition.RequiredCapabilities, []string{"provider-github"}) {
+			t.Errorf("%s requires capabilities %v, want provider-github", definition.Name, definition.RequiredCapabilities)
+		}
+		if !definition.OptIn {
+			t.Errorf("%s must be opt-in", definition.Name)
+		}
+		if want := definition.Name != ToolMerge; definition.ExternalSink != want {
+			t.Errorf("%s ExternalSink = %t, want %t", definition.Name, definition.ExternalSink, want)
+		}
+		if !providerSafeName.MatchString(definition.Name) {
+			t.Errorf("%s is not a provider-safe tool name", definition.Name)
 		}
 		var schema struct {
 			Required   []string                   `json:"required"`

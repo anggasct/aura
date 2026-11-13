@@ -31,6 +31,7 @@ type catalogDefinition struct {
 	ExternalSink         bool            `json:"external_sink"`
 	NoStandingGrant      bool            `json:"no_standing_grant"`
 	ExactDisplay         bool            `json:"exact_display"`
+	Orchestration        bool            `json:"orchestration"`
 	Display              []string        `json:"display"`
 	HasValidator         bool            `json:"has_validator"`
 }
@@ -69,6 +70,7 @@ func TestToolCatalogGolden(t *testing.T) {
 			ExternalSink:         definition.ExternalSink,
 			NoStandingGrant:      definition.NoStandingGrant,
 			ExactDisplay:         definition.ExactDisplay,
+			Orchestration:        definition.Orchestration,
 			Display:              definition.Display,
 			HasValidator:         definition.Validator != nil,
 		})

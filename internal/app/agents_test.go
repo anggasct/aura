@@ -127,3 +127,42 @@ agents:
 		t.Logf("config.Load: %v", err)
 	}
 }
+
+func TestPersonasMayListTheGitHubTools(t *testing.T) {
+	persona := func(tools, principalTools, publicTools []string) []config.AgentDefinition {
+		return []config.AgentDefinition{{
+			ID: "ops", Description: "d", Instructions: "i", Audience: config.AudienceTrusted,
+			Tools: tools, PrincipalTools: principalTools, PublicTools: publicTools,
+		}}
+	}
+	configured := config.Default()
+	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}
+	bare := config.Default()
+	cases := []struct {
+		name        string
+		cfg         *config.Config
+		definitions []config.AgentDefinition
+		code        auraagent.ErrorCode
+	}{
+		{"configured, merge listed", &configured, persona([]string{"read_file", "github_merge"}, []string{"github_merge"}, nil), ""},
+		{"configured, unknown github tool", &configured, persona([]string{"github_delete_repo"}, nil, nil), auraagent.ErrorCodeUnknownTool},
+		{"configured, dotted name", &configured, persona([]string{"github.merge"}, nil, nil), auraagent.ErrorCodeUnknownTool},
+		{"configured, public list", &configured, persona([]string{"github_merge"}, nil, []string{"github_merge"}), auraagent.ErrorCodePersonaInvalid},
+		{"not configured, merge listed", &bare, persona([]string{"read_file", "github_merge"}, []string{"github_merge"}, nil), auraagent.ErrorCodeUnknownTool},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.cfg.Agents = &config.Agents{Definitions: tc.definitions}
+			_, err := buildAgentRegistry(tc.cfg)
+			if tc.code == "" {
+				if err != nil {
+					t.Fatalf("buildAgentRegistry: %v", err)
+				}
+				return
+			}
+			if code, ok := auraagent.CodeOf(err); !ok || code != tc.code {
+				t.Fatalf("buildAgentRegistry error = %v, want %s", err, tc.code)
+			}
+		})
+	}
+}

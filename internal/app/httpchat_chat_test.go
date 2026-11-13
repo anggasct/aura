@@ -19,6 +19,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/channels/httpchat"
+	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -105,6 +106,7 @@ agents:
 
 type httpChatHarness struct {
 	t       *testing.T
+	cfg     *config.Config
 	config  string
 	baseURL string
 	db      *sql.DB
@@ -186,7 +188,7 @@ func newHTTPChatHarnessWithModel(t *testing.T, turnsPerMinute string, llm adkmod
 		t.Fatalf("buildHTTPChat: %v", err)
 	}
 	baseURL := serveHTTPChat(t, server)
-	return &httpChatHarness{t: t, config: path, baseURL: baseURL, db: db}
+	return &httpChatHarness{t: t, cfg: cfg, config: path, baseURL: baseURL, db: db}
 }
 
 func (h *httpChatHarness) key(persona, class string) (plaintext, id string) {

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -157,5 +158,63 @@ func TestAllowlistNamingAnUnloadedWorkflowFailsStartup(t *testing.T) {
 	var configErr *config.Error
 	if !errors.As(err, &configErr) || configErr.Code != config.ErrorCodePersonaInvalid || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("startup with an unknown allowlisted workflow = %v", err)
+	}
+}
+
+func toolStepSpec(tool string) *workflow.Spec {
+	approvalTimeout := 5 * time.Second
+	return &workflow.Spec{
+		ID: "tool-only", Goal: "call one tool", Version: 1, Source: workflow.SourceDefined,
+		Steps: []workflow.StepSpec{
+			{ID: "approve", Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: approvalTimeout},
+			{ID: "call", DependsOn: []string{"approve"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: &tool}, Timeout: approvalTimeout},
+		},
+	}
+}
+
+func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
+	forbidden := []string{
+		"handoff_to_owner", "workflow_list", "workflow_start", "workflow_status",
+		"workflow_cancel", "workflow_propose", "workflow_save_routine",
+	}
+	configured := config.Default()
+	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}
+	deps, err := workflowValidationDeps(&configured)
+	if err != nil {
+		t.Fatalf("workflowValidationDeps: %v", err)
+	}
+	for _, name := range []string{"read_file", "email_send", "github_create_pr", "github_merge", "github_comment"} {
+		if !slices.Contains(deps.KnownTools, name) {
+			t.Errorf("KnownTools lacks %q", name)
+		}
+	}
+	for _, name := range forbidden {
+		if slices.Contains(deps.KnownTools, name) {
+			t.Errorf("KnownTools holds %q", name)
+		}
+	}
+	for _, name := range append(forbidden, "github.comment") {
+		err := workflow.Validate(toolStepSpec(name), deps)
+		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid || !strings.Contains(err.Error(), "references unknown tool") {
+			t.Errorf("Validate with %q = %v, want executor_invalid references unknown tool", name, err)
+		}
+	}
+	if err := workflow.Validate(toolStepSpec("github_comment"), deps); err != nil {
+		t.Errorf("Validate with github_comment behind an approval step: %v", err)
+	}
+
+	bare := config.Default()
+	bareDeps, err := workflowValidationDeps(&bare)
+	if err != nil {
+		t.Fatalf("workflowValidationDeps without credentials: %v", err)
+	}
+	for _, name := range bareDeps.KnownTools {
+		if strings.HasPrefix(name, "github") {
+			t.Errorf("KnownTools without credentials holds %q", name)
+		}
+	}
+	err = workflow.Validate(toolStepSpec("github_comment"), bareDeps)
+	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid || !strings.Contains(err.Error(), "references unknown tool") {
+		t.Errorf("Validate with github_comment and no credentials = %v, want references unknown tool", err)
 	}
 }

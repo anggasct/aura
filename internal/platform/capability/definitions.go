@@ -36,5 +36,9 @@ func BuiltinRegistry() (Registry, error) {
 			Name:     "provider-search",
 			Profiles: []Profile{ProfileCore, ProfileExecLinux, ProfileBrowserLinux, ProfileNativeLinux},
 		},
+		Definition{
+			Name:     "provider-github",
+			Profiles: []Profile{ProfileCore, ProfileExecLinux, ProfileBrowserLinux, ProfileNativeLinux},
+		},
 	)
 }

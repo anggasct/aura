@@ -3,11 +3,34 @@ package config
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
 	yamlv3 "gopkg.in/yaml.v3"
+
+	"github.com/anggasct/aura/internal/platform/capability"
 )
+
+const githubCapabilityEnabled = "capabilities:\n  enabled: [provider-github]\n"
+
+func loadWithGitHubCapability(t testing.TB, path string) (LoadResult, error) {
+	t.Helper()
+	return loadUnderBuild(t, path, "provider-github")
+}
+
+func loadUnderBuild(t testing.TB, path, compiled string) (LoadResult, error) {
+	t.Helper()
+	build, err := capability.ParseBuild("core", compiled, runtime.GOOS)
+	if err != nil {
+		t.Fatalf("ParseBuild: %v", err)
+	}
+	registry, err := capability.BuiltinRegistry()
+	if err != nil {
+		t.Fatalf("BuiltinRegistry: %v", err)
+	}
+	return LoadWithOptions(path, LoadOptions{Build: build, Registry: registry})
+}
 
 func githubConfigSection(entries string) string {
 	return "  github:\n    credentials:\n" + entries
@@ -36,10 +59,12 @@ func TestToolsGitHubCredentialsLoadInOrder(t *testing.T) {
 		t.Fatalf("GitHub = %+v, default %+v, want no credentials", loaded.GitHub, Default().Tools.GitHub)
 	}
 	section := githubConfigSection(githubEntry("ci", "env://GITHUB_TOKEN") + githubEntry("release", "file:///etc/aura/github-release-token"))
-	loaded, err = loadGitHubConfig(t, section)
+	body := strings.Replace(webSearchBase, "%s\n", section, 1) + githubCapabilityEnabled
+	result, err := loadWithGitHubCapability(t, writeTempConfig(t, body))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
+	loaded = result.Config.Tools
 	want := []GitHubCredential{{Name: "ci", Ref: "env://GITHUB_TOKEN"}, {Name: "release", Ref: "file:///etc/aura/github-release-token"}}
 	if got := loaded.GitHub.Credentials; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("Credentials = %+v, want %+v", got, want)
@@ -126,5 +151,37 @@ func TestOwnerPreferencesMayNotRepeatAGitHubCredential(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), token) {
 		t.Errorf("error leaks the token: %v", err)
+	}
+}
+
+func TestToolsGitHubCredentialsNeedTheProviderCapability(t *testing.T) {
+	const detail = "tools.github.credentials needs the provider-github capability: compile it into the build and list it in capabilities.enabled"
+	credentials := strings.Replace(webSearchBase, "%s\n", githubConfigSection(githubEntry("ci", "env://GITHUB_TOKEN")), 1)
+	none := strings.Replace(webSearchBase, "%s\n", "", 1)
+	cases := []struct {
+		name     string
+		body     string
+		compiled string
+		refused  bool
+	}{
+		{"compiled and enabled", credentials + githubCapabilityEnabled, "provider-github", false},
+		{"compiled, not enabled", credentials, "provider-github", true},
+		{"enabled, not compiled", credentials + githubCapabilityEnabled, "", true},
+		{"no credentials, no capability", none, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadUnderBuild(t, writeTempConfig(t, tc.body), tc.compiled)
+			if !tc.refused {
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				return
+			}
+			var coded *Error
+			if !errors.As(err, &coded) || coded.Code != ErrorCodeConfigInvalid || coded.Detail != detail {
+				t.Fatalf("err = %v, want config_invalid with %q", err, detail)
+			}
+		})
 	}
 }
