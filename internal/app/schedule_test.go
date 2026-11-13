@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -215,7 +216,7 @@ func TestScheduleStoreAdapterRoundTrip(t *testing.T) {
 func TestBuildScheduleRunnerSmoke(t *testing.T) {
 	db := cronTestDB(t)
 	var started []string
-	runner, err := buildScheduleRunner(&scheduleRunnerInput{db: db, logger: slog.Default(), engine: &fakeCronEngine{}, broadcaster: testCronBroadcaster(t, db, &started), starter: durable.NewFake()})
+	runner, err := buildScheduleRunner(&scheduleRunnerInput{db: db, logger: slog.Default(), engine: &fakeCronEngine{}, broadcaster: testCronBroadcaster(t, db, &started), starter: durabletest.NewFake()})
 	if err != nil {
 		t.Fatalf("buildScheduleRunner(): %v", err)
 	}
@@ -241,7 +242,7 @@ func (r *recordingScheduleRegistrar) RegisterHandler(name string, _ durable.Hand
 func TestRegisterScheduleHandler(t *testing.T) {
 	db := cronTestDB(t)
 	var started []string
-	runner, err := buildScheduleRunner(&scheduleRunnerInput{db: db, logger: slog.Default(), engine: &fakeCronEngine{}, broadcaster: testCronBroadcaster(t, db, &started), starter: durable.NewFake()})
+	runner, err := buildScheduleRunner(&scheduleRunnerInput{db: db, logger: slog.Default(), engine: &fakeCronEngine{}, broadcaster: testCronBroadcaster(t, db, &started), starter: durabletest.NewFake()})
 	if err != nil {
 		t.Fatalf("buildScheduleRunner(): %v", err)
 	}
@@ -285,7 +286,7 @@ func scheduleRunKey(jobID string, instant time.Time) string {
 	return "schedule/" + jobID + "/" + instant.UTC().Format("20060102T150405.000000000Z")
 }
 
-func runExists(t *testing.T, rt *durable.Fake, key string) bool {
+func runExists(t *testing.T, rt *durabletest.Fake, key string) bool {
 	t.Helper()
 	_, err := rt.Status(t.Context(), durable.RunRef{Key: key})
 	return err == nil
@@ -350,7 +351,7 @@ func nextFireKeys(jobID string, fires []time.Time) []string {
 	return keys
 }
 
-func anyRunExists(t *testing.T, rt *durable.Fake, keys []string) bool {
+func anyRunExists(t *testing.T, rt *durabletest.Fake, keys []string) bool {
 	t.Helper()
 	return slices.ContainsFunc(keys, func(key string) bool { return runExists(t, rt, key) })
 }
@@ -366,7 +367,7 @@ func TestResumeScheduleRuns(t *testing.T) {
 		{id: "job-paused", state: store.ScheduleJobPaused},
 		{id: "job-deleted", state: store.ScheduleJobDeleted},
 	})
-	rt := durable.NewFake()
+	rt := durabletest.NewFake()
 	rt.RegisterHandler(schedule.HandlerName, func(context.Context, durable.Invocation) error { return nil })
 	before := time.Now().UTC()
 	count, err := resumeScheduleRuns(t.Context(), rt, db)
@@ -391,7 +392,7 @@ func TestResumeScheduleRuns(t *testing.T) {
 		}
 	}
 
-	if _, err := resumeScheduleRuns(t.Context(), durable.NewFake(), db); err == nil {
+	if _, err := resumeScheduleRuns(t.Context(), durabletest.NewFake(), db); err == nil {
 		t.Error("a failed start was not returned")
 	}
 }
@@ -426,7 +427,7 @@ func (l *passLogs) warned() bool {
 func TestSchedulePassPicksUpAManualOccurrence(t *testing.T) {
 	db := cronTestDB(t)
 	seedScheduleJobs(t, db, []scheduleSeed{{id: "job-1", state: store.ScheduleJobActive}})
-	rt := durable.NewFake()
+	rt := durabletest.NewFake()
 	logs := &passLogs{}
 	pass := &schedulePass{runtime: rt, db: db, logger: slog.New(logs), interval: 5 * time.Millisecond}
 	before := time.Now().UTC()

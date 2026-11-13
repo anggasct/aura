@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
 func TestNonRetryableStepCodesAreFinal(t *testing.T) {
@@ -45,7 +45,7 @@ func TestNonRetryableStepCodesAreFinal(t *testing.T) {
 				}
 				runner := &fakeToolRunner{err: codedError(tc.code, "refused")}
 				disk := newTestStore(t)
-				interpreter := NewInterpreter(disk, durable.NewFake(), &Options{Tools: runner, Driver: driver.driver})
+				interpreter := NewInterpreter(disk, durabletest.NewFake(), &Options{Tools: runner, Driver: driver.driver})
 				if err := interpreter.Install(t.Context(), []*Spec{spec}, testValidationDeps()); err != nil {
 					t.Fatalf("Install: %v", err)
 				}

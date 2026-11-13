@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
 type fakeRunStore struct {
@@ -211,8 +212,8 @@ type runnerFixture struct {
 	runner  *Runner
 	store   *fakeRunStore
 	sender  *fakeSender
-	runtime *durable.Fake
-	clock   *durable.ManualClock
+	runtime *durabletest.Fake
+	clock   *durabletest.ManualClock
 }
 
 func testRunPolicy() RunPolicy {
@@ -236,8 +237,8 @@ func freshFixtureTime() time.Time {
 
 func newRunnerFixtureWithPolicy(policy RunPolicy, scripts []sendScript) *runnerFixture {
 	start := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	clock := durable.NewManualClock(start)
-	runtime := durable.NewFake().WithClock(clock)
+	clock := durabletest.NewManualClock(start)
+	runtime := durabletest.NewFake().WithClock(clock)
 	store := newFakeRunStore()
 	sender := &fakeSender{scripts: scripts}
 	runner, err := NewRunner(
@@ -692,8 +693,8 @@ func TestSubmit_StartsRun(t *testing.T) {
 }
 
 func TestResumeActive(t *testing.T) {
-	clock := durable.NewManualClock(time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC))
-	runtime := durable.NewFake().WithClock(clock)
+	clock := durabletest.NewManualClock(time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC))
+	runtime := durabletest.NewFake().WithClock(clock)
 	runtime.RegisterHandler(HandlerName, func(context.Context, durable.Invocation) error { return nil })
 	store := &fakeResumeStore{items: []FullItem{
 		{Item: Item{ID: "bcst-1"}},

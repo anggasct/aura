@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
 type actionReport struct {
@@ -297,7 +298,7 @@ func TestRestartKeepsWaitTimeout(t *testing.T) {
 
 func TestRestartKeepsWaitDeadline(t *testing.T) {
 	path := newDatabaseFile(t)
-	clock := durable.NewManualClock(time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC))
+	clock := durabletest.NewManualClock(time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC))
 	withClock := func(opts *Options) { opts.Clock = clock }
 	reports := make(chan waitReport, 1)
 	waiter := func(ctx context.Context, inv durable.Invocation) error {
@@ -357,7 +358,7 @@ func TestZeroTimeoutWaitSeesALaterSignal(t *testing.T) {
 
 func TestRestartKeepsTimerFireTime(t *testing.T) {
 	path := newDatabaseFile(t)
-	clock := durable.NewManualClock(time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC))
+	clock := durabletest.NewManualClock(time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC))
 	withClock := func(opts *Options) { opts.Clock = clock }
 	sleeper := func(_ context.Context, inv durable.Invocation) error {
 		return inv.Sleep(time.Hour)
@@ -405,7 +406,7 @@ func TestRestartKeepsTimerFireTime(t *testing.T) {
 }
 
 type suspendedClock struct {
-	timers *durable.ManualClock
+	timers *durabletest.ManualClock
 	mu     sync.Mutex
 	jumped time.Duration
 }
@@ -427,7 +428,7 @@ func (c *suspendedClock) jump(d time.Duration) {
 }
 
 func TestSleepFollowsTheWallClock(t *testing.T) {
-	clock := &suspendedClock{timers: durable.NewManualClock(time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC))}
+	clock := &suspendedClock{timers: durabletest.NewManualClock(time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC))}
 	const check = 30 * time.Second
 	rt := newRuntime(t, openDB(t, newDatabaseFile(t)), func(opts *Options) {
 		opts.Clock = clock

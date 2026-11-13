@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -119,7 +120,7 @@ func seedReplayItem(t *testing.T, fixture *replayFixture, id, state string, notB
 	}
 }
 
-func startReplayRun(t *testing.T, runtime *durable.Fake, runner *broadcast.Runner, id string) durable.RunRef {
+func startReplayRun(t *testing.T, runtime *durabletest.Fake, runner *broadcast.Runner, id string) durable.RunRef {
 	t.Helper()
 	runtime.RegisterHandler(broadcast.HandlerName, runner.Handle)
 	ref, err := runtime.Start(t.Context(), durable.StartRequest{
@@ -166,7 +167,7 @@ func TestBroadcastReplay_CrashBetweenSendAndSettle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRunner(): %v", err)
 	}
-	first := durable.NewFake()
+	first := durabletest.NewFake()
 	first.RegisterHandler(broadcast.HandlerName, crashing.Handle)
 	ref, err := first.Start(t.Context(), durable.StartRequest{
 		Handler: broadcast.HandlerName, Key: "bcst-1", Payload: []byte("bcst-1"),
@@ -186,7 +187,7 @@ func TestBroadcastReplay_CrashBetweenSendAndSettle(t *testing.T) {
 		t.Fatalf("crashed row state = %q, want still scheduled", item.State)
 	}
 
-	second := durable.NewFake()
+	second := durabletest.NewFake()
 	startReplayRun(t, second, fixture.runner, "bcst-1")
 	waitBroadcastRow(t, fixture, "bcst-1", "succeeded")
 	if got := fixture.provider.invokes.Load(); got != 1 {
@@ -227,8 +228,8 @@ func (s *crashAdapter) ClaimDispatchSlot(ctx context.Context, alias string, now 
 }
 
 func TestBroadcastReplay_CancelMidSleepRedrives(t *testing.T) {
-	clock := durable.NewManualClock(time.Now().UTC())
-	first := durable.NewFake().WithClock(clock)
+	clock := durabletest.NewManualClock(time.Now().UTC())
+	first := durabletest.NewFake().WithClock(clock)
 	fixture := newReplayFixture(t, time.Hour)
 	seedReplayItem(t, fixture, "bcst-1", "scheduled", time.Now().UTC())
 	first.RegisterHandler(broadcast.HandlerName, fixture.runner.Handle)
@@ -252,8 +253,8 @@ func TestBroadcastReplay_CancelMidSleepRedrives(t *testing.T) {
 		t.Fatalf("cancelled row state = %q, want scheduled", item.State)
 	}
 
-	secondClock := durable.NewManualClock(time.Now().UTC())
-	second := durable.NewFake().WithClock(secondClock)
+	secondClock := durabletest.NewManualClock(time.Now().UTC())
+	second := durabletest.NewFake().WithClock(secondClock)
 	startReplayRun(t, second, fixture.runner, "bcst-1")
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {

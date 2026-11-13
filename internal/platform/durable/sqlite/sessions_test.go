@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
@@ -34,7 +35,7 @@ const (
 type sessionFixture struct {
 	path     string
 	db       *sql.DB
-	clock    *durable.ManualClock
+	clock    *durabletest.ManualClock
 	sessions *SessionStore
 }
 
@@ -43,7 +44,7 @@ func newSessionFixture(t *testing.T) *sessionFixture {
 	path := newDatabaseFile(t)
 	db := openDB(t, path)
 	createSession(t, db, testSessionID)
-	clock := durable.NewManualClock(sessionClockStart)
+	clock := durabletest.NewManualClock(sessionClockStart)
 	return &sessionFixture{path: path, db: db, clock: clock, sessions: newSessionStore(t, db, clock)}
 }
 
@@ -231,7 +232,7 @@ func TestNewSessionStoreRejectsMissingOptions(t *testing.T) {
 		opts *SessionStoreOptions
 	}{
 		{"nil options", nil},
-		{"nil database", &SessionStoreOptions{Clock: durable.NewManualClock(sessionClockStart)}},
+		{"nil database", &SessionStoreOptions{Clock: durabletest.NewManualClock(sessionClockStart)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

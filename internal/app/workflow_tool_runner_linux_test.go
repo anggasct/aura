@@ -24,6 +24,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
@@ -478,7 +479,7 @@ func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
 	disk := workflow.NewStore(db)
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{Tools: runner, Logger: slog.Default()})
 	tool := "write_file"
 	spec := &workflow.Spec{

@@ -1,2 +1,0 @@
-internal/platform/durable Fake  # until the in-memory runtime moves to its test kit
-internal/platform/durable NewFake  # until the in-memory runtime moves to its test kit

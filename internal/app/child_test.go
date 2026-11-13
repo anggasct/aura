@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
@@ -409,7 +410,7 @@ func TestBuildChildHandlerRegisters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildChildHandler: %v", err)
 	}
-	runtime := durable.NewFake()
+	runtime := durabletest.NewFake()
 	if err := registerChildHandler(runtime, handler); err != nil {
 		t.Fatalf("registerChildHandler: %v", err)
 	}
@@ -451,7 +452,7 @@ func TestChildCancellerDrivesDurableCancel(t *testing.T) {
 	if err := children.InsertRun(t.Context(), run); err != nil {
 		t.Fatalf("InsertRun: %v", err)
 	}
-	runtime := durable.NewFake()
+	runtime := durabletest.NewFake()
 	started := make(chan struct{}, 1)
 	runtime.RegisterHandler("child.run", func(ctx context.Context, inv durable.Invocation) error {
 		close(started)
@@ -667,7 +668,7 @@ func TestProductionHandlerDurablePerStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildChildHandler: %v", err)
 	}
-	runtime := durable.NewFake()
+	runtime := durabletest.NewFake()
 	if err := registerChildHandler(runtime, handler); err != nil {
 		t.Fatalf("registerChildHandler: %v", err)
 	}
@@ -729,7 +730,7 @@ func TestProductionHandlerDurablePerStep(t *testing.T) {
 }
 
 func TestDurableCancelRunSignalsCounterpart(t *testing.T) {
-	runtime := durable.NewFake()
+	runtime := durabletest.NewFake()
 	signalled := make(chan []byte, 1)
 	runtime.RegisterHandler("test-cancel", func(ctx context.Context, inv durable.Invocation) error {
 		payload, timedOut, ok := inv.Wait(ctx, "child-cancel/child/ch-cancel", 10*time.Second)
@@ -845,7 +846,7 @@ func TestProductionHandlerSignalsSettlement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildChildHandler: %v", err)
 	}
-	runtime := durable.NewFake()
+	runtime := durabletest.NewFake()
 	if err := registerChildHandler(runtime, handler); err != nil {
 		t.Fatalf("registerChildHandler: %v", err)
 	}

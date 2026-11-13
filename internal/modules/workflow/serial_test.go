@@ -10,20 +10,21 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
-func serialTestSetup(t *testing.T, tools *fakeToolRunner) (*Interpreter, *durable.Fake, *Store) {
+func serialTestSetup(t *testing.T, tools *fakeToolRunner) (*Interpreter, *durabletest.Fake, *Store) {
 	t.Helper()
 	return driverTestSetup(t, tools, DriverSerial)
 }
 
-func driverTestSetup(t *testing.T, tools ToolRunner, driver Driver) (*Interpreter, *durable.Fake, *Store) {
+func driverTestSetup(t *testing.T, tools ToolRunner, driver Driver) (*Interpreter, *durabletest.Fake, *Store) {
 	t.Helper()
 	registry, err := buildTestRegistry()
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	interpreter := NewInterpreter(disk, fake, &Options{
 		MaxConcurrentSteps: 2,
@@ -35,7 +36,7 @@ func driverTestSetup(t *testing.T, tools ToolRunner, driver Driver) (*Interprete
 	return interpreter, fake, disk
 }
 
-func holdInvocation(t *testing.T, fake *durable.Fake, key string) (durable.Invocation, durable.RunRef) {
+func holdInvocation(t *testing.T, fake *durabletest.Fake, key string) (durable.Invocation, durable.RunRef) {
 	t.Helper()
 	release := make(chan struct{})
 	invCh := make(chan durable.Invocation, 1)
@@ -74,7 +75,7 @@ func startSerialRun(t *testing.T, interpreter *Interpreter, disk *Store, spec *S
 	return summary.ID
 }
 
-func signalHolder(t *testing.T, fake *durable.Fake, ref durable.RunRef, name, payload string) {
+func signalHolder(t *testing.T, fake *durabletest.Fake, ref durable.RunRef, name, payload string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -305,7 +306,7 @@ func TestDriveSerialApprovalRequestRetryUsesDistinctKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	requester := &flakyApprovalRequester{}
 	interpreter := NewInterpreter(disk, fake, &Options{

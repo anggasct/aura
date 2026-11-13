@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -85,7 +86,7 @@ func newBatchRig(t *testing.T, size int, options *Options) *batchRig {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	invocations := make(chan durable.Invocation, 1)
 	fake.RegisterHandler("batch", func(ctx context.Context, inv durable.Invocation) error {
 		invocations <- inv

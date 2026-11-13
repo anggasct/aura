@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -347,7 +348,7 @@ type runFixture struct {
 	notify  *fakeNotifier
 	starter *recordingStarter
 	logs    *recordingLogs
-	runtime *durable.Fake
+	runtime *durabletest.Fake
 	service *Service
 	job     Job
 	horizon time.Time
@@ -359,7 +360,7 @@ func newRunFixture(t *testing.T, mutate func(*JobSpec)) *runFixture {
 	if mutate != nil {
 		mutate(spec)
 	}
-	f := &runFixture{store: newFakeJobStore(), turns: &fakeTurnRunner{}, notify: &fakeNotifier{}, starter: &recordingStarter{}, logs: &recordingLogs{}, runtime: durable.NewFake()}
+	f := &runFixture{store: newFakeJobStore(), turns: &fakeTurnRunner{}, notify: &fakeNotifier{}, starter: &recordingStarter{}, logs: &recordingLogs{}, runtime: durabletest.NewFake()}
 	runner, err := NewRunner(&RunnerDeps{Jobs: f.store, Turns: f.turns, Notify: f.notify, Starter: f.starter, Logger: slog.New(f.logs)})
 	if err != nil {
 		t.Fatalf("NewRunner(): %v", err)

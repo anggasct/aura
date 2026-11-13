@@ -14,7 +14,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -45,7 +45,7 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolContro
 	t.Helper()
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
 	runs := workflow.NewStore(db)
-	fake := durable.NewFake()
+	fake := durabletest.NewFake()
 	t.Cleanup(fake.Close)
 	interpreter := workflow.NewInterpreter(runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
 	registry, err := auraagent.Build([]config.AgentDefinition{{
@@ -165,7 +165,7 @@ func TestNonOwnersStartOnlyAllowlistedWorkflowsAndSeeOnlyTheirRuns(t *testing.T)
 func TestAllowlistNamingAnUnloadedWorkflowFailsStartup(t *testing.T) {
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
 	runs := workflow.NewStore(db)
-	interpreter := workflow.NewInterpreter(runs, durable.NewFake(), &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
+	interpreter := workflow.NewInterpreter(runs, durabletest.NewFake(), &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
 	registry, err := auraagent.Build([]config.AgentDefinition{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, toolsbuiltin.DefinitionNames(), nil)
 	if err != nil {
 		t.Fatal(err)

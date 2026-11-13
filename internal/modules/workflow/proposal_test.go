@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -117,7 +117,7 @@ func TestInterpreterResolvesStoredDefinitionsItDidNotLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	driver := NewInterpreter(disk, durable.NewFake(), &Options{MaxConcurrentSteps: 2, Tools: tools})
+	driver := NewInterpreter(disk, durabletest.NewFake(), &Options{MaxConcurrentSteps: 2, Tools: tools})
 	if err := driver.LoadAll(context.Background(), []*Spec{toolSpec("leaf")}, testValidationDeps()); err != nil {
 		t.Fatal(err)
 	}

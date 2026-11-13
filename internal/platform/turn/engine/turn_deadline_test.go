@@ -9,7 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
@@ -104,7 +104,7 @@ func closeInBubble(t *testing.T, engine *Engine) {
 	if err := engine.Shutdown(context.Background()); err != nil {
 		t.Errorf("Shutdown: %v", err)
 	}
-	if backend, ok := engine.durableRuntime.(*durable.Fake); ok {
+	if backend, ok := engine.durableRuntime.(*durabletest.Fake); ok {
 		backend.Close()
 	}
 	synctest.Wait()
