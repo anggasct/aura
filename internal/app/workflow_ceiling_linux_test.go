@@ -3,7 +3,6 @@
 package app
 
 import (
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,10 +35,7 @@ func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildAgentRegistry: %v", err)
 		}
-		runner, err := newWorkflowToolRunner(loadResultWithAll(t, &cfg), db, registry, slog.Default())
-		if err != nil {
-			t.Fatalf("newWorkflowToolRunner: %v", err)
-		}
+		runner := buildSurface(t, &surfaceInput{cfg: &cfg, db: db, registry: registry}).runner
 		return runner, registerToolProbe(t, runner)
 	}
 	scribe := func(tools ...string) config.AgentDefinition {

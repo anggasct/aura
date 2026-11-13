@@ -125,7 +125,7 @@ func (w *workflowShape) registry(t *testing.T) *auraagent.Registry {
 func (w *workflowShape) deps(registry *auraagent.Registry, runner *workflowToolRunner) *workflow.ValidationDeps {
 	return &workflow.ValidationDeps{
 		KnownTools: w.known, EffectfulTools: append([]string{}, w.effectful...), Agents: registry,
-		CheckToolCall: acceptToolCall, StepAllowed: stepCeiling(registry, runner.catalog),
+		CheckToolCall: acceptToolCall, StepAllowed: stepCeiling(registry, toolsbuiltin.NewStepCatalog(runner.broker.Definitions())),
 	}
 }
 
@@ -157,21 +157,13 @@ func newProductionToolRunner(t *testing.T, life *runLife, cfg *config.Config, re
 	if err := os.MkdirAll(cfg.Tools.Workspace, 0o700); err != nil {
 		t.Fatalf("create the tool workspace: %v", err)
 	}
-	built, err := newWorkflowToolRunner(loadResultWithAll(t, cfg), life.db, registry, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatalf("newWorkflowToolRunner: %v", err)
-	}
-	runner, ok := built.(*workflowToolRunner)
-	if !ok {
-		t.Fatalf("newWorkflowToolRunner returned %T, want *workflowToolRunner", built)
-	}
-	return runner
+	return buildSurface(t, &surfaceInput{cfg: cfg, db: life.db, registry: registry}).runner
 }
 
 func (w *workflowShape) registerStubs(t *testing.T, life *runLife, runner *workflowToolRunner) {
 	t.Helper()
 	for _, stub := range w.stubs {
-		toolbrokertest.Register(t, runner.executor.Broker(), toolbrokertest.Stub{
+		toolbrokertest.Register(t, runner.broker, toolbrokertest.Stub{
 			Name:             stub.tool.name,
 			RequiresApproval: stub.tool.approval,
 			Effectful:        stub.effectful,
@@ -190,7 +182,6 @@ func (w *workflowShape) host(t *testing.T, life *runLife) {
 	if w.wire != nil {
 		tools = w.wire(t, life, runner)
 	}
-	runner.catalog = toolsbuiltin.NewStepCatalog(runner.executor.Broker().Definitions())
 	deps := w.deps(registry, runner)
 	interpreter := workflow.NewInterpreter(life.workflows, life.runtime, &workflow.Options{
 		MaxConcurrentSteps: workflowMaxConcurrentSteps(&cfg),
@@ -299,7 +290,7 @@ func proofSpec(credential string) *workflow.Spec {
 
 func registerGitHubOnTheStub(t *testing.T, life *runLife, runner *workflowToolRunner) workflow.ToolRunner {
 	t.Helper()
-	if err := githubadapter.Register(runner.executor, &githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}, Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: "env://" + proofTokenEnv}}}); err != nil {
+	if err := githubadapter.Register(runner.in.Executor, &githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}, Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: "env://" + proofTokenEnv}}}); err != nil {
 		t.Fatalf("register the github tools: %v", err)
 	}
 	return runner

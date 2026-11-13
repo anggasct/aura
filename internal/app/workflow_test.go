@@ -21,7 +21,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func writeWorkflowFixtures(t *testing.T, definition string) *globalFlags {
@@ -343,25 +342,6 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	}
 }
 
-func TestNewWorkflowToolRunnerPropagatesConstructionErrors(t *testing.T) {
-	t.Setenv("HOME", "")
-	t.Setenv("XDG_DATA_HOME", "")
-	if _, err := newWorkflowToolRunner(loadResultWithAll(t, &config.Config{Tools: &config.Tools{}}), nil, nil, nil); err == nil {
-		t.Fatal("tool runner construction swallowed the storage path failure")
-	} else if !strings.Contains(err.Error(), "cannot resolve data directory") {
-		t.Fatalf("error = %v, want the data directory cause", err)
-	}
-	cfg := &config.Config{
-		Tools:   &config.Tools{Workspace: t.TempDir()},
-		Storage: config.Storage{Path: t.TempDir()},
-	}
-	if _, err := newWorkflowToolRunner(loadResultWithAll(t, cfg), nil, nil, nil); err == nil {
-		t.Fatal("tool runner construction swallowed the executor failure")
-	} else if !strings.Contains(err.Error(), "storage database is required") {
-		t.Fatalf("error = %v, want the executor cause", err)
-	}
-}
-
 func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	content, err := os.ReadFile(gf.configPath)
@@ -384,13 +364,22 @@ func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 	}
 }
 
+const (
+	stepDefinitionID      = "definition-1"
+	stepDefinitionDigest  = "digest-1"
+	stepDefinitionVersion = 1
+)
+
 func ownerStepCall(runID, stepID string, attempt int) *workflow.StepCall {
 	return &workflow.StepCall{
 		RunID: runID, StepID: stepID, Attempt: attempt,
 		Origin: workflow.RunOrigin{
 			PrincipalID: principal.OwnerID, PrincipalClass: string(principal.ClassOwner), AgentID: auraagent.DefaultID,
 		},
-		Approval: workflow.Approval{Kind: workflow.ApprovalInstalled},
+		DefinitionDigest: stepDefinitionDigest, DefinitionID: stepDefinitionID, DefinitionVersion: stepDefinitionVersion,
+		Approval: workflow.Approval{
+			Kind: workflow.ApprovalInstalled, Digest: stepDefinitionDigest, DefinitionID: stepDefinitionID, DefinitionVersion: stepDefinitionVersion,
+		},
 	}
 }
 
@@ -433,33 +422,8 @@ func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, s
 
 func newWorkflowToolRunnerFixtureWith(t *testing.T, configure func(*config.Config)) (workflow.ToolRunner, *sql.DB, string) {
 	t.Helper()
-	dir := t.TempDir()
-	workspace := filepath.Join(dir, "workspace")
-	if err := os.MkdirAll(workspace, 0o700); err != nil {
-		t.Fatalf("mkdir workspace: %v", err)
-	}
-	cfg := config.Default()
-	cfg.Tools.Workspace = workspace
-	cfg.Storage.Path = dir
-	if configure != nil {
-		configure(&cfg)
-	}
-	ctx := t.Context()
-	storetest.Seed(t, filepath.Join(dir, "aura.db"))
-	db, err := store.OpenDB(ctx, filepath.Join(dir, "aura.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	registry, err := buildAgentRegistry(&cfg)
-	if err != nil {
-		t.Fatalf("buildAgentRegistry: %v", err)
-	}
-	runner, err := newWorkflowToolRunner(loadResultWithAll(t, &cfg), db, registry, slog.Default())
-	if err != nil {
-		t.Fatalf("newWorkflowToolRunner: %v", err)
-	}
-	return runner, db, workspace
+	rig := newSurfaceRig(t, &surfaceRigOptions{configure: configure})
+	return rig.runner, rig.db, rig.workspace
 }
 
 func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
@@ -82,13 +83,13 @@ func workflowValidationDeps(cfg *config.Config) (*workflow.ValidationDeps, error
 	return deps, nil
 }
 
-func stepCeiling(registry *auraagent.Registry, catalog *toolsbuiltin.StepCatalog) func(agentID string, class principal.Class, toolID string) (allowed, personaKnown bool) {
+func stepCeiling(registry *auraagent.Registry, steps *toolsbuiltin.StepCatalog) func(agentID string, class principal.Class, toolID string) (allowed, personaKnown bool) {
 	return func(agentID string, class principal.Class, toolID string) (bool, bool) {
 		persona, known := registry.Lookup(agentID)
 		if !known {
 			return false, false
 		}
-		tool, found := catalog.Lookup(toolID)
+		tool, found := steps.Lookup(toolID)
 		return found && persona.StepToolAllowed(class, tool), true
 	}
 }
@@ -218,17 +219,20 @@ func workflowMaxConcurrentSteps(cfg *config.Config) int {
 	return cfg.Workflows.MaxConcurrentSteps
 }
 
-func workflowApprovalDecider(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
-	return true, nil
+type workflowToolRunnerInput struct {
+	Executor *toolsbuiltin.Executor
+	Sessions store.SessionService
+	Registry *auraagent.Registry
+	Runs     *workflow.Store
+	Route    *kitapproval.OwnerRoute
+	Logger   *slog.Logger
 }
 
 type workflowToolRunner struct {
-	executor      *toolsbuiltin.Executor
-	catalog       *toolsbuiltin.StepCatalog
-	sessions      store.SessionService
-	registry      *auraagent.Registry
-	caps          map[string][]string
-	orchestration map[string]bool
+	in     *workflowToolRunnerInput
+	broker *toolbroker.Broker
+	logger *slog.Logger
+	now    func() time.Time
 }
 
 type workflowToolIDs struct {
@@ -261,7 +265,7 @@ func workflowTrustLabel(kind workflow.ApprovalKind) (approval.TrustLabel, error)
 }
 
 func (r *workflowToolRunner) checkRunSession(ctx context.Context, sessionID string, origin *workflow.RunOrigin) error {
-	sess, err := r.sessions.Get(ctx, sessionID)
+	sess, err := r.in.Sessions.Get(ctx, sessionID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return &workflow.Error{Code: workflow.ErrorCodeSessionInvalid, Detail: "run session " + sessionID + " does not exist"}
@@ -273,41 +277,127 @@ func (r *workflowToolRunner) checkRunSession(ctx context.Context, sessionID stri
 	return nil
 }
 
-func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
-	if len(args) == 0 || string(args) == "{}" || string(args) == "null" {
-		return nil, &workflow.Error{
-			Code:   workflow.ErrorCodeStepFailed,
-			Detail: "tool step has no arguments: the workflow-core step model does not carry tool arguments, so no canned or placeholder payload is executed; real tool-step arguments ship with the durable-workflows feature",
+func checkStepApproval(call *workflow.StepCall) (approval.TrustLabel, error) {
+	trust, err := workflowTrustLabel(call.Approval.Kind)
+	if err != nil {
+		return "", err
+	}
+	record := &call.Approval
+	switch {
+	case record.Digest == "" || record.DefinitionID == "" || record.DefinitionVersion < 1:
+		return "", &workflow.Error{Code: workflow.ErrorCodeApprovalMissing, Detail: "step call carries an incomplete approval record"}
+	case record.Digest != call.DefinitionDigest:
+		return "", &workflow.Error{Code: workflow.ErrorCodeApprovalMissing, Detail: "step call approval digest does not match the run's definition digest"}
+	case record.DefinitionID != call.DefinitionID || record.DefinitionVersion != call.DefinitionVersion:
+		return "", &workflow.Error{Code: workflow.ErrorCodeApprovalMissing, Detail: "step call approval belongs to another definition"}
+	}
+	return trust, nil
+}
+
+func workflowToolError(toolID string, err error) error {
+	code, ok := toolbroker.CodeOf(err)
+	if !ok {
+		return err
+	}
+	if code == toolbroker.ResultCapabilityUnavailable {
+		return &workflow.Error{Code: workflow.ErrorCodeCapabilityUnavailable, Detail: "tool " + toolID + " needs a capability this host does not provide"}
+	}
+	if code == toolbroker.ResultApprovalRequired || code == toolbroker.ResultUntrustedInputNoApprover {
+		return &workflow.Error{Code: workflow.ErrorCodeApprovalRejected, Detail: err.Error()}
+	}
+	return err
+}
+
+func (r *workflowToolRunner) refused(ctx context.Context, call *workflow.StepCall, toolID string, err error) error {
+	var code string
+	if coded, ok := workflow.CodeOf(err); ok {
+		code = string(coded)
+	} else if coded, ok := toolbroker.CodeOf(err); ok {
+		code = string(coded)
+	}
+	r.logger.WarnContext(ctx, "workflow tool step refused before the broker", "component", "workflow",
+		"run_id", call.RunID, "step_id", call.StepID, "tool", toolID, "code", code, "error", err.Error())
+	return err
+}
+
+func (r *workflowToolRunner) ownsProposalRun(ctx context.Context, call *workflow.StepCall) error {
+	proposal, err := r.in.Runs.Proposal(ctx, call.Approval.ProposalID, r.now())
+	if err != nil {
+		return &workflow.Error{Code: workflow.ErrorCodeApprovalSpent, Detail: "the proposal's claimed run could not be read: " + err.Error()}
+	}
+	if call.RunID == "" || proposal.RunID != call.RunID {
+		return &workflow.Error{Code: workflow.ErrorCodeApprovalSpent, Detail: "the tainted proposal was approved for another run"}
+	}
+	return nil
+}
+
+func (r *workflowToolRunner) attaches(ctx context.Context, call *workflow.StepCall, request *toolbroker.ToolRequest) (bool, error) {
+	class := principal.ParseClass(call.Origin.PrincipalClass)
+	if class != principal.ClassOwner || call.Origin.PrincipalID != principal.OwnerID {
+		return r.broker.StandingApprovalAllowed(ctx, request)
+	}
+	if !request.Tainted {
+		return true, nil
+	}
+	if call.Approval.Kind == workflow.ApprovalProposal && call.Approval.Tainted {
+		return true, r.ownsProposalRun(ctx, call)
+	}
+	return false, nil
+}
+
+func (r *workflowToolRunner) grant(ctx context.Context, call *workflow.StepCall, request *toolbroker.ToolRequest) error {
+	attach, err := r.attaches(ctx, call, request)
+	if err != nil || !attach {
+		return err
+	}
+	if call.Approval.Kind == workflow.ApprovalProposal || call.Approval.Kind == workflow.ApprovalRoutine {
+		if _, err := r.broker.ExactCallText(request.ToolName, request.Arguments); err != nil {
+			return &workflow.Error{Code: workflow.ErrorCodePlanUnshowable, Detail: err.Error()}
 		}
 	}
-	call, ok := workflow.StepCallFrom(ctx)
-	if !ok {
-		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool step has no step call"}
+	grant, err := r.broker.GrantUntil(ctx, request, request.Deadline)
+	if err != nil {
+		return workflowToolError(request.ToolName, err)
 	}
-	if r.orchestration[toolID] {
+	request.Approval = &grant
+	return nil
+}
+
+func (r *workflowToolRunner) prepare(ctx context.Context, call *workflow.StepCall, toolID string, args json.RawMessage) (*toolbroker.ToolRequest, error) {
+	if _, scoped := durable.TurnScopeFrom(ctx); scoped {
+		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "a workflow tool step never runs inside a durable turn"}
+	}
+	definition, found := r.broker.Definition(toolID, "v1")
+	if !found {
+		return nil, &workflow.Error{Code: workflow.ErrorCodeCapabilityExceeded, Detail: "tool " + toolID + " is not registered"}
+	}
+	if definition.Orchestration {
 		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool " + toolID + " is an orchestration tool and cannot run as a workflow step"}
 	}
-	trust, err := workflowTrustLabel(call.Approval.Kind)
+	if toolID == toolsbuiltin.EmailSendToolName {
+		return nil, &workflow.Error{Code: workflow.ErrorCodeCapabilityUnavailable, Detail: "a workflow run has no email account to send from"}
+	}
+	trust, err := checkStepApproval(call)
 	if err != nil {
 		return nil, err
 	}
 	class := principal.ParseClass(call.Origin.PrincipalClass)
-	persona, ok := r.registry.Lookup(call.Origin.AgentID)
+	persona, ok := r.in.Registry.Lookup(call.Origin.AgentID)
 	if !ok {
 		return nil, &workflow.Error{Code: workflow.ErrorCodePersonaMissing, Detail: "persona " + call.Origin.AgentID + " is not configured"}
 	}
-	if tool, found := r.catalog.Lookup(toolID); !found || !persona.StepToolAllowed(class, tool) {
+	if !persona.StepToolAllowed(class, &definition) {
 		return nil, &workflow.Error{Code: workflow.ErrorCodeCapabilityExceeded, Detail: "tool " + toolID + " is outside the ceiling of persona " + call.Origin.AgentID + " for " + string(class) + " runs"}
 	}
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool step has no deadline"}
 	}
-	ids := workflowToolIDsFor(&call)
+	ids := workflowToolIDsFor(call)
 	if err := r.checkRunSession(ctx, ids.sessionID, &call.Origin); err != nil {
 		return nil, err
 	}
-	result, err := r.executor.Broker().Execute(ctx, &toolbroker.ToolRequest{
+	request := &toolbroker.ToolRequest{
 		RequestID:             ids.requestID,
 		SessionID:             ids.sessionID,
 		TurnID:                ids.turnID,
@@ -325,58 +415,52 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 		ToolName:              toolID,
 		ToolVersion:           "v1",
 		Arguments:             args,
-		Capabilities:          slices.Clone(r.caps[toolID]),
+		Capabilities:          slices.Clone(definition.RequiredCapabilities),
 		Trust:                 trust,
-	})
-	if code, ok := toolbroker.CodeOf(err); ok && code == toolbroker.ResultCapabilityUnavailable {
-		return nil, &workflow.Error{Code: workflow.ErrorCodeCapabilityUnavailable, Detail: "tool " + toolID + " needs a capability this host does not provide"}
 	}
-	if err != nil {
+	if err := r.grant(ctx, call, request); err != nil {
 		return nil, err
+	}
+	return request, nil
+}
+
+func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
+	call, ok := workflow.StepCallFrom(ctx)
+	if len(args) == 0 || string(args) == "{}" || string(args) == "null" {
+		return nil, r.refused(ctx, &call, toolID, &workflow.Error{
+			Code:   workflow.ErrorCodeStepFailed,
+			Detail: "tool step has no arguments: the workflow-core step model does not carry tool arguments, so no canned or placeholder payload is executed; real tool-step arguments ship with the durable-workflows feature",
+		})
+	}
+	if !ok {
+		return nil, r.refused(ctx, &call, toolID, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool step has no step call"})
+	}
+	request, err := r.prepare(ctx, &call, toolID, args)
+	if err != nil {
+		return nil, r.refused(ctx, &call, toolID, err)
+	}
+	result, err := r.execute(ctx, request)
+	if err != nil {
+		return nil, workflowToolError(toolID, err)
 	}
 	return result.Output, nil
 }
 
-func newWorkflowToolExecutor(result *config.LoadResult, db *sql.DB, logger *slog.Logger) (*toolsbuiltin.Executor, error) {
-	_, artifactRoot, _, err := storagePaths(result.Config)
-	if err != nil {
-		return nil, fmt.Errorf("resolve tool artifact root: %w", err)
-	}
-	if logger == nil {
-		logger = slog.Default()
-	}
-	executor, err := newToolExecutor(&toolExecutorInput{
-		result: result, db: db, artifactRoot: artifactRoot, logger: logger,
-		wiring: &toolWiring{decider: workflowApprovalDecider},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("build builtin tool executor: %w", err)
-	}
-	return executor, nil
+func (r *workflowToolRunner) execute(ctx context.Context, request *toolbroker.ToolRequest) (toolbroker.ToolResult, error) {
+	release := r.in.Route.Hold(request.SessionID, &kitapproval.Requester{Principal: request.PrincipalID, Class: request.PrincipalClass, Persona: request.AgentID})
+	defer release()
+	return r.broker.Execute(ctx, request)
 }
 
-func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, registry *auraagent.Registry, logger *slog.Logger) (workflow.ToolRunner, error) {
-	executor, err := newWorkflowToolExecutor(result, db, logger)
-	if err != nil {
-		return nil, err
+func newWorkflowToolRunner(in *workflowToolRunnerInput) (workflow.ToolRunner, error) {
+	if in == nil || in.Executor == nil || in.Executor.Broker() == nil || in.Sessions == nil || in.Registry == nil || in.Runs == nil {
+		return nil, invalidOptions("workflow tool runner needs an executor, sessions, a persona registry and a workflow store")
 	}
-	catalog, err := stepToolCatalog(result.Config)
-	if err != nil {
-		return nil, err
+	runner := &workflowToolRunner{in: in, broker: in.Executor.Broker(), logger: in.Logger, now: time.Now}
+	if runner.logger == nil {
+		runner.logger = slog.Default()
 	}
-	caps := make(map[string][]string)
-	definitions := executor.Definitions()
-	for i := range definitions {
-		caps[definitions[i].Name] = slices.Clone(definitions[i].RequiredCapabilities)
-	}
-	orchestration := make(map[string]bool)
-	registered := executor.Broker().Definitions()
-	for i := range registered {
-		if registered[i].Orchestration {
-			orchestration[registered[i].Name] = true
-		}
-	}
-	return &workflowToolRunner{executor: executor, catalog: catalog, sessions: store.NewSessionService(db), registry: registry, caps: caps, orchestration: orchestration}, nil
+	return runner, nil
 }
 
 func newWorkflowRunsCmd(gf *globalFlags) *cobra.Command {

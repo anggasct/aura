@@ -220,6 +220,8 @@ func EffectfulToolNames() []string {
 	return names
 }
 
+const EmailSendToolName = tools.EmailSendToolName
+
 func StepToolNames(personaTools []string) []string {
 	orchestration := map[string]bool{}
 	builtins := tools.Builtins()
