@@ -33,7 +33,6 @@ type pendingTransition struct {
 
 type StateTracker struct {
 	policy TransitionPolicy
-	now    func() time.Time
 	sink   EventSink
 
 	mu       sync.Mutex
@@ -54,7 +53,6 @@ func NewStateTracker(policy TransitionPolicy, sink EventSink, history func(ctx c
 	}
 	tracker := &StateTracker{
 		policy:   policy,
-		now:      func() time.Time { return time.Now().UTC() },
 		sink:     sink,
 		current:  make(map[string]Finding),
 		pending:  make(map[string]pendingTransition),
@@ -73,12 +71,10 @@ func NewStateTracker(policy TransitionPolicy, sink EventSink, history func(ctx c
 	return tracker, nil
 }
 
-func (t *StateTracker) SetClock(now func() time.Time) { t.now = now }
-
 func (t *StateTracker) Observe(ctx context.Context, findings []Finding) (committed []Transition, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	now := t.now()
+	now := time.Now().UTC()
 
 	for i := range findings {
 		finding := &findings[i]

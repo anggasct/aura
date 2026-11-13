@@ -99,10 +99,9 @@ func TestPartialModelTextStaysOutOfDeliveryAndPostTurnInput(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{adkPartialStep("par"), adkPartialStep("tial"), adkFinalStep("final answer")})
 		hook := &recordingHook{}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn}, executor)
-		mustCreateSession(t, db, "channel:333")
 		capture := &capturingAdapter{}
-		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		mustCreateSession(t, db, "channel:333")
 
 		if _, err := collect(t, engine, channelTurnRequest("channel:333", "turn-partial-delivery")); err != nil {
 			t.Fatalf("Run: %v", err)

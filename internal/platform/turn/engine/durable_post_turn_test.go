@@ -86,10 +86,10 @@ func TestDurableTurnRecordsItsPostTurnWork(t *testing.T) {
 	run := func(t *testing.T, cfg Config) (*durableHostRig, *lockedBuffer) {
 		t.Helper()
 		cfg.MaxActiveTurns, cfg.MaxPendingTurns = 4, 16
+		cfg.Channels = []runtimechannelhost.ChannelPort{&presenceCapture{}}
 		rig := newDurableHostRig(t, cfg, turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")}))
 		logs := &lockedBuffer{}
 		rig.engine.logger = slog.New(slog.NewTextHandler(logs, nil))
-		rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{&presenceCapture{}})
 		mustCreateSession(t, rig.db, "channel:333")
 		rig.startHost()
 		awaitTerminal(t, callTurn(context.WithoutCancel(t.Context()), rig.engine, channelPostTurnRequest("turn-1")), turn.EventKindTurnCompleted)
@@ -146,10 +146,10 @@ func (l *twoLives) run(t *testing.T) *durableHostRig {
 	t.Helper()
 	db := l.crash.db
 	l.cfg.MaxActiveTurns, l.cfg.MaxPendingTurns = 4, 16
+	l.cfg.Channels = []runtimechannelhost.ChannelPort{l.adapter}
 	rig := &durableHostRig{t: t, cfg: l.cfg, db: db, sessions: newHookedSessionStore(t, db)}
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello once")})
 	rig.build(executor)
-	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{l.adapter})
 	mustCreateSession(t, db, "channel:333")
 	rig.startHost()
 	_ = callTurn(context.WithoutCancel(t.Context()), rig.engine, channelPostTurnRequest("turn-1"))
@@ -163,7 +163,6 @@ func (l *twoLives) run(t *testing.T) *durableHostRig {
 		t.Fatalf("drop the other host: %v", err)
 	}
 	rig.build(executor)
-	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{l.adapter})
 	rig.startHost()
 	awaitTerminals(t, db, "turn-1")
 	return rig
@@ -230,12 +229,12 @@ func TestCancelledDurableTurnDoesItsPostTurnWork(t *testing.T) {
 		gate := make(chan struct{})
 		t.Cleanup(func() { close(gate) })
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("partial answer"), {Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+		presence = &presenceCapture{}
 		cfg.MaxActiveTurns, cfg.MaxPendingTurns = 4, 16
+		cfg.Channels = []runtimechannelhost.ChannelPort{presence}
 		rig = newDurableHostRig(t, cfg, executor)
 		logs = &lockedBuffer{}
 		rig.engine.logger = slog.New(slog.NewTextHandler(logs, nil))
-		presence = &presenceCapture{}
-		rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{presence})
 		mustCreateSession(t, rig.db, "channel:333")
 		rig.startHost()
 		outcome = callTurn(context.WithoutCancel(t.Context()), rig.engine, channelPostTurnRequest("turn-1"))
@@ -296,7 +295,6 @@ func TestPreemptedDurableTurnDoesItsPostTurnWorkOnce(t *testing.T) {
 				t.Helper()
 				rig.stopHost()
 				rig.build(executor)
-				rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{&presenceCapture{}})
 				rig.startHost()
 			},
 		},
@@ -313,8 +311,7 @@ func TestPreemptedDurableTurnDoesItsPostTurnWorkOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			hook, counter := &recordingHook{}, &recordingCounter{}
 			executor := newTwoInvocationExecutor()
-			rig := tc.rig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, PostTurnHook: hook.fn, CountTurn: counter.fn}, executor)
-			rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{&presenceCapture{}})
+			rig := tc.rig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, PostTurnHook: hook.fn, CountTurn: counter.fn, Channels: []runtimechannelhost.ChannelPort{&presenceCapture{}}}, executor)
 			mustCreateSession(t, rig.db, "channel:333")
 			rig.startHost()
 			_ = callTurn(context.WithoutCancel(t.Context()), rig.engine, channelPostTurnRequest("turn-1"))

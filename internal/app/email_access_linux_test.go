@@ -270,11 +270,12 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 		DefaultAgentID: auraagent.DefaultID,
 		Personas:       registryPersonas{registry: registry},
 		LiveEvents:     liveEvents,
+		Channels:       []runtimechannelhost.ChannelPort{adapter},
 	}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	host, err := runtimeengine.NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, slog.New(slog.DiscardHandler))
+	host, err := runtimeengine.NewHost(engine, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewHost: %v", err)
 	}

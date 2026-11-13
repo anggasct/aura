@@ -242,13 +242,6 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
-		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
-	}, events, store.NewDedupeStore(db), executor, nil)
-	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
-	}
 	router, err := auraagent.NewRouter(registry, &cfg.Channels, cfg.Bindings)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
@@ -274,7 +267,15 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	adapter.SetPersonaRouter(router)
 	settings := discordAccessSettings(cfg, db, nil, nil)
 	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals})
-	host, err := runtimeengine.NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, slog.New(slog.DiscardHandler))
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
+		DefaultAgentID: auraagent.DefaultID,
+		Personas:       registryPersonas{registry: registry},
+		Channels:       []runtimechannelhost.ChannelPort{adapter},
+	}, events, store.NewDedupeStore(db), executor, nil)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	host, err := runtimeengine.NewHost(engine, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewHost: %v", err)
 	}

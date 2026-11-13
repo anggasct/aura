@@ -10,9 +10,8 @@ import (
 )
 
 type Host struct {
-	runtime  *Engine
-	adapters []runtimechannelhost.ChannelPort
-	logger   *slog.Logger
+	runtime *Engine
+	logger  *slog.Logger
 
 	mu        sync.Mutex
 	runCancel context.CancelFunc
@@ -20,15 +19,14 @@ type Host struct {
 	wg        sync.WaitGroup
 }
 
-func NewHost(runtime *Engine, adapters []runtimechannelhost.ChannelPort, logger *slog.Logger) (*Host, error) {
-	if runtime == nil {
-		return nil, invalidArgument("runtime must not be nil")
+func NewHost(engine *Engine, logger *slog.Logger) (*Host, error) {
+	if engine == nil {
+		return nil, invalidArgument("engine must not be nil")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	runtime.SetChannelAdapters(adapters)
-	return &Host{runtime: runtime, adapters: adapters, logger: logger}, nil
+	return &Host{runtime: engine, logger: logger}, nil
 }
 
 func (h *Host) Start(ctx context.Context) error {
@@ -42,7 +40,7 @@ func (h *Host) Start(ctx context.Context) error {
 	h.running = true
 	h.mu.Unlock()
 
-	for _, adapter := range h.adapters {
+	for _, adapter := range h.runtime.adapters {
 		h.wg.Add(1)
 		go func(a runtimechannelhost.ChannelPort) {
 			defer h.wg.Done()
