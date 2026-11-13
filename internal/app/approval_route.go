@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
@@ -73,12 +74,49 @@ func approvalUnavailable(err error) bool {
 	return ok && code == telegram.ErrorCodeApprovalUnavailable
 }
 
-func newOwnerRoute(adapters []approvalAdapter, routed func(ctx context.Context, result string)) (*approval.OwnerRoute, error) {
+func approvalUnanswered(err error) bool {
+	if code, ok := discord.CodeOf(err); ok && (code == discord.ErrorCodeApprovalUnavailable || code == discord.ErrorCodeApprovalTimeout) {
+		return true
+	}
+	code, ok := telegram.CodeOf(err)
+	return ok && (code == telegram.ErrorCodeApprovalUnavailable || code == telegram.ErrorCodeApprovalTimeout)
+}
+
+func newOwnerApprovalRouter(adapters []approvalAdapter, routed func(ctx context.Context, result string)) *ownerApprovalRouter {
 	approvers := make([]ownerApprover, 0, len(adapters))
 	for _, adapter := range adapters {
 		approvers = append(approvers, adapter)
 	}
-	return approval.NewOwnerRoute(&ownerApprovalRouter{approvers: approvers, routed: routed})
+	return &ownerApprovalRouter{approvers: approvers, routed: routed}
+}
+
+func newOwnerRoute(adapters []approvalAdapter, routed func(ctx context.Context, result string)) (*approval.OwnerRoute, error) {
+	return approval.NewOwnerRoute(newOwnerApprovalRouter(adapters, routed))
+}
+
+type workflowOwnerApprover struct {
+	owners approval.OwnerApprover
+	now    func() time.Time
+}
+
+var _ approval.OwnerApprover = (*workflowOwnerApprover)(nil)
+
+func (a *workflowOwnerApprover) DecideForOwner(ctx context.Context, prompt *approval.Prompt, requester *approval.Requester) (bool, error) {
+	card := *prompt
+	card.StandingGrantAllowed = false
+	card.ExpiresAt = prompt.ExpiresAt.Add(-prompt.Timeout)
+	if !card.ExpiresAt.After(a.now()) {
+		return false, nil
+	}
+	accepted, err := a.owners.DecideForOwner(ctx, &card, requester)
+	if err != nil && approvalUnanswered(err) {
+		return false, nil
+	}
+	return accepted, err
+}
+
+func newWorkflowRoute(adapters []approvalAdapter, routed func(ctx context.Context, result string)) (*approval.OwnerRoute, error) {
+	return approval.NewOwnerRoute(&workflowOwnerApprover{owners: newOwnerApprovalRouter(adapters, routed), now: time.Now})
 }
 
 func approvalChannels(adapters []approvalAdapter, ownerRoute *approval.OwnerRoute) []approvalChannel {

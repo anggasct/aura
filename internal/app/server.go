@@ -63,6 +63,7 @@ type serverBuild struct {
 	approvalAdapters   []approvalAdapter
 	emailMailboxes     []*email.Adapter
 	ownerRoute         *approval.OwnerRoute
+	workflowRoute      *approval.OwnerRoute
 	accessRecorder     *telemetry.AccessRecorder
 	mcp                *mcpRuntime
 	personaRecorder    *telemetry.PersonaRecorder
@@ -149,10 +150,20 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 			return toolWiring{}, err
 		}
 	}
+	var workflowRoute *approval.OwnerRoute
+	if len(approvalAdapters) > 0 {
+		workflowRoute, err = newWorkflowRoute(approvalAdapters, accessRecorder.ApprovalRouted)
+		if err != nil {
+			return toolWiring{}, err
+		}
+	}
 	s.channels, s.checks, s.approvalAdapters = channelAdapters, channelChecks, approvalAdapters
-	s.ownerRoute, s.accessRecorder = ownerRoute, accessRecorder
+	s.ownerRoute, s.workflowRoute, s.accessRecorder = ownerRoute, workflowRoute, accessRecorder
 	s.emailMailboxes = wireEmailOwnerAccess(channelAdapters, ownerRoute, approvalAdapters)
 	approvalTargets := approvalChannels(approvalAdapters, ownerRoute)
+	if workflowRoute != nil {
+		approvalTargets = append(approvalTargets, workflowRoute)
+	}
 	return toolWiring{
 		observer:  toolObserver(toolRecorder),
 		decider:   channelApprovalDecider(approvalTargets),
