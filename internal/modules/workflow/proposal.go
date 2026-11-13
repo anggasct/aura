@@ -243,10 +243,7 @@ func scanProposal(row proposalRow) (*Proposal, error) {
 }
 
 func (i *Interpreter) CompileProposal(spec *Spec, allowed []string) (*Graph, error) {
-	i.depsMu.Lock()
-	deps := i.deps
-	i.depsMu.Unlock()
-	graph, err := Compile(spec, deps)
+	graph, err := Compile(spec, i.ValidationDeps())
 	if err != nil {
 		return nil, err
 	}
@@ -269,8 +266,15 @@ func (s *Store) AttachProposalRun(ctx context.Context, id, runID string) error {
 	return nil
 }
 
-func (i *Interpreter) ValidationDeps() ValidationDeps {
+func (i *Interpreter) ValidationDeps() *ValidationDeps {
 	i.depsMu.Lock()
 	defer i.depsMu.Unlock()
-	return i.deps
+	deps := i.deps
+	return &deps
+}
+
+func (i *Interpreter) setDeps(deps *ValidationDeps) {
+	i.depsMu.Lock()
+	defer i.depsMu.Unlock()
+	i.deps = *deps
 }

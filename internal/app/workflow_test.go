@@ -24,6 +24,11 @@ import (
 
 func writeWorkflowFixtures(t *testing.T, definition string) *globalFlags {
 	t.Helper()
+	return writeWorkflowFixturesWith(t, definition, "")
+}
+
+func writeWorkflowFixturesWith(t *testing.T, definition, extraConfig string) *globalFlags {
+	t.Helper()
 	dir := t.TempDir()
 	defsDir := filepath.Join(dir, "workflows")
 	if err := os.MkdirAll(defsDir, 0o700); err != nil {
@@ -50,7 +55,7 @@ storage:
   path: ` + dir + `
 workflows:
   definitions_dir: ` + defsDir + `
-`
+` + extraConfig
 	configPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -238,7 +243,7 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	}
 	disk := workflow.NewStore(db)
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames()}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), CheckToolCall: acceptToolCall}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
@@ -304,7 +309,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	}
 	disk := workflow.NewStore(db)
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames()}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), CheckToolCall: acceptToolCall}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
@@ -482,9 +487,10 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 			{ID: "run_tool", DependsOn: []string{"approve"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: toolPtr("write_file")}, Timeout: 5 * time.Second},
 		},
 	}
-	deps := workflow.ValidationDeps{
+	deps := &workflow.ValidationDeps{
 		KnownTools:     toolsbuiltin.DefinitionNames(),
 		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
+		CheckToolCall:  acceptToolCall,
 	}
 	ctx := t.Context()
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
@@ -679,7 +685,7 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 		t.Fatalf("load fixture spec: %v", err)
 	}
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durable.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames()}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), CheckToolCall: acceptToolCall}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())

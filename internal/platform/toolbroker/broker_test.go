@@ -130,6 +130,7 @@ func TestBrokerBindsExactApprovalAndReturnsUntrustedResult(t *testing.T) {
 		t.Fatalf("redacted output = %s", result.Output)
 	}
 	request.Arguments = json.RawMessage(`{"command":["printf","changed"]}`)
+	request.IdempotencyKey = "idempotency-changed"
 	if _, err := broker.Execute(context.Background(), request); classOf(err) != ResultPolicyDenied {
 		t.Fatalf("mutated approval error = %v", err)
 	}

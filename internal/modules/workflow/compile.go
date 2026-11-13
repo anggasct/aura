@@ -9,7 +9,7 @@ type Graph struct {
 	Dependents map[string][]string
 }
 
-func Compile(spec *Spec, deps ValidationDeps) (*Graph, error) {
+func Compile(spec *Spec, deps *ValidationDeps) (*Graph, error) {
 	if err := Validate(spec, deps); err != nil {
 		return nil, err
 	}

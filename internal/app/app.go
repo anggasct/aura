@@ -329,6 +329,7 @@ type build struct {
 	models       *model.Registry
 	runtime      durable.Runtime
 	interpreter  *workflow.Interpreter
+	quarantined  []workflow.Quarantined
 	artifactRoot string
 
 	registry   *auraagent.Registry

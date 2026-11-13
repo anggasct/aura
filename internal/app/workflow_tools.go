@@ -122,10 +122,13 @@ func (c *workflowToolController) deliverProposalCard(ctx context.Context, offer 
 	}
 }
 
-func newWorkflowToolController(interpreter *workflow.Interpreter, runs *workflow.Store, registry *auraagent.Registry, targets ...replyTargeter) (*workflowToolController, error) {
+func newWorkflowToolController(interpreter *workflow.Interpreter, runs *workflow.Store, registry *auraagent.Registry, quarantined []string, targets ...replyTargeter) (*workflowToolController, error) {
 	definitions := registry.Definitions()
 	for i := range definitions {
 		for _, id := range definitions[i].Workflows {
+			if slices.Contains(quarantined, id) {
+				continue
+			}
 			if _, ok := interpreter.Spec(id); !ok {
 				return nil, &config.Error{Code: config.ErrorCodePersonaInvalid, Detail: fmt.Sprintf("persona %q workflows: %q is not a loaded workflow definition", definitions[i].ID, id)}
 			}

@@ -26,7 +26,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
 func newWorkflowCmd(gf *globalFlags) *cobra.Command {
@@ -49,10 +48,27 @@ func newWorkflowCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func workflowValidationDeps(cfg *config.Config) (workflow.ValidationDeps, error) {
-	deps := workflow.ValidationDeps{
+func stepToolCatalog(cfg *config.Config) (*toolsbuiltin.StepCatalog, error) {
+	credentials := githubCredentials(cfg)
+	if len(credentials) == 0 {
+		return toolsbuiltin.NewStepCatalog(nil), nil
+	}
+	definitions, err := github.CheckedDefinitions(credentials)
+	if err != nil {
+		return nil, fmt.Errorf("prepare github step tools: %w", err)
+	}
+	return toolsbuiltin.NewStepCatalog(definitions), nil
+}
+
+func workflowValidationDeps(cfg *config.Config) (*workflow.ValidationDeps, error) {
+	catalog, err := stepToolCatalog(cfg)
+	if err != nil {
+		return nil, err
+	}
+	deps := &workflow.ValidationDeps{
 		KnownTools:     toolsbuiltin.StepToolNames(personaToolNames(cfg)),
 		EffectfulTools: append(toolsbuiltin.EffectfulToolNames(), github.ToolNames()...),
+		CheckToolCall:  catalog.CheckArguments,
 	}
 	if cfg.Workflows != nil {
 		deps.DefaultStepTimeout = time.Duration(cfg.Workflows.DefaultStepTimeout)
@@ -199,9 +215,10 @@ func workflowApprovalDecider(ctx context.Context, prompt *toolbroker.ApprovalPro
 }
 
 type workflowToolRunner struct {
-	executor *toolsbuiltin.Executor
-	db       *sql.DB
-	caps     map[string][]string
+	executor      *toolsbuiltin.Executor
+	db            *sql.DB
+	caps          map[string][]string
+	orchestration map[string]bool
 }
 
 type workflowToolIDs struct {
@@ -233,6 +250,9 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 	if !ok {
 		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool step has no step call"}
 	}
+	if r.orchestration[toolID] {
+		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool " + toolID + " is an orchestration tool and cannot run as a workflow step"}
+	}
 	ids := workflowToolIDsFor(&call)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if r.db != nil {
@@ -241,25 +261,28 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 			ids.sessionID, "workflow", now, now,
 		)
 	}
-	output, err := r.executor.Execute(ctx, &runtimeadk.BuiltinToolRequest{
-		RequestID:       ids.requestID,
-		SessionID:       ids.sessionID,
-		TurnID:          ids.turnID,
-		IdempotencyKey:  ids.idempotencyKey,
-		EventSequence:   1,
-		EventInvocation: ids.requestID,
-		EventBranch:     "main",
-		EventAuthor:     "workflow",
-		ToolName:        toolID,
-		ToolVersion:     "v1",
-		Arguments:       args,
-		Capabilities:    slices.Clone(r.caps[toolID]),
-		Trust:           string(approval.TrustTrustedConfiguration),
+	result, err := r.executor.Broker().Execute(ctx, &toolbroker.ToolRequest{
+		RequestID:             ids.requestID,
+		SessionID:             ids.sessionID,
+		TurnID:                ids.turnID,
+		IdempotencyKey:        ids.idempotencyKey,
+		AllocateEventSequence: true,
+		EventInvocation:       ids.requestID,
+		EventBranch:           "main",
+		EventAuthor:           "workflow",
+		ToolName:              toolID,
+		ToolVersion:           "v1",
+		Arguments:             args,
+		Capabilities:          slices.Clone(r.caps[toolID]),
+		Trust:                 approval.TrustTrustedConfiguration,
 	})
 	if code, ok := toolbroker.CodeOf(err); ok && code == toolbroker.ResultCapabilityUnavailable {
 		return nil, &workflow.Error{Code: workflow.ErrorCodeCapabilityUnavailable, Detail: "tool " + toolID + " needs a capability this host does not provide"}
 	}
-	return output, err
+	if err != nil {
+		return nil, err
+	}
+	return result.Output, nil
 }
 
 func newWorkflowToolExecutor(result *config.LoadResult, db *sql.DB, logger *slog.Logger) (*toolsbuiltin.Executor, error) {
@@ -303,7 +326,14 @@ func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, logger *slog.L
 	for i := range definitions {
 		caps[definitions[i].Name] = slices.Clone(definitions[i].RequiredCapabilities)
 	}
-	return &workflowToolRunner{executor: executor, db: db, caps: caps}, nil
+	orchestration := make(map[string]bool)
+	registered := executor.Broker().Definitions()
+	for i := range registered {
+		if registered[i].Orchestration {
+			orchestration[registered[i].Name] = true
+		}
+	}
+	return &workflowToolRunner{executor: executor, db: db, caps: caps, orchestration: orchestration}, nil
 }
 
 func newWorkflowRunsCmd(gf *globalFlags) *cobra.Command {

@@ -26,6 +26,8 @@ import (
 
 type queuedRuntime struct{ durable.Runtime }
 
+func acceptToolCall(string, json.RawMessage) error { return nil }
+
 func (queuedRuntime) Start(_ context.Context, req durable.StartRequest) (durable.RunRef, error) {
 	return durable.RunRef{Key: req.Key}, nil
 }
@@ -302,10 +304,11 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 			{ID: "ship", DependsOn: []string{"hold"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: &listDir}, Timeout: 30 * time.Second},
 		},
 	}
-	deps := workflow.ValidationDeps{
+	deps := &workflow.ValidationDeps{
 		KnownTools:     []string{"read_file", "list_dir"},
 		EffectfulTools: []string{},
 		Agents:         registry,
+		CheckToolCall:  acceptToolCall,
 	}
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -438,10 +441,11 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 			{ID: "ship", DependsOn: []string{"hold"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: &listDir}, Timeout: 30 * time.Second},
 		},
 	}
-	deps := workflow.ValidationDeps{
+	deps := &workflow.ValidationDeps{
 		KnownTools:     []string{"read_file", "list_dir"},
 		EffectfulTools: []string{},
 		Agents:         registry,
+		CheckToolCall:  acceptToolCall,
 	}
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)

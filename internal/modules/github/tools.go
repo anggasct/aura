@@ -665,6 +665,32 @@ func credentialValidator(inner func(json.RawMessage) (json.RawMessage, error), c
 	}
 }
 
+func CheckedDefinitions(credentials []Credential) ([]tools.Definition, error) {
+	credentials = slices.Clone(credentials)
+	if len(credentials) == 0 {
+		return nil, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "github tools require at least one configured credential")
+	}
+	for i := range credentials {
+		if credentialIndex(credentials[:i], credentials[i].Name) >= 0 {
+			return nil, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "github credential %q is listed twice", credentials[i].Name)
+		}
+	}
+	names := make([]string, len(credentials))
+	for i := range credentials {
+		names[i] = credentials[i].Name
+	}
+	definitions := Definitions()
+	for i := range definitions {
+		definitions[i].Validator = credentialValidator(definitions[i].Validator, credentials)
+		schema, err := withCredentialEnum(definitions[i].Schema, names)
+		if err != nil {
+			return nil, fmt.Errorf("register %s: %w", definitions[i].Name, err)
+		}
+		definitions[i].Schema = schema
+	}
+	return definitions, nil
+}
+
 func Register(registrar ToolRegistrar, options *ToolOptions) error {
 	if registrar == nil {
 		return errors.New("github tools require a registrar")
@@ -672,33 +698,17 @@ func Register(registrar ToolRegistrar, options *ToolOptions) error {
 	if options == nil {
 		return toolbroker.Errorf(toolbroker.ResultInvalidArgument, optionsRequired)
 	}
-	credentials := slices.Clone(options.Credentials)
-	if len(credentials) == 0 {
-		return toolbroker.Errorf(toolbroker.ResultInvalidArgument, "github tools require at least one configured credential")
-	}
-	for i := range credentials {
-		if credentialIndex(credentials[:i], credentials[i].Name) >= 0 {
-			return toolbroker.Errorf(toolbroker.ResultInvalidArgument, "github credential %q is listed twice", credentials[i].Name)
-		}
-	}
-	names := make([]string, len(credentials))
-	for i := range credentials {
-		names[i] = credentials[i].Name
+	definitions, err := CheckedDefinitions(options.Credentials)
+	if err != nil {
+		return err
 	}
 	adapters := map[string]toolbroker.Adapter{
 		ToolCreatePR: CreatePRAdapter(options),
 		ToolMerge:    MergeAdapter(options),
 		ToolComment:  CommentAdapter(options),
 	}
-	definitions := Definitions()
 	rules := Rules()
 	for i := range definitions {
-		definitions[i].Validator = credentialValidator(definitions[i].Validator, credentials)
-		schema, err := withCredentialEnum(definitions[i].Schema, names)
-		if err != nil {
-			return fmt.Errorf("register %s: %w", definitions[i].Name, err)
-		}
-		definitions[i].Schema = schema
 		if err := registrar.RegisterTool(&definitions[i], adapters[definitions[i].Name], &rules[i]); err != nil {
 			return fmt.Errorf("register %s: %w", definitions[i].Name, err)
 		}

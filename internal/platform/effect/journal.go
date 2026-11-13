@@ -114,11 +114,12 @@ type PrepareRequest struct {
 	Request        json.RawMessage
 	EventKind      string
 
-	EventID         string
-	EventSequence   uint64
-	EventInvocation string
-	EventBranch     string
-	EventAuthor     string
+	EventID          string
+	EventSequence    uint64
+	AllocateSequence bool
+	EventInvocation  string
+	EventBranch      string
+	EventAuthor      string
 }
 
 type Journal struct {
@@ -255,11 +256,13 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	var payload json.RawMessage
 	var sequence uint64
 	var schemaVersion uint16
-	if kind == EventKindChannelRequested {
+	if kind == EventKindChannelRequested || req.AllocateSequence {
 		sequence, err = store.AllocateSequenceTx(ctx, tx, req.SessionID)
 		if err != nil {
 			return nil, err
 		}
+	}
+	if kind == EventKindChannelRequested {
 		payload, err = json.Marshal(channelRequestedPayload{
 			EffectIntentID: intentID,
 			Provider:       req.Provider,
@@ -285,7 +288,9 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 		if err != nil {
 			return nil, fmt.Errorf("effect: marshal tool.requested payload: %w", err)
 		}
-		sequence = req.EventSequence
+		if !req.AllocateSequence {
+			sequence = req.EventSequence
+		}
 		schemaVersion = toolRequestedSchemaVersion
 	}
 	eventID := req.EventID
@@ -348,6 +353,25 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	return intent, nil
 }
 
+func (j *Journal) Lookup(ctx context.Context, provider, operation, idempotencyKey string, request json.RawMessage) (*Intent, bool, error) {
+	normalized, err := normalizeRequest(request)
+	if err != nil {
+		return nil, false, err
+	}
+	existing, err := intentByKey(ctx, j.db, provider, operation, idempotencyKey)
+	if errors.Is(err, errIntentNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if existing.RequestDigest != digestRequest(normalized) {
+		return nil, false, codedError(ErrorCodeIdempotencyConflict,
+			fmt.Sprintf("effect: idempotency key %q already bound to a different request", idempotencyKey), nil)
+	}
+	return existing, true, nil
+}
+
 func (j *Journal) resolvePrepareConflict(ctx context.Context, req *PrepareRequest, digest string, cause error) (*Intent, error) {
 	existing, err := intentByKey(ctx, j.db, req.Provider, req.Operation, req.IdempotencyKey)
 	if err != nil && !errors.Is(err, errIntentNotFound) {
@@ -393,7 +417,10 @@ func validatePrepare(req *PrepareRequest) error {
 		if req.ToolCallID == "" {
 			problems = append(problems, errors.New("tool_call_id must not be empty"))
 		}
-		if req.EventSequence == 0 {
+		switch {
+		case req.AllocateSequence && req.EventSequence != 0:
+			problems = append(problems, errors.New("event_sequence must be zero when the journal allocates it"))
+		case !req.AllocateSequence && req.EventSequence == 0:
 			problems = append(problems, errors.New("event_sequence must be positive"))
 		}
 	case EventKindChannelRequested:

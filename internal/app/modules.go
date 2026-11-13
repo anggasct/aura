@@ -193,8 +193,18 @@ func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 	if err := built.Install(ctx, specs, deps); err != nil {
 		return err
 	}
-	if err := built.LoadAll(ctx, routines, deps); err != nil {
+	quarantined, err := built.LoadRoutines(ctx, routines, deps)
+	if err != nil {
 		return err
+	}
+	for i := range quarantined {
+		b.logger.WarnContext(ctx, "workflow routine does not compile and is quarantined", "component", "workflow",
+			"definition_id", quarantined[i].ID, "version", quarantined[i].Version, "error", quarantined[i].Err)
+	}
+	b.quarantined = quarantined
+	if b.onServer() {
+		check := workflowDefinitionsCheck(b.cfg, b.registry, quarantined)
+		b.addHealthCheck(&check)
 	}
 	b.interpreter = built
 	return nil
