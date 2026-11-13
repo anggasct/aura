@@ -45,7 +45,7 @@ func TestParkDurationSurvival(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, deps); err != nil {
 		t.Fatal(err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil)
+	summary, err := disk.CreateRun(ctx, spec, nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}

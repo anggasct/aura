@@ -239,7 +239,7 @@ func TestProofWorkflowSurvivesCrashWithGitHubTools(t *testing.T) {
 	}
 	interpreter := newInterpreter()
 
-	summary, err := disk.CreateRun(ctx, proofSpec(proofCredential), &workflow.RunInput{Objective: "ship it"})
+	summary, err := disk.CreateRun(ctx, proofSpec(proofCredential), &workflow.RunInput{Objective: "ship it"}, ownerOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

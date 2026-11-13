@@ -60,7 +60,7 @@ func digestOf(runID, stepID string) string {
 
 func stepCallAt(t *testing.T, runID, stepID string, attempt int) context.Context {
 	t.Helper()
-	return workflow.WithStepCall(t.Context(), workflow.StepCall{RunID: runID, StepID: stepID, Attempt: attempt})
+	return workflow.WithStepCall(t.Context(), &workflow.StepCall{RunID: runID, StepID: stepID, Attempt: attempt})
 }
 
 func TestWorkflowToolRunnerDerivesItsIdsFromTheStepCall(t *testing.T) {

@@ -24,6 +24,10 @@ import (
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
+func ownerOrigin() *workflow.RunOrigin {
+	return &workflow.RunOrigin{PrincipalID: "local-owner", PrincipalClass: "owner", AgentID: auraagent.DefaultID}
+}
+
 type liveServer struct {
 	t       *testing.T
 	binary  string
@@ -300,7 +304,7 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, deps); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, &workflow.RunInput{Objective: "survive restart"})
+	summary, err := disk.CreateRun(ctx, spec, &workflow.RunInput{Objective: "survive restart"}, ownerOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -436,7 +440,7 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, deps); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, &workflow.RunInput{Objective: "survive restart"})
+	summary, err := disk.CreateRun(ctx, spec, &workflow.RunInput{Objective: "survive restart"}, ownerOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

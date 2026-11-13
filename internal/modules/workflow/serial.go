@@ -84,6 +84,10 @@ func (i *Interpreter) driveSerial(ctx context.Context, inv durable.Invocation, r
 	if !ok {
 		return "", codedError(ErrorCodeDefinitionNotFound, "definition "+summary.DefinitionID+" is not loaded")
 	}
+	digest, err := Digest(compiled.spec)
+	if err != nil {
+		return "", err
+	}
 	input, err := i.store.RunInputFor(ctx, runID)
 	if err != nil {
 		return "", err
@@ -92,16 +96,18 @@ func (i *Interpreter) driveSerial(ctx context.Context, inv durable.Invocation, r
 		return "", err
 	}
 	execution := &stepExecution{
-		interpreter: i,
-		invocation:  inv,
-		spec:        compiled.spec,
-		graph:       compiled.graph,
-		runID:       runID,
-		input:       input,
-		outputs:     map[string]json.RawMessage{},
-		statuses:    map[string]string{},
-		awaiting:    map[string]bool{},
-		budget:      i.budgetFor(compiled.spec, inherited),
+		interpreter:      i,
+		invocation:       inv,
+		spec:             compiled.spec,
+		graph:            compiled.graph,
+		runID:            runID,
+		origin:           summary.Origin,
+		definitionDigest: digest,
+		input:            input,
+		outputs:          map[string]json.RawMessage{},
+		statuses:         map[string]string{},
+		awaiting:         map[string]bool{},
+		budget:           i.budgetFor(compiled.spec, inherited),
 	}
 	for _, stepID := range compiled.graph.Order {
 		execution.driveStep(ctx, compiled.graph.ByStep[stepID])

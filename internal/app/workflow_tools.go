@@ -17,6 +17,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -157,7 +158,7 @@ func (c *workflowToolController) Start(ctx context.Context, caller *toolsbuiltin
 		return toolsbuiltin.WorkflowRunState{}, fmt.Errorf("workflow %q is not loaded", id)
 	}
 	origin := &workflow.RunOrigin{
-		PrincipalID: caller.PrincipalID, PrincipalClass: string(caller.PrincipalClass), AgentID: caller.AgentID, SessionID: caller.SessionID,
+		PrincipalID: caller.PrincipalID, PrincipalClass: string(caller.PrincipalClass), AgentID: caller.AgentID, SessionID: caller.SessionID, Tainted: caller.Tainted,
 	}
 	for _, targeter := range c.targets {
 		if target, ok := targeter.ReplyTarget(caller.SessionID); ok && target.Channel == principal.ChannelDiscord {
@@ -165,7 +166,7 @@ func (c *workflowToolController) Start(ctx context.Context, caller *toolsbuiltin
 			break
 		}
 	}
-	summary, err := c.interpreter.StartFor(ctx, id, &workflow.RunInput{Objective: strings.TrimSpace(objective)}, origin)
+	summary, err := c.interpreter.Start(ctx, id, &workflow.RunInput{Objective: strings.TrimSpace(objective)}, origin)
 	if err != nil {
 		return toolsbuiltin.WorkflowRunState{}, err
 	}
@@ -246,12 +247,16 @@ func (c *workflowToolController) Propose(ctx context.Context, caller *toolsbuilt
 		return toolsbuiltin.WorkflowProposal{}, workflowRejection(err)
 	}
 	if err := c.runs.CreateProposal(ctx, &workflow.Proposal{
-		ID: id, SessionID: caller.SessionID, AgentID: caller.AgentID, PrincipalID: caller.PrincipalID,
+		ID: id, SessionID: caller.SessionID, AgentID: caller.AgentID, PrincipalID: caller.PrincipalID, Tainted: caller.Tainted,
 		Spec: normalized, Digest: digest, CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		return toolsbuiltin.WorkflowProposal{}, err
 	}
-	plan := workflow.RenderPlan(normalized, graph) + "\nApprove with: aura workflow proposal approve " + id
+	plan := workflow.RenderPlan(normalized, graph)
+	if caller.Tainted {
+		plan += "\n" + approval.UntrustedInputNotice
+	}
+	plan += "\nApprove with: aura workflow proposal approve " + id
 	c.offerProposal(ctx, caller.SessionID, id, plan)
 	return toolsbuiltin.WorkflowProposal{ProposalID: id, Digest: digest, Plan: plan}, nil
 }

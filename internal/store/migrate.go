@@ -61,6 +61,7 @@ var migrations = []migration{
 	{version: 43, sql: webhookExecutionSessionSchemaSQL},
 	{version: 44, sql: runtimeEventTurnFirstIndexSQL},
 	{version: 45, sql: effectIntentResultSchemaSQL},
+	{version: 46, sql: workflowRunTaintSchemaSQL},
 }
 
 const bootstrapSchemaMigrationTableSQL = `
@@ -939,6 +940,15 @@ ALTER TABLE effect_intent ADD COLUMN result_digest TEXT
             AND typeof(result_digest) = 'text'
             AND json_valid(result_json)
             AND length(CAST(result_json AS BLOB)) <= 1048576)));
+`
+
+const workflowRunTaintSchemaSQL = `
+ALTER TABLE workflow_run ADD COLUMN tainted INTEGER NOT NULL DEFAULT 0 CHECK (tainted IN (0,1));
+ALTER TABLE workflow_run ADD COLUMN parent_run_id TEXT REFERENCES workflow_run(id);
+ALTER TABLE workflow_proposal ADD COLUMN tainted INTEGER NOT NULL DEFAULT 0 CHECK (tainted IN (0,1));
+DROP INDEX workflow_run_completion_idx;
+CREATE INDEX workflow_run_completion_idx ON workflow_run(status, updated_at)
+    WHERE origin_session_id IS NOT NULL AND completion_notified_at IS NULL AND parent_run_id IS NULL;
 `
 
 func Migrate(ctx context.Context, db *sql.DB) error {

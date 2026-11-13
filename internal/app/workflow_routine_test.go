@@ -21,7 +21,7 @@ func succeededGeneratedRun(t *testing.T, controller *workflowToolController, run
 	if err := controller.interpreter.LoadAll(t.Context(), []*workflow.Spec{generated}, controller.interpreter.ValidationDeps()); err != nil {
 		t.Fatal(err)
 	}
-	run, err := controller.interpreter.Start(t.Context(), generated.ID, nil)
+	run, err := controller.interpreter.Start(t.Context(), generated.ID, nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}

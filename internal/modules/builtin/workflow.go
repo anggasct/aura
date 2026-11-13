@@ -27,6 +27,7 @@ type WorkflowCaller struct {
 	PrincipalID    string
 	PrincipalClass principal.Class
 	AgentID        string
+	Tainted        bool
 }
 
 type WorkflowInfo struct {
@@ -140,7 +141,7 @@ func (h *workflowHolder) adapter(call workflowCall) toolbroker.Adapter {
 			class = principal.ClassOwner
 		}
 		result, err := call(ctx, *controller, &WorkflowCaller{
-			SessionID: request.SessionID, PrincipalID: request.PrincipalID, PrincipalClass: class, AgentID: request.AgentID,
+			SessionID: request.SessionID, PrincipalID: request.PrincipalID, PrincipalClass: class, AgentID: request.AgentID, Tainted: request.Tainted,
 		}, args)
 		var rejection *WorkflowRejection
 		switch {

@@ -240,7 +240,7 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	if err := disk.SaveDefinition(ctx, spec); err != nil {
 		t.Fatalf("save definition: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil)
+	summary, err := disk.CreateRun(ctx, spec, nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	if err := disk.SaveDefinition(ctx, spec); err != nil {
 		t.Fatalf("save definition: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil)
+	summary, err := disk.CreateRun(ctx, spec, nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 
 func stepCallContext(t *testing.T) context.Context {
 	t.Helper()
-	return workflow.WithStepCall(t.Context(), workflow.StepCall{RunID: "run-1", StepID: "step-1"})
+	return workflow.WithStepCall(t.Context(), &workflow.StepCall{RunID: "run-1", StepID: "step-1"})
 }
 
 func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, string) {
@@ -489,7 +489,7 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 		t.Fatalf("Load: %v", err)
 	}
 
-	summary, err := interpreter.Start(ctx, spec.ID, nil)
+	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -608,7 +608,7 @@ END;`); err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
 
-	summary, err := interpreter.Start(ctx, "demo", nil)
+	summary, err := interpreter.Start(ctx, "demo", nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -679,7 +679,7 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	if err := disk.SaveDefinition(ctx, spec); err != nil {
 		t.Fatalf("save definition: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil)
+	summary, err := disk.CreateRun(ctx, spec, nil, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}

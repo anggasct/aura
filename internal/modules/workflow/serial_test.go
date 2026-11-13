@@ -17,7 +17,7 @@ func serialTestSetup(t *testing.T, tools *fakeToolRunner) (*Interpreter, *durabl
 	return driverTestSetup(t, tools, DriverSerial)
 }
 
-func driverTestSetup(t *testing.T, tools *fakeToolRunner, driver Driver) (*Interpreter, *durable.Fake, *Store) {
+func driverTestSetup(t *testing.T, tools ToolRunner, driver Driver) (*Interpreter, *durable.Fake, *Store) {
 	t.Helper()
 	registry, err := buildTestRegistry()
 	if err != nil {
@@ -67,7 +67,7 @@ func startSerialRun(t *testing.T, interpreter *Interpreter, disk *Store, spec *S
 	if err := interpreter.Load(ctx, spec, testValidationDeps()); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, input)
+	summary, err := disk.CreateRun(ctx, spec, input, ownerOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

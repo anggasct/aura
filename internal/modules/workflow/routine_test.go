@@ -28,7 +28,7 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	proposed.Steps = append(proposed.Steps, StepSpec{ID: "gate", DependsOn: []string{"read"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second})
 	generated := NormalizeProposal(proposed, "prop_r")
 	loadAll(t, interpreter, generated, threeToolSteps("defined", SourceDefined))
-	run, err := interpreter.Start(context.Background(), generated.ID, nil)
+	run, err := interpreter.Start(context.Background(), generated.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	if stored, err := disk.Definition(context.Background(), first.ID, 1); err != nil || stored.Version != 1 {
 		t.Fatalf("version 1 after saving version 2 = %+v, %v", stored, err)
 	}
-	defined, err := interpreter.Start(context.Background(), "defined", nil)
+	defined, err := interpreter.Start(context.Background(), "defined", nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,11 +78,11 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	}
 	fresh := NewInterpreter(disk, durable.NewFake(), &Options{Driver: DriverConcurrent, Tools: tools})
 	loadAll(t, fresh, toolSpec("leaf"))
-	started, err := fresh.StartKeyed(context.Background(), first.ID, &RunInput{}, nil, "sched-once")
+	started, err := fresh.StartKeyed(context.Background(), first.ID, &RunInput{}, ownerOrigin(), "sched-once")
 	if err != nil || started.DefinitionVersion != 2 {
 		t.Fatalf("starting a routine that is only in the store = %+v, %v", started, err)
 	}
-	again, err := fresh.StartKeyed(context.Background(), first.ID, &RunInput{}, nil, "sched-once")
+	again, err := fresh.StartKeyed(context.Background(), first.ID, &RunInput{}, ownerOrigin(), "sched-once")
 	if err != nil || again.ID != started.ID {
 		t.Fatalf("a replayed keyed start created %v, %v instead of returning %s", again, err, started.ID)
 	}

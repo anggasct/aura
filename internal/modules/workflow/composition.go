@@ -8,12 +8,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 )
 
-func (i *Interpreter) createChildRun(ctx context.Context, workflowID string, input *RunInput) (*RunSummary, error) {
+func (i *Interpreter) createChildRun(ctx context.Context, workflowID string, input *RunInput, parentRunID string, origin *RunOrigin) (*RunSummary, error) {
 	compiled, ok := i.specs.get(workflowID)
 	if !ok {
 		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+workflowID+" is not loaded")
 	}
-	return i.store.CreateRun(ctx, compiled.spec, input)
+	return i.store.createRun(ctx, compiled.spec, input, origin, newID("dur"), parentRunID)
 }
 
 func (i *Interpreter) driveInline(ctx context.Context, inv durable.Invocation, runID string, inherited *runBudget) (string, error) {
@@ -25,6 +25,10 @@ func (i *Interpreter) driveInline(ctx context.Context, inv durable.Invocation, r
 	if !ok {
 		return "", codedError(ErrorCodeDefinitionNotFound, "definition "+summary.DefinitionID+" is not loaded")
 	}
+	digest, err := Digest(compiled.spec)
+	if err != nil {
+		return "", err
+	}
 	input, err := i.store.RunInputFor(ctx, runID)
 	if err != nil {
 		return "", err
@@ -33,14 +37,16 @@ func (i *Interpreter) driveInline(ctx context.Context, inv durable.Invocation, r
 		return "", err
 	}
 	execution := &stepExecution{
-		interpreter: i,
-		invocation:  inv,
-		spec:        compiled.spec,
-		graph:       compiled.graph,
-		runID:       runID,
-		input:       input,
-		awaiting:    map[string]bool{},
-		budget:      i.budgetFor(compiled.spec, inherited),
+		interpreter:      i,
+		invocation:       inv,
+		spec:             compiled.spec,
+		graph:            compiled.graph,
+		runID:            runID,
+		origin:           summary.Origin,
+		definitionDigest: digest,
+		input:            input,
+		awaiting:         map[string]bool{},
+		budget:           i.budgetFor(compiled.spec, inherited),
 	}
 	if err := execution.run(ctx); err != nil {
 		return RunCancelled, err
@@ -61,7 +67,7 @@ func childUpdate(childID, status string, err error) *stepUpdate {
 }
 
 func (e *stepExecution) runWorkflowStep(ctx context.Context, step *StepSpec) *stepUpdate {
-	child, err := e.interpreter.createChildRun(ctx, *step.Executor.WorkflowID, e.input)
+	child, err := e.interpreter.createChildRun(ctx, *step.Executor.WorkflowID, e.input, e.runID, &e.origin)
 	if err != nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeChildFailed), Detail: err.Error(), EndedAt: nowPtr()}
 	}
@@ -76,7 +82,7 @@ func (e *stepExecution) runWorkflowStepSerial(ctx context.Context, step *StepSpe
 	}
 	key := "run/" + e.runID + "/step/" + step.ID + "/attempt/" + strconv.Itoa(attempt) + "/child"
 	raw, err := e.invocation.RunAction(ctx, key, func(actionCtx context.Context) ([]byte, error) {
-		child, err := e.interpreter.createChildRun(actionCtx, *step.Executor.WorkflowID, e.input)
+		child, err := e.interpreter.createChildRun(actionCtx, *step.Executor.WorkflowID, e.input, e.runID, &e.origin)
 		if err != nil {
 			return nil, err
 		}

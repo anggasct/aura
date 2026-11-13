@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -243,7 +244,7 @@ func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest
 		}
 	}
 	run, err := (*starter).StartKeyed(ctx, req.WorkflowID, &workflow.RunInput{Objective: input.Objective}, &workflow.RunOrigin{
-		PrincipalID: req.PrincipalID, PrincipalClass: string(principal.ClassForPrincipal(req.PrincipalID)),
+		PrincipalID: req.PrincipalID, PrincipalClass: string(principal.ClassForPrincipal(req.PrincipalID)), AgentID: auraagent.DefaultID,
 	}, "sched-"+req.IdempotencyKey)
 	if err != nil {
 		return schedule.TurnResult{}, err

@@ -114,7 +114,7 @@ func TestInterpreterRunsMixedWorkflowEndToEnd(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, testValidationDeps()); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "mixed", &RunInput{Objective: "ship it"})
+	summary, err := interpreter.Start(ctx, "mixed", &RunInput{Objective: "ship it"}, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestInterpreterSkipsDownstreamOnFalseCondition(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "skipflow", nil)
+	summary, err := interpreter.Start(ctx, "skipflow", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -239,7 +239,7 @@ func testStepTimeoutRetriesThenFailsRun(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "slowflow", nil)
+	summary, err := interpreter.Start(ctx, "slowflow", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestInterpreterBoundsConcurrentSteps(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "fan", nil)
+	summary, err := interpreter.Start(ctx, "fan", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestInterpreterWaitSuspendsAndResumes(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "waitflow", nil)
+	summary, err := interpreter.Start(ctx, "waitflow", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestInterpreterCancelReachesCancelled(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "cancelflow", nil)
+	summary, err := interpreter.Start(ctx, "cancelflow", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestStartUnknownDefinitionFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	disk := newTestStore(t)
 	interpreter := NewInterpreter(disk, durable.NewFake(), &Options{})
-	if _, err := interpreter.Start(ctx, "ghost", nil); err == nil {
+	if _, err := interpreter.Start(ctx, "ghost", nil, ownerOrigin()); err == nil {
 		t.Fatal("Start accepted an unknown definition")
 	} else if code, _ := CodeOf(err); code != ErrorCodeDefinitionNotFound {
 		t.Fatalf("code = %s, want workflow_definition_not_found", code)
@@ -511,7 +511,7 @@ func TestApprovalRejectionRoutesRunToFailure(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "rejectflow", nil)
+	summary, err := interpreter.Start(ctx, "rejectflow", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -567,7 +567,7 @@ func TestInterpreterSignalStepTimeoutRetryConvergesOnSignal(t *testing.T) {
 				if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 					t.Fatalf("Load: %v", err)
 				}
-				summary, err := interpreter.Start(ctx, spec.ID, nil)
+				summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())
 				if err != nil {
 					t.Fatalf("Start: %v", err)
 				}
@@ -620,7 +620,7 @@ func testTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "attemptflow", nil)
+	summary, err := interpreter.Start(ctx, "attemptflow", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -730,7 +730,7 @@ func TestInterpreterSinksOversizedOutputThroughArtifactSink(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "sinkflow", nil)
+	summary, err := interpreter.Start(ctx, "sinkflow", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -779,7 +779,7 @@ func TestInterpreterWaitPayloadOverInlineLimitIsSunk(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "waitbig", nil)
+	summary, err := interpreter.Start(ctx, "waitbig", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -825,7 +825,7 @@ func TestInterpreterOversizedOutputWithoutSinkFailsTheRun(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "nosink", nil)
+	summary, err := interpreter.Start(ctx, "nosink", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -865,7 +865,7 @@ func TestInterpreterStepPersistFailureFailsTheRun(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "persistfail", nil)
+	summary, err := interpreter.Start(ctx, "persistfail", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -902,7 +902,7 @@ func TestInterpreterSuspendedRunStaysSuspendedWhenSiblingCompletes(t *testing.T)
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "siblingflow", nil)
+	summary, err := interpreter.Start(ctx, "siblingflow", nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -951,7 +951,7 @@ func TestInterpreterSuspendedStepReleasesConcurrencySlot(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, spec.ID, nil)
+	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -988,11 +988,11 @@ func TestRunsOrdersRunsByIdentity(t *testing.T) {
 	if err := disk.SaveDefinition(ctx, spec); err != nil {
 		t.Fatalf("SaveDefinition: %v", err)
 	}
-	first, err := disk.CreateRun(ctx, spec, nil)
+	first, err := disk.CreateRun(ctx, spec, nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("first CreateRun: %v", err)
 	}
-	second, err := disk.CreateRun(ctx, spec, nil)
+	second, err := disk.CreateRun(ctx, spec, nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("second CreateRun: %v", err)
 	}
@@ -1117,7 +1117,7 @@ func TestApprovalRequesterPortFailsStepAndRun(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, spec.ID, nil)
+	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -1158,7 +1158,7 @@ func TestApprovalRequesterPortSucceedsOnSignal(t *testing.T) {
 	if err := interpreter.Load(ctx, spec, ValidationDeps{}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, spec.ID, nil)
+	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

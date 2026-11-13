@@ -54,8 +54,8 @@ VALUES (?, 'sess-1', 'turn-1', 'call-1', ?, 'builtin-tools', 'exec', 'effectful'
 		t.Fatalf("Migrate: %v", err)
 	}
 	applied, latest, err := SchemaVersions(ctx, db)
-	if err != nil || applied != 45 || latest != 45 {
-		t.Fatalf("schema = applied %d latest %d %v, want 45", applied, latest, err)
+	if err != nil || applied != 46 || latest != 46 {
+		t.Fatalf("schema = applied %d latest %d %v, want 46", applied, latest, err)
 	}
 	for _, want := range legacy {
 		var got legacyIntent

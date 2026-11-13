@@ -3,6 +3,8 @@ package workflow
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 type Kind string
@@ -120,10 +122,23 @@ type RunOrigin struct {
 	SessionID      string
 	ReplyAccount   string
 	ReplyChannelID string
+	Tainted        bool
+}
+
+func (o *RunOrigin) Complete() bool {
+	if o == nil || o.PrincipalID == "" || o.AgentID == "" {
+		return false
+	}
+	switch principal.Class(o.PrincipalClass) {
+	case principal.ClassOwner, principal.ClassTrusted, principal.ClassPublic:
+		return true
+	}
+	return false
 }
 
 type RunSummary struct {
 	Origin            RunOrigin
+	ParentRunID       string
 	ID                string
 	DefinitionID      string
 	DefinitionVersion int

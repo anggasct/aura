@@ -147,7 +147,7 @@ func TestComposedRunDrivesChildrenInProcess(t *testing.T) {
 	interpreter, _, disk := driverTestSetup(t, tools, DriverConcurrent)
 	interpreter.options.MaxConcurrentSteps = 1
 	loadAll(t, interpreter, toolSpec("leaf"), composingSpec("middle", "leaf"), composingSpec("top", "middle", "leaf"))
-	summary, err := interpreter.Start(context.Background(), "top", &RunInput{Objective: "nest"})
+	summary, err := interpreter.Start(context.Background(), "top", &RunInput{Objective: "nest"}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,9 +156,10 @@ func TestComposedRunDrivesChildrenInProcess(t *testing.T) {
 	if len(leaves) != 2 || len(childRuns(t, disk, "middle")) != 1 {
 		t.Fatalf("child runs: leaf=%d middle=%d", len(leaves), len(childRuns(t, disk, "middle")))
 	}
-	for _, leaf := range leaves {
-		if leaf.Status != RunSucceeded || leaf.Origin != (RunOrigin{}) {
-			t.Fatalf("leaf run = %+v", leaf)
+	for _, listed := range leaves {
+		leaf, err := disk.Run(context.Background(), listed.ID)
+		if err != nil || leaf.Status != RunSucceeded || leaf.Origin != *ownerOrigin() || leaf.ParentRunID == "" {
+			t.Fatalf("leaf run = %+v, %v", leaf, err)
 		}
 		input, err := disk.RunInputFor(context.Background(), leaf.ID)
 		if err != nil || input.Objective != "nest" {
@@ -175,7 +176,7 @@ func TestFailedChildFailsTheComposingStep(t *testing.T) {
 	disk := newTestStore(t)
 	interpreter := NewInterpreter(disk, durable.NewFake(), &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 2, Tools: failingTools{}})
 	loadAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
-	summary, err := interpreter.Start(context.Background(), "top", nil)
+	summary, err := interpreter.Start(context.Background(), "top", nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +196,7 @@ func TestSerialCompositionJournalsTheChildAndPropagatesCancel(t *testing.T) {
 	event := "never"
 	waiting := &Spec{ID: "waiting", Goal: "Wait", Version: 1, Source: SourceDefined, Steps: []StepSpec{{ID: "hold", Executor: ExecutorSpec{Kind: KindWait, Event: &event}, Timeout: time.Minute}}}
 	loadAll(t, interpreter, toolSpec("leaf"), waiting, composingSpec("top", "leaf"), composingSpec("stuck", "waiting"))
-	topRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "top"), &RunInput{})
+	topRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "top"), &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +208,7 @@ func TestSerialCompositionJournalsTheChildAndPropagatesCancel(t *testing.T) {
 	if leaves := childRuns(t, disk, "leaf"); len(leaves) != 1 || leaves[0].Status != RunSucceeded {
 		t.Fatalf("leaf runs after serial drive = %+v", leaves)
 	}
-	stuckRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "stuck"), &RunInput{})
+	stuckRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "stuck"), &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
