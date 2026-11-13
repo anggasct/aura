@@ -39,9 +39,9 @@ const (
 
 	emailEffectIDs = `SELECT id FROM effect_intent WHERE ` + emailEffectMatch
 
-	ownedEffectIDs = `SELECT id FROM effect_intent WHERE session_id IN (SELECT id FROM session WHERE owner_id = ?1 AND id NOT LIKE 'wf-%')`
+	ownedEffectIDs = `SELECT id FROM effect_intent WHERE session_id IN (SELECT id FROM session WHERE owner_id = ?1 AND id NOT GLOB 'wf-*')`
 
-	runSessionEffectIDs = `SELECT id FROM effect_intent WHERE session_id IN (SELECT id FROM session WHERE owner_id = ?1 AND id LIKE 'wf-%')`
+	runSessionEffectIDs = `SELECT id FROM effect_intent WHERE session_id IN (SELECT id FROM session WHERE owner_id = ?1 AND id GLOB 'wf-*')`
 
 	turnRunSessionID = `CASE WHEN json_valid(CAST(durable_run.payload AS TEXT)) THEN json_extract(CAST(durable_run.payload AS TEXT), '$.session_id') END`
 
@@ -70,14 +70,14 @@ func (c *ErasureCounts) targets() []erasureTarget {
 			`DELETE FROM effect_intent WHERE id IN (` + emailEffectIDs + `)`,
 		}},
 		{field: &c.MemoryDocuments, count: `SELECT COUNT(*) FROM memory_document WHERE owner_id = ?`, erase: []string{`DELETE FROM memory_document WHERE owner_id = ?`}},
-		{field: &c.Sessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ? AND id NOT LIKE 'wf-%'`, erase: []string{
+		{field: &c.Sessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ? AND id NOT GLOB 'wf-*'`, erase: []string{
 			`DELETE FROM effect_approval WHERE intent_id IN (` + ownedEffectIDs + `)`,
-			`DELETE FROM session WHERE owner_id = ? AND id NOT LIKE 'wf-%'`,
+			`DELETE FROM session WHERE owner_id = ? AND id NOT GLOB 'wf-*'`,
 			orphanedTurnRuns,
 		}},
-		{field: &c.RunSessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ? AND id LIKE 'wf-%'`, erase: []string{
+		{field: &c.RunSessions, count: `SELECT COUNT(*) FROM session WHERE owner_id = ? AND id GLOB 'wf-*'`, erase: []string{
 			`DELETE FROM effect_approval WHERE intent_id IN (` + runSessionEffectIDs + `)`,
-			`DELETE FROM session WHERE owner_id = ? AND id LIKE 'wf-%'`,
+			`DELETE FROM session WHERE owner_id = ? AND id GLOB 'wf-*'`,
 		}},
 		{field: &c.Grants, count: `SELECT COUNT(*) FROM principal_grant WHERE principal_id = ?`, erase: []string{`DELETE FROM principal_grant WHERE principal_id = ?`}, grant: true},
 		{field: &c.StandingGrants, count: `SELECT COUNT(*) FROM standing_grant WHERE principal_id = ?`, erase: []string{`DELETE FROM standing_grant WHERE principal_id = ?`}},

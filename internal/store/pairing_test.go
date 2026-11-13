@@ -213,4 +213,9 @@ func TestRunSessionsAreNotPrincipalActivity(t *testing.T) {
 	if activity[0].Sessions != 1 || activity[0].LastActive.Format("2006-01-02") != "2026-11-01" {
 		t.Fatalf("activity = %+v, want the chat session only, last active 2026-11-01", activity[0])
 	}
+	seedPersonaSession(t, db, "WF-chat", "discord:3", "kantor")
+	activity, err = ListPrincipalActivity(t.Context(), db)
+	if err != nil || len(activity) != 2 {
+		t.Fatalf("ListPrincipalActivity() with an upper-case WF- chat session = %+v, %v; want two principals", activity, err)
+	}
 }

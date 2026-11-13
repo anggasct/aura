@@ -399,6 +399,15 @@ func TestErasureCountsRunSessionsApart(t *testing.T) {
 		}
 	})
 
+	t.Run("an upper-case WF- chat session is a chat session", func(t *testing.T) {
+		db := newTestDB(t)
+		seedPersonaSession(t, db, "WF-chat-601", "discord:601", "lobby")
+		got, err := ErasePrincipal(t.Context(), db, "discord:601", false, ErasureOptions{})
+		if err != nil || got != (ErasureCounts{Sessions: 1}) {
+			t.Fatalf("dry run = %+v, %v; want one chat session", got, err)
+		}
+	})
+
 	t.Run("a principal with only a run session still has it, its events and its intents erased", func(t *testing.T) {
 		db := newTestDB(t)
 		seedPersonaSession(t, db, run, "discord:601", "lobby")
