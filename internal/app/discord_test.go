@@ -48,7 +48,7 @@ func testRouter(t *testing.T, cfg *config.Config) *auraagent.Router {
 func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 	db := discordTestDB(t)
 	defaults := config.Default()
-	adapters, checks, _, err := buildChannelAdapters(&defaults, testRouter(t, &defaults), db, t.TempDir(), nil, nil)
+	adapters, checks, _, err := buildChannelAdapters(&defaults, testRouter(t, &defaults), db, t.TempDir(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -60,7 +60,7 @@ func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 func TestBuildChannelAdapters_EnabledBuildsAdapterAndCheck(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
-	adapters, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+	adapters, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -91,7 +91,7 @@ func TestBuildChannelAdapters_ReportsUnmappedOwnerIdentity(t *testing.T) {
 			db := discordTestDB(t)
 			cfg := enabledDiscordConfig()
 			cfg.Owner = &config.Owner{Identities: tc.identities}
-			_, checks, _, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+			_, checks, _, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil)
 			if err != nil {
 				t.Fatalf("buildChannelAdapters(): %v", err)
 			}
@@ -132,7 +132,7 @@ func TestBuildChannelAdapters_RejectsBadTokenRef(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
 	cfg.Channels.Discord.Accounts[0].BotTokenRef = "not-a-reference"
-	if _, _, _, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil); err == nil {
+	if _, _, _, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil); err == nil {
 		t.Fatal("bad token reference accepted")
 	}
 }
@@ -195,7 +195,7 @@ func TestBuildChannelAdapters_OneAdapterPerAccount(t *testing.T) {
 		Persona:        "engineer",
 		AllowedUserIDs: []string{"111"},
 	})
-	ports, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+	ports, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -221,7 +221,7 @@ func TestBuildChannelAdapters_OneAdapterPerAccount(t *testing.T) {
 func TestBuildChannelAdapters_RequiresRouter(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
-	if _, _, _, err := buildChannelAdapters(&cfg, nil, db, t.TempDir(), nil, nil); err == nil {
+	if _, _, _, err := buildChannelAdapters(&cfg, nil, db, t.TempDir(), nil, nil, nil); err == nil {
 		t.Fatal("enabled discord without a persona router accepted")
 	}
 }

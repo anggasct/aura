@@ -74,6 +74,7 @@ type serverBuild struct {
 	broadcastRunner    *broadcast.Runner
 	scheduleRunner     *schedule.Runner
 	scheduledWorkflows *scheduleWorkflows
+	erasureRuns        *erasureRuns
 	childLedger        child.BudgetLedger
 	listeners          *server.Server
 	httpChat           *httpchat.Server
@@ -133,7 +134,7 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 	if err := recoverEmailEffects(ctx, cfg, db, b.logger); err != nil {
 		return toolWiring{}, err
 	}
-	channelAdapters, channelChecks, approvalAdapters, err := buildChannelAdapters(cfg, personaRouter, db, b.artifactRoot, meters, b.logger)
+	channelAdapters, channelChecks, approvalAdapters, err := buildChannelAdapters(cfg, personaRouter, db, b.artifactRoot, meters, s.erasureRuns, b.logger)
 	if err != nil {
 		return toolWiring{}, err
 	}
@@ -267,6 +268,7 @@ func (b *build) buildServerSurface(ctx context.Context) error {
 		b.buildDurableHost,
 		b.buildProbe,
 		func() error { return b.wireDurableListener(ctx) },
+		b.bindErasureRuns,
 		b.addEdgeListeners,
 		b.registerSweeps,
 	}
@@ -525,6 +527,13 @@ func (b *build) wireDurableListener(ctx context.Context) error {
 		}
 	}
 	return s.listeners.Add(durableListener)
+}
+
+func (b *build) bindErasureRuns() error {
+	if b.interpreter != nil {
+		b.server.erasureRuns.set(b.interpreter)
+	}
+	return nil
 }
 
 func (b *build) registerSweeps() error {

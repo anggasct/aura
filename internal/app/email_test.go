@@ -272,7 +272,7 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	}
 	adapter.SetPrincipalResolver(owners)
 	adapter.SetPersonaRouter(router)
-	settings := discordAccessSettings(cfg, db, nil)
+	settings := discordAccessSettings(cfg, db, nil, nil)
 	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals})
 	host, err := runtimeengine.NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, slog.New(slog.DiscardHandler))
 	if err != nil {

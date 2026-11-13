@@ -476,6 +476,7 @@ func TestForgetMe(t *testing.T) {
 		{name: "owner is not permitted", from: ownerAddress, body: "/forgetme confirm", wantNotice: definition.Message(config.MessageNotPermitted)},
 		{name: "owner asking first is not permitted either", from: ownerAddress, body: "/forgetme", wantNotice: definition.Message(config.MessageNotPermitted)},
 		{name: "erasure failure sends no confirmation", from: friendAddress, body: "/forgetme confirm", eraser: &recordingEraser{fail: errBoom}, wantErased: []string{"email:" + friendAddress}},
+		{name: "erasure waiting on workflow runs asks to repeat", from: friendAddress, body: "/forgetme confirm", eraser: &recordingEraser{fail: fmt.Errorf("blocked: %w", access.ErrForgetRunsStopping)}, wantErased: []string{"email:" + friendAddress}, wantNotice: definition.Message(config.MessageForgetmeStopping)},
 		{name: "extra word is an ordinary message", from: friendAddress, body: "/forgetme now", wantTurn: true},
 		{name: "second word after confirm is an ordinary message", from: friendAddress, body: "/forgetme confirm please", wantTurn: true},
 		{name: "command inside a sentence is an ordinary message", from: friendAddress, body: "please /forgetme confirm", wantTurn: true},

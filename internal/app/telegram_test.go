@@ -25,7 +25,7 @@ func enabledTelegramConfig() config.Config {
 func TestBuildChannelAdapters_TelegramBuildsAdapterAndCheck(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledTelegramConfig()
-	ports, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+	ports, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -53,7 +53,7 @@ func TestBuildChannelAdapters_DiscordAndTelegramTogether(t *testing.T) {
 	telegramCfg := enabledTelegramConfig()
 	cfg.Owner = telegramCfg.Owner
 	cfg.Channels.Telegram = telegramCfg.Channels.Telegram
-	ports, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+	ports, checks, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
 	}
@@ -97,7 +97,7 @@ func TestBuildTelegramWebhookServer(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			ports, _, _, err := buildChannelAdapters(&tc.cfg, testRouter(t, &tc.cfg), db, t.TempDir(), nil, nil)
+			ports, _, _, err := buildChannelAdapters(&tc.cfg, testRouter(t, &tc.cfg), db, t.TempDir(), nil, nil, nil)
 			if err != nil {
 				t.Fatalf("buildChannelAdapters(): %v", err)
 			}

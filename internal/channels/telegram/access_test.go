@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -690,6 +691,15 @@ func TestForgetMeCommand(t *testing.T) {
 		rig.run(t, privateText(10, allowedUserID, "/forgetme confirm"))
 		rig.assertQuiet(t)
 		if got := sentTo(rig.h.api, allowedUserID); len(got) != 0 {
+			t.Errorf("reply = %q", got)
+		}
+	})
+	t.Run("an erasure waiting on workflow runs asks to repeat the command", func(t *testing.T) {
+		eraser := &fakeEraser{err: fmt.Errorf("blocked: %w", access.ErrForgetRunsStopping)}
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Erasure: eraser}})
+		rig.run(t, privateText(10, allowedUserID, "/forgetme confirm"))
+		rig.assertQuiet(t)
+		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(config.MessageForgetmeStopping)}) {
 			t.Errorf("reply = %q", got)
 		}
 	})

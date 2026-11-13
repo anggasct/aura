@@ -250,7 +250,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	}
 	adapter.SetPrincipalResolver(owners)
 	adapter.SetPersonaRouter(router)
-	settings := discordAccessSettings(cfg, db, nil)
+	settings := discordAccessSettings(cfg, db, nil, nil)
 	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
 	adapter.SetMediaStore(&channelMediaStore{store: store.NewArtifactStore(db, h.artifacts, int64(cfg.Storage.ArtifactQuota))})
 	mailboxes := wireEmailOwnerAccess([]runtimechannelhost.ChannelPort{adapter}, route, approvers)

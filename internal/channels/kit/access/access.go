@@ -40,6 +40,8 @@ type BudgetGate interface {
 	Admit(ctx context.Context, principalID string, class principal.Class) (string, error)
 }
 
+var ErrForgetRunsStopping = errors.New("the principal's workflow runs are being stopped")
+
 type PrincipalEraser interface {
 	Forget(ctx context.Context, principalID string) error
 }

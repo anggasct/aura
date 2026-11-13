@@ -403,7 +403,7 @@ func newBuild(opts *Options) *build {
 	b := &build{opts: opts, result: opts.Config, cfg: opts.Config.Config}
 	switch opts.Surface {
 	case SurfaceServer:
-		b.server = &serverBuild{}
+		b.server = &serverBuild{erasureRuns: &erasureRuns{}}
 	case SurfaceChat:
 		b.chat = &chatBuild{}
 	case SurfaceCommand:

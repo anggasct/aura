@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -185,6 +186,9 @@ func (a *Adapter) forgetMe(ctx context.Context, target destination, inv *command
 	}
 	if err := a.access.Erasure.Forget(ctx, envelope.PrincipalID); err != nil {
 		a.logger.WarnContext(ctx, "forgetme erasure failed", "component", "telegram")
+		if errors.Is(err, access.ErrForgetRunsStopping) {
+			a.postNotice(ctx, target, definition.Message(config.MessageForgetmeStopping))
+		}
 		return
 	}
 	a.postNotice(ctx, target, definition.Message(config.MessageForgetmeDone))

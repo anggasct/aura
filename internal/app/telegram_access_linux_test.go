@@ -46,7 +46,7 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testi
 		t.Run(name, func(t *testing.T) {
 			db := discordTestDB(t)
 			cfg := tc.cfg
-			_, _, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil)
+			_, _, approvers, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil)
 			if err != nil {
 				t.Fatalf("buildChannelAdapters(): %v", err)
 			}

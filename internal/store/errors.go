@@ -60,6 +60,7 @@ const (
 	ErrorCodeKBCapExceeded             ErrorCode = "kb_cap_exceeded"
 	ErrorCodeKBSourceNotFound          ErrorCode = "kb_source_not_found"
 	ErrorCodeKBEmbeddingStale          ErrorCode = "kb_embedding_stale"
+	ErrorCodeErasureBlocked            ErrorCode = "erasure_blocked_by_live_runs"
 )
 
 type Error struct {
