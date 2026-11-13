@@ -1,0 +1,48 @@
+internal/channels/discord Adapter.SetAccess  # the adapter takes this collaborator at construction when the channels move
+internal/channels/discord Adapter.SetAdmissionObserver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/discord Adapter.SetCommands  # the adapter takes this collaborator at construction when the channels move
+internal/channels/discord Adapter.SetDropObserver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/discord Adapter.SetPersonaRouter  # the adapter takes this collaborator at construction when the channels move
+internal/channels/discord Adapter.SetPrincipalResolver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/discord Adapter.SetSecretVault  # the adapter takes this collaborator at construction when the channels move
+internal/channels/discord Adapter.SetSessionResolver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/discord Adapter.SetVisionService  # the adapter takes this collaborator at construction when the channels move
+internal/channels/email Adapter.SetAccess  # the adapter takes this collaborator at construction when the channels move
+internal/channels/email Adapter.SetAdmissionObserver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/email Adapter.SetDropObserver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/email Adapter.SetHandoffNotifier  # the adapter takes this collaborator at construction when the channels move
+internal/channels/email Adapter.SetMediaStore  # the adapter takes this collaborator at construction when the channels move
+internal/channels/email Adapter.SetOwnerRoute  # the adapter takes this collaborator at construction when the channels move
+internal/channels/email Adapter.SetPersonaRouter  # the adapter takes this collaborator at construction when the channels move
+internal/channels/email Adapter.SetPrincipalResolver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/email Adapter.SetVisionService  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetAccess  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetAdmissionObserver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetCommands  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetDenialObserver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetDropObserver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetMediaStore  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetPersonaRouter  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetPrincipalResolver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetSecretVault  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetSessionResolver  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetUpdateLedger  # the adapter takes this collaborator at construction when the channels move
+internal/channels/telegram Adapter.SetVisionService  # the adapter takes this collaborator at construction when the channels move
+internal/channels/terminal Console.SetApprovalBridge  # the console takes this collaborator at construction when the channels move
+internal/channels/terminal Console.SetClock  # the console takes this collaborator at construction when the channels move
+internal/channels/terminal Console.SetCommandRecorder  # the console takes this collaborator at construction when the channels move
+internal/channels/terminal Console.SetInputCloser  # the console takes this collaborator at construction when the channels move
+internal/channels/terminal Console.SetInterrupts  # the console takes this collaborator at construction when the channels move
+internal/channels/terminal Console.SetSkills  # the console takes this collaborator at construction when the channels move
+internal/channels/terminal Console.SetTTY  # the console takes this collaborator at construction when the channels move
+internal/modules/builtin Executor.SetCodeRunner  # builtin assembles tool adapters until each module provides its tools
+internal/modules/builtin Executor.SetEmailOutbox  # builtin assembles tool adapters until each module provides its tools
+internal/modules/builtin Executor.SetEventPublisher  # until live tool events reach the engine through an event bus
+internal/modules/builtin Executor.SetHandoffOpener  # builtin assembles tool adapters until each module provides its tools
+internal/modules/builtin Executor.SetKnowledgeSearcher  # builtin assembles tool adapters until each module provides its tools
+internal/modules/builtin Executor.SetWorkflowController  # builtin assembles tool adapters until each module provides its tools
+internal/modules/child Handler.SetSignaler  # until the child handler takes its signaler at construction
+internal/platform/effect Journal.SetEventPublisher  # until live tool events reach the engine through an event bus
+internal/platform/health StateTracker.SetClock  # until the tracker tests run in a synctest bubble
+internal/platform/turn/adk ADKExecutor.SetEventPublisher  # until live tool events reach the engine through an event bus
+internal/platform/turn/engine Engine.SetChannelAdapters  # until the engine takes its channel adapters at construction
