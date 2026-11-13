@@ -111,7 +111,7 @@ func registerToolProbe(t *testing.T, runner workflow.ToolRunner) *toolProbe {
 		t.Fatalf("runner is %T, want *workflowToolRunner", runner)
 	}
 	probe := &toolProbe{}
-	toolbrokertest.Register(t, toolRunner.executor.Broker(), toolbrokertest.Stub{
+	toolbrokertest.Register(t, toolRunner.broker, toolbrokertest.Stub{
 		Name: probeTool, Effectful: true,
 		Run: func(_ context.Context, req *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
 			captured := *req
@@ -121,7 +121,6 @@ func registerToolProbe(t *testing.T, runner workflow.ToolRunner) *toolProbe {
 			return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
 		},
 	})
-	toolRunner.catalog = toolsbuiltin.NewStepCatalog(toolRunner.executor.Broker().Definitions())
 	return probe
 }
 
@@ -470,7 +469,7 @@ func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
 	runner, db, workspace := newWorkflowToolRunnerFixtureWith(t, func(c *config.Config) {
 		c.Agents.Definitions = append(c.Agents.Definitions, config.AgentDefinition{
 			ID: "kantor", Description: "d", Instructions: "i", Audience: config.AudienceTrusted,
-			Tools: []string{"read_file", "write_file"}, PrincipalTools: []string{"write_file"}, Workflows: []string{"write-note"},
+			Tools: []string{"read_file", "write_file"}, PrincipalTools: []string{"read_file"}, Workflows: []string{"write-note"},
 		})
 		cfg = *c
 	})
@@ -542,7 +541,16 @@ func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
 	call := ownerStepCall(state.RunID, "write", 0)
 	call.Origin = run.Origin
 	_, err = runner.Invoke(stepContextFor(t, db, call), tool, writeFileArgs(t, "note.txt", "delegated"))
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultToolTierDenied {
-		t.Fatalf("Invoke as the delegated origin error = %v, want %s", err, toolbroker.ResultToolTierDenied)
+	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
+		t.Fatalf("Invoke as the delegated origin error = %v, want %s", err, workflow.ErrorCodeCapabilityExceeded)
+	}
+	steps, err := disk.Steps(t.Context(), state.RunID)
+	if err != nil {
+		t.Fatalf("Steps: %v", err)
+	}
+	for _, step := range steps {
+		if step.StepID == "write" && step.ErrorCode != string(workflow.ErrorCodeCapabilityExceeded) {
+			t.Fatalf("write step error code = %q, want %s", step.ErrorCode, workflow.ErrorCodeCapabilityExceeded)
+		}
 	}
 }

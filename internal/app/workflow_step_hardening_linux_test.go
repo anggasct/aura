@@ -69,8 +69,8 @@ func TestWorkflowToolRunnerRefusesAnOrchestrationTool(t *testing.T) {
 		t.Fatalf("runner is %T, want *workflowToolRunner", runner)
 	}
 	controller, opener := &countingWorkflowController{}, &countingHandoffOpener{}
-	toolRunner.executor.SetWorkflowController(controller)
-	toolRunner.executor.SetHandoffOpener(opener)
+	toolRunner.in.Executor.SetWorkflowController(controller)
+	toolRunner.in.Executor.SetHandoffOpener(opener)
 
 	for name, args := range map[string]json.RawMessage{
 		"workflow_status":  json.RawMessage(`{"run_id":"r"}`),
@@ -98,7 +98,7 @@ func TestStepToolCatalogMatchesTheBroker(t *testing.T) {
 	if !ok {
 		t.Fatalf("runner is %T, want *workflowToolRunner", runner)
 	}
-	broker := toolRunner.executor.Broker()
+	broker := toolRunner.broker
 	catalog, err := stepToolCatalog(&configured)
 	if err != nil {
 		t.Fatalf("stepToolCatalog: %v", err)

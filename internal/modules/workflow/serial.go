@@ -190,12 +190,12 @@ func (e *stepExecution) driveStep(ctx context.Context, step *StepSpec) {
 			e.recordSuccess(step.ID, update.Output)
 			return
 		}
-		if attempt >= step.Retry.Attempts {
+		if attempt >= step.Retry.Attempts || finalFailure(update.ErrorCode) {
 			if err := e.terminal(ctx, step.ID, update); err != nil {
 				e.failRun(ctx, step.ID, err)
 				return
 			}
-			e.failRun(ctx, step.ID, &Error{Code: ErrorCode(update.ErrorCode), Detail: fmt.Sprintf("step %s exhausted %d attempts", step.ID, attempt+1)})
+			e.failRun(ctx, step.ID, finalStepError(step.ID, attempt, update.ErrorCode))
 			return
 		}
 		if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepFailed, Attempt: attempt, ErrorCode: update.ErrorCode}); err != nil {

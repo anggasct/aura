@@ -115,12 +115,12 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 			e.recordSuccess(step.ID, update.Output)
 			return
 		}
-		if attempt >= step.Retry.Attempts {
+		if attempt >= step.Retry.Attempts || finalFailure(update.ErrorCode) {
 			if err := e.terminal(ctx, step.ID, update); err != nil {
 				e.failRun(ctx, step.ID, err)
 				return
 			}
-			e.failRun(ctx, step.ID, &Error{Code: ErrorCode(update.ErrorCode), Detail: fmt.Sprintf("step %s exhausted %d attempts", step.ID, attempt+1)})
+			e.failRun(ctx, step.ID, finalStepError(step.ID, attempt, update.ErrorCode))
 			return
 		}
 		if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepFailed, Attempt: attempt, ErrorCode: update.ErrorCode}); err != nil {
@@ -566,4 +566,21 @@ func (i *Interpreter) acquire() {
 
 func (i *Interpreter) release() {
 	<-i.inflight
+}
+
+func finalFailure(code string) bool {
+	switch ErrorCode(code) {
+	case ErrorCodeApprovalRejected, ErrorCodeApprovalMissing, ErrorCodeApprovalSpent, ErrorCodePlanUnshowable,
+		ErrorCodeCapabilityExceeded, ErrorCodePersonaMissing, ErrorCodeSessionInvalid, ErrorCodeExecutorInvalid:
+		return true
+	default:
+		return false
+	}
+}
+
+func finalStepError(stepID string, attempt int, code string) *Error {
+	if finalFailure(code) {
+		return &Error{Code: ErrorCode(code), Detail: fmt.Sprintf("step %s failed with %s, which is not retried", stepID, code)}
+	}
+	return &Error{Code: ErrorCode(code), Detail: fmt.Sprintf("step %s exhausted %d attempts", stepID, attempt+1)}
 }

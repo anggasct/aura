@@ -4,7 +4,6 @@ package app
 
 import (
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,10 +79,7 @@ func TestWorkflowToolRunnerFollowsTheHostCapabilitySet(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildAgentRegistry: %v", err)
 			}
-			runner, err := newWorkflowToolRunner(&result, db, registry, slog.New(slog.DiscardHandler))
-			if err != nil {
-				t.Fatalf("newWorkflowToolRunner: %v", err)
-			}
+			runner := buildSurface(t, &surfaceInput{result: &result, db: db, registry: registry}).runner
 			_, invokeErr := runner.Invoke(stepCallContext(t, db), tc.tool, json.RawMessage(tc.arguments))
 			_, statErr := os.Stat(filepath.Join(result.Config.Tools.Workspace, tc.effect))
 			if tc.wantDenied {
