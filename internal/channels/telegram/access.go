@@ -242,7 +242,7 @@ func (a *Adapter) postNotice(ctx context.Context, target destination, text strin
 	}
 	call, cancel := context.WithTimeout(ctx, noticeTimeout)
 	defer cancel()
-	if _, err := a.bot.sendMessage(call, token, &sendMessageRequest{ChatID: target.chatID, MessageThreadID: target.threadID, Text: chunks[0]}); err != nil {
+	if _, err := a.bot.sendMessage(call, token, &sendMessageRequest{ChatID: target.chatID, MessageThreadID: target.threadID, Text: chunks[0], LinkPreviewOptions: previewsDisabled()}); err != nil {
 		a.logger.WarnContext(ctx, "access notice delivery failed", "component", "telegram")
 	}
 }

@@ -357,3 +357,25 @@ func TestOpenHandoffHoldsTheNextRequesterMessage(t *testing.T) {
 		t.Fatalf("owner messages = %q, want the notice then the forwarded message", forwarded)
 	}
 }
+
+func TestNoticesDisableLinkPreviewsOnOptedInAccount(t *testing.T) {
+	rig := newApprovalRig(t, accessOpts{})
+	rig.adapter.account.LinkPreviews = true
+	rig.adapter.rememberTarget(handoffSession, memberTarget(principal.ClassTrusted, privateDest(requesterID)))
+	if _, err := rig.adapter.NotifyHandoff(t.Context(), handoffSession, "see https://evil.example/?d=x"); err != nil {
+		t.Fatalf("NotifyHandoff: %v", err)
+	}
+	if err := sendPlainText(t.Context(), rig.adapter.bot, testToken, privateDest(ownerUserID), "relay https://evil.example/?d=y"); err != nil {
+		t.Fatalf("sendPlainText: %v", err)
+	}
+	sends := rig.h.api.sends()
+	if len(sends) < 3 {
+		t.Fatalf("sendMessage calls = %d, want the owner notice, the requester notice and the relay", len(sends))
+	}
+	for _, body := range sends {
+		options, _ := body["link_preview_options"].(map[string]any)
+		if options["is_disabled"] != true {
+			t.Errorf("send %v lacks link_preview_options is_disabled true", body["text"])
+		}
+	}
+}

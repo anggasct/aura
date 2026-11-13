@@ -581,3 +581,34 @@ func TestMarshal_TelegramWebhookSecretStaysAReference(t *testing.T) {
 		t.Errorf("config dump does not carry the secret reference:\n%s", dump)
 	}
 }
+
+func TestLoad_TelegramLinkPreviews(t *testing.T) {
+	account := func(extra string) string {
+		return "version: 1\n" + telegramOwner + "channels:\n  telegram:\n    enabled: true\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n" + extra
+	}
+	valid := map[string]struct {
+		extra string
+		want  bool
+	}{
+		"omitted defaults to off": {extra: "", want: false},
+		"true is kept":            {extra: "        link_previews: true\n", want: true},
+		"false is kept":           {extra: "        link_previews: false\n", want: false},
+	}
+	for name, tc := range valid {
+		t.Run(name, func(t *testing.T) {
+			res, err := Load(writeDiscordConfig(t, account(tc.extra)))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := res.Config.Channels.Telegram.Accounts[0].LinkPreviews; got != tc.want {
+				t.Errorf("link_previews = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	t.Run("string is refused", func(t *testing.T) {
+		_, err := Load(writeDiscordConfig(t, account("        link_previews: \"yes\"\n")))
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
+			t.Fatalf("Load error = %v, want %s", err, ErrorCodeConfigInvalid)
+		}
+	})
+}

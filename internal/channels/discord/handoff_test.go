@@ -179,3 +179,36 @@ func TestReplyTargetNamesTheConversationChannel(t *testing.T) {
 		t.Fatalf("ReplyTarget = %+v, %v", target, ok)
 	}
 }
+
+func TestNoticesSuppressEmbedsOnOptedInAccount(t *testing.T) {
+	gate := &fakeHandoffGate{state: HandoffStateNone}
+	adapter, sink, stub := newHandoffAdapter(t, gate)
+	adapter.account.LinkPreviews = true
+	if admitted, err := adapter.admit(t.Context(), textMessage("9901", "4400", "", "601", "halo", nil)); err != nil || !admitted {
+		t.Fatalf("admit = %v, %v", admitted, err)
+	}
+	session := routedEnvelope(t, sink, "message:9901").ConversationID
+	if _, err := adapter.NotifyHandoff(t.Context(), session, "see https://evil.example/?d=x"); err != nil {
+		t.Fatalf("NotifyHandoff: %v", err)
+	}
+	gate.state = HandoffStateOpen
+	if handled, err := adapter.admit(t.Context(), textMessage("9911", "4400", "", "601", "https://evil.example/?d=y", nil)); err != nil || !handled {
+		t.Fatalf("admit = %v, %v; want handled", handled, err)
+	}
+	cases := map[string][]cardPost{
+		"requester notice":       stub.postsTo("4400"),
+		"owner notice and relay": stub.postsTo("555"),
+	}
+	for name, posts := range cases {
+		t.Run(name, func(t *testing.T) {
+			if len(posts) == 0 {
+				t.Fatal("no posts")
+			}
+			for _, post := range posts {
+				if flags, _ := post.body["flags"].(float64); flags != suppressEmbedsFlags {
+					t.Errorf("flags = %v, want %d", flags, suppressEmbedsFlags)
+				}
+			}
+		})
+	}
+}

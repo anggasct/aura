@@ -332,7 +332,8 @@ func TestApprovalCardDisablesLinkPreviews(t *testing.T) {
 		t.Fatalf("Deliver: %v", err)
 	}
 	reply := h.api.sends()[0]
-	if _, present := reply["link_preview_options"]; present {
-		t.Errorf("reply body = %v, want no link_preview_options", reply)
+	options, _ := reply["link_preview_options"].(map[string]any)
+	if options["is_disabled"] != true {
+		t.Errorf("reply link_preview_options = %v, want is_disabled true", reply["link_preview_options"])
 	}
 }

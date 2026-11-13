@@ -212,7 +212,7 @@ func restDeadline(ctx context.Context, deadline time.Time) (context.Context, con
 }
 
 func (a *Adapter) postMessage(ctx context.Context, token string, operation *SendOperation) (string, effect.Outcome, error) {
-	body, contentType, err := sendBody(operation)
+	body, contentType, err := sendBody(operation, a.account.LinkPreviews)
 	if err != nil {
 		return "", effect.Outcome{}, err
 	}
@@ -232,10 +232,12 @@ func (a *Adapter) postMessage(ctx context.Context, token string, operation *Send
 }
 
 func (a *Adapter) patchMessage(ctx context.Context, token string, operation *editOperation) (effect.Outcome, error) {
-	payload, err := json.Marshal(map[string]any{
+	edit := map[string]any{
 		"content":          operation.Text,
 		"allowed_mentions": map[string]any{"parse": []string{}},
-	})
+	}
+	suppressEmbedsUnlessOptedIn(edit, a.account.LinkPreviews)
+	payload, err := json.Marshal(edit)
 	if err != nil {
 		return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "edit payload is not serializable")
 	}
@@ -287,11 +289,18 @@ func isDialError(err error) bool {
 	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
-func sendBody(operation *SendOperation) (body []byte, contentType string, err error) {
+func suppressEmbedsUnlessOptedIn(message map[string]any, linkPreviews bool) {
+	if !linkPreviews {
+		message["flags"] = suppressEmbedsFlags
+	}
+}
+
+func sendBody(operation *SendOperation, linkPreviews bool) (body []byte, contentType string, err error) {
 	message := map[string]any{
 		"content":          operation.Text,
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	}
+	suppressEmbedsUnlessOptedIn(message, linkPreviews)
 	if operation.ReplyTo != "" {
 		message["message_reference"] = map[string]any{"message_id": operation.ReplyTo}
 	}

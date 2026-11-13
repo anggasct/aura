@@ -247,6 +247,7 @@ type DiscordAccount struct {
 	AllowedGuildIDs   []string `koanf:"allowed_guild_ids" yaml:"allowed_guild_ids"`
 	AllowedChannelIDs []string `koanf:"allowed_channel_ids" yaml:"allowed_channel_ids"`
 	AcceptDMs         bool     `koanf:"accept_dms" yaml:"accept_dms"`
+	LinkPreviews      bool     `koanf:"link_previews" yaml:"link_previews"`
 }
 
 type Telegram struct {
@@ -267,6 +268,7 @@ type TelegramAccount struct {
 	AllowedUserIDs     []string `koanf:"allowed_user_ids" yaml:"allowed_user_ids"`
 	AllowedChatIDs     []string `koanf:"allowed_chat_ids" yaml:"allowed_chat_ids"`
 	AcceptPrivateChats bool     `koanf:"accept_private_chats" yaml:"accept_private_chats"`
+	LinkPreviews       bool     `koanf:"link_previews" yaml:"link_previews"`
 }
 
 const TelegramMaxAttachmentBytes int64 = 20971520

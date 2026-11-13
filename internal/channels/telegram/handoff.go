@@ -112,7 +112,7 @@ func sendPlainText(ctx context.Context, bot *botClient, token string, dest desti
 	}
 	for _, chunk := range splitMessage(text) {
 		call, cancel := context.WithTimeout(ctx, sendTimeout)
-		_, err := bot.sendMessage(call, token, &sendMessageRequest{ChatID: dest.chatID, MessageThreadID: dest.threadID, Text: chunk})
+		_, err := bot.sendMessage(call, token, &sendMessageRequest{ChatID: dest.chatID, MessageThreadID: dest.threadID, Text: chunk, LinkPreviewOptions: previewsDisabled()})
 		cancel()
 		if err != nil {
 			return err
