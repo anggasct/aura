@@ -29,6 +29,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
@@ -224,8 +225,9 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 		t.Fatalf("newOwnerRoute: %v", err)
 	}
 	name := "email-access"
+	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
 	decider := channelApprovalDecider(approvalChannels(approvers, route))
-	builtin, err := toolsbuiltin.New(cfg, db, h.artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil))
+	builtin, err := toolsbuiltin.New(cfg, db, h.artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil), toolsbuiltin.WithLiveEvents(liveEvents))
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}
@@ -267,11 +269,11 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
 		DefaultAgentID: auraagent.DefaultID,
 		Personas:       registryPersonas{registry: registry},
+		LiveEvents:     liveEvents,
 	}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	executor.SetEventPublisher(engine)
 	host, err := runtimeengine.NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewHost: %v", err)

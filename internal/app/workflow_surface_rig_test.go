@@ -22,6 +22,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -142,6 +143,7 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 	}
 	executor, err := newToolExecutor(&toolExecutorInput{
 		result: result, db: in.db, artifactRoot: artifactRoot, logger: slog.New(slog.DiscardHandler), wiring: wiring,
+		events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)

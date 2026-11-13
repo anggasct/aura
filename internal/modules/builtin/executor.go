@@ -41,21 +41,23 @@ type Executor struct {
 	host      []string
 }
 
-type effectPublisherFunc func(*store.RuntimeEvent)
-
-func (f effectPublisherFunc) Publish(ev *store.RuntimeEvent) { f(ev) }
-
-func (e *Executor) SetEventPublisher(publish func(*store.RuntimeEvent)) {
-	if publish == nil || e.journal == nil {
-		return
-	}
-	e.journal.SetEventPublisher(effectPublisherFunc(publish))
+type options struct {
+	approvalReachable func(sessionID string) bool
+	liveEvents        effect.EventPublisher
+	liveEventsSet     bool
 }
 
-type Option func(*toolbroker.Options)
+type Option func(*options)
 
 func WithApprovalReachable(reachable func(sessionID string) bool) Option {
-	return func(options *toolbroker.Options) { options.ApprovalReachable = reachable }
+	return func(o *options) { o.approvalReachable = reachable }
+}
+
+func WithLiveEvents(events effect.EventPublisher) Option {
+	return func(o *options) {
+		o.liveEvents = events
+		o.liveEventsSet = true
+	}
 }
 
 func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capability.Report, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider, access toolbroker.AccessPolicy, opts ...Option) (*Executor, error) {
@@ -71,6 +73,13 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 	if logger == nil {
 		logger = slog.Default()
 	}
+	var applied options
+	for _, apply := range opts {
+		apply(&applied)
+	}
+	if applied.liveEventsSet && applied.liveEvents == nil {
+		return nil, &turn.Error{Code: turn.ErrorCodeInvalidArgument, Detail: "live events publisher must not be nil"}
+	}
 	handoff := &handoffHolder{}
 	emails := &emailHolder{}
 	workflows := &workflowHolder{}
@@ -80,7 +89,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 	if err != nil {
 		return nil, err
 	}
-	journal, err := effect.NewJournal(db, effect.Options{Logger: logger})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: logger, Events: applied.liveEvents})
 	if err != nil {
 		return nil, err
 	}
@@ -102,9 +111,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 		ApprovalGuards:       map[string]toolbroker.ApprovalGuard{tools.EmailSendToolName: emails.guard},
 		HostCapabilities:     host,
 		ArgumentChecks:       map[string]toolbroker.ArgumentCheck{codeKey(): code.check},
-	}
-	for _, apply := range opts {
-		apply(brokerOptions)
+		ApprovalReachable:    applied.approvalReachable,
 	}
 	broker, err := toolbroker.New(brokerOptions)
 	if err != nil {

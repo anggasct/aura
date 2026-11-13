@@ -37,12 +37,9 @@ internal/channels/terminal Console.SetSkills  # the console takes this collabora
 internal/channels/terminal Console.SetTTY  # the console takes this collaborator at construction when the channels move
 internal/modules/builtin Executor.SetCodeRunner  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin Executor.SetEmailOutbox  # builtin assembles tool adapters until each module provides its tools
-internal/modules/builtin Executor.SetEventPublisher  # until live tool events reach the engine through an event bus
 internal/modules/builtin Executor.SetHandoffOpener  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin Executor.SetKnowledgeSearcher  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin Executor.SetWorkflowController  # builtin assembles tool adapters until each module provides its tools
 internal/modules/child Handler.SetSignaler  # until the child handler takes its signaler at construction
-internal/platform/effect Journal.SetEventPublisher  # until live tool events reach the engine through an event bus
 internal/platform/health StateTracker.SetClock  # until the tracker tests run in a synctest bubble
-internal/platform/turn/adk ADKExecutor.SetEventPublisher  # until live tool events reach the engine through an event bus
 internal/platform/turn/engine Engine.SetChannelAdapters  # until the engine takes its channel adapters at construction

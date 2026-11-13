@@ -39,9 +39,8 @@ func (p *channelPublisher) Publish(ev *store.RuntimeEvent) {
 }
 
 func TestPreparePublishesToolRequestBeforeProviderInvocation(t *testing.T) {
-	journal, _ := newTestJournal(t)
 	published := make(chan *store.RuntimeEvent, 1)
-	journal.SetEventPublisher(&channelPublisher{events: published})
+	journal, _ := newTestJournalWithEvents(t, &channelPublisher{events: published})
 	executor, err := NewExecutor(journal)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
@@ -99,9 +98,8 @@ func (p *recordingPublisher) Publish(ev *store.RuntimeEvent) {
 
 func TestFailedPrepareIsNeverPublished(t *testing.T) {
 	t.Parallel()
-	journal, db := newTestJournal(t)
 	publisher := &recordingPublisher{}
-	journal.SetEventPublisher(publisher)
+	journal, db := newTestJournalWithEvents(t, publisher)
 	first := mustPrepare(t, journal, validPrepare(1))
 
 	conflicting := validPrepare(2)

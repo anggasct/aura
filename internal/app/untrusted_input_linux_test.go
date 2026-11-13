@@ -107,7 +107,8 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 		rig.asked.Add(1)
 		return false, nil
 	}
-	builtin, err := toolsbuiltin.New(cfg, db, artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, rig.access, toolsbuiltin.WithApprovalReachable(rig.reachable))
+	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
+	builtin, err := toolsbuiltin.New(cfg, db, artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, rig.access, toolsbuiltin.WithApprovalReachable(rig.reachable), toolsbuiltin.WithLiveEvents(liveEvents))
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}
@@ -123,11 +124,11 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 	rig.engine, err = runtimeengine.NewEngine(&runtimeengine.Config{
 		DefaultAgentID: auraagent.DefaultID,
 		Personas:       registryPersonas{registry: registry},
+		LiveEvents:     liveEvents,
 	}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	executor.SetEventPublisher(rig.engine)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), emailTestWait)
 		defer cancel()

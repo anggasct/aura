@@ -256,16 +256,17 @@ type toolExecutorInput struct {
 	artifactRoot string
 	logger       *slog.Logger
 	wiring       *toolWiring
+	events       *turn.EventBus
 }
 
 func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
-	if in == nil || in.result == nil || in.wiring == nil {
-		return nil, invalidOptions("tool executor input must carry a config result and wiring")
+	if in == nil || in.result == nil || in.wiring == nil || in.events == nil {
+		return nil, invalidOptions("tool executor input must carry a config result, wiring and the live event bus")
 	}
 	wiring := in.wiring
 	executor, err := toolsbuiltin.New(in.result.Config, in.db, in.artifactRoot, in.result.CapabilityReport, in.logger,
 		wiring.observer, wiring.decider, wiring.access,
-		toolsbuiltin.WithApprovalReachable(wiring.reachable))
+		toolsbuiltin.WithApprovalReachable(wiring.reachable), toolsbuiltin.WithLiveEvents(in.events))
 	if err != nil {
 		return nil, err
 	}
@@ -343,6 +344,7 @@ type build struct {
 	sessions   store.SessionService
 	events     store.EventStore
 	wiring     toolWiring
+	liveEvents *turn.EventBus
 	builtin    *toolsbuiltin.Executor
 	routeModel func(route string) (string, error)
 	ledger     *usage.Ledger
@@ -511,6 +513,7 @@ func (b *build) buildKernel(ctx context.Context) error {
 	b.registry = registry
 	b.sessions = store.NewSessionService(b.db)
 	b.events = store.NewEventStore(b.db)
+	b.liveEvents = turn.NewEventBus(b.logger)
 	if b.onServer() {
 		logPersonas(ctx, b.logger, registry)
 		b.wiring, err = b.serverToolWiring(ctx)
@@ -523,6 +526,7 @@ func (b *build) buildKernel(ctx context.Context) error {
 	if b.onServer() || b.cfg.Tools != nil {
 		builtin, err := newToolExecutor(&toolExecutorInput{
 			result: b.result, db: b.db, artifactRoot: b.artifactRoot, logger: b.logger, wiring: &b.wiring,
+			events: b.liveEvents,
 		})
 		if err != nil {
 			return err
@@ -555,6 +559,9 @@ func (b *build) buildKernel(ctx context.Context) error {
 }
 
 func (b *build) buildTurnRuntime() error {
+	if b.liveEvents == nil {
+		return invalidOptions("the turn runtime requires the live event bus")
+	}
 	var broker turn.ToolBroker = terminalBroker{}
 	if b.builtin != nil {
 		broker = b.builtin
@@ -587,11 +594,11 @@ func (b *build) buildTurnRuntime() error {
 		Durable:         durableConfig,
 		PostTurnHook:    composePostTurnHooks(hooks...),
 		CountTurn:       countTurn,
+		LiveEvents:      b.liveEvents,
 	}, b.events, store.NewDedupeStore(b.db), executor, b.logger)
 	if err != nil {
 		return err
 	}
-	executor.SetEventPublisher(engine)
 	b.engine = engine
 	return nil
 }

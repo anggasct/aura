@@ -29,6 +29,11 @@ type Config struct {
 	Durable         *DurableConfig
 	PostTurnHook    func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
 	CountTurn       func(ctx context.Context, req *turn.TurnRequest)
+	LiveEvents      LiveEventSource
+}
+
+type LiveEventSource interface {
+	Subscribe(handler func(*store.RuntimeEvent)) error
 }
 
 const HandlerName = "turn"
@@ -157,6 +162,11 @@ func NewEngine(config *Config, events EventStore, dedupe DedupeStore, executor T
 	}
 	if registrar, ok := engine.durableRuntime.(durable.HandlerRegistrar); ok {
 		registrar.RegisterHandler(HandlerName, engine.serveTurn)
+	}
+	if cfg.LiveEvents != nil {
+		if err := cfg.LiveEvents.Subscribe(engine.relay); err != nil {
+			return nil, err
+		}
 	}
 	return engine, nil
 }
@@ -740,7 +750,7 @@ func (e *Engine) broadcast(t *turnState, ev *store.RuntimeEvent) {
 	}
 }
 
-func (e *Engine) Publish(ev *store.RuntimeEvent) {
+func (e *Engine) relay(ev *store.RuntimeEvent) {
 	if ev == nil || ev.TurnID == "" {
 		return
 	}

@@ -453,11 +453,11 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 		DefaultAgentID:  "main",
 		Skills:          wiring.renderer,
 		Durable:         &runtimeengine.DurableConfig{Sessions: sessions, Runtime: rt},
+		LiveEvents:      turn.NewEventBus(logger),
 	}, events, store.NewDedupeStore(db), executor, logger)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	executor.SetEventPublisher(engine)
 	serveRuntime(t, rt)
 	t.Cleanup(func() {
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), suiteStopBound)

@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -52,17 +53,16 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dataRoot
-	published := 0
+	published := &countingPublisher{}
 	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 		return true, nil
-	}, nil)
+	}, nil, WithLiveEvents(published))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	if executor.journal == nil {
 		t.Fatal("executor wired without an effect journal")
 	}
-	executor.SetEventPublisher(func(*store.RuntimeEvent) { published++ })
 	if _, err := executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID:       "wiring-effect-1",
 		TurnID:          "turn-1",
@@ -87,8 +87,35 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 	if intents != 1 {
 		t.Fatalf("effect intents = %d, want 1", intents)
 	}
-	if published == 0 {
-		t.Fatal("event publisher was not forwarded to the effect journal")
+	if published.count != 1 {
+		t.Fatalf("published events = %d, want 1", published.count)
+	}
+}
+
+type countingPublisher struct{ count int }
+
+func (p *countingPublisher) Publish(*store.RuntimeEvent) { p.count++ }
+
+func TestNewRefusesANilLiveEventsPublisher(t *testing.T) {
+	dataRoot := t.TempDir()
+	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	cfg := config.Default()
+	cfg.Tools.Workspace = t.TempDir()
+	cfg.Storage.Path = dataRoot
+	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil, WithLiveEvents(nil))
+	if err == nil {
+		t.Fatal("New accepted a nil live events publisher")
+	}
+	if executor != nil {
+		t.Fatalf("New returned an executor with a nil live events publisher: %v", executor)
+	}
+	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeInvalidArgument {
+		t.Fatalf("code = %q (%v), want %q", code, ok, turn.ErrorCodeInvalidArgument)
 	}
 }
 

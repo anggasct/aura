@@ -17,6 +17,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -52,7 +53,7 @@ func githubProposalFixture(t *testing.T) *githubHarness {
 	}
 	executor, err := newToolExecutor(&toolExecutorInput{
 		result: loadResultWithAll(t, &cfg), db: h.db, artifactRoot: filepath.Join(dir, "artifacts"), logger: slog.New(slog.DiscardHandler),
-		wiring: &toolWiring{},
+		wiring: &toolWiring{}, events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})
 	if err != nil {
 		t.Fatal(err)

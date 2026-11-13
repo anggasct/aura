@@ -140,11 +140,10 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	h.engine, err = runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: rt.context}, events, store.NewDedupeStore(db), executor, nil)
+	h.engine, err = runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: rt.context, LiveEvents: turn.NewEventBus(nil)}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	executor.SetEventPublisher(h.engine)
 	if err := sessions.Create(t.Context(), &store.Session{ID: "sess_skill", OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`)}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}

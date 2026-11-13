@@ -290,11 +290,11 @@ func (r *durableTurnRig) startLife(t *testing.T) {
 		MaxPendingTurns: 16,
 		TurnTimeout:     time.Minute,
 		Durable:         &runtimeengine.DurableConfig{Sessions: sessionStore, Runtime: rt},
+		LiveEvents:      turn.NewEventBus(nil),
 	}, r.events, store.NewDedupeStore(r.db), executor, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	executor.SetEventPublisher(eng)
 	hostCtx, cancelHost := context.WithCancel(context.WithoutCancel(t.Context()))
 	hostDone := make(chan error, 1)
 	go func() { hostDone <- rt.Run(hostCtx) }()

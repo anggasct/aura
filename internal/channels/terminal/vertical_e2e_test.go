@@ -68,20 +68,8 @@ func (m *e2eApprovalModel) GenerateContent(_ context.Context, _ *adkmodel.LLMReq
 	}
 }
 
-type e2eEffectPublisher func(*store.RuntimeEvent)
-
-func (f e2eEffectPublisher) Publish(ev *store.RuntimeEvent) { f(ev) }
-
 type e2eBuiltinTools struct {
-	broker  *toolbroker.Broker
-	journal *effect.Journal
-}
-
-func (b e2eBuiltinTools) SetEventPublisher(publish func(*store.RuntimeEvent)) {
-	if publish == nil {
-		return
-	}
-	b.journal.SetEventPublisher(e2eEffectPublisher(publish))
+	broker *toolbroker.Broker
 }
 
 func (b e2eBuiltinTools) Definitions() []runtimeadk.BuiltinToolDefinition {
@@ -134,7 +122,8 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	db := storetest.OpenMigrated(t)
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
-	journal, err := effect.NewJournal(db, effect.Options{})
+	liveEvents := turn.NewEventBus(nil)
+	journal, err := effect.NewJournal(db, effect.Options{Events: liveEvents})
 	if err != nil {
 		t.Fatalf("journal: %v", err)
 	}
@@ -156,18 +145,17 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	if err != nil {
 		t.Fatalf("broker: %v", err)
 	}
-	builtin := e2eBuiltinTools{broker: broker, journal: journal}
+	builtin := e2eBuiltinTools{broker: broker}
 	model := &e2eApprovalModel{toolName: "exec", answer: answer}
 	modelName := model.Name()
 	executor, err := runtimeadk.NewADKExecutor("aura", modelName, auramodel.Set{modelName: model}, sessions, builtin, nil, nil, runtimeadk.WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("executor: %v", err)
 	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{LiveEvents: liveEvents}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
-	executor.SetEventPublisher(engine)
 	return &approvalE2EStack{engine: engine, sessions: sessions, calls: calls}
 }
 
