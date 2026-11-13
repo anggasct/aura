@@ -71,8 +71,18 @@ func TestWorkerCoalescesOverlap(t *testing.T) {
 	if calls.Load() != 2 {
 		t.Fatalf("calls = %d, want 2 coalesced passes", calls.Load())
 	}
-	if got := state.Load(); got.State != WorkerIdle {
-		t.Fatalf("state = %q, want idle", got.State)
+	// The pass sends on finished before it returns, so the worker stores the
+	// idle outcome slightly later; wait for it instead of reading it at once.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := state.Load()
+		if got.State == WorkerIdle {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("state = %q, want idle", got.State)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
