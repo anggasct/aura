@@ -3,7 +3,6 @@ package runtimeadk
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"iter"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -11,8 +10,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
-
-const adkFunctionCallIDPrefix = "adk-"
 
 type journaledModel struct {
 	inner adkmodel.LLM
@@ -41,7 +38,6 @@ func (m *journaledModel) GenerateContent(ctx context.Context, req *adkmodel.LLMR
 			}
 		}()
 		key := scope.NextModelCall()
-		callPrefix := adkFunctionCallIDPrefix + turnIDFromContext(ctx) + "-" + key
 		raw, err := scope.Invocation().RunAction(ctx, key, func(ctx context.Context) ([]byte, error) {
 			var chunks []*adkmodel.LLMResponse
 			for response, err := range m.inner.GenerateContent(ctx, req, stream) {
@@ -57,7 +53,6 @@ func (m *journaledModel) GenerateContent(ctx context.Context, req *adkmodel.LLMR
 					return nil, codedError(turn.ErrorCodeTurnCancelled, "model stream consumer stopped", nil)
 				}
 			}
-			nameFunctionCalls(chunks, callPrefix)
 			return json.Marshal(chunks)
 		})
 		if stopped {
@@ -76,24 +71,6 @@ func (m *journaledModel) GenerateContent(ctx context.Context, req *adkmodel.LLMR
 			if !yield(chunk, nil) {
 				return
 			}
-		}
-	}
-}
-
-func nameFunctionCalls(chunks []*adkmodel.LLMResponse, prefix string) {
-	n := 0
-	for _, chunk := range chunks {
-		if chunk == nil || chunk.Content == nil {
-			continue
-		}
-		for _, part := range chunk.Content.Parts {
-			if part == nil || part.FunctionCall == nil {
-				continue
-			}
-			if part.FunctionCall.ID == "" {
-				part.FunctionCall.ID = fmt.Sprintf("%s-%d", prefix, n)
-			}
-			n++
 		}
 	}
 }
