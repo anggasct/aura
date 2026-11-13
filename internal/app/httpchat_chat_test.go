@@ -19,6 +19,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/channels/httpchat"
+	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -105,6 +106,7 @@ agents:
 
 type httpChatHarness struct {
 	t       *testing.T
+	cfg     *config.Config
 	config  string
 	baseURL string
 	db      *sql.DB
