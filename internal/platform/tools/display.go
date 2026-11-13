@@ -20,6 +20,7 @@ const (
 	maxJSONDepth         = 10000
 	truncatedMarker      = "...[truncated]"
 	jsonUnicodeEscapeLen = len(`\u0000`)
+	maxRawMarks          = 2
 )
 
 var displayNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,63}$`)
@@ -93,11 +94,11 @@ func jsonText(arguments json.RawMessage, redact func(string) string) string {
 		text = "{}"
 	}
 	text = strings.ToValidUTF8(redact(text), "�")
-	escaped, consumed := escapeWithin(text, ApprovalDisplayLimit)
+	escaped, consumed := escapeWithin(text, ApprovalDisplayLimit, false)
 	if consumed == len(text) {
 		return escaped
 	}
-	escaped, _ = escapeWithin(text, ApprovalDisplayLimit-len(truncatedMarker))
+	escaped, _ = escapeWithin(text, ApprovalDisplayLimit-len(truncatedMarker), false)
 	return escaped + truncatedMarker
 }
 
@@ -170,7 +171,7 @@ func truncateTail(lines []string, label, value string) (string, error) {
 	if available < 0 {
 		return "", tooLarge()
 	}
-	escaped, consumed := escapeWithin(value, available)
+	escaped, consumed := escapeWithin(value, available, true)
 	tail := label + escaped + hiddenMarker(len(value)-consumed)
 	if len(lines) == 0 {
 		return tail, nil
@@ -241,11 +242,26 @@ func displayEscaped(r rune) bool {
 		return true
 	case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
 		return true
+	case unicode.In(r, unicode.Cf, unicode.Co, unicode.Cs, unicode.Variation_Selector, unicode.Other_Default_Ignorable_Code_Point):
+		return true
 	}
-	return false
+	return !unicode.In(r, unicode.L, unicode.M, unicode.N, unicode.P, unicode.S, unicode.Z)
 }
 
-func escapeRune(r rune) string {
+type displayEscaper struct {
+	field bool
+	marks int
+}
+
+func (e *displayEscaper) escape(r rune) string {
+	if unicode.Is(unicode.M, r) && !displayEscaped(r) {
+		e.marks++
+		if e.marks > maxRawMarks {
+			return fmt.Sprintf(`\u{%04x}`, r)
+		}
+		return string(r)
+	}
+	e.marks = 0
 	switch {
 	case r == '\n':
 		return `\n`
@@ -255,23 +271,31 @@ func escapeRune(r rune) string {
 		return `\t`
 	case displayEscaped(r):
 		return fmt.Sprintf(`\u{%04x}`, r)
+	case e.field && r == '\\':
+		return `\\`
 	}
 	return string(r)
 }
 
+func EscapeDisplayText(text string) string {
+	return escapeText(text)
+}
+
 func escapeText(text string) string {
+	escaper := displayEscaper{field: true}
 	var out strings.Builder
 	for _, r := range strings.ToValidUTF8(text, "�") {
-		out.WriteString(escapeRune(r))
+		out.WriteString(escaper.escape(r))
 	}
 	return out.String()
 }
 
-func escapeWithin(text string, budget int) (escaped string, consumed int) {
+func escapeWithin(text string, budget int, field bool) (escaped string, consumed int) {
+	escaper := displayEscaper{field: field}
 	var out strings.Builder
 	for consumed < len(text) {
 		r, size := utf8.DecodeRuneInString(text[consumed:])
-		piece := escapeRune(r)
+		piece := escaper.escape(r)
 		if out.Len()+len(piece) > budget {
 			break
 		}

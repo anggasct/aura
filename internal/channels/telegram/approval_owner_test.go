@@ -273,3 +273,30 @@ func TestServesPersonaFollowsTheAccountBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestApprovalCardDisablesLinkPreviews(t *testing.T) {
+	rig := newApprovalRig(t, accessOpts{definition: routedDefinition()})
+	synctest.Test(t, func(t *testing.T) {
+		prompt := approvalPrompt("http-session", httpPrincipal)
+		prompt.Arguments = "body: see https://evil.example/path"
+		result := rig.decideForOwner(t.Context(), prompt, httpRequester(principal.ClassTrusted))
+		card := rig.mustCard(t, 1)
+		rig.press(t, "cb-owner", ownerUserID, card, card.data(t, "Approve"))
+		if outcome, done := settled(result); !done || outcome.err != nil || !outcome.accepted {
+			t.Fatalf("decision = %+v (settled %v), want accepted", outcome, done)
+		}
+		sent := rig.h.api.sends()
+		options, _ := sent[0]["link_preview_options"].(map[string]any)
+		if options["is_disabled"] != true {
+			t.Errorf("link_preview_options = %v, want is_disabled true", sent[0]["link_preview_options"])
+		}
+	})
+	h := newHarness(t)
+	if _, err := h.adapter(t, nil).Deliver(t.Context(), deliveryRequest(t, h, "turn-reply", "see https://evil.example/path")); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	reply := h.api.sends()[0]
+	if _, present := reply["link_preview_options"]; present {
+		t.Errorf("reply body = %v, want no link_preview_options", reply)
+	}
+}

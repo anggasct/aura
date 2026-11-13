@@ -16,6 +16,7 @@ import (
 
 	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const (
@@ -342,23 +343,24 @@ func RenderCard(prompt *Prompt, persona string, clean func(string) string) strin
 	if clean == nil {
 		clean = func(text string) string { return text }
 	}
+	header := func(text string) string { return clean(tools.EscapeDisplayText(text)) }
 	arguments := clean(strings.TrimSpace(prompt.Arguments))
 	if arguments == "" {
 		arguments = "{}"
 	}
 	var card strings.Builder
-	card.WriteString("approval required: " + clean(prompt.ToolName))
+	card.WriteString("approval required: " + header(prompt.ToolName))
 	if prompt.ToolVersion != "" {
-		card.WriteString("@" + clean(prompt.ToolVersion))
+		card.WriteString("@" + header(prompt.ToolVersion))
 	}
 	if prompt.ReasonCode == policy.ReasonUntrustedInput {
 		card.WriteString("\n" + policy.UntrustedInputNotice)
 	}
 	if persona != "" {
-		card.WriteString("\npersona: " + clean(persona))
+		card.WriteString("\npersona: " + header(persona))
 	}
-	card.WriteString("\nsession: " + clean(prompt.SessionID))
-	card.WriteString("\nprincipal: " + clean(prompt.PrincipalID))
+	card.WriteString("\nsession: " + header(prompt.SessionID))
+	card.WriteString("\nprincipal: " + header(prompt.PrincipalID))
 	if strings.Contains(arguments, "\n") {
 		card.WriteString("\narguments:\n" + arguments)
 	} else {

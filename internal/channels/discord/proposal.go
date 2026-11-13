@@ -2,11 +2,13 @@ package discord
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/status"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const (
@@ -44,7 +46,11 @@ func (a *Adapter) OfferProposal(ctx context.Context, proposalID, plan string, de
 	if err != nil {
 		return Errorf(ErrorCodeApprovalUnavailable, "approval token mint failed")
 	}
-	content := proposalCardHeader + proposalID + "\n" + status.TruncateRunes(plan, proposalPlanRunes)
+	lines := strings.Split(plan, "\n")
+	for i, line := range lines {
+		lines[i] = tools.EscapeDisplayText(line)
+	}
+	content := proposalCardHeader + tools.EscapeDisplayText(proposalID) + "\n" + fenceBlock(status.TruncateRunes(strings.Join(lines, "\n"), proposalPlanRunes))
 	cardID, err := a.postApprovalCard(ctx, token, dmChannel, content, tokenID, pending)
 	if err != nil {
 		a.approvals.Drop(tokenID, pending)

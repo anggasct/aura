@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/tools/displaytest"
 )
 
 const httpPrincipal = "http:key-1"
@@ -260,5 +261,55 @@ func TestServesPersonaFollowsTheAccountBinding(t *testing.T) {
 	adapter.SetPersonaRouter(nil)
 	if adapter.ServesPersona("team") {
 		t.Error("an adapter without a router serves a persona")
+	}
+}
+
+func ownerCard(t *testing.T, arguments string) cardPost {
+	t.Helper()
+	stub := newApprovalStub(t)
+	adapter, _ := newHTTPOwnerAdapter(t, stub, []string{"discord:777"}, accessPersonas())
+	prompt := httpPrompt(time.Now().Add(time.Minute))
+	prompt.Arguments = arguments
+	ctx, cancel := context.WithCancel(t.Context())
+	result := decideForOwnerAsync(ctx, adapter, prompt, httpRequester(principal.ClassTrusted))
+	card := stub.waitPostTo(t, "555", 1)[0]
+	cancel()
+	awaitDecide(t, result, 5*time.Second)
+	return card
+}
+
+func TestApprovalCardPayloadSuppressesEmbedsAndFencesTheArguments(t *testing.T) {
+	fence := strings.Repeat("`", 3)
+	cases := []struct {
+		name      string
+		arguments string
+		want      string
+	}{
+		{"an inline run of backticks", "body: x" + fence + "[ok](https://evil)", "arguments:\n" + fence + "\nbody: x``\u200b`[ok](https://evil)\n" + fence},
+		{"a line of three backticks", "body: a\n" + fence + "\nb", "arguments:\n" + fence + "\nbody: a\n``\u200b`\nb\n" + fence},
+		{"empty arguments", "", "arguments:\n" + fence + "\n{}\n" + fence},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			card := ownerCard(t, tc.arguments)
+			content, _ := card.body["content"].(string)
+			if flags, _ := card.body["flags"].(float64); flags != 4 {
+				t.Errorf("flags = %v, want 4", card.body["flags"])
+			}
+			if count := strings.Count(content, fence); count != 2 {
+				t.Errorf("card holds %d runs of three backticks, want 2: %q", count, content)
+			}
+			if !strings.Contains(content, tc.want) {
+				t.Errorf("card = %q, want it to contain %q", content, tc.want)
+			}
+		})
+	}
+	for _, scenario := range displaytest.Scenarios() {
+		t.Run(scenario.Name, func(t *testing.T) {
+			content, _ := ownerCard(t, scenario.Text(t)).body["content"].(string)
+			if count := strings.Count(content, fence); count != 2 {
+				t.Errorf("card holds %d runs of three backticks, want 2: %q", count, content)
+			}
+		})
 	}
 }

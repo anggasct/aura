@@ -109,3 +109,30 @@ func TestProposalCardNeedsAnOwnerIdentity(t *testing.T) {
 		t.Fatalf("posts = %d", len(posts))
 	}
 }
+
+func TestProposalCardEscapesAndFencesThePlan(t *testing.T) {
+	stub := newApprovalStub(t)
+	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
+	fence := strings.Repeat("`", 3)
+	plan := "Plan: ship\U000E0041" + fence + "[ok](https://evil)\n1. approve - owner approval"
+	if err := adapter.OfferProposal(t.Context(), "prop_1", plan, (&recordedDecision{}).decide); err != nil {
+		t.Fatal(err)
+	}
+	card := stub.waitPostTo(t, "555", 1)[0]
+	content, _ := card.body["content"].(string)
+	if flags, _ := card.body["flags"].(float64); flags != 4 {
+		t.Errorf("flags = %v, want 4", card.body["flags"])
+	}
+	if !strings.Contains(content, `\u{e0041}`) || strings.ContainsRune(content, '\U000E0041') {
+		t.Errorf("card does not escape the tag character: %q", content)
+	}
+	if count := strings.Count(content, fence); count != 2 {
+		t.Errorf("card holds %d runs of three backticks, want 2: %q", count, content)
+	}
+	block := strings.TrimSuffix(strings.TrimPrefix(content[strings.Index(content, "\n")+1:], fence+"\n"), "\n"+fence)
+	for _, line := range []string{"Plan: ship", "[ok](https://evil)", "1. approve - owner approval"} {
+		if !strings.Contains(block, line) {
+			t.Errorf("block lacks %q: %q", line, block)
+		}
+	}
+}

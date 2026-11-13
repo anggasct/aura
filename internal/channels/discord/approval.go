@@ -2,11 +2,13 @@ package discord
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,7 +17,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
-const approvalHTTPBytes = 1 << 16
+const (
+	approvalHTTPBytes   = 1 << 16
+	suppressEmbedsFlags = 4
+)
+
+var backtickRun = regexp.MustCompile("`{3,}")
 
 type ApprovalPrompt = approval.Prompt
 
@@ -240,7 +247,26 @@ func (a *Adapter) awaitApproval(ctx context.Context, token, tokenID string, pend
 }
 
 func renderApprovalCard(prompt *ApprovalPrompt, persona string) string {
-	return approval.RenderCard(prompt, persona, neutralizeMentions)
+	if prompt == nil {
+		return ""
+	}
+	fenced := *prompt
+	fenced.Arguments = fenceBlock(cmp.Or(strings.TrimSpace(prompt.Arguments), "{}"))
+	return approval.RenderCard(&fenced, persona, neutralizeMentions)
+}
+
+func fenceBlock(text string) string {
+	body := backtickRun.ReplaceAllStringFunc(text, func(run string) string {
+		var broken strings.Builder
+		for i := range len(run) {
+			broken.WriteByte('`')
+			if i%2 == 1 {
+				broken.WriteRune('\u200b')
+			}
+		}
+		return broken.String()
+	})
+	return "```\n" + body + "\n```"
 }
 
 func (a *Adapter) approvalButtons(tokenID string, pending *approval.Pending) []componentPayload {
@@ -257,6 +283,7 @@ func (a *Adapter) approvalButtons(tokenID string, pending *approval.Pending) []c
 func (a *Adapter) postApprovalCard(ctx context.Context, token, channelID, content, tokenID string, pending *approval.Pending) (string, error) {
 	payload, err := json.Marshal(map[string]any{
 		"content":          content,
+		"flags":            suppressEmbedsFlags,
 		"components":       a.approvalButtons(tokenID, pending),
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	})

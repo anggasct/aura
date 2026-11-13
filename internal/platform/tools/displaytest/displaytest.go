@@ -96,6 +96,19 @@ func Scenarios() []Scenario {
 			WantAbsent: []string{"\u202e", "\u0085", "\u2066", "\u001b", "\x00"},
 		},
 		{
+			Name:       "invisible and stacked runes are escaped",
+			Display:    mail,
+			Arguments:  `{"to":["alice@mail.example"],"subject":"s` + "\U000E0041\u200b\ufe0f" + ` a` + strings.Repeat("\u0301", 5) + `","body":"C:\\tmp"}`,
+			Want:       []string{`\u{e0041}`, `\u{200b}`, `\u{fe0f}`, `\u{0301}`, `C:\\tmp`},
+			WantAbsent: []string{"\U000E0041", "\ufe0f", strings.Repeat("\u0301", 3)},
+		},
+		{
+			Name:      "backticks and links stay text",
+			Display:   mail,
+			Arguments: `{"to":["alice@mail.example"],"subject":"Hi","body":"x` + "```" + `[ok](https://evil)"}`,
+			Want:      []string{"[ok](https://evil)"},
+		},
+		{
 			Name:       "the largest display that fits is complete",
 			Display:    mail,
 			Arguments:  `{"to":` + recipients(20) + `,"cc":[],"subject":"` + strings.Repeat("t", 160) + `","body":"short"}`,

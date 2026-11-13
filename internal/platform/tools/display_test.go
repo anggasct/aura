@@ -3,6 +3,7 @@ package tools_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -273,5 +274,72 @@ func TestFieldApprovalAppliesToPluginEffectToolsOnly(t *testing.T) {
 				t.Fatalf("FieldApproval = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func argumentsWithValue(t *testing.T, value string) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(map[string]string{"v": value})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+func TestDisplayEscapesInvisibleAndUnassignedRunes(t *testing.T) {
+	field := displaytest.Definition(nil)
+	plain := &tools.Definition{Name: "exec", Version: "v1", Effectful: true}
+	for _, r := range []rune{0xE0041, 0x200B, 0xFE0F, 0xE000, 0x0378} {
+		arguments := argumentsWithValue(t, "a"+string(r)+"b")
+		want := fmt.Sprintf(`\u{%04x}`, r)
+		for name, definition := range map[string]*tools.Definition{"field": field, "json": plain} {
+			text, err := definition.ApprovalText(arguments, nil)
+			if err != nil {
+				t.Fatalf("%s %U: %v", name, r, err)
+			}
+			if !strings.Contains(text, want) || strings.ContainsRune(text, r) {
+				t.Errorf("%s %U: display = %q, want %s and no raw rune", name, r, text, want)
+			}
+		}
+	}
+
+	stacked, err := field.ApprovalText(argumentsWithValue(t, "a"+strings.Repeat("\u0301", 50)), nil)
+	if want := "v: a\u0301\u0301" + strings.Repeat(`\u{0301}`, 48); err != nil || stacked != want {
+		t.Errorf("stacked marks: display = %q, %v, want %q", stacked, err, want)
+	}
+	single, err := field.ApprovalText(argumentsWithValue(t, "a\u0301b\u0301c\u0301"), nil)
+	if err != nil || single != "v: a\u0301b\u0301c\u0301" {
+		t.Errorf("one mark per letter: display = %q, %v", single, err)
+	}
+
+	typed := `C:\path\u{200b}`
+	text, err := field.ApprovalText(argumentsWithValue(t, typed), nil)
+	if want := `v: C:\\path\\u{200b}`; err != nil || text != want {
+		t.Errorf("field backslash: display = %q, %v, want %q", text, err, want)
+	}
+	arguments := argumentsWithValue(t, typed)
+	text, err = plain.ApprovalText(arguments, nil)
+	if err != nil || text != string(arguments) {
+		t.Errorf("json backslash: display = %q, %v, want %q", text, err, arguments)
+	}
+
+	for _, value := range []string{typed, "a\u0301\u0301\u0301\u200b\n\\", "plain"} {
+		text, err := field.ApprovalText(argumentsWithValue(t, value), nil)
+		if err != nil || text != "v: "+tools.EscapeDisplayText(value) {
+			t.Errorf("EscapeDisplayText(%q) differs from the field display %q, %v", value, text, err)
+		}
+	}
+
+	flood := argumentsWithValue(t, strings.Repeat("\u200b", 300))
+	_, err = field.ApprovalText(flood, nil)
+	requireCode(t, err, tools.ErrorCodeDisplayTooLarge)
+	tail := &tools.Definition{Name: "plugin_mailer_send", Version: "v1", Plugin: field.Plugin, Effectful: true, Display: []string{"v"}}
+	text, err = tail.ApprovalText(flood, nil)
+	if err != nil || len(text) > tools.ApprovalDisplayLimit || !strings.Contains(text, "bytes hidden]") || strings.ContainsRune(text, '\u200b') {
+		t.Errorf("field flood: %d bytes, %v", len(text), err)
+	}
+	text, err = plain.ApprovalText(flood, nil)
+	if err != nil || len(text) > tools.ApprovalDisplayLimit || !strings.HasSuffix(text, "...[truncated]") {
+		t.Errorf("json flood: %d bytes, %v", len(text), err)
 	}
 }
