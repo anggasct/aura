@@ -128,7 +128,7 @@ func TestMergeAndCommentRoundTrip(t *testing.T) {
 	server := stubGitHubAPI(t)
 	options := toolOptions(server)
 	merged, err := MergeAdapter(options)(context.Background(), toolRequest(t,
-		`{"repo":"org/repo","number":42,"merge_method":"squash","credential_name":"ci"}`),
+		`{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","merge_method":"squash","credential_name":"ci"}`),
 		approval.Constraints{})
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
@@ -160,8 +160,8 @@ func TestToolsRejectBadInput(t *testing.T) {
 		{"create missing title", CreatePRAdapter(options), `{"repo":"org/repo","head":"h","base":"b","credential_name":"ci"}`},
 		{"create bad credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"token"}`},
 		{"create missing credential", CreatePRAdapter(options), `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"absent"}`},
-		{"merge bad method", MergeAdapter(options), `{"repo":"org/repo","number":42,"merge_method":"fast-forward","credential_name":"ci"}`},
-		{"merge zero number", MergeAdapter(options), `{"repo":"org/repo","number":0,"credential_name":"ci"}`},
+		{"merge bad method", MergeAdapter(options), `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","merge_method":"fast-forward","credential_name":"ci"}`},
+		{"merge zero number", MergeAdapter(options), `{"repo":"org/repo","number":0,"sha":"0123456789abcdef0123456789abcdef01234567","credential_name":"ci"}`},
 		{"comment empty body", CommentAdapter(options), `{"repo":"org/repo","number":7,"body":"","credential_name":"ci"}`},
 	}
 	for _, tc := range cases {
@@ -184,6 +184,12 @@ func TestToolsSurfaceAuthFailure(t *testing.T) {
 	}
 }
 
+var displayOrders = map[string][]string{
+	ToolCreatePR: {"repo", "head", "base", "title", "credential_name", "body"},
+	ToolMerge:    {"repo", "number", "sha", "merge_method", "credential_name"},
+	ToolComment:  {"repo", "number", "credential_name", "body"},
+}
+
 func TestDefinitionsCarryBrokerContract(t *testing.T) {
 	definitions := Definitions()
 	if len(definitions) != 3 {
@@ -197,6 +203,12 @@ func TestDefinitionsCarryBrokerContract(t *testing.T) {
 		}
 		if !definition.RequiresApproval || !definition.Effectful {
 			t.Errorf("%s requires approval and effect handling, got %+v", definition.Name, definition)
+		}
+		if !definition.NoStandingGrant || !definition.ExactDisplay {
+			t.Errorf("%s NoStandingGrant = %t, ExactDisplay = %t; want both", definition.Name, definition.NoStandingGrant, definition.ExactDisplay)
+		}
+		if want := displayOrders[definition.Name]; !slices.Equal(definition.Display, want) {
+			t.Errorf("%s display = %v, want %v", definition.Name, definition.Display, want)
 		}
 		if len(definition.RequiredCapabilities) != 0 {
 			t.Errorf("%s requires capabilities %v that no host can provide", definition.Name, definition.RequiredCapabilities)
@@ -246,7 +258,7 @@ func TestAdaptersRefuseACredentialThatIsNotConfigured(t *testing.T) {
 		args  string
 	}{
 		{"create_pr", CreatePRAdapter, `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":%s}`},
-		{"merge", MergeAdapter, `{"repo":"org/repo","number":42,"credential_name":%s}`},
+		{"merge", MergeAdapter, `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","credential_name":%s}`},
 		{"comment", CommentAdapter, `{"repo":"org/repo","number":7,"body":"hi","credential_name":%s}`},
 	}
 	configured := func() []Credential { return []Credential{{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"}} }
@@ -296,5 +308,63 @@ func TestAdaptersRefuseACredentialThatIsNotConfigured(t *testing.T) {
 			}
 			assertRefused(t, call(cloned, tool.args, "other"), notConfigured)
 		})
+	}
+}
+
+func TestMergeSendsTheExpectedHead(t *testing.T) {
+	t.Setenv("GITHUB_TEST_TOKEN", "test-token")
+	const head = "0123456789abcdef0123456789abcdef01234567"
+	var requests atomic.Int32
+	var sent atomic.Value
+	status := atomic.Int32{}
+	status.Store(http.StatusOK)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			sent.Store(body)
+		}
+		w.WriteHeader(int(status.Load()))
+		_, _ = w.Write([]byte(`{"merged":true,"sha":"abc123","message":"Head branch was modified"}`))
+	}))
+	t.Cleanup(server.Close)
+	options := toolOptions(server)
+	arguments := func(sha string) json.RawMessage {
+		return json.RawMessage(`{"repo":"org/repo","number":42,"sha":"` + sha + `","merge_method":"squash","credential_name":"ci"}`)
+	}
+	if _, err := MergeAdapter(options)(t.Context(), toolRequest(t, string(arguments(head))), approval.Constraints{}); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if body, _ := sent.Load().(map[string]string); body["sha"] != head || body["merge_method"] != "squash" {
+		t.Fatalf("merge request body = %v, want the sha next to merge_method", body)
+	}
+	status.Store(http.StatusConflict)
+	_, err := MergeAdapter(options)(t.Context(), toolRequest(t, string(arguments(head))), approval.Constraints{})
+	var coded *toolbroker.Error
+	if !errors.As(err, &coded) || coded.Class != toolbroker.ResultInvalidArgument || coded.Detail != headMoved || strings.Contains(err.Error(), head) {
+		t.Fatalf("409 error = %v, want invalid_argument %q without the sha", err, headMoved)
+	}
+	validate := Definitions()[1].Validate
+	before := requests.Load()
+	for name, sha := range map[string]string{
+		"missing":   "",
+		"39 chars":  head[:39],
+		"41 chars":  head + "0",
+		"uppercase": strings.ToUpper(head),
+		"non hex":   head[:39] + "g",
+	} {
+		raw := arguments(sha)
+		if name == "missing" {
+			raw = json.RawMessage(`{"repo":"org/repo","number":42,"credential_name":"ci"}`)
+		}
+		if _, err := validate(raw); err == nil {
+			t.Errorf("validator accepted a %s sha", name)
+		}
+	}
+	if _, err := validate(arguments(head)); err != nil {
+		t.Errorf("validator refused a 40 character lowercase hex sha: %v", err)
+	}
+	if requests.Load() != before {
+		t.Errorf("validation made %d requests, want none", requests.Load()-before)
 	}
 }
