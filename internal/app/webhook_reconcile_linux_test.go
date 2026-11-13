@@ -35,7 +35,7 @@ func TestCompositionServerRegistersTheWebhookReconcile(t *testing.T) {
 	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))
 	requireNames(t, "entries", app.group.Names(), []string{
 		"sqlite", "telemetry", "memory_purge", "broadcast_resume", "schedule_resume", "schedule_pass", "turn_recovery", "channels",
-		"durable_host", "turn_engine", "turn_recovery_pass", "webhook_reconcile", "retention_sweeps", "run_retention", "persona_eval_schedules",
+		"durable_host", "turn_engine", "turn_recovery_pass", "workflow_proposal_cards", "webhook_reconcile", "retention_sweeps", "run_retention", "workflow_completion", "persona_eval_schedules",
 	})
 	if err := app.Close(t.Context()); err != nil {
 		t.Fatalf("Close without Run: %v", err)

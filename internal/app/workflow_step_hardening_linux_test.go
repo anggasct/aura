@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,9 +229,7 @@ func seedRoutine(t *testing.T, db *sql.DB, spec *workflow.Spec) {
 func serverConfigWithRoutinePersona(t *testing.T, listed string) *config.LoadResult {
 	t.Helper()
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
-	extra := fmt.Sprintf("durable:\n  enabled: true\n  mode: external\n  endpoint: http://%s\n  admin_endpoint: http://%s\n  handler_addr: %s\n",
-		freeLoopbackAddress(t), freeLoopbackAddress(t), freeLoopbackAddress(t)) +
-		"agents:\n  definitions:\n    - id: desk\n      description: trusted desk\n      instructions: \"You answer trusted callers.\"\n      audience: trusted\n      tools: [read_file]\n      principal_tools: [read_file]\n      workflows: [" + listed + "]\n" +
+	extra := "agents:\n  definitions:\n    - id: desk\n      description: trusted desk\n      instructions: \"You answer trusted callers.\"\n      audience: trusted\n      tools: [read_file]\n      principal_tools: [read_file]\n      workflows: [" + listed + "]\n" +
 		"access:\n  budgets:\n    trusted:\n      max_tokens_per_day: 100000\n      max_turns_per_minute: 50\n"
 	path := writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra)
 	seedConfiguredStorage(t, path)

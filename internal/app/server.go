@@ -283,6 +283,7 @@ func (b *build) buildServerSurface(ctx context.Context) error {
 		b.buildDurableHost,
 		b.buildProbe,
 		func() error { return b.wireDurableListener(ctx) },
+		b.wireWorkflowParts,
 		b.bindErasureRuns,
 		b.addEdgeListeners,
 		b.registerSweeps,
@@ -513,19 +514,6 @@ func (b *build) wireDurableListener(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	workflowTools, err := newWorkflowToolController(durableListener.interpreter, workflow.NewStore(db), b.registry, quarantinedIDs(b.quarantined), replyTargeters(s.channels)...)
-	if err != nil {
-		return err
-	}
-	workflowTools.enableProposalCards(cfg, proposalOfferers(s.channels), b.logger)
-	if broker := b.builtin.Broker(); broker != nil {
-		workflowTools.enableCallDisplay(broker.ExactCallText)
-	}
-	if err := b.group.Add(server.Background("workflow_proposal_cards", workflowTools.runProposalCards)); err != nil {
-		return err
-	}
-	b.builtin.SetWorkflowController(workflowTools)
-	s.scheduledWorkflows.set(durableListener.interpreter)
 	if err := registerBroadcastHandler(durableListener, s.broadcastRunner); err != nil {
 		return err
 	}
@@ -542,6 +530,25 @@ func (b *build) wireDurableListener(ctx context.Context) error {
 		}
 	}
 	return s.listeners.Add(durableListener)
+}
+
+func (b *build) wireWorkflowParts() error {
+	cfg, db, s := b.cfg, b.db, b.server
+	if b.interpreter == nil || b.builtin == nil || b.builtin.Broker() == nil {
+		return invalidOptions("the server's workflow parts need an interpreter and the surface tool executor")
+	}
+	controller, err := newWorkflowToolController(b.interpreter, workflow.NewStore(db), b.registry, quarantinedIDs(b.quarantined), replyTargeters(s.channels)...)
+	if err != nil {
+		return err
+	}
+	controller.enableProposalCards(cfg, proposalOfferers(s.channels), b.logger)
+	controller.enableCallDisplay(b.builtin.Broker().ExactCallText)
+	if err := b.group.Add(server.Background("workflow_proposal_cards", controller.runProposalCards)); err != nil {
+		return err
+	}
+	b.builtin.SetWorkflowController(controller)
+	s.scheduledWorkflows.set(b.interpreter)
+	return nil
 }
 
 func (b *build) bindErasureRuns() error {
@@ -561,12 +568,10 @@ func (b *build) registerSweeps() error {
 	if err := b.registerRunRetention(); err != nil {
 		return err
 	}
-	if durableEnabled(cfg) {
-		if err := b.group.Add(server.Background("workflow_completion", func(ctx context.Context) {
-			newWorkflowCompletionNotifier(cfg, db, registry, logger).run(ctx, workflowCompletionInterval)
-		})); err != nil {
-			return err
-		}
+	if err := b.group.Add(server.Background("workflow_completion", func(ctx context.Context) {
+		newWorkflowCompletionNotifier(cfg, db, registry, logger).run(ctx, workflowCompletionInterval)
+	})); err != nil {
+		return err
 	}
 	configPath := b.result.Path
 	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models}

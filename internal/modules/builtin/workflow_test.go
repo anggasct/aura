@@ -66,11 +66,11 @@ func runWorkflowTool(t *testing.T, holder *workflowHolder, request *toolbroker.T
 	return holder.adapters()[request.ToolName+"@"+tools.Version](t.Context(), request, approval.Constraints{})
 }
 
-func TestWorkflowAdaptersNeedTheDurableRuntime(t *testing.T) {
+func TestWorkflowAdaptersAnswerUnavailableWithoutAController(t *testing.T) {
 	holder := &workflowHolder{}
 	for _, tool := range []string{tools.WorkflowListToolName, tools.WorkflowStartToolName, tools.WorkflowStatusToolName, tools.WorkflowCancelToolName} {
 		_, err := runWorkflowTool(t, holder, workflowRequest(principal.ClassOwner, tool, `{"id":"x","run_id":"r"}`))
-		if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultCapabilityUnavailable || !strings.Contains(err.Error(), "durable runtime") {
+		if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultCapabilityUnavailable || !strings.Contains(err.Error(), "run only in aura server") {
 			t.Fatalf("%s without a controller = %v", tool, err)
 		}
 	}
