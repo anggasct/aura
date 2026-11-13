@@ -421,19 +421,17 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 	}
 
 	cancelled := make(chan struct{})
-	engine := &Engine{
-		turns: map[string]*turnState{
-			"turn-live": {
-				req:    turn.TurnRequest{SessionID: "session-a"},
-				cancel: func() { close(cancelled) },
-				subs:   map[*subscriber]struct{}{sub: {}},
-			},
-		},
+	bus := turn.NewEventBus(nil)
+	engine, _, _ := newTestRuntime(t, Config{LiveEvents: bus}, turntest.NewFakeExecutor(nil))
+	engine.turns["turn-live"] = &turnState{
+		req:    turn.TurnRequest{SessionID: "session-a"},
+		cancel: func() { close(cancelled) },
+		subs:   map[*subscriber]struct{}{sub: {}},
 	}
 
 	published := make(chan struct{})
 	go func() {
-		engine.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
+		bus.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
 		close(published)
 	}()
 	cancelDone := make(chan struct{})
@@ -477,20 +475,64 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 	}
 }
 
+func TestEngineRelaysBusEventsToItsRunningTurn(t *testing.T) {
+	gate := make(chan struct{})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
+	bus := turn.NewEventBus(nil)
+	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 2, LiveEvents: bus}, executor)
+	mustCreateSession(t, db, "session-a")
+
+	next, stop := iter.Pull2(engine.Run(t.Context(), sampleRequest("session-a", "turn-relay")))
+	defer stop()
+	first, err, ok := next()
+	if err != nil || !ok || first.Kind != turn.EventKindTurnAccepted {
+		t.Fatalf("first event = %+v, err=%v, present=%v; want accepted", first, err, ok)
+	}
+	waitFor(t, func() bool { return executor.StartCount() == 1 })
+
+	bus.Publish(&store.RuntimeEvent{ID: "foreign", SessionID: "session-b", TurnID: "turn-relay", Kind: turn.EventKindToolRequested})
+	bus.Publish(&store.RuntimeEvent{ID: "relayed", SessionID: "session-a", TurnID: "turn-relay", Kind: turn.EventKindToolRequested})
+	close(gate)
+
+	var relayed, foreign int
+	for {
+		ev, err, ok := next()
+		if err != nil {
+			t.Fatalf("stream error: %v", err)
+		}
+		if !ok {
+			break
+		}
+		switch ev.ID {
+		case "relayed":
+			relayed++
+		case "foreign":
+			foreign++
+		}
+		if ev.Kind == turn.EventKindTurnCompleted || ev.Kind == turn.EventKindTurnFailed {
+			break
+		}
+	}
+	if relayed != 1 {
+		t.Fatalf("relayed events = %d, want 1", relayed)
+	}
+	if foreign != 0 {
+		t.Fatalf("events for another session = %d, want 0", foreign)
+	}
+}
+
 func TestPublishAfterSubscriberCloseDoesNotPanic(t *testing.T) {
 	sub := newSubscriber()
 	sub.closeEvents()
-	engine := &Engine{
-		turns: map[string]*turnState{
-			"turn-live": {
-				req:  turn.TurnRequest{SessionID: "session-a"},
-				subs: map[*subscriber]struct{}{sub: {}},
-			},
-		},
+	bus := turn.NewEventBus(nil)
+	engine, _, _ := newTestRuntime(t, Config{LiveEvents: bus}, turntest.NewFakeExecutor(nil))
+	engine.turns["turn-live"] = &turnState{
+		req:  turn.TurnRequest{SessionID: "session-a"},
+		subs: map[*subscriber]struct{}{sub: {}},
 	}
 	done := make(chan struct{})
 	go func() {
-		engine.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
+		bus.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
 		close(done)
 	}()
 	select {

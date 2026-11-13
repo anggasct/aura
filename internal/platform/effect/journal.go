@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/anggasct/aura/internal/store"
@@ -127,31 +126,18 @@ type Journal struct {
 	now      func() time.Time
 	logger   *slog.Logger
 	observer Observer
-
-	mu             sync.Mutex
-	eventPublisher EventPublisher
+	events   EventPublisher
 }
 
 type EventPublisher interface {
 	Publish(*store.RuntimeEvent)
 }
 
-func (j *Journal) SetEventPublisher(p EventPublisher) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.eventPublisher = p
-}
-
-func (j *Journal) publisher() EventPublisher {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	return j.eventPublisher
-}
-
 type Options struct {
 	Now      func() time.Time
 	Logger   *slog.Logger
 	Observer Observer
+	Events   EventPublisher
 }
 
 func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
@@ -167,7 +153,7 @@ func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
 	if opts.Observer == nil {
 		opts.Observer = observerFunc(noopObserver)
 	}
-	return &Journal{db: db, now: opts.Now, logger: opts.Logger, observer: opts.Observer}, nil
+	return &Journal{db: db, now: opts.Now, logger: opts.Logger, observer: opts.Observer, events: opts.Events}, nil
 }
 
 const insertIntentSQL = `
@@ -319,8 +305,8 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("effect: commit prepare: %w", err)
 	}
-	if pub := j.publisher(); pub != nil {
-		pub.Publish(&store.RuntimeEvent{
+	if j.events != nil {
+		j.events.Publish(&store.RuntimeEvent{
 			ID:            eventID,
 			SessionID:     req.SessionID,
 			Sequence:      sequence,

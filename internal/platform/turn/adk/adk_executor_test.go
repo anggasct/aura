@@ -92,18 +92,18 @@ type fakeBroker struct {
 	requests []approval.ToolRequest
 }
 
+type liveEventPublisher interface {
+	Publish(*store.RuntimeEvent)
+}
+
 type fakeBuiltinExecutor struct {
 	definitions []BuiltinToolDefinition
 	requests    []*BuiltinToolRequest
 	events      store.EventStore
 	output      json.RawMessage
 	err         error
-	publish     func(*store.RuntimeEvent)
+	live        liveEventPublisher
 	block       chan struct{}
-}
-
-func (f *fakeBuiltinExecutor) SetEventPublisher(publish func(*store.RuntimeEvent)) {
-	f.publish = publish
 }
 
 func (f *fakeBuiltinExecutor) Definitions() []BuiltinToolDefinition {
@@ -129,8 +129,8 @@ func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolR
 		if err := f.events.Append(ctx, event); err != nil {
 			return nil, err
 		}
-		if f.publish != nil {
-			f.publish(event)
+		if f.live != nil {
+			f.live.Publish(event)
 		}
 	}
 	if f.block != nil {
@@ -144,14 +144,6 @@ func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolR
 		return nil, f.err
 	}
 	return f.output, nil
-}
-
-type recordingPublisher struct {
-	events []store.RuntimeEvent
-}
-
-func (p *recordingPublisher) Publish(event *store.RuntimeEvent) {
-	p.events = append(p.events, *event)
 }
 
 func (b *fakeBroker) Evaluate(ctx context.Context, req *approval.ToolRequest) (approval.PolicyDecision, error) {
@@ -317,39 +309,6 @@ func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
 	}
 }
 
-func TestADKExecutorPublishesDurableBuiltinEvents(t *testing.T) {
-	model := &fakeADKModel{answer: "call tool", toolCall: true, tokens: 3}
-	modelName, models := fakeModelSet(model)
-	db, sessions, events := newSessionTestDB(t)
-	builtin := &fakeBuiltinExecutor{
-		definitions: []BuiltinToolDefinition{{
-			Name: "sample_tool", Version: "v1", Description: "sample",
-			Schema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
-		}},
-		events: events,
-		output: json.RawMessage(`{"ok":true}`),
-	}
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
-	if err != nil {
-		t.Fatalf("NewADKExecutor: %v", err)
-	}
-	publisher := &recordingPublisher{}
-	executor.SetEventPublisher(publisher)
-	mustCreateSession(t, db, "session-1")
-
-	for _, err := range executor.Execute(context.Background(), &turn.TurnRequest{
-		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: turn.OriginTerminal,
-		Parts: []runtimeingress.InputPart{{Text: "hi"}},
-	}) {
-		if err != nil {
-			t.Fatalf("Execute: %v", err)
-		}
-	}
-	if len(publisher.events) != 1 || publisher.events[0].Kind != turn.EventKindToolRequested {
-		t.Fatalf("published events = %+v, want one tool.requested event", publisher.events)
-	}
-}
-
 func TestADKExecutorBudgetEnforced(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 50}
 	modelName, models := fakeModelSet(model)
@@ -380,6 +339,7 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 	modelName, models := fakeModelSet(model)
 	db, sessions, events := newSessionTestDB(t)
 	block := make(chan struct{})
+	bus := turn.NewEventBus(nil)
 	builtin := &fakeBuiltinExecutor{
 		definitions: []BuiltinToolDefinition{{
 			Name: "sample_tool", Version: "v1", Description: "sample",
@@ -388,16 +348,16 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 		events: events,
 		output: json.RawMessage(`{"ok":true}`),
 		block:  block,
+		live:   bus,
 	}
 	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, WithBuiltinToolExecutor(builtin))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{LiveEvents: bus}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("runtimeengine.NewEngine: %v", err)
 	}
-	executor.SetEventPublisher(engine)
 	mustCreateSession(t, db, "session-1")
 
 	kinds := make(chan string, 16)

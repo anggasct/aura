@@ -15,10 +15,16 @@ import (
 
 func newTestJournal(t *testing.T) (*Journal, *sql.DB) {
 	t.Helper()
+	return newTestJournalWithEvents(t, nil)
+}
+
+func newTestJournalWithEvents(t *testing.T, events EventPublisher) (*Journal, *sql.DB) {
+	t.Helper()
 	db := storetest.OpenMigrated(t)
 	j, err := NewJournal(db, Options{
 		Now:    func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
 		Logger: slog.New(slog.DiscardHandler),
+		Events: events,
 	})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)

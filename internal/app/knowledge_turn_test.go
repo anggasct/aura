@@ -159,11 +159,11 @@ agents:
 		MaxActiveTurns: 2, MaxPendingTurns: 4,
 		Personas:     registryPersonas{registry: personaRegistry(t, path)},
 		PostTurnHook: buildMemoryHook(memoryService, nil, nil, nil),
+		LiveEvents:   turn.NewEventBus(nil),
 	}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	executor.SetEventPublisher(rig.engine)
 	if err := sessions.Create(t.Context(), &store.Session{ID: "sess_kb", OwnerID: principal.OwnerID, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}

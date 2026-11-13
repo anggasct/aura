@@ -33,6 +33,7 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/store"
@@ -62,7 +63,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	executor, err := newToolExecutor(&toolExecutorInput{
 		result: loadResultWithAll(t, &cfg), db: db, artifactRoot: filepath.Join(dir, "artifacts"), logger: slog.Default(),
-		wiring: &toolWiring{},
+		wiring: &toolWiring{}, events: turn.NewEventBus(slog.Default()),
 	})
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
@@ -142,7 +143,7 @@ func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbui
 	}
 	executor, err := newToolExecutor(&toolExecutorInput{
 		result: &config.LoadResult{Config: &cfg, CapabilityReport: report}, db: db, artifactRoot: filepath.Join(dir, "artifacts"),
-		logger: slog.New(slog.DiscardHandler), wiring: &wiring,
+		logger: slog.New(slog.DiscardHandler), wiring: &wiring, events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
@@ -229,7 +230,7 @@ func TestToolExecutorRegistersTheGitHubTools(t *testing.T) {
 	if githubCredentials(&noTools) != nil {
 		t.Errorf("githubCredentials without a tools section = %v, want nil", githubCredentials(&noTools))
 	}
-	_, err = newToolExecutor(&toolExecutorInput{result: loadResultWithAll(t, &noTools), db: nil, logger: slog.New(slog.DiscardHandler), wiring: &toolWiring{}})
+	_, err = newToolExecutor(&toolExecutorInput{result: loadResultWithAll(t, &noTools), db: nil, logger: slog.New(slog.DiscardHandler), wiring: &toolWiring{}, events: turn.NewEventBus(slog.New(slog.DiscardHandler))})
 	if err == nil || !strings.Contains(err.Error(), "tools configuration is required") {
 		t.Errorf("newToolExecutor without a tools section err = %v, want tools configuration is required", err)
 	}
@@ -405,9 +406,11 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
 	passEvals(t, db, registry, "ops", "plain", "open")
+	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
 	builtin, err := newToolExecutor(&toolExecutorInput{
 		result: loadResultWithAll(t, cfg), db: db, artifactRoot: t.TempDir(), logger: slog.New(slog.DiscardHandler),
 		wiring: &toolWiring{decider: func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) { return false, nil }},
+		events: liveEvents,
 	})
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
@@ -424,6 +427,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
 		DefaultAgentID: auraagent.DefaultID,
 		Personas:       registryPersonas{registry: registry},
+		LiveEvents:     liveEvents,
 	}, events, store.NewDedupeStore(db), executor, nil)
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)

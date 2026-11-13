@@ -720,7 +720,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		}
 		ev.Sequence = sequence
 		e.broadcast(t, ev)
-		e.Publish(ev)
+		e.relay(ev)
 		return nil
 	}
 
@@ -741,7 +741,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 				}
 				if delta != nil {
 					e.broadcast(t, delta)
-					e.Publish(delta)
+					e.relay(delta)
 				}
 				continue
 			}

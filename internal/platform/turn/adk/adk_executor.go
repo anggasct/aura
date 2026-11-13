@@ -49,7 +49,6 @@ type ADKExecutor struct {
 	pluginTools       map[string]string
 	logger            *slog.Logger
 	builtins          BuiltinToolExecutor
-	publisher         EventPublisher
 	agents            AgentResolver
 	modelForRoute     func(route string) (string, error)
 	ledger            *usage.Ledger
@@ -75,24 +74,6 @@ type SkillContextProvider interface {
 
 type AgentResolver interface {
 	Resolve(required []string, preferID *string) (auraagent.Definition, error)
-}
-
-type EventPublisher interface {
-	Publish(*store.RuntimeEvent)
-}
-
-type builtinEventPublisher interface {
-	SetEventPublisher(func(*store.RuntimeEvent))
-}
-
-func (x *ADKExecutor) SetEventPublisher(publisher EventPublisher) {
-	x.publisher = publisher
-	if publisher == nil {
-		return
-	}
-	if setter, ok := x.builtins.(builtinEventPublisher); ok {
-		setter.SetEventPublisher(publisher.Publish)
-	}
 }
 
 func NewADKExecutor(appName, modelName string, models ModelSource, sessions SessionPort, broker turn.ToolBroker, tools []tool.Tool, logger *slog.Logger, opts ...ExecutorOption) (*ADKExecutor, error) {

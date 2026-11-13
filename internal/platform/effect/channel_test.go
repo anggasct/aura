@@ -139,9 +139,8 @@ func TestPrepare_ChannelReplayAndConflict(t *testing.T) {
 
 func TestPrepare_ChannelPublishesLiveEvent(t *testing.T) {
 	t.Parallel()
-	j, db := newTestJournal(t)
 	published := make(chan *store.RuntimeEvent, 1)
-	j.SetEventPublisher(&channelPublisher{events: published})
+	j, db := newTestJournalWithEvents(t, &channelPublisher{events: published})
 
 	req := validChannelPrepare("chan-live")
 	req.EventID = "evt-chan-live"
