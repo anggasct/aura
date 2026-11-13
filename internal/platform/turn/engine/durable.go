@@ -1,11 +1,13 @@
 package runtimeengine
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"time"
 
@@ -602,21 +604,44 @@ const durableStatusPoll = 500 * time.Millisecond
 
 const turnStartAction = "turn-start"
 
-func (e *Engine) turnDeadline(ctx context.Context, inv durable.Invocation, req *turn.TurnRequest) (time.Time, error) {
-	if !req.Deadline.IsZero() {
-		return req.Deadline, nil
+type turnStartRecord struct {
+	StartedAt time.Time `json:"started_at"`
+	Journal   int       `json:"journal"`
+}
+
+const turnJournalVersion = 1
+
+func decodeTurnStart(raw []byte) (turnStartRecord, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var record turnStartRecord
+	if err := decoder.Decode(&record); err != nil {
+		return turnStartRecord{}, false
 	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return turnStartRecord{}, false
+	}
+	if record.Journal != turnJournalVersion || record.StartedAt.IsZero() {
+		return turnStartRecord{}, false
+	}
+	return record, true
+}
+
+func (e *Engine) turnDeadline(ctx context.Context, inv durable.Invocation, req *turn.TurnRequest) (time.Time, error) {
 	raw, err := inv.RunAction(ctx, turnStartAction, func(context.Context) ([]byte, error) {
-		return json.Marshal(time.Now().UTC())
+		return json.Marshal(turnStartRecord{StartedAt: time.Now().UTC(), Journal: turnJournalVersion})
 	})
 	if err != nil {
 		return time.Time{}, codedError(turn.ErrorCodeStorageUnavailable, "failed to journal the turn start", err)
 	}
-	var started time.Time
-	if err := json.Unmarshal(raw, &started); err != nil {
-		return time.Time{}, codedError(turn.ErrorCodeStorageUnavailable, "failed to decode the turn start", err)
+	record, ok := decodeTurnStart(raw)
+	if !ok {
+		return time.Time{}, codedError(turn.ErrorCodeRuntimeInternal, "turn journal was written by another build", nil)
 	}
-	return started.Add(e.cfg.TurnTimeout), nil
+	if !req.Deadline.IsZero() {
+		return req.Deadline, nil
+	}
+	return record.StartedAt.Add(e.cfg.TurnTimeout), nil
 }
 
 func (e *Engine) closeCancelledPresence(ctx context.Context, req *turn.TurnRequest) {

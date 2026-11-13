@@ -10,7 +10,7 @@ import (
 type TurnScope struct {
 	mu     sync.Mutex
 	inv    Invocation
-	ops    uint64
+	models uint64
 	evs    uint64
 	clocks uint64
 }
@@ -26,11 +26,11 @@ func (s *TurnScope) Invocation() Invocation {
 	return s.inv
 }
 
-func (s *TurnScope) NextOp() string {
+func (s *TurnScope) NextModelCall() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ops++
-	return fmt.Sprintf("op-%d", s.ops)
+	s.models++
+	return fmt.Sprintf("model-%d", s.models)
 }
 
 func (s *TurnScope) NextEventID(turnID string) string {

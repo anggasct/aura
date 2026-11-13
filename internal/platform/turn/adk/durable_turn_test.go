@@ -41,6 +41,7 @@ type requestPart struct {
 	callName     string
 	responseID   string
 	responseName string
+	output       string
 }
 
 type requestParts []requestPart
@@ -61,7 +62,8 @@ func isResponse(part requestPart) bool { return part.responseName != "" }
 func hasPartID(part requestPart) bool  { return part.callID != "" || part.responseID != "" }
 
 type toolThenTextModel struct {
-	callID string
+	callID  string
+	queries []string
 
 	mu       sync.Mutex
 	requests []requestParts
@@ -80,6 +82,8 @@ func (m *toolThenTextModel) GenerateContent(_ context.Context, req *adkmodel.LLM
 				}
 				if part.FunctionResponse != nil {
 					captured.responseID, captured.responseName = part.FunctionResponse.ID, part.FunctionResponse.Name
+					output, _ := json.Marshal(part.FunctionResponse.Response)
+					captured.output = string(output)
 				}
 				seen = append(seen, captured)
 			}
@@ -89,7 +93,12 @@ func (m *toolThenTextModel) GenerateContent(_ context.Context, req *adkmodel.LLM
 		call := len(m.requests)
 		m.mu.Unlock()
 		parts := []*genai.Part{{Text: "done"}}
-		if call == 1 {
+		if call == 1 && len(m.queries) > 0 {
+			parts = nil
+			for _, query := range m.queries {
+				parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{Name: "tool-a", Args: map[string]any{"query": query}}})
+			}
+		} else if call == 1 {
 			parts = []*genai.Part{{FunctionCall: &genai.FunctionCall{ID: m.callID, Name: "tool-a", Args: map[string]any{"query": "x"}}}}
 		}
 		yield(&adkmodel.LLMResponse{
@@ -115,6 +124,8 @@ type gatedBrokerTools struct {
 	mu         sync.Mutex
 	keys       []string
 	executions int
+	runs       map[string]int
+	stalled    string
 }
 
 func (g *gatedBrokerTools) Definitions() []BuiltinToolDefinition {
@@ -158,11 +169,30 @@ func (g *gatedBrokerTools) Execute(ctx context.Context, request *BuiltinToolRequ
 	return result.Output, nil
 }
 
-func (g *gatedBrokerTools) execute(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
+func (g *gatedBrokerTools) execute(ctx context.Context, request *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
+	var arguments struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal(request.Arguments, &arguments); err != nil {
+		return toolbroker.ToolResult{}, err
+	}
+	g.mu.Lock()
+	g.executions++
+	g.runs[arguments.Query]++
+	stall := arguments.Query == g.stalled && g.runs[arguments.Query] == 1
+	g.mu.Unlock()
+	if stall {
+		<-ctx.Done()
+		return toolbroker.ToolResult{}, ctx.Err()
+	}
+	output, err := json.Marshal(map[string]string{"query": arguments.Query})
+	return toolbroker.ToolResult{Output: output}, err
+}
+
+func (g *gatedBrokerTools) runsOf(query string) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.executions++
-	return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
+	return g.runs[query]
 }
 
 func (g *gatedBrokerTools) seenKeys() []string {
@@ -178,10 +208,13 @@ func (g *gatedBrokerTools) executionCount() int {
 }
 
 type durableTurnRig struct {
-	db     *sql.DB
-	engine *runtimeengine.Engine
-	model  *toolThenTextModel
-	tools  *gatedBrokerTools
+	db       *sql.DB
+	engine   *runtimeengine.Engine
+	model    *toolThenTextModel
+	tools    *gatedBrokerTools
+	sessions store.SessionService
+	events   store.EventStore
+	stopHost func()
 }
 
 func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig {
@@ -192,7 +225,7 @@ func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig
 	if err != nil {
 		t.Fatalf("toolbroker.New: %v", err)
 	}
-	gated := &gatedBrokerTools{broker: broker, release: make(chan struct{})}
+	gated := &gatedBrokerTools{broker: broker, release: make(chan struct{}), runs: map[string]int{}}
 	if err := broker.RegisterTool(
 		&tools.Definition{Name: "tool-a", Version: "v1", Validator: func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil }},
 		gated.execute,
@@ -200,15 +233,22 @@ func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig
 	); err != nil {
 		t.Fatalf("register tool-a: %v", err)
 	}
-	executor, err := NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, sessions, events, gated, nil, nil, WithBuiltinToolExecutor(gated))
+	rig := &durableTurnRig{db: db, model: model, tools: gated, sessions: sessions, events: events}
+	rig.startLife(t)
+	return rig
+}
+
+func (r *durableTurnRig) startLife(t *testing.T) {
+	t.Helper()
+	executor, err := NewADKExecutor("aura", r.model.Name(), auramodel.Set{r.model.Name(): r.model}, r.sessions, r.events, r.tools, nil, nil, WithBuiltinToolExecutor(r.tools))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	rt, err := sqlite.New(&sqlite.Options{DB: db, Logger: slog.New(slog.DiscardHandler), PollInterval: durableTurnPoll, HostTTL: durableTurnHostTTL})
+	rt, err := sqlite.New(&sqlite.Options{DB: r.db, Logger: slog.New(slog.DiscardHandler), PollInterval: durableTurnPoll, HostTTL: durableTurnHostTTL})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)
 	}
-	sessionStore, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: db})
+	sessionStore, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: r.db})
 	if err != nil {
 		t.Fatalf("sqlite.NewSessionStore: %v", err)
 	}
@@ -217,26 +257,32 @@ func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig
 		MaxPendingTurns: 16,
 		TurnTimeout:     time.Minute,
 		Durable:         &runtimeengine.DurableConfig{Sessions: sessionStore, Runtime: rt},
-	}, events, store.NewDedupeStore(db), executor, slog.New(slog.DiscardHandler))
+	}, r.events, store.NewDedupeStore(r.db), executor, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
 	executor.SetEventPublisher(eng)
-	hostCtx, stopHost := context.WithCancel(context.WithoutCancel(t.Context()))
+	hostCtx, cancelHost := context.WithCancel(context.WithoutCancel(t.Context()))
 	hostDone := make(chan error, 1)
 	go func() { hostDone <- rt.Run(hostCtx) }()
-	t.Cleanup(func() {
-		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
-		defer cancel()
-		_ = eng.Shutdown(shutdownCtx)
-		stopHost()
+	stopHost := sync.OnceFunc(func() {
+		cancelHost()
 		select {
 		case <-hostDone:
 		case <-time.After(durableTurnWait):
 			t.Error("durable host did not stop")
 		}
 	})
-	return &durableTurnRig{db: db, engine: eng, model: model, tools: gated}
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
+		defer cancel()
+		_ = eng.Shutdown(shutdownCtx)
+		stopHost()
+	})
+	if r.engine == nil {
+		r.engine = eng
+	}
+	r.stopHost = stopHost
 }
 
 func (r *durableTurnRig) run(ctx context.Context) <-chan error {

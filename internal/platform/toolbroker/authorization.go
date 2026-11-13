@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -30,12 +31,12 @@ type authorizationRecord struct {
 	Failure       *recordedFailure `json:"failure,omitempty"`
 }
 
-func (b *Broker) authorize(ctx context.Context, call *authorization) (string, error) {
+func (b *Broker) authorize(ctx context.Context, slot *toolcall.Slot, call *authorization) (string, error) {
 	scope, ok := durable.TurnScopeFrom(ctx)
 	if !ok {
 		return b.decideAuthorization(ctx, call)
 	}
-	raw, err := scope.Invocation().RunAction(ctx, scope.NextOp(), func(ctx context.Context) ([]byte, error) {
+	raw, err := scope.Invocation().RunAction(ctx, slot.Action("authorization"), func(ctx context.Context) ([]byte, error) {
 		return b.recordAuthorization(ctx, call)
 	})
 	if err != nil {

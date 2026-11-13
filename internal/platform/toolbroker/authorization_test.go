@@ -136,11 +136,7 @@ func requireStates(t *testing.T, got []string, want ...string) {
 	}
 }
 
-func authorizationKey(inv durable.Invocation) string {
-	scope := durable.NewTurnScope(inv)
-	scope.NextOp()
-	return scope.NextOp()
-}
+const authorizationKey = "call-1-0/authorization"
 
 func TestDurableApprovalAsksTheDeciderOnce(t *testing.T) {
 	cases := []struct {
@@ -502,36 +498,25 @@ func TestDurableToolCallWritesOneAuthorizationAction(t *testing.T) {
 			if err != nil {
 				t.Fatalf("canonical request: %v", err)
 			}
-			want := 3
+			want := []string{"call-1-0/policy", "call-1-0/authorization", "call-1-0/execution"}
 			if tc.standing {
-				want = 4
+				want = []string{"call-1-0/policy", "call-1-0/standing-grant", "call-1-0/authorization", "call-1-0/execution"}
 			}
 			var outcome callOutcome
-			var next string
-			var positions []string
 			key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
-				scope := durable.NewTurnScope(inv)
-				outcome = outcomeOf(rig.broker.Execute(durable.WithTurnScope(ctx, scope), request))
-				next = scope.NextOp()
-				fresh := durable.NewTurnScope(inv)
-				for range want + 1 {
-					positions = append(positions, fresh.NextOp())
-				}
+				outcome = outcomeOf(rig.broker.Execute(inTurn(ctx, inv), request))
 				return nil
 			})
 			if outcome != probeSucceeded {
 				t.Fatalf("outcome = %+v, want %+v", outcome, probeSucceeded)
 			}
 			rows := hosted.actionRows(t, key)
-			if len(rows) != want {
-				t.Fatalf("recorded actions = %d, want %d", len(rows), want)
-			}
 			recordedKeys := make([]string, 0, len(rows))
 			for _, row := range rows {
 				recordedKeys = append(recordedKeys, row.key)
 			}
-			if expected := slices.Sorted(slices.Values(positions[:want])); !slices.Equal(recordedKeys, expected) || next != positions[want] {
-				t.Errorf("action keys = %q and then %q, want the first %d positions of the turn %q", recordedKeys, next, want, positions)
+			if !slices.Equal(recordedKeys, want) {
+				t.Errorf("action keys = %q, want %q", recordedKeys, want)
 			}
 			requirePolicyRow(t, rows[0])
 			if tc.standing && string(rows[1].result) != "true" {
@@ -590,7 +575,7 @@ func TestDurableAuthorizationIsBoundToItsRequest(t *testing.T) {
 			rig := newAuthorizationRig(t, &rigOptions{requiresApproval: true})
 			var outcome callOutcome
 			hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
-				if _, err := inv.RunAction(ctx, authorizationKey(inv), func(context.Context) ([]byte, error) {
+				if _, err := inv.RunAction(ctx, authorizationKey, func(context.Context) ([]byte, error) {
 					return []byte(tc.planted), nil
 				}); err != nil {
 					return err

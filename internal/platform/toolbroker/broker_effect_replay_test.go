@@ -424,7 +424,7 @@ func TestDurableTurnEffectReplayReturnsTheRecordedResult(t *testing.T) {
 		inlineLimit: 64 << 10,
 	})
 	inTurnScope := func() context.Context {
-		return durable.WithTurnScope(t.Context(), durable.NewTurnScope(passthroughInvocation{}))
+		return inTurn(t.Context(), passthroughInvocation{})
 	}
 	first, err := harness.run(inTurnScope(), replayRequest(replayArguments))
 	if err != nil {

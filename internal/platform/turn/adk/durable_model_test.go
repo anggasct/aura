@@ -261,7 +261,7 @@ func yieldedFunctionCallIDs(ctx context.Context, t *testing.T, model adkmodel.LL
 func TestJournaledModelGivesAnUnnamedFunctionCallAStableID(t *testing.T) {
 	inner := &functionCallModel{}
 	inv := &journalInvocation{}
-	want := []string{"adk-turn-1-op-1-0", "call-7", "adk-turn-1-op-1-2"}
+	want := []string{"adk-turn-1-model-1-0", "call-7", "adk-turn-1-model-1-2"}
 
 	first := yieldedFunctionCallIDs(withTurnID(scopedContext(t, inv), "turn-1"), t, journalModel(inner))
 	second := yieldedFunctionCallIDs(withTurnID(scopedContext(t, inv), "turn-1"), t, journalModel(inner))
@@ -275,7 +275,7 @@ func TestJournaledModelGivesAnUnnamedFunctionCallAStableID(t *testing.T) {
 	if calls := inner.callCount(); calls != 1 {
 		t.Errorf("model calls = %d, want the second call served from the journal", calls)
 	}
-	recorded := journalSnapshot(t, inv)["op-1"]
+	recorded := journalSnapshot(t, inv)["model-1"]
 	if len(recorded) != 1 || recorded[0].Content.Parts[0].FunctionCall.ID != want[0] {
 		t.Errorf("recorded response = %+v, want it to carry the id %s", recorded, want[0])
 	}
