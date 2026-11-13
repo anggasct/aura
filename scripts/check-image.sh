@@ -19,17 +19,6 @@ for image in "$@"; do
 		echo "check-image: $image does not run 'aura version' read-only as 65532" >&2
 		failed=1
 	fi
-	container="$(docker create --platform "$platform" "$image")"
-	listing="$(docker export "$container" | tar -t)"
-	docker rm "$container" >/dev/null
-	while IFS= read -r binary; do
-		[ -n "$binary" ] || continue
-		dir="$(dirname "$binary")"
-		if ! grep -Fxq "$dir/LICENSE" <<<"$listing"; then
-			echo "check-image: $image ships $binary without $dir/LICENSE" >&2
-			failed=1
-		fi
-	done < <(grep -E '(^|/)restate-server$' <<<"$listing" || true)
 	if [ "$failed" -ne 0 ]; then
 		status=1
 		continue

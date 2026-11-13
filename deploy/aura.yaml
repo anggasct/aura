@@ -5,14 +5,6 @@ tools:
   workspace: /var/lib/aura/workspace
 workflows:
   definitions_dir: /etc/aura/workflows
-durable:
-  enabled: true
-  mode: external
-  allow_plaintext: true
-  endpoint: http://restate:8080
-  admin_endpoint: http://restate:9070
-  handler_addr: 0.0.0.0:9080
-  handler_url: http://aura:9080
 models:
   definitions:
     primary:

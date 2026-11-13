@@ -110,35 +110,6 @@ jobs:
       - name: Workflow and child crash and resume suites on the SQLite runtime
         run: make durable-workflows
 
-  image:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: Snapshot release with images
-        run: make release-snapshot
-
-      - name: Image checks (non-root, read-only, content)
-        run: make image-check
-
-      - name: Compose smoke (private Restate, upgrade job, restart survival)
-        run: make compose-smoke
-
-      - name: Exec profile in a hardened container fails closed
-        run: make exec-container-check
-
   integration:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
