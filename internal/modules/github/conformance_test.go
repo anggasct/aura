@@ -142,7 +142,7 @@ func assertSchemasMatchValidators(t *testing.T, definitions []tools.Definition) 
 	}
 	expectedRequired := map[string]map[string]bool{
 		ToolCreatePR: {"repo": true, "credential_name": true, "title": true, "head": true, "base": true},
-		ToolMerge:    {"repo": true, "credential_name": true, "number": true, "sha": true},
+		ToolMerge:    {"repo": true, "credential_name": true, "number": true, "sha": true, "merge_method": true},
 		ToolComment:  {"repo": true, "credential_name": true, "number": true, "body": true},
 	}
 	for i := range definitions {
@@ -204,7 +204,7 @@ func assertSchemasMatchValidators(t *testing.T, definitions []tools.Definition) 
 	}
 	minimal := map[string]string{
 		ToolCreatePR: `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":"ci"}`,
-		ToolMerge:    `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","credential_name":"ci"}`,
+		ToolMerge:    `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","merge_method":"merge","credential_name":"ci"}`,
 		ToolComment:  `{"repo":"org/repo","number":7,"body":"hi","credential_name":"ci"}`,
 	}
 	for i := range definitions {
@@ -234,7 +234,7 @@ func assertSchemasMatchValidators(t *testing.T, definitions []tools.Definition) 
 		}
 	}
 	wrongNumerics := map[string]string{
-		ToolMerge:   `{"repo":"org/repo","number":"42","sha":"0123456789abcdef0123456789abcdef01234567","credential_name":"ci"}`,
+		ToolMerge:   `{"repo":"org/repo","number":"42","sha":"0123456789abcdef0123456789abcdef01234567","merge_method":"merge","credential_name":"ci"}`,
 		ToolComment: `{"repo":"org/repo","number":"7","body":"hi","credential_name":"ci"}`,
 	}
 	for i := range definitions {
@@ -380,8 +380,16 @@ func TestRegisterAdvertisesTheConfiguredCredentialNames(t *testing.T) {
 		}
 	}
 	for _, definition := range Definitions() {
-		if strings.Contains(string(definition.Schema), `"enum"`) {
-			t.Errorf("%s plain definition schema carries an enum", definition.Name)
+		var schema struct {
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(definition.Schema, &schema); err != nil {
+			t.Fatalf("%s plain schema is not JSON: %v", definition.Name, err)
+		}
+		if got := schema.Properties["credential_name"].Enum; got != nil {
+			t.Errorf("%s plain definition credential_name carries the enum %v", definition.Name, got)
 		}
 	}
 }
@@ -389,7 +397,7 @@ func TestRegisterAdvertisesTheConfiguredCredentialNames(t *testing.T) {
 func validArguments(tool, credential string) json.RawMessage {
 	arguments := map[string]string{
 		ToolCreatePR: `{"repo":"org/repo","title":"t","head":"h","base":"b","credential_name":%q}`,
-		ToolMerge:    `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","credential_name":%q}`,
+		ToolMerge:    `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","merge_method":"merge","credential_name":%q}`,
 		ToolComment:  `{"repo":"org/repo","number":7,"body":"hi","credential_name":%q}`,
 	}
 	return json.RawMessage(fmt.Sprintf(arguments[tool], credential))
