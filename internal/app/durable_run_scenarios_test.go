@@ -192,7 +192,7 @@ func (w *workflowShape) host(t *testing.T, life *runLife) {
 
 func (w *workflowShape) startRun(t *testing.T, life *runLife) {
 	t.Helper()
-	summary, err := life.interpreter.Start(t.Context(), w.spec().ID, &workflow.RunInput{Objective: "survive the kill"})
+	summary, err := life.interpreter.Start(t.Context(), w.spec().ID, &workflow.RunInput{Objective: "survive the kill"}, ownerRunOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

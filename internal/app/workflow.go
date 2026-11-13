@@ -20,8 +20,10 @@ import (
 	"github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 )
@@ -149,6 +151,10 @@ func workflowDefinitionsDir(cfg *config.Config) string {
 	return cfg.Workflows.DefinitionsDir
 }
 
+func ownerRunOrigin() *workflow.RunOrigin {
+	return &workflow.RunOrigin{PrincipalID: principal.OwnerID, PrincipalClass: string(principal.ClassOwner), AgentID: auraagent.DefaultID}
+}
+
 func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 	var inputFlag string
 	cmd := &cobra.Command{
@@ -167,7 +173,7 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 						return fmt.Errorf("invalid --input json: %w", err)
 					}
 				}
-				summary, err := app.interpreter.Start(ctx, args[0], runInput)
+				summary, err := app.interpreter.Start(ctx, args[0], runInput, ownerRunOrigin())
 				if err != nil {
 					return err
 				}
@@ -204,7 +210,7 @@ type workflowToolIDs struct {
 	idempotencyKey string
 }
 
-func workflowToolIDsFor(call workflow.StepCall) workflowToolIDs {
+func workflowToolIDsFor(call *workflow.StepCall) workflowToolIDs {
 	sum := sha256.Sum256([]byte(call.RunID + "/" + call.StepID))
 	digest := hex.EncodeToString(sum[:])[:24]
 	return workflowToolIDs{
@@ -226,7 +232,7 @@ func (r *workflowToolRunner) Invoke(ctx context.Context, toolID string, args jso
 	if !ok {
 		return nil, &workflow.Error{Code: workflow.ErrorCodeExecutorInvalid, Detail: "tool step has no step call"}
 	}
-	ids := workflowToolIDsFor(call)
+	ids := workflowToolIDsFor(&call)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if r.db != nil {
 		_, _ = r.db.ExecContext(ctx,

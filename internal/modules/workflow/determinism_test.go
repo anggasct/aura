@@ -44,7 +44,7 @@ func runScriptedWorkflow(t *testing.T, script []struct {
 	if err := interpreter.Load(ctx, spec, testValidationDeps()); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	summary, err := interpreter.Start(ctx, "replay", &RunInput{Objective: "ship it"})
+	summary, err := interpreter.Start(ctx, "replay", &RunInput{Objective: "ship it"}, ownerOrigin())
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

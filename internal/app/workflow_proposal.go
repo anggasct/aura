@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -78,6 +79,10 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 						"session: " + proposal.SessionID,
 						"digest: " + proposal.Digest,
 					}
+					lines = append(lines, "tainted: "+yesNo(proposal.Tainted))
+					if proposal.Tainted {
+						lines = append(lines, approval.UntrustedInputNotice)
+					}
 					if proposal.RunID != "" {
 						lines = append(lines, "run: "+proposal.RunID)
 					}
@@ -128,6 +133,13 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
+}
+
 func approveProposal(ctx context.Context, cfg *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, now time.Time) (string, error) {
 	proposal, err := runs.Proposal(ctx, id, now)
 	if err != nil {
@@ -160,8 +172,8 @@ func approveProposal(ctx context.Context, cfg *config.Config, interpreter *workf
 	if err := runs.DecideProposal(ctx, id, workflow.ProposalApproved, "", now); err != nil {
 		return "", err
 	}
-	summary, err := interpreter.StartFor(ctx, proposal.Spec.ID, &workflow.RunInput{}, &workflow.RunOrigin{
-		PrincipalID: proposal.PrincipalID, PrincipalClass: string(principal.ClassOwner), AgentID: proposal.AgentID, SessionID: proposal.SessionID,
+	summary, err := interpreter.Start(ctx, proposal.Spec.ID, &workflow.RunInput{}, &workflow.RunOrigin{
+		PrincipalID: proposal.PrincipalID, PrincipalClass: string(principal.ClassOwner), AgentID: proposal.AgentID, SessionID: proposal.SessionID, Tainted: proposal.Tainted,
 	})
 	if err != nil {
 		return "", err

@@ -54,7 +54,7 @@ func TestGeneratedRunsStopAtMaxStepsAndDefinedRunsDoNot(t *testing.T) {
 	tools := &fakeToolRunner{}
 	interpreter, disk, _ := budgetInterpreter(t, Budget{MaxSteps: 2, MaxTokens: 1000}, &Options{Tools: tools})
 	loadAll(t, interpreter, threeToolSteps("gen_prop_a", SourceGenerated), threeToolSteps("defined", SourceDefined))
-	generated, err := interpreter.Start(context.Background(), "gen_prop_a", nil)
+	generated, err := interpreter.Start(context.Background(), "gen_prop_a", nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestGeneratedRunsStopAtMaxStepsAndDefinedRunsDoNot(t *testing.T) {
 	if calls := len(tools.called); calls != 2 {
 		t.Fatalf("tool calls = %d, want 2 within the budget", calls)
 	}
-	defined, err := interpreter.Start(context.Background(), "defined", nil)
+	defined, err := interpreter.Start(context.Background(), "defined", nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestRetriesAndChildStepsCountTowardTheParentBudget(t *testing.T) {
 	tools := &flakyTools{}
 	interpreter, disk, _ := budgetInterpreter(t, Budget{MaxSteps: 3}, &Options{Tools: tools})
 	loadAll(t, interpreter, retrying)
-	run, err := interpreter.Start(context.Background(), retrying.ID, nil)
+	run, err := interpreter.Start(context.Background(), retrying.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestRetriesAndChildStepsCountTowardTheParentBudget(t *testing.T) {
 	parent := composingSpec("gen_prop_parent", "defined")
 	parent.Source = SourceGenerated
 	loadAll(t, parentInterpreter, threeToolSteps("defined", SourceDefined), parent)
-	parentRun, err := parentInterpreter.Start(context.Background(), parent.ID, nil)
+	parentRun, err := parentInterpreter.Start(context.Background(), parent.ID, nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestMeteredAgentTokensStopTheRunInBothDrivers(t *testing.T) {
 	}
 	interpreter, disk, fake := budgetInterpreter(t, Budget{MaxSteps: 10, MaxTokens: 250}, &Options{Agents: meteredAgents{tokens: 150}, AgentResolver: registry})
 	loadAll(t, interpreter, agentSteps("gen_prop_tokens"), agentSteps("gen_prop_serial"))
-	run, err := interpreter.Start(context.Background(), "gen_prop_tokens", nil)
+	run, err := interpreter.Start(context.Background(), "gen_prop_tokens", nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestMeteredAgentTokensStopTheRunInBothDrivers(t *testing.T) {
 	if third := stepByID(t, disk, run.ID, "third"); third.Status == StepSucceeded {
 		t.Fatal("a step ran after the token budget was spent")
 	}
-	serialRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "gen_prop_serial"), &RunInput{})
+	serialRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "gen_prop_serial"), &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
 	}

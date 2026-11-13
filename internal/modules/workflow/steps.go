@@ -235,7 +235,10 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec, attempt
 	if runner == nil || step.Executor.ToolID == nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: "no tool runner is wired", EndedAt: nowPtr()}
 	}
-	call := StepCall{RunID: e.runID, StepID: step.ID, Attempt: attempt}
+	if !e.origin.Complete() {
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeOriginIncomplete), Detail: "run " + e.runID + " has no complete origin", EndedAt: nowPtr()}
+	}
+	call := &StepCall{RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: e.origin, DefinitionDigest: e.definitionDigest}
 	output, err := runner.Invoke(WithStepCall(ctx, call), *step.Executor.ToolID, toolArguments(step))
 	if err != nil {
 		code := ErrorCodeStepFailed

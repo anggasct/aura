@@ -85,7 +85,7 @@ func TestSerialDriverRegistersTheJournaledHandler(t *testing.T) {
 			if got := runtime.registeredNames(); !slices.Equal(got, []string{HandlerName}) {
 				t.Fatalf("registered handlers = %v, want [%s]", got, HandlerName)
 			}
-			summary, err := interpreter.Start(ctx, "driver-two-steps", nil)
+			summary, err := interpreter.Start(ctx, "driver-two-steps", nil, ownerOrigin())
 			if err != nil {
 				t.Fatalf("Start: %v", err)
 			}
@@ -149,10 +149,14 @@ func TestToolStepCarriesItsStepCall(t *testing.T) {
 	if terminal != RunSucceeded {
 		t.Fatalf("terminal = %s, want %s", terminal, RunSucceeded)
 	}
+	digest, err := Digest(spec)
+	if err != nil {
+		t.Fatalf("Digest: %v", err)
+	}
 	want := []StepCall{
-		{RunID: runID, StepID: "first", Attempt: 0},
-		{RunID: runID, StepID: "second", Attempt: 0},
-		{RunID: runID, StepID: "second", Attempt: 1},
+		{RunID: runID, StepID: "first", Attempt: 0, Origin: *ownerOrigin(), DefinitionDigest: digest},
+		{RunID: runID, StepID: "second", Attempt: 0, Origin: *ownerOrigin(), DefinitionDigest: digest},
+		{RunID: runID, StepID: "second", Attempt: 1, Origin: *ownerOrigin(), DefinitionDigest: digest},
 	}
 	if got := tools.recorded(); !slices.Equal(got, want) {
 		t.Fatalf("step calls = %+v, want %+v", got, want)

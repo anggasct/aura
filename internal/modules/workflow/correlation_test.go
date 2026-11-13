@@ -19,7 +19,7 @@ func TestBindCorrelationRoundTrip(t *testing.T) {
 	if err := disk.SaveDefinition(ctx, spec); err != nil {
 		t.Fatalf("SaveDefinition: %v", err)
 	}
-	summary, err := disk.CreateRun(ctx, spec, nil)
+	summary, err := disk.CreateRun(ctx, spec, nil, ownerOrigin())
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

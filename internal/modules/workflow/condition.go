@@ -33,6 +33,7 @@ const (
 	ErrorCodeProposalDecided      ErrorCode = "workflow_proposal_decided"
 	ErrorCodeNotPermitted         ErrorCode = "workflow_not_permitted"
 	ErrorCodeRoutineInvalid       ErrorCode = "workflow_routine_invalid"
+	ErrorCodeOriginIncomplete     ErrorCode = "workflow_origin_incomplete"
 )
 
 const ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"

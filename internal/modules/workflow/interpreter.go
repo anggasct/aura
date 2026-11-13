@@ -211,11 +211,7 @@ func (i *Interpreter) Spec(id string) (*Spec, bool) {
 	return compiled.spec, true
 }
 
-func (i *Interpreter) Start(ctx context.Context, definitionID string, input *RunInput) (*RunSummary, error) {
-	return i.StartFor(ctx, definitionID, input, nil)
-}
-
-func (i *Interpreter) StartFor(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
+func (i *Interpreter) Start(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
 	return i.start(ctx, definitionID, input, origin, newID("dur"))
 }
 
@@ -235,7 +231,7 @@ func (i *Interpreter) start(ctx context.Context, definitionID string, input *Run
 	if !ok {
 		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+definitionID+" is not loaded")
 	}
-	summary, err := i.store.createRun(ctx, compiled.spec, input, origin, durableKey)
+	summary, err := i.store.createRun(ctx, compiled.spec, input, origin, durableKey, "")
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +292,14 @@ func (i *Interpreter) handleInvocation(ctx context.Context, inv durable.Invocati
 	if !ok {
 		return codedError(ErrorCodeDefinitionNotFound, "definition "+tick.DefinitionID+" is not loaded")
 	}
+	summary, err := i.store.Run(ctx, tick.RunID)
+	if err != nil {
+		return err
+	}
+	digest, err := Digest(compiled.spec)
+	if err != nil {
+		return err
+	}
 	input, err := i.store.RunInputFor(ctx, tick.RunID)
 	if err != nil {
 		return err
@@ -304,30 +308,34 @@ func (i *Interpreter) handleInvocation(ctx context.Context, inv durable.Invocati
 		return err
 	}
 	execution := &stepExecution{
-		interpreter: i,
-		invocation:  inv,
-		spec:        compiled.spec,
-		graph:       compiled.graph,
-		runID:       tick.RunID,
-		input:       input,
-		awaiting:    map[string]bool{},
-		budget:      i.budgetFor(compiled.spec, nil),
+		interpreter:      i,
+		invocation:       inv,
+		spec:             compiled.spec,
+		graph:            compiled.graph,
+		runID:            tick.RunID,
+		origin:           summary.Origin,
+		definitionDigest: digest,
+		input:            input,
+		awaiting:         map[string]bool{},
+		budget:           i.budgetFor(compiled.spec, nil),
 	}
 	return execution.run(ctx)
 }
 
 type stepExecution struct {
-	interpreter *Interpreter
-	invocation  durable.Invocation
-	spec        *Spec
-	graph       *Graph
-	runID       string
-	input       *RunInput
-	outputs     map[string]json.RawMessage
-	statuses    map[string]string
-	failedStep  string
-	budget      *runBudget
-	mu          sync.Mutex
+	interpreter      *Interpreter
+	invocation       durable.Invocation
+	spec             *Spec
+	graph            *Graph
+	definitionDigest string
+	runID            string
+	origin           RunOrigin
+	input            *RunInput
+	outputs          map[string]json.RawMessage
+	statuses         map[string]string
+	failedStep       string
+	budget           *runBudget
+	mu               sync.Mutex
 	// statusMu guards the in-memory awaiting set of steps currently
 	// suspended on a signal; it is never held across a database write.
 	statusMu sync.Mutex

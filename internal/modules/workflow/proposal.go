@@ -27,6 +27,7 @@ type Proposal struct {
 	SessionID   string
 	AgentID     string
 	PrincipalID string
+	Tainted     bool
 	Spec        *Spec
 	Digest      string
 	Status      string
@@ -122,15 +123,15 @@ func (s *Store) CreateProposal(ctx context.Context, proposal *Proposal) error {
 	if err != nil {
 		return codedError(ErrorCodeSpecInvalid, "encode proposal spec: "+err.Error())
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		proposal.ID, proposal.SessionID, proposal.AgentID, proposal.PrincipalID, string(encoded), proposal.Digest, ProposalProposed, proposal.CreatedAt.UTC().Format(time.RFC3339Nano))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, tainted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		proposal.ID, proposal.SessionID, proposal.AgentID, proposal.PrincipalID, string(encoded), proposal.Digest, ProposalProposed, proposal.CreatedAt.UTC().Format(time.RFC3339Nano), proposal.Tainted)
 	if err != nil {
 		return fmt.Errorf("insert proposal: %w", err)
 	}
 	return nil
 }
 
-const proposalColumns = `id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, COALESCE(decided_at, ''), COALESCE(run_id, ''), created_at`
+const proposalColumns = `id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, COALESCE(decided_at, ''), COALESCE(run_id, ''), created_at, tainted`
 
 func (s *Store) Proposal(ctx context.Context, id string, now time.Time) (*Proposal, error) {
 	if err := s.expireProposals(ctx, now); err != nil {
@@ -199,7 +200,7 @@ type proposalRow interface {
 func scanProposal(row proposalRow) (*Proposal, error) {
 	var proposal Proposal
 	var specJSON, decidedAt, createdAt string
-	if err := row.Scan(&proposal.ID, &proposal.SessionID, &proposal.AgentID, &proposal.PrincipalID, &specJSON, &proposal.Digest, &proposal.Status, &decidedAt, &proposal.RunID, &createdAt); err != nil {
+	if err := row.Scan(&proposal.ID, &proposal.SessionID, &proposal.AgentID, &proposal.PrincipalID, &specJSON, &proposal.Digest, &proposal.Status, &decidedAt, &proposal.RunID, &createdAt, &proposal.Tainted); err != nil {
 		return nil, err
 	}
 	proposal.Spec = &Spec{}
