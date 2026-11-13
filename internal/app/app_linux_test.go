@@ -112,13 +112,11 @@ func TestCompositionServerBuildFailureReleasesWhatWasBuilt(t *testing.T) {
 func TestCompositionServerRegistersEveryConfiguredEntry(t *testing.T) {
 	restoreDefaultLogger(t)
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
-	extra := fmt.Sprintf("profile:\n  enabled: true\ndurable:\n  enabled: true\n  mode: external\n  endpoint: http://%s\n  admin_endpoint: http://%s\n  handler_addr: %s\n",
-		freeLoopbackAddress(t), freeLoopbackAddress(t), freeLoopbackAddress(t))
-	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra))
+	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, "profile:\n  enabled: true\n"))
 	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))
 	requireNames(t, "entries", app.group.Names(), []string{
 		"sqlite", "telemetry", "memory_purge", "profile_extraction", "broadcast_resume", "schedule_resume",
-		"schedule_pass", "turn_recovery", "channels", "turn_engine", "turn_recovery_pass", "workflow_proposal_cards", "retention_sweeps", "workflow_completion", "persona_eval_schedules",
+		"schedule_pass", "turn_recovery", "channels", "durable_host", "turn_engine", "turn_recovery_pass", "workflow_proposal_cards", "retention_sweeps", "run_retention", "workflow_completion", "persona_eval_schedules",
 	})
 	if err := app.Close(t.Context()); err != nil {
 		t.Fatalf("Close without Run: %v", err)
@@ -154,15 +152,14 @@ func TestCompositionServerToolsHonourThePersonaCeiling(t *testing.T) {
 	requirePersonaCeiling(t, app)
 }
 
-func TestCompositionServerWithDurableKeepsThePersonaCeiling(t *testing.T) {
+func TestCompositionServerWithWorkflowsKeepsThePersonaCeiling(t *testing.T) {
 	restoreDefaultLogger(t)
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
 	definitions := t.TempDir()
 	if err := os.WriteFile(filepath.Join(definitions, "demo.yaml"), []byte(validWorkflowYAML), 0o600); err != nil {
 		t.Fatalf("write definition: %v", err)
 	}
-	extra := compositionPersonaYAML + fmt.Sprintf("workflows:\n  definitions_dir: %s\ndurable:\n  enabled: true\n  mode: external\n  endpoint: http://%s\n  admin_endpoint: http://%s\n  handler_addr: %s\n",
-		definitions, freeLoopbackAddress(t), freeLoopbackAddress(t), freeLoopbackAddress(t))
+	extra := compositionPersonaYAML + fmt.Sprintf("workflows:\n  definitions_dir: %s\n", definitions)
 	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra))
 	result.CapabilityReport = capabilitytest.Report(t, "workspace-read")
 	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))

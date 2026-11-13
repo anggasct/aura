@@ -337,39 +337,34 @@ func TestCompositionCommandModelOptionsMatchEvaluation(t *testing.T) {
 }
 
 func TestCompositionDurableRuntimeIsBuiltOnce(t *testing.T) {
-	for name, enabled := range map[string]bool{"sqlite": false, "external": true} {
-		t.Run(name, func(t *testing.T) {
-			b := newDurableRuntimeBuild(enabled)
-			b.db = storetest.OpenMigrated(t)
-			first, err := b.durableRuntime()
-			if err != nil {
-				t.Fatalf("durableRuntime: %v", err)
-			}
-			second, err := b.durableRuntime()
-			if err != nil {
-				t.Fatalf("second durableRuntime: %v", err)
-			}
-			if first != second {
-				t.Fatal("durableRuntime built a second runtime")
-			}
-			if _, isSQLite := first.(*sqlite.Runtime); isSQLite == enabled {
-				t.Fatalf("durableRuntime = %T with durable enabled %t", first, enabled)
-			}
-		})
-	}
+	t.Run("sqlite", func(t *testing.T) {
+		b := newDurableRuntimeBuild()
+		b.db = storetest.OpenMigrated(t)
+		first, err := b.durableRuntime()
+		if err != nil {
+			t.Fatalf("durableRuntime: %v", err)
+		}
+		second, err := b.durableRuntime()
+		if err != nil {
+			t.Fatalf("second durableRuntime: %v", err)
+		}
+		if first != second {
+			t.Fatal("durableRuntime built a second runtime")
+		}
+		if _, isSQLite := first.(*sqlite.Runtime); !isSQLite {
+			t.Fatalf("durableRuntime = %T, want the SQLite runtime", first)
+		}
+	})
 	t.Run("storage not open", func(t *testing.T) {
-		_, err := newDurableRuntimeBuild(false).durableRuntime()
+		_, err := newDurableRuntimeBuild().durableRuntime()
 		if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
 			t.Fatalf("durableRuntime without storage = %v, want %s", err, ErrorCodeInvalidArgument)
 		}
 	})
 }
 
-func newDurableRuntimeBuild(enabled bool) *build {
+func newDurableRuntimeBuild() *build {
 	cfg := config.Default()
-	cfg.Durable.Enabled = enabled
-	cfg.Durable.Mode = config.DurableModeExternal
-	cfg.Durable.Endpoint = "http://127.0.0.1:1"
 	b := newBuild(&Options{Surface: SurfaceCommand, Config: &config.LoadResult{Config: &cfg}})
 	b.logger = slog.New(slog.DiscardHandler)
 	return b

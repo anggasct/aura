@@ -81,10 +81,6 @@ type serverBuild struct {
 	httpChat           *httpchat.Server
 }
 
-func durableEnabled(cfg *config.Config) bool {
-	return cfg.Durable != nil && cfg.Durable.Enabled
-}
-
 func (b *build) startTelemetry() error {
 	if !b.onServer() {
 		return nil
@@ -258,13 +254,6 @@ func (b *build) buildServerDurable() error {
 	if err != nil {
 		return err
 	}
-	if durableEnabled(b.cfg) {
-		b.server.durableConfig = &runtimeengine.DurableConfig{
-			Sessions: &durableSessionStore{runtime: runtime},
-			Runtime:  runtime,
-		}
-		return nil
-	}
 	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: b.db})
 	if err != nil {
 		return err
@@ -282,7 +271,6 @@ func (b *build) buildServerSurface(ctx context.Context) error {
 		func() error { return b.buildWorkflowHost(ctx) },
 		b.buildDurableHost,
 		b.buildProbe,
-		func() error { return b.wireDurableListener(ctx) },
 		b.wireWorkflowParts,
 		b.bindErasureRuns,
 		b.addEdgeListeners,
@@ -328,12 +316,10 @@ func (b *build) buildBroadcast() error {
 	if err != nil {
 		return err
 	}
-	if !durableEnabled(cfg) {
-		if err := registerBroadcastHandler(s.broadcastRuntime, s.broadcastRunner); err != nil {
-			return err
-		}
-		s.hostedHandlers = append(s.hostedHandlers, broadcast.HandlerName)
+	if err := registerBroadcastHandler(s.broadcastRuntime, s.broadcastRunner); err != nil {
+		return err
 	}
+	s.hostedHandlers = append(s.hostedHandlers, broadcast.HandlerName)
 	runtime := s.broadcastRuntime
 	return b.group.Add(&lifecycleStage{name: "broadcast_resume", start: func(ctx context.Context) error {
 		resumed, err := resumeBroadcastRunners(ctx, runtime, db)
@@ -366,24 +352,20 @@ func (b *build) buildSchedule() error {
 	if err != nil {
 		return err
 	}
-	if !durableEnabled(cfg) {
-		if err := registerScheduleHandler(s.broadcastRuntime, s.scheduleRunner); err != nil {
-			return err
-		}
-		s.hostedHandlers = append(s.hostedHandlers, schedule.HandlerName)
+	if err := registerScheduleHandler(s.broadcastRuntime, s.scheduleRunner); err != nil {
+		return err
 	}
+	s.hostedHandlers = append(s.hostedHandlers, schedule.HandlerName)
 	s.childLedger = child.NewLedger(nil, 0)
 	if cfg.Children != nil && cfg.Children.Enabled {
 		childHandler, err := buildChildHandler(db, s.childLedger, &runtimeSignaler{runtime: s.broadcastRuntime}, b.executor, b.primaryModel())
 		if err != nil {
 			return err
 		}
-		if !durableEnabled(cfg) {
-			if err := registerChildHandler(s.broadcastRuntime, childHandler); err != nil {
-				return err
-			}
-			s.hostedHandlers = append(s.hostedHandlers, child.HandlerName)
+		if err := registerChildHandler(s.broadcastRuntime, childHandler); err != nil {
+			return err
 		}
+		s.hostedHandlers = append(s.hostedHandlers, child.HandlerName)
 	}
 	runtime, host := s.broadcastRuntime, s.host
 	if err := b.group.Add(&lifecycleStage{name: "schedule_resume", start: func(ctx context.Context) error {
@@ -410,9 +392,6 @@ func (b *build) buildSchedule() error {
 }
 
 func (b *build) buildWorkflowHost(ctx context.Context) error {
-	if durableEnabled(b.cfg) {
-		return nil
-	}
 	if err := b.buildWorkflows(ctx, true); err != nil {
 		return err
 	}
@@ -422,16 +401,14 @@ func (b *build) buildWorkflowHost(ctx context.Context) error {
 }
 
 func (b *build) buildDurableHost() error {
-	if !durableEnabled(b.cfg) {
-		s := b.server
-		host, ok := s.broadcastRuntime.(durableRunHost)
-		if !ok {
-			return invalidOptions("the durable runtime cannot host runs")
-		}
-		stage := &durableHostStage{host: host, handlers: s.hostedHandlers, logger: b.logger}
-		if err := b.group.Add(&lifecycleStage{name: "durable_host", start: stage.start, stop: stage.stop}); err != nil {
-			return err
-		}
+	s := b.server
+	host, ok := s.broadcastRuntime.(durableRunHost)
+	if !ok {
+		return invalidOptions("the durable runtime cannot host runs")
+	}
+	stage := &durableHostStage{host: host, handlers: s.hostedHandlers, logger: b.logger}
+	if err := b.group.Add(&lifecycleStage{name: "durable_host", start: stage.start, stop: stage.stop}); err != nil {
+		return err
 	}
 	if err := b.group.Add(&lifecycleStage{name: "turn_engine", stop: b.engine.Shutdown}); err != nil {
 		return err
@@ -500,38 +477,6 @@ func (b *build) newProbeListener() (*probeListener, error) {
 	return buildProbeListener(b.cfg, mapCapabilityStatuses(b.result.CapabilityReport), b.events, b.sessions, b.server.checks...)
 }
 
-func (b *build) wireDurableListener(ctx context.Context) error {
-	cfg, db, s := b.cfg, b.db, b.server
-	if !durableEnabled(cfg) {
-		return nil
-	}
-	if err := b.buildWorkflows(ctx, true); err != nil {
-		return err
-	}
-	durableListener, err := buildDurableListener(&durableListenerInput{
-		result: b.result, db: db, logger: b.logger, engine: b.engine, interpreter: b.interpreter,
-	})
-	if err != nil {
-		return err
-	}
-	if err := registerBroadcastHandler(durableListener, s.broadcastRunner); err != nil {
-		return err
-	}
-	if err := registerScheduleHandler(durableListener, s.scheduleRunner); err != nil {
-		return err
-	}
-	if cfg.Children != nil && cfg.Children.Enabled {
-		childHandler, err := buildChildHandler(db, s.childLedger, nil, b.executor, b.primaryModel())
-		if err != nil {
-			return err
-		}
-		if err := registerChildHandler(durableListener, childHandler); err != nil {
-			return err
-		}
-	}
-	return s.listeners.Add(durableListener)
-}
-
 func (b *build) wireWorkflowParts() error {
 	cfg, db, s := b.cfg, b.db, b.server
 	if b.interpreter == nil || b.builtin == nil || b.builtin.Broker() == nil {
@@ -581,9 +526,6 @@ func (b *build) registerSweeps() error {
 }
 
 func (b *build) registerRunRetention() error {
-	if durableEnabled(b.cfg) {
-		return nil
-	}
 	prune, ok := b.server.broadcastRuntime.(pruner)
 	if !ok {
 		return invalidOptions("the durable runtime cannot prune ended runs")
