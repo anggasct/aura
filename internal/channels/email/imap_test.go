@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,22 +93,25 @@ type imapFixture struct {
 	user   *imapmemserver.User
 	host   string
 	port   int
-	idling chan struct{}
+	idling *atomic.Int64
 }
 
-func (f *imapFixture) awaitIdle() {
+func (f *imapFixture) awaitIdleEntries(want int64) {
 	f.t.Helper()
-	select {
-	case <-f.idling:
-	case <-time.After(waitDeadline):
-		f.t.Fatal("adapter never entered IDLE")
+	deadline := time.After(waitDeadline)
+	for f.idling.Load() < want {
+		select {
+		case <-time.After(time.Millisecond):
+		case <-deadline:
+			f.t.Fatalf("idle entries = %d, want %d", f.idling.Load(), want)
+		}
 	}
 }
 
 type idleSession struct {
 	*imapmemserver.UserSession
 	user    *imapmemserver.User
-	started chan<- struct{}
+	started *atomic.Int64
 }
 
 func (s *idleSession) Login(username, password string) error {
@@ -119,10 +123,7 @@ func (s *idleSession) Login(username, password string) error {
 }
 
 func (s *idleSession) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) error {
-	select {
-	case s.started <- struct{}{}:
-	default:
-	}
+	s.started.Add(1)
 	return s.UserSession.Idle(w, stop)
 }
 
@@ -133,7 +134,7 @@ func startIMAPServer(t *testing.T, caps imap.CapSet) *imapFixture {
 	if err := user.Create("INBOX", nil); err != nil {
 		t.Fatalf("create INBOX: %v", err)
 	}
-	idling := make(chan struct{}, 64)
+	idling := new(atomic.Int64)
 	server := imapserver.New(&imapserver.Options{
 		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
 			return &idleSession{user: user, started: idling}, nil, nil
@@ -266,14 +267,14 @@ func TestIMAP_IdleDeliversNewMailWithoutPolling(t *testing.T) {
 	server := startIMAPServer(t, rev1Caps)
 	h := server.harness(time.Hour, false, harnessOptions{})
 	h.startAndAwaitCursor()
-	server.awaitIdle()
+	server.awaitIdleEntries(1)
 	server.append(mailSpec{subject: "over idle", messageID: "idle@example.com"}.raw())
 	h.awaitEnvelopes(1)
 	env := h.sink.all()[0]
 	if env.PrincipalClass != "owner" || env.Parts[0].Text != "Subject: over idle\n\nhello" {
 		t.Errorf("envelope = %+v", env)
 	}
-	server.awaitIdle()
+	server.awaitIdleEntries(2)
 	server.append(mailSpec{from: friendAddress, subject: "second", messageID: "idle2@example.com"}.raw())
 	h.awaitEnvelopes(2)
 	if got := h.sink.all()[1].PrincipalClass; got != "trusted" {
