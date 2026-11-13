@@ -343,3 +343,49 @@ func TestDisplayEscapesInvisibleAndUnassignedRunes(t *testing.T) {
 		t.Errorf("json flood: %d bytes, %v", len(text), err)
 	}
 }
+
+func TestExactDisplayRefusesInsteadOfTruncating(t *testing.T) {
+	arguments := json.RawMessage(`{"body":"` + strings.Repeat("b", 2000) + `","repo":"org/repo"}`)
+	exact := displaytest.Definition([]string{"repo", "body"})
+	exact.ExactDisplay = true
+	_, err := exact.ApprovalText(arguments, nil)
+	requireCode(t, err, tools.ErrorCodeDisplayTooLarge)
+	plugin := displaytest.Definition([]string{"repo", "body"})
+	text, err := plugin.ApprovalText(arguments, nil)
+	if err != nil || !hiddenPattern.MatchString(text) {
+		t.Fatalf("plugin display = %q, %v; want a truncated card with the hidden marker", text, err)
+	}
+	short := json.RawMessage(`{"body":"looks good","repo":"org/repo"}`)
+	text, err = exact.ApprovalText(short, nil)
+	if err != nil || text != "repo: org/repo\nbody: looks good" {
+		t.Fatalf("exact display = %q, %v", text, err)
+	}
+	probe := tools.Definition{ExactDisplay: true}
+	if !probe.FieldDisplay() || probe.FieldApproval() {
+		t.Fatalf("FieldDisplay() = %t, FieldApproval() = %t; want true and false", probe.FieldDisplay(), probe.FieldApproval())
+	}
+}
+
+func TestEmailSendCardShowsTheRecipientFirst(t *testing.T) {
+	var email *tools.Definition
+	builtins := tools.Builtins()
+	for i := range builtins {
+		if builtins[i].Name == tools.EmailSendToolName {
+			email = &builtins[i]
+		}
+	}
+	if email == nil {
+		t.Fatal("email_send is not a builtin")
+	}
+	text, err := email.ApprovalText(json.RawMessage(`{"body":"hello","subject":"Hi","to":"a@mail.example"}`), nil)
+	if err != nil || text != "to: a@mail.example\nsubject: Hi\nbody: hello" {
+		t.Fatalf("short card = %q, %v", text, err)
+	}
+	text, err = email.ApprovalText(json.RawMessage(`{"body":"`+strings.Repeat("b", 2048)+`","subject":"Hi","to":"a@mail.example"}`), nil)
+	if err != nil {
+		t.Fatalf("long card: %v", err)
+	}
+	if !strings.HasPrefix(text, "to: a@mail.example\nsubject: Hi\nbody: ") || !hiddenPattern.MatchString(text) || !strings.HasSuffix(text, "bytes hidden]") {
+		t.Fatalf("long card = %q, want the recipient first and a hidden-bytes marker", text)
+	}
+}

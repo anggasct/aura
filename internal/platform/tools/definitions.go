@@ -105,6 +105,8 @@ type Definition struct {
 	Effectful            bool
 	OptIn                bool
 	ExternalSink         bool
+	NoStandingGrant      bool
+	ExactDisplay         bool
 	Display              []string
 	Validator            func(raw json.RawMessage) (json.RawMessage, error)
 }
@@ -284,7 +286,7 @@ func Builtins() []Definition {
 		{Name: "web_search", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1},"max_results":{"type":"integer","minimum":1}},"required":["query"],"additionalProperties":false}`), RequiredCapabilities: []string{"provider-search"}, ExternalSink: true},
 		{Name: KBSearchToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/kb_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":500},"limit":{"type":"integer","minimum":1,"maximum":10}},"required":["query"],"additionalProperties":false}`)},
 		{Name: HandoffToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/handoff_to_owner/v1","type":"object","properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"],"additionalProperties":false}`), OptIn: true},
-		{Name: EmailSendToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/email_send/v1","type":"object","properties":{"to":{"type":"string","minLength":3,"maxLength":254},"subject":{"type":"string","minLength":1,"maxLength":160},"body":{"type":"string","minLength":1,"maxLength":65536}},"required":["to","subject","body"],"additionalProperties":false}`), Effectful: true, OptIn: true},
+		{Name: EmailSendToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/email_send/v1","type":"object","properties":{"to":{"type":"string","minLength":3,"maxLength":254},"subject":{"type":"string","minLength":1,"maxLength":160},"body":{"type":"string","minLength":1,"maxLength":65536}},"required":["to","subject","body"],"additionalProperties":false}`), Effectful: true, OptIn: true, Display: []string{"to", "subject", "body"}},
 		{Name: WorkflowListToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_list/v1","type":"object","properties":{},"additionalProperties":false}`), OptIn: true},
 		{Name: WorkflowStartToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_start/v1","type":"object","properties":{"id":{"type":"string","minLength":1},"objective":{"type":"string","maxLength":2000}},"required":["id"],"additionalProperties":false}`), OptIn: true, ExternalSink: true},
 		{Name: WorkflowStatusToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_status/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true},
