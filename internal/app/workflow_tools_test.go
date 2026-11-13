@@ -193,7 +193,7 @@ func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
 			t.Errorf("KnownTools holds %q", name)
 		}
 	}
-	for _, name := range append(forbidden, dottedGitHubName("comment")) {
+	for _, name := range append(forbidden, "github.comment") {
 		err := workflow.Validate(toolStepSpec(name), deps)
 		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid || !strings.Contains(err.Error(), "references unknown tool") {
 			t.Errorf("Validate with %q = %v, want executor_invalid references unknown tool", name, err)

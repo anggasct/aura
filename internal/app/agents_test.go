@@ -128,10 +128,6 @@ agents:
 	}
 }
 
-func dottedGitHubName(tool string) string {
-	return "github" + "." + tool
-}
-
 func TestPersonasMayListTheGitHubTools(t *testing.T) {
 	persona := func(tools, principalTools, publicTools []string) []config.AgentDefinition {
 		return []config.AgentDefinition{{
@@ -150,7 +146,7 @@ func TestPersonasMayListTheGitHubTools(t *testing.T) {
 	}{
 		{"configured, merge listed", &configured, persona([]string{"read_file", "github_merge"}, []string{"github_merge"}, nil), ""},
 		{"configured, unknown github tool", &configured, persona([]string{"github_delete_repo"}, nil, nil), auraagent.ErrorCodeUnknownTool},
-		{"configured, dotted name", &configured, persona([]string{dottedGitHubName("merge")}, nil, nil), auraagent.ErrorCodeUnknownTool},
+		{"configured, dotted name", &configured, persona([]string{"github.merge"}, nil, nil), auraagent.ErrorCodeUnknownTool},
 		{"configured, public list", &configured, persona([]string{"github_merge"}, nil, []string{"github_merge"}), auraagent.ErrorCodePersonaInvalid},
 		{"not configured, merge listed", &bare, persona([]string{"read_file", "github_merge"}, []string{"github_merge"}, nil), auraagent.ErrorCodeUnknownTool},
 	}
