@@ -24,7 +24,7 @@ RESTATE_BINARY  := $(RESTATE_DIR)/restate-server
 # paths, or process vocabulary in shipped code.
 INTERNAL_REFS := (AC|IMP|CAP|ADR)-[0-9]+|feat-[a-z0-9-]+|specs?/|project-docs|development-plan|delivery queue|delivery os|hermes|kanban
 
-.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check model-registry-check arch-check static-check static-check-darwin verify security eval load integration durable-test durable-live durable-turns durable-workflows restate-server fuzz-smoke fuzz-one release-snapshot image-check compose-smoke exec-container-check clean
+.PHONY: build build-all plugin-gmail test vet fmt-check lint refs-check model-registry-check arch-check static-check static-check-darwin verify security eval load integration durable-test durable-live durable-turns durable-workflows restate-server fuzz-smoke fuzz-one release-snapshot image-check exec-container-check release-check clean
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/aura
@@ -98,7 +98,7 @@ model-registry-check:
 		exit 1; \
 	fi
 
-static-check: fmt-check vet lint refs-check model-registry-check arch-check
+static-check: fmt-check vet lint refs-check model-registry-check arch-check release-check
 
 static-check-darwin:
 	GOOS=darwin $(GO) vet ./...
@@ -174,15 +174,15 @@ fuzz-one:
 
 GORELEASER_VERSION ?= v2.17.1
 SYFT_VERSION       ?= v1.42.3
+release-check:
+	$(GO) run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) check
+
 release-snapshot:
 	$(GO) install github.com/anchore/syft/cmd/syft@$(SYFT_VERSION)
 	$(GO) run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --snapshot --clean --skip=sign
 
 image-check:
 	scripts/check-image.sh $$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' dist/metadata.json | head -1 | xargs -I{} docker images --format '{{.Repository}}:{{.Tag}}' --filter 'reference=ghcr.io/anggasct/aura:{}-*')
-
-compose-smoke:
-	AURA_IMAGE=$${AURA_IMAGE:-$$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' dist/metadata.json | head -1 | sed 's|^|ghcr.io/anggasct/aura:|; s|$$|-amd64|')} scripts/compose-smoke.sh
 
 exec-container-check:
 	scripts/check-exec-container.sh

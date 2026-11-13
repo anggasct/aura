@@ -20,27 +20,6 @@ x-aura: &aura
     - ./aura.yaml:/etc/aura/aura.yaml:ro
 
 services:
-  restate:
-    image: docker.restate.dev/restatedev/restate:1.7.14@sha256:43eb4272d06ae8b0bd68280f8cf0bd3b2f08324b6ecdf625e987787b8bb62c64
-    hostname: restate
-    restart: unless-stopped
-    environment:
-      RESTATE_NODE_NAME: restate
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - restate-data:/restate-data
-    networks:
-      - internal
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/restate/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 10s
-
   aura-upgrade:
     <<: *aura
     command: ["storage", "upgrade"]
@@ -52,13 +31,11 @@ services:
     command: ["server"]
     restart: unless-stopped
     depends_on:
-      restate:
-        condition: service_healthy
       aura-upgrade:
         condition: service_completed_successfully
     networks:
-      - internal
       - egress
+    stop_grace_period: 40s
     healthcheck:
       test: ["CMD", "/usr/local/bin/aura", "status", "--probe", "live"]
       interval: 10s
@@ -67,10 +44,7 @@ services:
       start_period: 20s
 
 networks:
-  internal:
-    internal: true
   egress: {}
 
 volumes:
   aura-data: {}
-  restate-data: {}

@@ -1,10 +1,12 @@
 package deploy
 
 import (
+	"maps"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -14,9 +16,7 @@ import (
 
 type composeFile struct {
 	Services map[string]composeService `yaml:"services"`
-	Networks map[string]struct {
-		Internal bool `yaml:"internal"`
-	} `yaml:"networks"`
+	Networks map[string]any            `yaml:"networks"`
 }
 
 type composeService struct {
@@ -31,6 +31,8 @@ type composeService struct {
 	SecurityOpt []string                     `yaml:"security_opt"`
 	DependsOn   map[string]map[string]string `yaml:"depends_on"`
 	Volumes     []string                     `yaml:"volumes"`
+
+	StopGracePeriod string `yaml:"stop_grace_period"`
 }
 
 func loadCompose(t *testing.T, path string) composeFile {
@@ -55,25 +57,19 @@ func service(t *testing.T, file *composeFile, name string) composeService {
 	return svc
 }
 
-func TestRestateStaysOnThePrivateNetwork(t *testing.T) {
+func TestComposeRunsOnlyAuraAndPublishesNoPort(t *testing.T) {
 	file := loadCompose(t, "compose.yaml")
-	restate := service(t, &file, "restate")
-	if len(restate.Ports) != 0 {
-		t.Fatalf("restate publishes ports %v; every Restate port must stay on the internal network", restate.Ports)
-	}
-	if !slices.Equal(restate.Networks, []string{"internal"}) {
-		t.Fatalf("restate networks = %v, want only internal", restate.Networks)
-	}
-	if !file.Networks["internal"].Internal {
-		t.Fatal("the internal network must be declared internal: true")
-	}
-	if !strings.HasPrefix(restate.Image, "docker.restate.dev/restatedev/restate:") || !strings.Contains(restate.Image, "@sha256:") {
-		t.Fatalf("restate image %q must be the official image pinned by digest", restate.Image)
+	services := slices.Sorted(maps.Keys(file.Services))
+	if !slices.Equal(services, []string{"aura", "aura-upgrade"}) {
+		t.Fatalf("services = %v, want only aura and aura-upgrade", services)
 	}
 	for name, svc := range file.Services {
-		if name != "restate" && len(svc.Ports) != 0 {
+		if len(svc.Ports) != 0 {
 			t.Fatalf("%s publishes ports %v; the canonical topology publishes none", name, svc.Ports)
 		}
+	}
+	if _, declared := file.Networks["internal"]; declared {
+		t.Fatal("compose.yaml declares an internal network; aura runs on egress only")
 	}
 }
 
@@ -97,17 +93,33 @@ func TestAuraContainersAreLockedDown(t *testing.T) {
 	}
 }
 
-func TestAuraStartsOnlyAfterTheUpgradeJobAndAHealthyRestate(t *testing.T) {
+func TestAuraStartsOnlyAfterTheUpgradeJob(t *testing.T) {
 	file := loadCompose(t, "compose.yaml")
 	aura := service(t, &file, "aura")
-	want := map[string]string{"aura-upgrade": "service_completed_successfully", "restate": "service_healthy"}
-	for dependency, condition := range want {
-		if got := aura.DependsOn[dependency]["condition"]; got != condition {
-			t.Fatalf("aura depends_on %s condition = %q, want %q", dependency, got, condition)
-		}
+	want := map[string]map[string]string{"aura-upgrade": {"condition": "service_completed_successfully"}}
+	if !maps.EqualFunc(aura.DependsOn, want, maps.Equal) {
+		t.Fatalf("aura depends_on = %v, want %v", aura.DependsOn, want)
 	}
-	if !slices.Contains(aura.Networks, "internal") {
-		t.Fatalf("aura networks = %v, want internal so Restate can reach the handler", aura.Networks)
+	if !slices.Equal(aura.Networks, []string{"egress"}) {
+		t.Fatalf("aura networks = %v, want only egress", aura.Networks)
+	}
+}
+
+func TestAuraStopGracePeriodOutlastsTheShutdownTimeout(t *testing.T) {
+	t.Setenv("AURA_CONFIG", "")
+	result, err := config.Load("aura.yaml")
+	if err != nil {
+		t.Fatalf("deploy/aura.yaml does not load: %v", err)
+	}
+	file := loadCompose(t, "compose.yaml")
+	aura := service(t, &file, "aura")
+	grace, err := time.ParseDuration(aura.StopGracePeriod)
+	if err != nil {
+		t.Fatalf("aura stop_grace_period %q is not a duration: %v", aura.StopGracePeriod, err)
+	}
+	shutdown := time.Duration(result.Config.Runtime.ShutdownTimeout)
+	if grace < shutdown+10*time.Second {
+		t.Fatalf("aura stop_grace_period = %s, want at least the shutdown timeout %s plus 10s", grace, shutdown)
 	}
 }
 
@@ -117,19 +129,22 @@ func TestShippedConfigIsValidForTheTopology(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deploy/aura.yaml does not load: %v", err)
 	}
-	durable := result.Config.Durable
-	if !durable.Enabled || durable.Mode != config.DurableModeExternal || durable.HandlerURL != "http://aura:9080" {
-		t.Fatalf("durable = %+v, want external mode registering http://aura:9080", durable)
+	if result.Config.Storage.Path != "/var/lib/aura/data" {
+		t.Fatalf("storage path = %q, want it inside the aura-data volume", result.Config.Storage.Path)
 	}
-	if durable.Endpoint != "http://restate:8080" || durable.AdminEndpoint != "http://restate:9070" {
-		t.Fatalf("durable endpoints = %s %s", durable.Endpoint, durable.AdminEndpoint)
+	if result.Config.Tools.Workspace != "/var/lib/aura/workspace" {
+		t.Fatalf("tools workspace = %q, want it inside the aura-data volume", result.Config.Tools.Workspace)
 	}
-}
-
-func TestSmokeOverrideOnlyMountsTheSmokeWorkflows(t *testing.T) {
-	file := loadCompose(t, "smoke/compose.smoke.yaml")
-	if len(file.Services) != 1 || !slices.Equal(service(t, &file, "aura").Volumes, []string{"./smoke/workflows:/etc/aura/workflows:ro"}) {
-		t.Fatalf("smoke override = %+v", file.Services)
+	raw, err := os.ReadFile("aura.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]any
+	if err := yaml.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := top["durable"]; present {
+		t.Fatal("deploy/aura.yaml sets a durable section; the shipped example runs on the default configuration")
 	}
 }
 

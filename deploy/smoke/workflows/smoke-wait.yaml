@@ -1,9 +1,0 @@
-id: smoke-wait
-version: 1
-goal: Park on a wait step until the smoke test signals it
-steps:
-  - id: gate
-    timeout: 10m
-    executor:
-      kind: wait
-      event: gate
