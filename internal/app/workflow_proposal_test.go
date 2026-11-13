@@ -126,7 +126,7 @@ func TestApprovalRunsExactlyTheApprovedDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runID, err := approveProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, controller.showCall, time.Now())
+	runID, err := approveRenderedProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, controller.showCall, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestApprovalRunsExactlyTheApprovedDigest(t *testing.T) {
 	if err != nil || approved.Status != workflow.ProposalApproved || approved.RunID != runID {
 		t.Fatalf("approved proposal = %+v, %v", approved, err)
 	}
-	if _, err := approveProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, controller.showCall, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodeProposalDecided) {
+	if _, err := approveRenderedProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, controller.showCall, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodeProposalDecided) {
 		t.Fatalf("second approval = %v", err)
 	}
 }
@@ -153,7 +153,7 @@ func TestTamperedProposalIsRefusedAndRejectionRunsNothing(t *testing.T) {
 	if _, err := h.db.ExecContext(t.Context(), `UPDATE workflow_proposal SET spec_json = replace(spec_json, 'note.md', 'passwd') WHERE id = ?`, proposed.ProposalID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := approveProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, controller.showCall, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodeDigestMismatch) {
+	if _, err := approveRenderedProposal(t.Context(), cfg, controller.interpreter, runs, proposed.ProposalID, controller.showCall, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodeDigestMismatch) {
 		t.Fatalf("approving a modified spec = %v", err)
 	}
 	second, err := controller.Propose(t.Context(), owner, json.RawMessage(coveredProposal))

@@ -15,13 +15,13 @@ func durableStart(runID string, spec *Spec) durable.StartRequest {
 	}
 }
 
-func approveTaintedGenerated(t *testing.T, interpreter *Interpreter, disk *Store, id string) *Spec {
+func approveGenerated(t *testing.T, interpreter *Interpreter, disk *Store, id string, tainted bool) *Spec {
 	t.Helper()
 	generated := NormalizeProposal(toolSpec("x"), id)
 	if err := interpreter.LoadAll(t.Context(), []*Spec{generated}, testValidationDeps()); err != nil {
 		t.Fatal(err)
 	}
-	proposal := proposeSpec(t, disk, id, "ops", true, generated)
+	proposal := proposeSpec(t, disk, id, "ops", tainted, generated)
 	if err := disk.ApproveProposal(t.Context(), proposal.ID, proposalApproval(proposal)); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func approveTaintedGenerated(t *testing.T, interpreter *Interpreter, disk *Store
 func TestRestartedTaintedDefinitionStaysTainted(t *testing.T) {
 	tools := &stepCallTools{}
 	interpreter, _, disk := driverTestSetup(t, tools, DriverConcurrent)
-	generated := approveTaintedGenerated(t, interpreter, disk, "prop_restart")
+	generated := approveGenerated(t, interpreter, disk, "prop_restart", false)
 	first, err := interpreter.Start(t.Context(), generated.ID, &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +39,9 @@ func TestRestartedTaintedDefinitionStaysTainted(t *testing.T) {
 	waitForRunStatus(t, disk, first.ID, RunSucceeded, 5*time.Second)
 	routine, err := interpreter.SaveRoutine(t.Context(), first.ID, "Weekly report")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := disk.db.ExecContext(t.Context(), `UPDATE workflow_approval SET tainted = 1 WHERE definition_id = ?`, routine.ID); err != nil {
 		t.Fatal(err)
 	}
 

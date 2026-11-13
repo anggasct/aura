@@ -33,6 +33,7 @@ type Proposal struct {
 	PrincipalID string
 	Tainted     bool
 	Spec        *Spec
+	PlanText    string
 	Digest      string
 	Status      string
 	DecidedAt   time.Time
@@ -159,15 +160,15 @@ func (s *Store) CreateProposal(ctx context.Context, proposal *Proposal) error {
 	if err != nil {
 		return codedError(ErrorCodeSpecInvalid, "encode proposal spec: "+err.Error())
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, tainted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		proposal.ID, proposal.SessionID, proposal.AgentID, proposal.PrincipalID, string(encoded), proposal.Digest, ProposalProposed, proposal.CreatedAt.UTC().Format(time.RFC3339Nano), proposal.Tainted)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, tainted, plan_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		proposal.ID, proposal.SessionID, proposal.AgentID, proposal.PrincipalID, string(encoded), proposal.Digest, ProposalProposed, proposal.CreatedAt.UTC().Format(time.RFC3339Nano), proposal.Tainted, proposal.PlanText)
 	if err != nil {
 		return fmt.Errorf("insert proposal: %w", err)
 	}
 	return nil
 }
 
-const proposalColumns = `id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, COALESCE(decided_at, ''), COALESCE(run_id, ''), created_at, tainted`
+const proposalColumns = `id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, COALESCE(decided_at, ''), COALESCE(run_id, ''), created_at, tainted, plan_text`
 
 func (s *Store) Proposal(ctx context.Context, id string, now time.Time) (*Proposal, error) {
 	if err := s.expireProposals(ctx, now); err != nil {
@@ -236,7 +237,7 @@ type proposalRow interface {
 func scanProposal(row proposalRow) (*Proposal, error) {
 	var proposal Proposal
 	var specJSON, decidedAt, createdAt string
-	if err := row.Scan(&proposal.ID, &proposal.SessionID, &proposal.AgentID, &proposal.PrincipalID, &specJSON, &proposal.Digest, &proposal.Status, &decidedAt, &proposal.RunID, &createdAt, &proposal.Tainted); err != nil {
+	if err := row.Scan(&proposal.ID, &proposal.SessionID, &proposal.AgentID, &proposal.PrincipalID, &specJSON, &proposal.Digest, &proposal.Status, &decidedAt, &proposal.RunID, &createdAt, &proposal.Tainted, &proposal.PlanText); err != nil {
 		return nil, err
 	}
 	proposal.Spec = &Spec{}
@@ -272,13 +273,6 @@ func (i *Interpreter) CompileProposal(spec *Spec, agentID string) (*Graph, error
 		return nil, err
 	}
 	return graph, nil
-}
-
-func (s *Store) AttachProposalRun(ctx context.Context, id, runID string) error {
-	if _, err := s.db.ExecContext(ctx, `UPDATE workflow_proposal SET run_id = ? WHERE id = ?`, runID, id); err != nil {
-		return fmt.Errorf("attach proposal run: %w", err)
-	}
-	return nil
 }
 
 func (i *Interpreter) ValidationDeps() *ValidationDeps {

@@ -31,7 +31,7 @@ func TestApprovedProposalRecordsTheApprover(t *testing.T) {
 				}
 				bound.waitAttempts(t, 1)
 				if via == "cli" {
-					_, err = approveProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
+					_, err = approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
 				} else {
 					_, err = bound.decide(t.Context(), true)
 				}

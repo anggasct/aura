@@ -144,3 +144,31 @@ func originUnderApproval(origin *RunOrigin, approval *Approval) (*RunOrigin, err
 	copied.Tainted = origin.Tainted || approval.Tainted
 	return &copied, nil
 }
+
+func proposalClaimFor(approval *Approval, explicit string) (string, error) {
+	switch {
+	case explicit != "":
+		if approval.Kind != ApprovalProposal || approval.ProposalID != explicit {
+			return "", codedError(ErrorCodeApprovalMissing, fmt.Sprintf("definition %s version %d is not the approval of proposal %s", approval.DefinitionID, approval.DefinitionVersion, explicit))
+		}
+		return explicit, nil
+	case approval.Kind != ApprovalProposal:
+		return "", nil
+	case approval.Tainted:
+		return "", codedError(ErrorCodeApprovalSpent, fmt.Sprintf("definition %s version %d was approved from a proposal that untrusted input shaped, and that approval covers only its own run", approval.DefinitionID, approval.DefinitionVersion))
+	}
+	return approval.ProposalID, nil
+}
+
+func (s *Store) proposalApproval(ctx context.Context, proposalID string) (*Approval, error) {
+	var id string
+	var version int
+	err := s.db.QueryRowContext(ctx, `SELECT definition_id, definition_version FROM workflow_approval WHERE proposal_id = ?`, proposalID).Scan(&id, &version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, codedError(ErrorCodeApprovalMissing, "proposal "+proposalID+" has no approval record")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read proposal approval: %w", err)
+	}
+	return s.Approval(ctx, id, version)
+}

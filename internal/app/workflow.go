@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -354,19 +353,6 @@ func newWorkflowToolExecutor(result *config.LoadResult, db *sql.DB, logger *slog
 		return nil, fmt.Errorf("build builtin tool executor: %w", err)
 	}
 	return executor, nil
-}
-
-func commandToolCallText(result *config.LoadResult, db *sql.DB, logger *slog.Logger) workflow.ToolCallText {
-	var once sync.Once
-	var executor *toolsbuiltin.Executor
-	var buildErr error
-	return func(toolID string, args json.RawMessage) (string, error) {
-		once.Do(func() { executor, buildErr = newWorkflowToolExecutor(result, db, logger) })
-		if buildErr != nil {
-			return "", buildErr
-		}
-		return executor.Broker().ExactCallText(toolID, args)
-	}
 }
 
 func newWorkflowToolRunner(result *config.LoadResult, db *sql.DB, registry *auraagent.Registry, logger *slog.Logger) (workflow.ToolRunner, error) {

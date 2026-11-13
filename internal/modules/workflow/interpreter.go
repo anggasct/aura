@@ -268,7 +268,15 @@ func (i *Interpreter) Spec(id string) (*Spec, bool) {
 }
 
 func (i *Interpreter) Start(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
-	return i.start(ctx, definitionID, input, origin, newID("dur"), false)
+	return i.start(ctx, &startRequest{definitionID: definitionID, input: input, origin: origin, durableKey: newID("dur")})
+}
+
+func (i *Interpreter) StartApproved(ctx context.Context, proposalID string, input *RunInput, origin *RunOrigin) (*RunSummary, error) {
+	approval, err := i.store.proposalApproval(ctx, proposalID)
+	if err != nil {
+		return nil, err
+	}
+	return i.start(ctx, &startRequest{definitionID: approval.DefinitionID, input: input, origin: origin, durableKey: newID("dur"), claimProposalID: proposalID})
 }
 
 func (i *Interpreter) StartConfigured(ctx context.Context, definitionID string, input *RunInput, principalID string, class principal.Class, durableKey string) (*RunSummary, error) {
@@ -284,29 +292,42 @@ func (i *Interpreter) StartConfigured(ctx context.Context, definitionID string, 
 		}
 	}
 	origin := &RunOrigin{PrincipalID: principalID, PrincipalClass: string(class)}
-	return i.start(ctx, definitionID, input, origin, durableKey, true)
+	return i.start(ctx, &startRequest{definitionID: definitionID, input: input, origin: origin, durableKey: durableKey, configured: true})
 }
 
-func (i *Interpreter) start(ctx context.Context, definitionID string, input *RunInput, origin *RunOrigin, durableKey string, configured bool) (*RunSummary, error) {
-	compiled, ok := i.compiledFor(ctx, definitionID, 0)
+type startRequest struct {
+	definitionID    string
+	input           *RunInput
+	origin          *RunOrigin
+	durableKey      string
+	claimProposalID string
+	configured      bool
+}
+
+func (i *Interpreter) start(ctx context.Context, req *startRequest) (*RunSummary, error) {
+	compiled, ok := i.compiledFor(ctx, req.definitionID, 0)
 	if !ok {
-		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+definitionID+" is not loaded")
+		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+req.definitionID+" is not loaded")
 	}
 	approval, err := i.requireSpecApproval(ctx, compiled.spec)
 	if err != nil {
 		return nil, err
 	}
-	runOrigin, err := originUnderApproval(origin, approval)
+	claim, err := proposalClaimFor(approval, req.claimProposalID)
 	if err != nil {
 		return nil, err
 	}
-	if configured {
-		runOrigin.AgentID = configuredAgent(compiled.spec, approval)
-	}
-	if err := i.admitRun(compiled.spec, runOrigin); err != nil {
+	runOrigin, err := originUnderApproval(req.origin, approval)
+	if err != nil {
 		return nil, err
 	}
-	summary, err := i.store.createRun(ctx, compiled.spec, input, runOrigin, durableKey, "")
+	if req.configured {
+		runOrigin.AgentID = configuredAgent(compiled.spec, approval)
+	}
+	if err := i.admitRun(ctx, compiled.spec, runOrigin); err != nil {
+		return nil, err
+	}
+	summary, err := i.store.createRun(ctx, &runCreate{Spec: compiled.spec, Input: req.input, Origin: runOrigin, DurableKey: req.durableKey, ClaimProposalID: claim})
 	if err != nil {
 		return nil, err
 	}
