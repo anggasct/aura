@@ -307,8 +307,8 @@ func TestDisplayEscapesInvisibleAndUnassignedRunes(t *testing.T) {
 	if want := "v: a\u0301\u0301" + strings.Repeat(`\u{0301}`, 48); err != nil || stacked != want {
 		t.Errorf("stacked marks: display = %q, %v, want %q", stacked, err, want)
 	}
-	single, err := field.ApprovalText(argumentsWithValue(t, "a\u0301b\u0301"), nil)
-	if err != nil || single != "v: a\u0301b\u0301" {
+	single, err := field.ApprovalText(argumentsWithValue(t, "a\u0301b\u0301c\u0301"), nil)
+	if err != nil || single != "v: a\u0301b\u0301c\u0301" {
 		t.Errorf("one mark per letter: display = %q, %v", single, err)
 	}
 
