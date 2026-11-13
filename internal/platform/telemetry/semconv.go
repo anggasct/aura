@@ -79,6 +79,9 @@ const (
 
 	AttrSemconvVersion = "aura.semconv.version"
 
+	AttrWorkflowRunID  = "aura.workflow.run.id"
+	AttrWorkflowStepID = "aura.workflow.step.id"
+
 	AttrModelRoute             = "aura.model.route"
 	AttrModelCandidate         = "aura.model.candidate"
 	AttrModelFallbackAttempt   = "aura.model.fallback_attempt"
@@ -143,6 +146,8 @@ var toolSpanAttrs = []string{
 	AttrToolApproval,
 	AttrToolExecutor,
 	AttrToolOutputBytes,
+	AttrWorkflowRunID,
+	AttrWorkflowStepID,
 	AttrSemconvVersion,
 }
 

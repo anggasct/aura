@@ -20,6 +20,9 @@ type ToolObservation struct {
 	Executor      string
 	Duration      time.Duration
 	OutputBytes   int64
+
+	WorkflowRunID  string
+	WorkflowStepID string
 }
 
 type ToolRecorder struct {
@@ -58,18 +61,22 @@ func (r *ToolRecorder) Record(ctx context.Context, observation *ToolObservation)
 		attribute.String(AttrToolExecutor, observation.Executor),
 		attribute.String(AttrToolOutputBucket, OutputByteBucket(observation.OutputBytes)),
 	)
-	_, span := r.tracer.Start(ctx, SpanTool,
-		trace.WithTimestamp(start),
-		trace.WithAttributes(
-			attribute.String(AttrToolName, observation.Name),
-			attribute.String(AttrToolStatus, observation.Status),
-			attribute.String(AttrToolPolicyOutcome, observation.PolicyOutcome),
-			attribute.String(AttrToolApproval, observation.Approval),
-			attribute.String(AttrToolExecutor, observation.Executor),
-			attribute.Int64(AttrToolOutputBytes, observation.OutputBytes),
-			attribute.String(AttrSemconvVersion, SemconvVersion),
-		),
-	)
+	spanAttrs := []attribute.KeyValue{
+		attribute.String(AttrToolName, observation.Name),
+		attribute.String(AttrToolStatus, observation.Status),
+		attribute.String(AttrToolPolicyOutcome, observation.PolicyOutcome),
+		attribute.String(AttrToolApproval, observation.Approval),
+		attribute.String(AttrToolExecutor, observation.Executor),
+		attribute.Int64(AttrToolOutputBytes, observation.OutputBytes),
+		attribute.String(AttrSemconvVersion, SemconvVersion),
+	}
+	if observation.WorkflowRunID != "" {
+		spanAttrs = append(spanAttrs, attribute.String(AttrWorkflowRunID, observation.WorkflowRunID))
+	}
+	if observation.WorkflowStepID != "" {
+		spanAttrs = append(spanAttrs, attribute.String(AttrWorkflowStepID, observation.WorkflowStepID))
+	}
+	_, span := r.tracer.Start(ctx, SpanTool, trace.WithTimestamp(start), trace.WithAttributes(spanAttrs...))
 	if observation.Status == "ok" {
 		span.SetStatus(codes.Ok, "")
 	} else {
