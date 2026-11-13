@@ -37,6 +37,8 @@ const (
 	ErrorCodeApprovalMissing      ErrorCode = "workflow_approval_missing"
 	ErrorCodeApprovalConflict     ErrorCode = "workflow_approval_conflict"
 	ErrorCodePlanUnshowable       ErrorCode = "workflow_plan_unshowable"
+	ErrorCodePersonaMissing       ErrorCode = "workflow_persona_missing"
+	ErrorCodeSessionInvalid       ErrorCode = "workflow_session_invalid"
 )
 
 const ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"

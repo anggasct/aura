@@ -63,7 +63,7 @@ func (o *countingHandoffOpener) OpenHandoff(context.Context, *toolsbuiltin.Hando
 }
 
 func TestWorkflowToolRunnerRefusesAnOrchestrationTool(t *testing.T) {
-	runner, _, _ := newWorkflowToolRunnerFixture(t)
+	runner, db, _ := newWorkflowToolRunnerFixture(t)
 	toolRunner, ok := runner.(*workflowToolRunner)
 	if !ok {
 		t.Fatalf("runner is %T, want *workflowToolRunner", runner)
@@ -77,7 +77,7 @@ func TestWorkflowToolRunnerRefusesAnOrchestrationTool(t *testing.T) {
 		"handoff_to_owner": json.RawMessage(`{"reason":"x"}`),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := runner.Invoke(stepCallContext(t), name, args)
+			_, err := runner.Invoke(stepCallContext(t, db), name, args)
 			if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid {
 				t.Fatalf("Invoke error = %v, want %s", err, workflow.ErrorCodeExecutorInvalid)
 			}

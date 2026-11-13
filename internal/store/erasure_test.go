@@ -375,3 +375,50 @@ func TestDeleteOrphanedTurnRuns(t *testing.T) {
 		t.Errorf("DeleteOrphanedTurnRuns without a database = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 }
+
+func TestErasureCountsRunSessionsApart(t *testing.T) {
+	const (
+		chat = "lobby/discord:owner/dm:601"
+		run  = "wf-run-601"
+	)
+	t.Run("a chat session and a run session are counted apart", func(t *testing.T) {
+		db := newTestDB(t)
+		seedPersonaSession(t, db, chat, "discord:601", "lobby")
+		seedPersonaSession(t, db, run, "discord:601", "lobby")
+		want := ErasureCounts{Sessions: 1, RunSessions: 1}
+		dry, err := ErasePrincipal(t.Context(), db, "discord:601", false, ErasureOptions{})
+		if err != nil || dry != want {
+			t.Fatalf("dry run = %+v, %v; want %+v", dry, err, want)
+		}
+		applied, err := ErasePrincipal(t.Context(), db, "discord:601", true, ErasureOptions{})
+		if err != nil || applied != want {
+			t.Fatalf("apply = %+v, %v; want %+v", applied, err, want)
+		}
+		if got := countRows(t, db, `SELECT COUNT(*) FROM session`); got != 0 {
+			t.Fatalf("sessions left = %d, want 0", got)
+		}
+	})
+
+	t.Run("a principal with only a run session still has it, its events and its intents erased", func(t *testing.T) {
+		db := newTestDB(t)
+		seedPersonaSession(t, db, run, "discord:601", "lobby")
+		seedTurnEvent(t, db, turnEventFixture{session: run, turn: "turn-run", kind: "tool.requested"})
+		seedEmailEffect(t, db, "run-effect", run, "builtin-tools", "write_file", `{}`)
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO effect_approval (id, intent_id, action, request_digest, owner_id, reason, token_hash, issued_at, expires_at)
+			VALUES ('ap-run', 'run-effect', 'mark_failed', 'digest', 'local-owner', 'reconcile', 'hash-run', '2026-11-06T09:00:00Z', '2026-11-06T10:00:00Z')`); err != nil {
+			t.Fatalf("seed approval: %v", err)
+		}
+		root := t.TempDir()
+		artifacts := NewArtifactStore(db, root, DefaultArtifactQuotaBytes)
+		if _, err := artifacts.Put(t.Context(), strings.NewReader("run output"), &ArtifactMetadata{ID: "art-run", SessionID: run, Filename: "out.txt", MediaType: "text/plain"}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		applied, err := ErasePrincipal(t.Context(), db, "discord:601", true, ErasureOptions{ArtifactRoot: root})
+		if err != nil || applied != (ErasureCounts{RunSessions: 1, Blobs: 1}) {
+			t.Fatalf("apply = %+v, %v; want one run session and its blob", applied, err)
+		}
+		if got := countRows(t, db, `SELECT (SELECT COUNT(*) FROM session) + (SELECT COUNT(*) FROM runtime_event) + (SELECT COUNT(*) FROM effect_intent) + (SELECT COUNT(*) FROM effect_approval)`); got != 0 {
+			t.Fatalf("rows left of the run session = %d, want 0", got)
+		}
+	})
+}

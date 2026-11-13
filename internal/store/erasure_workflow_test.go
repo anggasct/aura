@@ -241,7 +241,7 @@ func TestErasureDeletesThePrincipalsWorkflowRuns(t *testing.T) {
 	}
 	keptLegacy := seedLegacyStepSession(t, db, "run-2", "fetch")
 
-	want := ErasureCounts{Sessions: 3, MemoryDocuments: 2, Grants: 1, StandingGrants: 1, PairingRequests: 1, UsageLinks: 1, WorkflowRuns: 2, LegacyStepSessions: 3}
+	want := ErasureCounts{Sessions: 2, RunSessions: 1, MemoryDocuments: 2, Grants: 1, StandingGrants: 1, PairingRequests: 1, UsageLinks: 1, WorkflowRuns: 2, LegacyStepSessions: 3}
 	dry, err := ErasePrincipal(t.Context(), db, principal, false, ErasureOptions{})
 	if err != nil || dry != want {
 		t.Fatalf("dry run = %+v, %v; want %+v", dry, err, want)

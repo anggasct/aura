@@ -193,3 +193,24 @@ func TestPairingApproveNeverConsumesAnotherChannelsCode(t *testing.T) {
 		t.Fatal("approval without a channel accepted")
 	}
 }
+
+func TestRunSessionsAreNotPrincipalActivity(t *testing.T) {
+	db := newTestDB(t)
+	seedPersonaSession(t, db, "wf-run-only", "discord:2", "kantor")
+	activity, err := ListPrincipalActivity(t.Context(), db)
+	if err != nil || len(activity) != 0 {
+		t.Fatalf("ListPrincipalActivity() with only a run session = %+v, %v; want none", activity, err)
+	}
+	seedPersonaSession(t, db, "kantor/discord:office/dm:1", "discord:1", "kantor")
+	if _, err := db.ExecContext(t.Context(), `UPDATE session SET updated_at = '2026-11-01T09:00:00Z' WHERE id = 'kantor/discord:office/dm:1'`); err != nil {
+		t.Fatalf("age the chat session: %v", err)
+	}
+	seedPersonaSession(t, db, "wf-run-later", "discord:1", "kantor")
+	activity, err = ListPrincipalActivity(t.Context(), db)
+	if err != nil || len(activity) != 1 {
+		t.Fatalf("ListPrincipalActivity() = %+v, %v; want one principal", activity, err)
+	}
+	if activity[0].Sessions != 1 || activity[0].LastActive.Format("2006-01-02") != "2026-11-01" {
+		t.Fatalf("activity = %+v, want the chat session only, last active 2026-11-01", activity[0])
+	}
+}

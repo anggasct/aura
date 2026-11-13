@@ -146,7 +146,11 @@ func newProductionToolRunner(t *testing.T, life *runLife, cfg *config.Config) *w
 	if err := os.MkdirAll(cfg.Tools.Workspace, 0o700); err != nil {
 		t.Fatalf("create the tool workspace: %v", err)
 	}
-	built, err := newWorkflowToolRunner(loadResultWithAll(t, cfg), life.db, slog.New(slog.DiscardHandler))
+	registry, err := buildAgentRegistry(cfg)
+	if err != nil {
+		t.Fatalf("buildAgentRegistry: %v", err)
+	}
+	built, err := newWorkflowToolRunner(loadResultWithAll(t, cfg), life.db, registry, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("newWorkflowToolRunner: %v", err)
 	}

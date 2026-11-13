@@ -11,14 +11,21 @@ import (
 	"time"
 
 	"modernc.org/sqlite"
+
+	"github.com/anggasct/aura/internal/store"
 )
 
 type Store struct {
-	db *sql.DB
+	db       *sql.DB
+	newRunID func() string
 }
 
 func NewStore(db *sql.DB) *Store {
-	return &Store{db: db}
+	return &Store{db: db, newRunID: func() string { return newID("run") }}
+}
+
+func RunSessionID(runID string) string {
+	return "wf-" + runID
 }
 
 func newID(prefix string) string {
@@ -172,7 +179,7 @@ func (s *Store) createRun(ctx context.Context, spec *Spec, input *RunInput, orig
 	now := time.Now().UTC()
 	summary := &RunSummary{
 		Origin:            *origin,
-		ID:                newID("run"),
+		ID:                s.newRunID(),
 		DefinitionID:      spec.ID,
 		DefinitionVersion: spec.Version,
 		DurableKey:        durableKey,
@@ -187,6 +194,15 @@ func (s *Store) createRun(ctx context.Context, spec *Spec, input *RunInput, orig
 		return nil, fmt.Errorf("begin run create: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := store.CreateSessionTx(ctx, tx, &store.Session{
+		ID: RunSessionID(summary.ID), OwnerID: origin.PrincipalID, AgentID: origin.AgentID,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionIDConflict {
+			return nil, codedError(ErrorCodeSessionInvalid, "session "+RunSessionID(summary.ID)+" already exists")
+		}
+		return nil, fmt.Errorf("create run session: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id, reply_account, reply_channel_id, tainted, parent_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		summary.ID, summary.DefinitionID, summary.DefinitionVersion, summary.DurableKey, summary.Goal,

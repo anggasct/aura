@@ -470,3 +470,27 @@ func assertMode(t *testing.T, path string, want os.FileMode) {
 		t.Errorf("%s mode = %04o, want %04o", path, got, want)
 	}
 }
+
+func TestWorkflowSessionPrefixIsReserved(t *testing.T) {
+	db := newTestDB(t)
+	ctx := t.Context()
+	wantCode(t, NewSessionService(db).Create(ctx, &Session{ID: "wf-x", OwnerID: "discord:1"}), ErrorCodeInvalidArgument)
+	if got := countRows(t, db, `SELECT COUNT(*) FROM session WHERE id = 'wf-x'`); got != 0 {
+		t.Fatalf("a refused reserved id left %d session rows", got)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := CreateSessionTx(ctx, tx, &Session{ID: "wf-x", OwnerID: "discord:1"}); err != nil {
+		t.Fatalf("CreateSessionTx of a reserved id: %v", err)
+	}
+	wantCode(t, CreateSessionTx(ctx, tx, &Session{ID: "wf-x", OwnerID: "discord:1"}), ErrorCodeSessionIDConflict)
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM session WHERE id = 'wf-x' AND agent_id = 'main'`); got != 1 {
+		t.Fatalf("committed run session rows = %d, want 1 with the default agent", got)
+	}
+}

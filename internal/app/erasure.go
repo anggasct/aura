@@ -29,6 +29,7 @@ const (
 func erasureLines(counts *store.ErasureCounts) []string {
 	return []string{
 		fmt.Sprintf("sessions: %d", counts.Sessions),
+		fmt.Sprintf("run_sessions: %d", counts.RunSessions),
 		fmt.Sprintf("memory_documents: %d", counts.MemoryDocuments),
 		fmt.Sprintf("grants: %d", counts.Grants),
 		fmt.Sprintf("standing_grants: %d", counts.StandingGrants),

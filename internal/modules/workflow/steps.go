@@ -144,7 +144,7 @@ func (e *stepExecution) executeAttempt(ctx context.Context, step *StepSpec, atte
 		defer e.interpreter.release()
 	}
 
-	attemptCtx, cancel := context.WithCancel(ctx)
+	attemptCtx, cancel := context.WithTimeout(ctx, step.Timeout)
 	defer cancel()
 	result := make(chan *stepUpdate, 1)
 	go func() {

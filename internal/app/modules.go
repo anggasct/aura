@@ -175,7 +175,7 @@ func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 		options.GeneratedBudget = workflow.Budget{MaxSteps: cfg.Workflows.Generated.MaxSteps, MaxTokens: cfg.Workflows.Generated.MaxTokens}
 	}
 	if host && cfg.Tools != nil {
-		tools, err := newWorkflowToolRunner(b.result, db, b.logger)
+		tools, err := newWorkflowToolRunner(b.result, db, b.registry, b.logger)
 		if err != nil {
 			return err
 		}
