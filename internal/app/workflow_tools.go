@@ -48,6 +48,7 @@ type workflowToolController struct {
 	registry    *auraagent.Registry
 	targets     []replyTargeter
 	cards       *proposalCards
+	showCall    workflow.ToolCallText
 }
 
 func proposalOfferers(ports []runtimechannelhost.ChannelPort) []proposalOfferer {
@@ -65,6 +66,10 @@ func (c *workflowToolController) enableProposalCards(cfg *config.Config, offerer
 		return
 	}
 	c.cards = &proposalCards{cfg: cfg, offerers: offerers, logger: logger, requests: make(chan proposalOffer, proposalCardQueue)}
+}
+
+func (c *workflowToolController) enableCallDisplay(show workflow.ToolCallText) {
+	c.showCall = show
 }
 
 func (c *workflowToolController) runProposalCards(ctx context.Context) {
@@ -242,6 +247,10 @@ func (c *workflowToolController) Propose(ctx context.Context, caller *toolsbuilt
 	if err != nil {
 		return toolsbuiltin.WorkflowProposal{}, workflowRejection(err)
 	}
+	plan, err := workflow.RenderPlan(normalized, graph, c.showCall)
+	if err != nil {
+		return toolsbuiltin.WorkflowProposal{}, workflowRejection(err)
+	}
 	digest, err := workflow.Digest(normalized)
 	if err != nil {
 		return toolsbuiltin.WorkflowProposal{}, workflowRejection(err)
@@ -252,7 +261,6 @@ func (c *workflowToolController) Propose(ctx context.Context, caller *toolsbuilt
 	}); err != nil {
 		return toolsbuiltin.WorkflowProposal{}, err
 	}
-	plan := workflow.RenderPlan(normalized, graph)
 	if caller.Tainted {
 		plan += "\n" + approval.UntrustedInputNotice
 	}

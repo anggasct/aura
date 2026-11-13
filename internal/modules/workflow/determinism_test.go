@@ -41,7 +41,7 @@ func runScriptedWorkflow(t *testing.T, script []struct {
 			{ID: "approve", DependsOn: []string{"record"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Load(ctx, spec, testValidationDeps()); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, testValidationDeps()); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "replay", &RunInput{Objective: "ship it"}, ownerOrigin())

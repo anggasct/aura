@@ -18,7 +18,7 @@ func succeededGeneratedRun(t *testing.T, controller *workflowToolController, run
 	generated := workflow.NormalizeProposal(&workflow.Spec{Goal: "Weekly report", Steps: []workflow.StepSpec{
 		{ID: "hold", Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &event}, Timeout: time.Minute},
 	}}, "prop_weekly")
-	if err := controller.interpreter.LoadAll(t.Context(), []*workflow.Spec{generated}, controller.interpreter.ValidationDeps()); err != nil {
+	if err := controller.interpreter.Install(t.Context(), []*workflow.Spec{generated}, controller.interpreter.ValidationDeps()); err != nil {
 		t.Fatal(err)
 	}
 	run, err := controller.interpreter.Start(t.Context(), generated.ID, nil, ownerRunOrigin())

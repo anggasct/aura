@@ -86,7 +86,11 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 					if proposal.RunID != "" {
 						lines = append(lines, "run: "+proposal.RunID)
 					}
-					return writeChildLines(cmd, append(lines, workflow.RenderPlan(proposal.Spec, graph)))
+					plan, err := workflow.RenderPlan(proposal.Spec, graph, commandToolCallText(&result, app.db, app.logger))
+					if err != nil {
+						return err
+					}
+					return writeChildLines(cmd, append(lines, plan))
 				})
 			},
 		},
@@ -169,7 +173,10 @@ func approveProposal(ctx context.Context, cfg *config.Config, interpreter *workf
 	if err := interpreter.LoadAll(ctx, []*workflow.Spec{proposal.Spec}, interpreter.ValidationDeps()); err != nil {
 		return "", err
 	}
-	if err := runs.DecideProposal(ctx, id, workflow.ProposalApproved, "", now); err != nil {
+	if err := runs.ApproveProposal(ctx, id, &workflow.Approval{
+		DefinitionID: proposal.Spec.ID, DefinitionVersion: proposal.Spec.Version, Digest: digest,
+		AgentID: proposal.AgentID, ApproverID: principal.OwnerID, Tainted: proposal.Tainted, ApprovedAt: now,
+	}); err != nil {
 		return "", err
 	}
 	summary, err := interpreter.Start(ctx, proposal.Spec.ID, &workflow.RunInput{}, &workflow.RunOrigin{

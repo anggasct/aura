@@ -61,6 +61,10 @@ func (s *Store) beginImmediate(ctx context.Context) (*sql.Conn, error) {
 }
 
 func (s *Store) SaveDefinition(ctx context.Context, spec *Spec) error {
+	return s.saveDefinition(ctx, spec, nil)
+}
+
+func (s *Store) saveDefinition(ctx context.Context, spec *Spec, approval *Approval) error {
 	encoded, err := specJSON(spec)
 	if err != nil {
 		return err
@@ -95,6 +99,14 @@ func (s *Store) SaveDefinition(ctx context.Context, spec *Spec) error {
 		return fmt.Errorf("read definition: %w", err)
 	case stored != digest:
 		return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("definition %s version %d already exists with different content", spec.ID, spec.Version))
+	}
+	if approval != nil {
+		record := *approval
+		record.DefinitionID, record.DefinitionVersion, record.Digest = spec.ID, spec.Version, digest
+		record.ApprovedAt = time.Now().UTC()
+		if err := insertApproval(ctx, conn, &record); err != nil {
+			return err
+		}
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return fmt.Errorf("commit definition save: %w", err)

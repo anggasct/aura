@@ -123,8 +123,19 @@ func (w *workflowShape) seed(t *testing.T, suite *runSuite) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the production workflow tool runner needs Linux: the filesystem adapters refuse other systems")
 	}
-	if err := workflow.NewStore(suite.db).SaveDefinition(t.Context(), w.spec()); err != nil {
+	spec := w.spec()
+	if err := workflow.NewStore(suite.db).SaveDefinition(t.Context(), spec); err != nil {
 		t.Fatalf("SaveDefinition: %v", err)
+	}
+	digest, err := workflow.Digest(spec)
+	if err != nil {
+		t.Fatalf("Digest: %v", err)
+	}
+	if _, err := suite.db.ExecContext(t.Context(),
+		`INSERT INTO workflow_approval (definition_id, definition_version, spec_sha256, kind, approver_id, tainted, approved_at) VALUES (?, ?, ?, 'installed', ?, 0, ?)`,
+		spec.ID, spec.Version, digest, principal.OwnerID, time.Now().UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("approve the seeded definition: %v", err)
 	}
 }
 

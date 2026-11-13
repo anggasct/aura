@@ -109,20 +109,20 @@ func TestLoaderReadsTheWorkflowExecutor(t *testing.T) {
 	}
 }
 
-func loadAll(t *testing.T, interpreter *Interpreter, specs ...*Spec) {
+func installAll(t *testing.T, interpreter *Interpreter, specs ...*Spec) {
 	t.Helper()
-	if err := interpreter.LoadAll(context.Background(), specs, testValidationDeps()); err != nil {
-		t.Fatalf("LoadAll: %v", err)
+	if err := interpreter.Install(context.Background(), specs, testValidationDeps()); err != nil {
+		t.Fatalf("Install: %v", err)
 	}
 }
 
 func TestLoadRejectsAChildThatIsNotLoaded(t *testing.T) {
 	interpreter, _, _ := serialTestSetup(t, &fakeToolRunner{})
-	if err := interpreter.Load(context.Background(), composingSpec("top", "leaf"), testValidationDeps()); !hasCode(err, ErrorCodeCompositionInvalid) {
+	if err := interpreter.Install(context.Background(), []*Spec{composingSpec("top", "leaf")}, testValidationDeps()); !hasCode(err, ErrorCodeCompositionInvalid) {
 		t.Fatalf("Load of a parent before its child = %v", err)
 	}
-	loadAll(t, interpreter, toolSpec("leaf"))
-	if err := interpreter.Load(context.Background(), composingSpec("top", "leaf"), testValidationDeps()); err != nil {
+	installAll(t, interpreter, toolSpec("leaf"))
+	if err := interpreter.Install(context.Background(), []*Spec{composingSpec("top", "leaf")}, testValidationDeps()); err != nil {
 		t.Fatalf("Load after the child is loaded: %v", err)
 	}
 }
@@ -146,7 +146,7 @@ func TestComposedRunDrivesChildrenInProcess(t *testing.T) {
 	tools := &fakeToolRunner{output: func(string) json.RawMessage { return json.RawMessage(`{"ok":true}`) }}
 	interpreter, _, disk := driverTestSetup(t, tools, DriverConcurrent)
 	interpreter.options.MaxConcurrentSteps = 1
-	loadAll(t, interpreter, toolSpec("leaf"), composingSpec("middle", "leaf"), composingSpec("top", "middle", "leaf"))
+	installAll(t, interpreter, toolSpec("leaf"), composingSpec("middle", "leaf"), composingSpec("top", "middle", "leaf"))
 	summary, err := interpreter.Start(context.Background(), "top", &RunInput{Objective: "nest"}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestComposedRunDrivesChildrenInProcess(t *testing.T) {
 func TestFailedChildFailsTheComposingStep(t *testing.T) {
 	disk := newTestStore(t)
 	interpreter := NewInterpreter(disk, durable.NewFake(), &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 2, Tools: failingTools{}})
-	loadAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
+	installAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
 	summary, err := interpreter.Start(context.Background(), "top", nil, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestSerialCompositionJournalsTheChildAndPropagatesCancel(t *testing.T) {
 	interpreter, fake, disk := serialTestSetup(t, tools)
 	event := "never"
 	waiting := &Spec{ID: "waiting", Goal: "Wait", Version: 1, Source: SourceDefined, Steps: []StepSpec{{ID: "hold", Executor: ExecutorSpec{Kind: KindWait, Event: &event}, Timeout: time.Minute}}}
-	loadAll(t, interpreter, toolSpec("leaf"), waiting, composingSpec("top", "leaf"), composingSpec("stuck", "waiting"))
+	installAll(t, interpreter, toolSpec("leaf"), waiting, composingSpec("top", "leaf"), composingSpec("stuck", "waiting"))
 	topRun, err := disk.CreateRun(context.Background(), specOf(t, interpreter, "top"), &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)

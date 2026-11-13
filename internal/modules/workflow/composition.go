@@ -13,6 +13,9 @@ func (i *Interpreter) createChildRun(ctx context.Context, workflowID string, inp
 	if !ok {
 		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+workflowID+" is not loaded")
 	}
+	if _, err := i.requireSpecApproval(ctx, compiled.spec); err != nil {
+		return nil, err
+	}
 	return i.store.createRun(ctx, compiled.spec, input, origin, newID("dur"), parentRunID)
 }
 

@@ -57,7 +57,10 @@ func TestCeilingAndPlanRendering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := RenderPlan(spec, graph)
+	plan, err := RenderPlan(spec, graph, func(toolID string, args json.RawMessage) (string, error) { return toolID + " " + string(args), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{"Plan: Ship the fix", "1. approve — owner approval", "2. write — run tool write_file (after approve)", "3. ci — wait for ci.done (after write)"} {
 		if !strings.Contains(plan, want) {
 			t.Fatalf("plan lacks %q:\n%s", want, plan)
@@ -106,7 +109,7 @@ func TestInterpreterResolvesStoredDefinitionsItDidNotLoad(t *testing.T) {
 	tools := &fakeToolRunner{}
 	author, fake, disk := serialTestSetup(t, tools)
 	generated := NormalizeProposal(toolSpec("x"), "prop_c")
-	loadAll(t, author, toolSpec("leaf"), generated)
+	installAll(t, author, toolSpec("leaf"), generated)
 	run, err := disk.CreateRun(context.Background(), generated, &RunInput{}, ownerOrigin())
 	if err != nil {
 		t.Fatal(err)

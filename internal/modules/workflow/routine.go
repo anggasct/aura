@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 var routineName = regexp.MustCompile(`^[A-Za-z0-9 _-]{1,64}$`)
@@ -37,6 +39,10 @@ func (i *Interpreter) SaveRoutine(ctx context.Context, runID, name string) (*Spe
 	if source.Source != SourceGenerated {
 		return nil, codedError(ErrorCodeRoutineInvalid, "only runs of generated workflows can be saved as routines")
 	}
+	sourceApproval, err := i.requireSpecApproval(ctx, source)
+	if err != nil {
+		return nil, err
+	}
 	version := 1
 	if latest, err := i.store.LatestDefinition(ctx, id); err == nil {
 		version = latest.Version + 1
@@ -44,7 +50,11 @@ func (i *Interpreter) SaveRoutine(ctx context.Context, runID, name string) (*Spe
 		return nil, err
 	}
 	routine := &Spec{ID: id, Name: strings.TrimSpace(name), Goal: source.Goal, Version: version, Source: SourceGenerated, Steps: slices.Clone(source.Steps)}
-	if err := i.LoadAll(ctx, []*Spec{routine}, i.ValidationDeps()); err != nil {
+	approval := &Approval{
+		Kind: ApprovalRoutine, AgentID: sourceApproval.AgentID, ApproverID: principal.OwnerID, Tainted: sourceApproval.Tainted,
+		SourceDefinitionID: source.ID, SourceDefinitionVersion: source.Version,
+	}
+	if err := i.load(ctx, []*Spec{routine}, i.ValidationDeps(), approval); err != nil {
 		return nil, err
 	}
 	return routine, nil

@@ -22,7 +22,7 @@ func TestToolStepRecordsTheCodeOfACodedRunnerError(t *testing.T) {
 		t.Run("started/"+tc.name, func(t *testing.T) {
 			tools := &fakeToolRunner{err: tc.err}
 			interpreter, _, disk := driverTestSetup(t, tools, DriverConcurrent)
-			loadAll(t, interpreter, toolSpec("leaf"))
+			installAll(t, interpreter, toolSpec("leaf"))
 			summary, err := interpreter.Start(context.Background(), "leaf", nil, ownerOrigin())
 			if err != nil {
 				t.Fatalf("Start: %v", err)

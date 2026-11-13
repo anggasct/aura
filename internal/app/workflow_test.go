@@ -485,7 +485,7 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
 	}
 	ctx := t.Context()
-	if err := interpreter.Load(ctx, spec, deps); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
