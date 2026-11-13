@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -272,4 +273,76 @@ func attributeValue(dp metricdata.DataPoint[int64], key attribute.Key) string {
 		return ""
 	}
 	return value.AsString()
+}
+
+func TestToolSpanCarriesTheWorkflowRunAndStep(t *testing.T) {
+	exporter, tp := newToolTestTracer(t)
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	recorder, err := NewToolRecorder(tp, mp)
+	if err != nil {
+		t.Fatalf("NewToolRecorder: %v", err)
+	}
+	recorder.Record(context.Background(), &ToolObservation{Name: "read_file", Status: "ok", WorkflowRunID: "run-1", WorkflowStepID: "step-1"})
+	recorder.Record(context.Background(), &ToolObservation{Name: "read_file", Status: "ok"})
+
+	spans := exporter.GetSpans()
+	if len(spans) != 2 {
+		t.Fatalf("spans = %d, want 2", len(spans))
+	}
+	spanAttrs := func(index int) map[string]string {
+		attrs := map[string]string{}
+		for _, kv := range spans[index].Attributes {
+			attrs[string(kv.Key)] = kv.Value.String()
+		}
+		return attrs
+	}
+	attrs := spanAttrs(0)
+	if attrs[AttrWorkflowRunID] != "run-1" || attrs[AttrWorkflowStepID] != "step-1" {
+		t.Errorf("workflow span attrs = %v, want run-1 and step-1", attrs)
+	}
+	bare := spanAttrs(1)
+	for _, key := range []string{AttrWorkflowRunID, AttrWorkflowStepID} {
+		if _, present := bare[key]; present {
+			t.Errorf("span without a workflow step carries %s", key)
+		}
+	}
+
+	var data metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &data); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	for _, scope := range data.ScopeMetrics {
+		for _, m := range scope.Metrics {
+			var sets []attribute.Set
+			switch points := m.Data.(type) {
+			case metricdata.Sum[int64]:
+				for _, dp := range points.DataPoints {
+					sets = append(sets, dp.Attributes)
+				}
+			case metricdata.Histogram[float64]:
+				for _, dp := range points.DataPoints {
+					sets = append(sets, dp.Attributes)
+				}
+			}
+			for _, set := range sets {
+				for _, key := range []string{AttrWorkflowRunID, AttrWorkflowStepID} {
+					if _, present := set.Value(attribute.Key(key)); present {
+						t.Errorf("metric %s carries the label %s", m.Name, key)
+					}
+				}
+			}
+		}
+	}
+	for _, key := range []string{AttrWorkflowRunID, AttrWorkflowStepID} {
+		if !slices.Contains(AllowedSpanAttrs(SpanTool), key) {
+			t.Errorf("tool span attribute list is missing %s", key)
+		}
+		for _, metricName := range []string{MetricToolCallsTotal, MetricToolCallDuration} {
+			if slices.Contains(AllowedMetricLabels(metricName), key) {
+				t.Errorf("metric %s lists the label %s", metricName, key)
+			}
+		}
+	}
 }

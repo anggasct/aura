@@ -189,6 +189,8 @@ func TestToolSpanAllowedAttrs(t *testing.T) {
 		AttrToolApproval,
 		AttrToolExecutor,
 		AttrToolOutputBytes,
+		AttrWorkflowRunID,
+		AttrWorkflowStepID,
 		AttrSemconvVersion,
 	}
 	assertAttrSet(t, "tool span", allowed, want)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -257,5 +258,55 @@ func TestBrokerSkipsTheArgumentCheckOfOtherTools(t *testing.T) {
 	}
 	if checked != 0 {
 		t.Fatalf("a check for another tool ran %d times", checked)
+	}
+}
+
+func TestBrokerDefinitionReturnsACopy(t *testing.T) {
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t)})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	first, ok := broker.Definition("exec", "v1")
+	if !ok {
+		t.Fatal("Definition(exec, v1) = false, want the registered definition")
+	}
+	if len(first.Schema) == 0 || len(first.RequiredCapabilities) == 0 {
+		t.Fatalf("definition = %+v, want a schema and required capabilities to mutate", first)
+	}
+	wantSchema := string(first.Schema)
+	wantCapabilities := append([]string(nil), first.RequiredCapabilities...)
+	first.Schema[0] = 'X'
+	first.RequiredCapabilities[0] = "mutated"
+	second, ok := broker.Definition("exec", "v1")
+	if !ok {
+		t.Fatal("second Definition(exec, v1) = false")
+	}
+	if string(second.Schema) != wantSchema || !slices.Equal(second.RequiredCapabilities, wantCapabilities) {
+		t.Fatalf("registered definition changed through the returned copy: %q %v", second.Schema, second.RequiredCapabilities)
+	}
+	for _, missing := range [][2]string{{"exec", "v9"}, {"no_such_tool", "v1"}} {
+		if _, ok := broker.Definition(missing[0], missing[1]); ok {
+			t.Errorf("Definition(%q, %q) = true, want false", missing[0], missing[1])
+		}
+	}
+}
+
+func TestGrantUntilExpiresAtTheGivenTime(t *testing.T) {
+	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t)})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	request := brokerRequest("exec", `{"command":["true"]}`, "exec-linux")
+	request.EventSequence = 1
+	expiresAt := time.Now().Add(37 * time.Minute)
+	grant, err := broker.GrantUntil(t.Context(), request, expiresAt)
+	if err != nil {
+		t.Fatalf("GrantUntil: %v", err)
+	}
+	if !grant.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("grant expires at %v, want exactly %v", grant.ExpiresAt, expiresAt)
+	}
+	if _, err := broker.GrantUntil(t.Context(), request, time.Now().Add(-time.Second)); classOf(err) != ResultPolicyDenied {
+		t.Fatalf("GrantUntil in the past error = %v, want policy_denied", err)
 	}
 }

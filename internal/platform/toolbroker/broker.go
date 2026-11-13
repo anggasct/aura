@@ -253,6 +253,19 @@ func (b *Broker) Definitions() []tools.Definition {
 	return definitions
 }
 
+func (b *Broker) Definition(name, version string) (tools.Definition, bool) {
+	b.mu.RLock()
+	definition, ok := b.definitions[name+"@"+version]
+	b.mu.RUnlock()
+	if !ok {
+		return tools.Definition{}, false
+	}
+	definitionCopy := *definition
+	definitionCopy.Schema = slices.Clone(definition.Schema)
+	definitionCopy.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
+	return definitionCopy, true
+}
+
 func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rule *approval.Rule) error {
 	if definition == nil {
 		return errorf(ResultInvalidArgument, "tool definition must not be nil")
@@ -332,6 +345,37 @@ func (b *Broker) Grant(ctx context.Context, request *ToolRequest, ttl time.Durat
 		return approval.ApprovalGrant{}, mapApprovalError(err)
 	}
 	return grant, nil
+}
+
+func (b *Broker) GrantUntil(ctx context.Context, request *ToolRequest, expiresAt time.Time) (approval.ApprovalGrant, error) {
+	canonical, err := b.canonicalRequest(request)
+	if err != nil {
+		return approval.ApprovalGrant{}, err
+	}
+	grant, err := b.engine.GrantUntil(ctx, toApprovalRequest(&canonical, b.PolicyVersion()), expiresAt)
+	if err != nil {
+		return approval.ApprovalGrant{}, mapApprovalError(err)
+	}
+	return grant, nil
+}
+
+func standingCovers(class principal.Class, definition *tools.Definition, guarded, tainted bool) bool {
+	return class == principal.ClassTrusted && definition.StandingGrantAllowed() && !guarded && !tainted
+}
+
+func (b *Broker) StandingApprovalAllowed(ctx context.Context, request *ToolRequest) (bool, error) {
+	canonical, err := b.canonicalRequest(request)
+	if err != nil {
+		return false, err
+	}
+	b.mu.RLock()
+	definition := b.definitions[canonical.ToolName+"@"+canonical.ToolVersion]
+	b.mu.RUnlock()
+	guarded, err := b.guardRequires(ctx, &canonical)
+	if err != nil {
+		return false, err
+	}
+	return standingCovers(requestClass(&canonical), definition, guarded, canonical.Tainted), nil
 }
 
 func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result ToolResult, err error) {
@@ -434,7 +478,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 	default:
 		call := &authorization{canonical: &canonical, definition: definition, decision: decision, standingAllowed: definition.StandingGrantAllowed() && !guarded}
-		if decision.Outcome == approval.OutcomeRequireApproval && class == principal.ClassTrusted && call.standingAllowed && !canonical.Tainted {
+		if decision.Outcome == approval.OutcomeRequireApproval && standingCovers(class, definition, guarded, canonical.Tainted) {
 			call.standing, err = b.standingGrant(ctx, slot, call)
 			if err != nil {
 				approvalState = ApprovalRejected

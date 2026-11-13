@@ -105,7 +105,7 @@ func (b *build) startTelemetry() error {
 
 func toolObserver(recorder *telemetry.ToolRecorder) toolbroker.Observer {
 	return func(ctx context.Context, observation toolbroker.Observation) {
-		recorder.Record(ctx, &telemetry.ToolObservation{
+		observed := telemetry.ToolObservation{
 			Name:          observation.ToolName + "@" + observation.ToolVersion,
 			Status:        string(observation.Class),
 			PolicyOutcome: observation.PolicyOutcome,
@@ -113,7 +113,11 @@ func toolObserver(recorder *telemetry.ToolRecorder) toolbroker.Observer {
 			Executor:      observation.Executor,
 			Duration:      observation.Duration,
 			OutputBytes:   observation.OutputBytes,
-		})
+		}
+		if call, ok := workflow.StepCallFrom(ctx); ok {
+			observed.WorkflowRunID, observed.WorkflowStepID = call.RunID, call.StepID
+		}
+		recorder.Record(ctx, &observed)
 	}
 }
 
