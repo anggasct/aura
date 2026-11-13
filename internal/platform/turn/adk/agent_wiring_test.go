@@ -41,11 +41,11 @@ func (t namedToolStub) IsLongRunning() bool { return false }
 
 func newAgentTestExecutor(t *testing.T, modelName string, models auramodel.Set, opts ...ExecutorOption) (*ADKExecutor, *stubResolver, *sql.DB) {
 	t.Helper()
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID}}
 	opts = append([]ExecutorOption{WithAgentResolver(resolver, nil)}, opts...)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, opts...)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, opts...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -82,10 +82,10 @@ func TestADKExecutorRunsTurnThroughResolvedDefinition(t *testing.T) {
 func TestADKExecutorResolutionFailsClosedBeforeWork(t *testing.T) {
 	model := &fakeADKModel{answer: "unused", tokens: 1}
 	modelName, models := fakeModelSet(model)
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	resolver := &stubResolver{err: &auraagent.Error{Code: auraagent.ErrorCodeResolutionFailed, Detail: "no agent covers required capabilities"}}
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithAgentResolver(resolver, nil))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, WithAgentResolver(resolver, nil))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

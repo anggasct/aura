@@ -235,7 +235,7 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	model := &countingModel{turns: make(chan struct{}, 16)}
 	name := "email-model"
 	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, store.NewSessionService(db), events, personaEvalDenyAll{}, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, store.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)

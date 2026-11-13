@@ -100,9 +100,9 @@ func (f *capturingModel) GenerateContent(_ context.Context, req *adkmodel.LLMReq
 
 func newEvalExecutor(t *testing.T, model *capturingModel, broker turn.ToolBroker, provider RecallProvider, tools ...tool.Tool) *ADKExecutor {
 	t.Helper()
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	modelName, models := capturingModelSet(model)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, broker, tools, nil, WithRecallProvider(provider))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, broker, tools, nil, WithRecallProvider(provider))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

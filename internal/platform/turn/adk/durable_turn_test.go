@@ -126,6 +126,7 @@ type gatedBrokerTools struct {
 	executions int
 	runs       map[string]int
 	stalled    string
+	overlap    *overlapGate
 }
 
 func (g *gatedBrokerTools) Definitions() []BuiltinToolDefinition {
@@ -185,6 +186,11 @@ func (g *gatedBrokerTools) execute(ctx context.Context, request *toolbroker.Tool
 		<-ctx.Done()
 		return toolbroker.ToolResult{}, ctx.Err()
 	}
+	if g.overlap != nil {
+		if err := g.overlap.pass(ctx, arguments.Query); err != nil {
+			return toolbroker.ToolResult{}, err
+		}
+	}
 	output, err := json.Marshal(map[string]string{"query": arguments.Query})
 	return toolbroker.ToolResult{Output: output}, err
 }
@@ -240,7 +246,7 @@ func startDurableTurnRig(t *testing.T, model *toolThenTextModel) *durableTurnRig
 
 func (r *durableTurnRig) startLife(t *testing.T) {
 	t.Helper()
-	executor, err := NewADKExecutor("aura", r.model.Name(), auramodel.Set{r.model.Name(): r.model}, r.sessions, r.events, r.tools, nil, nil, WithBuiltinToolExecutor(r.tools))
+	executor, err := NewADKExecutor("aura", r.model.Name(), auramodel.Set{r.model.Name(): r.model}, r.sessions, r.tools, nil, nil, WithBuiltinToolExecutor(r.tools))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

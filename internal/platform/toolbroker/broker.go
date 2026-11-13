@@ -369,6 +369,12 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if err := contextError(ctx, canonical.Deadline); err != nil {
 		return ToolResult{}, err
 	}
+	if slot != nil {
+		defer slot.Authorized(true)
+		if err := slot.AwaitAuthorization(ctx); err != nil {
+			return ToolResult{}, contextError(ctx, canonical.Deadline)
+		}
+	}
 	decision, err := b.evaluatePolicy(ctx, slot, toApprovalRequest(&canonical, b.PolicyVersion()))
 	if err != nil {
 		policyOutcome = PolicyOutcomeDeny
@@ -442,6 +448,12 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 				policyOutcome = PolicyOutcomeDeny
 			}
 			return ToolResult{}, err
+		}
+	}
+	if slot != nil {
+		slot.Authorized(definition.RunsAlone())
+		if err := slot.AwaitExecution(ctx); err != nil {
+			return ToolResult{}, contextError(ctx, canonical.Deadline)
 		}
 	}
 	if _, ok := durable.TurnScopeFrom(ctx); ok {

@@ -26,11 +26,11 @@ func (s *stubProfileContext) ProfileContext(context.Context, *turn.TurnRequest) 
 
 func newProfileContextExecutor(t *testing.T, model *capturingModel, owner string, provider ProfileContextProvider) *ADKExecutor {
 	t.Helper()
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL"}}
 	modelName, models := capturingModelSet(model)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 		WithAgentResolver(resolver, nil),
 		WithOwnerContext(owner),
 		WithProfileContext(provider),

@@ -89,8 +89,8 @@ func TestTurnCarriesTriggeringMessage(t *testing.T) {
 	defer srv.Close()
 
 	modelName, models := captureModelSet(t, srv.URL)
-	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil)
+	db, sessions, _ := newSessionTestDB(t)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestTurnHistoryOrderingExactlyOnce(t *testing.T) {
 
 	modelName, models := captureModelSet(t, srv.URL)
 	db, sessions, events := newSessionTestDB(t)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestTurnToolLoopShapesPreserved(t *testing.T) {
 	modelName, models := captureModelSet(t, srv.URL)
 	db, sessions, events := newSessionTestDB(t)
 	sample, _ := newRecordingTool(t)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, []tool.Tool{sample}, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, []tool.Tool{sample}, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

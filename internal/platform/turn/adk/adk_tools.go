@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -133,8 +132,4 @@ func cloneBuiltinDefinitions(definitions []BuiltinToolDefinition) []BuiltinToolD
 		cloned[i].RequiredCapabilities = slices.Clone(definitions[i].RequiredCapabilities)
 	}
 	return cloned
-}
-
-type toolSequence struct {
-	mu sync.Mutex
 }

@@ -43,11 +43,11 @@ func TestProfileContextStaysUntrustedUserData(t *testing.T) {
 	if strings.Count(block, turn.ProfileEvidenceEnd) != 1 {
 		t.Fatalf("corpus smuggles the envelope terminator")
 	}
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	broker := &fakeBroker{}
 	model := &capturingModel{answer: "noted"}
 	modelName, models := capturingModelSet(model)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, broker, nil, nil)
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, broker, nil, nil)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

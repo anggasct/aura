@@ -93,6 +93,8 @@ func (inv *invocation) Payload() []byte {
 	return copyBytes(inv.exec.payload)
 }
 
+func (inv *invocation) ConcurrentActions() bool { return true }
+
 func (inv *invocation) done() <-chan struct{} {
 	return inv.exec.done
 }

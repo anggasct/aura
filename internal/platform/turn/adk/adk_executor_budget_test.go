@@ -41,9 +41,9 @@ func newBudgetTestLedger(t *testing.T, db *sql.DB, dailyCapMicros int64) *usage.
 func TestADKExecutorBudgetBlocksDispatch(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 5}
 	modelName, models := fakeModelSet(model)
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	ledger := newBudgetTestLedger(t, db, 1) // no reservation fits under a 1-micro cap
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 		WithBudgetLedger(ledger, "primary"))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
@@ -71,9 +71,9 @@ func TestADKExecutorBudgetBlocksDispatch(t *testing.T) {
 func TestADKExecutorBudgetSettlesTurn(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 7}
 	modelName, models := fakeModelSet(model)
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	ledger := newBudgetTestLedger(t, db, 1_000_000_000)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 		WithBudgetLedger(ledger, "primary"))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
@@ -105,10 +105,10 @@ func TestADKExecutorBudgetSettlesTurn(t *testing.T) {
 func TestADKExecutorBudgetAttributesPersona(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 7}
 	modelName, models := fakeModelSet(model)
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	ledger := newBudgetTestLedger(t, db, 1_000_000_000)
 	resolver := &stubResolver{definition: auraagent.Definition{ID: "kuma", Instructions: "You are Kuma."}}
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil,
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 		WithBudgetLedger(ledger, "primary"), WithAgentResolver(resolver, nil))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
@@ -136,13 +136,13 @@ func TestADKExecutorBudgetAttributesPersona(t *testing.T) {
 func TestADKExecutorBudgetAttributesAndCapsPrincipal(t *testing.T) {
 	model := &fakeADKModel{answer: "final answer", tokens: 7}
 	modelName, models := fakeModelSet(model)
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	reg := usage.NewPriceRegistry()
 	ledger, err := usage.NewLedger(db, usage.LedgerOptions{Prices: reg, PrincipalCaps: map[string]int64{"trusted": 1_000_000, "public": 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, events, &fakeBroker{}, nil, nil, WithBudgetLedger(ledger, "primary"))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, WithBudgetLedger(ledger, "primary"))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

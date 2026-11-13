@@ -84,10 +84,10 @@ func newAccessExecutor(t *testing.T, model *declarationModel, builtin *fakeBuilt
 	t.Helper()
 	name := "declaration-model-" + strings.ReplaceAll(t.Name(), "/", "-")
 	models := auramodel.Set{name: model}
-	db, sessions, events := newSessionTestDB(t)
+	db, sessions, _ := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	options = append([]ExecutorOption{WithBuiltinToolExecutor(builtin), WithAgentResolver(&stubResolver{definition: teamDefinition()}, nil)}, options...)
-	executor, err := NewADKExecutor("aura", name, models, sessions, events, &fakeBroker{}, nil, nil, options...)
+	executor, err := NewADKExecutor("aura", name, models, sessions, &fakeBroker{}, nil, nil, options...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}

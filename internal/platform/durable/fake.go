@@ -275,6 +275,8 @@ func (i *invocation) Wait(ctx context.Context, name string, timeout time.Duratio
 	}
 }
 
+func (i *invocation) ConcurrentActions() bool { return true }
+
 func (i *invocation) RunAction(ctx context.Context, key string, fn func(ctx context.Context) ([]byte, error)) ([]byte, error) {
 	if key == "" {
 		return nil, errors.New("durable run action requires a key")

@@ -106,7 +106,7 @@ func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definiti
 	name := model.Name()
 	evaluated := *definition
 	evaluated.ModelRoute = ""
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, sessions, store.NewEventStore(db), personaEvalDenyAll{}, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, sessions, personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(&staticResolver{definition: evaluated}, nil),
 		runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
