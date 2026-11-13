@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"slices"
@@ -16,6 +17,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
+
+func acceptToolCall(string, json.RawMessage) error { return nil }
 
 func waitingSpec(id, goal string) *workflow.Spec {
 	event := id + ".done"
@@ -32,7 +35,7 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolContro
 	fake := durable.NewFake()
 	t.Cleanup(fake.Close)
 	interpreter := workflow.NewInterpreter(runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
-	deps := workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), EffectfulTools: toolsbuiltin.EffectfulToolNames()}
+	deps := &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), EffectfulTools: toolsbuiltin.EffectfulToolNames(), CheckToolCall: acceptToolCall}
 	for _, spec := range []*workflow.Spec{waitingSpec("book_visit", "Book a visit"), waitingSpec("refund", "Issue a refund")} {
 		if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, deps); err != nil {
 			t.Fatal(err)
@@ -45,7 +48,7 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolContro
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller, err := newWorkflowToolController(interpreter, runs, registry)
+	controller, err := newWorkflowToolController(interpreter, runs, registry, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +157,7 @@ func TestAllowlistNamingAnUnloadedWorkflowFailsStartup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = newWorkflowToolController(interpreter, runs, registry)
+	_, err = newWorkflowToolController(interpreter, runs, registry, nil)
 	var configErr *config.Error
 	if !errors.As(err, &configErr) || configErr.Code != config.ErrorCodePersonaInvalid || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("startup with an unknown allowlisted workflow = %v", err)
@@ -199,7 +202,9 @@ func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
 			t.Errorf("Validate with %q = %v, want executor_invalid references unknown tool", name, err)
 		}
 	}
-	if err := workflow.Validate(toolStepSpec("github_comment"), deps); err != nil {
+	commentStep := toolStepSpec("github_comment")
+	commentStep.Steps[1].Executor.ToolArgs = json.RawMessage(`{"repo":"org/repo","number":7,"body":"hi","credential_name":"ci"}`)
+	if err := workflow.Validate(commentStep, deps); err != nil {
 		t.Errorf("Validate with github_comment behind an approval step: %v", err)
 	}
 

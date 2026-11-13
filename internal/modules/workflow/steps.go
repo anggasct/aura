@@ -248,7 +248,10 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec, attempt
 	}
 	origin := e.origin
 	origin.Tainted = e.origin.Tainted || approval.Tainted
-	call := &StepCall{RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: origin, DefinitionDigest: e.definitionDigest}
+	call := &StepCall{
+		RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: origin, DefinitionDigest: e.definitionDigest,
+		DefinitionID: e.spec.ID, DefinitionVersion: e.spec.Version, Approval: *approval,
+	}
 	output, err := runner.Invoke(WithStepCall(ctx, call), *step.Executor.ToolID, toolArguments(step))
 	if err != nil {
 		code := ErrorCodeStepFailed

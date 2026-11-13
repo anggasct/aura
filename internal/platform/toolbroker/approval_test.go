@@ -252,7 +252,7 @@ func TestBrokerApprovalPromptBoundsDisplayArguments(t *testing.T) {
 	}
 }
 
-func TestBrokerApprovedGrantIsOneShot(t *testing.T) {
+func TestBrokerApprovedGrantReplayIsAnsweredFromTheJournal(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
 	broker, err := New(&Options{
@@ -278,8 +278,8 @@ func TestBrokerApprovedGrantIsOneShot(t *testing.T) {
 		t.Fatalf("Execute with grant: %v", err)
 	}
 	request.EventSequence = 2
-	if _, err := broker.Execute(context.Background(), request); classOf(err) != ResultPolicyDenied {
-		t.Fatalf("replayed grant error = %v, want policy_denied", err)
+	if _, err := broker.Execute(context.Background(), request); err != nil {
+		t.Fatalf("replay of a performed effect = %v, want the recorded result", err)
 	}
 	if calls != 1 {
 		t.Fatalf("adapter calls = %d, want 1", calls)

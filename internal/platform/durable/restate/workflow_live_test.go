@@ -302,7 +302,7 @@ func TestLiveCrashResumeSkipsCompletedSteps(t *testing.T) {
 			{ID: "ship", DependsOn: []string{"hold"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: &listDir}, Timeout: 30 * time.Second},
 		},
 	}
-	deps := workflow.ValidationDeps{
+	deps := &workflow.ValidationDeps{
 		KnownTools:     []string{"read_file", "list_dir"},
 		EffectfulTools: []string{},
 		Agents:         registry,
@@ -438,7 +438,7 @@ func TestLiveGeneratedRunResumesFromTheStoreWithinItsBudget(t *testing.T) {
 			{ID: "ship", DependsOn: []string{"hold"}, Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: &listDir}, Timeout: 30 * time.Second},
 		},
 	}
-	deps := workflow.ValidationDeps{
+	deps := &workflow.ValidationDeps{
 		KnownTools:     []string{"read_file", "list_dir"},
 		EffectfulTools: []string{},
 		Agents:         registry,

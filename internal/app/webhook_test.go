@@ -388,7 +388,7 @@ func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durable.Fake
 		},
 	}
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{backend}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, workflow.ValidationDeps{}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{CheckToolCall: acceptToolCall}); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerRunOrigin())

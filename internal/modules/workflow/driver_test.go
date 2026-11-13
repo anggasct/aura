@@ -158,8 +158,46 @@ func TestToolStepCarriesItsStepCall(t *testing.T) {
 		{RunID: runID, StepID: "second", Attempt: 0, Origin: *ownerOrigin(), DefinitionDigest: digest},
 		{RunID: runID, StepID: "second", Attempt: 1, Origin: *ownerOrigin(), DefinitionDigest: digest},
 	}
-	if got := tools.recorded(); !slices.Equal(got, want) {
+	got := tools.recorded()
+	for i := range got {
+		got[i].DefinitionID, got[i].DefinitionVersion, got[i].Approval = "", 0, Approval{}
+	}
+	if !slices.Equal(got, want) {
 		t.Fatalf("step calls = %+v, want %+v", got, want)
+	}
+}
+
+func TestToolStepCarriesItsApproval(t *testing.T) {
+	ctx := t.Context()
+	tools := &stepCallTools{}
+	registry, err := buildTestRegistry()
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	fake := durable.NewFake()
+	disk := newTestStore(t)
+	interpreter := NewInterpreter(disk, fake, &Options{AgentResolver: registry, Tools: tools})
+	spec := twoToolStepSpec("step-approval")
+	runID := startSerialRun(t, interpreter, disk, spec, nil)
+	inv, _ := holdInvocation(t, fake, "holder-step-approval")
+	if _, err := interpreter.DriveSerial(ctx, inv, runID); err != nil {
+		t.Fatalf("DriveSerial: %v", err)
+	}
+	stored, err := disk.Approval(ctx, spec.ID, spec.Version)
+	if err != nil {
+		t.Fatalf("Approval: %v", err)
+	}
+	calls := tools.recorded()
+	if len(calls) == 0 {
+		t.Fatal("the runner saw no step call")
+	}
+	for i := range calls {
+		if calls[i].Approval != *stored {
+			t.Fatalf("call %d approval = %+v, want %+v", i, calls[i].Approval, *stored)
+		}
+		if calls[i].DefinitionID != spec.ID || calls[i].DefinitionVersion != spec.Version {
+			t.Fatalf("call %d definition = %s v%d, want %s v%d", i, calls[i].DefinitionID, calls[i].DefinitionVersion, spec.ID, spec.Version)
+		}
 	}
 }
 

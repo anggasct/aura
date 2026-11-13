@@ -146,9 +146,7 @@ func (i *Interpreter) compiledFor(ctx context.Context, id string, version int) (
 	if err != nil {
 		return nil, false
 	}
-	i.depsMu.Lock()
-	deps := i.deps
-	i.depsMu.Unlock()
+	deps := i.ValidationDeps()
 	graph, err := Compile(spec, deps)
 	if err != nil {
 		i.options.Logger.WarnContext(ctx, "stored workflow definition does not compile", "component", "workflow", "definition_id", id, "version", version, "error", err)
@@ -160,18 +158,71 @@ func (i *Interpreter) compiledFor(ctx context.Context, id string, version int) (
 	return &compiledSpec{spec: spec, graph: graph}, true
 }
 
-func (i *Interpreter) LoadAll(ctx context.Context, specs []*Spec, deps ValidationDeps) error {
+func (i *Interpreter) LoadAll(ctx context.Context, specs []*Spec, deps *ValidationDeps) error {
 	return i.load(ctx, specs, deps, nil)
 }
 
-func (i *Interpreter) Install(ctx context.Context, specs []*Spec, deps ValidationDeps) error {
+type Quarantined struct {
+	ID      string
+	Version int
+	Err     error
+}
+
+func (i *Interpreter) LoadRoutines(ctx context.Context, specs []*Spec, deps *ValidationDeps) ([]Quarantined, error) {
+	i.setDeps(deps)
+	var quarantined []Quarantined
+	pending := make(map[string]*Spec, len(specs))
+	graphs := make(map[string]*Graph, len(specs))
+	for _, spec := range specs {
+		if spec == nil {
+			continue
+		}
+		graph, err := Compile(spec, deps)
+		if err != nil {
+			quarantined = append(quarantined, Quarantined{ID: spec.ID, Version: spec.Version, Err: err})
+			continue
+		}
+		pending[spec.ID] = spec
+		graphs[spec.ID] = graph
+	}
+	lookup := func(id string) (*Spec, bool) {
+		if spec, ok := pending[id]; ok {
+			return spec, true
+		}
+		return i.Spec(id)
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, spec := range specs {
+			if spec == nil || pending[spec.ID] == nil {
+				continue
+			}
+			if err := ValidateComposition(spec, lookup); err != nil {
+				quarantined = append(quarantined, Quarantined{ID: spec.ID, Version: spec.Version, Err: err})
+				delete(pending, spec.ID)
+				delete(graphs, spec.ID)
+				changed = true
+			}
+		}
+	}
+	for _, spec := range specs {
+		if spec == nil || pending[spec.ID] == nil {
+			continue
+		}
+		if err := i.store.saveDefinition(ctx, spec, nil); err != nil {
+			return nil, err
+		}
+		i.specs.put(spec, graphs[spec.ID])
+	}
+	return quarantined, nil
+}
+
+func (i *Interpreter) Install(ctx context.Context, specs []*Spec, deps *ValidationDeps) error {
 	return i.load(ctx, specs, deps, &Approval{Kind: ApprovalInstalled, ApproverID: principal.OwnerID})
 }
 
-func (i *Interpreter) load(ctx context.Context, specs []*Spec, deps ValidationDeps, approval *Approval) error {
-	i.depsMu.Lock()
-	i.deps = deps
-	i.depsMu.Unlock()
+func (i *Interpreter) load(ctx context.Context, specs []*Spec, deps *ValidationDeps, approval *Approval) error {
+	i.setDeps(deps)
 	pending := make(map[string]*Spec, len(specs))
 	for _, spec := range specs {
 		if spec != nil {

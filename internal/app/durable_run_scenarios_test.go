@@ -109,13 +109,13 @@ func (w *workflowShape) scenario(afterStart func(t *testing.T, life *runLife)) r
 	return runScenario{seed: w.seed, host: w.host, firstLife: firstLife, started: discoverTheRun}
 }
 
-func (w *workflowShape) deps(t *testing.T) workflow.ValidationDeps {
+func (w *workflowShape) deps(t *testing.T) *workflow.ValidationDeps {
 	t.Helper()
 	registry, err := auraagent.Build(nil, w.known, []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}
-	return workflow.ValidationDeps{KnownTools: w.known, EffectfulTools: append([]string{}, w.effectful...), Agents: registry}
+	return &workflow.ValidationDeps{KnownTools: w.known, EffectfulTools: append([]string{}, w.effectful...), Agents: registry, CheckToolCall: acceptToolCall}
 }
 
 func (w *workflowShape) seed(t *testing.T, suite *runSuite) {

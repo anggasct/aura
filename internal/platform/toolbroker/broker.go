@@ -47,6 +47,8 @@ type ToolRequest struct {
 	EventAuthor     string
 	Knowledge       []string
 	Tainted         bool
+
+	AllocateEventSequence bool
 }
 
 type ToolResult struct {
@@ -73,6 +75,7 @@ const (
 	ApprovalApproved = "approved"
 	ApprovalRejected = "rejected"
 	ApprovalStanding = "standing"
+	ApprovalReplayed = "replayed"
 
 	ExecutorDirect = "direct"
 	ExecutorEffect = "effect"
@@ -385,6 +388,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		policyOutcome = PolicyOutcomeDeny
 		return ToolResult{}, err
 	}
+	settled := false
 	tainted := canonical.Tainted && definition.IsExternalSink()
 	if (guarded || tainted || (class != principal.ClassOwner && definition.Effectful)) && decision.Outcome == approval.OutcomeAllow {
 		decision.Outcome = approval.OutcomeRequireApproval
@@ -397,18 +401,28 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		if b.effects == nil {
 			return ToolResult{}, errorf(ResultCapabilityUnavailable, "effect journal is required for tool %q", key)
 		}
-		if err := validateEffectRequest(&canonical); err != nil {
+		_, scoped := durable.TurnScopeFrom(ctx)
+		if err := validateEffectRequest(&canonical, scoped); err != nil {
 			return ToolResult{}, err
+		}
+		if !scoped {
+			settled, err = b.settledReplay(ctx, &canonical)
+			if err != nil {
+				return ToolResult{}, err
+			}
 		}
 	}
 
-	if canonical.Approval != nil {
+	switch {
+	case settled:
+		approvalState = ApprovalReplayed
+	case canonical.Approval != nil:
 		approvalState = ApprovalAttached
 		scope, _ := durable.TurnScopeFrom(ctx)
 		if err := b.validateDurable(ctx, scope, &canonical, canonical.Approval); err != nil {
 			return ToolResult{}, mapApprovalError(err)
 		}
-	} else {
+	default:
 		standing := false
 		standingAllowed := definition.StandingGrantAllowed() && !guarded
 		if decision.Outcome == approval.OutcomeRequireApproval && class == principal.ClassTrusted && standingAllowed && !canonical.Tainted {
@@ -644,14 +658,45 @@ func (i *effectInvocation) record(ctx context.Context, receipt json.RawMessage, 
 	return effect.Outcome{Succeeded: true, Receipt: receipt, Result: record}
 }
 
-func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constraints approval.Constraints, adapter Adapter) (ToolResult, error) {
+const effectProvider = "builtin-tools"
+
+func effectPayload(request *ToolRequest) (json.RawMessage, error) {
 	payload, err := json.Marshal(struct {
 		ToolName    string          `json:"tool_name"`
 		ToolVersion string          `json:"tool_version"`
 		Arguments   json.RawMessage `json:"arguments"`
 	}{request.ToolName, request.ToolVersion, request.Arguments})
 	if err != nil {
-		return ToolResult{}, errorf(ResultInvalidArgument, "encode effect request: %v", err)
+		return nil, errorf(ResultInvalidArgument, "encode effect request: %v", err)
+	}
+	return payload, nil
+}
+
+func (b *Broker) settledReplay(ctx context.Context, request *ToolRequest) (bool, error) {
+	payload, err := effectPayload(request)
+	if err != nil {
+		return false, err
+	}
+	intent, found, err := b.effects.Journal().Lookup(ctx, effectProvider, request.ToolName, request.IdempotencyKey, payload)
+	if err != nil {
+		if code, ok := effect.CodeOf(err); ok && code == effect.ErrorCodeIdempotencyConflict {
+			return false, errorf(ResultInvalidArgument, "tool %q was called again under its idempotency key with a different request", request.ToolName)
+		}
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	if intent.SessionID != request.SessionID {
+		return false, errorf(ResultInvalidArgument, "tool %q idempotency key belongs to another session", request.ToolName)
+	}
+	return intent.State != effect.StatePrepared, nil
+}
+
+func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constraints approval.Constraints, adapter Adapter) (ToolResult, error) {
+	payload, err := effectPayload(request)
+	if err != nil {
+		return ToolResult{}, err
 	}
 	invocation := &effectInvocation{
 		adapter: adapter, request: request, constraints: constraints, limit: b.outputLimit(constraints),
@@ -661,9 +706,9 @@ func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constr
 	}
 	intent, err := b.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID: request.SessionID, TurnID: request.TurnID, ToolCallID: request.RequestID,
-		IdempotencyKey: request.IdempotencyKey, Provider: "builtin-tools", Operation: request.ToolName,
+		IdempotencyKey: request.IdempotencyKey, Provider: effectProvider, Operation: request.ToolName,
 		Classification: effect.ClassificationEffectful, Request: payload,
-		EventSequence: request.EventSequence, EventInvocation: request.EventInvocation,
+		EventSequence: request.EventSequence, AllocateSequence: request.AllocateEventSequence, EventInvocation: request.EventInvocation,
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
 	}, invocation)
 	if err != nil {
@@ -687,8 +732,12 @@ func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constr
 	return invocation.result, nil
 }
 
-func validateEffectRequest(request *ToolRequest) error {
-	if request.SessionID == "" || request.TurnID == "" || request.RequestID == "" || request.IdempotencyKey == "" || request.EventSequence == 0 {
+func validateEffectRequest(request *ToolRequest, scoped bool) error {
+	if request.AllocateEventSequence && (request.EventSequence != 0 || scoped) {
+		return errorf(ResultInvalidArgument, "effectful tool requests that let the journal allocate the event sequence must carry none and run outside a durable turn")
+	}
+	sequenced := request.EventSequence != 0 || request.AllocateEventSequence
+	if request.SessionID == "" || request.TurnID == "" || request.RequestID == "" || request.IdempotencyKey == "" || !sequenced {
 		return errorf(ResultInvalidArgument, "effectful tool requests require session, turn, request, idempotency, and event sequence identifiers")
 	}
 	return nil

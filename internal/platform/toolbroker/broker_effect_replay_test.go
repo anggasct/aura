@@ -56,6 +56,7 @@ type replayConfig struct {
 	unlimited   bool
 	artifacts   bool
 	secrets     []string
+	decider     ApprovalDecider
 }
 
 type replayHarness struct {
@@ -91,6 +92,7 @@ func newReplayHarness(t *testing.T, config *replayConfig) *replayHarness {
 		Effects:              executor,
 		MaxInlineResultBytes: config.inlineLimit,
 		Secrets:              config.secrets,
+		ApprovalDecider:      config.decider,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				harness.calls++
@@ -349,7 +351,7 @@ func TestBrokerRefusesAnEffectReplayItCannotServe(t *testing.T) {
 				request.SessionID = "session-2"
 				return request
 			},
-			wantClass: ResultPolicyDenied, wantCalls: 1,
+			wantClass: ResultInvalidArgument, wantCalls: 1,
 		},
 		{
 			name: "an adapter output that is not JSON", output: json.RawMessage(`not json at all`),

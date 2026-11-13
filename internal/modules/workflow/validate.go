@@ -19,11 +19,12 @@ type ValidationDeps struct {
 	EffectfulTools     []string
 	Agents             AgentResolver
 	DefaultStepTimeout time.Duration
+	CheckToolCall      func(toolID string, args json.RawMessage) error
 }
 
 const MaxCompositionDepth = 3
 
-func Validate(spec *Spec, deps ValidationDeps) error {
+func Validate(spec *Spec, deps *ValidationDeps) error {
 	if spec == nil {
 		return codedError(ErrorCodeSpecInvalid, "spec must not be nil")
 	}
@@ -137,7 +138,7 @@ func Validate(spec *Spec, deps ValidationDeps) error {
 	return nil
 }
 
-func validateExecutor(step *StepSpec, deps ValidationDeps, ids map[string]bool) error {
+func validateExecutor(step *StepSpec, deps *ValidationDeps, ids map[string]bool) error {
 	field := fmt.Sprintf("step %q executor", step.ID)
 	switch step.Executor.Kind {
 	case KindAgent:
@@ -178,6 +179,12 @@ func validateExecutor(step *StepSpec, deps ValidationDeps, ids map[string]bool) 
 			if err := json.Unmarshal(step.Executor.ToolArgs, &document); err != nil || document == nil {
 				return codedError(ErrorCodeExecutorInvalid, field+" args must be a JSON object")
 			}
+		}
+		if deps.CheckToolCall == nil {
+			return codedError(ErrorCodeSpecInvalid, field+" cannot be checked: no tool argument checker is configured")
+		}
+		if err := deps.CheckToolCall(*step.Executor.ToolID, toolArguments(step)); err != nil {
+			return codedError(ErrorCodeSpecInvalid, field+" arguments are invalid: "+err.Error())
 		}
 	case KindWait:
 		if step.Executor.Event == nil || *step.Executor.Event == "" {

@@ -101,15 +101,18 @@ func validTestSpec() *Spec {
 	}
 }
 
-func testValidationDeps() ValidationDeps {
+func acceptToolCall(string, json.RawMessage) error { return nil }
+
+func testValidationDeps() *ValidationDeps {
 	registry, err := buildTestRegistry()
 	if err != nil {
 		panic(err)
 	}
-	return ValidationDeps{
+	return &ValidationDeps{
 		KnownTools:     []string{"read_file", "write_file", "exec"},
 		EffectfulTools: []string{"exec", "write_file"},
 		Agents:         registry,
+		CheckToolCall:  acceptToolCall,
 	}
 }
 

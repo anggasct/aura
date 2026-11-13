@@ -190,7 +190,7 @@ func TestInterpreterSkipsDownstreamOnFalseCondition(t *testing.T) {
 			{ID: "notify", DependsOn: []string{"merge"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "skipflow", nil, ownerOrigin())
@@ -240,7 +240,7 @@ func testStepTimeoutRetriesThenFailsRun(t *testing.T) {
 			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 2, Backoff: time.Minute}},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "slowflow", nil, ownerOrigin())
@@ -295,7 +295,7 @@ func TestInterpreterBoundsConcurrentSteps(t *testing.T) {
 		steps = append(steps, StepSpec{ID: id, Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second})
 	}
 	spec := &Spec{ID: "fan", Goal: "Fan", Version: 1, Source: SourceDefined, Steps: steps}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "fan", nil, ownerOrigin())
@@ -328,7 +328,7 @@ func TestInterpreterWaitSuspendsAndResumes(t *testing.T) {
 			{ID: "done", DependsOn: []string{"ci"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "waitflow", nil, ownerOrigin())
@@ -374,7 +374,7 @@ func TestInterpreterCancelReachesCancelled(t *testing.T) {
 			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: time.Hour},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "cancelflow", nil, ownerOrigin())
@@ -512,7 +512,7 @@ func TestApprovalRejectionRoutesRunToFailure(t *testing.T) {
 			{ID: "gate", Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "rejectflow", nil, ownerOrigin())
@@ -568,7 +568,7 @@ func TestInterpreterSignalStepTimeoutRetryConvergesOnSignal(t *testing.T) {
 					ID: "retry-" + tc.name, Goal: "Signal step retry", Version: 1, Source: SourceDefined,
 					Steps: []StepSpec{step},
 				}
-				if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+				if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 					t.Fatalf("Load: %v", err)
 				}
 				summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())
@@ -621,7 +621,7 @@ func testTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
 			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 2, Backoff: time.Minute}},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "attemptflow", nil, ownerOrigin())
@@ -731,7 +731,7 @@ func TestInterpreterSinksOversizedOutputThroughArtifactSink(t *testing.T) {
 			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "sinkflow", nil, ownerOrigin())
@@ -780,7 +780,7 @@ func TestInterpreterWaitPayloadOverInlineLimitIsSunk(t *testing.T) {
 			{ID: "ci", Executor: ExecutorSpec{Kind: KindWait, Event: ptr("ci.completed")}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "waitbig", nil, ownerOrigin())
@@ -826,7 +826,7 @@ func TestInterpreterOversizedOutputWithoutSinkFailsTheRun(t *testing.T) {
 			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "nosink", nil, ownerOrigin())
@@ -866,7 +866,7 @@ func TestInterpreterStepPersistFailureFailsTheRun(t *testing.T) {
 			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "persistfail", nil, ownerOrigin())
@@ -903,7 +903,7 @@ func TestInterpreterSuspendedRunStaysSuspendedWhenSiblingCompletes(t *testing.T)
 			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, "siblingflow", nil, ownerOrigin())
@@ -952,7 +952,7 @@ func TestInterpreterSuspendedStepReleasesConcurrencySlot(t *testing.T) {
 			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
 		},
 	}
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{Agents: registry}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())
@@ -1118,7 +1118,7 @@ func TestApprovalRequesterPortFailsStepAndRun(t *testing.T) {
 		Driver:    DriverConcurrent,
 		Approvals: requester,
 	})
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())
@@ -1159,7 +1159,7 @@ func TestApprovalRequesterPortSucceedsOnSignal(t *testing.T) {
 		Driver:    DriverConcurrent,
 		Approvals: requester,
 	})
-	if err := interpreter.Install(ctx, []*Spec{spec}, ValidationDeps{}); err != nil {
+	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{}); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	summary, err := interpreter.Start(ctx, spec.ID, nil, ownerOrigin())

@@ -498,7 +498,7 @@ func (b *build) wireDurableListener(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	workflowTools, err := newWorkflowToolController(durableListener.interpreter, workflow.NewStore(db), b.registry, replyTargeters(s.channels)...)
+	workflowTools, err := newWorkflowToolController(durableListener.interpreter, workflow.NewStore(db), b.registry, quarantinedIDs(b.quarantined), replyTargeters(s.channels)...)
 	if err != nil {
 		return err
 	}
