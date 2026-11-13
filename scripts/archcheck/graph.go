@@ -8,24 +8,32 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 )
 
 const modulePath = "github.com/anggasct/aura"
 
 type listedPackage struct {
-	ImportPath   string   `json:"ImportPath"`
-	Name         string   `json:"Name"`
-	Standard     bool     `json:"Standard"`
-	Imports      []string `json:"Imports"`
-	TestImports  []string `json:"TestImports"`
-	XTestImports []string `json:"XTestImports"`
+	ImportPath     string   `json:"ImportPath"`
+	Name           string   `json:"Name"`
+	Dir            string   `json:"Dir"`
+	Standard       bool     `json:"Standard"`
+	GoFiles        []string `json:"GoFiles"`
+	CgoFiles       []string `json:"CgoFiles"`
+	IgnoredGoFiles []string `json:"IgnoredGoFiles"`
+	Imports        []string `json:"Imports"`
+	TestImports    []string `json:"TestImports"`
+	XTestImports   []string `json:"XTestImports"`
 }
 
 type repoPackage struct {
-	path    string
-	name    string
-	imports []string
+	path              string
+	name              string
+	imports           []string
+	productionImports []string
+	files             []string
 }
 
 type repository struct {
@@ -44,25 +52,48 @@ func loadRepository(ctx context.Context) (repository, error) {
 		return repository{}, err
 	}
 	repo := repository{stdNames: make(map[string]string, len(stdListed)), importedStd: map[string]bool{}}
-	for _, p := range stdListed {
-		repo.stdNames[p.ImportPath] = p.Name
+	for index := range stdListed {
+		repo.stdNames[stdListed[index].ImportPath] = stdListed[index].Name
 	}
-	for _, p := range repoListed {
-		pkg := repoPackage{path: relativePath(p.ImportPath), name: p.Name}
-		for _, group := range [][]string{p.Imports, p.TestImports, p.XTestImports} {
-			for _, imported := range group {
-				if _, ok := repo.stdNames[imported]; ok {
-					repo.importedStd[imported] = true
-					continue
-				}
-				if imported == modulePath || strings.HasPrefix(imported, modulePath+"/") {
-					pkg.imports = append(pkg.imports, relativePath(imported))
-				}
-			}
-		}
-		repo.packages = append(repo.packages, pkg)
+	for index := range repoListed {
+		repo.packages = append(repo.packages, repo.newPackage(&repoListed[index]))
 	}
 	return repo, nil
+}
+
+func (repo *repository) newPackage(p *listedPackage) repoPackage {
+	production := repo.moduleImports(p.Imports)
+	return repoPackage{
+		path:              relativePath(p.ImportPath),
+		name:              p.Name,
+		imports:           slices.Concat(production, repo.moduleImports(p.TestImports), repo.moduleImports(p.XTestImports)),
+		productionImports: production,
+		files:             productionFiles(p),
+	}
+}
+
+func (repo *repository) moduleImports(imports []string) []string {
+	var result []string
+	for _, imported := range imports {
+		if _, ok := repo.stdNames[imported]; ok {
+			repo.importedStd[imported] = true
+			continue
+		}
+		if imported == modulePath || strings.HasPrefix(imported, modulePath+"/") {
+			result = append(result, relativePath(imported))
+		}
+	}
+	return result
+}
+
+func productionFiles(p *listedPackage) []string {
+	var files []string
+	for _, name := range slices.Concat(p.GoFiles, p.CgoFiles, p.IgnoredGoFiles) {
+		if !strings.HasSuffix(name, "_test.go") {
+			files = append(files, filepath.Join(p.Dir, name))
+		}
+	}
+	return files
 }
 
 func relativePath(importPath string) string {

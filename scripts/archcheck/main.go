@@ -7,13 +7,17 @@ import (
 	"io/fs"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"syscall"
 )
 
-const allowFile = "scripts/archcheck/layers.allow"
+const (
+	baselineDir = "scripts/archcheck/"
+	allowFile   = baselineDir + "layers.allow"
+)
 
-var checkNames = []string{"layout", "stdnames", "layers"}
+var checkNames = []string{"layout", "stdnames", "layers", "fakes", "setters", "codederrors"}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -56,7 +60,7 @@ func collect(ctx context.Context, selected []string) ([]string, error) {
 		}
 		violations = append(violations, checkLayout(entries)...)
 	}
-	if !slices.Contains(selected, "stdnames") && !slices.Contains(selected, "layers") {
+	if !slices.Contains(selected, "stdnames") && !slices.Contains(selected, "layers") && !hasSourceCheck(selected) {
 		return violations, nil
 	}
 	repo, err := loadRepository(ctx)
@@ -67,15 +71,30 @@ func collect(ctx context.Context, selected []string) ([]string, error) {
 		violations = append(violations, checkStdNames(repo.packages, repo.stdNames, repo.importedStd)...)
 	}
 	if slices.Contains(selected, "layers") {
-		content, err := os.ReadFile(allowFile)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("read %s: %w", allowFile, err)
+		content, err := readOptional(allowFile)
+		if err != nil {
+			return nil, err
 		}
-		allowed, problems := parseAllow(string(content))
+		allowed, problems := parseAllow(content)
 		violations = append(violations, problems...)
 		violations = append(violations, checkLayers(repo.packages, allowed)...)
 	}
+	if hasSourceCheck(selected) {
+		found, err := checkSources(selected, repo.packages)
+		if err != nil {
+			return nil, err
+		}
+		violations = append(violations, found...)
+	}
 	return violations, nil
+}
+
+func readOptional(path string) (string, error) {
+	content, err := os.ReadFile(filepath.Clean(path))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return string(content), nil
 }
 
 func readGroupDirs() (map[string][]dirEntry, error) {

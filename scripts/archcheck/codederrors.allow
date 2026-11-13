@@ -1,0 +1,50 @@
+internal/app  # until the kernel errors move to platform/fault
+internal/channels/discord  # until this channel's errors move to platform/fault with the channels
+internal/channels/email  # until this channel's errors move to platform/fault with the channels
+internal/channels/httpchat  # until this channel's errors move to platform/fault with the channels
+internal/channels/kit/approval  # until this channel's errors move to platform/fault with the channels
+internal/channels/kit/chatcommand  # until this channel's errors move to platform/fault with the channels
+internal/channels/kit/media  # until this channel's errors move to platform/fault with the channels
+internal/channels/telegram  # until this channel's errors move to platform/fault with the channels
+internal/channels/webhook  # until this channel's errors move to platform/fault with the channels
+internal/config  # legacy config; its errors move with each owner's section
+internal/modules/broadcast  # until this module's errors move to platform/fault with the module
+internal/modules/child  # until this module's errors move to platform/fault with the module
+internal/modules/codeexec  # until this module's errors move to platform/fault with the module
+internal/modules/codeexec/interpreter  # until this module's errors move to platform/fault with the module
+internal/modules/compaction  # until this module's errors move to platform/fault with the module
+internal/modules/fetch  # until this module's errors move to platform/fault with the module
+internal/modules/gitsync  # until this module's errors move to platform/fault with the module
+internal/modules/knowledge  # until this module's errors move to platform/fault with the module
+internal/modules/mcp  # until this module's errors move to platform/fault with the module
+internal/modules/memory  # until this module's errors move to platform/fault with the module
+internal/modules/plugin  # until this module's errors move to platform/fault with the module
+internal/modules/plugin/auth  # until this module's errors move to platform/fault with the module
+internal/modules/plugin/connector  # until this module's errors move to platform/fault with the module
+internal/modules/plugin/wire  # plugin protocol errors; plugins import only the wire contract
+internal/modules/profile  # until this module's errors move to platform/fault with the module
+internal/modules/schedule  # until this module's errors move to platform/fault with the module
+internal/modules/skills  # until this module's errors move to platform/fault with the module
+internal/modules/workflow  # until this module's errors move to platform/fault with the module
+internal/platform/agent  # until the kernel errors move to platform/fault
+internal/platform/approval  # until the kernel errors move to platform/fault
+internal/platform/capability  # until the kernel errors move to platform/fault
+internal/platform/command  # until the kernel errors move to platform/fault
+internal/platform/durable/sqlite  # until the kernel errors move to platform/fault
+internal/platform/effect  # until the kernel errors move to platform/fault
+internal/platform/egress  # until the kernel errors move to platform/fault
+internal/platform/embedding  # until the kernel errors move to platform/fault
+internal/platform/health  # until the kernel errors move to platform/fault
+internal/platform/model  # until the kernel errors move to platform/fault
+internal/platform/principal  # until the kernel errors move to platform/fault
+internal/platform/sandbox  # until the kernel errors move to platform/fault
+internal/platform/secret  # until the kernel errors move to platform/fault
+internal/platform/server  # until the kernel errors move to platform/fault
+internal/platform/telemetry  # until the kernel errors move to platform/fault
+internal/platform/toolbroker  # until the kernel errors move to platform/fault
+internal/platform/tools  # until the kernel errors move to platform/fault
+internal/platform/turn  # until the kernel errors move to platform/fault
+internal/platform/usage  # until the kernel errors move to platform/fault
+internal/platform/vision  # until the kernel errors move to platform/fault
+internal/store  # legacy store; its errors move with each owner's tables
+plugins/gmail/connector  # plugin protocol errors; plugins import only the wire contract
