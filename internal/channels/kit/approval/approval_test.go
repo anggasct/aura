@@ -428,3 +428,19 @@ func TestCardStatesTheUntrustedInputReason(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderCardEscapesEveryField(t *testing.T) {
+	hostile := "\u202e\U000E0041"
+	card := RenderCard(&Prompt{ToolName: "t" + hostile, ToolVersion: "v" + hostile, SessionID: "s" + hostile, PrincipalID: "p" + hostile, Arguments: `a\\b`}, "persona"+hostile, nil)
+	for _, field := range []string{"t", "v", "persona", "s", "p"} {
+		if !strings.Contains(card, field+`\u{202e}\u{e0041}`) {
+			t.Errorf("card does not escape the %q field: %q", field, card)
+		}
+	}
+	if strings.ContainsRune(card, '\u202e') || strings.ContainsRune(card, '\U000E0041') {
+		t.Errorf("card holds a raw hostile rune: %q", card)
+	}
+	if !strings.Contains(card, "arguments: "+`a\\b`) {
+		t.Errorf("card changed the arguments: %q", card)
+	}
+}
