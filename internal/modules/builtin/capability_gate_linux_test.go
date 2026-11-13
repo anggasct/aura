@@ -62,7 +62,7 @@ func (f *gateFixture) call(tool, arguments string, capabilities ...string) (json
 		RequestID: "call-" + tool, TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: tool, ToolVersion: "v1", Arguments: json.RawMessage(arguments),
 		Capabilities: capabilities, Trust: string(approval.TrustDerivedUntrusted),
-		IdempotencyKey: "test/" + tool, EventSequence: 1, EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
+		IdempotencyKey: "test/" + tool, EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
 	})
 }
 

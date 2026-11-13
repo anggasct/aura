@@ -117,8 +117,12 @@ func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolR
 		if err != nil {
 			return nil, err
 		}
+		last, err := f.events.LastSequence(ctx, request.SessionID)
+		if err != nil {
+			return nil, err
+		}
 		event := &store.RuntimeEvent{
-			ID: request.RequestID + "-requested", SessionID: request.SessionID, Sequence: request.EventSequence,
+			ID: request.RequestID + "-requested", SessionID: request.SessionID, Sequence: last + 1,
 			TurnID: request.TurnID, InvocationID: request.EventInvocation, Author: request.EventAuthor,
 			Kind: turn.EventKindToolRequested, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
 		}
@@ -305,7 +309,7 @@ func TestADKExecutorRunsBuiltInThroughExecutor(t *testing.T) {
 	if got.ToolName != "sample_tool" || got.ToolVersion != "v1" || got.TurnID != "turn-1" || got.SessionID != "session-1" || got.PrincipalID != "user-1" {
 		t.Fatalf("builtin request identity = %+v", got)
 	}
-	if got.EventSequence == 0 || got.RequestID == "" || got.IdempotencyKey == "" {
+	if got.RequestID == "" || got.IdempotencyKey == "" {
 		t.Fatalf("builtin request lacks execution identity = %+v", got)
 	}
 	if got.Trust != "derived_untrusted" || len(got.Capabilities) != 1 || got.Capabilities[0] != "sample-capability" {

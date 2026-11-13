@@ -71,7 +71,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 		RequestID: "request-1", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: "read_file", ToolVersion: "v1", Arguments: json.RawMessage(`{"path":"note.txt"}`),
 		Capabilities: []string{"workspace-read"}, Trust: string(approval.TrustDerivedUntrusted),
-		IdempotencyKey: "test/read", EventSequence: 1, EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
+		IdempotencyKey: "test/read", EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
 	})
 	if err != nil {
 		t.Fatalf("read_file: %v", err)
@@ -162,7 +162,7 @@ func gitHubCommentRequest(class principal.Class, credential string) *runtimeadk.
 		ToolName: github.ToolComment, ToolVersion: github.ToolVersion,
 		Arguments:    json.RawMessage(`{"repo":"org/repo","number":7,"body":"hi","credential_name":"` + credential + `"}`),
 		Capabilities: []string{"provider-github"}, Trust: string(approval.TrustTrustedConfiguration),
-		IdempotencyKey: "test/comment", EventSequence: 1, EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
+		IdempotencyKey: "test/comment", EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
 	}
 }
 

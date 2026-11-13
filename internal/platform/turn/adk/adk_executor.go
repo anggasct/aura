@@ -515,13 +515,7 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 	}
 	x.toolSeq.mu.Lock()
 	defer x.toolSeq.mu.Unlock()
-	sequence, err := x.events.LastSequence(actx, request.SessionID)
-	if err != nil {
-		return nil, fmt.Errorf("read tool event sequence: %w", err)
-	}
-	request.EventSequence = sequence + 1
-	output, executeErr := x.builtins.Execute(actx, request)
-	err = executeErr
+	output, err := x.builtins.Execute(actx, request)
 	if err != nil {
 		return nil, err
 	}

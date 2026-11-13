@@ -44,7 +44,6 @@ type BuiltinToolRequest struct {
 	Trust           string
 	Deadline        time.Time
 	IdempotencyKey  string
-	EventSequence   uint64
 	EventInvocation string
 	EventBranch     string
 	EventAuthor     string

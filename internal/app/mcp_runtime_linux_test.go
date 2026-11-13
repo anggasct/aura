@@ -183,7 +183,6 @@ type mcpHarness struct {
 	prompts  []string
 	shown    []string
 	approve  bool
-	sequence uint64
 	mu       sync.Mutex
 }
 
@@ -297,15 +296,11 @@ func (h *mcpHarness) callTool(ctx context.Context, name, id string, class princi
 }
 
 func (h *mcpHarness) callToolAs(ctx context.Context, name, id string, class principal.Class, agentID string) error {
-	h.mu.Lock()
-	h.sequence++
-	sequence := h.sequence
-	h.mu.Unlock()
 	_, err := h.executor.Execute(ctx, &runtimeadk.BuiltinToolRequest{
 		RequestID: id, TurnID: "turn-" + id, SessionID: "session-1", PrincipalID: "owner-1", PrincipalClass: class, AgentID: agentID,
 		ToolName: name, ToolVersion: "v1", Arguments: json.RawMessage(`{}`),
 		Capabilities: []string{"public-web"}, Trust: string(approval.TrustDerivedUntrusted),
-		IdempotencyKey: "key-" + id, EventSequence: sequence, EventInvocation: "inv-" + id, EventBranch: "main", EventAuthor: "agent",
+		IdempotencyKey: "key-" + id, EventInvocation: "inv-" + id, EventBranch: "main", EventAuthor: "agent",
 	})
 	return err
 }
