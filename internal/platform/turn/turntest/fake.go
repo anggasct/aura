@@ -1,4 +1,4 @@
-package turn
+package turntest
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -33,7 +34,7 @@ func NewFakeExecutor(script []FakeStep) *FakeExecutor {
 	return &FakeExecutor{script: script}
 }
 
-func (f *FakeExecutor) Execute(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (f *FakeExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		f.mu.Lock()
 		f.starts = append(f.starts, startRecord{turnID: req.TurnID, startedAt: time.Now()})

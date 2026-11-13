@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -224,7 +225,7 @@ func TestNewEngineRefusesADurableConfigWithoutAStoreOrARuntime(t *testing.T) {
 	}
 	for name, durableCfg := range configs {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewEngine(&Config{Durable: durableCfg}, store.NewEventStore(db), store.NewDedupeStore(db), turn.NewFakeExecutor(nil), nil)
+			_, err := NewEngine(&Config{Durable: durableCfg}, store.NewEventStore(db), store.NewDedupeStore(db), turntest.NewFakeExecutor(nil), nil)
 			if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeInvalidArgument {
 				t.Fatalf("NewEngine err = %v, want invalid_argument", err)
 			}

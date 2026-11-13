@@ -10,6 +10,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
 
 type fakeChannelAdapter struct {
@@ -63,7 +64,7 @@ func (a *fakeChannelAdapter) ref() (runtimeingress.TurnRef, error) {
 
 func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, sampleSession("conv-gw"))
 
@@ -98,7 +99,7 @@ func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 
 func TestHostShutdownStopsAdapters(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
 		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -137,7 +138,7 @@ func TestHostShutdownStopsAdapters(t *testing.T) {
 func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`), Block: gate}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`), Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
 		mustCreateSession(t, db, sampleSession("conv-drain"))
 

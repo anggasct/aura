@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
 
 var freshTurnStart = regexp.MustCompile(`^\{"started_at":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z","journal":2\}$`)
@@ -59,7 +60,7 @@ func TestTurnJournalOfAnotherVersionIsRefused(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			executor := turn.NewFakeExecutor([]turn.FakeStep{textStep("hello")})
+			executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")})
 			rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, TurnTimeout: time.Hour}, executor)
 			mustCreateSession(t, rig.db, "session-a")
 			outcome := callTurn(context.WithoutCancel(t.Context()), rig.engine, sampleRequest("session-a", "turn-1"))
@@ -92,7 +93,7 @@ func TestTurnJournalOfAnotherVersionIsRefused(t *testing.T) {
 		})
 	}
 	t.Run("a fresh turn writes the current record", func(t *testing.T) {
-		rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, TurnTimeout: time.Hour}, turn.NewFakeExecutor([]turn.FakeStep{textStep("hello")}))
+		rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, TurnTimeout: time.Hour}, turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")}))
 		mustCreateSession(t, rig.db, "session-a")
 		rig.startHost()
 		events, err := collect(t, rig.engine, sampleRequest("session-a", "turn-1"))

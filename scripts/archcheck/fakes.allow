@@ -1,5 +1,2 @@
 internal/platform/durable Fake  # until the in-memory runtime moves to its test kit
 internal/platform/durable NewFake  # until the in-memory runtime moves to its test kit
-internal/platform/turn FakeExecutor  # until the scripted executor moves to a test kit
-internal/platform/turn FakeStep  # until the scripted executor moves to a test kit
-internal/platform/turn NewFakeExecutor  # until the scripted executor moves to a test kit

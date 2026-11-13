@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -85,7 +86,7 @@ func TestDurableTurnRecordsItsPostTurnWork(t *testing.T) {
 	run := func(t *testing.T, cfg Config) (*durableHostRig, *lockedBuffer) {
 		t.Helper()
 		cfg.MaxActiveTurns, cfg.MaxPendingTurns = 4, 16
-		rig := newDurableHostRig(t, cfg, turn.NewFakeExecutor([]turn.FakeStep{textStep("hello")}))
+		rig := newDurableHostRig(t, cfg, turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")}))
 		logs := &lockedBuffer{}
 		rig.engine.logger = slog.New(slog.NewTextHandler(logs, nil))
 		rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{&presenceCapture{}})
@@ -146,7 +147,7 @@ func (l *twoLives) run(t *testing.T) *durableHostRig {
 	db := l.crash.db
 	l.cfg.MaxActiveTurns, l.cfg.MaxPendingTurns = 4, 16
 	rig := &durableHostRig{t: t, cfg: l.cfg, db: db, sessions: newHookedSessionStore(t, db)}
-	executor := turn.NewFakeExecutor([]turn.FakeStep{textStep("hello once")})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello once")})
 	rig.build(executor)
 	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{l.adapter})
 	mustCreateSession(t, db, "channel:333")
@@ -228,7 +229,7 @@ func TestCancelledDurableTurnDoesItsPostTurnWork(t *testing.T) {
 		t.Helper()
 		gate := make(chan struct{})
 		t.Cleanup(func() { close(gate) })
-		executor := turn.NewFakeExecutor([]turn.FakeStep{textStep("partial answer"), {Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("partial answer"), {Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
 		cfg.MaxActiveTurns, cfg.MaxPendingTurns = 4, 16
 		rig = newDurableHostRig(t, cfg, executor)
 		logs = &lockedBuffer{}
@@ -361,7 +362,7 @@ func TestTurnIsCountedOnceAfterItsPostTurnHook(t *testing.T) {
 	}
 	want := []string{"hook", "count"}
 	t.Run("a completed turn", func(t *testing.T) {
-		engine, order := newOrder(t, turn.NewFakeExecutor([]turn.FakeStep{hookMessageStep("hello")}))
+		engine, order := newOrder(t, turntest.NewFakeExecutor([]turntest.FakeStep{hookMessageStep("hello")}))
 		if _, err := collect(t, engine, sampleRequest("session-a", "turn-1")); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -372,7 +373,7 @@ func TestTurnIsCountedOnceAfterItsPostTurnHook(t *testing.T) {
 	t.Run("a cancelled turn", func(t *testing.T) {
 		gate := make(chan struct{})
 		t.Cleanup(func() { close(gate) })
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
 		engine, order := newOrder(t, executor)
 		outcome := callTurn(context.WithoutCancel(t.Context()), engine, sampleRequest("session-a", "turn-1"))
 		eventually(t, "the turn reaches the executor", func() bool { return executor.StartCount() == 1 })

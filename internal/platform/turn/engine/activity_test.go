@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -23,7 +24,7 @@ func TestCancelActiveCancelsOnlyTheRunningTurn(t *testing.T) {
 	for name, build := range modes {
 		t.Run(name, func(t *testing.T) {
 			gate := make(chan struct{})
-			executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
+			executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
 			engine, db := build(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 8}, executor)
 			mustCreateSession(t, db, "session-a")
 			mustCreateSession(t, db, "session-b")
@@ -83,7 +84,7 @@ func TestCancelActiveCancelsOnlyTheRunningTurn(t *testing.T) {
 }
 
 func TestCancelActiveAfterCompletionReportsNoActiveTurn(t *testing.T) {
-	executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)}})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)}})
 	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 	mustCreateSession(t, db, "session-a")
 	if _, err := collect(t, engine, sampleRequest("session-a", "turn-done")); err != nil {

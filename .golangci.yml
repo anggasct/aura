@@ -61,12 +61,10 @@ linters:
           deny:
             - pkg: github.com/anggasct/aura/internal/platform/turn/adk
               desc: only the app composition root may wire the ADK executor, with the builtin tool executor adapter as the one provider-side implementation; depend on the runtime boundary types instead
-        # The root package is the shared contract layer (types, errors, fake,
-        # checkpoint payload). It deliberately references the ingress and
-        # checkpoint contract packages — TurnRequest carries ingress
-        # InputParts and the checkpoint payload is shared with the engine —
-        # but must never depend on an implementation package: engine, adk,
-        # or channelhost. The dependency direction for those is reversed.
+        # The root package is the shared contract layer. It deliberately references the ingress and
+        # checkpoint contract packages — TurnRequest carries ingress InputParts and the checkpoint
+        # payload is shared with the engine — but must never depend on an implementation package:
+        # engine, adk, or channelhost. The dependency direction for those is reversed.
         runtime-root-stays-contract-only:
           files:
             - "**/internal/platform/turn/*.go"

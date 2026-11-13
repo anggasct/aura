@@ -13,17 +13,18 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
-func adkPartialStep(text string) turn.FakeStep {
+func adkPartialStep(text string) turntest.FakeStep {
 	payload := json.RawMessage(`{"content":{"role":"model","parts":[{"text":` + strconv.Quote(text) + `}]},"partial":true}`)
-	return turn.FakeStep{Kind: store.EventKindADK, Payload: payload}
+	return turntest.FakeStep{Kind: store.EventKindADK, Payload: payload}
 }
 
-func adkFinalStep(text string) turn.FakeStep {
+func adkFinalStep(text string) turntest.FakeStep {
 	payload := json.RawMessage(`{"content":{"role":"model","parts":[{"text":` + strconv.Quote(text) + `}]},"finishReason":"STOP"}`)
-	return turn.FakeStep{Kind: store.EventKindADK, Payload: payload}
+	return turntest.FakeStep{Kind: store.EventKindADK, Payload: payload}
 }
 
 func kindsOf(events []store.RuntimeEvent) []string {
@@ -52,7 +53,7 @@ func decodeDeltas(t *testing.T, events []store.RuntimeEvent) []turn.ModelDelta {
 
 func TestPartialModelTextReachesSubscribersOnlyAsDeltas(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo"), adkFinalStep("Hello")})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo"), adkFinalStep("Hello")})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -96,7 +97,7 @@ func TestPartialModelTextReachesSubscribersOnlyAsDeltas(t *testing.T) {
 
 func TestPartialModelTextStaysOutOfDeliveryAndPostTurnInput(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{adkPartialStep("par"), adkPartialStep("tial"), adkFinalStep("final answer")})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{adkPartialStep("par"), adkPartialStep("tial"), adkFinalStep("final answer")})
 		hook := &recordingHook{}
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn}, executor)
 		mustCreateSession(t, db, "channel:333")
@@ -123,7 +124,7 @@ func TestPartialModelTextStaysOutOfDeliveryAndPostTurnInput(t *testing.T) {
 
 func TestEmptyPartialModelTextProducesNoDelta(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{adkPartialStep(""), adkFinalStep("done")})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{adkPartialStep(""), adkFinalStep("done")})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -141,12 +142,12 @@ func TestEmptyPartialModelTextProducesNoDelta(t *testing.T) {
 func TestSlowSubscriberLosesDeltasButKeepsLifecycleEvents(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const partials = 3 * subscriberBufferSize
-		script := make([]turn.FakeStep, 0, partials+1)
+		script := make([]turntest.FakeStep, 0, partials+1)
 		for i := range partials {
 			script = append(script, adkPartialStep("t"+strconv.Itoa(i)))
 		}
 		script = append(script, adkFinalStep("done"))
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, turn.NewFakeExecutor(script))
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, turntest.NewFakeExecutor(script))
 		mustCreateSession(t, db, "session-a")
 
 		next, stop := iter.Pull2(engine.Run(context.Background(), sampleRequest("session-a", "turn-slow")))
@@ -271,20 +272,20 @@ func TestDescriptorWithoutStreamPartialDecodesAsFalse(t *testing.T) {
 }
 
 type gatedPartialExecutor struct {
-	partials []turn.FakeStep
-	final    turn.FakeStep
+	partials []turntest.FakeStep
+	final    turntest.FakeStep
 }
 
 func (e *gatedPartialExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	script := []turn.FakeStep{e.final}
+	script := []turntest.FakeStep{e.final}
 	if req.StreamPartial {
 		script = append(slices.Clone(e.partials), e.final)
 	}
-	return turn.NewFakeExecutor(script).Execute(ctx, req)
+	return turntest.NewFakeExecutor(script).Execute(ctx, req)
 }
 
 func TestDurableTurnRelaysPartialModelTextWithoutJournalingIt(t *testing.T) {
-	executor := &gatedPartialExecutor{partials: []turn.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo")}, final: adkFinalStep("Hello")}
+	executor := &gatedPartialExecutor{partials: []turntest.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo")}, final: adkFinalStep("Hello")}
 	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 	mustCreateSession(t, db, "session-live")
 	req := sampleRequest("session-live", "turn-durable-partial")
@@ -327,7 +328,7 @@ func TestDurableTurnRelaysPartialModelTextWithoutJournalingIt(t *testing.T) {
 }
 
 func TestDurableTurnWithoutStreamPartialRelaysNoDeltas(t *testing.T) {
-	executor := &gatedPartialExecutor{partials: []turn.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo")}, final: adkFinalStep("Hello")}
+	executor := &gatedPartialExecutor{partials: []turntest.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo")}, final: adkFinalStep("Hello")}
 	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 	mustCreateSession(t, db, "session-live")
 

@@ -8,12 +8,13 @@ import (
 	"testing/synctest"
 
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
 func TestTurnEventsCarryAgentID(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindMessageCompleted},
 		})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 8, DefaultAgentID: "main"}, executor)

@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
 
 type knowledgePersonas struct {
@@ -45,7 +46,7 @@ func TestStampPersonaPicksTheKnowledgeListByClass(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			engine, _, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: newKnowledgePersonas()}, turn.NewFakeExecutor(nil))
+			engine, _, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: newKnowledgePersonas()}, turntest.NewFakeExecutor(nil))
 			req := sampleRequest("session-a", "turn-0")
 			req.PrincipalClass = test.class
 			if err := engine.stampPersona(req); err != nil {
@@ -59,7 +60,7 @@ func TestStampPersonaPicksTheKnowledgeListByClass(t *testing.T) {
 }
 
 func TestStampPersonaOverwritesAKnowledgeListSetByTheCaller(t *testing.T) {
-	engine, _, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: newKnowledgePersonas()}, turn.NewFakeExecutor(nil))
+	engine, _, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: newKnowledgePersonas()}, turntest.NewFakeExecutor(nil))
 	req := sampleRequest("session-a", "turn-0")
 	req.PrincipalClass = principal.ClassPublic
 	req.Knowledge = []string{"hr-docs", "payroll"}
@@ -73,7 +74,7 @@ func TestStampPersonaOverwritesAKnowledgeListSetByTheCaller(t *testing.T) {
 
 func TestStampPersonaKeepsTheAcceptedListOfAResumedTurn(t *testing.T) {
 	personas := newKnowledgePersonas()
-	engine, _, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: personas}, turn.NewFakeExecutor(nil))
+	engine, _, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: personas}, turntest.NewFakeExecutor(nil))
 	req := sampleRequest("session-a", "turn-0")
 	req.PrincipalClass = principal.ClassOwner
 	accepted := personaFixture("main", "soul-main")
@@ -120,7 +121,7 @@ func TestKnowledgeSurvivesTheDescriptorRoundTripAndIsOmittedWhenEmpty(t *testing
 }
 
 func TestAcceptedTurnReachesTheExecutorWithItsKnowledgeList(t *testing.T) {
-	executor := &recordingExecutor{inner: turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindMessageCompleted)})}
+	executor := &recordingExecutor{inner: turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})}
 	engine, db, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: newKnowledgePersonas()}, executor)
 	mustCreateSession(t, db, "session-a")
 	req := sampleRequest("session-a", "turn-k")

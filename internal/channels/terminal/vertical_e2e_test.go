@@ -26,6 +26,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 
@@ -414,7 +415,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	}
 	sessions1 := store.NewSessionService(db1)
 	events1 := store.NewEventStore(db1)
-	executor1 := turn.NewFakeExecutor([]turn.FakeStep{
+	executor1 := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"first durable answer"}]},"partial":false}`)},
 	})
 	engine1, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events1, store.NewDedupeStore(db1), executor1, nil)
@@ -448,7 +449,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	t.Cleanup(func() { _ = db2.Close() })
 	sessions2 := store.NewSessionService(db2)
 	events2 := store.NewEventStore(db2)
-	executor2 := turn.NewFakeExecutor([]turn.FakeStep{
+	executor2 := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"second durable answer"}]},"partial":false}`)},
 	})
 	engine2, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events2, store.NewDedupeStore(db2), executor2, nil)
@@ -503,7 +504,7 @@ func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	sessions := store.NewSessionService(db)
 	events := store.NewEventStore(db)
-	executor := turn.NewFakeExecutor([]turn.FakeStep{
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"canary-output-7b1c"}]},"partial":false}`)},
 	})
 	logBuf := &bytes.Buffer{}

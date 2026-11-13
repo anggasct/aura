@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -69,7 +70,7 @@ func sampleRequest(sessionID, turnID string) *turn.TurnRequest {
 func TestPerSessionFIFONoOverlap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Block: gate},
 		})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
@@ -108,7 +109,7 @@ func TestPerSessionFIFONoOverlap(t *testing.T) {
 func TestGlobalConcurrencyLimit(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Block: gate},
 		})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 16}, executor)
@@ -141,7 +142,7 @@ func TestGlobalConcurrencyLimit(t *testing.T) {
 
 func TestDuplicateIngressReturnsOriginalTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted},
 			{Kind: turn.EventKindMessageCompleted},
 		})
@@ -204,7 +205,7 @@ func firstEventTurn(events []store.RuntimeEvent) string {
 func TestQueueOverflowIsTyped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, executor)
 		mustCreateSession(t, db, "session-a")
 		mustCreateSession(t, db, "session-b")
@@ -255,7 +256,7 @@ func waitFor(t *testing.T, cond func() bool) {
 func TestTurnDeadlineIsDurable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{
 			MaxActiveTurns: 2, MaxPendingTurns: 4, TurnTimeout: 50 * time.Millisecond,
 		}, executor)
@@ -298,7 +299,7 @@ func TestTurnDeadlineIsDurable(t *testing.T) {
 func TestRunCancellationIsDurable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -349,7 +350,7 @@ func waitForTerminal(t *testing.T, events chan store.RuntimeEvent) {
 func TestShutdownDrainsAndCancelsDurably(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{
 			MaxActiveTurns: 1, MaxPendingTurns: 4, ShutdownTimeout: 2 * time.Second,
 		}, executor)
@@ -392,7 +393,7 @@ func TestShutdownDrainsAndCancelsDurably(t *testing.T) {
 func TestAbandonedConsumerDoesNotBlockTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -500,11 +501,11 @@ func TestPublishAfterSubscriberCloseDoesNotPanic(t *testing.T) {
 }
 
 func TestSaturatedLifecycleSubscriberReplaysAfterGap(t *testing.T) {
-	script := make([]turn.FakeStep, subscriberBufferSize+1)
+	script := make([]turntest.FakeStep, subscriberBufferSize+1)
 	for i := range script {
-		script[i] = turn.FakeStep{Kind: turn.EventKindToolRequested, Payload: []byte(`{"tool":"test"}`)}
+		script[i] = turntest.FakeStep{Kind: turn.EventKindToolRequested, Payload: []byte(`{"tool":"test"}`)}
 	}
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 2}, turn.NewFakeExecutor(script))
+	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 2}, turntest.NewFakeExecutor(script))
 	mustCreateSession(t, db, "session-a")
 
 	next, stop := iter.Pull2(engine.Run(context.Background(), sampleRequest("session-a", "turn-gap")))
@@ -566,7 +567,7 @@ func waitForTerminalDurable(t *testing.T, db *sql.DB, turnID string) {
 func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 64}, executor)
 		mustCreateSession(t, db, "session-a")
 
@@ -625,7 +626,7 @@ func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 
 func TestCompletedTurnsArePruned(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted}})
 		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 		mustCreateSession(t, db, "session-a")
 

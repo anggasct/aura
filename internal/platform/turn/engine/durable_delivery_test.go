@@ -16,6 +16,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -74,9 +75,9 @@ func startDurableChannelTurn(t *testing.T, adapter runtimechannelhost.ChannelPor
 	return rig, outcome
 }
 
-func runDurableChannelTurn(t *testing.T, adapter runtimechannelhost.ChannelPort, step turn.FakeStep) *durableHostRig {
+func runDurableChannelTurn(t *testing.T, adapter runtimechannelhost.ChannelPort, step turntest.FakeStep) *durableHostRig {
 	t.Helper()
-	rig, outcome := startDurableChannelTurn(t, adapter, turn.NewFakeExecutor([]turn.FakeStep{step}))
+	rig, outcome := startDurableChannelTurn(t, adapter, turntest.NewFakeExecutor([]turntest.FakeStep{step}))
 	select {
 	case <-outcome:
 	case <-time.After(hostRigTimeout):
@@ -169,7 +170,7 @@ func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 	})
 	t.Run("a reply without text", func(t *testing.T) {
 		capture := &capturingAdapter{}
-		rig := runDurableChannelTurn(t, capture, turn.FakeStep{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)})
+		rig := runDurableChannelTurn(t, capture, turntest.FakeStep{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)})
 		if got := terminalRecordOf(t, rig.db, "turn-1"); got.kind != turn.EventKindTurnCompleted {
 			t.Fatalf("terminal of turn-1 = %+v, want turn.completed", got)
 		}
@@ -200,7 +201,7 @@ func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 			hooks.Add(1)
 			return nil
 		}}
-		executor := turn.NewFakeExecutor([]turn.FakeStep{textStep("hello")})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")})
 		rig := newDurableHostRig(t, cfg, executor)
 		adapter := &fencedDeliveryAdapter{db: rig.db, handed: make(chan struct{})}
 		rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{adapter})
@@ -240,7 +241,7 @@ func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 	})
 	t.Run("a reply whose send outlives the host's stop", func(t *testing.T) {
 		invocations := make(chan context.Context, 1)
-		executor := &invocationContextExecutor{TurnExecutor: turn.NewFakeExecutor([]turn.FakeStep{textStep("hello")}), contexts: invocations}
+		executor := &invocationContextExecutor{TurnExecutor: turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")}), contexts: invocations}
 		adapter := &stopOutlivingAdapter{invocations: invocations, entered: make(chan struct{})}
 		rig, _ := startDurableChannelTurn(t, adapter, executor)
 		select {
@@ -313,7 +314,7 @@ func replayAfterDelivery(t *testing.T, adapter runtimechannelhost.ChannelPort, l
 	crash := &crashAfterDelivery{db: db, crashed: make(chan struct{})}
 	cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 16, PostTurnHook: crash.hook}
 	rig := &durableHostRig{t: t, cfg: cfg, db: db, sessions: newHookedSessionStore(t, db)}
-	executor := turn.NewFakeExecutor([]turn.FakeStep{textStep("hello once")})
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello once")})
 	rig.build(executor)
 	rig.engine.logger = slog.New(slog.NewTextHandler(&logs.first, nil))
 	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{adapter})

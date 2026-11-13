@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -112,7 +113,7 @@ func closeInBubble(t *testing.T, engine *Engine) {
 func TestDurableTurnTimeoutCountsFromItsFirstStart(t *testing.T) {
 	t.Run("a turn that waited behind another keeps its whole timeout", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			executor := turn.NewFakeExecutor([]turn.FakeStep{
+			executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 				{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Wait: 40 * time.Second},
 				jsonStep(turn.EventKindMessageCompleted),
 			})
@@ -133,7 +134,7 @@ func TestDurableTurnTimeoutCountsFromItsFirstStart(t *testing.T) {
 	})
 	t.Run("a turn that runs longer than the timeout fails", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			executor := turn.NewFakeExecutor([]turn.FakeStep{
+			executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 				{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Wait: 2 * time.Minute},
 				jsonStep(turn.EventKindMessageCompleted),
 			})

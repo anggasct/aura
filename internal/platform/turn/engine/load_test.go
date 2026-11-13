@@ -12,12 +12,13 @@ import (
 	"testing/synctest"
 
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
 
 func TestLoadBoundsUnderVolume(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate, Payload: json.RawMessage(`{}`)}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate, Payload: json.RawMessage(`{}`)}})
 		cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 8}
 		engine, db, _ := newTestRuntime(t, cfg, executor)
 
@@ -81,7 +82,7 @@ func TestLoadBoundsUnderVolume(t *testing.T) {
 
 func TestLoadNoLeakAfterAbandonedConsumers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turn.NewFakeExecutor([]turn.FakeStep{jsonStep(turn.EventKindModelStarted), jsonStep(turn.EventKindMessageCompleted)})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindModelStarted), jsonStep(turn.EventKindMessageCompleted)})
 		cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 64}
 		engine, db, _ := newTestRuntime(t, cfg, executor)
 

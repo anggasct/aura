@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -528,7 +529,7 @@ func TestRecoverTurnsGrantsAKnownTurnTheStoreMadeActive(t *testing.T) {
 }
 
 func TestRecoverTurnsIsANoOpWithoutADurableStoreAndAfterShutdown(t *testing.T) {
-	plain, _, _ := newTestRuntime(t, Config{}, turn.NewFakeExecutor(nil))
+	plain, _, _ := newTestRuntime(t, Config{}, turntest.NewFakeExecutor(nil))
 	if err := plain.RecoverTurns(t.Context()); err != nil {
 		t.Fatalf("RecoverTurns without a durable store: %v", err)
 	}
@@ -789,7 +790,7 @@ func TestPendingCountIsNotConsumedByTurnsTheEngineStaged(t *testing.T) {
 func TestTurnGrantedBeforeItIsStagedReachesItsCallerOnADurableRuntime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
-		executor := turn.NewFakeExecutor([]turn.FakeStep{
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})

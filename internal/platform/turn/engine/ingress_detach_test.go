@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
 
 const pollsAfterTheCancel = 10
@@ -100,7 +101,7 @@ func stagedTurns(engine *Engine) int {
 
 func TestAcceptedDurableTurnOutlivesItsCallersContext(t *testing.T) {
 	gate := make(chan struct{})
-	executor := turn.NewFakeExecutor([]turn.FakeStep{
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: turn.EventKindModelStarted, Payload: json.RawMessage(`{}`)},
 		{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`), Block: gate},
 	})
