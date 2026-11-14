@@ -65,12 +65,12 @@ func (a *fakeChannelAdapter) ref() (runtimeingress.TurnRef, error) {
 func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, sampleSession("conv-gw"))
-
 		adapter := newFakeChannelAdapter("telegram")
 		adapter.acceptEnv = sampleEnvelope("conv-gw", "gw-msg-1")
-		host, err := NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, nil)
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
+		mustCreateSession(t, db, sampleSession("conv-gw"))
+
+		host, err := NewHost(engine, nil)
 		if err != nil {
 			t.Fatalf("NewHost: %v", err)
 		}
@@ -100,11 +100,11 @@ func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 func TestHostShutdownStopsAdapters(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
-		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
+		adapter := newFakeChannelAdapter("telegram")
+		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second, Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
 		mustCreateSession(t, db, "session-a")
 
-		adapter := newFakeChannelAdapter("telegram")
-		host, err := NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, nil)
+		host, err := NewHost(engine, nil)
 		if err != nil {
 			t.Fatalf("NewHost: %v", err)
 		}
@@ -139,12 +139,12 @@ func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`), Block: gate}})
-		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second}, executor)
-		mustCreateSession(t, db, sampleSession("conv-drain"))
-
 		adapter := newFakeChannelAdapter("telegram")
 		adapter.acceptEnv = sampleEnvelope("conv-drain", "drain-1")
-		host, err := NewHost(engine, []runtimechannelhost.ChannelPort{adapter}, nil)
+		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second, Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
+		mustCreateSession(t, db, sampleSession("conv-drain"))
+
+		host, err := NewHost(engine, nil)
 		if err != nil {
 			t.Fatalf("NewHost: %v", err)
 		}
@@ -180,7 +180,7 @@ func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 }
 
 func TestNewHostRequiresRuntime(t *testing.T) {
-	_, err := NewHost(nil, nil, nil)
+	_, err := NewHost(nil, nil)
 	code, ok := turn.CodeOf(err)
 	if !ok || code != turn.ErrorCodeInvalidArgument {
 		t.Fatalf("code = %q (ok=%v), want invalid_argument", code, ok)

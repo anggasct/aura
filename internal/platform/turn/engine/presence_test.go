@@ -84,10 +84,9 @@ func TestEngineDrivesPresenceForSlowTurn(t *testing.T) {
 			adkTextStep("Looking through notes"),
 			textStep("final answer"),
 		})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, "channel:333")
 		capture := &presenceCapture{}
-		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		mustCreateSession(t, db, "channel:333")
 		req := channelTurnRequest("channel:333", "turn-presence-1")
 		if _, err := collect(t, engine, req); err != nil {
 			t.Fatalf("Run: %v", err)
@@ -134,10 +133,9 @@ func TestEnginePresenceFailure(t *testing.T) {
 			{Kind: "adk_event", Payload: raw},
 			textStep("recovered answer"),
 		})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, "channel:333")
 		capture := &presenceCapture{}
-		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		mustCreateSession(t, db, "channel:333")
 		req := channelTurnRequest("channel:333", "turn-presence-fail")
 		if _, err := collect(t, engine, req); err != nil {
 			t.Fatalf("Run: %v", err)
@@ -216,10 +214,9 @@ func TestEngineForwardsToolArgsToPresence(t *testing.T) {
 			adkStepWithArgs("Looking at secret-token abc123", map[string]any{"path": "notes.md", "query": "secret hunter2"}),
 			textStep("final answer"),
 		})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, "channel:333")
 		capture := &presenceCapture{}
-		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		mustCreateSession(t, db, "channel:333")
 		req := channelTurnRequest("channel:333", "turn-presence-args")
 		if _, err := collect(t, engine, req); err != nil {
 			t.Fatalf("Run: %v", err)
@@ -256,10 +253,9 @@ func TestEngineSkipsPresenceForNonChannelOrigin(t *testing.T) {
 			adkTextStep("Looking through notes"),
 			textStep("final answer"),
 		})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, "channel:333")
 		capture := &presenceCapture{}
-		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		mustCreateSession(t, db, "channel:333")
 		req := channelTurnRequest("channel:333", "turn-presence-terminal")
 		req.Origin = turn.OriginTerminal
 		if _, err := collect(t, engine, req); err != nil {
@@ -279,11 +275,10 @@ func TestEngineRoutesPresenceToOwningAdapter(t *testing.T) {
 			adkTextStep("Looking through notes"),
 			textStep("final answer"),
 		})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
-		mustCreateSession(t, db, "channel:333")
 		discordCapture := &namedPresenceCapture{presenceCapture: &presenceCapture{}, name: "discord"}
 		slackCapture := &namedPresenceCapture{presenceCapture: &presenceCapture{}, name: "slack"}
-		engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{slackCapture, discordCapture})
+		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{slackCapture, discordCapture}}, executor)
+		mustCreateSession(t, db, "channel:333")
 		req := channelTurnRequest("channel:333", "turn-presence-owner")
 		if _, err := collect(t, engine, req); err != nil {
 			t.Fatalf("Run: %v", err)
@@ -316,9 +311,8 @@ func TestCancelledDurableTurnClosesItsPresence(t *testing.T) {
 	gate := make(chan struct{})
 	t.Cleanup(func() { close(gate) })
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 	capture := &presenceCapture{}
-	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 	mustCreateSession(t, rig.db, "channel:333")
 	rig.startHost()
 	outcome := callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", "turn-cancelled"))
@@ -338,9 +332,8 @@ func TestCancelledDurableTurnClosesItsPresence(t *testing.T) {
 
 func TestPreemptedDurableTurnEndsItsPresenceWithoutFailingIt(t *testing.T) {
 	executor := newTwoInvocationExecutor()
-	rig := newShortLeaseHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
 	capture := &presenceCapture{}
-	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{capture})
+	rig := newShortLeaseHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 	mustCreateSession(t, rig.db, "channel:333")
 	rig.startHost()
 	outcome := callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", "turn-preempted"))

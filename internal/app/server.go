@@ -293,7 +293,7 @@ func (b *build) buildChannelHost() error {
 	if err := wireChatCommands(s.channels, b.engine, b.sessions, b.events, store.NewConversationSessionStore(b.db), b.modules.skills, commandRecorder); err != nil {
 		return err
 	}
-	s.host, err = runtimeengine.NewHost(b.engine, s.channels, b.logger)
+	s.host, err = runtimeengine.NewHost(b.engine, b.logger)
 	return err
 }
 

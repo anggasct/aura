@@ -75,10 +75,7 @@ func adapterForOrigin(origin turn.Origin, adapters []runtimechannelhost.ChannelP
 }
 
 func (e *Engine) currentPresence(req *turn.TurnRequest) (runtimechannelhost.PresencePort, *runtimechannelhost.DeliveryRequest, bool) {
-	e.mu.Lock()
-	adapters := e.adapters
-	e.mu.Unlock()
-	return presenceAdapterFor(req, adapters)
+	return presenceAdapterFor(req, e.adapters)
 }
 
 func extractPresenceActivity(ev *store.RuntimeEvent) (text, args string, ok bool) {

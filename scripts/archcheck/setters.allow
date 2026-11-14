@@ -41,5 +41,3 @@ internal/modules/builtin Executor.SetHandoffOpener  # builtin assembles tool ada
 internal/modules/builtin Executor.SetKnowledgeSearcher  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin Executor.SetWorkflowController  # builtin assembles tool adapters until each module provides its tools
 internal/modules/child Handler.SetSignaler  # until the child handler takes its signaler at construction
-internal/platform/health StateTracker.SetClock  # until the tracker tests run in a synctest bubble
-internal/platform/turn/engine Engine.SetChannelAdapters  # until the engine takes its channel adapters at construction

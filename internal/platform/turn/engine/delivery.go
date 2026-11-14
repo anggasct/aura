@@ -12,15 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-func (e *Engine) SetChannelAdapters(adapters []runtimechannelhost.ChannelPort) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.adapters = adapters
-	if e.delivered == nil {
-		e.delivered = map[string]time.Time{}
-	}
-}
-
 func (e *Engine) channelAdapterFor(req *turn.TurnRequest) (runtimechannelhost.ChannelPort, bool) {
 	if req == nil {
 		return nil, false
@@ -32,10 +23,7 @@ func (e *Engine) channelAdapterFor(req *turn.TurnRequest) (runtimechannelhost.Ch
 	if len(req.ReplyContext) == 0 {
 		return nil, false
 	}
-	e.mu.Lock()
-	adapters := e.adapters
-	e.mu.Unlock()
-	return adapterForOrigin(req.Origin, adapters)
+	return adapterForOrigin(req.Origin, e.adapters)
 }
 
 func (e *Engine) pruneDeliveredLocked(now time.Time) {

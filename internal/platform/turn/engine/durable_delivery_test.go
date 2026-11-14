@@ -67,8 +67,7 @@ func deliveryRecordsOf(t *testing.T, db *sql.DB, turnID string) []string {
 
 func startDurableChannelTurn(t *testing.T, adapter runtimechannelhost.ChannelPort, executor TurnExecutor) (rig *durableHostRig, outcome <-chan turnOutcome) {
 	t.Helper()
-	rig = newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
-	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{adapter})
+	rig = newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
 	mustCreateSession(t, rig.db, "channel:333")
 	rig.startHost()
 	outcome = callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", "turn-1"))
@@ -202,9 +201,11 @@ func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 			return nil
 		}}
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")})
-		rig := newDurableHostRig(t, cfg, executor)
-		adapter := &fencedDeliveryAdapter{db: rig.db, handed: make(chan struct{})}
-		rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{adapter})
+		db := openTestDatabase(t)
+		adapter := &fencedDeliveryAdapter{db: db, handed: make(chan struct{})}
+		cfg.Channels = []runtimechannelhost.ChannelPort{adapter}
+		rig := &durableHostRig{t: t, cfg: cfg, db: db, sessions: newHookedSessionStore(t, db)}
+		rig.build(executor)
 		mustCreateSession(t, rig.db, "channel:333")
 		rig.startHost()
 		_ = callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", "turn-1"))
@@ -223,7 +224,6 @@ func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 			t.Fatalf("drop the other host: %v", err)
 		}
 		rig.build(executor)
-		rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{adapter})
 		rig.startHost()
 		awaitTerminals(t, rig.db, "turn-1")
 		if got := terminalRecordOf(t, rig.db, "turn-1"); got.kind != turn.EventKindTurnCompleted {
@@ -312,12 +312,11 @@ func replayAfterDelivery(t *testing.T, adapter runtimechannelhost.ChannelPort, l
 	t.Helper()
 	db := openTestDatabase(t)
 	crash := &crashAfterDelivery{db: db, crashed: make(chan struct{})}
-	cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 16, PostTurnHook: crash.hook}
+	cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 16, PostTurnHook: crash.hook, Channels: []runtimechannelhost.ChannelPort{adapter}}
 	rig := &durableHostRig{t: t, cfg: cfg, db: db, sessions: newHookedSessionStore(t, db)}
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello once")})
 	rig.build(executor)
 	rig.engine.logger = slog.New(slog.NewTextHandler(&logs.first, nil))
-	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{adapter})
 	mustCreateSession(t, db, "channel:333")
 	rig.startHost()
 	_ = callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", "turn-1"))
@@ -331,7 +330,6 @@ func replayAfterDelivery(t *testing.T, adapter runtimechannelhost.ChannelPort, l
 	}
 	rig.build(executor)
 	rig.engine.logger = slog.New(slog.NewTextHandler(&logs.replay, nil))
-	rig.engine.SetChannelAdapters([]runtimechannelhost.ChannelPort{adapter})
 	rig.startHost()
 	awaitTerminals(t, db, "turn-1")
 	return rig

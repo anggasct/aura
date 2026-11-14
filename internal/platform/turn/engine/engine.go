@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ type Config struct {
 	PostTurnHook    func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
 	CountTurn       func(ctx context.Context, req *turn.TurnRequest)
 	LiveEvents      LiveEventSource
+	Channels        []runtimechannelhost.ChannelPort
 }
 
 type LiveEventSource interface {
@@ -155,6 +157,8 @@ func NewEngine(config *Config, events EventStore, dedupe DedupeStore, executor T
 		staged:     make(map[string]*turnState),
 		granted:    make(map[string]struct{}),
 		sesKeys:    make(map[string]struct{}),
+		adapters:   slices.Clone(cfg.Channels),
+		delivered:  make(map[string]time.Time),
 	}
 	if cfg.Durable != nil {
 		engine.sessionStore = cfg.Durable.Sessions

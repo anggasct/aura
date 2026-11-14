@@ -29,6 +29,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/store"
@@ -576,12 +577,14 @@ func (b *build) buildTurnRuntime() error {
 	hooks := []postTurnHook{b.modules.memoryHook, b.modules.profileHook}
 	var durableConfig *runtimeengine.DurableConfig
 	var countTurn func(context.Context, *turn.TurnRequest)
+	var channels []runtimechannelhost.ChannelPort
 	if b.onServer() {
 		if err := b.buildServerDurable(); err != nil {
 			return err
 		}
 		durableConfig = b.server.durableConfig
 		countTurn = personaTurnCounter(b.server.personaRecorder)
+		channels = b.server.channels
 	}
 	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
 		MaxActiveTurns:  b.cfg.Runtime.MaxActiveTurns,
@@ -595,6 +598,7 @@ func (b *build) buildTurnRuntime() error {
 		PostTurnHook:    composePostTurnHooks(hooks...),
 		CountTurn:       countTurn,
 		LiveEvents:      b.liveEvents,
+		Channels:        channels,
 	}, b.events, store.NewDedupeStore(b.db), executor, b.logger)
 	if err != nil {
 		return err
