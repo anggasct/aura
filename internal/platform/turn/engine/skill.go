@@ -6,6 +6,7 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -53,13 +54,13 @@ func journaledSkillActivation(scope *durable.TurnScope, render skillActivationRe
 			if renderErr == nil {
 				return payload, nil
 			}
-			if code, ok := turn.CodeOf(renderErr); ok && code == turn.ErrorCodeSkillUnavailable {
+			if fault.HasCode(renderErr, turn.ErrorCodeSkillUnavailable) {
 				return []byte("null"), nil
 			}
 			return nil, renderErr
 		})
 		if err != nil {
-			if _, ok := turn.CodeOf(err); ok {
+			if _, ok := fault.CodeOf[turn.ErrorCode](err); ok {
 				return nil, err
 			}
 			return nil, codedError(turn.ErrorCodeStorageUnavailable, "failed to journal the skill activation", err)

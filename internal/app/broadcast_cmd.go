@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -191,7 +192,7 @@ func reconcileUnknownBroadcast(ctx context.Context, out io.Writer, db *sql.DB, l
 }
 
 func reconcileReason(err error) string {
-	if code, ok := effect.CodeOf(err); ok {
+	if code, ok := fault.CodeOf[effect.ErrorCode](err); ok {
 		return string(code)
 	}
 	return "reconciliation inconclusive"

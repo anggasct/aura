@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/checkpoint"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
@@ -115,7 +116,7 @@ func TestSaveCheckpointRejectsFutureBoundary(t *testing.T) {
 	checkpoint := checkpointFixture(last + 1)
 	if err := engine.SaveCheckpoint(context.Background(), checkpoint); err == nil {
 		t.Fatal("SaveCheckpoint succeeded for a future event boundary")
-	} else if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeCheckpointStale {
+	} else if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeCheckpointStale {
 		t.Fatalf("CodeOf(%v) = %q, %v; want checkpoint_stale", err, code, ok)
 	}
 }
@@ -133,7 +134,7 @@ func TestSaveCheckpointRejectsMutatedRetry(t *testing.T) {
 	mutated.StateDigest = strings.Repeat("c", 64)
 	if err := engine.SaveCheckpoint(context.Background(), &mutated); err == nil {
 		t.Fatal("SaveCheckpoint accepted a mutated retry")
-	} else if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeCheckpointStale {
+	} else if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeCheckpointStale {
 		t.Fatalf("CodeOf(%v) = %q, %v; want checkpoint_stale", err, code, ok)
 	}
 }
@@ -172,7 +173,7 @@ func TestConcurrentCheckpointMutationHasOneAuthoritativePayload(t *testing.T) {
 			successes++
 			continue
 		}
-		if code, ok := turn.CodeOf(err); ok && code == turn.ErrorCodeCheckpointStale {
+		if fault.HasCode(err, turn.ErrorCodeCheckpointStale) {
 			stale++
 			continue
 		}
@@ -212,7 +213,7 @@ func TestValidateResumeRejectsChangedState(t *testing.T) {
 			test.mutate(validation)
 			if err := checkpoint.ValidateResume(validation); err == nil {
 				t.Fatal("ValidateResume accepted invalid state")
-			} else if code, ok := turn.CodeOf(err); !ok || code != test.want {
+			} else if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != test.want {
 				t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, code, ok, test.want)
 			}
 		})
@@ -226,7 +227,7 @@ func TestValidateResumeRejectsMatchingAttackerIdentity(t *testing.T) {
 	validation.PrincipalID = "attacker"
 	if err := checkpoint.ValidateResume(validation); err == nil {
 		t.Fatal("ValidateResume accepted an attacker-controlled identity pair")
-	} else if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodePolicyDenied {
+	} else if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodePolicyDenied {
 		t.Fatalf("CodeOf(%v) = %q, %v; want policy_denied", err, code, ok)
 	}
 }
@@ -267,7 +268,7 @@ func TestCheckpointPayloadRejectsCorruption(t *testing.T) {
 			test.mutate(&event)
 			if _, err := turn.ParseCheckpoint(&event); err == nil {
 				t.Fatal("ParseCheckpoint accepted corrupted event")
-			} else if code, ok := turn.CodeOf(err); !ok || code != test.want {
+			} else if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != test.want {
 				t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, code, ok, test.want)
 			}
 		})
@@ -316,7 +317,7 @@ func TestValidateCheckpointWithEffectsRequiresRecovery(t *testing.T) {
 	validator.err = errors.New("effect recovery unavailable")
 	if _, err := engine.ValidateCheckpointWithEffects(context.Background(), validation, validator); err == nil {
 		t.Fatal("ValidateCheckpointWithEffects accepted failed effect recovery")
-	} else if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeCheckpointStale {
+	} else if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeCheckpointStale {
 		t.Fatalf("CodeOf(%v) = %q, %v; want checkpoint_stale", err, code, ok)
 	}
 }

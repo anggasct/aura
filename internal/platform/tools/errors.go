@@ -1,8 +1,9 @@
 package tools
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type ErrorCode string
@@ -14,29 +15,6 @@ const (
 	ErrorCodeArgumentsAmbiguous ErrorCode = "arguments_ambiguous"
 )
 
-type Error struct {
-	Code   ErrorCode
-	Detail string
-}
-
-func (e *Error) Error() string {
-	if e == nil {
-		return "<nil>"
-	}
-	if e.Detail == "" {
-		return string(e.Code)
-	}
-	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if errors.As(err, &target) && target != nil {
-		return target.Code, true
-	}
-	return "", false
-}
-
-func errorf(code ErrorCode, format string, args ...any) *Error {
-	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
+func errorf(code ErrorCode, format string, args ...any) error {
+	return fault.New(code, fmt.Sprintf(format, args...))
 }

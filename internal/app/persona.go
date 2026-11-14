@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -64,14 +65,14 @@ func logPersonas(ctx context.Context, logger *slog.Logger, registry *auraagent.R
 func resolveChatPersona(ctx context.Context, registry *auraagent.Registry, sessions store.SessionService, sessionID, requested string) (string, error) {
 	if requested != "" {
 		if _, ok := registry.Lookup(requested); !ok {
-			return "", &turn.Error{Code: turn.ErrorCodePersonaNotFound, Detail: fmt.Sprintf("persona %q is not registered", requested)}
+			return "", fault.New(turn.ErrorCodePersonaNotFound, fmt.Sprintf("persona %q is not registered", requested))
 		}
 	}
 	if sessionID != "" {
 		session, err := sessions.Get(ctx, sessionID)
 		switch {
 		case err == nil && requested != "" && requested != session.AgentID:
-			return "", &turn.Error{Code: turn.ErrorCodePersonaMismatch, Detail: fmt.Sprintf("session %s belongs to persona %q, not %q", sessionID, session.AgentID, requested)}
+			return "", fault.New(turn.ErrorCodePersonaMismatch, fmt.Sprintf("session %s belongs to persona %q, not %q", sessionID, session.AgentID, requested))
 		case err == nil:
 			return session.AgentID, nil
 		case !errors.Is(err, sql.ErrNoRows):

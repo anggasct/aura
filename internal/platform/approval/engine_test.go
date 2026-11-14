@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func testPolicy() Policy {
@@ -98,8 +100,8 @@ func TestEvaluateRequireApproval(t *testing.T) {
 func TestEvaluateUnknownToolDenied(t *testing.T) {
 	engine := newTestEngine(t)
 	_, err := engine.Evaluate(context.Background(), ptr(testRequest("rm_rf")))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePolicyDenied {
-		t.Fatalf("CodeOf(%v) = %q, %v; want policy_denied", err, code, ok)
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePolicyDenied {
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want policy_denied", err, code, ok)
 	}
 }
 
@@ -108,8 +110,8 @@ func TestEvaluateTrustRestriction(t *testing.T) {
 	request := testRequest("read_file")
 	request.Trust = TrustUntrustedExternal
 	_, err := engine.Evaluate(context.Background(), &request)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePolicyDenied {
-		t.Fatalf("CodeOf(%v) = %q, %v; want policy_denied for disallowed trust", err, code, ok)
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePolicyDenied {
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want policy_denied for disallowed trust", err, code, ok)
 	}
 }
 
@@ -144,8 +146,8 @@ func TestEvaluateChecksTheHostCapabilitySet(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeCapabilityUnavailable {
-				t.Fatalf("CodeOf(%v) = %q, %v; want capability_unavailable", err, code, ok)
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeCapabilityUnavailable {
+				t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want capability_unavailable", err, code, ok)
 			}
 			if _, err := engine.Grant(context.Background(), &request, time.Minute); err == nil {
 				t.Fatal("Grant succeeded for a request the host cannot satisfy")
@@ -173,8 +175,8 @@ func TestEvaluateInvalidTrustLabel(t *testing.T) {
 	request := testRequest("read_file")
 	request.Trust = TrustLabel("spoofed")
 	_, err := engine.Evaluate(context.Background(), &request)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePolicyDenied {
-		t.Fatalf("CodeOf(%v) = %q, %v; want policy_denied for invalid trust", err, code, ok)
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePolicyDenied {
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want policy_denied for invalid trust", err, code, ok)
 	}
 }
 
@@ -217,8 +219,8 @@ func TestApprovalOperationsRejectNilContext(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.run(); err == nil {
 				t.Fatal("operation accepted a nil context")
-			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
-				t.Fatalf("CodeOf(%v) = %q, %v; want invalid_argument", err, code, ok)
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
+				t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want invalid_argument", err, code, ok)
 			}
 		})
 	}
@@ -245,16 +247,16 @@ func TestExecuteRequiresGrantFromPolicy(t *testing.T) {
 
 	if _, err := engine.Execute(context.Background(), &request, &grant); err == nil {
 		t.Fatal("expected the consumed grant to be rejected")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
-		t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid", err, code, ok)
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeApprovalInvalid {
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want approval_invalid", err, code, ok)
 	}
 }
 
 func TestExecuteDeniedToolCannotGetGrant(t *testing.T) {
 	engine := newTestEngine(t)
 	_, err := engine.Grant(context.Background(), ptr(testRequest("rm_rf")), time.Minute)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePolicyDenied {
-		t.Fatalf("CodeOf(%v) = %q, %v; want policy_denied", err, code, ok)
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePolicyDenied {
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want policy_denied", err, code, ok)
 	}
 }
 
@@ -275,8 +277,8 @@ func TestExecuteForgedGrantRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a forged grant to be rejected")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
-		t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid", err, code, ok)
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeApprovalInvalid {
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want approval_invalid", err, code, ok)
 	}
 }
 
@@ -316,8 +318,8 @@ func TestGrantInvalidatedByFieldChanges(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected the mutated grant to be rejected")
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
-				t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid", err, code, ok)
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeApprovalInvalid {
+				t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want approval_invalid", err, code, ok)
 			}
 		})
 	}
@@ -350,8 +352,8 @@ func TestExecuteRejectsConstraintMutations(t *testing.T) {
 			tc.mutate(&grant)
 			if _, err := engine.Execute(context.Background(), &request, &grant); err == nil {
 				t.Fatal("Execute accepted mutated constraints")
-			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
-				t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid", err, code, ok)
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeApprovalInvalid {
+				t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want approval_invalid", err, code, ok)
 			}
 		})
 	}
@@ -371,8 +373,8 @@ func TestExecuteRejectsTamperedArguments(t *testing.T) {
 	tampered := request
 	tampered.Arguments = json.RawMessage(`{"path":"/etc/passwd"}`)
 	_, err = engine.Execute(context.Background(), &tampered, &grant)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
-		t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid for tampered arguments", err, code, ok)
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeApprovalInvalid {
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want approval_invalid for tampered arguments", err, code, ok)
 	}
 }
 
@@ -390,8 +392,8 @@ func TestExecuteRejectsCapabilityChange(t *testing.T) {
 	escalated := request
 	escalated.Capabilities = append(escalated.Capabilities, "sys-admin")
 	_, err = engine.Execute(context.Background(), &escalated, &grant)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
-		t.Fatalf("CodeOf(%v) = %q, %v; want approval_invalid for capability change", err, code, ok)
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeApprovalInvalid {
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want approval_invalid for capability change", err, code, ok)
 	}
 }
 
@@ -427,8 +429,8 @@ func TestUntrustedContentCannotModifyPolicy(t *testing.T) {
 	escalation := testRequest("exec")
 	escalation.Trust = TrustUntrustedExternal
 	_, err = engine.Evaluate(context.Background(), &escalation)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePolicyDenied {
-		t.Fatalf("CodeOf(%v) = %q, %v; want policy_denied for untrusted exec", err, code, ok)
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePolicyDenied {
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want policy_denied for untrusted exec", err, code, ok)
 	}
 }
 
@@ -583,7 +585,7 @@ func isInvalidArgument(err error) bool {
 	if err == nil {
 		return false
 	}
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	return ok && code == ErrorCodeInvalidArgument
 }
 
@@ -592,7 +594,7 @@ func TestErrorsAreTyped(t *testing.T) {
 	if err == nil {
 		t.Fatal("nil error")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePolicyDenied {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePolicyDenied {
 		t.Fatalf("CodeOf = %q, %v", code, ok)
 	}
 	if !errors.Is(err, err) {

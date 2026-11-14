@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -281,7 +282,7 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 		IdempotencyKey: req.IdempotencyKey,
 	}) {
 		if err != nil {
-			if code, ok := turn.CodeOf(err); ok && code == turn.ErrorCodeRuntimeOverloaded {
+			if fault.HasCode(err, turn.ErrorCodeRuntimeOverloaded) {
 				return schedule.TurnResult{}, schedule.Errorf(schedule.ErrorCodeRuntimeOverloaded, "runtime is overloaded")
 			}
 			return schedule.TurnResult{}, err

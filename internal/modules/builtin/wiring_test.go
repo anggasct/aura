@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -114,7 +115,7 @@ func TestNewRefusesANilLiveEventsPublisher(t *testing.T) {
 	if executor != nil {
 		t.Fatalf("New returned an executor with a nil live events publisher: %v", executor)
 	}
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeInvalidArgument {
+	if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeInvalidArgument {
 		t.Fatalf("code = %q (%v), want %q", code, ok, turn.ErrorCodeInvalidArgument)
 	}
 }

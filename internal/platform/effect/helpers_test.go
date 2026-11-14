@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -106,7 +107,7 @@ func eventCount(t *testing.T, db *sql.DB, kind string) int {
 
 func assertCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
-	got, ok := CodeOf(err)
+	got, ok := fault.CodeOf[ErrorCode](err)
 	if !ok {
 		t.Fatalf("expected coded error %s, got unwrapped: %v", want, err)
 	}

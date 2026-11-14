@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -303,7 +304,7 @@ func TestTurnEmptyGuardEmitsNoRequest(t *testing.T) {
 	if gotErr == nil {
 		t.Fatal("empty turn produced no error, want typed invalid input")
 	}
-	if code, ok := turn.CodeOf(gotErr); !ok || code != turn.ErrorCodeInvalidArgument {
+	if code, ok := fault.CodeOf[turn.ErrorCode](gotErr); !ok || code != turn.ErrorCodeInvalidArgument {
 		t.Fatalf("CodeOf(%v) = %q, want invalid_argument", gotErr, code)
 	}
 	if fake.callCount != 0 {

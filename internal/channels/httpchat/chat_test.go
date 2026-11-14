@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
@@ -664,8 +665,8 @@ func TestChatTurnFailuresMapToTheDocumentedErrors(t *testing.T) {
 		"deadline exceeded":       {failure: "turn_deadline_exceeded", status: http.StatusInternalServerError, kind: errorTypeServer, code: "internal_error"},
 		"runtime internal":        {failure: "runtime_internal", status: http.StatusInternalServerError, kind: errorTypeServer, code: "internal_error"},
 		"unknown failure code":    {failure: "brand_new_code", status: http.StatusInternalServerError, kind: errorTypeServer, code: "internal_error"},
-		"admission overloaded":    {runErr: &turn.Error{Code: turn.ErrorCodeRuntimeOverloaded, Detail: "queue is full"}, status: http.StatusServiceUnavailable, kind: errorTypeServer, code: "runtime_overloaded", retryAfter: "1"},
-		"admission persona":       {runErr: &turn.Error{Code: turn.ErrorCodePersonaNotFound, Detail: "persona missing"}, status: http.StatusInternalServerError, kind: errorTypeServer, code: "internal_error"},
+		"admission overloaded":    {runErr: fault.New(turn.ErrorCodeRuntimeOverloaded, "queue is full"), status: http.StatusServiceUnavailable, kind: errorTypeServer, code: "runtime_overloaded", retryAfter: "1"},
+		"admission persona":       {runErr: fault.New(turn.ErrorCodePersonaNotFound, "persona missing"), status: http.StatusInternalServerError, kind: errorTypeServer, code: "internal_error"},
 		"admission uncoded error": {runErr: errors.New("boom with prompt text"), status: http.StatusInternalServerError, kind: errorTypeServer, code: "internal_error"},
 	}
 	for name, tc := range cases {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -88,8 +89,8 @@ func TestWebhookRegistrationRetriesUntilTelegramAccepts(t *testing.T) {
 	if n := rig.h.api.count("setWebhook"); n != 3 {
 		t.Errorf("setWebhook calls = %d, want 3 (two failures then success)", n)
 	}
-	if fault := rig.adapter.currentFault(); fault != faultNone {
-		t.Errorf("fault after registration = %q, want none", fault)
+	if current := rig.adapter.currentFault(); current != faultNone {
+		t.Errorf("fault after registration = %q, want none", current)
 	}
 }
 
@@ -233,7 +234,7 @@ func TestWebhookClassifiesOutcomes(t *testing.T) {
 	rig := newWebhookRig(t, nil)
 	sink := newMemorySink()
 	sink.failOnce("update:21", overloaded())
-	sink.failOnce("update:22", &turn.Error{Code: turn.ErrorCodeInvalidArgument, Detail: "rejected"})
+	sink.failOnce("update:22", fault.New(turn.ErrorCodeInvalidArgument, "rejected"))
 	stop := rig.start(t, sink)
 	defer stop()
 	callback := update{UpdateID: 24, CallbackQuery: &callbackQuery{

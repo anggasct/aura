@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -581,7 +582,7 @@ func (e *Engine) terminalOutcome(ctx context.Context, execErr error, req *turn.T
 	case ctx.Err() == context.DeadlineExceeded:
 		return turn.EventKindTurnFailed, failedPayload(turn.ErrorCodeTurnDeadlineExceeded, "turn deadline elapsed", nil, e.agentID(req))
 	case execErr != nil:
-		code, ok := turn.CodeOf(execErr)
+		code, ok := fault.CodeOf[turn.ErrorCode](execErr)
 		if !ok {
 			code = turn.ErrorCodeRuntimeInternal
 		}

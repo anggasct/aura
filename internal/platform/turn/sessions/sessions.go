@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -103,5 +104,5 @@ func (p *Part) Validate() error {
 }
 
 func invalidArgument(detail string) error {
-	return &turn.Error{Code: turn.ErrorCodeInvalidArgument, Detail: detail}
+	return fault.New(turn.ErrorCodeInvalidArgument, detail)
 }

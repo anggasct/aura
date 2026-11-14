@@ -11,6 +11,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
@@ -47,7 +48,7 @@ func TestLoadBoundsUnderVolume(t *testing.T) {
 
 		var overflowCount int
 		for err := range overflow {
-			if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeRuntimeOverloaded {
+			if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeRuntimeOverloaded {
 				t.Errorf("overflow error code = %q (ok=%v), want runtime_overloaded", code, ok)
 			}
 			overflowCount++

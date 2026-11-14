@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -271,7 +272,7 @@ func TestEvalRecallDegradesAndRequireRecallFails(t *testing.T) {
 		if err == nil {
 			continue
 		}
-		code, ok := turn.CodeOf(err)
+		code, ok := fault.CodeOf[turn.ErrorCode](err)
 		if !ok || code != turn.ErrorCodeStorageUnavailable {
 			t.Fatalf("code = %v, %v", code, ok)
 		}

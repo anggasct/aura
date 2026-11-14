@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
@@ -138,7 +139,7 @@ func TestDurableQueueOverflowFailsClosed(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected an overload error")
 		}
-		code, ok := turn.CodeOf(err)
+		code, ok := fault.CodeOf[turn.ErrorCode](err)
 		if !ok || code != turn.ErrorCodeRuntimeOverloaded {
 			t.Fatalf("code = %v, want runtime_overloaded", err)
 		}
@@ -505,7 +506,7 @@ func (e errorExecutor) Execute(_ context.Context, _ *turn.TurnRequest) iter.Seq2
 }
 
 func TestDurableBudgetExhaustedIsTerminal(t *testing.T) {
-	executor := errorExecutor{err: &turn.Error{Code: turn.ErrorCodeBudgetExhausted, Detail: "test budget"}}
+	executor := errorExecutor{err: fault.New(turn.ErrorCodeBudgetExhausted, "test budget")}
 	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
 	mustCreateSession(t, db, "session-a")
 

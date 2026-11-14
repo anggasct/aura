@@ -8,6 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -91,7 +92,7 @@ func observeShutdown(t *testing.T, c *shutdownCase) shutdownObservation {
 
 func requireRuntimeInternal(t *testing.T, err error) {
 	t.Helper()
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeRuntimeInternal {
+	if !fault.HasCode(err, turn.ErrorCodeRuntimeInternal) {
 		t.Fatalf("Shutdown error = %v, want runtime_internal", err)
 	}
 }

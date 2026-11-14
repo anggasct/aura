@@ -18,6 +18,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
@@ -396,7 +397,7 @@ func TestRecoverTurnsAttachesRunningTurnsPastTheGate(t *testing.T) {
 		t.Fatalf("active, staged turns = %d, %d; want both attached turns active past the gate and none staged", active, staged)
 	}
 	if err := rig.engine.Shutdown(t.Context()); err != nil {
-		if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeRuntimeInternal {
+		if !fault.HasCode(err, turn.ErrorCodeRuntimeInternal) {
 			t.Fatalf("Shutdown: %v", err)
 		}
 	}
@@ -569,7 +570,7 @@ func TestRecoverTurnsReportsWhatItCouldNotStage(t *testing.T) {
 		}
 	})
 	err := rig.engine.RecoverTurns(t.Context())
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeStorageUnavailable {
+	if !fault.HasCode(err, turn.ErrorCodeStorageUnavailable) {
 		t.Fatalf("RecoverTurns with a failing listing = %v, want storage_unavailable", err)
 	}
 
@@ -838,7 +839,7 @@ func TestRepeatedReleaseKeepsTheSessionKnown(t *testing.T) {
 
 	rig.engine.releaseTurn(t.Context(), &turnState{req: turn.TurnRequest{SessionID: "session-b"}, turnID: "turn-not-held"})
 	if err := rig.engine.Shutdown(t.Context()); err != nil {
-		if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeRuntimeInternal {
+		if !fault.HasCode(err, turn.ErrorCodeRuntimeInternal) {
 			t.Fatalf("Shutdown: %v", err)
 		}
 	}

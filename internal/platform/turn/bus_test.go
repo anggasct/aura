@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -76,7 +77,7 @@ func TestEventBusKeepsDeliveringAfterAPanickingSubscriber(t *testing.T) {
 func TestEventBusRefusesANilHandlerAndFallsBackFromANilLogger(t *testing.T) {
 	bus := NewEventBus(nil)
 	err := bus.Subscribe(nil)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("Subscribe(nil) = %v, want code %q", err, ErrorCodeInvalidArgument)
 	}
 

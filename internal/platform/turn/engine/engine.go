@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
@@ -717,7 +718,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	if terminalKind == turn.EventKindTurnCompleted {
 		deliveryCtx := context.WithoutCancel(ctx)
 		if deliveryErr := e.deliverCompletedTurn(deliveryCtx, &t.req, executed); deliveryErr != nil {
-			if code, ok := turn.CodeOf(deliveryErr); ok && code == turn.ErrorCodeDeliverySkipped {
+			if fault.HasCode(deliveryErr, turn.ErrorCodeDeliverySkipped) {
 				e.logger.DebugContext(deliveryCtx, "turn delivery skipped", "error", deliveryErr, "turn_id", t.turnID)
 			} else {
 				e.logger.ErrorContext(deliveryCtx, "turn delivery failed", "error", deliveryErr, "turn_id", t.turnID)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type Executor struct {
@@ -139,7 +141,7 @@ func (e *Executor) Recover(ctx context.Context, p Provider, r Reconciler) (Recov
 	for i := range unknown {
 		resolved, rerr := e.Reconcile(ctx, unknown[i].ID, p, r)
 		if rerr != nil {
-			if code, ok := CodeOf(rerr); ok && code == ErrorCodeReconciliationUnsupported {
+			if fault.HasCode(rerr, ErrorCodeReconciliationUnsupported) {
 				summary.Unsupported++
 				continue
 			}
