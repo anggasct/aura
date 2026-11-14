@@ -16,6 +16,13 @@ func proposalRunID(t *testing.T, disk *Store, proposalID string) string {
 	return proposal.RunID
 }
 
+func settleRunBeforeTeardown(t *testing.T, disk *Store, runID string) {
+	t.Helper()
+	t.Cleanup(func() {
+		waitForRunStatus(t, disk, runID, RunSucceeded, 5*time.Second)
+	})
+}
+
 func TestTaintedProposalStartsOnce(t *testing.T) {
 	startsOfADefinition := []struct {
 		name  string
@@ -46,6 +53,7 @@ func TestTaintedProposalStartsOnce(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		settleRunBeforeTeardown(t, disk, run.ID)
 		if got := proposalRunID(t, disk, "prop_once"); got != run.ID {
 			t.Fatalf("proposal run_id = %q, want %q", got, run.ID)
 		}
@@ -68,9 +76,11 @@ func TestTaintedProposalStartsOnce(t *testing.T) {
 				generated := approveGenerated(t, interpreter, disk, "prop_other", true)
 				want := 0
 				if claimed {
-					if _, err := interpreter.StartApproved(t.Context(), "prop_other", &RunInput{}, ownerOrigin()); err != nil {
+					run, err := interpreter.StartApproved(t.Context(), "prop_other", &RunInput{}, ownerOrigin())
+					if err != nil {
 						t.Fatal(err)
 					}
+					settleRunBeforeTeardown(t, disk, run.ID)
 					want = 1
 				}
 				if err := tc.start(t, interpreter, generated.ID); !hasCode(err, ErrorCodeApprovalSpent) {
@@ -109,12 +119,17 @@ func TestTaintedProposalStartsOnce(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := interpreter.Start(t.Context(), generated.ID, &RunInput{}, ownerOrigin()); err != nil {
+		settleRunBeforeTeardown(t, disk, first.ID)
+		second, err := interpreter.Start(t.Context(), generated.ID, &RunInput{}, ownerOrigin())
+		if err != nil {
 			t.Fatalf("second Start of an untainted proposal: %v", err)
 		}
-		if _, err := interpreter.StartApproved(t.Context(), "prop_free", &RunInput{}, ownerOrigin()); err != nil {
+		settleRunBeforeTeardown(t, disk, second.ID)
+		third, err := interpreter.StartApproved(t.Context(), "prop_free", &RunInput{}, ownerOrigin())
+		if err != nil {
 			t.Fatalf("StartApproved after another run claimed an untainted proposal: %v", err)
 		}
+		settleRunBeforeTeardown(t, disk, third.ID)
 		if got := proposalRunID(t, disk, "prop_free"); got != first.ID {
 			t.Fatalf("proposal run_id = %q, want the first run %q", got, first.ID)
 		}
