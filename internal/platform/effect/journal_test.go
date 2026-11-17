@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -492,7 +493,7 @@ func TestStorePackageContract(t *testing.T) {
 
 func TestCodeOf_Unwrapped(t *testing.T) {
 	t.Parallel()
-	if _, ok := CodeOf(errors.New("plain")); ok {
+	if _, ok := fault.CodeOf[ErrorCode](errors.New("plain")); ok {
 		t.Fatal("plain error must not yield a code")
 	}
 }

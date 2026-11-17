@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -117,7 +118,7 @@ func TestResolveChatPersona(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := resolveChatPersona(t.Context(), registry, sessions, tc.session, tc.requested)
 			if tc.code != "" {
-				if code, ok := turn.CodeOf(err); !ok || code != tc.code {
+				if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != tc.code {
 					t.Fatalf("error = %v, want %s", err, tc.code)
 				}
 				return
@@ -165,7 +166,7 @@ func TestChatRejectsUnknownPersona(t *testing.T) {
 	opts := chatCompositionOptions(&result, io.Discard)
 	opts.Chat.Persona = "ghost"
 	_, err = Build(t.Context(), opts)
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodePersonaNotFound {
+	if !fault.HasCode(err, turn.ErrorCodePersonaNotFound) {
 		t.Fatalf("chat --persona ghost error = %v, want persona_not_found", err)
 	}
 }

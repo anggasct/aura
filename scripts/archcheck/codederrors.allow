@@ -27,11 +27,9 @@ internal/modules/schedule  # until this module's errors move to platform/fault w
 internal/modules/skills  # until this module's errors move to platform/fault with the module
 internal/modules/workflow  # until this module's errors move to platform/fault with the module
 internal/platform/agent  # until the kernel errors move to platform/fault
-internal/platform/approval  # until the kernel errors move to platform/fault
 internal/platform/capability  # until the kernel errors move to platform/fault
 internal/platform/command  # until the kernel errors move to platform/fault
 internal/platform/durable/sqlite  # until the kernel errors move to platform/fault
-internal/platform/effect  # until the kernel errors move to platform/fault
 internal/platform/egress  # until the kernel errors move to platform/fault
 internal/platform/embedding  # until the kernel errors move to platform/fault
 internal/platform/health  # until the kernel errors move to platform/fault
@@ -42,8 +40,6 @@ internal/platform/secret  # until the kernel errors move to platform/fault
 internal/platform/server  # until the kernel errors move to platform/fault
 internal/platform/telemetry  # until the kernel errors move to platform/fault
 internal/platform/toolbroker  # until the kernel errors move to platform/fault
-internal/platform/tools  # until the kernel errors move to platform/fault
-internal/platform/turn  # until the kernel errors move to platform/fault
 internal/platform/usage  # until the kernel errors move to platform/fault
 internal/platform/vision  # until the kernel errors move to platform/fault
 internal/store  # legacy store; its errors move with each owner's tables

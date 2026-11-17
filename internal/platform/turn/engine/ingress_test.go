@@ -8,6 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
@@ -127,7 +128,7 @@ func TestAcceptAfterShutdownIsRejected(t *testing.T) {
 			t.Fatalf("Shutdown: %v", err)
 		}
 		_, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-late"))
-		code, ok := turn.CodeOf(err)
+		code, ok := fault.CodeOf[turn.ErrorCode](err)
 		if !ok || code != turn.ErrorCodeRuntimeOverloaded {
 			t.Fatalf("Accept after shutdown code = %q (ok=%v), want runtime_overloaded", code, ok)
 		}
@@ -152,7 +153,7 @@ func TestAcceptValidatesIdentity(t *testing.T) {
 	for name, env := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := engine.Accept(context.Background(), env)
-			code, ok := turn.CodeOf(err)
+			code, ok := fault.CodeOf[turn.ErrorCode](err)
 			if !ok || code != turn.ErrorCodeInvalidArgument {
 				t.Fatalf("code = %q (ok=%v), want invalid_argument", code, ok)
 			}

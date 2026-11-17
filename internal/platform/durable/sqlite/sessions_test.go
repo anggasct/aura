@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
@@ -492,7 +493,7 @@ func TestAdmitValidatesItsRequest(t *testing.T) {
 				}
 			}
 			if tc.turnCode != "" {
-				if code, ok := turn.CodeOf(err); !ok || code != tc.turnCode {
+				if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != tc.turnCode {
 					t.Fatalf("err = %v, want turn code %s", err, tc.turnCode)
 				}
 			}

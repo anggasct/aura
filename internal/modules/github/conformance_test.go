@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/store"
@@ -119,7 +120,7 @@ func TestBrokerDeniesARequestClaimingACapabilityTheHostLacks(t *testing.T) {
 		IdempotencyKey: "idempotency-2",
 	}
 	_, err = broker.Evaluate(context.Background(), request)
-	if code, ok := approval.CodeOf(err); !ok || code != approval.ErrorCodeCapabilityUnavailable {
+	if !fault.HasCode(err, approval.ErrorCodeCapabilityUnavailable) {
 		t.Errorf("Evaluate claiming an unregistered capability error = %v, want capability_unavailable", err)
 	}
 }

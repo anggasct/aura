@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -314,7 +315,7 @@ func (c *Chat) complete(ctx context.Context, w http.ResponseWriter, caller *Prin
 	outcome := &turnOutcome{}
 	for event, err := range c.runtime.Run(ctx, turnRequest) {
 		if err != nil {
-			code, _ := turn.CodeOf(err)
+			code, _ := fault.CodeOf[turn.ErrorCode](err)
 			outcome.terminal = turn.EventKindTurnFailed
 			outcome.failure = code
 			break

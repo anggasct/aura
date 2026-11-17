@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -325,7 +326,7 @@ func (a *Adapter) activeSession(ctx context.Context, conversationKey string) (st
 }
 
 func retryableIntake(err error) bool {
-	code, ok := turn.CodeOf(err)
+	code, ok := fault.CodeOf[turn.ErrorCode](err)
 	if !ok {
 		return true
 	}

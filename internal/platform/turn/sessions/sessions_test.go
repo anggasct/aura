@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -24,7 +25,7 @@ func codeOf(t *testing.T, err error) turn.ErrorCode {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	code, ok := turn.CodeOf(err)
+	code, ok := fault.CodeOf[turn.ErrorCode](err)
 	if !ok {
 		t.Fatalf("expected a coded error, got %v", err)
 	}

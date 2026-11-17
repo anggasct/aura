@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -114,7 +115,7 @@ func TestPollSkipsPermanentlyRejectedUpdate(t *testing.T) {
 	h := newHarness(t)
 	h.api.queue(privateText(30, ownerUserID, "bad"), privateText(31, ownerUserID, "good"))
 	sink := newMemorySink()
-	sink.failOnce("update:30", &turn.Error{Code: turn.ErrorCodeInvalidArgument, Detail: "rejected"})
+	sink.failOnce("update:30", fault.New(turn.ErrorCodeInvalidArgument, "rejected"))
 	stop := startAdapter(t, h.adapter(t, nil), sink)
 	defer stop()
 	awaitCursor(t, h, 32)

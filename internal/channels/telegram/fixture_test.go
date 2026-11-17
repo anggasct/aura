@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -583,5 +584,5 @@ func startAdapter(t *testing.T, adapter *Adapter, sink runtimeingress.IngressSin
 }
 
 func overloaded() error {
-	return &turn.Error{Code: turn.ErrorCodeRuntimeOverloaded, Detail: "queue full"}
+	return fault.New(turn.ErrorCodeRuntimeOverloaded, "queue full")
 }

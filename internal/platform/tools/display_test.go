@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/tools/displaytest"
 )
@@ -17,7 +18,7 @@ var hiddenPattern = regexp.MustCompile(`\.{3}\[(\d+) bytes hidden\]`)
 
 func requireCode(t *testing.T, err error, want tools.ErrorCode) {
 	t.Helper()
-	got, ok := tools.CodeOf(err)
+	got, ok := fault.CodeOf[tools.ErrorCode](err)
 	if !ok || got != want {
 		t.Fatalf("error = %v, want code %s", err, want)
 	}

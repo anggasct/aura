@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -369,7 +370,7 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 	if err == nil {
 		t.Fatal("overloaded submission must surface an error")
 	}
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeRuntimeOverloaded {
+	if !fault.HasCode(err, turn.ErrorCodeRuntimeOverloaded) {
 		t.Fatalf("error = %v, want runtime_overloaded", err)
 	}
 	if !strings.Contains(diag.String(), "aura:") {
