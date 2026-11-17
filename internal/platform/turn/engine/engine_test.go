@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
@@ -224,7 +225,7 @@ func TestQueueOverflowIsTyped(t *testing.T) {
 		waitFor(t, func() bool { return acceptedCount(t, db, "session-b") >= 1 })
 
 		_, err := collect(t, engine, sampleRequest("session-c", turnID(2)))
-		code, ok := turn.CodeOf(err)
+		code, ok := fault.CodeOf[turn.ErrorCode](err)
 		if !ok || code != turn.ErrorCodeRuntimeOverloaded {
 			t.Fatalf("CodeOf(%v) = %q, %v; want runtime_overloaded", err, code, ok)
 		}
@@ -642,7 +643,7 @@ func TestSubmitDuringShutdownGetsDurableTerminal(t *testing.T) {
 		close(gate)
 		for i := range n {
 			if err := <-errs; err != nil {
-				if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeRuntimeOverloaded {
+				if !fault.HasCode(err, turn.ErrorCodeRuntimeOverloaded) {
 					t.Fatalf("submit %d: %v", i, err)
 				}
 			}
@@ -729,7 +730,7 @@ func TestShutdownBoundedWhenExecutorIgnoresCancellation(t *testing.T) {
 		if err == nil {
 			t.Fatal("Shutdown returned nil, want runtime_internal after grace")
 		}
-		if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeRuntimeInternal {
+		if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeRuntimeInternal {
 			t.Fatalf("CodeOf(%v) = %q, %v; want runtime_internal", err, code, ok)
 		}
 		if elapsed := time.Since(start); elapsed > 5*time.Second {

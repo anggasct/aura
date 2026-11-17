@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/toolcall"
@@ -739,7 +740,7 @@ func (b *Broker) settledReplay(ctx context.Context, request *ToolRequest) (bool,
 	}
 	intent, found, err := b.effects.Journal().Lookup(ctx, effectProvider, request.ToolName, request.IdempotencyKey, payload)
 	if err != nil {
-		if code, ok := effect.CodeOf(err); ok && code == effect.ErrorCodeIdempotencyConflict {
+		if fault.HasCode(err, effect.ErrorCodeIdempotencyConflict) {
 			return false, errorf(ResultInvalidArgument, "tool %q was called again under its idempotency key with a different request", request.ToolName)
 		}
 		return false, err
@@ -772,7 +773,7 @@ func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constr
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
 	}, invocation)
 	if err != nil {
-		if code, ok := effect.CodeOf(err); ok && code == effect.ErrorCodeIdempotencyConflict {
+		if fault.HasCode(err, effect.ErrorCodeIdempotencyConflict) {
 			return ToolResult{}, errorf(ResultInvalidArgument, "tool %q was called again under its idempotency key with a different request", request.ToolName)
 		}
 		return ToolResult{}, err
@@ -904,7 +905,7 @@ func (b *Broker) renderedText(arguments json.RawMessage, toolName string, render
 		return string(redact([]byte(text), secrets))
 	})
 	if err != nil {
-		code, _ := tools.CodeOf(err)
+		code, _ := fault.CodeOf[tools.ErrorCode](err)
 		if code == tools.ErrorCodeDisplayTooLarge {
 			return "", errorf(ResultApprovalDisplayTooLarge, "tool %q arguments do not fit the approval display", toolName)
 		}
@@ -1093,7 +1094,7 @@ func mapApprovalError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if code, ok := approval.CodeOf(err); ok {
+	if code, ok := fault.CodeOf[approval.ErrorCode](err); ok {
 		switch code {
 		case approval.ErrorCodeInvalidArgument:
 			return errorf(ResultInvalidArgument, "%v", err)

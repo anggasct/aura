@@ -9,6 +9,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
@@ -111,7 +112,7 @@ func TestRunDefaultsPersonaAndRejectsUnknown(t *testing.T) {
 	req := sampleRequest("session-a", "turn-unknown")
 	req.AgentID = "ghost"
 	_, err = collect(t, engine, req)
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodePersonaNotFound {
+	if !fault.HasCode(err, turn.ErrorCodePersonaNotFound) {
 		t.Fatalf("unknown persona error = %v, want persona_not_found", err)
 	}
 	if got := eventCountByKind(t, db, "turn-unknown", turn.EventKindTurnAccepted); got != 0 {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
@@ -235,7 +236,7 @@ func (e *Engine) deliverCompletedTurn(ctx context.Context, req *turn.TurnRequest
 	}
 	planned, err := e.planDelivery(req, events)
 	if err != nil {
-		if code, ok := turn.CodeOf(err); ok && code == turn.ErrorCodeDeliverySkipped {
+		if fault.HasCode(err, turn.ErrorCodeDeliverySkipped) {
 			e.markDelivered(req.TurnID)
 		}
 		return err
@@ -272,7 +273,7 @@ type endedTurn struct {
 func (e *Engine) deliverOnce(ctx context.Context, done *endedTurn) deliveryRecord {
 	planned, err := e.planDelivery(done.req, done.events)
 	if err != nil {
-		if code, ok := turn.CodeOf(err); ok && code == turn.ErrorCodeDeliverySkipped {
+		if fault.HasCode(err, turn.ErrorCodeDeliverySkipped) {
 			e.logger.DebugContext(ctx, "turn delivery skipped", "error", err, "turn_id", done.req.TurnID)
 			return deliveryRecord{Outcome: deliverySkipped}
 		}

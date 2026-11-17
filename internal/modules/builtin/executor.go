@@ -21,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -78,7 +79,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 		apply(&applied)
 	}
 	if applied.liveEventsSet && applied.liveEvents == nil {
-		return nil, &turn.Error{Code: turn.ErrorCodeInvalidArgument, Detail: "live events publisher must not be nil"}
+		return nil, fault.New(turn.ErrorCodeInvalidArgument, "live events publisher must not be nil")
 	}
 	handoff := &handoffHolder{}
 	emails := &emailHolder{}
@@ -315,7 +316,7 @@ func (e *Executor) Evaluate(ctx context.Context, request *approval.ToolRequest) 
 
 func (e *Executor) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {
 	if request == nil {
-		return nil, &turn.Error{Code: turn.ErrorCodeInvalidArgument, Detail: "builtin tool request must not be nil"}
+		return nil, fault.New(turn.ErrorCodeInvalidArgument, "builtin tool request must not be nil")
 	}
 	result, err := e.broker.Execute(ctx, &toolbroker.ToolRequest{
 		RequestID: request.RequestID, TurnID: request.TurnID, SessionID: request.SessionID,

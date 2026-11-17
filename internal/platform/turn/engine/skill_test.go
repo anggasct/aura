@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -197,7 +198,7 @@ func TestDurableTransientRenderFailureKeepsItsOwnCode(t *testing.T) {
 	if err == nil {
 		t.Fatal("transient render failure journaled a result")
 	}
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeStorageUnavailable {
+	if !fault.HasCode(err, turn.ErrorCodeStorageUnavailable) {
 		t.Fatalf("attempt error = %v, want storage_unavailable", err)
 	}
 	inv.mu.Lock()
@@ -235,7 +236,7 @@ func TestDurableUnavailableSkillJournalsNullOnce(t *testing.T) {
 	if err == nil {
 		t.Fatal("unavailable skill journaled an activation")
 	}
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeSkillUnavailable {
+	if !fault.HasCode(err, turn.ErrorCodeSkillUnavailable) {
 		t.Fatalf("attempt error = %v, want skill_unavailable", err)
 	}
 	inv.mu.Lock()
@@ -249,7 +250,7 @@ func TestDurableUnavailableSkillJournalsNullOnce(t *testing.T) {
 	renderer.mu.Unlock()
 	if err := attempt(); err == nil {
 		t.Fatal("replayed unavailability flipped to success")
-	} else if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeSkillUnavailable {
+	} else if !fault.HasCode(err, turn.ErrorCodeSkillUnavailable) {
 		t.Fatalf("replayed attempt error = %v, want skill_unavailable", err)
 	}
 	if renderer.calls != 1 {

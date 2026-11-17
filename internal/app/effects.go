@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func newEffectsCmd(gf *globalFlags) *cobra.Command {
@@ -133,7 +134,7 @@ func newEffectsReconcileCmd(gf *globalFlags) *cobra.Command {
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withEffects(cmd, gf, func(context.Context, *slog.Logger, *config.Config, *effect.Journal) error {
-				return &effect.Error{Code: effect.ErrorCodeReconciliationUnsupported, Detail: "provider reconciliation is unavailable for intent " + args[0]}
+				return fault.New(effect.ErrorCodeReconciliationUnsupported, "provider reconciliation is unavailable for intent "+args[0])
 			})
 		},
 	}

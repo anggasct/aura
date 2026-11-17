@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
@@ -114,7 +115,7 @@ func TestAcceptedDurableTurnOutlivesItsCallersContext(t *testing.T) {
 	ended, endCaller := context.WithCancel(t.Context())
 	endCaller()
 	_, err := rig.engine.Accept(ended, sampleEnvelope("conv-detach", "detach-ended"))
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeStorageUnavailable {
+	if !fault.HasCode(err, turn.ErrorCodeStorageUnavailable) {
 		t.Fatalf("Accept under an ended context = %v, want %s", err, turn.ErrorCodeStorageUnavailable)
 	}
 	if got := admissionRowsOf(t, rig.db, session); got != (admissionRows{}) {

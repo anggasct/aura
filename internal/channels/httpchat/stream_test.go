@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
@@ -201,7 +202,7 @@ func TestStreamKeepsGateErrorsAsPlainJSON(t *testing.T) {
 		},
 		"runtime overloaded at admission": {
 			setup: func(f *chatFixture) {
-				f.runtime.runErr = &turn.Error{Code: turn.ErrorCodeRuntimeOverloaded, Detail: "queue is full"}
+				f.runtime.runErr = fault.New(turn.ErrorCodeRuntimeOverloaded, "queue is full")
 			},
 			body: defaultStreamBody(), status: http.StatusServiceUnavailable, kind: errorTypeServer, code: "runtime_overloaded", retryAfter: "1",
 		},

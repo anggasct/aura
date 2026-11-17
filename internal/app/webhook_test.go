@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -50,7 +51,7 @@ func (f *fakeTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.S
 	f.mu.Unlock()
 	return func(yield func(store.RuntimeEvent, error) bool) {
 		if f.overload {
-			yield(store.RuntimeEvent{}, &turn.Error{Code: turn.ErrorCodeRuntimeOverloaded, Detail: "pending turn queue is full"})
+			yield(store.RuntimeEvent{}, fault.New(turn.ErrorCodeRuntimeOverloaded, "pending turn queue is full"))
 			return
 		}
 		outcomes := f.events(req.TurnID)

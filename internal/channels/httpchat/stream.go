@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -192,7 +193,7 @@ func (r *streamRun) consume(ctx context.Context, item *turnItem, open bool) (boo
 		return true, r.refuse(ctx, &errInternal, "turn_incomplete")
 	}
 	if item.err != nil {
-		code, _ := turn.CodeOf(item.err)
+		code, _ := fault.CodeOf[turn.ErrorCode](item.err)
 		return true, r.fail(ctx, code)
 	}
 	event := &item.event

@@ -1,9 +1,6 @@
 package turn
 
-import (
-	"errors"
-	"fmt"
-)
+import "github.com/anggasct/aura/internal/platform/fault"
 
 type ErrorCode string
 
@@ -38,30 +35,10 @@ func (c ErrorCode) Retryable() bool {
 	}
 }
 
-type Error struct {
-	Code   ErrorCode
-	Detail string
-}
-
-func (e *Error) Error() string {
-	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if !errors.As(err, &target) {
-		return "", false
-	}
-	return target.Code, true
-}
-
 func codedError(code ErrorCode, detail string, cause error) error {
-	if cause == nil {
-		return &Error{Code: code, Detail: detail}
-	}
-	return fmt.Errorf("%w: %w", &Error{Code: code, Detail: detail}, cause)
+	return fault.Wrap(code, detail, cause)
 }
 
 func invalidArgument(detail string) error {
-	return &Error{Code: ErrorCodeInvalidArgument, Detail: detail}
+	return fault.New(ErrorCodeInvalidArgument, detail)
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -541,7 +542,7 @@ func TestCursor_ChangedValidityIngestsNoOldMailAndReportsHealth(t *testing.T) {
 func TestCursor_DoesNotAdvancePastARetryableFailure(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	h.start()
-	h.sink.err = &turn.Error{Code: turn.ErrorCodeRuntimeOverloaded}
+	h.sink.err = fault.New(turn.ErrorCodeRuntimeOverloaded, "")
 	h.mailbox.add(mailSpec{messageID: "pending@example.com"}.raw())
 	h.mailbox.wake <- struct{}{}
 	h.awaitReconnect()
@@ -572,7 +573,7 @@ func TestCursor_DoesNotAdvancePastARetryableFailure(t *testing.T) {
 func TestCursor_RuntimeRejectionDropsAndMovesOn(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	h.start()
-	h.sink.err = &turn.Error{Code: turn.ErrorCodeInvalidArgument}
+	h.sink.err = fault.New(turn.ErrorCodeInvalidArgument, "")
 	h.deliver(mailSpec{messageID: "refused@example.com"}.raw())
 	h.wantDrops("intake_rejected")
 	if got := h.cursors.get("email:work"); got.LastUID != 1 {

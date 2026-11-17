@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
@@ -169,7 +170,7 @@ func TestNewADKExecutorRequiresModels(t *testing.T) {
 	db, sessions, _ := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	_, err := NewADKExecutor("aura", "model", nil, sessions, &fakeBroker{}, nil, nil)
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeInvalidArgument {
+	if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeInvalidArgument {
 		t.Fatalf("CodeOf(%v) = %q, want invalid_argument", err, code)
 	}
 }
@@ -329,7 +330,7 @@ func TestADKExecutorBudgetEnforced(t *testing.T) {
 	if lastErr == nil {
 		t.Fatal("budget exceeded but no error")
 	}
-	if code, ok := turn.CodeOf(lastErr); !ok || code != turn.ErrorCodeBudgetExhausted {
+	if code, ok := fault.CodeOf[turn.ErrorCode](lastErr); !ok || code != turn.ErrorCodeBudgetExhausted {
 		t.Fatalf("CodeOf(%v) = %q, %v; want budget_exhausted", lastErr, code, ok)
 	}
 }

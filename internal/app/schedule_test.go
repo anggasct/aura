@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
@@ -127,7 +128,7 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 
 func TestEngineTurnRunnerMapsOverload(t *testing.T) {
 	db := cronTestDB(t)
-	engine := &fakeCronEngine{errs: []error{&turn.Error{Code: turn.ErrorCodeRuntimeOverloaded, Detail: "full"}}}
+	engine := &fakeCronEngine{errs: []error{fault.New(turn.ErrorCodeRuntimeOverloaded, "full")}}
 	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
 	_, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "schedule",

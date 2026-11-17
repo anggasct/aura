@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -72,7 +73,7 @@ func succeedWithOutcome(t *testing.T, executor *Executor, n int, outcome Outcome
 
 func wantResultCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
-	if code, ok := CodeOf(err); !ok || code != want {
+	if !fault.HasCode(err, want) {
 		t.Fatalf("RecordedResult error = %v, want %s", err, want)
 	}
 }

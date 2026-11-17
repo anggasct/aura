@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -372,10 +373,10 @@ func TestBuiltinToolCallWithoutACallKeyIsRefused(t *testing.T) {
 
 	_, err = executor.executeBuiltinTool(slotlessContext{}, "tool-e", map[string]any{"note": "one"})
 
-	if code, ok := turn.CodeOf(err); !ok || code != turn.ErrorCodeInvalidArgument {
+	if !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
 		t.Errorf("executeBuiltinTool error = %v, want %s", err, turn.ErrorCodeInvalidArgument)
 	}
-	var coded *turn.Error
+	var coded *fault.Error[turn.ErrorCode]
 	if !errors.As(err, &coded) || coded.Detail != `tool "tool-e" has no call key` {
 		t.Errorf("executeBuiltinTool error = %v, want the missing call key", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func encodeRecord(result *ToolResult) ([]byte, error) {
@@ -55,7 +56,7 @@ func (b *Broker) replayRecorded(ctx context.Context, request *ToolRequest, inten
 	}
 	record, err := b.effects.Journal().RecordedResult(ctx, intent)
 	if err != nil {
-		code, coded := effect.CodeOf(err)
+		code, coded := fault.CodeOf[effect.ErrorCode](err)
 		switch {
 		case coded && code == effect.ErrorCodeResultUnavailable:
 			return ToolResult{}, errorf(ResultExecutionFailed, "effectful tool result is unavailable for a replayed request")

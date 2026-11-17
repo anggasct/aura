@@ -7,6 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -181,7 +182,7 @@ func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 
 func TestNewHostRequiresRuntime(t *testing.T) {
 	_, err := NewHost(nil, nil)
-	code, ok := turn.CodeOf(err)
+	code, ok := fault.CodeOf[turn.ErrorCode](err)
 	if !ok || code != turn.ErrorCodeInvalidArgument {
 		t.Fatalf("code = %q (ok=%v), want invalid_argument", code, ok)
 	}
