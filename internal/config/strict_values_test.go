@@ -159,6 +159,24 @@ func TestNullValuesAreRefused(t *testing.T) {
 	}
 }
 
+func TestScalarsOutsideTheTextNumberAndBoolTagsAreRefused(t *testing.T) {
+	cases := []struct {
+		name     string
+		content  string
+		path     string
+		position string
+	}{
+		{"a timestamp scalar", "version: 1\nruntime:\n  turn_timeout: 2026-01-01\n", "runtime.turn_timeout", "line 3, column 17"},
+		{"a binary scalar", "version: 1\nlogging:\n  level: !!binary aGVsbG8=\n", "logging.level", "line 3, column 10"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, tc.content))
+			requireProblemText(t, err, invalidText(tc.path, tc.position, "must be a string, a number or a boolean"))
+		})
+	}
+}
+
 func TestTheDefaultsLayerDecodesToDefault(t *testing.T) {
 	file := map[string]any{}
 	for _, section := range optionalSections {
