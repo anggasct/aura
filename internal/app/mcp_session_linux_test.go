@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
@@ -52,8 +53,8 @@ func TestContainedRealSessionExchange(t *testing.T) {
 		Transport:      config.MCPTransportStdio,
 		Command:        helper,
 		Environment:    map[string]string{"SERVER_MODE": "contained"},
-		StartupTimeout: config.Duration(30 * time.Second),
-		RequestTimeout: config.Duration(30 * time.Second),
+		StartupTimeout: configkit.Duration(30 * time.Second),
+		RequestTimeout: configkit.Duration(30 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 	client, err := mcp.NewClient(serverCfg, nil, mcp.WithSessionStarter(newMCPSessionStarter(sandbox.Start)))

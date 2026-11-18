@@ -7,14 +7,15 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestCodeLimitsReadEveryConfiguredBound(t *testing.T) {
 	configured := config.Interpreter{
-		Timeout:          config.Duration(7 * time.Second),
-		BuildTimeout:     config.Duration(21 * time.Second),
+		Timeout:          configkit.Duration(7 * time.Second),
+		BuildTimeout:     configkit.Duration(21 * time.Second),
 		MaxSourceBytes:   11,
 		MaxStdinBytes:    12,
 		MaxStdoutBytes:   13,

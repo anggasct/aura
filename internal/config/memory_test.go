@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func writeMemoryConfig(t *testing.T, content string) string {
@@ -36,7 +38,7 @@ func TestLoad_MemoryDefaults(t *testing.T) {
 	if memory.SummaryPromptVersion != "memory-summary-v1" {
 		t.Errorf("summary_prompt_version = %q", memory.SummaryPromptVersion)
 	}
-	if memory.SummaryTTL != Duration(720*time.Hour) {
+	if memory.SummaryTTL != configkit.Duration(720*time.Hour) {
 		t.Errorf("summary_ttl = %v", memory.SummaryTTL)
 	}
 }

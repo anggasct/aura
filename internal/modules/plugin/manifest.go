@@ -21,6 +21,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -629,9 +630,9 @@ func (m *Manifest) ServerConfig(bundleRoot string) config.MCPServer {
 		Transport:      backend.Transport,
 		Args:           slices.Clone(backend.Args),
 		URL:            backend.URL,
-		StartupTimeout: config.Duration(parseDuration(backend.StartupTimeout)),
-		RequestTimeout: config.Duration(parseDuration(backend.RequestTimeout)),
-		ConnectTimeout: config.Duration(parseDuration(backend.ConnectTimeout)),
+		StartupTimeout: configkit.Duration(parseDuration(backend.StartupTimeout)),
+		RequestTimeout: configkit.Duration(parseDuration(backend.RequestTimeout)),
+		ConnectTimeout: configkit.Duration(parseDuration(backend.ConnectTimeout)),
 		MaxMessageSize: parseByteSize(backend.MaxMessageSize),
 	}
 	if backend.Command != "" {
@@ -658,8 +659,8 @@ func parseDuration(text string) time.Duration {
 	return value
 }
 
-func parseByteSize(text string) config.ByteSize {
-	var size config.ByteSize
+func parseByteSize(text string) configkit.ByteSize {
+	var size configkit.ByteSize
 	if text == "" || size.UnmarshalText([]byte(text)) != nil {
 		return 0
 	}
@@ -675,7 +676,7 @@ func validDuration(text string) bool {
 }
 
 func validByteSize(text string) bool {
-	var size config.ByteSize
+	var size configkit.ByteSize
 	return text == "" || size.UnmarshalText([]byte(text)) == nil
 }
 

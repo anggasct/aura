@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -314,8 +315,8 @@ func mcpTestServer(name string) config.MCPServer {
 		Args:           []string{"--stdio"},
 		Environment:    map[string]string{"MODE": "test"},
 		Capabilities:   []string{"public-web"},
-		StartupTimeout: config.Duration(5 * time.Second),
-		RequestTimeout: config.Duration(5 * time.Second),
+		StartupTimeout: configkit.Duration(5 * time.Second),
+		RequestTimeout: configkit.Duration(5 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 }

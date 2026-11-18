@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -35,7 +36,7 @@ func TestDurableHostStopGraceFitsTheShutdownTimeout(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.shutdown.String(), func(t *testing.T) {
-			options := durableHostOptions(nil, nil, config.Runtime{ShutdownTimeout: config.Duration(tc.shutdown)})
+			options := durableHostOptions(nil, nil, config.Runtime{ShutdownTimeout: configkit.Duration(tc.shutdown)})
 			if options.StopGrace != tc.grace {
 				t.Fatalf("stop grace for a shutdown timeout of %s = %s, want %s", tc.shutdown, options.StopGrace, tc.grace)
 			}

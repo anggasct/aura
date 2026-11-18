@@ -22,6 +22,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -66,14 +67,14 @@ func testVisionConfig() *config.Vision {
 		MaxDimension:         8192,
 		MaxImages:            4,
 		MaxFrames:            1,
-		DecodeTimeout:        config.Duration(5 * time.Second),
+		DecodeTimeout:        configkit.Duration(5 * time.Second),
 		MaxDecodeConcurrency: 2,
 		MaxRequestBytes:      33554432,
 		StripMetadata:        true,
 		OrientNormalize:      true,
 		Detail:               "auto",
 		TransformVersion:     "v1",
-		MaxTransformMemory:   config.ByteSize(268435456),
+		MaxTransformMemory:   configkit.ByteSize(268435456),
 		Providers:            map[string]config.VisionProviderLimits{},
 	}
 }
@@ -433,7 +434,7 @@ func visionCapableDefinitions() map[string]config.ModelDefinition {
 
 func TestFallbackRejectsVisionlessRoute(t *testing.T) {
 	defs := map[string]config.ModelDefinition{"plain": visionCapableDefinitions()["plain"]}
-	route := config.ModelRoute{Candidates: []string{"plain"}, MaxProviderAttempts: 1, RetryDelayBudget: config.Duration(time.Second)}
+	route := config.ModelRoute{Candidates: []string{"plain"}, MaxProviderAttempts: 1, RetryDelayBudget: configkit.Duration(time.Second)}
 	fallback := NewFallbackAdapter("vision-route", route, defs, nil, MapAdapterResolver{}).WithVisionPolicy(NewVisionPolicy(testVisionConfig()))
 	data := []byte("sight-bytes")
 	req := visionRequest(visionFilePart("art-1", data, "image/png", 4, 4))
@@ -453,7 +454,7 @@ func TestFallbackRejectsVisionlessRoute(t *testing.T) {
 
 func TestFallbackRoutesAroundVisionlessCandidate(t *testing.T) {
 	defs := visionCapableDefinitions()
-	route := config.ModelRoute{Candidates: []string{"plain", "sight"}, MaxProviderAttempts: 2, RetryDelayBudget: config.Duration(time.Second)}
+	route := config.ModelRoute{Candidates: []string{"plain", "sight"}, MaxProviderAttempts: 2, RetryDelayBudget: configkit.Duration(time.Second)}
 	plainMock := &mockCandidateLLM{name: "plain"}
 	sightMock := &mockCandidateLLM{
 		name:      "sight",
@@ -490,7 +491,7 @@ func TestFallbackVisionEndToEnd(t *testing.T) {
 	policy := NewVisionPolicy(testVisionConfig())
 	sight := newOpenAIAdapter(nil, "sight", srv.URL, "", 0, 0, visionWiring{policy: policy, blobs: blobs})
 	defs := map[string]config.ModelDefinition{"sight": visionCapableDefinitions()["sight"]}
-	route := config.ModelRoute{Candidates: []string{"sight"}, MaxProviderAttempts: 1, RetryDelayBudget: config.Duration(time.Second)}
+	route := config.ModelRoute{Candidates: []string{"sight"}, MaxProviderAttempts: 1, RetryDelayBudget: configkit.Duration(time.Second)}
 	fallback := NewFallbackAdapter("vision-route", route, defs, nil, MapAdapterResolver{"sight": sight}).WithVisionPolicy(policy)
 	req := visionRequest(&genai.Part{Text: "describe"}, visionFilePart("art-1", data, "image/png", 4, 4))
 	for _, err := range fallback.GenerateContent(context.Background(), req, false) {

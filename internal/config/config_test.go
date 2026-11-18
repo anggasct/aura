@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -412,10 +413,10 @@ models:
 	if cfg.Models.Routing["summarize"] != "primary" {
 		t.Errorf("routing.summarize = %q, want primary", cfg.Models.Routing["summarize"])
 	}
-	if cfg.Models.RequestTimeout != Duration(120*time.Second) {
+	if cfg.Models.RequestTimeout != configkit.Duration(120*time.Second) {
 		t.Errorf("RequestTimeout = %v, want the 120s default", cfg.Models.RequestTimeout)
 	}
-	if cfg.Models.StreamingIdleTimeout != Duration(60*time.Second) {
+	if cfg.Models.StreamingIdleTimeout != configkit.Duration(60*time.Second) {
 		t.Errorf("StreamingIdleTimeout = %v, want the 60s default", cfg.Models.StreamingIdleTimeout)
 	}
 	if cfg.Server.Host != "127.0.0.1" || cfg.Server.Port != 8280 {
@@ -509,7 +510,7 @@ agents:
 	if d.ModelRoute != "fast" {
 		t.Errorf("ModelRoute = %q", d.ModelRoute)
 	}
-	if d.Limits.TurnTimeout != Duration(30*time.Second) {
+	if d.Limits.TurnTimeout != configkit.Duration(30*time.Second) {
 		t.Errorf("Limits.TurnTimeout = %v", d.Limits.TurnTimeout)
 	}
 }
@@ -842,16 +843,16 @@ storage:
 	if s.Path != "/data/aura" || s.BackupDirectory != "/data/backups" {
 		t.Errorf("paths = %q / %q", s.Path, s.BackupDirectory)
 	}
-	if s.BusyTimeout != Duration(10*time.Second) {
+	if s.BusyTimeout != configkit.Duration(10*time.Second) {
 		t.Errorf("BusyTimeout = %v, want 10s", s.BusyTimeout)
 	}
 	if s.MaxOpenConnections != 8 {
 		t.Errorf("MaxOpenConnections = %d, want 8", s.MaxOpenConnections)
 	}
-	if s.ArtifactQuota != ByteSize(2<<30) {
+	if s.ArtifactQuota != configkit.ByteSize(2<<30) {
 		t.Errorf("ArtifactQuota = %v, want 2GiB", s.ArtifactQuota)
 	}
-	if s.BackupInterval != Duration(12*time.Hour) {
+	if s.BackupInterval != configkit.Duration(12*time.Hour) {
 		t.Errorf("BackupInterval = %v, want 12h", s.BackupInterval)
 	}
 	if s.BackupRetention != 3 {
@@ -865,16 +866,16 @@ func TestLoad_StorageDefaultsApplied(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	s := res.Config.Storage
-	if s.BusyTimeout != Duration(5*time.Second) {
+	if s.BusyTimeout != configkit.Duration(5*time.Second) {
 		t.Errorf("BusyTimeout = %v, want default 5s", s.BusyTimeout)
 	}
 	if s.MaxOpenConnections != 4 {
 		t.Errorf("MaxOpenConnections = %d, want default 4", s.MaxOpenConnections)
 	}
-	if s.ArtifactQuota != ByteSize(5<<30) {
+	if s.ArtifactQuota != configkit.ByteSize(5<<30) {
 		t.Errorf("ArtifactQuota = %v, want default 5GiB", s.ArtifactQuota)
 	}
-	if s.BackupInterval != Duration(24*time.Hour) {
+	if s.BackupInterval != configkit.Duration(24*time.Hour) {
 		t.Errorf("BackupInterval = %v, want default 24h", s.BackupInterval)
 	}
 	if s.BackupRetention != 7 {
@@ -907,40 +908,6 @@ func TestLoad_StorageValidation(t *testing.T) {
 	}
 }
 
-func TestByteSizeParsing(t *testing.T) {
-	cases := []struct {
-		raw  string
-		want ByteSize
-	}{
-		{raw: "1000", want: 1000},
-		{raw: "5GiB", want: 5 << 30},
-		{raw: "512MiB", want: 512 << 20},
-		{raw: "2KiB", want: 2 << 10},
-		{raw: "1TiB", want: 1 << 40},
-		{raw: "2GB", want: 2000 * 1000 * 1000},
-		{raw: "1500KB", want: 1500 * 1000},
-	}
-	for _, tc := range cases {
-		var got ByteSize
-		if err := got.UnmarshalText([]byte(tc.raw)); err != nil {
-			t.Errorf("UnmarshalText(%q): %v", tc.raw, err)
-			continue
-		}
-		if got != tc.want {
-			t.Errorf("UnmarshalText(%q) = %d, want %d", tc.raw, got, tc.want)
-		}
-	}
-	for _, bad := range []string{"", "-5", "5XB", "abc", "5GiBx", "99999999999999999999TiB"} {
-		var got ByteSize
-		if err := got.UnmarshalText([]byte(bad)); err == nil {
-			t.Errorf("UnmarshalText(%q) accepted an invalid size", bad)
-		}
-	}
-	if got := (ByteSize(5 << 30)).String(); got != "5GiB" {
-		t.Errorf("String() = %q, want 5GiB", got)
-	}
-}
-
 func TestLoad_StorageEnvOverride(t *testing.T) {
 	t.Setenv("AURA_STORAGE_MAX_OPEN_CONNECTIONS", "2")
 	t.Setenv("AURA_STORAGE_ARTIFACT_QUOTA", "1GiB")
@@ -953,10 +920,10 @@ func TestLoad_StorageEnvOverride(t *testing.T) {
 	if s.MaxOpenConnections != 2 {
 		t.Errorf("MaxOpenConnections = %d, want 2 from env", s.MaxOpenConnections)
 	}
-	if s.ArtifactQuota != ByteSize(1<<30) {
+	if s.ArtifactQuota != configkit.ByteSize(1<<30) {
 		t.Errorf("ArtifactQuota = %v, want 1GiB from env", s.ArtifactQuota)
 	}
-	if s.BusyTimeout != Duration(3*time.Second) {
+	if s.BusyTimeout != configkit.Duration(3*time.Second) {
 		t.Errorf("BusyTimeout = %v, want 3s from env", s.BusyTimeout)
 	}
 }

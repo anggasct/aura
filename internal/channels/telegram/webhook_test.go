@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -474,7 +475,7 @@ func TestNewRejectsIncompleteWebhookAccounts(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			cfg := &config.Telegram{
-				Polling: config.TelegramPolling{Timeout: config.Duration(time.Second), MaxBackoff: config.Duration(time.Second)},
+				Polling: config.TelegramPolling{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
 				Webhook: config.TelegramWebhook{PublicBaseURL: testPublicBase, MaxBodyBytes: 1024, MaxConnections: 2},
 			}
 			account := &config.TelegramAccount{Name: "pocket", BotTokenRef: "env://" + testTokenEnv, Mode: config.TelegramModeWebhook, WebhookSecretRef: "env://" + testWebhookSecretEnv}

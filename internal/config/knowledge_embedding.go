@@ -8,6 +8,8 @@ import (
 	"unicode/utf8"
 
 	yamlv3 "gopkg.in/yaml.v3"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 const (
@@ -17,11 +19,11 @@ const (
 
 	DefaultEmbeddingDimensionsField = "dimensions"
 	DefaultEmbeddingBatchSize       = 96
-	DefaultEmbeddingMaxMemory       = ByteSize(256 << 20)
+	DefaultEmbeddingMaxMemory       = configkit.ByteSize(256 << 20)
 
 	MaxEmbeddingBatchSize  = 1000
 	MaxEmbeddingDimensions = 8192
-	MinEmbeddingMaxMemory  = ByteSize(1 << 20)
+	MinEmbeddingMaxMemory  = configkit.ByteSize(1 << 20)
 
 	maxEmbeddingModelLength  = 200
 	maxEmbeddingPrefixLength = 256
@@ -44,17 +46,17 @@ type Knowledge struct {
 }
 
 type KnowledgeEmbedding struct {
-	BaseURL         string   `koanf:"base_url" yaml:"base_url"`
-	Model           string   `koanf:"model" yaml:"model"`
-	Dimensions      int      `koanf:"dimensions" yaml:"dimensions"`
-	DimensionsField string   `koanf:"dimensions_field" yaml:"dimensions_field"`
-	CredentialRef   string   `koanf:"credential_ref" yaml:"credential_ref,omitempty"`
-	RoleStyle       string   `koanf:"role_style" yaml:"role_style"`
-	QueryPrefix     string   `koanf:"query_prefix" yaml:"query_prefix,omitempty"`
-	DocumentPrefix  string   `koanf:"document_prefix" yaml:"document_prefix,omitempty"`
-	BatchSize       int      `koanf:"batch_size" yaml:"batch_size"`
-	MaxMemory       ByteSize `koanf:"max_memory" yaml:"max_memory"`
-	PublicQueries   bool     `koanf:"public_queries" yaml:"public_queries"`
+	BaseURL         string             `koanf:"base_url" yaml:"base_url"`
+	Model           string             `koanf:"model" yaml:"model"`
+	Dimensions      int                `koanf:"dimensions" yaml:"dimensions"`
+	DimensionsField string             `koanf:"dimensions_field" yaml:"dimensions_field"`
+	CredentialRef   string             `koanf:"credential_ref" yaml:"credential_ref,omitempty"`
+	RoleStyle       string             `koanf:"role_style" yaml:"role_style"`
+	QueryPrefix     string             `koanf:"query_prefix" yaml:"query_prefix,omitempty"`
+	DocumentPrefix  string             `koanf:"document_prefix" yaml:"document_prefix,omitempty"`
+	BatchSize       int                `koanf:"batch_size" yaml:"batch_size"`
+	MaxMemory       configkit.ByteSize `koanf:"max_memory" yaml:"max_memory"`
+	PublicQueries   bool               `koanf:"public_queries" yaml:"public_queries"`
 }
 
 func (e *KnowledgeEmbedding) Endpoint() (ServiceEndpoint, error) {

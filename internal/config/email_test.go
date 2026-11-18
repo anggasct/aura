@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 const emailOwner = "owner:\n  identities:\n    - email:owner@example.com\n"
@@ -67,7 +69,7 @@ func TestLoad_EmailAccountApplied(t *testing.T) {
 	if smtp.Port != 587 {
 		t.Errorf("smtp default port = %d, want 587", smtp.Port)
 	}
-	if imap.Port != 993 || imap.Folder != "INBOX" || imap.PollInterval != Duration(time.Minute) {
+	if imap.Port != 993 || imap.Folder != "INBOX" || imap.PollInterval != configkit.Duration(time.Minute) {
 		t.Errorf("imap defaults = port %d folder %q poll %v, want 993 INBOX 1m", imap.Port, imap.Folder, imap.PollInterval)
 	}
 }
@@ -79,7 +81,7 @@ func TestLoad_EmailIMAPOverrides(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	imap := res.Config.Channels.Email.Accounts[0].IMAP
-	if imap.Port != 1993 || imap.Folder != "Aura" || imap.PollInterval != Duration(30*time.Second) {
+	if imap.Port != 1993 || imap.Folder != "Aura" || imap.PollInterval != configkit.Duration(30*time.Second) {
 		t.Errorf("imap = %+v", imap)
 	}
 }

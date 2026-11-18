@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -320,7 +321,7 @@ func TestOwnerRejectionTellsTheRequester(t *testing.T) {
 func TestOwnerApprovalTimeoutDeniesAndTellsTheRequester(t *testing.T) {
 	stub := newApprovalStub(t)
 	personas := accessPersonas()
-	personas[1].ApprovalTimeout = config.Duration(80 * time.Millisecond)
+	personas[1].ApprovalTimeout = configkit.Duration(80 * time.Millisecond)
 	adapter, _, observer := newAccessAdapter(t, "team", []string{"discord:777"}, personas)
 	adapter.restBase = stub.srv.URL
 	adapter.rememberTarget("dm:111", &approvalBinding{principal: "discord:111", class: principal.ClassTrusted, persona: "team", actor: "111", channelID: "333"})

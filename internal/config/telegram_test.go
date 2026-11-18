@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 const telegramOwner = "owner:\n  identities:\n    - telegram:424242\n"
@@ -17,10 +19,10 @@ func TestLoad_TelegramDefaults(t *testing.T) {
 	if telegram.Enabled || len(telegram.Accounts) != 0 {
 		t.Fatalf("telegram = %+v, want disabled with no accounts", telegram)
 	}
-	if telegram.Polling.Timeout != Duration(30*time.Second) || telegram.Polling.MaxBackoff != Duration(time.Minute) {
+	if telegram.Polling.Timeout != configkit.Duration(30*time.Second) || telegram.Polling.MaxBackoff != configkit.Duration(time.Minute) {
 		t.Errorf("polling = %+v, want 30s timeout and 1m backoff", telegram.Polling)
 	}
-	if telegram.MinEditInterval != Duration(2*time.Second) {
+	if telegram.MinEditInterval != configkit.Duration(2*time.Second) {
 		t.Errorf("min_edit_interval = %v, want 2s", telegram.MinEditInterval)
 	}
 	if telegram.MaxAttachmentBytes != 20971520 {
@@ -71,7 +73,7 @@ func TestLoad_TelegramMinEditIntervalOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := res.Config.Channels.Telegram.MinEditInterval; got != Duration(5*time.Second) {
+	if got := res.Config.Channels.Telegram.MinEditInterval; got != configkit.Duration(5*time.Second) {
 		t.Errorf("min_edit_interval = %v, want 5s", got)
 	}
 }
@@ -103,10 +105,10 @@ bindings:
 	if account := telegram.Accounts[0]; account.Name != "pocket" || account.Persona != "main" || account.BotTokenRef != "env://AURA_TELEGRAM_BOT_TOKEN" {
 		t.Errorf("account = %+v", account)
 	}
-	if telegram.Polling.Timeout != Duration(20*time.Second) {
+	if telegram.Polling.Timeout != configkit.Duration(20*time.Second) {
 		t.Errorf("timeout = %v, want 20s", telegram.Polling.Timeout)
 	}
-	if telegram.Polling.MaxBackoff != Duration(time.Minute) {
+	if telegram.Polling.MaxBackoff != configkit.Duration(time.Minute) {
 		t.Errorf("max_backoff default not applied: %v", telegram.Polling.MaxBackoff)
 	}
 	if len(res.Config.Bindings) != 1 || res.Config.Bindings[0].Channel != BindingChannelTelegram {

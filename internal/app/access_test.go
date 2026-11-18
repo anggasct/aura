@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -148,7 +149,7 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 
 func TestDiscordAccessSettingsUseTheAccessSection(t *testing.T) {
 	cfg := config.Default()
-	cfg.Access.ApprovalTimeout = config.Duration(10 * time.Minute)
+	cfg.Access.ApprovalTimeout = configkit.Duration(10 * time.Minute)
 	settings := discordAccessSettings(&cfg, nil, nil, nil)
 	if settings.ApprovalTimeout != 10*time.Minute || settings.StandingGrantTTL != 168*time.Hour || settings.Grants == nil {
 		t.Fatalf("settings = %+v", settings)

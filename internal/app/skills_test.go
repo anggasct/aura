@@ -7,6 +7,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -70,7 +71,7 @@ func TestBuildSkillsEngine(t *testing.T) {
 	engine, err := buildSkillsEngine(t.Context(), &config.Skills{
 		Enabled: true, Roots: []string{root}, AutoSelect: true,
 		MaxIndexedSkills: 16, MaxInstructionTokens: 5000,
-		MaxResourceBytes: 8388608, QuarantineRetention: config.Duration(1),
+		MaxResourceBytes: 8388608, QuarantineRetention: configkit.Duration(1),
 	}, chatDB, nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)

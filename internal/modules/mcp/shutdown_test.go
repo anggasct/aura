@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -52,9 +53,9 @@ func TestConnectCloseCycleLeaksNothing(t *testing.T) {
 
 	serverCfg := &config.MCPServer{
 		Name: "cycle", Transport: config.MCPTransportStreamableHTTP, URL: httpServer.URL,
-		RequestTimeout: config.Duration(10 * time.Second),
-		ConnectTimeout: config.Duration(10 * time.Second),
-		StartupTimeout: config.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: configkit.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 	baseline := runtime.NumGoroutine()

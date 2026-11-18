@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/status"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -387,7 +388,7 @@ func TestPresenceThrottleCoalescesInFlightPost(t *testing.T) {
 		writeMessage(t, w, "status-id")
 	})
 	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
-		cfg.MinEditInterval = config.Duration(time.Hour)
+		cfg.MinEditInterval = configkit.Duration(time.Hour)
 	})
 	adapter.statusAfter = 10 * time.Millisecond
 	adapter.typingRefresh = time.Hour

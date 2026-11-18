@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/health"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -31,9 +32,9 @@ func TestLegacySSEConnectAndDiscover(t *testing.T) {
 	serverCfg := &config.MCPServer{
 		Name: "legacy", Transport: config.MCPTransportLegacySSE, URL: httpServer.URL,
 		CompatibilityAck: true,
-		RequestTimeout:   config.Duration(10 * time.Second),
-		ConnectTimeout:   config.Duration(10 * time.Second),
-		StartupTimeout:   config.Duration(10 * time.Second),
+		RequestTimeout:   configkit.Duration(10 * time.Second),
+		ConnectTimeout:   configkit.Duration(10 * time.Second),
+		StartupTimeout:   configkit.Duration(10 * time.Second),
 		MaxMessageSize:   1 << 20,
 	}
 	var observations []*Observation
@@ -73,7 +74,7 @@ func TestLegacySSEOAuthFailsClosed(t *testing.T) {
 		Name: "legacy-oauth", Transport: config.MCPTransportLegacySSE, URL: httpServer.URL,
 		CompatibilityAck: true,
 		Auth:             &config.MCPAuth{OAuth: &config.MCPOAuth{ClientIDEnv: "X", ClientSecretEnv: "Y"}},
-		RequestTimeout:   config.Duration(10 * time.Second),
+		RequestTimeout:   configkit.Duration(10 * time.Second),
 	}
 	client, err := NewClient(serverCfg, nil,
 		WithHTTPClient(&http.Client{}),
@@ -126,9 +127,9 @@ func TestLegacyHandshakeCancelCarriesStableCode(t *testing.T) {
 		Transport:        config.MCPTransportLegacySSE,
 		URL:              blocking.URL,
 		CompatibilityAck: true,
-		RequestTimeout:   config.Duration(10 * time.Second),
-		ConnectTimeout:   config.Duration(10 * time.Second),
-		StartupTimeout:   config.Duration(10 * time.Second),
+		RequestTimeout:   configkit.Duration(10 * time.Second),
+		ConnectTimeout:   configkit.Duration(10 * time.Second),
+		StartupTimeout:   configkit.Duration(10 * time.Second),
 		MaxMessageSize:   1 << 20,
 	}
 	client, err := NewClient(serverCfg, nil,

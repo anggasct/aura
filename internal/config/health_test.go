@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func writeHealthConfig(t *testing.T, healthYAML string) LoadResult {
@@ -34,7 +36,7 @@ func TestLoadHealthDefaultsApplied(t *testing.T) {
 	if h.DiskWarningPercent != 15 || h.DiskCriticalPercent != 8 {
 		t.Errorf("disk percents = %d/%d", h.DiskWarningPercent, h.DiskCriticalPercent)
 	}
-	if h.DiskCriticalFloorBytes != ByteSize(512<<20) {
+	if h.DiskCriticalFloorBytes != configkit.ByteSize(512<<20) {
 		t.Errorf("floor = %v", h.DiskCriticalFloorBytes)
 	}
 	if time.Duration(h.BackupMaxAge) != 24*time.Hour {

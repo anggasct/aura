@@ -11,6 +11,7 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -130,7 +131,7 @@ func applyEmailDefaults(cfg *Config, doc *yamlv3.Node, defaults *Email) {
 			imap.Folder = EmailDefaultFolder
 		}
 		if imap.PollInterval == 0 && !emailItemHasKey(item, "imap", "poll_interval") {
-			imap.PollInterval = Duration(EmailDefaultPollInterval)
+			imap.PollInterval = configkit.Duration(EmailDefaultPollInterval)
 		}
 	}
 }

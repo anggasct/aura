@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -51,8 +52,8 @@ func startHostileManager(ctx context.Context, t *testing.T, broker *toolbroker.B
 			Name:           serverName,
 			Transport:      config.MCPTransportStdio,
 			Capabilities:   []string{"workspace-read"},
-			RequestTimeout: config.Duration(5 * time.Second),
-			StartupTimeout: config.Duration(5 * time.Second),
+			RequestTimeout: configkit.Duration(5 * time.Second),
+			StartupTimeout: configkit.Duration(5 * time.Second),
 			MaxMessageSize: 1024 * 1024,
 		}},
 	}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"net"
 	"net/url"
 	"reflect"
@@ -16,6 +15,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 type Config struct {
@@ -55,13 +56,13 @@ type Config struct {
 }
 
 type Webhook struct {
-	Enabled            bool         `koanf:"enabled" yaml:"enabled"`
-	Listen             string       `koanf:"listen_address" yaml:"listen_address"`
-	MaxBodySize        ByteSize     `koanf:"max_body_size" yaml:"max_body_size"`
-	TimestampTolerance Duration     `koanf:"timestamp_tolerance" yaml:"timestamp_tolerance"`
-	ReplayRetention    Duration     `koanf:"replay_retention" yaml:"replay_retention"`
-	RequestsPerMinute  int          `koanf:"requests_per_minute" yaml:"requests_per_minute"`
-	Keys               []WebhookKey `koanf:"keys" yaml:"keys"`
+	Enabled            bool               `koanf:"enabled" yaml:"enabled"`
+	Listen             string             `koanf:"listen_address" yaml:"listen_address"`
+	MaxBodySize        configkit.ByteSize `koanf:"max_body_size" yaml:"max_body_size"`
+	TimestampTolerance configkit.Duration `koanf:"timestamp_tolerance" yaml:"timestamp_tolerance"`
+	ReplayRetention    configkit.Duration `koanf:"replay_retention" yaml:"replay_retention"`
+	RequestsPerMinute  int                `koanf:"requests_per_minute" yaml:"requests_per_minute"`
+	Keys               []WebhookKey       `koanf:"keys" yaml:"keys"`
 }
 
 type WebhookKey struct {
@@ -78,36 +79,36 @@ type Channels struct {
 }
 
 type Broadcast struct {
-	Timezone       string            `koanf:"timezone" yaml:"timezone"`
-	QuietHours     QuietHours        `koanf:"quiet_hours" yaml:"quiet_hours"`
-	MaxDigestItems int               `koanf:"max_digest_items" yaml:"max_digest_items"`
-	MaxDigestBytes int64             `koanf:"max_digest_bytes" yaml:"max_digest_bytes"`
-	MaxAttempts    int               `koanf:"max_attempts" yaml:"max_attempts"`
-	MaxDeliveryAge Duration          `koanf:"max_delivery_age" yaml:"max_delivery_age"`
-	MinDispatchGap Duration          `koanf:"min_dispatch_gap" yaml:"min_dispatch_gap"`
-	Destinations   map[string]string `koanf:"destinations" yaml:"destinations"`
-	Fallback       map[string]string `koanf:"fallback" yaml:"fallback"`
+	Timezone       string             `koanf:"timezone" yaml:"timezone"`
+	QuietHours     QuietHours         `koanf:"quiet_hours" yaml:"quiet_hours"`
+	MaxDigestItems int                `koanf:"max_digest_items" yaml:"max_digest_items"`
+	MaxDigestBytes int64              `koanf:"max_digest_bytes" yaml:"max_digest_bytes"`
+	MaxAttempts    int                `koanf:"max_attempts" yaml:"max_attempts"`
+	MaxDeliveryAge configkit.Duration `koanf:"max_delivery_age" yaml:"max_delivery_age"`
+	MinDispatchGap configkit.Duration `koanf:"min_dispatch_gap" yaml:"min_dispatch_gap"`
+	Destinations   map[string]string  `koanf:"destinations" yaml:"destinations"`
+	Fallback       map[string]string  `koanf:"fallback" yaml:"fallback"`
 }
 
 type Scheduler struct {
-	Enabled             bool     `koanf:"enabled" yaml:"enabled"`
-	DefaultTimezone     string   `koanf:"default_timezone" yaml:"default_timezone"`
-	DefaultCatchUpGrace Duration `koanf:"default_catch_up_grace" yaml:"default_catch_up_grace"`
-	OccurrenceRetention Duration `koanf:"occurrence_retention" yaml:"occurrence_retention"`
+	Enabled             bool               `koanf:"enabled" yaml:"enabled"`
+	DefaultTimezone     string             `koanf:"default_timezone" yaml:"default_timezone"`
+	DefaultCatchUpGrace configkit.Duration `koanf:"default_catch_up_grace" yaml:"default_catch_up_grace"`
+	OccurrenceRetention configkit.Duration `koanf:"occurrence_retention" yaml:"occurrence_retention"`
 }
 
 type Memory struct {
-	Enabled              bool     `koanf:"enabled" yaml:"enabled"`
-	MaxDocuments         int      `koanf:"max_documents" yaml:"max_documents"`
-	RecallTokenBudget    int      `koanf:"recall_token_budget" yaml:"recall_token_budget"`
-	Locale               string   `koanf:"locale" yaml:"locale"`
-	EnglishStemming      bool     `koanf:"english_stemming" yaml:"english_stemming"`
-	SummaryPromptVersion string   `koanf:"summary_prompt_version" yaml:"summary_prompt_version"`
-	SummaryTTL           Duration `koanf:"summary_ttl" yaml:"summary_ttl"`
-	RangeThreshold       int      `koanf:"range_threshold" yaml:"range_threshold"`
-	RangeLiveWindow      int      `koanf:"range_live_window" yaml:"range_live_window"`
-	PurgeInterval        Duration `koanf:"purge_interval" yaml:"purge_interval"`
-	PurgeLimit           int      `koanf:"purge_limit" yaml:"purge_limit"`
+	Enabled              bool               `koanf:"enabled" yaml:"enabled"`
+	MaxDocuments         int                `koanf:"max_documents" yaml:"max_documents"`
+	RecallTokenBudget    int                `koanf:"recall_token_budget" yaml:"recall_token_budget"`
+	Locale               string             `koanf:"locale" yaml:"locale"`
+	EnglishStemming      bool               `koanf:"english_stemming" yaml:"english_stemming"`
+	SummaryPromptVersion string             `koanf:"summary_prompt_version" yaml:"summary_prompt_version"`
+	SummaryTTL           configkit.Duration `koanf:"summary_ttl" yaml:"summary_ttl"`
+	RangeThreshold       int                `koanf:"range_threshold" yaml:"range_threshold"`
+	RangeLiveWindow      int                `koanf:"range_live_window" yaml:"range_live_window"`
+	PurgeInterval        configkit.Duration `koanf:"purge_interval" yaml:"purge_interval"`
+	PurgeLimit           int                `koanf:"purge_limit" yaml:"purge_limit"`
 }
 
 type QuietHours struct {
@@ -117,14 +118,14 @@ type QuietHours struct {
 }
 
 type Skills struct {
-	Enabled                 bool     `koanf:"enabled" yaml:"enabled"`
-	Roots                   []string `koanf:"roots" yaml:"roots"`
-	AutoSelect              bool     `koanf:"auto_select" yaml:"auto_select"`
-	MaxIndexedSkills        int      `koanf:"max_indexed_skills" yaml:"max_indexed_skills"`
-	MaxInstructionTokens    int      `koanf:"max_instruction_tokens" yaml:"max_instruction_tokens"`
-	MaxSessionContextTokens int      `koanf:"max_session_context_tokens" yaml:"max_session_context_tokens"`
-	MaxResourceBytes        int64    `koanf:"max_resource_bytes" yaml:"max_resource_bytes"`
-	QuarantineRetention     Duration `koanf:"quarantine_retention" yaml:"quarantine_retention"`
+	Enabled                 bool               `koanf:"enabled" yaml:"enabled"`
+	Roots                   []string           `koanf:"roots" yaml:"roots"`
+	AutoSelect              bool               `koanf:"auto_select" yaml:"auto_select"`
+	MaxIndexedSkills        int                `koanf:"max_indexed_skills" yaml:"max_indexed_skills"`
+	MaxInstructionTokens    int                `koanf:"max_instruction_tokens" yaml:"max_instruction_tokens"`
+	MaxSessionContextTokens int                `koanf:"max_session_context_tokens" yaml:"max_session_context_tokens"`
+	MaxResourceBytes        int64              `koanf:"max_resource_bytes" yaml:"max_resource_bytes"`
+	QuarantineRetention     configkit.Duration `koanf:"quarantine_retention" yaml:"quarantine_retention"`
 }
 
 type Context struct {
@@ -145,15 +146,15 @@ type ContextSummary struct {
 }
 
 type Sync struct {
-	Enabled            bool     `koanf:"enabled" yaml:"enabled"`
-	Remote             string   `koanf:"remote" yaml:"remote"`
-	Branch             string   `koanf:"branch" yaml:"branch"`
-	Interval           Duration `koanf:"interval" yaml:"interval"`
-	TransportSecretRef string   `koanf:"transport_secret_ref" yaml:"transport_secret_ref"`
-	KnownHostsRef      string   `koanf:"known_hosts_ref" yaml:"known_hosts_ref"`
-	GitBinary          string   `koanf:"git_binary" yaml:"git_binary"`
-	SSHBinary          string   `koanf:"ssh_binary" yaml:"ssh_binary"`
-	Include            []string `koanf:"include" yaml:"include"`
+	Enabled            bool               `koanf:"enabled" yaml:"enabled"`
+	Remote             string             `koanf:"remote" yaml:"remote"`
+	Branch             string             `koanf:"branch" yaml:"branch"`
+	Interval           configkit.Duration `koanf:"interval" yaml:"interval"`
+	TransportSecretRef string             `koanf:"transport_secret_ref" yaml:"transport_secret_ref"`
+	KnownHostsRef      string             `koanf:"known_hosts_ref" yaml:"known_hosts_ref"`
+	GitBinary          string             `koanf:"git_binary" yaml:"git_binary"`
+	SSHBinary          string             `koanf:"ssh_binary" yaml:"ssh_binary"`
+	Include            []string           `koanf:"include" yaml:"include"`
 }
 
 type Profile struct {
@@ -174,16 +175,16 @@ type Owner struct {
 }
 
 type Access struct {
-	ApprovalTimeout  Duration        `koanf:"approval_timeout" yaml:"approval_timeout"`
-	StandingGrantTTL Duration        `koanf:"standing_grant_ttl" yaml:"standing_grant_ttl"`
-	Budgets          AccessBudgets   `koanf:"budgets" yaml:"budgets"`
-	Retention        AccessRetention `koanf:"retention" yaml:"retention"`
-	HandoffTimeout   Duration        `koanf:"handoff_timeout" yaml:"handoff_timeout"`
+	ApprovalTimeout  configkit.Duration `koanf:"approval_timeout" yaml:"approval_timeout"`
+	StandingGrantTTL configkit.Duration `koanf:"standing_grant_ttl" yaml:"standing_grant_ttl"`
+	Budgets          AccessBudgets      `koanf:"budgets" yaml:"budgets"`
+	Retention        AccessRetention    `koanf:"retention" yaml:"retention"`
+	HandoffTimeout   configkit.Duration `koanf:"handoff_timeout" yaml:"handoff_timeout"`
 }
 
 type AccessRetention struct {
-	Trusted Duration `koanf:"trusted" yaml:"trusted"`
-	Public  Duration `koanf:"public" yaml:"public"`
+	Trusted configkit.Duration `koanf:"trusted" yaml:"trusted"`
+	Public  configkit.Duration `koanf:"public" yaml:"public"`
 }
 
 type AccessBudgets struct {
@@ -197,13 +198,13 @@ type PrincipalBudget struct {
 }
 
 type Children struct {
-	Enabled            bool     `koanf:"enabled" yaml:"enabled"`
-	MaxDepth           int      `koanf:"max_depth" yaml:"max_depth"`
-	MaxActivePerParent int      `koanf:"max_active_per_parent" yaml:"max_active_per_parent"`
-	MaxActiveGlobal    int      `koanf:"max_active_global" yaml:"max_active_global"`
-	DefaultTimeout     Duration `koanf:"default_timeout" yaml:"default_timeout"`
-	MaxTimeout         Duration `koanf:"max_timeout" yaml:"max_timeout"`
-	Recovery           string   `koanf:"recovery" yaml:"recovery"`
+	Enabled            bool               `koanf:"enabled" yaml:"enabled"`
+	MaxDepth           int                `koanf:"max_depth" yaml:"max_depth"`
+	MaxActivePerParent int                `koanf:"max_active_per_parent" yaml:"max_active_per_parent"`
+	MaxActiveGlobal    int                `koanf:"max_active_global" yaml:"max_active_global"`
+	DefaultTimeout     configkit.Duration `koanf:"default_timeout" yaml:"default_timeout"`
+	MaxTimeout         configkit.Duration `koanf:"max_timeout" yaml:"max_timeout"`
+	Recovery           string             `koanf:"recovery" yaml:"recovery"`
 }
 
 type VisionProviderLimits struct {
@@ -219,23 +220,23 @@ type Vision struct {
 	MaxDimension         int                             `koanf:"max_dimension" yaml:"max_dimension"`
 	MaxImages            int                             `koanf:"max_images" yaml:"max_images"`
 	MaxFrames            int                             `koanf:"max_frames" yaml:"max_frames"`
-	DecodeTimeout        Duration                        `koanf:"decode_timeout" yaml:"decode_timeout"`
+	DecodeTimeout        configkit.Duration              `koanf:"decode_timeout" yaml:"decode_timeout"`
 	MaxDecodeConcurrency int                             `koanf:"max_decode_concurrency" yaml:"max_decode_concurrency"`
 	MaxRequestBytes      int64                           `koanf:"max_request_bytes" yaml:"max_request_bytes"`
 	StripMetadata        bool                            `koanf:"strip_metadata" yaml:"strip_metadata"`
 	OrientNormalize      bool                            `koanf:"orient_normalize" yaml:"orient_normalize"`
 	Detail               string                          `koanf:"detail" yaml:"detail"`
 	TransformVersion     string                          `koanf:"transform_version" yaml:"transform_version"`
-	MaxTransformMemory   ByteSize                        `koanf:"max_transform_memory_bytes" yaml:"max_transform_memory_bytes"`
+	MaxTransformMemory   configkit.ByteSize              `koanf:"max_transform_memory_bytes" yaml:"max_transform_memory_bytes"`
 	Providers            map[string]VisionProviderLimits `koanf:"providers" yaml:"providers,omitempty"`
 }
 
 type Discord struct {
-	Enabled                  bool             `koanf:"enabled" yaml:"enabled"`
-	Accounts                 []DiscordAccount `koanf:"accounts" yaml:"accounts"`
-	MinEditInterval          Duration         `koanf:"min_edit_interval" yaml:"min_edit_interval"`
-	MaxAttachmentBytes       int64            `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
-	ThreadAutoArchiveMinutes int              `koanf:"thread_auto_archive_minutes" yaml:"thread_auto_archive_minutes"`
+	Enabled                  bool               `koanf:"enabled" yaml:"enabled"`
+	Accounts                 []DiscordAccount   `koanf:"accounts" yaml:"accounts"`
+	MinEditInterval          configkit.Duration `koanf:"min_edit_interval" yaml:"min_edit_interval"`
+	MaxAttachmentBytes       int64              `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
+	ThreadAutoArchiveMinutes int                `koanf:"thread_auto_archive_minutes" yaml:"thread_auto_archive_minutes"`
 }
 
 type DiscordAccount struct {
@@ -250,12 +251,12 @@ type DiscordAccount struct {
 }
 
 type Telegram struct {
-	Enabled            bool              `koanf:"enabled" yaml:"enabled"`
-	Accounts           []TelegramAccount `koanf:"accounts" yaml:"accounts"`
-	Polling            TelegramPolling   `koanf:"polling" yaml:"polling"`
-	MinEditInterval    Duration          `koanf:"min_edit_interval" yaml:"min_edit_interval"`
-	MaxAttachmentBytes int64             `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
-	Webhook            TelegramWebhook   `koanf:"webhook" yaml:"webhook"`
+	Enabled            bool               `koanf:"enabled" yaml:"enabled"`
+	Accounts           []TelegramAccount  `koanf:"accounts" yaml:"accounts"`
+	Polling            TelegramPolling    `koanf:"polling" yaml:"polling"`
+	MinEditInterval    configkit.Duration `koanf:"min_edit_interval" yaml:"min_edit_interval"`
+	MaxAttachmentBytes int64              `koanf:"max_attachment_bytes" yaml:"max_attachment_bytes"`
+	Webhook            TelegramWebhook    `koanf:"webhook" yaml:"webhook"`
 }
 
 type TelegramAccount struct {
@@ -306,8 +307,8 @@ func (t *Telegram) UsesWebhook() bool {
 }
 
 type TelegramPolling struct {
-	Timeout    Duration `koanf:"timeout" yaml:"timeout"`
-	MaxBackoff Duration `koanf:"max_backoff" yaml:"max_backoff"`
+	Timeout    configkit.Duration `koanf:"timeout" yaml:"timeout"`
+	MaxBackoff configkit.Duration `koanf:"max_backoff" yaml:"max_backoff"`
 }
 
 const (
@@ -344,12 +345,12 @@ type EmailSMTP struct {
 }
 
 type EmailIMAP struct {
-	Host         string   `koanf:"host" yaml:"host"`
-	Port         int      `koanf:"port" yaml:"port"`
-	Username     string   `koanf:"username" yaml:"username"`
-	PasswordRef  string   `koanf:"password_ref" yaml:"password_ref"`
-	Folder       string   `koanf:"folder" yaml:"folder"`
-	PollInterval Duration `koanf:"poll_interval" yaml:"poll_interval"`
+	Host         string             `koanf:"host" yaml:"host"`
+	Port         int                `koanf:"port" yaml:"port"`
+	Username     string             `koanf:"username" yaml:"username"`
+	PasswordRef  string             `koanf:"password_ref" yaml:"password_ref"`
+	Folder       string             `koanf:"folder" yaml:"folder"`
+	PollInterval configkit.Duration `koanf:"poll_interval" yaml:"poll_interval"`
 }
 
 const (
@@ -370,14 +371,14 @@ const (
 )
 
 type HTTP struct {
-	Enabled             bool     `koanf:"enabled" yaml:"enabled"`
-	ListenAddress       string   `koanf:"listen_address" yaml:"listen_address"`
-	MaxBodyBytes        int64    `koanf:"max_body_bytes" yaml:"max_body_bytes"`
-	RequestsPerMinute   int      `koanf:"requests_per_minute" yaml:"requests_per_minute"`
-	MaxConcurrentPerKey int      `koanf:"max_concurrent_per_key" yaml:"max_concurrent_per_key"`
-	MaxHistoryMessages  int      `koanf:"max_history_messages" yaml:"max_history_messages"`
-	MaxHistoryBytes     int      `koanf:"max_history_bytes" yaml:"max_history_bytes"`
-	KeepaliveInterval   Duration `koanf:"keepalive_interval" yaml:"keepalive_interval"`
+	Enabled             bool               `koanf:"enabled" yaml:"enabled"`
+	ListenAddress       string             `koanf:"listen_address" yaml:"listen_address"`
+	MaxBodyBytes        int64              `koanf:"max_body_bytes" yaml:"max_body_bytes"`
+	RequestsPerMinute   int                `koanf:"requests_per_minute" yaml:"requests_per_minute"`
+	MaxConcurrentPerKey int                `koanf:"max_concurrent_per_key" yaml:"max_concurrent_per_key"`
+	MaxHistoryMessages  int                `koanf:"max_history_messages" yaml:"max_history_messages"`
+	MaxHistoryBytes     int                `koanf:"max_history_bytes" yaml:"max_history_bytes"`
+	KeepaliveInterval   configkit.Duration `koanf:"keepalive_interval" yaml:"keepalive_interval"`
 }
 
 const (
@@ -398,46 +399,46 @@ type Binding struct {
 }
 
 type Terminal struct {
-	RenderHz            int      `koanf:"render_hz" yaml:"render_hz"`
-	MaxInputBytes       int      `koanf:"max_input_bytes" yaml:"max_input_bytes"`
-	InMemoryHistory     int      `koanf:"in_memory_history" yaml:"in_memory_history"`
-	SecondInterruptTime Duration `koanf:"second_interrupt_window" yaml:"second_interrupt_window"`
-	PlainApproval       string   `koanf:"plain_approval" yaml:"plain_approval"`
+	RenderHz            int                `koanf:"render_hz" yaml:"render_hz"`
+	MaxInputBytes       int                `koanf:"max_input_bytes" yaml:"max_input_bytes"`
+	InMemoryHistory     int                `koanf:"in_memory_history" yaml:"in_memory_history"`
+	SecondInterruptTime configkit.Duration `koanf:"second_interrupt_window" yaml:"second_interrupt_window"`
+	PlainApproval       string             `koanf:"plain_approval" yaml:"plain_approval"`
 }
 
 type Health struct {
-	Listen                    string   `koanf:"listen" yaml:"listen"`
-	CheckInterval             Duration `koanf:"check_interval" yaml:"check_interval"`
-	CheckTimeout              Duration `koanf:"check_timeout" yaml:"check_timeout"`
-	DiskWarningPercent        int      `koanf:"disk_warning_percent" yaml:"disk_warning_percent"`
-	DiskCriticalPercent       int      `koanf:"disk_critical_percent" yaml:"disk_critical_percent"`
-	DiskCriticalFloorBytes    ByteSize `koanf:"disk_critical_floor_bytes" yaml:"disk_critical_floor_bytes"`
-	BackupMaxAge              Duration `koanf:"backup_max_age" yaml:"backup_max_age"`
-	RestoreVerificationMaxAge Duration `koanf:"restore_verification_max_age" yaml:"restore_verification_max_age"`
+	Listen                    string             `koanf:"listen" yaml:"listen"`
+	CheckInterval             configkit.Duration `koanf:"check_interval" yaml:"check_interval"`
+	CheckTimeout              configkit.Duration `koanf:"check_timeout" yaml:"check_timeout"`
+	DiskWarningPercent        int                `koanf:"disk_warning_percent" yaml:"disk_warning_percent"`
+	DiskCriticalPercent       int                `koanf:"disk_critical_percent" yaml:"disk_critical_percent"`
+	DiskCriticalFloorBytes    configkit.ByteSize `koanf:"disk_critical_floor_bytes" yaml:"disk_critical_floor_bytes"`
+	BackupMaxAge              configkit.Duration `koanf:"backup_max_age" yaml:"backup_max_age"`
+	RestoreVerificationMaxAge configkit.Duration `koanf:"restore_verification_max_age" yaml:"restore_verification_max_age"`
 }
 
 type Usage struct {
-	Currency            string   `koanf:"currency" yaml:"currency"`
-	DailyBudgetMicros   int64    `koanf:"daily_budget_micros" yaml:"daily_budget_micros"`
-	MonthlyBudgetMicros int64    `koanf:"monthly_budget_micros" yaml:"monthly_budget_micros"`
-	ReservationTTL      Duration `koanf:"reservation_ttl" yaml:"reservation_ttl"`
+	Currency            string             `koanf:"currency" yaml:"currency"`
+	DailyBudgetMicros   int64              `koanf:"daily_budget_micros" yaml:"daily_budget_micros"`
+	MonthlyBudgetMicros int64              `koanf:"monthly_budget_micros" yaml:"monthly_budget_micros"`
+	ReservationTTL      configkit.Duration `koanf:"reservation_ttl" yaml:"reservation_ttl"`
 }
 
 type Telemetry struct {
-	Exporter      string   `koanf:"exporter" yaml:"exporter"`
-	Endpoint      string   `koanf:"endpoint" yaml:"endpoint"`
-	CredentialRef string   `koanf:"credential_ref" yaml:"credential_ref"`
-	SampleRatio   float64  `koanf:"sample_ratio" yaml:"sample_ratio"`
-	QueueSize     int      `koanf:"queue_size" yaml:"queue_size"`
-	ExportTimeout Duration `koanf:"export_timeout" yaml:"export_timeout"`
+	Exporter      string             `koanf:"exporter" yaml:"exporter"`
+	Endpoint      string             `koanf:"endpoint" yaml:"endpoint"`
+	CredentialRef string             `koanf:"credential_ref" yaml:"credential_ref"`
+	SampleRatio   float64            `koanf:"sample_ratio" yaml:"sample_ratio"`
+	QueueSize     int                `koanf:"queue_size" yaml:"queue_size"`
+	ExportTimeout configkit.Duration `koanf:"export_timeout" yaml:"export_timeout"`
 }
 
 type Runtime struct {
-	MaxActiveTurns  int      `koanf:"max_active_turns" yaml:"max_active_turns"`
-	MaxPendingTurns int      `koanf:"max_pending_turns" yaml:"max_pending_turns"`
-	TurnTimeout     Duration `koanf:"turn_timeout" yaml:"turn_timeout"`
-	ShutdownTimeout Duration `koanf:"shutdown_timeout" yaml:"shutdown_timeout"`
-	RunRetention    Duration `koanf:"run_retention" yaml:"run_retention"`
+	MaxActiveTurns  int                `koanf:"max_active_turns" yaml:"max_active_turns"`
+	MaxPendingTurns int                `koanf:"max_pending_turns" yaml:"max_pending_turns"`
+	TurnTimeout     configkit.Duration `koanf:"turn_timeout" yaml:"turn_timeout"`
+	ShutdownTimeout configkit.Duration `koanf:"shutdown_timeout" yaml:"shutdown_timeout"`
+	RunRetention    configkit.Duration `koanf:"run_retention" yaml:"run_retention"`
 }
 
 type Capabilities struct {
@@ -454,16 +455,16 @@ type Tools struct {
 }
 
 type ToolExec struct {
-	Timeout        Duration `koanf:"timeout" yaml:"timeout"`
-	MaxStdoutBytes int64    `koanf:"max_stdout_bytes" yaml:"max_stdout_bytes"`
-	MaxStderrBytes int64    `koanf:"max_stderr_bytes" yaml:"max_stderr_bytes"`
+	Timeout        configkit.Duration `koanf:"timeout" yaml:"timeout"`
+	MaxStdoutBytes int64              `koanf:"max_stdout_bytes" yaml:"max_stdout_bytes"`
+	MaxStderrBytes int64              `koanf:"max_stderr_bytes" yaml:"max_stderr_bytes"`
 }
 
 type ToolFetch struct {
-	Timeout         Duration `koanf:"timeout" yaml:"timeout"`
-	MaxRedirects    int      `koanf:"max_redirects" yaml:"max_redirects"`
-	MaxEncodedBytes int64    `koanf:"max_encoded_bytes" yaml:"max_encoded_bytes"`
-	MaxDecodedBytes int64    `koanf:"max_decoded_bytes" yaml:"max_decoded_bytes"`
+	Timeout         configkit.Duration `koanf:"timeout" yaml:"timeout"`
+	MaxRedirects    int                `koanf:"max_redirects" yaml:"max_redirects"`
+	MaxEncodedBytes int64              `koanf:"max_encoded_bytes" yaml:"max_encoded_bytes"`
+	MaxDecodedBytes int64              `koanf:"max_decoded_bytes" yaml:"max_decoded_bytes"`
 }
 
 type ToolWebSearch struct {
@@ -484,82 +485,20 @@ type Logging struct {
 }
 
 type Storage struct {
-	Path               string   `koanf:"path" yaml:"path"`
-	BusyTimeout        Duration `koanf:"busy_timeout" yaml:"busy_timeout"`
-	MaxOpenConnections int      `koanf:"max_open_connections" yaml:"max_open_connections"`
-	ArtifactQuota      ByteSize `koanf:"artifact_quota" yaml:"artifact_quota"`
-	BackupDirectory    string   `koanf:"backup_directory" yaml:"backup_directory"`
-	BackupInterval     Duration `koanf:"backup_interval" yaml:"backup_interval"`
-	BackupRetention    int      `koanf:"backup_retention" yaml:"backup_retention"`
-}
-
-type ByteSize int64
-
-func (b ByteSize) MarshalYAML() (any, error) {
-	return b.String(), nil
-}
-
-func (b *ByteSize) UnmarshalText(text []byte) error {
-	value, err := parseByteSize(string(text))
-	if err != nil {
-		return err
-	}
-	*b = value
-	return nil
-}
-
-func (b ByteSize) String() string {
-	switch {
-	case b >= 1<<40 && b%(1<<40) == 0:
-		return fmt.Sprintf("%dTiB", b/(1<<40))
-	case b >= 1<<30 && b%(1<<30) == 0:
-		return fmt.Sprintf("%dGiB", b/(1<<30))
-	case b >= 1<<20 && b%(1<<20) == 0:
-		return fmt.Sprintf("%dMiB", b/(1<<20))
-	case b >= 1<<10 && b%(1<<10) == 0:
-		return fmt.Sprintf("%dKiB", b/(1<<10))
-	default:
-		return strconv.FormatInt(int64(b), 10)
-	}
-}
-
-func parseByteSize(raw string) (ByteSize, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, errors.New("empty size")
-	}
-	suffixes := []struct {
-		suffix string
-		mult   int64
-	}{
-		{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"TiB", 1 << 40},
-		{"KB", 1000}, {"MB", 1000 * 1000}, {"GB", 1000 * 1000 * 1000}, {"TB", 1000 * 1000 * 1000 * 1000},
-	}
-	for _, s := range suffixes {
-		if !strings.HasSuffix(raw, s.suffix) {
-			continue
-		}
-		n, err := strconv.ParseInt(strings.TrimSpace(strings.TrimSuffix(raw, s.suffix)), 10, 64)
-		if err != nil || n < 0 {
-			return 0, fmt.Errorf("invalid size %q", raw)
-		}
-		if n > math.MaxInt64/s.mult {
-			return 0, fmt.Errorf("size %q overflows", raw)
-		}
-		return ByteSize(n * s.mult), nil
-	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || n < 0 {
-		return 0, fmt.Errorf("invalid size %q", raw)
-	}
-	return ByteSize(n), nil
+	Path               string             `koanf:"path" yaml:"path"`
+	BusyTimeout        configkit.Duration `koanf:"busy_timeout" yaml:"busy_timeout"`
+	MaxOpenConnections int                `koanf:"max_open_connections" yaml:"max_open_connections"`
+	ArtifactQuota      configkit.ByteSize `koanf:"artifact_quota" yaml:"artifact_quota"`
+	BackupDirectory    string             `koanf:"backup_directory" yaml:"backup_directory"`
+	BackupInterval     configkit.Duration `koanf:"backup_interval" yaml:"backup_interval"`
+	BackupRetention    int                `koanf:"backup_retention" yaml:"backup_retention"`
 }
 
 type Models struct {
 	Definitions          map[string]ModelDefinition `koanf:"definitions" yaml:"definitions"`
 	Providers            map[string]ProviderPreset  `koanf:"providers" yaml:"providers,omitempty"`
-	RequestTimeout       Duration                   `koanf:"request_timeout" yaml:"request_timeout"`
-	StreamingIdleTimeout Duration                   `koanf:"streaming_idle_timeout" yaml:"streaming_idle_timeout"`
+	RequestTimeout       configkit.Duration         `koanf:"request_timeout" yaml:"request_timeout"`
+	StreamingIdleTimeout configkit.Duration         `koanf:"streaming_idle_timeout" yaml:"streaming_idle_timeout"`
 	Routing              map[string]string          `koanf:"routing" yaml:"routing"`
 }
 
@@ -743,45 +682,45 @@ const (
 )
 
 type ModelRoute struct {
-	Candidates          []string          `koanf:"candidates" yaml:"candidates"`
-	MaxProviderAttempts int               `koanf:"max_provider_attempts" yaml:"max_provider_attempts"`
-	RetryDelayBudget    Duration          `koanf:"retry_delay_budget" yaml:"retry_delay_budget"`
-	CostBudgetUSD       float64           `koanf:"cost_budget_usd" yaml:"cost_budget_usd"`
-	Circuit             ModelRouteCircuit `koanf:"circuit" yaml:"circuit"`
+	Candidates          []string           `koanf:"candidates" yaml:"candidates"`
+	MaxProviderAttempts int                `koanf:"max_provider_attempts" yaml:"max_provider_attempts"`
+	RetryDelayBudget    configkit.Duration `koanf:"retry_delay_budget" yaml:"retry_delay_budget"`
+	CostBudgetUSD       float64            `koanf:"cost_budget_usd" yaml:"cost_budget_usd"`
+	Circuit             ModelRouteCircuit  `koanf:"circuit" yaml:"circuit"`
 }
 
 type ModelRouteCircuit struct {
-	FailureThreshold int      `koanf:"failure_threshold" yaml:"failure_threshold"`
-	OpenDuration     Duration `koanf:"open_duration" yaml:"open_duration"`
-	MaxOpenDuration  Duration `koanf:"max_open_duration" yaml:"max_open_duration"`
+	FailureThreshold int                `koanf:"failure_threshold" yaml:"failure_threshold"`
+	OpenDuration     configkit.Duration `koanf:"open_duration" yaml:"open_duration"`
+	MaxOpenDuration  configkit.Duration `koanf:"max_open_duration" yaml:"max_open_duration"`
 }
 
 type AgentLimits struct {
-	TurnTimeout Duration `koanf:"turn_timeout" yaml:"turn_timeout"`
+	TurnTimeout configkit.Duration `koanf:"turn_timeout" yaml:"turn_timeout"`
 }
 
 type AgentDefinition struct {
-	ID              string            `koanf:"id" yaml:"id"`
-	Name            string            `koanf:"name" yaml:"name,omitempty"`
-	Description     string            `koanf:"description" yaml:"description"`
-	Instructions    string            `koanf:"instructions" yaml:"instructions"`
-	SoulFile        string            `koanf:"soul_file" yaml:"soul_file"`
-	Soul            string            `koanf:"-" yaml:"-"`
-	Tools           []string          `koanf:"tools" yaml:"tools"`
-	Capabilities    []string          `koanf:"capabilities" yaml:"capabilities"`
-	ModelRoute      string            `koanf:"model_route" yaml:"model_route"`
-	MemoryScope     string            `koanf:"memory_scope" yaml:"memory_scope,omitempty"`
-	Limits          AgentLimits       `koanf:"limits" yaml:"limits"`
-	Audience        string            `koanf:"audience" yaml:"audience,omitempty"`
-	Pairing         bool              `koanf:"pairing" yaml:"pairing,omitempty"`
-	PrincipalTools  []string          `koanf:"principal_tools" yaml:"principal_tools,omitempty"`
-	PublicTools     []string          `koanf:"public_tools" yaml:"public_tools,omitempty"`
-	ApprovalTimeout Duration          `koanf:"approval_timeout" yaml:"approval_timeout,omitempty"`
-	Messages        map[string]string `koanf:"messages" yaml:"messages,omitempty"`
-	GroupContext    string            `koanf:"group_context" yaml:"group_context,omitempty"`
-	Evals           AgentEvals        `koanf:"evals" yaml:"evals,omitempty"`
-	Workflows       []string          `koanf:"workflows" yaml:"workflows,omitempty"`
-	Plugins         []string          `koanf:"plugins" yaml:"plugins,omitempty"`
+	ID              string             `koanf:"id" yaml:"id"`
+	Name            string             `koanf:"name" yaml:"name,omitempty"`
+	Description     string             `koanf:"description" yaml:"description"`
+	Instructions    string             `koanf:"instructions" yaml:"instructions"`
+	SoulFile        string             `koanf:"soul_file" yaml:"soul_file"`
+	Soul            string             `koanf:"-" yaml:"-"`
+	Tools           []string           `koanf:"tools" yaml:"tools"`
+	Capabilities    []string           `koanf:"capabilities" yaml:"capabilities"`
+	ModelRoute      string             `koanf:"model_route" yaml:"model_route"`
+	MemoryScope     string             `koanf:"memory_scope" yaml:"memory_scope,omitempty"`
+	Limits          AgentLimits        `koanf:"limits" yaml:"limits"`
+	Audience        string             `koanf:"audience" yaml:"audience,omitempty"`
+	Pairing         bool               `koanf:"pairing" yaml:"pairing,omitempty"`
+	PrincipalTools  []string           `koanf:"principal_tools" yaml:"principal_tools,omitempty"`
+	PublicTools     []string           `koanf:"public_tools" yaml:"public_tools,omitempty"`
+	ApprovalTimeout configkit.Duration `koanf:"approval_timeout" yaml:"approval_timeout,omitempty"`
+	Messages        map[string]string  `koanf:"messages" yaml:"messages,omitempty"`
+	GroupContext    string             `koanf:"group_context" yaml:"group_context,omitempty"`
+	Evals           AgentEvals         `koanf:"evals" yaml:"evals,omitempty"`
+	Workflows       []string           `koanf:"workflows" yaml:"workflows,omitempty"`
+	Plugins         []string           `koanf:"plugins" yaml:"plugins,omitempty"`
 
 	Knowledge          []string `koanf:"knowledge" yaml:"knowledge,omitempty"`
 	PrincipalKnowledge []string `koanf:"principal_knowledge" yaml:"principal_knowledge,omitempty"`
@@ -808,7 +747,7 @@ type Agents struct {
 type Workflows struct {
 	DefinitionsDir     string             `koanf:"definitions_dir" yaml:"definitions_dir"`
 	MaxConcurrentSteps int                `koanf:"max_concurrent_steps" yaml:"max_concurrent_steps"`
-	DefaultStepTimeout Duration           `koanf:"default_step_timeout" yaml:"default_step_timeout"`
+	DefaultStepTimeout configkit.Duration `koanf:"default_step_timeout" yaml:"default_step_timeout"`
 	Generated          GeneratedWorkflows `koanf:"generated" yaml:"generated"`
 }
 
@@ -828,26 +767,26 @@ type MCP struct {
 }
 
 type MCPServer struct {
-	Name             string            `koanf:"name" yaml:"name"`
-	Transport        string            `koanf:"transport" yaml:"transport"`
-	Command          string            `koanf:"command" yaml:"command,omitempty"`
-	Args             []string          `koanf:"args" yaml:"args,omitempty"`
-	Environment      map[string]string `koanf:"environment" yaml:"environment,omitempty"`
-	Capabilities     []string          `koanf:"capabilities" yaml:"capabilities,omitempty"`
-	StartupTimeout   Duration          `koanf:"startup_timeout" yaml:"startup_timeout,omitempty"`
-	RequestTimeout   Duration          `koanf:"request_timeout" yaml:"request_timeout,omitempty"`
-	MaxMessageSize   ByteSize          `koanf:"max_message_size" yaml:"max_message_size,omitempty"`
-	Restart          *MCPRestart       `koanf:"restart" yaml:"restart,omitempty"`
-	URL              string            `koanf:"url" yaml:"url,omitempty"`
-	Auth             *MCPAuth          `koanf:"auth" yaml:"auth,omitempty"`
-	ConnectTimeout   Duration          `koanf:"connect_timeout" yaml:"connect_timeout,omitempty"`
-	AllowRedirects   *bool             `koanf:"allow_redirects" yaml:"allow_redirects,omitempty"`
-	CompatibilityAck bool              `koanf:"compatibility_ack" yaml:"compatibility_ack,omitempty"`
+	Name             string             `koanf:"name" yaml:"name"`
+	Transport        string             `koanf:"transport" yaml:"transport"`
+	Command          string             `koanf:"command" yaml:"command,omitempty"`
+	Args             []string           `koanf:"args" yaml:"args,omitempty"`
+	Environment      map[string]string  `koanf:"environment" yaml:"environment,omitempty"`
+	Capabilities     []string           `koanf:"capabilities" yaml:"capabilities,omitempty"`
+	StartupTimeout   configkit.Duration `koanf:"startup_timeout" yaml:"startup_timeout,omitempty"`
+	RequestTimeout   configkit.Duration `koanf:"request_timeout" yaml:"request_timeout,omitempty"`
+	MaxMessageSize   configkit.ByteSize `koanf:"max_message_size" yaml:"max_message_size,omitempty"`
+	Restart          *MCPRestart        `koanf:"restart" yaml:"restart,omitempty"`
+	URL              string             `koanf:"url" yaml:"url,omitempty"`
+	Auth             *MCPAuth           `koanf:"auth" yaml:"auth,omitempty"`
+	ConnectTimeout   configkit.Duration `koanf:"connect_timeout" yaml:"connect_timeout,omitempty"`
+	AllowRedirects   *bool              `koanf:"allow_redirects" yaml:"allow_redirects,omitempty"`
+	CompatibilityAck bool               `koanf:"compatibility_ack" yaml:"compatibility_ack,omitempty"`
 }
 
 type MCPRestart struct {
-	MaxAttempts int      `koanf:"max_attempts" yaml:"max_attempts"`
-	Window      Duration `koanf:"window" yaml:"window"`
+	MaxAttempts int                `koanf:"max_attempts" yaml:"max_attempts"`
+	Window      configkit.Duration `koanf:"window" yaml:"window"`
 }
 
 type MCPAuth struct {
@@ -903,48 +842,33 @@ func validProtocol(p string) bool {
 	}
 }
 
-type Duration time.Duration
-
-func (d Duration) MarshalYAML() (any, error) {
-	return time.Duration(d).String(), nil
-}
-
-func (d *Duration) UnmarshalText(text []byte) error {
-	duration, err := time.ParseDuration(string(text))
-	if err != nil {
-		return fmt.Errorf("invalid duration %q: %w", text, err)
-	}
-	*d = Duration(duration)
-	return nil
-}
-
 func Default() Config {
 	return Config{
 		Version: 1,
 		Runtime: Runtime{
 			MaxActiveTurns:  4,
 			MaxPendingTurns: 64,
-			TurnTimeout:     Duration(5 * time.Minute),
-			ShutdownTimeout: Duration(30 * time.Second),
-			RunRetention:    Duration(720 * time.Hour),
+			TurnTimeout:     configkit.Duration(5 * time.Minute),
+			ShutdownTimeout: configkit.Duration(30 * time.Second),
+			RunRetention:    configkit.Duration(720 * time.Hour),
 		},
 		Capabilities: Capabilities{Enabled: []string{}},
 		Agents:       &Agents{},
 		Workflows: &Workflows{
 			MaxConcurrentSteps: 4,
-			DefaultStepTimeout: Duration(15 * time.Minute),
+			DefaultStepTimeout: configkit.Duration(15 * time.Minute),
 			Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
 		},
 		Tools: &Tools{
 			Workspace:            "/srv/aura/workspace",
 			MaxInlineResultBytes: 65536,
 			Exec: ToolExec{
-				Timeout:        Duration(30 * time.Second),
+				Timeout:        configkit.Duration(30 * time.Second),
 				MaxStdoutBytes: 65536,
 				MaxStderrBytes: 65536,
 			},
 			Fetch: ToolFetch{
-				Timeout:         Duration(30 * time.Second),
+				Timeout:         configkit.Duration(30 * time.Second),
 				MaxRedirects:    5,
 				MaxEncodedBytes: 2097152,
 				MaxDecodedBytes: 8388608,
@@ -964,65 +888,65 @@ func Default() Config {
 		},
 		Models: Models{
 			Definitions:          map[string]ModelDefinition{},
-			RequestTimeout:       Duration(120 * time.Second),
-			StreamingIdleTimeout: Duration(60 * time.Second),
+			RequestTimeout:       configkit.Duration(120 * time.Second),
+			StreamingIdleTimeout: configkit.Duration(60 * time.Second),
 			Routing:              defaultModelsRouting(),
 		},
 		Storage: Storage{
-			BusyTimeout:        Duration(5 * time.Second),
+			BusyTimeout:        configkit.Duration(5 * time.Second),
 			MaxOpenConnections: 4,
-			ArtifactQuota:      ByteSize(5 << 30),
-			BackupInterval:     Duration(24 * time.Hour),
+			ArtifactQuota:      configkit.ByteSize(5 << 30),
+			BackupInterval:     configkit.Duration(24 * time.Hour),
 			BackupRetention:    7,
 		},
 		Telemetry: Telemetry{
 			Exporter:      "none",
 			SampleRatio:   0.10,
 			QueueSize:     2048,
-			ExportTimeout: Duration(5 * time.Second),
+			ExportTimeout: configkit.Duration(5 * time.Second),
 		},
 		Usage: Usage{
 			Currency:            "USD",
 			DailyBudgetMicros:   10000000,
 			MonthlyBudgetMicros: 200000000,
-			ReservationTTL:      Duration(time.Hour),
+			ReservationTTL:      configkit.Duration(time.Hour),
 		},
 		Health: Health{
 			Listen:                    "127.0.0.1:8281",
-			CheckInterval:             Duration(60 * time.Second),
-			CheckTimeout:              Duration(5 * time.Second),
+			CheckInterval:             configkit.Duration(60 * time.Second),
+			CheckTimeout:              configkit.Duration(5 * time.Second),
 			DiskWarningPercent:        15,
 			DiskCriticalPercent:       8,
-			DiskCriticalFloorBytes:    ByteSize(512 << 20),
-			BackupMaxAge:              Duration(24 * time.Hour),
-			RestoreVerificationMaxAge: Duration(30 * 24 * time.Hour),
+			DiskCriticalFloorBytes:    configkit.ByteSize(512 << 20),
+			BackupMaxAge:              configkit.Duration(24 * time.Hour),
+			RestoreVerificationMaxAge: configkit.Duration(30 * 24 * time.Hour),
 		},
 		Terminal: Terminal{
 			RenderHz:            20,
 			MaxInputBytes:       262144,
 			InMemoryHistory:     100,
-			SecondInterruptTime: Duration(2 * time.Second),
+			SecondInterruptTime: configkit.Duration(2 * time.Second),
 			PlainApproval:       "deny",
 		},
 		Webhook: Webhook{
 			Listen:             "127.0.0.1:8282",
-			MaxBodySize:        ByteSize(1 << 20),
-			TimestampTolerance: Duration(5 * time.Minute),
-			ReplayRetention:    Duration(24 * time.Hour),
+			MaxBodySize:        configkit.ByteSize(1 << 20),
+			TimestampTolerance: configkit.Duration(5 * time.Minute),
+			ReplayRetention:    configkit.Duration(24 * time.Hour),
 			RequestsPerMinute:  60,
 		},
 		Channels: Channels{
 			Discord: Discord{
-				MinEditInterval:          Duration(2 * time.Second),
+				MinEditInterval:          configkit.Duration(2 * time.Second),
 				MaxAttachmentBytes:       20971520,
 				ThreadAutoArchiveMinutes: 1440,
 			},
 			Telegram: Telegram{
 				Polling: TelegramPolling{
-					Timeout:    Duration(30 * time.Second),
-					MaxBackoff: Duration(time.Minute),
+					Timeout:    configkit.Duration(30 * time.Second),
+					MaxBackoff: configkit.Duration(time.Minute),
 				},
-				MinEditInterval:    Duration(2 * time.Second),
+				MinEditInterval:    configkit.Duration(2 * time.Second),
 				MaxAttachmentBytes: TelegramMaxAttachmentBytes,
 				Webhook: TelegramWebhook{
 					ListenAddress:  TelegramWebhookListenAddress,
@@ -1040,7 +964,7 @@ func Default() Config {
 				MaxConcurrentPerKey: HTTPMaxConcurrentPerKey,
 				MaxHistoryMessages:  HTTPMaxHistoryMessages,
 				MaxHistoryBytes:     HTTPMaxHistoryBytes,
-				KeepaliveInterval:   Duration(HTTPKeepaliveInterval),
+				KeepaliveInterval:   configkit.Duration(HTTPKeepaliveInterval),
 			},
 		},
 		Broadcast: Broadcast{
@@ -1049,26 +973,26 @@ func Default() Config {
 			MaxDigestItems: 20,
 			MaxDigestBytes: 12000,
 			MaxAttempts:    3,
-			MaxDeliveryAge: Duration(24 * time.Hour),
-			MinDispatchGap: Duration(5 * time.Second),
+			MaxDeliveryAge: configkit.Duration(24 * time.Hour),
+			MinDispatchGap: configkit.Duration(5 * time.Second),
 			Destinations:   map[string]string{},
 			Fallback:       map[string]string{},
 		},
 		Scheduler: Scheduler{
 			Enabled:             true,
 			DefaultTimezone:     "UTC",
-			DefaultCatchUpGrace: Duration(15 * time.Minute),
-			OccurrenceRetention: Duration(720 * time.Hour),
+			DefaultCatchUpGrace: configkit.Duration(15 * time.Minute),
+			OccurrenceRetention: configkit.Duration(720 * time.Hour),
 		},
 		Memory: Memory{
 			Enabled:              true,
 			MaxDocuments:         10,
 			RecallTokenBudget:    2000,
 			SummaryPromptVersion: "memory-summary-v1",
-			SummaryTTL:           Duration(720 * time.Hour),
+			SummaryTTL:           configkit.Duration(720 * time.Hour),
 			RangeThreshold:       20,
 			RangeLiveWindow:      5,
-			PurgeInterval:        Duration(1 * time.Hour),
+			PurgeInterval:        configkit.Duration(1 * time.Hour),
 			PurgeLimit:           100,
 		},
 		Interpreter: DefaultInterpreter(),
@@ -1080,12 +1004,12 @@ func Default() Config {
 			MaxInstructionTokens:    5000,
 			MaxSessionContextTokens: 15000,
 			MaxResourceBytes:        8388608,
-			QuarantineRetention:     Duration(720 * time.Hour),
+			QuarantineRetention:     configkit.Duration(720 * time.Hour),
 		},
 		Sync: &Sync{
 			Enabled:            false,
 			Branch:             "main",
-			Interval:           Duration(15 * time.Minute),
+			Interval:           configkit.Duration(15 * time.Minute),
 			TransportSecretRef: defaultSyncTransportSecretRef(),
 			KnownHostsRef:      defaultSyncKnownHostsRef(),
 			GitBinary:          "/usr/bin/git",
@@ -1099,14 +1023,14 @@ func Default() Config {
 			MaxDimension:         8192,
 			MaxImages:            4,
 			MaxFrames:            1,
-			DecodeTimeout:        Duration(5 * time.Second),
+			DecodeTimeout:        configkit.Duration(5 * time.Second),
 			MaxDecodeConcurrency: 2,
 			MaxRequestBytes:      33554432,
 			StripMetadata:        true,
 			OrientNormalize:      true,
 			Detail:               "auto",
 			TransformVersion:     "v1",
-			MaxTransformMemory:   ByteSize(268435456),
+			MaxTransformMemory:   configkit.ByteSize(268435456),
 			Providers:            map[string]VisionProviderLimits{},
 		},
 		Context: &Context{
@@ -1136,19 +1060,19 @@ func Default() Config {
 			MaxDepth:           1,
 			MaxActivePerParent: 2,
 			MaxActiveGlobal:    4,
-			DefaultTimeout:     Duration(5 * time.Minute),
-			MaxTimeout:         Duration(30 * time.Minute),
+			DefaultTimeout:     configkit.Duration(5 * time.Minute),
+			MaxTimeout:         configkit.Duration(30 * time.Minute),
 			Recovery:           "interrupt",
 		},
 		Access: &Access{
-			ApprovalTimeout:  Duration(30 * time.Minute),
-			StandingGrantTTL: Duration(168 * time.Hour),
+			ApprovalTimeout:  configkit.Duration(30 * time.Minute),
+			StandingGrantTTL: configkit.Duration(168 * time.Hour),
 			Budgets: AccessBudgets{
 				Trusted: PrincipalBudget{MaxTokensPerDay: 200000, MaxTurnsPerMinute: 6},
 				Public:  PrincipalBudget{MaxTokensPerDay: 20000, MaxTurnsPerMinute: 3},
 			},
-			Retention:      AccessRetention{Trusted: Duration(4320 * time.Hour), Public: Duration(720 * time.Hour)},
-			HandoffTimeout: Duration(24 * time.Hour),
+			Retention:      AccessRetention{Trusted: configkit.Duration(4320 * time.Hour), Public: configkit.Duration(720 * time.Hour)},
+			HandoffTimeout: configkit.Duration(24 * time.Hour),
 		},
 	}
 }
@@ -1229,7 +1153,7 @@ func validKeyPaths() (paths, mapPaths, structMapPaths, listStructPaths map[strin
 				}
 				continue
 			}
-			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(Duration(0)) {
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(configkit.Duration(0)) {
 				walk(ft, path)
 			}
 		}

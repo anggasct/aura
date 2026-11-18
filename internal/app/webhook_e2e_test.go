@@ -11,6 +11,7 @@ import (
 
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -87,9 +88,9 @@ func TestBuildWebhookListener(t *testing.T) {
 		Webhook: config.Webhook{
 			Enabled:            true,
 			Listen:             "127.0.0.1:0",
-			MaxBodySize:        config.ByteSize(4096),
-			TimestampTolerance: config.Duration(5 * time.Minute),
-			ReplayRetention:    config.Duration(24 * time.Hour),
+			MaxBodySize:        configkit.ByteSize(4096),
+			TimestampTolerance: configkit.Duration(5 * time.Minute),
+			ReplayRetention:    configkit.Duration(24 * time.Hour),
 			RequestsPerMinute:  60,
 			Keys:               []config.WebhookKey{{ID: "primary", SecretEnv: "AURA_WEBHOOK_E2E_SECRET"}},
 		},
