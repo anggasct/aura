@@ -2115,7 +2115,7 @@ func decode(data []byte) (*Config, error) {
 	}
 	var cfg Config
 	err := k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{
-		Tag: "koanf",
+		Tag: "json",
 		DecoderConfig: &mapstructure.DecoderConfig{
 			Result:           &cfg,
 			WeaklyTypedInput: false,

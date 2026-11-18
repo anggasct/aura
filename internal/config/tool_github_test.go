@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	yamlv3 "gopkg.in/yaml.v3"
-
 	"github.com/anggasct/aura/internal/platform/capability"
 )
 
@@ -69,7 +67,8 @@ func TestToolsGitHubCredentialsLoadInOrder(t *testing.T) {
 	if got := loaded.GitHub.Credentials; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("Credentials = %+v, want %+v", got, want)
 	}
-	marshaled, err := yamlv3.Marshal(Default())
+	defaults := Default()
+	marshaled, err := Marshal(&defaults)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}

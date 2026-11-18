@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,10 +22,18 @@ func TestPersonaPolicySuites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var file struct {
-		Definitions []config.AgentDefinition `yaml:"definitions"`
+	var document map[string]any
+	if err := yamlv3.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
 	}
-	if err := yamlv3.Unmarshal(data, &file); err != nil {
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Definitions []config.AgentDefinition `json:"definitions"`
+	}
+	if err := json.Unmarshal(encoded, &file); err != nil {
 		t.Fatal(err)
 	}
 	registry, err := auraagent.Build(file.Definitions, toolsbuiltin.DefinitionNames(), nil)

@@ -11,8 +11,8 @@ import (
 
 type ByteSize int64
 
-func (b ByteSize) MarshalYAML() (any, error) {
-	return b.String(), nil
+func (b ByteSize) MarshalText() ([]byte, error) {
+	return []byte(b.String()), nil
 }
 
 func (b *ByteSize) UnmarshalText(text []byte) error {
@@ -73,8 +73,8 @@ func ParseByteSize(raw string) (ByteSize, error) {
 
 type Duration time.Duration
 
-func (d Duration) MarshalYAML() (any, error) {
-	return time.Duration(d).String(), nil
+func (d Duration) MarshalText() ([]byte, error) {
+	return []byte(time.Duration(d).String()), nil
 }
 
 func (d *Duration) UnmarshalText(text []byte) error {
