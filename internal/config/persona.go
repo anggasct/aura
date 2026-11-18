@@ -256,40 +256,6 @@ func validateBudgetShapes(budgets *yamlv3.Node) error {
 	return nil
 }
 
-func applyAccessDefaults(cfg *Config, doc *yamlv3.Node) {
-	defaults := *Default().Access
-	if cfg.Access == nil {
-		cfg.Access = &defaults
-		return
-	}
-	if cfg.Access.ApprovalTimeout == 0 && !configValuePresent(doc, "access", "approval_timeout") && !envValuePresent("access.approval_timeout") {
-		cfg.Access.ApprovalTimeout = defaults.ApprovalTimeout
-	}
-	if cfg.Access.StandingGrantTTL == 0 && !configValuePresent(doc, "access", "standing_grant_ttl") && !envValuePresent("access.standing_grant_ttl") {
-		cfg.Access.StandingGrantTTL = defaults.StandingGrantTTL
-	}
-	if cfg.Access.HandoffTimeout == 0 && !configValuePresent(doc, "access", "handoff_timeout") && !envValuePresent("access.handoff_timeout") {
-		cfg.Access.HandoffTimeout = defaults.HandoffTimeout
-	}
-	applyBudgetDefaults(&cfg.Access.Budgets.Trusted, defaults.Budgets.Trusted, doc, AudienceTrusted)
-	applyBudgetDefaults(&cfg.Access.Budgets.Public, defaults.Budgets.Public, doc, AudiencePublic)
-	if cfg.Access.Retention.Trusted == 0 && !configValuePresent(doc, "access", "retention", AudienceTrusted) && !envValuePresent("access.retention.trusted") {
-		cfg.Access.Retention.Trusted = defaults.Retention.Trusted
-	}
-	if cfg.Access.Retention.Public == 0 && !configValuePresent(doc, "access", "retention", AudiencePublic) && !envValuePresent("access.retention.public") {
-		cfg.Access.Retention.Public = defaults.Retention.Public
-	}
-}
-
-func applyBudgetDefaults(budget *PrincipalBudget, defaults PrincipalBudget, doc *yamlv3.Node, class string) {
-	if budget.MaxTokensPerDay == 0 && !configValuePresent(doc, "access", "budgets", class, "max_tokens_per_day") && !envValuePresent("access.budgets."+class+".max_tokens_per_day") {
-		budget.MaxTokensPerDay = defaults.MaxTokensPerDay
-	}
-	if budget.MaxTurnsPerMinute == 0 && !configValuePresent(doc, "access", "budgets", class, "max_turns_per_minute") && !envValuePresent("access.budgets."+class+".max_turns_per_minute") {
-		budget.MaxTurnsPerMinute = defaults.MaxTurnsPerMinute
-	}
-}
-
 func validatePersonaNames(cfg *Config) error {
 	if cfg.Agents == nil {
 		return nil

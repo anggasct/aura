@@ -25,7 +25,7 @@ const (
 var emailHostPattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
 
 func validateEmailShapes(doc *yamlv3.Node) error {
-	emailNode := nestedValue(doc, "channels", "email")
+	emailNode := channelNode(doc, "email")
 	if emailNode == nil {
 		return nil
 	}
@@ -108,36 +108,15 @@ func validateEmailEndpointShape(field string, node *yamlv3.Node) error {
 	return nil
 }
 
-func applyEmailDefaults(cfg *Config, doc *yamlv3.Node, defaults *Email) {
-	email := &cfg.Channels.Email
-	if email.MaxAttachmentBytes == 0 && !configValuePresent(doc, "channels", "email", "max_attachment_bytes") && !envValuePresent("channels.email.max_attachment_bytes") {
-		email.MaxAttachmentBytes = defaults.MaxAttachmentBytes
+func (*EmailAccount) Default() any {
+	return EmailAccount{
+		IMAP: EmailIMAP{
+			Port:         EmailDefaultIMAPPort,
+			Folder:       EmailDefaultFolder,
+			PollInterval: configkit.Duration(EmailDefaultPollInterval),
+		},
+		SMTP: EmailSMTP{Port: EmailDefaultSMTPPort},
 	}
-	accountsNode := nestedValue(doc, "channels", "email", "accounts")
-	for i := range email.Accounts {
-		imap := &email.Accounts[i].IMAP
-		smtp := &email.Accounts[i].SMTP
-		var item *yamlv3.Node
-		if accountsNode != nil && accountsNode.Kind == yamlv3.SequenceNode && i < len(accountsNode.Content) {
-			item = accountsNode.Content[i]
-		}
-		if imap.Port == 0 && !emailItemHasKey(item, "imap", "port") {
-			imap.Port = EmailDefaultIMAPPort
-		}
-		if smtp.Port == 0 && !emailItemHasKey(item, "smtp", "port") {
-			smtp.Port = EmailDefaultSMTPPort
-		}
-		if imap.Folder == "" && !emailItemHasKey(item, "imap", "folder") {
-			imap.Folder = EmailDefaultFolder
-		}
-		if imap.PollInterval == 0 && !emailItemHasKey(item, "imap", "poll_interval") {
-			imap.PollInterval = configkit.Duration(EmailDefaultPollInterval)
-		}
-	}
-}
-
-func emailItemHasKey(item *yamlv3.Node, path ...string) bool {
-	return item != nil && configValuePresent(item, path...)
 }
 
 func validateEmail(email *Email, owner *Owner) error {

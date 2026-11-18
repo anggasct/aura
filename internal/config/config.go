@@ -246,6 +246,10 @@ type DiscordAccount struct {
 	LinkPreviews      bool     `json:"link_previews"`
 }
 
+func (*DiscordAccount) Default() any {
+	return DiscordAccount{AcceptDMs: true}
+}
+
 type Telegram struct {
 	Enabled            bool               `json:"enabled"`
 	Accounts           []TelegramAccount  `json:"accounts"`
@@ -265,6 +269,10 @@ type TelegramAccount struct {
 	AllowedChatIDs     []string `json:"allowed_chat_ids"`
 	AcceptPrivateChats bool     `json:"accept_private_chats"`
 	LinkPreviews       bool     `json:"link_previews"`
+}
+
+func (*TelegramAccount) Default() any {
+	return TelegramAccount{AcceptPrivateChats: true, Mode: TelegramModePolling}
 }
 
 const TelegramMaxAttachmentBytes int64 = 20971520
@@ -683,6 +691,17 @@ type ModelRoute struct {
 	RetryDelayBudget    configkit.Duration `json:"retry_delay_budget"`
 	CostBudgetUSD       float64            `json:"cost_budget_usd"`
 	Circuit             ModelRouteCircuit  `json:"circuit"`
+}
+
+func defaultModelRoute() ModelRoute {
+	return ModelRoute{
+		MaxProviderAttempts: DefaultModelRouteMaxProviderAttempts,
+		RetryDelayBudget:    configkit.Duration(DefaultModelRouteRetryDelayBudget),
+	}
+}
+
+func (*ModelRoute) Default() any {
+	return defaultModelRoute()
 }
 
 type ModelRouteCircuit struct {

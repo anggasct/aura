@@ -95,3 +95,33 @@ func orderOf(err error) problemOrder {
 	}
 	return order
 }
+
+func positionProblems(doc *document, err error) error {
+	if err == nil {
+		return nil
+	}
+	problems := flattenProblems(err)
+	for i, problem := range problems {
+		field, isField := errors.AsType[*configkit.FieldError](problem)
+		if !isField || field.Position != "" {
+			continue
+		}
+		positioned := *field
+		positioned.Position = doc.positionOf(field.Path)
+		problems[i] = &positioned
+	}
+	sortProblems(problems)
+	return errors.Join(problems...)
+}
+
+func flattenProblems(err error) []error {
+	if joined, isJoined := err.(interface{ Unwrap() []error }); isJoined {
+		children := joined.Unwrap()
+		problems := make([]error, 0, len(children))
+		for _, child := range children {
+			problems = append(problems, flattenProblems(child)...)
+		}
+		return problems
+	}
+	return []error{err}
+}

@@ -56,7 +56,7 @@ func TestLoad_PersonaKnowledgeRejectsInvalidLists(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, personaKnowledgeConfig(test.fields)))
-			if err == nil || !strings.Contains(err.Error(), test.detail) {
+			if err == nil || !strings.Contains(stripPositions(err.Error()), test.detail) {
 				t.Fatalf("error = %v, want detail %q", err, test.detail)
 			}
 		})
@@ -87,7 +87,7 @@ func TestLoad_PersonaKnowledgeRejectsSinksInTheMatchingClassList(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, personaKnowledgeConfig(test.fields)))
-			if err == nil || !strings.Contains(err.Error(), test.detail) {
+			if err == nil || !strings.Contains(stripPositions(err.Error()), test.detail) {
 				t.Fatalf("error = %v, want detail %q", err, test.detail)
 			}
 		})

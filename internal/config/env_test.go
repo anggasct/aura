@@ -193,7 +193,6 @@ func TestEnvNameBelowAMapKeyThatReachesNoLeafWarns(t *testing.T) {
 		"AURA_VISION_PROVIDERS_FOO",
 		"AURA_MODELS_PROVIDERS_FOO_HEADERS_X",
 		"AURA_MCP_SERVERS_ENVIRONMENT_X",
-		"AURA_MODELS_ROUTING_AGENT",
 	}
 	for _, name := range warned {
 		t.Run(name, func(t *testing.T) {

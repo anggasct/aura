@@ -154,22 +154,12 @@ func validEmbeddingPrefix(prefix string) bool {
 	return true
 }
 
-func applyKnowledgeDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.Knowledge == nil || cfg.Knowledge.Embedding == nil {
-		return
-	}
-	embedding := cfg.Knowledge.Embedding
-	if embedding.DimensionsField == "" && !configValuePresent(doc, "knowledge", "embedding", "dimensions_field") && !envValuePresent("knowledge.embedding.dimensions_field") {
-		embedding.DimensionsField = DefaultEmbeddingDimensionsField
-	}
-	if embedding.RoleStyle == "" && !configValuePresent(doc, "knowledge", "embedding", "role_style") && !envValuePresent("knowledge.embedding.role_style") {
-		embedding.RoleStyle = EmbeddingRoleNone
-	}
-	if embedding.BatchSize == 0 && !configValuePresent(doc, "knowledge", "embedding", "batch_size") && !envValuePresent("knowledge.embedding.batch_size") {
-		embedding.BatchSize = DefaultEmbeddingBatchSize
-	}
-	if embedding.MaxMemory == 0 && !configValuePresent(doc, "knowledge", "embedding", "max_memory") && !envValuePresent("knowledge.embedding.max_memory") {
-		embedding.MaxMemory = DefaultEmbeddingMaxMemory
+func (*KnowledgeEmbedding) Default() any {
+	return KnowledgeEmbedding{
+		DimensionsField: DefaultEmbeddingDimensionsField,
+		RoleStyle:       EmbeddingRoleNone,
+		BatchSize:       DefaultEmbeddingBatchSize,
+		MaxMemory:       DefaultEmbeddingMaxMemory,
 	}
 }
 

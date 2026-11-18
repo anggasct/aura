@@ -372,7 +372,7 @@ func TestLoad_StrictRuntimeAndCapabilityShapes(t *testing.T) {
 func TestLoad_ExplicitZeroRuntimeValuesRejected(t *testing.T) {
 	path := writeTempConfig(t, "version: 1\nruntime:\n  max_active_turns: 0\n")
 	_, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), "runtime.max_active_turns: config_invalid: must be positive") {
+	if err == nil || !strings.Contains(stripPositions(err.Error()), "runtime.max_active_turns: config_invalid: must be positive") {
 		t.Fatalf("Load error = %v, want explicit zero to be rejected", err)
 	}
 }
@@ -408,7 +408,7 @@ func TestRuntimeRunRetentionDefaultsAndValidates(t *testing.T) {
 			if code, ok := codeOf(err); !ok || code != invalidCode {
 				t.Fatalf("Load error = %v, want %s", err, invalidCode)
 			}
-			if !strings.Contains(err.Error(), "runtime.run_retention: config_invalid: must be at least 24h") {
+			if !strings.Contains(stripPositions(err.Error()), "runtime.run_retention: config_invalid: must be at least 24h") {
 				t.Fatalf("Load error = %v, want the floor named", err)
 			}
 		})
@@ -984,7 +984,7 @@ func TestLoad_StorageValidation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, "version: 1\n"+tc.content))
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || !strings.Contains(stripPositions(err.Error()), tc.want) {
 				t.Fatalf("Load error = %v, want substring %q", err, tc.want)
 			}
 		})
@@ -1086,7 +1086,7 @@ func TestLoad_DuplicateCapabilitiesRejected(t *testing.T) {
 func TestLoad_NegativeMaxConcurrentStepsRejected(t *testing.T) {
 	content := "version: 1\nworkflows:\n  max_concurrent_steps: -4\n"
 	_, err := Load(writeTempConfig(t, content))
-	if err == nil || !strings.Contains(err.Error(), "workflows.max_concurrent_steps: config_invalid: must be at least 1") {
+	if err == nil || !strings.Contains(stripPositions(err.Error()), "workflows.max_concurrent_steps: config_invalid: must be at least 1") {
 		t.Fatalf("Load error = %v, want negative max_concurrent_steps rejection", err)
 	}
 }
@@ -1331,7 +1331,7 @@ model_routes:
 				if err == nil {
 					t.Fatalf("Load() succeeded, want error containing %q", tc.wantError)
 				}
-				if !strings.Contains(err.Error(), tc.wantError) {
+				if !strings.Contains(stripPositions(err.Error()), tc.wantError) {
 					t.Fatalf("Load() error = %v, want substring %q", err, tc.wantError)
 				}
 				return

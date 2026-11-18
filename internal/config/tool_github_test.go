@@ -106,7 +106,7 @@ func TestToolsGitHubRejectsUnusableCredentialValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := loadGitHubConfig(t, githubConfigSection(tc.entries))
 			var field *configkit.FieldError
-			if !errors.As(err, &field) || !fault.HasCode(err, configkit.ErrorCodeInvalid) || field.Error() != tc.detail {
+			if !errors.As(err, &field) || !fault.HasCode(err, configkit.ErrorCodeInvalid) || stripPositions(field.Error()) != tc.detail {
 				t.Fatalf("err = %v, want config_invalid %q", err, tc.detail)
 			}
 			for _, leaked := range []string{"env:", "file:", "ghp_literal", "relative/token", "/a/"} {
@@ -180,7 +180,7 @@ func TestToolsGitHubCredentialsNeedTheProviderCapability(t *testing.T) {
 				return
 			}
 			var field *configkit.FieldError
-			if !errors.As(err, &field) || !fault.HasCode(err, configkit.ErrorCodeInvalid) || field.Error() != detail {
+			if !errors.As(err, &field) || !fault.HasCode(err, configkit.ErrorCodeInvalid) || stripPositions(field.Error()) != detail {
 				t.Fatalf("err = %v, want config_invalid with %q", err, detail)
 			}
 		})

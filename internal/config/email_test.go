@@ -134,7 +134,7 @@ func TestLoad_EmailMaxAttachmentBytes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  email:\n    max_attachment_bytes: "+tc.value+"\n"))
 			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				if err == nil || !strings.Contains(stripPositions(err.Error()), tc.wantErr) {
 					t.Fatalf("Load error = %v, want it to mention %q", err, tc.wantErr)
 				}
 				return
@@ -378,7 +378,7 @@ func TestLoad_EmailInvalid(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, tc.yaml))
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || !strings.Contains(stripPositions(err.Error()), tc.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
 			if strings.Contains(err.Error(), "hunter2") {
@@ -398,7 +398,7 @@ func TestLoad_EmailInvalidCodes(t *testing.T) {
 func TestLoad_EmailBindingsAreNotSupported(t *testing.T) {
 	yaml := emailConfig(emailOwner, "", emailAccountYAML) + "bindings:\n  - persona: main\n    channel: email\n    account: work\n    user_id: \"7\"\n"
 	_, err := Load(writeDiscordConfig(t, yaml))
-	if err == nil || !strings.Contains(err.Error(), "bindings[0].channel: binding_invalid: \"email\" is not supported") {
+	if err == nil || !strings.Contains(stripPositions(err.Error()), "bindings[0].channel: binding_invalid: \"email\" is not supported") {
 		t.Fatalf("Load error = %v, want the email binding rejected", err)
 	}
 }
