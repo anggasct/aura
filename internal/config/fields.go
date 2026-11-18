@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 type fieldInfo struct {
@@ -22,6 +23,7 @@ var configIndex = mustBuildIndex(reflect.TypeFor[Config]())
 var textKinds = map[reflect.Type]string{
 	reflect.TypeFor[configkit.Duration](): "a duration",
 	reflect.TypeFor[configkit.ByteSize](): "a byte size",
+	reflect.TypeFor[secret.Ref]():         "a secret reference",
 }
 
 var textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()

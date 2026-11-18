@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/vision"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -517,7 +518,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		AuthservID:     testAuthserv,
 		AllowedSenders: []string{friendAddress},
 		IMAP: config.EmailIMAP{
-			Host: "imap.example.com", Port: 993, Username: testAddress, PasswordRef: "env://AURA_TEST_EMAIL_PASSWORD",
+			Host: "imap.example.com", Port: 993, Username: testAddress, PasswordRef: secrettest.Ref("env://AURA_TEST_EMAIL_PASSWORD"),
 			Folder: "INBOX", PollInterval: configkit.Duration(time.Minute),
 		},
 	}

@@ -47,30 +47,30 @@ func configuredSecrets(cfg *config.Config) []configuredSecret {
 	var secrets []configuredSecret
 	for i := range cfg.Channels.Discord.Accounts {
 		account := &cfg.Channels.Discord.Accounts[i]
-		if ref := parseSecretRef(account.BotTokenRef); ref.Env != "" {
+		if ref := account.BotTokenRef.Reference(); ref.Env != "" {
 			secrets = append(secrets, referenceSecret("discord_bot_token_"+account.Name, ref))
 		}
 	}
 	for i := range cfg.Channels.Email.Accounts {
 		account := &cfg.Channels.Email.Accounts[i]
-		if ref := parseSecretRef(account.IMAP.PasswordRef); ref.Env != "" || ref.File != "" {
+		if ref := account.IMAP.PasswordRef.Reference(); ref.Env != "" || ref.File != "" {
 			secrets = append(secrets, referenceSecret("email_imap_password_"+account.Name, ref))
 		}
-		if ref := parseSecretRef(account.SMTP.PasswordRef); ref.Env != "" || ref.File != "" {
+		if ref := account.SMTP.PasswordRef.Reference(); ref.Env != "" || ref.File != "" {
 			secrets = append(secrets, referenceSecret("email_smtp_password_"+account.Name, ref))
 		}
 	}
 	for i := range cfg.Channels.Telegram.Accounts {
 		account := &cfg.Channels.Telegram.Accounts[i]
-		if ref := parseSecretRef(account.BotTokenRef); ref.Env != "" || ref.File != "" {
+		if ref := account.BotTokenRef.Reference(); ref.Env != "" || ref.File != "" {
 			secrets = append(secrets, referenceSecret("telegram_bot_token_"+account.Name, ref))
 		}
-		if ref := parseSecretRef(account.WebhookSecretRef); ref.Env != "" || ref.File != "" {
+		if ref := account.WebhookSecretRef.Reference(); ref.Env != "" || ref.File != "" {
 			secrets = append(secrets, referenceSecret("telegram_webhook_secret_"+account.Name, ref))
 		}
 	}
 	if cfg.Sync != nil {
-		if ref := parseSecretRef(cfg.Sync.TransportSecretRef); ref.Env != "" {
+		if ref := cfg.Sync.TransportSecretRef.Reference(); ref.Env != "" {
 			entry := referenceSecret("sync_transport_secret", ref)
 			entry.optional = !cfg.Sync.Enabled || cfg.Sync.TransportSecretRef == builtinDefaults().Sync.TransportSecretRef
 			secrets = append(secrets, entry)
@@ -82,15 +82,16 @@ func configuredSecrets(cfg *config.Config) []configuredSecret {
 		}
 	}
 	for _, credential := range githubCredentials(cfg) {
-		secrets = append(secrets, configuredSecret{name: "github_credential_" + credential.Name, optional: true, resolve: parseSecretRef(credential.Ref).Resolve})
+		secrets = append(secrets, configuredSecret{name: "github_credential_" + credential.Name, optional: true, resolve: credential.Ref.Reference().Resolve})
 	}
 	for name := range cfg.Models.Definitions {
 		def := cfg.Models.Definitions[name]
-		if def.APIKeyEnv != "" {
-			secrets = append(secrets, environmentSecret("model_"+def.Provider, def.APIKeyEnv))
+		source := def.APIKeyRef.Reference()
+		if source.Env != "" {
+			secrets = append(secrets, environmentSecret("model_"+def.Provider, source.Env))
 		}
-		if def.APIKeyFile != "" {
-			secrets = append(secrets, fileSecret("model_"+def.Provider, def.APIKeyFile))
+		if source.File != "" {
+			secrets = append(secrets, fileSecret("model_"+def.Provider, source.File))
 		}
 	}
 	for name, preset := range cfg.Models.Providers {
@@ -111,17 +112,17 @@ func configuredSecrets(cfg *config.Config) []configuredSecret {
 func additionalConfiguredSecrets(cfg *config.Config) []configuredSecret {
 	var secrets []configuredSecret
 	if cfg.Tools != nil {
-		if ref := parseSecretRef(cfg.Tools.WebSearch.CredentialRef); ref.Env != "" || ref.File != "" {
+		if ref := cfg.Tools.WebSearch.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {
 			entry := referenceSecret("web_search_credential", ref)
 			entry.optional = cfg.Tools.WebSearch.CredentialRef == config.DefaultWebSearchCredentialRef(cfg.Tools.WebSearch.Provider)
 			secrets = append(secrets, entry)
 		}
 	}
-	if ref := parseSecretRef(cfg.Telemetry.CredentialRef); ref.Env != "" || ref.File != "" {
+	if ref := cfg.Telemetry.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {
 		secrets = append(secrets, referenceSecret("telemetry_credential", ref))
 	}
 	if embeddingConfig := configuredEmbedding(cfg); embeddingConfig != nil {
-		if ref := parseSecretRef(embeddingConfig.CredentialRef); ref.Env != "" || ref.File != "" {
+		if ref := embeddingConfig.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {
 			entry := referenceSecret("knowledge_embedding_credential", ref)
 			entry.optional = true
 			secrets = append(secrets, entry)
@@ -134,7 +135,7 @@ func additionalConfiguredSecrets(cfg *config.Config) []configuredSecret {
 				continue
 			}
 			if static := server.Auth.Static; static != nil {
-				if ref := parseSecretRef(static.CredentialRef); ref.Env != "" || ref.File != "" {
+				if ref, known := staticCredentialReference(static.CredentialRef); known && (ref.Env != "" || ref.File != "") {
 					secrets = append(secrets, referenceSecret("mcp_credential_"+server.Name, ref))
 				}
 			}

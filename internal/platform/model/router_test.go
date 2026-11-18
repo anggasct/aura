@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 type stubLLM struct {
@@ -27,7 +28,7 @@ func configuredDefinition(protocol, name, baseURL string) config.ModelDefinition
 		Protocol:  protocol,
 		Model:     name,
 		BaseURL:   baseURL,
-		APIKeyEnv: "TEST_MODEL_API_KEY",
+		APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"),
 	}
 }
 
@@ -210,7 +211,7 @@ func TestBuildRouter_MissingKeyValidation(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
 		"primary": {Protocol: config.ProtocolAnthropicMessages, Model: "claude", BaseURL: "https://api.anthropic.com"},
 	}}
-	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "api_key_env or api_key_file") {
+	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "api_key_ref is required") {
 		t.Errorf("err = %v, want secret reference error", err)
 	}
 
@@ -224,7 +225,7 @@ func TestBuildRouter_MissingKeyValidation(t *testing.T) {
 
 func TestBuildRouter_InvalidBaseURLFails(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
-		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyEnv: "TEST_MODEL_API_KEY", BaseURL: "://bad"},
+		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"), BaseURL: "://bad"},
 	}}
 	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "invalid base_url") {
 		t.Errorf("err = %v, want invalid base_url error", err)
@@ -233,7 +234,7 @@ func TestBuildRouter_InvalidBaseURLFails(t *testing.T) {
 
 func TestBuildRouter_RemoteHTTPRequiresTLS(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
-		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyEnv: "TEST_MODEL_API_KEY", BaseURL: "http://provider.example"},
+		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"), BaseURL: "http://provider.example"},
 	}}
 	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "https is required") {
 		t.Errorf("err = %v, want remote HTTP TLS error", err)
@@ -242,7 +243,7 @@ func TestBuildRouter_RemoteHTTPRequiresTLS(t *testing.T) {
 
 func TestBuildRouter_BaseURLCredentialsRejected(t *testing.T) {
 	models := config.Models{Definitions: map[string]config.ModelDefinition{
-		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyEnv: "TEST_MODEL_API_KEY", BaseURL: "https://user:pass@provider.example"},
+		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"), BaseURL: "https://user:pass@provider.example"},
 	}}
 	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "user info is not allowed") {
 		t.Errorf("err = %v, want URL credentials error", err)
@@ -288,7 +289,7 @@ func TestResolveSecretFromFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(" file-secret\n"), 0o600); err != nil {
 		t.Fatalf("write secret: %v", err)
 	}
-	got, err := resolveSecret("primary", &config.ModelDefinition{APIKeyFile: path})
+	got, err := resolveSecret("primary", &config.ModelDefinition{APIKeyRef: secrettest.Ref("file://" + path)})
 	if err != nil {
 		t.Fatalf("resolveSecret: %v", err)
 	}
@@ -324,7 +325,7 @@ func TestBuildRouterErrorOmitsBaseURLCredentials(t *testing.T) {
 			Protocol:  config.ProtocolOpenAIChatCompat,
 			Model:     "gpt-4o",
 			BaseURL:   "https://alice:hunter2@provider.example",
-			APIKeyEnv: "AURA_TEST_KEY",
+			APIKeyRef: secrettest.Ref("env://AURA_TEST_KEY"),
 		},
 	}}
 	t.Setenv("AURA_TEST_KEY", "k")
@@ -343,10 +344,10 @@ func TestResolveSecretErrorOmitsAbsolutePath(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "api-key.txt")
 	_, err := resolveSecret("primary", &config.ModelDefinition{
-		Protocol:   config.ProtocolOpenAIChatCompat,
-		Model:      "gpt-4o",
-		BaseURL:    "https://provider.example",
-		APIKeyFile: missing,
+		Protocol:  config.ProtocolOpenAIChatCompat,
+		Model:     "gpt-4o",
+		BaseURL:   "https://provider.example",
+		APIKeyRef: secrettest.Ref("file://" + missing),
 	})
 	if err == nil {
 		t.Fatal("expected a missing secret file to be rejected")
@@ -458,5 +459,54 @@ func TestBuildRouterWithConfig_Validation(t *testing.T) {
 	_, err := BuildRouterWithConfig(nil, cfg, nil)
 	if err == nil {
 		t.Fatal("expected BuildRouterWithConfig to fail on unknown candidate")
+	}
+}
+
+func TestModelAPIKeyKeepsTheModelSecretRules(t *testing.T) {
+	const (
+		remote   = "https://provider.example"
+		loopback = "http://127.0.0.1:11434"
+	)
+	write := func(t *testing.T, content string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "api-key")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write key file: %v", err)
+		}
+		return path
+	}
+	t.Setenv("AURA_TEST_EMPTY_KEY", "")
+	t.Setenv("AURA_TEST_SET_KEY", "s05-canary-value")
+	cases := []struct {
+		name    string
+		baseURL string
+		ref     func(t *testing.T) string
+		want    string
+		refuse  string
+	}{
+		{name: "empty environment value on a remote endpoint", baseURL: remote, ref: func(*testing.T) string { return "env://AURA_TEST_EMPTY_KEY" }, refuse: `secret environment variable "AURA_TEST_EMPTY_KEY" is unavailable`},
+		{name: "empty environment value on a loopback endpoint", baseURL: loopback, ref: func(*testing.T) string { return "env://AURA_TEST_EMPTY_KEY" }},
+		{name: "unset environment variable on a loopback endpoint", baseURL: loopback, ref: func(*testing.T) string { return "env://AURA_TEST_UNSET_KEY" }, refuse: `secret environment variable "AURA_TEST_UNSET_KEY" is unavailable`},
+		{name: "environment value", baseURL: remote, ref: func(*testing.T) string { return "env://AURA_TEST_SET_KEY" }, want: "s05-canary-value"},
+		{name: "key file with surrounding whitespace", baseURL: remote, ref: func(t *testing.T) string { return "file://" + write(t, " key \n") }, want: "key"},
+		{name: "key file holding only whitespace", baseURL: loopback, ref: func(t *testing.T) string { return "file://" + write(t, " \r\n\t\n") }, refuse: "secret file is empty"},
+		{name: "missing key file", baseURL: remote, ref: func(t *testing.T) string { return "file://" + filepath.Join(t.TempDir(), "absent") }, refuse: `cannot read secret file "absent"`},
+		{name: "no reference on a remote endpoint", baseURL: remote, ref: func(*testing.T) string { return "" }, refuse: "api_key_ref is required for a non-loopback endpoint"},
+		{name: "no reference on a loopback endpoint", baseURL: loopback, ref: func(*testing.T) string { return "" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &config.ModelDefinition{BaseURL: tc.baseURL, APIKeyRef: secrettest.Ref(tc.ref(t))}
+			got, err := resolveSecret("primary", spec)
+			if tc.refuse != "" {
+				if !fault.HasCode(err, ErrorCodeSecretInvalid) || !strings.Contains(err.Error(), tc.refuse) {
+					t.Fatalf("resolveSecret = %q, %v, want model_secret_invalid containing %q", got, err, tc.refuse)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("resolveSecret = %q, %v, want %q", got, err, tc.want)
+			}
+		})
 	}
 }

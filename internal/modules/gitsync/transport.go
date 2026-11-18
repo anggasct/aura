@@ -3,7 +3,6 @@ package gitsync
 import (
 	"context"
 	"net/url"
-	"strings"
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/egress"
@@ -18,23 +17,11 @@ type Transport struct {
 	KnownHosts  secret.Reference
 }
 
-func parseSecretRef(raw string) (secret.Reference, error) {
-	switch {
-	case strings.HasPrefix(raw, "env://"):
-		name := strings.TrimPrefix(raw, "env://")
-		if strings.TrimSpace(name) == "" {
-			return secret.Reference{}, Errorf(ErrorCodeCredentialInvalid, "secret reference has no name")
-		}
-		return secret.Reference{Env: name}, nil
-	case strings.HasPrefix(raw, "file://"):
-		name := strings.TrimPrefix(raw, "file://")
-		if strings.TrimSpace(name) == "" || !strings.HasPrefix(name, "/") {
-			return secret.Reference{}, Errorf(ErrorCodeCredentialInvalid, "secret file reference must be absolute")
-		}
-		return secret.Reference{File: name}, nil
-	default:
+func parseSecretRef(ref secret.Ref) (secret.Reference, error) {
+	if ref.IsZero() {
 		return secret.Reference{}, Errorf(ErrorCodeCredentialInvalid, "secret reference must use env:// or file://")
 	}
+	return ref.Reference(), nil
 }
 
 func ValidateTransportShape(cfg *config.Sync) error {

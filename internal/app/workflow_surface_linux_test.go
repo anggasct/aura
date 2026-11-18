@@ -31,6 +31,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
@@ -47,7 +48,7 @@ const (
 )
 
 func surfacePersonas(cfg *config.Config) {
-	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://" + gitHubToken}}
+	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}}
 	withProbePersona(cfg)
 	cfg.Agents.Definitions = append(cfg.Agents.Definitions,
 		config.AgentDefinition{
@@ -88,7 +89,7 @@ func (r *surfaceRig) pointGitHubAtTheStub(t *testing.T) {
 	}
 	err := github.Register(r.executor, &github.ToolOptions{
 		BaseURL: os.Getenv("AURA_TEST_GITHUB_BASE"), HTTPClient: &http.Client{},
-		Credentials: []github.Credential{{Name: "ci", Ref: "env://" + gitHubToken}},
+		Credentials: []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}},
 	})
 	if err != nil {
 		t.Fatalf("register the github tools on the stub: %v", err)

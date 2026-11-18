@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
@@ -22,7 +21,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -245,17 +243,7 @@ func ConfiguredToolSecrets(cfg *config.Config) []string {
 	if cfg == nil || cfg.Tools == nil {
 		return nil
 	}
-	ref := cfg.Tools.WebSearch.CredentialRef
-	var source secret.Reference
-	switch {
-	case strings.HasPrefix(ref, "env://"):
-		source.Env = strings.TrimPrefix(ref, "env://")
-	case strings.HasPrefix(ref, "file://"):
-		source.File = strings.TrimPrefix(ref, "file://")
-	default:
-		return nil
-	}
-	value, err := source.Resolve()
+	value, err := cfg.Tools.WebSearch.CredentialRef.Reference().Resolve()
 	if err != nil || value == "" {
 		return nil
 	}

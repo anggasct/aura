@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 type Config struct {
@@ -146,8 +147,8 @@ type Sync struct {
 	Remote             string             `json:"remote"`
 	Branch             string             `json:"branch"`
 	Interval           configkit.Duration `json:"interval"`
-	TransportSecretRef string             `json:"transport_secret_ref"`
-	KnownHostsRef      string             `json:"known_hosts_ref"`
+	TransportSecretRef secret.Ref         `json:"transport_secret_ref"`
+	KnownHostsRef      secret.Ref         `json:"known_hosts_ref"`
 	GitBinary          string             `json:"git_binary"`
 	SSHBinary          string             `json:"ssh_binary"`
 	Include            []string           `json:"include"`
@@ -236,14 +237,14 @@ type Discord struct {
 }
 
 type DiscordAccount struct {
-	Name              string   `json:"name"`
-	BotTokenRef       string   `json:"bot_token_ref"`
-	Persona           string   `json:"persona,omitempty"`
-	AllowedUserIDs    []string `json:"allowed_user_ids"`
-	AllowedGuildIDs   []string `json:"allowed_guild_ids"`
-	AllowedChannelIDs []string `json:"allowed_channel_ids"`
-	AcceptDMs         bool     `json:"accept_dms"`
-	LinkPreviews      bool     `json:"link_previews"`
+	Name              string     `json:"name"`
+	BotTokenRef       secret.Ref `json:"bot_token_ref"`
+	Persona           string     `json:"persona,omitempty"`
+	AllowedUserIDs    []string   `json:"allowed_user_ids"`
+	AllowedGuildIDs   []string   `json:"allowed_guild_ids"`
+	AllowedChannelIDs []string   `json:"allowed_channel_ids"`
+	AcceptDMs         bool       `json:"accept_dms"`
+	LinkPreviews      bool       `json:"link_previews"`
 }
 
 func (*DiscordAccount) Default() any {
@@ -260,15 +261,15 @@ type Telegram struct {
 }
 
 type TelegramAccount struct {
-	Name               string   `json:"name"`
-	BotTokenRef        string   `json:"bot_token_ref"`
-	Mode               string   `json:"mode"`
-	WebhookSecretRef   string   `json:"webhook_secret_ref,omitempty"`
-	Persona            string   `json:"persona,omitempty"`
-	AllowedUserIDs     []string `json:"allowed_user_ids"`
-	AllowedChatIDs     []string `json:"allowed_chat_ids"`
-	AcceptPrivateChats bool     `json:"accept_private_chats"`
-	LinkPreviews       bool     `json:"link_previews"`
+	Name               string     `json:"name"`
+	BotTokenRef        secret.Ref `json:"bot_token_ref"`
+	Mode               string     `json:"mode"`
+	WebhookSecretRef   secret.Ref `json:"webhook_secret_ref,omitzero"`
+	Persona            string     `json:"persona,omitempty"`
+	AllowedUserIDs     []string   `json:"allowed_user_ids"`
+	AllowedChatIDs     []string   `json:"allowed_chat_ids"`
+	AcceptPrivateChats bool       `json:"accept_private_chats"`
+	LinkPreviews       bool       `json:"link_previews"`
 }
 
 func (*TelegramAccount) Default() any {
@@ -342,17 +343,17 @@ type EmailAccount struct {
 }
 
 type EmailSMTP struct {
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	Username    string `json:"username"`
-	PasswordRef string `json:"password_ref"`
+	Host        string     `json:"host"`
+	Port        int        `json:"port"`
+	Username    string     `json:"username"`
+	PasswordRef secret.Ref `json:"password_ref"`
 }
 
 type EmailIMAP struct {
 	Host         string             `json:"host"`
 	Port         int                `json:"port"`
 	Username     string             `json:"username"`
-	PasswordRef  string             `json:"password_ref"`
+	PasswordRef  secret.Ref         `json:"password_ref"`
 	Folder       string             `json:"folder"`
 	PollInterval configkit.Duration `json:"poll_interval"`
 }
@@ -431,7 +432,7 @@ type Usage struct {
 type Telemetry struct {
 	Exporter      string             `json:"exporter"`
 	Endpoint      string             `json:"endpoint"`
-	CredentialRef string             `json:"credential_ref"`
+	CredentialRef secret.Ref         `json:"credential_ref"`
 	SampleRatio   float64            `json:"sample_ratio"`
 	QueueSize     int                `json:"queue_size"`
 	ExportTimeout configkit.Duration `json:"export_timeout"`
@@ -472,10 +473,10 @@ type ToolFetch struct {
 }
 
 type ToolWebSearch struct {
-	Provider      string `json:"provider"`
-	CredentialRef string `json:"credential_ref,omitempty"`
-	Endpoint      string `json:"endpoint,omitempty"`
-	MaxResults    int    `json:"max_results"`
+	Provider      string     `json:"provider"`
+	CredentialRef secret.Ref `json:"credential_ref,omitzero"`
+	Endpoint      string     `json:"endpoint,omitempty"`
+	MaxResults    int        `json:"max_results"`
 }
 
 type Server struct {
@@ -512,8 +513,7 @@ type ModelDefinition struct {
 	BaseURL      string            `json:"base_url,omitempty"`
 	Provider     string            `json:"provider,omitempty"`
 	Custom       *CustomProvider   `json:"custom,omitempty"`
-	APIKeyEnv    string            `json:"api_key_env"`
-	APIKeyFile   string            `json:"api_key_file"`
+	APIKeyRef    secret.Ref        `json:"api_key_ref"`
 	Capabilities ModelCapabilities `json:"capabilities"`
 }
 
@@ -1091,12 +1091,20 @@ func Default() Config {
 	}
 }
 
-func defaultSyncTransportSecretRef() string {
-	return fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "TRANSPORT_SECRET")
+func defaultSyncTransportSecretRef() secret.Ref {
+	return mustRef(fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "TRANSPORT_SECRET"))
 }
 
-func defaultSyncKnownHostsRef() string {
-	return fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "KNOWN_HOSTS")
+func defaultSyncKnownHostsRef() secret.Ref {
+	return mustRef(fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "KNOWN_HOSTS"))
+}
+
+func mustRef(text string) secret.Ref {
+	ref, err := secret.ParseRef(text)
+	if err != nil {
+		panic(err)
+	}
+	return ref
 }
 
 func defaultModelsRouting() map[string]string {

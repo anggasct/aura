@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 type capturedRequest struct {
@@ -40,7 +41,7 @@ func providerCaptureServer(t *testing.T, mu *sync.Mutex, captured *[]capturedReq
 func mustProviderAdapter(t *testing.T, name string, spec *config.ModelDefinition, logger *slog.Logger, providers map[string]config.ProviderPreset) adkmodel.LLM {
 	t.Helper()
 	t.Setenv("AURA_PROVIDER_TEST_KEY", "test-key")
-	spec.APIKeyEnv = "AURA_PROVIDER_TEST_KEY"
+	spec.APIKeyRef = secrettest.Ref("env://AURA_PROVIDER_TEST_KEY")
 	if logger == nil {
 		logger = slog.Default()
 	}

@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 type denyResolver struct{}
@@ -26,8 +28,8 @@ func transportConfig(remote string) *config.Sync {
 		Enabled:            true,
 		Remote:             remote,
 		Branch:             "main",
-		TransportSecretRef: "env://AURA_SYNC_TRANSPORT_SECRET",
-		KnownHostsRef:      "file:///run/secrets/known-hosts",
+		TransportSecretRef: secrettest.Ref("env://AURA_SYNC_TRANSPORT_SECRET"),
+		KnownHostsRef:      secrettest.Ref("file:///run/secrets/known-hosts"),
 		GitBinary:          "/usr/bin/git",
 		SSHBinary:          "/usr/bin/ssh",
 		Include:            []string{"skills/**"},
@@ -90,14 +92,12 @@ func TestResolveTransportRejectsLoopback(t *testing.T) {
 
 func TestResolveTransportRejectsSecretScheme(t *testing.T) {
 	t.Parallel()
-	for _, ref := range []string{"secret://key", "file-secret://git-deploy-key", "deploy-key"} {
-		cfg := transportConfig("https://git.example.com/owner/aura-assets.git")
-		cfg.TransportSecretRef = ref
-		if _, err := ResolveTransport(t.Context(), cfg, denyResolver{}); err == nil {
-			t.Fatalf("ResolveTransport ref %q = nil, want error", ref)
-		} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCredentialInvalid {
-			t.Fatalf("code = %v,%v want sync_secret_invalid", code, ok)
-		}
+	cfg := transportConfig("https://git.example.com/owner/aura-assets.git")
+	cfg.TransportSecretRef = secret.Ref{}
+	if _, err := ResolveTransport(t.Context(), cfg, denyResolver{}); err == nil {
+		t.Fatal("ResolveTransport with no secret reference = nil, want error")
+	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCredentialInvalid {
+		t.Fatalf("code = %v,%v want sync_secret_invalid", code, ok)
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
@@ -237,7 +238,7 @@ func testAdapterConfig() config.Discord {
 func testAdapterAccount() config.DiscordAccount {
 	return config.DiscordAccount{
 		Name:              "owner",
-		BotTokenRef:       "env://AURA_DISCORD_BOT_TOKEN",
+		BotTokenRef:       secrettest.Ref("env://AURA_DISCORD_BOT_TOKEN"),
 		Persona:           auraagent.DefaultID,
 		AllowedUserIDs:    []string{"111"},
 		AllowedGuildIDs:   []string{"222"},

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 const (
@@ -393,12 +394,12 @@ func smtpAccount(server *fakeSMTP) *config.EmailAccount {
 		Persona:    testPersona,
 		Address:    testAddress,
 		AuthservID: testAuthserv,
-		IMAP:       config.EmailIMAP{Host: "imap.example.com", Port: 993, Username: testAddress, PasswordRef: "env://AURA_TEST_EMAIL_PASSWORD"},
+		IMAP:       config.EmailIMAP{Host: "imap.example.com", Port: 993, Username: testAddress, PasswordRef: secrettest.Ref("env://AURA_TEST_EMAIL_PASSWORD")},
 		SMTP: config.EmailSMTP{
 			Host:        "127.0.0.1",
 			Port:        server.port(),
 			Username:    smtpUsername,
-			PasswordRef: "env://" + smtpPasswordEnv,
+			PasswordRef: secrettest.Ref("env://" + smtpPasswordEnv),
 		},
 	}
 }

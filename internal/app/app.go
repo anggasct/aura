@@ -286,7 +286,7 @@ func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
 func githubCredentialSecrets(cfg *config.Config) []string {
 	var values []string
 	for _, credential := range githubCredentials(cfg) {
-		if value, err := parseSecretRef(credential.Ref).Resolve(); err == nil && strings.TrimSpace(value) != "" {
+		if value, err := credential.Ref.Reference().Resolve(); err == nil && strings.TrimSpace(value) != "" {
 			values = append(values, value)
 		}
 	}

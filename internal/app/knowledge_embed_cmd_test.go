@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/embedding"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 type providerCall struct {
@@ -667,7 +668,7 @@ func TestKnowledgeServiceUsesTheLoopbackClientOnlyForEmbeddings(t *testing.T) {
 }
 
 func TestEmbeddingCredentialIsAnOptionalSecretThatJoinsTheVaultWhenResolved(t *testing.T) {
-	cfg := &config.Config{Knowledge: &config.Knowledge{Embedding: &config.KnowledgeEmbedding{CredentialRef: "env://KB_EMBED_VAULT_ENTRY"}}}
+	cfg := &config.Config{Knowledge: &config.Knowledge{Embedding: &config.KnowledgeEmbedding{CredentialRef: secrettest.Ref("env://KB_EMBED_VAULT_ENTRY")}}}
 	var found *configuredSecret
 	for _, entry := range additionalConfiguredSecrets(cfg) {
 		if entry.name == "knowledge_embedding_credential" {

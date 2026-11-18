@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
@@ -142,7 +143,7 @@ func newWebhookRig(t *testing.T, configure func(*config.Telegram, *config.Telegr
 	t.Setenv(testWebhookSecretEnv, testWebhookSecret)
 	adapter := h.adapterWith(t, nil, func(cfg *config.Telegram, account *config.TelegramAccount) {
 		account.Mode = config.TelegramModeWebhook
-		account.WebhookSecretRef = "env://" + testWebhookSecretEnv
+		account.WebhookSecretRef = secrettest.Ref("env://" + testWebhookSecretEnv)
 		cfg.Webhook = config.TelegramWebhook{
 			ListenAddress:  config.TelegramWebhookListenAddress,
 			PublicBaseURL:  testPublicBase,

@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/store"
@@ -279,7 +280,7 @@ func TestRegisteredToolsRefuseAnUnconfiguredCredentialBeforeApproval(t *testing.
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	creds := []Credential{{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"}}
+	creds := []Credential{{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TEST_TOKEN")}}
 	if err := Register(broker, &ToolOptions{BaseURL: server.URL, HTTPClient: server.Client(), Credentials: creds}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -339,8 +340,8 @@ func (r *recordingRegistrar) RegisterTool(definition *tools.Definition, _ toolbr
 func TestRegisterAdvertisesTheConfiguredCredentialNames(t *testing.T) {
 	registrar := &recordingRegistrar{}
 	err := Register(registrar, &ToolOptions{Credentials: []Credential{
-		{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"},
-		{Name: "release", Ref: "file:///run/aura/gh-release"},
+		{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TEST_TOKEN")},
+		{Name: "release", Ref: secrettest.Ref("file:///run/aura/gh-release")},
 	}})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
@@ -412,7 +413,7 @@ func TestRegisterRefusesMissingEmptyOrRepeatedCredentials(t *testing.T) {
 		{"nil options", nil},
 		{"nil list", &ToolOptions{}},
 		{"empty list", &ToolOptions{Credentials: []Credential{}}},
-		{"repeated name", &ToolOptions{Credentials: []Credential{{Name: "ci", Ref: "env://A"}, {Name: "ci", Ref: "env://B"}}}},
+		{"repeated name", &ToolOptions{Credentials: []Credential{{Name: "ci", Ref: secrettest.Ref("env://A")}, {Name: "ci", Ref: secrettest.Ref("env://B")}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

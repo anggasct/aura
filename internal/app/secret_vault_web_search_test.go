@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 func webSearchSecretEntry(cfg *config.Config) *configuredSecret {
@@ -33,7 +34,7 @@ func TestWebSearchCredentialIsOptionalOnlyAtTheSelectedProvidersDefaultReference
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			cfg := &config.Config{Tools: &config.Tools{WebSearch: config.ToolWebSearch{Provider: test.provider, CredentialRef: test.ref}}}
+			cfg := &config.Config{Tools: &config.Tools{WebSearch: config.ToolWebSearch{Provider: test.provider, CredentialRef: secrettest.Ref(test.ref)}}}
 			entry := webSearchSecretEntry(cfg)
 			if (entry != nil) != test.present {
 				t.Fatalf("entry = %+v, want present %v", entry, test.present)

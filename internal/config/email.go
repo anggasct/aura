@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 const (
@@ -81,7 +82,7 @@ func emailAccountProblems(field string, account *EmailAccount, enabled bool) []e
 		problems = append(problems, configkit.Invalid(field+".authserv_id", "must be the receiving server's host name"))
 	}
 	problems = append(problems, emailIMAPProblems(field+".imap", &account.IMAP)...)
-	if enabled || account.SMTP.Host != "" || account.SMTP.Username != "" || account.SMTP.PasswordRef != "" {
+	if enabled || account.SMTP.Host != "" || account.SMTP.Username != "" || !account.SMTP.PasswordRef.IsZero() {
 		problems = append(problems, emailSMTPProblems(field+".smtp", &account.SMTP)...)
 	}
 	seen := make(map[string]bool, len(account.AllowedSenders))
@@ -114,7 +115,7 @@ func emailSMTPProblems(field string, smtp *EmailSMTP) []error {
 	return emailEndpointProblems(field, smtp.Host, smtp.Port, smtp.Username, smtp.PasswordRef)
 }
 
-func emailEndpointProblems(field, host string, port int, username, passwordRef string) []error {
+func emailEndpointProblems(field, host string, port int, username string, passwordRef secret.Ref) []error {
 	var problems []error
 	if !emailHostName(host) {
 		problems = append(problems, configkit.Invalid(field+".host", "must be a host name"))
@@ -125,22 +126,10 @@ func emailEndpointProblems(field, host string, port int, username, passwordRef s
 	if !emailPlainText(username, emailMaxUsernameBytes) {
 		problems = append(problems, configkit.Invalid(field+".username", fmt.Sprintf("must be a single line of at most %d bytes", emailMaxUsernameBytes)))
 	}
-	switch {
-	case passwordRef == "":
+	if passwordRef.IsZero() {
 		problems = append(problems, configkit.Invalid(field+".password_ref", "must not be empty"))
-	case !secretReferenceShaped(passwordRef):
-		problems = append(problems, configkit.Invalid(field+".password_ref", "must use env:// or file://"))
 	}
 	return problems
-}
-
-func secretReferenceShaped(raw string) bool {
-	for _, scheme := range []string{"env://", "file://"} {
-		if rest, found := strings.CutPrefix(raw, scheme); found {
-			return rest != ""
-		}
-	}
-	return false
 }
 
 func emailHostName(host string) bool {

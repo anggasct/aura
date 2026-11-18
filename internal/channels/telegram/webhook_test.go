@@ -17,6 +17,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -465,8 +467,7 @@ func (r *webhookRig) rejectedRequests(t *testing.T) {
 func TestNewRejectsIncompleteWebhookAccounts(t *testing.T) {
 	cases := map[string]func(*config.Telegram, *config.TelegramAccount){
 		"unknown mode":        func(_ *config.Telegram, a *config.TelegramAccount) { a.Mode = "carrier-pigeon" },
-		"missing secret ref":  func(_ *config.Telegram, a *config.TelegramAccount) { a.WebhookSecretRef = "" },
-		"inline secret":       func(_ *config.Telegram, a *config.TelegramAccount) { a.WebhookSecretRef = "plain-secret" },
+		"missing secret ref":  func(_ *config.Telegram, a *config.TelegramAccount) { a.WebhookSecretRef = secret.Ref{} },
 		"missing public url":  func(c *config.Telegram, _ *config.TelegramAccount) { c.Webhook.PublicBaseURL = "" },
 		"zero body bound":     func(c *config.Telegram, _ *config.TelegramAccount) { c.Webhook.MaxBodyBytes = 0 },
 		"zero connection cap": func(c *config.Telegram, _ *config.TelegramAccount) { c.Webhook.MaxConnections = 0 },
@@ -478,7 +479,7 @@ func TestNewRejectsIncompleteWebhookAccounts(t *testing.T) {
 				Polling: config.TelegramPolling{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
 				Webhook: config.TelegramWebhook{PublicBaseURL: testPublicBase, MaxBodyBytes: 1024, MaxConnections: 2},
 			}
-			account := &config.TelegramAccount{Name: "pocket", BotTokenRef: "env://" + testTokenEnv, Mode: config.TelegramModeWebhook, WebhookSecretRef: "env://" + testWebhookSecretEnv}
+			account := &config.TelegramAccount{Name: "pocket", BotTokenRef: secrettest.Ref("env://" + testTokenEnv), Mode: config.TelegramModeWebhook, WebhookSecretRef: secrettest.Ref("env://" + testWebhookSecretEnv)}
 			mutate(cfg, account)
 			_, err := New(cfg, account, h.cursors, h.effects, h.sessions, nil)
 			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {

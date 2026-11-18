@@ -33,6 +33,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
@@ -55,7 +56,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dir
-	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}
+	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	storetest.Seed(t, filepath.Join(dir, "aura.db"))
 	db, err := store.OpenDB(t.Context(), filepath.Join(dir, "aura.db"))
 	if err != nil {
@@ -88,7 +89,7 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 		return json.RawMessage(`{"repo":"org/repo","number":7,"body":"hi","credential_name":"` + credential + `"}`)
 	}
 	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *config.Config) {
-		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}
+		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 		cfg.Agents.Definitions = append(cfg.Agents.Definitions, config.AgentDefinition{
 			ID: "reviewer", Description: "d", Instructions: "i", Tools: []string{github.ToolComment},
 		})
@@ -153,7 +154,7 @@ func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbui
 }
 
 func oneCredential() []config.GitHubCredential {
-	return []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}
+	return []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 }
 
 func approveAll(context.Context, *toolbroker.ApprovalPrompt) (bool, error) { return true, nil }

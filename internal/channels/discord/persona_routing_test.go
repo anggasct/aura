@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
@@ -19,11 +20,11 @@ func twoAccountConfig() config.Discord {
 	cfg := testAdapterConfig()
 	home := testAdapterAccount()
 	home.Name = "home"
-	home.BotTokenRef = "env://AURA_TEST_HOME_TOKEN"
+	home.BotTokenRef = secrettest.Ref("env://AURA_TEST_HOME_TOKEN")
 	home.Persona = "engineer"
 	kuma := testAdapterAccount()
 	kuma.Name = "kuma"
-	kuma.BotTokenRef = "env://AURA_TEST_KUMA_TOKEN"
+	kuma.BotTokenRef = secrettest.Ref("env://AURA_TEST_KUMA_TOKEN")
 	kuma.Persona = "reviewer"
 	cfg.Accounts = []config.DiscordAccount{home, kuma}
 	return cfg

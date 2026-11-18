@@ -7,6 +7,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -16,7 +17,7 @@ func enabledTelegramConfig() config.Config {
 	defaults.Channels.Telegram.Enabled = true
 	defaults.Channels.Telegram.Accounts = []config.TelegramAccount{{
 		Name:        "pocket",
-		BotTokenRef: "env://AURA_TELEGRAM_BOT_TOKEN",
+		BotTokenRef: secrettest.Ref("env://AURA_TELEGRAM_BOT_TOKEN"),
 		Persona:     auraagent.DefaultID,
 	}}
 	return defaults
@@ -81,7 +82,7 @@ func TestBuildSecretVaultRedactsTelegramTokens(t *testing.T) {
 func webhookTelegramConfig() config.Config {
 	cfg := enabledTelegramConfig()
 	cfg.Channels.Telegram.Accounts[0].Mode = config.TelegramModeWebhook
-	cfg.Channels.Telegram.Accounts[0].WebhookSecretRef = "env://AURA_TELEGRAM_WEBHOOK_SECRET"
+	cfg.Channels.Telegram.Accounts[0].WebhookSecretRef = secrettest.Ref("env://AURA_TELEGRAM_WEBHOOK_SECRET")
 	cfg.Channels.Telegram.Webhook.PublicBaseURL = "https://aura.example.com"
 	return cfg
 }

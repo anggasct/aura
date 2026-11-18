@@ -24,6 +24,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
@@ -424,8 +425,8 @@ func TestBuildSecretVaultRedactsEmailPasswords(t *testing.T) {
 	cfg := config.Default()
 	cfg.Channels.Email.Accounts = []config.EmailAccount{{
 		Name: "work",
-		IMAP: config.EmailIMAP{PasswordRef: "env://AURA_TEST_VAULT_IMAP"},
-		SMTP: config.EmailSMTP{PasswordRef: "env://AURA_TEST_VAULT_SMTP"},
+		IMAP: config.EmailIMAP{PasswordRef: secrettest.Ref("env://AURA_TEST_VAULT_IMAP")},
+		SMTP: config.EmailSMTP{PasswordRef: secrettest.Ref("env://AURA_TEST_VAULT_SMTP")},
 	}}
 	vault := buildSecretVault(&cfg)
 	for _, secret := range []string{"imap-secret-probe", "smtp-secret-probe"} {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 func syncConfig() *config.Sync {
@@ -13,8 +14,8 @@ func syncConfig() *config.Sync {
 		Enabled:            true,
 		Remote:             "ssh://git@example.com/owner/aura-assets.git",
 		Branch:             "main",
-		TransportSecretRef: "env://AURA_SYNC_TRANSPORT_SECRET",
-		KnownHostsRef:      "env://AURA_SYNC_KNOWN_HOSTS",
+		TransportSecretRef: secrettest.Ref("env://AURA_SYNC_TRANSPORT_SECRET"),
+		KnownHostsRef:      secrettest.Ref("env://AURA_SYNC_KNOWN_HOSTS"),
 		GitBinary:          "/usr/bin/git",
 		SSHBinary:          "/usr/bin/ssh",
 		Include:            []string{"skills/**"},

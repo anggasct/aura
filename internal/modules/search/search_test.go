@@ -17,6 +17,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
@@ -105,7 +107,7 @@ func optionsFor(provider string) *Options {
 	options := &Options{Provider: provider, Timeout: time.Second, MaxResults: 5, MaxBodyBytes: 1 << 20, Resolver: searchResolver()}
 	switch provider {
 	case providerBrave, providerTavily:
-		options.CredentialRef = "env://AURA_TEST_SEARCH_TOKEN"
+		options.CredentialRef = secrettest.Ref("env://AURA_TEST_SEARCH_TOKEN")
 	case providerSearXNG:
 		options.Endpoint = searxngEndpoint
 	}
@@ -315,7 +317,7 @@ func TestSearXNGSendsBearerOnlyWhenACredentialIsConfigured(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var captured capturedRequest
 			options := optionsFor(providerSearXNG)
-			options.CredentialRef = ref
+			options.CredentialRef = secrettest.Ref(ref)
 			options.client = cannedClient(http.StatusOK, searxngFixture, &captured)
 			if _, err := callSearch(newAdapter(t, options), `{"query":"go"}`); err != nil {
 				t.Fatalf("search: %v", err)
@@ -338,8 +340,6 @@ func TestCredentialedProvidersNeedAResolvableCredential(t *testing.T) {
 		"unset variable":       "env://AURA_TEST_SEARCH_UNSET",
 		"empty variable value": "env://AURA_TEST_EMPTY_TOKEN",
 		"missing file":         "file:///nonexistent/aura-search-token",
-		"malformed reference":  "literal-key",
-		"bare scheme":          "env://",
 	}
 	for _, provider := range []string{providerBrave, providerTavily, providerSearXNG} {
 		for name, ref := range refs {
@@ -349,7 +349,7 @@ func TestCredentialedProvidersNeedAResolvableCredential(t *testing.T) {
 			t.Run(provider+"/"+name, func(t *testing.T) {
 				var captured capturedRequest
 				options := optionsFor(provider)
-				options.CredentialRef = ref
+				options.CredentialRef = secrettest.Ref(ref)
 				options.client = cannedClient(http.StatusOK, braveFixture, &captured)
 				_, err := callSearch(newAdapter(t, options), `{"query":"go"}`)
 				if classOf(err) != toolbroker.ResultCapabilityUnavailable || captured.calls != 0 {
@@ -484,7 +484,7 @@ func TestCredentialValuesAreRedactedFromResultsForEveryCredentialedProvider(t *t
 	for provider, body := range leaking {
 		t.Run(provider, func(t *testing.T) {
 			options := optionsFor(provider)
-			options.CredentialRef = "env://AURA_TEST_SEARCH_TOKEN"
+			options.CredentialRef = secrettest.Ref("env://AURA_TEST_SEARCH_TOKEN")
 			options.client = cannedClient(http.StatusOK, body, nil)
 			got, err := callSearch(newAdapter(t, options), `{"query":"go"}`)
 			if err != nil {
@@ -527,14 +527,18 @@ func TestMaxResultsArgumentOnlyNarrowsTheConfiguredLimit(t *testing.T) {
 
 func TestNewRejectsOptionsThatFallThroughToADefaultOrRedirectAKey(t *testing.T) {
 	tests := map[string]func(*Options){
-		"empty provider":              func(o *Options) { o.Provider = "" },
-		"unknown provider":            func(o *Options) { o.Provider = "bing" },
-		"upper case provider":         func(o *Options) { o.Provider = "Brave" },
-		"duckduckgo endpoint":         func(o *Options) { o.Provider = providerDuckDuckGo; o.CredentialRef = ""; o.Endpoint = searxngEndpoint },
+		"empty provider":      func(o *Options) { o.Provider = "" },
+		"unknown provider":    func(o *Options) { o.Provider = "bing" },
+		"upper case provider": func(o *Options) { o.Provider = "Brave" },
+		"duckduckgo endpoint": func(o *Options) {
+			o.Provider = providerDuckDuckGo
+			o.CredentialRef = secret.Ref{}
+			o.Endpoint = searxngEndpoint
+		},
 		"brave endpoint":              func(o *Options) { o.Provider = providerBrave; o.Endpoint = searxngEndpoint },
 		"tavily endpoint":             func(o *Options) { o.Provider = providerTavily; o.Endpoint = searxngEndpoint },
 		"brave loopback authority":    func(o *Options) { o.Provider = providerBrave; o.LoopbackAuthority = "127.0.0.1:8888" },
-		"duckduckgo credential":       func(o *Options) { o.Provider = providerDuckDuckGo; o.CredentialRef = "env://X" },
+		"duckduckgo credential":       func(o *Options) { o.Provider = providerDuckDuckGo; o.CredentialRef = secrettest.Ref("env://X") },
 		"searxng without endpoint":    func(o *Options) { o.Endpoint = "" },
 		"searxng plain http":          func(o *Options) { o.Endpoint = "http://search.example/search" },
 		"searxng credentials in url":  func(o *Options) { o.Endpoint = "https://user:pw@search.example/search" },
@@ -679,7 +683,7 @@ func TestLoopbackClientReachesARealSearXNGServer(t *testing.T) {
 			}))
 			defer server.Close()
 			options := loopbackOptions(server)
-			options.CredentialRef = ref
+			options.CredentialRef = secrettest.Ref(ref)
 			got, err := callSearch(newAdapter(t, options), `{"query":"go lang","max_results":2}`)
 			if err != nil {
 				t.Fatalf("search: %v", err)

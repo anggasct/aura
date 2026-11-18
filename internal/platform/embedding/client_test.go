@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 func testConfig(baseURL string) *config.KnowledgeEmbedding {
@@ -432,7 +433,7 @@ func TestFingerprintBindsEverythingThatChangesTheVectorSpace(t *testing.T) {
 	}
 	same := map[string]func(*config.KnowledgeEmbedding){
 		"batch size":     func(c *config.KnowledgeEmbedding) { c.BatchSize = 7 },
-		"credential":     func(c *config.KnowledgeEmbedding) { c.CredentialRef = "env://OTHER" },
+		"credential":     func(c *config.KnowledgeEmbedding) { c.CredentialRef = secrettest.Ref("env://OTHER") },
 		"memory":         func(c *config.KnowledgeEmbedding) { c.MaxMemory = 1 << 30 },
 		"public queries": func(c *config.KnowledgeEmbedding) { c.PublicQueries = true },
 		"trailing slash": func(c *config.KnowledgeEmbedding) { c.BaseURL = "https://API.example.com/v1/" },

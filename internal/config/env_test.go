@@ -89,6 +89,8 @@ func TestEnvValueIsParsedForItsFieldType(t *testing.T) {
 		{"AURA_RUNTIME_MAX_ACTIVE_TURNS", "99999999999999999999", "runtime.max_active_turns", "must be an integer"},
 		{"AURA_RUNTIME_TURN_TIMEOUT", envCanary, "runtime.turn_timeout", "must be a duration"},
 		{"AURA_STORAGE_ARTIFACT_QUOTA", envCanary, "storage.artifact_quota", "must be a byte size"},
+		{"AURA_TELEMETRY_CREDENTIAL_REF", envCanary, "telemetry.credential_ref", "must be a secret reference"},
+		{"AURA_SYNC_KNOWN_HOSTS_REF", "file://" + envCanary, "sync.known_hosts_ref", "must be a secret reference"},
 		{"AURA_CHANNELS_DISCORD_ENABLED", "maybe", "channels.discord.enabled", "must be a boolean"},
 		{"AURA_CONTEXT_HIGH_WATER_RATIO", envCanary, "context.high_water_ratio", "must be a number"},
 		{"AURA_SKILLS_ROOTS", "a," + envCanary + ",,b", "skills.roots", "must be a list of strings without empty items"},
@@ -118,6 +120,7 @@ func TestEnvValueIsParsedForItsFieldType(t *testing.T) {
 		t.Setenv("AURA_CONTEXT_HIGH_WATER_RATIO", "0.5")
 		t.Setenv("AURA_RUNTIME_TURN_TIMEOUT", "45s")
 		t.Setenv("AURA_STORAGE_ARTIFACT_QUOTA", "2MiB")
+		t.Setenv("AURA_TELEMETRY_CREDENTIAL_REF", "env://AURA_TEST_TELEMETRY_KEY")
 		t.Setenv("AURA_SKILLS_ROOTS", " one , two ")
 		cfg, err := decodeContent(t, "version: 1\n")
 		if err != nil {
@@ -131,6 +134,9 @@ func TestEnvValueIsParsedForItsFieldType(t *testing.T) {
 		}
 		if want := []string{"one", "two"}; !slices.Equal(cfg.Skills.Roots, want) {
 			t.Errorf("roots = %v, want %v", cfg.Skills.Roots, want)
+		}
+		if got := cfg.Telemetry.CredentialRef.String(); got != "env://AURA_TEST_TELEMETRY_KEY" {
+			t.Errorf("telemetry credential = %q, want the environment value", got)
 		}
 	})
 
@@ -229,8 +235,18 @@ func TestEnvNamedBySecretReferenceIsNotWarned(t *testing.T) {
 			set:     "AURA_TEST_CLIENT_ID",
 		},
 		{
+			name:    "mcp static credential variable",
+			content: "version: 1\nmcp:\n  servers:\n    - name: remote\n      transport: streamable_http\n      url: https://mcp.example.com/mcp\n      auth:\n        static:\n          credential_ref: env://AURA_TEST_MCP_TOKEN\n      capabilities: [\"external.read\"]\n",
+			set:     "AURA_TEST_MCP_TOKEN",
+		},
+		{
+			name:    "discord bot token variable",
+			content: "version: 1\nchannels:\n  discord:\n    accounts:\n      - name: home\n        bot_token_ref: env://AURA_TEST_BOT_TOKEN\n        allowed_user_ids: [\"111\"]\n",
+			set:     "AURA_TEST_BOT_TOKEN",
+		},
+		{
 			name:    "model api key variable",
-			content: "version: 1\n" + testModelDefinition + "      api_key_env: AURA_TEST_MODEL_KEY\n" + providerTestCapabilities,
+			content: "version: 1\n" + testModelDefinition + "      api_key_ref: env://AURA_TEST_MODEL_KEY\n" + providerTestCapabilities,
 			set:     "AURA_TEST_MODEL_KEY",
 		},
 	}

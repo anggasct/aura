@@ -6,7 +6,7 @@ models:
     primary:
       provider: openai
       model: gpt-4o-mini
-      api_key_env: OPENAI_API_KEY
+      api_key_ref: env://OPENAI_API_KEY
       capabilities:
         streaming: true
         tools: true

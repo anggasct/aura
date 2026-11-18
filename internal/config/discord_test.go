@@ -74,7 +74,7 @@ channels:
 		t.Fatalf("discord = %+v", discord)
 	}
 	home, kuma := discord.Accounts[0], discord.Accounts[1]
-	if home.Name != "home" || home.Persona != "main" || home.BotTokenRef != "env://DISCORD_HOME_TOKEN" {
+	if home.Name != "home" || home.Persona != "main" || home.BotTokenRef.String() != "env://DISCORD_HOME_TOKEN" {
 		t.Errorf("home = %+v", home)
 	}
 	if !home.AcceptDMs {

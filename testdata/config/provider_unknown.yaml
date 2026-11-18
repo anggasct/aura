@@ -6,7 +6,7 @@ models:
     primary:
       provider: no-such-provider
       model: some-model
-      api_key_env: SOME_API_KEY
+      api_key_ref: env://SOME_API_KEY
       capabilities:
         streaming: true
         tools: false

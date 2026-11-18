@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -301,13 +300,9 @@ func (a *Adapter) markFault(fault string) {
 	a.fault.Store(fault)
 }
 
-func parsePasswordRef(raw string) (secret.Reference, error) {
-	switch {
-	case strings.HasPrefix(raw, "env://"):
-		return secret.Reference{Env: strings.TrimPrefix(raw, "env://")}, nil
-	case strings.HasPrefix(raw, "file://"):
-		return secret.Reference{File: strings.TrimPrefix(raw, "file://")}, nil
-	default:
+func parsePasswordRef(ref secret.Ref) (secret.Reference, error) {
+	if ref.IsZero() {
 		return secret.Reference{}, Errorf(ErrorCodeInvalidArgument, "mailbox password reference must use env:// or file://")
 	}
+	return ref.Reference(), nil
 }

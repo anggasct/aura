@@ -405,20 +405,18 @@ func resolveDetail(err error) string {
 }
 
 func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {
-	if spec.APIKeyEnv != "" && spec.APIKeyFile != "" {
-		return "", newError(ErrorCodeSecretInvalid, name, "", "set only one of api_key_env or api_key_file")
-	}
-	if spec.APIKeyEnv != "" {
-		value, ok := os.LookupEnv(spec.APIKeyEnv)
+	source := spec.APIKeyRef.Reference()
+	if source.Env != "" {
+		value, ok := os.LookupEnv(source.Env)
 		if !ok || (value == "" && !config.IsLoopbackBaseURL(spec.BaseURL)) {
-			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("secret environment variable %q is unavailable", spec.APIKeyEnv))
+			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("secret environment variable %q is unavailable", source.Env))
 		}
 		return value, nil
 	}
-	if spec.APIKeyFile != "" {
-		data, err := os.ReadFile(spec.APIKeyFile)
+	if source.File != "" {
+		data, err := os.ReadFile(source.File)
 		if err != nil {
-			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("cannot read secret file %q: %v", filepath.Base(spec.APIKeyFile), withoutPath(err)))
+			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("cannot read secret file %q: %v", filepath.Base(source.File), withoutPath(err)))
 		}
 		value := strings.TrimSpace(string(data))
 		if value == "" {
@@ -427,7 +425,7 @@ func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {
 		return value, nil
 	}
 	if !config.IsLoopbackBaseURL(spec.BaseURL) {
-		return "", newError(ErrorCodeSecretInvalid, name, "", "api_key_env or api_key_file is required for a non-loopback endpoint")
+		return "", newError(ErrorCodeSecretInvalid, name, "", "api_key_ref is required for a non-loopback endpoint")
 	}
 	return "", nil
 }

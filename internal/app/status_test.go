@@ -308,7 +308,7 @@ func loadCapabilityConfig(t *testing.T, enabled []string, options config.LoadOpt
 		"vision: {}\n" +
 		"models:\n  definitions:\n    primary:\n" +
 		"      protocol: anthropic_messages\n" +
-		"      api_key_env: AURA_TEST_ANTHROPIC_KEY\n" +
+		"      api_key_ref: env://AURA_TEST_ANTHROPIC_KEY\n" +
 		"      model: claude-sonnet-4\n" +
 		"      capabilities:\n        context_tokens: 200000\n        tokenizer: anthropic\n"
 	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {

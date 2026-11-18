@@ -10,6 +10,8 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -24,7 +26,7 @@ func enabledDiscordConfig() config.Config {
 	defaults.Channels.Discord.Enabled = true
 	defaults.Channels.Discord.Accounts = []config.DiscordAccount{{
 		Name:           "owner",
-		BotTokenRef:    "env://AURA_DISCORD_BOT_TOKEN",
+		BotTokenRef:    secrettest.Ref("env://AURA_DISCORD_BOT_TOKEN"),
 		Persona:        auraagent.DefaultID,
 		AllowedUserIDs: []string{"111"},
 		AcceptDMs:      true,
@@ -116,7 +118,7 @@ func TestBuildSecretVaultSkipsEmptyValues(t *testing.T) {
 	cfg := config.Default()
 	cfg.Webhook.Keys = []config.WebhookKey{{ID: "probe", SecretEnv: "AURA_TEST_EMPTY_WEBHOOK_SECRET"}}
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
-		"probe": {Model: "probe", Provider: "probe", APIKeyEnv: "AURA_TEST_EMPTY_MODEL_KEY"},
+		"probe": {Model: "probe", Provider: "probe", APIKeyRef: secrettest.Ref("env://AURA_TEST_EMPTY_MODEL_KEY")},
 	}
 	vault := buildSecretVault(&cfg)
 	rendered := "Looking through notes"
@@ -131,7 +133,7 @@ func TestBuildSecretVaultSkipsEmptyValues(t *testing.T) {
 func TestBuildChannelAdapters_RejectsBadTokenRef(t *testing.T) {
 	db := discordTestDB(t)
 	cfg := enabledDiscordConfig()
-	cfg.Channels.Discord.Accounts[0].BotTokenRef = "not-a-reference"
+	cfg.Channels.Discord.Accounts[0].BotTokenRef = secret.Ref{}
 	if _, _, _, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil); err == nil {
 		t.Fatal("bad token reference accepted")
 	}
@@ -191,7 +193,7 @@ func TestBuildChannelAdapters_OneAdapterPerAccount(t *testing.T) {
 	cfg := enabledDiscordConfig()
 	cfg.Channels.Discord.Accounts = append(cfg.Channels.Discord.Accounts, config.DiscordAccount{
 		Name:           "kuma",
-		BotTokenRef:    "env://AURA_DISCORD_KUMA_TOKEN",
+		BotTokenRef:    secrettest.Ref("env://AURA_DISCORD_KUMA_TOKEN"),
 		Persona:        "engineer",
 		AllowedUserIDs: []string{"111"},
 	})
@@ -248,8 +250,8 @@ func TestBuildSecretVaultRedactsEveryAccountToken(t *testing.T) {
 	t.Setenv("AURA_TEST_KUMA_TOKEN", "kuma-token-value-456")
 	cfg := config.Default()
 	cfg.Channels.Discord.Accounts = []config.DiscordAccount{
-		{Name: "home", BotTokenRef: "env://AURA_TEST_HOME_TOKEN"},
-		{Name: "kuma", BotTokenRef: "env://AURA_TEST_KUMA_TOKEN"},
+		{Name: "home", BotTokenRef: secrettest.Ref("env://AURA_TEST_HOME_TOKEN")},
+		{Name: "kuma", BotTokenRef: secrettest.Ref("env://AURA_TEST_KUMA_TOKEN")},
 	}
 	vault := buildSecretVault(&cfg)
 	for _, token := range []string{"home-token-value-123", "kuma-token-value-456"} {

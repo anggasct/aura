@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -283,7 +284,7 @@ func TestAdapter_TokenUnavailableNeverDials(t *testing.T) {
 	sink := newMemorySink()
 	resumes := &memoryResumeStore{}
 	cfg := testAdapterConfig()
-	cfg.Accounts[0].BotTokenRef = "file:///nonexistent-token-file"
+	cfg.Accounts[0].BotTokenRef = secrettest.Ref("file:///nonexistent-token-file")
 	adapter, err := newRoutedTestAdapter(t, &cfg, resumes, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, nil)
 	if err != nil {
 		t.Fatalf("New(): %v", err)

@@ -21,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
@@ -534,7 +535,7 @@ func (h *harness) adapterWith(t *testing.T, cursors CursorStore, configure func(
 		Polling:            config.TelegramPolling{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
 		MaxAttachmentBytes: config.TelegramMaxAttachmentBytes,
 	}
-	account := &config.TelegramAccount{Name: "pocket", BotTokenRef: "env://" + testTokenEnv}
+	account := &config.TelegramAccount{Name: "pocket", BotTokenRef: secrettest.Ref("env://" + testTokenEnv)}
 	if configure != nil {
 		configure(cfg, account)
 	}
