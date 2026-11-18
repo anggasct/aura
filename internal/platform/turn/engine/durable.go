@@ -168,6 +168,9 @@ func (e *Engine) claimDurable(ctx context.Context, req *turn.TurnRequest) (accep
 	})
 	if err != nil {
 		e.releasePending()
+		if _, refused := fault.CodeOf[turn.ErrorCode](err); refused {
+			return store.RuntimeEvent{}, "", false, false, err
+		}
 		return store.RuntimeEvent{}, "", false, false, codedError(turn.ErrorCodeStorageUnavailable, "durable admit failed", err)
 	}
 	if result.Overloaded {

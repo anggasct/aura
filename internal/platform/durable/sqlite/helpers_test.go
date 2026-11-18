@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -160,6 +161,13 @@ func requireCode(t *testing.T, err error, want ErrorCode) (detail string) {
 		t.Fatalf("err = %v, want code %s", err, want)
 	}
 	return coded.Detail
+}
+
+func requireTurnCode(t *testing.T, err error, want turn.ErrorCode) {
+	t.Helper()
+	if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != want {
+		t.Fatalf("err = %v, want turn code %s", err, want)
+	}
 }
 
 type runFixture struct {
