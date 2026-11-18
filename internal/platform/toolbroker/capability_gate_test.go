@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -93,7 +94,7 @@ func TestBrokerDeniesToolsWhoseCapabilityTheHostLacks(t *testing.T) {
 				request := brokerRequest(tool.name, tool.arguments, tool.capability)
 				request.EventSequence = 1
 				_, err := probe.broker.Execute(context.Background(), request)
-				if code, ok := CodeOf(err); !ok || code != ResultCapabilityUnavailable {
+				if !fault.HasCode(err, ResultCapabilityUnavailable) {
 					t.Fatalf("Execute error = %v, want capability_unavailable", err)
 				}
 				if probe.adapter != 0 || probe.prompts != 0 || probe.intents(t) != 0 {
@@ -111,7 +112,7 @@ func TestBrokerDeniesARequestThatClaimsNothingWhenTheHostLacksTheCapability(t *t
 			request := brokerRequest(tool.name, tool.arguments)
 			request.EventSequence = 1
 			_, err := probe.broker.Execute(context.Background(), request)
-			if code, ok := CodeOf(err); !ok || code != ResultCapabilityUnavailable {
+			if !fault.HasCode(err, ResultCapabilityUnavailable) {
 				t.Fatalf("Execute error = %v, want capability_unavailable", err)
 			}
 			if probe.adapter != 0 || probe.prompts != 0 {
@@ -126,7 +127,7 @@ func TestBrokerDeniesARequestClaimingACapabilityTheHostLacks(t *testing.T) {
 	request := brokerRequest("read_file", `{"path":"note.txt"}`, "workspace-read", "exec-linux")
 	request.EventSequence = 1
 	_, err := probe.broker.Execute(context.Background(), request)
-	if code, ok := CodeOf(err); !ok || code != ResultCapabilityUnavailable {
+	if !fault.HasCode(err, ResultCapabilityUnavailable) {
 		t.Fatalf("Execute error = %v, want capability_unavailable", err)
 	}
 	if probe.adapter != 0 {

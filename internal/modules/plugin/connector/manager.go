@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -272,13 +273,9 @@ func contextCause(err error) error {
 func toolFailure(tool *Tool, fail *Error) error {
 	cause := contextCause(fail.Err)
 	if tool.Effect && fail.RequestSent {
-		return &toolbroker.Error{
-			Class:  toolbroker.ResultExecutionFailed,
-			Detail: "plugin tool outcome is unknown and the request was not retried: " + fail.Public(),
-			Cause:  cause,
-		}
+		return fault.Wrap(toolbroker.ResultExecutionFailed, "plugin tool outcome is unknown and the request was not retried: "+fail.Public(), cause)
 	}
-	failure := &toolbroker.Error{Class: toolbroker.ResultExecutionFailed, Detail: "plugin tool failed: " + fail.Public(), Cause: cause}
+	failure := fault.Wrap(toolbroker.ResultExecutionFailed, "plugin tool failed: "+fail.Public(), cause)
 	if tool.Effect {
 		return toolbroker.NotPerformed(string(fail.Code), failure)
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestFetchTimesOut(t *testing.T) {
@@ -61,7 +62,7 @@ func TestFetchResolvesOnceAgainstRebindingResolver(t *testing.T) {
 	if firstErr == nil {
 		t.Fatal("dial unexpectedly succeeded into TEST-NET space")
 	}
-	if _, ok := egress.CodeOf(firstErr); ok {
+	if _, ok := fault.CodeOf[egress.ErrorCode](firstErr); ok {
 		t.Fatalf("first attempt err = %v, want a dial failure, not egress_denied", firstErr)
 	}
 	if calls != 1 {
@@ -69,7 +70,7 @@ func TestFetchResolvesOnceAgainstRebindingResolver(t *testing.T) {
 	}
 
 	_, secondErr := adapter(context.Background(), fetchRequest("https://rebind.example/doc"), constraints())
-	if code, ok := egress.CodeOf(secondErr); !ok || code != egress.ErrorCodeEgressDenied {
+	if !fault.HasCode(secondErr, egress.ErrorCodeEgressDenied) {
 		t.Fatalf("second attempt err = %v, want egress_denied for the private answer", secondErr)
 	}
 	if calls != 2 {
@@ -117,7 +118,7 @@ func TestFetchRejectsSchemeDowngradeRedirect(t *testing.T) {
 		t.Fatalf("new request: %v", err)
 	}
 	err = client.CheckRedirect(downgraded, []*http.Request{original})
-	if code, ok := egress.CodeOf(err); !ok || code != egress.ErrorCodeEgressDenied {
+	if !fault.HasCode(err, egress.ErrorCodeEgressDenied) {
 		t.Fatalf("CheckRedirect(downgrade) = %v, want egress_denied", err)
 	}
 	sameScheme, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://public.example/next", http.NoBody)

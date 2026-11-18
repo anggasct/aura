@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -60,7 +61,7 @@ func decodeOutcome(raw []byte) (json.RawMessage, error) {
 	if err := json.Unmarshal(encoded, &failure); err != nil || !failure.Class.stable() || failure.Class == ResultOK {
 		return nil, unreadableOutcome()
 	}
-	return nil, &Error{Class: failure.Class, Detail: failure.Detail}
+	return nil, fault.New(failure.Class, failure.Detail)
 }
 
 func (b *Broker) readOutcome(raw []byte) (json.RawMessage, error) {
@@ -68,11 +69,11 @@ func (b *Broker) readOutcome(raw []byte) (json.RawMessage, error) {
 	if err == nil {
 		return result, nil
 	}
-	var failure *Error
+	var failure *fault.Error[ResultClass]
 	if !errors.As(err, &failure) {
 		return nil, err
 	}
-	return nil, &Error{Class: failure.Class, Detail: string(redact([]byte(failure.Detail), b.secretValues()))}
+	return nil, fault.New(failure.Code, string(redact([]byte(failure.Detail), b.secretValues())))
 }
 
 func (b *Broker) recordApproval(action func(ctx context.Context) ([]byte, error)) func(ctx context.Context) ([]byte, error) {
@@ -84,11 +85,11 @@ func (b *Broker) recordApproval(action func(ctx context.Context) ([]byte, error)
 		if ctx.Err() != nil {
 			return nil, err
 		}
-		var coded *Error
-		if !errors.As(mapApprovalError(err), &coded) || !coded.Class.stable() {
+		var coded *fault.Error[ResultClass]
+		if !errors.As(mapApprovalError(err), &coded) || !coded.Code.stable() {
 			return nil, err
 		}
-		return encodeOutcomeFailure(coded.Class, string(redact([]byte(coded.Detail), b.secretValues())))
+		return encodeOutcomeFailure(coded.Code, string(redact([]byte(coded.Detail), b.secretValues())))
 	}
 }
 
@@ -112,7 +113,7 @@ func (b *Broker) runJournaledTool(ctx context.Context, call *journaledTool) ([]b
 	}
 	if err != nil {
 		classified := b.classifyExecutionError(ctx, call.canonical, err)
-		return encodeOutcomeFailure(classified.Class, classified.Detail)
+		return encodeOutcomeFailure(classified.Code, classified.Detail)
 	}
 	result.Output = redactOutput(result.Output, b.secretValues())
 	encoded, err := json.Marshal(result)

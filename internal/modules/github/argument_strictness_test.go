@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
@@ -29,7 +30,7 @@ func argumentsForRepo(t *testing.T, tool, repo string) json.RawMessage {
 
 func requireInvalidArgument(t *testing.T, err error) {
 	t.Helper()
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultInvalidArgument {
+	if !fault.HasCode(err, toolbroker.ResultInvalidArgument) {
 		t.Fatalf("err = %v, want invalid_argument", err)
 	}
 }

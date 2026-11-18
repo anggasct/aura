@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const claimBatchSize = 64
@@ -101,7 +102,7 @@ func (r *Runtime) Acquire(ctx context.Context) error {
 
 func (r *Runtime) acquire(ctx context.Context) (*host, error) {
 	if !r.hosted.CompareAndSwap(false, true) {
-		return nil, &Error{Code: ErrorCodeHostRunning, Detail: "this durable runtime already hosts runs"}
+		return nil, fault.New(ErrorCodeHostRunning, "this durable runtime already hosts runs")
 	}
 	h := &host{
 		rt:     r,
@@ -666,7 +667,7 @@ func (h *host) stop(ctx context.Context) error {
 		failures = append(failures, fmt.Errorf("durable host stop: delete lease: %w", err))
 	}
 	if !returned {
-		failures = append(failures, &Error{Code: ErrorCodeStopTimeout, Detail: "durable handlers did not return within the stop grace"})
+		failures = append(failures, fault.New(ErrorCodeStopTimeout, "durable handlers did not return within the stop grace"))
 	}
 	return errors.Join(failures...)
 }

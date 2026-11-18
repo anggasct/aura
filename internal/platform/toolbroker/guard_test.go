@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -64,7 +65,7 @@ func TestApprovalGuardDecidesWhetherAnOwnerOrTrustedCallNeedsApproval(t *testing
 			request.PrincipalID = tc.principalID
 			request.AgentID = "team"
 			_, err = broker.Execute(t.Context(), request)
-			if class, _ := CodeOf(err); class != tc.wantErrClass {
+			if class, _ := fault.CodeOf[ResultClass](err); class != tc.wantErrClass {
 				t.Fatalf("Execute error class = %q (%v), want %q", class, err, tc.wantErrClass)
 			}
 			if prompts != tc.wantPrompts || calls != tc.wantCalls || access.lookups != tc.wantLookups {

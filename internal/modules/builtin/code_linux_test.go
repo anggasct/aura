@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
@@ -38,7 +39,7 @@ const codeArguments = `{"runtime":"python","source":"print(1)"}`
 func TestCodeExecuteWithoutARunnerIsUnavailableAfterApproval(t *testing.T) {
 	fixture := newGateFixture(t, capabilitytest.Report(t, "code-interpreter"), true)
 	_, err := fixture.call("code_execute", codeArguments, "code-interpreter")
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultCapabilityUnavailable {
+	if !fault.HasCode(err, toolbroker.ResultCapabilityUnavailable) {
 		t.Fatalf("code_execute error = %v, want capability_unavailable", err)
 	}
 }
@@ -48,7 +49,7 @@ func TestCodeExecuteNeedsApprovalLikeExec(t *testing.T) {
 	runner := &fakeCodeRunner{output: json.RawMessage(`{}`)}
 	fixture.executor.SetCodeRunner(runner)
 	_, err := fixture.call("code_execute", codeArguments, "code-interpreter")
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultApprovalRequired {
+	if !fault.HasCode(err, toolbroker.ResultApprovalRequired) {
 		t.Fatalf("code_execute error = %v, want approval_required", err)
 	}
 	if fixture.prompts != 1 || runner.calls != 0 {
@@ -86,7 +87,7 @@ func TestCodeExecuteRejectsBadArgumentsBeforeAnyPrompt(t *testing.T) {
 			runner := &fakeCodeRunner{check: tc.check, output: json.RawMessage(`{}`)}
 			fixture.executor.SetCodeRunner(runner)
 			_, err := fixture.call("code_execute", tc.arguments, "code-interpreter")
-			if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultInvalidArgument {
+			if !fault.HasCode(err, toolbroker.ResultInvalidArgument) {
 				t.Fatalf("code_execute error = %v, want invalid_argument", err)
 			}
 			if fixture.prompts != 0 || runner.calls != 0 {
@@ -138,7 +139,7 @@ func TestCodeExecuteIsNeverOfferedToPublicPrincipals(t *testing.T) {
 		Capabilities: []string{"code-interpreter"}, Trust: string(approval.TrustDerivedUntrusted),
 		IdempotencyKey: "test/public", EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
 	})
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultToolTierDenied {
+	if !fault.HasCode(err, toolbroker.ResultToolTierDenied) {
 		t.Fatalf("code_execute for a public principal = %v, want tool_tier_denied", err)
 	}
 	if runner.calls != 0 || fixture.prompts != 0 {

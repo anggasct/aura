@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -153,7 +154,7 @@ func TestAPIKeyCreateUsageErrors(t *testing.T) {
 func TestAPIKeyCreateUnknownPersonaFailsWithStableCode(t *testing.T) {
 	cfg := writePrincipalCLIConfig(t)
 	_, _, err := runAPIKey(t, cfg, "create", "--persona", "ghost", "--class", "trusted", "--label", "x")
-	code, ok := auraagent.CodeOf(err)
+	code, ok := fault.CodeOf[auraagent.ErrorCode](err)
 	if !ok || code != auraagent.ErrorCodeNotFound {
 		t.Fatalf("error = %v, want agent_not_found", err)
 	}

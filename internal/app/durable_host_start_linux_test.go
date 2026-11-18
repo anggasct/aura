@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestServerStartFailsWhenTheDurableHostHasNoLease(t *testing.T) {
@@ -20,7 +21,7 @@ func TestServerStartFailsWhenTheDurableHostHasNoLease(t *testing.T) {
 	select {
 	case err := <-srv.ran:
 		srv.ran = nil
-		if code, ok := sqlite.CodeOf(err); !ok || code != sqlite.ErrorCodeHostLease {
+		if !fault.HasCode(err, sqlite.ErrorCodeHostLease) {
 			t.Fatalf("Run = %v, want %s", err, sqlite.ErrorCodeHostLease)
 		}
 	case <-time.After(compositionServerWait):

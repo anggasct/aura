@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -661,8 +662,8 @@ func writeShowConfig(t *testing.T, tools string) string {
 func TestUnknownMCPServerInPersonaFailsBootWithPersonaInvalid(t *testing.T) {
 	for _, tools := range []string{"[mcp_ghost]", "[read_file, mcp_ghost_search]"} {
 		_, err := buildAgentRegistry(mcpPersonaConfig(t, tools))
-		if code, ok := auraagent.CodeOf(err); !ok || code != auraagent.ErrorCodePersonaInvalid {
-			t.Errorf("tools %s: error = %v (code %q, %v), want persona_invalid", tools, err, code, ok)
+		if !fault.HasCode(err, auraagent.ErrorCodePersonaInvalid) {
+			t.Errorf("tools %s: error = %v, want persona_invalid", tools, err)
 		}
 	}
 }
@@ -690,7 +691,7 @@ func TestMCPEntriesInPublicToolsFailBoot(t *testing.T) {
 		_, err := buildAgentRegistry(mcpTierConfig(t, section))
 		if err == nil {
 			t.Errorf("%s accepted", section)
-		} else if code, ok := auraagent.CodeOf(err); !ok || code != auraagent.ErrorCodePersonaInvalid {
+		} else if !fault.HasCode(err, auraagent.ErrorCodePersonaInvalid) {
 			t.Errorf("%s: error = %v, want persona_invalid", section, err)
 		}
 	}
@@ -709,7 +710,7 @@ func TestMCPEntriesInPrincipalToolsNeedToolsCoverageAtBoot(t *testing.T) {
 	}
 	for _, section := range []string{"principal_tools: [mcp_docs_search, mcp_files]", "principal_tools: [mcp_ghost]"} {
 		_, err := buildAgentRegistry(mcpTierConfig(t, section))
-		if code, ok := auraagent.CodeOf(err); !ok || code != auraagent.ErrorCodePersonaInvalid {
+		if !fault.HasCode(err, auraagent.ErrorCodePersonaInvalid) {
 			t.Errorf("%s: error = %v, want persona_invalid", section, err)
 		}
 	}

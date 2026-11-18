@@ -162,6 +162,21 @@ func reuseKeepsTheOldRunWhenTheInsertFails(t *testing.T) {
 	}
 }
 
+func TestKeyInUseNamesTheRunAndKeepsTheSentinel(t *testing.T) {
+	db := openDB(t, newDatabaseFile(t))
+	rt := newRuntime(t, db, nil)
+	rt.DeclareHandlers("job", "other")
+	insertRun(t, db, runFixture{key: "k-used", handler: "job", claim: 1})
+	_, err := rt.Start(t.Context(), durable.StartRequest{Handler: "other", Key: "k-used", Payload: []byte("other"), Reuse: durable.ReuseEnded})
+	want := "key_in_use: durable run k-used belongs to another handler: durable run key is used by another handler"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+	if !errors.Is(err, durable.ErrKeyInUse) {
+		t.Fatalf("error %v does not reach ErrKeyInUse", err)
+	}
+}
+
 func TestReuseEndedRefusesAKeyOfAnotherHandler(t *testing.T) {
 	db := openDB(t, newDatabaseFile(t))
 	rt := newRuntime(t, db, nil)

@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -93,7 +94,7 @@ func createAPIKey(ctx context.Context, cmd *cobra.Command, cfg *config.Config, d
 		return err
 	}
 	if _, ok := registry.Lookup(flags.persona); !ok {
-		return &auraagent.Error{Code: auraagent.ErrorCodeNotFound, Detail: "agent " + flags.persona + " is not registered"}
+		return fault.New(auraagent.ErrorCodeNotFound, "agent "+flags.persona+" is not registered")
 	}
 	issued, err := httpchat.NewKey()
 	if err != nil {

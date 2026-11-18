@@ -10,6 +10,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -105,7 +106,7 @@ func TestBrokerEffectfulFailureSettlesByWhetherTheEffectWasPerformed(t *testing.
 			}
 			request.Approval = &grant
 			_, err = broker.Execute(context.Background(), request)
-			if class, ok := CodeOf(err); !ok || class != ResultExecutionFailed {
+			if !fault.HasCode(err, ResultExecutionFailed) {
 				t.Fatalf("Execute error = %v, want execution_failed", err)
 			}
 			if calls != 1 {

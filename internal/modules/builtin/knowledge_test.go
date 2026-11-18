@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
@@ -113,7 +114,7 @@ func TestSetKnowledgeSearcherIgnoresNil(t *testing.T) {
 }
 
 func isClass(err error, class toolbroker.ResultClass) bool {
-	got, ok := toolbroker.CodeOf(err)
+	got, ok := fault.CodeOf[toolbroker.ResultClass](err)
 	return ok && got == class
 }
 

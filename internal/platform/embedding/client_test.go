@@ -16,6 +16,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func testConfig(baseURL string) *config.KnowledgeEmbedding {
@@ -188,7 +189,7 @@ func TestClientRejectsMalformedResponses(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := CodeOf(err); !ok || code != test.want || vectors != nil {
+			if !fault.HasCode(err, test.want) || vectors != nil {
 				t.Fatalf("Embed = %v, %v; want code %s and no vectors", vectors, err, test.want)
 			}
 		})
@@ -205,7 +206,7 @@ func TestClientReportsProviderStatusWithoutTheBody(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	_, err = client.Embed(t.Context(), RoleDocument, []string{"alpha"})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeStatusRejected || strings.Contains(err.Error(), "sk-leaked-secret") {
+	if !fault.HasCode(err, ErrorCodeStatusRejected) || strings.Contains(err.Error(), "sk-leaked-secret") {
 		t.Fatalf("error = %v, want a status error without the provider body", err)
 	}
 }
@@ -231,7 +232,7 @@ func TestClientRejectsInvalidRequestsBeforeSending(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := client.Embed(t.Context(), test.role, test.texts)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeRequestInvalid {
+			if !fault.HasCode(err, ErrorCodeRequestInvalid) {
 				t.Fatalf("error = %v, want %s", err, ErrorCodeRequestInvalid)
 			}
 		})
@@ -258,7 +259,7 @@ func TestClientRefusesEveryRedirect(t *testing.T) {
 				t.Fatalf("New: %v", err)
 			}
 			_, err = client.Embed(t.Context(), RoleDocument, []string{"alpha"})
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeRedirectRefused {
+			if !fault.HasCode(err, ErrorCodeRedirectRefused) {
 				t.Fatalf("error = %v, want %s", err, ErrorCodeRedirectRefused)
 			}
 			if follow.Load() != 0 || calls.Load() != 1 {
@@ -276,7 +277,7 @@ func TestRemoteClientRefusesSameOriginRedirects(t *testing.T) {
 	first, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://api.example.com/v1/embeddings", http.NoBody)
 	next, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://api.example.com/v1/other", http.NoBody)
 	err = client.http.CheckRedirect(next, []*http.Request{first})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeRedirectRefused {
+	if !fault.HasCode(err, ErrorCodeRedirectRefused) {
 		t.Fatalf("CheckRedirect = %v, want %s", err, ErrorCodeRedirectRefused)
 	}
 }
@@ -310,11 +311,11 @@ func TestRemoteClientDeniesLoopbackAndPrivateDestinations(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	_, err = client.Embed(t.Context(), RoleDocument, []string{"alpha"})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeDestinationDenied {
+	if !fault.HasCode(err, ErrorCodeDestinationDenied) {
 		t.Fatalf("error = %v, want %s", err, ErrorCodeDestinationDenied)
 	}
-	if code, ok := egress.CodeOf(err); !ok || code != egress.ErrorCodeEgressDenied {
-		t.Errorf("egress code = %v, %v", code, ok)
+	if !fault.HasCode(err, egress.ErrorCodeEgressDenied) {
+		t.Errorf("error = %v, want egress code %s", err, egress.ErrorCodeEgressDenied)
 	}
 	if reached.Load() != 0 {
 		t.Errorf("loopback listener received %d connections through the remote client", reached.Load())
@@ -332,7 +333,7 @@ func TestNewRejectsAnUnusableEndpoint(t *testing.T) {
 	} {
 		t.Run(baseURL, func(t *testing.T) {
 			_, err := New(testConfig(baseURL), "", nil)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
+			if !fault.HasCode(err, ErrorCodeConfigInvalid) {
 				t.Fatalf("New = %v, want %s", err, ErrorCodeConfigInvalid)
 			}
 		})
@@ -359,7 +360,7 @@ func TestLoopbackClientIsPinnedAndHasNoProxy(t *testing.T) {
 		if conn != nil {
 			_ = conn.Close()
 		}
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeDestinationDenied {
+		if !fault.HasCode(err, ErrorCodeDestinationDenied) {
 			t.Errorf("dial %s = %v, want %s", address, err, ErrorCodeDestinationDenied)
 		}
 	}
@@ -387,7 +388,7 @@ func TestClientStopsWhenTheProviderIsSlow(t *testing.T) {
 	}
 	client.timeout = 50 * time.Millisecond
 	_, err = client.Embed(t.Context(), RoleDocument, []string{"alpha"})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeRequestFailed {
+	if !fault.HasCode(err, ErrorCodeRequestFailed) {
 		t.Fatalf("error = %v, want %s", err, ErrorCodeRequestFailed)
 	}
 }

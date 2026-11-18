@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
@@ -276,7 +277,7 @@ func resolveCredential(raw string) (string, error) {
 }
 
 func transportError(err error) error {
-	var denied *egress.Error
+	var denied *fault.Error[egress.ErrorCode]
 	if errors.As(err, &denied) {
 		return denied
 	}

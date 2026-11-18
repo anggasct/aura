@@ -25,6 +25,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
@@ -336,7 +337,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 			t.Fatalf("retry Invoke output = %s, want the first output %s", retried, first)
 		}
 		_, err = runner.Invoke(stepCallAt(t, db, "run-1", "step-a", 2), "write_file", writeFileArgs(t, "a.txt", "two"))
-		if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultInvalidArgument {
+		if !fault.HasCode(err, toolbroker.ResultInvalidArgument) {
 			t.Fatalf("retry Invoke with other arguments error = %v, want %s", err, toolbroker.ResultInvalidArgument)
 		}
 		content, err := os.ReadFile(filepath.Join(workspace, "a.txt"))

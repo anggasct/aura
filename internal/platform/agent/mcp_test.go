@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -37,8 +38,8 @@ func TestBuildWithMCPRejectsUnknownServers(t *testing.T) {
 	for name, tools := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := BuildWithMCP([]config.AgentDefinition{mcpPersona(tools...)}, validTools, servers, []string{"primary"})
-			if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaInvalid {
-				t.Fatalf("BuildWithMCP() code = %q, %v (err %v), want persona_invalid", code, ok, err)
+			if !fault.HasCode(err, ErrorCodePersonaInvalid) {
+				t.Fatalf("BuildWithMCP() error = %v, want persona_invalid", err)
 			}
 		})
 	}
@@ -46,8 +47,8 @@ func TestBuildWithMCPRejectsUnknownServers(t *testing.T) {
 
 func TestBuildWithoutServersRejectsMCPEntries(t *testing.T) {
 	_, err := Build([]config.AgentDefinition{mcpPersona("mcp_docs")}, validTools, []string{"primary"})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaInvalid {
-		t.Fatalf("Build() code = %q, %v (err %v), want persona_invalid", code, ok, err)
+	if !fault.HasCode(err, ErrorCodePersonaInvalid) {
+		t.Fatalf("Build() error = %v, want persona_invalid", err)
 	}
 }
 
@@ -90,8 +91,8 @@ func TestBuildWithMCPRejectsPrincipalEntriesNotCoveredByTools(t *testing.T) {
 	for name, override := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := BuildWithMCP([]config.AgentDefinition{override}, validTools, []string{"docs", "files"}, []string{"primary"})
-			if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaInvalid {
-				t.Fatalf("BuildWithMCP() code = %q, %v (err %v), want persona_invalid", code, ok, err)
+			if !fault.HasCode(err, ErrorCodePersonaInvalid) {
+				t.Fatalf("BuildWithMCP() error = %v, want persona_invalid", err)
 			}
 		})
 	}
@@ -104,8 +105,8 @@ func TestBuildWithMCPRejectsPublicEntries(t *testing.T) {
 			override.Tools = append(override.Tools, "mcp_docs", "mcp_docs_search")
 			override.PublicTools = []string{entry}
 			_, err := BuildWithMCP([]config.AgentDefinition{override}, validTools, []string{"docs"}, []string{"primary"})
-			if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaInvalid {
-				t.Fatalf("BuildWithMCP() code = %q, %v (err %v), want persona_invalid", code, ok, err)
+			if !fault.HasCode(err, ErrorCodePersonaInvalid) {
+				t.Fatalf("BuildWithMCP() error = %v, want persona_invalid", err)
 			}
 		})
 	}

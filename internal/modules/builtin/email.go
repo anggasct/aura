@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
@@ -79,7 +80,7 @@ func (h *emailHolder) adapter(ctx context.Context, request *toolbroker.ToolReque
 		Body:           args.Body,
 	})
 	if err != nil {
-		if _, coded := toolbroker.CodeOf(err); coded {
+		if _, coded := fault.CodeOf[toolbroker.ResultClass](err); coded {
 			return toolbroker.ToolResult{}, err
 		}
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultExecutionFailed, "email could not be sent")

@@ -24,6 +24,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/store"
@@ -295,7 +296,7 @@ func checkStepApproval(call *workflow.StepCall) (approval.TrustLabel, error) {
 }
 
 func workflowToolError(toolID string, err error) error {
-	code, ok := toolbroker.CodeOf(err)
+	code, ok := fault.CodeOf[toolbroker.ResultClass](err)
 	if !ok {
 		return err
 	}
@@ -312,7 +313,7 @@ func (r *workflowToolRunner) refused(ctx context.Context, call *workflow.StepCal
 	var code string
 	if coded, ok := workflow.CodeOf(err); ok {
 		code = string(coded)
-	} else if coded, ok := toolbroker.CodeOf(err); ok {
+	} else if coded, ok := fault.CodeOf[toolbroker.ResultClass](err); ok {
 		code = string(coded)
 	}
 	r.logger.WarnContext(ctx, "workflow tool step refused before the broker", "component", "workflow",

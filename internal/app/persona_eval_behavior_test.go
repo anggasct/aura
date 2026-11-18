@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/store"
@@ -283,7 +284,7 @@ func TestRegistryRejectsAnInvalidBehaviorSchedule(t *testing.T) {
 		t.Fatalf("valid schedule: %v", err)
 	}
 	err := build("every monday")
-	if code, ok := auraagent.CodeOf(err); !ok || code != auraagent.ErrorCodeDefinitionInvalid || !strings.Contains(err.Error(), "evals.behavior.schedule") {
+	if !fault.HasCode(err, auraagent.ErrorCodeDefinitionInvalid) || !strings.Contains(err.Error(), "evals.behavior.schedule") {
 		t.Fatalf("invalid schedule: %v", err)
 	}
 }

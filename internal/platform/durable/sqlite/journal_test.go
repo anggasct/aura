@@ -99,8 +99,9 @@ func TestFailedActionIsRecorded(t *testing.T) {
 	h := startHost(t, first)
 	ref := mustStart(t, first, durable.StartRequest{Handler: "charge", Key: "k-charge"})
 	firstErr := receive(t, reports)
-	if detail := requireCode(t, firstErr, ErrorCodeActionFailed); detail != refused.Error() {
-		t.Fatalf("detail = %q", detail)
+	requireCode(t, firstErr, ErrorCodeActionFailed)
+	if firstErr.Error() != "action_failed: "+refused.Error() {
+		t.Fatalf("first failure = %q", firstErr)
 	}
 	if !errors.Is(firstErr, refused) {
 		t.Fatalf("first failure %v does not reach the original error", firstErr)
@@ -124,6 +125,39 @@ func TestFailedActionIsRecorded(t *testing.T) {
 	waitState(t, second, runWant{key: ref.Key, state: durable.RunSucceeded})
 	if calls.Load() != 1 {
 		t.Fatalf("action function ran %d times, want 1", calls.Load())
+	}
+}
+
+func TestActionFailureReadsTheSameOnTheFirstRunAndOnAReplay(t *testing.T) {
+	path := newDatabaseFile(t)
+	boom := errors.New("boom")
+	fail := func(context.Context) ([]byte, error) { return nil, boom }
+	reports := make(chan error, 2)
+	first := newRuntime(t, openDB(t, path), nil)
+	first.RegisterHandler("fail", func(ctx context.Context, inv durable.Invocation) error {
+		_, err := inv.RunAction(ctx, "fail", fail)
+		reports <- err
+		return parkUntilStopped(ctx)
+	})
+	h := startHost(t, first)
+	mustStart(t, first, durable.StartRequest{Handler: "fail", Key: "k-fail"})
+	firstErr := receive(t, reports)
+	if firstErr.Error() != "action_failed: boom" || !errors.Is(firstErr, boom) {
+		t.Fatalf("first run = %v (reaches the cause: %v), want action_failed: boom with the cause", firstErr, errors.Is(firstErr, boom))
+	}
+	if err := h.stop(t); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	restart(t, &restartPlan{path: path, register: func(rt *Runtime) {
+		rt.RegisterHandler("fail", func(ctx context.Context, inv durable.Invocation) error {
+			_, err := inv.RunAction(ctx, "fail", fail)
+			reports <- err
+			return nil
+		})
+	}})
+	replayErr := receive(t, reports)
+	if replayErr.Error() != firstErr.Error() || errors.Is(replayErr, boom) {
+		t.Fatalf("replay = %v (reaches the cause: %v), want the first run's text without the cause", replayErr, errors.Is(replayErr, boom))
 	}
 }
 

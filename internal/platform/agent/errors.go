@@ -1,9 +1,6 @@
 package agent
 
-import (
-	"errors"
-	"fmt"
-)
+import "github.com/anggasct/aura/internal/platform/fault"
 
 type ErrorCode string
 
@@ -19,26 +16,6 @@ const (
 	ErrorCodePersonaInvalid    ErrorCode = "persona_invalid"
 )
 
-type Error struct {
-	Code   ErrorCode
-	Detail string
-}
-
-func (e *Error) Error() string {
-	if e.Detail == "" {
-		return string(e.Code)
-	}
-	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-}
-
-func codedError(code ErrorCode, detail string) *Error {
-	return &Error{Code: code, Detail: detail}
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var coded *Error
-	if errors.As(err, &coded) {
-		return coded.Code, true
-	}
-	return "", false
+func codedError(code ErrorCode, detail string) error {
+	return fault.New(code, detail)
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -289,7 +290,7 @@ func TestCompositionCommandStartsRunsForTheServer(t *testing.T) {
 		})
 	}
 	_, err := app.runtime.Start(t.Context(), durable.StartRequest{Handler: "unknown", Key: "run-unknown"})
-	if code, ok := sqlite.CodeOf(err); !ok || code != sqlite.ErrorCodeHandlerNotRegistered {
+	if !fault.HasCode(err, sqlite.ErrorCodeHandlerNotRegistered) {
 		t.Fatalf("Start of an undeclared handler = %v, want %s", err, sqlite.ErrorCodeHandlerNotRegistered)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -120,8 +121,8 @@ func TestStepToolCatalogMatchesTheBroker(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			catalogErr := catalog.CheckArguments(tc.tool, tc.args)
 			_, brokerErr := broker.ExactCallText(tc.tool, tc.args)
-			catalogClass, _ := toolbroker.CodeOf(catalogErr)
-			brokerClass, _ := toolbroker.CodeOf(brokerErr)
+			catalogClass, _ := fault.CodeOf[toolbroker.ResultClass](catalogErr)
+			brokerClass, _ := fault.CodeOf[toolbroker.ResultClass](brokerErr)
 			if (catalogErr == nil) != (brokerErr == nil) || catalogClass != brokerClass {
 				t.Fatalf("catalog = %v (%s), broker = %v (%s)", catalogErr, catalogClass, brokerErr, brokerClass)
 			}

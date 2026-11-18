@@ -9,11 +9,12 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestChatCapabilityGate(t *testing.T) {
-	missing := &capability.Error{Code: capability.ErrorCodeDependencyMissing, Capability: "exec-linux", Detail: "required dependency process-containment is missing"}
-	unavailable := &capability.Error{Code: capability.ErrorCodeCapabilityUnavailable, Capability: "exec-linux", Detail: "capability is absent from this artifact"}
+	missing := fault.New(capability.ErrorCodeDependencyMissing, "exec-linux: required dependency process-containment is missing")
+	unavailable := fault.New(capability.ErrorCodeCapabilityUnavailable, "exec-linux: capability is absent from this artifact")
 	cases := []struct {
 		name     string
 		state    error

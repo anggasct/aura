@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func writeAgentsConfig(t *testing.T, agentsSection string) string {
@@ -82,7 +83,7 @@ func TestAgentsShowUnknownIDFailsWithStableError(t *testing.T) {
 	if err == nil {
 		t.Fatal("agents show accepted an unknown id")
 	}
-	code, ok := auraagent.CodeOf(err)
+	code, ok := fault.CodeOf[auraagent.ErrorCode](err)
 	if !ok || code != auraagent.ErrorCodeNotFound {
 		t.Fatalf("error = %v, want agent_not_found", err)
 	}
@@ -160,7 +161,7 @@ func TestPersonasMayListTheGitHubTools(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := auraagent.CodeOf(err); !ok || code != tc.code {
+			if !fault.HasCode(err, tc.code) {
 				t.Fatalf("buildAgentRegistry error = %v, want %s", err, tc.code)
 			}
 		})

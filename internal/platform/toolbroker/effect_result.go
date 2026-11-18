@@ -17,7 +17,7 @@ func encodeRecord(result *ToolResult) ([]byte, error) {
 	encoder := json.NewEncoder(&buffer)
 	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(result); err != nil {
-		return nil, &Error{Class: ResultExecutionFailed, Detail: "encode recorded result", Cause: err}
+		return nil, fault.Wrap(ResultExecutionFailed, "encode recorded result", err)
 	}
 	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
 }
@@ -25,7 +25,7 @@ func encodeRecord(result *ToolResult) ([]byte, error) {
 func decodeRecord(record []byte) (ToolResult, error) {
 	var result ToolResult
 	if err := json.Unmarshal(record, &result); err != nil {
-		return ToolResult{}, &Error{Class: ResultExecutionFailed, Detail: "decode recorded result", Cause: err}
+		return ToolResult{}, fault.Wrap(ResultExecutionFailed, "decode recorded result", err)
 	}
 	return result, nil
 }

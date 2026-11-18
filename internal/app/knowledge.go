@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -60,7 +61,7 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
 func refuseDeniedEgress(err error) error {
-	if code, ok := egress.CodeOf(err); ok && code == egress.ErrorCodeEgressDenied {
+	if fault.HasCode(err, egress.ErrorCodeEgressDenied) {
 		return knowledge.Errorf(knowledge.ErrorCodeURLRefused, "destination is not permitted")
 	}
 	return err

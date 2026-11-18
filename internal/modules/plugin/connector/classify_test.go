@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
@@ -190,7 +191,7 @@ func TestMutatingRequestsAreClassifiedFromTheirStatus(t *testing.T) {
 					t.Fatalf("Execute: %v", err)
 				}
 			} else {
-				if class, ok := toolbroker.CodeOf(err); !ok || class != toolbroker.ResultExecutionFailed || !strings.Contains(err.Error(), tc.wantCode) {
+				if !fault.HasCode(err, toolbroker.ResultExecutionFailed) || !strings.Contains(err.Error(), tc.wantCode) {
 					t.Fatalf("Execute error = %v, want an execution failure with %s", err, tc.wantCode)
 				}
 				if unknown := strings.Contains(err.Error(), "outcome is unknown"); unknown != (tc.want == settledUnknown) {

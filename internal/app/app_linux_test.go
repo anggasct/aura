@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
@@ -134,11 +135,11 @@ func requirePersonaCeiling(t *testing.T, app *App) {
 		})
 		return err
 	}
-	if code, denied := toolbroker.CodeOf(call("read_file")); denied && code == toolbroker.ResultToolTierDenied {
+	if fault.HasCode(call("read_file"), toolbroker.ResultToolTierDenied) {
 		t.Fatal("read_file inside the persona ceiling was refused with tool_tier_denied")
 	}
-	if code, ok := toolbroker.CodeOf(call("list_dir")); !ok || code != toolbroker.ResultToolTierDenied {
-		t.Fatalf("list_dir outside the persona ceiling = %v, want tool_tier_denied", code)
+	if err := call("list_dir"); !fault.HasCode(err, toolbroker.ResultToolTierDenied) {
+		t.Fatalf("list_dir outside the persona ceiling = %v, want tool_tier_denied", err)
 	}
 }
 

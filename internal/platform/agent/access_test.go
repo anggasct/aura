@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -110,8 +111,8 @@ func TestBuildRejectsInvalidToolCeilings(t *testing.T) {
 			override := kantorOverride()
 			mutate(&override)
 			_, err := Build([]config.AgentDefinition{override}, validTools, []string{"primary"})
-			if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaInvalid {
-				t.Fatalf("Build() code = %q, %v (err %v), want persona_invalid", code, ok, err)
+			if !fault.HasCode(err, ErrorCodePersonaInvalid) {
+				t.Fatalf("Build() error = %v, want code %s", err, ErrorCodePersonaInvalid)
 			}
 		})
 	}

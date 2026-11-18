@@ -29,6 +29,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -347,7 +348,7 @@ func TestWorkflowAttachRule(t *testing.T) {
 			case refused:
 				if tc.wantWorkflowCode != "" {
 					codeIs(t, err, tc.wantWorkflowCode)
-				} else if code, ok := toolbroker.CodeOf(err); !ok || string(code) != tc.wantCode {
+				} else if code, ok := fault.CodeOf[toolbroker.ResultClass](err); !ok || string(code) != tc.wantCode {
 					t.Fatalf("Invoke error = %v, want %s", err, tc.wantCode)
 				}
 				if cards != 0 {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -116,7 +117,7 @@ func TestEmailAdapter(t *testing.T) {
 			result, err := holder.adapter(t.Context(), emailRequest(tc.class, tc.session, tc.args), approval.Constraints{})
 			got := result.Class
 			if err != nil {
-				got, _ = toolbroker.CodeOf(err)
+				got, _ = fault.CodeOf[toolbroker.ResultClass](err)
 				if strings.Contains(err.Error(), "hunter2") {
 					t.Errorf("error %q leaks the transport failure", err)
 				}

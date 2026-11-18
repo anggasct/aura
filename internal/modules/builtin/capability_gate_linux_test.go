@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
@@ -162,7 +163,7 @@ func TestDirectCallsToUnavailableToolsAreDeniedWithoutEffect(t *testing.T) {
 			t.Run(tc.tool+"/"+reportName, func(t *testing.T) {
 				fixture := newGateFixture(t, report, true)
 				_, err := fixture.call(tc.tool, tc.arguments, tc.capability)
-				if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultCapabilityUnavailable {
+				if !fault.HasCode(err, toolbroker.ResultCapabilityUnavailable) {
 					t.Fatalf("call error = %v, want capability_unavailable", err)
 				}
 				if fixture.prompts != 0 {
@@ -213,7 +214,7 @@ func TestEnabledExecStillNeedsApproval(t *testing.T) {
 		t.Fatal("exec is not offered with exec-linux enabled")
 	}
 	_, err := fixture.call("exec", `{"command":["touch","exec-marker"]}`, "exec-linux")
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultApprovalRequired {
+	if !fault.HasCode(err, toolbroker.ResultApprovalRequired) {
 		t.Fatalf("exec error = %v, want approval_required", err)
 	}
 	if fixture.prompts != 1 {
@@ -227,7 +228,7 @@ func TestEnabledExecStillNeedsApproval(t *testing.T) {
 func TestRequestClaimingACapabilityTheHostLacksIsDenied(t *testing.T) {
 	fixture := newGateFixture(t, capabilitytest.Report(t, "workspace-read"), true)
 	_, err := fixture.call("read_file", `{"path":"note.txt"}`, "workspace-read", "exec-linux")
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultCapabilityUnavailable {
+	if !fault.HasCode(err, toolbroker.ResultCapabilityUnavailable) {
 		t.Fatalf("read_file error = %v, want capability_unavailable", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestSupportedPlatform(t *testing.T) {
@@ -93,7 +94,7 @@ func TestCodeInterpreterCapabilityAvailability(t *testing.T) {
 			t.Fatal(err)
 		}
 		report, resolveErr := registry.Resolve(build, nil, Dependencies("linux", "amd64", contained))
-		if code, ok := capability.CodeOf(resolveErr); !ok || code != capability.ErrorCodeCapabilityUnavailable {
+		if !fault.HasCode(resolveErr, capability.ErrorCodeCapabilityUnavailable) {
 			t.Errorf("Resolve error = %v, want capability_unavailable", resolveErr)
 		}
 		if status, _ := report.Status("code-interpreter"); status.Available {

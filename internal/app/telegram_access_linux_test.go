@@ -12,6 +12,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/store"
@@ -78,7 +79,7 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testi
 				IdempotencyKey: "idempotency-1",
 				EventSequence:  1,
 			})
-			if class, ok := toolbroker.CodeOf(err); !ok || class != toolbroker.ResultApprovalRequired {
+			if !fault.HasCode(err, toolbroker.ResultApprovalRequired) {
 				t.Fatalf("Execute error = %v, want approval_required (fail closed)", err)
 			}
 		})

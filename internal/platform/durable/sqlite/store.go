@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const dbNowMS = "CAST(unixepoch('subsec') * 1000 AS INTEGER)"
@@ -78,7 +79,7 @@ func requireRunning(ctx context.Context, q querier, key string) error {
 		return fmt.Errorf("read run state: %w", err)
 	}
 	if durable.RunState(state) != durable.RunRunning {
-		return &Error{Code: ErrorCodeRunTerminal, Detail: "durable run " + key + " is " + state + " and cannot receive signals"}
+		return fault.New(ErrorCodeRunTerminal, "durable run "+key+" is "+state+" and cannot receive signals")
 	}
 	return nil
 }

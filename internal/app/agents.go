@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func newAgentsCmd(gf *globalFlags) *cobra.Command {
@@ -79,7 +80,7 @@ func newAgentsShowCmd(gf *globalFlags) *cobra.Command {
 			}
 			definition, ok := registry.Lookup(args[0])
 			if !ok {
-				return &auraagent.Error{Code: auraagent.ErrorCodeNotFound, Detail: "agent " + args[0] + " is not registered"}
+				return fault.New(auraagent.ErrorCodeNotFound, "agent "+args[0]+" is not registered")
 			}
 			out := cmd.OutOrStdout()
 			write := func(format string, args ...any) error {
@@ -164,7 +165,7 @@ func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
 			continue
 		}
 		if _, err := schedule.ParseExpression(behavior.Schedule); err != nil {
-			return nil, &auraagent.Error{Code: auraagent.ErrorCodeDefinitionInvalid, Detail: fmt.Sprintf("agent %q evals.behavior.schedule: %v", definitions[i].ID, err)}
+			return nil, fault.New(auraagent.ErrorCodeDefinitionInvalid, fmt.Sprintf("agent %q evals.behavior.schedule: %v", definitions[i].ID, err))
 		}
 	}
 	return registry, nil

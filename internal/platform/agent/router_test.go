@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func routerFixture(t *testing.T, bindings []config.Binding) *Router {
@@ -124,7 +125,7 @@ func TestRouterRejectsUnregisteredPersonas(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := NewRouter(registry, &config.Channels{Discord: tc.discord, Telegram: tc.telegram}, tc.bindings)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeBindingInvalid {
+			if !fault.HasCode(err, ErrorCodeBindingInvalid) {
 				t.Fatalf("NewRouter error = %v, want %s", err, ErrorCodeBindingInvalid)
 			}
 		})

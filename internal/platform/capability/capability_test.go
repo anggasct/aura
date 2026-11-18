@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func requireErrorCode(t *testing.T, err error, want ErrorCode) {
@@ -11,9 +13,9 @@ func requireErrorCode(t *testing.T, err error, want ErrorCode) {
 	if err == nil {
 		t.Fatalf("error = nil, want %q", want)
 	}
-	got, ok := CodeOf(err)
+	got, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || got != want {
-		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, got, ok, want)
+		t.Fatalf("fault.CodeOf[ErrorCode](%v) = %q, %v; want %q, true", err, got, ok, want)
 	}
 }
 
@@ -240,5 +242,24 @@ func TestBuiltinRegistryDefinesCodeInterpreter(t *testing.T) {
 		if status, _ := report.Status("code-interpreter"); status.Available {
 			t.Errorf("code-interpreter is available in profile %s", profile)
 		}
+	}
+}
+
+func TestCapabilityErrorNamesItsCapability(t *testing.T) {
+	_, buildErr := NewBuild("bogus", nil, "linux")
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "a named capability leads the detail", err: newError(ErrorCodeCapabilityUnavailable, "code-interpreter", "detail"), want: "capability_unavailable: code-interpreter: detail"},
+		{name: "an empty capability adds no prefix", err: buildErr, want: `profile_invalid: unsupported build profile "bogus"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.err == nil || tc.err.Error() != tc.want {
+				t.Fatalf("error = %v, want %q", tc.err, tc.want)
+			}
+		})
 	}
 }

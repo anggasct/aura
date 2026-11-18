@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -48,7 +49,7 @@ func TestStandingApprovalAllowedMatchesTheStandingRule(t *testing.T) {
 				return built
 			}
 			got, err := rig.broker.StandingApprovalAllowed(t.Context(), request())
-			if code, _ := CodeOf(err); code != tc.wantCode {
+			if code, _ := fault.CodeOf[ResultClass](err); code != tc.wantCode {
 				t.Fatalf("StandingApprovalAllowed error = %v, want code %q", err, tc.wantCode)
 			}
 			if got != tc.want {

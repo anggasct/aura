@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const testdataDir = "../../testdata"
@@ -1042,8 +1043,8 @@ func TestLoad_NegativeMaxConcurrentStepsRejected(t *testing.T) {
 func TestLoad_UnknownCapability(t *testing.T) {
 	path := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: [unknown-test]\n")
 	_, err := Load(path)
-	if code, ok := capability.CodeOf(err); !ok || code != capability.ErrorCodeCapabilityUnknown {
-		t.Fatalf("capability.CodeOf(%v) = %q, %v; want %q, true", err, code, ok, capability.ErrorCodeCapabilityUnknown)
+	if !fault.HasCode(err, capability.ErrorCodeCapabilityUnknown) {
+		t.Fatalf("error = %v, want code %s", err, capability.ErrorCodeCapabilityUnknown)
 	}
 }
 
@@ -1061,8 +1062,8 @@ func TestLoad_EnabledCapabilityAbsentFromBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("absent capability state must load, not fail: %v", err)
 	}
-	if code, ok := capability.CodeOf(result.CapabilityStateError); !ok || code != capability.ErrorCodeCapabilityUnavailable {
-		t.Fatalf("capability.CodeOf(%v) = %q, %v; want %q, true", result.CapabilityStateError, code, ok, capability.ErrorCodeCapabilityUnavailable)
+	if !fault.HasCode(result.CapabilityStateError, capability.ErrorCodeCapabilityUnavailable) {
+		t.Fatalf("error = %v, want code %s", result.CapabilityStateError, capability.ErrorCodeCapabilityUnavailable)
 	}
 	status, ok := result.CapabilityReport.Status("sample")
 	if !ok || status.Compiled || !status.Enabled {
@@ -1098,8 +1099,8 @@ func TestLoad_MissingDependencyState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing dependency state must load, not fail: %v", err)
 	}
-	if code, ok := capability.CodeOf(result.CapabilityStateError); !ok || code != capability.ErrorCodeDependencyMissing {
-		t.Fatalf("capability.CodeOf(%v) = %q, %v; want %q, true", result.CapabilityStateError, code, ok, capability.ErrorCodeDependencyMissing)
+	if !fault.HasCode(result.CapabilityStateError, capability.ErrorCodeDependencyMissing) {
+		t.Fatalf("error = %v, want code %s", result.CapabilityStateError, capability.ErrorCodeDependencyMissing)
 	}
 }
 

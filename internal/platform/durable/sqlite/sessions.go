@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/store"
@@ -244,7 +245,7 @@ func (h heldTurns) grantState() (string, error) {
 	case h.active > 0:
 		return turnStateQueued, nil
 	case h.queued > 0:
-		return "", &Error{Code: ErrorCodeSessionStateInvalid, Detail: "session holds queued turns and no active turn"}
+		return "", fault.New(ErrorCodeSessionStateInvalid, "session holds queued turns and no active turn")
 	default:
 		return turnStateActive, nil
 	}

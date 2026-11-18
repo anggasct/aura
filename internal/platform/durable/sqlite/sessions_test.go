@@ -281,8 +281,8 @@ func TestSessionStoreValidatesIds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if code, ok := CodeOf(tc.call()); !ok || code != ErrorCodeInvalidArgument {
-				t.Fatalf("code = %q, %v; want %s", code, ok, ErrorCodeInvalidArgument)
+			if err := tc.call(); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+				t.Fatalf("error = %v, want code %s", err, ErrorCodeInvalidArgument)
 			}
 			requireUnchanged(t, f.db, before)
 		})
@@ -488,7 +488,7 @@ func TestAdmitValidatesItsRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := f.sessions.Admit(t.Context(), tc.mutate(admitRequest(turnSpec{turnID: "turn-1", key: "key-1"})))
 			if tc.code != "" {
-				if code, ok := CodeOf(err); !ok || code != tc.code {
+				if !fault.HasCode(err, tc.code) {
 					t.Fatalf("err = %v, want code %s", err, tc.code)
 				}
 			}

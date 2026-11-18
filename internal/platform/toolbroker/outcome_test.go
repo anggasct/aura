@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestToolOutcomeRecordRoundTrips(t *testing.T) {
@@ -26,11 +28,11 @@ func TestToolOutcomeRecordRoundTrips(t *testing.T) {
 			t.Fatalf("encode failure: %v", err)
 		}
 		decoded, err := decodeOutcome(encoded)
-		var failure *Error
+		var failure *fault.Error[ResultClass]
 		if !errors.As(err, &failure) {
 			t.Fatalf("decode failure = %s, %v, want a broker error", decoded, err)
 		}
-		if failure.Class != ResultPolicyDenied || failure.Detail != "policy_denied: denied" || failure.Cause != nil {
+		if failure.Code != ResultPolicyDenied || failure.Detail != "policy_denied: denied" || errors.Unwrap(failure) != nil {
 			t.Fatalf("decoded failure = %+v, want the encoded class and detail without a cause", failure)
 		}
 		if decoded != nil {
@@ -48,7 +50,7 @@ func TestToolOutcomeRecordRoundTrips(t *testing.T) {
 	for name, raw := range unreadable {
 		t.Run(name, func(t *testing.T) {
 			decoded, err := decodeOutcome([]byte(raw))
-			if code, ok := CodeOf(err); !ok || code != ResultExecutionFailed {
+			if !fault.HasCode(err, ResultExecutionFailed) {
 				t.Fatalf("decode %s = %s, %v, want %s", raw, decoded, err, ResultExecutionFailed)
 			}
 		})

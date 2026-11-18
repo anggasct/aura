@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestBrokerEndedRequestNeverReachesTheAdapter(t *testing.T) {
@@ -76,7 +77,7 @@ func TestBrokerEndedRequestNeverReachesTheAdapter(t *testing.T) {
 
 			_, err = broker.Execute(ctx, request)
 
-			if code, ok := CodeOf(err); !ok || code != ResultDeadlineExceeded {
+			if !fault.HasCode(err, ResultDeadlineExceeded) {
 				t.Fatalf("Execute error = %v, want deadline_exceeded", err)
 			}
 			if adapterCalls != 0 || probe.intents(t) != 0 {
