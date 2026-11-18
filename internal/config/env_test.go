@@ -19,6 +19,15 @@ func loadWithEnvironment(t *testing.T, content string, environment map[string]st
 	return Load(writeTempConfig(t, content))
 }
 
+func decodeContent(t *testing.T, content string) (*Config, error) {
+	t.Helper()
+	doc, err := parseDocument([]byte(content))
+	if err != nil {
+		t.Fatalf("parseDocument: %v", err)
+	}
+	return decode(doc)
+}
+
 type environmentProblem struct {
 	path   string
 	name   string
@@ -50,7 +59,7 @@ func requireEnvironmentProblem(t *testing.T, err error, problem environmentProbl
 func TestEnvPathPrefersTheLongestFieldSuffix(t *testing.T) {
 	t.Setenv("AURA_MODELS_DEFINITIONS_PRIMARY_CUSTOM_BASE_URL", "https://custom.example.com")
 	t.Setenv("AURA_MODELS_DEFINITIONS_PRIMARY_BASE_URL", "https://base.example.com")
-	cfg, err := decode([]byte("version: 1\n"))
+	cfg, err := decodeContent(t, "version: 1\n")
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -110,7 +119,7 @@ func TestEnvValueIsParsedForItsFieldType(t *testing.T) {
 		t.Setenv("AURA_RUNTIME_TURN_TIMEOUT", "45s")
 		t.Setenv("AURA_STORAGE_ARTIFACT_QUOTA", "2MiB")
 		t.Setenv("AURA_SKILLS_ROOTS", " one , two ")
-		cfg, err := decode([]byte("version: 1\n"))
+		cfg, err := decodeContent(t, "version: 1\n")
 		if err != nil {
 			t.Fatalf("decode: %v", err)
 		}
@@ -127,7 +136,7 @@ func TestEnvValueIsParsedForItsFieldType(t *testing.T) {
 
 	t.Run("reads an empty value as an empty list", func(t *testing.T) {
 		t.Setenv("AURA_SKILLS_ROOTS", "")
-		cfg, err := decode([]byte("version: 1\nskills:\n  roots: [kept]\n"))
+		cfg, err := decodeContent(t, "version: 1\nskills:\n  roots: [kept]\n")
 		if err != nil {
 			t.Fatalf("decode: %v", err)
 		}
@@ -138,7 +147,7 @@ func TestEnvValueIsParsedForItsFieldType(t *testing.T) {
 
 	t.Run("sets one leaf and keeps its siblings", func(t *testing.T) {
 		t.Setenv("AURA_VISION_PROVIDERS_FOO_MAX_IMAGES", "3")
-		cfg, err := decode([]byte("version: 1\nvision:\n  providers:\n    foo:\n      detail: low\n    bar:\n      detail: high\n"))
+		cfg, err := decodeContent(t, "version: 1\nvision:\n  providers:\n    foo:\n      detail: low\n    bar:\n      detail: high\n")
 		if err != nil {
 			t.Fatalf("decode: %v", err)
 		}

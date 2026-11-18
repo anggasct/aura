@@ -129,7 +129,7 @@ func TestToolsGitHubRejectsMisshapenCredentials(t *testing.T) {
 		{"scalar entry", "  github:\n    credentials:\n      - ci\n", "tools.github.credentials[0] must be a mapping"},
 		{"numeric name", "  github:\n    credentials:\n      - name: 5\n        ref: env://A\n", "tools.github.credentials[0].name must be a string"},
 		{"numeric ref", "  github:\n    credentials:\n      - name: ci\n        ref: 5\n", "tools.github.credentials[0].ref must be a string"},
-		{"old key", "  github:\n    credentials:\n      - name: ci\n        credential_ref: env://A\n", `unknown key "tools.github.credentials.credential_ref"`},
+		{"old key", "  github:\n    credentials:\n      - name: ci\n        credential_ref: env://A\n", unknownKeyText("tools.github.credentials[0].credential_ref", "line 7, column 9")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

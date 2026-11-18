@@ -84,7 +84,8 @@ func TestLoad_VisionShapeStrict(t *testing.T) {
 		t.Fatalf("error = %v, want integer shape rejection", err)
 	}
 	_, err = Load(writeTempConfig(t, "version: 1\nvision:\n  no_such_key: true\n"))
-	if err == nil || !strings.Contains(err.Error(), `unknown key "vision.no_such_key"`) {
+	wantCode(t, err, unknownKeyCode)
+	if !strings.Contains(err.Error(), unknownKeyText("vision.no_such_key", "line 3, column 3")) {
 		t.Fatalf("error = %v, want unknown key rejection", err)
 	}
 }
