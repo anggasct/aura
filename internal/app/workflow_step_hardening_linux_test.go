@@ -291,15 +291,14 @@ func TestServerReportsQuarantinedWorkflowDefinitions(t *testing.T) {
 			_ = app.Close(t.Context())
 			t.Fatal("Build accepted a persona that lists an unknown workflow")
 		}
-		if code, ok := config.CodeOf(err); !ok || code != config.ErrorCodePersonaInvalid {
+		if !fault.HasCode(err, config.ErrorCodePersonaInvalid) {
 			t.Fatalf("Build error = %v, want %s", err, config.ErrorCodePersonaInvalid)
 		}
 	})
 }
 
 func hasConfigCode(err error, want config.ErrorCode) bool {
-	code, ok := config.CodeOf(err)
-	return ok && code == want
+	return fault.HasCode(err, want)
 }
 
 func TestQuarantinedRoutineIsHiddenFromTheControllerTools(t *testing.T) {

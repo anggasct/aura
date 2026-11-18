@@ -106,12 +106,12 @@ func TestLoad_EmailSMTPOnlyRequiredWhenEnabled(t *testing.T) {
 		t.Fatalf("Load of a disabled channel without smtp: %v", err)
 	}
 	_, err := Load(writeDiscordConfig(t, emailConfig(emailOwner, "    enabled: true\n", withoutSMTP)))
-	if err == nil || !strings.Contains(err.Error(), "smtp.host must be a host name") || !strings.Contains(err.Error(), "smtp.password_ref must not be empty") {
+	if err == nil || !strings.Contains(err.Error(), "smtp.host: config_invalid: must be a host name") || !strings.Contains(err.Error(), "smtp.password_ref: config_invalid: must not be empty") {
 		t.Fatalf("Load error = %v, want the missing smtp settings rejected when the channel is enabled", err)
 	}
 	partial := strings.Replace(withoutSMTP, "        imap:\n", "        smtp:\n          host: smtp.example.com\n        imap:\n", 1)
 	_, err = Load(writeDiscordConfig(t, emailConfig(emailOwner, "", partial)))
-	if err == nil || !strings.Contains(err.Error(), "smtp.password_ref must not be empty") {
+	if err == nil || !strings.Contains(err.Error(), "smtp.password_ref: config_invalid: must not be empty") {
 		t.Fatalf("Load error = %v, want a partial smtp block rejected even when disabled", err)
 	}
 }
@@ -125,9 +125,9 @@ func TestLoad_EmailMaxAttachmentBytes(t *testing.T) {
 	}{
 		{name: "lower bound", value: "1", want: 1},
 		{name: "upper bound", value: "20971520", want: 20971520},
-		{name: "above the ceiling", value: "20971521", wantErr: "max_attachment_bytes must be between 1 and 20971520"},
-		{name: "zero", value: "0", wantErr: "max_attachment_bytes must be between 1 and 20971520"},
-		{name: "negative", value: "-5", wantErr: "max_attachment_bytes must be between 1 and 20971520"},
+		{name: "above the ceiling", value: "20971521", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520"},
+		{name: "zero", value: "0", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520"},
+		{name: "negative", value: "-5", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520"},
 		{name: "not an integer", value: "\"20MB\"", wantErr: "max_attachment_bytes must be an integer"},
 	}
 	for _, tc := range cases {
@@ -180,27 +180,27 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"inline password": {
 			yaml: replace("env://AURA_EMAIL_PASSWORD", "hunter2"),
-			want: "password_ref must use env:// or file://",
+			want: "password_ref: config_invalid: must use env:// or file://",
 		},
 		"plaintext url password": {
 			yaml: replace("env://AURA_EMAIL_PASSWORD", "https://user:hunter2@example.com"),
-			want: "password_ref must use env:// or file://",
+			want: "password_ref: config_invalid: must use env:// or file://",
 		},
 		"empty reference target": {
 			yaml: replace("env://AURA_EMAIL_PASSWORD", "env://"),
-			want: "password_ref must use env:// or file://",
+			want: "password_ref: config_invalid: must use env:// or file://",
 		},
 		"missing password": {
 			yaml: replace("          password_ref: env://AURA_EMAIL_PASSWORD\n", ""),
-			want: "password_ref must not be empty",
+			want: "password_ref: config_invalid: must not be empty",
 		},
 		"missing persona": {
 			yaml: replace("        persona: main\n", ""),
-			want: "persona must not be empty",
+			want: "persona: config_invalid: must not be empty",
 		},
 		"bad account name": {
 			yaml: replace("name: work", "name: Work/1"),
-			want: "name \"Work/1\" must match",
+			want: "name: config_invalid: \"Work/1\" must match",
 		},
 		"duplicate account name": {
 			yaml: withIMAP(strings.Replace(emailAccountYAML, "persona: main", "persona: other", 1)),
@@ -208,43 +208,43 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"uppercase address": {
 			yaml: replace("address: aura@example.com", "address: Aura@example.com"),
-			want: "address must be a lowercase mailbox address",
+			want: "address: config_invalid: must be a lowercase mailbox address",
 		},
 		"address without domain": {
 			yaml: replace("address: aura@example.com", "address: aura"),
-			want: "address must be a lowercase mailbox address",
+			want: "address: config_invalid: must be a lowercase mailbox address",
 		},
 		"missing authserv id": {
 			yaml: replace("        authserv_id: mx.example.com\n", ""),
-			want: "authserv_id must be the receiving server's host name",
+			want: "authserv_id: config_invalid: must be the receiving server's host name",
 		},
 		"authserv id with a space": {
 			yaml: replace("authserv_id: mx.example.com", "authserv_id: \"mx.example.com (trusted)\""),
-			want: "authserv_id must be the receiving server's host name",
+			want: "authserv_id: config_invalid: must be the receiving server's host name",
 		},
 		"host with a scheme": {
 			yaml: replace("host: imap.example.com", "host: imaps://imap.example.com"),
-			want: "imap.host must be a host name",
+			want: "imap.host: config_invalid: must be a host name",
 		},
 		"host with a port": {
 			yaml: replace("host: imap.example.com", "host: imap.example.com:143"),
-			want: "imap.host must be a host name",
+			want: "imap.host: config_invalid: must be a host name",
 		},
 		"missing host": {
 			yaml: replace("          host: imap.example.com\n", ""),
-			want: "imap.host must be a host name",
+			want: "imap.host: config_invalid: must be a host name",
 		},
 		"missing username": {
 			yaml: replace("          host: imap.example.com\n          username: aura@example.com\n", "          host: imap.example.com\n"),
-			want: "imap.username must be a single line",
+			want: "imap.username: config_invalid: must be a single line",
 		},
 		"port below range": {
 			yaml: withIMAP("          port: 0\n"),
-			want: "imap.port must be between 1 and 65535",
+			want: "imap.port: config_invalid: must be between 1 and 65535",
 		},
 		"port above range": {
 			yaml: withIMAP("          port: 65536\n"),
-			want: "imap.port must be between 1 and 65535",
+			want: "imap.port: config_invalid: must be between 1 and 65535",
 		},
 		"port as a string": {
 			yaml: withIMAP("          port: \"993\"\n"),
@@ -252,23 +252,23 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"empty folder": {
 			yaml: withIMAP("          folder: \"\"\n"),
-			want: "imap.folder must be a single line",
+			want: "imap.folder: config_invalid: must be a single line",
 		},
 		"folder with a newline": {
 			yaml: withIMAP("          folder: \"INBOX\\nA1 LOGOUT\"\n"),
-			want: "imap.folder must be a single line",
+			want: "imap.folder: config_invalid: must be a single line",
 		},
 		"poll interval below the floor": {
 			yaml: withIMAP("          poll_interval: 5s\n"),
-			want: "imap.poll_interval must be between 10s and 1h0m0s",
+			want: "imap.poll_interval: config_invalid: must be between 10s and 1h0m0s",
 		},
 		"poll interval above the ceiling": {
 			yaml: withIMAP("          poll_interval: 2h\n"),
-			want: "imap.poll_interval must be between 10s and 1h0m0s",
+			want: "imap.poll_interval: config_invalid: must be between 10s and 1h0m0s",
 		},
 		"zero poll interval": {
 			yaml: withIMAP("          poll_interval: 0s\n"),
-			want: "imap.poll_interval must be between 10s and 1h0m0s",
+			want: "imap.poll_interval: config_invalid: must be between 10s and 1h0m0s",
 		},
 		"numeric poll interval": {
 			yaml: withIMAP("          poll_interval: 60\n"),
@@ -276,11 +276,11 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"uppercase allowed sender": {
 			yaml: withIMAP("        allowed_senders:\n          - Friend@example.com\n"),
-			want: "allowed_senders entries must be lowercase mailbox addresses",
+			want: "allowed_senders: config_invalid: entries must be lowercase mailbox addresses",
 		},
 		"duplicate allowed sender": {
 			yaml: withIMAP("        allowed_senders:\n          - friend@example.com\n          - friend@example.com\n"),
-			want: "allowed_senders lists an address more than once",
+			want: "allowed_senders: config_invalid: lists an address more than once",
 		},
 		"unquoted allowed sender": {
 			yaml: withIMAP("        allowed_senders:\n          - 7\n"),
@@ -292,35 +292,35 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"smtp inline password": {
 			yaml: replace("env://AURA_EMAIL_SMTP_PASSWORD", "hunter2"),
-			want: "smtp.password_ref must use env:// or file://",
+			want: "smtp.password_ref: config_invalid: must use env:// or file://",
 		},
 		"smtp plaintext url password": {
 			yaml: replace("env://AURA_EMAIL_SMTP_PASSWORD", "https://user:hunter2@example.com"),
-			want: "smtp.password_ref must use env:// or file://",
+			want: "smtp.password_ref: config_invalid: must use env:// or file://",
 		},
 		"smtp missing password": {
 			yaml: replace("          password_ref: env://AURA_EMAIL_SMTP_PASSWORD\n", ""),
-			want: "smtp.password_ref must not be empty",
+			want: "smtp.password_ref: config_invalid: must not be empty",
 		},
 		"smtp host with a scheme": {
 			yaml: replace("host: smtp.example.com", "host: smtps://smtp.example.com"),
-			want: "smtp.host must be a host name",
+			want: "smtp.host: config_invalid: must be a host name",
 		},
 		"smtp host with a port": {
 			yaml: replace("host: smtp.example.com", "host: smtp.example.com:587"),
-			want: "smtp.host must be a host name",
+			want: "smtp.host: config_invalid: must be a host name",
 		},
 		"smtp missing username": {
 			yaml: replace("          username: aura@example.com\n          password_ref: env://AURA_EMAIL_SMTP_PASSWORD", "          password_ref: env://AURA_EMAIL_SMTP_PASSWORD"),
-			want: "smtp.username must be a single line",
+			want: "smtp.username: config_invalid: must be a single line",
 		},
 		"smtp port below range": {
 			yaml: withSMTP("          port: 0\n"),
-			want: "smtp.port must be between 1 and 65535",
+			want: "smtp.port: config_invalid: must be between 1 and 65535",
 		},
 		"smtp port above range": {
 			yaml: withSMTP("          port: 65536\n"),
-			want: "smtp.port must be between 1 and 65535",
+			want: "smtp.port: config_invalid: must be between 1 and 65535",
 		},
 		"smtp port as a string": {
 			yaml: withSMTP("          port: \"587\"\n"),
@@ -348,7 +348,7 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"address with an angle bracket": {
 			yaml: replace("address: aura@example.com", "address: \"a>b@example.com\""),
-			want: "address must be a lowercase mailbox address",
+			want: "address: config_invalid: must be a lowercase mailbox address",
 		},
 		"tls switch is not accepted": {
 			yaml: withIMAP("          tls: false\n"),
@@ -390,15 +390,15 @@ func TestLoad_EmailInvalid(t *testing.T) {
 
 func TestLoad_EmailInvalidCodes(t *testing.T) {
 	_, err := Load(writeDiscordConfig(t, emailConfig(emailOwner, "", strings.Replace(emailAccountYAML, "env://AURA_EMAIL_PASSWORD", "hunter2", 1))))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
-		t.Fatalf("code = %q, %v; want %q", code, ok, ErrorCodeConfigInvalid)
+	if code, ok := codeOf(err); !ok || code != invalidCode {
+		t.Fatalf("code = %q, %v; want %q", code, ok, invalidCode)
 	}
 }
 
 func TestLoad_EmailBindingsAreNotSupported(t *testing.T) {
 	yaml := emailConfig(emailOwner, "", emailAccountYAML) + "bindings:\n  - persona: main\n    channel: email\n    account: work\n    user_id: \"7\"\n"
 	_, err := Load(writeDiscordConfig(t, yaml))
-	if err == nil || !strings.Contains(err.Error(), "channel \"email\" is not supported") {
+	if err == nil || !strings.Contains(err.Error(), "bindings[0].channel: binding_invalid: \"email\" is not supported") {
 		t.Fatalf("Load error = %v, want the email binding rejected", err)
 	}
 }

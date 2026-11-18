@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -171,8 +172,7 @@ func TestAllowlistNamingAnUnloadedWorkflowFailsStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = newWorkflowToolController(interpreter, runs, registry, nil)
-	var configErr *config.Error
-	if !errors.As(err, &configErr) || configErr.Code != config.ErrorCodePersonaInvalid || !strings.Contains(err.Error(), "ghost") {
+	if !fault.HasCode(err, config.ErrorCodePersonaInvalid) || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("startup with an unknown allowlisted workflow = %v", err)
 	}
 }

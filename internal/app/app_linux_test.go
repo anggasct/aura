@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -104,8 +105,8 @@ func TestCompositionServerBuildFailureReleasesWhatWasBuilt(t *testing.T) {
 	if app != nil {
 		t.Fatal("Build returned an app for a config without a primary model")
 	}
-	if code, ok := config.CodeOf(err); !ok || code != config.ErrorCodeConfigInvalid {
-		t.Fatalf("Build error = %v, want %s", err, config.ErrorCodeConfigInvalid)
+	if !fault.HasCode(err, configkit.ErrorCodeInvalid) {
+		t.Fatalf("Build error = %v, want %s", err, configkit.ErrorCodeInvalid)
 	}
 	requireNames(t, "lifecycle stopped", lifecycleNames(t, logs.String(), "lifecycle stopped"), []string{"telemetry", "sqlite"})
 }

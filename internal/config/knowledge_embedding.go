@@ -61,11 +61,11 @@ type KnowledgeEmbedding struct {
 
 func (e *KnowledgeEmbedding) Endpoint() (ServiceEndpoint, error) {
 	if e == nil {
-		return ServiceEndpoint{}, &Error{Code: ErrorCodeConfigInvalid, Detail: "knowledge.embedding is not configured"}
+		return ServiceEndpoint{}, configkit.Invalid("knowledge.embedding", "is not configured")
 	}
 	endpoint, err := parseServiceEndpoint(embeddingBaseURLField, e.BaseURL)
 	if err != nil {
-		return ServiceEndpoint{}, &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+		return ServiceEndpoint{}, err
 	}
 	return endpoint, nil
 }
@@ -80,32 +80,29 @@ func validateKnowledge(knowledge *Knowledge) error {
 		problems = append(problems, err)
 	}
 	if len(embedding.Model) > maxEmbeddingModelLength || !embeddingModelPattern.MatchString(embedding.Model) {
-		problems = append(problems, errors.New("knowledge.embedding.model is required and must be a plain model name"))
+		problems = append(problems, configkit.Invalid("knowledge.embedding.model", "is required and must be a plain model name"))
 	}
 	if embedding.Dimensions < 1 || embedding.Dimensions > MaxEmbeddingDimensions {
-		problems = append(problems, fmt.Errorf("knowledge.embedding.dimensions is required and must be between 1 and %d", MaxEmbeddingDimensions))
+		problems = append(problems, configkit.Invalid("knowledge.embedding.dimensions", fmt.Sprintf("is required and must be between 1 and %d", MaxEmbeddingDimensions)))
 	}
 	problems = append(problems, validateEmbeddingField(embedding.DimensionsField)...)
 	problems = append(problems, validateEmbeddingCredentialRef(embedding.CredentialRef)...)
 	problems = append(problems, validateEmbeddingRole(embedding)...)
 	if embedding.BatchSize < 1 || embedding.BatchSize > MaxEmbeddingBatchSize {
-		problems = append(problems, fmt.Errorf("knowledge.embedding.batch_size must be between 1 and %d", MaxEmbeddingBatchSize))
+		problems = append(problems, configkit.Invalid("knowledge.embedding.batch_size", fmt.Sprintf("must be between 1 and %d", MaxEmbeddingBatchSize)))
 	}
 	if embedding.MaxMemory < MinEmbeddingMaxMemory {
-		problems = append(problems, fmt.Errorf("knowledge.embedding.max_memory must be at least %s", MinEmbeddingMaxMemory))
+		problems = append(problems, configkit.Invalid("knowledge.embedding.max_memory", fmt.Sprintf("must be at least %s", MinEmbeddingMaxMemory)))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateEmbeddingField(field string) []error {
 	if len(field) > maxEmbeddingFieldLength || !embeddingFieldPattern.MatchString(field) {
-		return []error{errors.New("knowledge.embedding.dimensions_field must be a lowercase request field name")}
+		return []error{configkit.Invalid("knowledge.embedding.dimensions_field", "must be a lowercase request field name")}
 	}
 	if _, reserved := reservedEmbeddingFields[field]; reserved {
-		return []error{fmt.Errorf("knowledge.embedding.dimensions_field must not be %q", field)}
+		return []error{configkit.Invalid("knowledge.embedding.dimensions_field", "must not be a reserved request field")}
 	}
 	return nil
 }
@@ -117,7 +114,7 @@ func validateEmbeddingCredentialRef(ref string) []error {
 	case credentialRefHasName(ref):
 		return nil
 	}
-	return []error{errors.New("knowledge.embedding.credential_ref must use env:// or file:// with a name")}
+	return []error{configkit.Invalid("knowledge.embedding.credential_ref", "must use env:// or file:// with a name")}
 }
 
 func validateEmbeddingRole(embedding *KnowledgeEmbedding) []error {
@@ -125,21 +122,21 @@ func validateEmbeddingRole(embedding *KnowledgeEmbedding) []error {
 	switch embedding.RoleStyle {
 	case EmbeddingRoleNone, EmbeddingRoleInputType:
 		if embedding.QueryPrefix != "" || embedding.DocumentPrefix != "" {
-			problems = append(problems, errors.New("knowledge.embedding prefixes require role_style prefix"))
+			problems = append(problems, configkit.Invalid("knowledge.embedding", "prefixes require role_style prefix"))
 		}
 	case EmbeddingRolePrefix:
 		if embedding.QueryPrefix == "" && embedding.DocumentPrefix == "" {
-			problems = append(problems, errors.New("knowledge.embedding.role_style prefix requires query_prefix or document_prefix"))
+			problems = append(problems, configkit.Invalid("knowledge.embedding.role_style", "prefix requires query_prefix or document_prefix"))
 		}
 	default:
-		problems = append(problems, errors.New("knowledge.embedding.role_style must be none, input_type or prefix"))
+		problems = append(problems, configkit.Invalid("knowledge.embedding.role_style", "must be none, input_type or prefix"))
 	}
 	for _, prefix := range []struct {
 		name  string
 		value string
 	}{{"query_prefix", embedding.QueryPrefix}, {"document_prefix", embedding.DocumentPrefix}} {
 		if !validEmbeddingPrefix(prefix.value) {
-			problems = append(problems, fmt.Errorf("knowledge.embedding.%s must be at most %d bytes of printable text", prefix.name, maxEmbeddingPrefixLength))
+			problems = append(problems, configkit.Invalid("knowledge.embedding."+prefix.name, fmt.Sprintf("must be at most %d bytes of printable text", maxEmbeddingPrefixLength)))
 		}
 	}
 	return problems

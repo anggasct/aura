@@ -87,20 +87,20 @@ func TestWebSearchRejectsConfigsThatDoNotFitTheProvider(t *testing.T) {
 		"tavily endpoint":                 {section: "    provider: tavily\n    endpoint: https://search.example.com/search\n", detail: "only supported for provider searxng"},
 		"duckduckgo credential":           {section: "    provider: duckduckgo\n    credential_ref: env://X\n", detail: "must be empty for provider duckduckgo"},
 		"credential without provider":     {section: "    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "must be empty for provider duckduckgo"},
-		"searxng without endpoint":        {section: "    provider: searxng\n", detail: "tools.web_search.endpoint must be set"},
+		"searxng without endpoint":        {section: "    provider: searxng\n", detail: "tools.web_search.endpoint: config_invalid: must be set"},
 		"non string endpoint":             {section: "    provider: searxng\n    endpoint: 8888\n", detail: "endpoint must be a string"},
-		"brave empty credential":          {section: "    provider: brave\n    credential_ref: \"\"\n", detail: "credential_ref must use env:// or file://"},
-		"tavily empty credential":         {section: "    provider: tavily\n    credential_ref: \"\"\n", detail: "credential_ref must use env:// or file://"},
-		"brave literal key":               {section: "    provider: brave\n    credential_ref: sk-literal\n", detail: "credential_ref must use env:// or file://"},
-		"brave bare env":                  {section: "    provider: brave\n    credential_ref: env://\n", detail: "credential_ref must use env:// or file://"},
-		"tavily bare file":                {section: "    provider: tavily\n    credential_ref: file://\n", detail: "credential_ref must use env:// or file://"},
-		"searxng bare env":                {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: env://\n", detail: "credential_ref must use env:// or file://"},
-		"searxng malformed credential":    {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: token\n", detail: "credential_ref must use env:// or file://"},
+		"brave empty credential":          {section: "    provider: brave\n    credential_ref: \"\"\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
+		"tavily empty credential":         {section: "    provider: tavily\n    credential_ref: \"\"\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
+		"brave literal key":               {section: "    provider: brave\n    credential_ref: sk-literal\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
+		"brave bare env":                  {section: "    provider: brave\n    credential_ref: env://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
+		"tavily bare file":                {section: "    provider: tavily\n    credential_ref: file://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
+		"searxng bare env":                {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: env://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
+		"searxng malformed credential":    {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: token\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
 		"tavily with brave default":       {section: "    provider: tavily\n    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "default reference of provider brave"},
 		"searxng with brave default":      {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "default reference of provider brave"},
 		"duckduckgo with brave default":   {section: "    provider: duckduckgo\n    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "must be empty for provider duckduckgo"},
 		"brave with tavily default":       {section: "    provider: brave\n    credential_ref: env://AURA_TAVILY_API_KEY\n", detail: "default reference of provider tavily"},
-		"max results above bound":         {section: "    max_results: 21\n", detail: "max_results must be between 1 and 20"},
+		"max results above bound":         {section: "    max_results: 21\n", detail: "max_results: config_invalid: must be between 1 and 20"},
 		"searxng endpoint without path":   {section: "    provider: searxng\n    endpoint: https://search.example.com\n", detail: "non-empty path"},
 		"searxng endpoint root path only": {section: "    provider: searxng\n    endpoint: http://127.0.0.1:8888/\n", detail: "non-empty path"},
 	}
@@ -110,7 +110,7 @@ func TestWebSearchRejectsConfigsThatDoNotFitTheProvider(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), test.detail) {
 				t.Fatalf("error = %v, want detail %q", err, test.detail)
 			}
-			if code, ok := CodeOf(err); ok && code != ErrorCodeConfigInvalid {
+			if code, ok := codeOf(err); ok && code != invalidCode {
 				t.Fatalf("code = %q, want config_invalid", code)
 			}
 		})
@@ -169,7 +169,7 @@ func TestWebSearchEndpointRules(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Load accepted %q", endpoint)
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
+			if code, ok := codeOf(err); !ok || code != invalidCode {
 				t.Fatalf("error = %v, want config_invalid", err)
 			}
 		})

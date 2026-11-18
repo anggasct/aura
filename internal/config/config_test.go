@@ -19,6 +19,18 @@ import (
 
 const testdataDir = "../../testdata"
 
+const invalidCode = ErrorCode(configkit.ErrorCodeInvalid)
+
+func codeOf(err error) (ErrorCode, bool) {
+	if code, ok := fault.CodeOf[ErrorCode](err); ok {
+		return code, true
+	}
+	if code, ok := fault.CodeOf[configkit.ErrorCode](err); ok {
+		return ErrorCode(code), true
+	}
+	return "", false
+}
+
 var updateGolden = flag.Bool("update", false, "rewrite golden files")
 
 func fixture(t *testing.T, name string) string {
@@ -307,8 +319,8 @@ func TestLoad_WrongVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported version, got nil")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeVersionUnsupported {
-		t.Errorf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeVersionUnsupported)
+	if code, ok := codeOf(err); !ok || code != ErrorCodeVersionUnsupported {
+		t.Errorf("codeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeVersionUnsupported)
 	}
 	if !strings.Contains(err.Error(), `unsupported version 2 (supported: 1)`) {
 		t.Errorf("error %q does not report unsupported version", err)
@@ -319,8 +331,8 @@ func TestLoad_EnvironmentCannotUpgradeSchemaVersion(t *testing.T) {
 	path := writeTempConfig(t, "version: 1\nserver:\n  host: 127.0.0.1\n")
 	t.Setenv("AURA_VERSION", "2")
 	_, err := Load(path)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeVersionUnsupported {
-		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeVersionUnsupported)
+	if code, ok := codeOf(err); !ok || code != ErrorCodeVersionUnsupported {
+		t.Fatalf("codeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeVersionUnsupported)
 	}
 }
 
@@ -354,7 +366,7 @@ func TestLoad_StrictRuntimeAndCapabilityShapes(t *testing.T) {
 func TestLoad_ExplicitZeroRuntimeValuesRejected(t *testing.T) {
 	path := writeTempConfig(t, "version: 1\nruntime:\n  max_active_turns: 0\n")
 	_, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), "runtime.max_active_turns must be positive") {
+	if err == nil || !strings.Contains(err.Error(), "runtime.max_active_turns: config_invalid: must be positive") {
 		t.Fatalf("Load error = %v, want explicit zero to be rejected", err)
 	}
 }
@@ -387,10 +399,10 @@ func TestRuntimeRunRetentionDefaultsAndValidates(t *testing.T) {
 	for _, value := range []string{"23h", "0s", "-48h"} {
 		t.Run("below the floor "+value, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, "version: 1\nruntime:\n  run_retention: "+value+"\n"))
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
-				t.Fatalf("Load error = %v, want %s", err, ErrorCodeConfigInvalid)
+			if code, ok := codeOf(err); !ok || code != invalidCode {
+				t.Fatalf("Load error = %v, want %s", err, invalidCode)
 			}
-			if !strings.Contains(err.Error(), "runtime.run_retention must be at least 24h") {
+			if !strings.Contains(err.Error(), "runtime.run_retention: config_invalid: must be at least 24h") {
 				t.Fatalf("Load error = %v, want the floor named", err)
 			}
 		})
@@ -658,8 +670,8 @@ models:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, tt.content))
-			if code, ok := CodeOf(err); !ok || code != tt.code {
-				t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, tt.code)
+			if code, ok := codeOf(err); !ok || code != tt.code {
+				t.Fatalf("codeOf(%v) = %q, %v; want %q, true", err, code, ok, tt.code)
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("error %q does not contain %q", err, tt.want)
@@ -831,7 +843,7 @@ func TestLoad_PortOutOfRange(t *testing.T) {
 	for _, port := range []string{"99999", "-1"} {
 		content := "version: 1\nserver:\n  host: 127.0.0.1\n  port: " + port + "\n"
 		_, err := Load(writeTempConfig(t, content))
-		wantCode(t, err, ErrorCodeConfigInvalid)
+		wantCode(t, err, invalidCode)
 	}
 }
 
@@ -872,7 +884,7 @@ models:
     summarize: auxiliary
 `
 	_, err := Load(writeTempConfig(t, content))
-	wantCode(t, err, ErrorCodeConfigInvalid)
+	wantCode(t, err, invalidCode)
 }
 
 func TestLoad_NonDurationTimeoutRejected(t *testing.T) {
@@ -951,12 +963,12 @@ func TestLoad_StorageValidation(t *testing.T) {
 		content string
 		want    string
 	}{
-		{name: "connections too low", content: "storage:\n  max_open_connections: 0\n", want: "storage.max_open_connections 0 is out of range (1-16)"},
-		{name: "connections too high", content: "storage:\n  max_open_connections: 17\n", want: "storage.max_open_connections 17 is out of range (1-16)"},
-		{name: "zero quota", content: "storage:\n  artifact_quota: 0\n", want: "storage.artifact_quota must be positive"},
-		{name: "zero busy timeout", content: "storage:\n  busy_timeout: 0s\n", want: "storage.busy_timeout must be positive"},
-		{name: "zero backup interval", content: "storage:\n  backup_interval: 0s\n", want: "storage.backup_interval must be positive"},
-		{name: "zero retention", content: "storage:\n  backup_retention: 0\n", want: "storage.backup_retention must be at least 1"},
+		{name: "connections too low", content: "storage:\n  max_open_connections: 0\n", want: "storage.max_open_connections: config_invalid: 0 is out of range (1-16)"},
+		{name: "connections too high", content: "storage:\n  max_open_connections: 17\n", want: "storage.max_open_connections: config_invalid: 17 is out of range (1-16)"},
+		{name: "zero quota", content: "storage:\n  artifact_quota: 0\n", want: "storage.artifact_quota: config_invalid: must be positive"},
+		{name: "zero busy timeout", content: "storage:\n  busy_timeout: 0s\n", want: "storage.busy_timeout: config_invalid: must be positive"},
+		{name: "zero backup interval", content: "storage:\n  backup_interval: 0s\n", want: "storage.backup_interval: config_invalid: must be positive"},
+		{name: "zero retention", content: "storage:\n  backup_retention: 0\n", want: "storage.backup_retention: config_invalid: must be at least 1"},
 		{name: "quota not a size", content: "storage:\n  artifact_quota: [1, 2]\n", want: "storage.artifact_quota must be a size string"},
 		{name: "quota invalid size", content: "storage:\n  artifact_quota: 5XB\n", want: "invalid size"},
 	}
@@ -1036,7 +1048,7 @@ func wantCode(t *testing.T, err error, want ErrorCode) {
 	if err == nil {
 		t.Fatalf("expected error with code %s, got nil", want)
 	}
-	got, ok := CodeOf(err)
+	got, ok := codeOf(err)
 	if !ok {
 		t.Fatalf("error %v carries no config code, want %s", err, want)
 	}
@@ -1065,7 +1077,7 @@ func TestLoad_DuplicateCapabilitiesRejected(t *testing.T) {
 func TestLoad_NegativeMaxConcurrentStepsRejected(t *testing.T) {
 	content := "version: 1\nworkflows:\n  max_concurrent_steps: -4\n"
 	_, err := Load(writeTempConfig(t, content))
-	if err == nil || !strings.Contains(err.Error(), "workflows.max_concurrent_steps must be at least 1") {
+	if err == nil || !strings.Contains(err.Error(), "workflows.max_concurrent_steps: config_invalid: must be at least 1") {
 		t.Fatalf("Load error = %v, want negative max_concurrent_steps rejection", err)
 	}
 }
@@ -1284,7 +1296,7 @@ model_routes:
     candidates: ["primary-model"]
     max_provider_attempts: -1
 `,
-			wantError: "max_provider_attempts must not be negative",
+			wantError: "max_provider_attempts: config_invalid: must not be negative",
 		},
 		{
 			name: "unknown_key_in_route_rejected",

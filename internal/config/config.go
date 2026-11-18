@@ -9,11 +9,11 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type Config struct {
@@ -576,11 +576,11 @@ func (m Models) ResolveDefinition(def *ModelDefinition) (ResolvedDefinition, err
 		registry[name] = preset
 	}
 	if def.Provider != "" && def.Custom != nil {
-		return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: "models.definitions entry sets both provider and custom"}
+		return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry sets both provider and custom"))
 	}
 	if def.Custom != nil {
 		if strings.TrimSpace(def.Protocol) != "" || strings.TrimSpace(def.BaseURL) != "" {
-			return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: "models.definitions entry with custom must not set protocol or base_url"}
+			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry with custom must not set protocol or base_url"))
 		}
 		if err := validateProviderShape("custom", *def.Custom); err != nil {
 			return ResolvedDefinition{}, err
@@ -595,13 +595,13 @@ func (m Models) ResolveDefinition(def *ModelDefinition) (ResolvedDefinition, err
 	}
 	if def.Provider != "" {
 		if strings.TrimSpace(def.Protocol) != "" {
-			return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: "models.definitions entry with provider must not set protocol"}
+			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry with provider must not set protocol"))
 		}
 		preset, ok := registry[def.Provider]
 		if !ok {
-			return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("models.definitions entry references unknown provider %q", def.Provider)}
+			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry references unknown provider"))
 		}
-		if err := validateProviderShape("provider "+strconv.Quote(def.Provider), preset); err != nil {
+		if err := validateProviderShape("provider", preset); err != nil {
 			return ResolvedDefinition{}, err
 		}
 		baseURL := preset.BaseURL
@@ -609,7 +609,7 @@ func (m Models) ResolveDefinition(def *ModelDefinition) (ResolvedDefinition, err
 			baseURL = def.BaseURL
 		}
 		if err := ValidateBaseURL(baseURL); err != nil {
-			return ResolvedDefinition{}, &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("models.definitions entry with provider %q has invalid base_url: %v", def.Provider, err)}
+			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry with provider has invalid base_url: "+err.Error()))
 		}
 		return ResolvedDefinition{
 			Protocol:        preset.Protocol,
@@ -628,19 +628,19 @@ func (m Models) ResolveDefinition(def *ModelDefinition) (ResolvedDefinition, err
 
 func validateProviderShape(where string, preset ProviderPreset) error {
 	if !validProtocol(preset.Protocol) {
-		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s uses unsupported protocol %q", where, preset.Protocol)}
+		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "uses unsupported protocol (must be one of "+strings.Join(protocolNames(), ", ")+")"))
 	}
 	if strings.TrimSpace(preset.BaseURL) == "" {
-		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: where + " requires a non-empty base_url"}
+		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "requires a non-empty base_url"))
 	}
 	if err := ValidateBaseURL(preset.BaseURL); err != nil {
-		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s has invalid base_url: %v", where, err)}
+		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "has invalid base_url: "+err.Error()))
 	}
 	if preset.AuthScheme != ProviderAuthBearer {
-		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s uses unsupported auth scheme %q", where, preset.AuthScheme)}
+		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "uses unsupported auth scheme (must be "+ProviderAuthBearer+")"))
 	}
 	if preset.SessionBehavior != ProviderSessionNone && preset.SessionBehavior != ProviderSessionOpencode {
-		return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s uses unsupported session behavior %q", where, preset.SessionBehavior)}
+		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "uses unsupported session behavior (must be "+ProviderSessionNone+" or "+ProviderSessionOpencode+")"))
 	}
 	return validateProviderHeaders(where, preset.Headers)
 }
@@ -649,14 +649,14 @@ func validateProviderHeaders(where string, headers map[string]string) error {
 	for _, name := range slices.Sorted(maps.Keys(headers)) {
 		value := headers[name]
 		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, " \t:") {
-			return &Error{Code: ErrorCodeModelProviderInvalid, Detail: where + " sets invalid header name"}
+			return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "sets invalid header name"))
 		}
 		if strings.EqualFold(name, "authorization") || strings.EqualFold(name, "content-type") || strings.EqualFold(name, SessionHeaderName) {
-			return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s header %q collides with a managed header", where, name)}
+			return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, fmt.Sprintf("header %q collides with a managed header", name)))
 		}
 		trimmed := strings.TrimSpace(value)
 		if strings.HasPrefix(trimmed, "env://") || strings.HasPrefix(trimmed, "file://") || strings.Contains(trimmed, "${") {
-			return &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("%s header %q must not carry a secret reference", where, name)}
+			return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, fmt.Sprintf("header %q must not carry a secret reference", name)))
 		}
 	}
 	return nil
@@ -830,13 +830,12 @@ var (
 	syncBranchPattern          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
 
+func protocolNames() []string {
+	return []string{ProtocolOpenAIResponses, ProtocolOpenAIChatCompat, ProtocolAnthropicMessages, ProtocolGeminiNative}
+}
+
 func validProtocol(p string) bool {
-	switch p {
-	case ProtocolOpenAIResponses, ProtocolOpenAIChatCompat, ProtocolAnthropicMessages, ProtocolGeminiNative:
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(protocolNames(), p)
 }
 
 func Default() Config {
@@ -1152,7 +1151,7 @@ func ValidateBaseURL(raw string) error {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return err
+		return errors.New("is not a valid URL")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return errors.New("scheme must be http or https")

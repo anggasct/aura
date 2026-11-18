@@ -142,7 +142,7 @@ func emailItemHasKey(item *yamlv3.Node, path ...string) bool {
 
 func validateEmail(email *Email, owner *Owner) error {
 	if email == nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.email must not be nil"}
+		return configkit.Invalid("channels.email", "must not be nil")
 	}
 	var problems []error
 	names := make(map[string]bool, len(email.Accounts))
@@ -151,44 +151,41 @@ func validateEmail(email *Email, owner *Owner) error {
 		field := fmt.Sprintf("channels.email.accounts[%d]", i)
 		switch {
 		case !discordAccountNamePattern.MatchString(account.Name):
-			problems = append(problems, fmt.Errorf("%s.name %q must match %s", field, account.Name, discordAccountNamePattern.String()))
+			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q must match %s", account.Name, discordAccountNamePattern.String())))
 		case names[account.Name]:
-			problems = append(problems, fmt.Errorf("%s.name %q is configured more than once", field, account.Name))
+			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q is configured more than once", account.Name)))
 		default:
 			names[account.Name] = true
 		}
 		problems = append(problems, emailAccountProblems(field, account, email.Enabled)...)
 	}
 	if email.Enabled && len(email.Accounts) == 0 {
-		problems = append(problems, errors.New("channels.email.enabled requires at least one channels.email.accounts entry"))
+		problems = append(problems, configkit.Invalid("channels.email.enabled", "requires at least one channels.email.accounts entry"))
 	}
 	if email.Enabled && !hasEmailOwner(owner) {
 		for i := range email.Accounts {
 			if len(email.Accounts[i].AllowedSenders) == 0 {
-				problems = append(problems, errors.New("channels.email.enabled requires an email:<address> entry in owner.identities or an allowed_senders entry on every account"))
+				problems = append(problems, configkit.Invalid("channels.email.enabled", "requires an email:<address> entry in owner.identities or an allowed_senders entry on every account"))
 				break
 			}
 		}
 	}
 	if email.MaxAttachmentBytes < 1 || email.MaxAttachmentBytes > EmailMaxAttachmentBytes {
-		problems = append(problems, fmt.Errorf("channels.email.max_attachment_bytes must be between 1 and %d", EmailMaxAttachmentBytes))
+		problems = append(problems, configkit.Invalid("channels.email.max_attachment_bytes", fmt.Sprintf("must be between 1 and %d", EmailMaxAttachmentBytes)))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func emailAccountProblems(field string, account *EmailAccount, enabled bool) []error {
 	var problems []error
 	if account.Persona == "" {
-		problems = append(problems, fmt.Errorf("%s.persona must not be empty", field))
+		problems = append(problems, configkit.Invalid(field+".persona", "must not be empty"))
 	}
 	if !principal.IsPlainEmailAddress(account.Address) {
-		problems = append(problems, fmt.Errorf("%s.address must be a lowercase mailbox address", field))
+		problems = append(problems, configkit.Invalid(field+".address", "must be a lowercase mailbox address"))
 	}
 	if !emailHostName(account.AuthservID) {
-		problems = append(problems, fmt.Errorf("%s.authserv_id must be the receiving server's host name", field))
+		problems = append(problems, configkit.Invalid(field+".authserv_id", "must be the receiving server's host name"))
 	}
 	problems = append(problems, emailIMAPProblems(field+".imap", &account.IMAP)...)
 	if enabled || account.SMTP.Host != "" || account.SMTP.Username != "" || account.SMTP.PasswordRef != "" {
@@ -198,9 +195,9 @@ func emailAccountProblems(field string, account *EmailAccount, enabled bool) []e
 	for _, sender := range account.AllowedSenders {
 		switch {
 		case !principal.IsEmailAddress(sender):
-			problems = append(problems, fmt.Errorf("%s.allowed_senders entries must be lowercase mailbox addresses", field))
+			problems = append(problems, configkit.Invalid(field+".allowed_senders", "entries must be lowercase mailbox addresses"))
 		case seen[sender]:
-			problems = append(problems, fmt.Errorf("%s.allowed_senders lists an address more than once", field))
+			problems = append(problems, configkit.Invalid(field+".allowed_senders", "lists an address more than once"))
 		default:
 			seen[sender] = true
 		}
@@ -211,11 +208,11 @@ func emailAccountProblems(field string, account *EmailAccount, enabled bool) []e
 func emailIMAPProblems(field string, imap *EmailIMAP) []error {
 	problems := emailEndpointProblems(field, imap.Host, imap.Port, imap.Username, imap.PasswordRef)
 	if !emailPlainText(imap.Folder, emailMaxFolderBytes) {
-		problems = append(problems, fmt.Errorf("%s.folder must be a single line of at most %d bytes", field, emailMaxFolderBytes))
+		problems = append(problems, configkit.Invalid(field+".folder", fmt.Sprintf("must be a single line of at most %d bytes", emailMaxFolderBytes)))
 	}
 	interval := time.Duration(imap.PollInterval)
 	if interval < EmailMinPollInterval || interval > EmailMaxPollInterval {
-		problems = append(problems, fmt.Errorf("%s.poll_interval must be between %s and %s", field, EmailMinPollInterval, EmailMaxPollInterval))
+		problems = append(problems, configkit.Invalid(field+".poll_interval", fmt.Sprintf("must be between %s and %s", EmailMinPollInterval, EmailMaxPollInterval)))
 	}
 	return problems
 }
@@ -227,19 +224,19 @@ func emailSMTPProblems(field string, smtp *EmailSMTP) []error {
 func emailEndpointProblems(field, host string, port int, username, passwordRef string) []error {
 	var problems []error
 	if !emailHostName(host) {
-		problems = append(problems, fmt.Errorf("%s.host must be a host name", field))
+		problems = append(problems, configkit.Invalid(field+".host", "must be a host name"))
 	}
 	if port < 1 || port > emailMaxPort {
-		problems = append(problems, fmt.Errorf("%s.port must be between 1 and %d", field, emailMaxPort))
+		problems = append(problems, configkit.Invalid(field+".port", fmt.Sprintf("must be between 1 and %d", emailMaxPort)))
 	}
 	if !emailPlainText(username, emailMaxUsernameBytes) {
-		problems = append(problems, fmt.Errorf("%s.username must be a single line of at most %d bytes", field, emailMaxUsernameBytes))
+		problems = append(problems, configkit.Invalid(field+".username", fmt.Sprintf("must be a single line of at most %d bytes", emailMaxUsernameBytes)))
 	}
 	switch {
 	case passwordRef == "":
-		problems = append(problems, fmt.Errorf("%s.password_ref must not be empty", field))
+		problems = append(problems, configkit.Invalid(field+".password_ref", "must not be empty"))
 	case !secretReferenceShaped(passwordRef):
-		problems = append(problems, fmt.Errorf("%s.password_ref must use env:// or file://", field))
+		problems = append(problems, configkit.Invalid(field+".password_ref", "must use env:// or file://"))
 	}
 	return problems
 }

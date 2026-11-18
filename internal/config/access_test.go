@@ -25,8 +25,8 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 		"pairing on owner":                 {fields: "      pairing: true\n", code: ErrorCodePersonaInvalid, detail: "pairing"},
 		"duplicate principal tool":         {fields: "      principal_tools: [web_fetch, web_fetch]\n", code: ErrorCodePersonaInvalid, detail: "principal_tools"},
 		"approval timeout in range":        {fields: "      approval_timeout: 10m\n"},
-		"approval timeout too short":       {fields: "      approval_timeout: 30s\n", code: ErrorCodeConfigInvalid, detail: "approval_timeout"},
-		"approval timeout too long":        {fields: "      approval_timeout: 25h\n", code: ErrorCodeConfigInvalid, detail: "approval_timeout"},
+		"approval timeout too short":       {fields: "      approval_timeout: 30s\n", code: invalidCode, detail: "approval_timeout"},
+		"approval timeout too long":        {fields: "      approval_timeout: 25h\n", code: invalidCode, detail: "approval_timeout"},
 		"unknown message key":              {fields: "      messages:\n        hello: hi\n", code: ErrorCodePersonaInvalid, detail: `unknown key "hello"`},
 		"empty message":                    {fields: "      messages:\n        waiting_for_owner: \" \"\n", code: ErrorCodePersonaInvalid, detail: "must not be empty"},
 		"multi line message":               {fields: "      messages:\n        waiting_for_owner: \"a\\nb\"\n", code: ErrorCodePersonaInvalid, detail: "single line"},
@@ -48,14 +48,14 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 		"workflows empty entry":            {fields: "      workflows: [\" \"]\n", code: ErrorCodePersonaInvalid, detail: "workflows"},
 		"evals behavior":                   {fields: "      evals:\n        behavior:\n          required: true\n          min_score: 0.75\n          judge_route: primary\n          schedule: \"0 3 * * 1\"\n          enforce_on_regression: true\n"},
 		"evals behavior min score 1":       {fields: "      evals:\n        behavior:\n          min_score: 1\n"},
-		"evals behavior min score zero":    {fields: "      evals:\n        behavior:\n          min_score: 0\n", code: ErrorCodeConfigInvalid, detail: "min_score"},
-		"evals behavior min score above 1": {fields: "      evals:\n        behavior:\n          min_score: 1.5\n", code: ErrorCodeConfigInvalid, detail: "min_score"},
-		"evals behavior min score text":    {fields: "      evals:\n        behavior:\n          min_score: high\n", code: ErrorCodeConfigInvalid, detail: "min_score"},
-		"evals behavior required text":     {fields: "      evals:\n        behavior:\n          required: yes please\n", code: ErrorCodeConfigInvalid, detail: "required"},
-		"evals behavior empty judge":       {fields: "      evals:\n        behavior:\n          judge_route: \"\"\n", code: ErrorCodeConfigInvalid, detail: "judge_route"},
-		"evals behavior unknown key":       {fields: "      evals:\n        behavior:\n          judge: primary\n", code: ErrorCodeConfigInvalid, detail: "evals.behavior.judge"},
-		"evals behavior not a mapping":     {fields: "      evals:\n        behavior: true\n", code: ErrorCodeConfigInvalid, detail: "evals.behavior"},
-		"evals unknown key":                {fields: "      evals:\n        directory: x\n", code: ErrorCodeConfigInvalid, detail: "evals.directory"},
+		"evals behavior min score zero":    {fields: "      evals:\n        behavior:\n          min_score: 0\n", code: invalidCode, detail: "min_score"},
+		"evals behavior min score above 1": {fields: "      evals:\n        behavior:\n          min_score: 1.5\n", code: invalidCode, detail: "min_score"},
+		"evals behavior min score text":    {fields: "      evals:\n        behavior:\n          min_score: high\n", code: invalidCode, detail: "min_score"},
+		"evals behavior required text":     {fields: "      evals:\n        behavior:\n          required: yes please\n", code: invalidCode, detail: "required"},
+		"evals behavior empty judge":       {fields: "      evals:\n        behavior:\n          judge_route: \"\"\n", code: invalidCode, detail: "judge_route"},
+		"evals behavior unknown key":       {fields: "      evals:\n        behavior:\n          judge: primary\n", code: invalidCode, detail: "evals.behavior.judge"},
+		"evals behavior not a mapping":     {fields: "      evals:\n        behavior: true\n", code: invalidCode, detail: "evals.behavior"},
+		"evals unknown key":                {fields: "      evals:\n        directory: x\n", code: invalidCode, detail: "evals.directory"},
 	}
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {
@@ -67,7 +67,7 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := CodeOf(err); !ok || code != tc.code {
+			if code, ok := codeOf(err); !ok || code != tc.code {
 				t.Fatalf("code = %q, %v (err %v), want %s", code, ok, err, tc.code)
 			}
 			if !strings.Contains(err.Error(), "agents.definitions[0]") || !strings.Contains(err.Error(), tc.detail) {
@@ -141,7 +141,7 @@ func TestLoad_AccessSection(t *testing.T) {
 	} {
 		t.Run(label, func(t *testing.T) {
 			_, err := Load(writeAccessConfig(t, access))
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
+			if code, ok := codeOf(err); !ok || code != invalidCode {
 				t.Fatalf("code = %q, %v (err %v), want config_invalid", code, ok, err)
 			}
 		})

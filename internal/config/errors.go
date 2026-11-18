@@ -1,15 +1,9 @@
 package config
 
-import (
-	"errors"
-	"fmt"
-)
-
 type ErrorCode string
 
 const (
 	ErrorCodeVersionUnsupported         ErrorCode = "config_version_unsupported"
-	ErrorCodeConfigInvalid              ErrorCode = "config_invalid"
 	ErrorCodeModelProtocolInvalid       ErrorCode = "model_protocol_invalid"
 	ErrorCodeModelCapabilityUnsupported ErrorCode = "model_capability_unsupported"
 	ErrorCodeModelSecretInvalid         ErrorCode = "model_secret_invalid"
@@ -21,20 +15,3 @@ const (
 	ErrorCodeBindingInvalid             ErrorCode = "binding_invalid"
 	ErrorCodeConfigShapeChanged         ErrorCode = "config_shape_changed"
 )
-
-type Error struct {
-	Code   ErrorCode
-	Detail string
-}
-
-func (e *Error) Error() string {
-	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if !errors.As(err, &target) {
-		return "", false
-	}
-	return target.Code, true
-}

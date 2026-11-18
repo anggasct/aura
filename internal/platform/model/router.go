@@ -15,6 +15,8 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
 
@@ -384,11 +386,22 @@ func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, 
 }
 
 func resolveDetail(err error) string {
-	var cfgErr *config.Error
-	if errors.As(err, &cfgErr) {
-		return cfgErr.Detail
+	var detail string
+	var configCoded *fault.Error[config.ErrorCode]
+	var kitCoded *fault.Error[configkit.ErrorCode]
+	switch {
+	case errors.As(err, &configCoded):
+		detail = configCoded.Detail
+	case errors.As(err, &kitCoded):
+		detail = kitCoded.Detail
+	default:
+		return err.Error()
 	}
-	return err.Error()
+	var field *configkit.FieldError
+	if errors.As(err, &field) && field.Path != "" {
+		return field.Path + " " + detail
+	}
+	return detail
 }
 
 func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {

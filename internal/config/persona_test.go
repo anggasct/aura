@@ -85,7 +85,7 @@ func TestLoad_SoulFileRejectsInvalidSouls(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaInvalid {
+			if code, ok := codeOf(err); !ok || code != ErrorCodePersonaInvalid {
 				t.Fatalf("code = %q, %v (err %v), want persona_invalid", code, ok, err)
 			}
 			if !strings.Contains(err.Error(), tc.detail) || !strings.Contains(err.Error(), "agents.definitions[0]") {
@@ -102,7 +102,7 @@ func TestLoad_SoulFileRejectsConfiguredSecret(t *testing.T) {
       soul_file: personas/leaky.md
 `)
 	_, err := Load(path)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaSecret {
+	if code, ok := codeOf(err); !ok || code != ErrorCodePersonaSecret {
 		t.Fatalf("code = %q, %v (err %v), want persona_secret_invalid", code, ok, err)
 	}
 	if !strings.Contains(err.Error(), `persona "leaky"`) {
@@ -166,7 +166,7 @@ func TestLoad_PersonaNameValidation(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaInvalid {
+			if code, ok := codeOf(err); !ok || code != ErrorCodePersonaInvalid {
 				t.Fatalf("code = %q, %v (err %v), want persona_invalid", code, ok, err)
 			}
 			if !strings.Contains(err.Error(), "agents.definitions[0].name") || !strings.Contains(err.Error(), tc.detail) {

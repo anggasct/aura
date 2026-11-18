@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 const (
@@ -31,11 +33,11 @@ func DefaultWebSearchCredentialRef(provider string) string {
 
 func (w *ToolWebSearch) SearchEndpoint() (ServiceEndpoint, error) {
 	if w == nil {
-		return ServiceEndpoint{}, &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.web_search is not configured"}
+		return ServiceEndpoint{}, configkit.Invalid("tools.web_search", "is not configured")
 	}
 	endpoint, err := parseSearchEndpoint(w.Endpoint)
 	if err != nil {
-		return ServiceEndpoint{}, &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+		return ServiceEndpoint{}, err
 	}
 	return endpoint, nil
 }
@@ -46,10 +48,10 @@ func parseSearchEndpoint(raw string) (ServiceEndpoint, error) {
 		return ServiceEndpoint{}, err
 	}
 	if endpoint.Path == "" {
-		return ServiceEndpoint{}, errors.New(webSearchEndpointField + " must carry a non-empty path")
+		return ServiceEndpoint{}, configkit.Invalid(webSearchEndpointField, "must carry a non-empty path")
 	}
 	if endpoint.Loopback && endpoint.Scheme != "http" {
-		return ServiceEndpoint{}, errors.New(webSearchEndpointField + " must use http for a loopback host")
+		return ServiceEndpoint{}, configkit.Invalid(webSearchEndpointField, "must use http for a loopback host")
 	}
 	return endpoint, nil
 }
@@ -59,7 +61,7 @@ func validateWebSearch(webSearch *ToolWebSearch) error {
 	switch webSearch.Provider {
 	case WebSearchProviderDuckDuckGo:
 		if webSearch.CredentialRef != "" {
-			problems = append(problems, errors.New("tools.web_search.credential_ref must be empty for provider duckduckgo"))
+			problems = append(problems, configkit.Invalid("tools.web_search.credential_ref", "must be empty for provider duckduckgo"))
 		}
 		problems = append(problems, rejectWebSearchEndpoint(webSearch)...)
 	case WebSearchProviderBrave, WebSearchProviderTavily:
@@ -71,39 +73,36 @@ func validateWebSearch(webSearch *ToolWebSearch) error {
 			problems = append(problems, err)
 		}
 	default:
-		problems = append(problems, fmt.Errorf("tools.web_search.provider must be one of %s", strings.Join(WebSearchProviders(), ", ")))
+		problems = append(problems, configkit.Invalid("tools.web_search.provider", "must be one of "+strings.Join(WebSearchProviders(), ", ")))
 	}
 	if webSearch.MaxResults < 1 || webSearch.MaxResults > 20 {
-		problems = append(problems, errors.New("tools.web_search.max_results must be between 1 and 20"))
+		problems = append(problems, configkit.Invalid("tools.web_search.max_results", "must be between 1 and 20"))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func rejectWebSearchEndpoint(webSearch *ToolWebSearch) []error {
 	if webSearch.Endpoint == "" {
 		return nil
 	}
-	return []error{fmt.Errorf("tools.web_search.endpoint is only supported for provider searxng, not %s", webSearch.Provider)}
+	return []error{configkit.Invalid("tools.web_search.endpoint", "is only supported for provider searxng, not "+webSearch.Provider)}
 }
 
 func validateWebSearchCredentialRef(webSearch *ToolWebSearch, required bool) []error {
 	ref := webSearch.CredentialRef
 	if ref == "" {
 		if required {
-			return []error{fmt.Errorf("tools.web_search.credential_ref must use env:// or file:// with a name for provider %s", webSearch.Provider)}
+			return []error{configkit.Invalid("tools.web_search.credential_ref", "must use env:// or file:// with a name for provider "+webSearch.Provider)}
 		}
 		return nil
 	}
 	var problems []error
 	if !credentialRefHasName(ref) {
-		problems = append(problems, errors.New("tools.web_search.credential_ref must use env:// or file:// with a name"))
+		problems = append(problems, configkit.Invalid("tools.web_search.credential_ref", "must use env:// or file:// with a name"))
 	}
 	for _, other := range WebSearchProviders() {
 		if other != webSearch.Provider && ref == DefaultWebSearchCredentialRef(other) {
-			problems = append(problems, fmt.Errorf("tools.web_search.credential_ref is the default reference of provider %s and cannot be used with provider %s", other, webSearch.Provider))
+			problems = append(problems, configkit.Invalid("tools.web_search.credential_ref", fmt.Sprintf("is the default reference of provider %s and cannot be used with provider %s", other, webSearch.Provider)))
 		}
 	}
 	return problems

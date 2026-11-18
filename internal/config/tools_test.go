@@ -18,7 +18,7 @@ func execLinuxOptions(t *testing.T) LoadOptions {
 
 func TestToolEnabledProfileRequiresToolsSection(t *testing.T) {
 	_, err := LoadWithOptions(writeTempConfig(t, "version: 1\n"), execLinuxOptions(t))
-	if err == nil || !strings.Contains(err.Error(), "tools section is required") {
+	if err == nil || !strings.Contains(err.Error(), "tools: config_invalid: section is required") {
 		t.Fatalf("LoadWithOptions error = %v", err)
 	}
 }

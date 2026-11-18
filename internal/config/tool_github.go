@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	yamlv3 "gopkg.in/yaml.v3"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 var githubCredentialNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
@@ -52,19 +54,19 @@ func validateToolGitHub(github *ToolGitHub) error {
 	for i := range github.Credentials {
 		entry := &github.Credentials[i]
 		path := fmt.Sprintf("tools.github.credentials[%d]", i)
-		detail := ""
+		var problem error
 		switch {
 		case !githubCredentialNamePattern.MatchString(entry.Name):
-			detail = path + ".name must be 1 to 64 lowercase letters, digits, '_' or '-', starting with a letter"
+			problem = configkit.Invalid(path+".name", "must be 1 to 64 lowercase letters, digits, '_' or '-', starting with a letter")
 		case names[entry.Name]:
-			detail = path + ".name repeats an earlier entry"
+			problem = configkit.Invalid(path+".name", "repeats an earlier entry")
 		case !validGitHubCredentialRef(entry.Ref):
-			detail = path + ".ref must name an environment variable or an absolute, clean file path"
+			problem = configkit.Invalid(path+".ref", "must name an environment variable or an absolute, clean file path")
 		case refs[entry.Ref]:
-			detail = path + ".ref repeats an earlier entry"
+			problem = configkit.Invalid(path+".ref", "repeats an earlier entry")
 		}
-		if detail != "" {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: detail}
+		if problem != nil {
+			return problem
 		}
 		names[entry.Name] = true
 		refs[entry.Ref] = true

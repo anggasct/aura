@@ -132,7 +132,7 @@ func TestLoad_KnowledgeEmbeddingRejectsInvalidSettings(t *testing.T) {
 		fields string
 		detail string
 	}{
-		"missing base url":          {fields: "    model: m\n    dimensions: 8\n", detail: "base_url must be set"},
+		"missing base url":          {fields: "    model: m\n    dimensions: 8\n", detail: "base_url: config_invalid: must be set"},
 		"plain http remote":         {fields: "    base_url: http://api.example.com/v1\n    model: m\n    dimensions: 8\n", detail: "must use https"},
 		"embedded credentials":      {fields: "    base_url: https://user:pw@api.example.com/v1\n    model: m\n    dimensions: 8\n", detail: "must not embed credentials"},
 		"query string":              {fields: "    base_url: https://api.example.com/v1?key=1\n    model: m\n    dimensions: 8\n", detail: "query or fragment"},
@@ -143,22 +143,22 @@ func TestLoad_KnowledgeEmbeddingRejectsInvalidSettings(t *testing.T) {
 		"bad port":                  {fields: "    base_url: https://api.example.com:0/v1\n    model: m\n    dimensions: 8\n", detail: "port must be between"},
 		"dot segment":               {fields: "    base_url: https://api.example.com/a/../v1\n    model: m\n    dimensions: 8\n", detail: "path must be plain"},
 		"encoded path":              {fields: "    base_url: https://api.example.com/a%2Fb\n    model: m\n    dimensions: 8\n", detail: "path must be plain"},
-		"missing model":             {fields: "    base_url: https://api.example.com/v1\n    dimensions: 8\n", detail: "model is required"},
-		"model with space":          {fields: "    base_url: https://api.example.com/v1\n    model: \"a b\"\n    dimensions: 8\n", detail: "model is required"},
-		"missing dimensions":        {fields: "    base_url: https://api.example.com/v1\n    model: m\n", detail: "dimensions is required"},
-		"zero dimensions":           {fields: "    base_url: https://api.example.com/v1\n    model: m\n    dimensions: 0\n", detail: "dimensions is required"},
-		"huge dimensions":           {fields: "    base_url: https://api.example.com/v1\n    model: m\n    dimensions: 100000\n", detail: "dimensions is required"},
-		"reserved dimensions field": {fields: validEmbeddingFields + "    dimensions_field: model\n", detail: "dimensions_field must not be"},
-		"bad dimensions field":      {fields: validEmbeddingFields + "    dimensions_field: Dim-Size\n", detail: "dimensions_field must be"},
-		"bad credential ref":        {fields: validEmbeddingFields + "    credential_ref: OPENAI_KEY\n", detail: "credential_ref must use"},
-		"empty env credential":      {fields: validEmbeddingFields + "    credential_ref: env://\n", detail: "credential_ref must use"},
-		"unknown role style":        {fields: validEmbeddingFields + "    role_style: task\n", detail: "role_style must be"},
+		"missing model":             {fields: "    base_url: https://api.example.com/v1\n    dimensions: 8\n", detail: "model: config_invalid: is required"},
+		"model with space":          {fields: "    base_url: https://api.example.com/v1\n    model: \"a b\"\n    dimensions: 8\n", detail: "model: config_invalid: is required"},
+		"missing dimensions":        {fields: "    base_url: https://api.example.com/v1\n    model: m\n", detail: "dimensions: config_invalid: is required"},
+		"zero dimensions":           {fields: "    base_url: https://api.example.com/v1\n    model: m\n    dimensions: 0\n", detail: "dimensions: config_invalid: is required"},
+		"huge dimensions":           {fields: "    base_url: https://api.example.com/v1\n    model: m\n    dimensions: 100000\n", detail: "dimensions: config_invalid: is required"},
+		"reserved dimensions field": {fields: validEmbeddingFields + "    dimensions_field: model\n", detail: "dimensions_field: config_invalid: must not be"},
+		"bad dimensions field":      {fields: validEmbeddingFields + "    dimensions_field: Dim-Size\n", detail: "dimensions_field: config_invalid: must be"},
+		"bad credential ref":        {fields: validEmbeddingFields + "    credential_ref: OPENAI_KEY\n", detail: "credential_ref: config_invalid: must use"},
+		"empty env credential":      {fields: validEmbeddingFields + "    credential_ref: env://\n", detail: "credential_ref: config_invalid: must use"},
+		"unknown role style":        {fields: validEmbeddingFields + "    role_style: task\n", detail: "role_style: config_invalid: must be"},
 		"prefix without style":      {fields: validEmbeddingFields + "    query_prefix: \"q: \"\n", detail: "require role_style prefix"},
 		"prefix style without text": {fields: validEmbeddingFields + "    role_style: prefix\n", detail: "requires query_prefix or document_prefix"},
-		"control in prefix":         {fields: validEmbeddingFields + "    role_style: prefix\n    query_prefix: \"a\\nb\"\n", detail: "query_prefix must be"},
-		"batch zero":                {fields: validEmbeddingFields + "    batch_size: 0\n", detail: "batch_size must be between"},
-		"batch above limit":         {fields: validEmbeddingFields + "    batch_size: 1001\n", detail: "batch_size must be between"},
-		"tiny memory":               {fields: validEmbeddingFields + "    max_memory: 1KiB\n", detail: "max_memory must be at least"},
+		"control in prefix":         {fields: validEmbeddingFields + "    role_style: prefix\n    query_prefix: \"a\\nb\"\n", detail: "query_prefix: config_invalid: must be"},
+		"batch zero":                {fields: validEmbeddingFields + "    batch_size: 0\n", detail: "batch_size: config_invalid: must be between"},
+		"batch above limit":         {fields: validEmbeddingFields + "    batch_size: 1001\n", detail: "batch_size: config_invalid: must be between"},
+		"tiny memory":               {fields: validEmbeddingFields + "    max_memory: 1KiB\n", detail: "max_memory: config_invalid: must be at least"},
 		"unknown key":               {fields: validEmbeddingFields + "    temperature: 1\n", detail: "unknown key"},
 		"string dimensions":         {fields: "    base_url: https://api.example.com/v1\n    model: m\n    dimensions: \"8\"\n", detail: "dimensions must be an integer"},
 		"string public queries":     {fields: validEmbeddingFields + "    public_queries: \"yes\"\n", detail: "public_queries must be a boolean"},
@@ -190,7 +190,7 @@ func TestLoad_KnowledgeRejectsUnknownKeyAndShape(t *testing.T) {
 
 func TestLoad_KnowledgeSectionKeepsVersionGateFirst(t *testing.T) {
 	_, err := Load(writeDiscordConfig(t, "version: 2\nknowledge:\n  embedding:\n    bogus: 1\n"))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeVersionUnsupported {
+	if code, ok := codeOf(err); !ok || code != ErrorCodeVersionUnsupported {
 		t.Fatalf("error = %v, want the version gate", err)
 	}
 }

@@ -115,7 +115,7 @@ func TestLoad_DiscordSingleBlockShapeChanged(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := writeDiscordConfig(t, "version: 1\nchannels:\n  discord:\n    enabled: true\n"+line)
 			_, err := Load(path)
-			code, ok := CodeOf(err)
+			code, ok := codeOf(err)
 			if !ok || code != ErrorCodeConfigShapeChanged {
 				t.Fatalf("Load error = %v, want %s", err, ErrorCodeConfigShapeChanged)
 			}
@@ -327,7 +327,7 @@ func TestLoad_BindingsInvalid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := writeDiscordConfig(t, bindingAccounts+content)
 			_, err := Load(path)
-			code, ok := CodeOf(err)
+			code, ok := codeOf(err)
 			if !ok || code != ErrorCodeBindingInvalid {
 				t.Fatalf("Load error = %v, want %s", err, ErrorCodeBindingInvalid)
 			}
@@ -388,8 +388,8 @@ func TestLoad_DiscordLinkPreviews(t *testing.T) {
 	}
 	t.Run("string is refused", func(t *testing.T) {
 		_, err := Load(writeDiscordConfig(t, account("        link_previews: \"yes\"\n")))
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
-			t.Fatalf("Load error = %v, want %s", err, ErrorCodeConfigInvalid)
+		if code, ok := codeOf(err); !ok || code != invalidCode {
+			t.Fatalf("Load error = %v, want %s", err, invalidCode)
 		}
 	})
 }
