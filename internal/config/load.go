@@ -86,20 +86,22 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err != nil {
 		return LoadResult{}, err
 	}
-	if err := validate(data); err != nil {
+	doc, err := parseDocument(data)
+	if err != nil {
 		return LoadResult{}, err
 	}
-	cfg, err := decode(data)
+	if err := validate(doc); err != nil {
+		return LoadResult{}, err
+	}
+	cfg, err := decode(doc)
 	if err != nil {
 		return LoadResult{}, err
 	}
 	if err := checkVersion(cfg.Version); err != nil {
 		return LoadResult{}, err
 	}
-	if err := applyDefaults(cfg, data); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateLoaded(cfg, routingExplicitIn(data), options.Build.Profile()); err != nil {
+	applyDefaults(cfg, doc)
+	if err := validateLoaded(cfg, doc.has("models.routing"), options.Build.Profile()); err != nil {
 		return LoadResult{}, err
 	}
 	if err := loadPersonaSouls(cfg, resolved); err != nil {
@@ -253,11 +255,8 @@ func syncDir(p string) error {
 	return f.Sync()
 }
 
-func validate(data []byte) error {
-	doc, err := parseDocument(data)
-	if err != nil {
-		return err
-	}
+func validate(parsed *document) error {
+	doc := parsed.root
 	version, err := documentVersion(doc)
 	if err != nil {
 		return err
@@ -358,42 +357,7 @@ func validate(data []byte) error {
 	if err := validateInterpreterShapes(doc); err != nil {
 		return err
 	}
-	valid, mapPaths, structMapPaths, listStructPaths := validKeyPaths()
-	return checkUnknownKeys(doc, "", valid, mapPaths, structMapPaths, listStructPaths)
-}
-
-func parseDocument(data []byte) (*yamlv3.Node, error) {
-	var root yamlv3.Node
-	if err := yamlv3.Unmarshal(data, &root); err != nil {
-		return nil, malformedYAMLError(err)
-	}
-	if root.Kind != yamlv3.DocumentNode || len(root.Content) == 0 {
-		return nil, errors.New("invalid YAML: empty document")
-	}
-	doc := root.Content[0]
-	if doc.Kind != yamlv3.MappingNode {
-		return nil, errors.New("invalid YAML: top level must be a mapping")
-	}
-	return doc, nil
-}
-
-func documentVersion(doc *yamlv3.Node) (int, error) {
-	found := false
-	version := 0
-	for i := 0; i+1 < len(doc.Content); i += 2 {
-		keyNode := doc.Content[i]
-		if keyNode.Value != "version" {
-			continue
-		}
-		if found {
-			return 0, fmt.Errorf("duplicate key %q at line %d", "version", keyNode.Line)
-		}
-		found = true
-		if err := doc.Content[i+1].Decode(&version); err != nil {
-			return 0, fmt.Errorf("invalid version at line %d: %w", doc.Content[i+1].Line, err)
-		}
-	}
-	return version, nil
+	return errors.Join(duplicateKeys(doc, "")...)
 }
 
 func validateSectionShapes(doc *yamlv3.Node) error {
@@ -1796,17 +1760,6 @@ func modelCapabilityProblems(name string, definition *ModelDefinition) []error {
 	return problems
 }
 
-func routingExplicitIn(data []byte) bool {
-	doc, err := parseDocument(data)
-	if err != nil {
-		return false
-	}
-	if modelsNode := mappingValue(doc, "models"); modelsNode != nil {
-		return mappingValue(modelsNode, "routing") != nil
-	}
-	return false
-}
-
 func validateRouting(models Models, explicit bool) error {
 	for task, role := range models.Routing {
 		if role != "primary" && role != "auxiliary" {
@@ -1870,128 +1823,46 @@ func validateLoadedModelRoutes(routes map[string]ModelRoute, models Models) erro
 	return errors.Join(problems...)
 }
 
-func malformedYAMLError(err error) error {
-	return fmt.Errorf("invalid YAML: %w", err)
-}
-
-func checkUnknownKeys(node *yamlv3.Node, prefix string, valid, mapPaths, structMapPaths, listStructPaths map[string]bool) error {
-	seen := make(map[string]struct{}, len(node.Content)/2)
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		keyNode := node.Content[i]
-		valNode := node.Content[i+1]
-		path := keyNode.Value
-		if prefix != "" {
-			path = prefix + "." + path
-		}
-		if _, exists := seen[path]; exists {
-			return fmt.Errorf("duplicate key %q at line %d", path, keyNode.Line)
-		}
-		seen[path] = struct{}{}
-		if !validConfigPath(path, valid, structMapPaths) {
-			return fmt.Errorf("unknown key %q at line %d", path, keyNode.Line)
-		}
-		if valNode.Kind == yamlv3.SequenceNode {
-			if listStructPaths[path] {
-				for _, item := range valNode.Content {
-					if err := checkUnknownKeys(item, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
-						return err
-					}
-				}
-			}
-			continue
-		}
-		if valNode.Kind == yamlv3.MappingNode {
-			if structMapPaths[path] {
-				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
-					return err
-				}
-			} else if !mapPaths[path] && !wildcardScalarMapPath(path, mapPaths) {
-				if err := checkUnknownKeys(valNode, path, valid, mapPaths, structMapPaths, listStructPaths); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func wildcardScalarMapPath(path string, mapPaths map[string]bool) bool {
-	for pattern := range mapPaths {
-		patternSegments := strings.Split(pattern, ".")
-		pathSegments := strings.Split(path, ".")
-		if len(patternSegments) != len(pathSegments) {
-			continue
-		}
-		matched := true
-		for i := range patternSegments {
-			if patternSegments[i] == "*" {
-				continue
-			}
-			if patternSegments[i] != pathSegments[i] {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			return true
-		}
-	}
-	return false
-}
-
-func validConfigPath(path string, valid, structMapPaths map[string]bool) bool {
-	if valid[path] {
-		return true
-	}
-	for mapPath := range structMapPaths {
-		prefix := mapPath + "."
-		if !strings.HasPrefix(path, prefix) {
-			continue
-		}
-		remainder := strings.TrimPrefix(path, prefix)
-		if !strings.Contains(remainder, ".") {
-			return true
-		}
-		if dot := strings.IndexByte(remainder, '.'); dot >= 0 {
-			return valid[mapPath+".*"+remainder[dot:]]
-		}
-	}
-	return false
-}
-
-func decode(data []byte) (*Config, error) {
+func decode(doc *document) (*Config, error) {
 	k := koanf.New(".")
-	if err := k.Load(rawbytes.Provider(data), yaml.Parser()); err != nil {
-		return nil, fmt.Errorf("invalid YAML: %w", err)
+	if err := k.Load(rawbytes.Provider(doc.data), yaml.Parser()); err != nil {
+		return nil, malformedDocument(fault.Wrap(configkit.ErrorCodeMalformed, "invalid YAML", err))
 	}
 	var collector envCollector
 	if err := k.Load(env.ProviderWithValue(envPrefix, ".", collector.provide), nil); err != nil {
 		return nil, fmt.Errorf("failed to load environment overrides: %w", err)
 	}
+	input := k.Raw()
+	problems := append(collector.errors(), reportUnknownKeys(doc, input)...)
 	var cfg Config
-	err := k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{
-		Tag: "json",
-		DecoderConfig: &mapstructure.DecoderConfig{
-			Result:           &cfg,
-			WeaklyTypedInput: false,
-			DecodeHook: mapstructure.ComposeDecodeHookFunc(
-				stringToDurationHook(),
-				stringToByteSizeHook(),
-				stringToBoolHook(),
-				stringToIntHook(),
-				stringToFloatHook(),
-				stringToStringSliceHook(),
-			),
-		},
-	})
-	problems := collector.errors()
-	if err != nil {
-		problems = append(problems, fmt.Errorf("failed to decode config: %w", err))
-	}
+	problems = append(problems, decodeProblems(doc, decodeInput(input, &cfg))...)
 	if len(problems) > 0 {
+		sortProblems(problems)
 		return nil, errors.Join(problems...)
 	}
 	return &cfg, nil
+}
+
+func decodeInput(input map[string]any, cfg *Config) error {
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		Result:           cfg,
+		TagName:          "json",
+		WeaklyTypedInput: false,
+		ErrorUnused:      true,
+		MatchName:        func(mapKey, fieldName string) bool { return mapKey == fieldName },
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			stringToDurationHook(),
+			stringToByteSizeHook(),
+			stringToBoolHook(),
+			stringToIntHook(),
+			stringToFloatHook(),
+			stringToStringSliceHook(),
+		),
+	})
+	if err != nil {
+		return err
+	}
+	return decoder.Decode(input)
 }
 
 func stringToDurationHook() mapstructure.DecodeHookFunc {
@@ -2102,11 +1973,8 @@ func stringToStringSliceHook() mapstructure.DecodeHookFunc {
 	}
 }
 
-func applyDefaults(cfg *Config, data []byte) error {
-	doc, err := parseDocument(data)
-	if err != nil {
-		return err
-	}
+func applyDefaults(cfg *Config, parsed *document) {
+	doc := parsed.root
 	defaults := Default()
 	if cfg.Runtime.MaxActiveTurns == 0 && !configValuePresent(doc, "runtime", "max_active_turns") && !envValuePresent("runtime.max_active_turns") {
 		cfg.Runtime.MaxActiveTurns = defaults.Runtime.MaxActiveTurns
@@ -2215,7 +2083,6 @@ func applyDefaults(cfg *Config, data []byte) error {
 	applyTelegramDefaults(cfg, doc, &defaults.Channels.Telegram)
 	applyEmailDefaults(cfg, doc, &defaults.Channels.Email)
 	applyHTTPDefaults(cfg, doc, &defaults.Channels.HTTP)
-	return nil
 }
 
 func applyModelRouteDefaults(cfg *Config, doc *yamlv3.Node) {

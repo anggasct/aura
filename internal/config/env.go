@@ -216,13 +216,18 @@ func environmentNames() []string {
 	return names
 }
 
-func envValuePresent(path string) bool {
+func environmentVariableFor(path string) (string, bool) {
 	for _, name := range environmentNames() {
 		if match := environment.resolve(name); match.outcome == envSet && match.path == path {
-			return true
+			return name, true
 		}
 	}
-	return false
+	return "", false
+}
+
+func envValuePresent(path string) bool {
+	_, set := environmentVariableFor(path)
+	return set
 }
 
 func envWarnings(cfg *Config) []string {

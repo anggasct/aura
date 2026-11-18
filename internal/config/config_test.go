@@ -19,7 +19,15 @@ import (
 
 const testdataDir = "../../testdata"
 
-const invalidCode = ErrorCode(configkit.ErrorCodeInvalid)
+const (
+	invalidCode    = ErrorCode(configkit.ErrorCodeInvalid)
+	unknownKeyCode = ErrorCode(configkit.ErrorCodeUnknownKey)
+	malformedCode  = ErrorCode(configkit.ErrorCodeMalformed)
+)
+
+func unknownKeyText(path, position string) string {
+	return path + " (" + position + "): config_unknown_key: unknown key"
+}
 
 func codeOf(err error) (ErrorCode, bool) {
 	if code, ok := fault.CodeOf[ErrorCode](err); ok {
@@ -266,11 +274,9 @@ func TestLoad_UnknownKey(t *testing.T) {
 	if !strings.HasPrefix(err.Error(), "config: ") {
 		t.Errorf("error %q missing config component prefix", err)
 	}
-	if !strings.Contains(err.Error(), `unknown key "server.typo"`) {
-		t.Errorf("error %q does not name the offending key", err)
-	}
-	if !strings.Contains(err.Error(), "line") {
-		t.Errorf("error %q does not specify a line", err)
+	wantCode(t, err, unknownKeyCode)
+	if !strings.Contains(err.Error(), unknownKeyText("server.typo", "line 4, column 3")) {
+		t.Errorf("error %q does not name the offending key and its position", err)
 	}
 }
 
@@ -513,17 +519,17 @@ func TestLoad_UnknownKeyInsideAgentDefinitionsRejected(t *testing.T) {
 		{
 			name:    "unknown item key",
 			item:    "      typo_key: oops",
-			wantErr: `unknown key "agents.definitions.typo_key"`,
+			wantErr: unknownKeyText("agents.definitions[0].typo_key", "line 10, column 7"),
 		},
 		{
 			name:    "misspelled capabilities key",
 			item:    "      capabilitis: [review]",
-			wantErr: `unknown key "agents.definitions.capabilitis"`,
+			wantErr: unknownKeyText("agents.definitions[0].capabilitis", "line 10, column 7"),
 		},
 		{
 			name:    "unknown key inside limits",
 			item:    "      limits:\n        turn_timeot: 30s",
-			wantErr: `unknown key "agents.definitions.limits.turn_timeot"`,
+			wantErr: unknownKeyText("agents.definitions[0].limits.turn_timeot", "line 11, column 9"),
 		},
 	}
 	for _, tt := range tests {
@@ -617,8 +623,9 @@ models:
 	if err == nil {
 		t.Fatal("expected unknown key error inside models")
 	}
-	if !strings.Contains(err.Error(), `unknown key "models.definitions.primary.typo_key"`) {
-		t.Errorf("error %q does not name the offending key", err)
+	wantCode(t, err, unknownKeyCode)
+	if !strings.Contains(err.Error(), unknownKeyText("models.definitions.primary.typo_key", "line 18, column 7")) {
+		t.Errorf("error %q does not name the offending key and its position", err)
 	}
 }
 
@@ -702,7 +709,8 @@ models:
         usage_reporting: true
 `
 	_, err := Load(writeTempConfig(t, content))
-	if err == nil || !strings.Contains(err.Error(), `unknown key "models.definitions.primary.api_key"`) {
+	wantCode(t, err, unknownKeyCode)
+	if !strings.Contains(err.Error(), unknownKeyText("models.definitions.primary.api_key", "line 9, column 7")) {
 		t.Fatalf("Load error = %v, want inline API key rejection", err)
 	}
 }
@@ -801,7 +809,8 @@ server:
   port: 9000
 `
 	_, err := Load(writeTempConfig(t, content))
-	if err == nil || !strings.Contains(err.Error(), `duplicate key "server.port"`) {
+	wantCode(t, err, malformedCode)
+	if !strings.Contains(err.Error(), "server.port (line 5, column 3): config_malformed: duplicate key") {
 		t.Fatalf("Load error = %v, want duplicate key rejection", err)
 	}
 }
@@ -1411,8 +1420,9 @@ func TestLoad_RejectsTheRemovedDurableSection(t *testing.T) {
 		if !strings.HasPrefix(err.Error(), "config: ") {
 			t.Errorf("error %q missing config component prefix", err)
 		}
-		if !strings.Contains(err.Error(), `unknown key "durable" at line 2`) {
-			t.Errorf("error %q does not name the durable key and its line", err)
+		wantCode(t, err, unknownKeyCode)
+		if !strings.Contains(err.Error(), unknownKeyText("durable", "line 2, column 1")) {
+			t.Errorf("error %q does not name the durable key and its position", err)
 		}
 	})
 	t.Run("a durable environment variable is reported, not applied", func(t *testing.T) {

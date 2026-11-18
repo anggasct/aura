@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -92,7 +93,9 @@ func TestTerminalUnknownKeyRejected(t *testing.T) {
 	if err := os.WriteFile(path, []byte("version: 1\nterminal:\n  bogus_key: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err == nil {
-		t.Fatal("expected unknown terminal key to fail")
+	_, err := Load(path)
+	wantCode(t, err, unknownKeyCode)
+	if !strings.Contains(err.Error(), unknownKeyText("terminal.bogus_key", "line 3, column 3")) {
+		t.Errorf("error %q does not name the unknown terminal key and its position", err)
 	}
 }

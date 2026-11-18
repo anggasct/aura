@@ -155,8 +155,8 @@ func TestLoad_InterpreterShapeAndKeysAreStrict(t *testing.T) {
 		{"numeric duration", "interpreter:\n  timeout: 30\n", "interpreter.timeout must be a duration string"},
 		{"boolean byte size", "interpreter:\n  max_memory_bytes: true\n", "interpreter.max_memory_bytes must be a byte size"},
 		{"list instead of a mapping", "interpreter: [1]\n", "interpreter must be a mapping"},
-		{"unknown key", "interpreter:\n  max_threads: 4\n", `unknown key "interpreter.max_threads"`},
-		{"retired profiles key", "profiles:\n  interpreter-python-linux:\n    enabled: true\n", `unknown key "profiles"`},
+		{"unknown key", "interpreter:\n  max_threads: 4\n", unknownKeyText("interpreter.max_threads", "line 3, column 3")},
+		{"retired profiles key", "profiles:\n  interpreter-python-linux:\n    enabled: true\n", unknownKeyText("profiles", "line 2, column 1")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

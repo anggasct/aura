@@ -6,7 +6,6 @@ import (
 	"maps"
 	"net"
 	"net/url"
-	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -1090,59 +1089,6 @@ func defaultModelsRouting() map[string]string {
 		"compression": "auxiliary",
 		"profiling":   "auxiliary",
 	}
-}
-
-func validKeyPaths() (paths, mapPaths, structMapPaths, listStructPaths map[string]bool) {
-	paths = map[string]bool{}
-	mapPaths = map[string]bool{}
-	structMapPaths = map[string]bool{}
-	listStructPaths = map[string]bool{}
-	var walk func(t reflect.Type, prefix string)
-	walk = func(t reflect.Type, prefix string) {
-		if t.Kind() == reflect.Pointer {
-			t = t.Elem()
-		}
-		if t.Kind() != reflect.Struct {
-			return
-		}
-		for i := range t.NumField() {
-			f := t.Field(i)
-			tag := strings.Split(f.Tag.Get("json"), ",")[0]
-			if tag == "" || tag == "-" {
-				continue
-			}
-			path := tag
-			if prefix != "" {
-				path = prefix + "." + tag
-			}
-			paths[path] = true
-			ft := f.Type
-			if ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
-			}
-			if ft.Kind() == reflect.Map {
-				if ft.Elem().Kind() == reflect.Struct {
-					structMapPaths[path] = true
-					walk(ft.Elem(), path+".*")
-				} else {
-					mapPaths[path] = true
-				}
-				continue
-			}
-			if ft.Kind() == reflect.Slice {
-				if ft.Elem().Kind() == reflect.Struct {
-					listStructPaths[path] = true
-					walk(ft.Elem(), path)
-				}
-				continue
-			}
-			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(configkit.Duration(0)) {
-				walk(ft, path)
-			}
-		}
-	}
-	walk(reflect.TypeOf(Config{}), "")
-	return paths, mapPaths, structMapPaths, listStructPaths
 }
 
 func ValidateBaseURL(raw string) error {

@@ -93,7 +93,7 @@ func TestServerInvalidConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected config error from server, got nil")
 	}
-	if !strings.Contains(err.Error(), `unknown key "server.typo"`) {
+	if !strings.Contains(err.Error(), "server.typo (line 4, column 3): config_unknown_key: unknown key") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
