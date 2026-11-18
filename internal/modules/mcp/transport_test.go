@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -17,9 +18,9 @@ func staticStreamableConfig(name, serverURL string) *config.MCPServer {
 	return &config.MCPServer{
 		Name: name, Transport: config.MCPTransportStreamableHTTP, URL: serverURL,
 		Auth:           &config.MCPAuth{Static: &config.MCPStaticAuth{CredentialRef: "env://MCP_STATIC_TOKEN"}},
-		RequestTimeout: config.Duration(10 * time.Second),
-		ConnectTimeout: config.Duration(10 * time.Second),
-		StartupTimeout: config.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: configkit.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 }
@@ -154,9 +155,9 @@ func TestSameOriginRedirectAllowed(t *testing.T) {
 	serverCfg := &config.MCPServer{
 		Name: "same-origin", Transport: config.MCPTransportStreamableHTTP, URL: httpServer.URL + "/entry",
 		AllowRedirects: &allow,
-		RequestTimeout: config.Duration(10 * time.Second),
-		ConnectTimeout: config.Duration(10 * time.Second),
-		StartupTimeout: config.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: configkit.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 	client, err := NewClient(serverCfg, nil,
@@ -191,9 +192,9 @@ func TestOversizeToolResultFails(t *testing.T) {
 
 	serverCfg := &config.MCPServer{
 		Name: "big", Transport: config.MCPTransportStreamableHTTP, URL: httpServer.URL,
-		RequestTimeout: config.Duration(10 * time.Second),
-		ConnectTimeout: config.Duration(10 * time.Second),
-		StartupTimeout: config.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: configkit.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1024,
 	}
 	client, err := NewClient(serverCfg, nil,

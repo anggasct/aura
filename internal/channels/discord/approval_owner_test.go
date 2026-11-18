@@ -10,6 +10,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
 	policy "github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools/displaytest"
 )
@@ -194,7 +195,7 @@ func TestDecideForOwnerOffersNoStandingGrantForPerCallOnlyTools(t *testing.T) {
 func TestDecideForOwnerTimesOutWithTheOwnerApprovalTimeout(t *testing.T) {
 	stub := newApprovalStub(t)
 	personas := accessPersonas()
-	personas[1].ApprovalTimeout = config.Duration(80 * time.Millisecond)
+	personas[1].ApprovalTimeout = configkit.Duration(80 * time.Millisecond)
 	adapter, observer := newHTTPOwnerAdapter(t, stub, []string{"discord:777"}, personas)
 	accepted, err := adapter.DecideForOwner(t.Context(), httpPrompt(time.Now().Add(time.Hour)), httpRequester(principal.ClassPublic))
 	if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeApprovalTimeout {

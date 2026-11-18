@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -491,7 +492,7 @@ func deliverLinkBodies(t *testing.T, linkPreviews bool) deliveredBodies {
 		writeMessage(t, w, "m1")
 	})
 	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
-		cfg.MinEditInterval = config.Duration(time.Millisecond)
+		cfg.MinEditInterval = configkit.Duration(time.Millisecond)
 		cfg.Accounts[0].LinkPreviews = linkPreviews
 	})
 	const link = "https://evil.example/?d=x"

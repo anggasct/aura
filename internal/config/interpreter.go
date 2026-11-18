@@ -7,6 +7,7 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -17,44 +18,44 @@ const (
 	MinInterpreterBuildTimeout = 5 * time.Second
 	MaxInterpreterBuildTimeout = 10 * time.Minute
 
-	MaxInterpreterSourceBytes   = ByteSize(tools.MaxCodeSourceBytes)
-	MaxInterpreterStdinBytes    = ByteSize(tools.MaxCodeStdinBytes)
-	MaxInterpreterOutputBytes   = ByteSize(1 << 20)
+	MaxInterpreterSourceBytes   = configkit.ByteSize(tools.MaxCodeSourceBytes)
+	MaxInterpreterStdinBytes    = configkit.ByteSize(tools.MaxCodeStdinBytes)
+	MaxInterpreterOutputBytes   = configkit.ByteSize(1 << 20)
 	MaxInterpreterOutputFiles   = tools.MaxCodeOutputFiles
-	MaxInterpreterArtifactBytes = ByteSize(1 << 30)
-	MinInterpreterMemoryBytes   = ByteSize(64 << 20)
-	MaxInterpreterMemoryBytes   = ByteSize(16 << 30)
+	MaxInterpreterArtifactBytes = configkit.ByteSize(1 << 30)
+	MinInterpreterMemoryBytes   = configkit.ByteSize(64 << 20)
+	MaxInterpreterMemoryBytes   = configkit.ByteSize(16 << 30)
 	MaxInterpreterProcesses     = 4096
-	MaxInterpreterRunDirBytes   = ByteSize(16 << 30)
+	MaxInterpreterRunDirBytes   = configkit.ByteSize(16 << 30)
 )
 
 type Interpreter struct {
-	Timeout          Duration `koanf:"timeout" yaml:"timeout"`
-	BuildTimeout     Duration `koanf:"build_timeout" yaml:"build_timeout"`
-	MaxSourceBytes   ByteSize `koanf:"max_source_bytes" yaml:"max_source_bytes"`
-	MaxStdinBytes    ByteSize `koanf:"max_stdin_bytes" yaml:"max_stdin_bytes"`
-	MaxStdoutBytes   ByteSize `koanf:"max_stdout_bytes" yaml:"max_stdout_bytes"`
-	MaxStderrBytes   ByteSize `koanf:"max_stderr_bytes" yaml:"max_stderr_bytes"`
-	MaxOutputFiles   int      `koanf:"max_output_files" yaml:"max_output_files"`
-	MaxArtifactBytes ByteSize `koanf:"max_artifact_bytes" yaml:"max_artifact_bytes"`
-	MaxMemoryBytes   ByteSize `koanf:"max_memory_bytes" yaml:"max_memory_bytes"`
-	MaxProcesses     int      `koanf:"max_processes" yaml:"max_processes"`
-	MaxRunDirBytes   ByteSize `koanf:"max_run_dir_bytes" yaml:"max_run_dir_bytes"`
+	Timeout          configkit.Duration `koanf:"timeout" yaml:"timeout"`
+	BuildTimeout     configkit.Duration `koanf:"build_timeout" yaml:"build_timeout"`
+	MaxSourceBytes   configkit.ByteSize `koanf:"max_source_bytes" yaml:"max_source_bytes"`
+	MaxStdinBytes    configkit.ByteSize `koanf:"max_stdin_bytes" yaml:"max_stdin_bytes"`
+	MaxStdoutBytes   configkit.ByteSize `koanf:"max_stdout_bytes" yaml:"max_stdout_bytes"`
+	MaxStderrBytes   configkit.ByteSize `koanf:"max_stderr_bytes" yaml:"max_stderr_bytes"`
+	MaxOutputFiles   int                `koanf:"max_output_files" yaml:"max_output_files"`
+	MaxArtifactBytes configkit.ByteSize `koanf:"max_artifact_bytes" yaml:"max_artifact_bytes"`
+	MaxMemoryBytes   configkit.ByteSize `koanf:"max_memory_bytes" yaml:"max_memory_bytes"`
+	MaxProcesses     int                `koanf:"max_processes" yaml:"max_processes"`
+	MaxRunDirBytes   configkit.ByteSize `koanf:"max_run_dir_bytes" yaml:"max_run_dir_bytes"`
 }
 
 func DefaultInterpreter() Interpreter {
 	return Interpreter{
-		Timeout:          Duration(30 * time.Second),
-		BuildTimeout:     Duration(60 * time.Second),
-		MaxSourceBytes:   ByteSize(256 << 10),
-		MaxStdinBytes:    ByteSize(1 << 20),
-		MaxStdoutBytes:   ByteSize(64 << 10),
-		MaxStderrBytes:   ByteSize(64 << 10),
+		Timeout:          configkit.Duration(30 * time.Second),
+		BuildTimeout:     configkit.Duration(60 * time.Second),
+		MaxSourceBytes:   configkit.ByteSize(256 << 10),
+		MaxStdinBytes:    configkit.ByteSize(1 << 20),
+		MaxStdoutBytes:   configkit.ByteSize(64 << 10),
+		MaxStderrBytes:   configkit.ByteSize(64 << 10),
 		MaxOutputFiles:   16,
-		MaxArtifactBytes: ByteSize(32 << 20),
-		MaxMemoryBytes:   ByteSize(512 << 20),
+		MaxArtifactBytes: configkit.ByteSize(32 << 20),
+		MaxMemoryBytes:   configkit.ByteSize(512 << 20),
 		MaxProcesses:     64,
-		MaxRunDirBytes:   ByteSize(256 << 20),
+		MaxRunDirBytes:   configkit.ByteSize(256 << 20),
 	}
 }
 
@@ -110,9 +111,9 @@ func validateInterpreter(interpreter *Interpreter) error {
 	}
 	for _, limit := range []struct {
 		name  string
-		value ByteSize
-		min   ByteSize
-		max   ByteSize
+		value configkit.ByteSize
+		min   configkit.ByteSize
+		max   configkit.ByteSize
 	}{
 		{"max_source_bytes", interpreter.MaxSourceBytes, 1, MaxInterpreterSourceBytes},
 		{"max_stdin_bytes", interpreter.MaxStdinBytes, 1, MaxInterpreterStdinBytes},

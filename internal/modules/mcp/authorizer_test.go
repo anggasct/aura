@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 const plantedProviderText = "PLANTED-PROVIDER-TEXT-91c2"
@@ -56,9 +57,9 @@ func (s *stubAuthorizer) callCount() int {
 func pluginHTTPConfig(name, serverURL string) *config.MCPServer {
 	return &config.MCPServer{
 		Name: name, Transport: config.MCPTransportStreamableHTTP, URL: serverURL,
-		RequestTimeout: config.Duration(10 * time.Second),
-		ConnectTimeout: config.Duration(10 * time.Second),
-		StartupTimeout: config.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: configkit.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 }

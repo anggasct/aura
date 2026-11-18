@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -53,8 +54,8 @@ func TestClientInMemory(t *testing.T) {
 	serverCfg := &config.MCPServer{
 		Name:           "mem-server",
 		Transport:      config.MCPTransportStdio,
-		RequestTimeout: config.Duration(5 * time.Second),
-		StartupTimeout: config.Duration(5 * time.Second),
+		RequestTimeout: configkit.Duration(5 * time.Second),
+		StartupTimeout: configkit.Duration(5 * time.Second),
 	}
 
 	client, err := NewClient(serverCfg, nil)
@@ -182,8 +183,8 @@ func TestClientStdioTransport(t *testing.T) {
 		Transport:      config.MCPTransportStdio,
 		Command:        "/bin/contained-stdio",
 		Environment:    map[string]string{"SERVER_MODE": "test"},
-		StartupTimeout: config.Duration(10 * time.Second),
-		RequestTimeout: config.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1024 * 1024,
 	}
 
@@ -241,8 +242,8 @@ func TestClientUnsupportedProtocolVersion(t *testing.T) {
 	serverCfg := &config.MCPServer{
 		Name:           "ancient-server",
 		Transport:      config.MCPTransportStdio,
-		StartupTimeout: config.Duration(3 * time.Second),
-		RequestTimeout: config.Duration(3 * time.Second),
+		StartupTimeout: configkit.Duration(3 * time.Second),
+		RequestTimeout: configkit.Duration(3 * time.Second),
 	}
 
 	client, err := NewClient(serverCfg, nil)
@@ -304,8 +305,8 @@ func TestClientDiscoveryValidation(t *testing.T) {
 		serverCfg := &config.MCPServer{
 			Name:           "dup-server",
 			Transport:      config.MCPTransportStdio,
-			StartupTimeout: config.Duration(3 * time.Second),
-			RequestTimeout: config.Duration(3 * time.Second),
+			StartupTimeout: configkit.Duration(3 * time.Second),
+			RequestTimeout: configkit.Duration(3 * time.Second),
 		}
 		client, err := NewClient(serverCfg, nil)
 		if err != nil {
@@ -353,8 +354,8 @@ func TestClientDiscoveryValidation(t *testing.T) {
 			Name:           "large-server",
 			Transport:      config.MCPTransportStdio,
 			MaxMessageSize: 30,
-			StartupTimeout: config.Duration(3 * time.Second),
-			RequestTimeout: config.Duration(3 * time.Second),
+			StartupTimeout: configkit.Duration(3 * time.Second),
+			RequestTimeout: configkit.Duration(3 * time.Second),
 		}
 		client, err := NewClient(serverCfg, nil)
 		if err != nil {
@@ -390,9 +391,9 @@ func TestClientStreamableHTTPTransport(t *testing.T) {
 		Name:           "http-server",
 		Transport:      config.MCPTransportStreamableHTTP,
 		URL:            httpServer.URL,
-		RequestTimeout: config.Duration(5 * time.Second),
-		ConnectTimeout: config.Duration(5 * time.Second),
-		StartupTimeout: config.Duration(5 * time.Second),
+		RequestTimeout: configkit.Duration(5 * time.Second),
+		ConnectTimeout: configkit.Duration(5 * time.Second),
+		StartupTimeout: configkit.Duration(5 * time.Second),
 		MaxMessageSize: 1024 * 1024,
 	}
 	client, err := NewClient(serverCfg, nil,
@@ -447,7 +448,7 @@ func TestClientStreamableHTTPWithoutClientFailsClosed(t *testing.T) {
 		Name:           "bare-server",
 		Transport:      config.MCPTransportStreamableHTTP,
 		URL:            "http://127.0.0.1:9/mcp",
-		RequestTimeout: config.Duration(5 * time.Second),
+		RequestTimeout: configkit.Duration(5 * time.Second),
 	}
 	client, err := NewClient(serverCfg, nil)
 	if err != nil {
@@ -467,7 +468,7 @@ func TestClientStreamableHTTPWithoutPolicyFailsClosed(t *testing.T) {
 		Name:           "no-policy-server",
 		Transport:      config.MCPTransportStreamableHTTP,
 		URL:            "http://127.0.0.1:9/mcp",
-		RequestTimeout: config.Duration(5 * time.Second),
+		RequestTimeout: configkit.Duration(5 * time.Second),
 	}
 	client, err := NewClient(serverCfg, nil, WithHTTPClient(&http.Client{}))
 	if err != nil {
@@ -513,8 +514,8 @@ func TestClientDiscoveryNameValidation(t *testing.T) {
 			serverCfg := &config.MCPServer{
 				Name:           "bad-server",
 				Transport:      config.MCPTransportStdio,
-				StartupTimeout: config.Duration(3 * time.Second),
-				RequestTimeout: config.Duration(3 * time.Second),
+				StartupTimeout: configkit.Duration(3 * time.Second),
+				RequestTimeout: configkit.Duration(3 * time.Second),
 			}
 			client, err := NewClient(serverCfg, nil)
 			if err != nil {

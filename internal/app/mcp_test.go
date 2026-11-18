@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -184,8 +185,8 @@ func TestMCPRecorderBridgeCarriesProtocolAndSize(t *testing.T) {
 	client, err := mcp.NewClient(&config.MCPServer{
 		Name:           "bridge-e2e",
 		Transport:      config.MCPTransportStdio,
-		RequestTimeout: config.Duration(5 * time.Second),
-		StartupTimeout: config.Duration(5 * time.Second),
+		RequestTimeout: configkit.Duration(5 * time.Second),
+		StartupTimeout: configkit.Duration(5 * time.Second),
 	}, nil, mcp.WithObserver(mcpRecorderObserver(recorder)))
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)

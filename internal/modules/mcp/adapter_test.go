@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -119,8 +120,8 @@ func TestAdapterOversizedResultFails(t *testing.T) {
 	serverCfg := &config.MCPServer{
 		Name:           "big-server",
 		Transport:      config.MCPTransportStdio,
-		RequestTimeout: config.Duration(5 * time.Second),
-		StartupTimeout: config.Duration(5 * time.Second),
+		RequestTimeout: configkit.Duration(5 * time.Second),
+		StartupTimeout: configkit.Duration(5 * time.Second),
 	}
 	client, err := NewClient(serverCfg, nil)
 	if err != nil {

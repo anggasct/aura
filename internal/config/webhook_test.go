@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func writeWebhookConfig(t *testing.T, content string) string {
@@ -29,13 +31,13 @@ func TestLoad_WebhookDefaults(t *testing.T) {
 	if w.Listen != "127.0.0.1:8282" {
 		t.Errorf("listen = %q", w.Listen)
 	}
-	if w.MaxBodySize != ByteSize(1<<20) {
+	if w.MaxBodySize != configkit.ByteSize(1<<20) {
 		t.Errorf("max_body_size = %d", w.MaxBodySize)
 	}
-	if w.TimestampTolerance != Duration(5*time.Minute) {
+	if w.TimestampTolerance != configkit.Duration(5*time.Minute) {
 		t.Errorf("timestamp_tolerance = %v", w.TimestampTolerance)
 	}
-	if w.ReplayRetention != Duration(24*time.Hour) {
+	if w.ReplayRetention != configkit.Duration(24*time.Hour) {
 		t.Errorf("replay_retention = %v", w.ReplayRetention)
 	}
 	if w.RequestsPerMinute != 60 {
@@ -69,7 +71,7 @@ webhook:
 	if w.Keys[0].ID != "primary" || w.Keys[0].AcceptUntil != "2075-01-01T00:00:00Z" {
 		t.Errorf("primary key = %+v", w.Keys[0])
 	}
-	if w.MaxBodySize != ByteSize(1<<20) {
+	if w.MaxBodySize != configkit.ByteSize(1<<20) {
 		t.Errorf("max_body_size default not applied: %d", w.MaxBodySize)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func TestLoad_InterpreterDefaults(t *testing.T) {
@@ -13,8 +15,8 @@ func TestLoad_InterpreterDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	want := Interpreter{
-		Timeout:          Duration(30 * time.Second),
-		BuildTimeout:     Duration(time.Minute),
+		Timeout:          configkit.Duration(30 * time.Second),
+		BuildTimeout:     configkit.Duration(time.Minute),
 		MaxSourceBytes:   262144,
 		MaxStdinBytes:    1 << 20,
 		MaxStdoutBytes:   65536,
@@ -53,7 +55,7 @@ interpreter:
 		t.Fatalf("Load: %v", err)
 	}
 	want := Interpreter{
-		Timeout: Duration(2 * time.Minute), BuildTimeout: Duration(90 * time.Second), MaxSourceBytes: 1 << 10, MaxStdinBytes: 2048, MaxStdoutBytes: 4 << 10,
+		Timeout: configkit.Duration(2 * time.Minute), BuildTimeout: configkit.Duration(90 * time.Second), MaxSourceBytes: 1 << 10, MaxStdinBytes: 2048, MaxStdoutBytes: 4 << 10,
 		MaxStderrBytes: 8 << 10, MaxOutputFiles: 3, MaxArtifactBytes: 1 << 20, MaxMemoryBytes: 128 << 20,
 		MaxProcesses: 9, MaxRunDirBytes: 2 << 20,
 	}
@@ -65,8 +67,8 @@ interpreter:
 func TestLoad_InterpreterBoundsAreRejected(t *testing.T) {
 	byteKeys := []struct {
 		key   string
-		max   ByteSize
-		min   ByteSize
+		max   configkit.ByteSize
+		min   configkit.ByteSize
 		other string
 	}{
 		{"max_source_bytes", MaxInterpreterSourceBytes, 1, ""},
@@ -175,7 +177,7 @@ func TestLoad_InterpreterEnvOverride(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	got := res.Config.Interpreter
-	if got.MaxProcesses != 12 || got.MaxMemoryBytes != 256<<20 || got.Timeout != Duration(45*time.Second) {
+	if got.MaxProcesses != 12 || got.MaxMemoryBytes != 256<<20 || got.Timeout != configkit.Duration(45*time.Second) {
 		t.Errorf("Interpreter = %+v", got)
 	}
 }

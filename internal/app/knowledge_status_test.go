@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/health"
 )
 
@@ -49,7 +49,7 @@ func TestStatusReportsUnknownCollectionsOfAConfiguredPersona(t *testing.T) {
 
 func TestStatusReportsAScopeAboveTheSupportedSize(t *testing.T) {
 	rig := newKnowledgeStatusRig(t)
-	rig.cfg.Health.CheckTimeout = config.Duration(30 * time.Second)
+	rig.cfg.Health.CheckTimeout = configkit.Duration(30 * time.Second)
 	if _, err := rig.db.ExecContext(t.Context(), `DROP TRIGGER kb_chunk_fts_insert`); err != nil {
 		t.Fatalf("drop index trigger: %v", err)
 	}

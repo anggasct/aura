@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -101,8 +102,8 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 				Name:           serverName,
 				Transport:      config.MCPTransportStdio,
 				Capabilities:   []string{"workspace-read"},
-				RequestTimeout: config.Duration(5 * time.Second),
-				StartupTimeout: config.Duration(5 * time.Second),
+				RequestTimeout: configkit.Duration(5 * time.Second),
+				StartupTimeout: configkit.Duration(5 * time.Second),
 				MaxMessageSize: 1024 * 1024,
 			},
 		},
@@ -222,8 +223,8 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 		Transport:      config.MCPTransportStdio,
 		Command:        "/bin/stdio-e2e",
 		Environment:    map[string]string{"SERVER_MODE": "test"},
-		StartupTimeout: config.Duration(10 * time.Second),
-		RequestTimeout: config.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1024 * 1024,
 	}
 
@@ -361,8 +362,8 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 		Name:           "digest-change",
 		Transport:      config.MCPTransportStdio,
 		Command:        cmdA,
-		StartupTimeout: config.Duration(3 * time.Second),
-		RequestTimeout: config.Duration(3 * time.Second),
+		StartupTimeout: configkit.Duration(3 * time.Second),
+		RequestTimeout: configkit.Duration(3 * time.Second),
 	}
 
 	trustRegistry := NewMemoryTrustRegistry()
@@ -484,8 +485,8 @@ func TestManagerCloseDoesNotBlockOnSlowServer(t *testing.T) {
 		Servers: []config.MCPServer{{
 			Name:           serverName,
 			Transport:      config.MCPTransportStdio,
-			RequestTimeout: config.Duration(5 * time.Second),
-			StartupTimeout: config.Duration(5 * time.Second),
+			RequestTimeout: configkit.Duration(5 * time.Second),
+			StartupTimeout: configkit.Duration(5 * time.Second),
 		}},
 	}
 	registry := NewMemoryTrustRegistry()
@@ -520,8 +521,8 @@ func TestManagerFailedConnectClosesClient(t *testing.T) {
 		Name:           "leaky-connect",
 		Transport:      config.MCPTransportStdio,
 		Command:        "/bin/leaky-server",
-		StartupTimeout: config.Duration(10 * time.Second),
-		RequestTimeout: config.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1024 * 1024,
 	}
 	broker, err := toolbroker.New(&toolbroker.Options{HostCapabilities: capabilitytest.Host(t)})
@@ -562,8 +563,8 @@ func startableStdioConfig(name string) config.MCPServer {
 		Name:           name,
 		Transport:      config.MCPTransportStdio,
 		Command:        "/bin/" + name,
-		StartupTimeout: config.Duration(5 * time.Second),
-		RequestTimeout: config.Duration(5 * time.Second),
+		StartupTimeout: configkit.Duration(5 * time.Second),
+		RequestTimeout: configkit.Duration(5 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 }
@@ -909,7 +910,7 @@ func TestManagerStartIsBoundedByStartupTimeout(t *testing.T) {
 	ctx := t.Context()
 	broker := newEffectBroker(t)
 	slow := startableStdioConfig("slow")
-	slow.StartupTimeout = config.Duration(300 * time.Millisecond)
+	slow.StartupTimeout = configkit.Duration(300 * time.Millisecond)
 	fast := startableStdioConfig("fast")
 	registry := NewMemoryTrustRegistry()
 	approveConfigDigest(t.Context(), t, registry, &slow)

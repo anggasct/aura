@@ -17,6 +17,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -530,7 +531,7 @@ func (h *harness) adapterWith(t *testing.T, cursors CursorStore, configure func(
 	}
 	cfg := &config.Telegram{
 		Enabled:            true,
-		Polling:            config.TelegramPolling{Timeout: config.Duration(time.Second), MaxBackoff: config.Duration(time.Second)},
+		Polling:            config.TelegramPolling{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
 		MaxAttachmentBytes: config.TelegramMaxAttachmentBytes,
 	}
 	account := &config.TelegramAccount{Name: "pocket", BotTokenRef: "env://" + testTokenEnv}

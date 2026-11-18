@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -517,7 +518,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		AllowedSenders: []string{friendAddress},
 		IMAP: config.EmailIMAP{
 			Host: "imap.example.com", Port: 993, Username: testAddress, PasswordRef: "env://AURA_TEST_EMAIL_PASSWORD",
-			Folder: "INBOX", PollInterval: config.Duration(time.Minute),
+			Folder: "INBOX", PollInterval: configkit.Duration(time.Minute),
 		},
 	}
 	if opts.email != nil {

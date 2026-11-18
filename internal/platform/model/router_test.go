@@ -14,6 +14,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -244,7 +245,7 @@ func TestBuildRouter_BaseURLCredentialsRejected(t *testing.T) {
 func TestBuildRouter_PassesStreamingIdleTimeout(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "k")
 	models := config.Models{
-		StreamingIdleTimeout: config.Duration(17 * time.Second),
+		StreamingIdleTimeout: configkit.Duration(17 * time.Second),
 		Definitions: map[string]config.ModelDefinition{
 			"primary": configuredDefinition(config.ProtocolOpenAIChatCompat, "gpt-4o", "https://api.example"),
 		},

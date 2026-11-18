@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func writeDiscordConfig(t *testing.T, content string) string {
@@ -29,7 +31,7 @@ func TestLoad_DiscordDefaults(t *testing.T) {
 	if len(discord.Accounts) != 0 {
 		t.Errorf("accounts = %+v, want none by default", discord.Accounts)
 	}
-	if discord.MinEditInterval != Duration(2*time.Second) {
+	if discord.MinEditInterval != configkit.Duration(2*time.Second) {
 		t.Errorf("min_edit_interval = %v", discord.MinEditInterval)
 	}
 	if discord.MaxAttachmentBytes != 20971520 {
@@ -83,7 +85,7 @@ channels:
 	if kuma.Persona != "" {
 		t.Errorf("kuma persona = %q, want empty", kuma.Persona)
 	}
-	if discord.MinEditInterval != Duration(2*time.Second) {
+	if discord.MinEditInterval != configkit.Duration(2*time.Second) {
 		t.Errorf("min_edit_interval default not applied: %v", discord.MinEditInterval)
 	}
 }
@@ -95,7 +97,7 @@ func TestLoad_DiscordEnvOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := res.Config.Channels.Discord.MinEditInterval; got != Duration(5*time.Second) {
+	if got := res.Config.Channels.Discord.MinEditInterval; got != configkit.Duration(5*time.Second) {
 		t.Errorf("min_edit_interval = %v, want 5s", got)
 	}
 }

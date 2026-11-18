@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
@@ -20,7 +21,7 @@ func kantorOverride() config.AgentDefinition {
 		Tools:           []string{"web_search", "web_fetch", "read_file", "write_file"},
 		PrincipalTools:  []string{"web_search", "write_file"},
 		PublicTools:     []string{"web_search"},
-		ApprovalTimeout: config.Duration(10 * time.Minute),
+		ApprovalTimeout: configkit.Duration(10 * time.Minute),
 		Messages:        map[string]string{config.MessageWaitingForOwner: "Sebentar ya."},
 	}
 }

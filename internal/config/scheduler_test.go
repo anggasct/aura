@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func writeSchedulerConfig(t *testing.T, content string) string {
@@ -29,10 +31,10 @@ func TestLoad_SchedulerDefaults(t *testing.T) {
 	if scheduler.DefaultTimezone != "UTC" {
 		t.Errorf("default_timezone = %q", scheduler.DefaultTimezone)
 	}
-	if scheduler.DefaultCatchUpGrace != Duration(15*time.Minute) {
+	if scheduler.DefaultCatchUpGrace != configkit.Duration(15*time.Minute) {
 		t.Errorf("default_catch_up_grace = %v", scheduler.DefaultCatchUpGrace)
 	}
-	if scheduler.OccurrenceRetention != Duration(720*time.Hour) {
+	if scheduler.OccurrenceRetention != configkit.Duration(720*time.Hour) {
 		t.Errorf("occurrence_retention = %v", scheduler.OccurrenceRetention)
 	}
 }

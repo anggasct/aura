@@ -8,6 +8,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func validDefinition(protocol string, caps config.ModelCapabilities) config.ModelDefinition {
@@ -47,7 +48,7 @@ func TestValidateRoute_ValidChains(t *testing.T) {
 			route := config.ModelRoute{
 				Candidates:          tt.candidates,
 				MaxProviderAttempts: 4,
-				RetryDelayBudget:    config.Duration(20 * time.Second),
+				RetryDelayBudget:    configkit.Duration(20 * time.Second),
 				CostBudgetUSD:       1.0,
 			}
 			if err := ValidateRoute("default-route", route, defs, nil); err != nil {
@@ -124,7 +125,7 @@ func TestValidateRoute_RejectsNegativeBounds(t *testing.T) {
 	routeAttempts := config.ModelRoute{Candidates: []string{"m1"}, MaxProviderAttempts: -1}
 	wantCode(t, ValidateRoute("primary", routeAttempts, defs, nil), ErrorCodeRouteInvalid)
 
-	routeDelay := config.ModelRoute{Candidates: []string{"m1"}, RetryDelayBudget: config.Duration(-time.Second)}
+	routeDelay := config.ModelRoute{Candidates: []string{"m1"}, RetryDelayBudget: configkit.Duration(-time.Second)}
 	wantCode(t, ValidateRoute("primary", routeDelay, defs, nil), ErrorCodeRouteInvalid)
 
 	routeCost := config.ModelRoute{Candidates: []string{"m1"}, CostBudgetUSD: -0.50}

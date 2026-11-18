@@ -8,6 +8,7 @@ import (
 	"time"
 
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func writeBroadcastConfig(t *testing.T, content string) string {
@@ -38,10 +39,10 @@ func TestLoad_BroadcastDefaults(t *testing.T) {
 	if broadcast.MaxAttempts != 3 {
 		t.Errorf("max_attempts = %d, want 3", broadcast.MaxAttempts)
 	}
-	if broadcast.MaxDeliveryAge != Duration(24*time.Hour) {
+	if broadcast.MaxDeliveryAge != configkit.Duration(24*time.Hour) {
 		t.Errorf("max_delivery_age = %v", broadcast.MaxDeliveryAge)
 	}
-	if broadcast.MinDispatchGap != Duration(5*time.Second) {
+	if broadcast.MinDispatchGap != configkit.Duration(5*time.Second) {
 		t.Errorf("min_dispatch_gap = %v", broadcast.MinDispatchGap)
 	}
 	if len(broadcast.Destinations) != 0 || len(broadcast.Fallback) != 0 {

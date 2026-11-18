@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func TestComputeTrustDigest(t *testing.T) {
@@ -365,7 +366,7 @@ func TestComputeConfigDigest(t *testing.T) {
 		"args":         func(c *config.MCPServer) { c.Args = []string{"--flag", "changed"} },
 		"environment":  func(c *config.MCPServer) { c.Environment = map[string]string{"ENV_A": "2"} },
 		"capabilities": func(c *config.MCPServer) { c.Capabilities = []string{"fs.write"} },
-		"timeout":      func(c *config.MCPServer) { c.RequestTimeout = config.Duration(time.Second) },
+		"timeout":      func(c *config.MCPServer) { c.RequestTimeout = configkit.Duration(time.Second) },
 		"url":          func(c *config.MCPServer) { c.URL = "https://example.com/mcp" },
 	}
 	for name, mutate := range mutations {

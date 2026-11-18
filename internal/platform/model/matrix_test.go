@@ -17,6 +17,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -318,7 +319,7 @@ func TestBudgetDeterministicBackoffAndCancellation(t *testing.T) {
 	route := config.ModelRoute{
 		Candidates:          []string{"cand-1"},
 		MaxProviderAttempts: 2,
-		RetryDelayBudget:    config.Duration(20 * time.Millisecond),
+		RetryDelayBudget:    configkit.Duration(20 * time.Millisecond),
 	}
 
 	router, err := BuildRouterWithRoutes(nil, config.Models{Definitions: defs}, map[string]config.ModelRoute{"primary": route}, nil)

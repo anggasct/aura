@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -191,7 +192,7 @@ func (h *skillHarness) activations(t *testing.T) []turn.SkillActivation {
 }
 
 func defaultSkillConfig() *config.Skills {
-	return &config.Skills{MaxIndexedSkills: 16, MaxInstructionTokens: 100, MaxSessionContextTokens: 300, MaxResourceBytes: 8388608, QuarantineRetention: config.Duration(1)}
+	return &config.Skills{MaxIndexedSkills: 16, MaxInstructionTokens: 100, MaxSessionContextTokens: 300, MaxResourceBytes: 8388608, QuarantineRetention: configkit.Duration(1)}
 }
 
 func TestSkillActivationReachesTheModelAndPersistsInTheSession(t *testing.T) {

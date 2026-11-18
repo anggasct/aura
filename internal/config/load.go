@@ -26,6 +26,7 @@ import (
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -2136,7 +2137,7 @@ func decode(data []byte) (*Config, error) {
 
 func stringToDurationHook() mapstructure.DecodeHookFunc {
 	return func(from, to reflect.Type, data any) (any, error) {
-		if to != reflect.TypeOf(Duration(0)) {
+		if to != reflect.TypeOf(configkit.Duration(0)) {
 			return data, nil
 		}
 		s, ok := data.(string)
@@ -2147,20 +2148,20 @@ func stringToDurationHook() mapstructure.DecodeHookFunc {
 		if err != nil {
 			return nil, fmt.Errorf("invalid duration %q: %w", s, err)
 		}
-		return Duration(d), nil
+		return configkit.Duration(d), nil
 	}
 }
 
 func stringToByteSizeHook() mapstructure.DecodeHookFunc {
 	return func(from, to reflect.Type, data any) (any, error) {
-		if to != reflect.TypeOf(ByteSize(0)) {
+		if to != reflect.TypeOf(configkit.ByteSize(0)) {
 			return data, nil
 		}
 		s, ok := data.(string)
 		if !ok {
 			return data, nil
 		}
-		b, err := parseByteSize(s)
+		b, err := configkit.ParseByteSize(s)
 		if err != nil {
 			return nil, fmt.Errorf("invalid size %q", s)
 		}
@@ -2369,7 +2370,7 @@ func applyModelRouteDefaults(cfg *Config, doc *yamlv3.Node) {
 				route = ModelRoute{
 					Candidates:          []string{defaultName},
 					MaxProviderAttempts: DefaultModelRouteMaxProviderAttempts,
-					RetryDelayBudget:    Duration(DefaultModelRouteRetryDelayBudget),
+					RetryDelayBudget:    configkit.Duration(DefaultModelRouteRetryDelayBudget),
 				}
 				cfg.ModelRoutes[defaultName] = route
 			} else if len(route.Candidates) == 0 {
@@ -2385,7 +2386,7 @@ func applyModelRouteDefaults(cfg *Config, doc *yamlv3.Node) {
 			mutated = true
 		}
 		if route.RetryDelayBudget == 0 && !configValuePresent(doc, "model_routes", name, "retry_delay_budget") && !envValuePresent("model_routes."+name+".retry_delay_budget") {
-			route.RetryDelayBudget = Duration(DefaultModelRouteRetryDelayBudget)
+			route.RetryDelayBudget = configkit.Duration(DefaultModelRouteRetryDelayBudget)
 			mutated = true
 		}
 		if mutated {
@@ -3192,16 +3193,16 @@ func applyMCPDefaults(cfg *Config, _ *yamlv3.Node) {
 
 func ApplyMCPServerDefaults(s *MCPServer) {
 	if s.StartupTimeout == 0 {
-		s.StartupTimeout = Duration(10 * time.Second)
+		s.StartupTimeout = configkit.Duration(10 * time.Second)
 	}
 	if s.RequestTimeout == 0 {
-		s.RequestTimeout = Duration(30 * time.Second)
+		s.RequestTimeout = configkit.Duration(30 * time.Second)
 	}
 	if s.MaxMessageSize == 0 {
 		s.MaxMessageSize = 1024 * 1024
 	}
 	if s.Transport == "streamable_http" && s.ConnectTimeout == 0 {
-		s.ConnectTimeout = Duration(10 * time.Second)
+		s.ConnectTimeout = configkit.Duration(10 * time.Second)
 	}
 }
 

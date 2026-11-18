@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -198,7 +199,7 @@ func assembleRig(t *testing.T, h *harness, opts accessOpts, cursors CursorStore,
 	}
 	cfg := &config.Telegram{
 		Enabled:            true,
-		Polling:            config.TelegramPolling{Timeout: config.Duration(time.Second), MaxBackoff: config.Duration(time.Second)},
+		Polling:            config.TelegramPolling{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
 		MaxAttachmentBytes: config.TelegramMaxAttachmentBytes,
 	}
 	account := &config.TelegramAccount{

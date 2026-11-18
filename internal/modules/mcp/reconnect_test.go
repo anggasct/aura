@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -55,10 +56,10 @@ func newDroppingServer(t *testing.T) *droppingServer {
 func reconnectTestConfig(name, serverURL string) *config.MCPServer {
 	return &config.MCPServer{
 		Name: name, Transport: config.MCPTransportStreamableHTTP, URL: serverURL,
-		Restart:        &config.MCPRestart{MaxAttempts: 3, Window: config.Duration(time.Minute)},
-		RequestTimeout: config.Duration(10 * time.Second),
-		ConnectTimeout: config.Duration(10 * time.Second),
-		StartupTimeout: config.Duration(10 * time.Second),
+		Restart:        &config.MCPRestart{MaxAttempts: 3, Window: configkit.Duration(time.Minute)},
+		RequestTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: configkit.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 }
@@ -158,7 +159,7 @@ func TestReconnectBudgetExhausts(t *testing.T) {
 }
 
 func TestReconnectWindowPrunes(t *testing.T) {
-	cfg := &config.MCPServer{Name: "window", Restart: &config.MCPRestart{MaxAttempts: 1, Window: config.Duration(40 * time.Millisecond)}}
+	cfg := &config.MCPServer{Name: "window", Restart: &config.MCPRestart{MaxAttempts: 1, Window: configkit.Duration(40 * time.Millisecond)}}
 	client, err := NewClient(cfg, nil)
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/status"
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/secret"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -26,7 +26,7 @@ func presenceAdapter(t *testing.T, h *harness, statusAfter, typingRefresh, minEd
 	adapter := h.adapter(t, nil)
 	adapter.statusAfter = statusAfter
 	adapter.typingRefresh = typingRefresh
-	adapter.cfg.MinEditInterval = config.Duration(minEdit)
+	adapter.cfg.MinEditInterval = configkit.Duration(minEdit)
 	return adapter
 }
 

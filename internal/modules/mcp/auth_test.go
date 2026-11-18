@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
@@ -169,9 +170,9 @@ func oauthStreamableConfig(name, serverURL, tokenStore string) *config.MCPServer
 	return &config.MCPServer{
 		Name: name, Transport: config.MCPTransportStreamableHTTP, URL: serverURL,
 		Auth:           &config.MCPAuth{OAuth: &config.MCPOAuth{ClientIDEnv: "OAUTH_TEST_ID", ClientSecretEnv: "OAUTH_TEST_SECRET", TokenStore: tokenStore}},
-		RequestTimeout: config.Duration(10 * time.Second),
-		ConnectTimeout: config.Duration(10 * time.Second),
-		StartupTimeout: config.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: configkit.Duration(10 * time.Second),
+		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
 }

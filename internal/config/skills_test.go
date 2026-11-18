@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func writeSkillsConfig(t *testing.T, content string) string {
@@ -28,7 +30,7 @@ func TestLoad_SkillsDefaults(t *testing.T) {
 	if got.MaxIndexedSkills != 256 || got.MaxInstructionTokens != 5000 || got.MaxSessionContextTokens != 15000 || got.MaxResourceBytes != 8388608 {
 		t.Errorf("skills = %+v", got)
 	}
-	if got.QuarantineRetention != Duration(720*time.Hour) {
+	if got.QuarantineRetention != configkit.Duration(720*time.Hour) {
 		t.Errorf("retention = %v", got.QuarantineRetention)
 	}
 }
@@ -58,7 +60,7 @@ children:
 		t.Fatalf("Load: %v", err)
 	}
 	got := result.Config.Skills
-	if got.AutoSelect || got.MaxIndexedSkills != 10 || got.QuarantineRetention != Duration(48*time.Hour) {
+	if got.AutoSelect || got.MaxIndexedSkills != 10 || got.QuarantineRetention != configkit.Duration(48*time.Hour) {
 		t.Errorf("skills = %+v", got)
 	}
 }

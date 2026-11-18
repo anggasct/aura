@@ -23,6 +23,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 const (
@@ -201,7 +202,7 @@ func (f *imapFixture) account(poll time.Duration) *config.EmailAccount {
 		AllowedSenders: []string{friendAddress},
 		IMAP: config.EmailIMAP{
 			Host: f.host, Port: f.port, Username: imapUser, PasswordRef: "env://" + imapPasswordName,
-			Folder: "INBOX", PollInterval: config.Duration(poll),
+			Folder: "INBOX", PollInterval: configkit.Duration(poll),
 		},
 	}
 }

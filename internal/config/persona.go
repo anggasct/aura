@@ -15,6 +15,7 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -175,7 +176,7 @@ func validateAccess(access *Access) error {
 	}
 	for _, retention := range []struct {
 		class string
-		ttl   Duration
+		ttl   configkit.Duration
 	}{{AudienceTrusted, access.Retention.Trusted}, {AudiencePublic, access.Retention.Public}} {
 		if time.Duration(retention.ttl) < MinRetention {
 			problems = append(problems, fmt.Errorf("access.retention.%s must be at least 24h", retention.class))

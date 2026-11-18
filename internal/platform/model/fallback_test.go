@@ -12,6 +12,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 type mockCandidateLLM struct {
@@ -70,7 +71,7 @@ func TestFallback_TransientAndRateLimitAdvances(t *testing.T) {
 	route := config.ModelRoute{
 		Candidates:          []string{"primary", "backup"},
 		MaxProviderAttempts: 4,
-		RetryDelayBudget:    config.Duration(20 * time.Second),
+		RetryDelayBudget:    configkit.Duration(20 * time.Second),
 	}
 
 	primaryMock := &mockCandidateLLM{
