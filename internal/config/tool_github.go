@@ -14,12 +14,12 @@ var githubCredentialNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 var githubEnvNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type ToolGitHub struct {
-	Credentials []GitHubCredential `koanf:"credentials" yaml:"credentials,omitempty"`
+	Credentials []GitHubCredential `json:"credentials,omitempty"`
 }
 
 type GitHubCredential struct {
-	Name string `koanf:"name" yaml:"name"`
-	Ref  string `koanf:"ref" yaml:"ref"`
+	Name string `json:"name"`
+	Ref  string `json:"ref"`
 }
 
 func validateToolGitHubShape(node *yamlv3.Node) error {

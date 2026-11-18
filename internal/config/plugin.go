@@ -18,13 +18,13 @@ var (
 )
 
 type Plugins struct {
-	Desired []PluginDesired `koanf:"desired" yaml:"desired"`
+	Desired []PluginDesired `json:"desired"`
 }
 
 type PluginDesired struct {
-	ID      string `koanf:"id" yaml:"id"`
-	Version string `koanf:"version" yaml:"version"`
-	Enabled bool   `koanf:"enabled" yaml:"enabled"`
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Enabled bool   `json:"enabled"`
 }
 
 func ValidPluginID(id string) bool {

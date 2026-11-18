@@ -182,7 +182,7 @@ linters:
         - style
         - performance
     recvcheck:
-      # UnmarshalText must take a pointer to assign; String and MarshalYAML
+      # UnmarshalText must take a pointer to assign; String and MarshalText
       # must take a value so the type still formats and marshals when held by
       # value. No arrangement satisfies both plus a uniform receiver.
       exclusions:

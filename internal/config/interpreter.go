@@ -30,17 +30,17 @@ const (
 )
 
 type Interpreter struct {
-	Timeout          configkit.Duration `koanf:"timeout" yaml:"timeout"`
-	BuildTimeout     configkit.Duration `koanf:"build_timeout" yaml:"build_timeout"`
-	MaxSourceBytes   configkit.ByteSize `koanf:"max_source_bytes" yaml:"max_source_bytes"`
-	MaxStdinBytes    configkit.ByteSize `koanf:"max_stdin_bytes" yaml:"max_stdin_bytes"`
-	MaxStdoutBytes   configkit.ByteSize `koanf:"max_stdout_bytes" yaml:"max_stdout_bytes"`
-	MaxStderrBytes   configkit.ByteSize `koanf:"max_stderr_bytes" yaml:"max_stderr_bytes"`
-	MaxOutputFiles   int                `koanf:"max_output_files" yaml:"max_output_files"`
-	MaxArtifactBytes configkit.ByteSize `koanf:"max_artifact_bytes" yaml:"max_artifact_bytes"`
-	MaxMemoryBytes   configkit.ByteSize `koanf:"max_memory_bytes" yaml:"max_memory_bytes"`
-	MaxProcesses     int                `koanf:"max_processes" yaml:"max_processes"`
-	MaxRunDirBytes   configkit.ByteSize `koanf:"max_run_dir_bytes" yaml:"max_run_dir_bytes"`
+	Timeout          configkit.Duration `json:"timeout"`
+	BuildTimeout     configkit.Duration `json:"build_timeout"`
+	MaxSourceBytes   configkit.ByteSize `json:"max_source_bytes"`
+	MaxStdinBytes    configkit.ByteSize `json:"max_stdin_bytes"`
+	MaxStdoutBytes   configkit.ByteSize `json:"max_stdout_bytes"`
+	MaxStderrBytes   configkit.ByteSize `json:"max_stderr_bytes"`
+	MaxOutputFiles   int                `json:"max_output_files"`
+	MaxArtifactBytes configkit.ByteSize `json:"max_artifact_bytes"`
+	MaxMemoryBytes   configkit.ByteSize `json:"max_memory_bytes"`
+	MaxProcesses     int                `json:"max_processes"`
+	MaxRunDirBytes   configkit.ByteSize `json:"max_run_dir_bytes"`
 }
 
 func DefaultInterpreter() Interpreter {

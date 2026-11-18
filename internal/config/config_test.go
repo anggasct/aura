@@ -5,12 +5,12 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -165,6 +165,68 @@ func TestLoad_MissingDefaultAutoGenerates(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("generated config != Default()\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+}
+
+func TestMarshalWritesNilValuesByTheirKind(t *testing.T) {
+	defaults := Default()
+	defaults.Capabilities.Enabled = nil
+	defaults.Broadcast.Destinations = nil
+	defaults.Tools = nil
+	data, err := Marshal(&defaults)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	text := string(data)
+	cases := []struct {
+		name string
+		line string
+	}{
+		{"nil list", "  enabled: []\n"},
+		{"nil map", "  destinations: {}\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(text, tc.line) {
+				t.Errorf("marshalled config lacks %q:\n%s", tc.line, text)
+			}
+		})
+	}
+	t.Run("nil section", func(t *testing.T) {
+		if strings.HasPrefix(text, "tools:") || strings.Contains(text, "\ntools:") {
+			t.Errorf("marshalled config carries a tools key:\n%s", text)
+		}
+	})
+}
+
+var tagKeyPattern = regexp.MustCompile(`(?:^|\s)([A-Za-z0-9_]+):"`)
+
+func TestConfigFieldsCarryOneJSONTag(t *testing.T) {
+	seen := map[reflect.Type]bool{}
+	var walk func(path string, typ reflect.Type)
+	walk = func(path string, typ reflect.Type) {
+		for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Map {
+			typ = typ.Elem()
+		}
+		if typ.Kind() != reflect.Struct || typ.PkgPath() != reflect.TypeFor[Config]().PkgPath() || seen[typ] {
+			return
+		}
+		seen[typ] = true
+		for field := range typ.Fields() {
+			fieldPath := path + "." + field.Name
+			var keys []string
+			for _, match := range tagKeyPattern.FindAllStringSubmatch(string(field.Tag), -1) {
+				keys = append(keys, match[1])
+			}
+			if !slices.Equal(keys, []string{"json"}) {
+				t.Errorf("%s has tag keys %v, want only json", fieldPath, keys)
+			}
+			walk(fieldPath, field.Type)
+		}
+	}
+	walk("Config", reflect.TypeFor[Config]())
+	if len(seen) < 2 {
+		t.Fatalf("walk visited %d struct types, want the whole config tree", len(seen))
 	}
 }
 
@@ -956,10 +1018,11 @@ func TestDurationYAMLRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	var decoded Config
-	if err := yaml.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("direct yaml.Unmarshal: %v", err)
+	loaded, err := Load(writeTempConfig(t, string(data)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
 	}
+	decoded := loaded.Config
 	if decoded.Runtime.TurnTimeout != cfg.Runtime.TurnTimeout {
 		t.Errorf("TurnTimeout round trip = %v, want %v", decoded.Runtime.TurnTimeout, cfg.Runtime.TurnTimeout)
 	}

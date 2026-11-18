@@ -42,21 +42,21 @@ var (
 )
 
 type Knowledge struct {
-	Embedding *KnowledgeEmbedding `koanf:"embedding" yaml:"embedding,omitempty"`
+	Embedding *KnowledgeEmbedding `json:"embedding,omitempty"`
 }
 
 type KnowledgeEmbedding struct {
-	BaseURL         string             `koanf:"base_url" yaml:"base_url"`
-	Model           string             `koanf:"model" yaml:"model"`
-	Dimensions      int                `koanf:"dimensions" yaml:"dimensions"`
-	DimensionsField string             `koanf:"dimensions_field" yaml:"dimensions_field"`
-	CredentialRef   string             `koanf:"credential_ref" yaml:"credential_ref,omitempty"`
-	RoleStyle       string             `koanf:"role_style" yaml:"role_style"`
-	QueryPrefix     string             `koanf:"query_prefix" yaml:"query_prefix,omitempty"`
-	DocumentPrefix  string             `koanf:"document_prefix" yaml:"document_prefix,omitempty"`
-	BatchSize       int                `koanf:"batch_size" yaml:"batch_size"`
-	MaxMemory       configkit.ByteSize `koanf:"max_memory" yaml:"max_memory"`
-	PublicQueries   bool               `koanf:"public_queries" yaml:"public_queries"`
+	BaseURL         string             `json:"base_url"`
+	Model           string             `json:"model"`
+	Dimensions      int                `json:"dimensions"`
+	DimensionsField string             `json:"dimensions_field"`
+	CredentialRef   string             `json:"credential_ref,omitempty"`
+	RoleStyle       string             `json:"role_style"`
+	QueryPrefix     string             `json:"query_prefix,omitempty"`
+	DocumentPrefix  string             `json:"document_prefix,omitempty"`
+	BatchSize       int                `json:"batch_size"`
+	MaxMemory       configkit.ByteSize `json:"max_memory"`
+	PublicQueries   bool               `json:"public_queries"`
 }
 
 func (e *KnowledgeEmbedding) Endpoint() (ServiceEndpoint, error) {
