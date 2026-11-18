@@ -42,8 +42,6 @@ const (
 	githubCapability = "provider-github"
 )
 
-var envLookup = buildEnvLookup()
-
 type LoadResult struct {
 	Config               *Config
 	Path                 string
@@ -57,84 +55,6 @@ type LoadOptions struct {
 	Build        capability.Build
 	Registry     capability.Registry
 	Dependencies capability.Dependencies
-}
-
-func buildEnvLookup() map[string]string {
-	paths, _, _, _ := validKeyPaths()
-	m := map[string]string{}
-	for path := range paths {
-		m[strings.ReplaceAll(path, ".", "_")] = path
-	}
-	return m
-}
-
-func envKeyMapper(s string) string {
-	normalized := strings.ToLower(strings.TrimPrefix(s, envPrefix))
-	if path := envLookup[normalized]; path != "" {
-		return path
-	}
-	const definitionsPrefix = "models_definitions_"
-	if strings.HasPrefix(normalized, definitionsPrefix) {
-		remainder := strings.TrimPrefix(normalized, definitionsPrefix)
-		fields := []struct {
-			suffix string
-			path   string
-		}{
-			{suffix: "_capabilities_streaming", path: "capabilities.streaming"},
-			{suffix: "_capabilities_tools", path: "capabilities.tools"},
-			{suffix: "_capabilities_structured_output", path: "capabilities.structured_output"},
-			{suffix: "_capabilities_vision", path: "capabilities.vision"},
-			{suffix: "_capabilities_audio", path: "capabilities.audio"},
-			{suffix: "_capabilities_reasoning", path: "capabilities.reasoning"},
-			{suffix: "_capabilities_context_tokens", path: "capabilities.context_tokens"},
-			{suffix: "_capabilities_tokenizer", path: "capabilities.tokenizer"},
-			{suffix: "_capabilities_usage_reporting", path: "capabilities.usage_reporting"},
-			{suffix: "_custom_protocol", path: "custom.protocol"},
-			{suffix: "_custom_base_url", path: "custom.base_url"},
-			{suffix: "_custom_auth_scheme", path: "custom.auth_scheme"},
-			{suffix: "_custom_session_behavior", path: "custom.session_behavior"},
-			{suffix: "_api_key_env", path: "api_key_env"},
-			{suffix: "_api_key_file", path: "api_key_file"},
-			{suffix: "_base_url", path: "base_url"},
-			{suffix: "_protocol", path: "protocol"},
-			{suffix: "_provider", path: "provider"},
-			{suffix: "_model", path: "model"},
-		}
-		for _, field := range fields {
-			if !strings.HasSuffix(remainder, field.suffix) {
-				continue
-			}
-			name := strings.TrimSuffix(remainder, field.suffix)
-			if modelDefinitionNamePattern.MatchString(name) {
-				return "models.definitions." + name + "." + field.path
-			}
-		}
-	}
-	const routesPrefix = "model_routes_"
-	if strings.HasPrefix(normalized, routesPrefix) {
-		remainder := strings.TrimPrefix(normalized, routesPrefix)
-		routeFields := []struct {
-			suffix string
-			path   string
-		}{
-			{suffix: "_max_provider_attempts", path: "max_provider_attempts"},
-			{suffix: "_retry_delay_budget", path: "retry_delay_budget"},
-			{suffix: "_cost_budget_usd", path: "cost_budget_usd"},
-			{suffix: "_circuit_failure_threshold", path: "circuit.failure_threshold"},
-			{suffix: "_circuit_open_duration", path: "circuit.open_duration"},
-			{suffix: "_circuit_max_open_duration", path: "circuit.max_open_duration"},
-		}
-		for _, field := range routeFields {
-			if !strings.HasSuffix(remainder, field.suffix) {
-				continue
-			}
-			name := strings.TrimSuffix(remainder, field.suffix)
-			if modelDefinitionNamePattern.MatchString(name) {
-				return "model_routes." + name + "." + field.path
-			}
-		}
-	}
-	return ""
 }
 
 func Load(path string) (LoadResult, error) {
@@ -198,7 +118,7 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		DefaultGenerated:     generated,
 		CapabilityReport:     report,
 		CapabilityStateError: resolveErr,
-		Warnings:             unknownEnvKeys(),
+		Warnings:             envWarnings(cfg),
 	}, nil
 }
 
@@ -2044,7 +1964,8 @@ func decode(data []byte) (*Config, error) {
 	if err := k.Load(rawbytes.Provider(data), yaml.Parser()); err != nil {
 		return nil, fmt.Errorf("invalid YAML: %w", err)
 	}
-	if err := k.Load(env.Provider(envPrefix, ".", envKeyMapper), nil); err != nil {
+	var collector envCollector
+	if err := k.Load(env.ProviderWithValue(envPrefix, ".", collector.provide), nil); err != nil {
 		return nil, fmt.Errorf("failed to load environment overrides: %w", err)
 	}
 	var cfg Config
@@ -2063,8 +1984,12 @@ func decode(data []byte) (*Config, error) {
 			),
 		},
 	})
+	problems := collector.errors()
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode config: %w", err)
+		problems = append(problems, fmt.Errorf("failed to decode config: %w", err))
+	}
+	if len(problems) > 0 {
+		return nil, errors.Join(problems...)
 	}
 	return &cfg, nil
 }
@@ -2960,12 +2885,6 @@ func configValuePresent(node *yamlv3.Node, path ...string) bool {
 		}
 	}
 	return true
-}
-
-func envValuePresent(path string) bool {
-	key := envPrefix + strings.ToUpper(strings.ReplaceAll(path, ".", "_"))
-	_, ok := os.LookupEnv(key)
-	return ok
 }
 
 func validateRuntime(runtime Runtime) error {
@@ -4375,32 +4294,6 @@ func validateTools(toolsConfig *Tools, profile capability.Profile) error {
 		return err
 	}
 	return validateWebSearch(&toolsConfig.WebSearch)
-}
-
-func unknownEnvKeys() []string {
-	warnings := make([]string, 0, len(os.Environ()))
-	known := make(map[string]bool, len(envLookup))
-	for key := range envLookup {
-		known[key] = true
-	}
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, envPrefix) {
-			continue
-		}
-		key, _, _ := strings.Cut(kv, "=")
-		if key == envConfigVar {
-			continue
-		}
-		normalized := strings.ToLower(strings.TrimPrefix(key, envPrefix))
-		if known[normalized] {
-			continue
-		}
-		if (strings.HasPrefix(normalized, "models_definitions_") || strings.HasPrefix(normalized, "model_routes_")) && envKeyMapper(key) != "" {
-			continue
-		}
-		warnings = append(warnings, key)
-	}
-	return warnings
 }
 
 func checkVersion(v int) error {
