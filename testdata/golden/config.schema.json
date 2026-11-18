@@ -1,0 +1,1668 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer"
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "max_active_turns": {
+          "type": "integer"
+        },
+        "max_pending_turns": {
+          "type": "integer"
+        },
+        "turn_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "shutdown_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "run_retention": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "tools": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "max_inline_result_bytes": {
+          "type": "integer"
+        },
+        "exec": {
+          "type": "object",
+          "properties": {
+            "timeout": {
+              "type": "string",
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+            },
+            "max_stdout_bytes": {
+              "type": "integer"
+            },
+            "max_stderr_bytes": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "fetch": {
+          "type": "object",
+          "properties": {
+            "timeout": {
+              "type": "string",
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+            },
+            "max_redirects": {
+              "type": "integer"
+            },
+            "max_encoded_bytes": {
+              "type": "integer"
+            },
+            "max_decoded_bytes": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "web_search": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string",
+              "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+            },
+            "endpoint": {
+              "type": "string"
+            },
+            "max_results": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "github": {
+          "type": "object",
+          "properties": {
+            "credentials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "ref": {
+                    "type": "string",
+                    "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "agents": {
+      "type": "object",
+      "properties": {
+        "definitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "instructions": {
+                "type": "string"
+              },
+              "soul_file": {
+                "type": "string"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "model_route": {
+                "type": "string"
+              },
+              "memory_scope": {
+                "type": "string"
+              },
+              "limits": {
+                "type": "object",
+                "properties": {
+                  "turn_timeout": {
+                    "type": "string",
+                    "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "audience": {
+                "type": "string"
+              },
+              "pairing": {
+                "type": "boolean"
+              },
+              "principal_tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "public_tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "approval_timeout": {
+                "type": "string",
+                "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+              },
+              "messages": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "group_context": {
+                "type": "string"
+              },
+              "evals": {
+                "type": "object",
+                "properties": {
+                  "dir": {
+                    "type": "string"
+                  },
+                  "behavior": {
+                    "type": "object",
+                    "properties": {
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "min_score": {
+                        "type": "number"
+                      },
+                      "judge_route": {
+                        "type": "string"
+                      },
+                      "schedule": {
+                        "type": "string"
+                      },
+                      "enforce_on_regression": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "workflows": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "knowledge": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "principal_knowledge": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "public_knowledge": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflows": {
+      "type": "object",
+      "properties": {
+        "definitions_dir": {
+          "type": "string"
+        },
+        "max_concurrent_steps": {
+          "type": "integer"
+        },
+        "default_step_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "generated": {
+          "type": "object",
+          "properties": {
+            "max_steps": {
+              "type": "integer"
+            },
+            "max_tokens": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "mcp": {
+      "type": "object",
+      "properties": {
+        "servers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "transport": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "environment": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "startup_timeout": {
+                "type": "string",
+                "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+              },
+              "request_timeout": {
+                "type": "string",
+                "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+              },
+              "max_message_size": {
+                "type": "string",
+                "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+              },
+              "restart": {
+                "type": "object",
+                "properties": {
+                  "max_attempts": {
+                    "type": "integer"
+                  },
+                  "window": {
+                    "type": "string",
+                    "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "url": {
+                "type": "string"
+              },
+              "auth": {
+                "type": "object",
+                "properties": {
+                  "oauth": {
+                    "type": "object",
+                    "properties": {
+                      "client_id_env": {
+                        "type": "string"
+                      },
+                      "client_secret_env": {
+                        "type": "string"
+                      },
+                      "token_store": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "static": {
+                    "type": "object",
+                    "properties": {
+                      "header": {
+                        "type": "string"
+                      },
+                      "credential_ref": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "connect_timeout": {
+                "type": "string",
+                "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+              },
+              "allow_redirects": {
+                "type": "boolean"
+              },
+              "compatibility_ack": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "plugins": {
+      "type": "object",
+      "properties": {
+        "desired": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "server": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "models": {
+      "type": "object",
+      "properties": {
+        "definitions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "protocol": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "base_url": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "custom": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "type": "string"
+                  },
+                  "base_url": {
+                    "type": "string"
+                  },
+                  "auth_scheme": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "session_behavior": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "api_key_ref": {
+                "type": "string",
+                "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+              },
+              "capabilities": {
+                "type": "object",
+                "properties": {
+                  "streaming": {
+                    "type": "boolean"
+                  },
+                  "tools": {
+                    "type": "boolean"
+                  },
+                  "structured_output": {
+                    "type": "boolean"
+                  },
+                  "vision": {
+                    "type": "boolean"
+                  },
+                  "audio": {
+                    "type": "boolean"
+                  },
+                  "reasoning": {
+                    "type": "boolean"
+                  },
+                  "context_tokens": {
+                    "type": "integer"
+                  },
+                  "tokenizer": {
+                    "type": "string"
+                  },
+                  "usage_reporting": {
+                    "type": "boolean"
+                  },
+                  "micros_per_input_token": {
+                    "type": "integer"
+                  },
+                  "micros_per_output_token": {
+                    "type": "integer"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "protocol": {
+                "type": "string"
+              },
+              "base_url": {
+                "type": "string"
+              },
+              "auth_scheme": {
+                "type": "string"
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "session_behavior": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "request_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "streaming_idle_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "routing": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "model_routes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_provider_attempts": {
+            "type": "integer"
+          },
+          "retry_delay_budget": {
+            "type": "string",
+            "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+          },
+          "cost_budget_usd": {
+            "type": "number"
+          },
+          "circuit": {
+            "type": "object",
+            "properties": {
+              "failure_threshold": {
+                "type": "integer"
+              },
+              "open_duration": {
+                "type": "string",
+                "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+              },
+              "max_open_duration": {
+                "type": "string",
+                "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "busy_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "max_open_connections": {
+          "type": "integer"
+        },
+        "artifact_quota": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "backup_directory": {
+          "type": "string"
+        },
+        "backup_interval": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "backup_retention": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "exporter": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "credential_ref": {
+          "type": "string",
+          "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+        },
+        "sample_ratio": {
+          "type": "number"
+        },
+        "queue_size": {
+          "type": "integer"
+        },
+        "export_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "currency": {
+          "type": "string"
+        },
+        "daily_budget_micros": {
+          "type": "integer"
+        },
+        "monthly_budget_micros": {
+          "type": "integer"
+        },
+        "reservation_ttl": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "health": {
+      "type": "object",
+      "properties": {
+        "listen": {
+          "type": "string"
+        },
+        "check_interval": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "check_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "disk_warning_percent": {
+          "type": "integer"
+        },
+        "disk_critical_percent": {
+          "type": "integer"
+        },
+        "disk_critical_floor_bytes": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "backup_max_age": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "restore_verification_max_age": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "terminal": {
+      "type": "object",
+      "properties": {
+        "render_hz": {
+          "type": "integer"
+        },
+        "max_input_bytes": {
+          "type": "integer"
+        },
+        "in_memory_history": {
+          "type": "integer"
+        },
+        "second_interrupt_window": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "plain_approval": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "webhook": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "listen_address": {
+          "type": "string"
+        },
+        "max_body_size": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "timestamp_tolerance": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "replay_retention": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "requests_per_minute": {
+          "type": "integer"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "secret_env": {
+                "type": "string"
+              },
+              "accept_until": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "broadcast": {
+      "type": "object",
+      "properties": {
+        "timezone": {
+          "type": "string"
+        },
+        "quiet_hours": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start": {
+              "type": "string"
+            },
+            "end": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "max_digest_items": {
+          "type": "integer"
+        },
+        "max_digest_bytes": {
+          "type": "integer"
+        },
+        "max_attempts": {
+          "type": "integer"
+        },
+        "max_delivery_age": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "min_dispatch_gap": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "destinations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "fallback": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "scheduler": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "default_timezone": {
+          "type": "string"
+        },
+        "default_catch_up_grace": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "occurrence_retention": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "memory": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_documents": {
+          "type": "integer"
+        },
+        "recall_token_budget": {
+          "type": "integer"
+        },
+        "locale": {
+          "type": "string"
+        },
+        "english_stemming": {
+          "type": "boolean"
+        },
+        "summary_prompt_version": {
+          "type": "string"
+        },
+        "summary_ttl": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "range_threshold": {
+          "type": "integer"
+        },
+        "range_live_window": {
+          "type": "integer"
+        },
+        "purge_interval": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "purge_limit": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "skills": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "roots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "auto_select": {
+          "type": "boolean"
+        },
+        "max_indexed_skills": {
+          "type": "integer"
+        },
+        "max_instruction_tokens": {
+          "type": "integer"
+        },
+        "max_session_context_tokens": {
+          "type": "integer"
+        },
+        "max_resource_bytes": {
+          "type": "integer"
+        },
+        "quarantine_retention": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "recent_complete_turns": {
+          "type": "integer"
+        },
+        "safety_margin_tokens": {
+          "type": "integer"
+        },
+        "conservative_estimator_ratio": {
+          "type": "number"
+        },
+        "high_water_ratio": {
+          "type": "number"
+        },
+        "max_tool_excerpt_bytes": {
+          "type": "integer"
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string"
+            },
+            "max_source_tokens": {
+              "type": "integer"
+            },
+            "max_output_tokens": {
+              "type": "integer"
+            },
+            "prompt_version": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_context_facts": {
+          "type": "integer"
+        },
+        "max_context_tokens": {
+          "type": "integer"
+        },
+        "extraction_queue_capacity": {
+          "type": "integer"
+        },
+        "candidate_min_confidence": {
+          "type": "number"
+        },
+        "prompt_version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "owner": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "preferences": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "identities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "children": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_depth": {
+          "type": "integer"
+        },
+        "max_active_per_parent": {
+          "type": "integer"
+        },
+        "max_active_global": {
+          "type": "integer"
+        },
+        "default_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "max_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "recovery": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "access": {
+      "type": "object",
+      "properties": {
+        "approval_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "standing_grant_ttl": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "budgets": {
+          "type": "object",
+          "properties": {
+            "trusted": {
+              "type": "object",
+              "properties": {
+                "max_tokens_per_day": {
+                  "type": "integer"
+                },
+                "max_turns_per_minute": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "public": {
+              "type": "object",
+              "properties": {
+                "max_tokens_per_day": {
+                  "type": "integer"
+                },
+                "max_turns_per_minute": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "retention": {
+          "type": "object",
+          "properties": {
+            "trusted": {
+              "type": "string",
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+            },
+            "public": {
+              "type": "string",
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+            }
+          },
+          "additionalProperties": false
+        },
+        "handoff_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sync": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "interval": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "transport_secret_ref": {
+          "type": "string",
+          "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+        },
+        "known_hosts_ref": {
+          "type": "string",
+          "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+        },
+        "git_binary": {
+          "type": "string"
+        },
+        "ssh_binary": {
+          "type": "string"
+        },
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "vision": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_encoded_bytes": {
+          "type": "integer"
+        },
+        "max_pixels": {
+          "type": "integer"
+        },
+        "max_dimension": {
+          "type": "integer"
+        },
+        "max_images": {
+          "type": "integer"
+        },
+        "max_frames": {
+          "type": "integer"
+        },
+        "decode_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "max_decode_concurrency": {
+          "type": "integer"
+        },
+        "max_request_bytes": {
+          "type": "integer"
+        },
+        "strip_metadata": {
+          "type": "boolean"
+        },
+        "orient_normalize": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "transform_version": {
+          "type": "string"
+        },
+        "max_transform_memory_bytes": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "max_images": {
+                "type": "integer"
+              },
+              "max_request_bytes": {
+                "type": "integer"
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "knowledge": {
+      "type": "object",
+      "properties": {
+        "embedding": {
+          "type": "object",
+          "properties": {
+            "base_url": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "dimensions": {
+              "type": "integer"
+            },
+            "dimensions_field": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string",
+              "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+            },
+            "role_style": {
+              "type": "string"
+            },
+            "query_prefix": {
+              "type": "string"
+            },
+            "document_prefix": {
+              "type": "string"
+            },
+            "batch_size": {
+              "type": "integer"
+            },
+            "max_memory": {
+              "type": "string",
+              "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+            },
+            "public_queries": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "interpreter": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "build_timeout": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "max_source_bytes": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "max_stdin_bytes": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "max_stdout_bytes": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "max_stderr_bytes": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "max_output_files": {
+          "type": "integer"
+        },
+        "max_artifact_bytes": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "max_memory_bytes": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        },
+        "max_processes": {
+          "type": "integer"
+        },
+        "max_run_dir_bytes": {
+          "type": "string",
+          "pattern": "^\\s*\\+?[0-9]+\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB)?\\s*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "channels": {
+      "type": "object",
+      "properties": {
+        "discord": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "accounts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "bot_token_ref": {
+                    "type": "string",
+                    "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+                  },
+                  "persona": {
+                    "type": "string"
+                  },
+                  "allowed_user_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "allowed_guild_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "allowed_channel_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "accept_dms": {
+                    "type": "boolean"
+                  },
+                  "link_previews": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "min_edit_interval": {
+              "type": "string",
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+            },
+            "max_attachment_bytes": {
+              "type": "integer"
+            },
+            "thread_auto_archive_minutes": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "telegram": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "accounts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "bot_token_ref": {
+                    "type": "string",
+                    "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "webhook_secret_ref": {
+                    "type": "string",
+                    "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+                  },
+                  "persona": {
+                    "type": "string"
+                  },
+                  "allowed_user_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "allowed_chat_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "accept_private_chats": {
+                    "type": "boolean"
+                  },
+                  "link_previews": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "polling": {
+              "type": "object",
+              "properties": {
+                "timeout": {
+                  "type": "string",
+                  "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+                },
+                "max_backoff": {
+                  "type": "string",
+                  "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "min_edit_interval": {
+              "type": "string",
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+            },
+            "max_attachment_bytes": {
+              "type": "integer"
+            },
+            "webhook": {
+              "type": "object",
+              "properties": {
+                "listen_address": {
+                  "type": "string"
+                },
+                "public_base_url": {
+                  "type": "string"
+                },
+                "max_body_bytes": {
+                  "type": "integer"
+                },
+                "max_connections": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "email": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "accounts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "persona": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "imap": {
+                    "type": "object",
+                    "properties": {
+                      "host": {
+                        "type": "string"
+                      },
+                      "port": {
+                        "type": "integer"
+                      },
+                      "username": {
+                        "type": "string"
+                      },
+                      "password_ref": {
+                        "type": "string",
+                        "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+                      },
+                      "folder": {
+                        "type": "string"
+                      },
+                      "poll_interval": {
+                        "type": "string",
+                        "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "smtp": {
+                    "type": "object",
+                    "properties": {
+                      "host": {
+                        "type": "string"
+                      },
+                      "port": {
+                        "type": "integer"
+                      },
+                      "username": {
+                        "type": "string"
+                      },
+                      "password_ref": {
+                        "type": "string",
+                        "pattern": "^(|env://[A-Za-z_][A-Za-z0-9_]*|file:///.*)$"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "authserv_id": {
+                    "type": "string"
+                  },
+                  "allowed_senders": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "max_attachment_bytes": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "http": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "listen_address": {
+              "type": "string"
+            },
+            "max_body_bytes": {
+              "type": "integer"
+            },
+            "requests_per_minute": {
+              "type": "integer"
+            },
+            "max_concurrent_per_key": {
+              "type": "integer"
+            },
+            "max_history_messages": {
+              "type": "integer"
+            },
+            "max_history_bytes": {
+              "type": "integer"
+            },
+            "keepalive_interval": {
+              "type": "string",
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "persona": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "guild_id": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "chat_id": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
