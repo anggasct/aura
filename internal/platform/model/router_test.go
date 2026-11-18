@@ -197,6 +197,13 @@ func TestBuildRouter_UnsupportedProviderFails(t *testing.T) {
 	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "unsupported protocol") {
 		t.Errorf("err = %v, want unsupported protocol error", err)
 	}
+
+	unknown := config.Models{Definitions: map[string]config.ModelDefinition{
+		"primary": {Provider: "bogus", Model: "x"},
+	}}
+	if _, err := BuildRouter(nil, unknown); err == nil || !strings.Contains(err.Error(), "models.definitions entry references unknown provider") {
+		t.Errorf("err = %v, want the unknown provider detail without the config code", err)
+	}
 }
 
 func TestBuildRouter_MissingKeyValidation(t *testing.T) {

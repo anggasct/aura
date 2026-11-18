@@ -26,7 +26,7 @@ func TestGeneratedWorkflowBudgets(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := Load(path)
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid || !strings.Contains(err.Error(), "workflows.generated") {
+		if code, ok := codeOf(err); !ok || code != invalidCode || !strings.Contains(err.Error(), "workflows.generated") {
 			t.Errorf("%s: err = %v, want config_invalid naming workflows.generated", label, err)
 		}
 	}

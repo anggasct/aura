@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const githubCapabilityEnabled = "capabilities:\n  enabled: [provider-github]\n"
@@ -78,8 +80,8 @@ func TestToolsGitHubCredentialsLoadInOrder(t *testing.T) {
 }
 
 func TestToolsGitHubRejectsUnusableCredentialValues(t *testing.T) {
-	const nameDetail = "tools.github.credentials[%d].name must be 1 to 64 lowercase letters, digits, '_' or '-', starting with a letter"
-	const refDetail = "tools.github.credentials[%d].ref must name an environment variable or an absolute, clean file path"
+	const nameDetail = "tools.github.credentials[%d].name: config_invalid: must be 1 to 64 lowercase letters, digits, '_' or '-', starting with a letter"
+	const refDetail = "tools.github.credentials[%d].ref: config_invalid: must name an environment variable or an absolute, clean file path"
 	cases := []struct {
 		name    string
 		entries string
@@ -89,7 +91,7 @@ func TestToolsGitHubRejectsUnusableCredentialValues(t *testing.T) {
 		{"uppercase name", githubEntry("CI", "env://A"), fmt.Sprintf(nameDetail, 0)},
 		{"dotted name", githubEntry("c.i", "env://A"), fmt.Sprintf(nameDetail, 0)},
 		{"long name", githubEntry("a"+strings.Repeat("b", 64), "env://A"), fmt.Sprintf(nameDetail, 0)},
-		{"repeated name", githubEntry("ci", "env://A") + githubEntry("ci", "env://B"), "tools.github.credentials[1].name repeats an earlier entry"},
+		{"repeated name", githubEntry("ci", "env://A") + githubEntry("ci", "env://B"), "tools.github.credentials[1].name: config_invalid: repeats an earlier entry"},
 		{"literal token", githubEntry("ci", "ghp_literal"), fmt.Sprintf(refDetail, 0)},
 		{"empty env name", githubEntry("ci", "env://"), fmt.Sprintf(refDetail, 0)},
 		{"digit env name", githubEntry("ci", "env://1BAD"), fmt.Sprintf(refDetail, 0)},
@@ -98,13 +100,13 @@ func TestToolsGitHubRejectsUnusableCredentialValues(t *testing.T) {
 		{"relative file path", githubEntry("ci", "file://relative/token"), fmt.Sprintf(refDetail, 0)},
 		{"unclean file path", githubEntry("ci", "file:///a/../b"), fmt.Sprintf(refDetail, 0)},
 		{"trailing slash", githubEntry("ci", "file:///a/"), fmt.Sprintf(refDetail, 0)},
-		{"repeated ref", githubEntry("ci", "env://A") + githubEntry("release", "env://A"), "tools.github.credentials[1].ref repeats an earlier entry"},
+		{"repeated ref", githubEntry("ci", "env://A") + githubEntry("release", "env://A"), "tools.github.credentials[1].ref: config_invalid: repeats an earlier entry"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := loadGitHubConfig(t, githubConfigSection(tc.entries))
-			var coded *Error
-			if !errors.As(err, &coded) || coded.Code != ErrorCodeConfigInvalid || coded.Detail != tc.detail {
+			var field *configkit.FieldError
+			if !errors.As(err, &field) || !fault.HasCode(err, configkit.ErrorCodeInvalid) || field.Error() != tc.detail {
 				t.Fatalf("err = %v, want config_invalid %q", err, tc.detail)
 			}
 			for _, leaked := range []string{"env:", "file:", "ghp_literal", "relative/token", "/a/"} {
@@ -144,7 +146,7 @@ func TestOwnerPreferencesMayNotRepeatAGitHubCredential(t *testing.T) {
 	t.Setenv("AURA_TEST_GITHUB_TOKEN", token)
 	body := strings.Replace(webSearchBase, "%s\n", githubConfigSection(githubEntry("ci", "env://AURA_TEST_GITHUB_TOKEN")), 1)
 	_, err := LoadWithOptions(writeTempConfig(t, body+"owner:\n  preferences:\n    note: \""+token+"\"\n"), execLinuxOptions(t))
-	code, ok := CodeOf(err)
+	code, ok := codeOf(err)
 	if !ok || code != ErrorCodeOwnerSecret {
 		t.Fatalf("code = %v, %v, want owner_secret_invalid (err %v)", code, ok, err)
 	}
@@ -154,7 +156,7 @@ func TestOwnerPreferencesMayNotRepeatAGitHubCredential(t *testing.T) {
 }
 
 func TestToolsGitHubCredentialsNeedTheProviderCapability(t *testing.T) {
-	const detail = "tools.github.credentials needs the provider-github capability: compile it into the build and list it in capabilities.enabled"
+	const detail = "tools.github.credentials: config_invalid: needs the provider-github capability: compile it into the build and list it in capabilities.enabled"
 	credentials := strings.Replace(webSearchBase, "%s\n", githubConfigSection(githubEntry("ci", "env://GITHUB_TOKEN")), 1)
 	none := strings.Replace(webSearchBase, "%s\n", "", 1)
 	cases := []struct {
@@ -177,8 +179,8 @@ func TestToolsGitHubCredentialsNeedTheProviderCapability(t *testing.T) {
 				}
 				return
 			}
-			var coded *Error
-			if !errors.As(err, &coded) || coded.Code != ErrorCodeConfigInvalid || coded.Detail != detail {
+			var field *configkit.FieldError
+			if !errors.As(err, &field) || !fault.HasCode(err, configkit.ErrorCodeInvalid) || field.Error() != detail {
 				t.Fatalf("err = %v, want config_invalid with %q", err, detail)
 			}
 		})

@@ -44,10 +44,10 @@ func TestLoad_VisionOptionalForCoreProfile(t *testing.T) {
 func TestVisionRequiredForNonCoreProfile(t *testing.T) {
 	base := "version: 1\ntools:\n  workspace: /srv/aura/workspace\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n  recent_complete_turns: 5\nprofile:\n  prompt_version: v1\nchildren:\n  recovery: interrupt\n"
 	_, err := LoadWithOptions(writeTempConfig(t, base), execLinuxOptions(t))
-	if err == nil || !strings.Contains(err.Error(), `vision section is required for build profile "exec-linux"`) {
+	if err == nil || !strings.Contains(err.Error(), `vision: config_invalid: section is required for build profile "exec-linux"`) {
 		t.Fatalf("LoadWithOptions error = %v", err)
 	}
-	wantCode(t, err, ErrorCodeConfigInvalid)
+	wantCode(t, err, invalidCode)
 
 	res, err := LoadWithOptions(writeTempConfig(t, base+"vision: {}\n"), execLinuxOptions(t))
 	if err != nil {
@@ -73,7 +73,7 @@ func TestLoad_VisionInvalid(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			wantCode(t, err, ErrorCodeConfigInvalid)
+			wantCode(t, err, invalidCode)
 		})
 	}
 }

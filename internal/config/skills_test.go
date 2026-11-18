@@ -1,12 +1,12 @@
 package config
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func writeSkillsConfig(t *testing.T, content string) string {
@@ -140,8 +140,7 @@ func TestLoad_SkillsSessionContextBoundInvalid(t *testing.T) {
 		})
 	}
 	_, err := LoadWithOptions(writeSkillsConfig(t, validSkillsBase+cases["below instruction bound"]), execLinuxOptions(t))
-	var cfgErr *Error
-	if !errors.As(err, &cfgErr) || cfgErr.Code != ErrorCodeConfigInvalid {
+	if !fault.HasCode(err, configkit.ErrorCodeInvalid) {
 		t.Fatalf("err = %v, want config_invalid", err)
 	}
 }

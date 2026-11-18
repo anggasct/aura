@@ -69,7 +69,7 @@ func TestLoadHealthRejectsNonLoopbackListen(t *testing.T) {
 			t.Fatalf("write config: %v", err)
 		}
 		_, err := Load(path)
-		if _, ok := CodeOf(err); err == nil || !ok {
+		if _, ok := codeOf(err); err == nil || !ok {
 			t.Errorf("Load(listen=%q) err = %v, want config_invalid", listen, err)
 		}
 	}
@@ -94,7 +94,7 @@ func TestValidateHealthBounds(t *testing.T) {
 			healthCfg := valid
 			tc.mutate(&healthCfg)
 			err := validateHealth(healthCfg)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
+			if code, ok := codeOf(err); !ok || code != invalidCode {
 				t.Errorf("validateHealth err = %v, want config_invalid", err)
 			}
 		})

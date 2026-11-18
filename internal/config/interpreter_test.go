@@ -129,14 +129,14 @@ func TestLoad_InterpreterBoundsAreRejected(t *testing.T) {
 				}
 				return
 			}
-			wantCode(t, err, ErrorCodeConfigInvalid)
+			wantCode(t, err, invalidCode)
 		})
 	}
 }
 
 func TestLoad_InterpreterReportsEveryProblem(t *testing.T) {
 	_, err := Load(writeTempConfig(t, "version: 1\ninterpreter:\n  timeout: 0s\n  max_processes: 0\n  max_output_files: 0\n"))
-	wantCode(t, err, ErrorCodeConfigInvalid)
+	wantCode(t, err, invalidCode)
 	for _, key := range []string{"interpreter.timeout", "interpreter.max_processes", "interpreter.max_output_files"} {
 		if !strings.Contains(err.Error(), key) {
 			t.Errorf("error omits %s: %v", key, err)
@@ -185,5 +185,5 @@ func TestLoad_InterpreterEnvOverride(t *testing.T) {
 func TestLoad_InterpreterEnvOverrideIsValidated(t *testing.T) {
 	t.Setenv("AURA_INTERPRETER_MAX_PROCESSES", "0")
 	_, err := Load(writeTempConfig(t, "version: 1\n"))
-	wantCode(t, err, ErrorCodeConfigInvalid)
+	wantCode(t, err, invalidCode)
 }

@@ -16,6 +16,7 @@ import (
 	yamlv3 "gopkg.in/yaml.v3"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -99,19 +100,19 @@ func validatePersonaAccess(cfg *Config) error {
 		switch definition.Audience {
 		case "", AudienceOwner, AudienceTrusted, AudiencePublic:
 		default:
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.audience must be %q, %q or %q", field, AudienceOwner, AudienceTrusted, AudiencePublic)}
+			return configkit.Field(field+".audience", fault.New(ErrorCodePersonaInvalid, fmt.Sprintf("must be %q, %q or %q", AudienceOwner, AudienceTrusted, AudiencePublic)))
 		}
 		if definition.Pairing && definition.Audience != AudienceTrusted {
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".pairing requires audience \"trusted\""}
+			return configkit.Field(field+".pairing", fault.New(ErrorCodePersonaInvalid, "requires audience \"trusted\""))
 		}
 		switch definition.GroupContext {
 		case "", GroupContextPerPrincipal:
 		case GroupContextShared:
 			if definition.Audience != AudienceTrusted {
-				return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".group_context \"shared\" requires audience \"trusted\""}
+				return configkit.Field(field+".group_context", fault.New(ErrorCodePersonaInvalid, "\"shared\" requires audience \"trusted\""))
 			}
 		default:
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.group_context must be %q or %q", field, GroupContextPerPrincipal, GroupContextShared)}
+			return configkit.Field(field+".group_context", fault.New(ErrorCodePersonaInvalid, fmt.Sprintf("must be %q or %q", GroupContextPerPrincipal, GroupContextShared)))
 		}
 		for _, list := range []struct {
 			name  string
@@ -120,16 +121,16 @@ func validatePersonaAccess(cfg *Config) error {
 			sorted := slices.Clone(list.tools)
 			slices.Sort(sorted)
 			if len(slices.Compact(sorted)) != len(list.tools) {
-				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.%s must not list a tool twice", field, list.name)}
+				return configkit.Field(field+"."+list.name, fault.New(ErrorCodePersonaInvalid, "must not list a tool twice"))
 			}
 		}
 		for _, id := range definition.Workflows {
 			if strings.TrimSpace(id) == "" || id != strings.TrimSpace(id) {
-				return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".workflows entries must be non-empty workflow ids"}
+				return configkit.Field(field+".workflows", fault.New(ErrorCodePersonaInvalid, "entries must be non-empty workflow ids"))
 			}
 		}
 		if sorted := slices.Sorted(slices.Values(definition.Workflows)); len(slices.Compact(sorted)) != len(definition.Workflows) {
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".workflows must not list a workflow twice"}
+			return configkit.Field(field+".workflows", fault.New(ErrorCodePersonaInvalid, "must not list a workflow twice"))
 		}
 		if err := validatePluginList(field, definition.Plugins); err != nil {
 			return err
@@ -138,22 +139,22 @@ func validatePersonaAccess(cfg *Config) error {
 			return err
 		}
 		if timeout := time.Duration(definition.ApprovalTimeout); timeout != 0 && (timeout < MinApprovalTimeout || timeout > MaxApprovalTimeout) {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".approval_timeout must be between 1m and 24h"}
+			return configkit.Invalid(field+".approval_timeout", "must be between 1m and 24h")
 		}
 		for _, key := range slices.Sorted(maps.Keys(definition.Messages)) {
 			if _, known := personaMessageDefaults[key]; !known {
-				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.messages: unknown key %q", field, key)}
+				return configkit.Field(field+".messages", fault.New(ErrorCodePersonaInvalid, fmt.Sprintf("unknown key %q", key)))
 			}
 			value := definition.Messages[key]
 			switch {
 			case strings.TrimSpace(value) == "":
-				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.messages.%s must not be empty", field, key)}
+				return configkit.Field(field+".messages."+key, fault.New(ErrorCodePersonaInvalid, "must not be empty"))
 			case strings.ContainsFunc(value, unicode.IsControl):
-				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.messages.%s must be a single line without control characters", field, key)}
+				return configkit.Field(field+".messages."+key, fault.New(ErrorCodePersonaInvalid, "must be a single line without control characters"))
 			case utf8.RuneCountInString(value) > MaxPersonaMessageRunes:
-				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.messages.%s must be at most %d characters", field, key, MaxPersonaMessageRunes)}
+				return configkit.Field(field+".messages."+key, fault.New(ErrorCodePersonaInvalid, fmt.Sprintf("must be at most %d characters", MaxPersonaMessageRunes)))
 			case key == MessagePairingCode && !strings.Contains(value, PairingCodePlaceholder):
-				return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.messages.%s must contain %s", field, key, PairingCodePlaceholder)}
+				return configkit.Field(field+".messages."+key, fault.New(ErrorCodePersonaInvalid, "must contain "+PairingCodePlaceholder))
 			}
 		}
 	}
@@ -166,20 +167,20 @@ func validateAccess(access *Access) error {
 	}
 	var problems []error
 	if timeout := time.Duration(access.ApprovalTimeout); timeout < MinApprovalTimeout || timeout > MaxApprovalTimeout {
-		problems = append(problems, errors.New("access.approval_timeout must be between 1m and 24h"))
+		problems = append(problems, configkit.Invalid("access.approval_timeout", "must be between 1m and 24h"))
 	}
 	if ttl := time.Duration(access.StandingGrantTTL); ttl <= 0 || ttl > MaxStandingGrantTTL {
-		problems = append(problems, errors.New("access.standing_grant_ttl must be positive and at most 720h"))
+		problems = append(problems, configkit.Invalid("access.standing_grant_ttl", "must be positive and at most 720h"))
 	}
 	if timeout := time.Duration(access.HandoffTimeout); timeout < MinApprovalTimeout || timeout > MaxStandingGrantTTL {
-		problems = append(problems, errors.New("access.handoff_timeout must be between 1m and 720h"))
+		problems = append(problems, configkit.Invalid("access.handoff_timeout", "must be between 1m and 720h"))
 	}
 	for _, retention := range []struct {
 		class string
 		ttl   configkit.Duration
 	}{{AudienceTrusted, access.Retention.Trusted}, {AudiencePublic, access.Retention.Public}} {
 		if time.Duration(retention.ttl) < MinRetention {
-			problems = append(problems, fmt.Errorf("access.retention.%s must be at least 24h", retention.class))
+			problems = append(problems, configkit.Invalid("access.retention."+retention.class, "must be at least 24h"))
 		}
 	}
 	for _, budget := range []struct {
@@ -187,16 +188,13 @@ func validateAccess(access *Access) error {
 		limits PrincipalBudget
 	}{{AudienceTrusted, access.Budgets.Trusted}, {AudiencePublic, access.Budgets.Public}} {
 		if budget.limits.MaxTokensPerDay < 1 {
-			problems = append(problems, fmt.Errorf("access.budgets.%s.max_tokens_per_day must be at least 1", budget.class))
+			problems = append(problems, configkit.Invalid("access.budgets."+budget.class+".max_tokens_per_day", "must be at least 1"))
 		}
 		if budget.limits.MaxTurnsPerMinute < 1 {
-			problems = append(problems, fmt.Errorf("access.budgets.%s.max_turns_per_minute must be at least 1", budget.class))
+			problems = append(problems, configkit.Invalid("access.budgets."+budget.class+".max_turns_per_minute", "must be at least 1"))
 		}
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateAccessShapes(doc *yamlv3.Node) error {
@@ -304,13 +302,13 @@ func validatePersonaNames(cfg *Config) error {
 		field := fmt.Sprintf("agents.definitions[%d].name", i)
 		switch {
 		case strings.TrimSpace(name) != name:
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + " must not have surrounding whitespace"}
+			return configkit.Field(field, fault.New(ErrorCodePersonaInvalid, "must not have surrounding whitespace"))
 		case strings.ContainsFunc(name, unicode.IsControl):
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + " must be a single line without control characters"}
+			return configkit.Field(field, fault.New(ErrorCodePersonaInvalid, "must be a single line without control characters"))
 		case utf8.RuneCountInString(name) > MaxPersonaNameRunes:
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s must be at most %d characters", field, MaxPersonaNameRunes)}
+			return configkit.Field(field, fault.New(ErrorCodePersonaInvalid, fmt.Sprintf("must be at most %d characters", MaxPersonaNameRunes)))
 		case strings.EqualFold(name, "user"):
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + " must not be \"user\""}
+			return configkit.Field(field, fault.New(ErrorCodePersonaInvalid, "must not be \"user\""))
 		}
 	}
 	return nil
@@ -328,17 +326,17 @@ func loadPersonaSouls(cfg *Config, configPath string) error {
 		}
 		field := fmt.Sprintf("agents.definitions[%d]", i)
 		if strings.TrimSpace(definition.Instructions) != "" {
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ": soul_file and instructions are mutually exclusive"}
+			return configkit.Field(field, fault.New(ErrorCodePersonaInvalid, "soul_file and instructions are mutually exclusive"))
 		}
 		soul, err := readSoul(soulPath(definition.SoulFile, configPath))
 		if err != nil {
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("%s.soul_file: %v", field, err)}
+			return configkit.Field(field+".soul_file", fault.New(ErrorCodePersonaInvalid, err.Error()))
 		}
 		if vault == nil {
 			vault = configuredSecretVault(cfg)
 		}
 		if vault.Contains(soul) {
-			return &Error{Code: ErrorCodePersonaSecret, Detail: fmt.Sprintf("persona %q soul must not repeat a configured secret value", definition.ID)}
+			return configkit.Field(field, fault.New(ErrorCodePersonaSecret, fmt.Sprintf("persona %q soul must not repeat a configured secret value", definition.ID)))
 		}
 		definition.Soul = soul
 	}

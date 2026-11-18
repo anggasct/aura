@@ -41,9 +41,9 @@ func TestLoad_TelegramMaxAttachmentBytes(t *testing.T) {
 		{name: "lower bound", value: "1", want: 1},
 		{name: "typical", value: "1048576", want: 1048576},
 		{name: "upper bound", value: "20971520", want: 20971520},
-		{name: "above the bot api limit", value: "20971521", wantErr: "max_attachment_bytes must be between 1 and 20971520", invalid: true},
-		{name: "zero", value: "0", wantErr: "max_attachment_bytes must be between 1 and 20971520", invalid: true},
-		{name: "negative", value: "-5", wantErr: "max_attachment_bytes must be between 1 and 20971520", invalid: true},
+		{name: "above the bot api limit", value: "20971521", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520", invalid: true},
+		{name: "zero", value: "0", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520", invalid: true},
+		{name: "negative", value: "-5", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520", invalid: true},
 		{name: "not an integer", value: "\"20MB\"", wantErr: "max_attachment_bytes must be an integer"},
 	}
 	for _, tc := range cases {
@@ -53,8 +53,8 @@ func TestLoad_TelegramMaxAttachmentBytes(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("Load error = %v, want it to mention %q", err, tc.wantErr)
 				}
-				if code, ok := CodeOf(err); tc.invalid && (!ok || code != ErrorCodeConfigInvalid) {
-					t.Errorf("error code = %q, want %q", code, ErrorCodeConfigInvalid)
+				if code, ok := codeOf(err); tc.invalid && (!ok || code != invalidCode) {
+					t.Errorf("error code = %q, want %q", code, invalidCode)
 				}
 				return
 			}
@@ -134,15 +134,15 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		},
 		"inline token": {
 			yaml: "version: 1\nchannels:\n  telegram:\n    accounts:\n      - name: pocket\n        bot_token_ref: \"123456:ABC\"\n",
-			want: "bot_token_ref must use env:// or file://",
+			want: "bot_token_ref: config_invalid: must use env:// or file://",
 		},
 		"missing token ref": {
 			yaml: "version: 1\nchannels:\n  telegram:\n    accounts:\n      - name: pocket\n",
-			want: "bot_token_ref must not be empty",
+			want: "bot_token_ref: config_invalid: must not be empty",
 		},
 		"bad account name": {
 			yaml: "version: 1\nchannels:\n  telegram:\n    accounts:\n      - name: Pocket/1\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n",
-			want: "name \"Pocket/1\" must match",
+			want: "name: config_invalid: \"Pocket/1\" must match",
 		},
 		"duplicate account names": {
 			yaml: account("      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_OTHER\n"),
@@ -158,15 +158,15 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		},
 		"fractional poll timeout": {
 			yaml: account("    polling:\n      timeout: 1500ms\n"),
-			want: "polling.timeout must be a whole number of seconds",
+			want: "polling.timeout: config_invalid: must be a whole number of seconds",
 		},
 		"poll timeout above the bound": {
 			yaml: account("    polling:\n      timeout: 2m\n"),
-			want: "polling.timeout must be a whole number of seconds",
+			want: "polling.timeout: config_invalid: must be a whole number of seconds",
 		},
 		"backoff below a second": {
 			yaml: account("    polling:\n      max_backoff: 10ms\n"),
-			want: "polling.max_backoff must be between",
+			want: "polling.max_backoff: config_invalid: must be between",
 		},
 		"numeric poll timeout": {
 			yaml: account("    polling:\n      timeout: 30\n"),
@@ -174,15 +174,15 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		},
 		"zero edit interval": {
 			yaml: account("    min_edit_interval: 0s\n"),
-			want: "min_edit_interval must be between 1s and 1m0s",
+			want: "min_edit_interval: config_invalid: must be between 1s and 1m0s",
 		},
 		"edit interval below a second": {
 			yaml: account("    min_edit_interval: 500ms\n"),
-			want: "min_edit_interval must be between 1s and 1m0s",
+			want: "min_edit_interval: config_invalid: must be between 1s and 1m0s",
 		},
 		"edit interval above a minute": {
 			yaml: account("    min_edit_interval: 2m\n"),
-			want: "min_edit_interval must be between 1s and 1m0s",
+			want: "min_edit_interval: config_invalid: must be between 1s and 1m0s",
 		},
 		"numeric edit interval": {
 			yaml: account("    min_edit_interval: 2\n"),
@@ -283,7 +283,7 @@ func TestLoad_TelegramBindingsInvalid(t *testing.T) {
 		"negative user":       {yaml: base + "    account: pocket\n    user_id: \"-42\"\n", want: "not a positive decimal telegram user id"},
 		"discord-only field":  {yaml: base + "    account: pocket\n    user_id: \"42\"\n    guild_id: \"1\"\n", want: "by chat_id, thread_id and user_id only"},
 		"channel id field":    {yaml: base + "    account: pocket\n    chat_id: \"-100\"\n    channel_id: \"1\"\n", want: "by chat_id, thread_id and user_id only"},
-		"thread without chat": {yaml: base + "    account: pocket\n    user_id: \"42\"\n    thread_id: \"5\"\n", want: "thread_id requires chat_id"},
+		"thread without chat": {yaml: base + "    account: pocket\n    user_id: \"42\"\n    thread_id: \"5\"\n", want: "thread_id: binding_invalid: requires chat_id"},
 		"positive chat":       {yaml: base + "    account: pocket\n    chat_id: \"42\"\n", want: "not a negative decimal telegram group chat id"},
 		"non numeric chat":    {yaml: base + "    account: pocket\n    chat_id: \"-abc\"\n", want: "not a negative decimal telegram group chat id"},
 		"zero chat":           {yaml: base + "    account: pocket\n    chat_id: \"0\"\n", want: "not a negative decimal telegram group chat id"},
@@ -296,7 +296,7 @@ func TestLoad_TelegramBindingsInvalid(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, tc.yaml))
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeBindingInvalid && code != ErrorCodeConfigInvalid {
+			if code, ok := codeOf(err); !ok || code != ErrorCodeBindingInvalid && code != invalidCode {
 				t.Fatalf("Load error = %v, want a binding or config error", err)
 			}
 			if !strings.Contains(err.Error(), tc.want) {
@@ -420,7 +420,7 @@ func TestLoad_ChatIDBindingIsTelegramOnly(t *testing.T) {
     chat_id: "-100"
 `)
 	_, err := Load(path)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeBindingInvalid || !strings.Contains(err.Error(), "chat_id is only valid on telegram bindings") {
+	if code, ok := codeOf(err); !ok || code != ErrorCodeBindingInvalid || !strings.Contains(err.Error(), "bindings[0].chat_id: binding_invalid: is only valid on telegram bindings") {
 		t.Fatalf("Load error = %v, want %s naming chat_id", err, ErrorCodeBindingInvalid)
 	}
 }
@@ -509,33 +509,33 @@ func TestLoad_TelegramWebhookInvalid(t *testing.T) {
 		want  string
 		shape bool
 	}{
-		"unknown mode":                     {yaml: hook("        mode: carrier\n", ""), want: `mode "carrier" must be polling or webhook`},
-		"empty mode":                       {yaml: hook("        mode: \"\"\n", ""), want: "mode \"\" must be polling or webhook"},
+		"unknown mode":                     {yaml: hook("        mode: carrier\n", ""), want: `mode: config_invalid: "carrier" must be polling or webhook`},
+		"empty mode":                       {yaml: hook("        mode: \"\"\n", ""), want: "mode: config_invalid: \"\" must be polling or webhook"},
 		"non string mode":                  {yaml: hook("        mode: 3\n", ""), want: "mode must be a string", shape: true},
-		"webhook without secret ref":       {yaml: hook("        mode: webhook\n", publicURL), want: "webhook_secret_ref must not be empty in webhook mode"},
-		"inline secret":                    {yaml: hook("        mode: webhook\n        webhook_secret_ref: plain\n", publicURL), want: "webhook_secret_ref must use env:// or file://"},
+		"webhook without secret ref":       {yaml: hook("        mode: webhook\n", publicURL), want: "webhook_secret_ref: config_invalid: must not be empty in webhook mode"},
+		"inline secret":                    {yaml: hook("        mode: webhook\n        webhook_secret_ref: plain\n", publicURL), want: "webhook_secret_ref: config_invalid: must use env:// or file://"},
 		"secret ref equals own token":      {yaml: hook("        mode: webhook\n        webhook_secret_ref: env://AURA_TELEGRAM_BOT_TOKEN\n", publicURL), want: "must differ from every bot token reference"},
 		"secret ref equals other token":    {yaml: hook(webhookAccount+"      - name: spare\n        bot_token_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n", publicURL), want: "must differ from every bot token reference"},
 		"secret ref equals discord token":  {yaml: "version: 1\nchannels:\n  discord:\n    accounts:\n      - name: home\n        bot_token_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n  telegram:\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n" + webhookAccount + "    webhook:\n" + publicURL, want: "must differ from every bot token reference"},
-		"secret ref on a polling account":  {yaml: hook("        webhook_secret_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n", ""), want: "webhook_secret_ref is only valid when mode is webhook"},
-		"missing public base url":          {yaml: hook(webhookAccount, ""), want: "public_base_url is required when an account uses webhook mode"},
-		"http public base url":             {yaml: hook(webhookAccount, "      public_base_url: http://aura.example.com\n"), want: "public_base_url must use https"},
-		"loopback http public base url":    {yaml: hook(webhookAccount, "      public_base_url: http://127.0.0.1:8283\n"), want: "public_base_url must use https"},
+		"secret ref on a polling account":  {yaml: hook("        webhook_secret_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n", ""), want: "webhook_secret_ref: config_invalid: is only valid when mode is webhook"},
+		"missing public base url":          {yaml: hook(webhookAccount, ""), want: "public_base_url: config_invalid: is required when an account uses webhook mode"},
+		"http public base url":             {yaml: hook(webhookAccount, "      public_base_url: http://aura.example.com\n"), want: "public_base_url: config_invalid: must use https"},
+		"loopback http public base url":    {yaml: hook(webhookAccount, "      public_base_url: http://127.0.0.1:8283\n"), want: "public_base_url: config_invalid: must use https"},
 		"public base url with query":       {yaml: hook(webhookAccount, "      public_base_url: https://aura.example.com/?a=b\n"), want: "must not carry a query or fragment"},
 		"public base url with empty query": {yaml: hook(webhookAccount, "      public_base_url: https://aura.example.com/?\n"), want: "must not carry a query or fragment"},
 		"public base url with fragment":    {yaml: hook(webhookAccount, "      public_base_url: https://aura.example.com/#top\n"), want: "must not carry a query or fragment"},
 		"public base url with userinfo":    {yaml: hook(webhookAccount, "      public_base_url: https://user:pass@aura.example.com\n"), want: "user info is not allowed"},
 		"public base url without host":     {yaml: hook(webhookAccount, "      public_base_url: https://\n"), want: "missing host"},
-		"public base url on polling only":  {yaml: hook("", "      public_base_url: http://aura.example.com\n"), want: "public_base_url must use https"},
-		"listen address without port":      {yaml: hook("", "      listen_address: 127.0.0.1\n"), want: "listen_address must be host:port"},
-		"listen address port zero":         {yaml: hook("", "      listen_address: 127.0.0.1:0\n"), want: "listen_address port must be between 1 and 65535"},
-		"listen address port too large":    {yaml: hook("", "      listen_address: 127.0.0.1:70000\n"), want: "listen_address port must be between 1 and 65535"},
-		"listen address without host":      {yaml: hook("", "      listen_address: \":8283\"\n"), want: "listen_address must include a host"},
-		"body bound zero":                  {yaml: hook("", "      max_body_bytes: 0\n"), want: "max_body_bytes must be between 1 and 10485760"},
-		"body bound negative":              {yaml: hook("", "      max_body_bytes: -1\n"), want: "max_body_bytes must be between 1 and 10485760"},
-		"body bound above the ceiling":     {yaml: hook("", "      max_body_bytes: 10485761\n"), want: "max_body_bytes must be between 1 and 10485760"},
-		"connections zero":                 {yaml: hook("", "      max_connections: 0\n"), want: "max_connections must be between 1 and 100"},
-		"connections above the ceiling":    {yaml: hook("", "      max_connections: 101\n"), want: "max_connections must be between 1 and 100"},
+		"public base url on polling only":  {yaml: hook("", "      public_base_url: http://aura.example.com\n"), want: "public_base_url: config_invalid: must use https"},
+		"listen address without port":      {yaml: hook("", "      listen_address: 127.0.0.1\n"), want: "listen_address: config_invalid: must be host:port"},
+		"listen address port zero":         {yaml: hook("", "      listen_address: 127.0.0.1:0\n"), want: "listen_address: config_invalid: port must be between 1 and 65535"},
+		"listen address port too large":    {yaml: hook("", "      listen_address: 127.0.0.1:70000\n"), want: "listen_address: config_invalid: port must be between 1 and 65535"},
+		"listen address without host":      {yaml: hook("", "      listen_address: \":8283\"\n"), want: "listen_address: config_invalid: must include a host"},
+		"body bound zero":                  {yaml: hook("", "      max_body_bytes: 0\n"), want: "max_body_bytes: config_invalid: must be between 1 and 10485760"},
+		"body bound negative":              {yaml: hook("", "      max_body_bytes: -1\n"), want: "max_body_bytes: config_invalid: must be between 1 and 10485760"},
+		"body bound above the ceiling":     {yaml: hook("", "      max_body_bytes: 10485761\n"), want: "max_body_bytes: config_invalid: must be between 1 and 10485760"},
+		"connections zero":                 {yaml: hook("", "      max_connections: 0\n"), want: "max_connections: config_invalid: must be between 1 and 100"},
+		"connections above the ceiling":    {yaml: hook("", "      max_connections: 101\n"), want: "max_connections: config_invalid: must be between 1 and 100"},
 		"connections not an integer":       {yaml: hook("", "      max_connections: many\n"), want: "max_connections must be an integer", shape: true},
 		"body bound not an integer":        {yaml: hook("", "      max_body_bytes: \"1MB\"\n"), want: "max_body_bytes must be an integer", shape: true},
 		"listen address not a string":      {yaml: hook("", "      listen_address: 8283\n"), want: "listen_address must be a string", shape: true},
@@ -548,8 +548,8 @@ func TestLoad_TelegramWebhookInvalid(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
-			if code, ok := CodeOf(err); !tc.shape && (!ok || code != ErrorCodeConfigInvalid) {
-				t.Errorf("error code = %q, want %q", code, ErrorCodeConfigInvalid)
+			if code, ok := codeOf(err); !tc.shape && (!ok || code != invalidCode) {
+				t.Errorf("error code = %q, want %q", code, invalidCode)
 			}
 		})
 	}
@@ -609,8 +609,8 @@ func TestLoad_TelegramLinkPreviews(t *testing.T) {
 	}
 	t.Run("string is refused", func(t *testing.T) {
 		_, err := Load(writeDiscordConfig(t, account("        link_previews: \"yes\"\n")))
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeConfigInvalid {
-			t.Fatalf("Load error = %v, want %s", err, ErrorCodeConfigInvalid)
+		if code, ok := codeOf(err); !ok || code != invalidCode {
+			t.Fatalf("Load error = %v, want %s", err, invalidCode)
 		}
 	})
 }

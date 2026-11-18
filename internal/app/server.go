@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -199,7 +200,7 @@ func (b *build) buildServerTools(ctx context.Context) error {
 		s.checks = append(s.checks, pluginCheck)
 	}
 	if b.primaryModel() == "" {
-		return &config.Error{Code: config.ErrorCodeConfigInvalid, Detail: "models.definitions.primary.model is required for the server runtime"}
+		return configkit.Invalid("models.definitions.primary.model", "is required for the server runtime")
 	}
 	return nil
 }

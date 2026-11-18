@@ -93,7 +93,7 @@ func TestLoad_ProviderNegativeFixtures(t *testing.T) {
 			t.Errorf("Load(%s): got nil error, want failure", name)
 			continue
 		}
-		code, ok := CodeOf(err)
+		code, ok := codeOf(err)
 		if !ok || code != ErrorCodeModelProviderInvalid {
 			t.Errorf("Load(%s): code = %q, %v; want %q", name, code, ok, ErrorCodeModelProviderInvalid)
 		}
@@ -296,7 +296,7 @@ models:
 				t.Fatalf("Load: got nil error, want failure")
 			}
 			if tc.wantCode != "" {
-				code, ok := CodeOf(err)
+				code, ok := codeOf(err)
 				if !ok || code != tc.wantCode {
 					t.Fatalf("code = %q, %v; want %q (err: %v)", code, ok, tc.wantCode, err)
 				}

@@ -136,7 +136,7 @@ owner:
 	if err == nil {
 		t.Fatal("secret-bearing owner name accepted")
 	}
-	code, ok := CodeOf(err)
+	code, ok := codeOf(err)
 	if !ok || code != ErrorCodeOwnerSecret {
 		t.Fatalf("code = %v, %v, want owner_secret_invalid", code, ok)
 	}
@@ -164,7 +164,7 @@ owner:
 	if err == nil {
 		t.Fatal("secret-bearing preference accepted")
 	}
-	code, ok := CodeOf(err)
+	code, ok := codeOf(err)
 	if !ok || code != ErrorCodeOwnerSecret {
 		t.Fatalf("code = %v, %v, want owner_secret_invalid", code, ok)
 	}
@@ -192,7 +192,7 @@ owner:
 	if err == nil {
 		t.Fatal("secret-bearing preference key accepted")
 	}
-	code, ok := CodeOf(err)
+	code, ok := codeOf(err)
 	if !ok || code != ErrorCodeOwnerSecret {
 		t.Fatalf("code = %v, %v, want owner_secret_invalid", code, ok)
 	}
@@ -270,7 +270,7 @@ func TestLoad_OwnerIdentitiesRejected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := writeOwnerConfig(t, "version: 1\nowner:\n  identities:\n"+tc.body)
 			_, err := Load(path)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeOwnerIdentityInvalid {
+			if code, ok := codeOf(err); !ok || code != ErrorCodeOwnerIdentityInvalid {
 				t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, ErrorCodeOwnerIdentityInvalid, err)
 			}
 			if !strings.Contains(err.Error(), tc.index) {
@@ -289,7 +289,7 @@ func TestLoad_OwnerIdentitiesRenderSingleCode(t *testing.T) {
 	if err == nil {
 		t.Fatal("invalid identities accepted")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeOwnerIdentityInvalid {
+	if code, ok := codeOf(err); !ok || code != ErrorCodeOwnerIdentityInvalid {
 		t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, ErrorCodeOwnerIdentityInvalid, err)
 	}
 	if got := strings.Count(err.Error(), string(ErrorCodeOwnerIdentityInvalid)+":"); got != 1 {

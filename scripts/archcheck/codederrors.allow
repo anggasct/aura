@@ -6,7 +6,6 @@ internal/channels/kit/chatcommand  # until this channel's errors move to platfor
 internal/channels/kit/media  # until this channel's errors move to platform/fault with the channels
 internal/channels/telegram  # until this channel's errors move to platform/fault with the channels
 internal/channels/webhook  # until this channel's errors move to platform/fault with the channels
-internal/config  # legacy config; its errors move with each owner's section
 internal/modules/broadcast  # until this module's errors move to platform/fault with the module
 internal/modules/child  # until this module's errors move to platform/fault with the module
 internal/modules/codeexec  # until this module's errors move to platform/fault with the module

@@ -179,115 +179,7 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if err := applyDefaults(cfg, data); err != nil {
 		return LoadResult{}, err
 	}
-	if err := validateLoadedModels(cfg.Models, routingExplicitIn(data)); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateLoadedModelRoutes(cfg.ModelRoutes, cfg.Models); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateTools(cfg.Tools, options.Build.Profile()); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateSkills(cfg.Skills, options.Build.Profile()); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateContext(cfg.Context, options.Build.Profile()); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateProfile(cfg.Profile, options.Build.Profile()); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateChildren(cfg.Children, options.Build.Profile()); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateAccess(cfg.Access); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateSync(cfg.Sync); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateVision(cfg.Vision, options.Build.Profile()); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateKnowledge(cfg.Knowledge); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateInterpreter(&cfg.Interpreter); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateRuntime(cfg.Runtime); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateServer(cfg.Server); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateLogging(cfg.Logging); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateStorage(cfg.Storage); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateTelemetry(cfg.Telemetry); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateUsage(cfg.Usage); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateHealth(cfg.Health); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateTerminal(cfg.Terminal); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateWorkflows(cfg.Workflows); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateMCP(cfg.MCP); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validatePlugins(cfg.Plugins); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateWebhook(&cfg.Webhook, cfg.Health.Listen); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateDiscord(&cfg.Channels.Discord); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateTelegram(&cfg.Channels.Telegram, &cfg.Channels.Discord, cfg.Owner); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateEmail(&cfg.Channels.Email, cfg.Owner); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateHTTP(&cfg.Channels.HTTP); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateBindings(cfg.Bindings, &cfg.Channels); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateBroadcast(&cfg.Broadcast); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateScheduler(&cfg.Scheduler); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateMemory(&cfg.Memory); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateOwner(cfg.Owner); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validateOwnerIdentities(cfg.Owner); err != nil {
-		return LoadResult{}, err
-	}
-	if err := screenOwnerSecrets(cfg.Owner, cfg); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validatePersonaNames(cfg); err != nil {
-		return LoadResult{}, err
-	}
-	if err := validatePersonaAccess(cfg); err != nil {
+	if err := validateLoaded(cfg, routingExplicitIn(data), options.Build.Profile()); err != nil {
 		return LoadResult{}, err
 	}
 	if err := loadPersonaSouls(cfg, resolved); err != nil {
@@ -298,7 +190,7 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		return LoadResult{}, resolveErr
 	}
 	if cfg.Tools != nil && len(cfg.Tools.GitHub.Credentials) > 0 && !slices.Contains(report.Active(), githubCapability) {
-		return LoadResult{}, &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.github.credentials needs the " + githubCapability + " capability: compile it into the build and list it in capabilities.enabled"}
+		return LoadResult{}, configkit.Invalid("tools.github.credentials", "needs the "+githubCapability+" capability: compile it into the build and list it in capabilities.enabled")
 	}
 	return LoadResult{
 		Config:               cfg,
@@ -308,6 +200,48 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		CapabilityStateError: resolveErr,
 		Warnings:             unknownEnvKeys(),
 	}, nil
+}
+
+func validateLoaded(cfg *Config, routingExplicit bool, profile capability.Profile) error {
+	return errors.Join(
+		validateLoadedModels(cfg.Models, routingExplicit),
+		validateLoadedModelRoutes(cfg.ModelRoutes, cfg.Models),
+		validateTools(cfg.Tools, profile),
+		validateSkills(cfg.Skills, profile),
+		validateContext(cfg.Context, profile),
+		validateProfile(cfg.Profile, profile),
+		validateChildren(cfg.Children, profile),
+		validateAccess(cfg.Access),
+		validateSync(cfg.Sync),
+		validateVision(cfg.Vision, profile),
+		validateKnowledge(cfg.Knowledge),
+		validateInterpreter(&cfg.Interpreter),
+		validateRuntime(cfg.Runtime),
+		validateServer(cfg.Server),
+		validateLogging(cfg.Logging),
+		validateStorage(cfg.Storage),
+		validateTelemetry(cfg.Telemetry),
+		validateUsage(cfg.Usage),
+		validateHealth(cfg.Health),
+		validateTerminal(cfg.Terminal),
+		validateWorkflows(cfg.Workflows),
+		validateMCP(cfg.MCP),
+		validatePlugins(cfg.Plugins),
+		validateWebhook(&cfg.Webhook, cfg.Health.Listen),
+		validateDiscord(&cfg.Channels.Discord),
+		validateTelegram(&cfg.Channels.Telegram, &cfg.Channels.Discord, cfg.Owner),
+		validateEmail(&cfg.Channels.Email, cfg.Owner),
+		validateHTTP(&cfg.Channels.HTTP),
+		validateBindings(cfg.Bindings, &cfg.Channels),
+		validateBroadcast(&cfg.Broadcast),
+		validateScheduler(&cfg.Scheduler),
+		validateMemory(&cfg.Memory),
+		validateOwner(cfg.Owner),
+		validateOwnerIdentities(cfg.Owner),
+		screenOwnerSecrets(cfg.Owner, cfg),
+		validatePersonaNames(cfg),
+		validatePersonaAccess(cfg),
+	)
 }
 
 func resolvePath(flagPath string) (path string, explicit bool, err error) {
@@ -790,7 +724,7 @@ func validateDiscordShapes(doc *yamlv3.Node) error {
 				return fmt.Errorf("channels.discord.%s must be a boolean at line %d", keyNode.Value, valueNode.Line)
 			}
 		case "instance", "bot_token_ref", "allowed_user_ids", "allowed_guild_ids", "allowed_channel_ids", "accept_dms":
-			return &Error{Code: ErrorCodeConfigShapeChanged, Detail: fmt.Sprintf("channels.discord.%s at line %d moved into channels.discord.accounts[]", keyNode.Value, keyNode.Line)}
+			return configkit.Field("channels.discord."+keyNode.Value, fault.New(ErrorCodeConfigShapeChanged, fmt.Sprintf("at line %d moved into channels.discord.accounts[]", keyNode.Line)))
 		case "accounts":
 			if err := validateDiscordAccountShapes(valueNode); err != nil {
 				return err
@@ -831,7 +765,7 @@ func validateDiscordAccountShapes(accountsNode *yamlv3.Node) error {
 				}
 			case "link_previews":
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
-					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.link_previews must be a boolean at line %d", field, valueNode.Line)}
+					return configkit.Invalid(field+".link_previews", fmt.Sprintf("must be a boolean at line %d", valueNode.Line))
 				}
 			case "name", "bot_token_ref", "persona":
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
@@ -962,7 +896,7 @@ func validateTelegramAccountShapes(accountsNode *yamlv3.Node) error {
 				}
 			case "link_previews":
 				if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
-					return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.link_previews must be a boolean at line %d", field, valueNode.Line)}
+					return configkit.Invalid(field+".link_previews", fmt.Sprintf("must be a boolean at line %d", valueNode.Line))
 				}
 			case "allowed_user_ids", "allowed_chat_ids":
 				if err := quotedStringSequence(field+"."+keyNode.Value, valueNode); err != nil {
@@ -1452,15 +1386,15 @@ func validateWorkflowsShapes(doc *yamlv3.Node) error {
 			}
 		case "generated":
 			if value.Kind != yamlv3.MappingNode {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.generated must be a mapping"}
+				return configkit.Invalid("workflows.generated", "must be a mapping")
 			}
 			for j := 0; j+1 < len(value.Content); j += 2 {
 				limit, limitValue := value.Content[j].Value, value.Content[j+1]
 				if limit != "max_steps" && limit != "max_tokens" {
-					return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.generated." + limit + " is not a known key"}
+					return configkit.Invalid("workflows.generated."+limit, "is not a known key")
 				}
 				if limitValue.Kind != yamlv3.ScalarNode || limitValue.Tag != "!!int" {
-					return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.generated." + limit + " must be an integer"}
+					return configkit.Invalid("workflows.generated."+limit, "must be an integer")
 				}
 			}
 		}
@@ -1569,26 +1503,26 @@ func validateMCPShapes(doc *yamlv3.Node) error {
 func validateEvalBehaviorShape(index int, node *yamlv3.Node) error {
 	field := fmt.Sprintf("agents.definitions[%d].evals.behavior", index)
 	if node.Kind != yamlv3.MappingNode {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " must be a mapping"}
+		return configkit.Invalid(field, "must be a mapping")
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key, value := node.Content[i].Value, node.Content[i+1]
 		switch key {
 		case "required", "enforce_on_regression":
 			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!bool" {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.%s must be a boolean", field, key)}
+				return configkit.Invalid(field+"."+key, "must be a boolean")
 			}
 		case "min_score":
 			score, err := strconv.ParseFloat(value.Value, 64)
 			if value.Kind != yamlv3.ScalarNode || (value.Tag != "!!float" && value.Tag != "!!int") || err != nil || score <= 0 || score > 1 {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".min_score must be a number greater than 0 and at most 1"}
+				return configkit.Invalid(field+".min_score", "must be a number greater than 0 and at most 1")
 			}
 		case "judge_route", "schedule":
 			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" || strings.TrimSpace(value.Value) == "" {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.%s must be a non-empty string", field, key)}
+				return configkit.Invalid(field+"."+key, "must be a non-empty string")
 			}
 		default:
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.%s is not a known key", field, key)}
+			return configkit.Invalid(field+"."+key, "is not a known key")
 		}
 	}
 	return nil
@@ -1624,7 +1558,7 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 					return fmt.Errorf("agents.definitions.%s must be a string at line %d", key, value.Line)
 				}
 				if key == "name" && value.Value == "" {
-					return &Error{Code: ErrorCodePersonaInvalid, Detail: fmt.Sprintf("agents.definitions[%d].name must not be empty", index)}
+					return configkit.Field(fmt.Sprintf("agents.definitions[%d].name", index), fault.New(ErrorCodePersonaInvalid, "must not be empty"))
 				}
 			case slices.Contains(listFields, key):
 				if value.Kind != yamlv3.SequenceNode {
@@ -1652,7 +1586,7 @@ func validateAgentsShapes(doc *yamlv3.Node) error {
 						continue
 					}
 					if evalKey != "dir" {
-						return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("agents.definitions[%d].evals.%s is not a known key", index, evalKey)}
+						return configkit.Invalid(fmt.Sprintf("agents.definitions[%d].evals.%s", index, evalKey), "is not a known key")
 					}
 					if evalKey == "dir" && (evalValue.Kind != yamlv3.ScalarNode || evalValue.Tag != "!!str" || evalValue.Value == "") {
 						return fmt.Errorf("agents.definitions.evals.dir must be a non-empty string at line %d", evalValue.Line)
@@ -1868,7 +1802,7 @@ func validateLoadedModels(models Models, routingExplicit bool) error {
 	for _, name := range slices.Sorted(maps.Keys(models.Providers)) {
 		preset := models.Providers[name]
 		if !modelDefinitionNamePattern.MatchString(name) {
-			problems = append(problems, &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("invalid models.providers name %q", name)})
+			problems = append(problems, configkit.Field("models.providers", fault.New(ErrorCodeModelProviderInvalid, fmt.Sprintf("invalid name %q", name))))
 			continue
 		}
 		if err := validateProviderShape("models.providers."+name, preset); err != nil {
@@ -1890,12 +1824,12 @@ func modelDefinitionProblems(models Models, name string, definition *ModelDefini
 	}
 	switch {
 	case strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "":
-		problems = append(problems, &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s requires non-empty protocol and model", name)})
+		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelProtocolInvalid, "requires non-empty protocol and model")))
 	case !validProtocol(definition.Protocol):
-		problems = append(problems, &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s uses unsupported protocol %q", name, definition.Protocol)})
+		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelProtocolInvalid, "uses unsupported protocol (must be one of "+strings.Join(protocolNames(), ", ")+")")))
 	}
 	if err := ValidateBaseURL(definition.BaseURL); err != nil {
-		problems = append(problems, &Error{Code: ErrorCodeModelProtocolInvalid, Detail: fmt.Sprintf("models.definitions.%s.base_url: %v", name, err)})
+		problems = append(problems, configkit.Field("models.definitions."+name+".base_url", fault.New(ErrorCodeModelProtocolInvalid, err.Error())))
 	}
 	problems = append(problems, modelSecretProblems(name, definition, definition.BaseURL)...)
 	problems = append(problems, modelCapabilityProblems(name, definition)...)
@@ -1905,7 +1839,7 @@ func modelDefinitionProblems(models Models, name string, definition *ModelDefini
 func providerDefinitionProblems(models Models, name string, definition *ModelDefinition) []error {
 	var problems []error
 	if strings.TrimSpace(definition.Model) == "" {
-		problems = append(problems, &Error{Code: ErrorCodeModelProviderInvalid, Detail: fmt.Sprintf("models.definitions.%s requires non-empty model", name)})
+		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelProviderInvalid, "requires non-empty model")))
 	}
 	resolved, err := models.ResolveDefinition(definition)
 	if err != nil {
@@ -1920,13 +1854,13 @@ func providerDefinitionProblems(models Models, name string, definition *ModelDef
 func modelSecretProblems(name string, definition *ModelDefinition, baseURL string) []error {
 	var problems []error
 	if definition.APIKeyEnv != "" && definition.APIKeyFile != "" {
-		problems = append(problems, &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s must set only one of api_key_env or api_key_file", name)})
+		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelSecretInvalid, "must set only one of api_key_env or api_key_file")))
 	}
 	if definition.APIKeyEnv != "" && !envNamePattern.MatchString(definition.APIKeyEnv) {
-		problems = append(problems, &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s.api_key_env is not a valid environment variable name", name)})
+		problems = append(problems, configkit.Field("models.definitions."+name+".api_key_env", fault.New(ErrorCodeModelSecretInvalid, "is not a valid environment variable name")))
 	}
 	if definition.APIKeyEnv == "" && definition.APIKeyFile == "" && !IsLoopbackBaseURL(baseURL) {
-		problems = append(problems, &Error{Code: ErrorCodeModelSecretInvalid, Detail: fmt.Sprintf("models.definitions.%s requires api_key_env or api_key_file for a non-loopback endpoint", name)})
+		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelSecretInvalid, "requires api_key_env or api_key_file for a non-loopback endpoint")))
 	}
 	return problems
 }
@@ -1934,10 +1868,10 @@ func modelSecretProblems(name string, definition *ModelDefinition, baseURL strin
 func modelCapabilityProblems(name string, definition *ModelDefinition) []error {
 	var problems []error
 	if definition.Capabilities.ContextTokens <= 0 || strings.TrimSpace(definition.Capabilities.Tokenizer) == "" {
-		problems = append(problems, &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s requires positive context_tokens and a tokenizer", name)})
+		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelCapabilityUnsupported, "requires positive context_tokens and a tokenizer")))
 	}
 	if definition.Capabilities.MicrosPerInputToken < 0 || definition.Capabilities.MicrosPerOutputToken < 0 {
-		problems = append(problems, &Error{Code: ErrorCodeModelCapabilityUnsupported, Detail: fmt.Sprintf("models.definitions.%s.capabilities cost rates must not be negative", name)})
+		problems = append(problems, configkit.Field("models.definitions."+name+".capabilities", fault.New(ErrorCodeModelCapabilityUnsupported, "cost rates must not be negative")))
 	}
 	return problems
 }
@@ -1956,11 +1890,11 @@ func routingExplicitIn(data []byte) bool {
 func validateRouting(models Models, explicit bool) error {
 	for task, role := range models.Routing {
 		if role != "primary" && role != "auxiliary" {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("models.routing.%s: role %q is not supported (must be primary or auxiliary)", task, role)}
+			return configkit.Invalid("models.routing."+task, "role is not supported (must be primary or auxiliary)")
 		}
 		if explicit && len(models.Definitions) > 0 {
 			if _, ok := models.Definitions[role]; !ok {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("models.routing.%s references undefined model %q", task, role)}
+				return configkit.Invalid("models.routing."+task, "references an undefined model")
 			}
 		}
 	}
@@ -1975,42 +1909,42 @@ func validateLoadedModelRoutes(routes map[string]ModelRoute, models Models) erro
 	for _, name := range slices.Sorted(maps.Keys(routes)) {
 		route := routes[name]
 		if !modelDefinitionNamePattern.MatchString(name) {
-			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("invalid model route name %q", name)})
+			problems = append(problems, configkit.Invalid("model_routes", fmt.Sprintf("invalid route name %q", name)))
 		}
 		if len(route.Candidates) < 1 {
-			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s requires at least one candidate", name)})
+			problems = append(problems, configkit.Invalid("model_routes."+name, "requires at least one candidate"))
 		} else if len(route.Candidates) > 4 {
-			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s exceeds maximum chain depth of 4 candidates", name)})
+			problems = append(problems, configkit.Invalid("model_routes."+name, "exceeds maximum chain depth of 4 candidates"))
 		}
 		seen := make(map[string]bool, len(route.Candidates))
 		for _, candidate := range route.Candidates {
 			if seen[candidate] {
-				problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s contains duplicate candidate %q", name, candidate)})
+				problems = append(problems, configkit.Invalid("model_routes."+name, "contains a duplicate candidate"))
 			}
 			seen[candidate] = true
 			if len(models.Definitions) > 0 {
 				if _, ok := models.Definitions[candidate]; !ok {
-					problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s references unknown model definition %q", name, candidate)})
+					problems = append(problems, configkit.Invalid("model_routes."+name, "references unknown model definition"))
 				}
 			}
 		}
 		if route.MaxProviderAttempts < 0 {
-			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.max_provider_attempts must not be negative", name)})
+			problems = append(problems, configkit.Invalid("model_routes."+name+".max_provider_attempts", "must not be negative"))
 		}
 		if route.RetryDelayBudget < 0 {
-			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.retry_delay_budget must not be negative", name)})
+			problems = append(problems, configkit.Invalid("model_routes."+name+".retry_delay_budget", "must not be negative"))
 		}
 		if route.CostBudgetUSD < 0 {
-			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.cost_budget_usd must not be negative", name)})
+			problems = append(problems, configkit.Invalid("model_routes."+name+".cost_budget_usd", "must not be negative"))
 		}
 		if route.Circuit.FailureThreshold < 0 {
-			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.circuit.failure_threshold must not be negative", name)})
+			problems = append(problems, configkit.Invalid("model_routes."+name+".circuit.failure_threshold", "must not be negative"))
 		}
 		if route.Circuit.OpenDuration < 0 {
-			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.circuit.open_duration must not be negative", name)})
+			problems = append(problems, configkit.Invalid("model_routes."+name+".circuit.open_duration", "must not be negative"))
 		}
 		if route.Circuit.MaxOpenDuration < 0 {
-			problems = append(problems, &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("model_routes.%s.circuit.max_open_duration must not be negative", name)})
+			problems = append(problems, configkit.Invalid("model_routes."+name+".circuit.max_open_duration", "must not be negative"))
 		}
 	}
 	return errors.Join(problems...)
@@ -2625,17 +2559,17 @@ func validateSync(syncConfig *Sync) error {
 	var problems []error
 	switch {
 	case strings.TrimSpace(syncConfig.Remote) == "" && syncConfig.Enabled:
-		problems = append(problems, errors.New("sync.enabled requires sync.remote"))
+		problems = append(problems, configkit.Invalid("sync.enabled", "requires sync.remote"))
 	case strings.TrimSpace(syncConfig.Remote) != "":
 		if err := validateSyncRemote(syncConfig.Remote); err != nil {
 			problems = append(problems, err)
 		}
 	}
 	if !syncBranchPattern.MatchString(syncConfig.Branch) {
-		problems = append(problems, fmt.Errorf("sync.branch %q must match [A-Za-z0-9][A-Za-z0-9._/-]*", syncConfig.Branch))
+		problems = append(problems, configkit.Invalid("sync.branch", "must match [A-Za-z0-9][A-Za-z0-9._/-]*"))
 	}
 	if syncConfig.Interval <= 0 || time.Duration(syncConfig.Interval) > 24*time.Hour {
-		problems = append(problems, errors.New("sync.interval must be positive and at most 24h"))
+		problems = append(problems, configkit.Invalid("sync.interval", "must be positive and at most 24h"))
 	}
 	for _, ref := range []struct {
 		name  string
@@ -2645,7 +2579,7 @@ func validateSync(syncConfig *Sync) error {
 		{"known_hosts_ref", syncConfig.KnownHostsRef},
 	} {
 		if !strings.HasPrefix(ref.value, "env://") && !strings.HasPrefix(ref.value, "file://") {
-			problems = append(problems, fmt.Errorf("sync.%s must use env:// or file://", ref.name))
+			problems = append(problems, configkit.Invalid("sync."+ref.name, "must use env:// or file://"))
 		}
 	}
 	for _, binary := range []struct {
@@ -2657,48 +2591,45 @@ func validateSync(syncConfig *Sync) error {
 	} {
 		switch {
 		case strings.TrimSpace(binary.value) == "":
-			problems = append(problems, fmt.Errorf("sync.%s must not be empty", binary.name))
+			problems = append(problems, configkit.Invalid("sync."+binary.name, "must not be empty"))
 		case !filepath.IsAbs(binary.value):
-			problems = append(problems, fmt.Errorf("sync.%s must be an absolute path", binary.name))
+			problems = append(problems, configkit.Invalid("sync."+binary.name, "must be an absolute path"))
 		case filepath.Clean(binary.value) != binary.value:
-			problems = append(problems, fmt.Errorf("sync.%s must be clean", binary.name))
+			problems = append(problems, configkit.Invalid("sync."+binary.name, "must be clean"))
 		}
 	}
 	if len(syncConfig.Include) == 0 {
-		problems = append(problems, errors.New("sync.include must list at least one pattern"))
+		problems = append(problems, configkit.Invalid("sync.include", "must list at least one pattern"))
 	}
 	for _, pattern := range syncConfig.Include {
 		if pattern != "skills/**" && pattern != "config-templates/**" {
-			problems = append(problems, fmt.Errorf("sync.include pattern %q is not supported", pattern))
+			problems = append(problems, configkit.Invalid("sync.include", "entries must be one of skills/**, config-templates/**"))
 		}
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateSyncRemote(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return errors.New("sync.remote is not a valid URL")
+		return configkit.Invalid("sync.remote", "is not a valid URL")
 	}
 	if u.Scheme != "ssh" && u.Scheme != "https" {
-		return fmt.Errorf("sync.remote scheme %q must be ssh or https", u.Scheme)
+		return configkit.Invalid("sync.remote", "scheme must be ssh or https")
 	}
 	if u.Host == "" {
-		return errors.New("sync.remote has no host")
+		return configkit.Invalid("sync.remote", "has no host")
 	}
 	if u.User != nil {
 		if u.Scheme != "ssh" {
-			return errors.New("sync.remote must not embed credentials")
+			return configkit.Invalid("sync.remote", "must not embed credentials")
 		}
 		if _, hasPassword := u.User.Password(); hasPassword {
-			return errors.New("sync.remote must not embed a password")
+			return configkit.Invalid("sync.remote", "must not embed a password")
 		}
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("sync.remote must not carry query or fragment")
+		return configkit.Invalid("sync.remote", "must not carry query or fragment")
 	}
 	return nil
 }
@@ -3039,26 +2970,26 @@ func envValuePresent(path string) bool {
 
 func validateRuntime(runtime Runtime) error {
 	if runtime.MaxActiveTurns <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.max_active_turns must be positive"}
+		return configkit.Invalid("runtime.max_active_turns", "must be positive")
 	}
 	if runtime.MaxPendingTurns < runtime.MaxActiveTurns {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.max_pending_turns must be at least runtime.max_active_turns"}
+		return configkit.Invalid("runtime.max_pending_turns", "must be at least runtime.max_active_turns")
 	}
 	if runtime.TurnTimeout <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.turn_timeout must be positive"}
+		return configkit.Invalid("runtime.turn_timeout", "must be positive")
 	}
 	if runtime.ShutdownTimeout <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.shutdown_timeout must be positive"}
+		return configkit.Invalid("runtime.shutdown_timeout", "must be positive")
 	}
 	if time.Duration(runtime.RunRetention) < MinRetention {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "runtime.run_retention must be at least 24h"}
+		return configkit.Invalid("runtime.run_retention", "must be at least 24h")
 	}
 	return nil
 }
 
 func validateServer(server Server) error {
 	if server.Port < 1 || server.Port > 65535 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("server.port %d is out of range (1-65535)", server.Port)}
+		return configkit.Invalid("server.port", fmt.Sprintf("%d is out of range (1-65535)", server.Port))
 	}
 	return nil
 }
@@ -3068,10 +2999,10 @@ func validateWorkflows(workflows *Workflows) error {
 		return nil
 	}
 	if workflows.MaxConcurrentSteps < 1 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.max_concurrent_steps must be at least 1"}
+		return configkit.Invalid("workflows.max_concurrent_steps", "must be at least 1")
 	}
 	if workflows.Generated.MaxSteps < 1 || workflows.Generated.MaxTokens < 1 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "workflows.generated.max_steps and max_tokens must be positive"}
+		return configkit.Invalid("workflows.generated", "max_steps and max_tokens must be positive")
 	}
 	return nil
 }
@@ -3084,10 +3015,10 @@ func validateMCP(m *MCP) error {
 	for i := range m.Servers {
 		s := &m.Servers[i]
 		if !mcpServerNamePattern.MatchString(s.Name) {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("mcp.servers[%d].name must match [a-z][a-z0-9_-]{0,62}", i)}
+			return configkit.Invalid(fmt.Sprintf("mcp.servers[%d].name", i), "must match [a-z][a-z0-9_-]{0,62}")
 		}
 		if _, exists := seen[s.Name]; exists {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("duplicate mcp server name %q", s.Name)}
+			return configkit.Invalid(fmt.Sprintf("mcp.servers[%d].name", i), fmt.Sprintf("%q is configured more than once", s.Name))
 		}
 		seen[s.Name] = struct{}{}
 		if err := ValidateMCPServer(s, fmt.Sprintf("mcp.servers[%s]", s.Name)); err != nil {
@@ -3101,81 +3032,81 @@ func ValidateMCPServer(s *MCPServer, field string) error {
 	switch s.Transport {
 	case "stdio":
 		if s.Command == "" {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".command is required for stdio transport"}
+			return configkit.Invalid(field+".command", "is required for stdio transport")
 		}
 		if !filepath.IsAbs(s.Command) {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".command must be an absolute path"}
+			return configkit.Invalid(field+".command", "must be an absolute path")
 		}
 		if s.URL != "" {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".url is not allowed for stdio transport"}
+			return configkit.Invalid(field+".url", "is not allowed for stdio transport")
 		}
 		if s.Auth != nil {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth is not allowed for stdio transport"}
+			return configkit.Invalid(field+".auth", "is not allowed for stdio transport")
 		}
 	case "streamable_http":
 		if s.URL == "" {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".url is required for streamable_http transport"}
+			return configkit.Invalid(field+".url", "is required for streamable_http transport")
 		}
 		if s.Command != "" || len(s.Args) > 0 {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".command/args are not allowed for streamable_http transport"}
+			return configkit.Invalid(field+".command", "and args are not allowed for streamable_http transport")
 		}
 		if err := ValidateBaseURL(s.URL); err != nil {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.url invalid: %v", field, err)}
+			return configkit.Invalid(field+".url", "is invalid: "+err.Error())
 		}
 	case "legacy_sse":
 		if !s.CompatibilityAck {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " legacy_sse requires compatibility_ack: true"}
+			return configkit.Invalid(field, "legacy_sse requires compatibility_ack: true")
 		}
 		if s.URL == "" {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".url is required for legacy_sse transport"}
+			return configkit.Invalid(field+".url", "is required for legacy_sse transport")
 		}
 		if err := ValidateBaseURL(s.URL); err != nil {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s.url invalid: %v", field, err)}
+			return configkit.Invalid(field+".url", "is invalid: "+err.Error())
 		}
 	default:
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".transport must be stdio, streamable_http, or legacy_sse"}
+		return configkit.Invalid(field+".transport", "must be stdio, streamable_http, or legacy_sse")
 	}
 
 	if s.StartupTimeout < 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".startup_timeout must not be negative"}
+		return configkit.Invalid(field+".startup_timeout", "must not be negative")
 	}
 	if s.RequestTimeout < 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".request_timeout must not be negative"}
+		return configkit.Invalid(field+".request_timeout", "must not be negative")
 	}
 	if s.ConnectTimeout < 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".connect_timeout must not be negative"}
+		return configkit.Invalid(field+".connect_timeout", "must not be negative")
 	}
 	if s.MaxMessageSize < 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".max_message_size must not be negative"}
+		return configkit.Invalid(field+".max_message_size", "must not be negative")
 	}
 
 	if s.Restart != nil {
 		if s.Restart.MaxAttempts < 0 {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".restart.max_attempts must not be negative"}
+			return configkit.Invalid(field+".restart.max_attempts", "must not be negative")
 		}
 		if s.Restart.Window < 0 {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".restart.window must not be negative"}
+			return configkit.Invalid(field+".restart.window", "must not be negative")
 		}
 	}
 
 	if s.Auth != nil {
 		if s.Auth.OAuth != nil && s.Auth.Static != nil {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth must declare either oauth or static, not both"}
+			return configkit.Invalid(field+".auth", "must declare either oauth or static, not both")
 		}
 		if s.Auth.OAuth == nil && s.Auth.Static == nil {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth must declare either oauth or static"}
+			return configkit.Invalid(field+".auth", "must declare either oauth or static")
 		}
 		if s.Auth.OAuth != nil {
 			if s.Auth.OAuth.ClientIDEnv == "" {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth.oauth.client_id_env is required"}
+				return configkit.Invalid(field+".auth.oauth.client_id_env", "is required")
 			}
 			if s.Auth.OAuth.ClientSecretEnv == "" {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth.oauth.client_secret_env is required"}
+				return configkit.Invalid(field+".auth.oauth.client_secret_env", "is required")
 			}
 		}
 		if s.Auth.Static != nil {
 			if s.Auth.Static.CredentialRef == "" {
-				return &Error{Code: ErrorCodeConfigInvalid, Detail: field + ".auth.static.credential_ref is required"}
+				return configkit.Invalid(field+".auth.static.credential_ref", "is required")
 			}
 		}
 	}
@@ -3207,30 +3138,31 @@ func ApplyMCPServerDefaults(s *MCPServer) {
 }
 
 func validateLogging(loggingConfig Logging) error {
+	var problems []error
 	if _, err := logging.ParseLevel(loggingConfig.Level); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+		problems = append(problems, configkit.Invalid("logging.level", "must be one of debug, info, warn, error"))
 	}
 	if _, err := logging.ParseFormat(loggingConfig.Format); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+		problems = append(problems, configkit.Invalid("logging.format", "must be one of text, json"))
 	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateStorage(storage Storage) error {
 	if storage.MaxOpenConnections < 1 || storage.MaxOpenConnections > 16 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("storage.max_open_connections %d is out of range (1-16)", storage.MaxOpenConnections)}
+		return configkit.Invalid("storage.max_open_connections", fmt.Sprintf("%d is out of range (1-16)", storage.MaxOpenConnections))
 	}
 	if storage.BusyTimeout <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "storage.busy_timeout must be positive"}
+		return configkit.Invalid("storage.busy_timeout", "must be positive")
 	}
 	if storage.ArtifactQuota <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "storage.artifact_quota must be positive"}
+		return configkit.Invalid("storage.artifact_quota", "must be positive")
 	}
 	if storage.BackupInterval <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "storage.backup_interval must be positive"}
+		return configkit.Invalid("storage.backup_interval", "must be positive")
 	}
 	if storage.BackupRetention < 1 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "storage.backup_retention must be at least 1"}
+		return configkit.Invalid("storage.backup_retention", "must be at least 1")
 	}
 	return nil
 }
@@ -3239,35 +3171,35 @@ func validateTelemetry(t Telemetry) error {
 	switch t.Exporter {
 	case "", "none", "stdout", "otlp_grpc", "otlp_http":
 	default:
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("telemetry.exporter %q is not supported (none, stdout, otlp_grpc, otlp_http)", t.Exporter)}
+		return configkit.Invalid("telemetry.exporter", "must be one of none, stdout, otlp_grpc, otlp_http")
 	}
 	if t.SampleRatio < 0 || t.SampleRatio > 1 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("telemetry.sample_ratio %f is out of range (0-1)", t.SampleRatio)}
+		return configkit.Invalid("telemetry.sample_ratio", fmt.Sprintf("%f is out of range (0-1)", t.SampleRatio))
 	}
 	if t.QueueSize < 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "telemetry.queue_size must not be negative"}
+		return configkit.Invalid("telemetry.queue_size", "must not be negative")
 	}
 	if t.ExportTimeout < 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "telemetry.export_timeout must not be negative"}
+		return configkit.Invalid("telemetry.export_timeout", "must not be negative")
 	}
 	if (t.Exporter == "otlp_grpc" || t.Exporter == "otlp_http") && t.Endpoint == "" {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("telemetry.endpoint is required for exporter %q", t.Exporter)}
+		return configkit.Invalid("telemetry.endpoint", fmt.Sprintf("is required for exporter %q", t.Exporter))
 	}
 	return nil
 }
 
 func validateUsage(u Usage) error {
 	if u.Currency == "" {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.currency must not be empty"}
+		return configkit.Invalid("usage.currency", "must not be empty")
 	}
 	if u.DailyBudgetMicros < 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.daily_budget_micros must not be negative"}
+		return configkit.Invalid("usage.daily_budget_micros", "must not be negative")
 	}
 	if u.MonthlyBudgetMicros < 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.monthly_budget_micros must not be negative"}
+		return configkit.Invalid("usage.monthly_budget_micros", "must not be negative")
 	}
 	if u.ReservationTTL <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "usage.reservation_ttl must be positive"}
+		return configkit.Invalid("usage.reservation_ttl", "must be positive")
 	}
 	return nil
 }
@@ -3277,52 +3209,52 @@ func validateHealth(h Health) error {
 		return err
 	}
 	if h.CheckInterval <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.check_interval must be positive"}
+		return configkit.Invalid("health.check_interval", "must be positive")
 	}
 	if h.CheckTimeout <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.check_timeout must be positive"}
+		return configkit.Invalid("health.check_timeout", "must be positive")
 	}
 	if h.CheckTimeout > h.CheckInterval {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.check_timeout must not exceed health.check_interval"}
+		return configkit.Invalid("health.check_timeout", "must not exceed health.check_interval")
 	}
 	if h.DiskWarningPercent < 1 || h.DiskWarningPercent > 99 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.disk_warning_percent must be between 1 and 99"}
+		return configkit.Invalid("health.disk_warning_percent", "must be between 1 and 99")
 	}
 	if h.DiskCriticalPercent < 1 || h.DiskCriticalPercent > 99 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.disk_critical_percent must be between 1 and 99"}
+		return configkit.Invalid("health.disk_critical_percent", "must be between 1 and 99")
 	}
 	if h.DiskCriticalPercent >= h.DiskWarningPercent {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.disk_critical_percent must be below health.disk_warning_percent"}
+		return configkit.Invalid("health.disk_critical_percent", "must be below health.disk_warning_percent")
 	}
 	if h.DiskCriticalFloorBytes <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.disk_critical_floor_bytes must be positive"}
+		return configkit.Invalid("health.disk_critical_floor_bytes", "must be positive")
 	}
 	if h.BackupMaxAge <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.backup_max_age must be positive"}
+		return configkit.Invalid("health.backup_max_age", "must be positive")
 	}
 	if h.RestoreVerificationMaxAge <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "health.restore_verification_max_age must be positive"}
+		return configkit.Invalid("health.restore_verification_max_age", "must be positive")
 	}
 	return nil
 }
 
 func validateTerminal(t Terminal) error {
 	if t.RenderHz <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.render_hz must be positive"}
+		return configkit.Invalid("terminal.render_hz", "must be positive")
 	}
 	if t.MaxInputBytes <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.max_input_bytes must be positive"}
+		return configkit.Invalid("terminal.max_input_bytes", "must be positive")
 	}
 	if t.InMemoryHistory < 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.in_memory_history must not be negative"}
+		return configkit.Invalid("terminal.in_memory_history", "must not be negative")
 	}
 	if t.SecondInterruptTime <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.second_interrupt_window must be positive"}
+		return configkit.Invalid("terminal.second_interrupt_window", "must be positive")
 	}
 	switch t.PlainApproval {
 	case "deny":
 	default:
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "terminal.plain_approval must be \"deny\""}
+		return configkit.Invalid("terminal.plain_approval", "must be \"deny\"")
 	}
 	return nil
 }
@@ -3330,11 +3262,11 @@ func validateTerminal(t Terminal) error {
 func validateLoopbackListen(listen, field string) error {
 	host, portText, err := net.SplitHostPort(listen)
 	if err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("%s must be host:port: %v", field, err)}
+		return configkit.Invalid(field, "must be host:port")
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port < 1 || port > 65535 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " port must be between 1 and 65535"}
+		return configkit.Invalid(field, "port must be between 1 and 65535")
 	}
 	if host == "localhost" {
 		return nil
@@ -3342,69 +3274,70 @@ func validateLoopbackListen(listen, field string) error {
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		return nil
 	}
-	return &Error{Code: ErrorCodeConfigInvalid, Detail: field + " must bind loopback; non-loopback probe exposure requires the authenticated admin surface"}
+	return configkit.Invalid(field, "must bind loopback; non-loopback probe exposure requires the authenticated admin surface")
 }
 
 func listenAddressProblem(field, address string) error {
 	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
-		return fmt.Errorf("%s must be host:port: %w", field, err)
+		return configkit.Invalid(field, "must be host:port")
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port < 1 || port > 65535 {
-		return fmt.Errorf("%s port must be between 1 and 65535", field)
+		return configkit.Invalid(field, "port must be between 1 and 65535")
 	}
 	if host == "" {
-		return fmt.Errorf("%s must include a host", field)
+		return configkit.Invalid(field, "must include a host")
 	}
 	return nil
 }
 
 func validateWebhook(w *Webhook, healthListen string) error {
 	if err := listenAddressProblem("webhook.listen_address", w.Listen); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+		return err
 	}
 	if w.MaxBodySize <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.max_body_size must be positive"}
+		return configkit.Invalid("webhook.max_body_size", "must be positive")
 	}
 	if w.TimestampTolerance <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.timestamp_tolerance must be positive"}
+		return configkit.Invalid("webhook.timestamp_tolerance", "must be positive")
 	}
 	if w.ReplayRetention <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.replay_retention must be positive"}
+		return configkit.Invalid("webhook.replay_retention", "must be positive")
 	}
 	if w.RequestsPerMinute < 1 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.requests_per_minute must be at least 1"}
+		return configkit.Invalid("webhook.requests_per_minute", "must be at least 1")
 	}
 	seen := make(map[string]bool, len(w.Keys))
 	var problems []error
-	for _, key := range w.Keys {
+	for i, key := range w.Keys {
+		field := fmt.Sprintf("webhook.keys[%d]", i)
 		switch {
 		case key.ID == "":
-			problems = append(problems, errors.New("webhook key id must not be empty"))
+			problems = append(problems, configkit.Invalid(field+".id", "must not be empty"))
 			continue
 		case seen[key.ID]:
-			problems = append(problems, fmt.Errorf("webhook key id %q is configured more than once", key.ID))
+			problems = append(problems, configkit.Invalid(field+".id", fmt.Sprintf("%q is configured more than once", key.ID)))
 			continue
 		}
 		seen[key.ID] = true
 		if !envNamePattern.MatchString(key.SecretEnv) {
-			problems = append(problems, fmt.Errorf("webhook key %q secret_env %q is not a valid environment variable name", key.ID, key.SecretEnv))
+			problems = append(problems, configkit.Invalid(field+".secret_env", fmt.Sprintf("%q is not a valid environment variable name", key.SecretEnv)))
 		}
 		if key.AcceptUntil != "" {
 			if _, err := time.Parse(time.RFC3339, key.AcceptUntil); err != nil {
-				problems = append(problems, fmt.Errorf("webhook key %q accept_until must be an RFC3339 timestamp or empty", key.ID))
+				problems = append(problems, configkit.Invalid(field+".accept_until", "must be an RFC3339 timestamp or empty"))
 			}
 		}
 	}
 	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
+		return err
 	}
 	if !w.Enabled {
 		return nil
 	}
 	if len(w.Keys) == 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.enabled requires at least one key"}
+		return configkit.Invalid("webhook.enabled", "requires at least one key")
 	}
 	now := time.Now().UTC()
 	active := false
@@ -3420,10 +3353,10 @@ func validateWebhook(w *Webhook, healthListen string) error {
 		}
 	}
 	if !active {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.enabled requires at least one key whose accept_until has not passed"}
+		return configkit.Invalid("webhook.enabled", "requires at least one key whose accept_until has not passed")
 	}
 	if w.Listen == healthListen {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "webhook.listen_address must differ from health.listen"}
+		return configkit.Invalid("webhook.listen_address", "must differ from health.listen")
 	}
 	return nil
 }
@@ -3432,7 +3365,7 @@ var discordAccountNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 func validateDiscord(discord *Discord) error {
 	if discord == nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.discord must not be nil"}
+		return configkit.Invalid("channels.discord", "must not be nil")
 	}
 	var problems []error
 	names := make(map[string]bool, len(discord.Accounts))
@@ -3442,19 +3375,19 @@ func validateDiscord(discord *Discord) error {
 		field := fmt.Sprintf("channels.discord.accounts[%d]", i)
 		switch {
 		case !discordAccountNamePattern.MatchString(account.Name):
-			problems = append(problems, fmt.Errorf("%s.name %q must match %s", field, account.Name, discordAccountNamePattern.String()))
+			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q must match %s", account.Name, discordAccountNamePattern.String())))
 		case names[account.Name]:
-			problems = append(problems, fmt.Errorf("%s.name %q is configured more than once", field, account.Name))
+			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q is configured more than once", account.Name)))
 		default:
 			names[account.Name] = true
 		}
 		switch {
 		case account.BotTokenRef == "":
-			problems = append(problems, fmt.Errorf("%s.bot_token_ref must not be empty", field))
+			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "must not be empty"))
 		case !strings.HasPrefix(account.BotTokenRef, "env://") && !strings.HasPrefix(account.BotTokenRef, "file://"):
-			problems = append(problems, fmt.Errorf("%s.bot_token_ref must use env:// or file://", field))
+			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "must use env:// or file://"))
 		case tokenRefs[account.BotTokenRef]:
-			problems = append(problems, fmt.Errorf("%s.bot_token_ref is shared with another account", field))
+			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "is shared with another account"))
 		default:
 			tokenRefs[account.BotTokenRef] = true
 		}
@@ -3462,25 +3395,22 @@ func validateDiscord(discord *Discord) error {
 		problems = append(problems, snowflakeListProblems(field+".allowed_guild_ids", account.AllowedGuildIDs)...)
 		problems = append(problems, snowflakeListProblems(field+".allowed_channel_ids", account.AllowedChannelIDs)...)
 		if discord.Enabled && len(account.AllowedUserIDs) == 0 {
-			problems = append(problems, fmt.Errorf("%s requires at least one allowed_user_ids entry when channels.discord is enabled", field))
+			problems = append(problems, configkit.Invalid(field, "requires at least one allowed_user_ids entry when channels.discord is enabled"))
 		}
 	}
 	if discord.Enabled && len(discord.Accounts) == 0 {
-		problems = append(problems, errors.New("channels.discord.enabled requires at least one channels.discord.accounts entry"))
+		problems = append(problems, configkit.Invalid("channels.discord.enabled", "requires at least one channels.discord.accounts entry"))
 	}
 	if discord.MinEditInterval <= 0 {
-		problems = append(problems, errors.New("channels.discord.min_edit_interval must be positive"))
+		problems = append(problems, configkit.Invalid("channels.discord.min_edit_interval", "must be positive"))
 	}
 	if discord.MaxAttachmentBytes <= 0 {
-		problems = append(problems, errors.New("channels.discord.max_attachment_bytes must be positive"))
+		problems = append(problems, configkit.Invalid("channels.discord.max_attachment_bytes", "must be positive"))
 	}
 	if discord.ThreadAutoArchiveMinutes <= 0 {
-		problems = append(problems, errors.New("channels.discord.thread_auto_archive_minutes must be positive"))
+		problems = append(problems, configkit.Invalid("channels.discord.thread_auto_archive_minutes", "must be positive"))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 const (
@@ -3492,7 +3422,7 @@ const (
 
 func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error {
 	if telegram == nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels.telegram must not be nil"}
+		return configkit.Invalid("channels.telegram", "must not be nil")
 	}
 	var problems []error
 	names := make(map[string]bool, len(telegram.Accounts))
@@ -3505,19 +3435,19 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 		field := fmt.Sprintf("channels.telegram.accounts[%d]", i)
 		switch {
 		case !discordAccountNamePattern.MatchString(account.Name):
-			problems = append(problems, fmt.Errorf("%s.name %q must match %s", field, account.Name, discordAccountNamePattern.String()))
+			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q must match %s", account.Name, discordAccountNamePattern.String())))
 		case names[account.Name]:
-			problems = append(problems, fmt.Errorf("%s.name %q is configured more than once", field, account.Name))
+			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q is configured more than once", account.Name)))
 		default:
 			names[account.Name] = true
 		}
 		switch {
 		case account.BotTokenRef == "":
-			problems = append(problems, fmt.Errorf("%s.bot_token_ref must not be empty", field))
+			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "must not be empty"))
 		case !strings.HasPrefix(account.BotTokenRef, "env://") && !strings.HasPrefix(account.BotTokenRef, "file://"):
-			problems = append(problems, fmt.Errorf("%s.bot_token_ref must use env:// or file://", field))
+			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "must use env:// or file://"))
 		case tokenRefs[account.BotTokenRef]:
-			problems = append(problems, fmt.Errorf("%s.bot_token_ref is shared with another account", field))
+			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "is shared with another account"))
 		default:
 			tokenRefs[account.BotTokenRef] = true
 		}
@@ -3529,35 +3459,32 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 	}
 	problems = append(problems, telegramWebhookProblems(telegram)...)
 	if telegram.Enabled && len(telegram.Accounts) == 0 {
-		problems = append(problems, errors.New("channels.telegram.enabled requires at least one channels.telegram.accounts entry"))
+		problems = append(problems, configkit.Invalid("channels.telegram.enabled", "requires at least one channels.telegram.accounts entry"))
 	}
 	if telegram.Enabled && !hasTelegramOwner(owner) {
 		for i := range telegram.Accounts {
 			if len(telegram.Accounts[i].AllowedUserIDs) == 0 {
-				problems = append(problems, errors.New("channels.telegram.enabled requires a telegram:<user_id> entry in owner.identities or an allowed_user_ids entry on every account"))
+				problems = append(problems, configkit.Invalid("channels.telegram.enabled", "requires a telegram:<user_id> entry in owner.identities or an allowed_user_ids entry on every account"))
 				break
 			}
 		}
 	}
 	timeout := time.Duration(telegram.Polling.Timeout)
 	if timeout < time.Second || timeout > telegramMaxPollTimeout || timeout%time.Second != 0 {
-		problems = append(problems, fmt.Errorf("channels.telegram.polling.timeout must be a whole number of seconds between 1s and %s", telegramMaxPollTimeout))
+		problems = append(problems, configkit.Invalid("channels.telegram.polling.timeout", fmt.Sprintf("must be a whole number of seconds between 1s and %s", telegramMaxPollTimeout)))
 	}
 	backoff := time.Duration(telegram.Polling.MaxBackoff)
 	if backoff < time.Second || backoff > telegramMaxBackoffCap {
-		problems = append(problems, fmt.Errorf("channels.telegram.polling.max_backoff must be between 1s and %s", telegramMaxBackoffCap))
+		problems = append(problems, configkit.Invalid("channels.telegram.polling.max_backoff", fmt.Sprintf("must be between 1s and %s", telegramMaxBackoffCap)))
 	}
 	editInterval := time.Duration(telegram.MinEditInterval)
 	if editInterval < telegramMinEditFloor || editInterval > telegramMinEditCeiling {
-		problems = append(problems, fmt.Errorf("channels.telegram.min_edit_interval must be between %s and %s", telegramMinEditFloor, telegramMinEditCeiling))
+		problems = append(problems, configkit.Invalid("channels.telegram.min_edit_interval", fmt.Sprintf("must be between %s and %s", telegramMinEditFloor, telegramMinEditCeiling)))
 	}
 	if telegram.MaxAttachmentBytes < 1 || telegram.MaxAttachmentBytes > TelegramMaxAttachmentBytes {
-		problems = append(problems, fmt.Errorf("channels.telegram.max_attachment_bytes must be between 1 and %d", TelegramMaxAttachmentBytes))
+		problems = append(problems, configkit.Invalid("channels.telegram.max_attachment_bytes", fmt.Sprintf("must be between 1 and %d", TelegramMaxAttachmentBytes)))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateHTTP(http *HTTP) error {
@@ -3566,48 +3493,45 @@ func validateHTTP(http *HTTP) error {
 		problems = append(problems, err)
 	}
 	if http.MaxBodyBytes < 1 || http.MaxBodyBytes > HTTPMaxBodyCeiling {
-		problems = append(problems, fmt.Errorf("channels.http.max_body_bytes must be between 1 and %d", HTTPMaxBodyCeiling))
+		problems = append(problems, configkit.Invalid("channels.http.max_body_bytes", fmt.Sprintf("must be between 1 and %d", HTTPMaxBodyCeiling)))
 	}
 	if http.RequestsPerMinute < 1 || http.RequestsPerMinute > HTTPRequestsPerMinuteCeiling {
-		problems = append(problems, fmt.Errorf("channels.http.requests_per_minute must be between 1 and %d", HTTPRequestsPerMinuteCeiling))
+		problems = append(problems, configkit.Invalid("channels.http.requests_per_minute", fmt.Sprintf("must be between 1 and %d", HTTPRequestsPerMinuteCeiling)))
 	}
 	if http.MaxConcurrentPerKey < 1 || http.MaxConcurrentPerKey > HTTPMaxConcurrentPerKeyLimit {
-		problems = append(problems, fmt.Errorf("channels.http.max_concurrent_per_key must be between 1 and %d", HTTPMaxConcurrentPerKeyLimit))
+		problems = append(problems, configkit.Invalid("channels.http.max_concurrent_per_key", fmt.Sprintf("must be between 1 and %d", HTTPMaxConcurrentPerKeyLimit)))
 	}
 	if http.MaxHistoryMessages < 0 || http.MaxHistoryMessages > HTTPMaxHistoryMessagesLimit {
-		problems = append(problems, fmt.Errorf("channels.http.max_history_messages must be between 0 and %d", HTTPMaxHistoryMessagesLimit))
+		problems = append(problems, configkit.Invalid("channels.http.max_history_messages", fmt.Sprintf("must be between 0 and %d", HTTPMaxHistoryMessagesLimit)))
 	}
 	if http.MaxHistoryBytes < 0 || http.MaxHistoryBytes > HTTPMaxHistoryBytesLimit {
-		problems = append(problems, fmt.Errorf("channels.http.max_history_bytes must be between 0 and %d", HTTPMaxHistoryBytesLimit))
+		problems = append(problems, configkit.Invalid("channels.http.max_history_bytes", fmt.Sprintf("must be between 0 and %d", HTTPMaxHistoryBytesLimit)))
 	}
 	if keepalive := time.Duration(http.KeepaliveInterval); keepalive < HTTPKeepaliveIntervalFloor || keepalive > HTTPKeepaliveIntervalCeiling {
-		problems = append(problems, fmt.Errorf("channels.http.keepalive_interval must be between %s and %s", HTTPKeepaliveIntervalFloor, HTTPKeepaliveIntervalCeiling))
+		problems = append(problems, configkit.Invalid("channels.http.keepalive_interval", fmt.Sprintf("must be between %s and %s", HTTPKeepaliveIntervalFloor, HTTPKeepaliveIntervalCeiling)))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func telegramModeProblems(field string, account *TelegramAccount, tokenRefs map[string]bool) []error {
 	switch account.Mode {
 	case TelegramModePolling:
 		if account.WebhookSecretRef != "" {
-			return []error{fmt.Errorf("%s.webhook_secret_ref is only valid when mode is %s", field, TelegramModeWebhook)}
+			return []error{configkit.Invalid(field+".webhook_secret_ref", "is only valid when mode is "+TelegramModeWebhook)}
 		}
 		return nil
 	case TelegramModeWebhook:
 		switch {
 		case account.WebhookSecretRef == "":
-			return []error{fmt.Errorf("%s.webhook_secret_ref must not be empty in webhook mode", field)}
+			return []error{configkit.Invalid(field+".webhook_secret_ref", "must not be empty in webhook mode")}
 		case !strings.HasPrefix(account.WebhookSecretRef, "env://") && !strings.HasPrefix(account.WebhookSecretRef, "file://"):
-			return []error{fmt.Errorf("%s.webhook_secret_ref must use env:// or file://", field)}
+			return []error{configkit.Invalid(field+".webhook_secret_ref", "must use env:// or file://")}
 		case tokenRefs[account.WebhookSecretRef]:
-			return []error{fmt.Errorf("%s.webhook_secret_ref must differ from every bot token reference", field)}
+			return []error{configkit.Invalid(field+".webhook_secret_ref", "must differ from every bot token reference")}
 		}
 		return nil
 	default:
-		return []error{fmt.Errorf("%s.mode %q must be %s or %s", field, account.Mode, TelegramModePolling, TelegramModeWebhook)}
+		return []error{configkit.Invalid(field+".mode", fmt.Sprintf("%q must be %s or %s", account.Mode, TelegramModePolling, TelegramModeWebhook))}
 	}
 }
 
@@ -3618,36 +3542,38 @@ func telegramWebhookProblems(telegram *Telegram) []error {
 		problems = append(problems, err)
 	}
 	if webhook.MaxBodyBytes < 1 || webhook.MaxBodyBytes > TelegramWebhookMaxBodyCeiling {
-		problems = append(problems, fmt.Errorf("channels.telegram.webhook.max_body_bytes must be between 1 and %d", TelegramWebhookMaxBodyCeiling))
+		problems = append(problems, configkit.Invalid("channels.telegram.webhook.max_body_bytes", fmt.Sprintf("must be between 1 and %d", TelegramWebhookMaxBodyCeiling)))
 	}
 	if webhook.MaxConnections < 1 || webhook.MaxConnections > TelegramWebhookConnectionLimit {
-		problems = append(problems, fmt.Errorf("channels.telegram.webhook.max_connections must be between 1 and %d", TelegramWebhookConnectionLimit))
+		problems = append(problems, configkit.Invalid("channels.telegram.webhook.max_connections", fmt.Sprintf("must be between 1 and %d", TelegramWebhookConnectionLimit)))
 	}
 	if webhook.PublicBaseURL == "" {
 		if telegram.UsesWebhook() {
-			problems = append(problems, errors.New("channels.telegram.webhook.public_base_url is required when an account uses webhook mode"))
+			problems = append(problems, configkit.Invalid(telegramWebhookPublicBaseURLField, "is required when an account uses webhook mode"))
 		}
 		return problems
 	}
 	if err := validatePublicWebhookURL(webhook.PublicBaseURL); err != nil {
-		problems = append(problems, fmt.Errorf("channels.telegram.webhook.public_base_url %w", err))
+		problems = append(problems, err)
 	}
 	return problems
 }
 
+const telegramWebhookPublicBaseURLField = "channels.telegram.webhook.public_base_url"
+
 func validatePublicWebhookURL(raw string) error {
 	if strings.ContainsAny(raw, "?#") {
-		return errors.New("must not carry a query or fragment")
+		return configkit.Invalid(telegramWebhookPublicBaseURLField, "must not carry a query or fragment")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return errors.New("is not a valid URL")
+		return configkit.Invalid(telegramWebhookPublicBaseURLField, "is not a valid URL")
 	}
 	if u.Scheme != "https" {
-		return errors.New("must use https")
+		return configkit.Invalid(telegramWebhookPublicBaseURLField, "must use https")
 	}
 	if err := ValidateBaseURL(raw); err != nil {
-		return fmt.Errorf("is not valid: %w", err)
+		return configkit.Invalid(telegramWebhookPublicBaseURLField, "is not valid: "+err.Error())
 	}
 	return nil
 }
@@ -3658,11 +3584,11 @@ func telegramUserListProblems(field string, ids []string) []error {
 	for _, id := range ids {
 		switch {
 		case id == "":
-			problems = append(problems, fmt.Errorf("%s must not contain empty ids", field))
+			problems = append(problems, configkit.Invalid(field, "must not contain empty ids"))
 		case !principal.IsTelegramUserID(id):
-			problems = append(problems, fmt.Errorf("%s id %q is not a positive decimal telegram user id", field, id))
+			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is not a positive decimal telegram user id", id)))
 		case seen[id]:
-			problems = append(problems, fmt.Errorf("%s id %q is configured more than once", field, id))
+			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is configured more than once", id)))
 		default:
 			seen[id] = true
 		}
@@ -3676,11 +3602,11 @@ func telegramChatListProblems(field string, ids []string) []error {
 	for _, id := range ids {
 		switch {
 		case id == "":
-			problems = append(problems, fmt.Errorf("%s must not contain empty ids", field))
+			problems = append(problems, configkit.Invalid(field, "must not contain empty ids"))
 		case !principal.IsTelegramGroupChatID(id):
-			problems = append(problems, fmt.Errorf("%s id %q is not a negative decimal telegram group chat id", field, id))
+			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is not a negative decimal telegram group chat id", id)))
 		case seen[id]:
-			problems = append(problems, fmt.Errorf("%s id %q is configured more than once", field, id))
+			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is configured more than once", id)))
 		default:
 			seen[id] = true
 		}
@@ -3706,11 +3632,11 @@ func snowflakeListProblems(field string, ids []string) []error {
 	for _, id := range ids {
 		switch {
 		case id == "":
-			problems = append(problems, fmt.Errorf("%s must not contain empty ids", field))
+			problems = append(problems, configkit.Invalid(field, "must not contain empty ids"))
 		case !isSnowflake(id):
-			problems = append(problems, fmt.Errorf("%s id %q is not a decimal snowflake", field, id))
+			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is not a decimal snowflake", id)))
 		case seen[id]:
-			problems = append(problems, fmt.Errorf("%s id %q is configured more than once", field, id))
+			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is configured more than once", id)))
 		default:
 			seen[id] = true
 		}
@@ -3720,7 +3646,7 @@ func snowflakeListProblems(field string, ids []string) []error {
 
 func validateBindings(bindings []Binding, channels *Channels) error {
 	if channels == nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "channels must not be nil"}
+		return configkit.Invalid("channels", "must not be nil")
 	}
 	accounts := map[string]map[string]bool{
 		BindingChannelDiscord:  make(map[string]bool, len(channels.Discord.Accounts)),
@@ -3738,7 +3664,7 @@ func validateBindings(bindings []Binding, channels *Channels) error {
 		binding := bindings[i]
 		field := fmt.Sprintf("bindings[%d]", i)
 		if strings.TrimSpace(binding.Persona) == "" {
-			problems = append(problems, fmt.Errorf("%s.persona must not be empty", field))
+			problems = append(problems, configkit.Field(field+".persona", fault.New(ErrorCodeBindingInvalid, "must not be empty")))
 		}
 		switch binding.Channel {
 		case BindingChannelDiscord:
@@ -3746,32 +3672,29 @@ func validateBindings(bindings []Binding, channels *Channels) error {
 		case BindingChannelTelegram:
 			problems = append(problems, telegramBindingProblems(field, &binding, accounts[BindingChannelTelegram])...)
 		default:
-			problems = append(problems, fmt.Errorf("%s.channel %q is not supported; use %q or %q", field, binding.Channel, BindingChannelDiscord, BindingChannelTelegram))
+			problems = append(problems, configkit.Field(field+".channel", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not supported; use %q or %q", binding.Channel, BindingChannelDiscord, BindingChannelTelegram))))
 		}
 		key := binding
 		key.Persona = ""
 		if first, ok := seen[key]; ok {
-			problems = append(problems, fmt.Errorf("%s has the same match fields as bindings[%d]", field, first))
+			problems = append(problems, configkit.Field(field, fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("has the same match fields as bindings[%d]", first))))
 			continue
 		}
 		seen[key] = i
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeBindingInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func discordBindingProblems(field string, binding *Binding, accounts map[string]bool) []error {
 	var problems []error
 	if !accounts[binding.Account] {
-		problems = append(problems, fmt.Errorf("%s.account %q is not a configured channels.discord.accounts name", field, binding.Account))
+		problems = append(problems, configkit.Field(field+".account", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a configured channels.discord.accounts name", binding.Account))))
 	}
 	if binding.ChatID != "" {
-		problems = append(problems, fmt.Errorf("%s.chat_id is only valid on telegram bindings", field))
+		problems = append(problems, configkit.Field(field+".chat_id", fault.New(ErrorCodeBindingInvalid, "is only valid on telegram bindings")))
 	}
 	if binding.GuildID == "" && binding.ChannelID == "" && binding.ThreadID == "" && binding.UserID == "" {
-		problems = append(problems, fmt.Errorf("%s must set at least one of guild_id, channel_id, thread_id, user_id", field))
+		problems = append(problems, configkit.Field(field, fault.New(ErrorCodeBindingInvalid, "must set at least one of guild_id, channel_id, thread_id, user_id")))
 	}
 	for _, match := range []struct{ name, id string }{
 		{"guild_id", binding.GuildID},
@@ -3780,7 +3703,7 @@ func discordBindingProblems(field string, binding *Binding, accounts map[string]
 		{"user_id", binding.UserID},
 	} {
 		if match.id != "" && !isSnowflake(match.id) {
-			problems = append(problems, fmt.Errorf("%s.%s %q is not a decimal snowflake", field, match.name, match.id))
+			problems = append(problems, configkit.Field(field+"."+match.name, fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a decimal snowflake", match.id))))
 		}
 	}
 	return problems
@@ -3789,224 +3712,209 @@ func discordBindingProblems(field string, binding *Binding, accounts map[string]
 func telegramBindingProblems(field string, binding *Binding, accounts map[string]bool) []error {
 	var problems []error
 	if !accounts[binding.Account] {
-		problems = append(problems, fmt.Errorf("%s.account %q is not a configured channels.telegram.accounts name", field, binding.Account))
+		problems = append(problems, configkit.Field(field+".account", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a configured channels.telegram.accounts name", binding.Account))))
 	}
 	if binding.GuildID != "" || binding.ChannelID != "" {
-		problems = append(problems, fmt.Errorf("%s matches telegram chats by chat_id, thread_id and user_id only", field))
+		problems = append(problems, configkit.Field(field, fault.New(ErrorCodeBindingInvalid, "matches telegram chats by chat_id, thread_id and user_id only")))
 	}
 	if binding.ChatID == "" && binding.UserID == "" {
-		problems = append(problems, fmt.Errorf("%s must set chat_id or user_id", field))
+		problems = append(problems, configkit.Field(field, fault.New(ErrorCodeBindingInvalid, "must set chat_id or user_id")))
 	}
 	if binding.ChatID != "" && !principal.IsTelegramGroupChatID(binding.ChatID) {
-		problems = append(problems, fmt.Errorf("%s.chat_id %q is not a negative decimal telegram group chat id", field, binding.ChatID))
+		problems = append(problems, configkit.Field(field+".chat_id", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a negative decimal telegram group chat id", binding.ChatID))))
 	}
 	if binding.ThreadID != "" {
 		switch {
 		case binding.ChatID == "":
-			problems = append(problems, fmt.Errorf("%s.thread_id requires chat_id", field))
+			problems = append(problems, configkit.Field(field+".thread_id", fault.New(ErrorCodeBindingInvalid, "requires chat_id")))
 		case !principal.IsTelegramTopicID(binding.ThreadID):
-			problems = append(problems, fmt.Errorf("%s.thread_id %q is not a positive decimal telegram topic id", field, binding.ThreadID))
+			problems = append(problems, configkit.Field(field+".thread_id", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a positive decimal telegram topic id", binding.ThreadID))))
 		}
 	}
 	if binding.UserID != "" && !principal.IsTelegramUserID(binding.UserID) {
-		problems = append(problems, fmt.Errorf("%s.user_id %q is not a positive decimal telegram user id", field, binding.UserID))
+		problems = append(problems, configkit.Field(field+".user_id", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a positive decimal telegram user id", binding.UserID))))
 	}
 	return problems
 }
 
 func validateBroadcast(broadcast *Broadcast) error {
 	if broadcast == nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "broadcast must not be nil"}
+		return configkit.Invalid("broadcast", "must not be nil")
 	}
 	var problems []error
 	if broadcast.Timezone == "" {
-		problems = append(problems, errors.New("broadcast.timezone must not be empty"))
+		problems = append(problems, configkit.Invalid("broadcast.timezone", "must not be empty"))
 	} else if _, err := time.LoadLocation(broadcast.Timezone); err != nil {
-		problems = append(problems, fmt.Errorf("broadcast.timezone %q is not a valid IANA timezone", broadcast.Timezone))
+		problems = append(problems, configkit.Invalid("broadcast.timezone", "is not a valid IANA timezone"))
 	}
 	if broadcast.QuietHours.Start == "" || !validHourMinute(broadcast.QuietHours.Start) {
-		problems = append(problems, fmt.Errorf("broadcast.quiet_hours.start %q must be HH:MM", broadcast.QuietHours.Start))
+		problems = append(problems, configkit.Invalid("broadcast.quiet_hours.start", "must be HH:MM"))
 	}
 	if broadcast.QuietHours.End == "" || !validHourMinute(broadcast.QuietHours.End) {
-		problems = append(problems, fmt.Errorf("broadcast.quiet_hours.end %q must be HH:MM", broadcast.QuietHours.End))
+		problems = append(problems, configkit.Invalid("broadcast.quiet_hours.end", "must be HH:MM"))
 	}
 	if broadcast.MaxDigestItems <= 0 {
-		problems = append(problems, errors.New("broadcast.max_digest_items must be positive"))
+		problems = append(problems, configkit.Invalid("broadcast.max_digest_items", "must be positive"))
 	}
 	if broadcast.MaxDigestBytes <= 0 {
-		problems = append(problems, errors.New("broadcast.max_digest_bytes must be positive"))
+		problems = append(problems, configkit.Invalid("broadcast.max_digest_bytes", "must be positive"))
 	}
 	if broadcast.MaxAttempts <= 0 {
-		problems = append(problems, errors.New("broadcast.max_attempts must be positive"))
+		problems = append(problems, configkit.Invalid("broadcast.max_attempts", "must be positive"))
 	}
 	if broadcast.MaxDeliveryAge <= 0 {
-		problems = append(problems, errors.New("broadcast.max_delivery_age must be positive"))
+		problems = append(problems, configkit.Invalid("broadcast.max_delivery_age", "must be positive"))
 	}
 	if broadcast.MinDispatchGap < 0 {
-		problems = append(problems, errors.New("broadcast.min_dispatch_gap must not be negative"))
+		problems = append(problems, configkit.Invalid("broadcast.min_dispatch_gap", "must not be negative"))
 	}
 	for alias, route := range broadcast.Destinations {
 		if !validBroadcastAlias(alias) {
-			problems = append(problems, fmt.Errorf("broadcast.destinations alias %q is not valid", alias))
+			problems = append(problems, configkit.Invalid("broadcast.destinations", fmt.Sprintf("alias %q is not valid", alias)))
 		}
 		if !validBroadcastRoute(route) {
-			problems = append(problems, fmt.Errorf("broadcast.destinations[%s] route %q is not a channel destination", alias, route))
+			problems = append(problems, configkit.Invalid("broadcast.destinations["+alias+"]", "route is not a channel destination"))
 		}
 	}
 	for alias, route := range broadcast.Fallback {
 		if !validBroadcastAlias(alias) {
-			problems = append(problems, fmt.Errorf("broadcast.fallback alias %q is not valid", alias))
+			problems = append(problems, configkit.Invalid("broadcast.fallback", fmt.Sprintf("alias %q is not valid", alias)))
 		}
 		if route == "" {
 			continue
 		}
 		if !validBroadcastRoute(route) {
-			problems = append(problems, fmt.Errorf("broadcast.fallback[%s] route %q is not a channel destination", alias, route))
+			problems = append(problems, configkit.Invalid("broadcast.fallback["+alias+"]", "route is not a channel destination"))
 		}
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateScheduler(scheduler *Scheduler) error {
 	if scheduler == nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "scheduler must not be nil"}
+		return configkit.Invalid("scheduler", "must not be nil")
 	}
 	var problems []error
 	if scheduler.DefaultTimezone == "" {
-		problems = append(problems, errors.New("scheduler.default_timezone must not be empty"))
+		problems = append(problems, configkit.Invalid("scheduler.default_timezone", "must not be empty"))
 	} else if _, err := time.LoadLocation(scheduler.DefaultTimezone); err != nil {
-		problems = append(problems, fmt.Errorf("scheduler.default_timezone %q is not a valid IANA timezone", scheduler.DefaultTimezone))
+		problems = append(problems, configkit.Invalid("scheduler.default_timezone", "is not a valid IANA timezone"))
 	}
 	if scheduler.DefaultCatchUpGrace < 0 {
-		problems = append(problems, errors.New("scheduler.default_catch_up_grace must not be negative"))
+		problems = append(problems, configkit.Invalid("scheduler.default_catch_up_grace", "must not be negative"))
 	}
 	if scheduler.OccurrenceRetention <= 0 {
-		problems = append(problems, errors.New("scheduler.occurrence_retention must be positive"))
+		problems = append(problems, configkit.Invalid("scheduler.occurrence_retention", "must be positive"))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateMemory(memory *Memory) error {
 	if memory == nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "memory must not be nil"}
+		return configkit.Invalid("memory", "must not be nil")
 	}
 	var problems []error
 	if memory.MaxDocuments <= 0 || memory.MaxDocuments > 50 {
-		problems = append(problems, errors.New("memory.max_documents must be between 1 and 50"))
+		problems = append(problems, configkit.Invalid("memory.max_documents", "must be between 1 and 50"))
 	}
 	if memory.RecallTokenBudget <= 0 || memory.RecallTokenBudget > 8000 {
-		problems = append(problems, errors.New("memory.recall_token_budget must be between 1 and 8000"))
+		problems = append(problems, configkit.Invalid("memory.recall_token_budget", "must be between 1 and 8000"))
 	}
 	if strings.TrimSpace(memory.SummaryPromptVersion) == "" {
-		problems = append(problems, errors.New("memory.summary_prompt_version must not be empty"))
+		problems = append(problems, configkit.Invalid("memory.summary_prompt_version", "must not be empty"))
 	}
 	if memory.SummaryTTL <= 0 {
-		problems = append(problems, errors.New("memory.summary_ttl must be positive"))
+		problems = append(problems, configkit.Invalid("memory.summary_ttl", "must be positive"))
 	}
 	if memory.EnglishStemming {
-		problems = append(problems, errors.New("memory.english_stemming is not supported by this build"))
+		problems = append(problems, configkit.Invalid("memory.english_stemming", "is not supported by this build"))
 	}
 	if strings.TrimSpace(memory.Locale) != "" {
-		problems = append(problems, errors.New("memory.locale is not supported by this build"))
+		problems = append(problems, configkit.Invalid("memory.locale", "is not supported by this build"))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateSkills(skillsConfig *Skills, profile capability.Profile) error {
 	if skillsConfig == nil {
 		if profile != capability.ProfileCore {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("skills section is required for build profile %q", profile)}
+			return configkit.Invalid("skills", fmt.Sprintf("section is required for build profile %q", profile))
 		}
 		return nil
 	}
 	var problems []error
 	if len(skillsConfig.Roots) == 0 {
-		problems = append(problems, errors.New("skills.roots must list at least one directory"))
+		problems = append(problems, configkit.Invalid("skills.roots", "must list at least one directory"))
 	}
 	for _, root := range skillsConfig.Roots {
 		switch {
 		case strings.TrimSpace(root) == "":
-			problems = append(problems, errors.New("skills.roots entries must not be empty"))
+			problems = append(problems, configkit.Invalid("skills.roots", "entries must not be empty"))
 		case !filepath.IsAbs(root):
-			problems = append(problems, fmt.Errorf("skills root %q must be an absolute path", root))
+			problems = append(problems, configkit.Invalid("skills.roots", "entries must be absolute paths"))
 		case filepath.Clean(root) != root:
-			problems = append(problems, fmt.Errorf("skills root %q must be clean", root))
+			problems = append(problems, configkit.Invalid("skills.roots", "entries must be clean paths"))
 		}
 	}
 	if skillsConfig.MaxIndexedSkills <= 0 || skillsConfig.MaxIndexedSkills > 4096 {
-		problems = append(problems, errors.New("skills.max_indexed_skills must be between 1 and 4096"))
+		problems = append(problems, configkit.Invalid("skills.max_indexed_skills", "must be between 1 and 4096"))
 	}
 	if skillsConfig.MaxInstructionTokens <= 0 || skillsConfig.MaxInstructionTokens > 128000 {
-		problems = append(problems, errors.New("skills.max_instruction_tokens must be between 1 and 128000"))
+		problems = append(problems, configkit.Invalid("skills.max_instruction_tokens", "must be between 1 and 128000"))
 	}
 	if skillsConfig.MaxSessionContextTokens <= 0 {
-		problems = append(problems, errors.New("skills.max_session_context_tokens must be positive"))
+		problems = append(problems, configkit.Invalid("skills.max_session_context_tokens", "must be positive"))
 	} else if skillsConfig.MaxSessionContextTokens < skillsConfig.MaxInstructionTokens {
-		problems = append(problems, errors.New("skills.max_session_context_tokens must be at least skills.max_instruction_tokens"))
+		problems = append(problems, configkit.Invalid("skills.max_session_context_tokens", "must be at least skills.max_instruction_tokens"))
 	}
 	if skillsConfig.MaxResourceBytes <= 0 || skillsConfig.MaxResourceBytes > 1<<30 {
-		problems = append(problems, errors.New("skills.max_resource_bytes must be between 1 and 1073741824"))
+		problems = append(problems, configkit.Invalid("skills.max_resource_bytes", "must be between 1 and 1073741824"))
 	}
 	if skillsConfig.QuarantineRetention <= 0 {
-		problems = append(problems, errors.New("skills.quarantine_retention must be positive"))
+		problems = append(problems, configkit.Invalid("skills.quarantine_retention", "must be positive"))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateContext(contextConfig *Context, profile capability.Profile) error {
 	if contextConfig == nil {
 		if profile != capability.ProfileCore {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("context section is required for build profile %q", profile)}
+			return configkit.Invalid("context", fmt.Sprintf("section is required for build profile %q", profile))
 		}
 		return nil
 	}
 	var problems []error
 	if contextConfig.RecentCompleteTurns <= 0 {
-		problems = append(problems, errors.New("context.recent_complete_turns must be positive"))
+		problems = append(problems, configkit.Invalid("context.recent_complete_turns", "must be positive"))
 	}
 	if contextConfig.SafetyMarginTokens <= 0 {
-		problems = append(problems, errors.New("context.safety_margin_tokens must be positive"))
+		problems = append(problems, configkit.Invalid("context.safety_margin_tokens", "must be positive"))
 	}
 	if contextConfig.ConservativeEstimatorRatio <= 0 || contextConfig.ConservativeEstimatorRatio >= 1 {
-		problems = append(problems, errors.New("context.conservative_estimator_ratio must be in (0,1)"))
+		problems = append(problems, configkit.Invalid("context.conservative_estimator_ratio", "must be in (0,1)"))
 	}
 	if contextConfig.HighWaterRatio <= 0 || contextConfig.HighWaterRatio >= 1 {
-		problems = append(problems, errors.New("context.high_water_ratio must be in (0,1)"))
+		problems = append(problems, configkit.Invalid("context.high_water_ratio", "must be in (0,1)"))
 	}
 	if contextConfig.ConservativeEstimatorRatio > contextConfig.HighWaterRatio {
-		problems = append(problems, errors.New("context.conservative_estimator_ratio must not exceed context.high_water_ratio"))
+		problems = append(problems, configkit.Invalid("context.conservative_estimator_ratio", "must not exceed context.high_water_ratio"))
 	}
 	if contextConfig.MaxToolExcerptBytes <= 0 {
-		problems = append(problems, errors.New("context.max_tool_excerpt_bytes must be positive"))
+		problems = append(problems, configkit.Invalid("context.max_tool_excerpt_bytes", "must be positive"))
 	}
 	if strings.TrimSpace(contextConfig.Summary.Task) == "" {
-		problems = append(problems, errors.New("context.summary.task must not be empty"))
+		problems = append(problems, configkit.Invalid("context.summary.task", "must not be empty"))
 	}
 	if contextConfig.Summary.MaxSourceTokens <= 0 {
-		problems = append(problems, errors.New("context.summary.max_source_tokens must be positive"))
+		problems = append(problems, configkit.Invalid("context.summary.max_source_tokens", "must be positive"))
 	}
 	if contextConfig.Summary.MaxOutputTokens <= 0 {
-		problems = append(problems, errors.New("context.summary.max_output_tokens must be positive"))
+		problems = append(problems, configkit.Invalid("context.summary.max_output_tokens", "must be positive"))
 	}
 	if strings.TrimSpace(contextConfig.Summary.PromptVersion) == "" {
-		problems = append(problems, errors.New("context.summary.prompt_version must not be empty"))
+		problems = append(problems, configkit.Invalid("context.summary.prompt_version", "must not be empty"))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validHourMinute(value string) bool {
@@ -4027,30 +3935,27 @@ func validHourMinute(value string) bool {
 func validateProfile(profileConfig *Profile, buildProfile capability.Profile) error {
 	if profileConfig == nil {
 		if buildProfile != capability.ProfileCore {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("profile section is required for build profile %q", buildProfile)}
+			return configkit.Invalid("profile", fmt.Sprintf("section is required for build profile %q", buildProfile))
 		}
 		return nil
 	}
 	var problems []error
 	if profileConfig.MaxContextFacts <= 0 || profileConfig.MaxContextFacts > 1000 {
-		problems = append(problems, errors.New("profile.max_context_facts must be between 1 and 1000"))
+		problems = append(problems, configkit.Invalid("profile.max_context_facts", "must be between 1 and 1000"))
 	}
 	if profileConfig.MaxContextTokens <= 0 || profileConfig.MaxContextTokens > 128000 {
-		problems = append(problems, errors.New("profile.max_context_tokens must be between 1 and 128000"))
+		problems = append(problems, configkit.Invalid("profile.max_context_tokens", "must be between 1 and 128000"))
 	}
 	if profileConfig.ExtractionQueueCapacity <= 0 || profileConfig.ExtractionQueueCapacity > 10000 {
-		problems = append(problems, errors.New("profile.extraction_queue_capacity must be between 1 and 10000"))
+		problems = append(problems, configkit.Invalid("profile.extraction_queue_capacity", "must be between 1 and 10000"))
 	}
 	if profileConfig.CandidateMinConfidence < 0 || profileConfig.CandidateMinConfidence > 1 {
-		problems = append(problems, errors.New("profile.candidate_min_confidence must be in [0,1]"))
+		problems = append(problems, configkit.Invalid("profile.candidate_min_confidence", "must be in [0,1]"))
 	}
 	if strings.TrimSpace(profileConfig.PromptVersion) == "" {
-		problems = append(problems, errors.New("profile.prompt_version must not be empty"))
+		problems = append(problems, configkit.Invalid("profile.prompt_version", "must not be empty"))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateProfileShapes(doc *yamlv3.Node) error {
@@ -4132,32 +4037,29 @@ func validateOwner(owner *Owner) error {
 	}
 	if owner.Timezone != "" {
 		if _, err := time.LoadLocation(owner.Timezone); err != nil {
-			problems = append(problems, fmt.Errorf("owner.timezone %q is not a valid IANA timezone", owner.Timezone))
+			problems = append(problems, configkit.Invalid("owner.timezone", "is not a valid IANA timezone"))
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(owner.Preferences)) {
 		switch {
 		case key == "":
-			problems = append(problems, errors.New("owner.preferences keys must not be empty"))
+			problems = append(problems, configkit.Invalid("owner.preferences", "keys must not be empty"))
 			continue
 		case key != strings.TrimSpace(key):
-			problems = append(problems, fmt.Errorf("owner.preferences key %q must not carry surrounding whitespace", key))
+			problems = append(problems, configkit.Invalid("owner.preferences", fmt.Sprintf("key %q must not carry surrounding whitespace", key)))
 			continue
 		case strings.Contains(key, ":"):
-			problems = append(problems, fmt.Errorf("owner.preferences key %q must not contain a colon", key))
+			problems = append(problems, configkit.Invalid("owner.preferences", fmt.Sprintf("key %q must not contain a colon", key)))
 			continue
 		case slices.Contains(ownerFixedKeys, key):
-			problems = append(problems, fmt.Errorf("owner.preferences key %q collides with owner.%s", key, key))
+			problems = append(problems, configkit.Invalid("owner.preferences", fmt.Sprintf("key %q collides with owner.%s", key, key)))
 			continue
 		}
 		if err := validateOwnerValue("owner.preferences."+key, owner.Preferences[key]); err != nil {
 			problems = append(problems, err)
 		}
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateOwnerIdentities(owner *Owner) error {
@@ -4165,7 +4067,7 @@ func validateOwnerIdentities(owner *Owner) error {
 		return nil
 	}
 	if _, err := principal.NewResolver(owner.Identities); err != nil {
-		return &Error{Code: ErrorCodeOwnerIdentityInvalid, Detail: identityProblemDetail(err)}
+		return configkit.Field("owner.identities", fault.New(ErrorCodeOwnerIdentityInvalid, identityProblemDetail(err)))
 	}
 	return nil
 }
@@ -4194,10 +4096,10 @@ func validateOwnerValue(path, value string) error {
 		return nil
 	}
 	if strings.ContainsAny(value, "\r\n") {
-		return fmt.Errorf("%s must be a single line", path)
+		return configkit.Invalid(path, "must be a single line")
 	}
 	if value != strings.TrimSpace(value) {
-		return fmt.Errorf("%s must not carry surrounding whitespace", path)
+		return configkit.Invalid(path, "must not carry surrounding whitespace")
 	}
 	return nil
 }
@@ -4217,19 +4119,16 @@ func screenOwnerSecrets(owner *Owner, cfg *Config) error {
 		{"owner.timezone", owner.Timezone},
 	} {
 		if field.value != "" && vault.Contains(field.value) {
-			problems = append(problems, fmt.Errorf("%s must not repeat a configured secret value", field.path))
+			problems = append(problems, configkit.Field(field.path, fault.New(ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
 		}
 	}
 	for key, value := range owner.Preferences {
 		if (key != "" && vault.Contains(key)) || (value != "" && vault.Contains(value)) {
-			problems = append(problems, errors.New("owner.preferences must not repeat a configured secret value"))
+			problems = append(problems, configkit.Field("owner.preferences", fault.New(ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
 			break
 		}
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeOwnerSecret, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func configuredSecretVault(cfg *Config) *secret.Vault {
@@ -4376,64 +4275,61 @@ func isSnowflake(id string) bool {
 func validateVision(vision *Vision, buildProfile capability.Profile) error {
 	if vision == nil {
 		if buildProfile != capability.ProfileCore {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("vision section is required for build profile %q", buildProfile)}
+			return configkit.Invalid("vision", fmt.Sprintf("section is required for build profile %q", buildProfile))
 		}
 		return nil
 	}
 	var problems []error
 	if vision.MaxEncodedBytes <= 0 {
-		problems = append(problems, errors.New("vision.max_encoded_bytes must be positive"))
+		problems = append(problems, configkit.Invalid("vision.max_encoded_bytes", "must be positive"))
 	}
 	if vision.MaxPixels <= 0 {
-		problems = append(problems, errors.New("vision.max_pixels must be positive"))
+		problems = append(problems, configkit.Invalid("vision.max_pixels", "must be positive"))
 	}
 	if vision.MaxDimension <= 0 {
-		problems = append(problems, errors.New("vision.max_dimension must be positive"))
+		problems = append(problems, configkit.Invalid("vision.max_dimension", "must be positive"))
 	}
 	if vision.MaxImages <= 0 {
-		problems = append(problems, errors.New("vision.max_images must be positive"))
+		problems = append(problems, configkit.Invalid("vision.max_images", "must be positive"))
 	}
 	if vision.MaxFrames != 1 {
-		problems = append(problems, errors.New("vision.max_frames must be 1"))
+		problems = append(problems, configkit.Invalid("vision.max_frames", "must be 1"))
 	}
 	if time.Duration(vision.DecodeTimeout) <= 0 || time.Duration(vision.DecodeTimeout) > 30*time.Second {
-		problems = append(problems, errors.New("vision.decode_timeout must be positive and at most 30s"))
+		problems = append(problems, configkit.Invalid("vision.decode_timeout", "must be positive and at most 30s"))
 	}
 	if vision.MaxDecodeConcurrency <= 0 {
-		problems = append(problems, errors.New("vision.max_decode_concurrency must be positive"))
+		problems = append(problems, configkit.Invalid("vision.max_decode_concurrency", "must be positive"))
 	}
 	if vision.MaxRequestBytes <= 0 {
-		problems = append(problems, errors.New("vision.max_request_bytes must be positive"))
+		problems = append(problems, configkit.Invalid("vision.max_request_bytes", "must be positive"))
 	}
 	if vision.MaxTransformMemory <= 0 {
-		problems = append(problems, errors.New("vision.max_transform_memory_bytes must be positive"))
+		problems = append(problems, configkit.Invalid("vision.max_transform_memory_bytes", "must be positive"))
 	}
 	if !validVisionDetail(vision.Detail) {
-		problems = append(problems, errors.New("vision.detail must be auto, low, or high"))
+		problems = append(problems, configkit.Invalid("vision.detail", "must be auto, low, or high"))
 	}
 	if strings.TrimSpace(vision.TransformVersion) == "" {
-		problems = append(problems, errors.New("vision.transform_version must not be empty"))
+		problems = append(problems, configkit.Invalid("vision.transform_version", "must not be empty"))
 	}
 	for _, name := range slices.Sorted(maps.Keys(vision.Providers)) {
 		limits := vision.Providers[name]
 		if !validProtocolName(name) {
-			problems = append(problems, fmt.Errorf("vision.providers.%s is not a known provider protocol", name))
+			problems = append(problems, configkit.Invalid("vision.providers."+name, "is not a known provider protocol"))
 			continue
 		}
 		if limits.MaxImages < 0 || limits.MaxImages > vision.MaxImages {
-			problems = append(problems, fmt.Errorf("vision.providers.%s.max_images must be between 0 and vision.max_images", name))
+			problems = append(problems, configkit.Invalid("vision.providers."+name+".max_images", "must be between 0 and vision.max_images"))
 		}
 		if limits.MaxRequestBytes < 0 || limits.MaxRequestBytes > vision.MaxRequestBytes {
-			problems = append(problems, fmt.Errorf("vision.providers.%s.max_request_bytes must be between 0 and vision.max_request_bytes", name))
+			problems = append(problems, configkit.Invalid("vision.providers."+name+".max_request_bytes", "must be between 0 and vision.max_request_bytes"))
 		}
 		if limits.Detail != "" && !validVisionDetail(limits.Detail) {
-			problems = append(problems, fmt.Errorf("vision.providers.%s.detail must be auto, low, or high", name))
+			problems = append(problems, configkit.Invalid("vision.providers."+name+".detail", "must be auto, low, or high"))
 		}
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validVisionDetail(detail string) bool {
@@ -4447,33 +4343,33 @@ func validProtocolName(name string) bool {
 func validateTools(toolsConfig *Tools, profile capability.Profile) error {
 	if toolsConfig == nil {
 		if profile != capability.ProfileCore {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("tools section is required for build profile %q", profile)}
+			return configkit.Invalid("tools", fmt.Sprintf("section is required for build profile %q", profile))
 		}
 		return nil
 	}
 	if strings.TrimSpace(toolsConfig.Workspace) == "" {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.workspace must not be empty"}
+		return configkit.Invalid("tools.workspace", "must not be empty")
 	}
 	if !filepath.IsAbs(toolsConfig.Workspace) {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.workspace must be an absolute path"}
+		return configkit.Invalid("tools.workspace", "must be an absolute path")
 	}
 	if toolsConfig.MaxInlineResultBytes <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.max_inline_result_bytes must be positive"}
+		return configkit.Invalid("tools.max_inline_result_bytes", "must be positive")
 	}
 	if toolsConfig.Exec.Timeout <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.exec.timeout must be positive"}
+		return configkit.Invalid("tools.exec.timeout", "must be positive")
 	}
 	if toolsConfig.Exec.MaxStdoutBytes <= 0 || toolsConfig.Exec.MaxStderrBytes <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.exec output limits must be positive"}
+		return configkit.Invalid("tools.exec", "output limits must be positive")
 	}
 	if toolsConfig.Fetch.Timeout <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.fetch.timeout must be positive"}
+		return configkit.Invalid("tools.fetch.timeout", "must be positive")
 	}
 	if toolsConfig.Fetch.MaxRedirects < 0 || toolsConfig.Fetch.MaxRedirects > 10 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.fetch.max_redirects must be between 0 and 10"}
+		return configkit.Invalid("tools.fetch.max_redirects", "must be between 0 and 10")
 	}
 	if toolsConfig.Fetch.MaxEncodedBytes <= 0 || toolsConfig.Fetch.MaxDecodedBytes <= 0 {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: "tools.fetch body limits must be positive"}
+		return configkit.Invalid("tools.fetch", "body limits must be positive")
 	}
 	if err := validateToolGitHub(&toolsConfig.GitHub); err != nil {
 		return err
@@ -4509,10 +4405,7 @@ func unknownEnvKeys() []string {
 
 func checkVersion(v int) error {
 	if v != supportedVersion {
-		return &Error{
-			Code:   ErrorCodeVersionUnsupported,
-			Detail: fmt.Sprintf("unsupported version %d (supported: %d)", v, supportedVersion),
-		}
+		return configkit.Field("version", fault.New(ErrorCodeVersionUnsupported, fmt.Sprintf("unsupported version %d (supported: %d)", v, supportedVersion)))
 	}
 	return nil
 }
@@ -4520,36 +4413,33 @@ func checkVersion(v int) error {
 func validateChildren(childrenConfig *Children, buildProfile capability.Profile) error {
 	if childrenConfig == nil {
 		if buildProfile != capability.ProfileCore {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("children section is required for build profile %q", buildProfile)}
+			return configkit.Invalid("children", fmt.Sprintf("section is required for build profile %q", buildProfile))
 		}
 		return nil
 	}
 	var problems []error
 	if childrenConfig.MaxDepth != 1 {
-		problems = append(problems, errors.New("children.max_depth must be 1"))
+		problems = append(problems, configkit.Invalid("children.max_depth", "must be 1"))
 	}
 	if childrenConfig.MaxActivePerParent <= 0 || childrenConfig.MaxActivePerParent > 64 {
-		problems = append(problems, errors.New("children.max_active_per_parent must be between 1 and 64"))
+		problems = append(problems, configkit.Invalid("children.max_active_per_parent", "must be between 1 and 64"))
 	}
 	if childrenConfig.MaxActiveGlobal <= 0 || childrenConfig.MaxActiveGlobal > 256 {
-		problems = append(problems, errors.New("children.max_active_global must be between 1 and 256"))
+		problems = append(problems, configkit.Invalid("children.max_active_global", "must be between 1 and 256"))
 	}
 	if time.Duration(childrenConfig.DefaultTimeout) <= 0 || time.Duration(childrenConfig.DefaultTimeout) > 24*time.Hour {
-		problems = append(problems, errors.New("children.default_timeout must be positive and at most 24h"))
+		problems = append(problems, configkit.Invalid("children.default_timeout", "must be positive and at most 24h"))
 	}
 	if time.Duration(childrenConfig.MaxTimeout) <= 0 || time.Duration(childrenConfig.MaxTimeout) > 24*time.Hour {
-		problems = append(problems, errors.New("children.max_timeout must be positive and at most 24h"))
+		problems = append(problems, configkit.Invalid("children.max_timeout", "must be positive and at most 24h"))
 	}
 	if time.Duration(childrenConfig.DefaultTimeout) > time.Duration(childrenConfig.MaxTimeout) {
-		problems = append(problems, errors.New("children.default_timeout must not exceed children.max_timeout"))
+		problems = append(problems, configkit.Invalid("children.default_timeout", "must not exceed children.max_timeout"))
 	}
 	if childrenConfig.Recovery != "interrupt" {
-		problems = append(problems, errors.New("children.recovery must be \"interrupt\""))
+		problems = append(problems, configkit.Invalid("children.recovery", "must be \"interrupt\""))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateChildrenShapes(doc *yamlv3.Node) error {

@@ -5,6 +5,9 @@ import (
 	"regexp"
 
 	yamlv3 "gopkg.in/yaml.v3"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -40,19 +43,19 @@ func validatePlugins(plugins *Plugins) error {
 		return nil
 	}
 	if len(plugins.Desired) > MaxPluginDesired {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("plugins.desired lists more than %d plugins", MaxPluginDesired)}
+		return configkit.Invalid("plugins.desired", fmt.Sprintf("lists more than %d plugins", MaxPluginDesired))
 	}
 	seen := make(map[string]struct{}, len(plugins.Desired))
 	for i := range plugins.Desired {
 		entry := &plugins.Desired[i]
 		if !ValidPluginID(entry.ID) {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("plugins.desired[%d].id must match [a-z][a-z0-9-]{1,47}", i)}
+			return configkit.Invalid(fmt.Sprintf("plugins.desired[%d].id", i), "must match [a-z][a-z0-9-]{1,47}")
 		}
 		if !ValidPluginVersion(entry.Version) {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("plugins.desired[%d].version must be a semantic version", i)}
+			return configkit.Invalid(fmt.Sprintf("plugins.desired[%d].version", i), "must be a semantic version")
 		}
 		if _, duplicate := seen[entry.ID]; duplicate {
-			return &Error{Code: ErrorCodeConfigInvalid, Detail: fmt.Sprintf("plugins.desired lists plugin %q twice", entry.ID)}
+			return configkit.Invalid("plugins.desired", fmt.Sprintf("lists plugin %q twice", entry.ID))
 		}
 		seen[entry.ID] = struct{}{}
 	}
@@ -99,10 +102,10 @@ func validatePluginList(field string, plugins []string) error {
 	seen := make(map[string]struct{}, len(plugins))
 	for _, id := range plugins {
 		if !ValidPluginID(id) {
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".plugins entries must be plugin ids"}
+			return configkit.Field(field+".plugins", fault.New(ErrorCodePersonaInvalid, "entries must be plugin ids"))
 		}
 		if _, duplicate := seen[id]; duplicate {
-			return &Error{Code: ErrorCodePersonaInvalid, Detail: field + ".plugins must not list a plugin twice"}
+			return configkit.Field(field+".plugins", fault.New(ErrorCodePersonaInvalid, "must not list a plugin twice"))
 		}
 		seen[id] = struct{}{}
 	}

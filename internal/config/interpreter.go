@@ -104,10 +104,10 @@ func applyInterpreterDefaults(cfg *Config, doc *yamlv3.Node) {
 func validateInterpreter(interpreter *Interpreter) error {
 	var problems []error
 	if time.Duration(interpreter.Timeout) < MinInterpreterTimeout || time.Duration(interpreter.Timeout) > MaxInterpreterTimeout {
-		problems = append(problems, fmt.Errorf("interpreter.timeout must be between %s and %s", MinInterpreterTimeout, MaxInterpreterTimeout))
+		problems = append(problems, configkit.Invalid("interpreter.timeout", fmt.Sprintf("must be between %s and %s", MinInterpreterTimeout, MaxInterpreterTimeout)))
 	}
 	if time.Duration(interpreter.BuildTimeout) < MinInterpreterBuildTimeout || time.Duration(interpreter.BuildTimeout) > MaxInterpreterBuildTimeout {
-		problems = append(problems, fmt.Errorf("interpreter.build_timeout must be between %s and %s", MinInterpreterBuildTimeout, MaxInterpreterBuildTimeout))
+		problems = append(problems, configkit.Invalid("interpreter.build_timeout", fmt.Sprintf("must be between %s and %s", MinInterpreterBuildTimeout, MaxInterpreterBuildTimeout)))
 	}
 	for _, limit := range []struct {
 		name  string
@@ -124,22 +124,19 @@ func validateInterpreter(interpreter *Interpreter) error {
 		{"max_run_dir_bytes", interpreter.MaxRunDirBytes, 1, MaxInterpreterRunDirBytes},
 	} {
 		if limit.value < limit.min || limit.value > limit.max {
-			problems = append(problems, fmt.Errorf("interpreter.%s must be between %d and %d bytes", limit.name, limit.min, limit.max))
+			problems = append(problems, configkit.Invalid("interpreter."+limit.name, fmt.Sprintf("must be between %d and %d bytes", limit.min, limit.max)))
 		}
 	}
 	if interpreter.MaxOutputFiles < 1 || interpreter.MaxOutputFiles > MaxInterpreterOutputFiles {
-		problems = append(problems, fmt.Errorf("interpreter.max_output_files must be between 1 and %d", MaxInterpreterOutputFiles))
+		problems = append(problems, configkit.Invalid("interpreter.max_output_files", fmt.Sprintf("must be between 1 and %d", MaxInterpreterOutputFiles)))
 	}
 	if interpreter.MaxProcesses < 1 || interpreter.MaxProcesses > MaxInterpreterProcesses {
-		problems = append(problems, fmt.Errorf("interpreter.max_processes must be between 1 and %d", MaxInterpreterProcesses))
+		problems = append(problems, configkit.Invalid("interpreter.max_processes", fmt.Sprintf("must be between 1 and %d", MaxInterpreterProcesses)))
 	}
 	if interpreter.MaxArtifactBytes > interpreter.MaxRunDirBytes {
-		problems = append(problems, errors.New("interpreter.max_artifact_bytes must not exceed interpreter.max_run_dir_bytes"))
+		problems = append(problems, configkit.Invalid("interpreter.max_artifact_bytes", "must not exceed interpreter.max_run_dir_bytes"))
 	}
-	if err := errors.Join(problems...); err != nil {
-		return &Error{Code: ErrorCodeConfigInvalid, Detail: err.Error()}
-	}
-	return nil
+	return errors.Join(problems...)
 }
 
 func validateInterpreterShapes(doc *yamlv3.Node) error {
