@@ -66,6 +66,19 @@ func decodeProblem(doc *document, failure decodeFailure) error {
 	}
 }
 
+func withoutReportedPaths(problems, reported []error) []error {
+	paths := make(map[string]bool, len(reported))
+	for _, problem := range reported {
+		if field, isField := errors.AsType[*configkit.FieldError](problem); isField {
+			paths[dottedPath(field.Path)] = true
+		}
+	}
+	return slices.DeleteFunc(problems, func(problem error) bool {
+		field, isField := errors.AsType[*configkit.FieldError](problem)
+		return isField && paths[dottedPath(field.Path)]
+	})
+}
+
 func sortProblems(problems []error) {
 	slices.SortStableFunc(problems, func(a, b error) int {
 		left, right := orderOf(a), orderOf(b)

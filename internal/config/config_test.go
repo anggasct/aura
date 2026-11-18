@@ -29,6 +29,27 @@ func unknownKeyText(path, position string) string {
 	return path + " (" + position + "): config_unknown_key: unknown key"
 }
 
+func invalidText(path, position, detail string) string {
+	return path + " (" + position + "): config_invalid: " + detail
+}
+
+func problemText(err error, want string) string {
+	if strings.Contains(want, " (line ") || strings.Contains(want, " (env ") {
+		return err.Error()
+	}
+	return stripPositions(err.Error())
+}
+
+func requireProblemText(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("Load succeeded, want the problem %q", want)
+	}
+	if !slices.Contains(strings.Split(strings.TrimPrefix(err.Error(), "config: "), "\n"), want) {
+		t.Fatalf("Load error = %v, want the problem %q", err, want)
+	}
+}
+
 func codeOf(err error) (ErrorCode, bool) {
 	if code, ok := fault.CodeOf[ErrorCode](err); ok {
 		return code, true
@@ -280,29 +301,23 @@ func TestLoad_UnknownKey(t *testing.T) {
 	}
 }
 
-func TestLoad_SyncRemovedKeysMigrationGuidance(t *testing.T) {
+func TestLoad_RemovedSyncKeysAreUnknown(t *testing.T) {
 	contents := map[string]string{
-		"profiles":          "version: 1\nsync:\n  profiles: foo\n",
-		"conflict_strategy": "version: 1\nsync:\n  conflict_strategy: theirs\n",
-		"include_db_snapshot": "version: 1\nsync:\n" +
-			"  include_db_snapshot: true\n",
-	}
-	wants := map[string]string{
-		"profiles":            "profile map",
-		"conflict_strategy":   "fast-forward-only",
-		"include_db_snapshot": "database snapshots are not stored in Git",
+		"profiles":            "version: 1\nsync:\n  profiles: foo\n",
+		"conflict_strategy":   "version: 1\nsync:\n  conflict_strategy: theirs\n",
+		"include_db_snapshot": "version: 1\nsync:\n  include_db_snapshot: true\n",
 	}
 	for key, content := range contents {
-		_, err := Load(writeTempConfig(t, content))
-		if err == nil {
-			t.Fatalf("Load with sync.%s = nil, want migration guidance", key)
-		}
-		if !strings.Contains(err.Error(), "sync."+key+" was removed") {
-			t.Errorf("Load with sync.%s error %q does not name the removed key", key, err)
-		}
-		if !strings.Contains(err.Error(), wants[key]) {
-			t.Errorf("Load with sync.%s error %q missing guidance %q", key, err, wants[key])
-		}
+		t.Run(key, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, content))
+			wantCode(t, err, unknownKeyCode)
+			if want := unknownKeyText("sync."+key, "line 3, column 3"); !strings.Contains(err.Error(), want) {
+				t.Errorf("Load error = %v, want %q", err, want)
+			}
+			if strings.Contains(err.Error(), "removed") {
+				t.Errorf("Load error = %v, want no removal hint", err)
+			}
+		})
 	}
 }
 
@@ -344,27 +359,31 @@ func TestLoad_EnvironmentCannotUpgradeSchemaVersion(t *testing.T) {
 
 func TestLoad_StrictRuntimeAndCapabilityShapes(t *testing.T) {
 	tests := []struct {
-		name    string
-		content string
-		want    string
+		name     string
+		content  string
+		path     string
+		position string
+		detail   string
 	}{
 		{
-			name:    "capability scalar",
-			content: "version: 1\ncapabilities:\n  enabled: sample\n",
-			want:    "capabilities.enabled must be a sequence",
+			name:     "capability scalar",
+			content:  "version: 1\ncapabilities:\n  enabled: sample\n",
+			path:     "capabilities.enabled",
+			position: "line 3, column 12",
+			detail:   "source data must be an array or slice, got string",
 		},
 		{
-			name:    "runtime quoted integer",
-			content: "version: 1\nruntime:\n  max_active_turns: \"4\"\n",
-			want:    "runtime.max_active_turns must be an integer",
+			name:     "runtime quoted integer",
+			content:  "version: 1\nruntime:\n  max_active_turns: \"4\"\n",
+			path:     "runtime.max_active_turns",
+			position: "line 3, column 21",
+			detail:   "must be an integer",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, tt.content))
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("Load error = %v, want substring %q", err, tt.want)
-			}
+			requireProblemText(t, err, invalidText(tt.path, tt.position, tt.detail))
 		})
 	}
 }
@@ -415,9 +434,7 @@ func TestRuntimeRunRetentionDefaultsAndValidates(t *testing.T) {
 	}
 	t.Run("not a duration string", func(t *testing.T) {
 		_, err := Load(writeTempConfig(t, "version: 1\nruntime:\n  run_retention: 720\n"))
-		if err == nil || !strings.Contains(err.Error(), "runtime.run_retention must be a duration string") {
-			t.Fatalf("Load error = %v, want a shape error", err)
-		}
+		requireProblemText(t, err, invalidText("runtime.run_retention", "line 3, column 18", "must be a duration written as a string"))
 	})
 }
 
@@ -843,9 +860,7 @@ server:
   port: "9090"
 `
 	_, err := Load(writeTempConfig(t, content))
-	if err == nil || !strings.Contains(err.Error(), "server.port must be an integer") {
-		t.Fatalf("Load error = %v, want quoted port rejection", err)
-	}
+	requireProblemText(t, err, invalidText("server.port", "line 4, column 9", "must be an integer"))
 }
 
 func TestLoad_PortOutOfRange(t *testing.T) {
@@ -902,9 +917,7 @@ models:
   request_timeout: 120
 `
 	_, err := Load(writeTempConfig(t, content))
-	if err == nil || !strings.Contains(err.Error(), "models.request_timeout must be a duration string") {
-		t.Fatalf("Load error = %v, want duration shape rejection", err)
-	}
+	requireProblemText(t, err, invalidText("models.request_timeout", "line 3, column 20", "must be a duration written as a string"))
 }
 
 func TestLoad_StorageSectionDefaultsAndOverrides(t *testing.T) {
@@ -974,11 +987,11 @@ func TestLoad_StorageValidation(t *testing.T) {
 	}{
 		{name: "connections too low", content: "storage:\n  max_open_connections: 0\n", want: "storage.max_open_connections: config_invalid: 0 is out of range (1-16)"},
 		{name: "connections too high", content: "storage:\n  max_open_connections: 17\n", want: "storage.max_open_connections: config_invalid: 17 is out of range (1-16)"},
-		{name: "zero quota", content: "storage:\n  artifact_quota: 0\n", want: "storage.artifact_quota: config_invalid: must be positive"},
+		{name: "zero quota", content: "storage:\n  artifact_quota: \"0\"\n", want: "storage.artifact_quota: config_invalid: must be positive"},
 		{name: "zero busy timeout", content: "storage:\n  busy_timeout: 0s\n", want: "storage.busy_timeout: config_invalid: must be positive"},
 		{name: "zero backup interval", content: "storage:\n  backup_interval: 0s\n", want: "storage.backup_interval: config_invalid: must be positive"},
 		{name: "zero retention", content: "storage:\n  backup_retention: 0\n", want: "storage.backup_retention: config_invalid: must be at least 1"},
-		{name: "quota not a size", content: "storage:\n  artifact_quota: [1, 2]\n", want: "storage.artifact_quota must be a size string"},
+		{name: "quota not a size", content: "storage:\n  artifact_quota: [1, 2]\n", want: "storage.artifact_quota: config_invalid: must be a byte size written as a string"},
 		{name: "quota invalid size", content: "storage:\n  artifact_quota: 5XB\n", want: "invalid size"},
 	}
 	for _, tc := range cases {
@@ -1078,8 +1091,9 @@ func mustRegistry(t *testing.T, definitions ...capability.Definition) capability
 func TestLoad_DuplicateCapabilitiesRejected(t *testing.T) {
 	path := writeTempConfig(t, "version: 1\ncapabilities:\n  enabled: [sample, sample]\n")
 	_, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), `duplicate capability "sample"`) {
-		t.Fatalf("Load duplicate capabilities error = %v", err)
+	requireProblemText(t, err, invalidText("capabilities.enabled[1]", "line 3, column 21", "is listed more than once"))
+	if strings.Contains(err.Error(), "sample") {
+		t.Fatalf("Load error = %v, want the capability name left out", err)
 	}
 }
 

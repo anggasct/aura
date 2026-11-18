@@ -13,7 +13,6 @@ func FuzzConfigDecode(f *testing.F) {
 		if err != nil {
 			return
 		}
-		_ = validate(doc)
 		_, _ = decode(doc)
 	})
 }

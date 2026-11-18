@@ -6,8 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	yamlv3 "gopkg.in/yaml.v3"
-
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -22,30 +20,6 @@ type ToolGitHub struct {
 type GitHubCredential struct {
 	Name string `json:"name"`
 	Ref  string `json:"ref"`
-}
-
-func validateToolGitHubShape(node *yamlv3.Node) error {
-	if node.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("tools.github must be a mapping at line %d", node.Line)
-	}
-	list := mappingValue(node, "credentials")
-	if list == nil {
-		return nil
-	}
-	if list.Kind != yamlv3.SequenceNode {
-		return fmt.Errorf("tools.github.credentials must be a sequence at line %d", list.Line)
-	}
-	for index, entry := range list.Content {
-		if entry.Kind != yamlv3.MappingNode {
-			return fmt.Errorf("tools.github.credentials[%d] must be a mapping at line %d", index, entry.Line)
-		}
-		for _, field := range []string{"name", "ref"} {
-			if value := mappingValue(entry, field); value != nil && (value.Kind != yamlv3.ScalarNode || value.Tag != "!!str") {
-				return fmt.Errorf("tools.github.credentials[%d].%s must be a string at line %d", index, field, value.Line)
-			}
-		}
-	}
-	return nil
 }
 
 func validateToolGitHub(github *ToolGitHub) error {

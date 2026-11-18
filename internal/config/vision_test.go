@@ -80,9 +80,7 @@ func TestLoad_VisionInvalid(t *testing.T) {
 
 func TestLoad_VisionShapeStrict(t *testing.T) {
 	_, err := Load(writeTempConfig(t, "version: 1\nvision:\n  max_images: \"4\"\n"))
-	if err == nil || !strings.Contains(err.Error(), "vision.max_images must be an integer") {
-		t.Fatalf("error = %v, want integer shape rejection", err)
-	}
+	requireProblemText(t, err, invalidText("vision.max_images", "line 3, column 15", "must be an integer"))
 	_, err = Load(writeTempConfig(t, "version: 1\nvision:\n  no_such_key: true\n"))
 	wantCode(t, err, unknownKeyCode)
 	if !strings.Contains(err.Error(), unknownKeyText("vision.no_such_key", "line 3, column 3")) {

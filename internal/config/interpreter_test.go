@@ -41,7 +41,7 @@ interpreter:
   timeout: 2m
   build_timeout: 90s
   max_source_bytes: 1KiB
-  max_stdin_bytes: 2048
+  max_stdin_bytes: "2048"
   max_stdout_bytes: 4KiB
   max_stderr_bytes: 8KiB
   max_output_files: 3
@@ -77,7 +77,7 @@ func TestLoad_InterpreterBoundsAreRejected(t *testing.T) {
 		{"max_stderr_bytes", MaxInterpreterOutputBytes, 1, ""},
 		{"max_artifact_bytes", MaxInterpreterArtifactBytes, 1, "max_run_dir_bytes: 16GiB"},
 		{"max_memory_bytes", MaxInterpreterMemoryBytes, MinInterpreterMemoryBytes, ""},
-		{"max_run_dir_bytes", MaxInterpreterRunDirBytes, 1, "max_artifact_bytes: 1"},
+		{"max_run_dir_bytes", MaxInterpreterRunDirBytes, 1, "max_artifact_bytes: \"1\""},
 	}
 	type bound struct {
 		name    string
@@ -87,12 +87,12 @@ func TestLoad_InterpreterBoundsAreRejected(t *testing.T) {
 	var cases []bound
 	for _, k := range byteKeys {
 		cases = append(cases,
-			bound{k.key + " at the minimum", fmt.Sprintf("%s: %d\n  %s", k.key, k.min, k.other), true},
-			bound{k.key + " at the maximum", fmt.Sprintf("%s: %d\n  %s", k.key, k.max, k.other), true},
-			bound{k.key + " below the minimum", fmt.Sprintf("%s: %d", k.key, k.min-1), false},
-			bound{k.key + " above the maximum", fmt.Sprintf("%s: %d", k.key, k.max+1), false},
-			bound{k.key + " explicit zero", k.key + ": 0", false},
-			bound{k.key + " negative", k.key + ": -1", false},
+			bound{k.key + " at the minimum", fmt.Sprintf("%s: \"%d\"\n  %s", k.key, k.min, k.other), true},
+			bound{k.key + " at the maximum", fmt.Sprintf("%s: \"%d\"\n  %s", k.key, k.max, k.other), true},
+			bound{k.key + " below the minimum", fmt.Sprintf("%s: \"%d\"", k.key, k.min-1), false},
+			bound{k.key + " above the maximum", fmt.Sprintf("%s: \"%d\"", k.key, k.max+1), false},
+			bound{k.key + " explicit zero", k.key + ": \"0\"", false},
+			bound{k.key + " negative", k.key + ": \"-1\"", false},
 		)
 	}
 	cases = append(cases,
@@ -150,11 +150,11 @@ func TestLoad_InterpreterShapeAndKeysAreStrict(t *testing.T) {
 		content string
 		want    string
 	}{
-		{"quoted integer", "interpreter:\n  max_processes: \"64\"\n", "interpreter.max_processes must be an integer"},
-		{"float count", "interpreter:\n  max_output_files: 1.5\n", "interpreter.max_output_files must be an integer"},
-		{"numeric duration", "interpreter:\n  timeout: 30\n", "interpreter.timeout must be a duration string"},
-		{"boolean byte size", "interpreter:\n  max_memory_bytes: true\n", "interpreter.max_memory_bytes must be a byte size"},
-		{"list instead of a mapping", "interpreter: [1]\n", "interpreter must be a mapping"},
+		{"quoted integer", "interpreter:\n  max_processes: \"64\"\n", invalidText("interpreter.max_processes", "line 3, column 18", "must be an integer")},
+		{"float count", "interpreter:\n  max_output_files: 1.5\n", invalidText("interpreter.max_output_files", "line 3, column 21", "must be an integer")},
+		{"numeric duration", "interpreter:\n  timeout: 30\n", invalidText("interpreter.timeout", "line 3, column 12", "must be a duration written as a string")},
+		{"boolean byte size", "interpreter:\n  max_memory_bytes: true\n", invalidText("interpreter.max_memory_bytes", "line 3, column 21", "must be a byte size written as a string")},
+		{"list instead of a mapping", "interpreter: [1]\n", invalidText("interpreter", "line 2, column 14", "expected a map or struct, got \"slice\"")},
 		{"unknown key", "interpreter:\n  max_threads: 4\n", unknownKeyText("interpreter.max_threads", "line 3, column 3")},
 		{"retired profiles key", "profiles:\n  interpreter-python-linux:\n    enabled: true\n", unknownKeyText("profiles", "line 2, column 1")},
 	}

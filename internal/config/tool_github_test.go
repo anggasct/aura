@@ -124,11 +124,11 @@ func TestToolsGitHubRejectsMisshapenCredentials(t *testing.T) {
 		section string
 		want    string
 	}{
-		{"scalar github", "  github: 5\n", "tools.github must be a mapping"},
-		{"scalar credentials", "  github:\n    credentials: ci\n", "tools.github.credentials must be a sequence"},
-		{"scalar entry", "  github:\n    credentials:\n      - ci\n", "tools.github.credentials[0] must be a mapping"},
-		{"numeric name", "  github:\n    credentials:\n      - name: 5\n        ref: env://A\n", "tools.github.credentials[0].name must be a string"},
-		{"numeric ref", "  github:\n    credentials:\n      - name: ci\n        ref: 5\n", "tools.github.credentials[0].ref must be a string"},
+		{"scalar github", "  github: 5\n", "tools.github (line 4, column 11): config_invalid: expected a map or struct, got \"int\""},
+		{"scalar credentials", "  github:\n    credentials: ci\n", "tools.github.credentials (line 5, column 18): config_invalid: source data must be an array or slice, got string"},
+		{"scalar entry", "  github:\n    credentials:\n      - ci\n", "tools.github.credentials[0] (line 6, column 9): config_invalid: expected a map or struct, got \"string\""},
+		{"numeric name", "  github:\n    credentials:\n      - name: 5\n        ref: env://A\n", "tools.github.credentials[0].name (line 6, column 15): config_invalid: expected type 'string', got unconvertible type 'int'"},
+		{"numeric ref", "  github:\n    credentials:\n      - name: ci\n        ref: 5\n", "tools.github.credentials[0].ref (line 7, column 14): config_invalid: expected type 'string', got unconvertible type 'int'"},
 		{"old key", "  github:\n    credentials:\n      - name: ci\n        credential_ref: env://A\n", unknownKeyText("tools.github.credentials[0].credential_ref", "line 7, column 9")},
 	}
 	for _, tc := range cases {
