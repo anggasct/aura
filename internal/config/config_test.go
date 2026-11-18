@@ -1208,7 +1208,11 @@ func TestValidateLoadedModelsReportsEveryDefinition(t *testing.T) {
 		"third": {Protocol: ProtocolOpenAIChatCompat, Model: "m", APIKeyEnv: "K",
 			Capabilities: ModelCapabilities{ContextTokens: 0, Tokenizer: ""}},
 	}}
-	err := validateLoadedModels(models, false)
+	doc, err := parseDocument([]byte("version: 1\n"))
+	if err != nil {
+		t.Fatalf("parseDocument: %v", err)
+	}
+	err = validateLoadedModels(models, doc)
 	if err == nil {
 		t.Fatal("expected the invalid definitions to be rejected")
 	}

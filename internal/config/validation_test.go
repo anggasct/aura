@@ -168,7 +168,11 @@ func TestEveryValidatorRunsOverInvalidFixtures(t *testing.T) {
 	t.Run("a zero config validates without a panic", func(t *testing.T) {
 		for _, profile := range []capability.Profile{capability.ProfileCore, capability.ProfileExecLinux} {
 			t.Run(string(profile), func(t *testing.T) {
-				if err := validateLoaded(&Config{}, true, profile); err == nil {
+				doc, err := parseDocument([]byte("version: 1\n"))
+				if err != nil {
+					t.Fatalf("parseDocument: %v", err)
+				}
+				if err := validateLoaded(&Config{}, doc, profile); err == nil {
 					t.Fatal("a zero config validated")
 				}
 			})

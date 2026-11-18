@@ -72,9 +72,8 @@ func documentVersion(doc *yamlv3.Node) (int, error) {
 	return version, nil
 }
 
-func (d *document) has(path string) bool {
-	_, _, found := d.find(path)
-	return found
+func (d *document) setByFileOrEnvironment(path string) bool {
+	return d.positionOf(path) != ""
 }
 
 func (d *document) positionOf(path string) string {

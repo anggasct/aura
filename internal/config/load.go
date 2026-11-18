@@ -97,7 +97,7 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		return LoadResult{}, positionProblems(doc, err)
 	}
 	deriveDefaults(cfg)
-	if err := validateLoaded(cfg, doc.has("models.routing"), options.Build.Profile()); err != nil {
+	if err := validateLoaded(cfg, doc, options.Build.Profile()); err != nil {
 		return LoadResult{}, positionProblems(doc, err)
 	}
 	if err := loadPersonaSouls(cfg, resolved); err != nil {
@@ -120,9 +120,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	}, nil
 }
 
-func validateLoaded(cfg *Config, routingExplicit bool, profile capability.Profile) error {
+func validateLoaded(cfg *Config, doc *document, profile capability.Profile) error {
 	return errors.Join(
-		validateLoadedModels(cfg.Models, routingExplicit),
+		validateLoadedModels(cfg.Models, doc),
 		validateLoadedModelRoutes(cfg.ModelRoutes, cfg.Models),
 		validateTools(cfg.Tools, profile),
 		validateSkills(cfg.Skills, profile),
@@ -1685,7 +1685,7 @@ func validateProviderPresetShape(prefix string, node *yamlv3.Node) error {
 	return nil
 }
 
-func validateLoadedModels(models Models, routingExplicit bool) error {
+func validateLoadedModels(models Models, doc *document) error {
 	problems := make([]error, 0, len(models.Definitions)+len(models.Providers)+1)
 	for _, name := range slices.Sorted(maps.Keys(models.Providers)) {
 		preset := models.Providers[name]
@@ -1701,7 +1701,7 @@ func validateLoadedModels(models Models, routingExplicit bool) error {
 		definition := models.Definitions[name]
 		problems = append(problems, modelDefinitionProblems(models, name, &definition)...)
 	}
-	problems = append(problems, validateRouting(models, routingExplicit))
+	problems = append(problems, validateRouting(models, doc))
 	return errors.Join(problems...)
 }
 
@@ -1764,12 +1764,12 @@ func modelCapabilityProblems(name string, definition *ModelDefinition) []error {
 	return problems
 }
 
-func validateRouting(models Models, explicit bool) error {
+func validateRouting(models Models, doc *document) error {
 	for task, role := range models.Routing {
 		if role != "primary" && role != "auxiliary" {
 			return configkit.Invalid("models.routing."+task, "role is not supported (must be primary or auxiliary)")
 		}
-		if explicit && len(models.Definitions) > 0 {
+		if doc.setByFileOrEnvironment(joinPath("models.routing", task)) && len(models.Definitions) > 0 {
 			if _, ok := models.Definitions[role]; !ok {
 				return configkit.Invalid("models.routing."+task, "references an undefined model")
 			}

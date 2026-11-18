@@ -63,6 +63,43 @@ func TestEnvSetsALeafAndKeepsItsSiblings(t *testing.T) {
 	})
 }
 
+const modelDefinitionsFixture = `  definitions:
+    primary:
+      protocol: anthropic_messages
+      model: claude-sonnet
+      base_url: https://api.anthropic.com
+      api_key_env: ANTHROPIC_API_KEY
+      capabilities:
+        streaming: true
+        tools: true
+        structured_output: false
+        vision: true
+        audio: false
+        reasoning: true
+        context_tokens: 200000
+        tokenizer: anthropic
+        usage_reporting: true
+`
+
+func TestEnvSetRoutingUndefinedModelRejected(t *testing.T) {
+	t.Run("a routed role the environment sets and the definitions lack fails the load", func(t *testing.T) {
+		_, err := loadWithEnvironment(t, "version: 1\nmodels:\n"+modelDefinitionsFixture, map[string]string{"AURA_MODELS_ROUTING_SUMMARIZE": "auxiliary"})
+		wantCode(t, err, invalidCode)
+		if !strings.Contains(err.Error(), "models.routing.summarize (env AURA_MODELS_ROUTING_SUMMARIZE): config_invalid: references an undefined model") {
+			t.Errorf("Load error = %v, want the undefined-model reference named at the environment variable", err)
+		}
+	})
+	t.Run("a routed role the environment sets and the definitions define keeps loading", func(t *testing.T) {
+		res, err := loadWithEnvironment(t, "version: 1\nmodels:\n"+modelDefinitionsFixture, map[string]string{"AURA_MODELS_ROUTING_SUMMARIZE": "primary"})
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got := res.Config.Models.Routing["summarize"]; got != "primary" {
+			t.Errorf("routing.summarize = %q, want primary", got)
+		}
+	})
+}
+
 func TestAnAbsentOptionalSectionStaysAbsent(t *testing.T) {
 	t.Run("a file without sections", func(t *testing.T) {
 		res, err := Load(writeTempConfig(t, "version: 1\n"))
