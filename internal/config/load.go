@@ -17,10 +17,6 @@ import (
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/env"
-	"github.com/knadh/koanf/providers/rawbytes"
-	"github.com/knadh/koanf/v2"
 	yamlv3 "gopkg.in/yaml.v3"
 
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
@@ -91,28 +87,28 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 	if err := validate(doc); err != nil {
-		return LoadResult{}, err
+		return LoadResult{}, positionProblems(doc, err)
 	}
 	cfg, err := decode(doc)
 	if err != nil {
 		return LoadResult{}, err
 	}
 	if err := checkVersion(cfg.Version); err != nil {
-		return LoadResult{}, err
+		return LoadResult{}, positionProblems(doc, err)
 	}
-	applyDefaults(cfg, doc)
-	if err := validateLoaded(cfg, doc.has("models.routing"), options.Build.Profile()); err != nil {
-		return LoadResult{}, err
+	deriveDefaults(cfg)
+	if err := validateLoaded(cfg, doc, options.Build.Profile()); err != nil {
+		return LoadResult{}, positionProblems(doc, err)
 	}
 	if err := loadPersonaSouls(cfg, resolved); err != nil {
-		return LoadResult{}, err
+		return LoadResult{}, positionProblems(doc, err)
 	}
 	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
 	}
 	if cfg.Tools != nil && len(cfg.Tools.GitHub.Credentials) > 0 && !slices.Contains(report.Active(), githubCapability) {
-		return LoadResult{}, configkit.Invalid("tools.github.credentials", "needs the "+githubCapability+" capability: compile it into the build and list it in capabilities.enabled")
+		return LoadResult{}, positionProblems(doc, configkit.Invalid("tools.github.credentials", "needs the "+githubCapability+" capability: compile it into the build and list it in capabilities.enabled"))
 	}
 	return LoadResult{
 		Config:               cfg,
@@ -124,9 +120,9 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	}, nil
 }
 
-func validateLoaded(cfg *Config, routingExplicit bool, profile capability.Profile) error {
+func validateLoaded(cfg *Config, doc *document, profile capability.Profile) error {
 	return errors.Join(
-		validateLoadedModels(cfg.Models, routingExplicit),
+		validateLoadedModels(cfg.Models, doc),
 		validateLoadedModelRoutes(cfg.ModelRoutes, cfg.Models),
 		validateTools(cfg.Tools, profile),
 		validateSkills(cfg.Skills, profile),
@@ -665,8 +661,16 @@ func validateDiscordAccountShapes(accountsNode *yamlv3.Node) error {
 	return nil
 }
 
+func channelNode(doc *yamlv3.Node, name string) *yamlv3.Node {
+	channels := mappingValue(doc, "channels")
+	if channels == nil || channels.Kind != yamlv3.MappingNode {
+		return nil
+	}
+	return mappingValue(channels, name)
+}
+
 func validateTelegramShapes(doc *yamlv3.Node) error {
-	telegramNode := nestedValue(doc, "channels", "telegram")
+	telegramNode := channelNode(doc, "telegram")
 	if telegramNode == nil {
 		return nil
 	}
@@ -713,7 +717,7 @@ func validateTelegramShapes(doc *yamlv3.Node) error {
 }
 
 func validateHTTPShapes(doc *yamlv3.Node) error {
-	httpNode := nestedValue(doc, "channels", "http")
+	httpNode := channelNode(doc, "http")
 	if httpNode == nil {
 		return nil
 	}
@@ -1681,7 +1685,7 @@ func validateProviderPresetShape(prefix string, node *yamlv3.Node) error {
 	return nil
 }
 
-func validateLoadedModels(models Models, routingExplicit bool) error {
+func validateLoadedModels(models Models, doc *document) error {
 	problems := make([]error, 0, len(models.Definitions)+len(models.Providers)+1)
 	for _, name := range slices.Sorted(maps.Keys(models.Providers)) {
 		preset := models.Providers[name]
@@ -1697,7 +1701,7 @@ func validateLoadedModels(models Models, routingExplicit bool) error {
 		definition := models.Definitions[name]
 		problems = append(problems, modelDefinitionProblems(models, name, &definition)...)
 	}
-	problems = append(problems, validateRouting(models, routingExplicit))
+	problems = append(problems, validateRouting(models, doc))
 	return errors.Join(problems...)
 }
 
@@ -1760,12 +1764,12 @@ func modelCapabilityProblems(name string, definition *ModelDefinition) []error {
 	return problems
 }
 
-func validateRouting(models Models, explicit bool) error {
+func validateRouting(models Models, doc *document) error {
 	for task, role := range models.Routing {
 		if role != "primary" && role != "auxiliary" {
 			return configkit.Invalid("models.routing."+task, "role is not supported (must be primary or auxiliary)")
 		}
-		if explicit && len(models.Definitions) > 0 {
+		if doc.setByFileOrEnvironment(joinPath("models.routing", task)) && len(models.Definitions) > 0 {
 			if _, ok := models.Definitions[role]; !ok {
 				return configkit.Invalid("models.routing."+task, "references an undefined model")
 			}
@@ -1824,15 +1828,11 @@ func validateLoadedModelRoutes(routes map[string]ModelRoute, models Models) erro
 }
 
 func decode(doc *document) (*Config, error) {
-	k := koanf.New(".")
-	if err := k.Load(rawbytes.Provider(doc.data), yaml.Parser()); err != nil {
-		return nil, malformedDocument(fault.Wrap(configkit.ErrorCodeMalformed, "invalid YAML", err))
-	}
 	var collector envCollector
-	if err := k.Load(env.ProviderWithValue(envPrefix, ".", collector.provide), nil); err != nil {
-		return nil, fmt.Errorf("failed to load environment overrides: %w", err)
+	input, err := loadLayers(doc, &collector)
+	if err != nil {
+		return nil, err
 	}
-	input := k.Raw()
 	problems := append(collector.errors(), reportUnknownKeys(doc, input)...)
 	var cfg Config
 	problems = append(problems, decodeProblems(doc, decodeInput(input, &cfg))...)
@@ -1973,337 +1973,6 @@ func stringToStringSliceHook() mapstructure.DecodeHookFunc {
 	}
 }
 
-func applyDefaults(cfg *Config, parsed *document) {
-	doc := parsed.root
-	defaults := Default()
-	if cfg.Runtime.MaxActiveTurns == 0 && !configValuePresent(doc, "runtime", "max_active_turns") && !envValuePresent("runtime.max_active_turns") {
-		cfg.Runtime.MaxActiveTurns = defaults.Runtime.MaxActiveTurns
-	}
-	if cfg.Runtime.MaxPendingTurns == 0 && !configValuePresent(doc, "runtime", "max_pending_turns") && !envValuePresent("runtime.max_pending_turns") {
-		cfg.Runtime.MaxPendingTurns = defaults.Runtime.MaxPendingTurns
-	}
-	if cfg.Runtime.TurnTimeout == 0 && !configValuePresent(doc, "runtime", "turn_timeout") && !envValuePresent("runtime.turn_timeout") {
-		cfg.Runtime.TurnTimeout = defaults.Runtime.TurnTimeout
-	}
-	if cfg.Runtime.ShutdownTimeout == 0 && !configValuePresent(doc, "runtime", "shutdown_timeout") && !envValuePresent("runtime.shutdown_timeout") {
-		cfg.Runtime.ShutdownTimeout = defaults.Runtime.ShutdownTimeout
-	}
-	if cfg.Runtime.RunRetention == 0 && !configValuePresent(doc, "runtime", "run_retention") && !envValuePresent("runtime.run_retention") {
-		cfg.Runtime.RunRetention = defaults.Runtime.RunRetention
-	}
-	if cfg.Capabilities.Enabled == nil {
-		cfg.Capabilities.Enabled = []string{}
-	}
-	applyToolDefaults(cfg, doc)
-	applyWorkflowDefaults(cfg, doc)
-	applyMCPDefaults(cfg, doc)
-	if cfg.Server.Host == "" {
-		cfg.Server.Host = defaults.Server.Host
-	}
-	if cfg.Server.Port == 0 {
-		cfg.Server.Port = defaults.Server.Port
-	}
-	if cfg.Logging.Level == "" {
-		cfg.Logging.Level = defaults.Logging.Level
-	}
-	if cfg.Logging.Format == "" {
-		cfg.Logging.Format = defaults.Logging.Format
-	}
-	if cfg.Models.Definitions == nil {
-		cfg.Models.Definitions = defaults.Models.Definitions
-	}
-	if cfg.Models.Providers == nil {
-		cfg.Models.Providers = map[string]ProviderPreset{}
-	}
-	if cfg.Models.RequestTimeout == 0 && !configValuePresent(doc, "models", "request_timeout") && !envValuePresent("models.request_timeout") {
-		cfg.Models.RequestTimeout = defaults.Models.RequestTimeout
-	}
-	if cfg.Models.StreamingIdleTimeout == 0 && !configValuePresent(doc, "models", "streaming_idle_timeout") && !envValuePresent("models.streaming_idle_timeout") {
-		cfg.Models.StreamingIdleTimeout = defaults.Models.StreamingIdleTimeout
-	}
-	if cfg.Models.Routing == nil {
-		cfg.Models.Routing = defaults.Models.Routing
-	}
-	if cfg.Storage.BusyTimeout == 0 && !configValuePresent(doc, "storage", "busy_timeout") && !envValuePresent("storage.busy_timeout") {
-		cfg.Storage.BusyTimeout = defaults.Storage.BusyTimeout
-	}
-	if cfg.Storage.MaxOpenConnections == 0 && !configValuePresent(doc, "storage", "max_open_connections") && !envValuePresent("storage.max_open_connections") {
-		cfg.Storage.MaxOpenConnections = defaults.Storage.MaxOpenConnections
-	}
-	if cfg.Storage.ArtifactQuota == 0 && !configValuePresent(doc, "storage", "artifact_quota") && !envValuePresent("storage.artifact_quota") {
-		cfg.Storage.ArtifactQuota = defaults.Storage.ArtifactQuota
-	}
-	if cfg.Storage.BackupInterval == 0 && !configValuePresent(doc, "storage", "backup_interval") && !envValuePresent("storage.backup_interval") {
-		cfg.Storage.BackupInterval = defaults.Storage.BackupInterval
-	}
-	if cfg.Storage.BackupRetention == 0 && !configValuePresent(doc, "storage", "backup_retention") && !envValuePresent("storage.backup_retention") {
-		cfg.Storage.BackupRetention = defaults.Storage.BackupRetention
-	}
-	if cfg.Telemetry.Exporter == "" {
-		cfg.Telemetry.Exporter = defaults.Telemetry.Exporter
-	}
-	if cfg.Telemetry.SampleRatio == 0 && !configValuePresent(doc, "telemetry", "sample_ratio") && !envValuePresent("telemetry.sample_ratio") {
-		cfg.Telemetry.SampleRatio = defaults.Telemetry.SampleRatio
-	}
-	if cfg.Telemetry.QueueSize == 0 && !configValuePresent(doc, "telemetry", "queue_size") && !envValuePresent("telemetry.queue_size") {
-		cfg.Telemetry.QueueSize = defaults.Telemetry.QueueSize
-	}
-	if cfg.Telemetry.ExportTimeout == 0 && !configValuePresent(doc, "telemetry", "export_timeout") && !envValuePresent("telemetry.export_timeout") {
-		cfg.Telemetry.ExportTimeout = defaults.Telemetry.ExportTimeout
-	}
-	if cfg.Usage.Currency == "" {
-		cfg.Usage.Currency = defaults.Usage.Currency
-	}
-	if cfg.Usage.DailyBudgetMicros == 0 && !configValuePresent(doc, "usage", "daily_budget_micros") && !envValuePresent("usage.daily_budget_micros") {
-		cfg.Usage.DailyBudgetMicros = defaults.Usage.DailyBudgetMicros
-	}
-	if cfg.Usage.MonthlyBudgetMicros == 0 && !configValuePresent(doc, "usage", "monthly_budget_micros") && !envValuePresent("usage.monthly_budget_micros") {
-		cfg.Usage.MonthlyBudgetMicros = defaults.Usage.MonthlyBudgetMicros
-	}
-	if cfg.Usage.ReservationTTL == 0 && !configValuePresent(doc, "usage", "reservation_ttl") && !envValuePresent("usage.reservation_ttl") {
-		cfg.Usage.ReservationTTL = defaults.Usage.ReservationTTL
-	}
-	applyHealthDefaults(cfg, doc, defaults.Health)
-	applyTerminalDefaults(cfg, doc, defaults.Terminal)
-	applyModelRouteDefaults(cfg, doc)
-	applyWebhookDefaults(cfg, doc, &defaults.Webhook)
-	applyBroadcastDefaults(cfg, doc, &defaults.Broadcast)
-	applySchedulerDefaults(cfg, doc, &defaults.Scheduler)
-	applyMemoryDefaults(cfg, doc, &defaults.Memory)
-	applySkillsDefaults(cfg, doc)
-	applyContextDefaults(cfg, doc)
-	applyProfileDefaults(cfg, doc)
-	applyChildrenDefaults(cfg, doc)
-	applyAccessDefaults(cfg, doc)
-	applySyncDefaults(cfg, doc)
-	applyVisionDefaults(cfg, doc)
-	applyKnowledgeDefaults(cfg, doc)
-	applyInterpreterDefaults(cfg, doc)
-	applyDiscordDefaults(cfg, doc, &defaults.Channels.Discord)
-	applyTelegramDefaults(cfg, doc, &defaults.Channels.Telegram)
-	applyEmailDefaults(cfg, doc, &defaults.Channels.Email)
-	applyHTTPDefaults(cfg, doc, &defaults.Channels.HTTP)
-}
-
-func applyModelRouteDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.ModelRoutes == nil && (len(cfg.Models.Definitions) > 0 || configValuePresent(doc, "model_routes")) {
-		cfg.ModelRoutes = make(map[string]ModelRoute)
-	}
-	for _, defaultName := range []string{"primary", "auxiliary"} {
-		if _, ok := cfg.Models.Definitions[defaultName]; ok {
-			route, exists := cfg.ModelRoutes[defaultName]
-			if !exists {
-				route = ModelRoute{
-					Candidates:          []string{defaultName},
-					MaxProviderAttempts: DefaultModelRouteMaxProviderAttempts,
-					RetryDelayBudget:    configkit.Duration(DefaultModelRouteRetryDelayBudget),
-				}
-				cfg.ModelRoutes[defaultName] = route
-			} else if len(route.Candidates) == 0 {
-				route.Candidates = []string{defaultName}
-				cfg.ModelRoutes[defaultName] = route
-			}
-		}
-	}
-	for name, route := range cfg.ModelRoutes {
-		mutated := false
-		if route.MaxProviderAttempts == 0 && !configValuePresent(doc, "model_routes", name, "max_provider_attempts") && !envValuePresent("model_routes."+name+".max_provider_attempts") {
-			route.MaxProviderAttempts = DefaultModelRouteMaxProviderAttempts
-			mutated = true
-		}
-		if route.RetryDelayBudget == 0 && !configValuePresent(doc, "model_routes", name, "retry_delay_budget") && !envValuePresent("model_routes."+name+".retry_delay_budget") {
-			route.RetryDelayBudget = configkit.Duration(DefaultModelRouteRetryDelayBudget)
-			mutated = true
-		}
-		if mutated {
-			cfg.ModelRoutes[name] = route
-		}
-	}
-}
-
-func applyWebhookDefaults(cfg *Config, doc *yamlv3.Node, defaults *Webhook) {
-	if cfg.Webhook.Listen == "" && !configValuePresent(doc, "webhook", "listen_address") && !envValuePresent("webhook.listen_address") {
-		cfg.Webhook.Listen = defaults.Listen
-	}
-	if cfg.Webhook.MaxBodySize == 0 && !configValuePresent(doc, "webhook", "max_body_size") && !envValuePresent("webhook.max_body_size") {
-		cfg.Webhook.MaxBodySize = defaults.MaxBodySize
-	}
-	if cfg.Webhook.TimestampTolerance == 0 && !configValuePresent(doc, "webhook", "timestamp_tolerance") && !envValuePresent("webhook.timestamp_tolerance") {
-		cfg.Webhook.TimestampTolerance = defaults.TimestampTolerance
-	}
-	if cfg.Webhook.ReplayRetention == 0 && !configValuePresent(doc, "webhook", "replay_retention") && !envValuePresent("webhook.replay_retention") {
-		cfg.Webhook.ReplayRetention = defaults.ReplayRetention
-	}
-	if cfg.Webhook.RequestsPerMinute == 0 && !configValuePresent(doc, "webhook", "requests_per_minute") && !envValuePresent("webhook.requests_per_minute") {
-		cfg.Webhook.RequestsPerMinute = defaults.RequestsPerMinute
-	}
-}
-
-func applyBroadcastDefaults(cfg *Config, doc *yamlv3.Node, defaults *Broadcast) {
-	if cfg.Broadcast.Timezone == "" && !configValuePresent(doc, "broadcast", "timezone") && !envValuePresent("broadcast.timezone") {
-		cfg.Broadcast.Timezone = defaults.Timezone
-	}
-	if !cfg.Broadcast.QuietHours.Enabled && !configValuePresent(doc, "broadcast", "quiet_hours", "enabled") && !envValuePresent("broadcast.quiet_hours.enabled") {
-		cfg.Broadcast.QuietHours.Enabled = defaults.QuietHours.Enabled
-	}
-	if cfg.Broadcast.QuietHours.Start == "" && !configValuePresent(doc, "broadcast", "quiet_hours", "start") && !envValuePresent("broadcast.quiet_hours.start") {
-		cfg.Broadcast.QuietHours.Start = defaults.QuietHours.Start
-	}
-	if cfg.Broadcast.QuietHours.End == "" && !configValuePresent(doc, "broadcast", "quiet_hours", "end") && !envValuePresent("broadcast.quiet_hours.end") {
-		cfg.Broadcast.QuietHours.End = defaults.QuietHours.End
-	}
-	if cfg.Broadcast.MaxDigestItems == 0 && !configValuePresent(doc, "broadcast", "max_digest_items") && !envValuePresent("broadcast.max_digest_items") {
-		cfg.Broadcast.MaxDigestItems = defaults.MaxDigestItems
-	}
-	if cfg.Broadcast.MaxDigestBytes == 0 && !configValuePresent(doc, "broadcast", "max_digest_bytes") && !envValuePresent("broadcast.max_digest_bytes") {
-		cfg.Broadcast.MaxDigestBytes = defaults.MaxDigestBytes
-	}
-	if cfg.Broadcast.MaxAttempts == 0 && !configValuePresent(doc, "broadcast", "max_attempts") && !envValuePresent("broadcast.max_attempts") {
-		cfg.Broadcast.MaxAttempts = defaults.MaxAttempts
-	}
-	if cfg.Broadcast.MaxDeliveryAge == 0 && !configValuePresent(doc, "broadcast", "max_delivery_age") && !envValuePresent("broadcast.max_delivery_age") {
-		cfg.Broadcast.MaxDeliveryAge = defaults.MaxDeliveryAge
-	}
-	if cfg.Broadcast.MinDispatchGap == 0 && !configValuePresent(doc, "broadcast", "min_dispatch_gap") && !envValuePresent("broadcast.min_dispatch_gap") {
-		cfg.Broadcast.MinDispatchGap = defaults.MinDispatchGap
-	}
-	if cfg.Broadcast.Destinations == nil {
-		cfg.Broadcast.Destinations = map[string]string{}
-	}
-	if cfg.Broadcast.Fallback == nil {
-		cfg.Broadcast.Fallback = map[string]string{}
-	}
-}
-
-func applySchedulerDefaults(cfg *Config, doc *yamlv3.Node, defaults *Scheduler) {
-	if !cfg.Scheduler.Enabled && !configValuePresent(doc, "scheduler", "enabled") && !envValuePresent("scheduler.enabled") {
-		cfg.Scheduler.Enabled = defaults.Enabled
-	}
-	if cfg.Scheduler.DefaultTimezone == "" && !configValuePresent(doc, "scheduler", "default_timezone") && !envValuePresent("scheduler.default_timezone") {
-		cfg.Scheduler.DefaultTimezone = defaults.DefaultTimezone
-	}
-	if cfg.Scheduler.DefaultCatchUpGrace == 0 && !configValuePresent(doc, "scheduler", "default_catch_up_grace") && !envValuePresent("scheduler.default_catch_up_grace") {
-		cfg.Scheduler.DefaultCatchUpGrace = defaults.DefaultCatchUpGrace
-	}
-	if cfg.Scheduler.OccurrenceRetention == 0 && !configValuePresent(doc, "scheduler", "occurrence_retention") && !envValuePresent("scheduler.occurrence_retention") {
-		cfg.Scheduler.OccurrenceRetention = defaults.OccurrenceRetention
-	}
-}
-
-func applyMemoryDefaults(cfg *Config, doc *yamlv3.Node, defaults *Memory) {
-	if !cfg.Memory.Enabled && !configValuePresent(doc, "memory", "enabled") && !envValuePresent("memory.enabled") {
-		cfg.Memory.Enabled = defaults.Enabled
-	}
-	if cfg.Memory.MaxDocuments == 0 && !configValuePresent(doc, "memory", "max_documents") && !envValuePresent("memory.max_documents") {
-		cfg.Memory.MaxDocuments = defaults.MaxDocuments
-	}
-	if cfg.Memory.RecallTokenBudget == 0 && !configValuePresent(doc, "memory", "recall_token_budget") && !envValuePresent("memory.recall_token_budget") {
-		cfg.Memory.RecallTokenBudget = defaults.RecallTokenBudget
-	}
-	if cfg.Memory.SummaryPromptVersion == "" && !configValuePresent(doc, "memory", "summary_prompt_version") && !envValuePresent("memory.summary_prompt_version") {
-		cfg.Memory.SummaryPromptVersion = defaults.SummaryPromptVersion
-	}
-	if cfg.Memory.SummaryTTL == 0 && !configValuePresent(doc, "memory", "summary_ttl") && !envValuePresent("memory.summary_ttl") {
-		cfg.Memory.SummaryTTL = defaults.SummaryTTL
-	}
-}
-
-func applySkillsDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.Skills == nil {
-		return
-	}
-	defaults := Default().Skills
-	if !cfg.Skills.Enabled && !configValuePresent(doc, "skills", "enabled") && !envValuePresent("skills.enabled") {
-		cfg.Skills.Enabled = defaults.Enabled
-	}
-	if cfg.Skills.Roots == nil && !configValuePresent(doc, "skills", "roots") && !envValuePresent("skills.roots") {
-		cfg.Skills.Roots = defaults.Roots
-	}
-	if !cfg.Skills.AutoSelect && !configValuePresent(doc, "skills", "auto_select") && !envValuePresent("skills.auto_select") {
-		cfg.Skills.AutoSelect = defaults.AutoSelect
-	}
-	if cfg.Skills.MaxIndexedSkills == 0 && !configValuePresent(doc, "skills", "max_indexed_skills") && !envValuePresent("skills.max_indexed_skills") {
-		cfg.Skills.MaxIndexedSkills = defaults.MaxIndexedSkills
-	}
-	if cfg.Skills.MaxInstructionTokens == 0 && !configValuePresent(doc, "skills", "max_instruction_tokens") && !envValuePresent("skills.max_instruction_tokens") {
-		cfg.Skills.MaxInstructionTokens = defaults.MaxInstructionTokens
-	}
-	if cfg.Skills.MaxSessionContextTokens == 0 && !configValuePresent(doc, "skills", "max_session_context_tokens") && !envValuePresent("skills.max_session_context_tokens") {
-		cfg.Skills.MaxSessionContextTokens = defaults.MaxSessionContextTokens
-	}
-	if cfg.Skills.MaxResourceBytes == 0 && !configValuePresent(doc, "skills", "max_resource_bytes") && !envValuePresent("skills.max_resource_bytes") {
-		cfg.Skills.MaxResourceBytes = defaults.MaxResourceBytes
-	}
-	if cfg.Skills.QuarantineRetention == 0 && !configValuePresent(doc, "skills", "quarantine_retention") && !envValuePresent("skills.quarantine_retention") {
-		cfg.Skills.QuarantineRetention = defaults.QuarantineRetention
-	}
-}
-
-func applyContextDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.Context == nil {
-		return
-	}
-	defaults := Default().Context
-	if !cfg.Context.Enabled && !configValuePresent(doc, "context", "enabled") && !envValuePresent("context.enabled") {
-		cfg.Context.Enabled = defaults.Enabled
-	}
-	if cfg.Context.RecentCompleteTurns == 0 && !configValuePresent(doc, "context", "recent_complete_turns") && !envValuePresent("context.recent_complete_turns") {
-		cfg.Context.RecentCompleteTurns = defaults.RecentCompleteTurns
-	}
-	if cfg.Context.SafetyMarginTokens == 0 && !configValuePresent(doc, "context", "safety_margin_tokens") && !envValuePresent("context.safety_margin_tokens") {
-		cfg.Context.SafetyMarginTokens = defaults.SafetyMarginTokens
-	}
-	if cfg.Context.ConservativeEstimatorRatio == 0 && !configValuePresent(doc, "context", "conservative_estimator_ratio") && !envValuePresent("context.conservative_estimator_ratio") {
-		cfg.Context.ConservativeEstimatorRatio = defaults.ConservativeEstimatorRatio
-	}
-	if cfg.Context.HighWaterRatio == 0 && !configValuePresent(doc, "context", "high_water_ratio") && !envValuePresent("context.high_water_ratio") {
-		cfg.Context.HighWaterRatio = defaults.HighWaterRatio
-	}
-	if cfg.Context.MaxToolExcerptBytes == 0 && !configValuePresent(doc, "context", "max_tool_excerpt_bytes") && !envValuePresent("context.max_tool_excerpt_bytes") {
-		cfg.Context.MaxToolExcerptBytes = defaults.MaxToolExcerptBytes
-	}
-	if cfg.Context.Summary.Task == "" && !configValuePresent(doc, "context", "summary", "task") && !envValuePresent("context.summary.task") {
-		cfg.Context.Summary.Task = defaults.Summary.Task
-	}
-	if cfg.Context.Summary.MaxSourceTokens == 0 && !configValuePresent(doc, "context", "summary", "max_source_tokens") && !envValuePresent("context.summary.max_source_tokens") {
-		cfg.Context.Summary.MaxSourceTokens = defaults.Summary.MaxSourceTokens
-	}
-	if cfg.Context.Summary.MaxOutputTokens == 0 && !configValuePresent(doc, "context", "summary", "max_output_tokens") && !envValuePresent("context.summary.max_output_tokens") {
-		cfg.Context.Summary.MaxOutputTokens = defaults.Summary.MaxOutputTokens
-	}
-	if cfg.Context.Summary.PromptVersion == "" && !configValuePresent(doc, "context", "summary", "prompt_version") && !envValuePresent("context.summary.prompt_version") {
-		cfg.Context.Summary.PromptVersion = defaults.Summary.PromptVersion
-	}
-}
-
-func applySyncDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.Sync == nil {
-		return
-	}
-	defaults := Default().Sync
-	if cfg.Sync.Branch == "" && !configValuePresent(doc, "sync", "branch") && !envValuePresent("sync.branch") {
-		cfg.Sync.Branch = defaults.Branch
-	}
-	if cfg.Sync.Interval == 0 && !configValuePresent(doc, "sync", "interval") && !envValuePresent("sync.interval") {
-		cfg.Sync.Interval = defaults.Interval
-	}
-	if cfg.Sync.TransportSecretRef == "" && !configValuePresent(doc, "sync", "transport_secret_ref") && !envValuePresent("sync.transport_secret_ref") {
-		cfg.Sync.TransportSecretRef = defaults.TransportSecretRef
-	}
-	if cfg.Sync.KnownHostsRef == "" && !configValuePresent(doc, "sync", "known_hosts_ref") && !envValuePresent("sync.known_hosts_ref") {
-		cfg.Sync.KnownHostsRef = defaults.KnownHostsRef
-	}
-	if cfg.Sync.GitBinary == "" && !configValuePresent(doc, "sync", "git_binary") && !envValuePresent("sync.git_binary") {
-		cfg.Sync.GitBinary = defaults.GitBinary
-	}
-	if cfg.Sync.SSHBinary == "" && !configValuePresent(doc, "sync", "ssh_binary") && !envValuePresent("sync.ssh_binary") {
-		cfg.Sync.SSHBinary = defaults.SSHBinary
-	}
-	if cfg.Sync.Include == nil && !configValuePresent(doc, "sync", "include") && !envValuePresent("sync.include") {
-		cfg.Sync.Include = defaults.Include
-	}
-}
-
 func validateSyncShapes(doc *yamlv3.Node) error {
 	syncNode := mappingValue(doc, "sync")
 	if syncNode == nil {
@@ -2426,263 +2095,6 @@ func validateSyncRemote(raw string) error {
 	return nil
 }
 
-func applyVisionDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.Vision == nil {
-		return
-	}
-	defaults := Default().Vision
-	if !cfg.Vision.Enabled && !configValuePresent(doc, "vision", "enabled") && !envValuePresent("vision.enabled") {
-		cfg.Vision.Enabled = defaults.Enabled
-	}
-	if cfg.Vision.MaxEncodedBytes == 0 && !configValuePresent(doc, "vision", "max_encoded_bytes") && !envValuePresent("vision.max_encoded_bytes") {
-		cfg.Vision.MaxEncodedBytes = defaults.MaxEncodedBytes
-	}
-	if cfg.Vision.MaxPixels == 0 && !configValuePresent(doc, "vision", "max_pixels") && !envValuePresent("vision.max_pixels") {
-		cfg.Vision.MaxPixels = defaults.MaxPixels
-	}
-	if cfg.Vision.MaxDimension == 0 && !configValuePresent(doc, "vision", "max_dimension") && !envValuePresent("vision.max_dimension") {
-		cfg.Vision.MaxDimension = defaults.MaxDimension
-	}
-	if cfg.Vision.MaxImages == 0 && !configValuePresent(doc, "vision", "max_images") && !envValuePresent("vision.max_images") {
-		cfg.Vision.MaxImages = defaults.MaxImages
-	}
-	if cfg.Vision.MaxFrames == 0 && !configValuePresent(doc, "vision", "max_frames") && !envValuePresent("vision.max_frames") {
-		cfg.Vision.MaxFrames = defaults.MaxFrames
-	}
-	if cfg.Vision.DecodeTimeout == 0 && !configValuePresent(doc, "vision", "decode_timeout") && !envValuePresent("vision.decode_timeout") {
-		cfg.Vision.DecodeTimeout = defaults.DecodeTimeout
-	}
-	if cfg.Vision.MaxDecodeConcurrency == 0 && !configValuePresent(doc, "vision", "max_decode_concurrency") && !envValuePresent("vision.max_decode_concurrency") {
-		cfg.Vision.MaxDecodeConcurrency = defaults.MaxDecodeConcurrency
-	}
-	if cfg.Vision.MaxRequestBytes == 0 && !configValuePresent(doc, "vision", "max_request_bytes") && !envValuePresent("vision.max_request_bytes") {
-		cfg.Vision.MaxRequestBytes = defaults.MaxRequestBytes
-	}
-	if !cfg.Vision.StripMetadata && !configValuePresent(doc, "vision", "strip_metadata") && !envValuePresent("vision.strip_metadata") {
-		cfg.Vision.StripMetadata = defaults.StripMetadata
-	}
-	if !cfg.Vision.OrientNormalize && !configValuePresent(doc, "vision", "orient_normalize") && !envValuePresent("vision.orient_normalize") {
-		cfg.Vision.OrientNormalize = defaults.OrientNormalize
-	}
-	if cfg.Vision.Detail == "" && !configValuePresent(doc, "vision", "detail") && !envValuePresent("vision.detail") {
-		cfg.Vision.Detail = defaults.Detail
-	}
-	if cfg.Vision.TransformVersion == "" && !configValuePresent(doc, "vision", "transform_version") && !envValuePresent("vision.transform_version") {
-		cfg.Vision.TransformVersion = defaults.TransformVersion
-	}
-	if cfg.Vision.MaxTransformMemory == 0 && !configValuePresent(doc, "vision", "max_transform_memory_bytes") && !envValuePresent("vision.max_transform_memory_bytes") {
-		cfg.Vision.MaxTransformMemory = defaults.MaxTransformMemory
-	}
-	if cfg.Vision.Providers == nil {
-		cfg.Vision.Providers = map[string]VisionProviderLimits{}
-	}
-}
-
-func applyDiscordDefaults(cfg *Config, doc *yamlv3.Node, defaults *Discord) {
-	discord := &cfg.Channels.Discord
-	if discord.MinEditInterval == 0 && !configValuePresent(doc, "channels", "discord", "min_edit_interval") && !envValuePresent("channels.discord.min_edit_interval") {
-		discord.MinEditInterval = defaults.MinEditInterval
-	}
-	if discord.MaxAttachmentBytes == 0 && !configValuePresent(doc, "channels", "discord", "max_attachment_bytes") && !envValuePresent("channels.discord.max_attachment_bytes") {
-		discord.MaxAttachmentBytes = defaults.MaxAttachmentBytes
-	}
-	if discord.ThreadAutoArchiveMinutes == 0 && !configValuePresent(doc, "channels", "discord", "thread_auto_archive_minutes") && !envValuePresent("channels.discord.thread_auto_archive_minutes") {
-		discord.ThreadAutoArchiveMinutes = defaults.ThreadAutoArchiveMinutes
-	}
-	accountsNode := nestedValue(doc, "channels", "discord", "accounts")
-	for i := range discord.Accounts {
-		if !discord.Accounts[i].AcceptDMs && !sequenceItemHasKey(accountsNode, i, "accept_dms") {
-			discord.Accounts[i].AcceptDMs = true
-		}
-	}
-}
-
-func applyHTTPDefaults(cfg *Config, doc *yamlv3.Node, defaults *HTTP) {
-	http := &cfg.Channels.HTTP
-	if http.ListenAddress == "" && !configValuePresent(doc, "channels", "http", "listen_address") && !envValuePresent("channels.http.listen_address") {
-		http.ListenAddress = defaults.ListenAddress
-	}
-	if http.MaxBodyBytes == 0 && !configValuePresent(doc, "channels", "http", "max_body_bytes") && !envValuePresent("channels.http.max_body_bytes") {
-		http.MaxBodyBytes = defaults.MaxBodyBytes
-	}
-	if http.RequestsPerMinute == 0 && !configValuePresent(doc, "channels", "http", "requests_per_minute") && !envValuePresent("channels.http.requests_per_minute") {
-		http.RequestsPerMinute = defaults.RequestsPerMinute
-	}
-	if http.MaxConcurrentPerKey == 0 && !configValuePresent(doc, "channels", "http", "max_concurrent_per_key") && !envValuePresent("channels.http.max_concurrent_per_key") {
-		http.MaxConcurrentPerKey = defaults.MaxConcurrentPerKey
-	}
-	if http.MaxHistoryMessages == 0 && !configValuePresent(doc, "channels", "http", "max_history_messages") && !envValuePresent("channels.http.max_history_messages") {
-		http.MaxHistoryMessages = defaults.MaxHistoryMessages
-	}
-	if http.MaxHistoryBytes == 0 && !configValuePresent(doc, "channels", "http", "max_history_bytes") && !envValuePresent("channels.http.max_history_bytes") {
-		http.MaxHistoryBytes = defaults.MaxHistoryBytes
-	}
-	if http.KeepaliveInterval == 0 && !configValuePresent(doc, "channels", "http", "keepalive_interval") && !envValuePresent("channels.http.keepalive_interval") {
-		http.KeepaliveInterval = defaults.KeepaliveInterval
-	}
-}
-
-func applyTelegramDefaults(cfg *Config, doc *yamlv3.Node, defaults *Telegram) {
-	polling := &cfg.Channels.Telegram.Polling
-	if polling.Timeout == 0 && !configValuePresent(doc, "channels", "telegram", "polling", "timeout") && !envValuePresent("channels.telegram.polling.timeout") {
-		polling.Timeout = defaults.Polling.Timeout
-	}
-	if polling.MaxBackoff == 0 && !configValuePresent(doc, "channels", "telegram", "polling", "max_backoff") && !envValuePresent("channels.telegram.polling.max_backoff") {
-		polling.MaxBackoff = defaults.Polling.MaxBackoff
-	}
-	telegram := &cfg.Channels.Telegram
-	if telegram.MinEditInterval == 0 && !configValuePresent(doc, "channels", "telegram", "min_edit_interval") && !envValuePresent("channels.telegram.min_edit_interval") {
-		telegram.MinEditInterval = defaults.MinEditInterval
-	}
-	if telegram.MaxAttachmentBytes == 0 && !configValuePresent(doc, "channels", "telegram", "max_attachment_bytes") && !envValuePresent("channels.telegram.max_attachment_bytes") {
-		telegram.MaxAttachmentBytes = defaults.MaxAttachmentBytes
-	}
-	webhook := &telegram.Webhook
-	if webhook.ListenAddress == "" && !configValuePresent(doc, "channels", "telegram", "webhook", "listen_address") && !envValuePresent("channels.telegram.webhook.listen_address") {
-		webhook.ListenAddress = defaults.Webhook.ListenAddress
-	}
-	if webhook.MaxBodyBytes == 0 && !configValuePresent(doc, "channels", "telegram", "webhook", "max_body_bytes") && !envValuePresent("channels.telegram.webhook.max_body_bytes") {
-		webhook.MaxBodyBytes = defaults.Webhook.MaxBodyBytes
-	}
-	if webhook.MaxConnections == 0 && !configValuePresent(doc, "channels", "telegram", "webhook", "max_connections") && !envValuePresent("channels.telegram.webhook.max_connections") {
-		webhook.MaxConnections = defaults.Webhook.MaxConnections
-	}
-	accountsNode := nestedValue(doc, "channels", "telegram", "accounts")
-	for i := range telegram.Accounts {
-		if !telegram.Accounts[i].AcceptPrivateChats && !sequenceItemHasKey(accountsNode, i, "accept_private_chats") {
-			telegram.Accounts[i].AcceptPrivateChats = true
-		}
-		if telegram.Accounts[i].Mode == "" && !sequenceItemHasKey(accountsNode, i, "mode") {
-			telegram.Accounts[i].Mode = TelegramModePolling
-		}
-	}
-}
-
-func nestedValue(node *yamlv3.Node, path ...string) *yamlv3.Node {
-	for _, key := range path {
-		if node == nil || node.Kind != yamlv3.MappingNode {
-			return nil
-		}
-		node = mappingValue(node, key)
-	}
-	return node
-}
-
-func sequenceItemHasKey(sequence *yamlv3.Node, index int, key string) bool {
-	if sequence == nil || sequence.Kind != yamlv3.SequenceNode || index >= len(sequence.Content) {
-		return false
-	}
-	item := sequence.Content[index]
-	return item.Kind == yamlv3.MappingNode && mappingValue(item, key) != nil
-}
-
-func applyTerminalDefaults(cfg *Config, doc *yamlv3.Node, defaults Terminal) {
-	if cfg.Terminal.RenderHz == 0 && !configValuePresent(doc, "terminal", "render_hz") && !envValuePresent("terminal.render_hz") {
-		cfg.Terminal.RenderHz = defaults.RenderHz
-	}
-	if cfg.Terminal.MaxInputBytes == 0 && !configValuePresent(doc, "terminal", "max_input_bytes") && !envValuePresent("terminal.max_input_bytes") {
-		cfg.Terminal.MaxInputBytes = defaults.MaxInputBytes
-	}
-	if cfg.Terminal.InMemoryHistory == 0 && !configValuePresent(doc, "terminal", "in_memory_history") && !envValuePresent("terminal.in_memory_history") {
-		cfg.Terminal.InMemoryHistory = defaults.InMemoryHistory
-	}
-	if cfg.Terminal.SecondInterruptTime == 0 && !configValuePresent(doc, "terminal", "second_interrupt_window") && !envValuePresent("terminal.second_interrupt_window") {
-		cfg.Terminal.SecondInterruptTime = defaults.SecondInterruptTime
-	}
-	if cfg.Terminal.PlainApproval == "" && !configValuePresent(doc, "terminal", "plain_approval") && !envValuePresent("terminal.plain_approval") {
-		cfg.Terminal.PlainApproval = defaults.PlainApproval
-	}
-}
-
-func applyHealthDefaults(cfg *Config, doc *yamlv3.Node, defaults Health) {
-	if cfg.Health.Listen == "" && !configValuePresent(doc, "health", "listen") && !envValuePresent("health.listen") {
-		cfg.Health.Listen = defaults.Listen
-	}
-	if cfg.Health.CheckInterval == 0 && !configValuePresent(doc, "health", "check_interval") && !envValuePresent("health.check_interval") {
-		cfg.Health.CheckInterval = defaults.CheckInterval
-	}
-	if cfg.Health.CheckTimeout == 0 && !configValuePresent(doc, "health", "check_timeout") && !envValuePresent("health.check_timeout") {
-		cfg.Health.CheckTimeout = defaults.CheckTimeout
-	}
-	if cfg.Health.DiskWarningPercent == 0 && !configValuePresent(doc, "health", "disk_warning_percent") && !envValuePresent("health.disk_warning_percent") {
-		cfg.Health.DiskWarningPercent = defaults.DiskWarningPercent
-	}
-	if cfg.Health.DiskCriticalPercent == 0 && !configValuePresent(doc, "health", "disk_critical_percent") && !envValuePresent("health.disk_critical_percent") {
-		cfg.Health.DiskCriticalPercent = defaults.DiskCriticalPercent
-	}
-	if cfg.Health.DiskCriticalFloorBytes == 0 && !configValuePresent(doc, "health", "disk_critical_floor_bytes") && !envValuePresent("health.disk_critical_floor_bytes") {
-		cfg.Health.DiskCriticalFloorBytes = defaults.DiskCriticalFloorBytes
-	}
-	if cfg.Health.BackupMaxAge == 0 && !configValuePresent(doc, "health", "backup_max_age") && !envValuePresent("health.backup_max_age") {
-		cfg.Health.BackupMaxAge = defaults.BackupMaxAge
-	}
-	if cfg.Health.RestoreVerificationMaxAge == 0 && !configValuePresent(doc, "health", "restore_verification_max_age") && !envValuePresent("health.restore_verification_max_age") {
-		cfg.Health.RestoreVerificationMaxAge = defaults.RestoreVerificationMaxAge
-	}
-}
-
-func applyWorkflowDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.Workflows == nil {
-		cfg.Workflows = &Workflows{}
-	}
-	defaults := Default().Workflows
-	if cfg.Workflows.MaxConcurrentSteps == 0 && !configValuePresent(doc, "workflows", "max_concurrent_steps") && !envValuePresent("workflows.max_concurrent_steps") {
-		cfg.Workflows.MaxConcurrentSteps = defaults.MaxConcurrentSteps
-	}
-	if cfg.Workflows.DefaultStepTimeout == 0 && !configValuePresent(doc, "workflows", "default_step_timeout") && !envValuePresent("workflows.default_step_timeout") {
-		cfg.Workflows.DefaultStepTimeout = defaults.DefaultStepTimeout
-	}
-	if cfg.Workflows.Generated.MaxSteps == 0 && !configValuePresent(doc, "workflows", "generated", "max_steps") && !envValuePresent("workflows.generated.max_steps") {
-		cfg.Workflows.Generated.MaxSteps = defaults.Generated.MaxSteps
-	}
-	if cfg.Workflows.Generated.MaxTokens == 0 && !configValuePresent(doc, "workflows", "generated", "max_tokens") && !envValuePresent("workflows.generated.max_tokens") {
-		cfg.Workflows.Generated.MaxTokens = defaults.Generated.MaxTokens
-	}
-}
-
-func applyToolDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.Tools == nil {
-		return
-	}
-	defaults := Default().Tools
-	if cfg.Tools.Workspace == "" && !configValuePresent(doc, "tools", "workspace") && !envValuePresent("tools.workspace") {
-		cfg.Tools.Workspace = defaults.Workspace
-	}
-	if cfg.Tools.MaxInlineResultBytes == 0 && !configValuePresent(doc, "tools", "max_inline_result_bytes") && !envValuePresent("tools.max_inline_result_bytes") {
-		cfg.Tools.MaxInlineResultBytes = defaults.MaxInlineResultBytes
-	}
-	if cfg.Tools.Exec.Timeout == 0 && !configValuePresent(doc, "tools", "exec", "timeout") && !envValuePresent("tools.exec.timeout") {
-		cfg.Tools.Exec.Timeout = defaults.Exec.Timeout
-	}
-	if cfg.Tools.Exec.MaxStdoutBytes == 0 && !configValuePresent(doc, "tools", "exec", "max_stdout_bytes") && !envValuePresent("tools.exec.max_stdout_bytes") {
-		cfg.Tools.Exec.MaxStdoutBytes = defaults.Exec.MaxStdoutBytes
-	}
-	if cfg.Tools.Exec.MaxStderrBytes == 0 && !configValuePresent(doc, "tools", "exec", "max_stderr_bytes") && !envValuePresent("tools.exec.max_stderr_bytes") {
-		cfg.Tools.Exec.MaxStderrBytes = defaults.Exec.MaxStderrBytes
-	}
-	if cfg.Tools.Fetch.Timeout == 0 && !configValuePresent(doc, "tools", "fetch", "timeout") && !envValuePresent("tools.fetch.timeout") {
-		cfg.Tools.Fetch.Timeout = defaults.Fetch.Timeout
-	}
-	if cfg.Tools.Fetch.MaxRedirects == 0 && !configValuePresent(doc, "tools", "fetch", "max_redirects") && !envValuePresent("tools.fetch.max_redirects") {
-		cfg.Tools.Fetch.MaxRedirects = defaults.Fetch.MaxRedirects
-	}
-	if cfg.Tools.Fetch.MaxEncodedBytes == 0 && !configValuePresent(doc, "tools", "fetch", "max_encoded_bytes") && !envValuePresent("tools.fetch.max_encoded_bytes") {
-		cfg.Tools.Fetch.MaxEncodedBytes = defaults.Fetch.MaxEncodedBytes
-	}
-	if cfg.Tools.Fetch.MaxDecodedBytes == 0 && !configValuePresent(doc, "tools", "fetch", "max_decoded_bytes") && !envValuePresent("tools.fetch.max_decoded_bytes") {
-		cfg.Tools.Fetch.MaxDecodedBytes = defaults.Fetch.MaxDecodedBytes
-	}
-	if cfg.Tools.WebSearch.Provider == "" && !configValuePresent(doc, "tools", "web_search", "provider") && !envValuePresent("tools.web_search.provider") {
-		cfg.Tools.WebSearch.Provider = defaults.WebSearch.Provider
-	}
-	if cfg.Tools.WebSearch.CredentialRef == "" && !configValuePresent(doc, "tools", "web_search", "credential_ref") && !envValuePresent("tools.web_search.credential_ref") {
-		cfg.Tools.WebSearch.CredentialRef = DefaultWebSearchCredentialRef(cfg.Tools.WebSearch.Provider)
-	}
-	if cfg.Tools.WebSearch.MaxResults == 0 && !configValuePresent(doc, "tools", "web_search", "max_results") && !envValuePresent("tools.web_search.max_results") {
-		cfg.Tools.WebSearch.MaxResults = defaults.WebSearch.MaxResults
-	}
-}
-
 func validateVisionShapes(doc *yamlv3.Node) error {
 	visionNode := mappingValue(doc, "vision")
 	if visionNode == nil {
@@ -2742,16 +2154,6 @@ func validateVisionShapes(doc *yamlv3.Node) error {
 		}
 	}
 	return nil
-}
-
-func configValuePresent(node *yamlv3.Node, path ...string) bool {
-	for _, key := range path {
-		node = mappingValue(node, key)
-		if node == nil {
-			return false
-		}
-	}
-	return true
 }
 
 func validateRuntime(runtime Runtime) error {
@@ -2897,15 +2299,6 @@ func ValidateMCPServer(s *MCPServer, field string) error {
 		}
 	}
 	return nil
-}
-
-func applyMCPDefaults(cfg *Config, _ *yamlv3.Node) {
-	if cfg.MCP == nil {
-		return
-	}
-	for i := range cfg.MCP.Servers {
-		ApplyMCPServerDefaults(&cfg.MCP.Servers[i])
-	}
 }
 
 func ApplyMCPServerDefaults(s *MCPServer) {
@@ -3777,31 +3170,6 @@ func validateProfileShapes(doc *yamlv3.Node) error {
 	return nil
 }
 
-func applyProfileDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.Profile == nil {
-		return
-	}
-	defaults := Default().Profile
-	if !cfg.Profile.Enabled && !configValuePresent(doc, "profile", "enabled") && !envValuePresent("profile.enabled") {
-		cfg.Profile.Enabled = defaults.Enabled
-	}
-	if cfg.Profile.MaxContextFacts == 0 && !configValuePresent(doc, "profile", "max_context_facts") && !envValuePresent("profile.max_context_facts") {
-		cfg.Profile.MaxContextFacts = defaults.MaxContextFacts
-	}
-	if cfg.Profile.MaxContextTokens == 0 && !configValuePresent(doc, "profile", "max_context_tokens") && !envValuePresent("profile.max_context_tokens") {
-		cfg.Profile.MaxContextTokens = defaults.MaxContextTokens
-	}
-	if cfg.Profile.ExtractionQueueCapacity == 0 && !configValuePresent(doc, "profile", "extraction_queue_capacity") && !envValuePresent("profile.extraction_queue_capacity") {
-		cfg.Profile.ExtractionQueueCapacity = defaults.ExtractionQueueCapacity
-	}
-	if cfg.Profile.CandidateMinConfidence == 0 && !configValuePresent(doc, "profile", "candidate_min_confidence") && !envValuePresent("profile.candidate_min_confidence") {
-		cfg.Profile.CandidateMinConfidence = defaults.CandidateMinConfidence
-	}
-	if cfg.Profile.PromptVersion == "" && !configValuePresent(doc, "profile", "prompt_version") && !envValuePresent("profile.prompt_version") {
-		cfg.Profile.PromptVersion = defaults.PromptVersion
-	}
-}
-
 var ownerFixedKeys = []string{"name", "language", "timezone"}
 
 func validateOwner(owner *Owner) error {
@@ -4233,32 +3601,4 @@ func validateChildrenShapes(doc *yamlv3.Node) error {
 		}
 	}
 	return nil
-}
-
-func applyChildrenDefaults(cfg *Config, doc *yamlv3.Node) {
-	if cfg.Children == nil {
-		return
-	}
-	defaults := Default().Children
-	if !cfg.Children.Enabled && !configValuePresent(doc, "children", "enabled") && !envValuePresent("children.enabled") {
-		cfg.Children.Enabled = defaults.Enabled
-	}
-	if cfg.Children.MaxDepth == 0 && !configValuePresent(doc, "children", "max_depth") && !envValuePresent("children.max_depth") {
-		cfg.Children.MaxDepth = defaults.MaxDepth
-	}
-	if cfg.Children.MaxActivePerParent == 0 && !configValuePresent(doc, "children", "max_active_per_parent") && !envValuePresent("children.max_active_per_parent") {
-		cfg.Children.MaxActivePerParent = defaults.MaxActivePerParent
-	}
-	if cfg.Children.MaxActiveGlobal == 0 && !configValuePresent(doc, "children", "max_active_global") && !envValuePresent("children.max_active_global") {
-		cfg.Children.MaxActiveGlobal = defaults.MaxActiveGlobal
-	}
-	if time.Duration(cfg.Children.DefaultTimeout) == 0 && !configValuePresent(doc, "children", "default_timeout") && !envValuePresent("children.default_timeout") {
-		cfg.Children.DefaultTimeout = defaults.DefaultTimeout
-	}
-	if time.Duration(cfg.Children.MaxTimeout) == 0 && !configValuePresent(doc, "children", "max_timeout") && !envValuePresent("children.max_timeout") {
-		cfg.Children.MaxTimeout = defaults.MaxTimeout
-	}
-	if cfg.Children.Recovery == "" && !configValuePresent(doc, "children", "recovery") && !envValuePresent("children.recovery") {
-		cfg.Children.Recovery = defaults.Recovery
-	}
 }

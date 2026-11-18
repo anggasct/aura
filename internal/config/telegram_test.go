@@ -50,7 +50,7 @@ func TestLoad_TelegramMaxAttachmentBytes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  telegram:\n    max_attachment_bytes: "+tc.value+"\n"))
 			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				if err == nil || !strings.Contains(stripPositions(err.Error()), tc.wantErr) {
 					t.Fatalf("Load error = %v, want it to mention %q", err, tc.wantErr)
 				}
 				if code, ok := codeOf(err); tc.invalid && (!ok || code != invalidCode) {
@@ -264,7 +264,7 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, tc.yaml))
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || !strings.Contains(stripPositions(err.Error()), tc.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
 		})
@@ -299,7 +299,7 @@ func TestLoad_TelegramBindingsInvalid(t *testing.T) {
 			if code, ok := codeOf(err); !ok || code != ErrorCodeBindingInvalid && code != invalidCode {
 				t.Fatalf("Load error = %v, want a binding or config error", err)
 			}
-			if !strings.Contains(err.Error(), tc.want) {
+			if !strings.Contains(stripPositions(err.Error()), tc.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
 		})
@@ -420,7 +420,7 @@ func TestLoad_ChatIDBindingIsTelegramOnly(t *testing.T) {
     chat_id: "-100"
 `)
 	_, err := Load(path)
-	if code, ok := codeOf(err); !ok || code != ErrorCodeBindingInvalid || !strings.Contains(err.Error(), "bindings[0].chat_id: binding_invalid: is only valid on telegram bindings") {
+	if code, ok := codeOf(err); !ok || code != ErrorCodeBindingInvalid || !strings.Contains(stripPositions(err.Error()), "bindings[0].chat_id: binding_invalid: is only valid on telegram bindings") {
 		t.Fatalf("Load error = %v, want %s naming chat_id", err, ErrorCodeBindingInvalid)
 	}
 }
@@ -545,7 +545,7 @@ func TestLoad_TelegramWebhookInvalid(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, tc.yaml))
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || !strings.Contains(stripPositions(err.Error()), tc.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
 			if code, ok := codeOf(err); !tc.shape && (!ok || code != invalidCode) {

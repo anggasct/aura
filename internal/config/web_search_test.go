@@ -50,6 +50,8 @@ func TestWebSearchCredentialDefaultFollowsTheSelectedProvider(t *testing.T) {
 		"custom ref":             {section: "    provider: tavily\n    credential_ref: env://MY_TAVILY\n", ref: "env://MY_TAVILY"},
 		"searxng with file ref":  {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: file:///run/secrets/searx\n", ref: "file:///run/secrets/searx"},
 		"searxng explicit empty": {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: \"\"\n", ref: ""},
+		"brave explicit empty":   {section: "    provider: brave\n    credential_ref: \"\"\n", ref: "env://AURA_BRAVE_API_KEY"},
+		"tavily explicit empty":  {section: "    provider: tavily\n    credential_ref: \"\"\n", ref: "env://AURA_TAVILY_API_KEY"},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -89,8 +91,6 @@ func TestWebSearchRejectsConfigsThatDoNotFitTheProvider(t *testing.T) {
 		"credential without provider":     {section: "    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "must be empty for provider duckduckgo"},
 		"searxng without endpoint":        {section: "    provider: searxng\n", detail: "tools.web_search.endpoint: config_invalid: must be set"},
 		"non string endpoint":             {section: "    provider: searxng\n    endpoint: 8888\n", detail: "endpoint must be a string"},
-		"brave empty credential":          {section: "    provider: brave\n    credential_ref: \"\"\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
-		"tavily empty credential":         {section: "    provider: tavily\n    credential_ref: \"\"\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
 		"brave literal key":               {section: "    provider: brave\n    credential_ref: sk-literal\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
 		"brave bare env":                  {section: "    provider: brave\n    credential_ref: env://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
 		"tavily bare file":                {section: "    provider: tavily\n    credential_ref: file://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
@@ -107,7 +107,7 @@ func TestWebSearchRejectsConfigsThatDoNotFitTheProvider(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := loadWebSearch(t, test.section)
-			if err == nil || !strings.Contains(err.Error(), test.detail) {
+			if err == nil || !strings.Contains(stripPositions(err.Error()), test.detail) {
 				t.Fatalf("error = %v, want detail %q", err, test.detail)
 			}
 			if code, ok := codeOf(err); ok && code != invalidCode {

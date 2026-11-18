@@ -167,7 +167,7 @@ func TestLoad_KnowledgeEmbeddingRejectsInvalidSettings(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, embeddingConfig(test.fields)))
-			if err == nil || !strings.Contains(err.Error(), test.detail) {
+			if err == nil || !strings.Contains(stripPositions(err.Error()), test.detail) {
 				t.Fatalf("error = %v, want detail %q", err, test.detail)
 			}
 		})

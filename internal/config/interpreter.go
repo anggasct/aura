@@ -59,48 +59,6 @@ func DefaultInterpreter() Interpreter {
 	}
 }
 
-func interpreterAbsent(doc *yamlv3.Node, key string) bool {
-	return !configValuePresent(doc, "interpreter", key) && !envValuePresent("interpreter."+key)
-}
-
-func applyInterpreterDefaults(cfg *Config, doc *yamlv3.Node) {
-	defaults := DefaultInterpreter()
-	interpreter := &cfg.Interpreter
-	if interpreter.Timeout == 0 && interpreterAbsent(doc, "timeout") {
-		interpreter.Timeout = defaults.Timeout
-	}
-	if interpreter.BuildTimeout == 0 && interpreterAbsent(doc, "build_timeout") {
-		interpreter.BuildTimeout = defaults.BuildTimeout
-	}
-	if interpreter.MaxSourceBytes == 0 && interpreterAbsent(doc, "max_source_bytes") {
-		interpreter.MaxSourceBytes = defaults.MaxSourceBytes
-	}
-	if interpreter.MaxStdinBytes == 0 && interpreterAbsent(doc, "max_stdin_bytes") {
-		interpreter.MaxStdinBytes = defaults.MaxStdinBytes
-	}
-	if interpreter.MaxStdoutBytes == 0 && interpreterAbsent(doc, "max_stdout_bytes") {
-		interpreter.MaxStdoutBytes = defaults.MaxStdoutBytes
-	}
-	if interpreter.MaxStderrBytes == 0 && interpreterAbsent(doc, "max_stderr_bytes") {
-		interpreter.MaxStderrBytes = defaults.MaxStderrBytes
-	}
-	if interpreter.MaxOutputFiles == 0 && interpreterAbsent(doc, "max_output_files") {
-		interpreter.MaxOutputFiles = defaults.MaxOutputFiles
-	}
-	if interpreter.MaxArtifactBytes == 0 && interpreterAbsent(doc, "max_artifact_bytes") {
-		interpreter.MaxArtifactBytes = defaults.MaxArtifactBytes
-	}
-	if interpreter.MaxMemoryBytes == 0 && interpreterAbsent(doc, "max_memory_bytes") {
-		interpreter.MaxMemoryBytes = defaults.MaxMemoryBytes
-	}
-	if interpreter.MaxProcesses == 0 && interpreterAbsent(doc, "max_processes") {
-		interpreter.MaxProcesses = defaults.MaxProcesses
-	}
-	if interpreter.MaxRunDirBytes == 0 && interpreterAbsent(doc, "max_run_dir_bytes") {
-		interpreter.MaxRunDirBytes = defaults.MaxRunDirBytes
-	}
-}
-
 func validateInterpreter(interpreter *Interpreter) error {
 	var problems []error
 	if time.Duration(interpreter.Timeout) < MinInterpreterTimeout || time.Duration(interpreter.Timeout) > MaxInterpreterTimeout {

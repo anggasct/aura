@@ -168,7 +168,11 @@ func TestEveryValidatorRunsOverInvalidFixtures(t *testing.T) {
 	t.Run("a zero config validates without a panic", func(t *testing.T) {
 		for _, profile := range []capability.Profile{capability.ProfileCore, capability.ProfileExecLinux} {
 			t.Run(string(profile), func(t *testing.T) {
-				if err := validateLoaded(&Config{}, true, profile); err == nil {
+				doc, err := parseDocument([]byte("version: 1\n"))
+				if err != nil {
+					t.Fatalf("parseDocument: %v", err)
+				}
+				if err := validateLoaded(&Config{}, doc, profile); err == nil {
 					t.Fatal("a zero config validated")
 				}
 			})
@@ -190,6 +194,11 @@ func TestValidationDetailsNeverQuoteAnEnvironmentValue(t *testing.T) {
 			"logging.format":     "must be one of text, json",
 			"telemetry.exporter": "must be one of none, stdout, otlp_grpc, otlp_http",
 		}
+		variables := map[string]string{
+			"logging.level":      "AURA_LOGGING_LEVEL",
+			"logging.format":     "AURA_LOGGING_FORMAT",
+			"telemetry.exporter": "AURA_TELEMETRY_EXPORTER",
+		}
 		problems := fieldProblems(err)
 		if len(problems) != len(want) {
 			t.Fatalf("problems = %v, want the three environment paths (err %v)", problemPaths(err), err)
@@ -203,7 +212,7 @@ func TestValidationDetailsNeverQuoteAnEnvironmentValue(t *testing.T) {
 			if !fault.HasCode(problem, configkit.ErrorCodeInvalid) {
 				t.Errorf("%s: %v does not carry %s", problem.Path, problem, configkit.ErrorCodeInvalid)
 			}
-			if got, wantText := problem.Error(), problem.Path+": config_invalid: "+detail; got != wantText {
+			if got, wantText := problem.Error(), problem.Path+" (env "+variables[problem.Path]+"): config_invalid: "+detail; got != wantText {
 				t.Errorf("%s: text = %q, want %q", problem.Path, got, wantText)
 			}
 		}

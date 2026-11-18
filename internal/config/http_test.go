@@ -92,7 +92,7 @@ func TestLoad_HTTPInvalid(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  http:\n"+tc.block))
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || !strings.Contains(stripPositions(err.Error()), tc.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
 			if code, ok := codeOf(err); !tc.shape && (!ok || code != invalidCode) {

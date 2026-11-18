@@ -17,8 +17,6 @@ const (
 	environmentRefusal = "is not addressable from the environment"
 )
 
-var mapsWithDefaultEntries = []string{"models.routing"}
-
 var environment = newEnvTable(configIndex)
 
 type envOutcome int
@@ -81,7 +79,7 @@ func (t envTable) resolve(name string) envMatch {
 	normalized := strings.ToLower(strings.TrimPrefix(name, envPrefix))
 	if path, found := t.exact[normalized]; found {
 		info := t.index[path]
-		if addressable(path, info) {
+		if addressable(info) {
 			return envMatch{outcome: envSet, path: path, typ: info.typ}
 		}
 		return envMatch{outcome: envRefused, path: path}
@@ -92,7 +90,7 @@ func (t envTable) resolve(name string) envMatch {
 			continue
 		}
 		info := t.index[pattern.path]
-		if !addressable(pattern.path, info) {
+		if !addressable(info) {
 			return envMatch{}
 		}
 		return envMatch{outcome: envSet, path: strings.Replace(pattern.path, mapEntryWildcard, key, 1), typ: info.typ}
@@ -113,16 +111,8 @@ func (p envPattern) key(normalized string) (string, bool) {
 	return key, true
 }
 
-func addressable(path string, info fieldInfo) bool {
-	if !info.leaf || info.underList {
-		return false
-	}
-	for _, owner := range mapsWithDefaultEntries {
-		if strings.HasPrefix(path, owner+".") {
-			return false
-		}
-	}
-	return true
+func addressable(info fieldInfo) bool {
+	return info.leaf && !info.underList
 }
 
 func parseEnvValue(t reflect.Type, raw string) (any, bool) {
@@ -223,11 +213,6 @@ func environmentVariableFor(path string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func envValuePresent(path string) bool {
-	_, set := environmentVariableFor(path)
-	return set
 }
 
 func envWarnings(cfg *Config) []string {
