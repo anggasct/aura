@@ -43,7 +43,7 @@ const (
 
 type Credential struct {
 	Name string
-	Ref  string
+	Ref  secret.Ref
 }
 
 type ToolOptions struct {
@@ -148,15 +148,7 @@ func resolveToken(name string, credentials []Credential) (string, error) {
 	if index < 0 {
 		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, aliasNotConfigured)
 	}
-	ref := credentials[index].Ref
-	var source secret.Reference
-	switch {
-	case strings.HasPrefix(ref, "env://"):
-		source.Env = strings.TrimPrefix(ref, "env://")
-	case strings.HasPrefix(ref, "file://"):
-		source.File = strings.TrimPrefix(ref, "file://")
-	}
-	token, err := source.Resolve()
+	token, err := credentials[index].Ref.Reference().Resolve()
 	if err != nil || token == "" {
 		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, "github credential is unavailable")
 	}

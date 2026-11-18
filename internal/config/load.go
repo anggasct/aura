@@ -330,14 +330,8 @@ func providerDefinitionProblems(models Models, name string, definition *ModelDef
 
 func modelSecretProblems(name string, definition *ModelDefinition, baseURL string) []error {
 	var problems []error
-	if definition.APIKeyEnv != "" && definition.APIKeyFile != "" {
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelSecretInvalid, "must set only one of api_key_env or api_key_file")))
-	}
-	if definition.APIKeyEnv != "" && !envNamePattern.MatchString(definition.APIKeyEnv) {
-		problems = append(problems, configkit.Field("models.definitions."+name+".api_key_env", fault.New(ErrorCodeModelSecretInvalid, "is not a valid environment variable name")))
-	}
-	if definition.APIKeyEnv == "" && definition.APIKeyFile == "" && !IsLoopbackBaseURL(baseURL) {
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelSecretInvalid, "requires api_key_env or api_key_file for a non-loopback endpoint")))
+	if definition.APIKeyRef.IsZero() && !IsLoopbackBaseURL(baseURL) {
+		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelSecretInvalid, "requires api_key_ref for a non-loopback endpoint")))
 	}
 	return problems
 }
@@ -476,13 +470,13 @@ func validateSync(syncConfig *Sync) error {
 	}
 	for _, ref := range []struct {
 		name  string
-		value string
+		value secret.Ref
 	}{
 		{"transport_secret_ref", syncConfig.TransportSecretRef},
 		{"known_hosts_ref", syncConfig.KnownHostsRef},
 	} {
-		if !strings.HasPrefix(ref.value, "env://") && !strings.HasPrefix(ref.value, "file://") {
-			problems = append(problems, configkit.Invalid("sync."+ref.name, "must use env:// or file://"))
+		if ref.value.IsZero() {
+			problems = append(problems, configkit.Invalid("sync."+ref.name, "must not be empty"))
 		}
 	}
 	for _, binary := range []struct {
@@ -929,7 +923,7 @@ func validateDiscord(discord *Discord) error {
 	}
 	var problems []error
 	names := make(map[string]bool, len(discord.Accounts))
-	tokenRefs := make(map[string]bool, len(discord.Accounts))
+	tokenRefs := make(map[secret.Ref]bool, len(discord.Accounts))
 	for i := range discord.Accounts {
 		account := &discord.Accounts[i]
 		field := fmt.Sprintf("channels.discord.accounts[%d]", i)
@@ -942,10 +936,8 @@ func validateDiscord(discord *Discord) error {
 			names[account.Name] = true
 		}
 		switch {
-		case account.BotTokenRef == "":
+		case account.BotTokenRef.IsZero():
 			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "must not be empty"))
-		case !strings.HasPrefix(account.BotTokenRef, "env://") && !strings.HasPrefix(account.BotTokenRef, "file://"):
-			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "must use env:// or file://"))
 		case tokenRefs[account.BotTokenRef]:
 			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "is shared with another account"))
 		default:
@@ -986,7 +978,7 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 	}
 	var problems []error
 	names := make(map[string]bool, len(telegram.Accounts))
-	tokenRefs := make(map[string]bool, len(telegram.Accounts)+len(discord.Accounts))
+	tokenRefs := make(map[secret.Ref]bool, len(telegram.Accounts)+len(discord.Accounts))
 	for i := range discord.Accounts {
 		tokenRefs[discord.Accounts[i].BotTokenRef] = true
 	}
@@ -1002,10 +994,8 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 			names[account.Name] = true
 		}
 		switch {
-		case account.BotTokenRef == "":
+		case account.BotTokenRef.IsZero():
 			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "must not be empty"))
-		case !strings.HasPrefix(account.BotTokenRef, "env://") && !strings.HasPrefix(account.BotTokenRef, "file://"):
-			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "must use env:// or file://"))
 		case tokenRefs[account.BotTokenRef]:
 			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "is shared with another account"))
 		default:
@@ -1073,19 +1063,17 @@ func validateHTTP(http *HTTP) error {
 	return errors.Join(problems...)
 }
 
-func telegramModeProblems(field string, account *TelegramAccount, tokenRefs map[string]bool) []error {
+func telegramModeProblems(field string, account *TelegramAccount, tokenRefs map[secret.Ref]bool) []error {
 	switch account.Mode {
 	case TelegramModePolling:
-		if account.WebhookSecretRef != "" {
+		if !account.WebhookSecretRef.IsZero() {
 			return []error{configkit.Invalid(field+".webhook_secret_ref", "is only valid when mode is "+TelegramModeWebhook)}
 		}
 		return nil
 	case TelegramModeWebhook:
 		switch {
-		case account.WebhookSecretRef == "":
+		case account.WebhookSecretRef.IsZero():
 			return []error{configkit.Invalid(field+".webhook_secret_ref", "must not be empty in webhook mode")}
-		case !strings.HasPrefix(account.WebhookSecretRef, "env://") && !strings.HasPrefix(account.WebhookSecretRef, "file://"):
-			return []error{configkit.Invalid(field+".webhook_secret_ref", "must use env:// or file://")}
 		case tokenRefs[account.WebhookSecretRef]:
 			return []error{configkit.Invalid(field+".webhook_secret_ref", "must differ from every bot token reference")}
 		}
@@ -1650,11 +1638,12 @@ func configuredSecretValues(cfg *Config) []string {
 	}
 	for name := range cfg.Models.Definitions {
 		definition := cfg.Models.Definitions[name]
-		if definition.APIKeyEnv != "" {
-			add(os.Getenv(definition.APIKeyEnv))
+		source := definition.APIKeyRef.Reference()
+		if source.Env != "" {
+			add(os.Getenv(source.Env))
 		}
-		if definition.APIKeyFile != "" {
-			if data, err := os.ReadFile(definition.APIKeyFile); err == nil {
+		if source.File != "" {
+			if data, err := os.ReadFile(source.File); err == nil {
 				add(string(data))
 			}
 		}
@@ -1692,25 +1681,24 @@ func configuredSecretValues(cfg *Config) []string {
 				}
 			}
 			if static := auth.Static; static != nil {
-				add(resolveSecretRef(static.CredentialRef))
+				add(resolveStaticCredential(static.CredentialRef))
 			}
 		}
 	}
 	return values
 }
 
-func resolveSecretRef(raw string) string {
-	raw = strings.TrimSpace(raw)
-	switch {
-	case strings.HasPrefix(raw, "env://"):
-		value, _ := secret.Reference{Env: strings.TrimPrefix(raw, "env://")}.Resolve()
-		return value
-	case strings.HasPrefix(raw, "file://"):
-		value, _ := secret.Reference{File: strings.TrimPrefix(raw, "file://")}.Resolve()
-		return value
-	default:
+func resolveSecretRef(ref secret.Ref) string {
+	value, _ := ref.Reference().Resolve()
+	return value
+}
+
+func resolveStaticCredential(raw string) string {
+	ref, err := secret.ParseRef(strings.TrimSpace(raw))
+	if err != nil {
 		return ""
 	}
+	return resolveSecretRef(ref)
 }
 
 func validBroadcastAlias(alias string) bool {

@@ -10,6 +10,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 func writeAgentsConfig(t *testing.T, agentsSection string) string {
@@ -21,7 +22,7 @@ models:
     primary:
       protocol: openai_chat_compat
       model: test-model
-      api_key_env: AURA_TEST_MODEL_KEY
+      api_key_ref: env://AURA_TEST_MODEL_KEY
       capabilities:
         streaming: true
         tools: true
@@ -137,7 +138,7 @@ func TestPersonasMayListTheGitHubTools(t *testing.T) {
 		}}
 	}
 	configured := config.Default()
-	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}
+	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	bare := config.Default()
 	cases := []struct {
 		name        string

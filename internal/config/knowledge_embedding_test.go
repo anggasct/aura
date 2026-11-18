@@ -28,7 +28,7 @@ func TestLoad_KnowledgeEmbeddingAppliesDefaults(t *testing.T) {
 	}
 	embedding := result.Config.Knowledge.Embedding
 	if embedding.DimensionsField != "dimensions" || embedding.RoleStyle != EmbeddingRoleNone ||
-		embedding.BatchSize != 96 || embedding.MaxMemory != 256<<20 || embedding.PublicQueries || embedding.CredentialRef != "" {
+		embedding.BatchSize != 96 || embedding.MaxMemory != 256<<20 || embedding.PublicQueries || !embedding.CredentialRef.IsZero() {
 		t.Fatalf("defaults = %+v", embedding)
 	}
 	endpoint, err := embedding.Endpoint()
@@ -55,7 +55,7 @@ func TestLoad_KnowledgeEmbeddingReadsEveryField(t *testing.T) {
 	embedding := result.Config.Knowledge.Embedding
 	if embedding.DimensionsField != "output_dimension" || embedding.RoleStyle != EmbeddingRoleInputType ||
 		embedding.BatchSize != 128 || embedding.MaxMemory != 512<<20 || !embedding.PublicQueries ||
-		embedding.CredentialRef != "env://VOYAGE_API_KEY" {
+		embedding.CredentialRef.String() != "env://VOYAGE_API_KEY" {
 		t.Fatalf("embedding = %+v", embedding)
 	}
 	endpoint, err := embedding.Endpoint()
@@ -150,8 +150,8 @@ func TestLoad_KnowledgeEmbeddingRejectsInvalidSettings(t *testing.T) {
 		"huge dimensions":           {fields: "    base_url: https://api.example.com/v1\n    model: m\n    dimensions: 100000\n", detail: "dimensions: config_invalid: is required"},
 		"reserved dimensions field": {fields: validEmbeddingFields + "    dimensions_field: model\n", detail: "dimensions_field: config_invalid: must not be"},
 		"bad dimensions field":      {fields: validEmbeddingFields + "    dimensions_field: Dim-Size\n", detail: "dimensions_field: config_invalid: must be"},
-		"bad credential ref":        {fields: validEmbeddingFields + "    credential_ref: OPENAI_KEY\n", detail: "credential_ref: config_invalid: must use"},
-		"empty env credential":      {fields: validEmbeddingFields + "    credential_ref: env://\n", detail: "credential_ref: config_invalid: must use"},
+		"bad credential ref":        {fields: validEmbeddingFields + "    credential_ref: OPENAI_KEY\n", detail: "credential_ref: config_invalid: secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme"},
+		"empty env credential":      {fields: validEmbeddingFields + "    credential_ref: env://\n", detail: "credential_ref: config_invalid: secret_scope_violation: env:// secret reference must be a valid environment variable name"},
 		"unknown role style":        {fields: validEmbeddingFields + "    role_style: task\n", detail: "role_style: config_invalid: must be"},
 		"prefix without style":      {fields: validEmbeddingFields + "    query_prefix: \"q: \"\n", detail: "require role_style prefix"},
 		"prefix style without text": {fields: validEmbeddingFields + "    role_style: prefix\n", detail: "requires query_prefix or document_prefix"},

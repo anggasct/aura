@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 const handoffSession = "main/telegram:pocket/chat:555001"
@@ -307,7 +308,7 @@ func TestSendPlainTextErrorsNeverCarryTheToken(t *testing.T) {
 
 func TestDeliverTextValidatesBeforeSending(t *testing.T) {
 	t.Setenv(testTokenEnv, testToken)
-	valid := &config.TelegramAccount{Name: "pocket", BotTokenRef: "env://" + testTokenEnv}
+	valid := &config.TelegramAccount{Name: "pocket", BotTokenRef: secrettest.Ref("env://" + testTokenEnv)}
 	cases := []struct {
 		name     string
 		account  *config.TelegramAccount
@@ -318,8 +319,8 @@ func TestDeliverTextValidatesBeforeSending(t *testing.T) {
 		{name: "nil account", chatID: "555001", want: ErrorCodeInvalidArgument},
 		{name: "corrupt chat id", account: valid, chatID: "not-a-chat", want: ErrorCodeInvalidArgument},
 		{name: "corrupt thread id", account: valid, chatID: "555001", threadID: "-1", want: ErrorCodeInvalidArgument},
-		{name: "unsupported token reference", account: &config.TelegramAccount{Name: "pocket", BotTokenRef: "literal"}, chatID: "555001", want: ErrorCodeInvalidArgument},
-		{name: "unset token", account: &config.TelegramAccount{Name: "pocket", BotTokenRef: "env://AURA_TEST_UNSET_TELEGRAM_TOKEN"}, chatID: "555001", want: ErrorCodeConnectionFailed},
+		{name: "unsupported token reference", account: &config.TelegramAccount{Name: "pocket"}, chatID: "555001", want: ErrorCodeInvalidArgument},
+		{name: "unset token", account: &config.TelegramAccount{Name: "pocket", BotTokenRef: secrettest.Ref("env://AURA_TEST_UNSET_TELEGRAM_TOKEN")}, chatID: "555001", want: ErrorCodeConnectionFailed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

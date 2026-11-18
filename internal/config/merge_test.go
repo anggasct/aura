@@ -68,7 +68,7 @@ const modelDefinitionsFixture = `  definitions:
       protocol: anthropic_messages
       model: claude-sonnet
       base_url: https://api.anthropic.com
-      api_key_env: ANTHROPIC_API_KEY
+      api_key_ref: env://ANTHROPIC_API_KEY
       capabilities:
         streaming: true
         tools: true

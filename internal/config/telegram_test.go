@@ -102,7 +102,7 @@ bindings:
 	if !telegram.Enabled || len(telegram.Accounts) != 1 {
 		t.Fatalf("telegram = %+v", telegram)
 	}
-	if account := telegram.Accounts[0]; account.Name != "pocket" || account.Persona != "main" || account.BotTokenRef != "env://AURA_TELEGRAM_BOT_TOKEN" {
+	if account := telegram.Accounts[0]; account.Name != "pocket" || account.Persona != "main" || account.BotTokenRef.String() != "env://AURA_TELEGRAM_BOT_TOKEN" {
 		t.Errorf("account = %+v", account)
 	}
 	if telegram.Polling.Timeout != configkit.Duration(20*time.Second) {
@@ -134,7 +134,7 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		},
 		"inline token": {
 			yaml: "version: 1\nchannels:\n  telegram:\n    accounts:\n      - name: pocket\n        bot_token_ref: \"123456:ABC\"\n",
-			want: "bot_token_ref: config_invalid: must use env:// or file://",
+			want: "bot_token_ref: config_invalid: secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme",
 		},
 		"missing token ref": {
 			yaml: "version: 1\nchannels:\n  telegram:\n    accounts:\n      - name: pocket\n",
@@ -483,7 +483,7 @@ func TestLoad_TelegramWebhookValid(t *testing.T) {
 	if !telegram.UsesWebhook() || !telegram.Accounts[0].WebhookMode() || telegram.Accounts[1].WebhookMode() {
 		t.Fatalf("accounts = %+v, want only pocket in webhook mode", telegram.Accounts)
 	}
-	if telegram.Accounts[0].WebhookSecretRef != "file:///run/secrets/telegram-hook" {
+	if telegram.Accounts[0].WebhookSecretRef.String() != "file:///run/secrets/telegram-hook" {
 		t.Errorf("webhook_secret_ref = %q", telegram.Accounts[0].WebhookSecretRef)
 	}
 	want := TelegramWebhook{ListenAddress: "0.0.0.0:9000", PublicBaseURL: "https://aura.example.com/edge", MaxBodyBytes: 2048, MaxConnections: 10}
@@ -511,7 +511,7 @@ func TestLoad_TelegramWebhookInvalid(t *testing.T) {
 		"empty mode":                       {yaml: hook("        mode: \"\"\n", ""), want: "mode: config_invalid: \"\" must be polling or webhook"},
 		"non string mode":                  {yaml: hook("        mode: 3\n", ""), want: "channels.telegram.accounts[0].mode (line 10, column 15): config_invalid: expected type 'string', got unconvertible type 'int'", shape: true},
 		"webhook without secret ref":       {yaml: hook("        mode: webhook\n", publicURL), want: "webhook_secret_ref: config_invalid: must not be empty in webhook mode"},
-		"inline secret":                    {yaml: hook("        mode: webhook\n        webhook_secret_ref: plain\n", publicURL), want: "webhook_secret_ref: config_invalid: must use env:// or file://"},
+		"inline secret":                    {yaml: hook("        mode: webhook\n        webhook_secret_ref: plain\n", publicURL), want: "webhook_secret_ref: config_invalid: secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme"},
 		"secret ref equals own token":      {yaml: hook("        mode: webhook\n        webhook_secret_ref: env://AURA_TELEGRAM_BOT_TOKEN\n", publicURL), want: "must differ from every bot token reference"},
 		"secret ref equals other token":    {yaml: hook(webhookAccount+"      - name: spare\n        bot_token_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n", publicURL), want: "must differ from every bot token reference"},
 		"secret ref equals discord token":  {yaml: "version: 1\nchannels:\n  discord:\n    accounts:\n      - name: home\n        bot_token_ref: env://AURA_TELEGRAM_WEBHOOK_SECRET\n  telegram:\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n" + webhookAccount + "    webhook:\n" + publicURL, want: "must differ from every bot token reference"},

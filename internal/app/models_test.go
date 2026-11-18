@@ -27,14 +27,14 @@ models:
     cand1:
       protocol: openai_chat_compat
       model: test-cand1
-      api_key_env: AURA_TEST_MODEL_KEY
+      api_key_ref: env://AURA_TEST_MODEL_KEY
       capabilities:
         context_tokens: 128000
         tokenizer: cl100k_base
     cand2:
       protocol: openai_chat_compat
       model: test-cand2
-      api_key_env: AURA_TEST_MODEL_KEY
+      api_key_ref: env://AURA_TEST_MODEL_KEY
       capabilities:
         context_tokens: 128000
         tokenizer: cl100k_base

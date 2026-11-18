@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
@@ -171,7 +172,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	cfg := config.Default()
 	cfg.Tools.Workspace = workspace
 	cfg.Tools.WebSearch.Provider = "brave"
-	cfg.Tools.WebSearch.CredentialRef = "env://AURA_TEST_TOOL_SECRET"
+	cfg.Tools.WebSearch.CredentialRef = secrettest.Ref("env://AURA_TEST_TOOL_SECRET")
 	cfg.Tools.MaxInlineResultBytes = 512
 	cfg.Storage.Path = dataRoot
 	var prompted *toolbroker.ApprovalPrompt

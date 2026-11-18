@@ -17,6 +17,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 const (
@@ -204,7 +205,7 @@ func assembleRig(t *testing.T, h *harness, opts accessOpts, cursors CursorStore,
 	}
 	account := &config.TelegramAccount{
 		Name:               "pocket",
-		BotTokenRef:        "env://" + testTokenEnv,
+		BotTokenRef:        secrettest.Ref("env://" + testTokenEnv),
 		AllowedUserIDs:     opts.allowed,
 		AllowedChatIDs:     opts.chats,
 		AcceptPrivateChats: !opts.privateOff,

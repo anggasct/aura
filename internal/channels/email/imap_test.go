@@ -24,6 +24,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 const (
@@ -201,7 +202,7 @@ func (f *imapFixture) account(poll time.Duration) *config.EmailAccount {
 		AuthservID:     testAuthserv,
 		AllowedSenders: []string{friendAddress},
 		IMAP: config.EmailIMAP{
-			Host: f.host, Port: f.port, Username: imapUser, PasswordRef: "env://" + imapPasswordName,
+			Host: f.host, Port: f.port, Username: imapUser, PasswordRef: secrettest.Ref("env://" + imapPasswordName),
 			Folder: "INBOX", PollInterval: configkit.Duration(poll),
 		},
 	}
@@ -450,21 +451,21 @@ func TestIMAP_ConnectFailuresAreClassified(t *testing.T) {
 		"wrong password": {
 			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
 				t.Setenv("AURA_TEST_WRONG_PASSWORD", "wrong")
-				account.IMAP.PasswordRef = "env://AURA_TEST_WRONG_PASSWORD"
+				account.IMAP.PasswordRef = secrettest.Ref("env://AURA_TEST_WRONG_PASSWORD")
 				return server.connector(account)
 			},
 			want: ErrorCodeLoginRejected,
 		},
 		"unset password": {
 			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
-				account.IMAP.PasswordRef = "env://AURA_TEST_UNSET_PASSWORD"
+				account.IMAP.PasswordRef = secrettest.Ref("env://AURA_TEST_UNSET_PASSWORD")
 				return server.connector(account)
 			},
 			want: ErrorCodeCredentialsUnavailable,
 		},
 		"missing password file": {
 			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
-				account.IMAP.PasswordRef = "file://" + t.TempDir() + "/absent"
+				account.IMAP.PasswordRef = secrettest.Ref("file://" + t.TempDir() + "/absent")
 				return server.connector(account)
 			},
 			want: ErrorCodeCredentialsUnavailable,
@@ -545,7 +546,7 @@ func TestIMAP_PlaintextServerIsNeverSpoken(t *testing.T) {
 	}()
 	t.Setenv(imapPasswordName, imapPassword)
 	account := &config.EmailAccount{IMAP: config.EmailIMAP{
-		Host: "127.0.0.1", Port: listenerPort(t, listener), Username: imapUser, PasswordRef: "env://" + imapPasswordName,
+		Host: "127.0.0.1", Port: listenerPort(t, listener), Username: imapUser, PasswordRef: secrettest.Ref("env://" + imapPasswordName),
 	}}
 	connector, err := NewIMAPConnector(account)
 	if err != nil {
@@ -563,12 +564,10 @@ func TestNewIMAPConnector_RejectsBadInput(t *testing.T) {
 	if _, err := NewIMAPConnector(nil); err == nil {
 		t.Error("NewIMAPConnector(nil) succeeded")
 	}
-	for _, ref := range []string{"", "hunter2", "http://secret", "plain:hunter2"} {
-		account := &config.EmailAccount{IMAP: config.EmailIMAP{Host: "imap.example.com", Port: 993, PasswordRef: ref}}
-		_, err := NewIMAPConnector(account)
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
-			t.Errorf("NewIMAPConnector(%q) error = %v, want invalid_argument", ref, err)
-		}
+	account := &config.EmailAccount{IMAP: config.EmailIMAP{Host: "imap.example.com", Port: 993}}
+	_, err := NewIMAPConnector(account)
+	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		t.Errorf("NewIMAPConnector without a password reference error = %v, want invalid_argument", err)
 	}
 }
 

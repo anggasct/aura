@@ -40,7 +40,7 @@ func deriveModelRoutes(cfg *Config) {
 }
 
 func deriveWebSearchCredential(tools *Tools) {
-	if tools == nil || tools.WebSearch.CredentialRef != "" {
+	if tools == nil || !tools.WebSearch.CredentialRef.IsZero() {
 		return
 	}
 	tools.WebSearch.CredentialRef = DefaultWebSearchCredentialRef(tools.WebSearch.Provider)

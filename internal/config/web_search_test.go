@@ -28,7 +28,7 @@ func TestWebSearchDefaultsToDuckDuckGoWithoutCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got.Provider != WebSearchProviderDuckDuckGo || got.CredentialRef != "" || got.Endpoint != "" || got.MaxResults != 5 {
+	if got.Provider != WebSearchProviderDuckDuckGo || !got.CredentialRef.IsZero() || got.Endpoint != "" || got.MaxResults != 5 {
 		t.Fatalf("WebSearch = %+v", got)
 	}
 	defaults := Default()
@@ -59,7 +59,7 @@ func TestWebSearchCredentialDefaultFollowsTheSelectedProvider(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Load: %v", err)
 			}
-			if got.CredentialRef != test.ref {
+			if got.CredentialRef.String() != test.ref {
 				t.Fatalf("CredentialRef = %q, want %q", got.CredentialRef, test.ref)
 			}
 		})
@@ -72,7 +72,7 @@ func TestWebSearchProviderAndCredentialFromEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got.Provider != WebSearchProviderTavily || got.CredentialRef != "env://AURA_TAVILY_API_KEY" {
+	if got.Provider != WebSearchProviderTavily || got.CredentialRef.String() != "env://AURA_TAVILY_API_KEY" {
 		t.Fatalf("WebSearch = %+v", got)
 	}
 }
@@ -91,11 +91,11 @@ func TestWebSearchRejectsConfigsThatDoNotFitTheProvider(t *testing.T) {
 		"credential without provider":     {section: "    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "must be empty for provider duckduckgo"},
 		"searxng without endpoint":        {section: "    provider: searxng\n", detail: "tools.web_search.endpoint: config_invalid: must be set"},
 		"non string endpoint":             {section: "    provider: searxng\n    endpoint: 8888\n", detail: "tools.web_search.endpoint (line 6, column 15): config_invalid: expected type 'string', got unconvertible type 'int'"},
-		"brave literal key":               {section: "    provider: brave\n    credential_ref: sk-literal\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
-		"brave bare env":                  {section: "    provider: brave\n    credential_ref: env://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
-		"tavily bare file":                {section: "    provider: tavily\n    credential_ref: file://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
-		"searxng bare env":                {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: env://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
-		"searxng malformed credential":    {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: token\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
+		"brave literal key":               {section: "    provider: brave\n    credential_ref: sk-literal\n", detail: "credential_ref: config_invalid: secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme"},
+		"brave bare env":                  {section: "    provider: brave\n    credential_ref: env://\n", detail: "credential_ref: config_invalid: secret_scope_violation: env:// secret reference must be a valid environment variable name"},
+		"tavily bare file":                {section: "    provider: tavily\n    credential_ref: file://\n", detail: "credential_ref: config_invalid: secret_scope_violation: file:// secret reference must be an absolute, clean path"},
+		"searxng bare env":                {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: env://\n", detail: "credential_ref: config_invalid: secret_scope_violation: env:// secret reference must be a valid environment variable name"},
+		"searxng malformed credential":    {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: token\n", detail: "credential_ref: config_invalid: secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme"},
 		"tavily with brave default":       {section: "    provider: tavily\n    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "default reference of provider brave"},
 		"searxng with brave default":      {section: "    provider: searxng\n    endpoint: https://search.example.com/search\n    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "default reference of provider brave"},
 		"duckduckgo with brave default":   {section: "    provider: duckduckgo\n    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "must be empty for provider duckduckgo"},

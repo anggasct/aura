@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 const (
@@ -241,6 +242,12 @@ func collectEnvNames(v reflect.Value, tag string, names map[string]bool) {
 			collectEnvNames(v.Elem(), tag, names)
 		}
 	case reflect.Struct:
+		if ref, isRef := v.Interface().(secret.Ref); isRef {
+			if name := ref.Reference().Env; name != "" {
+				names[name] = true
+			}
+			return
+		}
 		for i := range v.NumField() {
 			name, _, _ := strings.Cut(v.Type().Field(i).Tag.Get("json"), ",")
 			if name != "" && name != "-" {
@@ -267,12 +274,12 @@ func referencedEnvName(tag, value string) string {
 	switch {
 	case strings.HasSuffix(tag, "_env"):
 		return value
-	case tag == "ref" || strings.HasSuffix(tag, "_ref"):
-		name, _ := strings.CutPrefix(value, "env://")
-		if name == value {
+	case strings.HasSuffix(tag, "_ref"):
+		ref, err := secret.ParseRef(value)
+		if err != nil {
 			return ""
 		}
-		return name
+		return ref.Reference().Env
 	}
 	return ""
 }

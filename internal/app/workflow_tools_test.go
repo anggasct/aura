@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 func acceptToolCall(string, json.RawMessage) error { return nil }
@@ -194,7 +195,7 @@ func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
 		"workflow_cancel", "workflow_propose", "workflow_save_routine",
 	}
 	configured := config.Default()
-	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: "env://AURA_TEST_GITHUB_TOKEN"}}
+	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	deps, err := workflowValidationDeps(&configured)
 	if err != nil {
 		t.Fatalf("workflowValidationDeps: %v", err)

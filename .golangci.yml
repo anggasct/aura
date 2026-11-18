@@ -187,6 +187,7 @@ linters:
       # value. No arrangement satisfies both plus a uniform receiver.
       exclusions:
         - ByteSize.UnmarshalText
+        - Ref.UnmarshalText
     nolintlint:
       require-explanation: true
       require-specific: true

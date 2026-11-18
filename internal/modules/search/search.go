@@ -38,7 +38,7 @@ const (
 
 type Options struct {
 	Provider          string
-	CredentialRef     string
+	CredentialRef     secret.Ref
 	Endpoint          string
 	LoopbackAuthority string
 	Timeout           time.Duration
@@ -114,7 +114,7 @@ func New(options *Options) (toolbroker.Adapter, error) {
 func selectProvider(options *Options) (provider, credentialMode, error) {
 	switch options.Provider {
 	case providerDuckDuckGo:
-		if options.CredentialRef != "" {
+		if !options.CredentialRef.IsZero() {
 			return nil, credentialNever, errors.New("search: provider duckduckgo does not take a credential")
 		}
 		return duckDuckGo{}, credentialNever, rejectEndpoint(options)
@@ -250,13 +250,13 @@ func (s *searcher) resolveCredential() (string, error) {
 	if s.credential == credentialNever {
 		return "", nil
 	}
-	if s.options.CredentialRef == "" {
+	if s.options.CredentialRef.IsZero() {
 		if s.credential == credentialOptional {
 			return "", nil
 		}
 		return "", errors.New("credential reference is empty")
 	}
-	value, err := resolveCredential(s.options.CredentialRef)
+	value, err := s.options.CredentialRef.Reference().Resolve()
 	if err != nil {
 		return "", err
 	}
@@ -264,16 +264,6 @@ func (s *searcher) resolveCredential() (string, error) {
 		return "", errors.New("credential is empty")
 	}
 	return value, nil
-}
-
-func resolveCredential(raw string) (string, error) {
-	if name, ok := strings.CutPrefix(raw, "env://"); ok && name != "" {
-		return secret.Reference{Env: name}.Resolve()
-	}
-	if name, ok := strings.CutPrefix(raw, "file://"); ok && name != "" {
-		return secret.Reference{File: name}.Resolve()
-	}
-	return "", errors.New("invalid credential reference")
 }
 
 func transportError(err error) error {

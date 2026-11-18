@@ -23,6 +23,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -290,7 +291,7 @@ func proofSpec(credential string) *workflow.Spec {
 
 func registerGitHubOnTheStub(t *testing.T, life *runLife, runner *workflowToolRunner) workflow.ToolRunner {
 	t.Helper()
-	if err := githubadapter.Register(runner.in.Executor, &githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}, Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: "env://" + proofTokenEnv}}}); err != nil {
+	if err := githubadapter.Register(runner.in.Executor, &githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}, Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: secrettest.Ref("env://" + proofTokenEnv)}}}); err != nil {
 		t.Fatalf("register the github tools: %v", err)
 	}
 	return runner

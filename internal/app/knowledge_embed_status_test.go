@@ -7,6 +7,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -69,7 +70,7 @@ func TestStatusSaysLexicalOnlyWithoutEmbeddingConfiguration(t *testing.T) {
 func TestStatusReportsAnUnresolvedEmbeddingCredentialAsLexicalOnly(t *testing.T) {
 	rig := newKnowledgeStatusRig(t)
 	rig.cfg.Knowledge = statusEmbeddingConfig()
-	rig.cfg.Knowledge.Embedding.CredentialRef = "env://KB_STATUS_UNSET_KEY"
+	rig.cfg.Knowledge.Embedding.CredentialRef = secrettest.Ref("env://KB_STATUS_UNSET_KEY")
 	findings := embeddingFindings(t, rig)
 	if len(findings) != 1 || findings[0].Code != "knowledge_lexical_only" || !strings.Contains(findings[0].Detail, "credential could not be resolved") {
 		t.Fatalf("findings = %+v", findings)

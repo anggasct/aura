@@ -107,7 +107,7 @@ models:
     primary:
       protocol: openai_chat_compat
       model: test-model
-      api_key_env: AURA_TEST_MODEL_KEY
+      api_key_ref: env://AURA_TEST_MODEL_KEY
       capabilities:
         streaming: true
         tools: true
@@ -281,7 +281,7 @@ models:
     primary:
       protocol: openai_chat_compat
       model: test-model
-      api_key_env: AURA_TEST_MODEL_KEY
+      api_key_ref: env://AURA_TEST_MODEL_KEY
       capabilities:
         streaming: true
         tools: true

@@ -10,6 +10,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -78,11 +79,11 @@ func configuredEmbedding(cfg *config.Config) *config.KnowledgeEmbedding {
 	return cfg.Knowledge.Embedding
 }
 
-func resolveEmbeddingCredential(ref string) (string, bool) {
-	if ref == "" {
+func resolveEmbeddingCredential(ref secret.Ref) (string, bool) {
+	if ref.IsZero() {
 		return "", true
 	}
-	value, err := parseSecretRef(ref).Resolve()
+	value, err := ref.Reference().Resolve()
 	value = strings.TrimSpace(value)
 	if err != nil || value == "" {
 		return "", false

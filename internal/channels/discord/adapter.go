@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -256,15 +255,11 @@ func New(cfg *config.Discord, account *config.DiscordAccount, resumes ResumeStor
 	return adapter, nil
 }
 
-func parseTokenRef(raw string) (secret.Reference, error) {
-	switch {
-	case strings.HasPrefix(raw, "env://"):
-		return secret.Reference{Env: strings.TrimPrefix(raw, "env://")}, nil
-	case strings.HasPrefix(raw, "file://"):
-		return secret.Reference{File: strings.TrimPrefix(raw, "file://")}, nil
-	default:
+func parseTokenRef(ref secret.Ref) (secret.Reference, error) {
+	if ref.IsZero() {
 		return secret.Reference{}, Errorf(ErrorCodeInvalidArgument, "bot token reference must use env:// or file://")
 	}
+	return ref.Reference(), nil
 }
 
 func digestDiscordConfig(cfg *config.Discord, account *config.DiscordAccount) string {

@@ -197,19 +197,15 @@ func New(cfg *config.Telegram, account *config.TelegramAccount, cursors CursorSt
 	return adapter, nil
 }
 
-func parseTokenRef(raw string) (secret.Reference, error) {
-	return parseSecretReference(raw, "bot token")
+func parseTokenRef(ref secret.Ref) (secret.Reference, error) {
+	return parseSecretReference(ref, "bot token")
 }
 
-func parseSecretReference(raw, what string) (secret.Reference, error) {
-	switch {
-	case strings.HasPrefix(raw, "env://"):
-		return secret.Reference{Env: strings.TrimPrefix(raw, "env://")}, nil
-	case strings.HasPrefix(raw, "file://"):
-		return secret.Reference{File: strings.TrimPrefix(raw, "file://")}, nil
-	default:
+func parseSecretReference(ref secret.Ref, what string) (secret.Reference, error) {
+	if ref.IsZero() {
 		return secret.Reference{}, Errorf(ErrorCodeInvalidArgument, "%s reference must use env:// or file://", what)
 	}
+	return ref.Reference(), nil
 }
 
 func (a *Adapter) SetPrincipalResolver(owners *principal.Resolver) {

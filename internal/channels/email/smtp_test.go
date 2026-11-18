@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 const shortTimeout = 300 * time.Millisecond
@@ -141,12 +143,9 @@ func TestNewSMTPMailer_RejectsBadInput(t *testing.T) {
 	wantCode(t, err, ErrorCodeInvalidArgument)
 	server := newFakeSMTP(t, newAuthority(t))
 	account := smtpAccount(server)
-	account.SMTP.PasswordRef = "hunter2"
+	account.SMTP.PasswordRef = secret.Ref{}
 	_, err = NewSMTPMailer(account)
 	wantCode(t, err, ErrorCodeInvalidArgument)
-	if strings.Contains(err.Error(), "hunter2") {
-		t.Errorf("error %q leaks the inline password", err)
-	}
 	mailer, err := newSMTPMailer(smtpAccount(server), nil)
 	if err != nil {
 		t.Fatalf("newSMTPMailer: %v", err)

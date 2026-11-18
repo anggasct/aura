@@ -15,6 +15,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 const testdataDir = "../../testdata"
@@ -481,7 +483,7 @@ models:
       protocol: anthropic_messages
       model: claude-sonnet-4-20250514
       base_url: https://api.anthropic.com
-      api_key_env: ANTHROPIC_API_KEY
+      api_key_ref: env://ANTHROPIC_API_KEY
       capabilities:
         streaming: true
         tools: true
@@ -504,7 +506,7 @@ models:
 	}
 	cfg := res.Config
 	primary := cfg.Models.Definitions["primary"]
-	if primary.Protocol != "anthropic_messages" || primary.Model != "claude-sonnet-4-20250514" || primary.APIKeyEnv != "ANTHROPIC_API_KEY" {
+	if primary.Protocol != "anthropic_messages" || primary.Model != "claude-sonnet-4-20250514" || primary.APIKeyRef.String() != "env://ANTHROPIC_API_KEY" {
 		t.Errorf("primary = %+v", primary)
 	}
 	if cfg.Models.Routing["summarize"] != "primary" {
@@ -620,7 +622,7 @@ models:
     primary:
       protocol: anthropic_messages
       model: claude-sonnet-4-20250514
-      api_key_env: ANTHROPIC_API_KEY
+      api_key_ref: env://ANTHROPIC_API_KEY
       capabilities:
         streaming: true
         tools: true
@@ -654,7 +656,7 @@ models:
       protocol: anthropic_messages
       model: claude-sonnet
       base_url: https://api.anthropic.com
-      api_key_env: ANTHROPIC_API_KEY
+      api_key_ref: env://ANTHROPIC_API_KEY
       capabilities:
         streaming: true
         tools: true
@@ -684,12 +686,6 @@ models:
 			code:    ErrorCodeModelCapabilityUnsupported,
 			want:    "requires positive context_tokens and a tokenizer",
 		},
-		{
-			name:    "both secret references",
-			content: strings.Replace(valid, "      api_key_env: ANTHROPIC_API_KEY\n", "      api_key_env: ANTHROPIC_API_KEY\n      api_key_file: /run/secrets/anthropic\n", 1),
-			code:    ErrorCodeModelSecretInvalid,
-			want:    "only one of api_key_env or api_key_file",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -712,7 +708,7 @@ models:
       protocol: anthropic_messages
       model: claude-sonnet
       base_url: https://api.anthropic.com
-      api_key_env: ANTHROPIC_API_KEY
+      api_key_ref: env://ANTHROPIC_API_KEY
       api_key: inline-secret
       capabilities:
         streaming: true
@@ -740,7 +736,7 @@ models:
       protocol: anthropic_messages
       model: claude-sonnet
       base_url: https://api.anthropic.com
-      api_key_env: ANTHROPIC_API_KEY
+      api_key_ref: env://ANTHROPIC_API_KEY
       capabilities:
         streaming: true
         tools: true
@@ -771,10 +767,10 @@ models:
 		t.Fatalf("Load: %v", err)
 	}
 	primary := result.Config.Models.Definitions["primary"]
-	if primary.APIKeyEnv != "ANTHROPIC_API_KEY" || primary.APIKeyFile != "" {
+	if primary.APIKeyRef.String() != "env://ANTHROPIC_API_KEY" {
 		t.Errorf("primary secret reference = %+v", primary)
 	}
-	if auxiliary := result.Config.Models.Definitions["auxiliary"]; auxiliary.APIKeyEnv != "" || auxiliary.APIKeyFile != "" {
+	if auxiliary := result.Config.Models.Definitions["auxiliary"]; !auxiliary.APIKeyRef.IsZero() {
 		t.Errorf("loopback secret reference = %+v", auxiliary)
 	}
 }
@@ -787,7 +783,7 @@ models:
       protocol: anthropic_messages
       model: claude-sonnet
       base_url: https://api.anthropic.com
-      api_key_env: ANTHROPIC_API_KEY
+      api_key_ref: env://ANTHROPIC_API_KEY
       capabilities:
         streaming: true
         tools: true
@@ -893,7 +889,7 @@ models:
       protocol: anthropic_messages
       model: claude-sonnet
       base_url: https://api.anthropic.com
-      api_key_env: ANTHROPIC_API_KEY
+      api_key_ref: env://ANTHROPIC_API_KEY
       capabilities:
         streaming: true
         tools: true
@@ -1028,7 +1024,7 @@ func TestLoad_EnvOnlyModelDefinitionValidated(t *testing.T) {
 	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_PROTOCOL", "anthropic_messages")
 	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_MODEL", "claude-sonnet")
 	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_BASE_URL", "https://api.anthropic.com")
-	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_API_KEY_ENV", "ANTHROPIC_API_KEY")
+	t.Setenv("AURA_MODELS_DEFINITIONS_SECONDARY_API_KEY_REF", "env://ANTHROPIC_API_KEY")
 	content := `version: 1
 `
 	_, err := Load(writeTempConfig(t, content))
@@ -1215,11 +1211,11 @@ func TestResolvePath_XDGEmptyFallsBack(t *testing.T) {
 
 func TestValidateLoadedModelsReportsEveryDefinition(t *testing.T) {
 	models := Models{Definitions: map[string]ModelDefinition{
-		"primary": {Protocol: "nope", Model: "m", APIKeyEnv: "K",
+		"primary": {Protocol: "nope", Model: "m", APIKeyRef: secrettest.Ref("env://K"),
 			Capabilities: ModelCapabilities{ContextTokens: 1, Tokenizer: "t"}},
 		"auxiliary": {Protocol: ProtocolOpenAIChatCompat, Model: "",
 			Capabilities: ModelCapabilities{ContextTokens: 1, Tokenizer: "t"}},
-		"third": {Protocol: ProtocolOpenAIChatCompat, Model: "m", APIKeyEnv: "K",
+		"third": {Protocol: ProtocolOpenAIChatCompat, Model: "m", APIKeyRef: secrettest.Ref("env://K"),
 			Capabilities: ModelCapabilities{ContextTokens: 0, Tokenizer: ""}},
 	}}
 	doc, err := parseDocument([]byte("version: 1\n"))
@@ -1246,7 +1242,7 @@ models:
       protocol: openai_responses
       model: gpt-5
       base_url: https://api.openai.com
-      api_key_env: TEST_API_KEY
+      api_key_ref: env://TEST_API_KEY
       capabilities:
         context_tokens: 128000
         tokenizer: o200k
@@ -1254,7 +1250,7 @@ models:
       protocol: anthropic_messages
       model: claude-3-7
       base_url: https://api.anthropic.com
-      api_key_env: TEST_API_KEY
+      api_key_ref: env://TEST_API_KEY
       capabilities:
         context_tokens: 200000
         tokenizer: anthropic
@@ -1389,7 +1385,7 @@ models:
       protocol: openai_responses
       model: gpt-5
       base_url: https://api.openai.com
-      api_key_env: TEST_API_KEY
+      api_key_ref: env://TEST_API_KEY
       capabilities:
         context_tokens: 128000
         tokenizer: o200k
@@ -1397,7 +1393,7 @@ models:
       protocol: anthropic_messages
       model: claude-3-7
       base_url: https://api.anthropic.com
-      api_key_env: TEST_API_KEY
+      api_key_ref: env://TEST_API_KEY
       capabilities:
         context_tokens: 200000
         tokenizer: anthropic
@@ -1453,4 +1449,33 @@ func TestLoad_RejectsTheRemovedDurableSection(t *testing.T) {
 			t.Errorf("Warnings = %v, want AURA_DURABLE_ENABLED listed", res.Warnings)
 		}
 	})
+}
+
+func TestModelAPIKeyIsAReference(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want secret.Reference
+	}{
+		{"env://K", secret.Reference{Env: "K"}},
+		{"file:///run/secrets/model-key", secret.Reference{File: "/run/secrets/model-key"}},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			result, err := Load(writeTempConfig(t, "version: 1\n"+testModelDefinition+"      api_key_ref: "+tc.text+"\n"+providerTestCapabilities))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := result.Config.Models.Definitions["primary"].APIKeyRef.Reference(); got != tc.want {
+				t.Errorf("api_key_ref resolves to %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+	for _, key := range []string{"api_key_env: K", "api_key_file: /run/secrets/model-key"} {
+		t.Run("old key "+key, func(t *testing.T) {
+			_, err := Load(writeTempConfig(t, "version: 1\n"+testModelDefinition+"      "+key+"\n"+providerTestCapabilities))
+			want := unknownKeyText("models.definitions.primary."+strings.Split(key, ":")[0], "line 8, column 7")
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want %q", err, want)
+			}
+		})
+	}
 }

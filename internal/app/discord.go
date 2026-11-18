@@ -273,14 +273,3 @@ func buildSecretVault(cfg *config.Config) *secret.Vault {
 	}
 	return vault
 }
-
-func parseSecretRef(raw string) secret.Reference {
-	switch {
-	case strings.HasPrefix(raw, "env://"):
-		return secret.Reference{Env: strings.TrimPrefix(raw, "env://")}
-	case strings.HasPrefix(raw, "file://"):
-		return secret.Reference{File: strings.TrimPrefix(raw, "file://")}
-	default:
-		return secret.Reference{}
-	}
-}

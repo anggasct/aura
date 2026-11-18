@@ -17,6 +17,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
@@ -83,8 +84,8 @@ func stubGitHubAPICounting(t *testing.T) (*httptest.Server, *atomic.Int32) {
 
 func testCredentials() []Credential {
 	return []Credential{
-		{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"},
-		{Name: "absent", Ref: "env://GITHUB_TEST_TOKEN_ABSENT"},
+		{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TEST_TOKEN")},
+		{Name: "absent", Ref: secrettest.Ref("env://GITHUB_TEST_TOKEN_ABSENT")},
 	}
 }
 
@@ -274,7 +275,9 @@ func TestAdaptersRefuseACredentialThatIsNotConfigured(t *testing.T) {
 		{"merge", MergeAdapter, `{"repo":"org/repo","number":42,"sha":"0123456789abcdef0123456789abcdef01234567","merge_method":"merge","credential_name":%s}`},
 		{"comment", CommentAdapter, `{"repo":"org/repo","number":7,"body":"hi","credential_name":%s}`},
 	}
-	configured := func() []Credential { return []Credential{{Name: "ci", Ref: "env://GITHUB_TEST_TOKEN"}} }
+	configured := func() []Credential {
+		return []Credential{{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TEST_TOKEN")}}
+	}
 	call := func(adapter toolbroker.Adapter, template, credential string) error {
 		quoted, err := json.Marshal(credential)
 		if err != nil {

@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 const (
@@ -48,7 +49,7 @@ type KnowledgeEmbedding struct {
 	Model           string             `json:"model"`
 	Dimensions      int                `json:"dimensions"`
 	DimensionsField string             `json:"dimensions_field"`
-	CredentialRef   string             `json:"credential_ref,omitempty"`
+	CredentialRef   secret.Ref         `json:"credential_ref,omitzero"`
 	RoleStyle       string             `json:"role_style"`
 	QueryPrefix     string             `json:"query_prefix,omitempty"`
 	DocumentPrefix  string             `json:"document_prefix,omitempty"`
@@ -84,7 +85,6 @@ func validateKnowledge(knowledge *Knowledge) error {
 		problems = append(problems, configkit.Invalid("knowledge.embedding.dimensions", fmt.Sprintf("is required and must be between 1 and %d", MaxEmbeddingDimensions)))
 	}
 	problems = append(problems, validateEmbeddingField(embedding.DimensionsField)...)
-	problems = append(problems, validateEmbeddingCredentialRef(embedding.CredentialRef)...)
 	problems = append(problems, validateEmbeddingRole(embedding)...)
 	if embedding.BatchSize < 1 || embedding.BatchSize > MaxEmbeddingBatchSize {
 		problems = append(problems, configkit.Invalid("knowledge.embedding.batch_size", fmt.Sprintf("must be between 1 and %d", MaxEmbeddingBatchSize)))
@@ -103,16 +103,6 @@ func validateEmbeddingField(field string) []error {
 		return []error{configkit.Invalid("knowledge.embedding.dimensions_field", "must not be a reserved request field")}
 	}
 	return nil
-}
-
-func validateEmbeddingCredentialRef(ref string) []error {
-	switch {
-	case ref == "":
-		return nil
-	case credentialRefHasName(ref):
-		return nil
-	}
-	return []error{configkit.Invalid("knowledge.embedding.credential_ref", "must use env:// or file:// with a name")}
 }
 
 func validateEmbeddingRole(embedding *KnowledgeEmbedding) []error {

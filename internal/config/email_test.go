@@ -59,11 +59,11 @@ func TestLoad_EmailAccountApplied(t *testing.T) {
 		t.Errorf("allowed_senders = %v", account.AllowedSenders)
 	}
 	imap := account.IMAP
-	if imap.Host != "imap.example.com" || imap.Username != "aura@example.com" || imap.PasswordRef != "env://AURA_EMAIL_PASSWORD" {
+	if imap.Host != "imap.example.com" || imap.Username != "aura@example.com" || imap.PasswordRef.String() != "env://AURA_EMAIL_PASSWORD" {
 		t.Errorf("imap = %+v", imap)
 	}
 	smtp := account.SMTP
-	if smtp.Host != "smtp.example.com" || smtp.Username != "aura@example.com" || smtp.PasswordRef != "env://AURA_EMAIL_SMTP_PASSWORD" {
+	if smtp.Host != "smtp.example.com" || smtp.Username != "aura@example.com" || smtp.PasswordRef.String() != "env://AURA_EMAIL_SMTP_PASSWORD" {
 		t.Errorf("smtp = %+v", smtp)
 	}
 	if smtp.Port != 587 {
@@ -180,15 +180,15 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"inline password": {
 			yaml: replace("env://AURA_EMAIL_PASSWORD", "hunter2"),
-			want: "password_ref: config_invalid: must use env:// or file://",
+			want: "password_ref: config_invalid: secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme",
 		},
 		"plaintext url password": {
 			yaml: replace("env://AURA_EMAIL_PASSWORD", "https://user:hunter2@example.com"),
-			want: "password_ref: config_invalid: must use env:// or file://",
+			want: "password_ref: config_invalid: secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme",
 		},
 		"empty reference target": {
 			yaml: replace("env://AURA_EMAIL_PASSWORD", "env://"),
-			want: "password_ref: config_invalid: must use env:// or file://",
+			want: "password_ref: config_invalid: secret_scope_violation: env:// secret reference must be a valid environment variable name",
 		},
 		"missing password": {
 			yaml: replace("          password_ref: env://AURA_EMAIL_PASSWORD\n", ""),
@@ -292,11 +292,11 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"smtp inline password": {
 			yaml: replace("env://AURA_EMAIL_SMTP_PASSWORD", "hunter2"),
-			want: "smtp.password_ref: config_invalid: must use env:// or file://",
+			want: "smtp.password_ref: config_invalid: secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme",
 		},
 		"smtp plaintext url password": {
 			yaml: replace("env://AURA_EMAIL_SMTP_PASSWORD", "https://user:hunter2@example.com"),
-			want: "smtp.password_ref: config_invalid: must use env:// or file://",
+			want: "smtp.password_ref: config_invalid: secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme",
 		},
 		"smtp missing password": {
 			yaml: replace("          password_ref: env://AURA_EMAIL_SMTP_PASSWORD\n", ""),

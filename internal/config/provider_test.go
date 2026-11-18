@@ -143,7 +143,7 @@ models:
 			name: "provider and custom together",
 			body: header + `      provider: openai
       model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         base_url: https://models.example.com/v1
@@ -155,7 +155,7 @@ models:
 		{
 			name: "custom missing protocol",
 			body: header + `      model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         base_url: https://models.example.com/v1
         auth_scheme: bearer
@@ -166,7 +166,7 @@ models:
 		{
 			name: "custom missing base_url",
 			body: header + `      model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         auth_scheme: bearer
@@ -178,7 +178,7 @@ models:
 			name: "custom with top-level protocol",
 			body: header + `      protocol: openai_chat_compat
       model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         base_url: https://models.example.com/v1
@@ -190,7 +190,7 @@ models:
 		{
 			name: "custom invalid auth scheme",
 			body: header + `      model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         base_url: https://models.example.com/v1
@@ -202,7 +202,7 @@ models:
 		{
 			name: "custom invalid session behavior",
 			body: header + `      model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         base_url: https://models.example.com/v1
@@ -214,7 +214,7 @@ models:
 		{
 			name: "file secret header",
 			body: header + `      model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         base_url: https://models.example.com/v1
@@ -228,7 +228,7 @@ models:
 		{
 			name: "interpolation secret header",
 			body: header + `      model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         base_url: https://models.example.com/v1
@@ -242,7 +242,7 @@ models:
 		{
 			name: "content-type collision case-insensitive",
 			body: header + `      model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         base_url: https://models.example.com/v1
@@ -256,7 +256,7 @@ models:
 		{
 			name: "session header collision case-insensitive",
 			body: header + `      model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         base_url: https://models.example.com/v1
@@ -270,7 +270,7 @@ models:
 		{
 			name: "unknown key in custom",
 			body: header + `      model: m
-      api_key_env: K
+      api_key_ref: env://K
       custom:
         protocol: openai_chat_compat
         base_url: https://models.example.com/v1
@@ -284,7 +284,7 @@ models:
 			name: "non-string provider",
 			body: header + `      provider: 42
       model: m
-      api_key_env: K
+      api_key_ref: env://K
 ` + providerTestCapabilities,
 			wantSubstr: "models.definitions[primary].provider (line 7, column 17): config_invalid: expected type 'string', got unconvertible type 'int'",
 		},
@@ -319,7 +319,7 @@ models:
       provider: openai
       model: gpt-4o-mini
       base_url: https://proxy.example.com/openai
-      api_key_env: OPENAI_API_KEY
+      api_key_ref: env://OPENAI_API_KEY
 `+providerTestCapabilities)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -346,7 +346,7 @@ models:
     primary:
       provider: openai
       model: gpt-4o-mini
-      api_key_env: OPENAI_API_KEY
+      api_key_ref: env://OPENAI_API_KEY
 `+providerTestCapabilities+`  providers:
     openai:
       protocol: openai_chat_compat

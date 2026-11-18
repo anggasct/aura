@@ -34,14 +34,19 @@ func (p mcpEndpointPolicy) ValidateEndpoint(ctx context.Context, rawURL string) 
 
 type mcpSecretResolver struct{}
 
-func (mcpSecretResolver) ResolveSecret(_ context.Context, ref string) (string, error) {
-	var source secret.Reference
+func staticCredentialReference(ref string) (secret.Reference, bool) {
 	switch {
 	case strings.HasPrefix(ref, "env://"):
-		source.Env = strings.TrimPrefix(ref, "env://")
+		return secret.Reference{Env: strings.TrimPrefix(ref, "env://")}, true
 	case strings.HasPrefix(ref, "file://"):
-		source.File = strings.TrimPrefix(ref, "file://")
-	default:
+		return secret.Reference{File: strings.TrimPrefix(ref, "file://")}, true
+	}
+	return secret.Reference{}, false
+}
+
+func (mcpSecretResolver) ResolveSecret(_ context.Context, ref string) (string, error) {
+	source, known := staticCredentialReference(ref)
+	if !known {
 		return "", mcp.Errorf(mcp.ErrConfigInvalid, "credential reference must use env:// or file://")
 	}
 	token, err := source.Resolve()

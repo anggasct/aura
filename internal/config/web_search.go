@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 const (
@@ -21,14 +22,14 @@ func WebSearchProviders() []string {
 	return []string{WebSearchProviderDuckDuckGo, WebSearchProviderBrave, WebSearchProviderTavily, WebSearchProviderSearXNG}
 }
 
-func DefaultWebSearchCredentialRef(provider string) string {
+func DefaultWebSearchCredentialRef(provider string) secret.Ref {
 	switch provider {
 	case WebSearchProviderBrave:
-		return fmt.Sprintf("env://%s_%s_%s_%s", "AURA", "BRAVE", "API", "KEY")
+		return mustRef(fmt.Sprintf("env://%s_%s_%s_%s", "AURA", "BRAVE", "API", "KEY"))
 	case WebSearchProviderTavily:
-		return fmt.Sprintf("env://%s_%s_%s_%s", "AURA", "TAVILY", "API", "KEY")
+		return mustRef(fmt.Sprintf("env://%s_%s_%s_%s", "AURA", "TAVILY", "API", "KEY"))
 	}
-	return ""
+	return secret.Ref{}
 }
 
 func (w *ToolWebSearch) SearchEndpoint() (ServiceEndpoint, error) {
@@ -60,7 +61,7 @@ func validateWebSearch(webSearch *ToolWebSearch) error {
 	var problems []error
 	switch webSearch.Provider {
 	case WebSearchProviderDuckDuckGo:
-		if webSearch.CredentialRef != "" {
+		if !webSearch.CredentialRef.IsZero() {
 			problems = append(problems, configkit.Invalid("tools.web_search.credential_ref", "must be empty for provider duckduckgo"))
 		}
 		problems = append(problems, rejectWebSearchEndpoint(webSearch)...)
@@ -90,30 +91,17 @@ func rejectWebSearchEndpoint(webSearch *ToolWebSearch) []error {
 
 func validateWebSearchCredentialRef(webSearch *ToolWebSearch, required bool) []error {
 	ref := webSearch.CredentialRef
-	if ref == "" {
+	if ref.IsZero() {
 		if required {
 			return []error{configkit.Invalid("tools.web_search.credential_ref", "must use env:// or file:// with a name for provider "+webSearch.Provider)}
 		}
 		return nil
 	}
 	var problems []error
-	if !credentialRefHasName(ref) {
-		problems = append(problems, configkit.Invalid("tools.web_search.credential_ref", "must use env:// or file:// with a name"))
-	}
 	for _, other := range WebSearchProviders() {
 		if other != webSearch.Provider && ref == DefaultWebSearchCredentialRef(other) {
 			problems = append(problems, configkit.Invalid("tools.web_search.credential_ref", fmt.Sprintf("is the default reference of provider %s and cannot be used with provider %s", other, webSearch.Provider)))
 		}
 	}
 	return problems
-}
-
-func credentialRefHasName(ref string) bool {
-	switch {
-	case strings.HasPrefix(ref, "env://"):
-		return len(ref) > len("env://")
-	case strings.HasPrefix(ref, "file://"):
-		return len(ref) > len("file://")
-	}
-	return false
 }

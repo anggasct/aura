@@ -10,6 +10,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 const githubCapabilityEnabled = "capabilities:\n  enabled: [provider-github]\n"
@@ -65,7 +66,7 @@ func TestToolsGitHubCredentialsLoadInOrder(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	loaded = result.Config.Tools
-	want := []GitHubCredential{{Name: "ci", Ref: "env://GITHUB_TOKEN"}, {Name: "release", Ref: "file:///etc/aura/github-release-token"}}
+	want := []GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TOKEN")}, {Name: "release", Ref: secrettest.Ref("file:///etc/aura/github-release-token")}}
 	if got := loaded.GitHub.Credentials; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("Credentials = %+v, want %+v", got, want)
 	}
@@ -81,7 +82,7 @@ func TestToolsGitHubCredentialsLoadInOrder(t *testing.T) {
 
 func TestToolsGitHubRejectsUnusableCredentialValues(t *testing.T) {
 	const nameDetail = "tools.github.credentials[%d].name: config_invalid: must be 1 to 64 lowercase letters, digits, '_' or '-', starting with a letter"
-	const refDetail = "tools.github.credentials[%d].ref: config_invalid: must name an environment variable or an absolute, clean file path"
+	const refDetail = "tools.github.credentials[%d].ref: config_invalid: "
 	cases := []struct {
 		name    string
 		entries string
@@ -92,14 +93,14 @@ func TestToolsGitHubRejectsUnusableCredentialValues(t *testing.T) {
 		{"dotted name", githubEntry("c.i", "env://A"), fmt.Sprintf(nameDetail, 0)},
 		{"long name", githubEntry("a"+strings.Repeat("b", 64), "env://A"), fmt.Sprintf(nameDetail, 0)},
 		{"repeated name", githubEntry("ci", "env://A") + githubEntry("ci", "env://B"), "tools.github.credentials[1].name: config_invalid: repeats an earlier entry"},
-		{"literal token", githubEntry("ci", "ghp_literal"), fmt.Sprintf(refDetail, 0)},
-		{"empty env name", githubEntry("ci", "env://"), fmt.Sprintf(refDetail, 0)},
-		{"digit env name", githubEntry("ci", "env://1BAD"), fmt.Sprintf(refDetail, 0)},
-		{"spaced env name", githubEntry("ci", "env://A B"), fmt.Sprintf(refDetail, 0)},
-		{"empty file path", githubEntry("ci", "file://"), fmt.Sprintf(refDetail, 0)},
-		{"relative file path", githubEntry("ci", "file://relative/token"), fmt.Sprintf(refDetail, 0)},
-		{"unclean file path", githubEntry("ci", "file:///a/../b"), fmt.Sprintf(refDetail, 0)},
-		{"trailing slash", githubEntry("ci", "file:///a/"), fmt.Sprintf(refDetail, 0)},
+		{"literal token", githubEntry("ci", "ghp_literal"), fmt.Sprintf(refDetail, 0) + "secret_scope_violation: secret reference must be empty or use the env:// or file:// scheme"},
+		{"empty env name", githubEntry("ci", "env://"), fmt.Sprintf(refDetail, 0) + "secret_scope_violation: env:// secret reference must be a valid environment variable name"},
+		{"digit env name", githubEntry("ci", "env://1BAD"), fmt.Sprintf(refDetail, 0) + "secret_scope_violation: env:// secret reference must be a valid environment variable name"},
+		{"spaced env name", githubEntry("ci", "env://A B"), fmt.Sprintf(refDetail, 0) + "secret_scope_violation: env:// secret reference must be a valid environment variable name"},
+		{"empty file path", githubEntry("ci", "file://"), fmt.Sprintf(refDetail, 0) + "secret_scope_violation: file:// secret reference must be an absolute, clean path"},
+		{"relative file path", githubEntry("ci", "file://relative/token"), fmt.Sprintf(refDetail, 0) + "secret_scope_violation: file:// secret reference must be an absolute, clean path"},
+		{"unclean file path", githubEntry("ci", "file:///a/../b"), fmt.Sprintf(refDetail, 0) + "secret_scope_violation: file:// secret reference must be an absolute, clean path"},
+		{"trailing slash", githubEntry("ci", "file:///a/"), fmt.Sprintf(refDetail, 0) + "secret_scope_violation: file:// secret reference must be an absolute, clean path"},
 		{"repeated ref", githubEntry("ci", "env://A") + githubEntry("release", "env://A"), "tools.github.credentials[1].ref: config_invalid: repeats an earlier entry"},
 	}
 	for _, tc := range cases {
@@ -109,7 +110,7 @@ func TestToolsGitHubRejectsUnusableCredentialValues(t *testing.T) {
 			if !errors.As(err, &field) || !fault.HasCode(err, configkit.ErrorCodeInvalid) || stripPositions(field.Error()) != tc.detail {
 				t.Fatalf("err = %v, want config_invalid %q", err, tc.detail)
 			}
-			for _, leaked := range []string{"env:", "file:", "ghp_literal", "relative/token", "/a/"} {
+			for _, leaked := range []string{"ghp_literal", "relative/token", "/a/"} {
 				if strings.Contains(err.Error(), leaked) {
 					t.Errorf("error %q contains %q", err, leaked)
 				}
@@ -128,7 +129,7 @@ func TestToolsGitHubRejectsMisshapenCredentials(t *testing.T) {
 		{"scalar credentials", "  github:\n    credentials: ci\n", "tools.github.credentials (line 5, column 18): config_invalid: source data must be an array or slice, got string"},
 		{"scalar entry", "  github:\n    credentials:\n      - ci\n", "tools.github.credentials[0] (line 6, column 9): config_invalid: expected a map or struct, got \"string\""},
 		{"numeric name", "  github:\n    credentials:\n      - name: 5\n        ref: env://A\n", "tools.github.credentials[0].name (line 6, column 15): config_invalid: expected type 'string', got unconvertible type 'int'"},
-		{"numeric ref", "  github:\n    credentials:\n      - name: ci\n        ref: 5\n", "tools.github.credentials[0].ref (line 7, column 14): config_invalid: expected type 'string', got unconvertible type 'int'"},
+		{"numeric ref", "  github:\n    credentials:\n      - name: ci\n        ref: 5\n", "tools.github.credentials[0].ref (line 7, column 14): config_invalid: must be a secret reference written as a string"},
 		{"old key", "  github:\n    credentials:\n      - name: ci\n        credential_ref: env://A\n", unknownKeyText("tools.github.credentials[0].credential_ref", "line 7, column 9")},
 	}
 	for _, tc := range cases {
