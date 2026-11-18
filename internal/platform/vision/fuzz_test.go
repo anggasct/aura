@@ -3,6 +3,8 @@ package vision
 import (
 	"bytes"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func FuzzSniffFormat(f *testing.F) {
@@ -46,7 +48,7 @@ func FuzzSniffFormat(f *testing.F) {
 		}
 		_, err := sniffDimensions(mime, raw)
 		if err != nil {
-			if _, ok := CodeOf(err); !ok {
+			if _, ok := fault.CodeOf[ErrorCode](err); !ok {
 				t.Fatalf("untyped sniff error: %v", err)
 			}
 		}
@@ -79,7 +81,7 @@ func FuzzPartRoundTrip(f *testing.F) {
 		}
 		decoded, err := UnmarshalPart(input)
 		if err != nil {
-			if _, ok := CodeOf(err); !ok {
+			if _, ok := fault.CodeOf[ErrorCode](err); !ok {
 				t.Fatalf("untyped part error: %v", err)
 			}
 			return

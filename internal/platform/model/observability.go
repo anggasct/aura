@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	adkmodel "google.golang.org/adk/v2/model"
 )
 
@@ -56,7 +57,7 @@ func (t *modelTelemetry) finish(ctx context.Context, response *adkmodel.LLMRespo
 	status := "ok"
 	if err != nil {
 		status = "error"
-		if code, ok := CodeOf(err); ok {
+		if code, ok := fault.CodeOf[ErrorCode](err); ok {
 			status = string(code)
 		} else if errors.Is(err, context.Canceled) {
 			status = "canceled"

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
@@ -392,8 +393,8 @@ func TestOpenAI_EmptyResponseTyped(t *testing.T) {
 
 	a := mustOpenAIAdapter(t, "gpt-4o", srv.URL, "sk-test", 0)
 	_, err := collect(a.GenerateContent(context.Background(), sampleRequest("hi"), false))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
-		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeProtocolInvalid)
+	if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeProtocolInvalid)
 	}
 }
 
@@ -408,8 +409,8 @@ func TestGemini_EmptyResponseTyped(t *testing.T) {
 		t.Fatalf("NewGeminiAdapter: %v", err)
 	}
 	_, err = collect(adapter.GenerateContent(context.Background(), sampleRequest("hi"), false))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
-		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeProtocolInvalid)
+	if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeProtocolInvalid)
 	}
 }
 
@@ -424,8 +425,8 @@ func TestResponses_EmptyOutputTyped(t *testing.T) {
 		t.Fatalf("NewOpenAIResponsesAdapter: %v", err)
 	}
 	_, err = collect(adapter.GenerateContent(context.Background(), sampleRequest("hi"), false))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
-		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeProtocolInvalid)
+	if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeProtocolInvalid)
 	}
 }
 

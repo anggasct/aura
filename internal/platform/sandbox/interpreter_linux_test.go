@@ -15,6 +15,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"golang.org/x/sys/unix"
 )
 
@@ -43,10 +44,10 @@ func TestInterpreterProfileRequiresEveryBound(t *testing.T) {
 			limits := interpreterLimits()
 			tc.mutate(&limits)
 			spec := Spec{Profile: ProfileInterpreter, WorkingDir: t.TempDir(), Limits: limits}
-			if err := spec.validate(); !hasCode(err, ErrorCodeInvalidArgument) {
+			if err := spec.validate(); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Fatalf("validate = %v, want invalid_argument", err)
 			}
-			if _, err := Run(t.Context(), &spec, "true"); !hasCode(err, ErrorCodeInvalidArgument) {
+			if _, err := Run(t.Context(), &spec, "true"); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Fatalf("Run = %v, want invalid_argument", err)
 			}
 		})
@@ -432,7 +433,7 @@ func TestRunWithACancelledContextCreatesNoCgroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	spec := Spec{Profile: ProfileInterpreter, WorkingDir: t.TempDir(), Limits: interpreterLimits()}
-	if _, err := runWithCgroups(ctx, host, &spec, "true"); !hasCode(err, ErrorCodeSandboxUnavailable) {
+	if _, err := runWithCgroups(ctx, host, &spec, "true"); !fault.HasCode(err, ErrorCodeSandboxUnavailable) {
 		t.Fatalf("runWithCgroups = %v, want sandbox_unavailable", err)
 	}
 	if got := entriesWithPrefix(t, tree, fixtureOwn, sandboxCgroupStem); len(got) != 0 {
@@ -450,7 +451,7 @@ func TestCgroupGroupKillFailsClosed(t *testing.T) {
 		t.Fatalf("newCgroup: %v", err)
 	}
 	tree.failOn = cg.name + "/memory.oom.group"
-	if err := cg.killAsGroup(); !hasCode(err, ErrorCodeSandboxInitFailed) {
+	if err := cg.killAsGroup(); !fault.HasCode(err, ErrorCodeSandboxInitFailed) {
 		t.Fatalf("killAsGroup = %v, want sandbox_init_failed", err)
 	}
 }

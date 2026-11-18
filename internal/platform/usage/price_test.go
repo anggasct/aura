@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func testPrice(modelDef string) *Price {
@@ -174,8 +176,8 @@ func TestPricesFileLoaderRejectsBadVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported version")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePriceVersionInvalid {
-		t.Errorf("code = %v, want %v", code, ErrorCodePriceVersionInvalid)
+	if !fault.HasCode(err, ErrorCodePriceVersionInvalid) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodePriceVersionInvalid)
 	}
 }
 

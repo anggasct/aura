@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const sessionCloseGrace = 2 * time.Second
@@ -435,13 +437,11 @@ func isDeadline(err error) bool {
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return true
 	}
-	code, _ := CodeOf(err)
-	return code == ErrorCodeSandboxTimeout
+	return fault.HasCode(err, ErrorCodeSandboxTimeout)
 }
 
 func isOutputExceeded(err error) bool {
-	code, _ := CodeOf(err)
-	return code == ErrorCodeSandboxOutputExceeded
+	return fault.HasCode(err, ErrorCodeSandboxOutputExceeded)
 }
 
 func sigtermDroppedByInit(pid int) bool {

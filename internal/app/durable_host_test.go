@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -98,8 +99,7 @@ func TestDurableHostStageReportsHowItsRunEnded(t *testing.T) {
 		})
 		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 		defer cancel()
-		var coded *Error
-		if err := stage.stop(ctx); !errors.As(err, &coded) || coded.Code != ErrorCodeStopTimeout {
+		if err := stage.stop(ctx); !fault.HasCode(err, ErrorCodeStopTimeout) {
 			t.Fatalf("stop = %v, want %s", err, ErrorCodeStopTimeout)
 		}
 	})

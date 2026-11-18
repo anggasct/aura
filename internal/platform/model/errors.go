@@ -3,9 +3,10 @@ package model
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type ErrorCode string
@@ -51,32 +52,6 @@ func (c ErrorClass) FallbackEligible() bool {
 	return c == ErrorClassTransient || c == ErrorClassRateLimited || c == ErrorClassOverloaded
 }
 
-type Error struct {
-	Code       ErrorCode
-	Model      string
-	Capability string
-	Detail     string
-}
-
-func (e *Error) Error() string {
-	parts := []string{string(e.Code)}
-	if e.Model != "" {
-		parts = append(parts, e.Model)
-	}
-	if e.Capability != "" {
-		parts = append(parts, e.Capability)
-	}
-	return fmt.Sprintf("%s: %s", strings.Join(parts, ": "), e.Detail)
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if !errors.As(err, &target) {
-		return "", false
-	}
-	return target.Code, true
-}
-
 func ClassifyError(err error) ErrorClass {
 	if err == nil {
 		return ErrorClassInvalidRequest
@@ -92,7 +67,7 @@ func ClassifyError(err error) ErrorClass {
 		return ErrorClassTransient
 	}
 
-	code, hasCode := CodeOf(err)
+	code, hasCode := fault.CodeOf[ErrorCode](err)
 	if hasCode {
 		switch code {
 		case ErrorCodeRateLimited:
@@ -161,12 +136,21 @@ var (
 )
 
 func newError(code ErrorCode, model, capability, detail string) error {
-	return &Error{Code: code, Model: model, Capability: capability, Detail: detail}
+	return fault.New(code, subject(model, capability, detail))
+}
+
+func subject(model, capability, detail string) string {
+	parts := make([]string, 0, 3)
+	if model != "" {
+		parts = append(parts, model)
+	}
+	if capability != "" {
+		parts = append(parts, capability)
+	}
+	parts = append(parts, detail)
+	return strings.Join(parts, ": ")
 }
 
 func codedError(code ErrorCode, cause error, detail string) error {
-	if cause == nil {
-		return newError(code, "", "", detail)
-	}
-	return fmt.Errorf("%w: %w", newError(code, "", "", detail), cause)
+	return fault.Wrap(code, detail, cause)
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestTrustIsAlwaysUntrustedExternal(t *testing.T) {
@@ -217,7 +218,7 @@ func TestVisionErrorsCarryNoSensitiveDetail(t *testing.T) {
 			t.Errorf("error leaks %q: %q", leaked, msg)
 		}
 	}
-	if _, ok := CodeOf(err); !ok {
+	if _, ok := fault.CodeOf[ErrorCode](err); !ok {
 		t.Fatal("vision error is untyped")
 	}
 }

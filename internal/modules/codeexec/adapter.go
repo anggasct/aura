@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -104,7 +105,7 @@ func notPerformed(ctx context.Context, err error) error {
 		return toolbroker.NotPerformed("cancelled", ctxErr)
 	}
 	code, _ := CodeOf(err)
-	if sandboxCode, ok := sandbox.CodeOf(err); ok && sandboxCode == sandbox.ErrorCodeSandboxUnavailable {
+	if fault.HasCode(err, sandbox.ErrorCodeSandboxUnavailable) {
 		code = ErrorCodeUnavailable
 	}
 	switch code {

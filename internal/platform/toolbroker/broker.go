@@ -1058,7 +1058,7 @@ func (b *Broker) classifyExecutionError(ctx context.Context, canonical *ToolRequ
 	if code, ok := fault.CodeOf[ResultClass](err); ok && code.stable() {
 		return classified(code, err.Error())
 	}
-	if code, ok := sandbox.CodeOf(err); ok {
+	if code, ok := fault.CodeOf[sandbox.ErrorCode](err); ok {
 		switch code {
 		case sandbox.ErrorCodeSandboxUnavailable:
 			return classified(ResultCapabilityUnavailable, err.Error())

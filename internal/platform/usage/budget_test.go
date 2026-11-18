@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
@@ -107,8 +108,8 @@ func TestBudgetedBlocksOnBudgetExhaustion(t *testing.T) {
 			sawErr = err
 		}
 	}
-	if code, ok := CodeOf(sawErr); !ok || code != ErrorCodeBudgetExceeded {
-		t.Errorf("code = %v, want budget_exceeded (err=%v)", code, sawErr)
+	if !fault.HasCode(sawErr, ErrorCodeBudgetExceeded) {
+		t.Errorf("error = %v, want code %s", sawErr, ErrorCodeBudgetExceeded)
 	}
 	if inner.callCount() != 0 {
 		t.Errorf("inner called %d times, want 0 (budget must block before dispatch)", inner.callCount())
@@ -540,8 +541,8 @@ func TestBudgetedRejectsFileDataUnderCap(t *testing.T) {
 	if sawErr == nil {
 		t.Fatal("expected file_data under a cap to be rejected before dispatch")
 	}
-	if code, ok := CodeOf(sawErr); !ok || code != ErrorCodeInvalidArgument {
-		t.Errorf("code = %v, want invalid_argument (err=%v)", code, sawErr)
+	if !fault.HasCode(sawErr, ErrorCodeInvalidArgument) {
+		t.Errorf("error = %v, want code %s", sawErr, ErrorCodeInvalidArgument)
 	}
 	if inner.callCount() != 0 {
 		t.Errorf("inner called %d times, want 0 (rejected before dispatch)", inner.callCount())

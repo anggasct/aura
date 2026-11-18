@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func (r *Registry) record(ctx context.Context, req *SandboxRequest, grant *approval.ApprovalGrant, result *Result, runErr error, duration time.Duration) {
@@ -31,7 +32,7 @@ func (r *Registry) record(ctx context.Context, req *SandboxRequest, grant *appro
 
 func (r *Registry) recordDenied(ctx context.Context, req *SandboxRequest, err error) {
 	code := "approval_invalid"
-	if c, ok := CodeOf(err); ok {
+	if c, ok := fault.CodeOf[ErrorCode](err); ok {
 		code = string(c)
 	}
 	r.logger.LogAttrs(ctx, slog.LevelInfo, "sandbox run denied",
@@ -44,7 +45,7 @@ func (r *Registry) recordDenied(ctx context.Context, req *SandboxRequest, err er
 
 func classifyResult(result *Result, runErr error) string {
 	if runErr != nil {
-		if code, ok := CodeOf(runErr); ok {
+		if code, ok := fault.CodeOf[ErrorCode](runErr); ok {
 			return string(code)
 		}
 		return "error"

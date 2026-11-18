@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestNonLinuxFailsClosed(t *testing.T) {
@@ -16,7 +18,7 @@ func TestNonLinuxFailsClosed(t *testing.T) {
 		Limits:     Limits{Timeout: 5 * time.Second},
 	}
 	_, err := Run(context.Background(), &spec, "true")
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxUnavailable {
+	if !fault.HasCode(err, ErrorCodeSandboxUnavailable) {
 		t.Fatalf("Run = %v, want sandbox_unavailable on non-Linux", err)
 	}
 	if _, err := Negotiate(); err == nil {

@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 var _ Listener = (*mockListener)(nil)
@@ -130,8 +132,8 @@ func TestRunPanicRecovery(t *testing.T) {
 	}
 
 	err := srv.Run(context.Background())
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeListenerPanicked {
-		t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, code, ok, ErrorCodeListenerPanicked)
+	if !fault.HasCode(err, ErrorCodeListenerPanicked) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeListenerPanicked)
 	}
 	if strings.Contains(err.Error(), "kaboom") {
 		t.Errorf("panic value leaked into the returned error: %v", err)
@@ -356,8 +358,8 @@ func TestRunCancellationWithListeners(t *testing.T) {
 func TestAddNilListener(t *testing.T) {
 	srv := New(Options{Logger: discardLogger()})
 	err := srv.Add(nil)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
-		t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, code, ok, ErrorCodeInvalidArgument)
+	if !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeInvalidArgument)
 	}
 }
 

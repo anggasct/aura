@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type stubChecker struct {
@@ -27,20 +29,15 @@ func (s stubChecker) Check(ctx context.Context) []Finding {
 	return s.findings
 }
 
-func hasCode(err error, code ErrorCode) bool {
-	got, ok := CodeOf(err)
-	return ok && got == code
-}
-
 func TestRegistryRejectsInvalidChecks(t *testing.T) {
-	if _, err := NewRegistry(RegisteredCheck{ID: "x"}); !hasCode(err, ErrorCodeInvalidCheck) {
+	if _, err := NewRegistry(RegisteredCheck{ID: "x"}); !fault.HasCode(err, ErrorCodeInvalidCheck) {
 		t.Errorf("missing checker err = %v", err)
 	}
-	if _, err := NewRegistry(RegisteredCheck{ID: "", Checker: stubChecker{}}); !hasCode(err, ErrorCodeInvalidCheck) {
+	if _, err := NewRegistry(RegisteredCheck{ID: "", Checker: stubChecker{}}); !fault.HasCode(err, ErrorCodeInvalidCheck) {
 		t.Errorf("empty id err = %v", err)
 	}
 	dup := []RegisteredCheck{{ID: "a", Checker: stubChecker{}}, {ID: "a", Checker: stubChecker{}}}
-	if _, err := NewRegistry(dup...); !hasCode(err, ErrorCodeInvalidCheck) {
+	if _, err := NewRegistry(dup...); !fault.HasCode(err, ErrorCodeInvalidCheck) {
 		t.Errorf("duplicate id err = %v", err)
 	}
 }

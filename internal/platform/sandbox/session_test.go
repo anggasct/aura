@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func testSessionRequest(t *testing.T) *SessionRequest {
@@ -46,7 +48,7 @@ func TestStartValidatesRequest(t *testing.T) {
 			req := testSessionRequest(t)
 			tc.mut(req)
 			_, err := Start(t.Context(), req)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Fatalf("Start = %v, want invalid_argument", err)
 			}
 		})
@@ -55,7 +57,7 @@ func TestStartValidatesRequest(t *testing.T) {
 
 func TestStartNilRequest(t *testing.T) {
 	_, err := Start(t.Context(), nil)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("Start(nil) = %v, want invalid_argument", err)
 	}
 }

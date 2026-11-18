@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 
 	adkmodel "google.golang.org/adk/v2/model"
 )
@@ -156,7 +157,7 @@ func TestRegistryValidatesEveryDefinition(t *testing.T) {
 	}
 	if _, err := NewRegistry(t.Context(), nil); err == nil {
 		t.Fatal("NewRegistry(nil) succeeded")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("NewRegistry(nil) error = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 }

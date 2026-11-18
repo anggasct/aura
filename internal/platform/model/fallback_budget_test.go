@@ -9,6 +9,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
 
@@ -73,8 +74,8 @@ func TestFallbackCostBudgetExceeded(t *testing.T) {
 	if gotErr == nil {
 		t.Fatal("invocation crossing cost_budget_usd succeeded; want model_budget_exceeded")
 	}
-	if code, ok := CodeOf(gotErr); !ok || code != ErrorCodeBudgetExceeded {
-		t.Fatalf("error code = %q (found=%v), want %q", code, ok, ErrorCodeBudgetExceeded)
+	if !fault.HasCode(gotErr, ErrorCodeBudgetExceeded) {
+		t.Fatalf("error = %v, want code %s", gotErr, ErrorCodeBudgetExceeded)
 	}
 
 	cheap := &mockCandidateLLM{

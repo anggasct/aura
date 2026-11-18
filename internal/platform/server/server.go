@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -59,7 +60,7 @@ func (c *SignalCause) Error() string {
 
 func (s *Server) Add(l Listener) error {
 	if l == nil {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "listener must not be nil"}
+		return fault.New(ErrorCodeInvalidArgument, "listener must not be nil")
 	}
 	s.listeners = append(s.listeners, l)
 	return nil
@@ -136,7 +137,7 @@ func (s *Server) runListener(ctx context.Context, l Listener) (err error) {
 				"panic", fmt.Sprint(r),
 				"stack", string(debug.Stack()),
 			)
-			err = &Error{Code: ErrorCodeListenerPanicked, Detail: "listener " + l.Name() + " panicked"}
+			err = fault.New(ErrorCodeListenerPanicked, "listener "+l.Name()+" panicked")
 		}
 	}()
 	s.logger.InfoContext(ctx, "starting listener", "component", "server", "listener", l.Name())

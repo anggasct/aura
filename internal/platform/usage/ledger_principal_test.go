@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
@@ -46,8 +47,8 @@ func TestReservePrincipalDailyTokenCap(t *testing.T) {
 	}
 	if _, err := principalReserve(l, "inv-2", "discord:1", "public", 50, 100); err == nil {
 		t.Fatal("reserve over the public cap accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetExceeded {
-		t.Fatalf("over-cap code = %v, %v; want usage_budget_exceeded", code, ok)
+	} else if !fault.HasCode(err, ErrorCodeBudgetExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeBudgetExceeded)
 	}
 	if _, err := principalReserve(l, "inv-3", "discord:1", "public", 50, 50); err != nil {
 		t.Fatalf("reserve exactly at the cap: %v", err)
@@ -132,7 +133,7 @@ func TestConcurrentPrincipalReserveAtomic(t *testing.T) {
 	for err := range results {
 		if err == nil {
 			successes++
-		} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetExceeded {
+		} else if !fault.HasCode(err, ErrorCodeBudgetExceeded) {
 			t.Errorf("unexpected error: %v", err)
 		}
 	}
@@ -165,7 +166,7 @@ func TestBudgetedStopsCallingTheModelOnceThePrincipalIsExhausted(t *testing.T) {
 			}
 		}
 	}
-	if code, ok := CodeOf(lastErr); !ok || code != ErrorCodeBudgetExceeded {
+	if !fault.HasCode(lastErr, ErrorCodeBudgetExceeded) {
 		t.Fatalf("third call err = %v, want usage_budget_exceeded", lastErr)
 	}
 	if calls := inner.callCount(); calls != 2 {

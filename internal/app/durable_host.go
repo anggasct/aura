@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const maxDurableStopGrace = 10 * time.Second
@@ -54,6 +55,6 @@ func (d *durableHostStage) stop(ctx context.Context) error {
 	case <-d.done:
 		return d.err
 	case <-ctx.Done():
-		return &Error{Code: ErrorCodeStopTimeout, Detail: "durable host did not stop within the shutdown timeout"}
+		return fault.New(ErrorCodeStopTimeout, "durable host did not stop within the shutdown timeout")
 	}
 }

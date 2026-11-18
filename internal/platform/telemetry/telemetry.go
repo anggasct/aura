@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -81,7 +82,7 @@ func WithDefaultAgentID(id string) InstrumentOption {
 
 func InstrumentRuntime(inner turn.AgentRuntime, tp trace.TracerProvider, mp metric.MeterProvider, dropped *atomic.Int64, opts ...InstrumentOption) (*Instrument, error) {
 	if inner == nil {
-		return nil, &Error{Code: ErrorCodeInstrumentFailed, Detail: "runtime must not be nil"}
+		return nil, fault.New(ErrorCodeInstrumentFailed, "runtime must not be nil")
 	}
 	if tp == nil {
 		tp = otel.GetTracerProvider()

@@ -3,6 +3,8 @@ package sandbox
 import (
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestRequire(t *testing.T) {
@@ -26,8 +28,7 @@ func TestRequire(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := Require(tc.have)
-			code, ok := CodeOf(err)
-			if !ok || code != ErrorCodeSandboxUnavailable {
+			if !fault.HasCode(err, ErrorCodeSandboxUnavailable) {
 				t.Fatalf("Require = %v, want sandbox_unavailable", err)
 			}
 			if !strings.Contains(err.Error(), tc.missing) {

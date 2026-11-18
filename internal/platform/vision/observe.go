@@ -3,6 +3,8 @@ package vision
 import (
 	stdcontext "context"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type Observation struct {
@@ -29,7 +31,7 @@ func (s *Service) observe(ctx stdcontext.Context, observation *Observation) {
 		return
 	}
 	if observation.Err != nil {
-		if code, ok := CodeOf(observation.Err); ok {
+		if code, ok := fault.CodeOf[ErrorCode](observation.Err); ok {
 			observation.Result = string(code)
 		} else {
 			observation.Result = "error"

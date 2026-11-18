@@ -75,8 +75,8 @@ func TestCompositionServerStartsAndStopsInOrder(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("/livez status = %d, want 200", response.StatusCode)
 	}
-	if code, ok := CodeOf(app.Close(ctx)); !ok || code != ErrorCodeInvalidArgument {
-		t.Fatalf("Close during Run = %v, want %s", code, ErrorCodeInvalidArgument)
+	if err := app.Close(ctx); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("Close during Run = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 	cancel()
 	select {

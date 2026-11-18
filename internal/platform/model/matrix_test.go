@@ -17,6 +17,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func mockProviderServer(t *testing.T, protocol string, handler http.HandlerFunc) *httptest.Server {
@@ -203,8 +204,8 @@ func TestObservableBoundaryStreaming(t *testing.T) {
 	if streamErr == nil {
 		t.Fatal("expected boundary error on truncated stream")
 	}
-	if code, ok := CodeOf(streamErr); !ok || code != ErrorCodeFallbackBoundary {
-		t.Errorf("error code = %v (ok=%v), want %s", code, ok, ErrorCodeFallbackBoundary)
+	if !fault.HasCode(streamErr, ErrorCodeFallbackBoundary) {
+		t.Errorf("error = %v, want code %s", streamErr, ErrorCodeFallbackBoundary)
 	}
 	if c2Calls.Load() != 0 {
 		t.Errorf("candidate 2 was called %d times after observable output was emitted; want 0", c2Calls.Load())
@@ -284,8 +285,8 @@ func TestNonFallbackClassesProvePolicyAndAuthNoBypass(t *testing.T) {
 				t.Fatal("expected error, got nil")
 			}
 
-			if code, ok := CodeOf(err); !ok || code != tt.wantErr {
-				t.Errorf("error code = %v, want %s (err: %v)", code, tt.wantErr, err)
+			if !fault.HasCode(err, tt.wantErr) {
+				t.Errorf("error = %v, want code %s", err, tt.wantErr)
 			}
 
 			if c2Calls.Load() != 0 {

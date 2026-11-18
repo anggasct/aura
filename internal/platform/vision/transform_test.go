@@ -7,6 +7,8 @@ import (
 	"image/color"
 	"image/png"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func gradientImage(width, height int) *image.NRGBA {
@@ -191,14 +193,14 @@ func TestResizeLanczos3RejectsPeakAllocationOverBound(t *testing.T) {
 	src := gradientImage(64, 64)
 	if _, err := ResizeLanczos3(ctx, src, 32, 32, int64(32*64*64)-1); err == nil {
 		t.Fatal("expected source-grid bound rejection")
-	} else if code, _ := CodeOf(err); code != ErrorCodeVisionLimitExceeded {
-		t.Fatalf("code = %q, want vision_limit_exceeded", code)
+	} else if !fault.HasCode(err, ErrorCodeVisionLimitExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionLimitExceeded)
 	}
 	stub := boundStubImage{w: 8000, h: 5000}
 	if _, err := ResizeLanczos3(ctx, stub, 4000, 2500, 268435456); err == nil {
 		t.Fatal("expected max-pixels source rejection under default bounds")
-	} else if code, _ := CodeOf(err); code != ErrorCodeVisionLimitExceeded {
-		t.Fatalf("code = %q, want vision_limit_exceeded", code)
+	} else if !fault.HasCode(err, ErrorCodeVisionLimitExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionLimitExceeded)
 	}
 }
 
@@ -208,8 +210,8 @@ func TestResizeLanczos3RejectsConcurrentPeakOverBound(t *testing.T) {
 	bound := int64(32 * 64 * 64)
 	if _, err := ResizeLanczos3(ctx, src, 32, 32, bound); err == nil {
 		t.Fatal("expected concurrent-peak bound rejection")
-	} else if code, _ := CodeOf(err); code != ErrorCodeVisionLimitExceeded {
-		t.Fatalf("code = %q, want vision_limit_exceeded", code)
+	} else if !fault.HasCode(err, ErrorCodeVisionLimitExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionLimitExceeded)
 	}
 	peak := int64(32*64*64) + int64(32*32*64)
 	if _, err := ResizeLanczos3(ctx, src, 32, 32, peak); err != nil {

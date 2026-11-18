@@ -8,6 +8,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -77,7 +78,7 @@ func (a *sandboxSessionAdapter) Close(ctx context.Context) error {
 }
 
 func translateSessionError(err error) error {
-	code, ok := sandbox.CodeOf(err)
+	code, ok := fault.CodeOf[sandbox.ErrorCode](err)
 	if !ok {
 		return mcp.Errorf(mcp.ErrServerUnavailable, "contained session exchange failed")
 	}

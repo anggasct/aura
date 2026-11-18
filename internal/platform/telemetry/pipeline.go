@@ -18,6 +18,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -44,7 +45,7 @@ func NewPipeline(cfg config.Telemetry, logger *slog.Logger) (*Pipeline, error) {
 		exporter = ExporterNone
 	}
 	if !validExporter(exporter) {
-		return nil, &Error{Code: ErrorCodeExporterInvalid, Detail: fmt.Sprintf("unsupported exporter %q", exporter)}
+		return nil, fault.New(ErrorCodeExporterInvalid, fmt.Sprintf("unsupported exporter %q", exporter))
 	}
 
 	res := resource.Default()
@@ -182,7 +183,7 @@ func buildExporters(cfg config.Telemetry, exporter string) (sdktrace.SpanExporte
 		}
 		return se, me, nil
 	default:
-		return nil, nil, &Error{Code: ErrorCodeExporterInvalid, Detail: fmt.Sprintf("unsupported exporter %q", exporter)}
+		return nil, nil, fault.New(ErrorCodeExporterInvalid, fmt.Sprintf("unsupported exporter %q", exporter))
 	}
 }
 

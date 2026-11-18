@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type Lifecycle interface {
@@ -50,30 +52,30 @@ func NewLifecycleGroup(opts LifecycleOptions) *LifecycleGroup {
 
 func (g *LifecycleGroup) Add(l Lifecycle) error {
 	if l == nil {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "lifecycle must not be nil"}
+		return fault.New(ErrorCodeInvalidArgument, "lifecycle must not be nil")
 	}
 	return g.register(&lifecycleEntry{name: l.Name(), start: l.Start, stop: l.Stop})
 }
 
 func (g *LifecycleGroup) Defer(name string, stop func(ctx context.Context) error) error {
 	if stop == nil {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "deferred stop must not be nil"}
+		return fault.New(ErrorCodeInvalidArgument, "deferred stop must not be nil")
 	}
 	return g.register(&lifecycleEntry{name: name, stop: stop, running: true})
 }
 
 func (g *LifecycleGroup) register(entry *lifecycleEntry) error {
 	if entry.name == "" {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "lifecycle name must not be empty"}
+		return fault.New(ErrorCodeInvalidArgument, "lifecycle name must not be empty")
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.started || g.stopped {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "lifecycle group no longer accepts entries"}
+		return fault.New(ErrorCodeInvalidArgument, "lifecycle group no longer accepts entries")
 	}
 	for _, registered := range g.entries {
 		if registered.name == entry.name {
-			return &Error{Code: ErrorCodeInvalidArgument, Detail: "lifecycle " + entry.name + " is already registered"}
+			return fault.New(ErrorCodeInvalidArgument, "lifecycle "+entry.name+" is already registered")
 		}
 	}
 	g.entries = append(g.entries, entry)
@@ -94,7 +96,7 @@ func (g *LifecycleGroup) Start(ctx context.Context) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.started || g.stopped {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "lifecycle group was already started or stopped"}
+		return fault.New(ErrorCodeInvalidArgument, "lifecycle group was already started or stopped")
 	}
 	g.started = true
 	for _, entry := range g.entries {
@@ -155,12 +157,12 @@ func (b *background) Name() string { return b.name }
 
 func (b *background) Start(ctx context.Context) error {
 	if b.run == nil {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "background " + b.name + " has no run function"}
+		return fault.New(ErrorCodeInvalidArgument, "background "+b.name+" has no run function")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.done != nil {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "background " + b.name + " was already started"}
+		return fault.New(ErrorCodeInvalidArgument, "background "+b.name+" was already started")
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -184,6 +186,6 @@ func (b *background) Stop(ctx context.Context) error {
 	case <-done:
 		return nil
 	case <-ctx.Done():
-		return &Error{Code: ErrorCodeStopTimeout, Detail: b.name + " did not stop"}
+		return fault.New(ErrorCodeStopTimeout, b.name+" did not stop")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -326,7 +327,7 @@ func buildEnvironment(dir string, bundle *interpreter.Bundle, lang *language) []
 }
 
 func wrapSandbox(err error) error {
-	if code, ok := sandbox.CodeOf(err); ok {
+	if code, ok := fault.CodeOf[sandbox.ErrorCode](err); ok {
 		return wrapf(ErrorCodeRunFailed, err, "the sandbox refused the run (%s)", code)
 	}
 	return wrapf(ErrorCodeRunFailed, err, "the run failed")

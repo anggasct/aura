@@ -11,6 +11,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
 
@@ -390,7 +391,7 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 		if len(reqImages) > 0 {
 			if err := mapVisionExhaustion(f.name, candidateErrors); err != nil {
 				decision := "capability_unsupported"
-				if code, ok := CodeOf(err); ok {
+				if code, ok := fault.CodeOf[ErrorCode](err); ok {
 					decision = string(code)
 				}
 				if f.logger != nil {

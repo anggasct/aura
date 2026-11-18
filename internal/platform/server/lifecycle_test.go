@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type lifecycleRecord struct {
@@ -281,7 +283,7 @@ func TestLifecycleGroupRejectsInvalidUse(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.use(t, newTestLifecycleGroup())
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Fatalf("error = %v, want %s", err, ErrorCodeInvalidArgument)
 			}
 		})
@@ -323,7 +325,7 @@ func TestBackgroundStopTimesOut(t *testing.T) {
 		stopCtx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
 		err := loop.Stop(stopCtx)
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeStopTimeout {
+		if !fault.HasCode(err, ErrorCodeStopTimeout) {
 			t.Fatalf("Stop error = %v, want %s", err, ErrorCodeStopTimeout)
 		}
 		close(release)
