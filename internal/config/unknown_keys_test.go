@@ -22,15 +22,19 @@ func TestUnknownKeysAreAllReportedWithLineAndColumn(t *testing.T) {
 		"    primary:\n" +
 		"      protocol: openai_chat_compat\n" +
 		"      model: m\n" +
-		"      typo: 1\n"
+		"      typo: 1\n" +
+		"server:\n" +
+		"  port: 8080\n" +
+		"server.port: 1\n"
 	_, err := Load(writeTempConfig(t, content))
 	if err == nil {
-		t.Fatal("Load succeeded, want three unknown keys")
+		t.Fatal("Load succeeded, want four unknown keys")
 	}
 	want := []string{
 		unknownKeyText("bogus", "line 2, column 1"),
 		unknownKeyText("channels.discord.accounts[0].extra", "line 7, column 9"),
 		unknownKeyText("models.definitions.primary.typo", "line 13, column 7"),
+		unknownKeyText("server.port", "line 16, column 1"),
 	}
 	if got := strings.Split(strings.TrimPrefix(err.Error(), "config: "), "\n"); !slices.Equal(got, want) {
 		t.Errorf("problems = %q, want %q", got, want)

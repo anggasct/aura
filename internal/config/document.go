@@ -107,7 +107,7 @@ func descend(node *yamlv3.Node, segments []string) (key, value *yamlv3.Node, fou
 	}
 	switch node.Kind {
 	case yamlv3.MappingNode:
-		for n := 1; n <= len(segments); n++ {
+		for n := len(segments); n >= 1; n-- {
 			name := strings.Join(segments[:n], ".")
 			for i := 0; i+1 < len(node.Content); i += 2 {
 				if node.Content[i].Value != name {
