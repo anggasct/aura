@@ -53,9 +53,9 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 		"evals behavior min score text":    {fields: "      evals:\n        behavior:\n          min_score: high\n", code: invalidCode, detail: "min_score"},
 		"evals behavior required text":     {fields: "      evals:\n        behavior:\n          required: yes please\n", code: invalidCode, detail: "required"},
 		"evals behavior empty judge":       {fields: "      evals:\n        behavior:\n          judge_route: \"\"\n", code: invalidCode, detail: "judge_route"},
-		"evals behavior unknown key":       {fields: "      evals:\n        behavior:\n          judge: primary\n", code: invalidCode, detail: "evals.behavior.judge"},
+		"evals behavior unknown key":       {fields: "      evals:\n        behavior:\n          judge: primary\n", code: unknownKeyCode, detail: "evals.behavior.judge"},
 		"evals behavior not a mapping":     {fields: "      evals:\n        behavior: true\n", code: invalidCode, detail: "evals.behavior"},
-		"evals unknown key":                {fields: "      evals:\n        directory: x\n", code: invalidCode, detail: "evals.directory"},
+		"evals unknown key":                {fields: "      evals:\n        directory: x\n", code: unknownKeyCode, detail: "evals.directory"},
 	}
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {

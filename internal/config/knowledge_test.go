@@ -49,14 +49,14 @@ func TestLoad_PersonaKnowledgeRejectsInvalidLists(t *testing.T) {
 		"public outside":        {fields: "      knowledge: [support]\n      public_knowledge: [faq]\n", detail: "public_knowledge: persona_invalid: lists \"faq\""},
 		"principal outside":     {fields: "      principal_knowledge: [faq]\n", detail: "principal_knowledge: persona_invalid: lists \"faq\""},
 		"public duplicate":      {fields: "      knowledge: [faq]\n      public_knowledge: [faq, faq]\n", detail: "public_knowledge: persona_invalid: must not list"},
-		"not a list":            {fields: "      knowledge: support\n", detail: "must be a list"},
-		"non string entry":      {fields: "      knowledge: [1]\n", detail: "entries must be strings"},
+		"not a list":            {fields: "      knowledge: support\n", detail: "agents.definitions[0].knowledge (line 8, column 18): config_invalid: source data must be an array or slice, got string"},
+		"non string entry":      {fields: "      knowledge: [1]\n", detail: "agents.definitions[0].knowledge[0] (line 8, column 19): config_invalid: expected type 'string', got unconvertible type 'int'"},
 		"principal bad pattern": {fields: "      knowledge: [faq]\n      principal_knowledge: [FAQ]\n", detail: "principal_knowledge: persona_invalid: entries must match"},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, personaKnowledgeConfig(test.fields)))
-			if err == nil || !strings.Contains(stripPositions(err.Error()), test.detail) {
+			if err == nil || !strings.Contains(problemText(err, test.detail), test.detail) {
 				t.Fatalf("error = %v, want detail %q", err, test.detail)
 			}
 		})

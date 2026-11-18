@@ -13,8 +13,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	yamlv3 "gopkg.in/yaml.v3"
-
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
@@ -195,65 +193,6 @@ func validateAccess(access *Access) error {
 		}
 	}
 	return errors.Join(problems...)
-}
-
-func validateAccessShapes(doc *yamlv3.Node) error {
-	accessNode := mappingValue(doc, "access")
-	if accessNode == nil {
-		return nil
-	}
-	if accessNode.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("access must be a mapping at line %d", accessNode.Line)
-	}
-	for i := 0; i+1 < len(accessNode.Content); i += 2 {
-		keyNode := accessNode.Content[i]
-		valueNode := accessNode.Content[i+1]
-		switch keyNode.Value {
-		case "approval_timeout", "standing_grant_ttl", "handoff_timeout":
-			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
-				return fmt.Errorf("access.%s must be a duration string at line %d", keyNode.Value, valueNode.Line)
-			}
-		case "budgets":
-			if err := validateBudgetShapes(valueNode); err != nil {
-				return err
-			}
-		case "retention":
-			if err := validateRetentionShapes(valueNode); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func validateRetentionShapes(retention *yamlv3.Node) error {
-	if retention.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("access.retention must be a mapping at line %d", retention.Line)
-	}
-	for i := 0; i+1 < len(retention.Content); i += 2 {
-		if value := retention.Content[i+1]; value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
-			return fmt.Errorf("access.retention.%s must be a duration string at line %d", retention.Content[i].Value, value.Line)
-		}
-	}
-	return nil
-}
-
-func validateBudgetShapes(budgets *yamlv3.Node) error {
-	if budgets.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("access.budgets must be a mapping at line %d", budgets.Line)
-	}
-	for i := 0; i+1 < len(budgets.Content); i += 2 {
-		class, limits := budgets.Content[i].Value, budgets.Content[i+1]
-		if limits.Kind != yamlv3.MappingNode {
-			return fmt.Errorf("access.budgets.%s must be a mapping at line %d", class, limits.Line)
-		}
-		for j := 0; j+1 < len(limits.Content); j += 2 {
-			if value := limits.Content[j+1]; value.Kind != yamlv3.ScalarNode || value.Tag != "!!int" {
-				return fmt.Errorf("access.budgets.%s.%s must be an integer at line %d", class, limits.Content[j].Value, value.Line)
-			}
-		}
-	}
-	return nil
 }
 
 func validatePersonaNames(cfg *Config) error {

@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"regexp"
 
-	yamlv3 "gopkg.in/yaml.v3"
-
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
@@ -58,42 +56,6 @@ func validatePlugins(plugins *Plugins) error {
 			return configkit.Invalid("plugins.desired", fmt.Sprintf("lists plugin %q twice", entry.ID))
 		}
 		seen[entry.ID] = struct{}{}
-	}
-	return nil
-}
-
-func validatePluginsShapes(doc *yamlv3.Node) error {
-	pluginsNode := mappingValue(doc, "plugins")
-	if pluginsNode == nil {
-		return nil
-	}
-	if pluginsNode.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("plugins must be a mapping at line %d", pluginsNode.Line)
-	}
-	desiredNode := mappingValue(pluginsNode, "desired")
-	if desiredNode == nil {
-		return nil
-	}
-	if desiredNode.Kind != yamlv3.SequenceNode {
-		return fmt.Errorf("plugins.desired must be a list at line %d", desiredNode.Line)
-	}
-	for _, item := range desiredNode.Content {
-		if item.Kind != yamlv3.MappingNode {
-			return fmt.Errorf("plugins.desired entries must be mappings at line %d", item.Line)
-		}
-		for i := 0; i+1 < len(item.Content); i += 2 {
-			key, value := item.Content[i].Value, item.Content[i+1]
-			switch key {
-			case "id", "version":
-				if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
-					return fmt.Errorf("plugins.desired.%s must be a string at line %d", key, value.Line)
-				}
-			case "enabled":
-				if value.Kind != yamlv3.ScalarNode || value.Tag != "!!bool" {
-					return fmt.Errorf("plugins.desired.enabled must be a boolean at line %d", value.Line)
-				}
-			}
-		}
 	}
 	return nil
 }

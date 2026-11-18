@@ -44,13 +44,13 @@ func TestLoad_TelegramMaxAttachmentBytes(t *testing.T) {
 		{name: "above the bot api limit", value: "20971521", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520", invalid: true},
 		{name: "zero", value: "0", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520", invalid: true},
 		{name: "negative", value: "-5", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520", invalid: true},
-		{name: "not an integer", value: "\"20MB\"", wantErr: "max_attachment_bytes must be an integer"},
+		{name: "not an integer", value: "\"20MB\"", wantErr: "channels.telegram.max_attachment_bytes (line 4, column 27): config_invalid: must be an integer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  telegram:\n    max_attachment_bytes: "+tc.value+"\n"))
 			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(stripPositions(err.Error()), tc.wantErr) {
+				if err == nil || !strings.Contains(problemText(err, tc.wantErr), tc.wantErr) {
 					t.Fatalf("Load error = %v, want it to mention %q", err, tc.wantErr)
 				}
 				if code, ok := codeOf(err); tc.invalid && (!ok || code != invalidCode) {
@@ -170,7 +170,7 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		},
 		"numeric poll timeout": {
 			yaml: account("    polling:\n      timeout: 30\n"),
-			want: "must be a duration string",
+			want: "channels.telegram.polling.timeout (line 12, column 16): config_invalid: must be a duration written as a string",
 		},
 		"zero edit interval": {
 			yaml: account("    min_edit_interval: 0s\n"),
@@ -186,7 +186,7 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		},
 		"numeric edit interval": {
 			yaml: account("    min_edit_interval: 2\n"),
-			want: "min_edit_interval must be a duration string",
+			want: "channels.telegram.min_edit_interval (line 11, column 24): config_invalid: must be a duration written as a string",
 		},
 		"enabled without owner or allowlist": {
 			yaml: "version: 1\nchannels:\n  telegram:\n    enabled: true\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\n",
@@ -198,15 +198,15 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		},
 		"unquoted allowed user id": {
 			yaml: account("        allowed_user_ids:\n          - 7\n"),
-			want: "entries must be quoted strings",
+			want: "channels.telegram.accounts[0].allowed_user_ids[0] (line 12, column 13): config_invalid: expected type 'string', got unconvertible type 'int'",
 		},
 		"unquoted allowed chat id": {
 			yaml: account("        allowed_chat_ids:\n          - -100\n"),
-			want: "entries must be quoted strings",
+			want: "channels.telegram.accounts[0].allowed_chat_ids[0] (line 12, column 13): config_invalid: expected type 'string', got unconvertible type 'int'",
 		},
 		"allowed chat ids not a sequence": {
 			yaml: account("        allowed_chat_ids: \"-100\"\n"),
-			want: "allowed_chat_ids must be a sequence",
+			want: "channels.telegram.accounts[0].allowed_chat_ids (line 11, column 27): config_invalid: source data must be an array or slice, got string",
 		},
 		"positive allowed chat id": {
 			yaml: account("        allowed_chat_ids:\n          - \"42\"\n"),
@@ -230,7 +230,7 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		},
 		"allowed user ids not a sequence": {
 			yaml: account("        allowed_user_ids: \"7\"\n"),
-			want: "allowed_user_ids must be a sequence",
+			want: "channels.telegram.accounts[0].allowed_user_ids (line 11, column 27): config_invalid: source data must be an array or slice, got string",
 		},
 		"non numeric allowed user id": {
 			yaml: account("        allowed_user_ids:\n          - \"alice\"\n"),
@@ -254,7 +254,7 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 		},
 		"accept private chats not a boolean": {
 			yaml: account("        accept_private_chats: \"yes\"\n"),
-			want: "accept_private_chats must be a boolean",
+			want: "channels.telegram.accounts[0].accept_private_chats (line 11, column 31): config_invalid: expected type 'bool', got unconvertible type 'string'",
 		},
 		"unknown account key": {
 			yaml: account("        transport: webhook\n"),
@@ -264,7 +264,7 @@ func TestLoad_TelegramInvalid(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, tc.yaml))
-			if err == nil || !strings.Contains(stripPositions(err.Error()), tc.want) {
+			if err == nil || !strings.Contains(problemText(err, tc.want), tc.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
 		})
@@ -427,9 +427,7 @@ func TestLoad_ChatIDBindingIsTelegramOnly(t *testing.T) {
 
 func TestLoad_TelegramChatBindingMustBeQuoted(t *testing.T) {
 	_, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  telegram:\n    accounts:\n      - name: pocket\n        bot_token_ref: env://AURA_TELEGRAM_BOT_TOKEN\nbindings:\n  - persona: main\n    channel: telegram\n    account: pocket\n    chat_id: -100\n"))
-	if err == nil || !strings.Contains(err.Error(), "bindings[0].chat_id must be a quoted string") {
-		t.Fatalf("Load error = %v, want a quoted-string shape error", err)
-	}
+	requireProblemText(t, err, invalidText("bindings[0].chat_id", "line 11, column 14", "expected type 'string', got unconvertible type 'int'"))
 }
 
 func TestLoad_TelegramWebhookDefaults(t *testing.T) {
@@ -511,7 +509,7 @@ func TestLoad_TelegramWebhookInvalid(t *testing.T) {
 	}{
 		"unknown mode":                     {yaml: hook("        mode: carrier\n", ""), want: `mode: config_invalid: "carrier" must be polling or webhook`},
 		"empty mode":                       {yaml: hook("        mode: \"\"\n", ""), want: "mode: config_invalid: \"\" must be polling or webhook"},
-		"non string mode":                  {yaml: hook("        mode: 3\n", ""), want: "mode must be a string", shape: true},
+		"non string mode":                  {yaml: hook("        mode: 3\n", ""), want: "channels.telegram.accounts[0].mode (line 10, column 15): config_invalid: expected type 'string', got unconvertible type 'int'", shape: true},
 		"webhook without secret ref":       {yaml: hook("        mode: webhook\n", publicURL), want: "webhook_secret_ref: config_invalid: must not be empty in webhook mode"},
 		"inline secret":                    {yaml: hook("        mode: webhook\n        webhook_secret_ref: plain\n", publicURL), want: "webhook_secret_ref: config_invalid: must use env:// or file://"},
 		"secret ref equals own token":      {yaml: hook("        mode: webhook\n        webhook_secret_ref: env://AURA_TELEGRAM_BOT_TOKEN\n", publicURL), want: "must differ from every bot token reference"},
@@ -536,16 +534,16 @@ func TestLoad_TelegramWebhookInvalid(t *testing.T) {
 		"body bound above the ceiling":     {yaml: hook("", "      max_body_bytes: 10485761\n"), want: "max_body_bytes: config_invalid: must be between 1 and 10485760"},
 		"connections zero":                 {yaml: hook("", "      max_connections: 0\n"), want: "max_connections: config_invalid: must be between 1 and 100"},
 		"connections above the ceiling":    {yaml: hook("", "      max_connections: 101\n"), want: "max_connections: config_invalid: must be between 1 and 100"},
-		"connections not an integer":       {yaml: hook("", "      max_connections: many\n"), want: "max_connections must be an integer", shape: true},
-		"body bound not an integer":        {yaml: hook("", "      max_body_bytes: \"1MB\"\n"), want: "max_body_bytes must be an integer", shape: true},
-		"listen address not a string":      {yaml: hook("", "      listen_address: 8283\n"), want: "listen_address must be a string", shape: true},
-		"webhook block not a mapping":      {yaml: "version: 1\nchannels:\n  telegram:\n    webhook: yes\n", want: "channels.telegram.webhook must be a mapping", shape: true},
+		"connections not an integer":       {yaml: hook("", "      max_connections: many\n"), want: "channels.telegram.webhook.max_connections (line 11, column 24): config_invalid: must be an integer", shape: true},
+		"body bound not an integer":        {yaml: hook("", "      max_body_bytes: \"1MB\"\n"), want: "channels.telegram.webhook.max_body_bytes (line 11, column 23): config_invalid: must be an integer", shape: true},
+		"listen address not a string":      {yaml: hook("", "      listen_address: 8283\n"), want: "channels.telegram.webhook.listen_address (line 11, column 23): config_invalid: expected type 'string', got unconvertible type 'int'", shape: true},
+		"webhook block not a mapping":      {yaml: "version: 1\nchannels:\n  telegram:\n    webhook: yes\n", want: "channels.telegram.webhook (line 4, column 14): config_invalid: expected a map or struct, got \"string\"", shape: true},
 		"unknown webhook key":              {yaml: hook("", "      route: /x\n"), want: "unknown key", shape: true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, tc.yaml))
-			if err == nil || !strings.Contains(stripPositions(err.Error()), tc.want) {
+			if err == nil || !strings.Contains(problemText(err, tc.want), tc.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
 			if code, ok := codeOf(err); !tc.shape && (!ok || code != invalidCode) {

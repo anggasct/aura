@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	yamlv3 "gopkg.in/yaml.v3"
-
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -95,33 +93,4 @@ func validateInterpreter(interpreter *Interpreter) error {
 		problems = append(problems, configkit.Invalid("interpreter.max_artifact_bytes", "must not exceed interpreter.max_run_dir_bytes"))
 	}
 	return errors.Join(problems...)
-}
-
-func validateInterpreterShapes(doc *yamlv3.Node) error {
-	node := mappingValue(doc, "interpreter")
-	if node == nil {
-		return nil
-	}
-	if node.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("interpreter must be a mapping at line %d", node.Line)
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		value := node.Content[i+1]
-		switch key {
-		case "timeout", "build_timeout":
-			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
-				return fmt.Errorf("interpreter.%s must be a duration string at line %d", key, value.Line)
-			}
-		case "max_output_files", "max_processes":
-			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!int" {
-				return fmt.Errorf("interpreter.%s must be an integer at line %d", key, value.Line)
-			}
-		case "max_source_bytes", "max_stdin_bytes", "max_stdout_bytes", "max_stderr_bytes", "max_artifact_bytes", "max_memory_bytes", "max_run_dir_bytes":
-			if value.Kind != yamlv3.ScalarNode || (value.Tag != "!!int" && value.Tag != "!!str") {
-				return fmt.Errorf("interpreter.%s must be a byte size at line %d", key, value.Line)
-			}
-		}
-	}
-	return nil
 }

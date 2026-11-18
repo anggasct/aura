@@ -7,8 +7,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	yamlv3 "gopkg.in/yaml.v3"
-
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -161,44 +159,4 @@ func (*KnowledgeEmbedding) Default() any {
 		BatchSize:       DefaultEmbeddingBatchSize,
 		MaxMemory:       DefaultEmbeddingMaxMemory,
 	}
-}
-
-func validateKnowledgeShapes(doc *yamlv3.Node) error {
-	knowledgeNode := mappingValue(doc, "knowledge")
-	if knowledgeNode == nil {
-		return nil
-	}
-	if knowledgeNode.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("knowledge must be a mapping at line %d", knowledgeNode.Line)
-	}
-	embeddingNode := mappingValue(knowledgeNode, "embedding")
-	if embeddingNode == nil {
-		return nil
-	}
-	if embeddingNode.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("knowledge.embedding must be a mapping at line %d", embeddingNode.Line)
-	}
-	for i := 0; i+1 < len(embeddingNode.Content); i += 2 {
-		keyNode := embeddingNode.Content[i]
-		valueNode := embeddingNode.Content[i+1]
-		switch keyNode.Value {
-		case "base_url", "model", "dimensions_field", "credential_ref", "role_style", "query_prefix", "document_prefix":
-			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!str" {
-				return fmt.Errorf("knowledge.embedding.%s must be a string at line %d", keyNode.Value, valueNode.Line)
-			}
-		case "dimensions", "batch_size":
-			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!int" {
-				return fmt.Errorf("knowledge.embedding.%s must be an integer at line %d", keyNode.Value, valueNode.Line)
-			}
-		case "max_memory":
-			if valueNode.Kind != yamlv3.ScalarNode || (valueNode.Tag != "!!int" && valueNode.Tag != "!!str") {
-				return fmt.Errorf("knowledge.embedding.max_memory must be a byte size at line %d", valueNode.Line)
-			}
-		case "public_queries":
-			if valueNode.Kind != yamlv3.ScalarNode || valueNode.Tag != "!!bool" {
-				return fmt.Errorf("knowledge.embedding.public_queries must be a boolean at line %d", valueNode.Line)
-			}
-		}
-	}
-	return nil
 }

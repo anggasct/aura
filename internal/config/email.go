@@ -9,8 +9,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	yamlv3 "gopkg.in/yaml.v3"
-
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
@@ -23,90 +21,6 @@ const (
 )
 
 var emailHostPattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
-
-func validateEmailShapes(doc *yamlv3.Node) error {
-	emailNode := channelNode(doc, "email")
-	if emailNode == nil {
-		return nil
-	}
-	if emailNode.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("channels.email must be a mapping at line %d", emailNode.Line)
-	}
-	for i := 0; i+1 < len(emailNode.Content); i += 2 {
-		key := emailNode.Content[i].Value
-		value := emailNode.Content[i+1]
-		switch key {
-		case "enabled":
-			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!bool" {
-				return fmt.Errorf("channels.email.enabled must be a boolean at line %d", value.Line)
-			}
-		case "max_attachment_bytes":
-			if value.Kind != yamlv3.ScalarNode || value.Tag != "!!int" {
-				return fmt.Errorf("channels.email.max_attachment_bytes must be an integer at line %d", value.Line)
-			}
-		case "accounts":
-			if err := validateEmailAccountShapes(value); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func validateEmailAccountShapes(accountsNode *yamlv3.Node) error {
-	if accountsNode.Kind != yamlv3.SequenceNode {
-		return fmt.Errorf("channels.email.accounts must be a sequence at line %d", accountsNode.Line)
-	}
-	for index, accountNode := range accountsNode.Content {
-		field := fmt.Sprintf("channels.email.accounts[%d]", index)
-		if accountNode.Kind != yamlv3.MappingNode {
-			return fmt.Errorf("%s must be a mapping at line %d", field, accountNode.Line)
-		}
-		for i := 0; i+1 < len(accountNode.Content); i += 2 {
-			key := accountNode.Content[i].Value
-			value := accountNode.Content[i+1]
-			switch key {
-			case "name", "persona", "address", "authserv_id":
-				if value.Kind != yamlv3.ScalarNode || value.Tag != "!!str" {
-					return fmt.Errorf("%s.%s must be a string at line %d", field, key, value.Line)
-				}
-			case "allowed_senders":
-				if err := quotedStringSequence(field+"."+key, value); err != nil {
-					return err
-				}
-			case "imap", "smtp":
-				if err := validateEmailEndpointShape(field+"."+key, value); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func validateEmailEndpointShape(field string, node *yamlv3.Node) error {
-	if node.Kind != yamlv3.MappingNode {
-		return fmt.Errorf("%s must be a mapping at line %d", field, node.Line)
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		value := node.Content[i+1]
-		tag, kind := "!!str", "a string"
-		switch key {
-		case "host", "username", "password_ref", "folder":
-		case "poll_interval":
-			kind = "a duration string"
-		case "port":
-			tag, kind = "!!int", "an integer"
-		default:
-			continue
-		}
-		if value.Kind != yamlv3.ScalarNode || value.Tag != tag {
-			return fmt.Errorf("%s.%s must be %s at line %d", field, key, kind, value.Line)
-		}
-	}
-	return nil
-}
 
 func (*EmailAccount) Default() any {
 	return EmailAccount{

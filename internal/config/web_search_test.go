@@ -90,7 +90,7 @@ func TestWebSearchRejectsConfigsThatDoNotFitTheProvider(t *testing.T) {
 		"duckduckgo credential":           {section: "    provider: duckduckgo\n    credential_ref: env://X\n", detail: "must be empty for provider duckduckgo"},
 		"credential without provider":     {section: "    credential_ref: env://AURA_BRAVE_API_KEY\n", detail: "must be empty for provider duckduckgo"},
 		"searxng without endpoint":        {section: "    provider: searxng\n", detail: "tools.web_search.endpoint: config_invalid: must be set"},
-		"non string endpoint":             {section: "    provider: searxng\n    endpoint: 8888\n", detail: "endpoint must be a string"},
+		"non string endpoint":             {section: "    provider: searxng\n    endpoint: 8888\n", detail: "tools.web_search.endpoint (line 6, column 15): config_invalid: expected type 'string', got unconvertible type 'int'"},
 		"brave literal key":               {section: "    provider: brave\n    credential_ref: sk-literal\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
 		"brave bare env":                  {section: "    provider: brave\n    credential_ref: env://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
 		"tavily bare file":                {section: "    provider: tavily\n    credential_ref: file://\n", detail: "credential_ref: config_invalid: must use env:// or file://"},
@@ -107,7 +107,7 @@ func TestWebSearchRejectsConfigsThatDoNotFitTheProvider(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := loadWebSearch(t, test.section)
-			if err == nil || !strings.Contains(stripPositions(err.Error()), test.detail) {
+			if err == nil || !strings.Contains(problemText(err, test.detail), test.detail) {
 				t.Fatalf("error = %v, want detail %q", err, test.detail)
 			}
 			if code, ok := codeOf(err); ok && code != invalidCode {

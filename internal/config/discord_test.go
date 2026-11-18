@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,7 +103,7 @@ func TestLoad_DiscordEnvOverride(t *testing.T) {
 	}
 }
 
-func TestLoad_DiscordSingleBlockShapeChanged(t *testing.T) {
+func TestLoad_DiscordSingleBlockKeysAreUnknown(t *testing.T) {
 	cases := map[string]string{
 		"instance":            "    instance: owner\n",
 		"bot_token_ref":       "    bot_token_ref: env://AURA_DISCORD_BOT_TOKEN\n",
@@ -115,9 +116,12 @@ func TestLoad_DiscordSingleBlockShapeChanged(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := writeDiscordConfig(t, "version: 1\nchannels:\n  discord:\n    enabled: true\n"+line)
 			_, err := Load(path)
-			code, ok := codeOf(err)
-			if !ok || code != ErrorCodeConfigShapeChanged {
-				t.Fatalf("Load error = %v, want %s", err, ErrorCodeConfigShapeChanged)
+			wantCode(t, err, unknownKeyCode)
+			if want := unknownKeyText("channels.discord."+name, "line 5, column 5"); !strings.Contains(err.Error(), want) {
+				t.Fatalf("Load error = %v, want %q", err, want)
+			}
+			if strings.Contains(err.Error(), "accounts[]") {
+				t.Fatalf("Load error = %v, want no move hint", err)
 			}
 		})
 	}

@@ -160,14 +160,14 @@ func TestLoad_KnowledgeEmbeddingRejectsInvalidSettings(t *testing.T) {
 		"batch above limit":         {fields: validEmbeddingFields + "    batch_size: 1001\n", detail: "batch_size: config_invalid: must be between"},
 		"tiny memory":               {fields: validEmbeddingFields + "    max_memory: 1KiB\n", detail: "max_memory: config_invalid: must be at least"},
 		"unknown key":               {fields: validEmbeddingFields + "    temperature: 1\n", detail: "unknown key"},
-		"string dimensions":         {fields: "    base_url: https://api.example.com/v1\n    model: m\n    dimensions: \"8\"\n", detail: "dimensions must be an integer"},
-		"string public queries":     {fields: validEmbeddingFields + "    public_queries: \"yes\"\n", detail: "public_queries must be a boolean"},
-		"embedding not mapping":     {fields: "    - a\n", detail: "must be a mapping"},
+		"string dimensions":         {fields: "    base_url: https://api.example.com/v1\n    model: m\n    dimensions: \"8\"\n", detail: "knowledge.embedding.dimensions (line 6, column 17): config_invalid: must be an integer"},
+		"string public queries":     {fields: validEmbeddingFields + "    public_queries: \"yes\"\n", detail: "knowledge.embedding.public_queries (line 7, column 21): config_invalid: expected type 'bool', got unconvertible type 'string'"},
+		"embedding not mapping":     {fields: "    - a\n", detail: "knowledge.embedding (line 4, column 5): config_invalid: expected a map or struct, got \"slice\""},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, embeddingConfig(test.fields)))
-			if err == nil || !strings.Contains(stripPositions(err.Error()), test.detail) {
+			if err == nil || !strings.Contains(problemText(err, test.detail), test.detail) {
 				t.Fatalf("error = %v, want detail %q", err, test.detail)
 			}
 		})

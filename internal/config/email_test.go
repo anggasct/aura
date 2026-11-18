@@ -128,13 +128,13 @@ func TestLoad_EmailMaxAttachmentBytes(t *testing.T) {
 		{name: "above the ceiling", value: "20971521", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520"},
 		{name: "zero", value: "0", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520"},
 		{name: "negative", value: "-5", wantErr: "max_attachment_bytes: config_invalid: must be between 1 and 20971520"},
-		{name: "not an integer", value: "\"20MB\"", wantErr: "max_attachment_bytes must be an integer"},
+		{name: "not an integer", value: "\"20MB\"", wantErr: "channels.email.max_attachment_bytes (line 4, column 27): config_invalid: must be an integer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := Load(writeDiscordConfig(t, "version: 1\nchannels:\n  email:\n    max_attachment_bytes: "+tc.value+"\n"))
 			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(stripPositions(err.Error()), tc.wantErr) {
+				if err == nil || !strings.Contains(problemText(err, tc.wantErr), tc.wantErr) {
 					t.Fatalf("Load error = %v, want it to mention %q", err, tc.wantErr)
 				}
 				return
@@ -248,7 +248,7 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"port as a string": {
 			yaml: withIMAP("          port: \"993\"\n"),
-			want: "imap.port must be an integer",
+			want: "channels.email.accounts[0].imap.port (line 20, column 17): config_invalid: must be an integer",
 		},
 		"empty folder": {
 			yaml: withIMAP("          folder: \"\"\n"),
@@ -272,7 +272,7 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"numeric poll interval": {
 			yaml: withIMAP("          poll_interval: 60\n"),
-			want: "imap.poll_interval must be a duration string",
+			want: "channels.email.accounts[0].imap.poll_interval (line 20, column 26): config_invalid: must be a duration written as a string",
 		},
 		"uppercase allowed sender": {
 			yaml: withIMAP("        allowed_senders:\n          - Friend@example.com\n"),
@@ -284,11 +284,11 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"unquoted allowed sender": {
 			yaml: withIMAP("        allowed_senders:\n          - 7\n"),
-			want: "entries must be quoted strings",
+			want: "channels.email.accounts[0].allowed_senders[0] (line 21, column 13): config_invalid: expected type 'string', got unconvertible type 'int'",
 		},
 		"allowed senders not a sequence": {
 			yaml: withIMAP("        allowed_senders: friend@example.com\n"),
-			want: "allowed_senders must be a sequence",
+			want: "channels.email.accounts[0].allowed_senders (line 20, column 26): config_invalid: source data must be an array or slice, got string",
 		},
 		"smtp inline password": {
 			yaml: replace("env://AURA_EMAIL_SMTP_PASSWORD", "hunter2"),
@@ -324,11 +324,11 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"smtp port as a string": {
 			yaml: withSMTP("          port: \"587\"\n"),
-			want: "smtp.port must be an integer",
+			want: "channels.email.accounts[0].smtp.port (line 14, column 17): config_invalid: must be an integer",
 		},
 		"smtp not a mapping": {
 			yaml: emailConfig(emailOwner, "", strings.Replace(emailAccountYAML, "        smtp:\n          host: smtp.example.com\n          username: aura@example.com\n          password_ref: env://AURA_EMAIL_SMTP_PASSWORD\n", "        smtp: relay\n", 1)),
-			want: "smtp must be a mapping",
+			want: "channels.email.accounts[0].smtp (line 12, column 15): config_invalid: expected a map or struct, got \"string\"",
 		},
 		"smtp tls switch is not accepted": {
 			yaml: withSMTP("          tls: false\n"),
@@ -364,21 +364,21 @@ func TestLoad_EmailInvalid(t *testing.T) {
 		},
 		"enabled not a boolean": {
 			yaml: emailConfig(emailOwner, "    enabled: \"yes\"\n", emailAccountYAML),
-			want: "channels.email.enabled must be a boolean",
+			want: "channels.email.enabled (line 7, column 14): config_invalid: expected type 'bool', got unconvertible type 'string'",
 		},
 		"account name not a string": {
 			yaml: replace("name: work", "name: 7"),
-			want: "name must be a string",
+			want: "channels.email.accounts[0].name (line 8, column 15): config_invalid: expected type 'string', got unconvertible type 'int'",
 		},
 		"imap not a mapping": {
-			yaml: withIMAP("        imap: plain\n"),
-			want: "imap must be a mapping",
+			yaml: emailConfig(emailOwner, "", strings.Replace(emailAccountYAML, "        imap:\n          host: imap.example.com\n          username: aura@example.com\n          password_ref: env://AURA_EMAIL_PASSWORD\n", "        imap: plain\n", 1)),
+			want: "channels.email.accounts[0].imap (line 16, column 15): config_invalid: expected a map or struct, got \"string\"",
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, tc.yaml))
-			if err == nil || !strings.Contains(stripPositions(err.Error()), tc.want) {
+			if err == nil || !strings.Contains(problemText(err, tc.want), tc.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tc.want)
 			}
 			if strings.Contains(err.Error(), "hunter2") {

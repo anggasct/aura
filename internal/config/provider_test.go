@@ -286,7 +286,7 @@ models:
       model: m
       api_key_env: K
 ` + providerTestCapabilities,
-			wantSubstr: "must be a string",
+			wantSubstr: "models.definitions[primary].provider (line 7, column 17): config_invalid: expected type 'string', got unconvertible type 'int'",
 		},
 	}
 	for _, tc := range tests {
