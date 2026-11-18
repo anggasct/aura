@@ -80,16 +80,20 @@ func (s *SessionStore) Admit(ctx context.Context, req *runtimesessions.AdmitRequ
 	return result, nil
 }
 
+func admissionRefused(detail string) error {
+	return fault.New(turn.ErrorCodeInvalidArgument, detail)
+}
+
 func validateAdmitRequest(req *runtimesessions.AdmitRequest) error {
 	switch {
 	case req == nil:
-		return invalidArgument("durable session admit requires a request")
+		return admissionRefused("durable session admit requires a request")
 	case req.Turn.TurnID == "":
-		return invalidArgument("durable session admit requires a turn id")
+		return admissionRefused("durable session admit requires a turn id")
 	case req.AcceptedEventID == "":
-		return invalidArgument("durable session admit requires an accepted event id")
+		return admissionRefused("durable session admit requires an accepted event id")
 	case req.MaxPending <= 0:
-		return invalidArgument("durable session admit requires a positive max pending bound")
+		return admissionRefused("durable session admit requires a positive max pending bound")
 	}
 	if err := req.Turn.Validate(); err != nil {
 		return fmt.Errorf("durable session admit: %w", err)
@@ -214,7 +218,7 @@ func rejectHeldTurn(ctx context.Context, tx *sql.Tx, turnID string) error {
 		return fmt.Errorf("durable session admit: read turn: %w", err)
 	}
 	if held {
-		return invalidArgument(fmt.Sprintf("turn %q is already held by a session", turnID))
+		return admissionRefused(fmt.Sprintf("turn %q is already held by a session", turnID))
 	}
 	return nil
 }
@@ -226,7 +230,7 @@ func rejectUsedTurn(ctx context.Context, tx *sql.Tx, turnID string) error {
 		return fmt.Errorf("durable session admit: read turn use: %w", err)
 	}
 	if used {
-		return invalidArgument(fmt.Sprintf("turn %q was already used", turnID))
+		return admissionRefused(fmt.Sprintf("turn %q was already used", turnID))
 	}
 	return nil
 }

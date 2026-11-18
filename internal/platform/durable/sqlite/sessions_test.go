@@ -374,7 +374,7 @@ func TestAdmitIsOneTransaction(t *testing.T) {
 			{turnID: "turn-2", key: "key-other", eventID: "event-turn-2-elsewhere", sessionID: "session-2"},
 		} {
 			_, err := f.sessions.Admit(t.Context(), admitRequest(spec))
-			requireCode(t, err, ErrorCodeInvalidArgument)
+			requireTurnCode(t, err, turn.ErrorCodeInvalidArgument)
 			requireUnchanged(t, f.db, before)
 		}
 	})
@@ -447,26 +447,25 @@ func TestAdmitValidatesItsRequest(t *testing.T) {
 	cases := []struct {
 		name     string
 		mutate   func(req *runtimesessions.AdmitRequest) *runtimesessions.AdmitRequest
-		code     ErrorCode
 		turnCode turn.ErrorCode
 	}{
-		{name: "nil request", mutate: func(*runtimesessions.AdmitRequest) *runtimesessions.AdmitRequest { return nil }, code: ErrorCodeInvalidArgument},
+		{name: "nil request", mutate: func(*runtimesessions.AdmitRequest) *runtimesessions.AdmitRequest { return nil }, turnCode: turn.ErrorCodeInvalidArgument},
 		{name: "empty turn id", mutate: func(req *runtimesessions.AdmitRequest) *runtimesessions.AdmitRequest {
 			req.Turn.TurnID = ""
 			return req
-		}, code: ErrorCodeInvalidArgument},
+		}, turnCode: turn.ErrorCodeInvalidArgument},
 		{name: "empty accepted event id", mutate: func(req *runtimesessions.AdmitRequest) *runtimesessions.AdmitRequest {
 			req.AcceptedEventID = ""
 			return req
-		}, code: ErrorCodeInvalidArgument},
+		}, turnCode: turn.ErrorCodeInvalidArgument},
 		{name: "zero max pending", mutate: func(req *runtimesessions.AdmitRequest) *runtimesessions.AdmitRequest {
 			req.MaxPending = 0
 			return req
-		}, code: ErrorCodeInvalidArgument},
+		}, turnCode: turn.ErrorCodeInvalidArgument},
 		{name: "negative max pending", mutate: func(req *runtimesessions.AdmitRequest) *runtimesessions.AdmitRequest {
 			req.MaxPending = -1
 			return req
-		}, code: ErrorCodeInvalidArgument},
+		}, turnCode: turn.ErrorCodeInvalidArgument},
 		{name: "empty session id", mutate: func(req *runtimesessions.AdmitRequest) *runtimesessions.AdmitRequest {
 			req.Turn.SessionID = ""
 			return req
@@ -487,16 +486,7 @@ func TestAdmitValidatesItsRequest(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := f.sessions.Admit(t.Context(), tc.mutate(admitRequest(turnSpec{turnID: "turn-1", key: "key-1"})))
-			if tc.code != "" {
-				if !fault.HasCode(err, tc.code) {
-					t.Fatalf("err = %v, want code %s", err, tc.code)
-				}
-			}
-			if tc.turnCode != "" {
-				if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != tc.turnCode {
-					t.Fatalf("err = %v, want turn code %s", err, tc.turnCode)
-				}
-			}
+			requireTurnCode(t, err, tc.turnCode)
 			requireUnchanged(t, f.db, before)
 		})
 	}
@@ -923,7 +913,7 @@ func TestAdmitRefusesATurnIDUsedInAnotherSession(t *testing.T) {
 	createSession(t, f.db, "session-b")
 	before := snapshotAdmission(t, f.db)
 	_, err := f.sessions.Admit(t.Context(), admitRequest(turnSpec{sessionID: "session-b", turnID: "turn-1", eventID: "event-turn-1-in-b"}))
-	requireCode(t, err, ErrorCodeInvalidArgument)
+	requireTurnCode(t, err, turn.ErrorCodeInvalidArgument)
 	requireUnchanged(t, f.db, before)
 	got := f.admit(t, turnSpec{sessionID: "session-b", turnID: "turn-2"})
 	if got.Replayed || got.Sequence == 0 {
@@ -943,7 +933,7 @@ func TestAdmitRejectsAUsedTurnID(t *testing.T) {
 	} {
 		t.Run(spec.turnID, func(t *testing.T) {
 			_, err := f.sessions.Admit(t.Context(), admitRequest(spec))
-			requireCode(t, err, ErrorCodeInvalidArgument)
+			requireTurnCode(t, err, turn.ErrorCodeInvalidArgument)
 			requireUnchanged(t, f.db, before)
 		})
 	}

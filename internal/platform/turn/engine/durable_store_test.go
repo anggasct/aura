@@ -233,3 +233,25 @@ func TestNewEngineRefusesADurableConfigWithoutAStoreOrARuntime(t *testing.T) {
 		})
 	}
 }
+
+func TestDurableAdmissionRefusesAUsedTurnIDAsInvalidArgument(t *testing.T) {
+	executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")})
+	rig := newDurableHostRig(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 16}, executor)
+	mustCreateSession(t, rig.db, "session-a")
+	rig.startHost()
+
+	if _, err := collect(t, rig.engine, sampleRequest("session-a", "turn-1")); err != nil {
+		t.Fatalf("first run of turn-1: %v", err)
+	}
+	_, err := collect(t, rig.engine, sampleRequest("session-a", "turn-1"))
+	code, ok := fault.CodeOf[turn.ErrorCode](err)
+	if !ok || code != turn.ErrorCodeInvalidArgument {
+		t.Fatalf("run under a used turn id = %v, want %s", err, turn.ErrorCodeInvalidArgument)
+	}
+	if code.Retryable() {
+		t.Fatalf("%s is retryable, want a refusal that is not", code)
+	}
+	if got := executor.StartCount(); got != 1 {
+		t.Fatalf("executor starts = %d, want 1: the refused turn must not start a run", got)
+	}
+}
