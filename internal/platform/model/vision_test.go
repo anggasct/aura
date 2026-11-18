@@ -22,6 +22,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func newVisionCaptureServer(t *testing.T, captured *[]byte) *httptest.Server {
@@ -151,8 +152,8 @@ func TestVisionPolicyProviderNarrowing(t *testing.T) {
 	}
 	if err := policy.CheckCandidate("openai_chat_compat", images); err == nil {
 		t.Fatal("expected provider image-count rejection")
-	} else if code, _ := CodeOf(err); code != ErrorCodeVisionBudgetExceeded {
-		t.Fatalf("code = %q, want vision_budget_exceeded", code)
+	} else if !fault.HasCode(err, ErrorCodeVisionBudgetExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionBudgetExceeded)
 	}
 }
 
@@ -172,8 +173,8 @@ func TestVisionPolicyBudgetGates(t *testing.T) {
 	badGeometry := VisionImage{MIME: "image/png", Width: 9000, Height: 8, EncodedBytes: 64}
 	if err := policy.CheckGlobal([]VisionImage{badGeometry}); err == nil {
 		t.Fatal("expected geometry rejection")
-	} else if code, _ := CodeOf(err); code != ErrorCodeProtocolInvalid {
-		t.Fatalf("code = %q, want model_protocol_invalid", code)
+	} else if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeProtocolInvalid)
 	}
 }
 
@@ -206,8 +207,8 @@ func TestCollectVisionImagesRejects(t *testing.T) {
 			req := visionRequest(part)
 			if _, err := collectVisionImages(req.Contents); err == nil {
 				t.Fatal("expected rejection")
-			} else if code, _ := CodeOf(err); code != ErrorCodeProtocolInvalid {
-				t.Fatalf("code = %q, want model_protocol_invalid", code)
+			} else if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+				t.Fatalf("error = %v, want code %s", err, ErrorCodeProtocolInvalid)
 			}
 		})
 	}
@@ -277,8 +278,8 @@ func TestResolveVisionImagesFailsClosed(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected failure")
 			}
-			if code, _ := CodeOf(err); code != tc.want {
-				t.Fatalf("code = %q, want %q", code, tc.want)
+			if !fault.HasCode(err, tc.want) {
+				t.Fatalf("error = %v, want code %s", err, tc.want)
 			}
 			if tc.want == ErrorCodeVisionBudgetExceeded && tc.blobs.calls != calls {
 				t.Fatal("budget rejection must not touch the store")
@@ -303,8 +304,8 @@ func TestResolveVisionImagesBudgetSkipsStore(t *testing.T) {
 	)
 	if err := client.resolveVisionImages(context.Background(), req); err == nil {
 		t.Fatal("expected budget rejection")
-	} else if code, _ := CodeOf(err); code != ErrorCodeVisionBudgetExceeded {
-		t.Fatalf("code = %q", code)
+	} else if !fault.HasCode(err, ErrorCodeVisionBudgetExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionBudgetExceeded)
 	}
 	if blobs.calls != 0 {
 		t.Fatalf("store reads = %d, want 0", blobs.calls)
@@ -415,8 +416,8 @@ func TestAdapterRejectsUnresolvedFileReference(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := build(); err == nil {
 				t.Fatal("expected unresolved reference rejection")
-			} else if code, _ := CodeOf(err); code != ErrorCodeProtocolInvalid {
-				t.Fatalf("code = %q", code)
+			} else if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+				t.Fatalf("error = %v, want code %s", err, ErrorCodeProtocolInvalid)
 			}
 		})
 	}
@@ -445,8 +446,8 @@ func TestFallbackRejectsVisionlessRoute(t *testing.T) {
 	if gotErr == nil {
 		t.Fatal("expected capability rejection")
 	}
-	if code, _ := CodeOf(gotErr); code != ErrorCodeCapabilityUnsupported {
-		t.Fatalf("code = %q, want model_capability_unsupported", code)
+	if !fault.HasCode(gotErr, ErrorCodeCapabilityUnsupported) {
+		t.Fatalf("error = %v, want code %s", gotErr, ErrorCodeCapabilityUnsupported)
 	}
 }
 
@@ -526,13 +527,13 @@ func TestMapVisionExhaustion(t *testing.T) {
 	transient := candidateAttemptError{Candidate: "c", Class: ErrorClassTransient, Err: newError(ErrorCodeOverloaded, "c", "", "busy")}
 	if err := mapVisionExhaustion("route", []candidateAttemptError{unsupported}); err == nil {
 		t.Fatal("expected capability error")
-	} else if code, _ := CodeOf(err); code != ErrorCodeCapabilityUnsupported {
-		t.Fatalf("code = %q", code)
+	} else if !fault.HasCode(err, ErrorCodeCapabilityUnsupported) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeCapabilityUnsupported)
 	}
 	if err := mapVisionExhaustion("route", []candidateAttemptError{budget}); err == nil {
 		t.Fatal("expected budget error")
-	} else if code, _ := CodeOf(err); code != ErrorCodeVisionBudgetExceeded {
-		t.Fatalf("code = %q", code)
+	} else if !fault.HasCode(err, ErrorCodeVisionBudgetExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionBudgetExceeded)
 	}
 	if err := mapVisionExhaustion("route", []candidateAttemptError{unsupported, transient}); err != nil {
 		t.Fatalf("mixed chain must fall through, got %v", err)
@@ -633,8 +634,8 @@ func TestOpenAIAssistantImageIsTypedError(t *testing.T) {
 	}
 	if _, err := contentToOpenAIMessages(content, "auto"); err == nil {
 		t.Fatal("expected typed error for assistant image")
-	} else if code, _ := CodeOf(err); code != ErrorCodeProtocolInvalid {
-		t.Fatalf("code = %q, want model_protocol_invalid", code)
+	} else if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeProtocolInvalid)
 	}
 }
 
@@ -644,8 +645,8 @@ func TestCheckVisionBudgetPreStoreRejectsEmptyEncodedBytes(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected encoded-size rejection")
 	}
-	if code, _ := CodeOf(err); code != ErrorCodeProtocolInvalid {
-		t.Fatalf("code = %q, want model_protocol_invalid", code)
+	if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeProtocolInvalid)
 	}
 	if !strings.Contains(err.Error(), "encoded size") {
 		t.Fatalf("detail = %q, want encoded-size failure", err.Error())
@@ -662,8 +663,8 @@ func TestResolveVisionImagesPreservesBlobCause(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure")
 	}
-	if code, _ := CodeOf(err); code != ErrorCodeVisionArtifactUnavailable {
-		t.Fatalf("code = %q, want vision_artifact_unavailable", code)
+	if !fault.HasCode(err, ErrorCodeVisionArtifactUnavailable) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionArtifactUnavailable)
 	}
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("underlying store error is not reachable: %v", err)

@@ -169,7 +169,7 @@ func TestCompositionRejectsInvalidOptions(t *testing.T) {
 			if app != nil {
 				t.Fatalf("Build returned an app for invalid options")
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Fatalf("Build error = %v, want %s", err, ErrorCodeInvalidArgument)
 			}
 		})
@@ -214,8 +214,8 @@ func TestCompositionCommandBuildsOnlyStorage(t *testing.T) {
 	if app.runtime != nil || app.interpreter != nil || app.models != nil {
 		t.Fatalf("an unnamed part was built: runtime=%v interpreter=%v models=%v", app.runtime, app.interpreter, app.models)
 	}
-	if code, ok := CodeOf(app.Run(t.Context())); !ok || code != ErrorCodeInvalidArgument {
-		t.Fatalf("Run on a command app = %v, want %s", code, ErrorCodeInvalidArgument)
+	if err := app.Run(t.Context()); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("Run on a command app = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 	for range 2 {
 		if err := app.Close(t.Context()); err != nil {
@@ -358,7 +358,7 @@ func TestCompositionDurableRuntimeIsBuiltOnce(t *testing.T) {
 	})
 	t.Run("storage not open", func(t *testing.T) {
 		_, err := newDurableRuntimeBuild().durableRuntime()
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 			t.Fatalf("durableRuntime without storage = %v, want %s", err, ErrorCodeInvalidArgument)
 		}
 	})

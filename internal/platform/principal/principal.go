@@ -7,6 +7,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type Class string
@@ -34,23 +36,6 @@ type ErrorCode string
 
 const ErrorCodeIdentityInvalid ErrorCode = "owner_identity_invalid"
 
-type Error struct {
-	Code   ErrorCode
-	Detail string
-}
-
-func (e *Error) Error() string {
-	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if !errors.As(err, &target) {
-		return "", false
-	}
-	return target.Code, true
-}
-
 // ParseClass fails closed: anything that is not a known class, including the
 // empty value carried by turns recorded before classes existed, is trusted.
 func ParseClass(raw string) Class {
@@ -76,27 +61,27 @@ func Namespaced(channel, externalID string) string {
 func ParseIdentity(raw string) (channel, externalID string, err error) {
 	channel, externalID, found := strings.Cut(raw, ":")
 	if !found {
-		return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "identity must be <channel>:<id>"}
+		return "", "", fault.New(ErrorCodeIdentityInvalid, "identity must be <channel>:<id>")
 	}
 	switch channel {
 	case ChannelDiscord:
 		if !isSnowflake(externalID) {
-			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "discord identity must be a numeric user id"}
+			return "", "", fault.New(ErrorCodeIdentityInvalid, "discord identity must be a numeric user id")
 		}
 	case ChannelTelegram:
 		if !IsTelegramUserID(externalID) {
-			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "telegram identity must be a positive decimal user id"}
+			return "", "", fault.New(ErrorCodeIdentityInvalid, "telegram identity must be a positive decimal user id")
 		}
 	case ChannelEmail:
 		if !IsEmailAddress(externalID) {
-			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "email identity must be a lowercase address"}
+			return "", "", fault.New(ErrorCodeIdentityInvalid, "email identity must be a lowercase address")
 		}
 	case ChannelHTTP:
 		if !IsHTTPKeyID(externalID) {
-			return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "http identity must be an api key id"}
+			return "", "", fault.New(ErrorCodeIdentityInvalid, "http identity must be an api key id")
 		}
 	default:
-		return "", "", &Error{Code: ErrorCodeIdentityInvalid, Detail: "identity channel is not supported"}
+		return "", "", fault.New(ErrorCodeIdentityInvalid, "identity channel is not supported")
 	}
 	return channel, externalID, nil
 }
@@ -207,7 +192,7 @@ func NewResolver(identities []string) (*Resolver, error) {
 	for i, raw := range identities {
 		channel, externalID, err := ParseIdentity(raw)
 		if err == nil && channel == ChannelHTTP {
-			err = &Error{Code: ErrorCodeIdentityInvalid, Detail: "http identities cannot be owner identities"}
+			err = fault.New(ErrorCodeIdentityInvalid, "http identities cannot be owner identities")
 		}
 		if err != nil {
 			problems = append(problems, fmt.Errorf("owner.identities[%d]: %w", i, err))
@@ -215,7 +200,7 @@ func NewResolver(identities []string) (*Resolver, error) {
 		}
 		key := Namespaced(channel, externalID)
 		if _, dup := r.owners[key]; dup {
-			problems = append(problems, fmt.Errorf("owner.identities[%d]: %w", i, &Error{Code: ErrorCodeIdentityInvalid, Detail: "identity is listed more than once"}))
+			problems = append(problems, fmt.Errorf("owner.identities[%d]: %w", i, fault.New(ErrorCodeIdentityInvalid, "identity is listed more than once")))
 			continue
 		}
 		r.owners[key] = struct{}{}

@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestMain(m *testing.M) {
@@ -44,7 +46,7 @@ func TestIntegrationSessionInitFailureFailsClosed(t *testing.T) {
 	req := sessionRequest(t)
 	req.ReadOnlyPaths = []string{"/nonexistent-sandbox-probe-path"}
 	_, err := Start(t.Context(), req)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
+	if !fault.HasCode(err, ErrorCodeSandboxInitFailed) {
 		t.Fatalf("Start = %v, want sandbox_init_failed", err)
 	}
 }
@@ -173,7 +175,7 @@ func TestIntegrationInitFailureDeterministic(t *testing.T) {
 	before := runtime.NumGoroutine()
 	for range 5 {
 		_, err := Run(context.Background(), &spec, "true")
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
+		if !fault.HasCode(err, ErrorCodeSandboxInitFailed) {
 			t.Fatalf("Run = %v, want sandbox_init_failed", err)
 		}
 	}
@@ -330,7 +332,7 @@ func TestIntegrationElevatedRunRejectsMutation(t *testing.T) {
 	mutated.ApprovalGrantID = grant.GrantID
 	mutated.Arguments = []string{"tampered"}
 	_, err := registry.Execute(context.Background(), mutated)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalInvalid {
+	if !fault.HasCode(err, ErrorCodeApprovalInvalid) {
 		t.Fatalf("Execute mutated = %v, want approval_invalid", err)
 	}
 }

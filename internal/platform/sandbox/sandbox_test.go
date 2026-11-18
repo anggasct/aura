@@ -12,6 +12,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"golang.org/x/sys/unix"
 )
 
@@ -25,7 +26,7 @@ func TestRunNetworkDeniedByDefault(t *testing.T) {
 		Limits:       Limits{Timeout: 5 * time.Second},
 	}
 	_, err := Run(ctx, &spec, "true")
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxUnavailable {
+	if !fault.HasCode(err, ErrorCodeSandboxUnavailable) {
 		t.Fatalf("Run(AllowNetwork) = %v, want sandbox_unavailable", err)
 	}
 }
@@ -34,11 +35,11 @@ func TestRunInvalidSpecFailsClosed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, err := Run(ctx, &Spec{Limits: Limits{Timeout: time.Second}}, "true")
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("Run(empty workdir) = %v, want invalid_argument", err)
 	}
 	_, err = Run(ctx, &Spec{WorkingDir: t.TempDir()}, "true")
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("Run(zero timeout) = %v, want invalid_argument", err)
 	}
 }

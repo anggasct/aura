@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"errors"
 	"fmt"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -70,13 +70,13 @@ func NewRegistry(checks ...RegisteredCheck) (*Registry, error) {
 	normalized := make([]RegisteredCheck, 0, len(checks))
 	for _, check := range checks {
 		if check.ID == "" {
-			return nil, &Error{Code: ErrorCodeInvalidCheck, Detail: "check id must not be empty"}
+			return nil, fault.New(ErrorCodeInvalidCheck, "check id must not be empty")
 		}
 		if check.Checker == nil {
-			return nil, &Error{Code: ErrorCodeInvalidCheck, Detail: fmt.Sprintf("check %q has no checker", check.ID)}
+			return nil, fault.New(ErrorCodeInvalidCheck, fmt.Sprintf("check %q has no checker", check.ID))
 		}
 		if _, ok := ids[check.ID]; ok {
-			return nil, &Error{Code: ErrorCodeInvalidCheck, Detail: fmt.Sprintf("duplicate check id %q", check.ID)}
+			return nil, fault.New(ErrorCodeInvalidCheck, fmt.Sprintf("duplicate check id %q", check.ID))
 		}
 		ids[check.ID] = struct{}{}
 		if check.Timeout <= 0 {
@@ -283,27 +283,10 @@ func compareStrings(a, b string) int {
 	}
 }
 
-type Error struct {
-	Code   ErrorCode
-	Detail string
-}
-
 type ErrorCode string
 
-func (e *Error) Error() string {
-	return string(e.Code) + ": " + e.Detail
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if errors.As(err, &target) {
-		return target.Code, true
-	}
-	return "", false
-}
-
 func redactedCheckError(err error) string {
-	if code, ok := CodeOf(err); ok {
+	if code, ok := fault.CodeOf[ErrorCode](err); ok {
 		return string(code)
 	}
 	return "unknown"

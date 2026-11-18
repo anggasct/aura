@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func sessionFixture(t *testing.T) string {
@@ -95,7 +97,7 @@ func TestIntegrationSessionRequestTimeoutThenRecovers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
 	_, err := s.Request(ctx, []byte("late"))
 	cancel()
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxTimeout {
+	if !fault.HasCode(err, ErrorCodeSandboxTimeout) {
 		t.Fatalf("slow request = %v, want sandbox_timeout", err)
 	}
 	if got := exchange(t, s, "after-timeout"); got != "after-timeout" {
@@ -111,7 +113,7 @@ func TestIntegrationSessionOutputExceededThenRecovers(t *testing.T) {
 		t.Fatalf("arm big mode: %v", err)
 	}
 	_, err := s.Request(t.Context(), []byte("big"))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxOutputExceeded {
+	if !fault.HasCode(err, ErrorCodeSandboxOutputExceeded) {
 		t.Fatalf("big response = %v, want sandbox_output_exceeded", err)
 	}
 	if got := exchange(t, s, "after-big"); got != "after-big" {
@@ -185,7 +187,7 @@ func TestIntegrationSessionCloseReaps(t *testing.T) {
 		t.Errorf("orphan session-helper processes: %d", orphans)
 	}
 	_, err = s.Request(t.Context(), []byte("late"))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSessionClosed {
+	if !fault.HasCode(err, ErrorCodeSessionClosed) {
 		t.Fatalf("request after Close = %v, want session_closed", err)
 	}
 }
@@ -196,7 +198,7 @@ func TestSessionRequestAfterCloseFailsClosed(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	_, err := s.Request(t.Context(), []byte("again"))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSessionClosed {
+	if !fault.HasCode(err, ErrorCodeSessionClosed) {
 		t.Fatalf("Request after Close = %v, want session_closed", err)
 	}
 }
@@ -208,7 +210,7 @@ func TestIntegrationSessionCrashFailsClosed(t *testing.T) {
 	}
 	for range 2 {
 		_, err := s.Request(t.Context(), []byte("after-crash"))
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeSessionBroken {
+		if !fault.HasCode(err, ErrorCodeSessionBroken) {
 			t.Fatalf("request after crash = %v, want session_broken", err)
 		}
 	}
@@ -251,7 +253,7 @@ func TestIntegrationSessionCtxCancelTearsDown(t *testing.T) {
 	}
 	if _, err := s.Request(t.Context(), []byte("late")); err == nil {
 		t.Fatal("request after ctx-cancel succeeded, want failure")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSessionClosed {
+	} else if !fault.HasCode(err, ErrorCodeSessionClosed) {
 		t.Fatalf("request after ctx-cancel = %v, want session_closed", err)
 	}
 	if err := s.Close(t.Context()); err != nil {

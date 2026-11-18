@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -174,7 +176,7 @@ func TestPrepareHostMovesSelfIntoLeaf(t *testing.T) {
 func TestPrepareHostFailsClosedWhenUnitShared(t *testing.T) {
 	host, tree := newFixture(t, fixtureOwn, undelegatedUnit(strconv.Itoa(fixturePID)+"\n"+fixtureOther))
 	_, err := host.prepare()
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxUnavailable {
+	if !fault.HasCode(err, ErrorCodeSandboxUnavailable) {
 		t.Fatalf("prepare = %v, want sandbox_unavailable", err)
 	}
 	detail := errorDetail(err)
@@ -192,7 +194,7 @@ func TestPrepareHostFailsClosedWhenUnitShared(t *testing.T) {
 		t.Fatalf("prepare wrote to a shared cgroup: %+v", tree.writes)
 	}
 	requireErr := Require(Primitives{UserNamespace: true, PidNamespace: true, Seccomp: true, Landlock: true, ProcessGroups: true})
-	if code, ok := CodeOf(requireErr); !ok || code != ErrorCodeSandboxUnavailable {
+	if !fault.HasCode(requireErr, ErrorCodeSandboxUnavailable) {
 		t.Fatalf("Require without cgroup v2 = %v, want sandbox_unavailable", requireErr)
 	}
 }
@@ -201,7 +203,7 @@ func TestPrepareHostRollsBackOnEnableFailure(t *testing.T) {
 	host, tree := newFixture(t, fixtureOwn, undelegatedUnit(strconv.Itoa(fixturePID)))
 	tree.failOn = fixtureOwn + "/cgroup.subtree_control"
 	_, err := host.prepare()
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxUnavailable {
+	if !fault.HasCode(err, ErrorCodeSandboxUnavailable) {
 		t.Fatalf("prepare = %v, want sandbox_unavailable", err)
 	}
 	if !strings.Contains(errorDetail(err), "enable bounds controllers") {
@@ -230,7 +232,7 @@ func TestCgroupRootNeverMigratesOutsideServer(t *testing.T) {
 	host, tree := newFixture(t, fixtureOwn, undelegatedUnit(strconv.Itoa(fixturePID)))
 	if _, err := host.available(); err == nil {
 		t.Fatal("available succeeded on an undelegated cgroup")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxUnavailable {
+	} else if !fault.HasCode(err, ErrorCodeSandboxUnavailable) {
 		t.Fatalf("available = %v, want sandbox_unavailable", err)
 	}
 	if _, err := host.newCgroup(&Limits{MemoryBytes: 1 << 20}); err == nil {
@@ -310,7 +312,7 @@ func TestNewCgroupCreatesUnderResolvedRoot(t *testing.T) {
 func TestNewCgroupFailsClosedWithoutDelegatedRoot(t *testing.T) {
 	host, tree := newFixture(t, fixtureOwn, undelegatedUnit(strconv.Itoa(fixturePID)))
 	_, err := host.newCgroup(&Limits{MemoryBytes: 2 << 20, MaxProcesses: 8})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
+	if !fault.HasCode(err, ErrorCodeSandboxInitFailed) {
 		t.Fatalf("newCgroup = %v, want sandbox_init_failed", err)
 	}
 	if got := entriesWithPrefix(t, tree, fixtureOwn, sandboxCgroupStem); len(got) != 0 {
@@ -322,7 +324,7 @@ func TestCgroupLimitsAppliedOrFailsClosed(t *testing.T) {
 	host := hostCgroups()
 	if _, err := host.available(); err != nil {
 		_, err := host.newCgroup(&Limits{MemoryBytes: 1 << 20, MaxProcesses: 4})
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
+		if !fault.HasCode(err, ErrorCodeSandboxInitFailed) {
 			t.Fatalf("newCgroup without delegated controllers = %v, want sandbox_init_failed", err)
 		}
 		t.Logf("controllers not delegated; fail-closed path asserted")
@@ -360,7 +362,7 @@ func TestRunFailsClosedWhenCgroupCreationFails(t *testing.T) {
 		sentinel := filepath.Join(t.TempDir(), "ran")
 		spec := Spec{WorkingDir: t.TempDir(), Limits: Limits{Timeout: 5 * time.Second}}
 		_, err := runWithCgroups(t.Context(), host, &spec, "/usr/bin/touch", sentinel)
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
+		if !fault.HasCode(err, ErrorCodeSandboxInitFailed) {
 			t.Fatalf("runWithCgroups = %v, want sandbox_init_failed", err)
 		}
 		if _, statErr := os.Stat(sentinel); !errors.Is(statErr, fs.ErrNotExist) {
@@ -373,7 +375,7 @@ func TestRunFailsClosedWhenCgroupCreationFails(t *testing.T) {
 		req.Executable = "/usr/bin/touch"
 		req.Arguments = []string{sentinel}
 		_, err := startSessionWithCgroups(t.Context(), host, req, req.spec())
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeSandboxInitFailed {
+		if !fault.HasCode(err, ErrorCodeSandboxInitFailed) {
 			t.Fatalf("startSessionWithCgroups = %v, want sandbox_init_failed", err)
 		}
 		if _, statErr := os.Stat(sentinel); !errors.Is(statErr, fs.ErrNotExist) {

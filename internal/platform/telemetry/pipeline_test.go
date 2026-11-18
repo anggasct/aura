@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestPipelineNoneExporter(t *testing.T) {
@@ -44,7 +45,7 @@ func TestPipelineInvalidExporter(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid exporter")
 	}
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || code != ErrorCodeExporterInvalid {
 		t.Errorf("error code = %v, want %v", code, ErrorCodeExporterInvalid)
 	}

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"golang.org/x/sys/unix"
 )
 
@@ -91,7 +92,7 @@ func cgroupV2Available() (available bool, detail string) {
 }
 
 func errorDetail(err error) string {
-	var coded *Error
+	var coded *fault.Error[ErrorCode]
 	if errors.As(err, &coded) {
 		return coded.Detail
 	}

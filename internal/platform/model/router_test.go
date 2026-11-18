@@ -14,6 +14,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type stubLLM struct {
@@ -123,7 +124,7 @@ func wantCode(t *testing.T, err error, want ErrorCode) {
 	if err == nil {
 		t.Fatalf("expected error with code %s, got nil", want)
 	}
-	got, ok := CodeOf(err)
+	got, ok := fault.CodeOf[ErrorCode](err)
 	if !ok {
 		t.Fatalf("error %v carries no model code, want %s", err, want)
 	}

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestReferenceResolvesFromEnv(t *testing.T) {
@@ -45,7 +47,7 @@ func TestReferenceRejectsInvalid(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.ref.Resolve()
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeScopeViolation {
+			if !fault.HasCode(err, ErrorCodeScopeViolation) {
 				t.Fatalf("Resolve() = %v, want secret_scope_violation", err)
 			}
 		})

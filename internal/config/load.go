@@ -26,6 +26,7 @@ import (
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sandbox"
@@ -4177,7 +4178,7 @@ func identityProblemDetail(err error) string {
 	}
 	lines := make([]string, 0, len(problems))
 	for _, problem := range problems {
-		var typed *principal.Error
+		var typed *fault.Error[principal.ErrorCode]
 		if errors.As(problem, &typed) {
 			lines = append(lines, strings.Replace(problem.Error(), typed.Error(), typed.Detail, 1))
 			continue

@@ -21,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
@@ -130,12 +131,12 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 
 func (a *App) Run(ctx context.Context) error {
 	if a.surface == SurfaceCommand {
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "surface command has no main loop"}
+		return fault.New(ErrorCodeInvalidArgument, "surface command has no main loop")
 	}
 	a.mu.Lock()
 	if a.state != appReady {
 		a.mu.Unlock()
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "app was already run or closed"}
+		return fault.New(ErrorCodeInvalidArgument, "app was already run or closed")
 	}
 	a.state = appRunning
 	a.mu.Unlock()
@@ -154,7 +155,7 @@ func (a *App) Close(ctx context.Context) error {
 	a.mu.Lock()
 	if a.state == appRunning {
 		a.mu.Unlock()
-		return &Error{Code: ErrorCodeInvalidArgument, Detail: "app is still running"}
+		return fault.New(ErrorCodeInvalidArgument, "app is still running")
 	}
 	a.state = appClosed
 	a.mu.Unlock()
@@ -241,7 +242,7 @@ func validateParts(parts []Part) error {
 }
 
 func invalidOptions(detail string) error {
-	return &Error{Code: ErrorCodeInvalidArgument, Detail: detail}
+	return fault.New(ErrorCodeInvalidArgument, detail)
 }
 
 type toolWiring struct {

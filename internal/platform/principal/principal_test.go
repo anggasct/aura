@@ -3,6 +3,8 @@ package principal
 import (
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestResolverResolve(t *testing.T) {
@@ -87,8 +89,8 @@ func TestNewResolverRejectsInvalidIdentities(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := NewResolver(tc.identities)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeIdentityInvalid {
-				t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, ErrorCodeIdentityInvalid, err)
+			if !fault.HasCode(err, ErrorCodeIdentityInvalid) {
+				t.Fatalf("error = %v, want code %s", err, ErrorCodeIdentityInvalid)
 			}
 			if !strings.Contains(err.Error(), tc.index) {
 				t.Errorf("error %q does not name %s", err, tc.index)
@@ -203,8 +205,8 @@ func TestParseIdentityHTTPKeyPrincipal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			channel, id, err := ParseIdentity(tc.raw)
 			if !tc.valid {
-				if code, ok := CodeOf(err); !ok || code != ErrorCodeIdentityInvalid {
-					t.Fatalf("code = %q, %v; want %q", code, ok, ErrorCodeIdentityInvalid)
+				if !fault.HasCode(err, ErrorCodeIdentityInvalid) {
+					t.Fatalf("error = %v, want code %s", err, ErrorCodeIdentityInvalid)
 				}
 				return
 			}
@@ -243,8 +245,8 @@ func TestParseIdentityEmailAddress(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			channel, id, err := ParseIdentity(tc.raw)
 			if !tc.valid {
-				if code, ok := CodeOf(err); !ok || code != ErrorCodeIdentityInvalid {
-					t.Fatalf("code = %q, %v; want %q", code, ok, ErrorCodeIdentityInvalid)
+				if !fault.HasCode(err, ErrorCodeIdentityInvalid) {
+					t.Fatalf("error = %v, want code %s", err, ErrorCodeIdentityInvalid)
 				}
 				return
 			}

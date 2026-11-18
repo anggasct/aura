@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestReserveCreatesConservativeReservation(t *testing.T) {
@@ -118,8 +120,8 @@ func TestReserveBudgetExceeded(t *testing.T) {
 		KnownInputTokens:         100,
 		RequestedMaxOutputTokens: 200,
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetExceeded {
-		t.Errorf("code = %v, want budget_exceeded (err=%v)", code, err)
+	if !fault.HasCode(err, ErrorCodeBudgetExceeded) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodeBudgetExceeded)
 	}
 }
 
@@ -132,8 +134,8 @@ func TestReserveUnknownPriceRejectedWhenCapped(t *testing.T) {
 		KnownInputTokens:         100,
 		RequestedMaxOutputTokens: 200,
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePriceNotFound {
-		t.Errorf("code = %v, want price_not_found (err=%v)", code, err)
+	if !fault.HasCode(err, ErrorCodePriceNotFound) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodePriceNotFound)
 	}
 }
 
@@ -263,8 +265,8 @@ func TestSettleProviderUsageMismatchConflicts(t *testing.T) {
 		ProviderUsageID: "prov-2",
 		Usage:           Usage{InputTokens: 50, OutputTokens: 100},
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeUsageMismatch {
-		t.Errorf("code = %v, want usage_mismatch (err=%v)", code, err)
+	if !fault.HasCode(err, ErrorCodeUsageMismatch) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodeUsageMismatch)
 	}
 	same, err := l.Settle(context.Background(), &SettleRequest{
 		ReservationID:   r.ID,
@@ -300,8 +302,8 @@ func TestSettleMissingUsageEstimatesReservation(t *testing.T) {
 func TestSettleUnknownReservation(t *testing.T) {
 	l := newTestLedger(t, 1000000, 10000000)
 	_, err := l.Settle(context.Background(), &SettleRequest{ReservationID: "missing"})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeReservationNotFound {
-		t.Errorf("code = %v, want reservation_not_found", code)
+	if !fault.HasCode(err, ErrorCodeReservationNotFound) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodeReservationNotFound)
 	}
 }
 
@@ -377,8 +379,8 @@ func TestSettleAfterReconcileConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := l.Settle(context.Background(), &SettleRequest{ReservationID: r.ID, Usage: Usage{InputTokens: 1}})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeReservationConflict {
-		t.Errorf("code = %v, want reservation_conflict after reconcile (err=%v)", code, err)
+	if !fault.HasCode(err, ErrorCodeReservationConflict) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodeReservationConflict)
 	}
 }
 
@@ -408,7 +410,7 @@ func TestConcurrentReserveAtomic(t *testing.T) {
 		if err == nil {
 			successes++
 		} else {
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetExceeded {
+			if !fault.HasCode(err, ErrorCodeBudgetExceeded) {
 				t.Errorf("unexpected error: %v", err)
 			}
 			failures++
@@ -543,8 +545,8 @@ func TestRestartPreservesCapState(t *testing.T) {
 func TestEntriesNegativeLimitRejected(t *testing.T) {
 	l := newTestLedger(t, 1000000, 10000000)
 	_, err := l.Entries(context.Background(), -1)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
-		t.Errorf("code = %v, want invalid_argument (err=%v)", code, err)
+	if !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodeInvalidArgument)
 	}
 }
 
@@ -559,7 +561,7 @@ func TestMonthlyCapEnforced(t *testing.T) {
 		KnownInputTokens:         100,
 		RequestedMaxOutputTokens: 200,
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetExceeded {
-		t.Errorf("code = %v, want budget_exceeded (monthly cap)", code)
+	if !fault.HasCode(err, ErrorCodeBudgetExceeded) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodeBudgetExceeded)
 	}
 }

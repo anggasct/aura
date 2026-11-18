@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -312,7 +313,7 @@ func TestServerWorkflowPartsNeedTheirDependencies(t *testing.T) {
 			strip(b)
 			before := b.group.Names()
 			err := b.wireWorkflowParts()
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Fatalf("wireWorkflowParts = %v, want %s", err, ErrorCodeInvalidArgument)
 			}
 			if after := b.group.Names(); len(after) != len(before) {

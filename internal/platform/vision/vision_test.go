@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func ptrLimits() *Limits {
@@ -236,8 +238,8 @@ func TestHostileCorpus(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if code, ok := CodeOf(err); !ok || code != tc.code {
-				t.Errorf("code = %v, %v (%v), want %q", code, ok, err, tc.code)
+			if !fault.HasCode(err, tc.code) {
+				t.Errorf("error = %v, want code %s", err, tc.code)
 			}
 			if store.puts != puts {
 				t.Errorf("hostile input wrote %d artifacts", store.puts-puts)
@@ -261,8 +263,8 @@ func TestLimitsEnforced(t *testing.T) {
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	}); err == nil {
 		t.Error("expected limit error")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
-		t.Errorf("code = %v (%v)", code, err)
+	} else if !fault.HasCode(err, ErrorCodeVisionLimitExceeded) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodeVisionLimitExceeded)
 	}
 }
 
@@ -379,8 +381,8 @@ func TestPartValidation(t *testing.T) {
 		field.mutate(&bad)
 		if err := ValidatePart(&bad); err == nil {
 			t.Errorf("expected %s rejection", field.name)
-		} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
-			t.Errorf("%s code = %v (%v), want invalid_argument", field.name, code, err)
+		} else if !fault.HasCode(err, ErrorCodeInvalidArgument) {
+			t.Errorf("%s error = %v, want code invalid_argument", field.name, err)
 		}
 		raw, mErr := MarshalPart(&part)
 		if mErr != nil {
@@ -460,8 +462,8 @@ func TestDecodeConcurrencyBound(t *testing.T) {
 		SessionID:  "sess-1",
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
-		t.Errorf("code = %v (%v), want vision_limit_exceeded", code, err)
+	if !fault.HasCode(err, ErrorCodeVisionLimitExceeded) {
+		t.Errorf("error = %v, want code %s", err, ErrorCodeVisionLimitExceeded)
 	}
 }
 
@@ -637,8 +639,8 @@ func TestWebPOverDimensionRejectedPreDecode(t *testing.T) {
 		SessionID:  "sess-1",
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
-		t.Fatalf("code = %v (%v), want vision_limit_exceeded", code, err)
+	if !fault.HasCode(err, ErrorCodeVisionLimitExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionLimitExceeded)
 	}
 	if len(store.blobs) != 0 {
 		t.Errorf("over-dimension input wrote %d artifacts", len(store.blobs))
@@ -658,7 +660,7 @@ func TestDecodeDeadlineHoldsSlot(t *testing.T) {
 		SessionID:  "sess-1",
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
-	if code, ok := CodeOf(err); !ok || (code != ErrorCodeVisionDecodeFailed && code != ErrorCodeVisionLimitExceeded) {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || (code != ErrorCodeVisionDecodeFailed && code != ErrorCodeVisionLimitExceeded) {
 		t.Fatalf("first ingest code = %v (%v), want decode failure or limit", code, err)
 	}
 	time.Sleep(200 * time.Millisecond)
@@ -678,8 +680,8 @@ func TestDecodeDeadlineHoldsSlot(t *testing.T) {
 		SessionID:  "sess-1",
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
-		t.Fatalf("concurrency code = %v (%v), want vision_limit_exceeded", code, err)
+	if !fault.HasCode(err, ErrorCodeVisionLimitExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionLimitExceeded)
 	}
 	<-svc2.sem
 	if _, err := svc2.Ingest(context.Background(), &IngestRequest{
@@ -705,7 +707,7 @@ func TestDecodeCancelHoldsSlot(t *testing.T) {
 		SessionID:  "sess-1",
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
-	if code, ok := CodeOf(err); ok && code != ErrorCodeVisionDecodeFailed {
+	if code, ok := fault.CodeOf[ErrorCode](err); ok && code != ErrorCodeVisionDecodeFailed {
 		t.Fatalf("code = %v (%v), want vision_decode_failed or success", code, err)
 	}
 	time.Sleep(200 * time.Millisecond)
@@ -823,8 +825,8 @@ func TestPixelBombRejectedPreDecode(t *testing.T) {
 		SessionID:  "sess-1",
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionLimitExceeded {
-		t.Fatalf("code = %v (%v), want vision_limit_exceeded", code, err)
+	if !fault.HasCode(err, ErrorCodeVisionLimitExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionLimitExceeded)
 	}
 	if len(store.blobs) != 0 {
 		t.Errorf("bomb wrote %d artifacts", len(store.blobs))
@@ -845,8 +847,8 @@ func TestBadColorModelRejected(t *testing.T) {
 		SessionID:  "sess-1",
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionDecodeFailed {
-		t.Fatalf("code = %v (%v), want vision_decode_failed", code, err)
+	if !fault.HasCode(err, ErrorCodeVisionDecodeFailed) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionDecodeFailed)
 	}
 	if len(store.blobs) != 0 {
 		t.Errorf("bad color wrote %d artifacts", len(store.blobs))
@@ -918,8 +920,8 @@ func TestQuotaThroughStore(t *testing.T) {
 			SessionID:  "sess-1",
 			Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 		})
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeArtifactQuotaExceeded {
-			t.Errorf("failOn %d code = %v (%v), want artifact_quota_exceeded", failOn, code, err)
+		if !fault.HasCode(err, ErrorCodeArtifactQuotaExceeded) {
+			t.Errorf("failOn %d error = %v, want code artifact_quota_exceeded", failOn, err)
 		}
 		if err != nil && !strings.Contains(err.Error(), "artifact_quota_exceeded") {
 			t.Errorf("failOn %d error does not preserve quota cause: %v", failOn, err)
@@ -939,8 +941,8 @@ func TestQuotaExhaustionPreservesCauseAndLeavesNoPartialLink(t *testing.T) {
 		SessionID:  "sess-1",
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeArtifactQuotaExceeded {
-		t.Fatalf("code = %v (%v), want artifact_quota_exceeded", code, err)
+	if !fault.HasCode(err, ErrorCodeArtifactQuotaExceeded) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeArtifactQuotaExceeded)
 	}
 	if !strings.Contains(err.Error(), "artifact_quota_exceeded") {
 		t.Fatalf("quota cause missing from error chain: %v", err)
@@ -965,8 +967,8 @@ func TestNonQuotaWriteFailureKeepsUnavailableWithCause(t *testing.T) {
 		SessionID:  "sess-1",
 		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeVisionArtifactUnavailable {
-		t.Fatalf("code = %v (%v), want vision_artifact_unavailable", code, err)
+	if !fault.HasCode(err, ErrorCodeVisionArtifactUnavailable) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeVisionArtifactUnavailable)
 	}
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("store cause is not reachable in chain: %v", err)

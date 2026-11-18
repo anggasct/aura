@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestNewToolExecutorRefusesANilEventBus(t *testing.T) {
@@ -11,7 +12,7 @@ func TestNewToolExecutorRefusesANilEventBus(t *testing.T) {
 	if executor != nil {
 		t.Fatalf("newToolExecutor returned %v without an event bus", executor)
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("newToolExecutor error = %v, want code %q", err, ErrorCodeInvalidArgument)
 	}
 }
@@ -19,7 +20,7 @@ func TestNewToolExecutorRefusesANilEventBus(t *testing.T) {
 func TestBuildTurnRuntimeRefusesANilEventBus(t *testing.T) {
 	b := &build{}
 	err := b.buildTurnRuntime()
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("buildTurnRuntime error = %v, want code %q", err, ErrorCodeInvalidArgument)
 	}
 	if b.engine != nil || b.executor != nil {

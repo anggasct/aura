@@ -12,6 +12,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type capturedRequest struct {
@@ -131,8 +132,8 @@ func TestProviderSessionHeader_MissingFails(t *testing.T) {
 	if err == nil {
 		t.Fatalf("GenerateContent without session: got nil error, want failure")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
-		t.Fatalf("code = %q, %v; want %q", code, ok, ErrorCodeProtocolInvalid)
+	if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeProtocolInvalid)
 	}
 	mu.Lock()
 	defer mu.Unlock()

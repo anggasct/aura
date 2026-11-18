@@ -14,6 +14,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestOpenAIResponsesAdapter(t *testing.T) {
@@ -175,8 +176,8 @@ func TestBuildRouterRejectsTaskWithoutCapability(t *testing.T) {
 		},
 		Routing: map[string]string{"vision": "primary"},
 	})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeCapabilityUnsupported {
-		t.Fatalf("CodeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeCapabilityUnsupported)
+	if !fault.HasCode(err, ErrorCodeCapabilityUnsupported) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeCapabilityUnsupported)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -175,7 +176,7 @@ func TestADKExecutorBudgetAttributesAndCapsPrincipal(t *testing.T) {
 			sawErr = err
 		}
 	}
-	if code, ok := usage.CodeOf(sawErr); !ok || code != usage.ErrorCodeBudgetExceeded {
+	if !fault.HasCode(sawErr, usage.ErrorCodeBudgetExceeded) {
 		t.Fatalf("public turn err = %v, want usage_budget_exceeded", sawErr)
 	}
 	if model.callCount != calls {

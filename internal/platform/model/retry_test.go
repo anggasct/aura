@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"google.golang.org/genai"
 )
 
@@ -265,7 +266,7 @@ func TestClassifyHTTPResponse_NonJSONBodyIsPlain400(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader("not json at all")),
 	}
 	err := classifyHTTPResponse(resp, "test")
-	if _, ok := CodeOf(err); ok {
+	if _, ok := fault.CodeOf[ErrorCode](err); ok {
 		t.Fatalf("CodeOf(%v) = %q, want no typed code for a non-JSON body", err, err)
 	}
 }
@@ -294,8 +295,8 @@ func TestClassifyRequestErrorPreservesTransientCause(t *testing.T) {
 		if !isTransientError(classified) {
 			t.Errorf("classified %v is not recognised as transient", cause)
 		}
-		if code, ok := CodeOf(classified); !ok || code != ErrorCodeConnectionFailed {
-			t.Errorf("CodeOf = %q, %v; want %q", code, ok, ErrorCodeConnectionFailed)
+		if !fault.HasCode(classified, ErrorCodeConnectionFailed) {
+			t.Errorf("error = %v, want code %s", classified, ErrorCodeConnectionFailed)
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func testRequest(t *testing.T) *SandboxRequest {
@@ -77,8 +78,7 @@ func mintTestGrant(t *testing.T, policyVersion string, ttl time.Duration, req *S
 
 func wantApprovalInvalid(t *testing.T, err error) {
 	t.Helper()
-	code, ok := CodeOf(err)
-	if !ok || code != ErrorCodeApprovalInvalid {
+	if !fault.HasCode(err, ErrorCodeApprovalInvalid) {
 		t.Fatalf("err = %v, want approval_invalid", err)
 	}
 }

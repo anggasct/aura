@@ -13,6 +13,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 )
 
@@ -240,9 +241,8 @@ func TestChatWireCostBudget(t *testing.T) {
 				if invocationErr == nil {
 					t.Fatalf("expected error %s, got nil", tc.wantErrCode)
 				}
-				code, ok := model.CodeOf(invocationErr)
-				if !ok || code != tc.wantErrCode {
-					t.Fatalf("invocation error code = %v (ok=%v), want %s; err: %v", code, ok, tc.wantErrCode, invocationErr)
+				if !fault.HasCode(invocationErr, tc.wantErrCode) {
+					t.Fatalf("invocation error = %v, want code %s", invocationErr, tc.wantErrCode)
 				}
 			} else if invocationErr != nil {
 				t.Fatalf("unexpected invocation error: %v", invocationErr)

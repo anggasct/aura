@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestErrorSentinels_DetectableWhenWrapped(t *testing.T) {
@@ -22,9 +24,9 @@ func TestErrorSentinels_DetectableWhenWrapped(t *testing.T) {
 }
 
 func TestStructuredErrorsExposeStableCodes(t *testing.T) {
-	err := newError(ErrorCodeCapabilityUnsupported, "primary", "vision", "capability is unavailable")
-	if code, ok := CodeOf(fmt.Errorf("validate model: %w", err)); !ok || code != ErrorCodeCapabilityUnsupported {
-		t.Fatalf("CodeOf(%v) = %q, %v", err, code, ok)
+	err := fmt.Errorf("validate model: %w", newError(ErrorCodeCapabilityUnsupported, "primary", "vision", "capability is unavailable"))
+	if !fault.HasCode(err, ErrorCodeCapabilityUnsupported) {
+		t.Fatalf("error = %v, want code %s", err, ErrorCodeCapabilityUnsupported)
 	}
 }
 
@@ -64,5 +66,29 @@ func TestClassifyError_IgnoresMessageText(t *testing.T) {
 		if got := ClassifyError(tc.err); got != tc.want {
 			t.Errorf("ClassifyError(%v) = %q, want %q", tc.err, got, tc.want)
 		}
+	}
+}
+
+func TestModelErrorNamesItsModelAndCapability(t *testing.T) {
+	cases := []struct {
+		name       string
+		model      string
+		capability string
+		want       string
+	}{
+		{name: "a model and a capability lead the detail", model: "m", capability: "c", want: "model_not_found: m: c: detail"},
+		{name: "a model without a capability adds one prefix", model: "m", want: "model_not_found: m: detail"},
+		{name: "an empty subject adds no prefix", want: "model_not_found: detail"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := newError(ErrorCodeNotFound, tc.model, tc.capability, "detail")
+			if err.Error() != tc.want {
+				t.Fatalf("error = %q, want %q", err.Error(), tc.want)
+			}
+			if !fault.HasCode(err, ErrorCodeNotFound) {
+				t.Fatalf("error = %v, want code %s", err, ErrorCodeNotFound)
+			}
+		})
 	}
 }

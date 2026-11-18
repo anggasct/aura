@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestRegistryResolvesDefinitionsAndRoutes(t *testing.T) {
@@ -81,7 +82,7 @@ func TestRegistryUnknownNameIsNotFound(t *testing.T) {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 	_, err = registry.LLM(t.Context(), "missing-reg-test-1")
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeNotFound {
+	if !fault.HasCode(err, ErrorCodeNotFound) {
 		t.Errorf("err = %v, want code %s", err, ErrorCodeNotFound)
 	}
 	if err == nil || !strings.Contains(err.Error(), "missing-reg-test-1") {
@@ -97,7 +98,7 @@ func TestSetResolvesOnlyItsNames(t *testing.T) {
 		t.Fatalf("LLM(known) = %v, %v, want the stored instance", got, err)
 	}
 	_, err = set.LLM(t.Context(), "set-reg-test-other")
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeNotFound {
+	if !fault.HasCode(err, ErrorCodeNotFound) {
 		t.Errorf("err = %v, want code %s", err, ErrorCodeNotFound)
 	}
 }

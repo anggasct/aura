@@ -21,6 +21,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
 
@@ -372,8 +373,7 @@ func checkVisionBudget(limits VisionRequestLimits, images []VisionImage) error {
 }
 
 func isVisionBudgetError(err error) bool {
-	code, ok := CodeOf(err)
-	return ok && code == ErrorCodeVisionBudgetExceeded
+	return fault.HasCode(err, ErrorCodeVisionBudgetExceeded)
 }
 
 type VisionBlobReader interface {
@@ -531,7 +531,7 @@ func mapVisionTransformError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	if code, ok := vision.CodeOf(err); ok {
+	if code, ok := fault.CodeOf[vision.ErrorCode](err); ok {
 		switch code {
 		case vision.ErrorCodeVisionLimitExceeded, vision.ErrorCodeVisionBudgetExceeded:
 			return codedError(ErrorCodeVisionBudgetExceeded, err, "stored image exceeds the configured maximum")
