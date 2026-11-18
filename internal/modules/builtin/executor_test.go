@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
@@ -196,7 +197,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 		EventBranch:     "main",
 		EventAuthor:     "agent",
 	})
-	class, ok := toolbroker.CodeOf(err)
+	class, ok := fault.CodeOf[toolbroker.ResultClass](err)
 	if !ok || class != toolbroker.ResultApprovalRequired {
 		t.Fatalf("approval error = %v, want approval_required", err)
 	}

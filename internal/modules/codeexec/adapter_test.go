@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -182,7 +183,7 @@ func TestAdapterRefusesBeforeAnyEffect(t *testing.T) {
 			rig := newRig(t, nil)
 			_, err := rig.runner.Adapter()(t.Context(), tc.request, brokerConstraints())
 			code, notPerformed := notPerformedCode(err)
-			class, _ := toolbroker.CodeOf(err)
+			class, _ := fault.CodeOf[toolbroker.ResultClass](err)
 			if !notPerformed || code != tc.wantCode || class != tc.wantType {
 				t.Fatalf("error = %v (code %q, class %q), want %q and %q", err, code, class, tc.wantCode, tc.wantType)
 			}
@@ -201,7 +202,7 @@ func TestAdapterRefusesAnUnverifiedRuntime(t *testing.T) {
 	for _, runtime := range []string{"python", "javascript"} {
 		request := codeRequest(`{"runtime":"` + runtime + `","source":"x"}`)
 		_, err := rig.runner.Adapter()(t.Context(), request, brokerConstraints())
-		class, _ := toolbroker.CodeOf(err)
+		class, _ := fault.CodeOf[toolbroker.ResultClass](err)
 		if code, ok := notPerformedCode(err); !ok || code != "runtime_unavailable" || class != toolbroker.ResultCapabilityUnavailable {
 			t.Fatalf("%s: error = %v", runtime, err)
 		}
@@ -224,7 +225,7 @@ func TestAdapterRejectsForeignRequests(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := rig.runner.Adapter()(t.Context(), tc.request, brokerConstraints())
-			if class, _ := toolbroker.CodeOf(err); class != toolbroker.ResultInvalidArgument {
+			if class, _ := fault.CodeOf[toolbroker.ResultClass](err); class != toolbroker.ResultInvalidArgument {
 				t.Fatalf("error = %v, want invalid_argument", err)
 			}
 		})
@@ -262,7 +263,7 @@ func TestAdapterHidesSandboxFailureDetail(t *testing.T) {
 			rig.stub.err = tc.err
 			_, err := rig.runner.Adapter()(t.Context(), codeRequest(`{"runtime":"python","source":"SECRET"}`), brokerConstraints())
 			code, ok := notPerformedCode(err)
-			class, _ := toolbroker.CodeOf(err)
+			class, _ := fault.CodeOf[toolbroker.ResultClass](err)
 			if !ok || code != tc.wantCode || class != tc.wantType {
 				t.Fatalf("error = %v (code %q, class %q), want %q and %q", err, code, class, tc.wantCode, tc.wantType)
 			}

@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
@@ -228,7 +229,7 @@ func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
 }
 
 func isNotSwitchable(err error) bool {
-	code, ok := command.CodeOf(err)
+	code, ok := fault.CodeOf[command.ErrorCode](err)
 	return ok && code == command.ErrorCodeNotSwitchable
 }
 

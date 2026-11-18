@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type Role string
@@ -99,7 +99,7 @@ func (c *Client) Embed(ctx context.Context, role Role, texts []string) ([][]floa
 	limit := int64(len(texts))*int64(c.dimensions)*maxBytesPerValue + responseSlackBytes
 	raw, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", &Error{Code: ErrorCodeRequestFailed, Detail: "the embedding response could not be read"}, err)
+		return nil, fault.Wrap(ErrorCodeRequestFailed, "the embedding response could not be read", err)
 	}
 	if int64(len(raw)) > limit {
 		return nil, Errorf(ErrorCodeResponseInvalid, "the embedding response is larger than the request allows")
@@ -108,13 +108,13 @@ func (c *Client) Embed(ctx context.Context, role Role, texts []string) ([][]floa
 }
 
 func wrapTransportError(err error) error {
-	if _, coded := CodeOf(err); coded {
+	if _, coded := fault.CodeOf[ErrorCode](err); coded {
 		return err
 	}
-	if _, denied := egress.CodeOf(err); denied {
-		return fmt.Errorf("%w: %w", &Error{Code: ErrorCodeDestinationDenied, Detail: "the embedding destination is not permitted"}, err)
+	if _, denied := fault.CodeOf[egress.ErrorCode](err); denied {
+		return fault.Wrap(ErrorCodeDestinationDenied, "the embedding destination is not permitted", err)
 	}
-	return fmt.Errorf("%w: %w", &Error{Code: ErrorCodeRequestFailed, Detail: "the request to the embedding provider failed"}, err)
+	return fault.Wrap(ErrorCodeRequestFailed, "the request to the embedding provider failed", err)
 }
 
 func (c *Client) input(role Role, texts []string) ([]string, error) {

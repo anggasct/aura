@@ -69,8 +69,9 @@ func TestAcquireFailsWithoutALease(t *testing.T) {
 	execSQL(t, openDB(t, path), refuseLeaseSQL)
 	rt := newRuntime(t, openDB(t, path), nil)
 	err := rt.Acquire(t.Context())
-	if detail := requireCode(t, err, ErrorCodeHostLease); !strings.Contains(detail, "lease refused") {
-		t.Fatalf("lease error detail = %q, want the cause", detail)
+	requireCode(t, err, ErrorCodeHostLease)
+	if !strings.Contains(err.Error(), "lease refused") {
+		t.Fatalf("lease error text = %q, want the cause", err)
 	}
 	if cause := errors.Unwrap(err); cause == nil || !strings.Contains(cause.Error(), "lease refused") {
 		t.Fatalf("lease error cause = %v, want the refused insert", cause)

@@ -20,6 +20,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -342,8 +343,7 @@ func approvalRoutedWith(ctx context.Context, db *sql.DB, definition *auraagent.D
 		EventSequence: 1, EventInvocation: "persona-eval-invocation", EventAuthor: definition.ID,
 	})
 	if c.Class == principal.ClassPublic {
-		code, ok := toolbroker.CodeOf(execErr)
-		return ok && code == toolbroker.ResultToolTierDenied && len(prompted) == 0, nil
+		return fault.HasCode(execErr, toolbroker.ResultToolTierDenied) && len(prompted) == 0, nil
 	}
 	return len(prompted) == 1 && prompted[0] == c.Tool, nil
 }

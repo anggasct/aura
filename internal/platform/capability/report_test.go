@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func sampleReport(t *testing.T) capability.Report {
@@ -91,7 +92,7 @@ func TestReportRequire(t *testing.T) {
 			}
 			var got []capability.ErrorCode
 			for _, part := range parts {
-				code, ok := capability.CodeOf(part)
+				code, ok := fault.CodeOf[capability.ErrorCode](part)
 				if !ok {
 					t.Fatalf("part %v carries no capability code", part)
 				}
@@ -107,15 +108,15 @@ func TestReportRequire(t *testing.T) {
 func TestRequireOnTheZeroReportRejectsEveryName(t *testing.T) {
 	var report capability.Report
 	err := report.Require([]string{"workspace-read"})
-	if code, ok := capability.CodeOf(err); !ok || code != capability.ErrorCodeCapabilityUnknown {
-		t.Fatalf("CodeOf(%v) = %q, %v; want capability_unknown", err, code, ok)
+	if !fault.HasCode(err, capability.ErrorCodeCapabilityUnknown) {
+		t.Fatalf("Require() error = %v, want code %s", err, capability.ErrorCodeCapabilityUnknown)
 	}
 }
 
 func TestErrorClassifiers(t *testing.T) {
-	missing := fmt.Errorf("dependency_missing: %w", &capability.Error{Code: capability.ErrorCodeDependencyMissing, Capability: "exec-linux"})
-	unavailable := &capability.Error{Code: capability.ErrorCodeCapabilityUnavailable, Capability: "exec-linux"}
-	unknown := &capability.Error{Code: capability.ErrorCodeCapabilityUnknown, Capability: "nope"}
+	missing := fmt.Errorf("dependency_missing: %w", fault.New(capability.ErrorCodeDependencyMissing, "exec-linux"))
+	unavailable := fault.New(capability.ErrorCodeCapabilityUnavailable, "exec-linux")
+	unknown := fault.New(capability.ErrorCodeCapabilityUnknown, "nope")
 	cases := []struct {
 		name          string
 		err           error
@@ -123,7 +124,7 @@ func TestErrorClassifiers(t *testing.T) {
 		wantMissingOn bool
 	}{
 		{name: "nil", err: nil},
-		{name: "dependency missing", err: &capability.Error{Code: capability.ErrorCodeDependencyMissing}, wantHealth: true, wantMissingOn: true},
+		{name: "dependency missing", err: fault.New(capability.ErrorCodeDependencyMissing, ""), wantHealth: true, wantMissingOn: true},
 		{name: "wrapped dependency missing", err: missing, wantHealth: true, wantMissingOn: true},
 		{name: "capability unavailable", err: unavailable, wantHealth: true},
 		{name: "unknown capability", err: unknown},

@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -172,8 +173,8 @@ func requireSameResult(t *testing.T, replay, first *ToolResult) {
 
 func requireDetailSuffix(t *testing.T, err error, class ResultClass, suffix string) {
 	t.Helper()
-	var coded *Error
-	if !errors.As(err, &coded) || coded.Class != class || !strings.HasSuffix(coded.Detail, suffix) {
+	var coded *fault.Error[ResultClass]
+	if !errors.As(err, &coded) || coded.Code != class || !strings.HasSuffix(coded.Detail, suffix) {
 		t.Fatalf("error = %v, want class %s ending with %q", err, class, suffix)
 	}
 }

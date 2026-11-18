@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -174,14 +176,14 @@ func (h *handler) session(ctx context.Context) Result {
 	id := h.args[0]
 	sess, err := h.ports.Sessions.Switch(ctx, h.caller, id)
 	if err != nil {
-		if code, ok := CodeOf(err); ok && code == ErrorCodeNotSwitchable {
+		if fault.HasCode(err, ErrorCodeNotSwitchable) {
 			if h.style == StyleTerminal {
-				var cerr *Error
+				var cerr *fault.Error[ErrorCode]
 				if errors.As(err, &cerr) {
-					return failure(code, "aura: session "+id+": "+cerr.Detail)
+					return failure(ErrorCodeNotSwitchable, "aura: session "+id+": "+cerr.Detail)
 				}
 			}
-			return failure(code, ReplyNotSwitchable)
+			return failure(ErrorCodeNotSwitchable, ReplyNotSwitchable)
 		}
 		return h.failed("session", err)
 	}

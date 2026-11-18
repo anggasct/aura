@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -89,7 +90,7 @@ func TestAdapterNilGuards(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if code, _ := toolbroker.CodeOf(err); code != toolbroker.ResultCapabilityUnavailable {
+		if code, _ := fault.CodeOf[toolbroker.ResultClass](err); code != toolbroker.ResultCapabilityUnavailable {
 			t.Fatalf("got %s, want %s", code, toolbroker.ResultCapabilityUnavailable)
 		}
 	})
@@ -101,7 +102,7 @@ func TestAdapterNilGuards(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if code, _ := toolbroker.CodeOf(err); code != toolbroker.ResultInvalidArgument {
+		if code, _ := fault.CodeOf[toolbroker.ResultClass](err); code != toolbroker.ResultInvalidArgument {
 			t.Fatalf("got %s, want %s", code, toolbroker.ResultInvalidArgument)
 		}
 	})
@@ -136,7 +137,7 @@ func TestAdapterOversizedResultFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected oversized result to fail")
 	}
-	if code, _ := toolbroker.CodeOf(err); code != toolbroker.ResultExecutionFailed {
+	if code, _ := fault.CodeOf[toolbroker.ResultClass](err); code != toolbroker.ResultExecutionFailed {
 		t.Fatalf("expected %s, got %s (%v)", toolbroker.ResultExecutionFailed, code, err)
 	}
 }

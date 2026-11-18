@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -169,8 +170,7 @@ func (h *host) interrupted(ctx, callCtx context.Context) *Error {
 }
 
 func (h *host) transportFailure(ctx, callCtx context.Context, state *callState, mutating bool, err error) (*httpResultMessage, *Error) {
-	code, denied := egress.CodeOf(err)
-	denied = denied && code == egress.ErrorCodeEgressDenied
+	denied := fault.HasCode(err, egress.ErrorCodeEgressDenied)
 	if mutating && !denied && !neverReachedTheServer(err) {
 		state.sent = true
 	}

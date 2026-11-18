@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -70,7 +71,7 @@ func TestWorkflowAdaptersAnswerUnavailableWithoutAController(t *testing.T) {
 	holder := &workflowHolder{}
 	for _, tool := range []string{tools.WorkflowListToolName, tools.WorkflowStartToolName, tools.WorkflowStatusToolName, tools.WorkflowCancelToolName} {
 		_, err := runWorkflowTool(t, holder, workflowRequest(principal.ClassOwner, tool, `{"id":"x","run_id":"r"}`))
-		if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultCapabilityUnavailable || !strings.Contains(err.Error(), "run only in aura server") {
+		if !fault.HasCode(err, toolbroker.ResultCapabilityUnavailable) || !strings.Contains(err.Error(), "run only in aura server") {
 			t.Fatalf("%s without a controller = %v", tool, err)
 		}
 	}
@@ -117,7 +118,7 @@ func TestWorkflowProposeAdapterPassesTheSpecAndMapsRejections(t *testing.T) {
 	}
 	controller.err = &WorkflowRejection{Code: "workflow_capability_exceeded", Detail: "step uses exec"}
 	_, err = runWorkflowTool(t, holder, workflowRequest(principal.ClassOwner, tools.WorkflowProposeToolName, `{"spec":{"goal":"g","steps":[]}}`))
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultInvalidArgument || !strings.Contains(err.Error(), "workflow_capability_exceeded: step uses exec") {
+	if !fault.HasCode(err, toolbroker.ResultInvalidArgument) || !strings.Contains(err.Error(), "workflow_capability_exceeded: step uses exec") {
 		t.Fatalf("rejection surfaced as %v", err)
 	}
 }
@@ -147,7 +148,7 @@ func TestWorkflowAdaptersMapControllerErrors(t *testing.T) {
 	} {
 		controller.err = tc.err
 		_, err := runWorkflowTool(t, holder, workflowRequest(principal.ClassTrusted, tools.WorkflowStartToolName, `{"id":"refund"}`))
-		if code, ok := toolbroker.CodeOf(err); !ok || code != tc.class || !strings.Contains(err.Error(), tc.code) {
+		if !fault.HasCode(err, tc.class) || !strings.Contains(err.Error(), tc.code) {
 			t.Fatalf("controller error %v surfaced as %v", tc.err, err)
 		}
 	}

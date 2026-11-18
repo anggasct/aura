@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -154,7 +155,7 @@ func mustSignal(t *testing.T, rt *Runtime, sig sentSignal) {
 
 func requireCode(t *testing.T, err error, want ErrorCode) (detail string) {
 	t.Helper()
-	var coded *Error
+	var coded *fault.Error[ErrorCode]
 	if !errors.As(err, &coded) || coded.Code != want {
 		t.Fatalf("err = %v, want code %s", err, want)
 	}

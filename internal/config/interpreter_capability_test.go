@@ -5,6 +5,7 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestLoad_CodeInterpreterCapabilityByBuildAndPlatform(t *testing.T) {
@@ -42,8 +43,8 @@ func TestLoad_CodeInterpreterCapabilityByBuildAndPlatform(t *testing.T) {
 				if result.CapabilityStateError != nil {
 					t.Fatalf("CapabilityStateError = %v", result.CapabilityStateError)
 				}
-			} else if code, ok := capability.CodeOf(result.CapabilityStateError); !ok || code != tc.wantCode {
-				t.Fatalf("CodeOf(%v) = %q, %v; want %q", result.CapabilityStateError, code, ok, tc.wantCode)
+			} else if !fault.HasCode(result.CapabilityStateError, tc.wantCode) {
+				t.Fatalf("error = %v, want code %s", result.CapabilityStateError, tc.wantCode)
 			}
 			status, _ := result.CapabilityReport.Status("code-interpreter")
 			if status.Available != tc.wantAvailable {
@@ -67,8 +68,8 @@ func TestLoad_CodeInterpreterIsExcludedFromTheCoreProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWithOptions: %v", err)
 	}
-	if code, ok := capability.CodeOf(result.CapabilityStateError); !ok || code != capability.ErrorCodeCapabilityUnavailable {
-		t.Fatalf("CodeOf(%v) = %q, %v; want capability_unavailable", result.CapabilityStateError, code, ok)
+	if !fault.HasCode(result.CapabilityStateError, capability.ErrorCodeCapabilityUnavailable) {
+		t.Fatalf("error = %v, want capability_unavailable", result.CapabilityStateError)
 	}
 	status, ok := result.CapabilityReport.Status("code-interpreter")
 	if !ok || status.Compiled || status.Available || !status.Enabled {

@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/store"
@@ -261,7 +262,7 @@ func TestEffectToolAsksForApprovalOnEveryCallAndIsJournaled(t *testing.T) {
 	f.mu.Unlock()
 	before := f.api.count()
 	_, err := f.execute(f.request("plugin_mailer_send", `{"q":"hi"}`, principal.ClassOwner))
-	if class, ok := toolbroker.CodeOf(err); !ok || class != toolbroker.ResultApprovalRequired {
+	if !fault.HasCode(err, toolbroker.ResultApprovalRequired) {
 		t.Fatalf("rejected call error = %v, want approval_required", err)
 	}
 	if f.api.count() != before || f.promptCount() != 3 {
@@ -274,7 +275,7 @@ func TestPublicPrincipalsNeverReachAConnector(t *testing.T) {
 	f.start()
 	for _, tool := range []string{"plugin_mailer_search", "plugin_mailer_send"} {
 		_, err := f.execute(f.request(tool, `{}`, principal.ClassPublic))
-		if class, ok := toolbroker.CodeOf(err); !ok || class != toolbroker.ResultToolTierDenied {
+		if !fault.HasCode(err, toolbroker.ResultToolTierDenied) {
 			t.Fatalf("%s for a public principal = %v, want tool_tier_denied", tool, err)
 		}
 	}
@@ -300,7 +301,7 @@ func TestEffectSettlesUnknownAfterTheRequestLeftAndIsNeverResent(t *testing.T) {
 	f.start()
 	request := f.request("plugin_mailer_send", `{}`, principal.ClassOwner)
 	_, err := f.execute(request)
-	if class, ok := toolbroker.CodeOf(err); !ok || class != toolbroker.ResultExecutionFailed || !strings.Contains(err.Error(), "outcome is unknown") {
+	if !fault.HasCode(err, toolbroker.ResultExecutionFailed) || !strings.Contains(err.Error(), "outcome is unknown") {
 		t.Fatalf("Execute error = %v", err)
 	}
 	if len(f.intents(effect.StateUnknown)) != 1 || len(f.intents(effect.StateFailed)) != 0 {
@@ -400,7 +401,7 @@ func TestEffectFailsNormallyWhenNoRequestLeft(t *testing.T) {
 			}, nil)
 			f.start()
 			_, err := f.execute(f.request("plugin_mailer_send", `{}`, principal.ClassOwner))
-			if class, ok := toolbroker.CodeOf(err); !ok || class != toolbroker.ResultExecutionFailed || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "unknown") {
+			if !fault.HasCode(err, toolbroker.ResultExecutionFailed) || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "unknown") {
 				t.Fatalf("Execute error = %v, want a plain failure with %s", err, tc.want)
 			}
 			failed := f.intents(effect.StateFailed)

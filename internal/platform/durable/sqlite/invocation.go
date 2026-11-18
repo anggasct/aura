@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -27,7 +28,7 @@ type actionRecord struct {
 
 func (a actionRecord) answer() ([]byte, error) {
 	if a.failed {
-		return nil, &Error{Code: ErrorCodeActionFailed, Detail: a.detail}
+		return nil, fault.New(ErrorCodeActionFailed, a.detail)
 	}
 	return copyBytes(a.result), nil
 }
@@ -311,7 +312,7 @@ func (inv *invocation) RunAction(ctx context.Context, key string, fn func(ctx co
 	inv.actions[key] = stored
 	inv.mu.Unlock()
 	if stored.failed && won {
-		return nil, &Error{Code: ErrorCodeActionFailed, Detail: stored.detail, cause: fnErr}
+		return nil, fault.Wrap(ErrorCodeActionFailed, "", fnErr)
 	}
 	return stored.answer()
 }

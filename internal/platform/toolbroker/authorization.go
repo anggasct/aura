@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -104,11 +105,11 @@ func (b *Broker) recordAuthorization(ctx context.Context, call *authorization) (
 	state, err := b.decideAuthorization(ctx, call)
 	record := authorizationRecord{State: state, RequestDigest: call.canonical.RequestDigest}
 	if err != nil {
-		var refusal *Error
-		if ctx.Err() != nil || !errors.As(err, &refusal) || !recordableClass(refusal.Class) {
+		var refusal *fault.Error[ResultClass]
+		if ctx.Err() != nil || !errors.As(err, &refusal) || !recordableClass(refusal.Code) {
 			return nil, b.redactedAuthorizationError(err)
 		}
-		record.Failure = &recordedFailure{Class: refusal.Class, Detail: string(redact([]byte(refusal.Detail), b.secretValues()))}
+		record.Failure = &recordedFailure{Class: refusal.Code, Detail: string(redact([]byte(refusal.Detail), b.secretValues()))}
 	}
 	return json.Marshal(record)
 }
@@ -119,15 +120,15 @@ func recordableClass(class ResultClass) bool {
 
 func (b *Broker) redactedAuthorizationError(err error) error {
 	secrets := b.secretValues()
-	var coded *Error
-	if errors.As(err, &coded) && recordableClass(coded.Class) {
-		return &Error{Class: coded.Class, Detail: string(redact([]byte(coded.Detail), secrets))}
+	var coded *fault.Error[ResultClass]
+	if errors.As(err, &coded) && recordableClass(coded.Code) {
+		return fault.New(coded.Code, string(redact([]byte(coded.Detail), secrets)))
 	}
-	return &Error{Class: ResultPolicyDenied, Detail: string(redact([]byte(err.Error()), secrets))}
+	return fault.New(ResultPolicyDenied, string(redact([]byte(err.Error()), secrets)))
 }
 
 func (b *Broker) unrecordedAuthorization(canonical *ToolRequest, err error) error {
-	class, ok := CodeOf(err)
+	class, ok := fault.CodeOf[ResultClass](err)
 	if !ok || !recordableClass(class) {
 		class = ResultPolicyDenied
 	}
@@ -142,7 +143,7 @@ func (b *Broker) readAuthorization(raw []byte, canonical *ToolRequest) (string, 
 	if record.Failure == nil {
 		return record.State, nil
 	}
-	return record.State, &Error{Class: record.Failure.Class, Detail: string(redact([]byte(record.Failure.Detail), b.secretValues()))}
+	return record.State, fault.New(record.Failure.Class, string(redact([]byte(record.Failure.Detail), b.secretValues())))
 }
 
 func decodeAuthorization(raw []byte) (authorizationRecord, bool) {

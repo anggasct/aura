@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -196,7 +197,7 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 	unknownCapability.RequestID = "req-2"
 	unknownCapability.Capabilities = []string{"not-a-host-capability"}
 	_, err = broker.Execute(ctx, withEffectIdentity(&unknownCapability, "lifecycle-2"))
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultCapabilityUnavailable {
+	if !fault.HasCode(err, toolbroker.ResultCapabilityUnavailable) {
 		t.Fatalf("execution claiming a capability the host lacks = %v, want %s", err, toolbroker.ResultCapabilityUnavailable)
 	}
 

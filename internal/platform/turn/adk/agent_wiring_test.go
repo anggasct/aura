@@ -9,6 +9,7 @@ import (
 
 	"database/sql"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -84,7 +85,7 @@ func TestADKExecutorResolutionFailsClosedBeforeWork(t *testing.T) {
 	modelName, models := fakeModelSet(model)
 	db, sessions, _ := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
-	resolver := &stubResolver{err: &auraagent.Error{Code: auraagent.ErrorCodeResolutionFailed, Detail: "no agent covers required capabilities"}}
+	resolver := &stubResolver{err: fault.New(auraagent.ErrorCodeResolutionFailed, "no agent covers required capabilities")}
 	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, WithAgentResolver(resolver, nil))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
@@ -99,7 +100,7 @@ func TestADKExecutorResolutionFailsClosedBeforeWork(t *testing.T) {
 	produced := false
 	for _, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
-			code, ok := auraagent.CodeOf(err)
+			code, ok := fault.CodeOf[auraagent.ErrorCode](err)
 			if !ok || code != auraagent.ErrorCodeResolutionFailed {
 				t.Fatalf("error = %v, want agent_resolution_failed", err)
 			}

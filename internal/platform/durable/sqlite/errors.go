@@ -1,10 +1,10 @@
 package sqlite
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type ErrorCode string
@@ -24,30 +24,8 @@ const (
 	ErrorCodeKeyInUse             ErrorCode = "key_in_use"
 )
 
-type Error struct {
-	Code   ErrorCode
-	Detail string
-	cause  error
-}
-
-func (e *Error) Error() string {
-	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-}
-
-func (e *Error) Unwrap() error {
-	return e.cause
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if !errors.As(err, &target) {
-		return "", false
-	}
-	return target.Code, true
-}
-
 func invalidArgument(detail string) error {
-	return &Error{Code: ErrorCodeInvalidArgument, Detail: detail}
+	return fault.New(ErrorCodeInvalidArgument, detail)
 }
 
 func unknownRun(key string) error {
@@ -55,17 +33,17 @@ func unknownRun(key string) error {
 }
 
 func handlerNotRegistered(name string) error {
-	return &Error{Code: ErrorCodeHandlerNotRegistered, Detail: "no durable handler registered or declared for " + name}
+	return fault.New(ErrorCodeHandlerNotRegistered, "no durable handler registered or declared for "+name)
 }
 
 func keyInUse(key string) error {
-	return &Error{Code: ErrorCodeKeyInUse, Detail: "durable run " + key + " belongs to another handler", cause: durable.ErrKeyInUse}
+	return fault.Wrap(ErrorCodeKeyInUse, "durable run "+key+" belongs to another handler", durable.ErrKeyInUse)
 }
 
 func hostLease(cause error) error {
-	return &Error{Code: ErrorCodeHostLease, Detail: "the durable host could not write its lease: " + cause.Error(), cause: cause}
+	return fault.Wrap(ErrorCodeHostLease, "the durable host could not write its lease", cause)
 }
 
 func ownershipLost(key string) error {
-	return &Error{Code: ErrorCodeOwnershipLost, Detail: "run " + key + " is owned by another host"}
+	return fault.New(ErrorCodeOwnershipLost, "run "+key+" is owned by another host")
 }

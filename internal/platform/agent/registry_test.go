@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 )
@@ -134,7 +135,7 @@ func TestBuildRejectsInvalidOverrides(t *testing.T) {
 			if err == nil {
 				t.Fatal("Build accepted an invalid definition")
 			}
-			code, ok := CodeOf(err)
+			code, ok := fault.CodeOf[ErrorCode](err)
 			if !ok || code != tc.wantCode {
 				t.Fatalf("code = %s (%v), want %s", code, err, tc.wantCode)
 			}
@@ -162,7 +163,7 @@ func TestResolveExplicitID(t *testing.T) {
 		t.Fatalf("resolved %q, want reviewer", definition.ID)
 	}
 	missing := "nonexistent"
-	code, ok := CodeOf(registry.mustResolveErr(t, &missing))
+	code, ok := fault.CodeOf[ErrorCode](registry.mustResolveErr(t, &missing))
 	if !ok || code != ErrorCodeNotFound {
 		t.Fatalf("code = %s, want agent_not_found", code)
 	}
@@ -238,7 +239,7 @@ func TestResolveFailsClosedWithoutEligibleDefinition(t *testing.T) {
 	if definition.ID != "" {
 		t.Fatalf("returned a partial definition %q on failure", definition.ID)
 	}
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || code != ErrorCodeResolutionFailed {
 		t.Fatalf("code = %s, want agent_resolution_failed", code)
 	}
@@ -427,7 +428,7 @@ func TestBuildRejectsUnknownMemoryScope(t *testing.T) {
 	_, err := Build([]config.AgentDefinition{
 		{ID: "kuma", Description: "Casual", Instructions: "Be casual.", MemoryScope: "global"},
 	}, validTools, []string{"primary"})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeDefinitionInvalid {
+	if !fault.HasCode(err, ErrorCodeDefinitionInvalid) {
 		t.Fatalf("Build error = %v, want %s", err, ErrorCodeDefinitionInvalid)
 	}
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
@@ -134,12 +135,12 @@ func decodeResults(t *testing.T, output []byte) []searchResult {
 }
 
 func classOf(err error) toolbroker.ResultClass {
-	class, _ := toolbroker.CodeOf(err)
+	class, _ := fault.CodeOf[toolbroker.ResultClass](err)
 	return class
 }
 
 func detailOf(err error) string {
-	var target *toolbroker.Error
+	var target *fault.Error[toolbroker.ResultClass]
 	if errors.As(err, &target) {
 		return target.Detail
 	}
@@ -574,7 +575,7 @@ func TestMediatedClientDeniesPrivateEndpointsBeforeDialingAndKeepsTheQueryOutOfT
 			options.Endpoint = "https://" + host + "/search"
 			options.Resolver = resolver
 			_, err := callSearch(newAdapter(t, options), `{"query":"`+query+`"}`)
-			if code, ok := egress.CodeOf(err); !ok || code != egress.ErrorCodeEgressDenied {
+			if !fault.HasCode(err, egress.ErrorCodeEgressDenied) {
 				t.Fatalf("err = %v, want egress_denied", err)
 			}
 			if strings.Contains(err.Error(), query) {
@@ -757,7 +758,7 @@ func TestLoopbackClientRefusesAnythingButItsOwnAddress(t *testing.T) {
 	if response != nil {
 		_ = response.Body.Close()
 	}
-	if code, ok := egress.CodeOf(err); !ok || code != egress.ErrorCodeEgressDenied {
+	if !fault.HasCode(err, egress.ErrorCodeEgressDenied) {
 		t.Fatalf("err = %v, want egress_denied", err)
 	}
 }

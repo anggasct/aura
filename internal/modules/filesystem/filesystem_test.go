@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
@@ -296,11 +297,11 @@ func classOfError(result *toolbroker.ToolResult, err error) toolbroker.ResultCla
 	if err == nil {
 		return result.Class
 	}
-	class, _ := toolbroker.CodeOf(err)
+	class, _ := fault.CodeOf[toolbroker.ResultClass](err)
 	return class
 }
 
 func classOf(err error) toolbroker.ResultClass {
-	class, _ := toolbroker.CodeOf(err)
+	class, _ := fault.CodeOf[toolbroker.ResultClass](err)
 	return class
 }

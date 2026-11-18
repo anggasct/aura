@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type composeFile struct {
@@ -197,7 +198,7 @@ func TestCodeInterpreterFixtureNeedsABuildThatCompilesIt(t *testing.T) {
 				t.Fatalf("smoke/code-interpreter-profile.yaml does not load: %v", err)
 			}
 			if tc.wantCode != "" {
-				if code, ok := capability.CodeOf(result.CapabilityStateError); !ok || code != tc.wantCode {
+				if !fault.HasCode(result.CapabilityStateError, tc.wantCode) {
 					t.Fatalf("capability state error = %v, want code %q", result.CapabilityStateError, tc.wantCode)
 				}
 				return

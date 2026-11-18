@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 )
 
@@ -314,8 +315,8 @@ func TestInterpreterCommandsNeedTheCapability(t *testing.T) {
 				rig := newInterpreterRig(t, build, tc.dependencies)
 				rig.deps.platformSupported = func() bool { return tc.platform }
 				_, err := rig.run(t, args...)
-				if code, ok := capability.CodeOf(err); !ok || code != tc.wantCode {
-					t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, code, ok, tc.wantCode)
+				if !fault.HasCode(err, tc.wantCode) {
+					t.Fatalf("error = %v, want code %s", err, tc.wantCode)
 				}
 				if _, statErr := os.Stat(filepath.Join(rig.dataRoot, "runtimes")); !os.IsNotExist(statErr) {
 					t.Errorf("a refused command touched the data directory: %v", statErr)

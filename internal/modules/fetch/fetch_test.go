@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
@@ -147,7 +148,7 @@ func TestFetchDeniesUnsafeDestinationsCarryingAQuery(t *testing.T) {
 	}
 	for _, raw := range []string{"https://127.0.0.1/doc?a=1", "https://10.0.0.5/doc?a=1", "https://internal.example/doc?a=1", "http://public.example/doc?a=1"} {
 		_, err := adapter(context.Background(), fetchRequest(raw), constraints())
-		if code, ok := egress.CodeOf(err); !ok || code != egress.ErrorCodeEgressDenied {
+		if !fault.HasCode(err, egress.ErrorCodeEgressDenied) {
 			t.Errorf("fetch(%q) = %v, want egress_denied before dialing", raw, err)
 		}
 	}
@@ -180,7 +181,7 @@ func TestFetchFollowsOnlySameOriginRedirectsToAQuery(t *testing.T) {
 			if tc.followed && err != nil {
 				t.Fatalf("fetch: %v", err)
 			}
-			if code, ok := egress.CodeOf(err); !tc.followed && (!ok || code != egress.ErrorCodeEgressDenied) {
+			if code, ok := fault.CodeOf[egress.ErrorCode](err); !tc.followed && (!ok || code != egress.ErrorCodeEgressDenied) {
 				t.Fatalf("fetch = %v, want egress_denied", err)
 			}
 		})
@@ -228,7 +229,7 @@ func TestFetchMediatedClientDeniesUnsafeDestinations(t *testing.T) {
 		"http://public.example/doc",
 	} {
 		_, err := adapter(context.Background(), fetchRequest(raw), constraints())
-		if code, ok := egress.CodeOf(err); !ok || code != egress.ErrorCodeEgressDenied {
+		if !fault.HasCode(err, egress.ErrorCodeEgressDenied) {
 			t.Errorf("fetch(%q) = %v, want egress_denied before dialing", raw, err)
 		}
 	}
@@ -433,6 +434,6 @@ func fetchRequest(raw string) *toolbroker.ToolRequest {
 func constraints() approval.Constraints { return approval.Constraints{} }
 
 func classOf(err error) toolbroker.ResultClass {
-	class, _ := toolbroker.CodeOf(err)
+	class, _ := fault.CodeOf[toolbroker.ResultClass](err)
 	return class
 }

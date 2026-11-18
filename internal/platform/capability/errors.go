@@ -2,8 +2,9 @@ package capability
 
 import (
 	"errors"
-	"fmt"
 	"slices"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type ErrorCode string
@@ -15,29 +16,15 @@ const (
 	ErrorCodeDependencyMissing     ErrorCode = "dependency_missing"
 )
 
-type Error struct {
-	Code       ErrorCode
-	Capability string
-	Detail     string
-}
-
-func (e *Error) Error() string {
-	if e.Capability == "" {
-		return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-	}
-	return fmt.Sprintf("%s: %s: %s", e.Code, e.Capability, e.Detail)
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if !errors.As(err, &target) {
-		return "", false
-	}
-	return target.Code, true
-}
-
 func newError(code ErrorCode, capability, detail string) error {
-	return &Error{Code: code, Capability: capability, Detail: detail}
+	return fault.New(code, subject(capability, detail))
+}
+
+func subject(capability, detail string) string {
+	if capability == "" {
+		return detail
+	}
+	return capability + ": " + detail
 }
 
 func IsHealthState(err error) bool {
@@ -65,7 +52,7 @@ func onlyCodes(err error, codes ...ErrorCode) bool {
 		}
 		return true
 	}
-	var typed *Error
+	var typed *fault.Error[ErrorCode]
 	if errors.As(err, &typed) {
 		return slices.Contains(codes, typed.Code)
 	}

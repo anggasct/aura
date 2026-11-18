@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -418,7 +419,7 @@ func (r *Runtime) Call(ctx context.Context, req durable.CallRequest) ([]byte, er
 	fn := r.calls[callKey{service: req.Service, handler: req.Handler}]
 	r.mu.Unlock()
 	if fn == nil {
-		return nil, &Error{Code: ErrorCodeCallNotRegistered, Detail: "no durable call registered for " + req.Handler + " on " + req.Service}
+		return nil, fault.New(ErrorCodeCallNotRegistered, "no durable call registered for "+req.Handler+" on "+req.Service)
 	}
 	return fn(ctx, req.Key, req.Payload)
 }
@@ -437,7 +438,7 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req durable.ResolveApprov
 			return fmt.Errorf("durable resolve approval: read approval: %w", err)
 		}
 		if consumed {
-			return &Error{Code: ErrorCodeApprovalConsumed, Detail: "durable approval was already resolved"}
+			return fault.New(ErrorCodeApprovalConsumed, "durable approval was already resolved")
 		}
 		if err := requireRunning(ctx, tx, runKey); err != nil {
 			return err

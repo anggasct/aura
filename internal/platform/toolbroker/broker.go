@@ -388,7 +388,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 		class := result.Class
 		if class == "" {
-			class, _ = CodeOf(err)
+			class, _ = fault.CodeOf[ResultClass](err)
 		}
 		if class == "" {
 			class = ResultExecutionFailed
@@ -489,7 +489,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		call.expiry = absoluteApprovalExpiry(canonical.Deadline)
 		approvalState, err = b.authorize(ctx, slot, call)
 		if err != nil {
-			if code, _ := CodeOf(err); code == ResultUntrustedInputNoApprover {
+			if fault.HasCode(err, ResultUntrustedInputNoApprover) {
 				policyOutcome = PolicyOutcomeDeny
 			}
 			return ToolResult{}, err
@@ -1047,15 +1047,15 @@ func toolKey(request *ToolRequest) string {
 	return request.ToolName + "@" + request.ToolVersion
 }
 
-func (b *Broker) classifyExecutionError(ctx context.Context, canonical *ToolRequest, err error) *Error {
+func (b *Broker) classifyExecutionError(ctx context.Context, canonical *ToolRequest, err error) *fault.Error[ResultClass] {
 	secrets := b.secretValues()
-	classified := func(class ResultClass, detail string) *Error {
-		return &Error{Class: class, Detail: string(redact([]byte(detail), secrets))}
+	classified := func(class ResultClass, detail string) *fault.Error[ResultClass] {
+		return &fault.Error[ResultClass]{Code: class, Detail: string(redact([]byte(detail), secrets))}
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return classified(ResultDeadlineExceeded, fmt.Sprintf("tool request ended: %v", err))
 	}
-	if code, ok := CodeOf(err); ok && code.stable() {
+	if code, ok := fault.CodeOf[ResultClass](err); ok && code.stable() {
 		return classified(code, err.Error())
 	}
 	if code, ok := sandbox.CodeOf(err); ok {
@@ -1068,12 +1068,12 @@ func (b *Broker) classifyExecutionError(ctx context.Context, canonical *ToolRequ
 			return classified(ResultExecutionFailed, err.Error())
 		}
 	}
-	if code, ok := egress.CodeOf(err); ok && code == egress.ErrorCodeEgressDenied {
+	if fault.HasCode(err, egress.ErrorCodeEgressDenied) {
 		return classified(ResultPolicyDenied, err.Error())
 	}
-	var ended *Error
+	var ended *fault.Error[ResultClass]
 	if errors.As(contextError(ctx, canonical.Deadline), &ended) {
-		return classified(ended.Class, ended.Detail)
+		return classified(ended.Code, ended.Detail)
 	}
 	return classified(ResultExecutionFailed, fmt.Sprintf("tool %q failed: %s", toolKey(canonical), err.Error()))
 }

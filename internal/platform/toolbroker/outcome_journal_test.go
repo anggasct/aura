@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -269,7 +270,7 @@ type callOutcome struct {
 
 func outcomeOf(result ToolResult, err error) callOutcome {
 	if err != nil {
-		class, _ := CodeOf(err)
+		class, _ := fault.CodeOf[ResultClass](err)
 		return callOutcome{class: class, text: err.Error()}
 	}
 	return callOutcome{class: result.Class, output: string(result.Output)}
@@ -702,7 +703,7 @@ func requireNoInterruptionRecorded(t *testing.T, rows []actionRow) {
 		recorded, err := decodeOutcome(row.result)
 		if err != nil {
 			failures++
-			if code, _ := CodeOf(err); code != ResultPolicyDenied {
+			if code, _ := fault.CodeOf[ResultClass](err); code != ResultPolicyDenied {
 				t.Errorf("action %s records the failure %v, want only the first tool's denial", row.key, err)
 			}
 			continue
@@ -857,10 +858,10 @@ func TestDurableApprovalErrorsReplayWithTheirClass(t *testing.T) {
 				err = fixture.broker.validateDurable(endedCtx, callSlot(endedCtx), &request)
 				return nil
 			})
-			if code, ok := sqlite.CodeOf(err); !ok || code != sqlite.ErrorCodeActionFailed {
+			if !fault.HasCode(err, sqlite.ErrorCodeActionFailed) {
 				t.Errorf("error = %v, want the runtime's failed action", err)
 			}
-			if code, ok := CodeOf(err); ok {
+			if code, ok := fault.CodeOf[ResultClass](err); ok {
 				t.Errorf("error carries the broker class %s, want it raw", code)
 			}
 			rows := hosted.actionRows(t, key)

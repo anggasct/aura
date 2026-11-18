@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 )
 
@@ -63,10 +64,10 @@ func withInterpreter(cmd *cobra.Command, gf *globalFlags, deps interpreterDeps, 
 func requireInterpreterCapability(report capability.Report, platformSupported bool) error {
 	status, ok := report.Status(codeInterpreterCapability)
 	if !ok || !status.Compiled {
-		return &capability.Error{Code: capability.ErrorCodeCapabilityUnavailable, Capability: codeInterpreterCapability, Detail: "capability is absent from this artifact"}
+		return fault.New(capability.ErrorCodeCapabilityUnavailable, codeInterpreterCapability+": capability is absent from this artifact")
 	}
 	if !platformSupported {
-		return &capability.Error{Code: capability.ErrorCodeCapabilityUnavailable, Capability: codeInterpreterCapability, Detail: "runtimes need linux/amd64"}
+		return fault.New(capability.ErrorCodeCapabilityUnavailable, codeInterpreterCapability+": runtimes need linux/amd64")
 	}
 	return nil
 }

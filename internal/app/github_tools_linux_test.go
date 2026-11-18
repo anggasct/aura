@@ -30,6 +30,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -221,7 +222,7 @@ func TestToolExecutorRegistersTheGitHubTools(t *testing.T) {
 		}
 	}
 	_, err = executor.Execute(t.Context(), gitHubCommentRequest(principal.ClassOwner, "ci"))
-	if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultPolicyDenied || !strings.Contains(err.Error(), "unknown tool") {
+	if !fault.HasCode(err, toolbroker.ResultPolicyDenied) || !strings.Contains(err.Error(), "unknown tool") {
 		t.Errorf("no credentials err = %v, want policy_denied unknown tool", err)
 	}
 
@@ -323,7 +324,7 @@ func TestSurfaceExecutorAsksApprovalForAGitHubCall(t *testing.T) {
 		request := gitHubCommentRequest(class, "ci")
 		request.PrincipalID, request.AgentID = "discord:111", agentID
 		_, err := executor.Execute(t.Context(), request)
-		if code, ok := toolbroker.CodeOf(err); !ok || code != toolbroker.ResultToolTierDenied {
+		if !fault.HasCode(err, toolbroker.ResultToolTierDenied) {
 			t.Errorf("%s call as %s err = %v, want tool_tier_denied", agentID, class, err)
 		}
 	}

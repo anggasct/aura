@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -59,8 +60,8 @@ func TestBuildValidatesPluginToolCeilings(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodePersonaInvalid {
-				t.Fatalf("Build code = %q, %v (err %v), want persona_invalid", code, ok, err)
+			if !fault.HasCode(err, ErrorCodePersonaInvalid) {
+				t.Fatalf("Build error = %v, want persona_invalid", err)
 			}
 		})
 	}

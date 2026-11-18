@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func seedIntent(t *testing.T, h *replayHarness, request *ToolRequest, settled bool) {
@@ -69,7 +70,7 @@ func TestReplayOfASettledEffectIsAnsweredBeforeApproval(t *testing.T) {
 
 	t.Run("the same key with other arguments is a conflict that asks nobody", func(t *testing.T) {
 		_, err := execute(replayRequest(`{"command":["false"]}`))
-		if class, _ := CodeOf(err); class != ResultInvalidArgument {
+		if class, _ := fault.CodeOf[ResultClass](err); class != ResultInvalidArgument {
 			t.Fatalf("Execute = %v, want %s", err, ResultInvalidArgument)
 		}
 		if asked != 1 {
@@ -106,7 +107,7 @@ func TestReplayOfASettledEffectIsAnsweredBeforeApproval(t *testing.T) {
 			own.IdempotencyKey = foreign.IdempotencyKey
 			before, callsBefore := asked, h.calls
 			_, err := execute(own)
-			if class, _ := CodeOf(err); class != ResultInvalidArgument {
+			if class, _ := fault.CodeOf[ResultClass](err); class != ResultInvalidArgument {
 				t.Fatalf("Execute = %v, want %s", err, ResultInvalidArgument)
 			}
 			if asked != before || h.calls != callsBefore {
@@ -133,7 +134,7 @@ func TestEffectRequestMayLetTheJournalAllocateItsSequence(t *testing.T) {
 			tc.mutate(request)
 			err := validateEffectRequest(request)
 			if tc.wantFail {
-				if class, _ := CodeOf(err); class != ResultInvalidArgument {
+				if class, _ := fault.CodeOf[ResultClass](err); class != ResultInvalidArgument {
 					t.Fatalf("validateEffectRequest = %v, want %s", err, ResultInvalidArgument)
 				}
 				return

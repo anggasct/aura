@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -38,15 +39,15 @@ func TestExecutorForwardsTheTaintFlagToTheBroker(t *testing.T) {
 		}
 	}
 	_, err = executor.Execute(t.Context(), request("unreachable", true))
-	if class, _ := toolbroker.CodeOf(err); class != toolbroker.ResultUntrustedInputNoApprover || decisions != 0 {
+	if class, _ := fault.CodeOf[toolbroker.ResultClass](err); class != toolbroker.ResultUntrustedInputNoApprover || decisions != 0 {
 		t.Fatalf("tainted on an unreachable session: %v, decisions %d", err, decisions)
 	}
 	_, err = executor.Execute(t.Context(), request("reachable", true))
-	if class, _ := toolbroker.CodeOf(err); class != toolbroker.ResultApprovalRequired || decisions != 1 {
+	if class, _ := fault.CodeOf[toolbroker.ResultClass](err); class != toolbroker.ResultApprovalRequired || decisions != 1 {
 		t.Fatalf("tainted on a reachable session: %v, decisions %d, want a rejected prompt", err, decisions)
 	}
 	_, err = executor.Execute(t.Context(), request("unreachable", false))
-	if class, _ := toolbroker.CodeOf(err); class == toolbroker.ResultUntrustedInputNoApprover || decisions != 1 {
+	if class, _ := fault.CodeOf[toolbroker.ResultClass](err); class == toolbroker.ResultUntrustedInputNoApprover || decisions != 1 {
 		t.Fatalf("untainted call: %v, decisions %d, want no taint denial and no prompt", err, decisions)
 	}
 }

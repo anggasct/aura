@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type staticResolver map[string][]net.IP
@@ -63,7 +65,7 @@ func TestValidateRejectsPrivateDestinations(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.raw, func(t *testing.T) {
 			_, err := Validate(ctx, tc.raw, resolver)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+			if !fault.HasCode(err, ErrorCodeEgressDenied) {
 				t.Fatalf("Validate(%q) = %v, want egress_denied", tc.raw, err)
 			}
 		})
@@ -83,7 +85,7 @@ func TestValidateRejectsUnixSocketAndEmptyHost(t *testing.T) {
 	resolver := staticResolver{}
 	for _, raw := range []string{"https:///var/run/x.sock", "unix:///var/run/x.sock", "https://"} {
 		_, err := Validate(ctx, raw, resolver)
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+		if !fault.HasCode(err, ErrorCodeEgressDenied) {
 			t.Fatalf("Validate(%q) = %v, want egress_denied", raw, err)
 		}
 	}
@@ -161,7 +163,7 @@ func TestPinnedDialerDeniesPrivateResolution(t *testing.T) {
 		_ = conn.Close()
 		t.Fatal("expected dial to be denied, got a connection")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+	if !fault.HasCode(err, ErrorCodeEgressDenied) {
 		t.Fatalf("dial error = %v, want egress_denied", err)
 	}
 }
@@ -183,7 +185,7 @@ func TestClientRejectsInvalidInitialRequest(t *testing.T) {
 				t.Fatalf("new request: %v", err)
 			}
 			resp, err := client.Do(req)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+			if !fault.HasCode(err, ErrorCodeEgressDenied) {
 				if resp != nil {
 					_ = resp.Body.Close()
 				}
@@ -205,7 +207,7 @@ func TestNewClientRejectsCrossOriginRedirect(t *testing.T) {
 	}
 	first, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://public.example/start", http.NoBody)
 	err = client.CheckRedirect(req, []*http.Request{first})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+	if !fault.HasCode(err, ErrorCodeEgressDenied) {
 		t.Fatalf("CheckRedirect(cross-origin) = %v, want egress_denied", err)
 	}
 	if !strings.Contains(err.Error(), "cross-origin") {
@@ -239,7 +241,7 @@ func TestNewClientRejectsRedirectToPrivate(t *testing.T) {
 		t.Fatalf("new request: %v", err)
 	}
 	err = client.CheckRedirect(req, []*http.Request{{URL: req.URL}})
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+	if !fault.HasCode(err, ErrorCodeEgressDenied) {
 		t.Fatalf("CheckRedirect = %v, want egress_denied for metadata redirect", err)
 	}
 
@@ -267,7 +269,7 @@ func TestValidateRequiresHTTPS(t *testing.T) {
 	}
 
 	_, err := Validate(context.Background(), "http://public.example/v1", resolver)
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || code != ErrorCodeEgressDenied {
 		t.Fatalf("Validate(http) = %v, want egress_denied", err)
 	}
@@ -312,7 +314,7 @@ func TestAPIClientAllowsQueriesButStillValidatesTheHost(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied || reached != 0 {
+			if !fault.HasCode(err, ErrorCodeEgressDenied) || reached != 0 {
 				t.Fatalf("RoundTrip(%q) = %v, reached %d, want egress_denied", tc.raw, err, reached)
 			}
 		})
@@ -402,7 +404,7 @@ func TestValidateLiteralDestinationRejectsNonPublicLiteralsAndNames(t *testing.T
 				t.Fatalf("ValidateLiteralDestination(%q) = %v, want ok=%v", tc.raw, err, tc.ok)
 			}
 			if err != nil {
-				if code, coded := CodeOf(err); !coded || code != ErrorCodeEgressDenied {
+				if !fault.HasCode(err, ErrorCodeEgressDenied) {
 					t.Fatalf("error = %v, want egress_denied", err)
 				}
 			}
@@ -417,7 +419,7 @@ func TestNewLoopbackClientRejectsNonLoopbackAuthorities(t *testing.T) {
 			if client != nil {
 				t.Fatalf("NewLoopbackClient(%q) returned a client", authority)
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+			if !fault.HasCode(err, ErrorCodeEgressDenied) {
 				t.Fatalf("NewLoopbackClient(%q) = %v, want egress_denied", authority, err)
 			}
 		})
@@ -466,7 +468,7 @@ func TestLoopbackClientDialsOnlyItsPinnedAddress(t *testing.T) {
 		if response != nil {
 			_ = response.Body.Close()
 		}
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeEgressDenied {
+		if !fault.HasCode(err, ErrorCodeEgressDenied) {
 			t.Fatalf("Do(%q) = %v, want egress_denied", other, err)
 		}
 	}

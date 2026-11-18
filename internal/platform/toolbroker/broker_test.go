@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -50,8 +51,8 @@ func TestBrokerRejectsUnknownArgumentsBeforeAdapter(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	_, err = broker.Execute(context.Background(), brokerRequest("read_file", `{"path":"/tmp/file","extra":true}`, "workspace-read"))
-	if class, ok := CodeOf(err); !ok || class != ResultInvalidArgument {
-		t.Fatalf("CodeOf(%v) = %q, %v; want invalid_argument", err, class, ok)
+	if !fault.HasCode(err, ResultInvalidArgument) {
+		t.Fatalf("error = %v, want code %s", err, ResultInvalidArgument)
 	}
 	if calls != 0 {
 		t.Fatalf("adapter calls = %d, want 0", calls)
@@ -138,7 +139,7 @@ func TestBrokerBindsExactApprovalAndReturnsUntrustedResult(t *testing.T) {
 }
 
 func classOf(err error) ResultClass {
-	class, _ := CodeOf(err)
+	class, _ := fault.CodeOf[ResultClass](err)
 	return class
 }
 

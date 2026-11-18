@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
@@ -284,8 +285,8 @@ func TestAdaptersRefuseACredentialThatIsNotConfigured(t *testing.T) {
 	}
 	assertRefused := func(t *testing.T, err error, detail string) {
 		t.Helper()
-		var coded *toolbroker.Error
-		if !errors.As(err, &coded) || coded.Class != toolbroker.ResultInvalidArgument || coded.Detail != detail {
+		var coded *fault.Error[toolbroker.ResultClass]
+		if !errors.As(err, &coded) || coded.Code != toolbroker.ResultInvalidArgument || coded.Detail != detail {
 			t.Errorf("err = %v, want invalid_argument %q", err, detail)
 		}
 	}
@@ -352,8 +353,8 @@ func TestMergeSendsTheExpectedHead(t *testing.T) {
 	}
 	status.Store(http.StatusConflict)
 	_, err := MergeAdapter(options)(t.Context(), toolRequest(t, string(arguments(head))), approval.Constraints{})
-	var coded *toolbroker.Error
-	if !errors.As(err, &coded) || coded.Class != toolbroker.ResultInvalidArgument || coded.Detail != headMoved || strings.Contains(err.Error(), head) {
+	var coded *fault.Error[toolbroker.ResultClass]
+	if !errors.As(err, &coded) || coded.Code != toolbroker.ResultInvalidArgument || coded.Detail != headMoved || strings.Contains(err.Error(), head) {
 		t.Fatalf("409 error = %v, want invalid_argument %q without the sha", err, headMoved)
 	}
 	validate := Definitions()[1].Validate

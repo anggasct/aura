@@ -300,8 +300,8 @@ func TestRegisteredToolsRefuseAnUnconfiguredCredentialBeforeApproval(t *testing.
 	assertRefusedBeforeApproval := func(credential string, wantAsked, wantRequests int32) {
 		t.Helper()
 		err := execute(credential)
-		var coded *toolbroker.Error
-		if !errors.As(err, &coded) || coded.Class != toolbroker.ResultInvalidArgument || coded.Detail != "credential is not a configured github credential" {
+		var coded *fault.Error[toolbroker.ResultClass]
+		if !errors.As(err, &coded) || coded.Code != toolbroker.ResultInvalidArgument || coded.Detail != "credential is not a configured github credential" {
 			t.Errorf("credential %q err = %v, want invalid_argument not a configured github credential", credential, err)
 		}
 		if asked.Load() != wantAsked || requests.Load() != wantRequests {
@@ -418,8 +418,8 @@ func TestRegisterRefusesMissingEmptyOrRepeatedCredentials(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			registrar := &recordingRegistrar{}
 			err := Register(registrar, tc.options)
-			var coded *toolbroker.Error
-			if !errors.As(err, &coded) || coded.Class != toolbroker.ResultInvalidArgument {
+			var coded *fault.Error[toolbroker.ResultClass]
+			if !errors.As(err, &coded) || coded.Code != toolbroker.ResultInvalidArgument {
 				t.Fatalf("err = %v, want an invalid_argument error", err)
 			}
 			if len(registrar.registered) != 0 {
@@ -466,8 +466,8 @@ func TestApprovalCardShowsTheTargetFirstAndRefusesWhatDoesNotFit(t *testing.T) {
 		return err
 	}
 	err = execute(ToolComment, `{"repo":"org/repo","number":7,"credential_name":"ci","body":"`+strings.Repeat("b", 2048)+`"}`)
-	var coded *toolbroker.Error
-	if !errors.As(err, &coded) || coded.Class != toolbroker.ResultApprovalDisplayTooLarge {
+	var coded *fault.Error[toolbroker.ResultClass]
+	if !errors.As(err, &coded) || coded.Code != toolbroker.ResultApprovalDisplayTooLarge {
 		t.Fatalf("long body error = %v, want approval_display_too_large", err)
 	}
 	if len(prompts) != 0 || requests.Load() != 0 || journalSize(t, executor) != 0 {
