@@ -16,6 +16,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -285,15 +286,19 @@ func (r *durableTurnRig) startLife(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite.NewSessionStore: %v", err)
 	}
-	eng, err := runtimeengine.NewEngine(&runtimeengine.Config{
-		MaxActiveTurns:  4,
-		MaxPendingTurns: 16,
-		TurnTimeout:     time.Minute,
-		Durable:         &runtimeengine.DurableConfig{Sessions: sessionStore, Runtime: rt},
-		LiveEvents:      turn.NewEventBus(nil),
-	}, r.events, store.NewDedupeStore(r.db), executor, slog.New(slog.DiscardHandler))
+	limits := engineLimits(4, 16)
+	limits.TurnTimeout = configkit.Duration(time.Minute)
+	eng, err := runtimeengine.New(&runtimeengine.Deps{
+		Events:     r.events,
+		Dedupe:     store.NewDedupeStore(r.db),
+		Executor:   executor,
+		Logger:     slog.New(slog.DiscardHandler),
+		Config:     limits,
+		Durable:    &runtimeengine.DurableConfig{Sessions: sessionStore, Runtime: rt},
+		LiveEvents: turn.NewEventBus(nil),
+	})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	hostCtx, cancelHost := context.WithCancel(context.WithoutCancel(t.Context()))
 	hostDone := make(chan error, 1)

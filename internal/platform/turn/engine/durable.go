@@ -645,7 +645,7 @@ func (e *Engine) turnDeadline(ctx context.Context, inv durable.Invocation, req *
 	if !req.Deadline.IsZero() {
 		return req.Deadline, nil
 	}
-	return record.StartedAt.Add(e.cfg.TurnTimeout), nil
+	return record.StartedAt.Add(time.Duration(e.cfg.TurnTimeout)), nil
 }
 
 func (e *Engine) closeCancelledPresence(ctx context.Context, req *turn.TurnRequest) {
@@ -800,15 +800,15 @@ const deliveryAction = "delivery"
 const postTurnAction = "post-turn"
 
 func (e *Engine) journalPostTurn(ctx context.Context, scope *durable.TurnScope, done *endedTurn) error {
-	if e.cfg.PostTurnHook == nil && e.cfg.CountTurn == nil {
+	if e.deps.PostTurnHook == nil && e.deps.CountTurn == nil {
 		return nil
 	}
 	ran := false
 	_, err := scope.Invocation().RunAction(ctx, postTurnAction, func(ctx context.Context) ([]byte, error) {
 		ran = true
-		if e.cfg.PostTurnHook != nil {
+		if e.deps.PostTurnHook != nil {
 			hookCtx := context.WithoutCancel(ctx)
-			if hookErr := e.cfg.PostTurnHook(hookCtx, done.req, done.events); hookErr != nil {
+			if hookErr := e.deps.PostTurnHook(hookCtx, done.req, done.events); hookErr != nil {
 				e.logger.ErrorContext(hookCtx, "post-turn hook failed", "error", hookErr, "turn_id", done.req.TurnID)
 			}
 		}
@@ -817,8 +817,8 @@ func (e *Engine) journalPostTurn(ctx context.Context, scope *durable.TurnScope, 
 	if err != nil {
 		return codedError(turn.ErrorCodeStorageUnavailable, "failed to journal the post-turn work", err)
 	}
-	if ran && e.cfg.CountTurn != nil {
-		e.cfg.CountTurn(context.WithoutCancel(ctx), done.req)
+	if ran && e.deps.CountTurn != nil {
+		e.deps.CountTurn(context.WithoutCancel(ctx), done.req)
 	}
 	return nil
 }

@@ -94,7 +94,7 @@ func TestConcurrentSubmitsStartInAcceptedOrder(t *testing.T) {
 			t.Parallel()
 			gate := make(chan struct{})
 			executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate}})
-			engine, db, events := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+			engine, db, events := newTestRuntime(t, Deps{Config: testLimits(4, 16)}, executor)
 			session := sampleSession("conv-1")
 			mustCreateSession(t, db, session)
 

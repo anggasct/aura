@@ -17,7 +17,7 @@ func TestTurnEventsCarryAgentID(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 			{Kind: turn.EventKindMessageCompleted},
 		})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 8, DefaultAgentID: "main"}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 8), DefaultAgentID: "main"}, executor)
 		mustCreateSession(t, db, "session-agent")
 
 		events, err := collect(t, engine, sampleRequest("session-agent", "turn-agent"))
@@ -38,7 +38,7 @@ func TestTurnEventsCarryAgentID(t *testing.T) {
 
 		requested := sampleRequest("session-agent", "turn-agent-explicit")
 		requested.AgentID = "reviewer"
-		engine2, db2, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 8, DefaultAgentID: "main"}, executor)
+		engine2, db2, _ := newTestRuntime(t, Deps{Config: testLimits(2, 8), DefaultAgentID: "main"}, executor)
 		mustCreateSession(t, db2, "session-agent")
 		if _, err := collect(t, engine2, requested); err != nil {
 			t.Fatalf("Run explicit: %v", err)

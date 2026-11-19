@@ -121,13 +121,17 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	rig.engine, err = runtimeengine.NewEngine(&runtimeengine.Config{
+	rig.engine, err = runtimeengine.New(&runtimeengine.Deps{
+		Events:         events,
+		Dedupe:         store.NewDedupeStore(db),
+		Executor:       executor,
+		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
 		Personas:       registryPersonas{registry: registry},
 		LiveEvents:     liveEvents,
-	}, events, store.NewDedupeStore(db), executor, nil)
+	})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), emailTestWait)

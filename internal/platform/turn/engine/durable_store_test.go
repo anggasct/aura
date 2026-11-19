@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -89,9 +90,9 @@ func (s *hookedSessionStore) ActiveTurns(ctx context.Context) ([]runtimesessions
 	return around(list)
 }
 
-func newDurableLiveTestRuntime(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *hookedSessionStore, *sql.DB) {
+func newDurableLiveTestRuntime(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *hookedSessionStore, *sql.DB) {
 	t.Helper()
-	engine, db, _ := newTestRuntime(t, cfg, executor)
+	engine, db, _ := newTestRuntime(t, deps, executor)
 	sessions := newHookedSessionStore(t, db)
 	backend := durabletest.NewFake()
 	engine.sessionStore = sessions
@@ -108,7 +109,7 @@ const (
 
 type durableHostRig struct {
 	t        *testing.T
-	cfg      Config
+	cfg      Deps
 	db       *sql.DB
 	sessions *hookedSessionStore
 	runtime  *sqlite.Runtime
@@ -135,20 +136,20 @@ func openTestDatabase(t *testing.T) *sql.DB {
 	return db
 }
 
-func newDurableHostRig(t *testing.T, cfg Config, executor TurnExecutor) *durableHostRig {
+func newDurableHostRig(t *testing.T, deps Deps, executor TurnExecutor) *durableHostRig {
 	t.Helper()
 	db := openTestDatabase(t)
-	rig := &durableHostRig{t: t, cfg: cfg, db: db, sessions: newHookedSessionStore(t, db)}
+	rig := &durableHostRig{t: t, cfg: deps, db: db, sessions: newHookedSessionStore(t, db)}
 	rig.build(executor)
 	return rig
 }
 
 const shortHostTTL = time.Second
 
-func newShortLeaseHostRig(t *testing.T, cfg Config, executor TurnExecutor) *durableHostRig {
+func newShortLeaseHostRig(t *testing.T, deps Deps, executor TurnExecutor) *durableHostRig {
 	t.Helper()
 	db := openTestDatabase(t)
-	rig := &durableHostRig{t: t, cfg: cfg, db: db, sessions: newHookedSessionStore(t, db), hostTTL: shortHostTTL}
+	rig := &durableHostRig{t: t, cfg: deps, db: db, sessions: newHookedSessionStore(t, db), hostTTL: shortHostTTL}
 	rig.build(executor)
 	return rig
 }
@@ -159,11 +160,13 @@ func (r *durableHostRig) build(executor TurnExecutor) {
 	if err != nil {
 		r.t.Fatalf("sqlite.New: %v", err)
 	}
-	cfg := r.cfg
-	cfg.Durable = &DurableConfig{Sessions: r.sessions, Runtime: rt}
-	engine, err := NewEngine(&cfg, store.NewEventStore(r.db), store.NewDedupeStore(r.db), executor, slog.New(slog.DiscardHandler))
+	deps := r.cfg
+	deps.Durable = &DurableConfig{Sessions: r.sessions, Runtime: rt}
+	deps.Events, deps.Dedupe, deps.Executor = store.NewEventStore(r.db), store.NewDedupeStore(r.db), executor
+	deps.Logger = slog.New(slog.DiscardHandler)
+	engine, err := New(&deps)
 	if err != nil {
-		r.t.Fatalf("NewEngine: %v", err)
+		r.t.Fatalf("New: %v", err)
 	}
 	engine.statusPoll = hostRigPoll
 	r.runtime = rt
@@ -226,9 +229,9 @@ func TestNewEngineRefusesADurableConfigWithoutAStoreOrARuntime(t *testing.T) {
 	}
 	for name, durableCfg := range configs {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewEngine(&Config{Durable: durableCfg}, store.NewEventStore(db), store.NewDedupeStore(db), turntest.NewFakeExecutor(nil), nil)
+			_, err := New(&Deps{Events: store.NewEventStore(db), Dedupe: store.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: Default(), Durable: durableCfg})
 			if !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
-				t.Fatalf("NewEngine err = %v, want invalid_argument", err)
+				t.Fatalf("New err = %v, want invalid_argument", err)
 			}
 		})
 	}
@@ -236,7 +239,7 @@ func TestNewEngineRefusesADurableConfigWithoutAStoreOrARuntime(t *testing.T) {
 
 func TestDurableAdmissionRefusesAUsedTurnIDAsInvalidArgument(t *testing.T) {
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")})
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 16}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(2, 16)}, executor)
 	mustCreateSession(t, rig.db, "session-a")
 	rig.startHost()
 
@@ -253,5 +256,26 @@ func TestDurableAdmissionRefusesAUsedTurnIDAsInvalidArgument(t *testing.T) {
 	}
 	if got := executor.StartCount(); got != 1 {
 		t.Fatalf("executor starts = %d, want 1: the refused turn must not start a run", got)
+	}
+}
+
+func TestNewRefusesZeroLimits(t *testing.T) {
+	cases := map[string]func(*Config){
+		"max active turns":    func(c *Config) { c.MaxActiveTurns = 0 },
+		"max pending turns":   func(c *Config) { c.MaxPendingTurns = 0 },
+		"turn timeout":        func(c *Config) { c.TurnTimeout = 0 },
+		"shutdown timeout":    func(c *Config) { c.ShutdownTimeout = 0 },
+		"run retention floor": func(c *Config) { c.RunRetention = configkit.Duration(MinRunRetention - time.Second) },
+	}
+	db := openTestDatabase(t)
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := Default()
+			mutate(&cfg)
+			_, err := New(&Deps{Events: store.NewEventStore(db), Dedupe: store.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: cfg})
+			if !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
+				t.Fatalf("New err = %v, want invalid_argument", err)
+			}
+		})
 	}
 }

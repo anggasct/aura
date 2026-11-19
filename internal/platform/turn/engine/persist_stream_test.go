@@ -70,9 +70,9 @@ func newRefusingTestRuntime(t *testing.T, executor TurnExecutor, refusedKind str
 	t.Cleanup(func() { _ = db.Close() })
 	events := store.NewEventStore(db)
 	dedupe := store.NewDedupeStore(db)
-	engine, err := NewEngine(&Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, &refusingEventStore{EventStore: events, kind: refusedKind}, dedupe, executor, nil)
+	engine, err := New(&Deps{Events: &refusingEventStore{EventStore: events, kind: refusedKind}, Dedupe: dedupe, Executor: executor, Config: testLimits(4, 16)})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	if live {
 		backend := durabletest.NewFake()
@@ -134,7 +134,7 @@ func TestFailedEventWriteIsNeverStreamed(t *testing.T) {
 
 func TestRunStreamMatchesTheStoredTurn(t *testing.T) {
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(4, 16)}, executor)
 	mustCreateSession(t, db, "session-entry")
 
 	streamed, err := collect(t, engine, sampleRequest("session-entry", "turn-entry"))

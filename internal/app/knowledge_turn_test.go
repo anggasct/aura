@@ -155,14 +155,17 @@ agents:
 	if err != nil {
 		t.Fatalf("memory.NewService: %v", err)
 	}
-	rig.engine, err = runtimeengine.NewEngine(&runtimeengine.Config{
-		MaxActiveTurns: 2, MaxPendingTurns: 4,
+	rig.engine, err = runtimeengine.New(&runtimeengine.Deps{
+		Events:       events,
+		Dedupe:       store.NewDedupeStore(db),
+		Executor:     executor,
+		Config:       engineLimits(2, 4),
 		Personas:     registryPersonas{registry: personaRegistry(t, path)},
 		PostTurnHook: buildMemoryHook(memoryService, nil, nil, nil),
 		LiveEvents:   turn.NewEventBus(nil),
-	}, events, store.NewDedupeStore(db), executor, nil)
+	})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	if err := sessions.Create(t.Context(), &store.Session{ID: "sess_kb", OwnerID: principal.OwnerID, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("create session: %v", err)

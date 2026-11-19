@@ -67,7 +67,7 @@ func (h *Host) Shutdown(ctx context.Context) error {
 		close(adaptersDone)
 	}()
 
-	grace := h.runtime.cfg.ShutdownTimeout
+	grace := time.Duration(h.runtime.cfg.ShutdownTimeout)
 	if deadline, ok := ctx.Deadline(); ok {
 		if remaining := time.Until(deadline); remaining < grace {
 			grace = remaining

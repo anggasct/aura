@@ -18,10 +18,10 @@ type SkillRenderer interface {
 type skillActivationRender func(ctx context.Context, req *turn.TurnRequest) ([]byte, error)
 
 func (e *Engine) renderSkillActivation(ctx context.Context, req *turn.TurnRequest) ([]byte, error) {
-	if e.cfg.Skills == nil {
+	if e.deps.Skills == nil {
 		return nil, codedError(turn.ErrorCodeSkillUnavailable, "skill activation is not configured", nil)
 	}
-	caveat, body, err := e.cfg.Skills.RenderSkill(ctx, req.SessionID, req.Skill)
+	caveat, body, err := e.deps.Skills.RenderSkill(ctx, req.SessionID, req.Skill)
 	if err != nil {
 		if code, ok := skills.CodeOf(err); ok && code == skills.ErrorCodeSkillUnavailable {
 			e.logger.WarnContext(ctx, "skill activation unavailable", "component", "skills", "skill_id", req.Skill.SkillID, "turn_id", req.TurnID, "error", err)

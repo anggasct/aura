@@ -273,7 +273,7 @@ func engineKnows(engine *Engine, turnID string) bool {
 func TestRecoverTurnsStartsAGrantedTurnWithoutARun(t *testing.T) {
 	executor := newHoldingExecutor()
 	gate := executor.hold("turn-1")
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 16}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(2, 16)}, executor)
 	mustCreateSession(t, rig.db, "session-a")
 	rig.startHost()
 	admitThroughStore(t, rig.sessions, sampleRequest("session-a", "turn-1"))
@@ -305,7 +305,7 @@ func resumeHeldTurnAfterRestart(t *testing.T) *restartedTurn {
 	t.Helper()
 	first := newHoldingExecutor()
 	first.hold("turn-1")
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, first)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, first)
 	mustCreateSession(t, rig.db, "session-a")
 	rig.startHost()
 	admitThroughStore(t, rig.sessions, sampleRequest("session-a", "turn-1"))
@@ -371,7 +371,7 @@ func TestRecoverTurnsAttachesRunningTurnsPastTheGate(t *testing.T) {
 	executor := newHoldingExecutor()
 	executor.hold("turn-a")
 	executor.hold("turn-b")
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 16, ShutdownTimeout: 200 * time.Millisecond}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(1, 16).withShutdownTimeout(200 * time.Millisecond)}, executor)
 	for _, session := range []string{"session-a", "session-b"} {
 		mustCreateSession(t, rig.db, session)
 	}
@@ -456,7 +456,7 @@ func TestRecoverTurnsEndsATurnWhoseRunEndedWithoutATerminalEvent(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			executor := newHoldingExecutor()
-			rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+			rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 			mustCreateSession(t, rig.db, "session-a")
 			ended := sampleRequest("session-a", "turn-1")
 			admitThroughStore(t, rig.sessions, ended)
@@ -491,7 +491,7 @@ func TestRecoverTurnsEndsATurnWhoseRunEndedWithoutATerminalEvent(t *testing.T) {
 func TestRecoverTurnsGrantsAKnownTurnTheStoreMadeActive(t *testing.T) {
 	executor := newHoldingExecutor()
 	gate := executor.hold("turn-0")
-	engine, sessions, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	engine, sessions, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(4, 16)}, executor)
 	engine.statusPoll = hostRigPoll
 	mustCreateSession(t, db, "session-a")
 
@@ -530,13 +530,13 @@ func TestRecoverTurnsGrantsAKnownTurnTheStoreMadeActive(t *testing.T) {
 }
 
 func TestRecoverTurnsIsANoOpWithoutADurableStoreAndAfterShutdown(t *testing.T) {
-	plain, _, _ := newTestRuntime(t, Config{}, turntest.NewFakeExecutor(nil))
+	plain, _, _ := newTestRuntime(t, Deps{Config: Default()}, turntest.NewFakeExecutor(nil))
 	if err := plain.RecoverTurns(t.Context()); err != nil {
 		t.Fatalf("RecoverTurns without a durable store: %v", err)
 	}
 
 	executor := newHoldingExecutor()
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 	mustCreateSession(t, rig.db, "session-a")
 	rig.startHost()
 	if err := rig.engine.Shutdown(t.Context()); err != nil {
@@ -559,7 +559,7 @@ func TestRecoverTurnsIsANoOpWithoutADurableStoreAndAfterShutdown(t *testing.T) {
 
 func TestRecoverTurnsReportsWhatItCouldNotStage(t *testing.T) {
 	executor := newHoldingExecutor()
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 	for _, session := range []string{"session-a", "session-b"} {
 		mustCreateSession(t, rig.db, session)
 	}
@@ -625,7 +625,7 @@ func TestTurnRunIsRefusedWhenItsSessionNoLongerHoldsIt(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			executor := newHoldingExecutor()
-			rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+			rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 			mustCreateSession(t, rig.db, "session-a")
 			req := sampleRequest("session-a", "turn-1")
 			admitThroughStore(t, rig.sessions, req)
@@ -654,7 +654,7 @@ func TestTurnRunWithATerminalEventOnlyReleases(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			executor := newHoldingExecutor()
-			rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+			rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 			mustCreateSession(t, rig.db, "session-a")
 			done := sampleRequest("session-a", "turn-1")
 			admitThroughStore(t, rig.sessions, done)
@@ -712,7 +712,7 @@ func (v *gateViolations) list() []string {
 func TestQueuedTurnStartsThroughTheGate(t *testing.T) {
 	executor := newHoldingExecutor()
 	gate := executor.hold("turn-a1")
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 16}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(1, 16)}, executor)
 	rig.engine.statusPoll = 200 * time.Millisecond
 	sessionOf := map[string]string{"turn-a1": "session-a", "turn-a2": "session-a", "turn-b1": "session-b"}
 	violations := &gateViolations{}
@@ -753,7 +753,7 @@ func TestQueuedTurnStartsThroughTheGate(t *testing.T) {
 func TestPendingCountIsNotConsumedByTurnsTheEngineStaged(t *testing.T) {
 	executor := newHoldingExecutor()
 	gate := executor.hold("turn-0")
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 	var mu sync.Mutex
 	var seen []int
 	executor.setOnEnter(func(string, int) {
@@ -795,7 +795,7 @@ func TestTurnGrantedBeforeItIsStagedReachesItsCallerOnADurableRuntime(t *testing
 			{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate},
 			{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)},
 		})
-		engine, sessions, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		engine, sessions, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(4, 16)}, executor)
 		mustCreateSession(t, db, "session-a")
 		sessions.hooks(func(s *hookedSessionStore) {
 			s.afterAdmit = func(turnID string) {
@@ -823,7 +823,7 @@ func TestTurnGrantedBeforeItIsStagedReachesItsCallerOnADurableRuntime(t *testing
 func TestRepeatedReleaseKeepsTheSessionKnown(t *testing.T) {
 	executor := newHoldingExecutor()
 	executor.hold("turn-a")
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 16, ShutdownTimeout: 200 * time.Millisecond}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(1, 16).withShutdownTimeout(200 * time.Millisecond)}, executor)
 	for _, session := range []string{"session-a", "session-b"} {
 		mustCreateSession(t, rig.db, session)
 	}
@@ -852,7 +852,7 @@ func TestRepeatedReleaseKeepsTheSessionKnown(t *testing.T) {
 
 func TestTurnAdmittedDuringShutdownLeavesNoRow(t *testing.T) {
 	executor := newHoldingExecutor()
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 	mustCreateSession(t, rig.db, "session-a")
 	rig.startHost()
 	shutdown := make(chan error, 1)
@@ -901,7 +901,7 @@ func TestShutdownCancelsTheQueuedTurnsOfAnEarlierProcess(t *testing.T) {
 	t.Run("turns an earlier process admitted", func(t *testing.T) {
 		executor := newHoldingExecutor()
 		gate := executor.hold("turn-1")
-		rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
+		rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16).withShutdownTimeout(5 * time.Second)}, executor)
 		mustCreateSession(t, rig.db, "session-a")
 		rig.startHost()
 		admitThroughStore(t, rig.sessions, sampleRequest("session-a", "turn-1"))
@@ -933,7 +933,7 @@ func TestShutdownCancelsTheQueuedTurnsOfAnEarlierProcess(t *testing.T) {
 	t.Run("a turn the engine queued", func(t *testing.T) {
 		executor := newHoldingExecutor()
 		gate := executor.hold("turn-1")
-		rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, ShutdownTimeout: 5 * time.Second}, executor)
+		rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16).withShutdownTimeout(5 * time.Second)}, executor)
 		mustCreateSession(t, rig.db, "session-a")
 		rig.startHost()
 		first := callTurn(context.WithoutCancel(t.Context()), rig.engine, sampleRequest("session-a", "turn-1"))
@@ -960,7 +960,7 @@ func TestTurnTheEngineAdoptedOutlivesTheCallThatAdoptedIt(t *testing.T) {
 	t.Run("recovery call", func(t *testing.T) {
 		executor := newHoldingExecutor()
 		gate := executor.hold("turn-1")
-		rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 		mustCreateSession(t, rig.db, "session-a")
 		rig.startHost()
 		admitThroughStore(t, rig.sessions, sampleRequest("session-a", "turn-1"))
@@ -980,7 +980,7 @@ func TestTurnTheEngineAdoptedOutlivesTheCallThatAdoptedIt(t *testing.T) {
 		executor := newHoldingExecutor()
 		before := executor.hold("turn-0")
 		gate := executor.hold("turn-1")
-		rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+		rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 		mustCreateSession(t, rig.db, "session-a")
 		rig.startHost()
 		ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
@@ -1002,7 +1002,7 @@ func TestTurnTheEngineAdoptedOutlivesTheCallThatAdoptedIt(t *testing.T) {
 func TestTurnCancelledWhileQueuedEndsCancelled(t *testing.T) {
 	executor := newHoldingExecutor()
 	gate := executor.hold("turn-0")
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 	mustCreateSession(t, rig.db, "session-a")
 	rig.startHost()
 
@@ -1037,7 +1037,7 @@ func TestTurnCancelledWhileQueuedEndsCancelled(t *testing.T) {
 
 func TestCancelAfterTheRunCompletedKeepsTheOneTerminalEvent(t *testing.T) {
 	executor := newHoldingExecutor()
-	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 	engine.statusPoll = time.Hour
 	mustCreateSession(t, db, "session-a")
 
@@ -1070,7 +1070,7 @@ func runUntilCompleted(ctx context.Context, engine *Engine, req *turn.TurnReques
 }
 
 func TestSubmitterLeavingAfterTheTerminalEventDoesNotCancelTheRun(t *testing.T) {
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, newHoldingExecutor())
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, newHoldingExecutor())
 	mustCreateSession(t, rig.db, "session-a")
 	releasing, proceed := make(chan struct{}), make(chan struct{})
 	var handlerReleased atomic.Bool
@@ -1125,7 +1125,7 @@ func (d *budgetedTurnEvents) ListTurnEvents(ctx context.Context, sessionID, turn
 
 func TestEndedTurnWhoseEventsCannotBeReadStaysActiveUntilTheNextRecovery(t *testing.T) {
 	executor := newHoldingExecutor()
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, executor)
 	events := &budgetedTurnEvents{DedupeStore: rig.engine.dedupe}
 	rig.engine.dedupe = events
 	mustCreateSession(t, rig.db, "session-a")

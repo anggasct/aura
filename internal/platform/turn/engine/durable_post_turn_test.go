@@ -83,9 +83,9 @@ func channelPostTurnRequest(turnID string) *turn.TurnRequest {
 }
 
 func TestDurableTurnRecordsItsPostTurnWork(t *testing.T) {
-	run := func(t *testing.T, cfg Config) (*durableHostRig, *lockedBuffer) {
+	run := func(t *testing.T, cfg Deps) (*durableHostRig, *lockedBuffer) {
 		t.Helper()
-		cfg.MaxActiveTurns, cfg.MaxPendingTurns = 4, 16
+		cfg.Config = testLimits(4, 16)
 		cfg.Channels = []runtimechannelhost.ChannelPort{&presenceCapture{}}
 		rig := newDurableHostRig(t, cfg, turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")}))
 		logs := &lockedBuffer{}
@@ -97,7 +97,7 @@ func TestDurableTurnRecordsItsPostTurnWork(t *testing.T) {
 	}
 	t.Run("a completed turn", func(t *testing.T) {
 		hook, counter := &recordingHook{}, &recordingCounter{}
-		rig, _ := run(t, Config{PostTurnHook: hook.fn, CountTurn: counter.fn})
+		rig, _ := run(t, Deps{PostTurnHook: hook.fn, CountTurn: counter.fn})
 		requireCalls(t, hook, counter, 1, 1)
 		if !slices.Equal(hook.counts, []int{1}) {
 			t.Errorf("events passed to the hook = %v, want the turn's one event", hook.counts)
@@ -109,7 +109,7 @@ func TestDurableTurnRecordsItsPostTurnWork(t *testing.T) {
 	})
 	t.Run("a hook that fails", func(t *testing.T) {
 		hook, counter := &recordingHook{err: errors.New("boom hook")}, &recordingCounter{}
-		rig, logs := run(t, Config{PostTurnHook: hook.fn, CountTurn: counter.fn})
+		rig, logs := run(t, Deps{PostTurnHook: hook.fn, CountTurn: counter.fn})
 		requireCalls(t, hook, counter, 1, 1)
 		requirePostTurnRecord(t, rig.db, "turn-1")
 		if got := strings.Count(logs.String(), "post-turn hook failed"); got != 1 {
@@ -117,7 +117,7 @@ func TestDurableTurnRecordsItsPostTurnWork(t *testing.T) {
 		}
 	})
 	t.Run("an engine without post-turn work", func(t *testing.T) {
-		rig, _ := run(t, Config{})
+		rig, _ := run(t, Deps{})
 		if got := postTurnRecordsOf(t, rig.db, "turn-1"); len(got) != 0 {
 			t.Fatalf("post-turn records = %v, want none", got)
 		}
@@ -135,7 +135,7 @@ func (a *crashAtPresenceEnd) PresenceEnded(ctx context.Context, turnID string) e
 }
 
 type twoLives struct {
-	cfg      Config
+	cfg      Deps
 	adapter  runtimechannelhost.ChannelPort
 	presence *presenceCapture
 	crash    *crashAfterDelivery
@@ -145,7 +145,7 @@ type twoLives struct {
 func (l *twoLives) run(t *testing.T) *durableHostRig {
 	t.Helper()
 	db := l.crash.db
-	l.cfg.MaxActiveTurns, l.cfg.MaxPendingTurns = 4, 16
+	l.cfg.Config = testLimits(4, 16)
 	l.cfg.Channels = []runtimechannelhost.ChannelPort{l.adapter}
 	rig := &durableHostRig{t: t, cfg: l.cfg, db: db, sessions: newHookedSessionStore(t, db)}
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello once")})
@@ -179,7 +179,7 @@ func TestReplayedTurnDoesNotRepeatItsPostTurnWork(t *testing.T) {
 	t.Run("a crash after the record", func(t *testing.T) {
 		lives, crash := newCrashingLives(t)
 		hook, counter := &recordingHook{}, &recordingCounter{}
-		lives.cfg = Config{PostTurnHook: hook.fn, CountTurn: counter.fn}
+		lives.cfg = Deps{PostTurnHook: hook.fn, CountTurn: counter.fn}
 		lives.adapter = &crashAtPresenceEnd{presenceCapture: lives.presence, crash: crash}
 		rig := lives.run(t)
 		if got := terminalRecordOf(t, rig.db, "turn-1"); got.kind != turn.EventKindTurnCompleted {
@@ -191,7 +191,7 @@ func TestReplayedTurnDoesNotRepeatItsPostTurnWork(t *testing.T) {
 	t.Run("a crash inside the hook", func(t *testing.T) {
 		lives, crash := newCrashingLives(t)
 		hook, counter := &recordingHook{}, &recordingCounter{}
-		lives.cfg = Config{
+		lives.cfg = Deps{
 			PostTurnHook: func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
 				_ = hook.fn(ctx, req, events)
 				return crash.hook(ctx, req, events)
@@ -224,13 +224,13 @@ func (h *handingHook) fn(ctx context.Context, req *turn.TurnRequest, events []st
 }
 
 func TestCancelledDurableTurnDoesItsPostTurnWork(t *testing.T) {
-	start := func(t *testing.T, cfg Config) (rig *durableHostRig, presence *presenceCapture, outcome <-chan turnOutcome, logs *lockedBuffer) {
+	start := func(t *testing.T, cfg Deps) (rig *durableHostRig, presence *presenceCapture, outcome <-chan turnOutcome, logs *lockedBuffer) {
 		t.Helper()
 		gate := make(chan struct{})
 		t.Cleanup(func() { close(gate) })
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("partial answer"), {Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
 		presence = &presenceCapture{}
-		cfg.MaxActiveTurns, cfg.MaxPendingTurns = 4, 16
+		cfg.Config = testLimits(4, 16)
 		cfg.Channels = []runtimechannelhost.ChannelPort{presence}
 		rig = newDurableHostRig(t, cfg, executor)
 		logs = &lockedBuffer{}
@@ -250,7 +250,7 @@ func TestCancelledDurableTurnDoesItsPostTurnWork(t *testing.T) {
 	}
 	t.Run("a cancelled turn", func(t *testing.T) {
 		hook, counter := &recordingHook{}, &recordingCounter{}
-		rig, presence, outcome, _ := start(t, Config{PostTurnHook: hook.fn, CountTurn: counter.fn})
+		rig, presence, outcome, _ := start(t, Deps{PostTurnHook: hook.fn, CountTurn: counter.fn})
 		cancel(t, rig)
 		awaitTerminal(t, outcome, turn.EventKindTurnCancelled)
 		requireCalls(t, hook, counter, 1, 1)
@@ -265,7 +265,7 @@ func TestCancelledDurableTurnDoesItsPostTurnWork(t *testing.T) {
 	t.Run("a cancelled turn whose record is fenced", func(t *testing.T) {
 		counter := &recordingCounter{}
 		hook := &handingHook{crash: &crashAfterDelivery{crashed: make(chan struct{})}}
-		rig, _, outcome, logs := start(t, Config{PostTurnHook: hook.fn, CountTurn: counter.fn})
+		rig, _, outcome, logs := start(t, Deps{PostTurnHook: hook.fn, CountTurn: counter.fn})
 		hook.crash.db = rig.db
 		cancel(t, rig)
 		awaitTerminal(t, outcome, turn.EventKindTurnCancelled)
@@ -285,7 +285,7 @@ func TestCancelledDurableTurnDoesItsPostTurnWork(t *testing.T) {
 func TestPreemptedDurableTurnDoesItsPostTurnWorkOnce(t *testing.T) {
 	cases := []struct {
 		name    string
-		rig     func(*testing.T, Config, TurnExecutor) *durableHostRig
+		rig     func(*testing.T, Deps, TurnExecutor) *durableHostRig
 		preempt func(*testing.T, *durableHostRig, TurnExecutor)
 	}{
 		{
@@ -311,7 +311,7 @@ func TestPreemptedDurableTurnDoesItsPostTurnWorkOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			hook, counter := &recordingHook{}, &recordingCounter{}
 			executor := newTwoInvocationExecutor()
-			rig := tc.rig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, PostTurnHook: hook.fn, CountTurn: counter.fn, Channels: []runtimechannelhost.ChannelPort{&presenceCapture{}}}, executor)
+			rig := tc.rig(t, Deps{Config: testLimits(4, 16), PostTurnHook: hook.fn, CountTurn: counter.fn, Channels: []runtimechannelhost.ChannelPort{&presenceCapture{}}}, executor)
 			mustCreateSession(t, rig.db, "channel:333")
 			rig.startHost()
 			_ = callTurn(context.WithoutCancel(t.Context()), rig.engine, channelPostTurnRequest("turn-1"))
@@ -335,9 +335,8 @@ func TestTurnIsCountedOnceAfterItsPostTurnHook(t *testing.T) {
 		t.Helper()
 		var mu sync.Mutex
 		var order []string
-		engine, db, _ := newTestRuntime(t, Config{
-			MaxActiveTurns:  2,
-			MaxPendingTurns: 4,
+		engine, db, _ := newTestRuntime(t, Deps{
+			Config: testLimits(2, 4),
 			PostTurnHook: func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
 				mu.Lock()
 				defer mu.Unlock()

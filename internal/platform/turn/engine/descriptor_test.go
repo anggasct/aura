@@ -126,7 +126,7 @@ func TestTurnDescriptorCarriesEveryRequestField(t *testing.T) {
 
 func TestDurableTurnExecutesWithTheCallersContext(t *testing.T) {
 	executor := &recordingExecutor{inner: turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})}
-	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, executor)
+	engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(4, 16)}, executor)
 	mustCreateSession(t, db, "session-context")
 	req := sampleRequest("session-context", "turn-context")
 	req.UntrustedContext = callersContext()

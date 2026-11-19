@@ -100,25 +100,6 @@ func validateSyncRemote(raw string) error {
 	return nil
 }
 
-func ValidateRuntime(runtime Runtime) error {
-	if runtime.MaxActiveTurns <= 0 {
-		return configkit.Invalid("runtime.max_active_turns", "must be positive")
-	}
-	if runtime.MaxPendingTurns < runtime.MaxActiveTurns {
-		return configkit.Invalid("runtime.max_pending_turns", "must be at least runtime.max_active_turns")
-	}
-	if runtime.TurnTimeout <= 0 {
-		return configkit.Invalid("runtime.turn_timeout", "must be positive")
-	}
-	if runtime.ShutdownTimeout <= 0 {
-		return configkit.Invalid("runtime.shutdown_timeout", "must be positive")
-	}
-	if time.Duration(runtime.RunRetention) < principal.MinRetention {
-		return configkit.Invalid("runtime.run_retention", "must be at least 24h")
-	}
-	return nil
-}
-
 func ValidateWorkflows(workflows *Workflows) error {
 	if workflows == nil {
 		return nil

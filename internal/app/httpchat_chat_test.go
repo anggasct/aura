@@ -176,12 +176,16 @@ func newHTTPChatHarnessWithModel(t *testing.T, turnsPerMinute string, llm adkmod
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
+	engine, err := runtimeengine.New(&runtimeengine.Deps{
+		Events:         events,
+		Dedupe:         store.NewDedupeStore(db),
+		Executor:       executor,
+		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
 		Personas:       registryPersonas{registry: registry},
-	}, events, store.NewDedupeStore(db), executor, nil)
+	})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	server, _, err := buildHTTPChat(cfg, db, engine, registry, nil, nil, slog.New(slog.DiscardHandler))
 	if err != nil {

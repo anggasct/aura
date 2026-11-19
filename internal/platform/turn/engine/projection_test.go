@@ -42,7 +42,7 @@ func hookMessageStep(text string) turntest.FakeStep {
 func TestPostTurnHookRunsAfterCommit(t *testing.T) {
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{hookMessageStep("hello from model")})
 	hook := &recordingHook{}
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn}, executor)
+	engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), PostTurnHook: hook.fn}, executor)
 	mustCreateSession(t, db, "session-a")
 	req := &turn.TurnRequest{
 		TurnID: "turn-hook-1", SessionID: "session-a", PrincipalID: "user-1",
@@ -72,7 +72,7 @@ func TestPostTurnHookRunsAfterCommit(t *testing.T) {
 func TestPostTurnHookFailureDoesNotFailTurn(t *testing.T) {
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{hookMessageStep("hello from model")})
 	hook := &recordingHook{err: errors.New("projection boom")}
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn}, executor)
+	engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), PostTurnHook: hook.fn}, executor)
 	mustCreateSession(t, db, "session-a")
 	req := &turn.TurnRequest{
 		TurnID: "turn-hook-2", SessionID: "session-a", PrincipalID: "user-1",

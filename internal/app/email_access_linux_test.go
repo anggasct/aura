@@ -267,14 +267,18 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
+	engine, err := runtimeengine.New(&runtimeengine.Deps{
+		Events:         events,
+		Dedupe:         store.NewDedupeStore(db),
+		Executor:       executor,
+		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
 		Personas:       registryPersonas{registry: registry},
 		LiveEvents:     liveEvents,
 		Channels:       []runtimechannelhost.ChannelPort{adapter},
-	}, events, store.NewDedupeStore(db), executor, nil)
+	})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	host, err := runtimeengine.NewHost(engine, slog.New(slog.DiscardHandler))
 	if err != nil {

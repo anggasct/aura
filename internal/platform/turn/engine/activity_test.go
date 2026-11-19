@@ -11,13 +11,13 @@ import (
 )
 
 func TestCancelActiveCancelsOnlyTheRunningTurn(t *testing.T) {
-	modes := map[string]func(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *sql.DB){
-		"in-process": func(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *sql.DB) {
-			engine, db, _ := newTestRuntime(t, cfg, executor)
+	modes := map[string]func(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *sql.DB){
+		"in-process": func(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *sql.DB) {
+			engine, db, _ := newTestRuntime(t, deps, executor)
 			return engine, db
 		},
-		"durable": func(t *testing.T, cfg Config, executor TurnExecutor) (*Engine, *sql.DB) {
-			engine, _, db := newDurableLiveTestRuntime(t, cfg, executor)
+		"durable": func(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *sql.DB) {
+			engine, _, db := newDurableLiveTestRuntime(t, deps, executor)
 			return engine, db
 		},
 	}
@@ -25,7 +25,7 @@ func TestCancelActiveCancelsOnlyTheRunningTurn(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			gate := make(chan struct{})
 			executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Block: gate}})
-			engine, db := build(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 8}, executor)
+			engine, db := build(t, Deps{Config: testLimits(4, 8)}, executor)
 			mustCreateSession(t, db, "session-a")
 			mustCreateSession(t, db, "session-b")
 
@@ -85,7 +85,7 @@ func TestCancelActiveCancelsOnlyTheRunningTurn(t *testing.T) {
 
 func TestCancelActiveAfterCompletionReportsNoActiveTurn(t *testing.T) {
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)}})
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 	mustCreateSession(t, db, "session-a")
 	if _, err := collect(t, engine, sampleRequest("session-a", "turn-done")); err != nil {
 		t.Fatalf("run: %v", err)

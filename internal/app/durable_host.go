@@ -6,14 +6,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/fault"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 )
 
 const maxDurableStopGrace = 10 * time.Second
 
-func durableHostOptions(db *sql.DB, logger *slog.Logger, runtimeCfg config.Runtime) *sqlite.Options {
+func durableHostOptions(db *sql.DB, logger *slog.Logger, runtimeCfg runtimeengine.Config) *sqlite.Options {
 	grace := max(time.Millisecond, min(maxDurableStopGrace, time.Duration(runtimeCfg.ShutdownTimeout)/2))
 	return &sqlite.Options{DB: db, Logger: logger, StopGrace: grace}
 }

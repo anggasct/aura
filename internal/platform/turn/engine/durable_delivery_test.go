@@ -67,7 +67,7 @@ func deliveryRecordsOf(t *testing.T, db *sql.DB, turnID string) []string {
 
 func startDurableChannelTurn(t *testing.T, adapter runtimechannelhost.ChannelPort, executor TurnExecutor) (rig *durableHostRig, outcome <-chan turnOutcome) {
 	t.Helper()
-	rig = newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
+	rig = newDurableHostRig(t, Deps{Config: testLimits(4, 16), Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
 	mustCreateSession(t, rig.db, "channel:333")
 	rig.startHost()
 	outcome = callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", "turn-1"))
@@ -196,10 +196,13 @@ func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 	})
 	t.Run("a delivery whose record another host fences is decided again by the next execution", func(t *testing.T) {
 		var hooks atomic.Int32
-		cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 16, PostTurnHook: func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
-			hooks.Add(1)
-			return nil
-		}}
+		cfg := Deps{
+			Config: testLimits(4, 16),
+			PostTurnHook: func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
+				hooks.Add(1)
+				return nil
+			},
+		}
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")})
 		db := openTestDatabase(t)
 		adapter := &fencedDeliveryAdapter{db: db, handed: make(chan struct{})}
@@ -312,7 +315,7 @@ func replayAfterDelivery(t *testing.T, adapter runtimechannelhost.ChannelPort, l
 	t.Helper()
 	db := openTestDatabase(t)
 	crash := &crashAfterDelivery{db: db, crashed: make(chan struct{})}
-	cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 16, PostTurnHook: crash.hook, Channels: []runtimechannelhost.ChannelPort{adapter}}
+	cfg := Deps{Config: testLimits(4, 16), PostTurnHook: crash.hook, Channels: []runtimechannelhost.ChannelPort{adapter}}
 	rig := &durableHostRig{t: t, cfg: cfg, db: db, sessions: newHookedSessionStore(t, db)}
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello once")})
 	rig.build(executor)
