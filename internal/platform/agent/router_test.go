@@ -13,13 +13,10 @@ func routerFixture(t *testing.T, bindings []config.Binding) *Router {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	discord := &config.Discord{Accounts: []config.DiscordAccount{
-		{Name: "home", Persona: DefaultID},
-		{Name: "kuma"},
-	}}
-	router, err := NewRouter(registry, &config.Channels{
-		Discord:  *discord,
-		Telegram: config.Telegram{Accounts: []config.TelegramAccount{{Name: "pocket", Persona: "researcher"}}},
+	router, err := NewRouter(registry, []ChannelAccount{
+		{Channel: config.BindingChannelDiscord, Name: "home", Persona: DefaultID, Field: "channels.discord.accounts[0]"},
+		{Channel: config.BindingChannelDiscord, Name: "kuma", Field: "channels.discord.accounts[1]"},
+		{Channel: config.BindingChannelTelegram, Name: "pocket", Persona: "researcher", Field: "channels.telegram.accounts[0]"},
 	}, bindings)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
@@ -107,34 +104,30 @@ func TestRouterRejectsUnregisteredPersonas(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	cases := map[string]struct {
-		discord  config.Discord
-		telegram config.Telegram
+		accounts []ChannelAccount
 		bindings []config.Binding
 	}{
 		"binding persona": {
-			discord:  config.Discord{Accounts: []config.DiscordAccount{{Name: "home"}}},
+			accounts: []ChannelAccount{{Channel: config.BindingChannelDiscord, Name: "home", Field: "channels.discord.accounts[0]"}},
 			bindings: []config.Binding{discordBinding("ghost", "home", config.Binding{ChannelID: "2"})},
 		},
 		"account default persona": {
-			discord: config.Discord{Accounts: []config.DiscordAccount{{Name: "home", Persona: "ghost"}}},
+			accounts: []ChannelAccount{{Channel: config.BindingChannelDiscord, Name: "home", Persona: "ghost", Field: "channels.discord.accounts[0]"}},
 		},
 		"telegram account default persona": {
-			telegram: config.Telegram{Accounts: []config.TelegramAccount{{Name: "pocket", Persona: "ghost"}}},
+			accounts: []ChannelAccount{{Channel: config.BindingChannelTelegram, Name: "pocket", Persona: "ghost", Field: "channels.telegram.accounts[0]"}},
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewRouter(registry, &config.Channels{Discord: tc.discord, Telegram: tc.telegram}, tc.bindings)
+			_, err := NewRouter(registry, tc.accounts, tc.bindings)
 			if !fault.HasCode(err, ErrorCodeBindingInvalid) {
 				t.Fatalf("NewRouter error = %v, want %s", err, ErrorCodeBindingInvalid)
 			}
 		})
 	}
-	if _, err := NewRouter(nil, &config.Channels{}, nil); err == nil {
+	if _, err := NewRouter(nil, nil, nil); err == nil {
 		t.Error("nil registry accepted")
-	}
-	if _, err := NewRouter(registry, nil, nil); err == nil {
-		t.Error("nil channels config accepted")
 	}
 }
 
@@ -229,15 +222,14 @@ func TestRouterEmailAccountRoutesToItsPersona(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	channels := &config.Channels{Email: config.Email{Accounts: []config.EmailAccount{
-		{Name: "work", Persona: DefaultID},
-		{Name: "ghost", Persona: "not-registered"},
-	}}}
-	if _, err := NewRouter(registry, channels, nil); err == nil {
+	accounts := []ChannelAccount{
+		{Channel: config.BindingChannelEmail, Name: "work", Persona: DefaultID, Field: "channels.email.accounts[0]"},
+		{Channel: config.BindingChannelEmail, Name: "ghost", Persona: "not-registered", Field: "channels.email.accounts[1]"},
+	}
+	if _, err := NewRouter(registry, accounts, nil); err == nil {
 		t.Fatal("NewRouter accepted an email account with an unregistered persona")
 	}
-	channels.Email.Accounts = channels.Email.Accounts[:1]
-	router, err := NewRouter(registry, channels, nil)
+	router, err := NewRouter(registry, accounts[:1], nil)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

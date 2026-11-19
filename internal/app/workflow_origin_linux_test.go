@@ -27,7 +27,7 @@ func TestWorkflowStartCarriesTheCallerTaint(t *testing.T) {
 			controller, runs, db := workflowToolFixture(t, "book_visit")
 			cfg := mustLoadConfig(t, writePersonaEvalConfig(t, "x", "web_search"))
 			approveAll := func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) { return true, nil }
-			executor, err := toolsbuiltin.New(cfg, db, t.TempDir(), capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, approveAll, nil,
+			executor, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, t.TempDir(), capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, approveAll, nil,
 				toolsbuiltin.WithApprovalReachable(func(string) bool { return true }))
 			if err != nil {
 				t.Fatalf("toolsbuiltin.New: %v", err)

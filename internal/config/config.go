@@ -856,6 +856,28 @@ func validProtocol(p string) bool {
 	return slices.Contains(protocolNames(), p)
 }
 
+func DefaultTools() *Tools {
+	return &Tools{
+		Workspace:            "/srv/aura/workspace",
+		MaxInlineResultBytes: 65536,
+		Exec: ToolExec{
+			Timeout:        configkit.Duration(30 * time.Second),
+			MaxStdoutBytes: 65536,
+			MaxStderrBytes: 65536,
+		},
+		Fetch: ToolFetch{
+			Timeout:         configkit.Duration(30 * time.Second),
+			MaxRedirects:    5,
+			MaxEncodedBytes: 2097152,
+			MaxDecodedBytes: 8388608,
+		},
+		WebSearch: ToolWebSearch{
+			Provider:   WebSearchProviderDuckDuckGo,
+			MaxResults: 5,
+		},
+	}
+}
+
 func Default() Config {
 	return Config{
 		Version: 1,
@@ -873,25 +895,7 @@ func Default() Config {
 			DefaultStepTimeout: configkit.Duration(15 * time.Minute),
 			Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
 		},
-		Tools: &Tools{
-			Workspace:            "/srv/aura/workspace",
-			MaxInlineResultBytes: 65536,
-			Exec: ToolExec{
-				Timeout:        configkit.Duration(30 * time.Second),
-				MaxStdoutBytes: 65536,
-				MaxStderrBytes: 65536,
-			},
-			Fetch: ToolFetch{
-				Timeout:         configkit.Duration(30 * time.Second),
-				MaxRedirects:    5,
-				MaxEncodedBytes: 2097152,
-				MaxDecodedBytes: 8388608,
-			},
-			WebSearch: ToolWebSearch{
-				Provider:   WebSearchProviderDuckDuckGo,
-				MaxResults: 5,
-			},
-		},
+		Tools: DefaultTools(),
 		Server: Server{
 			Host: "127.0.0.1",
 			Port: 8280,

@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -59,8 +60,8 @@ func WithLiveEvents(events effect.EventPublisher) Option {
 	}
 }
 
-func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capability.Report, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider, access toolbroker.AccessPolicy, opts ...Option) (*Executor, error) {
-	if cfg == nil || cfg.Tools == nil {
+func New(toolsCfg *config.Tools, artifactQuota configkit.ByteSize, db *sql.DB, artifactRoot string, capabilities capability.Report, logger *slog.Logger, observer toolbroker.Observer, decider toolbroker.ApprovalDecider, access toolbroker.AccessPolicy, opts ...Option) (*Executor, error) {
+	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")
 	}
 	if db == nil {
@@ -84,7 +85,7 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 	workflows := &workflowHolder{}
 	knowledge := &knowledgeHolder{}
 	code := &codeHolder{}
-	adapters, err := builtinAdapters(cfg.Tools, handoff, emails, workflows, knowledge, code)
+	adapters, err := builtinAdapters(toolsCfg, handoff, emails, workflows, knowledge, code)
 	if err != nil {
 		return nil, err
 	}
@@ -97,11 +98,11 @@ func New(cfg *config.Config, db *sql.DB, artifactRoot string, capabilities capab
 		return nil, err
 	}
 	host := capabilities.Active()
-	artifacts := store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))
+	artifacts := store.NewArtifactStore(db, artifactRoot, int64(artifactQuota))
 	brokerOptions := &toolbroker.Options{
 		Adapters:             adapters,
-		Secrets:              ConfiguredToolSecrets(cfg),
-		MaxInlineResultBytes: cfg.Tools.MaxInlineResultBytes,
+		Secrets:              ConfiguredToolSecrets(toolsCfg),
+		MaxInlineResultBytes: toolsCfg.MaxInlineResultBytes,
 		Artifacts:            artifacts,
 		Effects:              effects,
 		Observer:             observer,
@@ -239,11 +240,11 @@ func StepToolNames(personaTools []string) []string {
 	return slices.DeleteFunc(slices.Clone(personaTools), func(name string) bool { return orchestration[name] })
 }
 
-func ConfiguredToolSecrets(cfg *config.Config) []string {
-	if cfg == nil || cfg.Tools == nil {
+func ConfiguredToolSecrets(toolsCfg *config.Tools) []string {
+	if toolsCfg == nil {
 		return nil
 	}
-	value, err := cfg.Tools.WebSearch.CredentialRef.Reference().Resolve()
+	value, err := toolsCfg.WebSearch.CredentialRef.Reference().Resolve()
 	if err != nil || value == "" {
 		return nil
 	}

@@ -154,6 +154,14 @@ channels:
     accounts:
       - name: home
         bot_token_ref: env://DISCORD_HOME_TOKEN
+      - name: kuma
+        bot_token_ref: env://DISCORD_KUMA_TOKEN
+        persona: phantom
+  telegram:
+    accounts:
+      - name: pocket
+        bot_token_ref: env://TELEGRAM_POCKET_TOKEN
+        persona: specter
 bindings:
   - persona: ghost
     channel: discord
@@ -163,6 +171,15 @@ bindings:
 	_, err := runBindingsExplain(t, path, "--account", "home", "--channel-id", "123")
 	if err == nil || !strings.Contains(err.Error(), "binding_invalid") {
 		t.Fatalf("error = %v, want binding_invalid", err)
+	}
+	for _, want := range []string{
+		`channels.discord.accounts[1].persona "phantom" is not a registered persona`,
+		`channels.telegram.accounts[0].persona "specter" is not a registered persona`,
+		`bindings[0].persona "ghost" is not a registered persona`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to contain %q", err, want)
+		}
 	}
 	var usage *usageError
 	if errors.As(err, &usage) {

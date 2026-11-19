@@ -243,7 +243,7 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	router, err := auraagent.NewRouter(registry, &cfg.Channels, cfg.Bindings)
+	router, err := auraagent.NewRouter(registry, channelAccounts(&cfg.Channels), cfg.Bindings)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

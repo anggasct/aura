@@ -34,7 +34,7 @@ func newKBSearchRig(t *testing.T) *kbSearchRig {
 	if err != nil {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
-	builtin, err := toolsbuiltin.New(rig.cfg, rig.db, artifactRoot, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, nil, newAccessPolicy(registry, rig.db, nil))
+	builtin, err := toolsbuiltin.New(rig.cfg.Tools, rig.cfg.Storage.ArtifactQuota, rig.db, artifactRoot, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, nil, newAccessPolicy(registry, rig.db, nil))
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}

@@ -28,10 +28,9 @@ func TestTurnToolCallsLetTheJournalAllocateTheSequence(t *testing.T) {
 	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: session, OwnerID: principal.OwnerID}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	cfg := config.Default()
-	cfg.Tools.Workspace = t.TempDir()
-	cfg.Storage.Path = dataRoot
-	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil)
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = t.TempDir()
+	executor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

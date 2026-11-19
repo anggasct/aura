@@ -439,26 +439,24 @@ func TestBuildRouterWithRoutes_FallbackExecution(t *testing.T) {
 	}
 }
 
-func TestBuildRouterWithConfig_Validation(t *testing.T) {
-	cfg := &config.Config{
-		Models: config.Models{
-			Definitions: map[string]config.ModelDefinition{
-				"primary": {
-					Protocol: config.ProtocolOpenAIChatCompat,
-					Model:    "gpt-4o",
-					BaseURL:  "http://127.0.0.1:9999",
-				},
-			},
-		},
-		ModelRoutes: map[string]config.ModelRoute{
+func TestBuildRouterWithRoutes_Validation(t *testing.T) {
+	models := config.Models{
+		Definitions: map[string]config.ModelDefinition{
 			"primary": {
-				Candidates: []string{"nonexistent"},
+				Protocol: config.ProtocolOpenAIChatCompat,
+				Model:    "gpt-4o",
+				BaseURL:  "http://127.0.0.1:9999",
 			},
 		},
 	}
-	_, err := BuildRouterWithConfig(nil, cfg, nil)
+	routes := map[string]config.ModelRoute{
+		"primary": {
+			Candidates: []string{"nonexistent"},
+		},
+	}
+	_, err := BuildRouterWithRoutes(nil, models, routes, nil)
 	if err == nil {
-		t.Fatal("expected BuildRouterWithConfig to fail on unknown candidate")
+		t.Fatal("expected BuildRouterWithRoutes to fail on unknown candidate")
 	}
 }
 

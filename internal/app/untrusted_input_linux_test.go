@@ -108,7 +108,7 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 		return false, nil
 	}
 	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
-	builtin, err := toolsbuiltin.New(cfg, db, artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, rig.access, toolsbuiltin.WithApprovalReachable(rig.reachable), toolsbuiltin.WithLiveEvents(liveEvents))
+	builtin, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, rig.access, toolsbuiltin.WithApprovalReachable(rig.reachable), toolsbuiltin.WithLiveEvents(liveEvents))
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}

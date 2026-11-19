@@ -54,7 +54,7 @@ func newBindingsExplainCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			router, err := auraagent.NewRouter(registry, &result.Config.Channels, result.Config.Bindings)
+			router, err := auraagent.NewRouter(registry, channelAccounts(&result.Config.Channels), result.Config.Bindings)
 			if err != nil {
 				return err
 			}
@@ -154,4 +154,36 @@ func bindingLabel(scope *bindingScopeFlags, bindings []config.Binding, index int
 		}
 	}
 	return strings.Join(fields, " ")
+}
+
+func channelAccounts(channels *config.Channels) []auraagent.ChannelAccount {
+	accounts := make([]auraagent.ChannelAccount, 0, len(channels.Discord.Accounts)+len(channels.Telegram.Accounts)+len(channels.Email.Accounts))
+	for i := range channels.Discord.Accounts {
+		account := &channels.Discord.Accounts[i]
+		accounts = append(accounts, auraagent.ChannelAccount{
+			Channel: config.BindingChannelDiscord,
+			Name:    account.Name,
+			Persona: account.Persona,
+			Field:   fmt.Sprintf("channels.discord.accounts[%d]", i),
+		})
+	}
+	for i := range channels.Telegram.Accounts {
+		account := &channels.Telegram.Accounts[i]
+		accounts = append(accounts, auraagent.ChannelAccount{
+			Channel: config.BindingChannelTelegram,
+			Name:    account.Name,
+			Persona: account.Persona,
+			Field:   fmt.Sprintf("channels.telegram.accounts[%d]", i),
+		})
+	}
+	for i := range channels.Email.Accounts {
+		account := &channels.Email.Accounts[i]
+		accounts = append(accounts, auraagent.ChannelAccount{
+			Channel: config.BindingChannelEmail,
+			Name:    account.Name,
+			Persona: account.Persona,
+			Field:   fmt.Sprintf("channels.email.accounts[%d]", i),
+		})
+	}
+	return accounts
 }

@@ -19,10 +19,10 @@ func TestBuiltinToolExecutorFailsClosedWithoutLinux(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	cfg := config.Default()
-	cfg.Tools.Workspace = t.TempDir()
-	cfg.Storage.Path = t.TempDir()
-	_, err = New(&cfg, db, cfg.Storage.Path, capabilitytest.All(t), nil, nil, nil, nil)
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = t.TempDir()
+	dataRoot := t.TempDir()
+	_, err = New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("New succeeded on a platform without race-safe filesystem access")
 	}

@@ -99,7 +99,7 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
-					secrets := slices.Concat(toolsbuiltin.ConfiguredToolSecrets(result.Config), githubCredentialSecrets(result.Config))
+					secrets := slices.Concat(toolsbuiltin.ConfiguredToolSecrets(result.Config.Tools), githubCredentialSecrets(result.Config))
 					runID, err := approveStoredProposal(ctx, result.Config, app.interpreter, workflow.NewStore(app.db), args[0], secrets, time.Now())
 					if err != nil {
 						return err

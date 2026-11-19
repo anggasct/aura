@@ -21,9 +21,9 @@ import (
 )
 
 func TestWiringRegistersEveryBuiltinAdapter(t *testing.T) {
-	cfg := config.Default()
-	cfg.Tools.Workspace = t.TempDir()
-	adapters, err := builtinAdapters(cfg.Tools, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &knowledgeHolder{}, &codeHolder{})
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = t.TempDir()
+	adapters, err := builtinAdapters(toolsCfg, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &knowledgeHolder{}, &codeHolder{})
 	if err != nil {
 		t.Fatalf("builtinAdapters: %v", err)
 	}
@@ -51,11 +51,10 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	cfg := config.Default()
-	cfg.Tools.Workspace = workspace
-	cfg.Storage.Path = dataRoot
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = workspace
 	published := &countingPublisher{}
-	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
+	executor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 		return true, nil
 	}, nil, WithLiveEvents(published))
 	if err != nil {
@@ -105,10 +104,9 @@ func TestNewRefusesANilLiveEventsPublisher(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	cfg := config.Default()
-	cfg.Tools.Workspace = t.TempDir()
-	cfg.Storage.Path = dataRoot
-	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil, WithLiveEvents(nil))
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = t.TempDir()
+	executor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil, WithLiveEvents(nil))
 	if err == nil {
 		t.Fatal("New accepted a nil live events publisher")
 	}

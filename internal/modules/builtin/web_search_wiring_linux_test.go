@@ -8,30 +8,29 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
 func TestEveryConfiguredWebSearchProviderBuildsAnAdapter(t *testing.T) {
 	for _, provider := range config.WebSearchProviders() {
 		t.Run(provider, func(t *testing.T) {
-			cfg := config.Default()
-			cfg.Tools.Workspace = t.TempDir()
-			cfg.Tools.WebSearch = config.ToolWebSearch{
+			toolsCfg := config.DefaultTools()
+			toolsCfg.Workspace = t.TempDir()
+			toolsCfg.WebSearch = config.ToolWebSearch{
 				Provider:      provider,
 				CredentialRef: config.DefaultWebSearchCredentialRef(provider),
 				MaxResults:    5,
 			}
 			if provider == config.WebSearchProviderSearXNG {
-				cfg.Tools.WebSearch.Endpoint = "https://search.example.com/search"
+				toolsCfg.WebSearch.Endpoint = "https://search.example.com/search"
 			}
-			adapters, err := builtinAdapters(cfg.Tools, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &knowledgeHolder{}, &codeHolder{})
+			adapters, err := builtinAdapters(toolsCfg, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &knowledgeHolder{}, &codeHolder{})
 			if err != nil {
 				t.Fatalf("builtinAdapters: %v", err)
 			}
@@ -42,7 +41,7 @@ func TestEveryConfiguredWebSearchProviderBuildsAnAdapter(t *testing.T) {
 	}
 }
 
-func TestLoadedSearXNGConfigReachesALoopbackServerThroughTheExecutorAdapters(t *testing.T) {
+func TestSearXNGToolsConfigReachesALoopbackServerThroughTheExecutorAdapters(t *testing.T) {
 	t.Setenv("AURA_TEST_SEARXNG_TOKEN", "searxng-bearer-value")
 	var mu sync.Mutex
 	var seen *http.Request
@@ -53,17 +52,15 @@ func TestLoadedSearXNGConfigReachesALoopbackServerThroughTheExecutorAdapters(t *
 		_, _ = io.WriteString(w, `{"results":[{"title":"Go","url":"https://go.dev","content":"searxng-bearer-value"}]}`)
 	}))
 	defer server.Close()
-	workspace := t.TempDir()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	content := "version: 1\ntools:\n  workspace: " + workspace + "\n  web_search:\n    provider: searxng\n    endpoint: " + server.URL + "/search\n    credential_ref: env://AURA_TEST_SEARXNG_TOKEN\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = t.TempDir()
+	toolsCfg.WebSearch = config.ToolWebSearch{
+		Provider:      config.WebSearchProviderSearXNG,
+		Endpoint:      server.URL + "/search",
+		CredentialRef: secrettest.Ref("env://AURA_TEST_SEARXNG_TOKEN"),
+		MaxResults:    5,
 	}
-	loaded, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	adapters, err := builtinAdapters(loaded.Config.Tools, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &knowledgeHolder{}, &codeHolder{})
+	adapters, err := builtinAdapters(toolsCfg, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &knowledgeHolder{}, &codeHolder{})
 	if err != nil {
 		t.Fatalf("builtinAdapters: %v", err)
 	}
@@ -88,10 +85,10 @@ func TestLoadedSearXNGConfigReachesALoopbackServerThroughTheExecutorAdapters(t *
 }
 
 func TestExecutorRejectsASearchEndpointItCannotParse(t *testing.T) {
-	cfg := config.Default()
-	cfg.Tools.Workspace = t.TempDir()
-	cfg.Tools.WebSearch = config.ToolWebSearch{Provider: config.WebSearchProviderSearXNG, Endpoint: "http://localhost:8888/search", MaxResults: 5}
-	if _, err := builtinAdapters(cfg.Tools, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &knowledgeHolder{}, &codeHolder{}); err == nil {
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = t.TempDir()
+	toolsCfg.WebSearch = config.ToolWebSearch{Provider: config.WebSearchProviderSearXNG, Endpoint: "http://localhost:8888/search", MaxResults: 5}
+	if _, err := builtinAdapters(toolsCfg, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &knowledgeHolder{}, &codeHolder{}); err == nil {
 		t.Fatal("builtinAdapters accepted a loopback name endpoint")
 	}
 }

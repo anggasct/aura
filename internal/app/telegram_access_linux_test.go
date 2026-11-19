@@ -60,7 +60,7 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testi
 			if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: sessionID, OwnerID: "telegram:5", AgentID: auraagent.DefaultID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 				t.Fatalf("Create session: %v", err)
 			}
-			executor, err := toolsbuiltin.New(&cfg, db, t.TempDir(), capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, telegramOriginAccess{})
+			executor, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, t.TempDir(), capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, telegramOriginAccess{})
 			if err != nil {
 				t.Fatalf("toolsbuiltin.New: %v", err)
 			}
