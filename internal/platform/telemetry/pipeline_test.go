@@ -10,12 +10,11 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestPipelineNoneExporter(t *testing.T) {
-	p, err := NewPipeline(config.Telemetry{Exporter: "none"}, nil)
+	p, err := NewPipeline(Config{Exporter: "none"}, nil)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -33,7 +32,7 @@ func TestPipelineNoneExporter(t *testing.T) {
 }
 
 func TestPipelineEmptyExporterDefaultsToNone(t *testing.T) {
-	p, err := NewPipeline(config.Telemetry{}, nil)
+	p, err := NewPipeline(Config{}, nil)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -41,7 +40,7 @@ func TestPipelineEmptyExporterDefaultsToNone(t *testing.T) {
 }
 
 func TestPipelineInvalidExporter(t *testing.T) {
-	_, err := NewPipeline(config.Telemetry{Exporter: "kafka"}, nil)
+	_, err := NewPipeline(Config{Exporter: "kafka"}, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid exporter")
 	}
@@ -52,7 +51,7 @@ func TestPipelineInvalidExporter(t *testing.T) {
 }
 
 func TestPipelineStdoutExporter(t *testing.T) {
-	p, err := NewPipeline(config.Telemetry{Exporter: "stdout"}, nil)
+	p, err := NewPipeline(Config{Exporter: "stdout"}, nil)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}
@@ -107,7 +106,7 @@ func TestCountingExporterSuccessNoDrop(t *testing.T) {
 }
 
 func TestPipelineShutdownIdempotent(t *testing.T) {
-	p, err := NewPipeline(config.Telemetry{Exporter: "none"}, nil)
+	p, err := NewPipeline(Config{Exporter: "none"}, nil)
 	if err != nil {
 		t.Fatalf("NewPipeline: %v", err)
 	}

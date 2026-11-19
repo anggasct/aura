@@ -168,30 +168,6 @@ type Children struct {
 	Recovery           string             `json:"recovery"`
 }
 
-type VisionProviderLimits struct {
-	MaxImages       int    `json:"max_images,omitempty"`
-	MaxRequestBytes int64  `json:"max_request_bytes,omitempty"`
-	Detail          string `json:"detail,omitempty"`
-}
-
-type Vision struct {
-	Enabled              bool                            `json:"enabled"`
-	MaxEncodedBytes      int64                           `json:"max_encoded_bytes"`
-	MaxPixels            int64                           `json:"max_pixels"`
-	MaxDimension         int                             `json:"max_dimension"`
-	MaxImages            int                             `json:"max_images"`
-	MaxFrames            int                             `json:"max_frames"`
-	DecodeTimeout        configkit.Duration              `json:"decode_timeout"`
-	MaxDecodeConcurrency int                             `json:"max_decode_concurrency"`
-	MaxRequestBytes      int64                           `json:"max_request_bytes"`
-	StripMetadata        bool                            `json:"strip_metadata"`
-	OrientNormalize      bool                            `json:"orient_normalize"`
-	Detail               string                          `json:"detail"`
-	TransformVersion     string                          `json:"transform_version"`
-	MaxTransformMemory   configkit.ByteSize              `json:"max_transform_memory_bytes"`
-	Providers            map[string]VisionProviderLimits `json:"providers,omitempty"`
-}
-
 type Discord struct {
 	Enabled                  bool               `json:"enabled"`
 	Accounts                 []DiscordAccount   `json:"accounts"`
@@ -375,43 +351,12 @@ type Terminal struct {
 	PlainApproval       string             `json:"plain_approval"`
 }
 
-type Health struct {
-	Listen                    string             `json:"listen"`
-	CheckInterval             configkit.Duration `json:"check_interval"`
-	CheckTimeout              configkit.Duration `json:"check_timeout"`
-	DiskWarningPercent        int                `json:"disk_warning_percent"`
-	DiskCriticalPercent       int                `json:"disk_critical_percent"`
-	DiskCriticalFloorBytes    configkit.ByteSize `json:"disk_critical_floor_bytes"`
-	BackupMaxAge              configkit.Duration `json:"backup_max_age"`
-	RestoreVerificationMaxAge configkit.Duration `json:"restore_verification_max_age"`
-}
-
-type Usage struct {
-	Currency            string             `json:"currency"`
-	DailyBudgetMicros   int64              `json:"daily_budget_micros"`
-	MonthlyBudgetMicros int64              `json:"monthly_budget_micros"`
-	ReservationTTL      configkit.Duration `json:"reservation_ttl"`
-}
-
-type Telemetry struct {
-	Exporter      string             `json:"exporter"`
-	Endpoint      string             `json:"endpoint"`
-	CredentialRef secret.Ref         `json:"credential_ref"`
-	SampleRatio   float64            `json:"sample_ratio"`
-	QueueSize     int                `json:"queue_size"`
-	ExportTimeout configkit.Duration `json:"export_timeout"`
-}
-
 type Runtime struct {
 	MaxActiveTurns  int                `json:"max_active_turns"`
 	MaxPendingTurns int                `json:"max_pending_turns"`
 	TurnTimeout     configkit.Duration `json:"turn_timeout"`
 	ShutdownTimeout configkit.Duration `json:"shutdown_timeout"`
 	RunRetention    configkit.Duration `json:"run_retention"`
-}
-
-type Capabilities struct {
-	Enabled []string `json:"enabled"`
 }
 
 type Tools struct {
@@ -441,16 +386,6 @@ type ToolWebSearch struct {
 	CredentialRef secret.Ref `json:"credential_ref,omitzero"`
 	Endpoint      string     `json:"endpoint,omitempty"`
 	MaxResults    int        `json:"max_results"`
-}
-
-type Server struct {
-	Host string `json:"host"`
-	Port int    `json:"port"`
-}
-
-type Logging struct {
-	Level  string `json:"level"`
-	Format string `json:"format"`
 }
 
 type Storage struct {
@@ -851,10 +786,6 @@ func DefaultRuntime() Runtime {
 	}
 }
 
-func DefaultCapabilities() Capabilities {
-	return Capabilities{Enabled: []string{}}
-}
-
 func DefaultAgents() *Agents {
 	return &Agents{}
 }
@@ -864,20 +795,6 @@ func DefaultWorkflows() *Workflows {
 		MaxConcurrentSteps: 4,
 		DefaultStepTimeout: configkit.Duration(15 * time.Minute),
 		Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
-	}
-}
-
-func DefaultServer() Server {
-	return Server{
-		Host: "127.0.0.1",
-		Port: 8280,
-	}
-}
-
-func DefaultLogging() Logging {
-	return Logging{
-		Level:  "info",
-		Format: "text",
 	}
 }
 
@@ -897,37 +814,6 @@ func DefaultStorage() Storage {
 		ArtifactQuota:      configkit.ByteSize(5 << 30),
 		BackupInterval:     configkit.Duration(24 * time.Hour),
 		BackupRetention:    7,
-	}
-}
-
-func DefaultTelemetry() Telemetry {
-	return Telemetry{
-		Exporter:      "none",
-		SampleRatio:   0.10,
-		QueueSize:     2048,
-		ExportTimeout: configkit.Duration(5 * time.Second),
-	}
-}
-
-func DefaultUsage() Usage {
-	return Usage{
-		Currency:            "USD",
-		DailyBudgetMicros:   10000000,
-		MonthlyBudgetMicros: 200000000,
-		ReservationTTL:      configkit.Duration(time.Hour),
-	}
-}
-
-func DefaultHealth() Health {
-	return Health{
-		Listen:                    "127.0.0.1:8281",
-		CheckInterval:             configkit.Duration(60 * time.Second),
-		CheckTimeout:              configkit.Duration(5 * time.Second),
-		DiskWarningPercent:        15,
-		DiskCriticalPercent:       8,
-		DiskCriticalFloorBytes:    configkit.ByteSize(512 << 20),
-		BackupMaxAge:              configkit.Duration(24 * time.Hour),
-		RestoreVerificationMaxAge: configkit.Duration(30 * 24 * time.Hour),
 	}
 }
 
@@ -1046,26 +932,6 @@ func DefaultSync() *Sync {
 		GitBinary:          "/usr/bin/git",
 		SSHBinary:          "/usr/bin/ssh",
 		Include:            []string{"skills/**", "config-templates/**"},
-	}
-}
-
-func DefaultVision() *Vision {
-	return &Vision{
-		Enabled:              true,
-		MaxEncodedBytes:      20971520,
-		MaxPixels:            40000000,
-		MaxDimension:         8192,
-		MaxImages:            4,
-		MaxFrames:            1,
-		DecodeTimeout:        configkit.Duration(5 * time.Second),
-		MaxDecodeConcurrency: 2,
-		MaxRequestBytes:      33554432,
-		StripMetadata:        true,
-		OrientNormalize:      true,
-		Detail:               "auto",
-		TransformVersion:     "v1",
-		MaxTransformMemory:   configkit.ByteSize(268435456),
-		Providers:            map[string]VisionProviderLimits{},
 	}
 }
 

@@ -2,25 +2,32 @@ package config
 
 import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/logging"
+	"github.com/anggasct/aura/internal/platform/server"
+	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/usage"
+	"github.com/anggasct/aura/internal/platform/vision"
 )
 
 type Config struct {
 	Version      int                                `json:"version"`
 	Runtime      legacyconfig.Runtime               `json:"runtime"`
-	Capabilities legacyconfig.Capabilities          `json:"capabilities"`
+	Capabilities capability.Config                  `json:"capabilities"`
 	Tools        *legacyconfig.Tools                `json:"tools,omitempty"`
 	Agents       *legacyconfig.Agents               `json:"agents,omitempty"`
 	Workflows    *legacyconfig.Workflows            `json:"workflows,omitempty"`
 	MCP          *legacyconfig.MCP                  `json:"mcp,omitempty"`
 	Plugins      *legacyconfig.Plugins              `json:"plugins,omitempty"`
-	Server       legacyconfig.Server                `json:"server"`
-	Logging      legacyconfig.Logging               `json:"logging"`
+	Server       server.Config                      `json:"server"`
+	Logging      logging.Config                     `json:"logging"`
 	Models       legacyconfig.Models                `json:"models"`
 	ModelRoutes  map[string]legacyconfig.ModelRoute `json:"model_routes,omitempty"`
 	Storage      legacyconfig.Storage               `json:"storage"`
-	Telemetry    legacyconfig.Telemetry             `json:"telemetry"`
-	Usage        legacyconfig.Usage                 `json:"usage"`
-	Health       legacyconfig.Health                `json:"health"`
+	Telemetry    telemetry.Config                   `json:"telemetry"`
+	Usage        usage.Config                       `json:"usage"`
+	Health       health.Config                      `json:"health"`
 	Terminal     legacyconfig.Terminal              `json:"terminal"`
 	Webhook      legacyconfig.Webhook               `json:"webhook"`
 	Broadcast    legacyconfig.Broadcast             `json:"broadcast"`
@@ -33,7 +40,7 @@ type Config struct {
 	Children     *legacyconfig.Children             `json:"children,omitempty"`
 	Access       *legacyconfig.Access               `json:"access,omitempty"`
 	Sync         *legacyconfig.Sync                 `json:"sync,omitempty"`
-	Vision       *legacyconfig.Vision               `json:"vision,omitempty"`
+	Vision       *vision.Config                     `json:"vision,omitempty"`
 	Knowledge    *legacyconfig.Knowledge            `json:"knowledge,omitempty"`
 	Interpreter  legacyconfig.Interpreter           `json:"interpreter"`
 	Channels     legacyconfig.Channels              `json:"channels"`
@@ -41,20 +48,21 @@ type Config struct {
 }
 
 func Default() Config {
+	defaultVision := vision.Default()
 	return Config{
 		Version:      1,
 		Runtime:      legacyconfig.DefaultRuntime(),
-		Capabilities: legacyconfig.DefaultCapabilities(),
+		Capabilities: capability.Default(),
 		Agents:       legacyconfig.DefaultAgents(),
 		Workflows:    legacyconfig.DefaultWorkflows(),
 		Tools:        legacyconfig.DefaultTools(),
-		Server:       legacyconfig.DefaultServer(),
-		Logging:      legacyconfig.DefaultLogging(),
+		Server:       server.Default(),
+		Logging:      logging.Default(),
 		Models:       legacyconfig.DefaultModels(),
 		Storage:      legacyconfig.DefaultStorage(),
-		Telemetry:    legacyconfig.DefaultTelemetry(),
-		Usage:        legacyconfig.DefaultUsage(),
-		Health:       legacyconfig.DefaultHealth(),
+		Telemetry:    telemetry.Default(),
+		Usage:        usage.Default(),
+		Health:       health.Default(),
 		Terminal:     legacyconfig.DefaultTerminal(),
 		Webhook:      legacyconfig.DefaultWebhook(),
 		Channels:     legacyconfig.DefaultChannels(),
@@ -64,7 +72,7 @@ func Default() Config {
 		Interpreter:  legacyconfig.DefaultInterpreter(),
 		Skills:       legacyconfig.DefaultSkills(),
 		Sync:         legacyconfig.DefaultSync(),
-		Vision:       legacyconfig.DefaultVision(),
+		Vision:       &defaultVision,
 		Context:      legacyconfig.DefaultContext(),
 		Profile:      legacyconfig.DefaultProfile(),
 		Children:     legacyconfig.DefaultChildren(),

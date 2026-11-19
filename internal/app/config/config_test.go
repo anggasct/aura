@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding"
 	"flag"
 	"os"
 	"path/filepath"
@@ -247,12 +248,13 @@ var tagKeyPattern = regexp.MustCompile(`(?:^|\s)([A-Za-z0-9_]+):"`)
 
 func TestConfigFieldsCarryOneJSONTag(t *testing.T) {
 	seen := map[reflect.Type]bool{}
+	modulePrefix := strings.TrimSuffix(reflect.TypeFor[Config]().PkgPath(), "app/config")
 	var walk func(path string, typ reflect.Type)
 	walk = func(path string, typ reflect.Type) {
 		for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Map {
 			typ = typ.Elem()
 		}
-		if typ.Kind() != reflect.Struct || (typ.PkgPath() != reflect.TypeFor[Config]().PkgPath() && typ.PkgPath() != reflect.TypeFor[legacyconfig.Runtime]().PkgPath()) || seen[typ] {
+		if typ.Kind() != reflect.Struct || !strings.HasPrefix(typ.PkgPath(), modulePrefix) || reflect.PointerTo(typ).Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) || seen[typ] {
 			return
 		}
 		seen[typ] = true

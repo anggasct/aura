@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -73,35 +72,6 @@ func TestLoadHealthRejectsNonLoopbackListen(t *testing.T) {
 		if _, ok := codeOf(err); err == nil || !ok {
 			t.Errorf("Load(listen=%q) err = %v, want config_invalid", listen, err)
 		}
-	}
-}
-
-func TestValidateHealthBounds(t *testing.T) {
-	valid := Default().Health
-	cases := []struct {
-		name   string
-		mutate func(*legacyconfig.Health)
-	}{
-		{"interval zero", func(h *legacyconfig.Health) { h.CheckInterval = 0 }},
-		{"timeout exceeds interval", func(h *legacyconfig.Health) { h.CheckTimeout = valid.CheckInterval * 2 }},
-		{"warning percent zero", func(h *legacyconfig.Health) { h.DiskWarningPercent = 0 }},
-		{"critical above warning", func(h *legacyconfig.Health) { h.DiskCriticalPercent = valid.DiskWarningPercent }},
-		{"floor zero", func(h *legacyconfig.Health) { h.DiskCriticalFloorBytes = 0 }},
-		{"backup age zero", func(h *legacyconfig.Health) { h.BackupMaxAge = 0 }},
-		{"restore age negative", func(h *legacyconfig.Health) { h.RestoreVerificationMaxAge = -1 }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			healthCfg := valid
-			tc.mutate(&healthCfg)
-			err := legacyconfig.ValidateHealth(healthCfg)
-			if code, ok := codeOf(err); !ok || code != invalidCode {
-				t.Errorf("validateHealth err = %v, want config_invalid", err)
-			}
-		})
-	}
-	if err := legacyconfig.ValidateHealth(valid); err != nil {
-		t.Errorf("valid health config rejected: %v", err)
 	}
 }
 
