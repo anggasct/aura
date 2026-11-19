@@ -149,7 +149,7 @@ func loseHostLease(t *testing.T, db *sql.DB) {
 
 func startBlockedReplayTurn(t *testing.T, executor *replayingExecutor) (rig *durableHostRig, outcome <-chan turnOutcome) {
 	t.Helper()
-	cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 16, Skills: &stubSkillRenderer{body: "Do things."}}
+	cfg := Deps{Config: testLimits(4, 16), Skills: &stubSkillRenderer{body: "Do things."}}
 	rig = newShortLeaseHostRig(t, cfg, executor)
 	mustCreateSession(t, rig.db, "session-a")
 	rig.startHost()
@@ -245,7 +245,7 @@ func TestReplayThatFailsEarlyStillEndsTheTurn(t *testing.T) {
 }
 
 func TestDurableTurnTerminalEventHasAFixedID(t *testing.T) {
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, newHoldingExecutor())
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, newHoldingExecutor())
 	mustCreateSession(t, rig.db, "session-a")
 	rig.startHost()
 

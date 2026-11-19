@@ -68,7 +68,7 @@ func TestHostGatewayAdapterRunsWorkThroughSink(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
 		adapter := newFakeChannelAdapter("telegram")
 		adapter.acceptEnv = sampleEnvelope("conv-gw", "gw-msg-1")
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
 		mustCreateSession(t, db, sampleSession("conv-gw"))
 
 		host, err := NewHost(engine, nil)
@@ -102,7 +102,7 @@ func TestHostShutdownStopsAdapters(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
 		adapter := newFakeChannelAdapter("telegram")
-		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second, Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: Default().withShutdownTimeout(time.Second), Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		host, err := NewHost(engine, nil)
@@ -142,7 +142,7 @@ func TestHostShutdownDrainsAcceptedTurn(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`), Block: gate}})
 		adapter := newFakeChannelAdapter("telegram")
 		adapter.acceptEnv = sampleEnvelope("conv-drain", "drain-1")
-		engine, db, _ := newTestRuntime(t, Config{ShutdownTimeout: time.Second, Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: Default().withShutdownTimeout(time.Second), Channels: []runtimechannelhost.ChannelPort{adapter}}, executor)
 		mustCreateSession(t, db, sampleSession("conv-drain"))
 
 		host, err := NewHost(engine, nil)

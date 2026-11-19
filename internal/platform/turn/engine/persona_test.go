@@ -74,7 +74,7 @@ func TestAcceptStampsEnvelopePersonaAndFingerprint(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := &recordingExecutor{inner: turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})}
 		personas := stubPersonas{"main": personaFixture("main", "soul-main"), "kuma": personaFixture("kuma", "soul-kuma")}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, DefaultAgentID: "main", Personas: personas}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), DefaultAgentID: "main", Personas: personas}, executor)
 		env := sampleEnvelope("conv-1", "msg-1")
 		env.AgentID = "kuma"
 		env.ConversationID = "kuma/telegram/conv-1"
@@ -98,7 +98,7 @@ func TestAcceptStampsEnvelopePersonaAndFingerprint(t *testing.T) {
 func TestRunDefaultsPersonaAndRejectsUnknown(t *testing.T) {
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
 	personas := stubPersonas{"main": personaFixture("main", "soul-main")}
-	engine, db, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: personas}, executor)
+	engine, db, _ := newTestRuntime(t, Deps{Config: Default(), DefaultAgentID: "main", Personas: personas}, executor)
 	mustCreateSession(t, db, "session-a")
 
 	events, err := collect(t, engine, sampleRequest("session-a", "turn-default"))
@@ -137,7 +137,7 @@ func TestDurableDescriptorKeepsAcceptedPersona(t *testing.T) {
 		t.Fatalf("descriptor %s does not persist the fingerprint: %v", payload, err)
 	}
 
-	engine, _, _ := newTestRuntime(t, Config{DefaultAgentID: "main", Personas: stubPersonas{"kuma": personaFixture("kuma", "soul-v2")}}, turntest.NewFakeExecutor(nil))
+	engine, _, _ := newTestRuntime(t, Deps{Config: Default(), DefaultAgentID: "main", Personas: stubPersonas{"kuma": personaFixture("kuma", "soul-v2")}}, turntest.NewFakeExecutor(nil))
 	var stored runtimesessions.Descriptor
 	if err := json.Unmarshal(payload, &stored); err != nil {
 		t.Fatalf("unmarshal descriptor: %v", err)

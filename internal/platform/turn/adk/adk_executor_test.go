@@ -355,9 +355,9 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{LiveEvents: bus}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default(), LiveEvents: bus})
 	if err != nil {
-		t.Fatalf("runtimeengine.NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	mustCreateSession(t, db, "session-1")
 

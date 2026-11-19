@@ -91,7 +91,7 @@ func TestTerminalVerticalSlice(t *testing.T) {
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"hello from the slice"}]},"partial":false}`)},
 	})
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestTerminalReplayCompletedEventWins(t *testing.T) {
 		{Kind: turn.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"stream"}]}}`)},
 		{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"content":{"parts":[{"text":"durable answer"}]}}`)},
 	})
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

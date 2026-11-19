@@ -132,7 +132,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		validateVision(cfg.Vision),
 		legacyconfig.ValidateKnowledge(cfg.Knowledge),
 		legacyconfig.ValidateInterpreter(&cfg.Interpreter),
-		legacyconfig.ValidateRuntime(cfg.Runtime),
+		configkit.Under("runtime", cfg.Runtime.Validate()),
 		configkit.Under("server", cfg.Server.Validate()),
 		configkit.Under("logging", cfg.Logging.Validate()),
 		legacyconfig.ValidateStorage(cfg.Storage),

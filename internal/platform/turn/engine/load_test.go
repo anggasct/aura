@@ -20,8 +20,8 @@ func TestLoadBoundsUnderVolume(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindModelStarted, Block: gate, Payload: json.RawMessage(`{}`)}})
-		cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 8}
-		engine, db, _ := newTestRuntime(t, cfg, executor)
+		deps := Deps{Config: testLimits(4, 8)}
+		engine, db, _ := newTestRuntime(t, deps, executor)
 
 		const n = 50
 		for i := range n {
@@ -63,14 +63,14 @@ func TestLoadBoundsUnderVolume(t *testing.T) {
 			defer engine.mu.Unlock()
 			return engine.active, engine.pending
 		}
-		wantActive := min(accepted, cfg.MaxActiveTurns)
+		wantActive := min(accepted, deps.Config.MaxActiveTurns)
 		waitFor(t, func() bool { return executor.StartCount() == wantActive })
 		active, pending := counts()
-		if active > cfg.MaxActiveTurns {
-			t.Errorf("active = %d, exceeds max %d", active, cfg.MaxActiveTurns)
+		if active > deps.Config.MaxActiveTurns {
+			t.Errorf("active = %d, exceeds max %d", active, deps.Config.MaxActiveTurns)
 		}
-		if pending > cfg.MaxPendingTurns {
-			t.Errorf("pending = %d, exceeds max %d", pending, cfg.MaxPendingTurns)
+		if pending > deps.Config.MaxPendingTurns {
+			t.Errorf("pending = %d, exceeds max %d", pending, deps.Config.MaxPendingTurns)
 		}
 		if active+pending != accepted {
 			t.Errorf("active+pending = %d, want accepted %d", active+pending, accepted)
@@ -84,8 +84,8 @@ func TestLoadBoundsUnderVolume(t *testing.T) {
 func TestLoadNoLeakAfterAbandonedConsumers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindModelStarted), jsonStep(turn.EventKindMessageCompleted)})
-		cfg := Config{MaxActiveTurns: 4, MaxPendingTurns: 64}
-		engine, db, _ := newTestRuntime(t, cfg, executor)
+		deps := Deps{Config: testLimits(4, 64)}
+		engine, db, _ := newTestRuntime(t, deps, executor)
 
 		const n = 30
 		for i := range n {

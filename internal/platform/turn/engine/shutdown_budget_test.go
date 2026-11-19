@@ -59,7 +59,7 @@ const budgetTestTimeout = 30 * time.Second
 func observeShutdown(t *testing.T, c *shutdownCase) shutdownObservation {
 	t.Helper()
 	executor := newStopClockExecutor()
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 1, MaxPendingTurns: 4, ShutdownTimeout: budgetTestTimeout}, executor)
+	engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(1, 4).withShutdownTimeout(budgetTestTimeout)}, executor)
 	mustCreateSession(t, db, "session-a")
 	go func() {
 		_, _ = collect(t, engine, sampleRequest("session-a", "turn-0"))

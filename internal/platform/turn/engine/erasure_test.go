@@ -18,7 +18,7 @@ func durableRowsOf(t *testing.T, db *sql.DB, turnID string) (runs, actions int) 
 }
 
 func TestErasedPrincipalLeavesNoTurnRun(t *testing.T) {
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16}, newHoldingExecutor())
+	rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, newHoldingExecutor())
 	rig.startHost()
 	turns := []struct{ principal, session, turnID string }{
 		{principal: "discord:601", session: "lobby/discord:owner/dm:601", turnID: "turn-erased"},

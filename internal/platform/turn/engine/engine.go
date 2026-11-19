@@ -20,19 +20,20 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
-type Config struct {
-	MaxActiveTurns  int
-	MaxPendingTurns int
-	TurnTimeout     time.Duration
-	ShutdownTimeout time.Duration
-	DefaultAgentID  string
-	Personas        turn.Personas
-	Skills          SkillRenderer
-	Durable         *DurableConfig
-	PostTurnHook    func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
-	CountTurn       func(ctx context.Context, req *turn.TurnRequest)
-	LiveEvents      LiveEventSource
-	Channels        []runtimechannelhost.ChannelPort
+type Deps struct {
+	Events         EventStore
+	Dedupe         DedupeStore
+	Executor       TurnExecutor
+	Logger         *slog.Logger
+	Config         Config
+	DefaultAgentID string
+	Personas       turn.Personas
+	Skills         SkillRenderer
+	Durable        *DurableConfig
+	PostTurnHook   func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
+	CountTurn      func(ctx context.Context, req *turn.TurnRequest)
+	LiveEvents     LiveEventSource
+	Channels       []runtimechannelhost.ChannelPort
 }
 
 type LiveEventSource interface {
@@ -46,50 +47,13 @@ type DurableConfig struct {
 	Runtime  durable.Runtime
 }
 
-func (c *Config) applyDefaults() {
-	if c.MaxActiveTurns <= 0 {
-		c.MaxActiveTurns = 4
-	}
-	if c.MaxPendingTurns <= 0 {
-		c.MaxPendingTurns = 64
-	}
-	if c.TurnTimeout <= 0 {
-		c.TurnTimeout = 5 * time.Minute
-	}
-	if c.ShutdownTimeout <= 0 {
-		c.ShutdownTimeout = 30 * time.Second
-	}
-}
-
-func (c *Config) validate() error {
-	var problems []error
-	if c.MaxActiveTurns <= 0 {
-		problems = append(problems, invalidArgument("max_active_turns must be positive"))
-	}
-	if c.MaxPendingTurns < c.MaxActiveTurns {
-		problems = append(problems, invalidArgument("max_pending_turns must be at least max_active_turns"))
-	}
-	if c.TurnTimeout <= 0 {
-		problems = append(problems, invalidArgument("turn_timeout must be positive"))
-	}
-	if c.ShutdownTimeout <= 0 {
-		problems = append(problems, invalidArgument("shutdown_timeout must be positive"))
-	}
-	if c.Durable != nil && c.Durable.Sessions == nil {
-		problems = append(problems, invalidArgument("durable turns need a session store"))
-	}
-	if c.Durable != nil && c.Durable.Runtime == nil {
-		problems = append(problems, invalidArgument("durable turns need a durable runtime"))
-	}
-	return errors.Join(problems...)
-}
-
 type TurnExecutor interface {
 	Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error]
 }
 
 type Engine struct {
 	cfg            Config
+	deps           Deps
 	events         EventStore
 	dedupe         DedupeStore
 	executor       TurnExecutor
@@ -125,55 +89,72 @@ type DedupeStore interface {
 	ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]store.RuntimeEvent, error)
 }
 
-func NewEngine(config *Config, events EventStore, dedupe DedupeStore, executor TurnExecutor, logger *slog.Logger) (*Engine, error) {
-	if config == nil {
-		return nil, invalidArgument("engine config must not be nil")
+func New(deps *Deps) (*Engine, error) {
+	if deps == nil {
+		return nil, invalidArgument("engine deps must not be nil")
 	}
-	if events == nil {
+	d := *deps
+	if d.Events == nil {
 		return nil, invalidArgument("event store must not be nil")
 	}
-	if dedupe == nil {
+	if d.Dedupe == nil {
 		return nil, invalidArgument("dedupe store must not be nil")
 	}
-	if executor == nil {
+	if d.Executor == nil {
 		return nil, invalidArgument("executor must not be nil")
 	}
-	if logger == nil {
-		logger = slog.Default()
+	if d.Logger == nil {
+		d.Logger = slog.Default()
 	}
-	cfg := *config
-	cfg.applyDefaults()
-	if err := cfg.validate(); err != nil {
+	if err := d.Config.Validate(); err != nil {
+		return nil, invalidArgument(err.Error())
+	}
+	if err := validateDurable(d.Durable); err != nil {
 		return nil, err
 	}
 	engine := &Engine{
-		cfg:        cfg,
-		events:     events,
-		dedupe:     dedupe,
-		executor:   executor,
-		logger:     logger,
+		cfg:        d.Config,
+		deps:       d,
+		events:     d.Events,
+		dedupe:     d.Dedupe,
+		executor:   d.Executor,
+		logger:     d.Logger,
 		statusPoll: durableStatusPoll,
 		sessions:   make(map[string]*sessionQueue),
 		turns:      make(map[string]*turnState),
 		staged:     make(map[string]*turnState),
 		granted:    make(map[string]struct{}),
 		sesKeys:    make(map[string]struct{}),
-		adapters:   slices.Clone(cfg.Channels),
+		adapters:   slices.Clone(d.Channels),
 		delivered:  make(map[string]time.Time),
 	}
-	if cfg.Durable != nil {
-		engine.sessionStore = cfg.Durable.Sessions
-		engine.durableRuntime = cfg.Durable.Runtime
+	if d.Durable != nil {
+		engine.sessionStore = d.Durable.Sessions
+		engine.durableRuntime = d.Durable.Runtime
 	}
 	if registrar, ok := engine.durableRuntime.(durable.HandlerRegistrar); ok {
 		registrar.RegisterHandler(HandlerName, engine.serveTurn)
 	}
-	if cfg.LiveEvents != nil {
-		if err := cfg.LiveEvents.Subscribe(engine.relay); err != nil {
+	if d.LiveEvents != nil {
+		if err := d.LiveEvents.Subscribe(engine.relay); err != nil {
 			return nil, err
 		}
 	}
 	return engine, nil
+}
+
+func validateDurable(durableConfig *DurableConfig) error {
+	if durableConfig == nil {
+		return nil
+	}
+	var problems []error
+	if durableConfig.Sessions == nil {
+		problems = append(problems, invalidArgument("durable turns need a session store"))
+	}
+	if durableConfig.Runtime == nil {
+		problems = append(problems, invalidArgument("durable turns need a durable runtime"))
+	}
+	return errors.Join(problems...)
 }
 
 type sessionQueue struct {
@@ -565,20 +546,20 @@ func (e *Engine) agentID(req *turn.TurnRequest) string {
 	if req.AgentID != "" {
 		return req.AgentID
 	}
-	return e.cfg.DefaultAgentID
+	return e.deps.DefaultAgentID
 }
 
 func (e *Engine) stampPersona(req *turn.TurnRequest) error {
 	req.AgentID = e.agentID(req)
-	if e.cfg.Personas == nil || req.AgentID == "" || req.Persona != nil {
+	if e.deps.Personas == nil || req.AgentID == "" || req.Persona != nil {
 		return nil
 	}
-	fingerprint, ok := e.cfg.Personas.Fingerprint(req.AgentID)
+	fingerprint, ok := e.deps.Personas.Fingerprint(req.AgentID)
 	if !ok {
 		return codedError(turn.ErrorCodePersonaNotFound, fmt.Sprintf("persona %q is not registered", req.AgentID), nil)
 	}
 	req.Persona = &fingerprint
-	req.Knowledge = e.cfg.Personas.Knowledge(req.AgentID, req.PrincipalClass)
+	req.Knowledge = e.deps.Personas.Knowledge(req.AgentID, req.PrincipalClass)
 	return nil
 }
 
@@ -648,7 +629,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 
 	deadline := t.req.Deadline
 	if deadline.IsZero() {
-		deadline = time.Now().Add(e.cfg.TurnTimeout)
+		deadline = time.Now().Add(time.Duration(e.cfg.TurnTimeout))
 	}
 	ctx, stop := context.WithDeadline(ctx, deadline)
 	defer stop()
@@ -727,14 +708,14 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 			}
 		}
 	}
-	if e.cfg.PostTurnHook != nil {
+	if e.deps.PostTurnHook != nil {
 		hookCtx := context.WithoutCancel(ctx)
-		if hookErr := e.cfg.PostTurnHook(hookCtx, &t.req, executed); hookErr != nil {
+		if hookErr := e.deps.PostTurnHook(hookCtx, &t.req, executed); hookErr != nil {
 			e.logger.ErrorContext(hookCtx, "post-turn hook failed", "error", hookErr, "turn_id", t.turnID)
 		}
 	}
-	if e.cfg.CountTurn != nil {
-		e.cfg.CountTurn(context.WithoutCancel(ctx), &t.req)
+	if e.deps.CountTurn != nil {
+		e.deps.CountTurn(context.WithoutCancel(ctx), &t.req)
 	}
 	if terminalKind != turn.EventKindTurnCompleted {
 		e.notifyPresenceFailed(context.WithoutCancel(ctx), &t.req)
@@ -899,7 +880,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 		close(done)
 	}()
 
-	budget := e.cfg.ShutdownTimeout
+	budget := time.Duration(e.cfg.ShutdownTimeout)
 	if deadline, ok := ctx.Deadline(); ok {
 		if remaining := time.Until(deadline); remaining < budget {
 			budget = remaining

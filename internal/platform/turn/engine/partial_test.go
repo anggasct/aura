@@ -54,7 +54,7 @@ func decodeDeltas(t *testing.T, events []store.RuntimeEvent) []turn.ModelDelta {
 func TestPartialModelTextReachesSubscribersOnlyAsDeltas(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo"), adkFinalStep("Hello")})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		live, err := collect(t, engine, sampleRequest("session-a", "turn-partial"))
@@ -100,7 +100,7 @@ func TestPartialModelTextStaysOutOfDeliveryAndPostTurnInput(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{adkPartialStep("par"), adkPartialStep("tial"), adkFinalStep("final answer")})
 		hook := &recordingHook{}
 		capture := &capturingAdapter{}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, PostTurnHook: hook.fn, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), PostTurnHook: hook.fn, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		if _, err := collect(t, engine, channelTurnRequest("channel:333", "turn-partial-delivery")); err != nil {
@@ -124,7 +124,7 @@ func TestPartialModelTextStaysOutOfDeliveryAndPostTurnInput(t *testing.T) {
 func TestEmptyPartialModelTextProducesNoDelta(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{adkPartialStep(""), adkFinalStep("done")})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		live, err := collect(t, engine, sampleRequest("session-a", "turn-empty-partial"))
@@ -146,7 +146,7 @@ func TestSlowSubscriberLosesDeltasButKeepsLifecycleEvents(t *testing.T) {
 			script = append(script, adkPartialStep("t"+strconv.Itoa(i)))
 		}
 		script = append(script, adkFinalStep("done"))
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, turntest.NewFakeExecutor(script))
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, turntest.NewFakeExecutor(script))
 		mustCreateSession(t, db, "session-a")
 
 		next, stop := iter.Pull2(engine.Run(context.Background(), sampleRequest("session-a", "turn-slow")))
@@ -210,7 +210,7 @@ func TestStreamPartialReachesTheExecutor(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			executor := &streamPartialExecutor{}
-			engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+			engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 			mustCreateSession(t, db, "session-a")
 			req := sampleRequest("session-a", "turn-flag")
 			req.StreamPartial = tc.want
@@ -285,7 +285,7 @@ func (e *gatedPartialExecutor) Execute(ctx context.Context, req *turn.TurnReques
 
 func TestDurableTurnRelaysPartialModelTextWithoutJournalingIt(t *testing.T) {
 	executor := &gatedPartialExecutor{partials: []turntest.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo")}, final: adkFinalStep("Hello")}
-	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 	mustCreateSession(t, db, "session-live")
 	req := sampleRequest("session-live", "turn-durable-partial")
 	req.StreamPartial = true
@@ -328,7 +328,7 @@ func TestDurableTurnRelaysPartialModelTextWithoutJournalingIt(t *testing.T) {
 
 func TestDurableTurnWithoutStreamPartialRelaysNoDeltas(t *testing.T) {
 	executor := &gatedPartialExecutor{partials: []turntest.FakeStep{adkPartialStep("Hel"), adkPartialStep("lo")}, final: adkFinalStep("Hello")}
-	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 	mustCreateSession(t, db, "session-live")
 
 	live, err := collect(t, engine, sampleRequest("session-live", "turn-durable-plain"))

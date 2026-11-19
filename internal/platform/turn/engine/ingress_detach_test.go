@@ -106,7 +106,7 @@ func TestAcceptedDurableTurnOutlivesItsCallersContext(t *testing.T) {
 		{Kind: turn.EventKindModelStarted, Payload: json.RawMessage(`{}`)},
 		{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`), Block: gate},
 	})
-	rig := newDurableHostRig(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+	rig := newDurableHostRig(t, Deps{Config: testLimits(2, 4)}, executor)
 	watched := watchRuntime(rig.engine)
 	session := sampleSession("conv-detach")
 	mustCreateSession(t, rig.db, session)

@@ -446,17 +446,19 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	}
 	executor := newLedgerExecutor(t, db, &ledgerTurn{scenario: scenario, ledger: ledger, options: opts})
 	events := store.NewEventStore(db)
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
-		MaxActiveTurns:  4,
-		MaxPendingTurns: 16,
-		TurnTimeout:     5 * time.Minute,
-		DefaultAgentID:  "main",
-		Skills:          wiring.renderer,
-		Durable:         &runtimeengine.DurableConfig{Sessions: sessions, Runtime: rt},
-		LiveEvents:      turn.NewEventBus(logger),
-	}, events, store.NewDedupeStore(db), executor, logger)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{
+		Events:         events,
+		Dedupe:         store.NewDedupeStore(db),
+		Executor:       executor,
+		Logger:         logger,
+		Config:         engineLimits(4, 16),
+		DefaultAgentID: "main",
+		Skills:         wiring.renderer,
+		Durable:        &runtimeengine.DurableConfig{Sessions: sessions, Runtime: rt},
+		LiveEvents:     turn.NewEventBus(logger),
+	})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	serveRuntime(t, rt)
 	t.Cleanup(func() {

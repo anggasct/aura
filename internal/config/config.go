@@ -296,14 +296,6 @@ type Terminal struct {
 	PlainApproval       string             `json:"plain_approval"`
 }
 
-type Runtime struct {
-	MaxActiveTurns  int                `json:"max_active_turns"`
-	MaxPendingTurns int                `json:"max_pending_turns"`
-	TurnTimeout     configkit.Duration `json:"turn_timeout"`
-	ShutdownTimeout configkit.Duration `json:"shutdown_timeout"`
-	RunRetention    configkit.Duration `json:"run_retention"`
-}
-
 type Tools struct {
 	Workspace            string        `json:"workspace"`
 	MaxInlineResultBytes int64         `json:"max_inline_result_bytes"`
@@ -429,16 +421,6 @@ func DefaultTools() *Tools {
 			Provider:   WebSearchProviderDuckDuckGo,
 			MaxResults: 5,
 		},
-	}
-}
-
-func DefaultRuntime() Runtime {
-	return Runtime{
-		MaxActiveTurns:  4,
-		MaxPendingTurns: 64,
-		TurnTimeout:     configkit.Duration(5 * time.Minute),
-		ShutdownTimeout: configkit.Duration(30 * time.Second),
-		RunRetention:    configkit.Duration(720 * time.Hour),
 	}
 }
 

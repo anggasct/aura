@@ -115,7 +115,7 @@ func TestDeliveryExcludesToolEventText(t *testing.T) {
 			textStep("final answer"),
 		})
 		capture := &capturingAdapter{}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-deliver-tool-text")
@@ -136,7 +136,7 @@ func TestDeliverCompletedTextTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello from model")})
 		capture := &capturingAdapter{}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-deliver-1")
@@ -173,7 +173,7 @@ func TestReprocessDoesNotRedeliver(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("once")})
 		capture := &capturingAdapter{}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-once")
@@ -212,7 +212,7 @@ func TestDeliveryFailureMarksTurnFailed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("needs reply")})
 		capture := &capturingAdapter{deliverErr: errDeliveryBoom}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")
 		var logs lockedBuffer
 		engine.logger = slog.New(slog.NewTextHandler(&logs, nil))
@@ -275,7 +275,7 @@ func TestEmptyTextSkipsDelivery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})
 		capture := &capturingAdapter{}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-empty")
@@ -305,7 +305,7 @@ func TestEmptyTextSkipsDelivery(t *testing.T) {
 func TestMissingAdapterFailsChannelTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("hello")})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-no-adapter")
@@ -331,7 +331,7 @@ func TestMissingAdapterFailsChannelTurn(t *testing.T) {
 func TestTerminalTurnSkipsWithoutAdapter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{textStep("terminal text")})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 		mustCreateSession(t, db, "session-a")
 
 		req := sampleRequest("session-a", "turn-terminal-skip")
@@ -350,7 +350,7 @@ func TestDeliveryExtractsADKModelText(t *testing.T) {
 		adkPayload := json.RawMessage(`{"content":{"role":"model","parts":[{"text":"adk hello"}]},"partial":false}`)
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: store.EventKindADK, Payload: adkPayload}})
 		capture := &capturingAdapter{}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-adk-text")
@@ -374,7 +374,7 @@ func TestDeliveryRetryAfterFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor(nil)
 		capture := &capturingAdapter{deliverErr: errDeliveryBoom}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-retry-failure")
@@ -407,7 +407,7 @@ func TestDeliveryRetryAfterFailure(t *testing.T) {
 func TestMissingAdapterFailureIsRetryable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor(nil)
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-no-adapter-retry")
@@ -418,7 +418,7 @@ func TestMissingAdapterFailureIsRetryable(t *testing.T) {
 			t.Fatalf("code = %q (ok=%v), want delivery_failed", code, ok)
 		}
 		capture := &capturingAdapter{}
-		configured, _, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		configured, _, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		if err := configured.deliverCompletedTurn(context.Background(), req, events); err != nil {
 			t.Fatalf("retry after adapter configured: %v", err)
 		}
@@ -432,7 +432,7 @@ func TestDeliveredEntriesExpireAfterDedupeWindow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor(nil)
 		capture := &capturingAdapter{}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-expire")
@@ -478,7 +478,7 @@ func TestDeliveryLeavesThroughTheOriginAccountAdapter(t *testing.T) {
 		executor := turntest.NewFakeExecutor(nil)
 		home := &namedCapturingAdapter{capturingAdapter: &capturingAdapter{}, name: "discord:home"}
 		kuma := &namedCapturingAdapter{capturingAdapter: &capturingAdapter{}, name: "discord:kuma"}
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Channels: []runtimechannelhost.ChannelPort{home, kuma}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{home, kuma}}, executor)
 		mustCreateSession(t, db, "channel:333")
 		events := []store.RuntimeEvent{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hi from kuma"}`)}}
 

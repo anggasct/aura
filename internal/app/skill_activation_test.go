@@ -45,6 +45,12 @@ type skillCapturingModel struct {
 	requests []skillRequest
 }
 
+func engineLimits(active, pending int) runtimeengine.Config {
+	cfg := runtimeengine.Default()
+	cfg.MaxActiveTurns, cfg.MaxPendingTurns = active, pending
+	return cfg
+}
+
 func (m *skillCapturingModel) Name() string { return "skill-capturing-model" }
 
 func (m *skillCapturingModel) GenerateContent(_ context.Context, req *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
@@ -141,9 +147,9 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	h.engine, err = runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: rt.context, LiveEvents: turn.NewEventBus(nil)}, events, store.NewDedupeStore(db), executor, nil)
+	h.engine, err = runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: engineLimits(2, 4), Skills: rt.context, LiveEvents: turn.NewEventBus(nil)})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	if err := sessions.Create(t.Context(), &store.Session{ID: "sess_skill", OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`)}); err != nil {
 		t.Fatalf("create session: %v", err)

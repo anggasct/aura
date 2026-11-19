@@ -10,13 +10,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
 
 type Config struct {
 	Version      int                         `json:"version"`
-	Runtime      legacyconfig.Runtime        `json:"runtime"`
+	Runtime      runtimeengine.Config        `json:"runtime"`
 	Capabilities capability.Config           `json:"capabilities"`
 	Tools        *legacyconfig.Tools         `json:"tools,omitempty"`
 	Agents       *auraagent.Config           `json:"agents,omitempty"`
@@ -56,7 +57,7 @@ func Default() Config {
 	defaultVision := vision.Default()
 	return Config{
 		Version:      1,
-		Runtime:      legacyconfig.DefaultRuntime(),
+		Runtime:      runtimeengine.Default(),
 		Capabilities: capability.Default(),
 		Agents:       &defaultAgents,
 		Workflows:    legacyconfig.DefaultWorkflows(),

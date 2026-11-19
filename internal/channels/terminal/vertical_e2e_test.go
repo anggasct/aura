@@ -153,7 +153,7 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	if err != nil {
 		t.Fatalf("executor: %v", err)
 	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{LiveEvents: liveEvents}, events, store.NewDedupeStore(db), executor, nil)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default(), LiveEvents: liveEvents})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -322,7 +322,9 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 		}
 	}
 	blocker := &blockingExecutor{started: make(chan struct{}), release: make(chan struct{})}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 1, MaxPendingTurns: 1}, events, store.NewDedupeStore(db), blocker, nil)
+	limits := runtimeengine.Default()
+	limits.MaxActiveTurns, limits.MaxPendingTurns = 1, 1
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: blocker, Config: limits})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -407,7 +409,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	executor1 := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"first durable answer"}]},"partial":false}`)},
 	})
-	engine1, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events1, store.NewDedupeStore(db1), executor1, nil)
+	engine1, err := runtimeengine.New(&runtimeengine.Deps{Events: events1, Dedupe: store.NewDedupeStore(db1), Executor: executor1, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -441,7 +443,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	executor2 := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"second durable answer"}]},"partial":false}`)},
 	})
-	engine2, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events2, store.NewDedupeStore(db2), executor2, nil)
+	engine2, err := runtimeengine.New(&runtimeengine.Deps{Events: events2, Dedupe: store.NewDedupeStore(db2), Executor: executor2, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("second engine: %v", err)
 	}
@@ -498,7 +500,7 @@ func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 	})
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(logBuf, nil))
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{}, events, store.NewDedupeStore(db), executor, logger)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Logger: logger, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}

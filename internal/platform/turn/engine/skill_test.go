@@ -89,7 +89,7 @@ func assertActivation(t *testing.T, ev *store.RuntimeEvent, turnID, body string)
 func TestPinnedTurnRecordsTheActivationBeforeExecution(t *testing.T) {
 	executor := &pinRecordingExecutor{}
 	renderer := &stubSkillRenderer{body: "Do things."}
-	engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, executor)
+	engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, executor)
 	mustCreateSession(t, db, "session-a")
 	events, err := collect(t, engine, pinnedRequest("session-a", "turn-1"))
 	if err != nil {
@@ -124,7 +124,7 @@ func TestPinnedTurnFailsClosedWhenTheSkillIsUnavailable(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			executor := &pinRecordingExecutor{}
-			engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, executor)
+			engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, executor)
 			mustCreateSession(t, db, "session-a")
 			events, err := collect(t, engine, pinnedRequest("session-a", "turn-1"))
 			if err != nil {
@@ -153,7 +153,7 @@ func TestPinnedTurnSurfacesTransientRenderFailuresWithTheirOwnCode(t *testing.T)
 	} {
 		t.Run(name, func(t *testing.T) {
 			executor := &pinRecordingExecutor{}
-			engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, executor)
+			engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, executor)
 			mustCreateSession(t, db, "session-a")
 			events, err := collect(t, engine, pinnedRequest("session-a", "turn-1"))
 			if err != nil {
@@ -180,7 +180,7 @@ func TestPinnedTurnSurfacesTransientRenderFailuresWithTheirOwnCode(t *testing.T)
 
 func TestDurableTransientRenderFailureKeepsItsOwnCode(t *testing.T) {
 	renderer := &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
-	engine, db, events := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, &pinRecordingExecutor{})
+	engine, db, events := newTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, &pinRecordingExecutor{})
 	mustCreateSession(t, db, "session-a")
 	inv := &journalInvocation{}
 	req := pinnedRequest("session-a", "turn-1")
@@ -218,7 +218,7 @@ func TestDurableTransientRenderFailureKeepsItsOwnCode(t *testing.T) {
 
 func TestDurableUnavailableSkillJournalsNullOnce(t *testing.T) {
 	renderer := &stubSkillRenderer{err: skills.Errorf(skills.ErrorCodeSkillUnavailable, "quarantined")}
-	engine, db, events := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, &pinRecordingExecutor{})
+	engine, db, events := newTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, &pinRecordingExecutor{})
 	mustCreateSession(t, db, "session-a")
 	inv := &journalInvocation{}
 	req := pinnedRequest("session-a", "turn-1")
@@ -264,7 +264,7 @@ func TestDurableUnavailableSkillJournalsNullOnce(t *testing.T) {
 func TestDurablePinnedTurnRecordsOneActivation(t *testing.T) {
 	executor := &pinRecordingExecutor{}
 	renderer := &stubSkillRenderer{body: "Do things."}
-	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, executor)
+	engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, executor)
 	envelope := sampleEnvelope("conv-1", "msg-1")
 	envelope.Skill = samplePin()
 	mustCreateSession(t, db, envelope.ConversationID)
@@ -291,7 +291,7 @@ func TestDurablePinnedTurnRecordsOneActivation(t *testing.T) {
 func TestDurablePinnedTurnFailsAndReleasesOnTransientRenderFailure(t *testing.T) {
 	executor := &pinRecordingExecutor{}
 	renderer := &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
-	engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, executor)
+	engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, executor)
 	pinned := sampleEnvelope("conv-1", "msg-1")
 	pinned.Skill = samplePin()
 	mustCreateSession(t, db, pinned.ConversationID)
@@ -362,7 +362,7 @@ func (j *journalInvocation) RunAction(ctx context.Context, key string, fn func(c
 
 func TestDurableReplayReusesTheJournaledActivation(t *testing.T) {
 	renderer := &stubSkillRenderer{body: "Original body."}
-	engine, db, events := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4, Skills: renderer}, &pinRecordingExecutor{})
+	engine, db, events := newTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, &pinRecordingExecutor{})
 	mustCreateSession(t, db, "session-a")
 	inv := &journalInvocation{}
 	req := pinnedRequest("session-a", "turn-1")

@@ -199,9 +199,9 @@ func (r *memoryRig) engine(t *testing.T) *runtimeengine.Engine {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, r.events, store.NewDedupeStore(r.db), executor, nil)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: r.events, Dedupe: store.NewDedupeStore(r.db), Executor: executor, Config: engineLimits(2, 4)})
 	if err != nil {
-		t.Fatalf("runtimeengine.NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	return engine
 }

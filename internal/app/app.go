@@ -588,20 +588,21 @@ func (b *build) buildTurnRuntime() error {
 		countTurn = personaTurnCounter(b.server.personaRecorder)
 		channels = b.server.channels
 	}
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
-		MaxActiveTurns:  b.cfg.Runtime.MaxActiveTurns,
-		MaxPendingTurns: b.cfg.Runtime.MaxPendingTurns,
-		TurnTimeout:     time.Duration(b.cfg.Runtime.TurnTimeout),
-		ShutdownTimeout: time.Duration(b.cfg.Runtime.ShutdownTimeout),
-		DefaultAgentID:  auraagent.DefaultID,
-		Personas:        registryPersonas{registry: b.registry},
-		Skills:          b.modules.skillRenderer,
-		Durable:         durableConfig,
-		PostTurnHook:    composePostTurnHooks(hooks...),
-		CountTurn:       countTurn,
-		LiveEvents:      b.liveEvents,
-		Channels:        channels,
-	}, b.events, store.NewDedupeStore(b.db), executor, b.logger)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{
+		Events:         b.events,
+		Dedupe:         store.NewDedupeStore(b.db),
+		Executor:       executor,
+		Logger:         b.logger,
+		Config:         b.cfg.Runtime,
+		DefaultAgentID: auraagent.DefaultID,
+		Personas:       registryPersonas{registry: b.registry},
+		Skills:         b.modules.skillRenderer,
+		Durable:        durableConfig,
+		PostTurnHook:   composePostTurnHooks(hooks...),
+		CountTurn:      countTurn,
+		LiveEvents:     b.liveEvents,
+		Channels:       channels,
+	})
 	if err != nil {
 		return err
 	}

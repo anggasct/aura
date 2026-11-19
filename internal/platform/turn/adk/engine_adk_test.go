@@ -10,6 +10,12 @@ import (
 	"github.com/anggasct/aura/internal/store"
 )
 
+func engineLimits(active, pending int) runtimeengine.Config {
+	cfg := runtimeengine.Default()
+	cfg.MaxActiveTurns, cfg.MaxPendingTurns = active, pending
+	return cfg
+}
+
 func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	model := &fakeADKModel{answer: "engine answer", tokens: 4}
 	modelName, models := fakeModelSet(model)
@@ -20,9 +26,9 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	dedupe := store.NewDedupeStore(db)
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: dedupe, Executor: executor, Config: engineLimits(2, 4)})
 	if err != nil {
-		t.Fatalf("runtimeengine.NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	mustCreateSession(t, db, "session-1")
 
@@ -99,9 +105,9 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	dedupe := store.NewDedupeStore(db)
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, events, dedupe, executor, nil)
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: dedupe, Executor: executor, Config: engineLimits(2, 4)})
 	if err != nil {
-		t.Fatalf("runtimeengine.NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	mustCreateSession(t, db, "session-1")
 

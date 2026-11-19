@@ -269,13 +269,17 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	adapter.SetPersonaRouter(router)
 	settings := discordAccessSettings(cfg, db, nil, nil)
 	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals})
-	engine, err := runtimeengine.NewEngine(&runtimeengine.Config{
+	engine, err := runtimeengine.New(&runtimeengine.Deps{
+		Events:         events,
+		Dedupe:         store.NewDedupeStore(db),
+		Executor:       executor,
+		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
 		Personas:       registryPersonas{registry: registry},
 		Channels:       []runtimechannelhost.ChannelPort{adapter},
-	}, events, store.NewDedupeStore(db), executor, nil)
+	})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("runtimeengine.New: %v", err)
 	}
 	host, err := runtimeengine.NewHost(engine, slog.New(slog.DiscardHandler))
 	if err != nil {

@@ -60,7 +60,7 @@ func (x *twoInvocationExecutor) waitBlocked(t *testing.T) {
 func runAcrossALostLease(t *testing.T, req *turn.TurnRequest) (*durableHostRig, []time.Time) {
 	t.Helper()
 	executor := newTwoInvocationExecutor()
-	rig := newShortLeaseHostRig(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, TurnTimeout: time.Hour}, executor)
+	rig := newShortLeaseHostRig(t, Deps{Config: testLimits(4, 16).withTurnTimeout(time.Hour)}, executor)
 	mustCreateSession(t, rig.db, req.SessionID)
 	rig.startHost()
 	outcome := callTurn(context.WithoutCancel(t.Context()), rig.engine, req)
@@ -117,7 +117,7 @@ func TestDurableTurnTimeoutCountsFromItsFirstStart(t *testing.T) {
 				{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Wait: 40 * time.Second},
 				jsonStep(turn.EventKindMessageCompleted),
 			})
-			engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, TurnTimeout: time.Minute}, executor)
+			engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(4, 16).withTurnTimeout(time.Minute)}, executor)
 			mustCreateSession(t, db, "session-a")
 			var streams []<-chan []store.RuntimeEvent
 			for i := range 2 {
@@ -138,7 +138,7 @@ func TestDurableTurnTimeoutCountsFromItsFirstStart(t *testing.T) {
 				{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`), Wait: 2 * time.Minute},
 				jsonStep(turn.EventKindMessageCompleted),
 			})
-			engine, _, db := newDurableLiveTestRuntime(t, Config{MaxActiveTurns: 4, MaxPendingTurns: 16, TurnTimeout: time.Minute}, executor)
+			engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(4, 16).withTurnTimeout(time.Minute)}, executor)
 			mustCreateSession(t, db, "session-a")
 			events := <-runInBubble(engine, sampleRequest("session-a", turnID(0)))
 			if got := lastKind(events); got != turn.EventKindTurnFailed {

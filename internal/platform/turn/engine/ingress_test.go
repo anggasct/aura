@@ -61,7 +61,7 @@ func sampleEnvelope(conversation, externalID string) *runtimeingress.IngressEnve
 func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindModelStarted), jsonStep(turn.EventKindMessageCompleted)})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 		mustCreateSession(t, db, sampleSession("conv-1"))
 
 		ref, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-1"))
@@ -88,7 +88,7 @@ func TestAcceptRunsTurnToDurableTerminal(t *testing.T) {
 func TestAcceptDuplicateReturnsOriginal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 		mustCreateSession(t, db, sampleSession("conv-1"))
 
 		first, err := engine.Accept(context.Background(), sampleEnvelope("conv-1", "msg-dup"))
@@ -121,7 +121,7 @@ func TestAcceptDuplicateReturnsOriginal(t *testing.T) {
 func TestAcceptAfterShutdownIsRejected(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		executor := turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)})
-		engine, db, _ := newTestRuntime(t, Config{MaxActiveTurns: 2, MaxPendingTurns: 4}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4)}, executor)
 		mustCreateSession(t, db, sampleSession("conv-1"))
 
 		if err := engine.Shutdown(context.Background()); err != nil {
@@ -137,7 +137,7 @@ func TestAcceptAfterShutdownIsRejected(t *testing.T) {
 
 func TestAcceptValidatesIdentity(t *testing.T) {
 	executor := turntest.NewFakeExecutor(nil)
-	engine, db, _ := newTestRuntime(t, Config{}, executor)
+	engine, db, _ := newTestRuntime(t, Deps{Config: Default()}, executor)
 	mustCreateSession(t, db, sampleSession("conv-1"))
 
 	cases := map[string]*runtimeingress.IngressEnvelope{
