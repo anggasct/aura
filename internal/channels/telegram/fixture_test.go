@@ -420,14 +420,14 @@ func (s *memorySink) accepted() []*runtimeingress.IngressEnvelope {
 type fixedRouter struct{}
 
 func (fixedRouter) Resolve(scope *auraagent.RouteScope) (auraagent.RouteMatch, bool) {
-	if scope.Channel != config.BindingChannelTelegram || scope.Account != "pocket" {
+	if scope.Channel != auraagent.BindingChannelTelegram || scope.Account != "pocket" {
 		return auraagent.RouteMatch{}, false
 	}
 	return auraagent.RouteMatch{Persona: testPersona, Score: auraagent.ScoreAccountDefault, Binding: auraagent.AccountDefaultBinding}, true
 }
 
 func (fixedRouter) Persona(id string) (auraagent.Definition, bool) {
-	return auraagent.Definition{ID: id, Audience: config.AudienceOwner}, id == testPersona
+	return auraagent.Definition{ID: id, Audience: auraagent.AudienceOwner}, id == testPersona
 }
 
 func (fixedRouter) ServesPublic(string, string) bool {
@@ -435,7 +435,7 @@ func (fixedRouter) ServesPublic(string, string) bool {
 }
 
 func (fixedRouter) ServesPersona(channel, account, persona string) bool {
-	return channel == config.BindingChannelTelegram && account == "pocket" && persona == testPersona
+	return channel == auraagent.BindingChannelTelegram && account == "pocket" && persona == testPersona
 }
 
 type storeSessions struct {

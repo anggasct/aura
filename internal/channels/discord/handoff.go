@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/status"
 	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -36,7 +37,7 @@ func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (
 		return access.HandoffTarget{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	definition, _ := a.personaDefinition(binding.persona)
-	a.postNotice(ctx, token, binding.channelID, definition.Message(config.MessageHandoffOpen))
+	a.postNotice(ctx, token, binding.channelID, definition.Message(auraagent.MessageHandoffOpen))
 	return access.HandoffTarget{Channel: principal.ChannelDiscord, Account: a.account.Name, ChannelID: binding.channelID}, nil
 }
 
@@ -99,7 +100,7 @@ func (a *Adapter) handoffHeld(ctx context.Context, msg *messagePayload, envelope
 	case HandoffStateExpired:
 		if tokenErr == nil {
 			definition, _ := a.personaDefinition(envelope.AgentID)
-			a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageHandoffClosed))
+			a.postNotice(ctx, token, msg.ChannelID, definition.Message(auraagent.MessageHandoffClosed))
 		}
 		return false
 	default:

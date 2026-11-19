@@ -627,7 +627,7 @@ func TestEmailHandoffHoldsReleasesAndAnswersThroughAuraReply(t *testing.T) {
 	if _, err := runAccessCommand(t, newHandoffCmd, h.configPath, "release", session); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if len(delivered) != 2 || delivered[1].Text != config.PersonaMessageDefaults()[config.MessageHandoffClosed] {
+	if len(delivered) != 2 || delivered[1].Text != auraagent.PersonaMessageDefaults()[auraagent.MessageHandoffClosed] {
 		t.Fatalf("release notice = %+v", delivered)
 	}
 

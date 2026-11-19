@@ -3,8 +3,6 @@ package agent
 import (
 	"errors"
 	"fmt"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
 const (
@@ -42,7 +40,7 @@ type routeAccount struct {
 type Router struct {
 	defaults map[routeAccount]string
 	accounts map[routeAccount]bool
-	bindings []config.Binding
+	bindings []Binding
 	personas []string
 	registry *Registry
 }
@@ -54,14 +52,14 @@ type ChannelAccount struct {
 	Field   string
 }
 
-func NewRouter(registry *Registry, accounts []ChannelAccount, bindings []config.Binding) (*Router, error) {
+func NewRouter(registry *Registry, accounts []ChannelAccount, bindings []Binding) (*Router, error) {
 	if registry == nil {
 		return nil, codedError(ErrorCodeBindingInvalid, "agent registry must not be nil")
 	}
 	router := &Router{
 		defaults: make(map[routeAccount]string, len(accounts)),
 		accounts: make(map[routeAccount]bool, len(accounts)),
-		bindings: append([]config.Binding(nil), bindings...),
+		bindings: append([]Binding(nil), bindings...),
 		registry: registry,
 	}
 	for i := range registry.definitions {
@@ -124,7 +122,7 @@ func (r *Router) ServesPublic(channel, account string) bool {
 		}
 	}
 	for _, persona := range reachable {
-		if definition, ok := r.registry.Lookup(persona); ok && definition.Audience == config.AudiencePublic {
+		if definition, ok := r.registry.Lookup(persona); ok && definition.Audience == AudiencePublic {
 			return true
 		}
 	}
@@ -172,7 +170,7 @@ func (r *Router) Resolve(scope *RouteScope) (RouteMatch, bool) {
 	return RouteMatch{Persona: persona, Score: ScoreAccountDefault, Binding: AccountDefaultBinding}, true
 }
 
-func bindingScore(binding *config.Binding, scope *RouteScope) (int, bool) {
+func bindingScore(binding *Binding, scope *RouteScope) (int, bool) {
 	score := 0
 	for _, field := range []struct {
 		want, got string

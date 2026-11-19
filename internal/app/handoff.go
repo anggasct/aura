@@ -21,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -254,7 +255,7 @@ func newHandoffCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				definition, _ := registry.Lookup(handoff.AgentID)
-				if err := deliverToHandoff(ctx, cfg, &handoff, definition.Message(config.MessageHandoffClosed)); err != nil {
+				if err := deliverToHandoff(ctx, cfg, &handoff, definition.Message(auraagent.MessageHandoffClosed)); err != nil {
 					logger.WarnContext(ctx, "handoff release notice failed", "component", "access")
 				}
 				if err := recordAccessAction(ctx, db, &accessAction{Action: accessActionHandoffRelease, Principal: handoff.PrincipalID, Persona: handoff.AgentID, Account: handoff.Account}, "release-"+handoff.SessionID+"-"+now.Format(time.RFC3339Nano), now); err != nil {

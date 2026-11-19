@@ -21,6 +21,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -197,7 +198,7 @@ func (m *Manifest) Validate() error {
 	if m.APIVersion != APIVersion {
 		found.add("api_version must be %s", APIVersion)
 	}
-	if !config.ValidPluginID(m.ID) {
+	if !auraagent.ValidPluginID(m.ID) {
 		found.add("id must match [a-z][a-z0-9-]{1,47}")
 	}
 	if !config.ValidPluginVersion(m.Version) {

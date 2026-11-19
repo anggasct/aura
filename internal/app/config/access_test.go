@@ -10,6 +10,7 @@ import (
 	"time"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 func TestLoad_PersonaAccessValidation(t *testing.T) {
@@ -22,32 +23,32 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 		"defaults":                         {},
 		"trusted with pairing":             {fields: "      audience: trusted\n      pairing: true\n"},
 		"public":                           {fields: "      audience: public\n"},
-		"unknown audience":                 {fields: "      audience: everyone\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "audience"},
-		"pairing on public":                {fields: "      audience: public\n      pairing: true\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "pairing"},
-		"pairing on owner":                 {fields: "      pairing: true\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "pairing"},
-		"duplicate principal tool":         {fields: "      principal_tools: [web_fetch, web_fetch]\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "principal_tools"},
+		"unknown audience":                 {fields: "      audience: everyone\n", code: personaInvalidCode, detail: "audience"},
+		"pairing on public":                {fields: "      audience: public\n      pairing: true\n", code: personaInvalidCode, detail: "pairing"},
+		"pairing on owner":                 {fields: "      pairing: true\n", code: personaInvalidCode, detail: "pairing"},
+		"duplicate principal tool":         {fields: "      principal_tools: [web_fetch, web_fetch]\n", code: personaInvalidCode, detail: "principal_tools"},
 		"approval timeout in range":        {fields: "      approval_timeout: 10m\n"},
 		"approval timeout too short":       {fields: "      approval_timeout: 30s\n", code: invalidCode, detail: "approval_timeout"},
 		"approval timeout too long":        {fields: "      approval_timeout: 25h\n", code: invalidCode, detail: "approval_timeout"},
-		"unknown message key":              {fields: "      messages:\n        hello: hi\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: `unknown key "hello"`},
-		"empty message":                    {fields: "      messages:\n        waiting_for_owner: \" \"\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "must not be empty"},
-		"multi line message":               {fields: "      messages:\n        waiting_for_owner: \"a\\nb\"\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "single line"},
-		"overlong message":                 {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", legacyconfig.MaxPersonaMessageRunes+1) + "\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "at most"},
-		"pairing code without placeholder": {fields: "      messages:\n        pairing_code: here is your code\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "{code}"},
-		"message at the length limit":      {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", legacyconfig.MaxPersonaMessageRunes) + "\n"},
+		"unknown message key":              {fields: "      messages:\n        hello: hi\n", code: personaInvalidCode, detail: `unknown key "hello"`},
+		"empty message":                    {fields: "      messages:\n        waiting_for_owner: \" \"\n", code: personaInvalidCode, detail: "must not be empty"},
+		"multi line message":               {fields: "      messages:\n        waiting_for_owner: \"a\\nb\"\n", code: personaInvalidCode, detail: "single line"},
+		"overlong message":                 {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", auraagent.MaxPersonaMessageRunes+1) + "\n", code: personaInvalidCode, detail: "at most"},
+		"pairing code without placeholder": {fields: "      messages:\n        pairing_code: here is your code\n", code: personaInvalidCode, detail: "{code}"},
+		"message at the length limit":      {fields: "      messages:\n        waiting_for_owner: " + strings.Repeat("x", auraagent.MaxPersonaMessageRunes) + "\n"},
 		"shared group on trusted":          {fields: "      audience: trusted\n      group_context: shared\n"},
 		"per principal group on public":    {fields: "      audience: public\n      group_context: per_principal\n"},
-		"shared group on public":           {fields: "      audience: public\n      group_context: shared\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "group_context"},
-		"shared group on owner":            {fields: "      group_context: shared\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "group_context"},
-		"unknown group context":            {fields: "      audience: trusted\n      group_context: everyone\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "group_context"},
+		"shared group on public":           {fields: "      audience: public\n      group_context: shared\n", code: personaInvalidCode, detail: "group_context"},
+		"shared group on owner":            {fields: "      group_context: shared\n", code: personaInvalidCode, detail: "group_context"},
+		"unknown group context":            {fields: "      audience: trusted\n      group_context: everyone\n", code: personaInvalidCode, detail: "group_context"},
 		"evals dir":                        {fields: "      evals:\n        dir: evals/kantor\n"},
 		"workflows allowlist":              {fields: "      workflows: [book_visit, refund]\n"},
 		"plugins allowlist":                {fields: "      plugins: [weather, mail-reader]\n"},
-		"plugins duplicate":                {fields: "      plugins: [weather, weather]\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "twice"},
-		"plugins invalid id":               {fields: "      plugins: [Weather]\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "plugin ids"},
-		"plugins path like id":             {fields: "      plugins: [\"../x\"]\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "plugin ids"},
-		"workflows duplicate":              {fields: "      workflows: [book_visit, book_visit]\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "twice"},
-		"workflows empty entry":            {fields: "      workflows: [\" \"]\n", code: legacyconfig.ErrorCodePersonaInvalid, detail: "workflows"},
+		"plugins duplicate":                {fields: "      plugins: [weather, weather]\n", code: personaInvalidCode, detail: "twice"},
+		"plugins invalid id":               {fields: "      plugins: [Weather]\n", code: personaInvalidCode, detail: "plugin ids"},
+		"plugins path like id":             {fields: "      plugins: [\"../x\"]\n", code: personaInvalidCode, detail: "plugin ids"},
+		"workflows duplicate":              {fields: "      workflows: [book_visit, book_visit]\n", code: personaInvalidCode, detail: "twice"},
+		"workflows empty entry":            {fields: "      workflows: [\" \"]\n", code: personaInvalidCode, detail: "workflows"},
 		"evals behavior":                   {fields: "      evals:\n        behavior:\n          required: true\n          min_score: 0.75\n          judge_route: primary\n          schedule: \"0 3 * * 1\"\n          enforce_on_regression: true\n"},
 		"evals behavior min score 1":       {fields: "      evals:\n        behavior:\n          min_score: 1\n"},
 		"evals behavior min score zero":    {fields: "      evals:\n        behavior:\n          min_score: 0\n", code: invalidCode, detail: "min_score"},
@@ -81,7 +82,7 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 
 func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
-	defaults := legacyconfig.PersonaMessageDefaults()
+	defaults := auraagent.PersonaMessageDefaults()
 	keys := slices.Sorted(maps.Keys(defaults))
 	if len(keys) != 18 {
 		t.Fatalf("message keys = %v, want the 18 fixed replies", keys)
@@ -89,8 +90,8 @@ func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 	for _, key := range keys {
 		t.Run(key, func(t *testing.T) {
 			value := "custom " + key
-			if key == legacyconfig.MessagePairingCode {
-				value += " " + legacyconfig.PairingCodePlaceholder
+			if key == auraagent.MessagePairingCode {
+				value += " " + auraagent.PairingCodePlaceholder
 			}
 			definition := "    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        " + key + ": " + value + "\n"
 			res, err := Load(writePersonaConfig(t, "", "", definition))

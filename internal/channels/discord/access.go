@@ -12,7 +12,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -78,7 +77,7 @@ func (a *Adapter) SetAccess(settings *AccessSettings) {
 }
 
 func (a *Adapter) servesPublic() bool {
-	return a.router != nil && a.router.ServesPublic(config.BindingChannelDiscord, a.account.Name)
+	return a.router != nil && a.router.ServesPublic(auraagent.BindingChannelDiscord, a.account.Name)
 }
 
 func (a *Adapter) authorAccess(ctx context.Context) authorAccess {
@@ -117,7 +116,7 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *messagePayload) bool {
 		return false
 	}
 	definition, ok := a.personaDefinition(persona)
-	if !ok || !definition.Pairing || definition.Audience != config.AudienceTrusted {
+	if !ok || !definition.Pairing || definition.Audience != auraagent.AudienceTrusted {
 		return false
 	}
 	result, err := a.access.Pairing.Request(ctx, principal.Namespaced(principal.ChannelDiscord, msg.Author.ID), a.account.Name)
@@ -128,11 +127,11 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *messagePayload) bool {
 	var reply string
 	switch result.Outcome {
 	case PairingOutcomeIssued:
-		reply = strings.ReplaceAll(definition.Message(config.MessagePairingCode), config.PairingCodePlaceholder, result.Code)
+		reply = strings.ReplaceAll(definition.Message(auraagent.MessagePairingCode), auraagent.PairingCodePlaceholder, result.Code)
 	case PairingOutcomeLocked:
-		reply = definition.Message(config.MessagePairingLocked)
+		reply = definition.Message(auraagent.MessagePairingLocked)
 	default:
-		reply = definition.Message(config.MessagePairingPending)
+		reply = definition.Message(auraagent.MessagePairingPending)
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
@@ -178,21 +177,21 @@ func (a *Adapter) forgetMe(ctx context.Context, msg *messagePayload, inv *comman
 		return
 	}
 	if principal.ParseClass(envelope.PrincipalClass) == principal.ClassOwner || a.access.Erasure == nil {
-		a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageNotPermitted))
+		a.postNotice(ctx, token, msg.ChannelID, definition.Message(auraagent.MessageNotPermitted))
 		return
 	}
 	if len(inv.Args) != 1 || !strings.EqualFold(inv.Args[0], command.ArgConfirm) {
-		a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageForgetmeConfirm))
+		a.postNotice(ctx, token, msg.ChannelID, definition.Message(auraagent.MessageForgetmeConfirm))
 		return
 	}
 	if err := a.access.Erasure.Forget(ctx, envelope.PrincipalID); err != nil {
 		a.logger.WarnContext(ctx, "forgetme erasure failed", "component", "discord")
 		if errors.Is(err, access.ErrForgetRunsStopping) {
-			a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageForgetmeStopping))
+			a.postNotice(ctx, token, msg.ChannelID, definition.Message(auraagent.MessageForgetmeStopping))
 		}
 		return
 	}
-	a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageForgetmeDone))
+	a.postNotice(ctx, token, msg.ChannelID, definition.Message(auraagent.MessageForgetmeDone))
 }
 
 func (a *Adapter) channelConversation(persona, channelID, principalID string, class principal.Class) string {
@@ -200,7 +199,7 @@ func (a *Adapter) channelConversation(persona, channelID, principalID string, cl
 	if class == principal.ClassOwner {
 		return conversation
 	}
-	if definition, ok := a.personaDefinition(persona); ok && definition.GroupContext == config.GroupContextShared {
+	if definition, ok := a.personaDefinition(persona); ok && definition.GroupContext == auraagent.GroupContextShared {
 		return conversation
 	}
 	return conversation + "/principal:" + principalID
@@ -229,7 +228,7 @@ func (a *Adapter) personaEvaluated(ctx context.Context, msg *messagePayload, per
 		return true
 	}
 	definition, ok := a.personaDefinition(persona)
-	if ok && definition.Audience == config.AudienceOwner {
+	if ok && definition.Audience == auraagent.AudienceOwner {
 		return true
 	}
 	evaluated, err := a.access.Evals.Evaluated(ctx, persona)
@@ -243,7 +242,7 @@ func (a *Adapter) personaEvaluated(ctx context.Context, msg *messagePayload, per
 		a.access.Denied(ctx, DeniedReasonEvalMissing)
 	}
 	if token, tokenErr := a.tokenRef.Resolve(); tokenErr == nil {
-		a.postNotice(ctx, token, msg.ChannelID, definition.Message(config.MessageUnavailable))
+		a.postNotice(ctx, token, msg.ChannelID, definition.Message(auraagent.MessageUnavailable))
 	}
 	return false
 }

@@ -15,7 +15,6 @@ import (
 	"google.golang.org/genai"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -136,11 +135,11 @@ func TestBehaviorEvalReplaysTurnsLiveAndRecordsTheJudgedScore(t *testing.T) {
 	}
 }
 
-func gateRegistry(t *testing.T, behavior *config.AgentEvalBehavior) *auraagent.Registry {
+func gateRegistry(t *testing.T, behavior *auraagent.PersonaEvalBehavior) *auraagent.Registry {
 	t.Helper()
-	registry, err := auraagent.Build([]config.AgentDefinition{{
-		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: config.AudiencePublic,
-		Tools: []string{"web_search"}, PublicTools: []string{"web_search"}, Evals: config.AgentEvals{Behavior: behavior},
+	registry, err := auraagent.Build([]auraagent.Persona{{
+		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
+		Tools: []string{"web_search"}, PublicTools: []string{"web_search"}, Evals: auraagent.PersonaEvals{Behavior: behavior},
 	}}, []string{"web_search"}, []string{auraagent.DefaultEvalJudgeRoute})
 	if err != nil {
 		t.Fatal(err)
@@ -163,24 +162,24 @@ func TestEvalGateHonorsBehaviorRequirementAndRegressionEnforcement(t *testing.T)
 		passed bool
 	}
 	for label, tc := range map[string]struct {
-		behavior *config.AgentEvalBehavior
+		behavior *auraagent.PersonaEvalBehavior
 		history  []step
 		want     bool
 	}{
 		"policy only persona":                    {history: []step{{store.EvalLayerPolicy, true}}, want: true},
-		"behavior not required, never run":       {behavior: &config.AgentEvalBehavior{}, history: []step{{store.EvalLayerPolicy, true}}, want: true},
-		"behavior not required, regressed":       {behavior: &config.AgentEvalBehavior{}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}, {store.EvalLayerBehavior, false}}, want: true},
-		"required, never run":                    {behavior: &config.AgentEvalBehavior{Required: true}, history: []step{{store.EvalLayerPolicy, true}}, want: false},
-		"required, passed":                       {behavior: &config.AgentEvalBehavior{Required: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}}, want: true},
-		"required, latest failed":                {behavior: &config.AgentEvalBehavior{Required: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}, {store.EvalLayerBehavior, false}}, want: false},
-		"required, policy failed":                {behavior: &config.AgentEvalBehavior{Required: true}, history: []step{{store.EvalLayerPolicy, false}, {store.EvalLayerBehavior, true}}, want: false},
-		"enforced regression, never run":         {behavior: &config.AgentEvalBehavior{EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}}, want: true},
-		"enforced regression, regressed":         {behavior: &config.AgentEvalBehavior{EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}, {store.EvalLayerBehavior, false}}, want: false},
-		"enforced regression, recovered":         {behavior: &config.AgentEvalBehavior{EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, false}, {store.EvalLayerBehavior, true}}, want: true},
-		"enforced regression, policy never run":  {behavior: &config.AgentEvalBehavior{EnforceOnRegression: true}, history: []step{{store.EvalLayerBehavior, true}}, want: false},
-		"required and enforced, latest failed":   {behavior: &config.AgentEvalBehavior{Required: true, EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, false}}, want: false},
-		"required and enforced, latest passed":   {behavior: &config.AgentEvalBehavior{Required: true, EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}}, want: true},
-		"behavior row alone never admits policy": {behavior: &config.AgentEvalBehavior{Required: true}, history: []step{{store.EvalLayerBehavior, true}}, want: false},
+		"behavior not required, never run":       {behavior: &auraagent.PersonaEvalBehavior{}, history: []step{{store.EvalLayerPolicy, true}}, want: true},
+		"behavior not required, regressed":       {behavior: &auraagent.PersonaEvalBehavior{}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}, {store.EvalLayerBehavior, false}}, want: true},
+		"required, never run":                    {behavior: &auraagent.PersonaEvalBehavior{Required: true}, history: []step{{store.EvalLayerPolicy, true}}, want: false},
+		"required, passed":                       {behavior: &auraagent.PersonaEvalBehavior{Required: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}}, want: true},
+		"required, latest failed":                {behavior: &auraagent.PersonaEvalBehavior{Required: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}, {store.EvalLayerBehavior, false}}, want: false},
+		"required, policy failed":                {behavior: &auraagent.PersonaEvalBehavior{Required: true}, history: []step{{store.EvalLayerPolicy, false}, {store.EvalLayerBehavior, true}}, want: false},
+		"enforced regression, never run":         {behavior: &auraagent.PersonaEvalBehavior{EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}}, want: true},
+		"enforced regression, regressed":         {behavior: &auraagent.PersonaEvalBehavior{EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}, {store.EvalLayerBehavior, false}}, want: false},
+		"enforced regression, recovered":         {behavior: &auraagent.PersonaEvalBehavior{EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, false}, {store.EvalLayerBehavior, true}}, want: true},
+		"enforced regression, policy never run":  {behavior: &auraagent.PersonaEvalBehavior{EnforceOnRegression: true}, history: []step{{store.EvalLayerBehavior, true}}, want: false},
+		"required and enforced, latest failed":   {behavior: &auraagent.PersonaEvalBehavior{Required: true, EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, false}}, want: false},
+		"required and enforced, latest passed":   {behavior: &auraagent.PersonaEvalBehavior{Required: true, EnforceOnRegression: true}, history: []step{{store.EvalLayerPolicy, true}, {store.EvalLayerBehavior, true}}, want: true},
+		"behavior row alone never admits policy": {behavior: &auraagent.PersonaEvalBehavior{Required: true}, history: []step{{store.EvalLayerBehavior, true}}, want: false},
 	} {
 		t.Run(label, func(t *testing.T) {
 			registry := gateRegistry(t, tc.behavior)
@@ -197,7 +196,7 @@ func TestEvalGateHonorsBehaviorRequirementAndRegressionEnforcement(t *testing.T)
 }
 
 func TestRegressionRaisesAHealthFindingUntilTheNextPass(t *testing.T) {
-	registry := gateRegistry(t, &config.AgentEvalBehavior{})
+	registry := gateRegistry(t, &auraagent.PersonaEvalBehavior{})
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
 	results := store.NewPersonaEvalStore(db)
 	check := &personaEvalHealth{registry: registry, results: results}
@@ -275,8 +274,8 @@ func TestRegistryRejectsAnInvalidBehaviorSchedule(t *testing.T) {
 	build := func(schedule string) error {
 		_, err := buildAgentRegistry(&appconfig.Config{
 			Models: auramodel.Config{Definitions: map[string]auramodel.Definition{auraagent.DefaultEvalJudgeRoute: {Model: "judge"}}},
-			Agents: &config.Agents{Definitions: []config.AgentDefinition{{
-				ID: "lobby", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{Schedule: schedule}},
+			Agents: &auraagent.Config{Definitions: []auraagent.Persona{{
+				ID: "lobby", Description: "d", Instructions: "x", Evals: auraagent.PersonaEvals{Behavior: &auraagent.PersonaEvalBehavior{Schedule: schedule}},
 			}}},
 		})
 		return err

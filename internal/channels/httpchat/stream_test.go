@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -238,7 +238,7 @@ func TestStreamKeepsGateErrorsAsPlainJSON(t *testing.T) {
 }
 
 func TestStreamAudienceGateAnswersPlainJSON(t *testing.T) {
-	fixture := newChatFixture(t, chatFixtureOptions{audience: config.AudienceOwner})
+	fixture := newChatFixture(t, chatFixtureOptions{audience: auraagent.AudienceOwner})
 	issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
 
 	rec := fixture.post(t, issued.Plaintext, defaultStreamBody())

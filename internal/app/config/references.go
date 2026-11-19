@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
@@ -23,9 +24,7 @@ func validateReferences(cfg *Config, doc *document) error {
 		errors.Join(telegramDiscordTokenProblems(&cfg.Channels.Telegram, &cfg.Channels.Discord)...),
 		telegramOwnerProblem(&cfg.Channels.Telegram, cfg.Owner),
 		emailOwnerProblem(&cfg.Channels.Email, cfg.Owner),
-		errors.Join(bindingProblems(cfg.Bindings, &cfg.Channels)...),
-		validatePersonaNames(cfg),
-		validatePersonaAccess(cfg),
+		errors.Join(bindingAccountProblems(cfg.Bindings, &cfg.Channels)...),
 		screenOwnerSecrets(cfg.Owner, cfg),
 	)
 }
@@ -130,95 +129,26 @@ func hasOwnerChannel(owner *legacyconfig.Owner, channel string) bool {
 	return false
 }
 
-func bindingProblems(bindings []legacyconfig.Binding, channels *legacyconfig.Channels) []error {
+func bindingAccountProblems(bindings auraagent.Bindings, channels *legacyconfig.Channels) []error {
 	if channels == nil {
 		return []error{configkit.Invalid("channels", "must not be nil")}
 	}
 	accounts := map[string]map[string]bool{
-		legacyconfig.BindingChannelDiscord:  make(map[string]bool, len(channels.Discord.Accounts)),
-		legacyconfig.BindingChannelTelegram: make(map[string]bool, len(channels.Telegram.Accounts)),
+		auraagent.BindingChannelDiscord:  make(map[string]bool, len(channels.Discord.Accounts)),
+		auraagent.BindingChannelTelegram: make(map[string]bool, len(channels.Telegram.Accounts)),
 	}
 	for i := range channels.Discord.Accounts {
-		accounts[legacyconfig.BindingChannelDiscord][channels.Discord.Accounts[i].Name] = true
+		accounts[auraagent.BindingChannelDiscord][channels.Discord.Accounts[i].Name] = true
 	}
 	for i := range channels.Telegram.Accounts {
-		accounts[legacyconfig.BindingChannelTelegram][channels.Telegram.Accounts[i].Name] = true
+		accounts[auraagent.BindingChannelTelegram][channels.Telegram.Accounts[i].Name] = true
 	}
 	var problems []error
-	seen := make(map[legacyconfig.Binding]int, len(bindings))
 	for i := range bindings {
-		binding := bindings[i]
-		field := fmt.Sprintf("bindings[%d]", i)
-		if strings.TrimSpace(binding.Persona) == "" {
-			problems = append(problems, configkit.Field(field+".persona", fault.New(legacyconfig.ErrorCodeBindingInvalid, "must not be empty")))
+		names, supported := accounts[bindings[i].Channel]
+		if supported && !names[bindings[i].Account] {
+			problems = append(problems, configkit.Field(fmt.Sprintf("bindings[%d].account", i), fault.New(auraagent.ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a configured channels.%s.accounts name", bindings[i].Account, bindings[i].Channel))))
 		}
-		switch binding.Channel {
-		case legacyconfig.BindingChannelDiscord:
-			problems = append(problems, discordBindingProblems(field, &binding, accounts[legacyconfig.BindingChannelDiscord])...)
-		case legacyconfig.BindingChannelTelegram:
-			problems = append(problems, telegramBindingProblems(field, &binding, accounts[legacyconfig.BindingChannelTelegram])...)
-		default:
-			problems = append(problems, configkit.Field(field+".channel", fault.New(legacyconfig.ErrorCodeBindingInvalid, fmt.Sprintf("%q is not supported; use %q or %q", binding.Channel, legacyconfig.BindingChannelDiscord, legacyconfig.BindingChannelTelegram))))
-		}
-		key := binding
-		key.Persona = ""
-		if first, ok := seen[key]; ok {
-			problems = append(problems, configkit.Field(field, fault.New(legacyconfig.ErrorCodeBindingInvalid, fmt.Sprintf("has the same match fields as bindings[%d]", first))))
-			continue
-		}
-		seen[key] = i
-	}
-	return problems
-}
-
-func discordBindingProblems(field string, binding *legacyconfig.Binding, accounts map[string]bool) []error {
-	var problems []error
-	if !accounts[binding.Account] {
-		problems = append(problems, configkit.Field(field+".account", fault.New(legacyconfig.ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a configured channels.discord.accounts name", binding.Account))))
-	}
-	if binding.ChatID != "" {
-		problems = append(problems, configkit.Field(field+".chat_id", fault.New(legacyconfig.ErrorCodeBindingInvalid, "is only valid on telegram bindings")))
-	}
-	if binding.GuildID == "" && binding.ChannelID == "" && binding.ThreadID == "" && binding.UserID == "" {
-		problems = append(problems, configkit.Field(field, fault.New(legacyconfig.ErrorCodeBindingInvalid, "must set at least one of guild_id, channel_id, thread_id, user_id")))
-	}
-	for _, match := range []struct{ name, id string }{
-		{"guild_id", binding.GuildID},
-		{"channel_id", binding.ChannelID},
-		{"thread_id", binding.ThreadID},
-		{"user_id", binding.UserID},
-	} {
-		if match.id != "" && !legacyconfig.IsSnowflake(match.id) {
-			problems = append(problems, configkit.Field(field+"."+match.name, fault.New(legacyconfig.ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a decimal snowflake", match.id))))
-		}
-	}
-	return problems
-}
-
-func telegramBindingProblems(field string, binding *legacyconfig.Binding, accounts map[string]bool) []error {
-	var problems []error
-	if !accounts[binding.Account] {
-		problems = append(problems, configkit.Field(field+".account", fault.New(legacyconfig.ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a configured channels.telegram.accounts name", binding.Account))))
-	}
-	if binding.GuildID != "" || binding.ChannelID != "" {
-		problems = append(problems, configkit.Field(field, fault.New(legacyconfig.ErrorCodeBindingInvalid, "matches telegram chats by chat_id, thread_id and user_id only")))
-	}
-	if binding.ChatID == "" && binding.UserID == "" {
-		problems = append(problems, configkit.Field(field, fault.New(legacyconfig.ErrorCodeBindingInvalid, "must set chat_id or user_id")))
-	}
-	if binding.ChatID != "" && !principal.IsTelegramGroupChatID(binding.ChatID) {
-		problems = append(problems, configkit.Field(field+".chat_id", fault.New(legacyconfig.ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a negative decimal telegram group chat id", binding.ChatID))))
-	}
-	if binding.ThreadID != "" {
-		switch {
-		case binding.ChatID == "":
-			problems = append(problems, configkit.Field(field+".thread_id", fault.New(legacyconfig.ErrorCodeBindingInvalid, "requires chat_id")))
-		case !principal.IsTelegramTopicID(binding.ThreadID):
-			problems = append(problems, configkit.Field(field+".thread_id", fault.New(legacyconfig.ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a positive decimal telegram topic id", binding.ThreadID))))
-		}
-	}
-	if binding.UserID != "" && !principal.IsTelegramUserID(binding.UserID) {
-		problems = append(problems, configkit.Field(field+".user_id", fault.New(legacyconfig.ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a positive decimal telegram user id", binding.UserID))))
 	}
 	return problems
 }

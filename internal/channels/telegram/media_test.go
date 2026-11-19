@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/vision"
@@ -679,7 +678,7 @@ func TestRejectedSendersAndClosedGatesTriggerNoMediaCall(t *testing.T) {
 		},
 		{
 			name:      "budget refusal",
-			opts:      accessOpts{allowed: []string{allowed}, settings: AccessSettings{Budgets: &fakeBudgets{refusal: config.MessageRateLimited}}},
+			opts:      accessOpts{allowed: []string{allowed}, settings: AccessSettings{Budgets: &fakeBudgets{refusal: auraagent.MessageRateLimited}}},
 			update:    privateMedia(10, mediaUserID, "hi", document),
 			wantDrops: []string{"rate_limited"},
 		},
@@ -691,7 +690,7 @@ func TestRejectedSendersAndClosedGatesTriggerNoMediaCall(t *testing.T) {
 		},
 		{
 			name:      "persona audience rejects the sender",
-			opts:      accessOpts{allowed: []string{allowed}, definition: auraagent.Definition{ID: testPersona, Name: "Main", Audience: config.AudienceOwner}},
+			opts:      accessOpts{allowed: []string{allowed}, definition: auraagent.Definition{ID: testPersona, Name: "Main", Audience: auraagent.AudienceOwner}},
 			update:    privateMedia(10, mediaUserID, "hi", document),
 			wantDrops: []string{"audience"},
 		},

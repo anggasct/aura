@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/channels/kit/status"
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -32,8 +32,8 @@ type PairingService interface {
 }
 
 const (
-	BudgetRefusalRateLimited = config.MessageRateLimited
-	BudgetRefusalExhausted   = config.MessageBudgetExhausted
+	BudgetRefusalRateLimited = auraagent.MessageRateLimited
+	BudgetRefusalExhausted   = auraagent.MessageBudgetExhausted
 )
 
 type BudgetGate interface {

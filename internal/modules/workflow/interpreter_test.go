@@ -12,7 +12,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
@@ -20,8 +19,8 @@ import (
 )
 
 func buildTestRegistry() (*auraagent.Registry, error) {
-	lobby := config.AgentDefinition{ID: "lobby", Description: "front desk", Instructions: "greet", Audience: config.AudiencePublic}
-	return auraagent.Build([]config.AgentDefinition{lobby}, []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search"}, []string{"primary"})
+	lobby := auraagent.Persona{ID: "lobby", Description: "front desk", Instructions: "greet", Audience: auraagent.AudiencePublic}
+	return auraagent.Build([]auraagent.Persona{lobby}, []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search"}, []string{"primary"})
 }
 
 type fakeAgentRunner struct {

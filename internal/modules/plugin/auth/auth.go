@@ -9,7 +9,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 const (
@@ -131,7 +131,7 @@ func (r *Registry) Strategy(spec *Spec) (Strategy, error) {
 	if spec == nil {
 		return nil, Errorf(ErrInvalid, "an auth spec is required")
 	}
-	if !config.ValidPluginID(spec.PluginID) {
+	if !auraagent.ValidPluginID(spec.PluginID) {
 		return nil, Errorf(ErrInvalid, "the plugin id is not valid")
 	}
 	build, known := r.factories[spec.Kind]

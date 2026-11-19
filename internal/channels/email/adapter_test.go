@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -164,7 +165,7 @@ func TestIngest_AuthenticationFailuresDropEveryClass(t *testing.T) {
 	for name, spec := range cases {
 		for _, from := range []string{ownerAddress, friendAddress, strangerAddr} {
 			t.Run(name+"/"+from, func(t *testing.T) {
-				h := newHarness(t, harnessOptions{audience: config.AudiencePublic})
+				h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic})
 				h.start()
 				spec.from = from
 				spec.messageID = "forged@example.com"
@@ -273,7 +274,7 @@ func TestIngest_DropReasons(t *testing.T) {
 			want: "author_not_allowed",
 		},
 		"trusted sender to an owner persona": {
-			opts: harnessOptions{audience: config.AudienceOwner},
+			opts: harnessOptions{audience: auraagent.AudienceOwner},
 			spec: mailSpec{from: friendAddress},
 			want: "audience",
 		},
@@ -293,12 +294,12 @@ func TestIngest_DropReasons(t *testing.T) {
 			want: "persona_eval_missing",
 		},
 		"rate limited": {
-			opts: harnessOptions{budgets: failingBudgets{refusal: config.MessageRateLimited}},
+			opts: harnessOptions{budgets: failingBudgets{refusal: auraagent.MessageRateLimited}},
 			spec: mailSpec{from: friendAddress},
 			want: "rate_limited",
 		},
 		"budget exhausted": {
-			opts: harnessOptions{budgets: failingBudgets{refusal: config.MessageBudgetExhausted}},
+			opts: harnessOptions{budgets: failingBudgets{refusal: auraagent.MessageBudgetExhausted}},
 			spec: mailSpec{from: friendAddress},
 			want: "budget_exhausted",
 		},
@@ -333,8 +334,8 @@ func TestIngest_DropReasons(t *testing.T) {
 
 func TestIngest_OwnerBypassesBudgetsAndEvals(t *testing.T) {
 	h := newHarness(t, harnessOptions{
-		audience: config.AudienceTrusted,
-		budgets:  failingBudgets{refusal: config.MessageRateLimited},
+		audience: auraagent.AudienceTrusted,
+		budgets:  failingBudgets{refusal: auraagent.MessageRateLimited},
 		evals:    staticEvals{},
 	})
 	h.start()

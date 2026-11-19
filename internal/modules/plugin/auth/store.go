@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 const (
@@ -39,7 +39,7 @@ type tokenStore struct {
 }
 
 func (s *tokenStore) valid() error {
-	if !config.ValidPluginID(s.id) {
+	if !auraagent.ValidPluginID(s.id) {
 		return Errorf(ErrInvalid, "the plugin id is not valid")
 	}
 	return nil

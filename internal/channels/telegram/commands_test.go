@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -203,11 +202,11 @@ func TestStartStaysThePairingEntryAndIsNotACommand(t *testing.T) {
 	})
 	t.Run("unknown sender is paired", func(t *testing.T) {
 		pairing := &fakePairing{result: access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "ABCD2345"}}
-		definition := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted, Pairing: true}
+		definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
 		rig := newCommandRig(t, accessOpts{definition: definition, settings: AccessSettings{Pairing: pairing}})
 		rig.handle(t, privateText(10, strangerID, "/start"))
 		rig.assertQuiet(t, "pairing")
-		want := strings.ReplaceAll(personaMessage(config.MessagePairingCode), config.PairingCodePlaceholder, "ABCD2345")
+		want := strings.ReplaceAll(personaMessage(auraagent.MessagePairingCode), auraagent.PairingCodePlaceholder, "ABCD2345")
 		if got := sentTo(rig.h.api, strangerID); !slices.Equal(got, []string{want}) {
 			t.Errorf("pairing reply = %q, want %q", got, want)
 		}
@@ -223,14 +222,14 @@ func TestForgetMeBehavesTheSameThroughTheDispatcher(t *testing.T) {
 		if erased := eraser.erased(); !slices.Equal(erased, []string{"telegram:555001"}) {
 			t.Errorf("erased %v", erased)
 		}
-		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(config.MessageForgetmeDone)}) {
+		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageForgetmeDone)}) {
 			t.Errorf("reply = %q", got)
 		}
 	})
 	t.Run("the owner is not permitted", func(t *testing.T) {
 		rig := newCommandRig(t, accessOpts{settings: AccessSettings{Erasure: &fakeEraser{}}})
 		rig.handle(t, privateText(10, ownerUserID, "/forgetme confirm"))
-		if got := sentTo(rig.h.api, ownerUserID); !slices.Equal(got, []string{personaMessage(config.MessageNotPermitted)}) {
+		if got := sentTo(rig.h.api, ownerUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageNotPermitted)}) {
 			t.Errorf("reply = %q", got)
 		}
 	})

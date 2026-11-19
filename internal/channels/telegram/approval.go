@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -98,7 +98,7 @@ func (a *Adapter) DecideForOwner(ctx context.Context, prompt *approval.Prompt, r
 }
 
 func (a *Adapter) ServesPersona(persona string) bool {
-	return a.router != nil && a.router.ServesPersona(config.BindingChannelTelegram, a.account.Name, persona)
+	return a.router != nil && a.router.ServesPersona(auraagent.BindingChannelTelegram, a.account.Name, persona)
 }
 
 func (a *Adapter) decideInChat(ctx context.Context, prompt *approval.Prompt, target *approvalTarget) (bool, error) {
@@ -162,13 +162,13 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, r
 		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, Errorf(ErrorCodeApprovalUnavailable, "owner approval card delivery failed")
 	}
-	a.postNotice(ctx, requester.dest, definition.Message(config.MessageWaitingForOwner))
+	a.postNotice(ctx, requester.dest, definition.Message(auraagent.MessageWaitingForOwner))
 	outcome, timedOut, err := a.awaitApproval(ctx, token, &card)
 	notify := context.WithoutCancel(ctx)
 	switch {
 	case timedOut || errors.Is(err, context.DeadlineExceeded):
 		a.observeRouted(ctx, approval.RoutedTimeout)
-		a.postNotice(notify, requester.dest, definition.Message(config.MessageApprovalTimeout))
+		a.postNotice(notify, requester.dest, definition.Message(auraagent.MessageApprovalTimeout))
 		if err != nil {
 			return false, err
 		}
@@ -192,7 +192,7 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, r
 		return true, nil
 	default:
 		a.observeRouted(ctx, approval.RoutedRejected)
-		a.postNotice(notify, requester.dest, definition.Message(config.MessageApprovalDenied))
+		a.postNotice(notify, requester.dest, definition.Message(auraagent.MessageApprovalDenied))
 		return false, nil
 	}
 }

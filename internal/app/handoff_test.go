@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -106,7 +107,7 @@ func TestReplyAndReleaseAHandoff(t *testing.T) {
 	if _, err := runAccessCommand(t, newHandoffCmd, cfg, "release", session); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if len(*delivered) != 2 || (*delivered)[1].text != config.PersonaMessageDefaults()[config.MessageHandoffClosed] {
+	if len(*delivered) != 2 || (*delivered)[1].text != auraagent.PersonaMessageDefaults()[auraagent.MessageHandoffClosed] {
 		t.Fatalf("release notice = %+v", *delivered)
 	}
 	if _, err := runAccessCommand(t, newHandoffCmd, cfg, "release", session); err == nil {
@@ -190,7 +191,7 @@ func TestReplyAndReleaseATelegramHandoff(t *testing.T) {
 	if _, err := runAccessCommand(t, newHandoffCmd, cfg, "release", session); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	closed := deliveredTelegramText{"pocket", "-1001234567890", "7", config.PersonaMessageDefaults()[config.MessageHandoffClosed]}
+	closed := deliveredTelegramText{"pocket", "-1001234567890", "7", auraagent.PersonaMessageDefaults()[auraagent.MessageHandoffClosed]}
 	if len(*delivered) != 2 || (*delivered)[1] != closed {
 		t.Fatalf("release notice = %+v, want %+v", *delivered, closed)
 	}

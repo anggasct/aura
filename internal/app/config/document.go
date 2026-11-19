@@ -7,7 +7,7 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
@@ -121,7 +121,7 @@ func (d *document) writtenPersonaProblems() []error {
 			problems = append(problems, &configkit.FieldError{
 				Path:     field + ".name",
 				Position: nodePosition(name),
-				Err:      fault.New(legacyconfig.ErrorCodePersonaInvalid, "must not be empty"),
+				Err:      fault.New(auraagent.ErrorCodePersonaInvalid, "must not be empty"),
 			})
 		}
 		evals := childOf(definition, "evals")

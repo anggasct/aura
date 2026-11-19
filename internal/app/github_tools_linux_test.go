@@ -91,7 +91,7 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 	}
 	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *appconfig.Config) {
 		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
-		cfg.Agents.Definitions = append(cfg.Agents.Definitions, config.AgentDefinition{
+		cfg.Agents.Definitions = append(cfg.Agents.Definitions, auraagent.Persona{
 			ID: "reviewer", Description: "d", Instructions: "i", Tools: []string{github.ToolComment},
 		})
 	})
@@ -294,10 +294,10 @@ func TestSurfaceExecutorAsksApprovalForAGitHubCall(t *testing.T) {
 	verdict := false
 	cfg := appconfig.Default()
 	cfg.Tools.GitHub.Credentials = oneCredential()
-	registry, err := auraagent.Build([]config.AgentDefinition{
-		{ID: "ops", Description: "d", Instructions: "i", Audience: config.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}},
-		{ID: "plain", Description: "d", Instructions: "i", Audience: config.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"read_file"}},
-		{ID: "lobby", Description: "d", Instructions: "i", Audience: config.AudiencePublic, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}, PublicTools: []string{"read_file"}},
+	registry, err := auraagent.Build([]auraagent.Persona{
+		{ID: "ops", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}},
+		{ID: "plain", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"read_file"}},
+		{ID: "lobby", Description: "d", Instructions: "i", Audience: auraagent.AudiencePublic, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}, PublicTools: []string{"read_file"}},
 	}, personaToolNames(&cfg), nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)

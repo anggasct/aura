@@ -176,63 +176,63 @@ func TestAccess_PublicSendersPassTheSharedGates(t *testing.T) {
 		wantDrop  string
 		wantClass principal.Class
 	}{
-		{name: "public persona admits a stranger", audience: config.AudiencePublic, from: strangerAddr, wantClass: principal.ClassPublic},
-		{name: "trusted persona refuses a stranger", audience: config.AudienceTrusted, from: strangerAddr, wantDrop: "author_not_allowed"},
-		{name: "owner persona refuses a stranger", audience: config.AudienceOwner, from: strangerAddr, wantDrop: "author_not_allowed"},
-		{name: "public persona still admits the trusted friend", audience: config.AudiencePublic, from: friendAddress, wantClass: principal.ClassTrusted},
-		{name: "public persona still admits the owner", audience: config.AudiencePublic, from: ownerAddress, wantClass: principal.ClassOwner},
+		{name: "public persona admits a stranger", audience: auraagent.AudiencePublic, from: strangerAddr, wantClass: principal.ClassPublic},
+		{name: "trusted persona refuses a stranger", audience: auraagent.AudienceTrusted, from: strangerAddr, wantDrop: "author_not_allowed"},
+		{name: "owner persona refuses a stranger", audience: auraagent.AudienceOwner, from: strangerAddr, wantDrop: "author_not_allowed"},
+		{name: "public persona still admits the trusted friend", audience: auraagent.AudiencePublic, from: friendAddress, wantClass: principal.ClassTrusted},
+		{name: "public persona still admits the owner", audience: auraagent.AudiencePublic, from: ownerAddress, wantClass: principal.ClassOwner},
 		{
-			name: "missing eval refuses a stranger", audience: config.AudiencePublic, from: strangerAddr, wantDrop: "persona_eval_missing",
+			name: "missing eval refuses a stranger", audience: auraagent.AudiencePublic, from: strangerAddr, wantDrop: "persona_eval_missing",
 			evals: func(g *gateLog) access.EvalGate { return loggedEvals{log: g} },
 		},
 		{
-			name: "eval lookup failure refuses a stranger", audience: config.AudiencePublic, from: strangerAddr, wantDrop: "persona_eval_missing",
+			name: "eval lookup failure refuses a stranger", audience: auraagent.AudiencePublic, from: strangerAddr, wantDrop: "persona_eval_missing",
 			evals: func(g *gateLog) access.EvalGate { return loggedEvals{log: g, evaluated: true, err: errBoom} },
 		},
 		{
-			name: "missing eval never refuses the owner", audience: config.AudiencePublic, from: ownerAddress, wantClass: principal.ClassOwner,
+			name: "missing eval never refuses the owner", audience: auraagent.AudiencePublic, from: ownerAddress, wantClass: principal.ClassOwner,
 			evals: func(g *gateLog) access.EvalGate { return loggedEvals{log: g} },
 		},
 		{
-			name: "rate limit refuses a stranger", audience: config.AudiencePublic, from: strangerAddr, wantDrop: "rate_limited",
+			name: "rate limit refuses a stranger", audience: auraagent.AudiencePublic, from: strangerAddr, wantDrop: "rate_limited",
 			budgets: func(g *gateLog) access.BudgetGate {
 				return loggedBudgets{log: g, refusal: access.BudgetRefusalRateLimited}
 			},
 		},
 		{
-			name: "exhausted budget refuses a stranger", audience: config.AudiencePublic, from: strangerAddr, wantDrop: "budget_exhausted",
+			name: "exhausted budget refuses a stranger", audience: auraagent.AudiencePublic, from: strangerAddr, wantDrop: "budget_exhausted",
 			budgets: func(g *gateLog) access.BudgetGate {
 				return loggedBudgets{log: g, refusal: access.BudgetRefusalExhausted}
 			},
 		},
 		{
-			name: "budget lookup failure refuses a stranger", audience: config.AudiencePublic, from: strangerAddr, wantDrop: "budget_check_failed",
+			name: "budget lookup failure refuses a stranger", audience: auraagent.AudiencePublic, from: strangerAddr, wantDrop: "budget_check_failed",
 			budgets: func(g *gateLog) access.BudgetGate { return loggedBudgets{log: g, err: errBoom} },
 		},
 		{
-			name: "exhausted budget never refuses the owner", audience: config.AudiencePublic, from: ownerAddress, wantClass: principal.ClassOwner,
+			name: "exhausted budget never refuses the owner", audience: auraagent.AudiencePublic, from: ownerAddress, wantClass: principal.ClassOwner,
 			budgets: func(g *gateLog) access.BudgetGate {
 				return loggedBudgets{log: g, refusal: access.BudgetRefusalExhausted}
 			},
 		},
 		{
-			name: "open handoff holds a stranger", audience: config.AudiencePublic, from: strangerAddr, wantDrop: "handoff_held",
+			name: "open handoff holds a stranger", audience: auraagent.AudiencePublic, from: strangerAddr, wantDrop: "handoff_held",
 			handoffs: func(g *gateLog) access.HandoffGate { return loggedHandoffs{log: g, state: access.HandoffStateOpen} },
 		},
 		{
-			name: "open handoff holds a trusted sender", audience: config.AudienceTrusted, from: friendAddress, wantDrop: "handoff_held",
+			name: "open handoff holds a trusted sender", audience: auraagent.AudienceTrusted, from: friendAddress, wantDrop: "handoff_held",
 			handoffs: func(g *gateLog) access.HandoffGate { return loggedHandoffs{log: g, state: access.HandoffStateOpen} },
 		},
 		{
-			name: "handoff lookup failure holds a stranger", audience: config.AudiencePublic, from: strangerAddr, wantDrop: "handoff_check_failed",
+			name: "handoff lookup failure holds a stranger", audience: auraagent.AudiencePublic, from: strangerAddr, wantDrop: "handoff_check_failed",
 			handoffs: func(g *gateLog) access.HandoffGate { return loggedHandoffs{log: g, err: errBoom} },
 		},
 		{
-			name: "expired handoff admits a stranger", audience: config.AudiencePublic, from: strangerAddr, wantClass: principal.ClassPublic,
+			name: "expired handoff admits a stranger", audience: auraagent.AudiencePublic, from: strangerAddr, wantClass: principal.ClassPublic,
 			handoffs: func(g *gateLog) access.HandoffGate { return loggedHandoffs{log: g, state: access.HandoffStateExpired} },
 		},
 		{
-			name: "open handoff never holds the owner", audience: config.AudiencePublic, from: ownerAddress, wantClass: principal.ClassOwner,
+			name: "open handoff never holds the owner", audience: auraagent.AudiencePublic, from: ownerAddress, wantClass: principal.ClassOwner,
 			handoffs: func(g *gateLog) access.HandoffGate { return loggedHandoffs{log: g, state: access.HandoffStateOpen} },
 		},
 	}
@@ -273,7 +273,7 @@ func TestAccess_PublicSendersPassTheSharedGates(t *testing.T) {
 }
 
 func TestAccess_PublicPrincipalIsTheSenderAddress(t *testing.T) {
-	h := newHarness(t, harnessOptions{audience: config.AudiencePublic})
+	h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic})
 	h.start()
 	h.deliver(mailSpec{from: strangerAddr, subject: "Hello", messageID: "p1@example.com"}.raw())
 	h.wantTurns(1)
@@ -296,10 +296,10 @@ func TestAccess_GatesRunInDiscordDMOrder(t *testing.T) {
 		from     string
 		want     []string
 	}{
-		{name: "public stranger runs eval, budget and handoff in order", audience: config.AudiencePublic, from: strangerAddr, want: []string{"eval", "budget", "handoff"}},
-		{name: "trusted sender runs the same order", audience: config.AudienceTrusted, from: friendAddress, want: []string{"eval", "budget", "handoff"}},
-		{name: "owner skips every gate", audience: config.AudienceTrusted, from: ownerAddress, want: nil},
-		{name: "audience refusal runs no later gate", audience: config.AudienceOwner, from: strangerAddr, want: nil},
+		{name: "public stranger runs eval, budget and handoff in order", audience: auraagent.AudiencePublic, from: strangerAddr, want: []string{"eval", "budget", "handoff"}},
+		{name: "trusted sender runs the same order", audience: auraagent.AudienceTrusted, from: friendAddress, want: []string{"eval", "budget", "handoff"}},
+		{name: "owner skips every gate", audience: auraagent.AudienceTrusted, from: ownerAddress, want: nil},
+		{name: "audience refusal runs no later gate", audience: auraagent.AudienceOwner, from: strangerAddr, want: nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -337,7 +337,7 @@ func TestAccess_UnauthenticatedMailNeverReachesGatesCommandsOrAttachments(t *tes
 					t.Fatalf("NewOwnerRoute: %v", err)
 				}
 				h := newHarness(t, harnessOptions{
-					audience: config.AudiencePublic, route: route, erasure: eraser, media: store,
+					audience: auraagent.AudiencePublic, route: route, erasure: eraser, media: store,
 					evals: loggedEvals{log: log, evaluated: true}, budgets: loggedBudgets{log: log}, handoffs: loggedHandoffs{log: log},
 				})
 				h.start()
@@ -404,7 +404,7 @@ func TestAccess_AdmittedSessionsRegisterTheirRequesterForOwnerApproval(t *testin
 			if err != nil {
 				t.Fatalf("NewOwnerRoute: %v", err)
 			}
-			h := newHarness(t, harnessOptions{audience: config.AudiencePublic, route: route})
+			h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic, route: route})
 			h.start()
 			h.deliver(mailSpec{from: tc.from, messageID: "r1@example.com"}.raw())
 			h.wantTurns(1)
@@ -430,7 +430,7 @@ func TestAccess_RefusedMailRegistersNoApprovalTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOwnerRoute: %v", err)
 	}
-	h := newHarness(t, harnessOptions{audience: config.AudienceTrusted, route: route, evals: loggedEvals{evaluated: true, log: &gateLog{}}})
+	h := newHarness(t, harnessOptions{audience: auraagent.AudienceTrusted, route: route, evals: loggedEvals{evaluated: true, log: &gateLog{}}})
 	h.start()
 	h.deliver(mailSpec{from: strangerAddr, messageID: "x1@example.com"}.raw())
 	h.wantTurns(0)
@@ -445,7 +445,7 @@ func TestAccess_MailBodiesNeverAnswerAnApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOwnerRoute: %v", err)
 	}
-	h := newHarness(t, harnessOptions{audience: config.AudiencePublic, route: route})
+	h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic, route: route})
 	h.start()
 	for i, body := range []string{"approve", "yes, go ahead", "aura:0123456789abcdef:a:0123456789abcdef", "/approve all"} {
 		h.deliver(mailSpec{from: ownerAddress, messageID: fmt.Sprintf("a%d@example.com", i), body: body}.raw())
@@ -469,14 +469,14 @@ func TestForgetMe(t *testing.T) {
 		wantErased []string
 		wantTurn   bool
 	}{
-		{name: "trusted asks first", from: friendAddress, body: "/forgetme", wantNotice: definition.Message(config.MessageForgetmeConfirm)},
-		{name: "trusted confirms", from: friendAddress, body: "/forgetme confirm", wantNotice: definition.Message(config.MessageForgetmeDone), wantErased: []string{"email:" + friendAddress}},
-		{name: "confirm is case insensitive", from: friendAddress, body: "  /FORGETME Confirm \r\n", wantNotice: definition.Message(config.MessageForgetmeDone), wantErased: []string{"email:" + friendAddress}},
-		{name: "public confirms", from: strangerAddr, body: "/forgetme confirm", wantNotice: definition.Message(config.MessageForgetmeDone), wantErased: []string{"email:" + strangerAddr}},
-		{name: "owner is not permitted", from: ownerAddress, body: "/forgetme confirm", wantNotice: definition.Message(config.MessageNotPermitted)},
-		{name: "owner asking first is not permitted either", from: ownerAddress, body: "/forgetme", wantNotice: definition.Message(config.MessageNotPermitted)},
+		{name: "trusted asks first", from: friendAddress, body: "/forgetme", wantNotice: definition.Message(auraagent.MessageForgetmeConfirm)},
+		{name: "trusted confirms", from: friendAddress, body: "/forgetme confirm", wantNotice: definition.Message(auraagent.MessageForgetmeDone), wantErased: []string{"email:" + friendAddress}},
+		{name: "confirm is case insensitive", from: friendAddress, body: "  /FORGETME Confirm \r\n", wantNotice: definition.Message(auraagent.MessageForgetmeDone), wantErased: []string{"email:" + friendAddress}},
+		{name: "public confirms", from: strangerAddr, body: "/forgetme confirm", wantNotice: definition.Message(auraagent.MessageForgetmeDone), wantErased: []string{"email:" + strangerAddr}},
+		{name: "owner is not permitted", from: ownerAddress, body: "/forgetme confirm", wantNotice: definition.Message(auraagent.MessageNotPermitted)},
+		{name: "owner asking first is not permitted either", from: ownerAddress, body: "/forgetme", wantNotice: definition.Message(auraagent.MessageNotPermitted)},
 		{name: "erasure failure sends no confirmation", from: friendAddress, body: "/forgetme confirm", eraser: &recordingEraser{fail: errBoom}, wantErased: []string{"email:" + friendAddress}},
-		{name: "erasure waiting on workflow runs asks to repeat", from: friendAddress, body: "/forgetme confirm", eraser: &recordingEraser{fail: fmt.Errorf("blocked: %w", access.ErrForgetRunsStopping)}, wantErased: []string{"email:" + friendAddress}, wantNotice: definition.Message(config.MessageForgetmeStopping)},
+		{name: "erasure waiting on workflow runs asks to repeat", from: friendAddress, body: "/forgetme confirm", eraser: &recordingEraser{fail: fmt.Errorf("blocked: %w", access.ErrForgetRunsStopping)}, wantErased: []string{"email:" + friendAddress}, wantNotice: definition.Message(auraagent.MessageForgetmeStopping)},
 		{name: "extra word is an ordinary message", from: friendAddress, body: "/forgetme now", wantTurn: true},
 		{name: "second word after confirm is an ordinary message", from: friendAddress, body: "/forgetme confirm please", wantTurn: true},
 		{name: "command inside a sentence is an ordinary message", from: friendAddress, body: "please /forgetme confirm", wantTurn: true},
@@ -490,7 +490,7 @@ func TestForgetMe(t *testing.T) {
 			if eraser == nil {
 				eraser = &recordingEraser{}
 			}
-			opts := harnessOptions{audience: config.AudiencePublic}
+			opts := harnessOptions{audience: auraagent.AudiencePublic}
 			if !tc.noEraser {
 				opts.erasure = eraser
 			}
@@ -532,7 +532,7 @@ func TestForgetMe(t *testing.T) {
 
 func TestForgetMe_OnlyTheAuthenticatedSenderIsErased(t *testing.T) {
 	eraser := &recordingEraser{}
-	h := newHarness(t, harnessOptions{audience: config.AudiencePublic, erasure: eraser})
+	h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic, erasure: eraser})
 	h.start()
 	h.deliver(mailSpec{from: friendAddress, messageID: "f2@example.com", body: "/forgetme confirm"}.raw())
 	h.deliver(mailSpec{from: strangerAddr, messageID: "f3@example.com", body: "/forgetme confirm", extra: []string{"X-Forwarded-For: " + friendAddress}}.raw())
@@ -548,7 +548,7 @@ func TestForgetMe_HoldsNoApprovalTargetAndLeavesNoSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOwnerRoute: %v", err)
 	}
-	h := newHarness(t, harnessOptions{audience: config.AudiencePublic, route: route, erasure: &recordingEraser{}})
+	h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic, route: route, erasure: &recordingEraser{}})
 	h.start()
 	h.deliver(mailSpec{from: friendAddress, messageID: "f4@example.com", body: "/forgetme confirm"}.raw())
 	if route.HoldsApprovalTarget(wantSession("f4@example.com")) || h.sessions.count() != 0 {
@@ -622,7 +622,7 @@ func TestAttachments_AreBoundedAndLandAsArtifacts(t *testing.T) {
 			if store == nil {
 				store = &recordingMedia{}
 			}
-			h := newHarness(t, harnessOptions{audience: config.AudiencePublic, media: store, email: func(cfg *config.Email) { cfg.MaxAttachmentBytes = limit }})
+			h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic, media: store, email: func(cfg *config.Email) { cfg.MaxAttachmentBytes = limit }})
 			h.start()
 			h.deliver(mailWithAttachments(mailSpec{from: friendAddress, subject: "Docs", messageID: "att@example.com"}, tc.text, tc.attachments...))
 			if tc.wantDrop != "" {
@@ -704,7 +704,7 @@ func TestAttachments_TooManyDropTheMessage(t *testing.T) {
 }
 
 func TestSessionRoute(t *testing.T) {
-	h := newHarness(t, harnessOptions{audience: config.AudiencePublic})
+	h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic})
 	h.start()
 	h.deliver(mailSpec{from: strangerAddr, messageID: "s1@example.com"}.raw())
 	h.wantTurns(1)
@@ -754,7 +754,7 @@ func TestNotifyHandoff(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			notifier := tc.notifier()
-			h := newHarness(t, harnessOptions{audience: config.AudiencePublic, notifier: notifier})
+			h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic, notifier: notifier})
 			h.start()
 			h.deliver(mailSpec{from: tc.from, subject: "Refund please", messageID: "h1@example.com"}.raw())
 			h.wantTurns(1)
@@ -787,7 +787,7 @@ func TestNotifyHandoff(t *testing.T) {
 }
 
 func TestNotifyHandoff_WithoutAnOwnerRouteFailsClosed(t *testing.T) {
-	h := newHarness(t, harnessOptions{audience: config.AudiencePublic})
+	h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic})
 	h.start()
 	h.deliver(mailSpec{from: strangerAddr, messageID: "h2@example.com"}.raw())
 	h.wantTurns(1)

@@ -3,20 +3,19 @@ package agent
 import (
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
-func routerFixture(t *testing.T, bindings []config.Binding) *Router {
+func routerFixture(t *testing.T, bindings []Binding) *Router {
 	t.Helper()
 	registry, err := Build(nil, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	router, err := NewRouter(registry, []ChannelAccount{
-		{Channel: config.BindingChannelDiscord, Name: "home", Persona: DefaultID, Field: "channels.discord.accounts[0]"},
-		{Channel: config.BindingChannelDiscord, Name: "kuma", Field: "channels.discord.accounts[1]"},
-		{Channel: config.BindingChannelTelegram, Name: "pocket", Persona: "researcher", Field: "channels.telegram.accounts[0]"},
+		{Channel: BindingChannelDiscord, Name: "home", Persona: DefaultID, Field: "channels.discord.accounts[0]"},
+		{Channel: BindingChannelDiscord, Name: "kuma", Field: "channels.discord.accounts[1]"},
+		{Channel: BindingChannelTelegram, Name: "pocket", Persona: "researcher", Field: "channels.telegram.accounts[0]"},
 	}, bindings)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
@@ -24,21 +23,21 @@ func routerFixture(t *testing.T, bindings []config.Binding) *Router {
 	return router
 }
 
-func discordBinding(persona, account string, match config.Binding) config.Binding {
+func discordBinding(persona, account string, match Binding) Binding {
 	match.Persona = persona
-	match.Channel = config.BindingChannelDiscord
+	match.Channel = BindingChannelDiscord
 	match.Account = account
 	return match
 }
 
 func TestRouterMostSpecificBindingWins(t *testing.T) {
-	router := routerFixture(t, []config.Binding{
-		discordBinding("researcher", "home", config.Binding{GuildID: "1"}),
-		discordBinding("engineer", "home", config.Binding{ChannelID: "2"}),
-		discordBinding("reviewer", "home", config.Binding{ThreadID: "3"}),
-		discordBinding("researcher", "home", config.Binding{UserID: "4"}),
-		discordBinding("reviewer", "home", config.Binding{GuildID: "1", ChannelID: "5"}),
-		discordBinding("engineer", "kuma", config.Binding{ChannelID: "2"}),
+	router := routerFixture(t, []Binding{
+		discordBinding("researcher", "home", Binding{GuildID: "1"}),
+		discordBinding("engineer", "home", Binding{ChannelID: "2"}),
+		discordBinding("reviewer", "home", Binding{ThreadID: "3"}),
+		discordBinding("researcher", "home", Binding{UserID: "4"}),
+		discordBinding("reviewer", "home", Binding{GuildID: "1", ChannelID: "5"}),
+		discordBinding("engineer", "kuma", Binding{ChannelID: "2"}),
 	})
 	cases := []struct {
 		name        string
@@ -58,7 +57,7 @@ func TestRouterMostSpecificBindingWins(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			scope := tc.scope
-			scope.Channel = config.BindingChannelDiscord
+			scope.Channel = BindingChannelDiscord
 			scope.Account = "home"
 			match, ok := router.Resolve(&scope)
 			if !ok {
@@ -72,14 +71,14 @@ func TestRouterMostSpecificBindingWins(t *testing.T) {
 }
 
 func TestRouterScopesBindingsToTheirAccount(t *testing.T) {
-	router := routerFixture(t, []config.Binding{
-		discordBinding("engineer", "kuma", config.Binding{ChannelID: "2"}),
+	router := routerFixture(t, []Binding{
+		discordBinding("engineer", "kuma", Binding{ChannelID: "2"}),
 	})
-	home, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelDiscord, Account: "home", ChannelID: "2"})
+	home, ok := router.Resolve(&RouteScope{Channel: BindingChannelDiscord, Account: "home", ChannelID: "2"})
 	if !ok || home.Persona != DefaultID {
 		t.Errorf("home = %+v, %t; want account default %q", home, ok, DefaultID)
 	}
-	kuma, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelDiscord, Account: "kuma", ChannelID: "2"})
+	kuma, ok := router.Resolve(&RouteScope{Channel: BindingChannelDiscord, Account: "kuma", ChannelID: "2"})
 	if !ok || kuma.Persona != "engineer" || kuma.Score != ScoreChannel {
 		t.Errorf("kuma = %+v, %t; want engineer by channel", kuma, ok)
 	}
@@ -87,10 +86,10 @@ func TestRouterScopesBindingsToTheirAccount(t *testing.T) {
 
 func TestRouterNoMatchWithoutAccountDefault(t *testing.T) {
 	router := routerFixture(t, nil)
-	if match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelDiscord, Account: "kuma", ChannelID: "2"}); ok {
+	if match, ok := router.Resolve(&RouteScope{Channel: BindingChannelDiscord, Account: "kuma", ChannelID: "2"}); ok {
 		t.Fatalf("match = %+v, want none", match)
 	}
-	if match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelDiscord, Account: "work", ChannelID: "2"}); ok {
+	if match, ok := router.Resolve(&RouteScope{Channel: BindingChannelDiscord, Account: "work", ChannelID: "2"}); ok {
 		t.Fatalf("unknown account match = %+v, want none", match)
 	}
 	if _, ok := router.Resolve(nil); ok {
@@ -105,17 +104,17 @@ func TestRouterRejectsUnregisteredPersonas(t *testing.T) {
 	}
 	cases := map[string]struct {
 		accounts []ChannelAccount
-		bindings []config.Binding
+		bindings []Binding
 	}{
 		"binding persona": {
-			accounts: []ChannelAccount{{Channel: config.BindingChannelDiscord, Name: "home", Field: "channels.discord.accounts[0]"}},
-			bindings: []config.Binding{discordBinding("ghost", "home", config.Binding{ChannelID: "2"})},
+			accounts: []ChannelAccount{{Channel: BindingChannelDiscord, Name: "home", Field: "channels.discord.accounts[0]"}},
+			bindings: []Binding{discordBinding("ghost", "home", Binding{ChannelID: "2"})},
 		},
 		"account default persona": {
-			accounts: []ChannelAccount{{Channel: config.BindingChannelDiscord, Name: "home", Persona: "ghost", Field: "channels.discord.accounts[0]"}},
+			accounts: []ChannelAccount{{Channel: BindingChannelDiscord, Name: "home", Persona: "ghost", Field: "channels.discord.accounts[0]"}},
 		},
 		"telegram account default persona": {
-			accounts: []ChannelAccount{{Channel: config.BindingChannelTelegram, Name: "pocket", Persona: "ghost", Field: "channels.telegram.accounts[0]"}},
+			accounts: []ChannelAccount{{Channel: BindingChannelTelegram, Name: "pocket", Persona: "ghost", Field: "channels.telegram.accounts[0]"}},
 		},
 	}
 	for name, tc := range cases {
@@ -137,48 +136,48 @@ func TestRouterListsRegisteredPersonasAndAccounts(t *testing.T) {
 	if len(personas) != 4 || personas[0] != DefaultID {
 		t.Errorf("personas = %v", personas)
 	}
-	if !router.HasAccount(config.BindingChannelDiscord, "kuma") || router.HasAccount(config.BindingChannelDiscord, "work") {
+	if !router.HasAccount(BindingChannelDiscord, "kuma") || router.HasAccount(BindingChannelDiscord, "work") {
 		t.Error("HasAccount does not reflect configured accounts")
 	}
-	if !router.HasAccount(config.BindingChannelTelegram, "pocket") || router.HasAccount(config.BindingChannelDiscord, "pocket") {
+	if !router.HasAccount(BindingChannelTelegram, "pocket") || router.HasAccount(BindingChannelDiscord, "pocket") {
 		t.Error("HasAccount does not keep telegram accounts apart from discord")
 	}
 }
 
 func TestRouterResolvesTelegramAccountsAndUserBindings(t *testing.T) {
-	router := routerFixture(t, []config.Binding{{
+	router := routerFixture(t, []Binding{{
 		Persona: "engineer",
-		Channel: config.BindingChannelTelegram,
+		Channel: BindingChannelTelegram,
 		Account: "pocket",
 		UserID:  "42",
 	}})
-	match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelTelegram, Account: "pocket", UserID: "7"})
+	match, ok := router.Resolve(&RouteScope{Channel: BindingChannelTelegram, Account: "pocket", UserID: "7"})
 	if !ok || match.Persona != "researcher" || match.Binding != AccountDefaultBinding {
 		t.Fatalf("account default = %+v %v, want researcher", match, ok)
 	}
-	match, ok = router.Resolve(&RouteScope{Channel: config.BindingChannelTelegram, Account: "pocket", UserID: "42"})
+	match, ok = router.Resolve(&RouteScope{Channel: BindingChannelTelegram, Account: "pocket", UserID: "42"})
 	if !ok || match.Persona != "engineer" || match.Score != ScoreUser {
 		t.Fatalf("user binding = %+v %v, want engineer", match, ok)
 	}
-	if match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelDiscord, Account: "pocket", UserID: "42"}); ok {
+	if match, ok := router.Resolve(&RouteScope{Channel: BindingChannelDiscord, Account: "pocket", UserID: "42"}); ok {
 		t.Fatalf("telegram binding resolved for a discord scope: %+v", match)
 	}
 }
 
-func telegramBinding(persona string, match config.Binding) config.Binding {
+func telegramBinding(persona string, match Binding) Binding {
 	match.Persona = persona
-	match.Channel = config.BindingChannelTelegram
+	match.Channel = BindingChannelTelegram
 	match.Account = "pocket"
 	return match
 }
 
 func TestRouterScoresTelegramChatBindings(t *testing.T) {
-	router := routerFixture(t, []config.Binding{
-		telegramBinding("engineer", config.Binding{ChatID: "-100"}),
-		telegramBinding("reviewer", config.Binding{ChatID: "-100", ThreadID: "5"}),
-		telegramBinding("researcher", config.Binding{ChatID: "-100", UserID: "7"}),
-		telegramBinding("reviewer", config.Binding{UserID: "8"}),
-		discordBinding("engineer", "home", config.Binding{ChatID: "-100"}),
+	router := routerFixture(t, []Binding{
+		telegramBinding("engineer", Binding{ChatID: "-100"}),
+		telegramBinding("reviewer", Binding{ChatID: "-100", ThreadID: "5"}),
+		telegramBinding("researcher", Binding{ChatID: "-100", UserID: "7"}),
+		telegramBinding("reviewer", Binding{UserID: "8"}),
+		discordBinding("engineer", "home", Binding{ChatID: "-100"}),
 	})
 	cases := []struct {
 		name        string
@@ -198,7 +197,7 @@ func TestRouterScoresTelegramChatBindings(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			scope := tc.scope
-			scope.Channel, scope.Account = config.BindingChannelTelegram, "pocket"
+			scope.Channel, scope.Account = BindingChannelTelegram, "pocket"
 			match, ok := router.Resolve(&scope)
 			if !ok || match.Persona != tc.wantPersona || match.Score != tc.wantScore || match.Binding != tc.wantBinding {
 				t.Fatalf("Resolve = %+v %v, want %s score %d binding %d", match, ok, tc.wantPersona, tc.wantScore, tc.wantBinding)
@@ -208,10 +207,10 @@ func TestRouterScoresTelegramChatBindings(t *testing.T) {
 }
 
 func TestRouterChatBindingNeverMatchesDiscordScopes(t *testing.T) {
-	router := routerFixture(t, []config.Binding{
-		telegramBinding("engineer", config.Binding{ChatID: "-100"}),
+	router := routerFixture(t, []Binding{
+		telegramBinding("engineer", Binding{ChatID: "-100"}),
 	})
-	match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelDiscord, Account: "home", ChannelID: "-100", ChatID: "-100"})
+	match, ok := router.Resolve(&RouteScope{Channel: BindingChannelDiscord, Account: "home", ChannelID: "-100", ChatID: "-100"})
 	if !ok || match.Binding != AccountDefaultBinding {
 		t.Fatalf("Resolve = %+v %v, want the discord account default", match, ok)
 	}
@@ -223,8 +222,8 @@ func TestRouterEmailAccountRoutesToItsPersona(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	accounts := []ChannelAccount{
-		{Channel: config.BindingChannelEmail, Name: "work", Persona: DefaultID, Field: "channels.email.accounts[0]"},
-		{Channel: config.BindingChannelEmail, Name: "ghost", Persona: "not-registered", Field: "channels.email.accounts[1]"},
+		{Channel: BindingChannelEmail, Name: "work", Persona: DefaultID, Field: "channels.email.accounts[0]"},
+		{Channel: BindingChannelEmail, Name: "ghost", Persona: "not-registered", Field: "channels.email.accounts[1]"},
 	}
 	if _, err := NewRouter(registry, accounts, nil); err == nil {
 		t.Fatal("NewRouter accepted an email account with an unregistered persona")
@@ -233,14 +232,14 @@ func TestRouterEmailAccountRoutesToItsPersona(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
-	if !router.HasAccount(config.BindingChannelEmail, "work") || router.HasAccount(config.BindingChannelTelegram, "work") {
+	if !router.HasAccount(BindingChannelEmail, "work") || router.HasAccount(BindingChannelTelegram, "work") {
 		t.Error("email account is not registered under the email channel only")
 	}
-	match, ok := router.Resolve(&RouteScope{Channel: config.BindingChannelEmail, Account: "work", UserID: "friend@example.com"})
+	match, ok := router.Resolve(&RouteScope{Channel: BindingChannelEmail, Account: "work", UserID: "friend@example.com"})
 	if !ok || match.Persona != DefaultID || match.Binding != AccountDefaultBinding {
 		t.Errorf("match = %+v %v, want the account persona", match, ok)
 	}
-	if !router.ServesPersona(config.BindingChannelEmail, "work", DefaultID) {
+	if !router.ServesPersona(BindingChannelEmail, "work", DefaultID) {
 		t.Error("ServesPersona(email) = false for the account persona")
 	}
 }

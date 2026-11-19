@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
-	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -14,7 +14,6 @@ const (
 )
 
 var (
-	pluginIDPattern      = regexp.MustCompile(`^[a-z][a-z0-9-]{1,47}$`)
 	pluginVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$`)
 )
 
@@ -26,10 +25,6 @@ type PluginDesired struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
 	Enabled bool   `json:"enabled"`
-}
-
-func ValidPluginID(id string) bool {
-	return pluginIDPattern.MatchString(id)
 }
 
 func ValidPluginVersion(version string) bool {
@@ -46,7 +41,7 @@ func ValidatePlugins(plugins *Plugins) error {
 	seen := make(map[string]struct{}, len(plugins.Desired))
 	for i := range plugins.Desired {
 		entry := &plugins.Desired[i]
-		if !ValidPluginID(entry.ID) {
+		if !agent.ValidPluginID(entry.ID) {
 			return configkit.Invalid(fmt.Sprintf("plugins.desired[%d].id", i), "must match [a-z][a-z0-9-]{1,47}")
 		}
 		if !ValidPluginVersion(entry.Version) {
@@ -56,20 +51,6 @@ func ValidatePlugins(plugins *Plugins) error {
 			return configkit.Invalid("plugins.desired", fmt.Sprintf("lists plugin %q twice", entry.ID))
 		}
 		seen[entry.ID] = struct{}{}
-	}
-	return nil
-}
-
-func ValidatePluginList(field string, plugins []string) error {
-	seen := make(map[string]struct{}, len(plugins))
-	for _, id := range plugins {
-		if !ValidPluginID(id) {
-			return configkit.Field(field+".plugins", fault.New(ErrorCodePersonaInvalid, "entries must be plugin ids"))
-		}
-		if _, duplicate := seen[id]; duplicate {
-			return configkit.Field(field+".plugins", fault.New(ErrorCodePersonaInvalid, "must not list a plugin twice"))
-		}
-		seen[id] = struct{}{}
 	}
 	return nil
 }

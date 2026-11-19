@@ -14,7 +14,6 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -133,7 +132,7 @@ func newWorkflowToolController(interpreter *workflow.Interpreter, runs *workflow
 				continue
 			}
 			if _, ok := interpreter.Spec(id); !ok {
-				return nil, configkit.Field("agents.definitions", fault.New(config.ErrorCodePersonaInvalid, fmt.Sprintf("persona %q workflows: %q is not a loaded workflow definition", definitions[i].ID, id)))
+				return nil, configkit.Field("agents.definitions", fault.New(auraagent.ErrorCodePersonaInvalid, fmt.Sprintf("persona %q workflows: %q is not a loaded workflow definition", definitions[i].ID, id)))
 			}
 		}
 	}

@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -91,7 +91,7 @@ func NewManager(opts *ManagerOptions) (*Manager, error) {
 }
 
 func validateConfig(cfg *Config) error {
-	if !config.ValidPluginID(cfg.ID) || cfg.Executable == "" || cfg.WorkingDir == "" || cfg.Auth == nil {
+	if !auraagent.ValidPluginID(cfg.ID) || cfg.Executable == "" || cfg.WorkingDir == "" || cfg.Auth == nil {
 		return errors.New("identity, executable, working directory and auth are required")
 	}
 	if cfg.StartupTimeout <= 0 || cfg.RequestTimeout <= 0 || cfg.MaxMessageBytes <= 0 {

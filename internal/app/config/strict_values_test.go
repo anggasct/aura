@@ -210,7 +210,7 @@ func TestWrittenEmptyPersonaValuesAreRefused(t *testing.T) {
 		detail string
 		clean  string
 	}{
-		{"an empty name", "      name: \"\"\n", "name", "line 11, column 13", legacyconfig.ErrorCodePersonaInvalid, "must not be empty", ""},
+		{"an empty name", "      name: \"\"\n", "name", "line 11, column 13", personaInvalidCode, "must not be empty", ""},
 		{"an empty evals dir", "      evals:\n        dir: \"\"\n", "evals.dir", "line 12, column 14", invalidCode, "must be a non-empty string", "      evals:\n        behavior:\n          required: true\n"},
 		{"an empty judge route", "      evals:\n        behavior:\n          judge_route: \"\"\n", "evals.behavior.judge_route", "line 13, column 24", invalidCode, "must be a non-empty string", "      evals:\n        behavior:\n          required: true\n"},
 		{"a blank schedule", "      evals:\n        behavior:\n          schedule: \" \"\n", "evals.behavior.schedule", "line 13, column 21", invalidCode, "must be a non-empty string", "      evals:\n        behavior:\n          required: true\n"},

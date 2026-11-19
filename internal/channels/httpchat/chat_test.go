@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -455,31 +454,31 @@ func TestChatPersonaGates(t *testing.T) {
 		denied    []string
 	}{
 		"public key on a trusted persona": {
-			audience: config.AudienceTrusted, class: principal.ClassPublic, evaluated: true,
+			audience: agent.AudienceTrusted, class: principal.ClassPublic, evaluated: true,
 			status: http.StatusForbidden, kind: errorTypePermission, code: "audience_denied", denied: []string{access.DeniedReasonAudience},
 		},
 		"trusted key on an owner persona": {
-			audience: config.AudienceOwner, class: principal.ClassTrusted, evaluated: true,
+			audience: agent.AudienceOwner, class: principal.ClassTrusted, evaluated: true,
 			status: http.StatusForbidden, kind: errorTypePermission, code: "audience_denied", denied: []string{access.DeniedReasonAudience},
 		},
 		"persona unknown to the registry": {
-			audience: config.AudiencePublic, class: principal.ClassPublic, persona: "gone", evaluated: true,
+			audience: agent.AudiencePublic, class: principal.ClassPublic, persona: "gone", evaluated: true,
 			status: http.StatusForbidden, kind: errorTypePermission, code: "audience_denied", denied: []string{access.DeniedReasonAudience},
 		},
 		"persona without an eval record": {
-			audience: config.AudiencePublic, class: principal.ClassPublic, evaluated: false,
+			audience: agent.AudiencePublic, class: principal.ClassPublic, evaluated: false,
 			status: http.StatusForbidden, kind: errorTypePermission, code: "eval_gate_closed", gates: []string{"eval:support"}, denied: []string{access.DeniedReasonEvalMissing},
 		},
 		"eval lookup failure denies": {
-			audience: config.AudiencePublic, class: principal.ClassPublic, evalErr: errors.New("db down"),
+			audience: agent.AudiencePublic, class: principal.ClassPublic, evalErr: errors.New("db down"),
 			status: http.StatusInternalServerError, kind: errorTypeServer, code: "internal_error", gates: []string{"eval:support"},
 		},
 		"owner key skips the eval gate on a trusted persona": {
-			audience: config.AudienceTrusted, class: principal.ClassOwner, evaluated: false,
+			audience: agent.AudienceTrusted, class: principal.ClassOwner, evaluated: false,
 			status: http.StatusOK,
 		},
 		"owner persona skips the eval gate for an owner key": {
-			audience: config.AudienceOwner, class: principal.ClassOwner, evaluated: false,
+			audience: agent.AudienceOwner, class: principal.ClassOwner, evaluated: false,
 			status: http.StatusOK,
 		},
 	}
@@ -519,7 +518,7 @@ func cmpOrString(value, fallback string) string {
 
 func TestChatPersonaGateUsesTheRegistryDefinition(t *testing.T) {
 	fixture := newChatFixture(t, chatFixtureOptions{})
-	fixture.personas["other"] = agent.Definition{ID: "other", Audience: config.AudienceOwner}
+	fixture.personas["other"] = agent.Definition{ID: "other", Audience: agent.AudienceOwner}
 	issued := fixture.keys.add(t, principal.ClassTrusted, "other")
 
 	rec := fixture.post(t, issued.Plaintext, `{"messages":[{"role":"user","content":"hi"}]}`)

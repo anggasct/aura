@@ -2,6 +2,7 @@ package config
 
 import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/logging"
@@ -17,7 +18,7 @@ type Config struct {
 	Runtime      legacyconfig.Runtime        `json:"runtime"`
 	Capabilities capability.Config           `json:"capabilities"`
 	Tools        *legacyconfig.Tools         `json:"tools,omitempty"`
-	Agents       *legacyconfig.Agents        `json:"agents,omitempty"`
+	Agents       *auraagent.Config           `json:"agents,omitempty"`
 	Workflows    *legacyconfig.Workflows     `json:"workflows,omitempty"`
 	MCP          *legacyconfig.MCP           `json:"mcp,omitempty"`
 	Plugins      *legacyconfig.Plugins       `json:"plugins,omitempty"`
@@ -45,16 +46,17 @@ type Config struct {
 	Knowledge    *legacyconfig.Knowledge     `json:"knowledge,omitempty"`
 	Interpreter  legacyconfig.Interpreter    `json:"interpreter"`
 	Channels     legacyconfig.Channels       `json:"channels"`
-	Bindings     []legacyconfig.Binding      `json:"bindings,omitempty"`
+	Bindings     auraagent.Bindings          `json:"bindings,omitempty"`
 }
 
 func Default() Config {
+	defaultAgents := auraagent.Default()
 	defaultVision := vision.Default()
 	return Config{
 		Version:      1,
 		Runtime:      legacyconfig.DefaultRuntime(),
 		Capabilities: capability.Default(),
-		Agents:       legacyconfig.DefaultAgents(),
+		Agents:       &defaultAgents,
 		Workflows:    legacyconfig.DefaultWorkflows(),
 		Tools:        legacyconfig.DefaultTools(),
 		Server:       server.Default(),

@@ -14,6 +14,7 @@ const (
 	ErrorCodeResolutionFailed  ErrorCode = "agent_resolution_failed"
 	ErrorCodeBindingInvalid    ErrorCode = "binding_invalid"
 	ErrorCodePersonaInvalid    ErrorCode = "persona_invalid"
+	ErrorCodePersonaSecret     ErrorCode = "persona_secret_invalid"
 )
 
 func codedError(code ErrorCode, detail string) error {

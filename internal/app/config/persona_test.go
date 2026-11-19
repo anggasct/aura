@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 const soulSecretFixture = "tr0ub4dor-and-3-persona-secret"
@@ -68,11 +68,11 @@ func TestLoad_SoulFileRejectsInvalidSouls(t *testing.T) {
       instructions: inline
       soul_file: personas/kuma.md
 `},
-		"too large":    {soul: strings.Repeat("a", legacyconfig.MaxSoulBytes+1), detail: "exceeds"},
+		"too large":    {soul: strings.Repeat("a", auraagent.MaxSoulBytes+1), detail: "exceeds"},
 		"not utf8":     {soul: "caf\xc3\x28", detail: "UTF-8"},
 		"blank":        {soul: " \n\t ", detail: "empty"},
 		"missing":      {detail: "not readable", definition: "    - id: kuma\n      description: d\n      soul_file: personas/absent.md\n"},
-		"at the limit": {soul: strings.Repeat("a", legacyconfig.MaxSoulBytes)},
+		"at the limit": {soul: strings.Repeat("a", auraagent.MaxSoulBytes)},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -87,7 +87,7 @@ func TestLoad_SoulFileRejectsInvalidSouls(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodePersonaInvalid {
+			if code, ok := codeOf(err); !ok || code != personaInvalidCode {
 				t.Fatalf("code = %q, %v (err %v), want persona_invalid", code, ok, err)
 			}
 			if !strings.Contains(err.Error(), tc.detail) || !strings.Contains(err.Error(), "agents.definitions[0]") {
@@ -104,7 +104,7 @@ func TestLoad_SoulFileRejectsConfiguredSecret(t *testing.T) {
       soul_file: personas/leaky.md
 `)
 	_, err := Load(path)
-	if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodePersonaSecret {
+	if code, ok := codeOf(err); !ok || code != personaSecretCode {
 		t.Fatalf("code = %q, %v (err %v), want persona_secret_invalid", code, ok, err)
 	}
 	if !strings.Contains(err.Error(), `persona "leaky"`) {
@@ -147,10 +147,10 @@ func TestLoad_PersonaNameValidation(t *testing.T) {
 		"valid":               {name: `"Kuma"`},
 		"surrounding space":   {name: `" Kuma"`, detail: "surrounding whitespace"},
 		"multi line":          {name: `"a\nb"`, detail: "single line"},
-		"too long":            {name: `"` + strings.Repeat("k", legacyconfig.MaxPersonaNameRunes+1) + `"`, detail: "at most"},
+		"too long":            {name: `"` + strings.Repeat("k", auraagent.MaxPersonaNameRunes+1) + `"`, detail: "at most"},
 		"explicitly empty":    {name: `""`, detail: "must not be empty"},
 		"reserved user":       {name: `"User"`, detail: `"user"`},
-		"at the length limit": {name: `"` + strings.Repeat("k", legacyconfig.MaxPersonaNameRunes) + `"`},
+		"at the length limit": {name: `"` + strings.Repeat("k", auraagent.MaxPersonaNameRunes) + `"`},
 	}
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {
@@ -168,7 +168,7 @@ func TestLoad_PersonaNameValidation(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodePersonaInvalid {
+			if code, ok := codeOf(err); !ok || code != personaInvalidCode {
 				t.Fatalf("code = %q, %v (err %v), want persona_invalid", code, ok, err)
 			}
 			if !strings.Contains(err.Error(), "agents.definitions[0].name") || !strings.Contains(err.Error(), tc.detail) {

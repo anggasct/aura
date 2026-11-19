@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -33,8 +33,8 @@ func TestLoad_PersonaKnowledgeLists(t *testing.T) {
 }
 
 func TestLoad_PersonaKnowledgeRejectsInvalidLists(t *testing.T) {
-	tooMany := make([]string, 0, legacyconfig.MaxPersonaCollections+1)
-	for i := range legacyconfig.MaxPersonaCollections + 1 {
+	tooMany := make([]string, 0, auraagent.MaxPersonaCollections+1)
+	for i := range auraagent.MaxPersonaCollections + 1 {
 		tooMany = append(tooMany, fmt.Sprintf("col-%02d", i))
 	}
 	tests := map[string]struct {
@@ -107,8 +107,8 @@ func TestLoad_PersonaKnowledgeTreatsUnknownToolsAsSinks(t *testing.T) {
 				}
 				return
 			}
-			var coded *fault.Error[legacyconfig.ErrorCode]
-			if !errors.As(err, &coded) || coded.Code != legacyconfig.ErrorCodePersonaInvalid || !strings.Contains(coded.Detail, test.detail) {
+			var coded *fault.Error[auraagent.ErrorCode]
+			if !errors.As(err, &coded) || coded.Code != auraagent.ErrorCodePersonaInvalid || !strings.Contains(coded.Detail, test.detail) {
 				t.Fatalf("error = %v, want persona_invalid with %q", err, test.detail)
 			}
 			if test.detail == "which sends data out" && strings.Contains(coded.Detail, "not a known tool") {

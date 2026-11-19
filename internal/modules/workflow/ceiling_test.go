@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -36,7 +35,7 @@ func registryStepAllowed(registry *auraagent.Registry, extra ...tools.Definition
 
 func ceilingTestRegistry(t *testing.T) *auraagent.Registry {
 	t.Helper()
-	overrides := []config.AgentDefinition{
+	overrides := []auraagent.Persona{
 		{ID: "open", Description: "no list", Instructions: "work"},
 		{ID: "lister", Description: "lists one", Instructions: "work", Tools: []string{"read_file"}},
 		{ID: "gh", Description: "lists github", Instructions: "work", Tools: []string{"github_comment"}},

@@ -4,12 +4,11 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
-func pluginPersona(plugins, principals, public []string) config.AgentDefinition {
+func pluginPersona(plugins, principals, public []string) Persona {
 	override := kantorOverride()
 	override.Plugins = plugins
 	override.PrincipalTools = principals
@@ -18,7 +17,7 @@ func pluginPersona(plugins, principals, public []string) config.AgentDefinition 
 }
 
 func TestBuildCarriesPersonaPlugins(t *testing.T) {
-	registry, err := Build([]config.AgentDefinition{pluginPersona([]string{"weather", "mail-reader"}, nil, nil)}, validTools, []string{"primary"})
+	registry, err := Build([]Persona{pluginPersona([]string{"weather", "mail-reader"}, nil, nil)}, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -39,7 +38,7 @@ func TestBuildCarriesPersonaPlugins(t *testing.T) {
 func TestBuildValidatesPluginToolCeilings(t *testing.T) {
 	cases := []struct {
 		name     string
-		override config.AgentDefinition
+		override Persona
 		ok       bool
 	}{
 		{"principal plugin entry for a listed plugin", pluginPersona([]string{"weather"}, []string{"plugin_weather"}, nil), true},
@@ -53,7 +52,7 @@ func TestBuildValidatesPluginToolCeilings(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Build([]config.AgentDefinition{tc.override}, validTools, []string{"primary"})
+			_, err := Build([]Persona{tc.override}, validTools, []string{"primary"})
 			if tc.ok {
 				if err != nil {
 					t.Fatalf("Build: %v", err)
@@ -68,7 +67,7 @@ func TestBuildValidatesPluginToolCeilings(t *testing.T) {
 }
 
 func TestPublicCeilingNeverContainsPluginTools(t *testing.T) {
-	registry, err := Build([]config.AgentDefinition{pluginPersona([]string{"weather"}, []string{"plugin_weather"}, nil)}, validTools, []string{"primary"})
+	registry, err := Build([]Persona{pluginPersona([]string{"weather"}, []string{"plugin_weather"}, nil)}, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

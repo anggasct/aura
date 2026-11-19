@@ -16,7 +16,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	githubadapter "github.com/anggasct/aura/internal/modules/github"
@@ -116,8 +115,8 @@ const scenarioPersona = "scenario"
 
 func (w *workflowShape) registry(t *testing.T) *auraagent.Registry {
 	t.Helper()
-	persona := config.AgentDefinition{ID: scenarioPersona, Description: "runs the scenario tools", Instructions: "run the listed tools", Tools: w.known}
-	registry, err := auraagent.Build([]config.AgentDefinition{persona}, w.known, []string{"primary"})
+	persona := auraagent.Persona{ID: scenarioPersona, Description: "runs the scenario tools", Instructions: "run the listed tools", Tools: w.known}
+	registry, err := auraagent.Build([]auraagent.Persona{persona}, w.known, []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}

@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -26,7 +26,7 @@ func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	boot := func(t *testing.T, personas ...config.AgentDefinition) (workflow.ToolRunner, *toolProbe) {
+	boot := func(t *testing.T, personas ...auraagent.Persona) (workflow.ToolRunner, *toolProbe) {
 		t.Helper()
 		cfg := appconfig.Default()
 		cfg.Tools.Workspace = workspace
@@ -39,8 +39,8 @@ func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
 		runner := buildSurface(t, &surfaceInput{cfg: &cfg, db: db, registry: registry}).runner
 		return runner, registerToolProbe(t, runner)
 	}
-	scribe := func(tools ...string) config.AgentDefinition {
-		return config.AgentDefinition{ID: "scribe", Description: "d", Instructions: "i", Tools: tools}
+	scribe := func(tools ...string) auraagent.Persona {
+		return auraagent.Persona{ID: "scribe", Description: "d", Instructions: "i", Tools: tools}
 	}
 	callAs := func(runID string) *workflow.StepCall {
 		call := ownerStepCall(runID, "step-1", 0)

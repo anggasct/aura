@@ -10,7 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -64,7 +64,7 @@ func TestNotifyHandoffTellsTheOwnerAndTheRequester(t *testing.T) {
 			t.Errorf("owner notice %q lacks %q", owner, want)
 		}
 	}
-	if got := postContents(stub, "4400"); len(got) != 1 || got[0] != config.PersonaMessageDefaults()[config.MessageHandoffOpen] {
+	if got := postContents(stub, "4400"); len(got) != 1 || got[0] != auraagent.PersonaMessageDefaults()[auraagent.MessageHandoffOpen] {
 		t.Fatalf("requester notices = %q, want handoff_open", got)
 	}
 	if _, err := adapter.NotifyHandoff(t.Context(), "lobby/discord:owner/dm:unknown", "x"); !errors.Is(err, access.ErrNoHandoffTarget) {
@@ -162,7 +162,7 @@ func TestOpenHandoffForwardsMessagesInsteadOfStartingTurns(t *testing.T) {
 	if admitted, err := adapter.admit(t.Context(), textMessage("9913", "4400", "", "601", "hello again", nil)); err != nil || !admitted {
 		t.Fatalf("admit after timeout = %v, %v; want a normal turn", admitted, err)
 	}
-	if got := postContents(stub, "4400"); len(got) != 1 || got[0] != config.PersonaMessageDefaults()[config.MessageHandoffClosed] {
+	if got := postContents(stub, "4400"); len(got) != 1 || got[0] != auraagent.PersonaMessageDefaults()[auraagent.MessageHandoffClosed] {
 		t.Fatalf("requester notices = %q, want handoff_closed", got)
 	}
 	routedEnvelope(t, sink, "message:9913")

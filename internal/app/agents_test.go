@@ -132,9 +132,9 @@ agents:
 }
 
 func TestPersonasMayListTheGitHubTools(t *testing.T) {
-	persona := func(tools, principalTools, publicTools []string) []config.AgentDefinition {
-		return []config.AgentDefinition{{
-			ID: "ops", Description: "d", Instructions: "i", Audience: config.AudienceTrusted,
+	persona := func(tools, principalTools, publicTools []string) []auraagent.Persona {
+		return []auraagent.Persona{{
+			ID: "ops", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted,
 			Tools: tools, PrincipalTools: principalTools, PublicTools: publicTools,
 		}}
 	}
@@ -144,7 +144,7 @@ func TestPersonasMayListTheGitHubTools(t *testing.T) {
 	cases := []struct {
 		name        string
 		cfg         *appconfig.Config
-		definitions []config.AgentDefinition
+		definitions []auraagent.Persona
 		code        auraagent.ErrorCode
 	}{
 		{"configured, merge listed", &configured, persona([]string{"read_file", "github_merge"}, []string{"github_merge"}, nil), ""},
@@ -155,7 +155,7 @@ func TestPersonasMayListTheGitHubTools(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.cfg.Agents = &config.Agents{Definitions: tc.definitions}
+			tc.cfg.Agents = &auraagent.Config{Definitions: tc.definitions}
 			_, err := buildAgentRegistry(tc.cfg)
 			if tc.code == "" {
 				if err != nil {

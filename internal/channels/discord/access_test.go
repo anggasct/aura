@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -18,16 +17,16 @@ import (
 
 var accessTestTools = []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}
 
-func accessPersonas() []config.AgentDefinition {
-	return []config.AgentDefinition{
+func accessPersonas() []auraagent.Persona {
+	return []auraagent.Persona{
 		{ID: "owneronly", Description: "d", Instructions: "i"},
 		{
-			ID: "team", Name: "Team", Description: "d", Instructions: "i", Audience: config.AudienceTrusted,
+			ID: "team", Name: "Team", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted,
 			Tools: []string{"read_file", "write_file"}, PrincipalTools: []string{"read_file", "write_file"},
-			Messages: map[string]string{config.MessageWaitingForOwner: "Sebentar, aku tanya pemilik dulu."},
+			Messages: map[string]string{auraagent.MessageWaitingForOwner: "Sebentar, aku tanya pemilik dulu."},
 		},
 		{
-			ID: "lobby", Description: "d", Instructions: "i", Audience: config.AudiencePublic,
+			ID: "lobby", Description: "d", Instructions: "i", Audience: auraagent.AudiencePublic,
 			Tools: []string{"read_file"}, PublicTools: []string{"read_file"},
 		},
 	}
@@ -71,7 +70,7 @@ func (o *accessObserver) count(table map[string]int, key string) int {
 	return table[key]
 }
 
-func newAccessAdapter(t *testing.T, persona string, owners []string, personas []config.AgentDefinition) (*Adapter, *memorySink, *accessObserver) {
+func newAccessAdapter(t *testing.T, persona string, owners []string, personas []auraagent.Persona) (*Adapter, *memorySink, *accessObserver) {
 	t.Helper()
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	cfg := testAdapterConfig()
@@ -310,7 +309,7 @@ func TestOwnerRejectionTellsTheRequester(t *testing.T) {
 		t.Fatalf("reject = %v, %v; want declined", outcome.accepted, outcome.err)
 	}
 	notices := stub.waitPostTo(t, "333", 2)
-	if got, _ := notices[1].body["content"].(string); got != config.PersonaMessageDefaults()[config.MessageApprovalDenied] {
+	if got, _ := notices[1].body["content"].(string); got != auraagent.PersonaMessageDefaults()[auraagent.MessageApprovalDenied] {
 		t.Fatalf("rejection notice = %q", got)
 	}
 	if observer.count(observer.routed, ApprovalRoutedRejected) != 1 {
@@ -330,7 +329,7 @@ func TestOwnerApprovalTimeoutDeniesAndTellsTheRequester(t *testing.T) {
 		t.Fatalf("Decide() = %v, %v; want approval_timeout", accepted, err)
 	}
 	notices := stub.waitPostTo(t, "333", 2)
-	if got, _ := notices[1].body["content"].(string); got != config.PersonaMessageDefaults()[config.MessageApprovalTimeout] {
+	if got, _ := notices[1].body["content"].(string); got != auraagent.PersonaMessageDefaults()[auraagent.MessageApprovalTimeout] {
 		t.Fatalf("timeout notice = %q", got)
 	}
 	if _, _, patches := stub.counts(); patches != 1 {

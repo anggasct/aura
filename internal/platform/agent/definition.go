@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -57,9 +56,9 @@ type EvalBehavior struct {
 
 func audienceRank(audience string) int {
 	switch audience {
-	case config.AudiencePublic:
+	case AudiencePublic:
 		return 2
-	case config.AudienceTrusted:
+	case AudienceTrusted:
 		return 1
 	default:
 		return 0
@@ -138,7 +137,7 @@ func (d *Definition) Message(key string) string {
 	if text, ok := d.Messages[key]; ok {
 		return text
 	}
-	return config.PersonaMessageDefaults()[key]
+	return PersonaMessageDefaults()[key]
 }
 
 const (

@@ -13,6 +13,7 @@ import (
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -151,6 +152,8 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateMemory(&cfg.Memory),
 		legacyconfig.ValidateOwner(cfg.Owner),
 		legacyconfig.ValidateOwnerIdentities(cfg.Owner),
+		validateAgents(cfg.Agents),
+		configkit.Under("bindings", auraagent.ValidateBindings(cfg.Bindings)),
 		validateAgainstBuild(cfg, profile),
 		validateReferences(cfg, doc),
 	)

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -176,7 +176,7 @@ func (a *Adapter) groupConversation(persona string, msg *message, principalID st
 	if class == principal.ClassOwner {
 		return conversation
 	}
-	if definition, ok := a.personaDefinition(persona); ok && definition.GroupContext == config.GroupContextShared {
+	if definition, ok := a.personaDefinition(persona); ok && definition.GroupContext == auraagent.GroupContextShared {
 		return conversation
 	}
 	return conversation + "/principal:" + principalID

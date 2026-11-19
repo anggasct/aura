@@ -319,23 +319,6 @@ type HTTP struct {
 	KeepaliveInterval   configkit.Duration `json:"keepalive_interval"`
 }
 
-const (
-	BindingChannelDiscord  = "discord"
-	BindingChannelTelegram = "telegram"
-	BindingChannelEmail    = "email"
-)
-
-type Binding struct {
-	Persona   string `json:"persona"`
-	Channel   string `json:"channel"`
-	Account   string `json:"account"`
-	GuildID   string `json:"guild_id,omitempty"`
-	ChannelID string `json:"channel_id,omitempty"`
-	ChatID    string `json:"chat_id,omitempty"`
-	ThreadID  string `json:"thread_id,omitempty"`
-	UserID    string `json:"user_id,omitempty"`
-}
-
 type Terminal struct {
 	RenderHz            int                `json:"render_hz"`
 	MaxInputBytes       int                `json:"max_input_bytes"`
@@ -389,55 +372,6 @@ type Storage struct {
 	BackupDirectory    string             `json:"backup_directory"`
 	BackupInterval     configkit.Duration `json:"backup_interval"`
 	BackupRetention    int                `json:"backup_retention"`
-}
-
-type AgentLimits struct {
-	TurnTimeout configkit.Duration `json:"turn_timeout"`
-}
-
-type AgentDefinition struct {
-	ID              string             `json:"id"`
-	Name            string             `json:"name,omitempty"`
-	Description     string             `json:"description"`
-	Instructions    string             `json:"instructions"`
-	SoulFile        string             `json:"soul_file"`
-	Soul            string             `json:"-"`
-	Tools           []string           `json:"tools"`
-	Capabilities    []string           `json:"capabilities"`
-	ModelRoute      string             `json:"model_route"`
-	MemoryScope     string             `json:"memory_scope,omitempty"`
-	Limits          AgentLimits        `json:"limits"`
-	Audience        string             `json:"audience,omitempty"`
-	Pairing         bool               `json:"pairing,omitempty"`
-	PrincipalTools  []string           `json:"principal_tools,omitempty"`
-	PublicTools     []string           `json:"public_tools,omitempty"`
-	ApprovalTimeout configkit.Duration `json:"approval_timeout,omitempty"`
-	Messages        map[string]string  `json:"messages,omitempty"`
-	GroupContext    string             `json:"group_context,omitempty"`
-	Evals           AgentEvals         `json:"evals,omitzero"`
-	Workflows       []string           `json:"workflows,omitempty"`
-	Plugins         []string           `json:"plugins,omitempty"`
-
-	Knowledge          []string `json:"knowledge,omitempty"`
-	PrincipalKnowledge []string `json:"principal_knowledge,omitempty"`
-	PublicKnowledge    []string `json:"public_knowledge,omitempty"`
-}
-
-type AgentEvals struct {
-	Dir      string             `json:"dir,omitempty"`
-	Behavior *AgentEvalBehavior `json:"behavior,omitempty"`
-}
-
-type AgentEvalBehavior struct {
-	Required            bool    `json:"required,omitempty"`
-	MinScore            float64 `json:"min_score,omitempty"`
-	JudgeRoute          string  `json:"judge_route,omitempty"`
-	Schedule            string  `json:"schedule,omitempty"`
-	EnforceOnRegression bool    `json:"enforce_on_regression,omitempty"`
-}
-
-type Agents struct {
-	Definitions []AgentDefinition `json:"definitions"`
 }
 
 type Workflows struct {
@@ -537,10 +471,6 @@ func DefaultRuntime() Runtime {
 		ShutdownTimeout: configkit.Duration(30 * time.Second),
 		RunRetention:    configkit.Duration(720 * time.Hour),
 	}
-}
-
-func DefaultAgents() *Agents {
-	return &Agents{}
 }
 
 func DefaultWorkflows() *Workflows {

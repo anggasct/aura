@@ -9,7 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/vision"
@@ -52,7 +52,7 @@ func (a *Adapter) SetVisionService(svc *vision.Service) {
 }
 
 func (a *Adapter) servesPublic() bool {
-	return a.router != nil && a.router.ServesPublic(config.BindingChannelEmail, a.account.Name)
+	return a.router != nil && a.router.ServesPublic(auraagent.BindingChannelEmail, a.account.Name)
 }
 
 func (a *Adapter) handoffDrop(ctx context.Context, found *admission) dropReason {
@@ -92,17 +92,17 @@ func (a *Adapter) forgetMe(ctx context.Context, inv *command.Invocation, found *
 	definition, _ := a.personaDefinition(found.persona)
 	switch {
 	case found.class == principal.ClassOwner:
-		a.noticeSender(ctx, found, definition.Message(config.MessageNotPermitted))
+		a.noticeSender(ctx, found, definition.Message(auraagent.MessageNotPermitted))
 	case len(inv.Args) == 0:
-		a.noticeSender(ctx, found, definition.Message(config.MessageForgetmeConfirm))
+		a.noticeSender(ctx, found, definition.Message(auraagent.MessageForgetmeConfirm))
 	default:
 		if err := a.access.Erasure.Forget(ctx, found.principal); err != nil {
 			a.logger.WarnContext(ctx, "forgetme erasure failed", "component", "email", "account", a.account.Name)
 			if errors.Is(err, access.ErrForgetRunsStopping) {
-				a.noticeSender(ctx, found, definition.Message(config.MessageForgetmeStopping))
+				a.noticeSender(ctx, found, definition.Message(auraagent.MessageForgetmeStopping))
 			}
 			return
 		}
-		a.noticeSender(ctx, found, definition.Message(config.MessageForgetmeDone))
+		a.noticeSender(ctx, found, definition.Message(auraagent.MessageForgetmeDone))
 	}
 }

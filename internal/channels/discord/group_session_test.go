@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 func TestGroupContextDecidesChannelSessions(t *testing.T) {
@@ -12,8 +12,8 @@ func TestGroupContextDecidesChannelSessions(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	})
 	personas := accessPersonas()
-	personas = append(personas, config.AgentDefinition{
-		ID: "crew", Description: "d", Instructions: "i", Audience: config.AudienceTrusted, GroupContext: config.GroupContextShared,
+	personas = append(personas, auraagent.Persona{
+		ID: "crew", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, GroupContext: auraagent.GroupContextShared,
 	})
 	cases := map[string]struct {
 		persona string

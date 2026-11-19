@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
@@ -58,7 +59,7 @@ func TestNotifyHandoffTellsTheOwnerAndTheRequester(t *testing.T) {
 					t.Errorf("owner notice %q lacks %q", owner, want)
 				}
 			}
-			if got := noticesTo(rig, tc.dest); !slices.Equal(got, []string{personaMessage(config.MessageHandoffOpen)}) {
+			if got := noticesTo(rig, tc.dest); !slices.Equal(got, []string{personaMessage(auraagent.MessageHandoffOpen)}) {
 				t.Errorf("requester notices = %q, want the handoff_open message", got)
 			}
 			for _, call := range rig.h.api.callsOf("sendMessage") {
@@ -345,7 +346,7 @@ func TestOpenHandoffHoldsTheNextRequesterMessage(t *testing.T) {
 	if err != nil || target.ChannelID != strconv.Itoa(allowedUserID) || target.Channel != "telegram" {
 		t.Fatalf("NotifyHandoff = %+v, %v", target, err)
 	}
-	if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(config.MessageHandoffOpen)}) {
+	if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageHandoffOpen)}) {
 		t.Fatalf("requester notices = %q, want handoff_open", got)
 	}
 	handoffs.state = access.HandoffStateOpen
