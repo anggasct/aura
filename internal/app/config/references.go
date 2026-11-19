@@ -28,6 +28,9 @@ func validateReferences(cfg *Config, doc *document) error {
 }
 
 func webhookListenProblem(webhook *legacyconfig.Webhook, healthListen string) error {
+	if webhook == nil {
+		return configkit.Invalid("webhook", "must not be nil")
+	}
 	if webhook.Enabled && webhook.Listen == healthListen {
 		return configkit.Invalid("webhook.listen_address", "must differ from health.listen")
 	}
@@ -35,6 +38,12 @@ func webhookListenProblem(webhook *legacyconfig.Webhook, healthListen string) er
 }
 
 func telegramDiscordTokenProblems(telegram *legacyconfig.Telegram, discord *legacyconfig.Discord) []error {
+	if telegram == nil {
+		return []error{configkit.Invalid("channels.telegram", "must not be nil")}
+	}
+	if discord == nil {
+		return []error{configkit.Invalid("channels.discord", "must not be nil")}
+	}
 	discordRefs := make(map[secret.Ref]bool, len(discord.Accounts))
 	for i := range discord.Accounts {
 		discordRefs[discord.Accounts[i].BotTokenRef] = true
@@ -62,6 +71,9 @@ func telegramDiscordTokenProblems(telegram *legacyconfig.Telegram, discord *lega
 }
 
 func telegramOwnerProblem(telegram *legacyconfig.Telegram, owner *legacyconfig.Owner) error {
+	if telegram == nil {
+		return configkit.Invalid("channels.telegram", "must not be nil")
+	}
 	if !telegram.Enabled || hasOwnerChannel(owner, principal.ChannelTelegram) {
 		return nil
 	}
@@ -74,6 +86,9 @@ func telegramOwnerProblem(telegram *legacyconfig.Telegram, owner *legacyconfig.O
 }
 
 func emailOwnerProblem(email *legacyconfig.Email, owner *legacyconfig.Owner) error {
+	if email == nil {
+		return configkit.Invalid("channels.email", "must not be nil")
+	}
 	if !email.Enabled || hasOwnerChannel(owner, principal.ChannelEmail) {
 		return nil
 	}
@@ -98,6 +113,9 @@ func hasOwnerChannel(owner *legacyconfig.Owner, channel string) bool {
 }
 
 func bindingProblems(bindings []legacyconfig.Binding, channels *legacyconfig.Channels) []error {
+	if channels == nil {
+		return []error{configkit.Invalid("channels", "must not be nil")}
+	}
 	accounts := map[string]map[string]bool{
 		legacyconfig.BindingChannelDiscord:  make(map[string]bool, len(channels.Discord.Accounts)),
 		legacyconfig.BindingChannelTelegram: make(map[string]bool, len(channels.Telegram.Accounts)),

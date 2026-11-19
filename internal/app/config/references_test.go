@@ -1,11 +1,14 @@
 package config
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -48,5 +51,34 @@ func TestReferencesAreValidatedOnceAndJoined(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), canary) {
 		t.Errorf("validateReferences leaks the secret value: %v", err)
+	}
+}
+
+func TestReferenceHelpersGuardNilPointers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		run  func() error
+	}{
+		{"webhook nil", "webhook", func() error { return webhookListenProblem(nil, "") }},
+		{"telegram discord tokens nil telegram", "channels.telegram", func() error { return telegramDiscordTokenProblems(nil, nil)[0] }},
+		{"telegram discord tokens nil discord", "channels.discord", func() error { return telegramDiscordTokenProblems(&legacyconfig.Telegram{}, nil)[0] }},
+		{"telegram owner nil telegram", "channels.telegram", func() error { return telegramOwnerProblem(nil, nil) }},
+		{"email owner nil email", "channels.email", func() error { return emailOwnerProblem(nil, nil) }},
+		{"bindings nil channels", "channels", func() error { return bindingProblems(nil, nil)[0] }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if err == nil {
+				t.Fatalf("helper accepted a nil pointer, want a coded problem at %q", tc.path)
+			}
+			if !fault.HasCode(err, configkit.ErrorCodeInvalid) {
+				t.Fatalf("helper error = %v, want code %q", err, configkit.ErrorCodeInvalid)
+			}
+			field, _ := errors.AsType[*configkit.FieldError](err)
+			if field == nil || field.Path != tc.path {
+				t.Fatalf("helper error = %v, want field path %q", err, tc.path)
+			}
+		})
 	}
 }
