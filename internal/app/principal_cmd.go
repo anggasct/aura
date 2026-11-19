@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -26,7 +26,7 @@ type principalSummary struct {
 	lastActive time.Time
 }
 
-func collectPrincipals(ctx context.Context, cfg *config.Config, db *sql.DB) (map[string]*principalSummary, error) {
+func collectPrincipals(ctx context.Context, cfg *appconfig.Config, db *sql.DB) (map[string]*principalSummary, error) {
 	owners, err := ownerResolver(cfg)
 	if err != nil {
 		return nil, err
@@ -155,7 +155,7 @@ func newPrincipalListCmd(gf *globalFlags) *cobra.Command {
 			if class != "" && class != string(principal.ClassTrusted) && class != string(principal.ClassPublic) {
 				return &usageError{err: errors.New("class must be trusted or public")}
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
 				summaries, err := collectPrincipals(ctx, cfg, db)
 				if err != nil {
 					return err
@@ -185,7 +185,7 @@ func newPrincipalShowCmd(gf *globalFlags) *cobra.Command {
 		Short: "Show one principal's access and activity",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
 				summaries, err := collectPrincipals(ctx, cfg, db)
 				if err != nil {
 					return err

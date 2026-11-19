@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/store"
@@ -27,7 +28,7 @@ func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	boot := func(t *testing.T, personas ...config.AgentDefinition) (workflow.ToolRunner, *toolProbe) {
 		t.Helper()
-		cfg := config.Default()
+		cfg := appconfig.Default()
 		cfg.Tools.Workspace = workspace
 		cfg.Storage.Path = dir
 		cfg.Agents.Definitions = append(cfg.Agents.Definitions, personas...)

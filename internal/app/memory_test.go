@@ -11,6 +11,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -64,7 +65,7 @@ func TestMemoryDocumentStoreRoundTrip(t *testing.T) {
 
 func TestBuildMemoryRuntime(t *testing.T) {
 	db := newMemoryTestDB(t)
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	memoryRuntime, err := buildMemoryRuntime(context.Background(), &cfg, db, testRecallScopes(t, &cfg), auramodel.Set{}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildMemoryRuntime(): %v", err)
@@ -174,7 +175,7 @@ func TestBuildMemorySummaryDefaultsToAuxiliaryRoute(t *testing.T) {
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
 	auxModel := "aux-" + suffix
 	models := auramodel.Set{"auxiliary": &countingSummaryLLM{answer: "digest"}}
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Models.Routing = nil
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"primary": summaryDefinition("primary-protocol", "primary-"+suffix),
@@ -219,7 +220,7 @@ func TestBuildMemorySummaryHonorsSummarizeOverride(t *testing.T) {
 	route := "summary-route-" + suffix
 	overrideModel := "override-" + suffix
 	models := auramodel.Set{route: &countingSummaryLLM{answer: "digest"}}
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Models.Routing = map[string]string{"summarize": route}
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"primary":  summaryDefinition("primary-protocol", "primary-"+suffix),
@@ -243,7 +244,7 @@ func TestMemoryRuntimeRecallStaysRaw(t *testing.T) {
 	route := "memory-recall-" + suffix
 	llm := &countingSummaryLLM{answer: "digest"}
 	models := auramodel.Set{route: llm}
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Memory.RangeThreshold = 6
 	cfg.Memory.RangeLiveWindow = 2
 	cfg.Models.Routing = map[string]string{"summarize": route}
@@ -322,7 +323,7 @@ func TestMemoryRuntimeRecallStaysRaw(t *testing.T) {
 	}
 }
 
-func testRecallScopes(t *testing.T, cfg *config.Config) memory.RecallScopes {
+func testRecallScopes(t *testing.T, cfg *appconfig.Config) memory.RecallScopes {
 	t.Helper()
 	registry, err := buildAgentRegistry(cfg)
 	if err != nil {

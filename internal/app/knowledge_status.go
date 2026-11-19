@@ -5,7 +5,7 @@ import (
 	"os"
 	"slices"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -16,7 +16,7 @@ type personaKnowledgeScope struct {
 	collections []string
 }
 
-func configuredKnowledgeScopes(cfg *config.Config) []personaKnowledgeScope {
+func configuredKnowledgeScopes(cfg *appconfig.Config) []personaKnowledgeScope {
 	var scopes []personaKnowledgeScope
 	if cfg == nil || cfg.Agents == nil {
 		return nil
@@ -39,7 +39,7 @@ func configuredKnowledgeScopes(cfg *config.Config) []personaKnowledgeScope {
 	return scopes
 }
 
-func knowledgeScopeReader(cfg *config.Config, dbPath string) func(ctx context.Context) ([]health.KnowledgeScope, bool, error) {
+func knowledgeScopeReader(cfg *appconfig.Config, dbPath string) func(ctx context.Context) ([]health.KnowledgeScope, bool, error) {
 	configured := configuredKnowledgeScopes(cfg)
 	return func(ctx context.Context) ([]health.KnowledgeScope, bool, error) {
 		if _, err := os.Stat(dbPath); err != nil {

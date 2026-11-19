@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/embedding"
@@ -167,7 +168,7 @@ func replaceEmbeddingSection(t *testing.T, path, section string) {
 
 type embedRig struct {
 	cfgPath  string
-	cfg      *config.Config
+	cfg      *appconfig.Config
 	db       *sql.DB
 	dbPath   string
 	provider *embeddingProvider
@@ -197,9 +198,9 @@ func (r *embedRig) addDoc(t *testing.T, collection, name, content string) string
 
 func (r *embedRig) fingerprint(t *testing.T) string {
 	t.Helper()
-	loaded, err := config.Load(r.cfgPath)
+	loaded, err := appconfig.Load(r.cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	fingerprint, err := embedding.Fingerprint(loaded.Config.Knowledge.Embedding)
 	if err != nil {
@@ -668,7 +669,7 @@ func TestKnowledgeServiceUsesTheLoopbackClientOnlyForEmbeddings(t *testing.T) {
 }
 
 func TestEmbeddingCredentialIsAnOptionalSecretThatJoinsTheVaultWhenResolved(t *testing.T) {
-	cfg := &config.Config{Knowledge: &config.Knowledge{Embedding: &config.KnowledgeEmbedding{CredentialRef: secrettest.Ref("env://KB_EMBED_VAULT_ENTRY")}}}
+	cfg := &appconfig.Config{Knowledge: &config.Knowledge{Embedding: &config.KnowledgeEmbedding{CredentialRef: secrettest.Ref("env://KB_EMBED_VAULT_ENTRY")}}}
 	var found *configuredSecret
 	for _, entry := range additionalConfiguredSecrets(cfg) {
 		if entry.name == "knowledge_embedding_credential" {
@@ -686,7 +687,7 @@ func TestEmbeddingCredentialIsAnOptionalSecretThatJoinsTheVaultWhenResolved(t *t
 	if err != nil || !vault.Contains("a paragraph with embedding-credential-value inside") {
 		t.Fatalf("vault = %v, %v; want the credential screened", vault, err)
 	}
-	if entries := additionalConfiguredSecrets(&config.Config{}); len(entries) != 0 {
+	if entries := additionalConfiguredSecrets(&appconfig.Config{}); len(entries) != 0 {
 		t.Errorf("entries without configuration = %+v", entries)
 	}
 }

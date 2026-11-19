@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/schedule"
@@ -57,16 +57,16 @@ func writeChatCompositionConfig(t *testing.T, extra string) string {
 	return path
 }
 
-func loadCompositionConfig(t *testing.T, path string) *config.LoadResult {
+func loadCompositionConfig(t *testing.T, path string) *appconfig.LoadResult {
 	t.Helper()
-	result, err := config.Load(path)
+	result, err := appconfig.Load(path)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	return &result
 }
 
-func chatCompositionOptions(result *config.LoadResult, logs io.Writer) *Options {
+func chatCompositionOptions(result *appconfig.LoadResult, logs io.Writer) *Options {
 	return &Options{
 		Surface: SurfaceChat, Config: result, LogLevel: "debug", LogFormat: "json", LogOutput: logs,
 		Chat: ChatOptions{In: strings.NewReader(""), Out: &bytes.Buffer{}, Diag: &bytes.Buffer{}, Plain: true},
@@ -91,7 +91,7 @@ func writeCommandCompositionConfig(t *testing.T, definition string) string {
 	return path
 }
 
-func commandCompositionOptions(result *config.LoadResult, logs io.Writer, parts ...Part) *Options {
+func commandCompositionOptions(result *appconfig.LoadResult, logs io.Writer, parts ...Part) *Options {
 	return &Options{
 		Surface: SurfaceCommand, Config: result, LogLevel: "debug", LogFormat: "json", LogOutput: logs,
 		Command: CommandOptions{Parts: parts},
@@ -137,15 +137,15 @@ func buildApp(t *testing.T, opts *Options) *App {
 
 func TestCompositionRejectsInvalidOptions(t *testing.T) {
 	restoreDefaultLogger(t)
-	defaults := config.Default()
+	defaults := appconfig.Default()
 	chat := func() *Options {
 		return &Options{
-			Surface: SurfaceChat, Config: &config.LoadResult{Config: &defaults}, LogOutput: io.Discard,
+			Surface: SurfaceChat, Config: &appconfig.LoadResult{Config: &defaults}, LogOutput: io.Discard,
 			Chat: ChatOptions{In: strings.NewReader(""), Out: io.Discard, Diag: io.Discard},
 		}
 	}
 	command := func() *Options {
-		return &Options{Surface: SurfaceCommand, Config: &config.LoadResult{Config: &defaults}, LogOutput: io.Discard}
+		return &Options{Surface: SurfaceCommand, Config: &appconfig.LoadResult{Config: &defaults}, LogOutput: io.Discard}
 	}
 	cases := []struct {
 		name string
@@ -153,7 +153,7 @@ func TestCompositionRejectsInvalidOptions(t *testing.T) {
 	}{
 		{"nil options", func() *Options { return nil }},
 		{"nil config result", func() *Options { o := chat(); o.Config = nil; return o }},
-		{"nil config", func() *Options { o := chat(); o.Config = &config.LoadResult{}; return o }},
+		{"nil config", func() *Options { o := chat(); o.Config = &appconfig.LoadResult{}; return o }},
 		{"unknown surface", func() *Options { o := chat(); o.Surface = "exec"; return o }},
 		{"nil log output", func() *Options { o := chat(); o.LogOutput = nil; return o }},
 		{"chat without input", func() *Options { o := chat(); o.Chat.In = nil; return o }},
@@ -321,7 +321,7 @@ func TestCompositionCommandHasNoCapabilityGate(t *testing.T) {
 }
 
 func TestCompositionCommandModelOptionsMatchEvaluation(t *testing.T) {
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	options := evaluationModelOptions(&cfg, storetest.OpenMigrated(t))
 	if options.Prices != nil {
 		t.Error("the evaluation registry carries a price registry")
@@ -365,8 +365,8 @@ func TestCompositionDurableRuntimeIsBuiltOnce(t *testing.T) {
 }
 
 func newDurableRuntimeBuild() *build {
-	cfg := config.Default()
-	b := newBuild(&Options{Surface: SurfaceCommand, Config: &config.LoadResult{Config: &cfg}})
+	cfg := appconfig.Default()
+	b := newBuild(&Options{Surface: SurfaceCommand, Config: &appconfig.LoadResult{Config: &cfg}})
 	b.logger = slog.New(slog.DiscardHandler)
 	return b
 }

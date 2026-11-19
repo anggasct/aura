@@ -16,7 +16,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -120,8 +120,8 @@ func newInterpreterRig(t *testing.T, build capability.Build, dependencies capabi
 		t.Fatal(err)
 	}
 	rig.deps = interpreterDeps{
-		load: func(path string) (config.LoadResult, error) {
-			return config.LoadWithOptions(path, config.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
+		load: func(path string) (appconfig.LoadResult, error) {
+			return appconfig.LoadWithOptions(path, appconfig.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
 		},
 		manifest:          func() (*interpreter.Manifest, error) { return rig.manifest, nil },
 		platformSupported: func() bool { return true },

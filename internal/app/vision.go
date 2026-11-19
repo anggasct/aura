@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/vision"
@@ -49,7 +49,7 @@ func (r *visionBlobReader) ReadBlob(ctx context.Context, refID string, maxBytes 
 	return data, nil
 }
 
-func visionWiringForConfig(cfg *config.Config, db *sql.DB, artifactRoot string) model.VisionWiring {
+func visionWiringForConfig(cfg *appconfig.Config, db *sql.DB, artifactRoot string) model.VisionWiring {
 	if cfg == nil || db == nil {
 		return model.VisionWiring{}
 	}
@@ -104,7 +104,7 @@ func (a *visionStoreAdapter) Unlink(ctx context.Context, refID string) error {
 	return a.inner.Unlink(ctx, refID)
 }
 
-func newVisionService(cfg *config.Config, db *sql.DB, artifactRoot string) *vision.Service {
+func newVisionService(cfg *appconfig.Config, db *sql.DB, artifactRoot string) *vision.Service {
 	if cfg == nil || cfg.Vision == nil || !cfg.Vision.Enabled {
 		return nil
 	}

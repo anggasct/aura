@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -125,8 +126,8 @@ agents:
 	if _, err := runAgentsCommand(t, gf, "list"); err == nil {
 		t.Fatal("agents list accepted an unknown capability")
 	}
-	if _, err := config.Load(gf.configPath); err != nil {
-		t.Logf("config.Load: %v", err)
+	if _, err := appconfig.Load(gf.configPath); err != nil {
+		t.Logf("appconfig.Load: %v", err)
 	}
 }
 
@@ -137,12 +138,12 @@ func TestPersonasMayListTheGitHubTools(t *testing.T) {
 			Tools: tools, PrincipalTools: principalTools, PublicTools: publicTools,
 		}}
 	}
-	configured := config.Default()
+	configured := appconfig.Default()
 	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
-	bare := config.Default()
+	bare := appconfig.Default()
 	cases := []struct {
 		name        string
-		cfg         *config.Config
+		cfg         *appconfig.Config
 		definitions []config.AgentDefinition
 		code        auraagent.ErrorCode
 	}{

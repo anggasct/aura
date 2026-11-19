@@ -36,7 +36,7 @@ func ValidPluginVersion(version string) bool {
 	return len(version) <= MaxPluginVersionLength && pluginVersionPattern.MatchString(version)
 }
 
-func validatePlugins(plugins *Plugins) error {
+func ValidatePlugins(plugins *Plugins) error {
 	if plugins == nil {
 		return nil
 	}
@@ -60,7 +60,7 @@ func validatePlugins(plugins *Plugins) error {
 	return nil
 }
 
-func validatePluginList(field string, plugins []string) error {
+func ValidatePluginList(field string, plugins []string) error {
 	seen := make(map[string]struct{}, len(plugins))
 	for _, id := range plugins {
 		if !ValidPluginID(id) {

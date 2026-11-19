@@ -22,6 +22,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
@@ -185,7 +186,7 @@ type emailAccessOptions struct {
 type emailAccessHarness struct {
 	t           *testing.T
 	configPath  string
-	cfg         *config.Config
+	cfg         *appconfig.Config
 	db          *sql.DB
 	mail        *fakeMail
 	submissions *fakeSubmissions

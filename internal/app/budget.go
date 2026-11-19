@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -21,7 +22,7 @@ const (
 	budgetLimitRate   = "turns_per_minute"
 )
 
-func principalTokenCaps(cfg *config.Config) map[string]int64 {
+func principalTokenCaps(cfg *appconfig.Config) map[string]int64 {
 	if cfg.Access == nil {
 		return nil
 	}
@@ -31,7 +32,7 @@ func principalTokenCaps(cfg *config.Config) map[string]int64 {
 	}
 }
 
-func newTurnLedger(cfg *config.Config, db *sql.DB, prices *usage.PriceRegistry, logger *slog.Logger) (*usage.Ledger, error) {
+func newTurnLedger(cfg *appconfig.Config, db *sql.DB, prices *usage.PriceRegistry, logger *slog.Logger) (*usage.Ledger, error) {
 	return usage.NewLedger(db, usage.LedgerOptions{
 		Prices:           prices,
 		Currency:         cfg.Usage.Currency,

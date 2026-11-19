@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -17,14 +18,14 @@ import (
 func TestEnableExecutionBuildsTheRunnerAndVerifier(t *testing.T) {
 	defaults := config.DefaultInterpreter()
 	rig := newAvailableInterpreterRig(t)
-	runtime, err := newInterpreterRuntime(&config.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: defaults}, rig.manifest)
+	runtime, err := newInterpreterRuntime(&appconfig.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: defaults}, rig.manifest)
 	if err != nil {
 		t.Fatalf("newInterpreterRuntime: %v", err)
 	}
 	if runtime.runner != nil {
 		t.Fatal("execution must stay off until it is enabled")
 	}
-	if err := runtime.enableExecution(t.Context(), &config.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: defaults}, testArtifacts(t), nil, slog.New(slog.DiscardHandler)); err != nil {
+	if err := runtime.enableExecution(t.Context(), &appconfig.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: defaults}, testArtifacts(t), nil, slog.New(slog.DiscardHandler)); err != nil {
 		t.Fatalf("enableExecution: %v", err)
 	}
 	if runtime.runner == nil || runtime.verifier == nil {
@@ -34,7 +35,7 @@ func TestEnableExecutionBuildsTheRunnerAndVerifier(t *testing.T) {
 
 func TestEnableExecutionSweepsStaleRunDirectories(t *testing.T) {
 	rig := newAvailableInterpreterRig(t)
-	cfg := &config.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: config.DefaultInterpreter()}
+	cfg := &appconfig.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: config.DefaultInterpreter()}
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +60,7 @@ func TestEnableExecutionRejectsAnInvalidLimit(t *testing.T) {
 	rig := newAvailableInterpreterRig(t)
 	invalid := config.DefaultInterpreter()
 	invalid.MaxProcesses = 0
-	cfg := &config.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: invalid}
+	cfg := &appconfig.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: invalid}
 	runtime, err := newInterpreterRuntime(cfg, rig.manifest)
 	if err != nil {
 		t.Fatal(err)

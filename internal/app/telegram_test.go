@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -11,8 +12,8 @@ import (
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
-func enabledTelegramConfig() config.Config {
-	defaults := config.Default()
+func enabledTelegramConfig() appconfig.Config {
+	defaults := appconfig.Default()
 	defaults.Owner = &config.Owner{Identities: []string{"telegram:424242"}}
 	defaults.Channels.Telegram.Enabled = true
 	defaults.Channels.Telegram.Accounts = []config.TelegramAccount{{
@@ -79,7 +80,7 @@ func TestBuildSecretVaultRedactsTelegramTokens(t *testing.T) {
 	}
 }
 
-func webhookTelegramConfig() config.Config {
+func webhookTelegramConfig() appconfig.Config {
 	cfg := enabledTelegramConfig()
 	cfg.Channels.Telegram.Accounts[0].Mode = config.TelegramModeWebhook
 	cfg.Channels.Telegram.Accounts[0].WebhookSecretRef = secrettest.Ref("env://AURA_TELEGRAM_WEBHOOK_SECRET")
@@ -90,7 +91,7 @@ func webhookTelegramConfig() config.Config {
 func TestBuildTelegramWebhookServer(t *testing.T) {
 	db := discordTestDB(t)
 	cases := map[string]struct {
-		cfg     config.Config
+		cfg     appconfig.Config
 		wantErr bool
 	}{
 		"webhook account": {cfg: webhookTelegramConfig()},

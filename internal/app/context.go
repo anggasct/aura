@@ -11,14 +11,14 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/store"
 )
 
 const contextSummaryAuthor = "runtime"
 
-func compressionProducer(cfg *config.Config) (compaction.Producer, error) {
+func compressionProducer(cfg *appconfig.Config) (compaction.Producer, error) {
 	if cfg == nil {
 		return compaction.Producer{}, errors.New("cli: config must not be nil")
 	}

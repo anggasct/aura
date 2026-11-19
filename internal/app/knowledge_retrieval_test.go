@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -15,7 +16,7 @@ import (
 )
 
 type kbRetrievalRig struct {
-	cfg       *config.Config
+	cfg       *appconfig.Config
 	db        *sql.DB
 	retriever *knowledge.Retriever
 	service   *knowledge.Service

@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
 const compositionPersonaYAML = `agents:
@@ -51,7 +51,7 @@ func writeCompositionConfig(t *testing.T, probeAddr, models, extra string) strin
 	return path
 }
 
-func serverCompositionOptions(result *config.LoadResult, logs io.Writer) *Options {
+func serverCompositionOptions(result *appconfig.LoadResult, logs io.Writer) *Options {
 	return &Options{Surface: SurfaceServer, Config: result, LogLevel: "debug", LogFormat: "json", LogOutput: logs}
 }
 

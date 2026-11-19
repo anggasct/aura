@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 )
 
 func writeSkillsCLIConfig(t *testing.T, skillsSection string) string {
@@ -174,7 +174,7 @@ func TestSkillsRejectFlow(t *testing.T) {
 func TestSkillsRetentionWiringThroughCLIHelper(t *testing.T) {
 	root := t.TempDir()
 	cfgPath := writeSkillsCLIConfig(t, "skills:\n  enabled: true\n  roots: ["+root+"]\n  quarantine_retention: 1h\n")
-	result, err := config.Load(cfgPath)
+	result, err := appconfig.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

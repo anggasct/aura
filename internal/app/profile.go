@@ -12,7 +12,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -457,7 +457,7 @@ func ensureOwnerActionSession(ctx context.Context, db *sql.DB, ownerID string) (
 	return sessionID, nil
 }
 
-func profilingProducer(cfg *config.Config) (profile.ModelProducer, error) {
+func profilingProducer(cfg *appconfig.Config) (profile.ModelProducer, error) {
 	if cfg == nil {
 		return profile.ModelProducer{}, errors.New("cli: config must not be nil")
 	}
@@ -479,7 +479,7 @@ func profilingProducer(cfg *config.Config) (profile.ModelProducer, error) {
 	return profile.ModelProducer{Provider: definition.Protocol, Model: definition.Model}, nil
 }
 
-func profilingRole(cfg *config.Config) string {
+func profilingRole(cfg *appconfig.Config) string {
 	if role := strings.TrimSpace(cfg.Models.Routing["profiling"]); role != "" {
 		return role
 	}

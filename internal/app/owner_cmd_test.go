@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -99,9 +100,9 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os user unavailable: %v", err)
 	}
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -188,7 +189,7 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 }
 
 func TestOwnerRekeyMoves(t *testing.T) {
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Owner = &config.Owner{Identities: []string{"discord:" + testOwnerDiscordID}}
 	cfg.Channels.Discord.Accounts = []config.DiscordAccount{
 		{Name: "owner", AllowedUserIDs: []string{testOwnerDiscordID}},

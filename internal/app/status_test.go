@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -89,7 +90,7 @@ func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, err
 	if healthyStorage {
 		seedHealthyStorage(t, dataRoot)
 	}
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
 	ignoreHostDiskHeadroom(&cfg)
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
@@ -103,7 +104,7 @@ func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, err
 	return cmd
 }
 
-func ignoreHostDiskHeadroom(cfg *config.Config) {
+func ignoreHostDiskHeadroom(cfg *appconfig.Config) {
 	cfg.Health.DiskWarningPercent = 0
 	cfg.Health.DiskCriticalPercent = 0
 	cfg.Health.DiskCriticalFloorBytes = 0
@@ -115,9 +116,9 @@ func pinnedProcessProbe() (health.ProcessStatus, bool) {
 
 func seedConfiguredStorage(t *testing.T, configPath string) {
 	t.Helper()
-	loaded, err := config.Load(configPath)
+	loaded, err := appconfig.Load(configPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	if loaded.Config.Storage.Path == "" {
 		return
@@ -172,7 +173,7 @@ func TestStatusJSONEncodesContract(t *testing.T) {
 	}
 	dataRoot := t.TempDir()
 	seedHealthyStorage(t, dataRoot)
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
 	ignoreHostDiskHeadroom(&cfg)
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
@@ -218,7 +219,7 @@ func TestStatusJSONEncodesContract(t *testing.T) {
 func TestDoctorFiltersByCheck(t *testing.T) {
 	dataRoot := t.TempDir()
 	seedHealthyStorage(t, dataRoot)
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
@@ -270,9 +271,9 @@ func TestStatusUsesBuiltinCapabilityRegistry(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("AURA_CONFIG", "")
 	t.Setenv("AURA_TOOLS_WORKSPACE", t.TempDir())
-	loaded, err := config.Load("")
+	loaded, err := appconfig.Load("")
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	statuses := mapCapabilityStatuses(loaded.CapabilityReport)
 	names := make([]string, 0, len(statuses))
@@ -291,7 +292,7 @@ func TestStatusUsesBuiltinCapabilityRegistry(t *testing.T) {
 	}
 }
 
-func loadCapabilityConfig(t *testing.T, enabled []string, options config.LoadOptions) config.LoadResult {
+func loadCapabilityConfig(t *testing.T, enabled []string, options appconfig.LoadOptions) appconfig.LoadResult {
 	t.Helper()
 	dir := t.TempDir()
 	dataRoot := t.TempDir()
@@ -321,14 +322,14 @@ func loadCapabilityConfig(t *testing.T, enabled []string, options config.LoadOpt
 		}
 		options.Build = build
 	}
-	loaded, err := config.LoadWithOptions(cfgPath, options)
+	loaded, err := appconfig.LoadWithOptions(cfgPath, options)
 	if err != nil {
-		t.Fatalf("config.LoadWithOptions: %v", err)
+		t.Fatalf("appconfig.LoadWithOptions: %v", err)
 	}
 	return loaded
 }
 
-func statusFromLoadedConfig(t *testing.T, enabled []string, options config.LoadOptions) (*cobra.Command, string, error) {
+func statusFromLoadedConfig(t *testing.T, enabled []string, options appconfig.LoadOptions) (*cobra.Command, string, error) {
 	t.Helper()
 	loaded := loadCapabilityConfig(t, enabled, options)
 	ignoreHostDiskHeadroom(loaded.Config)
@@ -351,7 +352,7 @@ func TestStatusReportsEnabledCapabilityMissingDependency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, output, runErr := statusFromLoadedConfig(t, []string{"exec-linux"}, config.LoadOptions{
+	_, output, runErr := statusFromLoadedConfig(t, []string{"exec-linux"}, appconfig.LoadOptions{
 		Build:        build,
 		Registry:     registry,
 		Dependencies: capability.Dependencies{},
@@ -377,7 +378,7 @@ func TestStatusReportsEnabledCapabilityNotCompiled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, output, runErr := statusFromLoadedConfig(t, []string{"public-web"}, config.LoadOptions{Build: build, Registry: registry})
+	_, output, runErr := statusFromLoadedConfig(t, []string{"public-web"}, appconfig.LoadOptions{Build: build, Registry: registry})
 	var exitErr *exitCodeError
 	if !errors.As(runErr, &exitErr) {
 		t.Fatalf("runStatus error = %v, want exit code error", runErr)
@@ -405,7 +406,7 @@ func TestStatusUnknownCapabilityIsAConfigError(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = config.LoadWithOptions(cfgPath, config.LoadOptions{Build: build, Registry: registry})
+	_, err = appconfig.LoadWithOptions(cfgPath, appconfig.LoadOptions{Build: build, Registry: registry})
 	if err == nil || !strings.Contains(err.Error(), "capability_unknown") {
 		t.Fatalf("load error = %v, want capability_unknown config error", err)
 	}
@@ -420,7 +421,7 @@ func TestStatusReportsProfileExclusionReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, output, runErr := statusFromLoadedConfig(t, []string{"workspace-write"}, config.LoadOptions{Build: build, Registry: registry})
+	_, output, runErr := statusFromLoadedConfig(t, []string{"workspace-write"}, appconfig.LoadOptions{Build: build, Registry: registry})
 	var exitErr *exitCodeError
 	if !errors.As(runErr, &exitErr) {
 		t.Fatalf("runStatus error = %v, want exit code error", runErr)
@@ -445,7 +446,7 @@ func TestStatusReportsNonLinuxReasonForEffectfulCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, output, runErr := statusFromLoadedConfig(t, []string{"exec-linux"}, config.LoadOptions{Build: build, Registry: registry, Dependencies: capability.Dependencies{capability.DependencyProcessContainment: true}})
+	_, output, runErr := statusFromLoadedConfig(t, []string{"exec-linux"}, appconfig.LoadOptions{Build: build, Registry: registry, Dependencies: capability.Dependencies{capability.DependencyProcessContainment: true}})
 	var exitErr *exitCodeError
 	if !errors.As(runErr, &exitErr) {
 		t.Fatalf("runStatus error = %v, want exit code error", runErr)
@@ -468,7 +469,7 @@ func TestStatusReportsInterpreterRuntimeStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	dependencies := capability.Dependencies{capability.DependencyProcessContainment: true, capability.DependencyInterpreterRuntime: true}
-	_, output, runErr := statusFromLoadedConfig(t, []string{"code-interpreter"}, config.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
+	_, output, runErr := statusFromLoadedConfig(t, []string{"code-interpreter"}, appconfig.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
 	var exitErr *exitCodeError
 	if !errors.As(runErr, &exitErr) || exitErr.code != exitDegraded {
 		t.Fatalf("runStatus error = %v, want a degraded exit", runErr)
@@ -479,7 +480,7 @@ func TestStatusReportsInterpreterRuntimeStates(t *testing.T) {
 		}
 	}
 
-	_, output, _ = statusFromLoadedConfig(t, []string{}, config.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
+	_, output, _ = statusFromLoadedConfig(t, []string{}, appconfig.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
 	if strings.Contains(output, "interpreter_runtime") {
 		t.Errorf("status reports interpreter runtimes while the capability is disabled:\n%s", output)
 	}

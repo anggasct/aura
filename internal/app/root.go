@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/terminal"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 )
@@ -51,7 +51,7 @@ func NewRootCommand() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newSkillsCmd(gf), newProfileCmd(gf), newMemoryCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newReplyCmd(gf), newHandoffCmd(gf), newWorkflowCmd(gf), newBroadcastCmd(gf), newScheduleCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newMCPCmd(gf), newPluginCmd(gf), newAPIKeyCmd(gf), newKBCmd(gf), newInterpreterCmd(gf, interpreterDeps{load: config.Load, manifest: interpreter.DefaultManifest, platformSupported: interpreter.HostSupported}), newConfigCmd(gf))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newSkillsCmd(gf), newProfileCmd(gf), newMemoryCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newReplyCmd(gf), newHandoffCmd(gf), newWorkflowCmd(gf), newBroadcastCmd(gf), newScheduleCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newMCPCmd(gf), newPluginCmd(gf), newAPIKeyCmd(gf), newKBCmd(gf), newInterpreterCmd(gf, interpreterDeps{load: appconfig.Load, manifest: interpreter.DefaultManifest, platformSupported: interpreter.HostSupported}), newConfigCmd(gf))
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return &usageError{err}
 	})
@@ -79,7 +79,7 @@ func ExitCode(root *cobra.Command, args []string, err error) int {
 	return 1
 }
 
-func logConfigResult(ctx context.Context, logger *slog.Logger, result *config.LoadResult) {
+func logConfigResult(ctx context.Context, logger *slog.Logger, result *appconfig.LoadResult) {
 	if result.DefaultGenerated {
 		logger.InfoContext(ctx, "generating default config", "component", "config", "file", filepath.Base(result.Path))
 	}
@@ -88,7 +88,7 @@ func logConfigResult(ctx context.Context, logger *slog.Logger, result *config.Lo
 	}
 }
 
-func resolveLogging(cmd *cobra.Command, cfg *config.Config) (level, format string) {
+func resolveLogging(cmd *cobra.Command, cfg *appconfig.Config) (level, format string) {
 	level, format = cfg.Logging.Level, cfg.Logging.Format
 	if f := cmd.Flags().Lookup("log-level"); f != nil && f.Changed {
 		level = f.Value.String()

@@ -17,6 +17,7 @@ import (
 
 	adkmodel "google.golang.org/adk/v2/model"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
@@ -422,7 +423,7 @@ func awaitSignal(t *testing.T, signal <-chan struct{}, failure string) {
 func TestBuildSecretVaultRedactsEmailPasswords(t *testing.T) {
 	t.Setenv("AURA_TEST_VAULT_IMAP", "imap-secret-probe")
 	t.Setenv("AURA_TEST_VAULT_SMTP", "smtp-secret-probe")
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Channels.Email.Accounts = []config.EmailAccount{{
 		Name: "work",
 		IMAP: config.EmailIMAP{PasswordRef: secrettest.Ref("env://AURA_TEST_VAULT_IMAP")},
@@ -478,7 +479,7 @@ func TestRecoverEmailEffects(t *testing.T) {
 			}
 			mine := startedIntent(t, journal, email.ProviderName)
 			foreign := startedIntent(t, journal, "telegram")
-			cfg := config.Default()
+			cfg := appconfig.Default()
 			cfg.Channels.Email.Enabled = tc.enabled
 			if err := recoverEmailEffects(t.Context(), &cfg, db, slog.New(slog.DiscardHandler)); err != nil {
 				t.Fatalf("recoverEmailEffects: %v", err)
@@ -498,7 +499,7 @@ func TestRecoverEmailEffects_FailsClosedWhenTheJournalIsUnreadable(t *testing.T)
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Channels.Email.Enabled = true
 	if err := recoverEmailEffects(t.Context(), &cfg, db, slog.New(slog.DiscardHandler)); err == nil {
 		t.Fatal("recoverEmailEffects succeeded against an unreadable journal")

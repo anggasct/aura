@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -36,7 +37,7 @@ func replyTargeters(ports []runtimechannelhost.ChannelPort) []replyTargeter {
 }
 
 type workflowCompletionNotifier struct {
-	cfg      *config.Config
+	cfg      *appconfig.Config
 	db       *sql.DB
 	runs     *workflow.Store
 	registry *auraagent.Registry
@@ -45,7 +46,7 @@ type workflowCompletionNotifier struct {
 	now      func() time.Time
 }
 
-func newWorkflowCompletionNotifier(cfg *config.Config, db *sql.DB, registry *auraagent.Registry, logger *slog.Logger) *workflowCompletionNotifier {
+func newWorkflowCompletionNotifier(cfg *appconfig.Config, db *sql.DB, registry *auraagent.Registry, logger *slog.Logger) *workflowCompletionNotifier {
 	return &workflowCompletionNotifier{cfg: cfg, db: db, runs: workflow.NewStore(db), registry: registry, deliver: deliverText, logger: logger, now: time.Now}
 }
 

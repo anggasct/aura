@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
@@ -28,7 +28,7 @@ func newMemoryCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func openMemoryServiceForCLI(db *sql.DB, cfg *config.Config) (*memory.Service, error) {
+func openMemoryServiceForCLI(db *sql.DB, cfg *appconfig.Config) (*memory.Service, error) {
 	if db == nil {
 		return nil, errors.New("memory database must not be nil")
 	}
@@ -76,7 +76,7 @@ func newMemoryInspectCmd(gf *globalFlags) *cobra.Command {
 			if limit <= 0 {
 				limit = 50
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
 				if !cfg.Memory.Enabled {
 					return errors.New("memory is not enabled")
 				}
@@ -122,7 +122,7 @@ func newMemoryForgetCmd(gf *globalFlags) *cobra.Command {
 			if limit <= 0 {
 				limit = 100
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
 				if !cfg.Memory.Enabled {
 					return errors.New("memory is not enabled")
 				}
@@ -183,7 +183,7 @@ func newMemoryPurgeCmd(gf *globalFlags) *cobra.Command {
 			if limit <= 0 {
 				limit = 100
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
 				if !cfg.Memory.Enabled {
 					return errors.New("memory is not enabled")
 				}

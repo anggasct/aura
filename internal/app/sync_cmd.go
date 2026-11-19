@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/gitsync"
 )
@@ -29,8 +30,8 @@ func newSyncCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func loadSyncConfig(gf *globalFlags) (*config.Config, error) {
-	result, err := config.Load(gf.configPath)
+func loadSyncConfig(gf *globalFlags) (*appconfig.Config, error) {
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +41,7 @@ func loadSyncConfig(gf *globalFlags) (*config.Config, error) {
 	return result.Config, nil
 }
 
-func openSyncStateStore(cfg *config.Config) (*gitsync.StateStore, error) {
+func openSyncStateStore(cfg *appconfig.Config) (*gitsync.StateStore, error) {
 	_, dataRoot, _, err := storagePaths(cfg)
 	if err != nil {
 		return nil, err
@@ -106,7 +107,7 @@ func newSyncIntentID() string {
 
 var syncRunPassFunc = defaultSyncRunPass
 
-func defaultSyncRunPass(ctx context.Context, cfg *config.Config, store *gitsync.StateStore) (gitsync.PassOutcome, error) {
+func defaultSyncRunPass(ctx context.Context, cfg *appconfig.Config, store *gitsync.StateStore) (gitsync.PassOutcome, error) {
 	if cfg.Sync == nil {
 		return gitsync.PassOutcome{}, gitsync.Errorf(gitsync.ErrorCodeNotConfigured, "sync is not configured")
 	}

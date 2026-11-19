@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -54,9 +54,9 @@ func runMemoryCommand(t *testing.T, cfg string, args ...string) (string, error) 
 
 func seedMemoryDoc(t *testing.T, cfgPath, id, owner, session, content string, seq int64) {
 	t.Helper()
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -79,9 +79,9 @@ func seedMemoryDoc(t *testing.T, cfgPath, id, owner, session, content string, se
 
 func seedMemorySummary(t *testing.T, cfgPath, id, owner, session string, expires time.Time, seq int64) {
 	t.Helper()
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {

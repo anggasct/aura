@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
@@ -108,7 +108,7 @@ func TestAuraStartsOnlyAfterTheUpgradeJob(t *testing.T) {
 
 func TestAuraStopGracePeriodOutlastsTheShutdownTimeout(t *testing.T) {
 	t.Setenv("AURA_CONFIG", "")
-	result, err := config.Load("aura.yaml")
+	result, err := appconfig.Load("aura.yaml")
 	if err != nil {
 		t.Fatalf("deploy/aura.yaml does not load: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestAuraStopGracePeriodOutlastsTheShutdownTimeout(t *testing.T) {
 
 func TestShippedConfigIsValidForTheTopology(t *testing.T) {
 	t.Setenv("AURA_CONFIG", "")
-	result, err := config.Load("aura.yaml")
+	result, err := appconfig.Load("aura.yaml")
 	if err != nil {
 		t.Fatalf("deploy/aura.yaml does not load: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestExecProfileFixtureLoadsForTheExecBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AURA_CONFIG", "")
-	result, err := config.LoadWithOptions("smoke/exec-profile.yaml", config.LoadOptions{Build: build, Registry: registry, Dependencies: capability.Dependencies{capability.DependencyProcessContainment: true}})
+	result, err := appconfig.LoadWithOptions("smoke/exec-profile.yaml", appconfig.LoadOptions{Build: build, Registry: registry, Dependencies: capability.Dependencies{capability.DependencyProcessContainment: true}})
 	if err != nil {
 		t.Fatalf("smoke/exec-profile.yaml does not load for the exec-linux build: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestCodeInterpreterFixtureNeedsABuildThatCompilesIt(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("AURA_CONFIG", "")
-			result, err := config.LoadWithOptions("smoke/code-interpreter-profile.yaml", config.LoadOptions{Build: build, Registry: registry, Dependencies: tc.dependencies})
+			result, err := appconfig.LoadWithOptions("smoke/code-interpreter-profile.yaml", appconfig.LoadOptions{Build: build, Registry: registry, Dependencies: tc.dependencies})
 			if err != nil {
 				t.Fatalf("smoke/code-interpreter-profile.yaml does not load: %v", err)
 			}

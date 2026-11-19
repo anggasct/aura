@@ -14,6 +14,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -68,7 +69,7 @@ const behaviorCases = "cases:\n  - name: greets and refuses owner facts\n    kin
 
 func behaviorPersona(t *testing.T, cfg string) auraagent.Definition {
 	t.Helper()
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +273,7 @@ func TestScheduledBehaviorEvalRunsOnItsCronAndStopsWithServe(t *testing.T) {
 
 func TestRegistryRejectsAnInvalidBehaviorSchedule(t *testing.T) {
 	build := func(schedule string) error {
-		_, err := buildAgentRegistry(&config.Config{
+		_, err := buildAgentRegistry(&appconfig.Config{
 			Models: config.Models{Definitions: map[string]config.ModelDefinition{auraagent.DefaultEvalJudgeRoute: {Model: "judge"}}},
 			Agents: &config.Agents{Definitions: []config.AgentDefinition{{
 				ID: "lobby", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{Schedule: schedule}},

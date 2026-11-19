@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 )
@@ -18,7 +19,7 @@ const (
 	mcpRestartNotice = "takes effect at the next server start"
 )
 
-func mcpTrustRegistryPath(cfg *config.Config) (string, error) {
+func mcpTrustRegistryPath(cfg *appconfig.Config) (string, error) {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return "", err
@@ -26,14 +27,14 @@ func mcpTrustRegistryPath(cfg *config.Config) (string, error) {
 	return filepath.Join(dataRoot, mcpTrustDirName, mcpTrustFileName), nil
 }
 
-func configuredMCPServers(cfg *config.Config) []config.MCPServer {
+func configuredMCPServers(cfg *appconfig.Config) []config.MCPServer {
 	if cfg == nil || cfg.MCP == nil {
 		return nil
 	}
 	return cfg.MCP.Servers
 }
 
-func configuredMCPServerNames(cfg *config.Config) []string {
+func configuredMCPServerNames(cfg *appconfig.Config) []string {
 	servers := configuredMCPServers(cfg)
 	names := make([]string, 0, len(servers))
 	for i := range servers {
@@ -75,7 +76,7 @@ func newMCPListCmd(gf *globalFlags) *cobra.Command {
 		Short: "List configured MCP servers with their trust state",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -129,7 +130,7 @@ func toolsColumn(tools []string) string {
 	return strings.Join(tools, ",")
 }
 
-func openMCPTrustRegistry(cfg *config.Config) (*mcp.FileTrustRegistry, error) {
+func openMCPTrustRegistry(cfg *appconfig.Config) (*mcp.FileTrustRegistry, error) {
 	path, err := mcpTrustRegistryPath(cfg)
 	if err != nil {
 		return nil, err
@@ -137,7 +138,7 @@ func openMCPTrustRegistry(cfg *config.Config) (*mcp.FileTrustRegistry, error) {
 	return mcp.NewFileTrustRegistry(path)
 }
 
-func findMCPServer(cfg *config.Config, name string) (*config.MCPServer, bool) {
+func findMCPServer(cfg *appconfig.Config, name string) (*config.MCPServer, bool) {
 	servers := configuredMCPServers(cfg)
 	for i := range servers {
 		if servers[i].Name == name {
@@ -153,7 +154,7 @@ func newMCPTrustApproveCmd(gf *globalFlags) *cobra.Command {
 		Short: "Approve the current configuration of an MCP server",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -190,7 +191,7 @@ func newMCPTrustRevokeCmd(gf *globalFlags) *cobra.Command {
 		Short: "Remove the trust record of an MCP server",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}

@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	adkmodel "google.golang.org/adk/v2/model"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -62,7 +63,7 @@ type profileRuntime struct {
 	stated    []string
 }
 
-func buildProfileRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, models runtimeadk.ModelSource, mp metric.MeterProvider, logger *slog.Logger) (*profileRuntime, error) {
+func buildProfileRuntime(ctx context.Context, cfg *appconfig.Config, db *sql.DB, models runtimeadk.ModelSource, mp metric.MeterProvider, logger *slog.Logger) (*profileRuntime, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -73,7 +74,7 @@ func buildProfileRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, mo
 	return newProfileRuntime(cfg, db, llm, producer, mp, buildSecretVault(cfg), logger)
 }
 
-func profilingLLM(ctx context.Context, cfg *config.Config, models runtimeadk.ModelSource) (adkmodel.LLM, profile.ModelProducer, error) {
+func profilingLLM(ctx context.Context, cfg *appconfig.Config, models runtimeadk.ModelSource) (adkmodel.LLM, profile.ModelProducer, error) {
 	producer, err := profilingProducer(cfg)
 	if err != nil {
 		return nil, profile.ModelProducer{}, err
@@ -86,7 +87,7 @@ func profilingLLM(ctx context.Context, cfg *config.Config, models runtimeadk.Mod
 }
 
 // A nil llm leaves extraction off while verified facts are still served.
-func newProfileRuntime(cfg *config.Config, db *sql.DB, llm adkmodel.LLM, producer profile.ModelProducer, mp metric.MeterProvider, scanner profile.SecretScanner, logger *slog.Logger) (*profileRuntime, error) {
+func newProfileRuntime(cfg *appconfig.Config, db *sql.DB, llm adkmodel.LLM, producer profile.ModelProducer, mp metric.MeterProvider, scanner profile.SecretScanner, logger *slog.Logger) (*profileRuntime, error) {
 	if cfg == nil || cfg.Profile == nil {
 		return nil, errors.New("cli: profile configuration must not be nil")
 	}
@@ -143,7 +144,7 @@ func (r *profileRuntime) run(ctx context.Context) {
 	}
 }
 
-func (r *profileRuntime) check(cfg *config.Config) health.RegisteredCheck {
+func (r *profileRuntime) check(cfg *appconfig.Config) health.RegisteredCheck {
 	return health.RegisteredCheck{
 		ID:          "profile",
 		Checker:     r.health,

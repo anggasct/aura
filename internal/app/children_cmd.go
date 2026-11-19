@@ -9,13 +9,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/store"
 )
 
 func openChildStore(cmd *cobra.Command, gf *globalFlags) (store.ChildStore, func(), error) {
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -134,7 +134,7 @@ func newChildrenCancelCmd(gf *globalFlags) *cobra.Command {
 		Short: "Cancel a nonterminal child run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}

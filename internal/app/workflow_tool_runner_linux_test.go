@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -82,7 +83,7 @@ func probeStepCall(runID, stepID string, attempt int) *workflow.StepCall {
 	return call
 }
 
-func withProbePersona(cfg *config.Config) {
+func withProbePersona(cfg *appconfig.Config) {
 	cfg.Agents.Definitions = append(cfg.Agents.Definitions, config.AgentDefinition{
 		ID: probePersona, Description: "d", Instructions: "i",
 	})
@@ -151,7 +152,7 @@ func runSessionEvents(t *testing.T, db *sql.DB, runID string) []uint64 {
 	return sequences
 }
 
-func withKnowledgePersona(cfg *config.Config) {
+func withKnowledgePersona(cfg *appconfig.Config) {
 	withProbePersona(cfg)
 	cfg.Agents.Definitions = append(cfg.Agents.Definitions, config.AgentDefinition{
 		ID: "librarian", Description: "d", Instructions: "i", Knowledge: []string{"docs"},
@@ -467,8 +468,8 @@ func TestWorkflowStepsShareTheirRunsJournal(t *testing.T) {
 }
 
 func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
-	var cfg config.Config
-	runner, db, workspace := newWorkflowToolRunnerFixtureWith(t, func(c *config.Config) {
+	var cfg appconfig.Config
+	runner, db, workspace := newWorkflowToolRunnerFixtureWith(t, func(c *appconfig.Config) {
 		c.Agents.Definitions = append(c.Agents.Definitions, config.AgentDefinition{
 			ID: "kantor", Description: "d", Instructions: "i", Audience: config.AudienceTrusted,
 			Tools: []string{"read_file", "write_file"}, PrincipalTools: []string{"read_file"}, Workflows: []string{"write-note"},

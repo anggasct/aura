@@ -11,6 +11,7 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/telegram"
@@ -124,7 +125,7 @@ func (adapters discordAdapters) Check(ctx context.Context) []health.Finding {
 	return findings
 }
 
-func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, runs *erasureRuns, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
+func buildChannelAdapters(cfg *appconfig.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, runs *erasureRuns, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
 	if cfg == nil || (!cfg.Channels.Discord.Enabled && !cfg.Channels.Telegram.Enabled && !cfg.Channels.Email.Enabled) {
 		return nil, nil, nil, nil
 	}
@@ -242,7 +243,7 @@ func buildChannelAdapters(cfg *config.Config, router *auraagent.Router, db *sql.
 	return ports, checks, approvers, nil
 }
 
-func newDiscordAdapter(cfg *config.Config, account *config.DiscordAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*discord.Adapter, error) {
+func newDiscordAdapter(cfg *appconfig.Config, account *config.DiscordAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*discord.Adapter, error) {
 	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
 	if err != nil {
 		return nil, err
@@ -264,7 +265,7 @@ func newDiscordAdapter(cfg *config.Config, account *config.DiscordAccount, db *s
 	return adapter, nil
 }
 
-func buildSecretVault(cfg *config.Config) *secret.Vault {
+func buildSecretVault(cfg *appconfig.Config) *secret.Vault {
 	vault := secret.New()
 	for _, entry := range configuredSecrets(cfg) {
 		if value, err := entry.resolve(); err == nil && strings.TrimSpace(value) != "" {

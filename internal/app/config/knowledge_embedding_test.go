@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	legacyconfig "github.com/anggasct/aura/internal/config"
 )
 
 func embeddingConfig(fields string) string {
@@ -27,7 +29,7 @@ func TestLoad_KnowledgeEmbeddingAppliesDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	embedding := result.Config.Knowledge.Embedding
-	if embedding.DimensionsField != "dimensions" || embedding.RoleStyle != EmbeddingRoleNone ||
+	if embedding.DimensionsField != "dimensions" || embedding.RoleStyle != legacyconfig.EmbeddingRoleNone ||
 		embedding.BatchSize != 96 || embedding.MaxMemory != 256<<20 || embedding.PublicQueries || !embedding.CredentialRef.IsZero() {
 		t.Fatalf("defaults = %+v", embedding)
 	}
@@ -53,7 +55,7 @@ func TestLoad_KnowledgeEmbeddingReadsEveryField(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	embedding := result.Config.Knowledge.Embedding
-	if embedding.DimensionsField != "output_dimension" || embedding.RoleStyle != EmbeddingRoleInputType ||
+	if embedding.DimensionsField != "output_dimension" || embedding.RoleStyle != legacyconfig.EmbeddingRoleInputType ||
 		embedding.BatchSize != 128 || embedding.MaxMemory != 512<<20 || !embedding.PublicQueries ||
 		embedding.CredentialRef.String() != "env://VOYAGE_API_KEY" {
 		t.Fatalf("embedding = %+v", embedding)
@@ -190,7 +192,7 @@ func TestLoad_KnowledgeRejectsUnknownKeyAndShape(t *testing.T) {
 
 func TestLoad_KnowledgeSectionKeepsVersionGateFirst(t *testing.T) {
 	_, err := Load(writeDiscordConfig(t, "version: 2\nknowledge:\n  embedding:\n    bogus: 1\n"))
-	if code, ok := codeOf(err); !ok || code != ErrorCodeVersionUnsupported {
+	if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodeVersionUnsupported {
 		t.Fatalf("error = %v, want the version gate", err)
 	}
 }

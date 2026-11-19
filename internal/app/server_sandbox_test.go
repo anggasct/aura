@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
@@ -54,9 +54,9 @@ func TestServerPreparesTheHostBeforeResolvingCapabilities(t *testing.T) {
 		order = append(order, "prepare")
 		return sandbox.HostPreparation{}, nil
 	}
-	load := func(string) (config.LoadResult, error) {
+	load := func(string) (appconfig.LoadResult, error) {
 		order = append(order, "load")
-		return config.LoadResult{}, nil
+		return appconfig.LoadResult{}, nil
 	}
 	if _, err := prepareHostThenLoad("aura.yaml", prepare, load); err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestServerKeepsThePreparationFailureForLogging(t *testing.T) {
 	failure := sandbox.Errorf(sandbox.ErrorCodeSandboxUnavailable, "no delegated cgroup")
 	startup, err := prepareHostThenLoad("aura.yaml",
 		func() (sandbox.HostPreparation, error) { return sandbox.HostPreparation{}, failure },
-		func(string) (config.LoadResult, error) { return config.LoadResult{}, nil },
+		func(string) (appconfig.LoadResult, error) { return appconfig.LoadResult{}, nil },
 	)
 	if err != nil {
 		t.Fatal(err)

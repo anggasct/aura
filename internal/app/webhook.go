@@ -16,14 +16,14 @@ import (
 	"sync"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -393,7 +393,7 @@ func (l *webhookListener) Start(ctx context.Context) error {
 }
 
 type webhookListenerInput struct {
-	cfg     *config.Config
+	cfg     *appconfig.Config
 	db      *sql.DB
 	backend turn.AgentRuntime
 	logger  *slog.Logger

@@ -3,11 +3,12 @@ package app
 import (
 	"testing"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
-func webSearchSecretEntry(cfg *config.Config) *configuredSecret {
+func webSearchSecretEntry(cfg *appconfig.Config) *configuredSecret {
 	for _, entry := range additionalConfiguredSecrets(cfg) {
 		if entry.name == "web_search_credential" {
 			return &entry
@@ -34,7 +35,7 @@ func TestWebSearchCredentialIsOptionalOnlyAtTheSelectedProvidersDefaultReference
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			cfg := &config.Config{Tools: &config.Tools{WebSearch: config.ToolWebSearch{Provider: test.provider, CredentialRef: secrettest.Ref(test.ref)}}}
+			cfg := &appconfig.Config{Tools: &config.Tools{WebSearch: config.ToolWebSearch{Provider: test.provider, CredentialRef: secrettest.Ref(test.ref)}}}
 			entry := webSearchSecretEntry(cfg)
 			if (entry != nil) != test.present {
 				t.Fatalf("entry = %+v, want present %v", entry, test.present)

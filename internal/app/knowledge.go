@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -21,7 +21,7 @@ import (
 
 const knowledgeOwnerActionKind = "kb.owner_action.v1"
 
-func newKnowledgeService(cfg *config.Config, db *sql.DB, resolver egress.Resolver) (*knowledge.Service, error) {
+func newKnowledgeService(cfg *appconfig.Config, db *sql.DB, resolver egress.Resolver) (*knowledge.Service, error) {
 	if cfg == nil {
 		return nil, errors.New("knowledge config must not be nil")
 	}
@@ -45,7 +45,7 @@ func newKnowledgeService(cfg *config.Config, db *sql.DB, resolver egress.Resolve
 }
 
 type knowledgeSecrets struct {
-	cfg *config.Config
+	cfg *appconfig.Config
 }
 
 func (s *knowledgeSecrets) Snapshot(_ context.Context) (knowledge.SecretScreen, error) {
@@ -245,7 +245,7 @@ func openKnowledgeReadPool(ctx context.Context, dbPath string) (*sql.DB, error) 
 	return pool, nil
 }
 
-func newKnowledgeRetriever(cfg *config.Config, pool *sql.DB, opts ...knowledge.RetrieverOption) (*knowledge.Retriever, error) {
+func newKnowledgeRetriever(cfg *appconfig.Config, pool *sql.DB, opts ...knowledge.RetrieverOption) (*knowledge.Retriever, error) {
 	if cfg == nil {
 		return nil, errors.New("knowledge config must not be nil")
 	}
@@ -305,7 +305,7 @@ func personasListKnowledge(registry *auraagent.Registry) bool {
 	return false
 }
 
-func buildKnowledgeRuntime(ctx context.Context, cfg *config.Config, registry *auraagent.Registry) (rt *knowledgeRuntime, enabled bool, err error) {
+func buildKnowledgeRuntime(ctx context.Context, cfg *appconfig.Config, registry *auraagent.Registry) (rt *knowledgeRuntime, enabled bool, err error) {
 	if !personasListKnowledge(registry) {
 		return nil, false, nil
 	}

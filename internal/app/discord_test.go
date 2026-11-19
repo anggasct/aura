@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -21,8 +22,8 @@ func discordTestDB(t *testing.T) *sql.DB {
 	return storetest.OpenMigrated(t)
 }
 
-func enabledDiscordConfig() config.Config {
-	defaults := config.Default()
+func enabledDiscordConfig() appconfig.Config {
+	defaults := appconfig.Default()
 	defaults.Channels.Discord.Enabled = true
 	defaults.Channels.Discord.Accounts = []config.DiscordAccount{{
 		Name:           "owner",
@@ -34,7 +35,7 @@ func enabledDiscordConfig() config.Config {
 	return defaults
 }
 
-func testRouter(t *testing.T, cfg *config.Config) *auraagent.Router {
+func testRouter(t *testing.T, cfg *appconfig.Config) *auraagent.Router {
 	t.Helper()
 	registry, err := buildAgentRegistry(cfg)
 	if err != nil {
@@ -49,7 +50,7 @@ func testRouter(t *testing.T, cfg *config.Config) *auraagent.Router {
 
 func TestBuildChannelAdapters_DisabledByDefault(t *testing.T) {
 	db := discordTestDB(t)
-	defaults := config.Default()
+	defaults := appconfig.Default()
 	adapters, checks, _, err := buildChannelAdapters(&defaults, testRouter(t, &defaults), db, t.TempDir(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildChannelAdapters(): %v", err)
@@ -115,7 +116,7 @@ func TestBuildChannelAdapters_ReportsUnmappedOwnerIdentity(t *testing.T) {
 func TestBuildSecretVaultSkipsEmptyValues(t *testing.T) {
 	t.Setenv("AURA_TEST_EMPTY_WEBHOOK_SECRET", "")
 	t.Setenv("AURA_TEST_EMPTY_MODEL_KEY", "")
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Webhook.Keys = []config.WebhookKey{{ID: "probe", SecretEnv: "AURA_TEST_EMPTY_WEBHOOK_SECRET"}}
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"probe": {Model: "probe", Provider: "probe", APIKeyRef: secrettest.Ref("env://AURA_TEST_EMPTY_MODEL_KEY")},
@@ -248,7 +249,7 @@ func TestDiscordSessionEnsurer_ReportsExistence(t *testing.T) {
 func TestBuildSecretVaultRedactsEveryAccountToken(t *testing.T) {
 	t.Setenv("AURA_TEST_HOME_TOKEN", "home-token-value-123")
 	t.Setenv("AURA_TEST_KUMA_TOKEN", "kuma-token-value-456")
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Channels.Discord.Accounts = []config.DiscordAccount{
 		{Name: "home", BotTokenRef: secrettest.Ref("env://AURA_TEST_HOME_TOKEN")},
 		{Name: "kuma", BotTokenRef: secrettest.Ref("env://AURA_TEST_KUMA_TOKEN")},

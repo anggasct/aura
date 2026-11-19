@@ -15,8 +15,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -60,8 +60,8 @@ func (l *observationLog) record(observation toolbroker.Observation) {
 }
 
 type surfaceInput struct {
-	cfg      *config.Config
-	result   *config.LoadResult
+	cfg      *appconfig.Config
+	result   *appconfig.LoadResult
 	db       *sql.DB
 	registry *auraagent.Registry
 	owner    *workflowOwnerCards
@@ -164,7 +164,7 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 }
 
 type surfaceRigOptions struct {
-	configure func(*config.Config)
+	configure func(*appconfig.Config)
 	owner     *workflowOwnerCards
 	logger    *slog.Logger
 }
@@ -176,7 +176,7 @@ func newSurfaceRig(t *testing.T, opts *surfaceRigOptions) *surfaceRig {
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		t.Fatalf("mkdir workspace: %v", err)
 	}
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dir
 	if opts.configure != nil {

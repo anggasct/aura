@@ -14,7 +14,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -131,9 +131,9 @@ context:
 
 func openContextTestDB(t *testing.T, cfgPath string) *sql.DB {
 	t.Helper()
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -263,9 +263,9 @@ func TestRouterSummarizerRejects(t *testing.T) {
 
 func TestCompressionProducerResolves(t *testing.T) {
 	cfgPath, _ := writeContextCLIConfig(t, "")
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	if _, err := compressionProducer(nil); err == nil {
 		t.Errorf("expected nil config rejection")
@@ -304,9 +304,9 @@ context:
 	if err := os.WriteFile(routed, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loadedRouted, err := config.Load(routed)
+	loadedRouted, err := appconfig.Load(routed)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	producer, err := compressionProducer(loadedRouted.Config)
 	if err != nil {

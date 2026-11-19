@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -32,7 +32,7 @@ func newWorkflowProposalsCmd(gf *globalFlags) *cobra.Command {
 			default:
 				return &usageError{err: errors.New("--status must be proposed, approved, rejected or expired")}
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 				proposals, err := workflow.NewStore(db).Proposals(ctx, status, time.Now())
 				if err != nil {
 					return err
@@ -63,7 +63,7 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 			Short: "Show a proposal and its plan",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+				return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 					proposal, err := workflow.NewStore(db).Proposal(ctx, args[0], time.Now())
 					if err != nil {
 						return err
@@ -94,7 +94,7 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 			Short: "Approve a proposal and start exactly the approved spec",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				result, err := config.Load(gf.configPath)
+				result, err := appconfig.Load(gf.configPath)
 				if err != nil {
 					return err
 				}
@@ -113,7 +113,7 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 			Short: "Reject a proposal; nothing runs",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				result, err := config.Load(gf.configPath)
+				result, err := appconfig.Load(gf.configPath)
 				if err != nil {
 					return err
 				}
@@ -144,7 +144,7 @@ const planNotStoredLine = "plan: not stored; this proposal predates plan storage
 
 type planCheck func(proposal *workflow.Proposal, graph *workflow.Graph) error
 
-func approveRenderedProposal(ctx context.Context, _ *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, render workflow.ToolCallText, now time.Time) (string, error) {
+func approveRenderedProposal(ctx context.Context, _ *appconfig.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, render workflow.ToolCallText, now time.Time) (string, error) {
 	return approveOnStoredPlan(ctx, interpreter, runs, id, now, func(proposal *workflow.Proposal, graph *workflow.Graph) error {
 		if render == nil {
 			return planUnshowable("no tool display is available to show the plan again")
@@ -160,7 +160,7 @@ func approveRenderedProposal(ctx context.Context, _ *config.Config, interpreter 
 	})
 }
 
-func approveStoredProposal(ctx context.Context, _ *config.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, secrets []string, now time.Time) (string, error) {
+func approveStoredProposal(ctx context.Context, _ *appconfig.Config, interpreter *workflow.Interpreter, runs *workflow.Store, id string, secrets []string, now time.Time) (string, error) {
 	return approveOnStoredPlan(ctx, interpreter, runs, id, now, func(proposal *workflow.Proposal, _ *workflow.Graph) error {
 		if holdsSecret(proposal.PlanText, secrets) || stepArgumentsHoldSecret(proposal.Spec, secrets) {
 			return planUnshowable("the plan holds a configured secret value; propose it again without it")

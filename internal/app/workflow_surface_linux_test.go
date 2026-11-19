@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
@@ -47,7 +48,7 @@ const (
 	recordedTool = "record_call"
 )
 
-func surfacePersonas(cfg *config.Config) {
+func surfacePersonas(cfg *appconfig.Config) {
 	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}}
 	withProbePersona(cfg)
 	cfg.Agents.Definitions = append(cfg.Agents.Definitions,

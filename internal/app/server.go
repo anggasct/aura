@@ -8,12 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
-	"github.com/anggasct/aura/internal/modules/builtin"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -26,8 +26,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -37,7 +37,7 @@ func newServerCmd(gf *globalFlags) *cobra.Command {
 		Short: "Start the daemon with all listeners",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			startup, err := prepareHostThenLoad(gf.configPath, sandbox.PrepareHost, config.Load)
+			startup, err := prepareHostThenLoad(gf.configPath, sandbox.PrepareHost, appconfig.Load)
 			if err != nil {
 				return err
 			}
@@ -543,7 +543,7 @@ func (b *build) registerRunRetention() error {
 	return b.group.Add(server.Background("run_retention", sweep.run))
 }
 
-func serveListeners(listeners *server.Server, logger *slog.Logger, cfg *config.Config) func(ctx context.Context) error {
+func serveListeners(listeners *server.Server, logger *slog.Logger, cfg *appconfig.Config) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		logger.InfoContext(ctx, "starting server",
 			"component", "server",
@@ -555,12 +555,12 @@ func serveListeners(listeners *server.Server, logger *slog.Logger, cfg *config.C
 }
 
 type serverStartup struct {
-	config  config.LoadResult
+	config  appconfig.LoadResult
 	host    sandbox.HostPreparation
 	hostErr error
 }
 
-func prepareHostThenLoad(path string, prepare func() (sandbox.HostPreparation, error), load func(string) (config.LoadResult, error)) (serverStartup, error) {
+func prepareHostThenLoad(path string, prepare func() (sandbox.HostPreparation, error), load func(string) (appconfig.LoadResult, error)) (serverStartup, error) {
 	host, hostErr := prepare()
 	result, err := load(path)
 	if err != nil {

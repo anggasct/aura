@@ -69,7 +69,7 @@ func (e *KnowledgeEmbedding) Endpoint() (ServiceEndpoint, error) {
 	return endpoint, nil
 }
 
-func validateKnowledge(knowledge *Knowledge) error {
+func ValidateKnowledge(knowledge *Knowledge) error {
 	if knowledge == nil || knowledge.Embedding == nil {
 		return nil
 	}

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -127,9 +127,9 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 
 func seedProfileCandidate(t *testing.T, cfg string) string {
 	t.Helper()
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -165,9 +165,9 @@ func seedProfileCandidate(t *testing.T, cfg string) string {
 
 func seedProfileConflictingCandidate(t *testing.T, cfg string) string {
 	t.Helper()
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -250,9 +250,9 @@ context:
 
 func TestProfileActionSinkRecordsEvents(t *testing.T) {
 	cfg := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {

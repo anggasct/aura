@@ -16,42 +16,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
-type Config struct {
-	Version      int                   `json:"version"`
-	Runtime      Runtime               `json:"runtime"`
-	Capabilities Capabilities          `json:"capabilities"`
-	Tools        *Tools                `json:"tools,omitempty"`
-	Agents       *Agents               `json:"agents,omitempty"`
-	Workflows    *Workflows            `json:"workflows,omitempty"`
-	MCP          *MCP                  `json:"mcp,omitempty"`
-	Plugins      *Plugins              `json:"plugins,omitempty"`
-	Server       Server                `json:"server"`
-	Logging      Logging               `json:"logging"`
-	Models       Models                `json:"models"`
-	ModelRoutes  map[string]ModelRoute `json:"model_routes,omitempty"`
-	Storage      Storage               `json:"storage"`
-	Telemetry    Telemetry             `json:"telemetry"`
-	Usage        Usage                 `json:"usage"`
-	Health       Health                `json:"health"`
-	Terminal     Terminal              `json:"terminal"`
-	Webhook      Webhook               `json:"webhook"`
-	Broadcast    Broadcast             `json:"broadcast"`
-	Scheduler    Scheduler             `json:"scheduler"`
-	Memory       Memory                `json:"memory"`
-	Skills       *Skills               `json:"skills,omitempty"`
-	Context      *Context              `json:"context,omitempty"`
-	Profile      *Profile              `json:"profile,omitempty"`
-	Owner        *Owner                `json:"owner,omitempty"`
-	Children     *Children             `json:"children,omitempty"`
-	Access       *Access               `json:"access,omitempty"`
-	Sync         *Sync                 `json:"sync,omitempty"`
-	Vision       *Vision               `json:"vision,omitempty"`
-	Knowledge    *Knowledge            `json:"knowledge,omitempty"`
-	Interpreter  Interpreter           `json:"interpreter"`
-	Channels     Channels              `json:"channels"`
-	Bindings     []Binding             `json:"bindings,omitempty"`
-}
-
 type Webhook struct {
 	Enabled            bool               `json:"enabled"`
 	Listen             string             `json:"listen_address"`
@@ -589,7 +553,7 @@ func (m Models) ResolveDefinition(def *ModelDefinition) (ResolvedDefinition, err
 		if strings.TrimSpace(def.Protocol) != "" || strings.TrimSpace(def.BaseURL) != "" {
 			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry with custom must not set protocol or base_url"))
 		}
-		if err := validateProviderShape("custom", *def.Custom); err != nil {
+		if err := ValidateProviderShape("custom", *def.Custom); err != nil {
 			return ResolvedDefinition{}, err
 		}
 		return ResolvedDefinition{
@@ -608,7 +572,7 @@ func (m Models) ResolveDefinition(def *ModelDefinition) (ResolvedDefinition, err
 		if !ok {
 			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry references unknown provider"))
 		}
-		if err := validateProviderShape("provider", preset); err != nil {
+		if err := ValidateProviderShape("provider", preset); err != nil {
 			return ResolvedDefinition{}, err
 		}
 		baseURL := preset.BaseURL
@@ -633,9 +597,9 @@ func (m Models) ResolveDefinition(def *ModelDefinition) (ResolvedDefinition, err
 	}, nil
 }
 
-func validateProviderShape(where string, preset ProviderPreset) error {
-	if !validProtocol(preset.Protocol) {
-		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "uses unsupported protocol (must be one of "+strings.Join(protocolNames(), ", ")+")"))
+func ValidateProviderShape(where string, preset ProviderPreset) error {
+	if !ValidProtocol(preset.Protocol) {
+		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "uses unsupported protocol (must be one of "+strings.Join(ProtocolNames(), ", ")+")"))
 	}
 	if strings.TrimSpace(preset.BaseURL) == "" {
 		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "requires a non-empty base_url"))
@@ -693,7 +657,7 @@ type ModelRoute struct {
 	Circuit             ModelRouteCircuit  `json:"circuit"`
 }
 
-func defaultModelRoute() ModelRoute {
+func DefaultModelRoute() ModelRoute {
 	return ModelRoute{
 		MaxProviderAttempts: DefaultModelRouteMaxProviderAttempts,
 		RetryDelayBudget:    configkit.Duration(DefaultModelRouteRetryDelayBudget),
@@ -701,7 +665,7 @@ func defaultModelRoute() ModelRoute {
 }
 
 func (*ModelRoute) Default() any {
-	return defaultModelRoute()
+	return DefaultModelRoute()
 }
 
 type ModelRouteCircuit struct {
@@ -842,18 +806,17 @@ const (
 )
 
 var (
-	modelDefinitionNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
-	envNamePattern             = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	mcpServerNamePattern       = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
-	syncBranchPattern          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+	envNamePattern       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	mcpServerNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	syncBranchPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
 
-func protocolNames() []string {
+func ProtocolNames() []string {
 	return []string{ProtocolOpenAIResponses, ProtocolOpenAIChatCompat, ProtocolAnthropicMessages, ProtocolGeminiNative}
 }
 
-func validProtocol(p string) bool {
-	return slices.Contains(protocolNames(), p)
+func ValidProtocol(p string) bool {
+	return slices.Contains(ProtocolNames(), p)
 }
 
 func DefaultTools() *Tools {
@@ -878,220 +841,284 @@ func DefaultTools() *Tools {
 	}
 }
 
-func Default() Config {
-	return Config{
-		Version: 1,
-		Runtime: Runtime{
-			MaxActiveTurns:  4,
-			MaxPendingTurns: 64,
-			TurnTimeout:     configkit.Duration(5 * time.Minute),
-			ShutdownTimeout: configkit.Duration(30 * time.Second),
-			RunRetention:    configkit.Duration(720 * time.Hour),
+func DefaultRuntime() Runtime {
+	return Runtime{
+		MaxActiveTurns:  4,
+		MaxPendingTurns: 64,
+		TurnTimeout:     configkit.Duration(5 * time.Minute),
+		ShutdownTimeout: configkit.Duration(30 * time.Second),
+		RunRetention:    configkit.Duration(720 * time.Hour),
+	}
+}
+
+func DefaultCapabilities() Capabilities {
+	return Capabilities{Enabled: []string{}}
+}
+
+func DefaultAgents() *Agents {
+	return &Agents{}
+}
+
+func DefaultWorkflows() *Workflows {
+	return &Workflows{
+		MaxConcurrentSteps: 4,
+		DefaultStepTimeout: configkit.Duration(15 * time.Minute),
+		Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
+	}
+}
+
+func DefaultServer() Server {
+	return Server{
+		Host: "127.0.0.1",
+		Port: 8280,
+	}
+}
+
+func DefaultLogging() Logging {
+	return Logging{
+		Level:  "info",
+		Format: "text",
+	}
+}
+
+func DefaultModels() Models {
+	return Models{
+		Definitions:          map[string]ModelDefinition{},
+		RequestTimeout:       configkit.Duration(120 * time.Second),
+		StreamingIdleTimeout: configkit.Duration(60 * time.Second),
+		Routing:              defaultModelsRouting(),
+	}
+}
+
+func DefaultStorage() Storage {
+	return Storage{
+		BusyTimeout:        configkit.Duration(5 * time.Second),
+		MaxOpenConnections: 4,
+		ArtifactQuota:      configkit.ByteSize(5 << 30),
+		BackupInterval:     configkit.Duration(24 * time.Hour),
+		BackupRetention:    7,
+	}
+}
+
+func DefaultTelemetry() Telemetry {
+	return Telemetry{
+		Exporter:      "none",
+		SampleRatio:   0.10,
+		QueueSize:     2048,
+		ExportTimeout: configkit.Duration(5 * time.Second),
+	}
+}
+
+func DefaultUsage() Usage {
+	return Usage{
+		Currency:            "USD",
+		DailyBudgetMicros:   10000000,
+		MonthlyBudgetMicros: 200000000,
+		ReservationTTL:      configkit.Duration(time.Hour),
+	}
+}
+
+func DefaultHealth() Health {
+	return Health{
+		Listen:                    "127.0.0.1:8281",
+		CheckInterval:             configkit.Duration(60 * time.Second),
+		CheckTimeout:              configkit.Duration(5 * time.Second),
+		DiskWarningPercent:        15,
+		DiskCriticalPercent:       8,
+		DiskCriticalFloorBytes:    configkit.ByteSize(512 << 20),
+		BackupMaxAge:              configkit.Duration(24 * time.Hour),
+		RestoreVerificationMaxAge: configkit.Duration(30 * 24 * time.Hour),
+	}
+}
+
+func DefaultTerminal() Terminal {
+	return Terminal{
+		RenderHz:            20,
+		MaxInputBytes:       262144,
+		InMemoryHistory:     100,
+		SecondInterruptTime: configkit.Duration(2 * time.Second),
+		PlainApproval:       "deny",
+	}
+}
+
+func DefaultWebhook() Webhook {
+	return Webhook{
+		Listen:             "127.0.0.1:8282",
+		MaxBodySize:        configkit.ByteSize(1 << 20),
+		TimestampTolerance: configkit.Duration(5 * time.Minute),
+		ReplayRetention:    configkit.Duration(24 * time.Hour),
+		RequestsPerMinute:  60,
+	}
+}
+
+func DefaultChannels() Channels {
+	return Channels{
+		Discord: Discord{
+			MinEditInterval:          configkit.Duration(2 * time.Second),
+			MaxAttachmentBytes:       20971520,
+			ThreadAutoArchiveMinutes: 1440,
 		},
-		Capabilities: Capabilities{Enabled: []string{}},
-		Agents:       &Agents{},
-		Workflows: &Workflows{
-			MaxConcurrentSteps: 4,
-			DefaultStepTimeout: configkit.Duration(15 * time.Minute),
-			Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
-		},
-		Tools: DefaultTools(),
-		Server: Server{
-			Host: "127.0.0.1",
-			Port: 8280,
-		},
-		Logging: Logging{
-			Level:  "info",
-			Format: "text",
-		},
-		Models: Models{
-			Definitions:          map[string]ModelDefinition{},
-			RequestTimeout:       configkit.Duration(120 * time.Second),
-			StreamingIdleTimeout: configkit.Duration(60 * time.Second),
-			Routing:              defaultModelsRouting(),
-		},
-		Storage: Storage{
-			BusyTimeout:        configkit.Duration(5 * time.Second),
-			MaxOpenConnections: 4,
-			ArtifactQuota:      configkit.ByteSize(5 << 30),
-			BackupInterval:     configkit.Duration(24 * time.Hour),
-			BackupRetention:    7,
-		},
-		Telemetry: Telemetry{
-			Exporter:      "none",
-			SampleRatio:   0.10,
-			QueueSize:     2048,
-			ExportTimeout: configkit.Duration(5 * time.Second),
-		},
-		Usage: Usage{
-			Currency:            "USD",
-			DailyBudgetMicros:   10000000,
-			MonthlyBudgetMicros: 200000000,
-			ReservationTTL:      configkit.Duration(time.Hour),
-		},
-		Health: Health{
-			Listen:                    "127.0.0.1:8281",
-			CheckInterval:             configkit.Duration(60 * time.Second),
-			CheckTimeout:              configkit.Duration(5 * time.Second),
-			DiskWarningPercent:        15,
-			DiskCriticalPercent:       8,
-			DiskCriticalFloorBytes:    configkit.ByteSize(512 << 20),
-			BackupMaxAge:              configkit.Duration(24 * time.Hour),
-			RestoreVerificationMaxAge: configkit.Duration(30 * 24 * time.Hour),
-		},
-		Terminal: Terminal{
-			RenderHz:            20,
-			MaxInputBytes:       262144,
-			InMemoryHistory:     100,
-			SecondInterruptTime: configkit.Duration(2 * time.Second),
-			PlainApproval:       "deny",
-		},
-		Webhook: Webhook{
-			Listen:             "127.0.0.1:8282",
-			MaxBodySize:        configkit.ByteSize(1 << 20),
-			TimestampTolerance: configkit.Duration(5 * time.Minute),
-			ReplayRetention:    configkit.Duration(24 * time.Hour),
-			RequestsPerMinute:  60,
-		},
-		Channels: Channels{
-			Discord: Discord{
-				MinEditInterval:          configkit.Duration(2 * time.Second),
-				MaxAttachmentBytes:       20971520,
-				ThreadAutoArchiveMinutes: 1440,
+		Telegram: Telegram{
+			Polling: TelegramPolling{
+				Timeout:    configkit.Duration(30 * time.Second),
+				MaxBackoff: configkit.Duration(time.Minute),
 			},
-			Telegram: Telegram{
-				Polling: TelegramPolling{
-					Timeout:    configkit.Duration(30 * time.Second),
-					MaxBackoff: configkit.Duration(time.Minute),
-				},
-				MinEditInterval:    configkit.Duration(2 * time.Second),
-				MaxAttachmentBytes: TelegramMaxAttachmentBytes,
-				Webhook: TelegramWebhook{
-					ListenAddress:  TelegramWebhookListenAddress,
-					MaxBodyBytes:   TelegramWebhookMaxBodyBytes,
-					MaxConnections: TelegramWebhookMaxConnections,
-				},
-			},
-			Email: Email{
-				MaxAttachmentBytes: EmailMaxAttachmentBytes,
-			},
-			HTTP: HTTP{
-				ListenAddress:       HTTPListenAddress,
-				MaxBodyBytes:        HTTPMaxBodyBytes,
-				RequestsPerMinute:   HTTPRequestsPerMinute,
-				MaxConcurrentPerKey: HTTPMaxConcurrentPerKey,
-				MaxHistoryMessages:  HTTPMaxHistoryMessages,
-				MaxHistoryBytes:     HTTPMaxHistoryBytes,
-				KeepaliveInterval:   configkit.Duration(HTTPKeepaliveInterval),
-			},
-		},
-		Broadcast: Broadcast{
-			Timezone:       "UTC",
-			QuietHours:     QuietHours{Enabled: true, Start: "23:00", End: "07:00"},
-			MaxDigestItems: 20,
-			MaxDigestBytes: 12000,
-			MaxAttempts:    3,
-			MaxDeliveryAge: configkit.Duration(24 * time.Hour),
-			MinDispatchGap: configkit.Duration(5 * time.Second),
-			Destinations:   map[string]string{},
-			Fallback:       map[string]string{},
-		},
-		Scheduler: Scheduler{
-			Enabled:             true,
-			DefaultTimezone:     "UTC",
-			DefaultCatchUpGrace: configkit.Duration(15 * time.Minute),
-			OccurrenceRetention: configkit.Duration(720 * time.Hour),
-		},
-		Memory: Memory{
-			Enabled:              true,
-			MaxDocuments:         10,
-			RecallTokenBudget:    2000,
-			SummaryPromptVersion: "memory-summary-v1",
-			SummaryTTL:           configkit.Duration(720 * time.Hour),
-			RangeThreshold:       20,
-			RangeLiveWindow:      5,
-			PurgeInterval:        configkit.Duration(1 * time.Hour),
-			PurgeLimit:           100,
-		},
-		Interpreter: DefaultInterpreter(),
-		Skills: &Skills{
-			Enabled:                 true,
-			Roots:                   []string{"/srv/aura/skills"},
-			AutoSelect:              true,
-			MaxIndexedSkills:        256,
-			MaxInstructionTokens:    5000,
-			MaxSessionContextTokens: 15000,
-			MaxResourceBytes:        8388608,
-			QuarantineRetention:     configkit.Duration(720 * time.Hour),
-		},
-		Sync: &Sync{
-			Enabled:            false,
-			Branch:             "main",
-			Interval:           configkit.Duration(15 * time.Minute),
-			TransportSecretRef: defaultSyncTransportSecretRef(),
-			KnownHostsRef:      defaultSyncKnownHostsRef(),
-			GitBinary:          "/usr/bin/git",
-			SSHBinary:          "/usr/bin/ssh",
-			Include:            []string{"skills/**", "config-templates/**"},
-		},
-		Vision: &Vision{
-			Enabled:              true,
-			MaxEncodedBytes:      20971520,
-			MaxPixels:            40000000,
-			MaxDimension:         8192,
-			MaxImages:            4,
-			MaxFrames:            1,
-			DecodeTimeout:        configkit.Duration(5 * time.Second),
-			MaxDecodeConcurrency: 2,
-			MaxRequestBytes:      33554432,
-			StripMetadata:        true,
-			OrientNormalize:      true,
-			Detail:               "auto",
-			TransformVersion:     "v1",
-			MaxTransformMemory:   configkit.ByteSize(268435456),
-			Providers:            map[string]VisionProviderLimits{},
-		},
-		Context: &Context{
-			Enabled:                    true,
-			RecentCompleteTurns:        10,
-			SafetyMarginTokens:         1024,
-			ConservativeEstimatorRatio: 0.80,
-			HighWaterRatio:             0.90,
-			MaxToolExcerptBytes:        2048,
-			Summary: ContextSummary{
-				Task:            "compression",
-				MaxSourceTokens: 32768,
-				MaxOutputTokens: 2048,
-				PromptVersion:   "v1",
+			MinEditInterval:    configkit.Duration(2 * time.Second),
+			MaxAttachmentBytes: TelegramMaxAttachmentBytes,
+			Webhook: TelegramWebhook{
+				ListenAddress:  TelegramWebhookListenAddress,
+				MaxBodyBytes:   TelegramWebhookMaxBodyBytes,
+				MaxConnections: TelegramWebhookMaxConnections,
 			},
 		},
-		Profile: &Profile{
-			Enabled:                 true,
-			MaxContextFacts:         20,
-			MaxContextTokens:        1024,
-			ExtractionQueueCapacity: 64,
-			CandidateMinConfidence:  0.70,
-			PromptVersion:           "v1",
+		Email: Email{
+			MaxAttachmentBytes: EmailMaxAttachmentBytes,
 		},
-		Children: &Children{
-			Enabled:            true,
-			MaxDepth:           1,
-			MaxActivePerParent: 2,
-			MaxActiveGlobal:    4,
-			DefaultTimeout:     configkit.Duration(5 * time.Minute),
-			MaxTimeout:         configkit.Duration(30 * time.Minute),
-			Recovery:           "interrupt",
+		HTTP: HTTP{
+			ListenAddress:       HTTPListenAddress,
+			MaxBodyBytes:        HTTPMaxBodyBytes,
+			RequestsPerMinute:   HTTPRequestsPerMinute,
+			MaxConcurrentPerKey: HTTPMaxConcurrentPerKey,
+			MaxHistoryMessages:  HTTPMaxHistoryMessages,
+			MaxHistoryBytes:     HTTPMaxHistoryBytes,
+			KeepaliveInterval:   configkit.Duration(HTTPKeepaliveInterval),
 		},
-		Access: &Access{
-			ApprovalTimeout:  configkit.Duration(30 * time.Minute),
-			StandingGrantTTL: configkit.Duration(168 * time.Hour),
-			Budgets: AccessBudgets{
-				Trusted: PrincipalBudget{MaxTokensPerDay: 200000, MaxTurnsPerMinute: 6},
-				Public:  PrincipalBudget{MaxTokensPerDay: 20000, MaxTurnsPerMinute: 3},
-			},
-			Retention:      AccessRetention{Trusted: configkit.Duration(4320 * time.Hour), Public: configkit.Duration(720 * time.Hour)},
-			HandoffTimeout: configkit.Duration(24 * time.Hour),
+	}
+}
+
+func DefaultBroadcast() Broadcast {
+	return Broadcast{
+		Timezone:       "UTC",
+		QuietHours:     QuietHours{Enabled: true, Start: "23:00", End: "07:00"},
+		MaxDigestItems: 20,
+		MaxDigestBytes: 12000,
+		MaxAttempts:    3,
+		MaxDeliveryAge: configkit.Duration(24 * time.Hour),
+		MinDispatchGap: configkit.Duration(5 * time.Second),
+		Destinations:   map[string]string{},
+		Fallback:       map[string]string{},
+	}
+}
+
+func DefaultScheduler() Scheduler {
+	return Scheduler{
+		Enabled:             true,
+		DefaultTimezone:     "UTC",
+		DefaultCatchUpGrace: configkit.Duration(15 * time.Minute),
+		OccurrenceRetention: configkit.Duration(720 * time.Hour),
+	}
+}
+
+func DefaultMemory() Memory {
+	return Memory{
+		Enabled:              true,
+		MaxDocuments:         10,
+		RecallTokenBudget:    2000,
+		SummaryPromptVersion: "memory-summary-v1",
+		SummaryTTL:           configkit.Duration(720 * time.Hour),
+		RangeThreshold:       20,
+		RangeLiveWindow:      5,
+		PurgeInterval:        configkit.Duration(1 * time.Hour),
+		PurgeLimit:           100,
+	}
+}
+
+func DefaultSkills() *Skills {
+	return &Skills{
+		Enabled:                 true,
+		Roots:                   []string{"/srv/aura/skills"},
+		AutoSelect:              true,
+		MaxIndexedSkills:        256,
+		MaxInstructionTokens:    5000,
+		MaxSessionContextTokens: 15000,
+		MaxResourceBytes:        8388608,
+		QuarantineRetention:     configkit.Duration(720 * time.Hour),
+	}
+}
+
+func DefaultSync() *Sync {
+	return &Sync{
+		Enabled:            false,
+		Branch:             "main",
+		Interval:           configkit.Duration(15 * time.Minute),
+		TransportSecretRef: defaultSyncTransportSecretRef(),
+		KnownHostsRef:      defaultSyncKnownHostsRef(),
+		GitBinary:          "/usr/bin/git",
+		SSHBinary:          "/usr/bin/ssh",
+		Include:            []string{"skills/**", "config-templates/**"},
+	}
+}
+
+func DefaultVision() *Vision {
+	return &Vision{
+		Enabled:              true,
+		MaxEncodedBytes:      20971520,
+		MaxPixels:            40000000,
+		MaxDimension:         8192,
+		MaxImages:            4,
+		MaxFrames:            1,
+		DecodeTimeout:        configkit.Duration(5 * time.Second),
+		MaxDecodeConcurrency: 2,
+		MaxRequestBytes:      33554432,
+		StripMetadata:        true,
+		OrientNormalize:      true,
+		Detail:               "auto",
+		TransformVersion:     "v1",
+		MaxTransformMemory:   configkit.ByteSize(268435456),
+		Providers:            map[string]VisionProviderLimits{},
+	}
+}
+
+func DefaultContext() *Context {
+	return &Context{
+		Enabled:                    true,
+		RecentCompleteTurns:        10,
+		SafetyMarginTokens:         1024,
+		ConservativeEstimatorRatio: 0.80,
+		HighWaterRatio:             0.90,
+		MaxToolExcerptBytes:        2048,
+		Summary: ContextSummary{
+			Task:            "compression",
+			MaxSourceTokens: 32768,
+			MaxOutputTokens: 2048,
+			PromptVersion:   "v1",
 		},
+	}
+}
+
+func DefaultProfile() *Profile {
+	return &Profile{
+		Enabled:                 true,
+		MaxContextFacts:         20,
+		MaxContextTokens:        1024,
+		ExtractionQueueCapacity: 64,
+		CandidateMinConfidence:  0.70,
+		PromptVersion:           "v1",
+	}
+}
+
+func DefaultChildren() *Children {
+	return &Children{
+		Enabled:            true,
+		MaxDepth:           1,
+		MaxActivePerParent: 2,
+		MaxActiveGlobal:    4,
+		DefaultTimeout:     configkit.Duration(5 * time.Minute),
+		MaxTimeout:         configkit.Duration(30 * time.Minute),
+		Recovery:           "interrupt",
+	}
+}
+
+func DefaultAccess() *Access {
+	return &Access{
+		ApprovalTimeout:  configkit.Duration(30 * time.Minute),
+		StandingGrantTTL: configkit.Duration(168 * time.Hour),
+		Budgets: AccessBudgets{
+			Trusted: PrincipalBudget{MaxTokensPerDay: 200000, MaxTurnsPerMinute: 6},
+			Public:  PrincipalBudget{MaxTokensPerDay: 20000, MaxTurnsPerMinute: 3},
+		},
+		Retention:      AccessRetention{Trusted: configkit.Duration(4320 * time.Hour), Public: configkit.Duration(720 * time.Hour)},
+		HandoffTimeout: configkit.Duration(24 * time.Hour),
 	}
 }
 

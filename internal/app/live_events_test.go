@@ -3,12 +3,12 @@ package app
 import (
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestNewToolExecutorRefusesANilEventBus(t *testing.T) {
-	executor, err := newToolExecutor(&toolExecutorInput{result: &config.LoadResult{}, wiring: &toolWiring{}})
+	executor, err := newToolExecutor(&toolExecutorInput{result: &appconfig.LoadResult{}, wiring: &toolWiring{}})
 	if executor != nil {
 		t.Fatalf("newToolExecutor returned %v without an event bus", executor)
 	}

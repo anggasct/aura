@@ -8,8 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/modules/builtin"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -31,7 +32,7 @@ func newAgentsListCmd(gf *globalFlags) *cobra.Command {
 		Short: "List registered agent definitions",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -70,7 +71,7 @@ func newAgentsShowCmd(gf *globalFlags) *cobra.Command {
 		Short: "Show one agent definition",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -132,7 +133,7 @@ func orNone(value string) string {
 	return value
 }
 
-func personaToolNames(cfg *config.Config) []string {
+func personaToolNames(cfg *appconfig.Config) []string {
 	names := toolsbuiltin.DefinitionNames()
 	if len(githubCredentials(cfg)) > 0 {
 		names = append(names, github.ToolNames()...)
@@ -140,7 +141,7 @@ func personaToolNames(cfg *config.Config) []string {
 	return names
 }
 
-func buildAgentRegistry(cfg *config.Config) (*auraagent.Registry, error) {
+func buildAgentRegistry(cfg *appconfig.Config) (*auraagent.Registry, error) {
 	routeSet := make(map[string]bool, len(cfg.Models.Definitions)+len(cfg.ModelRoutes))
 	for route := range cfg.Models.Definitions {
 		routeSet[route] = true

@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/capability"
@@ -52,11 +53,11 @@ func writeKBDocument(t *testing.T, name, content string) string {
 	return path
 }
 
-func kbTestStorage(t *testing.T, cfgPath string) (*config.Config, *sql.DB, string) {
+func kbTestStorage(t *testing.T, cfgPath string) (*appconfig.Config, *sql.DB, string) {
 	t.Helper()
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -316,7 +317,7 @@ func TestKnowledgeIngestRejectsSecretBearingSourcesAndFailsClosedOnUnresolvableR
 }
 
 func TestStrictSecretVaultNamesEveryUnresolvedReferenceAndMatchesTheLenientVault(t *testing.T) {
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	t.Setenv("KB_TEST_SET_SECRET", "set-secret-value")
 	cfg.Webhook.Keys = []config.WebhookKey{
 		{ID: "set", SecretEnv: "KB_TEST_SET_SECRET"},
@@ -485,7 +486,7 @@ func TestStatusToleratesADatabaseWithoutTheKnowledgeSchema(t *testing.T) {
 		t.Fatalf("close db: %v", err)
 	}
 
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
 	ignoreHostDiskHeadroom(&cfg)
 	cfg.Models.Definitions = map[string]config.ModelDefinition{"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"}}

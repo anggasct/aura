@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -159,8 +160,8 @@ func TestAnElementGetsItsDefaultsUnderItsKeys(t *testing.T) {
 			t.Fatalf("Load: %v", err)
 		}
 		imap := res.Config.Channels.Email.Accounts[0].IMAP
-		if imap.Folder != EmailDefaultFolder || imap.PollInterval != configkit.Duration(time.Minute) {
-			t.Errorf("imap = %+v, want folder %s and poll interval 1m", imap, EmailDefaultFolder)
+		if imap.Folder != legacyconfig.EmailDefaultFolder || imap.PollInterval != configkit.Duration(time.Minute) {
+			t.Errorf("imap = %+v, want folder %s and poll interval 1m", imap, legacyconfig.EmailDefaultFolder)
 		}
 	})
 }

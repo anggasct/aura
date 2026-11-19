@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -39,14 +39,14 @@ func newStorageCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func resolveDataRoot(cfg *config.Config) (string, error) {
+func resolveDataRoot(cfg *appconfig.Config) (string, error) {
 	if cfg.Storage.Path != "" {
 		return cfg.Storage.Path, nil
 	}
 	return defaultDataRoot()
 }
 
-func storagePaths(cfg *config.Config) (dbPath, artifactRoot, backupDir string, err error) {
+func storagePaths(cfg *appconfig.Config) (dbPath, artifactRoot, backupDir string, err error) {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return "", "", "", err
@@ -71,7 +71,7 @@ func defaultDataRoot() (string, error) {
 	return filepath.Join(home, ".local", "share", "aura"), nil
 }
 
-func openStorage(ctx context.Context, cfg *config.Config) (*sql.DB, error) {
+func openStorage(ctx context.Context, cfg *appconfig.Config) (*sql.DB, error) {
 	dbPath, _, _, err := storagePaths(cfg)
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func newStorageBackupCmd(gf *globalFlags) *cobra.Command {
 		Use:   "backup",
 		Short: "Create and verify an online database and artifact-manifest backup",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
 				_, artifactRoot, backupDir, err := storagePaths(cfg)
 				if err != nil {
 					return err
@@ -135,14 +135,14 @@ func newStorageUpgradeCmd(gf *globalFlags) *cobra.Command {
 		Short: "Back up and verify the database, then apply pending migrations",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, _ *sql.DB) error {
+			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, _ *sql.DB) error {
 				return runStorageUpgrade(ctx, logger, cfg, time.Now())
 			})
 		},
 	}
 }
 
-func runStorageUpgrade(ctx context.Context, logger *slog.Logger, cfg *config.Config, now time.Time) error {
+func runStorageUpgrade(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, now time.Time) error {
 	dbPath, artifactRoot, backupDir, err := storagePaths(cfg)
 	if err != nil {
 		return err
@@ -195,7 +195,7 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
 				_, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
 					return err
@@ -244,7 +244,7 @@ func newStorageRestoreCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+			return withStorage(cmd, gf, false, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
 				dbPath, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
 					return err
@@ -276,7 +276,7 @@ func newStorageReconcileCmd(gf *globalFlags) *cobra.Command {
 		Use:   "reconcile",
 		Short: "Report missing or orphaned blobs; never deletes data",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
 				_, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
 					return err
@@ -306,7 +306,7 @@ func newStorageGcCmd(gf *globalFlags) *cobra.Command {
 		Use:   "gc",
 		Short: "Delete only unreferenced blobs older than the grace period",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
 				_, artifactRoot, _, err := storagePaths(cfg)
 				if err != nil {
 					return err
@@ -346,14 +346,14 @@ func collectCutoff(before string) (time.Time, error) {
 	return cutoff, nil
 }
 
-func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *slog.Logger, *config.Config, *sql.DB) error) error {
-	return withLoadedStorage(cmd, gf, needDB, func(ctx context.Context, logger *slog.Logger, result *config.LoadResult, db *sql.DB) error {
+func withStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *slog.Logger, *appconfig.Config, *sql.DB) error) error {
+	return withLoadedStorage(cmd, gf, needDB, func(ctx context.Context, logger *slog.Logger, result *appconfig.LoadResult, db *sql.DB) error {
 		return fn(ctx, logger, result.Config, db)
 	})
 }
 
-func withLoadedStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *slog.Logger, *config.LoadResult, *sql.DB) error) error {
-	result, err := config.Load(gf.configPath)
+func withLoadedStorage(cmd *cobra.Command, gf *globalFlags, needDB bool, fn func(context.Context, *slog.Logger, *appconfig.LoadResult, *sql.DB) error) error {
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return err
 	}

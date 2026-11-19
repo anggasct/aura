@@ -34,7 +34,7 @@ func (*EmailAccount) Default() any {
 	}
 }
 
-func validateEmail(email *Email, owner *Owner) error {
+func ValidateEmail(email *Email, owner *Owner) error {
 	if email == nil {
 		return configkit.Invalid("channels.email", "must not be nil")
 	}

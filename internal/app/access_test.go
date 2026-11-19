@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -27,9 +28,9 @@ func runGrantsCommand(t *testing.T, cfg string, args ...string) (string, error) 
 
 func accessEventCount(t *testing.T, cfg, action string) int {
 	t.Helper()
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -45,9 +46,9 @@ func accessEventCount(t *testing.T, cfg, action string) int {
 
 func recordTestGrant(t *testing.T, cfg string) string {
 	t.Helper()
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -105,9 +106,9 @@ func TestGrantsListAndRevoke(t *testing.T) {
 
 func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 	cfg := writeChildrenCLIConfig(t)
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -148,7 +149,7 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 }
 
 func TestDiscordAccessSettingsUseTheAccessSection(t *testing.T) {
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Access.ApprovalTimeout = configkit.Duration(10 * time.Minute)
 	settings := discordAccessSettings(&cfg, nil, nil, nil)
 	if settings.ApprovalTimeout != 10*time.Minute || settings.StandingGrantTTL != 168*time.Hour || settings.Grants == nil {

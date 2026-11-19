@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
@@ -49,7 +50,7 @@ func completionFixture(t *testing.T) *completionHarness {
 		t.Fatal(err)
 	}
 	harness := &completionHarness{controller: controller}
-	cfg := &config.Config{Channels: config.Channels{Discord: config.Discord{Accounts: []config.DiscordAccount{{Name: "front"}}}}}
+	cfg := &appconfig.Config{Channels: config.Channels{Discord: config.Discord{Accounts: []config.DiscordAccount{{Name: "front"}}}}}
 	harness.notifier = &workflowCompletionNotifier{
 		cfg: cfg, db: db, runs: runs, registry: registry, logger: slog.New(slog.DiscardHandler),
 		now: func() time.Time { return time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC) },

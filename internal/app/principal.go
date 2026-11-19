@@ -3,14 +3,14 @@ package app
 import (
 	"context"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 const remediationMapOwnerIdentity = "add your discord user id to owner.identities as discord:<id>, then run aura owner rekey"
 
-func ownerResolver(cfg *config.Config) (*principal.Resolver, error) {
+func ownerResolver(cfg *appconfig.Config) (*principal.Resolver, error) {
 	var identities []string
 	if cfg != nil && cfg.Owner != nil {
 		identities = cfg.Owner.Identities

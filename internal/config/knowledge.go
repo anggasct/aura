@@ -21,7 +21,7 @@ func ValidKnowledgeCollectionID(id string) bool {
 	return knowledgeCollectionID.MatchString(id)
 }
 
-func validatePersonaKnowledge(field string, definition *AgentDefinition) error {
+func ValidatePersonaKnowledge(field string, definition *AgentDefinition) error {
 	lists := []struct {
 		name        string
 		collections []string

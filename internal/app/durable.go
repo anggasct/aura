@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/schedule"
@@ -13,7 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 )
 
-func durableRuntimeForConfig(cfg *config.Config, db *sql.DB, logger *slog.Logger) (durable.Runtime, error) {
+func durableRuntimeForConfig(cfg *appconfig.Config, db *sql.DB, logger *slog.Logger) (durable.Runtime, error) {
 	if cfg == nil || db == nil {
 		return nil, invalidOptions("the durable runtime needs a config and open storage")
 	}

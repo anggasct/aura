@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/terminal"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -387,7 +387,7 @@ func buildScheduleRunner(in *scheduleRunnerInput) (*schedule.Runner, error) {
 	})
 }
 
-func buildCronBroadcaster(cfg *config.Config, db *sql.DB, rt durable.Runtime, channels *broadcastChannels) (*broadcast.Broadcaster, error) {
+func buildCronBroadcaster(cfg *appconfig.Config, db *sql.DB, rt durable.Runtime, channels *broadcastChannels) (*broadcast.Broadcaster, error) {
 	location, err := time.LoadLocation(cfg.Broadcast.Timezone)
 	if err != nil {
 		return nil, fmt.Errorf("broadcast timezone %q is not valid", cfg.Broadcast.Timezone)

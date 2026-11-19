@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
@@ -34,7 +35,7 @@ type discardRedactor struct{}
 
 func (discardRedactor) RegisterSecret(string) {}
 
-func pluginDirectory(cfg *config.Config, name string) (string, error) {
+func pluginDirectory(cfg *appconfig.Config, name string) (string, error) {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return "", err
@@ -46,7 +47,7 @@ func pluginDirectory(cfg *config.Config, name string) (string, error) {
 	return filepath.Join(absolute, name), nil
 }
 
-func newPluginAuth(cfg *config.Config, redactor auth.Redactor) (*auth.Registry, error) {
+func newPluginAuth(cfg *appconfig.Config, redactor auth.Redactor) (*auth.Registry, error) {
 	dir, err := pluginDirectory(cfg, pluginSecretsDirName)
 	if err != nil {
 		return nil, err
@@ -78,7 +79,7 @@ func pluginHTTPClient(external *http.Client) *http.Client {
 	return &http.Client{Transport: &loopbackAwareTransport{loopback: http.DefaultTransport, external: external.Transport}}
 }
 
-func newPluginService(cfg *config.Config, db *sql.DB, redactor auth.Redactor) (*plugin.Service, error) {
+func newPluginService(cfg *appconfig.Config, db *sql.DB, redactor auth.Redactor) (*plugin.Service, error) {
 	dir, err := pluginDirectory(cfg, pluginDirName)
 	if err != nil {
 		return nil, err
@@ -202,7 +203,7 @@ type pluginRuntime struct {
 	connectors *connector.Manager
 }
 
-func planPlugins(ctx context.Context, cfg *config.Config, db *sql.DB, redactor auth.Redactor) (*pluginRuntime, error) {
+func planPlugins(ctx context.Context, cfg *appconfig.Config, db *sql.DB, redactor auth.Redactor) (*pluginRuntime, error) {
 	service, err := newPluginService(cfg, db, redactor)
 	if err != nil {
 		return nil, err
@@ -237,7 +238,7 @@ func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {
 	return servers
 }
 
-func (r *pluginRuntime) healthCheck(cfg *config.Config, db *sql.DB, mcpServers *mcpRuntime) (health.RegisteredCheck, bool, error) {
+func (r *pluginRuntime) healthCheck(cfg *appconfig.Config, db *sql.DB, mcpServers *mcpRuntime) (health.RegisteredCheck, bool, error) {
 	if r == nil || (cfg.Plugins == nil && r.installed == 0) {
 		return health.RegisteredCheck{}, false, nil
 	}

@@ -16,9 +16,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/modules/builtin"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -50,7 +50,7 @@ func newWorkflowCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func stepToolCatalog(cfg *config.Config) (*toolsbuiltin.StepCatalog, error) {
+func stepToolCatalog(cfg *appconfig.Config) (*toolsbuiltin.StepCatalog, error) {
 	credentials := githubCredentials(cfg)
 	if len(credentials) == 0 {
 		return toolsbuiltin.NewStepCatalog(nil), nil
@@ -62,7 +62,7 @@ func stepToolCatalog(cfg *config.Config) (*toolsbuiltin.StepCatalog, error) {
 	return toolsbuiltin.NewStepCatalog(definitions), nil
 }
 
-func workflowValidationDeps(cfg *config.Config) (*workflow.ValidationDeps, error) {
+func workflowValidationDeps(cfg *appconfig.Config) (*workflow.ValidationDeps, error) {
 	catalog, err := stepToolCatalog(cfg)
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func newWorkflowValidateCmd(gf *globalFlags) *cobra.Command {
 		Short: "Validate a workflow definition file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -145,7 +145,7 @@ func newWorkflowDefinitionsCmd(gf *globalFlags) *cobra.Command {
 		Use:   "definitions",
 		Short: "List workflow definitions from the configured directory",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -175,7 +175,7 @@ func newWorkflowDefinitionsCmd(gf *globalFlags) *cobra.Command {
 	}
 }
 
-func workflowDefinitionsDir(cfg *config.Config) string {
+func workflowDefinitionsDir(cfg *appconfig.Config) string {
 	if cfg.Workflows == nil || cfg.Workflows.DefinitionsDir == "" {
 		return ""
 	}
@@ -189,7 +189,7 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 		Short: "Start one workflow run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -213,7 +213,7 @@ func newWorkflowStartCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func workflowMaxConcurrentSteps(cfg *config.Config) int {
+func workflowMaxConcurrentSteps(cfg *appconfig.Config) int {
 	if cfg.Workflows == nil || cfg.Workflows.MaxConcurrentSteps <= 0 {
 		return 4
 	}
@@ -471,7 +471,7 @@ func newWorkflowRunsCmd(gf *globalFlags) *cobra.Command {
 		Short: "List workflow runs",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -504,7 +504,7 @@ func newWorkflowInspectCmd(gf *globalFlags) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -572,7 +572,7 @@ func newWorkflowCancelCmd(gf *globalFlags) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -616,7 +616,7 @@ func newWorkflowApproveCmd(gf *globalFlags) *cobra.Command {
 			if stepID == "" {
 				return errors.New("step id is required: pass --step <id>")
 			}
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -656,7 +656,7 @@ func newWorkflowSignalCmd(gf *globalFlags) *cobra.Command {
 			if !json.Valid([]byte(payloadFlag)) {
 				return errors.New("payload must be valid JSON")
 			}
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
